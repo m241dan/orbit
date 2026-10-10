@@ -35,18 +35,33 @@ from orbit.tui.widgets import (
 
 TOOL_ACCESS_OPTIONS: tuple[ToolAccess, ...] = get_args(ToolAccess)
 
+# Window reached from each window by h/j/k/l; missing means an edge.
+# Conversation over prompt on the left, task list over verification steps on the right.
+NEIGHBORS: dict[str, dict[str, str]] = {
+    "transcript": {"j": "prompt", "l": "task-list"},
+    "prompt": {"k": "transcript", "l": "verification-steps"},
+    "task-list": {"h": "transcript", "j": "verification-steps"},
+    "verification-steps": {"h": "prompt", "k": "task-list"},
+}
+
 
 # Not inheriting App's bindings drops its ctrl+q quit and ctrl+c "how to quit" hint.
 class OrbitApp(App[None], inherit_bindings=False):
     TITLE = "orbit"
-    # Start in normal mode: nothing focused until `i`.
+    # Start in normal mode: nothing focused; h/j/k/l move the selected window.
     AUTO_FOCUS = None
     CSS = """
     #side { width: 33%; }
+    .selected { border: round $accent; }
+    PromptInput:focus { border: heavy $accent; }
     """
     BINDINGS: ClassVar[list[BindingType]] = [
         # Priority, so it beats the prompt's own ctrl+c (copy).
         Binding("ctrl+c", "quit", "Quit", show=False, priority=True),
+        Binding("h", "move('h')", show=False),
+        Binding("j", "move('j')", show=False),
+        Binding("k", "move('k')", show=False),
+        Binding("l", "move('l')", show=False),
         Binding("i", "insert_mode", "Type"),
         Binding("escape", "cancel_turn", "Cancel turn"),
         Binding("ctrl+o", "pick_model", "Model"),
@@ -56,6 +71,8 @@ class OrbitApp(App[None], inherit_bindings=False):
     def __init__(self, session: Session) -> None:
         super().__init__()
         self._session = session
+        # Id of the window h/j/k/l last moved to.
+        self._selected = "prompt"
         # Last settings reported by the backend; None until the first report.
         self._settings: Settings | None = None
         self._model_choices: tuple[str, ...] = ()
@@ -76,6 +93,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         yield Footer()
 
     def on_mount(self) -> None:
+        self.query_one(f"#{self._selected}").add_class("selected")
         self.install_screen(self._model_picker, "pick-model")
         self.install_screen(self._tool_picker, "pick-tool-access")
         self._consume_events()
@@ -90,8 +108,16 @@ class OrbitApp(App[None], inherit_bindings=False):
         self._append(text, "user")
         await self._session.send(SubmitPrompt(text=text))
 
+    def action_move(self, direction: str) -> None:
+        target = NEIGHBORS[self._selected].get(direction)
+        if target is not None:
+            self.query_one(f"#{self._selected}").remove_class("selected")
+            self.query_one(f"#{target}").add_class("selected")
+            self._selected = target
+
     def action_insert_mode(self) -> None:
-        self.query_one(PromptInput).enter_insert_mode()
+        if self._selected == "prompt":
+            self.query_one(PromptInput).enter_insert_mode()
 
     async def action_cancel_turn(self) -> None:
         await self._session.send(CancelTurn())

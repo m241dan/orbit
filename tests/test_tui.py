@@ -1,6 +1,7 @@
 import asyncio
 from collections.abc import AsyncIterator
 
+import pytest
 from textual.pilot import Pilot
 from textual.widgets import Footer, Input, OptionList
 
@@ -417,3 +418,92 @@ async def test_side_panels_fill_right_third_top_and_bottom() -> None:
         # Conversation and prompt take the rest of the width on the left.
         assert transcript.width == prompt.width == 81
         assert prompt.bottom == 40
+
+
+def selected(app: OrbitApp) -> list[str | None]:
+    return [w.id for w in app.query(".selected")]
+
+
+async def test_prompt_window_is_selected_on_start_and_highlighted() -> None:
+    app = OrbitApp(FakeSession())
+    async with app.run_test():
+        assert selected(app) == ["prompt"]
+        assert app.focused is None
+        tasks = app.query_one("#task-list")
+        unselected_border = tasks.styles.border_top
+        tasks.add_class("selected")
+        assert tasks.styles.border_top != unselected_border
+
+
+@pytest.mark.parametrize(
+    ("keys", "expected"),
+    [
+        ("k", "transcript"),
+        ("l", "verification-steps"),
+        ("kl", "task-list"),
+        ("klj", "verification-steps"),
+        ("kljh", "prompt"),
+        ("klh", "transcript"),
+        ("kj", "prompt"),
+        ("lk", "task-list"),
+        # Edges: nothing further in that direction.
+        ("j", "prompt"),
+        ("h", "prompt"),
+        ("kk", "transcript"),
+        ("kh", "transcript"),
+        ("kll", "task-list"),
+        ("lj", "verification-steps"),
+    ],
+)
+async def test_hjkl_moves_selection_between_windows(keys: str, expected: str) -> None:
+    app = OrbitApp(FakeSession())
+    async with app.run_test() as pilot:
+        await pilot.press(*keys)
+        assert selected(app) == [expected]
+        assert app.focused is None
+
+
+async def test_border_highlight_follows_selection() -> None:
+    app = OrbitApp(FakeSession())
+    async with app.run_test() as pilot:
+        tasks = app.query_one("#task-list")
+        before = tasks.styles.border_top
+        await pilot.press("k", "l")
+        assert tasks.styles.border_top != before
+        await pilot.press("h")
+        assert tasks.styles.border_top == before
+
+
+@pytest.mark.parametrize("key", ["i", "enter"])
+async def test_i_and_enter_do_nothing_off_the_prompt(key: str) -> None:
+    app = OrbitApp(FakeSession())
+    async with app.run_test() as pilot:
+        await pilot.press("k", key)
+        assert app.focused is None
+        assert selected(app) == ["transcript"]
+
+
+async def test_enter_on_prompt_does_nothing() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await pilot.press("enter")
+        assert app.focused is None
+        assert session.commands == []
+
+
+async def test_i_on_prompt_enters_insert_mode_and_hjkl_type() -> None:
+    app = OrbitApp(FakeSession())
+    async with app.run_test() as pilot:
+        prompt = app.query_one(PromptInput)
+        normal_border = prompt.styles.border_top
+        await pilot.press("k", "j", "i")
+        assert app.focused is prompt
+        assert prompt.styles.border_top != normal_border  # active, not just selected
+        await pilot.press(*"hjkl")
+        assert prompt.value == "hjkl"
+        assert selected(app) == ["prompt"]
+
+        await pilot.press("escape", "k")
+        assert app.focused is None
+        assert selected(app) == ["transcript"]

@@ -86,7 +86,6 @@ class PromptInput(Input):
         height: 3;
         border: round $secondary;
     }
-    PromptInput:focus { border: round $accent; }
     """
 
     BINDINGS: ClassVar[list[BindingType]] = [

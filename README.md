@@ -22,7 +22,8 @@ In the app:
 
 | Key | Action |
 |---|---|
-| `i` | Start typing in the prompt (vim-style insert mode) |
+| `h` `j` `k` `l` | Move between windows (the selected one is highlighted) |
+| `i` | On the prompt: start typing (vim-style insert mode) |
 | `ctrl+o` | Pick the model (default, fable, opus, sonnet, haiku) |
 | `ctrl+l` | Pick the tool access level (off, restricted, full) |
 | `esc` | Stop typing; otherwise cancel the running turn or close a picker |
