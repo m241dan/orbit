@@ -4,6 +4,14 @@ from rich.text import Text
 from textual.containers import VerticalScroll
 from textual.widgets import Input, Static
 
+from orbit.protocol import Settings, ToolAccess
+
+TOOL_ACCESS_LABELS: dict[ToolAccess, str] = {
+    "off": "off",
+    "restricted": "restricted",
+    "full": "full (auto-approved)",
+}
+
 
 class Entry(Static):
     """One item in the transcript."""
@@ -51,3 +59,8 @@ class PromptInput(Input):
 
     def on_mount(self) -> None:
         self.border_title = "Prompt"
+
+    def show_settings(self, settings: Settings) -> None:
+        model = settings.model or "default"
+        tools = TOOL_ACCESS_LABELS[settings.tool_access]
+        self.border_subtitle = f"model: {model} · tools: {tools}"

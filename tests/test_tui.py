@@ -1,6 +1,8 @@
 import asyncio
 from collections.abc import AsyncIterator
 
+import pytest
+from textual.pilot import Pilot
 from textual.widgets import Footer, Input
 
 from orbit.protocol import (
@@ -9,11 +11,15 @@ from orbit.protocol import (
     Command,
     ErrorOccurred,
     Event,
+    Settings,
+    SettingsChanged,
     SubmitPrompt,
+    ToolAccess,
     ToolCallFinished,
     ToolCallStarted,
     TurnFinished,
     TurnStarted,
+    UpdateSettings,
 )
 from orbit.tui import OrbitApp
 from orbit.tui.widgets import Entry, PromptInput, Transcript
@@ -152,3 +158,80 @@ async def test_display_follows_latest_output() -> None:
         transcript = app.query_one(Transcript)
         assert transcript.max_scroll_y > 0
         assert transcript.scroll_y == transcript.max_scroll_y
+
+
+CHOICES = ("opus", "sonnet")
+
+
+async def show_settings(session: FakeSession, pilot: Pilot[None], settings: Settings) -> None:
+    await session.queue.put(SettingsChanged(settings=settings, model_choices=CHOICES))
+    await pilot.pause()
+
+
+async def test_settings_shown_under_prompt() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        prompt = app.query_one(PromptInput)
+        assert not app.query_one(PromptInput).border_subtitle
+
+        await show_settings(session, pilot, Settings())
+        assert prompt.border_subtitle == "model: default · tools: restricted"
+
+        await show_settings(session, pilot, Settings(model="opus", tool_access="full"))
+        assert prompt.border_subtitle == "model: opus · tools: full (auto-approved)"
+
+        await show_settings(session, pilot, Settings(tool_access="off"))
+        assert prompt.border_subtitle == "model: default · tools: off"
+
+
+async def test_settings_keys_do_nothing_before_backend_reports_settings() -> None:
+    session = FakeSession()
+    async with OrbitApp(session).run_test() as pilot:
+        await pilot.press("f2", "f3")
+        assert session.commands == []
+
+
+@pytest.mark.parametrize(
+    ("current", "expected"),
+    [
+        (None, "opus"),
+        ("opus", "sonnet"),
+        ("sonnet", None),
+        ("claude-custom-1", None),
+    ],
+)
+async def test_f2_requests_next_model(current: str | None, expected: str | None) -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await show_settings(session, pilot, Settings(model=current, tool_access="off"))
+        await pilot.press("f2")
+        assert session.commands == [
+            UpdateSettings(settings=Settings(model=expected, tool_access="off"))
+        ]
+
+
+@pytest.mark.parametrize(
+    ("current", "expected"),
+    [("off", "restricted"), ("restricted", "full"), ("full", "off")],
+)
+async def test_f3_requests_next_tool_access(current: ToolAccess, expected: ToolAccess) -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await show_settings(session, pilot, Settings(model="opus", tool_access=current))
+        await pilot.press("f3")
+        assert session.commands == [
+            UpdateSettings(settings=Settings(model="opus", tool_access=expected))
+        ]
+
+
+async def test_display_waits_for_backend_to_confirm_settings() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await show_settings(session, pilot, Settings())
+        await pilot.press("f3")
+        await pilot.pause()
+        assert app.query_one(PromptInput).border_subtitle == "model: default · tools: restricted"

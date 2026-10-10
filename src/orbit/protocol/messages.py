@@ -14,6 +14,22 @@ class _Message(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
 
+ToolAccess = Literal["off", "restricted", "full"]
+"""How much the agent may use tools.
+
+- ``off``: no tools at all.
+- ``restricted``: anything that would need approval is refused; read-only actions still work.
+- ``full``: every tool call is approved automatically.
+"""
+
+
+class Settings(_Message):
+    """Per-session agent configuration. ``model=None`` means the backend's default."""
+
+    model: str | None = None
+    tool_access: ToolAccess = "restricted"
+
+
 # Commands: frontend -> backend
 
 
@@ -30,10 +46,25 @@ class CancelTurn(_Message):
     type: Literal["cancel_turn"] = "cancel_turn"
 
 
-Command = Annotated[SubmitPrompt | CancelTurn, Field(discriminator="type")]
+class UpdateSettings(_Message):
+    """Replace the session settings; they apply from the next turn."""
+
+    type: Literal["update_settings"] = "update_settings"
+    settings: Settings
+
+
+Command = Annotated[SubmitPrompt | CancelTurn | UpdateSettings, Field(discriminator="type")]
 
 
 # Events: backend -> frontend
+
+
+class SettingsChanged(_Message):
+    """Current settings, sent on connect and after every change."""
+
+    type: Literal["settings_changed"] = "settings_changed"
+    settings: Settings
+    model_choices: tuple[str, ...] = ()
 
 
 class TurnStarted(_Message):
@@ -79,7 +110,8 @@ class ErrorOccurred(_Message):
 
 
 Event = Annotated[
-    TurnStarted
+    SettingsChanged
+    | TurnStarted
     | AssistantMessage
     | ToolCallStarted
     | ToolCallFinished

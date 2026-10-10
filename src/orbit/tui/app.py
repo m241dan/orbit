@@ -14,22 +14,47 @@ from orbit.protocol import (
     ErrorOccurred,
     Event,
     Session,
+    Settings,
+    SettingsChanged,
     SubmitPrompt,
+    ToolAccess,
     ToolCallFinished,
     ToolCallStarted,
     TurnFinished,
     TurnStarted,
+    UpdateSettings,
 )
 from orbit.tui.widgets import PromptInput, Transcript
+
+NEXT_TOOL_ACCESS: dict[ToolAccess, ToolAccess] = {
+    "off": "restricted",
+    "restricted": "full",
+    "full": "off",
+}
+
+
+def next_model(current: str | None, choices: tuple[str, ...]) -> str | None:
+    """Cycle default -> each choice -> default. Unknown models go back to default."""
+    options = (None, *choices)
+    if current not in options:
+        return None
+    return options[(options.index(current) + 1) % len(options)]
 
 
 class OrbitApp(App[None]):
     TITLE = "orbit"
-    BINDINGS: ClassVar[list[BindingType]] = [Binding("escape", "cancel_turn", "Cancel turn")]
+    BINDINGS: ClassVar[list[BindingType]] = [
+        Binding("escape", "cancel_turn", "Cancel turn"),
+        Binding("f2", "next_model", "Model"),
+        Binding("f3", "next_tool_access", "Tools"),
+    ]
 
     def __init__(self, session: Session) -> None:
         super().__init__()
         self._session = session
+        # Last settings reported by the backend; None until the first report.
+        self._settings: Settings | None = None
+        self._model_choices: tuple[str, ...] = ()
 
     def compose(self) -> ComposeResult:
         yield Transcript(id="transcript")
@@ -52,6 +77,20 @@ class OrbitApp(App[None]):
     async def action_cancel_turn(self) -> None:
         await self._session.send(CancelTurn())
 
+    async def action_next_model(self) -> None:
+        if self._settings is not None:
+            model = next_model(self._settings.model, self._model_choices)
+            await self._request_settings(self._settings.model_copy(update={"model": model}))
+
+    async def action_next_tool_access(self) -> None:
+        if self._settings is not None:
+            access = NEXT_TOOL_ACCESS[self._settings.tool_access]
+            await self._request_settings(self._settings.model_copy(update={"tool_access": access}))
+
+    async def _request_settings(self, settings: Settings) -> None:
+        # The display updates when the backend confirms with SettingsChanged.
+        await self._session.send(UpdateSettings(settings=settings))
+
     @work(exclusive=True, group="events")
     async def _consume_events(self) -> None:
         async for event in self._session.events():
@@ -59,6 +98,9 @@ class OrbitApp(App[None]):
 
     def _render_event(self, event: Event) -> None:
         match event:
+            case SettingsChanged(settings=settings, model_choices=choices):
+                self._settings, self._model_choices = settings, choices
+                self.query_one(PromptInput).show_settings(settings)
             case TurnStarted():
                 self.query_one(PromptInput).disabled = True
             case AssistantMessage(text=text):

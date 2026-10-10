@@ -1,5 +1,5 @@
 import asyncio
-from collections.abc import Sequence
+from collections.abc import AsyncIterator, Sequence
 from typing import Any
 
 from orbit.agent import AgentSession, EchoModel, ModelLoopRunner, ToolRegistry
@@ -10,11 +10,15 @@ from orbit.protocol import (
     CancelTurn,
     ErrorOccurred,
     Event,
+    Settings,
+    SettingsChanged,
     SubmitPrompt,
+    ToolAccess,
     ToolCallFinished,
     ToolCallStarted,
     TurnFinished,
     TurnStarted,
+    UpdateSettings,
 )
 
 
@@ -44,8 +48,11 @@ class HangingModel:
 
 
 async def collect(session: AgentSession) -> list[Event]:
+    """Events up to the next TurnFinished, ignoring settings announcements."""
     events: list[Event] = []
     async for event in session.events():
+        if isinstance(event, SettingsChanged):
+            continue
         events.append(event)
         if isinstance(event, TurnFinished):
             return events
@@ -122,6 +129,7 @@ async def test_session_rejects_concurrent_turn() -> None:
     await session.send(SubmitPrompt(text="one"))
     await session.send(SubmitPrompt(text="two"))
     stream = session.events()
+    assert isinstance(await anext(stream), SettingsChanged)
     assert isinstance(await anext(stream), ErrorOccurred)
     await session.send(CancelTurn())
 
@@ -156,3 +164,60 @@ async def test_session_reports_model_errors() -> None:
         TurnFinished(turn_id=turn_id, reason="error"),
     ]
     assert runner.history == []
+
+
+class RecordingModel:
+    def __init__(self) -> None:
+        self.tools_seen: list[list[str]] = []
+
+    async def complete(
+        self, messages: Sequence[Message], tools: Sequence[ToolSpec]
+    ) -> ModelResponse:
+        self.tools_seen.append([t.name for t in tools])
+        return ModelResponse(text="ok")
+
+
+class RecordingRunner:
+    def __init__(self) -> None:
+        self.settings_seen: list[Settings] = []
+
+    async def run_turn(self, turn_id: str, prompt: str, settings: Settings) -> AsyncIterator[Event]:
+        self.settings_seen.append(settings)
+        yield TurnStarted(turn_id=turn_id)
+        yield TurnFinished(turn_id=turn_id, reason="completed")
+
+
+async def test_loop_runner_hides_tools_when_tool_access_is_off() -> None:
+    model = RecordingModel()
+    runner = ModelLoopRunner(model, ToolRegistry([UpperTool()]))
+    accesses: tuple[ToolAccess, ...] = ("off", "restricted", "full")
+    for access in accesses:
+        _ = [e async for e in runner.run_turn("t", "go", Settings(tool_access=access))]
+    assert model.tools_seen == [[], ["upper"], ["upper"]]
+
+
+async def test_session_announces_initial_settings() -> None:
+    settings = Settings(model="opus", tool_access="off")
+    session = AgentSession(RecordingRunner(), settings, model_choices=("opus", "sonnet"))
+    assert session.settings == settings
+    assert await anext(session.events()) == SettingsChanged(
+        settings=settings, model_choices=("opus", "sonnet")
+    )
+
+
+async def test_session_applies_updated_settings_to_next_turn() -> None:
+    runner = RecordingRunner()
+    session = AgentSession(runner, model_choices=("opus",))
+    stream = session.events()
+    assert await anext(stream) == SettingsChanged(settings=Settings(), model_choices=("opus",))
+
+    await session.send(SubmitPrompt(text="one"))
+    await collect(session)
+    new = Settings(model="opus", tool_access="full")
+    await session.send(UpdateSettings(settings=new))
+    assert await anext(stream) == SettingsChanged(settings=new, model_choices=("opus",))
+    await session.send(SubmitPrompt(text="two"))
+    await collect(session)
+
+    assert runner.settings_seen == [Settings(), new]
+    assert session.settings == new

@@ -6,16 +6,34 @@ import typer
 
 from orbit import __version__
 from orbit.agent import AgentSession, ClaudeCliRunner
+from orbit.agent.claude_cli import MODEL_ALIASES
+from orbit.protocol import Settings, ToolAccess
 from orbit.tui import OrbitApp
 
 app = typer.Typer(help="Orbit command-line tool.", no_args_is_help=True)
 
 
 @app.command()
-def chat() -> None:
-    """Start an interactive agent session."""
+def chat(
+    model: Annotated[
+        str | None,
+        typer.Option(help=f"Model alias ({', '.join(MODEL_ALIASES)}) or full model name."),
+    ] = None,
+    tools: Annotated[
+        ToolAccess,
+        typer.Option(
+            help="Tool access: off (none), restricted (read-only; anything needing approval is"
+            " refused), full (auto-approve everything)."
+        ),
+    ] = "restricted",
+) -> None:
+    """Start an interactive agent session. Change model (F2) and tools (F3) in the app."""
     # The only place the backend and frontend meet.
-    session = AgentSession(ClaudeCliRunner())
+    session = AgentSession(
+        ClaudeCliRunner(),
+        Settings(model=model, tool_access=tools),
+        model_choices=MODEL_ALIASES,
+    )
     OrbitApp(session).run()
 
 

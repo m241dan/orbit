@@ -14,6 +14,8 @@ from orbit.protocol import (
     AssistantMessage,
     ErrorOccurred,
     Event,
+    Settings,
+    ToolAccess,
     ToolCallFinished,
     ToolCallStarted,
     TurnFinished,
@@ -21,6 +23,13 @@ from orbit.protocol import (
 )
 
 STREAM_ARGS = ("-p", "--output-format", "stream-json", "--verbose")
+# Aliases the CLI resolves to the latest model of each family.
+MODEL_ALIASES = ("fable", "opus", "sonnet", "haiku")
+TOOL_ACCESS_ARGS: dict[ToolAccess, tuple[str, ...]] = {
+    "off": ("--tools", ""),
+    "restricted": (),
+    "full": ("--permission-mode", "bypassPermissions"),
+}
 # Tool results (e.g. whole files) arrive as single JSON lines; allow large ones.
 LINE_LIMIT = 64 * 1024 * 1024
 
@@ -92,9 +101,12 @@ class ClaudeCliRunner:
         self._command = tuple(command)
         self.session_id: str | None = None
 
-    async def run_turn(self, turn_id: str, prompt: str) -> AsyncIterator[Event]:
+    async def run_turn(self, turn_id: str, prompt: str, settings: Settings) -> AsyncIterator[Event]:
         yield TurnStarted(turn_id=turn_id)
         args = [*self._command, *STREAM_ARGS]
+        if settings.model:
+            args += ["--model", settings.model]
+        args += TOOL_ACCESS_ARGS[settings.tool_access]
         if self.session_id:
             args += ["--resume", self.session_id]
         try:

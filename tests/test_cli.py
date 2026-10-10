@@ -1,9 +1,13 @@
+from typing import ClassVar
+
 import pytest
 from typer.testing import CliRunner
 
 from orbit import __version__
 from orbit.agent import AgentSession, ClaudeCliRunner
+from orbit.agent.claude_cli import MODEL_ALIASES
 from orbit.cli import app
+from orbit.protocol import Settings
 
 runner = CliRunner()
 
@@ -26,21 +30,43 @@ def test_hello_name() -> None:
     assert "Hello, Ada!" in result.stdout
 
 
-def test_chat_runs_tui_against_claude_cli(monkeypatch: pytest.MonkeyPatch) -> None:
-    launched: list[object] = []
+class FakeApp:
+    launched: ClassVar[list[AgentSession]] = []
 
-    class FakeApp:
-        def __init__(self, session: object) -> None:
-            self.session = session
+    def __init__(self, session: AgentSession) -> None:
+        self.session = session
 
-        def run(self) -> None:
-            launched.append(self.session)
+    def run(self) -> None:
+        FakeApp.launched.append(self.session)
 
+
+@pytest.fixture
+def launched(monkeypatch: pytest.MonkeyPatch) -> list[AgentSession]:
     monkeypatch.setattr("orbit.cli.OrbitApp", FakeApp)
+    FakeApp.launched = []
+    return FakeApp.launched
+
+
+def test_chat_runs_tui_against_claude_cli(launched: list[AgentSession]) -> None:
     result = runner.invoke(app, ["chat"])
 
     assert result.exit_code == 0
-    assert len(launched) == 1
-    session = launched[0]
-    assert isinstance(session, AgentSession)
+    [session] = launched
     assert isinstance(session.runner, ClaudeCliRunner)
+    assert session.settings == Settings()
+    assert session.model_choices == MODEL_ALIASES
+
+
+def test_chat_accepts_model_and_tool_access(launched: list[AgentSession]) -> None:
+    result = runner.invoke(app, ["chat", "--model", "opus", "--tools", "full"])
+
+    assert result.exit_code == 0
+    [session] = launched
+    assert session.settings == Settings(model="opus", tool_access="full")
+
+
+def test_chat_rejects_unknown_tool_access(launched: list[AgentSession]) -> None:
+    result = runner.invoke(app, ["chat", "--tools", "sometimes"])
+
+    assert result.exit_code == 2
+    assert launched == []

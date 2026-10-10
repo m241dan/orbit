@@ -7,6 +7,7 @@ from orbit.agent.tools import ToolRegistry
 from orbit.protocol import (
     AssistantMessage,
     Event,
+    Settings,
     ToolCallFinished,
     ToolCallStarted,
     TurnFinished,
@@ -69,13 +70,13 @@ class ModelLoopRunner:
         self._max_steps = max_steps
         self.history: list[Message] = []
 
-    async def run_turn(self, turn_id: str, prompt: str) -> AsyncIterator[Event]:
+    async def run_turn(self, turn_id: str, prompt: str, settings: Settings) -> AsyncIterator[Event]:
+        """Run a turn. ``settings.model`` is ignored: the model client is fixed."""
+        tools = ToolRegistry() if settings.tool_access == "off" else self._tools
         checkpoint = len(self.history)
         self.history.append(Message(role="user", content=prompt))
         try:
-            async for event in run_turn(
-                turn_id, self.history, self._model, self._tools, self._max_steps
-            ):
+            async for event in run_turn(turn_id, self.history, self._model, tools, self._max_steps):
                 yield event
         except BaseException:
             # Drop the partial turn so history never holds unanswered tool calls.

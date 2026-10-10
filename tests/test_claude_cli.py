@@ -14,6 +14,8 @@ from orbit.protocol import (
     CancelTurn,
     ErrorOccurred,
     Event,
+    Settings,
+    SettingsChanged,
     SubmitPrompt,
     ToolCallFinished,
     ToolCallStarted,
@@ -166,8 +168,10 @@ def lines(*messages: dict[str, Any]) -> list[str]:
     return [json.dumps(m) for m in messages]
 
 
-async def run(runner: ClaudeCliRunner, prompt: str) -> list[Event]:
-    return [e async for e in runner.run_turn("t", prompt)]
+async def run(
+    runner: ClaudeCliRunner, prompt: str, settings: Settings | None = None
+) -> list[Event]:
+    return [e async for e in runner.run_turn("t", prompt, settings or Settings())]
 
 
 async def test_runner_streams_a_turn(tmp_path: Path) -> None:
@@ -191,14 +195,36 @@ async def test_runner_streams_a_turn(tmp_path: Path) -> None:
     assert call["stdin"] == "--what version?"
 
 
+@pytest.mark.parametrize(
+    ("settings", "extra_args"),
+    [
+        (Settings(), []),
+        (Settings(model="opus"), ["--model", "opus"]),
+        (Settings(tool_access="off"), ["--tools", ""]),
+        (Settings(tool_access="full"), ["--permission-mode", "bypassPermissions"]),
+        (
+            Settings(model="claude-sonnet-5-5", tool_access="full"),
+            ["--model", "claude-sonnet-5-5", "--permission-mode", "bypassPermissions"],
+        ),
+    ],
+)
+async def test_runner_passes_settings_as_flags(
+    tmp_path: Path, settings: Settings, extra_args: list[str]
+) -> None:
+    runner, scenario = make_runner(tmp_path, stdout=lines(RESULT))
+    await run(runner, "hi", settings)
+    [call] = calls(scenario)
+    assert call["argv"] == ["-p", "--output-format", "stream-json", "--verbose", *extra_args]
+
+
 async def test_runner_resumes_session_on_next_turn(tmp_path: Path) -> None:
     runner, scenario = make_runner(tmp_path, stdout=lines(*TRANSCRIPT))
     await run(runner, "first")
-    await run(runner, "second")
+    await run(runner, "second", Settings(model="opus"))
 
     first, second = calls(scenario)
     assert "--resume" not in first["argv"]
-    assert second["argv"][-2:] == ["--resume", SESSION_ID]
+    assert second["argv"][-4:] == ["--model", "opus", "--resume", SESSION_ID]
 
 
 async def test_runner_does_not_resume_without_session_id(tmp_path: Path) -> None:
@@ -244,6 +270,7 @@ async def test_cancel_kills_the_cli_process(tmp_path: Path) -> None:
     runner, scenario = make_runner(tmp_path, stdout=lines(INIT), hang=True)
     session = AgentSession(runner)
     stream = session.events()
+    assert isinstance(await anext(stream), SettingsChanged)
 
     await session.send(SubmitPrompt(text="hi"))
     assert isinstance(await anext(stream), TurnStarted)

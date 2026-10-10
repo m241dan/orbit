@@ -14,8 +14,18 @@ uv run pre-commit install
 ## Usage
 
 ```sh
-uv run orbit chat       # interactive agent session
+uv run orbit chat                              # interactive agent session
+uv run orbit chat --model opus --tools full    # pick model and tool access up front
 ```
+
+In the app, **F2** cycles the model (default → fable → opus → sonnet → haiku) and **F3** cycles
+tool access; both apply from the next prompt and keep the conversation. Tool access levels:
+
+- `off`: no tools.
+- `restricted` (default): Claude Code's normal permissions; anything that would need approval
+  is refused, read-only actions still work.
+- `full`: every tool call is auto-approved (`--permission-mode bypassPermissions`). Claude can
+  edit files and run commands without asking.
 
 ## Development
 
