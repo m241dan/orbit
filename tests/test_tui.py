@@ -519,3 +519,22 @@ async def test_i_on_prompt_enters_insert_mode_and_hjkl_type() -> None:
         await pilot.press("escape", "k")
         assert app.focused is None
         assert selected(app) == ["transcript"]
+
+
+async def test_pickers_move_with_j_and_k() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await show_settings(session, pilot, Settings(model="opus", tool_access="off"))
+        await pilot.press("ctrl+o", "j")
+        assert picker(app)[2] == 2
+        await pilot.press("k", "k")
+        assert picker(app)[2] == 0
+        await pilot.press("escape")
+        # The window selection underneath didn't move.
+        assert selected(app) == ["prompt"]
+
+        await pilot.press("ctrl+l", "j", "j", "k", "enter")
+        assert session.commands == [
+            UpdateSettings(settings=Settings(model="opus", tool_access="restricted"))
+        ]

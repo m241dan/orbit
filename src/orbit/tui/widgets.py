@@ -135,7 +135,12 @@ class PickerScreen(ModalScreen[int | None]):
     PickerScreen > OptionList, PickerScreen > OptionList:focus { border: round $accent; }
     """
     AUTO_FOCUS = "OptionList"
-    BINDINGS: ClassVar[list[BindingType]] = [Binding("escape", "close", "Close")]
+    BINDINGS: ClassVar[list[BindingType]] = [
+        Binding("escape", "close", "Close"),
+        # Vim-style movement alongside the list's own arrow keys.
+        Binding("j", "move('down')", "Down", show=False),
+        Binding("k", "move('up')", "Up", show=False),
+    ]
 
     def __init__(self, title_text: str, labels: Sequence[str]) -> None:
         super().__init__()
@@ -162,6 +167,13 @@ class PickerScreen(ModalScreen[int | None]):
     @on(OptionList.OptionSelected)
     def _select(self, event: OptionList.OptionSelected) -> None:
         self.dismiss(event.option_index)
+
+    def action_move(self, direction: str) -> None:
+        options = self.query_one(OptionList)
+        if direction == "down":
+            options.action_cursor_down()
+        else:
+            options.action_cursor_up()
 
     def action_close(self) -> None:
         self.dismiss(None)

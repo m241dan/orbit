@@ -29,6 +29,8 @@ In the app:
 | `esc` | Stop typing; otherwise cancel the running turn or close a picker |
 | `ctrl+c` | Quit |
 
+In a picker, `j`/`k` (or the arrow keys) move and `enter` chooses.
+
 Changes apply from the next prompt and keep the conversation.
 
 Tool access levels:
