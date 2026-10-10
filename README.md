@@ -4,7 +4,7 @@ Orbit command-line tool.
 
 ## Setup
 
-Requires [uv](https://docs.astral.sh/uv/).
+Requires [uv](https://docs.astral.sh/uv/) and the [Claude Code CLI](https://docs.claude.com/en/docs/claude-code) (`claude`) on your `PATH`.
 
 ```sh
 uv sync
@@ -39,7 +39,10 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
 
 - `orbit.protocol`: pydantic models (`Command`s in, `Event`s out) and the `Session`
   interface. It imports no other orbit package.
-- `orbit.agent`: backend. Runs the model/tool loop and implements `Session`. Has no UI imports.
+- `orbit.agent`: backend. `AgentSession` implements `Session` and delegates each turn to a
+  `TurnRunner`. `ClaudeCliRunner` (used by `orbit chat`) streams `claude -p --output-format
+  stream-json` and resumes the same Claude session across turns; `ModelLoopRunner` is an in-house
+  model/tool loop for direct API use. Has no UI imports.
 - `orbit.tui`: frontend. Sends commands and renders events. Imports only `orbit.protocol`.
 - `orbit.cli`: the only place the two sides are wired together.
 

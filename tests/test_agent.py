@@ -2,7 +2,7 @@ import asyncio
 from collections.abc import Sequence
 from typing import Any
 
-from orbit.agent import AgentSession, EchoModel, ToolRegistry
+from orbit.agent import AgentSession, EchoModel, ModelLoopRunner, ToolRegistry
 from orbit.agent.loop import run_turn
 from orbit.agent.model import Message, ModelResponse, ToolCall, ToolSpec
 from orbit.protocol import (
@@ -95,27 +95,30 @@ async def test_loop_stops_at_max_steps() -> None:
 
 
 async def test_session_echo_turn() -> None:
-    session = AgentSession(EchoModel())
+    runner = ModelLoopRunner(EchoModel())
+    session = AgentSession(runner)
     await session.send(SubmitPrompt(text="hello"))
     events = await collect(session)
 
     assert any(isinstance(e, AssistantMessage) and e.text == "echo: hello" for e in events)
     assert isinstance(events[-1], TurnFinished) and events[-1].reason == "completed"
+    assert [m.content for m in runner.history] == ["hello", "echo: hello"]
 
 
 async def test_session_cancel() -> None:
-    session = AgentSession(HangingModel())
+    runner = ModelLoopRunner(HangingModel())
+    session = AgentSession(runner)
     await session.send(SubmitPrompt(text="hello"))
     await asyncio.sleep(0)
     await session.send(CancelTurn())
     events = await collect(session)
 
     assert isinstance(events[-1], TurnFinished) and events[-1].reason == "cancelled"
-    assert session._history == []
+    assert runner.history == []
 
 
 async def test_session_rejects_concurrent_turn() -> None:
-    session = AgentSession(HangingModel())
+    session = AgentSession(ModelLoopRunner(HangingModel()))
     await session.send(SubmitPrompt(text="one"))
     await session.send(SubmitPrompt(text="two"))
     stream = session.events()
@@ -131,7 +134,7 @@ class FailingModel:
 
 
 async def test_session_cancel_without_turn_is_noop() -> None:
-    session = AgentSession(EchoModel())
+    session = AgentSession(ModelLoopRunner(EchoModel()))
     await session.send(CancelTurn())
     await session.send(SubmitPrompt(text="hello"))
     events = await collect(session)
@@ -141,7 +144,8 @@ async def test_session_cancel_without_turn_is_noop() -> None:
 
 
 async def test_session_reports_model_errors() -> None:
-    session = AgentSession(FailingModel())
+    runner = ModelLoopRunner(FailingModel())
+    session = AgentSession(runner)
     await session.send(SubmitPrompt(text="hello"))
     events = await collect(session)
 
@@ -151,4 +155,4 @@ async def test_session_reports_model_errors() -> None:
         ErrorOccurred(turn_id=turn_id, message="boom"),
         TurnFinished(turn_id=turn_id, reason="error"),
     ]
-    assert session._history == []
+    assert runner.history == []

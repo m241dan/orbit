@@ -3,12 +3,10 @@
 import json
 from typing import ClassVar, assert_never
 
-from rich.text import Text
 from textual import on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding, BindingType
-from textual.containers import VerticalScroll
-from textual.widgets import Footer, Input, Static
+from textual.widgets import Footer, Input
 
 from orbit.protocol import (
     AssistantMessage,
@@ -22,40 +20,24 @@ from orbit.protocol import (
     TurnFinished,
     TurnStarted,
 )
-
-
-class Entry(Static):
-    """One line in the transcript."""
-
-    DEFAULT_CSS = """
-    Entry { margin: 0 0 1 0; }
-    Entry.user { color: $text-accent; }
-    Entry.tool { color: $text-muted; }
-    Entry.error { color: $text-error; }
-    """
-
-    def __init__(self, text: str, kind: str) -> None:
-        super().__init__(Text(text), classes=kind)
+from orbit.tui.widgets import PromptInput, Transcript
 
 
 class OrbitApp(App[None]):
     TITLE = "orbit"
     BINDINGS: ClassVar[list[BindingType]] = [Binding("escape", "cancel_turn", "Cancel turn")]
-    CSS = """
-    #transcript { height: 1fr; padding: 0 1; }
-    #prompt { dock: bottom; }
-    """
 
     def __init__(self, session: Session) -> None:
         super().__init__()
         self._session = session
 
     def compose(self) -> ComposeResult:
-        yield VerticalScroll(id="transcript")
-        yield Input(placeholder="Ask orbit…", id="prompt")
+        yield Transcript(id="transcript")
+        yield PromptInput(placeholder="Ask orbit…", id="prompt")
         yield Footer()
 
     def on_mount(self) -> None:
+        self.query_one(PromptInput).focus()
         self._consume_events()
 
     @on(Input.Submitted, "#prompt")
@@ -78,7 +60,7 @@ class OrbitApp(App[None]):
     def _render_event(self, event: Event) -> None:
         match event:
             case TurnStarted():
-                self.query_one("#prompt", Input).disabled = True
+                self.query_one(PromptInput).disabled = True
             case AssistantMessage(text=text):
                 self._append(text, "assistant")
             case ToolCallStarted(name=name, arguments=arguments):
@@ -88,7 +70,7 @@ class OrbitApp(App[None]):
             case TurnFinished(reason=reason):
                 if reason not in ("completed", "error"):
                     self._append(f"[turn ended: {reason}]", "tool")
-                prompt = self.query_one("#prompt", Input)
+                prompt = self.query_one(PromptInput)
                 prompt.disabled = False
                 prompt.focus()
             case ErrorOccurred(message=message):
@@ -97,6 +79,4 @@ class OrbitApp(App[None]):
                 assert_never(event)
 
     def _append(self, text: str, kind: str) -> None:
-        transcript = self.query_one("#transcript", VerticalScroll)
-        transcript.mount(Entry(text, kind))
-        transcript.scroll_end(animate=False)
+        self.query_one(Transcript).add_entry(text, kind)

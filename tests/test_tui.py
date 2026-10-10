@@ -1,7 +1,7 @@
 import asyncio
 from collections.abc import AsyncIterator
 
-from textual.widgets import Input
+from textual.widgets import Footer, Input
 
 from orbit.protocol import (
     AssistantMessage,
@@ -16,7 +16,7 @@ from orbit.protocol import (
     TurnStarted,
 )
 from orbit.tui import OrbitApp
-from orbit.tui.app import Entry
+from orbit.tui.widgets import Entry, PromptInput, Transcript
 
 
 class FakeSession:
@@ -95,3 +95,60 @@ async def test_renders_tool_calls_errors_and_cancellation() -> None:
             ("boom", frozenset({"error"})),
             ("[turn ended: cancelled]", frozenset({"tool"})),
         ]
+
+
+async def test_layout_stacks_display_over_prompt_over_footer() -> None:
+    app = OrbitApp(FakeSession())
+    async with app.run_test(size=(80, 24)):
+        transcript = app.query_one(Transcript)
+        prompt = app.query_one(PromptInput)
+        footer = app.query_one(Footer)
+
+        assert transcript.region.y == 0
+        assert transcript.region.bottom == prompt.region.y
+        assert prompt.region.bottom == footer.region.y
+        assert footer.region.bottom == 24
+        assert transcript.region.width == prompt.region.width == 80
+        assert prompt.region.height == 3  # one line of text inside a border
+
+
+async def test_display_absorbs_resize_and_prompt_stays_at_bottom() -> None:
+    app = OrbitApp(FakeSession())
+    async with app.run_test(size=(80, 24)) as pilot:
+        transcript = app.query_one(Transcript)
+        prompt = app.query_one(PromptInput)
+        footer = app.query_one(Footer)
+        before = transcript.region.height
+
+        await pilot.resize_terminal(100, 40)
+        await pilot.pause()
+
+        assert transcript.region.height == before + 16
+        assert prompt.region.height == 3
+        assert prompt.region.bottom == footer.region.y
+
+
+async def test_sections_are_labelled() -> None:
+    app = OrbitApp(FakeSession())
+    async with app.run_test():
+        assert app.query_one(Transcript).border_title == "Conversation"
+        assert app.query_one(PromptInput).border_title == "Prompt"
+
+
+async def test_prompt_has_focus_on_start() -> None:
+    app = OrbitApp(FakeSession())
+    async with app.run_test():
+        assert app.focused is app.query_one(PromptInput)
+
+
+async def test_display_follows_latest_output() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test(size=(80, 24)) as pilot:
+        for i in range(40):
+            await session.queue.put(AssistantMessage(turn_id="t", text=f"line {i}"))
+        await pilot.pause()
+
+        transcript = app.query_one(Transcript)
+        assert transcript.max_scroll_y > 0
+        assert transcript.scroll_y == transcript.max_scroll_y

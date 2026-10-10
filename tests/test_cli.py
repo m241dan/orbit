@@ -2,7 +2,7 @@ import pytest
 from typer.testing import CliRunner
 
 from orbit import __version__
-from orbit.agent import AgentSession
+from orbit.agent import AgentSession, ClaudeCliRunner
 from orbit.cli import app
 
 runner = CliRunner()
@@ -26,7 +26,7 @@ def test_hello_name() -> None:
     assert "Hello, Ada!" in result.stdout
 
 
-def test_chat_runs_tui_with_agent_session(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_chat_runs_tui_against_claude_cli(monkeypatch: pytest.MonkeyPatch) -> None:
     launched: list[object] = []
 
     class FakeApp:
@@ -41,4 +41,6 @@ def test_chat_runs_tui_with_agent_session(monkeypatch: pytest.MonkeyPatch) -> No
 
     assert result.exit_code == 0
     assert len(launched) == 1
-    assert isinstance(launched[0], AgentSession)
+    session = launched[0]
+    assert isinstance(session, AgentSession)
+    assert isinstance(session.runner, ClaudeCliRunner)

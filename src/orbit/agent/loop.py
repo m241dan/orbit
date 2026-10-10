@@ -53,3 +53,31 @@ async def run_turn(
             )
 
     yield TurnFinished(turn_id=turn_id, reason="max_steps")
+
+
+class ModelLoopRunner:
+    """Turn runner that drives :func:`run_turn` against a model client."""
+
+    def __init__(
+        self,
+        model: ModelClient,
+        tools: ToolRegistry | None = None,
+        max_steps: int = DEFAULT_MAX_STEPS,
+    ) -> None:
+        self._model = model
+        self._tools = tools or ToolRegistry()
+        self._max_steps = max_steps
+        self.history: list[Message] = []
+
+    async def run_turn(self, turn_id: str, prompt: str) -> AsyncIterator[Event]:
+        checkpoint = len(self.history)
+        self.history.append(Message(role="user", content=prompt))
+        try:
+            async for event in run_turn(
+                turn_id, self.history, self._model, self._tools, self._max_steps
+            ):
+                yield event
+        except BaseException:
+            # Drop the partial turn so history never holds unanswered tool calls.
+            del self.history[checkpoint:]
+            raise
