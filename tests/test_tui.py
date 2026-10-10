@@ -20,7 +20,7 @@ from orbit.protocol import (
     UpdateSettings,
 )
 from orbit.tui import OrbitApp
-from orbit.tui.widgets import Entry, PickerScreen, PromptInput, Transcript
+from orbit.tui.widgets import Entry, PickerScreen, PromptInput, SidePanel, Transcript
 
 
 class FakeSession:
@@ -112,7 +112,8 @@ async def test_layout_stacks_display_over_prompt_over_footer() -> None:
         assert transcript.region.bottom == prompt.region.y
         assert prompt.region.bottom == footer.region.y
         assert footer.region.bottom == 24
-        assert transcript.region.width == prompt.region.width == 80
+        # The side panels take 33% (26 columns); conversation and prompt get the rest.
+        assert transcript.region.width == prompt.region.width == 54
         assert prompt.region.height == 3  # one line of text inside a border
 
 
@@ -341,3 +342,27 @@ async def test_ctrl_q_does_not_quit() -> None:
         await pilot.press("ctrl+q")
         await pilot.pause()
         assert app.is_running
+
+
+async def test_side_panels_fill_right_third_top_and_bottom() -> None:
+    app = OrbitApp(FakeSession())
+    async with app.run_test(size=(120, 41)) as pilot:
+        await pilot.pause()
+        tasks = app.query_one("#task-list", SidePanel)
+        steps = app.query_one("#verification-steps", SidePanel)
+        transcript = app.query_one(Transcript).region
+        prompt = app.query_one(PromptInput).region
+        assert (tasks.border_title, steps.border_title) == ("Task list", "Verification steps")
+
+        # 33% of the width (39.6 rounds down), split top/bottom above the footer.
+        for panel in (tasks, steps):
+            assert panel.region.width == 39
+            assert panel.region.right == 120
+        assert tasks.region.y == 0
+        assert steps.region.y == tasks.region.bottom
+        assert steps.region.bottom == 40
+        assert tasks.region.height == steps.region.height
+
+        # Conversation and prompt take the rest of the width on the left.
+        assert transcript.width == prompt.width == 81
+        assert prompt.bottom == 40

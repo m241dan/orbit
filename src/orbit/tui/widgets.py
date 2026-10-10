@@ -58,6 +58,22 @@ class Transcript(VerticalScroll):
         self.scroll_end(animate=False)
 
 
+class SidePanel(VerticalScroll):
+    """Titled pane in the right-hand column."""
+
+    DEFAULT_CSS = """
+    SidePanel {
+        height: 1fr;
+        border: round $primary;
+        padding: 0 1;
+    }
+    """
+
+    def __init__(self, title: str, *, id: str) -> None:
+        super().__init__(id=id)
+        self.border_title = title
+
+
 class PromptInput(Input):
     """Single-line prompt box at the bottom of the screen."""
 

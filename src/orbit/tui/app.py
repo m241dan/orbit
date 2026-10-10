@@ -6,6 +6,7 @@ from typing import ClassVar, assert_never, get_args
 from textual import on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding, BindingType
+from textual.containers import Horizontal, Vertical
 from textual.widgets import Footer, Input
 
 from orbit.protocol import (
@@ -24,7 +25,13 @@ from orbit.protocol import (
     TurnStarted,
     UpdateSettings,
 )
-from orbit.tui.widgets import TOOL_ACCESS_DESCRIPTIONS, PickerScreen, PromptInput, Transcript
+from orbit.tui.widgets import (
+    TOOL_ACCESS_DESCRIPTIONS,
+    PickerScreen,
+    PromptInput,
+    SidePanel,
+    Transcript,
+)
 
 TOOL_ACCESS_OPTIONS: tuple[ToolAccess, ...] = get_args(ToolAccess)
 
@@ -32,6 +39,9 @@ TOOL_ACCESS_OPTIONS: tuple[ToolAccess, ...] = get_args(ToolAccess)
 # Not inheriting App's bindings drops its ctrl+q quit and ctrl+c "how to quit" hint.
 class OrbitApp(App[None], inherit_bindings=False):
     TITLE = "orbit"
+    CSS = """
+    #side { width: 33%; }
+    """
     BINDINGS: ClassVar[list[BindingType]] = [
         # Priority, so it beats the prompt's own ctrl+c (copy).
         Binding("ctrl+c", "quit", "Quit", show=False, priority=True),
@@ -53,8 +63,13 @@ class OrbitApp(App[None], inherit_bindings=False):
         )
 
     def compose(self) -> ComposeResult:
-        yield Transcript(id="transcript")
-        yield PromptInput(placeholder="Ask orbit…", id="prompt")
+        with Horizontal():
+            with Vertical():
+                yield Transcript(id="transcript")
+                yield PromptInput(placeholder="Ask orbit…", id="prompt")
+            with Vertical(id="side"):
+                yield SidePanel("Task list", id="task-list")
+                yield SidePanel("Verification steps", id="verification-steps")
         yield Footer()
 
     def on_mount(self) -> None:
