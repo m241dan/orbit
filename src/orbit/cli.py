@@ -29,8 +29,8 @@ def chat(
 ) -> None:
     """Start an interactive agent session.
 
-    In the app: h/j/k/l move between windows; on the prompt, i starts
-    typing and esc stops;
+    In the app: h/j/k/l move between windows; i jumps to the prompt to
+    type and esc stops;
     ctrl+o / ctrl+l open a picker for the model / tool access.
     """
     # The only place the backend and frontend meet.

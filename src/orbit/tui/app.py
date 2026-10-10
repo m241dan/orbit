@@ -111,13 +111,17 @@ class OrbitApp(App[None], inherit_bindings=False):
     def action_move(self, direction: str) -> None:
         target = NEIGHBORS[self._selected].get(direction)
         if target is not None:
-            self.query_one(f"#{self._selected}").remove_class("selected")
-            self.query_one(f"#{target}").add_class("selected")
-            self._selected = target
+            self._select(target)
 
     def action_insert_mode(self) -> None:
-        if self._selected == "prompt":
-            self.query_one(PromptInput).enter_insert_mode()
+        """Shortcut from any window: select the prompt and start typing."""
+        self._select("prompt")
+        self.query_one(PromptInput).enter_insert_mode()
+
+    def _select(self, window_id: str) -> None:
+        self.query_one(f"#{self._selected}").remove_class("selected")
+        self.query_one(f"#{window_id}").add_class("selected")
+        self._selected = window_id
 
     async def action_cancel_turn(self) -> None:
         await self._session.send(CancelTurn())

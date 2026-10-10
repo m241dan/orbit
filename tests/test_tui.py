@@ -474,13 +474,25 @@ async def test_border_highlight_follows_selection() -> None:
         assert tasks.styles.border_top == before
 
 
-@pytest.mark.parametrize("key", ["i", "enter"])
-async def test_i_and_enter_do_nothing_off_the_prompt(key: str) -> None:
+async def test_enter_does_nothing_off_the_prompt() -> None:
     app = OrbitApp(FakeSession())
     async with app.run_test() as pilot:
-        await pilot.press("k", key)
+        await pilot.press("k", "enter")
         assert app.focused is None
         assert selected(app) == ["transcript"]
+
+
+@pytest.mark.parametrize("keys", ["k", "kl", "l", "lk"])
+async def test_i_jumps_to_prompt_from_any_window(keys: str) -> None:
+    app = OrbitApp(FakeSession())
+    async with app.run_test() as pilot:
+        await pilot.press(*keys, "i")
+        assert selected(app) == ["prompt"]
+        assert app.focused is app.query_one(PromptInput)
+
+        await pilot.press("escape")
+        assert selected(app) == ["prompt"]
+        assert app.focused is None
 
 
 async def test_enter_on_prompt_does_nothing() -> None:
