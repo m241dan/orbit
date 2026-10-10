@@ -1,0 +1,47 @@
+[project]
+name = "orbit"
+version = "0.1.0"
+description = "Orbit command-line tool"
+readme = "README.md"
+authors = [
+    { name = "Daniel R Koris", email = "korisd@gmail.com" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "typer>=0.27.3",
+]
+
+[project.scripts]
+orbit = "orbit.cli:app"
+
+[build-system]
+requires = ["uv_build>=0.13.0,<0.14.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "mypy>=2.4.0",
+    "pre-commit>=4.6.2",
+    "pytest>=9.1.1",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.17.0",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "RUF"]
+
+[tool.mypy]
+strict = true
+files = ["src", "tests"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+
+[tool.coverage.run]
+source = ["orbit"]
+branch = true
