@@ -1,7 +1,7 @@
 """Building blocks of the orbit screen."""
 
 from collections.abc import Sequence
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from rich.text import Text
 from textual import on
@@ -75,7 +75,11 @@ class SidePanel(VerticalScroll):
 
 
 class PromptInput(Input):
-    """Single-line prompt box at the bottom of the screen."""
+    """Single-line prompt box at the bottom of the screen.
+
+    Vim-style: it only takes focus in insert mode (``enter_insert_mode``), and
+    escape or losing focus returns to normal mode, where keys go to the app.
+    """
 
     DEFAULT_CSS = """
     PromptInput {
@@ -85,8 +89,28 @@ class PromptInput(Input):
     PromptInput:focus { border: round $accent; }
     """
 
+    BINDINGS: ClassVar[list[BindingType]] = [
+        Binding("escape", "normal_mode", "Normal mode", show=False)
+    ]
+
+    def __init__(self, **kwargs: Any) -> None:
+        # Keep the draft unselected so re-entering insert mode appends to it.
+        super().__init__(select_on_focus=False, **kwargs)
+        self.can_focus = False
+
     def on_mount(self) -> None:
         self.border_title = "Prompt"
+
+    def enter_insert_mode(self) -> None:
+        if not self.disabled:
+            self.can_focus = True
+            self.focus()
+
+    def action_normal_mode(self) -> None:
+        self.screen.set_focus(None)
+
+    def on_blur(self) -> None:
+        self.can_focus = False
 
     def show_settings(self, settings: Settings) -> None:
         model = settings.model or "default"
@@ -111,6 +135,7 @@ class PickerScreen(ModalScreen[int | None]):
     }
     PickerScreen > OptionList, PickerScreen > OptionList:focus { border: round $accent; }
     """
+    AUTO_FOCUS = "OptionList"
     BINDINGS: ClassVar[list[BindingType]] = [Binding("escape", "close", "Close")]
 
     def __init__(self, title_text: str, labels: Sequence[str]) -> None:

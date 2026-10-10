@@ -22,9 +22,10 @@ In the app:
 
 | Key | Action |
 |---|---|
+| `i` | Start typing in the prompt (vim-style insert mode) |
 | `ctrl+o` | Pick the model (default, fable, opus, sonnet, haiku) |
 | `ctrl+l` | Pick the tool access level (off, restricted, full) |
-| `esc` | Cancel the running turn, or close a picker |
+| `esc` | Stop typing; otherwise cancel the running turn or close a picker |
 | `ctrl+c` | Quit |
 
 Changes apply from the next prompt and keep the conversation.

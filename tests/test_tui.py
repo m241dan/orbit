@@ -42,8 +42,7 @@ async def test_submit_sends_command_and_renders_events() -> None:
     session = FakeSession()
     app = OrbitApp(session)
     async with app.run_test() as pilot:
-        await pilot.click("#prompt")
-        await pilot.press(*"hi", "enter")
+        await pilot.press("i", *"hi", "enter")
         assert session.commands == [SubmitPrompt(text="hi")]
 
         await session.queue.put(TurnStarted(turn_id="t"))
@@ -70,8 +69,7 @@ async def test_blank_submit_is_ignored() -> None:
     session = FakeSession()
     app = OrbitApp(session)
     async with app.run_test() as pilot:
-        await pilot.click("#prompt")
-        await pilot.press("space", "enter")
+        await pilot.press("i", "space", "enter")
         assert session.commands == []
         assert len(app.query(Entry)) == 0
 
@@ -140,9 +138,61 @@ async def test_sections_are_labelled() -> None:
         assert app.query_one(PromptInput).border_title == "Prompt"
 
 
-async def test_prompt_has_focus_on_start() -> None:
+async def test_prompt_starts_in_normal_mode_and_ignores_typing_and_clicks() -> None:
     app = OrbitApp(FakeSession())
-    async with app.run_test():
+    async with app.run_test() as pilot:
+        prompt = app.query_one(PromptInput)
+        assert app.focused is None
+        await pilot.press(*"hello")
+        await pilot.click("#prompt")
+        assert app.focused is None
+        assert prompt.value == ""
+
+
+async def test_i_enters_insert_mode_without_typing_the_i() -> None:
+    app = OrbitApp(FakeSession())
+    async with app.run_test() as pilot:
+        prompt = app.query_one(PromptInput)
+        await pilot.press("i")
+        assert app.focused is prompt
+        await pilot.press(*"hi")
+        assert prompt.value == "hi"
+
+
+async def test_escape_in_insert_mode_returns_to_normal_mode_without_cancelling() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        prompt = app.query_one(PromptInput)
+        await pilot.press("i", "a", "escape")
+        assert app.focused is None
+        assert session.commands == []
+
+        # Back in normal mode: keys don't type, the draft is kept, escape cancels.
+        await pilot.press("b", "escape")
+        assert prompt.value == "a"
+        assert session.commands == [CancelTurn()]
+
+        await pilot.press("i", "b")
+        assert prompt.value == "ab"
+
+
+async def test_submit_returns_to_normal_mode_and_finished_turn_stays_there() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await pilot.press("i", *"hi", "enter")
+        assert app.focused is None
+
+        await session.queue.put(TurnStarted(turn_id="t"))
+        await pilot.pause()
+        await pilot.press("i")
+        assert app.focused is None  # can't edit while a turn runs
+
+        await session.queue.put(TurnFinished(turn_id="t", reason="completed"))
+        await pilot.pause()
+        assert app.focused is None
+        await pilot.press("i")
         assert app.focused is app.query_one(PromptInput)
 
 
@@ -330,6 +380,7 @@ async def test_picker_keys_ignored_while_a_picker_is_open() -> None:
 async def test_ctrl_c_quits_even_with_prompt_focused() -> None:
     app = OrbitApp(FakeSession())
     async with app.run_test() as pilot:
+        await pilot.press("i")
         assert app.focused is app.query_one(PromptInput)
         await pilot.press("ctrl+c")
         await pilot.pause()

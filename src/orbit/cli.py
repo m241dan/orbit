@@ -29,7 +29,8 @@ def chat(
 ) -> None:
     """Start an interactive agent session.
 
-    In the app: ctrl+o / ctrl+l open a picker for the model / tool access.
+    In the app: i starts typing a prompt and esc stops;
+    ctrl+o / ctrl+l open a picker for the model / tool access.
     """
     # The only place the backend and frontend meet.
     session = AgentSession(

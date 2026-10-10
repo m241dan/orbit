@@ -39,12 +39,15 @@ TOOL_ACCESS_OPTIONS: tuple[ToolAccess, ...] = get_args(ToolAccess)
 # Not inheriting App's bindings drops its ctrl+q quit and ctrl+c "how to quit" hint.
 class OrbitApp(App[None], inherit_bindings=False):
     TITLE = "orbit"
+    # Start in normal mode: nothing focused until `i`.
+    AUTO_FOCUS = None
     CSS = """
     #side { width: 33%; }
     """
     BINDINGS: ClassVar[list[BindingType]] = [
         # Priority, so it beats the prompt's own ctrl+c (copy).
         Binding("ctrl+c", "quit", "Quit", show=False, priority=True),
+        Binding("i", "insert_mode", "Type"),
         Binding("escape", "cancel_turn", "Cancel turn"),
         Binding("ctrl+o", "pick_model", "Model"),
         Binding("ctrl+l", "pick_tool_access", "Tools"),
@@ -66,7 +69,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         with Horizontal():
             with Vertical():
                 yield Transcript(id="transcript")
-                yield PromptInput(placeholder="Ask orbit…", id="prompt")
+                yield PromptInput(placeholder="Press i to type, esc to stop", id="prompt")
             with Vertical(id="side"):
                 yield SidePanel("Task list", id="task-list")
                 yield SidePanel("Verification steps", id="verification-steps")
@@ -75,7 +78,6 @@ class OrbitApp(App[None], inherit_bindings=False):
     def on_mount(self) -> None:
         self.install_screen(self._model_picker, "pick-model")
         self.install_screen(self._tool_picker, "pick-tool-access")
-        self.query_one(PromptInput).focus()
         self._consume_events()
 
     @on(Input.Submitted, "#prompt")
@@ -84,8 +86,12 @@ class OrbitApp(App[None], inherit_bindings=False):
         if not text:
             return
         message.input.clear()
+        self.query_one(PromptInput).action_normal_mode()
         self._append(text, "user")
         await self._session.send(SubmitPrompt(text=text))
+
+    def action_insert_mode(self) -> None:
+        self.query_one(PromptInput).enter_insert_mode()
 
     async def action_cancel_turn(self) -> None:
         await self._session.send(CancelTurn())
@@ -144,9 +150,7 @@ class OrbitApp(App[None], inherit_bindings=False):
             case TurnFinished(reason=reason):
                 if reason not in ("completed", "error"):
                     self._append(f"[turn ended: {reason}]", "tool")
-                prompt = self.query_one(PromptInput)
-                prompt.disabled = False
-                prompt.focus()
+                self.query_one(PromptInput).disabled = False
             case ErrorOccurred(message=message):
                 self._append(message, "error")
             case _:
