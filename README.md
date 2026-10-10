@@ -18,8 +18,18 @@ uv run orbit chat                              # interactive agent session
 uv run orbit chat --model opus --tools full    # pick model and tool access up front
 ```
 
-In the app, **F2** cycles the model (default → fable → opus → sonnet → haiku) and **F3** cycles
-tool access; both apply from the next prompt and keep the conversation. Tool access levels:
+In the app:
+
+| Key | Action |
+|---|---|
+| `ctrl+o` | Pick the model (default, fable, opus, sonnet, haiku) |
+| `ctrl+l` | Pick the tool access level (off, restricted, full) |
+| `esc` | Cancel the running turn, or close a picker |
+| `ctrl+c` | Quit |
+
+Changes apply from the next prompt and keep the conversation.
+
+Tool access levels:
 
 - `off`: no tools.
 - `restricted` (default): Claude Code's normal permissions; anything that would need approval

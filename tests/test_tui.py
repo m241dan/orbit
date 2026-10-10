@@ -1,9 +1,8 @@
 import asyncio
 from collections.abc import AsyncIterator
 
-import pytest
 from textual.pilot import Pilot
-from textual.widgets import Footer, Input
+from textual.widgets import Footer, Input, OptionList
 
 from orbit.protocol import (
     AssistantMessage,
@@ -14,7 +13,6 @@ from orbit.protocol import (
     Settings,
     SettingsChanged,
     SubmitPrompt,
-    ToolAccess,
     ToolCallFinished,
     ToolCallStarted,
     TurnFinished,
@@ -22,7 +20,7 @@ from orbit.protocol import (
     UpdateSettings,
 )
 from orbit.tui import OrbitApp
-from orbit.tui.widgets import Entry, PromptInput, Transcript
+from orbit.tui.widgets import Entry, PickerScreen, PromptInput, Transcript
 
 
 class FakeSession:
@@ -187,44 +185,11 @@ async def test_settings_shown_under_prompt() -> None:
 
 async def test_settings_keys_do_nothing_before_backend_reports_settings() -> None:
     session = FakeSession()
-    async with OrbitApp(session).run_test() as pilot:
-        await pilot.press("f2", "f3")
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await pilot.press("ctrl+o", "ctrl+l")
         assert session.commands == []
-
-
-@pytest.mark.parametrize(
-    ("current", "expected"),
-    [
-        (None, "opus"),
-        ("opus", "sonnet"),
-        ("sonnet", None),
-        ("claude-custom-1", None),
-    ],
-)
-async def test_f2_requests_next_model(current: str | None, expected: str | None) -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        await show_settings(session, pilot, Settings(model=current, tool_access="off"))
-        await pilot.press("f2")
-        assert session.commands == [
-            UpdateSettings(settings=Settings(model=expected, tool_access="off"))
-        ]
-
-
-@pytest.mark.parametrize(
-    ("current", "expected"),
-    [("off", "restricted"), ("restricted", "full"), ("full", "off")],
-)
-async def test_f3_requests_next_tool_access(current: ToolAccess, expected: ToolAccess) -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        await show_settings(session, pilot, Settings(model="opus", tool_access=current))
-        await pilot.press("f3")
-        assert session.commands == [
-            UpdateSettings(settings=Settings(model="opus", tool_access=expected))
-        ]
+        assert not isinstance(app.screen, PickerScreen)
 
 
 async def test_display_waits_for_backend_to_confirm_settings() -> None:
@@ -232,6 +197,147 @@ async def test_display_waits_for_backend_to_confirm_settings() -> None:
     app = OrbitApp(session)
     async with app.run_test() as pilot:
         await show_settings(session, pilot, Settings())
-        await pilot.press("f3")
+        prompt = app.query_one(PromptInput)
+        await pilot.press("ctrl+l", "down", "enter")
         await pilot.pause()
-        assert app.query_one(PromptInput).border_subtitle == "model: default · tools: restricted"
+        assert prompt.border_subtitle == "model: default · tools: restricted"
+        assert session.commands == [UpdateSettings(settings=Settings(tool_access="full"))]
+
+        await show_settings(session, pilot, Settings(tool_access="full"))
+        assert prompt.border_subtitle == "model: default · tools: full (auto-approved)"
+
+
+def picker(app: OrbitApp) -> tuple[str, list[str], int | None]:
+    """The open picker's title, option labels and highlighted index."""
+    screen = app.screen
+    assert isinstance(screen, PickerScreen)
+    options = screen.query_one(OptionList)
+    labels = [str(options.get_option_at_index(i).prompt) for i in range(options.option_count)]
+    return screen.title_text, labels, options.highlighted
+
+
+async def test_ctrl_o_lists_models_with_current_highlighted() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await show_settings(session, pilot, Settings(model="opus"))
+        await pilot.press("ctrl+o")
+        assert picker(app) == ("Model", ["default", "opus", "sonnet"], 1)
+
+
+async def test_model_picker_selection_requests_that_model() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await show_settings(session, pilot, Settings(model="opus", tool_access="full"))
+        await pilot.press("ctrl+o", "down", "enter")
+        assert session.commands == [
+            UpdateSettings(settings=Settings(model="sonnet", tool_access="full"))
+        ]
+        assert not isinstance(app.screen, PickerScreen)
+
+
+async def test_model_picker_highlights_nothing_for_custom_model() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await show_settings(session, pilot, Settings(model="claude-custom-1"))
+        await pilot.press("ctrl+o")
+        assert picker(app)[2] is None
+
+
+async def test_ctrl_l_lists_tool_access_and_selects() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await show_settings(session, pilot, Settings(model="opus", tool_access="off"))
+        await pilot.press("ctrl+l")
+        assert picker(app) == (
+            "Tool access",
+            [
+                "off: no tools",
+                "restricted: read-only; anything needing approval is refused",
+                "full: auto-approve everything",
+            ],
+            0,
+        )
+
+        await pilot.press("down", "down", "enter")
+        assert session.commands == [
+            UpdateSettings(settings=Settings(model="opus", tool_access="full"))
+        ]
+
+
+async def test_escape_closes_picker_without_changes() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await show_settings(session, pilot, Settings())
+        await pilot.press("ctrl+l", "down", "escape")
+        assert not isinstance(app.screen, PickerScreen)
+        assert session.commands == []
+
+
+async def test_pickers_are_built_once_and_reused() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await show_settings(session, pilot, Settings())
+        opened: list[object] = []
+        for key in ["ctrl+o", "ctrl+o", "ctrl+l", "ctrl+l"]:
+            await pilot.press(key)
+            opened.append(app.screen)
+            await pilot.press("escape")
+
+        assert opened[0] is opened[1]
+        assert opened[2] is opened[3]
+        # A later settings report with the same choices keeps the cached picker.
+        await show_settings(session, pilot, Settings(model="opus"))
+        await pilot.press("ctrl+o")
+        assert app.screen is opened[0]
+        assert picker(app)[2] == 1
+
+
+async def test_model_picker_updates_when_choices_change() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await show_settings(session, pilot, Settings())
+        await pilot.press("ctrl+o")
+        first = app.screen
+        await pilot.press("escape")
+
+        await session.queue.put(SettingsChanged(settings=Settings(), model_choices=("haiku",)))
+        await pilot.pause()
+        await pilot.press("ctrl+o")
+        assert app.screen is first
+        assert picker(app)[1] == ["default", "haiku"]
+
+
+async def test_picker_keys_ignored_while_a_picker_is_open() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await show_settings(session, pilot, Settings())
+        await pilot.press("ctrl+o")
+        model_picker = app.screen
+        await pilot.press("ctrl+o", "ctrl+l")
+        assert app.screen is model_picker
+        assert len(app.screen_stack) == 2
+
+
+async def test_ctrl_c_quits_even_with_prompt_focused() -> None:
+    app = OrbitApp(FakeSession())
+    async with app.run_test() as pilot:
+        assert app.focused is app.query_one(PromptInput)
+        await pilot.press("ctrl+c")
+        await pilot.pause()
+        assert not app.is_running
+
+
+async def test_ctrl_q_does_not_quit() -> None:
+    app = OrbitApp(FakeSession())
+    async with app.run_test() as pilot:
+        await pilot.press("ctrl+q")
+        await pilot.pause()
+        assert app.is_running

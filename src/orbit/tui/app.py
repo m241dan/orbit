@@ -1,7 +1,7 @@
 """Textual frontend. Talks to the backend only through a protocol Session."""
 
 import json
-from typing import ClassVar, assert_never
+from typing import ClassVar, assert_never, get_args
 
 from textual import on, work
 from textual.app import App, ComposeResult
@@ -24,29 +24,20 @@ from orbit.protocol import (
     TurnStarted,
     UpdateSettings,
 )
-from orbit.tui.widgets import PromptInput, Transcript
+from orbit.tui.widgets import TOOL_ACCESS_DESCRIPTIONS, PickerScreen, PromptInput, Transcript
 
-NEXT_TOOL_ACCESS: dict[ToolAccess, ToolAccess] = {
-    "off": "restricted",
-    "restricted": "full",
-    "full": "off",
-}
+TOOL_ACCESS_OPTIONS: tuple[ToolAccess, ...] = get_args(ToolAccess)
 
 
-def next_model(current: str | None, choices: tuple[str, ...]) -> str | None:
-    """Cycle default -> each choice -> default. Unknown models go back to default."""
-    options = (None, *choices)
-    if current not in options:
-        return None
-    return options[(options.index(current) + 1) % len(options)]
-
-
-class OrbitApp(App[None]):
+# Not inheriting App's bindings drops its ctrl+q quit and ctrl+c "how to quit" hint.
+class OrbitApp(App[None], inherit_bindings=False):
     TITLE = "orbit"
     BINDINGS: ClassVar[list[BindingType]] = [
+        # Priority, so it beats the prompt's own ctrl+c (copy).
+        Binding("ctrl+c", "quit", "Quit", show=False, priority=True),
         Binding("escape", "cancel_turn", "Cancel turn"),
-        Binding("f2", "next_model", "Model"),
-        Binding("f3", "next_tool_access", "Tools"),
+        Binding("ctrl+o", "pick_model", "Model"),
+        Binding("ctrl+l", "pick_tool_access", "Tools"),
     ]
 
     def __init__(self, session: Session) -> None:
@@ -55,6 +46,11 @@ class OrbitApp(App[None]):
         # Last settings reported by the backend; None until the first report.
         self._settings: Settings | None = None
         self._model_choices: tuple[str, ...] = ()
+        # Pickers are built once and installed so they open instantly.
+        self._model_picker = PickerScreen("Model", ["default"])
+        self._tool_picker = PickerScreen(
+            "Tool access", [TOOL_ACCESS_DESCRIPTIONS[a] for a in TOOL_ACCESS_OPTIONS]
+        )
 
     def compose(self) -> ComposeResult:
         yield Transcript(id="transcript")
@@ -62,6 +58,8 @@ class OrbitApp(App[None]):
         yield Footer()
 
     def on_mount(self) -> None:
+        self.install_screen(self._model_picker, "pick-model")
+        self.install_screen(self._tool_picker, "pick-tool-access")
         self.query_one(PromptInput).focus()
         self._consume_events()
 
@@ -77,15 +75,32 @@ class OrbitApp(App[None]):
     async def action_cancel_turn(self) -> None:
         await self._session.send(CancelTurn())
 
-    async def action_next_model(self) -> None:
+    def action_pick_model(self) -> None:
         if self._settings is not None:
-            model = next_model(self._settings.model, self._model_choices)
-            await self._request_settings(self._settings.model_copy(update={"model": model}))
+            models = (None, *self._model_choices)
+            candidates = [self._settings.model_copy(update={"model": m}) for m in models]
+            self._open_picker(self._model_picker, candidates)
 
-    async def action_next_tool_access(self) -> None:
+    def action_pick_tool_access(self) -> None:
         if self._settings is not None:
-            access = NEXT_TOOL_ACCESS[self._settings.tool_access]
-            await self._request_settings(self._settings.model_copy(update={"tool_access": access}))
+            candidates = [
+                self._settings.model_copy(update={"tool_access": a}) for a in TOOL_ACCESS_OPTIONS
+            ]
+            self._open_picker(self._tool_picker, candidates)
+
+    def _open_picker(self, picker: PickerScreen, candidates: list[Settings]) -> None:
+        """Show ``picker``; choosing option ``i`` requests ``candidates[i]``.
+
+        While a picker is open, its modal screen blocks the app's key bindings, so
+        a second picker can't be pushed on top.
+        """
+        picker.current = candidates.index(self._settings) if self._settings in candidates else None
+
+        async def chosen(index: int | None) -> None:
+            if index is not None:
+                await self._request_settings(candidates[index])
+
+        self.push_screen(picker, chosen)
 
     async def _request_settings(self, settings: Settings) -> None:
         # The display updates when the backend confirms with SettingsChanged.
@@ -99,6 +114,8 @@ class OrbitApp(App[None]):
     def _render_event(self, event: Event) -> None:
         match event:
             case SettingsChanged(settings=settings, model_choices=choices):
+                if choices != self._model_choices:
+                    self._model_picker.set_labels(["default", *choices])
                 self._settings, self._model_choices = settings, choices
                 self.query_one(PromptInput).show_settings(settings)
             case TurnStarted():
