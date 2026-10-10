@@ -5,3 +5,11 @@ repos:
       - id: ruff-check
         args: [--fix]
       - id: ruff-format
+  - repo: local
+    hooks:
+      - id: lint-imports
+        name: lint-imports (frontend/backend separation)
+        entry: uv run lint-imports
+        language: system
+        pass_filenames: false
+        types: [python]

@@ -8,6 +8,8 @@ authors = [
 ]
 requires-python = ">=3.13"
 dependencies = [
+    "pydantic>=2.14.0",
+    "textual>=8.2.8",
     "typer>=0.27.3",
 ]
 
@@ -20,9 +22,11 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
+    "import-linter>=2.15",
     "mypy>=2.4.0",
     "pre-commit>=4.6.2",
     "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
     "pytest-cov>=7.1.0",
     "ruff>=0.17.0",
 ]
@@ -41,7 +45,42 @@ files = ["src", "tests"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
+asyncio_mode = "auto"
 
 [tool.coverage.run]
 source = ["orbit"]
 branch = true
+# Entry-point shim: `python -m orbit` just calls the Typer app tested in test_cli.
+omit = ["*/orbit/__main__.py"]
+
+[tool.coverage.report]
+fail_under = 100
+show_missing = true
+skip_covered = true
+exclude_also = [
+    'if __name__ == .__main__.:',
+    "if TYPE_CHECKING:",
+    "assert_never\\(",
+]
+
+# Keep frontend and backend apart; they meet only in orbit.cli via orbit.protocol.
+[tool.importlinter]
+root_package = "orbit"
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "Frontend and backend are independent"
+type = "independence"
+modules = ["orbit.agent", "orbit.tui"]
+
+[[tool.importlinter.contracts]]
+name = "Protocol depends on neither side"
+type = "forbidden"
+source_modules = ["orbit.protocol"]
+forbidden_modules = ["orbit.agent", "orbit.tui", "orbit.cli", "textual", "rich"]
+
+[[tool.importlinter.contracts]]
+name = "Backend has no UI dependencies"
+type = "forbidden"
+source_modules = ["orbit.agent"]
+forbidden_modules = ["textual", "rich", "typer"]
