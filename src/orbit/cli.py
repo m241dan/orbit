@@ -5,7 +5,7 @@ from typing import Annotated
 import typer
 
 from orbit import __version__
-from orbit.agent import AgentSession, ClaudeCliRunner
+from orbit.agent import DEFAULT_STEPS, AgentSession, ClaudeCliRunner
 from orbit.agent.claude_cli import MODEL_ALIASES
 from orbit.protocol import Settings, ToolAccess
 from orbit.tui import OrbitApp
@@ -26,6 +26,13 @@ def chat(
             " refused), full (auto-approve everything)."
         ),
     ] = "restricted",
+    verify: Annotated[
+        bool,
+        typer.Option(
+            help="After each task, run the unit tests and require 100% coverage; a failure"
+            " queues a task to fix it."
+        ),
+    ] = True,
 ) -> None:
     """Start an interactive agent session.
 
@@ -33,12 +40,14 @@ def chat(
     type and esc stops;
     ctrl+o / ctrl+l open a picker for the model / tool access; enter on the
     task list edits queued tasks and ctrl+r runs them, each in a fresh session.
+    Verification steps run after each task; a failing one queues a fix task.
     """
     # The only place the backend and frontend meet.
     session = AgentSession(
         ClaudeCliRunner(),
         Settings(model=model, tool_access=tools),
         model_choices=MODEL_ALIASES,
+        verification_steps=DEFAULT_STEPS if verify else (),
     )
     OrbitApp(session).run()
 

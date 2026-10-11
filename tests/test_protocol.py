@@ -7,10 +7,14 @@ from orbit.protocol import (
     SettingsChanged,
     SubmitPrompt,
     TaskFinished,
+    TaskInserted,
     TaskSpec,
     TaskStarted,
     ToolCallStarted,
     UpdateSettings,
+    VerificationConfigured,
+    VerificationFinished,
+    VerificationStarted,
     command_adapter,
     event_adapter,
 )
@@ -76,3 +80,19 @@ def test_run_tasks_rejects_empty_list_and_empty_prompt() -> None:
 def test_task_events_round_trip() -> None:
     for event in (TaskStarted(index=0), TaskFinished(index=2, reason="error")):
         assert event_adapter.validate_json(event.model_dump_json()) == event
+
+
+def test_verification_events_round_trip() -> None:
+    events = (
+        VerificationConfigured(steps=("Unit tests",)),
+        VerificationStarted(index=0, step=0),
+        VerificationFinished(index=0, step=0, passed=False),
+        TaskInserted(index=1, task=TaskSpec(prompt="fix it")),
+        TaskFinished(index=0, reason="completed", verified=False),
+    )
+    for event in events:
+        assert event_adapter.validate_json(event.model_dump_json()) == event
+
+
+def test_task_finished_is_unverified_by_default() -> None:
+    assert TaskFinished(index=0, reason="error").verified is None

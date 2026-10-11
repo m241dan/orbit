@@ -1,7 +1,7 @@
 """Building blocks of the orbit screen."""
 
 from collections.abc import Sequence
-from typing import Any, ClassVar, get_args
+from typing import Any, ClassVar, Literal, get_args
 
 from rich.text import Text
 from textual import on
@@ -78,6 +78,50 @@ class SidePanel(VerticalScroll):
     def __init__(self, title: str, *, id: str) -> None:
         super().__init__(id=id)
         self.border_title = title
+
+
+StepStatus = Literal["pending", "running", "passed", "failed", "cancelled"]
+STEP_ICONS: dict[StepStatus, str] = {
+    "pending": "○",
+    "running": "▶",
+    "passed": "✓",
+    "failed": "✗",
+    "cancelled": "■",
+}
+
+
+class VerificationPanel(SidePanel):
+    """The verification steps and how each fared after the current task."""
+
+    def __init__(self, *, id: str) -> None:
+        super().__init__("Verification steps", id=id)
+        self.steps: tuple[str, ...] = ()
+        self.statuses: list[StepStatus] = []
+
+    def compose(self) -> ComposeResult:
+        yield Static("No verification steps")
+
+    def set_steps(self, steps: Sequence[str]) -> None:
+        self.steps = tuple(steps)
+        self.reset()
+
+    def reset(self) -> None:
+        self.statuses = ["pending"] * len(self.steps)
+        self._show()
+
+    def set_status(self, step: int, status: StepStatus) -> None:
+        self.statuses[step] = status
+        self._show()
+
+    def cancel_running(self) -> None:
+        self.statuses = ["cancelled" if s == "running" else s for s in self.statuses]
+        self._show()
+
+    def _show(self) -> None:
+        lines = [
+            f"{STEP_ICONS[s]} {name}" for name, s in zip(self.steps, self.statuses, strict=True)
+        ]
+        self.query_one(Static).update(Text("\n".join(lines)))
 
 
 class PromptInput(Input):

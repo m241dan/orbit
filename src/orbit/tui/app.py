@@ -20,6 +20,7 @@ from orbit.protocol import (
     SettingsChanged,
     SubmitPrompt,
     TaskFinished,
+    TaskInserted,
     TaskSpec,
     TaskStarted,
     ToolCallFinished,
@@ -27,6 +28,9 @@ from orbit.protocol import (
     TurnFinished,
     TurnStarted,
     UpdateSettings,
+    VerificationConfigured,
+    VerificationFinished,
+    VerificationStarted,
 )
 from orbit.tui.tasks import TaskEditorScreen, TaskList
 from orbit.tui.widgets import (
@@ -34,8 +38,8 @@ from orbit.tui.widgets import (
     TOOL_ACCESS_OPTIONS,
     PickerScreen,
     PromptInput,
-    SidePanel,
     Transcript,
+    VerificationPanel,
 )
 
 # Window reached from each window by h/j/k/l; missing means an edge.
@@ -96,7 +100,7 @@ class OrbitApp(App[None], inherit_bindings=False):
                 yield PromptInput(placeholder="Press i to type, esc to stop", id="prompt")
             with Vertical(id="side"):
                 yield TaskList(id="task-list")
-                yield SidePanel("Verification steps", id="verification-steps")
+                yield VerificationPanel(id="verification-steps")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -149,10 +153,13 @@ class OrbitApp(App[None], inherit_bindings=False):
         self.push_screen(editor, saved)
 
     async def action_run_tasks(self) -> None:
-        """Run every task that hasn't completed, unless something is already running."""
+        """Run every task that hasn't completed, unless something is already running.
+
+        Unverified tasks count as completed: a fix task was queued after them.
+        """
         tasks = self.query_one(TaskList)
         prompt = self.query_one(PromptInput)
-        batch = [i for i, s in enumerate(tasks.statuses) if s != "completed"]
+        batch = [i for i, s in enumerate(tasks.statuses) if s not in ("completed", "unverified")]
         if not batch or prompt.disabled:
             return
         self._batch = batch
@@ -228,13 +235,33 @@ class OrbitApp(App[None], inherit_bindings=False):
                 tasks = self.query_one(TaskList)
                 position = self._batch[index]
                 tasks.set_status(position, "running")
+                self.query_one(VerificationPanel).reset()
                 self._append(f"Task {position + 1}: {tasks.tasks[position].prompt}", "user")
-            case TaskFinished(index=index, reason=reason):
+            case TaskInserted(index=index, task=task):
+                # Goes on the row after the batch's previous task; later rows shift down.
                 assert self._batch is not None
-                self.query_one(TaskList).set_status(self._batch[index], reason)
+                position = self._batch[index - 1] + 1
+                self.query_one(TaskList).insert_task(position, task)
+                self._batch[index:] = [p + 1 for p in self._batch[index:]]
+                self._batch.insert(index, position)
+            case TaskFinished(index=index, reason=reason, verified=verified):
+                assert self._batch is not None
+                status = "unverified" if verified is False else reason
+                self.query_one(TaskList).set_status(self._batch[index], status)
+                if reason == "cancelled":
+                    self.query_one(VerificationPanel).cancel_running()
                 if reason == "cancelled" or index == len(self._batch) - 1:
                     self._batch = None
                     self.query_one(PromptInput).disabled = False
+            case VerificationConfigured(steps=steps):
+                self.query_one(VerificationPanel).set_steps(steps)
+            case VerificationStarted(step=step):
+                self.query_one(VerificationPanel).set_status(step, "running")
+            case VerificationFinished(step=step, passed=passed):
+                panel = self.query_one(VerificationPanel)
+                panel.set_status(step, "passed" if passed else "failed")
+                if not passed:
+                    self._append(f"Verification failed: {panel.steps[step]}", "error")
             case ErrorOccurred(message=message):
                 self._append(message, "error")
             case _:

@@ -1,10 +1,13 @@
 import asyncio
+import sys
 from collections.abc import AsyncIterator, Sequence
+from pathlib import Path
 from typing import Any
 
 from orbit.agent import AgentSession, EchoModel, ModelLoopRunner, ToolRegistry
 from orbit.agent.loop import run_turn
 from orbit.agent.model import Message, ModelResponse, ToolCall, ToolSpec
+from orbit.agent.verify import VerificationStep
 from orbit.protocol import (
     AssistantMessage,
     CancelTurn,
@@ -15,6 +18,7 @@ from orbit.protocol import (
     SettingsChanged,
     SubmitPrompt,
     TaskFinished,
+    TaskInserted,
     TaskSpec,
     TaskStarted,
     ToolAccess,
@@ -23,6 +27,9 @@ from orbit.protocol import (
     TurnFinished,
     TurnStarted,
     UpdateSettings,
+    VerificationConfigured,
+    VerificationFinished,
+    VerificationStarted,
 )
 
 
@@ -342,3 +349,183 @@ async def test_loop_runner_new_context_has_empty_history_and_same_model() -> Non
     _ = [e async for e in fresh.run_turn("t", "again", Settings())]
     assert [m.content for m in fresh.history] == ["again", "ok"]
     assert model.tools_seen == [["upper"], ["upper"]]
+
+
+def file_exists_step(path: Path, name: str = "check") -> VerificationStep:
+    """Passes once ``path`` exists."""
+    code = f"import os, sys; sys.exit(0 if os.path.exists({str(path)!r}) else 1)"
+    return VerificationStep(name=name, command=(sys.executable, "-c", code))
+
+
+FAILING_STEP = VerificationStep(
+    name="always fails", command=(sys.executable, "-c", "print('nope'); raise SystemExit(1)")
+)
+
+
+class FixingRunner(RecordingRunner):
+    """Creates ``path`` when asked to fix something, so a file_exists_step then passes."""
+
+    def __init__(
+        self, path: Path, log: list[tuple[RecordingRunner, str, Settings]] | None = None
+    ) -> None:
+        super().__init__(log)
+        self.path = path
+
+    def new_context(self) -> "FixingRunner":
+        return FixingRunner(self.path, self.log)
+
+    async def run_turn(self, turn_id: str, prompt: str, settings: Settings) -> AsyncIterator[Event]:
+        if prompt.startswith("Fix"):
+            self.path.touch()
+        async for event in super().run_turn(turn_id, prompt, settings):
+            yield event
+
+
+async def test_session_announces_verification_steps() -> None:
+    session = AgentSession(RecordingRunner(), verification_steps=(FAILING_STEP,))
+    assert session.verification_steps == (FAILING_STEP,)
+    stream = session.events()
+    assert isinstance(await anext(stream), SettingsChanged)
+    assert await anext(stream) == VerificationConfigured(steps=("always fails",))
+
+
+async def test_passing_verification_marks_the_task_verified(tmp_path: Path) -> None:
+    (tmp_path / "ok").touch()
+    session = AgentSession(
+        RecordingRunner(), verification_steps=(file_exists_step(tmp_path / "ok"),)
+    )
+    await session.send(RunTasks(tasks=(TaskSpec(prompt="one"),)))
+    events = await collect_tasks(session, 1)
+
+    assert kinds(events) == [
+        "verification_configured",
+        "task_started",
+        "turn_started",
+        "turn_finished",
+        "verification_started",
+        "verification_finished",
+        "task_finished",
+    ]
+    assert events[4:] == [
+        VerificationStarted(index=0, step=0),
+        VerificationFinished(index=0, step=0, passed=True),
+        TaskFinished(index=0, reason="completed", verified=True),
+    ]
+
+
+async def test_failed_verification_inserts_a_fix_task_after_the_task(tmp_path: Path) -> None:
+    fixed = tmp_path / "fixed"
+    runner = FixingRunner(fixed)
+    session = AgentSession(runner, verification_steps=(file_exists_step(fixed),))
+    settings = Settings(model="opus", tool_access="full")
+    tasks = (TaskSpec(prompt="one", settings=settings), TaskSpec(prompt="two"))
+    await session.send(RunTasks(tasks=tasks))
+    events = await collect_tasks(session, 3)
+
+    inserted = next(e for e in events if isinstance(e, TaskInserted))
+    assert inserted.index == 1
+    assert inserted.task.prompt.startswith("Fix the failed verification step: check")
+    # The fix runs with the failed task's settings.
+    assert inserted.task.settings == settings
+
+    # The insert is announced before the failed task finishes, then the fix runs next.
+    after_first = [e for e in events if not isinstance(e, TurnStarted | TurnFinished)][1:]
+    assert after_first[:6] == [
+        TaskStarted(index=0),
+        VerificationStarted(index=0, step=0),
+        VerificationFinished(index=0, step=0, passed=False),
+        inserted,
+        TaskFinished(index=0, reason="completed", verified=False),
+        TaskStarted(index=1),
+    ]
+    finished = [e for e in events if isinstance(e, TaskFinished)]
+    assert finished == [
+        TaskFinished(index=0, reason="completed", verified=False),
+        TaskFinished(index=1, reason="completed", verified=True),
+        TaskFinished(index=2, reason="completed", verified=True),
+    ]
+    assert [p for _, p, _ in runner.log] == ["one", inserted.task.prompt, "two"]
+    runners = [entry[0] for entry in runner.log]
+    assert len({id(r) for r in runners}) == 3
+
+
+async def test_verification_stops_at_the_first_failing_step(tmp_path: Path) -> None:
+    session = AgentSession(
+        RecordingRunner(),
+        verification_steps=(FAILING_STEP, file_exists_step(tmp_path)),
+        max_fix_attempts=0,
+    )
+    await session.send(RunTasks(tasks=(TaskSpec(prompt="one"),)))
+    events = await collect_tasks(session, 1)
+
+    assert [e for e in events if isinstance(e, VerificationStarted)] == [
+        VerificationStarted(index=0, step=0)
+    ]
+
+
+async def test_fix_tasks_stop_after_max_attempts() -> None:
+    runner = RecordingRunner()
+    session = AgentSession(runner, verification_steps=(FAILING_STEP,), max_fix_attempts=2)
+    await session.send(RunTasks(tasks=(TaskSpec(prompt="one"), TaskSpec(prompt="two"))))
+    events = await collect_tasks(session, 6)
+
+    assert [e.index for e in events if isinstance(e, TaskInserted)] == [1, 2, 4, 5]
+    # Each original task gets its own two attempts, then the batch moves on.
+    prompts = [p for _, p, _ in runner.log]
+    assert [p.split("\n")[0] for p in prompts] == [
+        "one",
+        "Fix the failed verification step: always fails",
+        "Fix the failed verification step: always fails",
+        "two",
+        "Fix the failed verification step: always fails",
+        "Fix the failed verification step: always fails",
+    ]
+    errors = [e for e in events if isinstance(e, ErrorOccurred)]
+    assert (
+        errors
+        == [
+            ErrorOccurred(
+                message="Verification step 'always fails' still fails after 2 fix attempts."
+            )
+        ]
+        * 2
+    )
+    assert "nope" in prompts[1]
+
+
+async def test_tasks_that_do_not_complete_are_not_verified() -> None:
+    session = AgentSession(ModelLoopRunner(FailingModel()), verification_steps=(FAILING_STEP,))
+    await session.send(RunTasks(tasks=(TaskSpec(prompt="one"),)))
+    events = await collect_tasks(session, 1)
+
+    assert not any(isinstance(e, VerificationStarted | TaskInserted) for e in events)
+    assert events[-1] == TaskFinished(index=0, reason="error")
+
+
+async def test_cancel_during_verification_cancels_the_task_and_batch() -> None:
+    slow = VerificationStep(
+        name="slow", command=(sys.executable, "-c", "import time; time.sleep(60)")
+    )
+    session = AgentSession(RecordingRunner(), verification_steps=(slow,))
+    await session.send(RunTasks(tasks=(TaskSpec(prompt="one"), TaskSpec(prompt="two"))))
+    events: list[Event] = []
+    async for event in session.events():
+        events.append(event)
+        if isinstance(event, VerificationStarted):
+            break
+    await session.send(CancelTurn())
+    events = await asyncio.wait_for(collect_tasks(session, 2), timeout=5)
+
+    assert events == [TaskFinished(index=0, reason="cancelled")]
+    await asyncio.sleep(0.01)
+    assert session._events.empty()
+
+
+async def test_conversation_turns_are_not_verified() -> None:
+    session = AgentSession(ModelLoopRunner(EchoModel()), verification_steps=(FAILING_STEP,))
+    await session.send(SubmitPrompt(text="hello"))
+    events = await collect(session)
+
+    assert not any(isinstance(e, VerificationStarted) for e in events)
+    await asyncio.sleep(0.01)
+    assert session._events.empty()

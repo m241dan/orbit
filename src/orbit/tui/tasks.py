@@ -19,10 +19,12 @@ from orbit.tui.widgets import (
     PromptInput,
 )
 
-TaskStatus = Literal["pending", "running"] | TurnEndReason
+# "unverified": the turn completed but a verification step failed after it.
+TaskStatus = Literal["pending", "running", "unverified"] | TurnEndReason
 STATUS_ICONS: dict[TaskStatus, str] = {
     "pending": "○",
     "running": "▶",
+    "unverified": "⚠",
     "completed": "✓",
     "cancelled": "■",
     "max_steps": "✗",
@@ -89,6 +91,15 @@ class TaskList(OptionList):
             self.statuses[index] = "pending"
             self._show()
 
+    def insert_task(self, index: int, task: TaskSpec) -> None:
+        """Insert a pending ``task`` at ``index``; the highlight stays on its row."""
+        self.tasks.insert(index, task)
+        self.statuses.insert(index, "pending")
+        highlight = self.highlighted
+        if highlight is not None and highlight >= index:
+            highlight += 1
+        self._show(highlight=highlight)
+
     def set_status(self, index: int, status: TaskStatus) -> None:
         self.statuses[index] = status
         self._show()
@@ -106,7 +117,9 @@ class TaskList(OptionList):
 
 def task_label(task: TaskSpec, status: TaskStatus) -> Text:
     model = task.settings.model or "default"
-    label = Text(f"{STATUS_ICONS[status]} {task.prompt}\n")
+    # Long prompts (like fix tasks) are titled by their first line.
+    title = task.prompt.split("\n", 1)[0]
+    label = Text(f"{STATUS_ICONS[status]} {title}\n")
     label.append(f"  {model} · {task.settings.tool_access}", style="dim")
     return label
 

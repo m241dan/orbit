@@ -6,6 +6,7 @@ from typer.testing import CliRunner
 from orbit import __version__
 from orbit.agent import AgentSession, ClaudeCliRunner
 from orbit.agent.claude_cli import MODEL_ALIASES
+from orbit.agent.verify import DEFAULT_STEPS
 from orbit.cli import app
 from orbit.protocol import Settings
 
@@ -70,3 +71,19 @@ def test_chat_rejects_unknown_tool_access(launched: list[AgentSession]) -> None:
 
     assert result.exit_code == 2
     assert launched == []
+
+
+def test_chat_verifies_tasks_by_default(launched: list[AgentSession]) -> None:
+    result = runner.invoke(app, ["chat"])
+
+    assert result.exit_code == 0
+    [session] = launched
+    assert session.verification_steps == DEFAULT_STEPS
+
+
+def test_chat_can_turn_verification_off(launched: list[AgentSession]) -> None:
+    result = runner.invoke(app, ["chat", "--no-verify"])
+
+    assert result.exit_code == 0
+    [session] = launched
+    assert session.verification_steps == ()

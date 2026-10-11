@@ -131,9 +131,49 @@ class TaskStarted(_Message):
 
 
 class TaskFinished(_Message):
+    """Task ``index`` is done.
+
+    ``verified`` says whether the verification steps passed after it; ``None``
+    when none ran (no steps configured, or the task's turn didn't complete).
+    """
+
     type: Literal["task_finished"] = "task_finished"
     index: int
     reason: TurnEndReason
+    verified: bool | None = None
+
+
+class TaskInserted(_Message):
+    """``task`` joins the running batch at ``index``; tasks from there on shift down one.
+
+    Sent before the ``TaskFinished`` of the task it follows.
+    """
+
+    type: Literal["task_inserted"] = "task_inserted"
+    index: int
+    task: TaskSpec
+
+
+class VerificationConfigured(_Message):
+    """Names of the steps run after each task, sent on connect when there are any."""
+
+    type: Literal["verification_configured"] = "verification_configured"
+    steps: tuple[str, ...]
+
+
+class VerificationStarted(_Message):
+    """Step ``step`` (an index into the configured steps) begins checking task ``index``."""
+
+    type: Literal["verification_started"] = "verification_started"
+    index: int
+    step: int
+
+
+class VerificationFinished(_Message):
+    type: Literal["verification_finished"] = "verification_finished"
+    index: int
+    step: int
+    passed: bool
 
 
 class ErrorOccurred(_Message):
@@ -151,6 +191,10 @@ Event = Annotated[
     | TurnFinished
     | TaskStarted
     | TaskFinished
+    | TaskInserted
+    | VerificationConfigured
+    | VerificationStarted
+    | VerificationFinished
     | ErrorOccurred,
     Field(discriminator="type"),
 ]

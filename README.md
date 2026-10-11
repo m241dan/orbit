@@ -16,6 +16,7 @@ uv run pre-commit install
 ```sh
 uv run orbit chat                              # interactive agent session
 uv run orbit chat --model opus --tools full    # pick model and tool access up front
+uv run orbit chat --no-verify                  # don't verify tasks
 ```
 
 In the app:
@@ -44,6 +45,24 @@ context with each other or with the conversation. Their output appears in the co
 each row shows its status: `○` pending, `▶` running, `✓` done, `✗` failed, `■` cancelled. A failed
 task doesn't stop the rest; `esc` cancels the running task and skips the remaining ones. Running
 again skips tasks that already completed, and editing a task makes it pending again.
+
+### Verification steps
+
+After each task completes, orbit runs the verification steps in the working directory, in order,
+stopping at the first failure. The panel under the task list shows how each step did on the
+current task. There is one step so far:
+
+- Unit tests, 100% coverage: `uv run pytest --cov --cov-fail-under=100` must exit successfully.
+
+When a step fails, the task is marked `⚠` and a fix task is inserted right after it, with the same
+model and tool access. Its prompt quotes the end of the step's output and asks Claude to fix the
+cause without weakening the check. If the fix also fails verification, another fix is queued, up
+to 3 in a row; after that orbit reports the failure and moves on to the next task. Running again
+skips `⚠` tasks, because their fix tasks follow them. Tasks that errored or were cancelled aren't
+verified, and neither is the conversation.
+
+Fix tasks need to edit files, so give tasks `full` tool access when you want them fixed
+automatically. With `restricted` access, Claude can explain the failure but can't fix it.
 
 Changes apply from the next prompt and keep the conversation.
 
