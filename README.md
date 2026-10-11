@@ -42,24 +42,27 @@ set in the task editor: `j`/`k` pick a field, `i` types in the prompt (`esc` or 
 
 `ctrl+r` runs the tasks one after another, each in a fresh Claude session, so they don't share
 context with each other or with the conversation. Their output appears in the conversation and
-each row shows its status: `○` pending, `▶` running, `✓` done, `✗` failed, `■` cancelled. A failed
-task doesn't stop the rest; `esc` cancels the running task and skips the remaining ones. Running
-again skips tasks that already completed, and editing a task makes it pending again. Tasks added
-while a run is going join it; the running task can't be edited.
+each row shows its status: ⏳ pending, 🔄 running, 🔍 verifying, ✅ done, ❗ failed verification,
+❌ failed, ⌛ ran out of steps, 🛑 cancelled. A failed task doesn't stop the rest; `esc` cancels
+the running task and skips the remaining ones. Running again skips tasks that already completed,
+and editing a task makes it pending again. Tasks added while a run is going join it; the running
+task can't be edited.
 
 ### Verification steps
 
 After each task completes, orbit runs the verification steps in the working directory, in order,
-stopping at the first failure. The panel under the task list shows how each step did on the
-current task. There is one step so far:
+stopping at the first failure. While that happens the task shows 🔍, the conversation notes each
+step as it starts and ends, and the panel under the task list shows each step's progress on the
+current task (⏳ pending, 🔍 running with its elapsed time, ✅ passed, ❌ failed, 🛑 cancelled).
+There is one step so far:
 
 - Unit tests, 100% coverage: `uv run pytest --cov --cov-fail-under=100` must exit successfully.
 
-When a step fails, the task is marked `⚠` and a fix task is inserted right after it, with the same
+When a step fails, the task is marked ❗ and a fix task is inserted right after it, with the same
 model and tool access. Its prompt quotes the end of the step's output and asks Claude to fix the
 cause without weakening the check. If the fix also fails verification, another fix is queued, up
 to 3 in a row; after that orbit reports the failure and moves on to the next task. Running again
-skips `⚠` tasks, because their fix tasks follow them. Tasks that errored or were cancelled aren't
+skips ❗ tasks, because their fix tasks follow them. Tasks that errored or were cancelled aren't
 verified, and neither is the conversation.
 
 Fix tasks need to edit files, so give tasks `full` tool access when you want them fixed

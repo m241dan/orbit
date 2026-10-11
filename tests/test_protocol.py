@@ -18,6 +18,7 @@ from orbit.protocol import (
     UpdateSettings,
     VerificationChanged,
     VerificationFinished,
+    VerificationStarted,
     command_adapter,
     event_adapter,
 )
@@ -86,8 +87,10 @@ def test_state_and_log_events_round_trip() -> None:
             tasks=(
                 TaskState(id="1", task=TaskSpec(prompt="one"), status="unverified"),
                 TaskState(id="2", task=TaskSpec(prompt="fix it")),
+                TaskState(id="3", task=TaskSpec(prompt="three"), status="verifying"),
             )
         ),
+        VerificationStarted(task_id="3", step=0),
         TaskStarted(task_id="2"),
         VerificationChanged(steps=(StepState(name="Unit tests", status="failed"),)),
         VerificationFinished(task_id="1", step=0, passed=False),

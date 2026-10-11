@@ -98,8 +98,12 @@ Command = Annotated[
 
 TurnEndReason = Literal["completed", "cancelled", "max_steps", "error"]
 
-TaskStatus = Literal["pending", "running", "unverified"] | TurnEndReason
-"""Where a task stands. ``unverified``: its turn completed but a verification step failed."""
+TaskStatus = Literal["pending", "running", "verifying", "unverified"] | TurnEndReason
+"""Where a task stands.
+
+``verifying``: its turn completed and the verification steps are checking it.
+``unverified``: its turn completed but a verification step failed.
+"""
 
 
 class TaskState(_Message):
@@ -195,6 +199,14 @@ class VerificationChanged(_Message):
     steps: tuple[StepState, ...]
 
 
+class VerificationStarted(_Message):
+    """Step ``step`` (an index into the steps) begins checking task ``task_id``."""
+
+    type: Literal["verification_started"] = "verification_started"
+    task_id: str
+    step: int
+
+
 class VerificationFinished(_Message):
     """Step ``step`` (an index into the steps) finished checking task ``task_id``."""
 
@@ -221,6 +233,7 @@ Event = Annotated[
     | TasksChanged
     | TaskStarted
     | VerificationChanged
+    | VerificationStarted
     | VerificationFinished
     | ErrorOccurred,
     Field(discriminator="type"),

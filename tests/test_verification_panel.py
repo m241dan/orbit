@@ -1,6 +1,12 @@
 from textual.widgets import Static
 
-from orbit.protocol import StepState, VerificationChanged, VerificationFinished
+from orbit.protocol import (
+    StepState,
+    StepStatus,
+    VerificationChanged,
+    VerificationFinished,
+    VerificationStarted,
+)
 from orbit.tui import OrbitApp
 from orbit.tui.widgets import Entry, VerificationPanel
 from tests.test_task_list import feed
@@ -9,6 +15,13 @@ from tests.test_tui import FakeSession
 
 def steps(app: OrbitApp) -> str:
     return str(app.query_one(VerificationPanel).query_one(Static).render())
+
+
+def report(*statuses: StepStatus) -> VerificationChanged:
+    names = ("Unit tests", "Lint", "Types", "Docs", "Build")
+    return VerificationChanged(
+        steps=tuple(StepState(name=n, status=s) for n, s in zip(names, statuses, strict=False))
+    )
 
 
 async def test_panel_says_so_when_there_are_no_steps() -> None:
@@ -22,30 +35,56 @@ async def test_panel_shows_the_steps_the_backend_reports() -> None:
     session = FakeSession()
     app = OrbitApp(session)
     async with app.run_test() as pilot:
-        names = ("Unit tests", "Lint", "Types", "Docs", "Build")
-        statuses = ("pending", "running", "passed", "failed", "cancelled")
-        report = VerificationChanged(
-            steps=tuple(
-                StepState(name=n, status=s)  # type: ignore[arg-type]
-                for n, s in zip(names, statuses, strict=True)
-            )
-        )
-        await feed(session, pilot, report)
-        assert steps(app) == "○ Unit tests\n▶ Lint\n✓ Types\n✗ Docs\n■ Build"
+        app.query_one(VerificationPanel).clock = lambda: 0.0
+        await feed(session, pilot, report("pending", "running", "passed", "failed", "cancelled"))
+        assert steps(app) == "⏳ Unit tests\n🔍 Lint · 0s\n✅ Types\n❌ Docs\n🛑 Build"
 
 
-async def test_a_failed_step_is_reported_in_the_transcript() -> None:
+async def test_running_step_shows_how_long_it_has_been_running() -> None:
     session = FakeSession()
     app = OrbitApp(session)
     async with app.run_test() as pilot:
-        report = VerificationChanged(steps=(StepState(name="Unit tests"), StepState(name="Lint")))
+        panel = app.query_one(VerificationPanel)
+        now = [100.0]
+        panel.clock = lambda: now[0]
+        await feed(session, pilot, report("running", "pending"))
+        now[0] = 112.7
+        panel.tick()
+        assert steps(app) == "🔍 Unit tests · 12s\n⏳ Lint"
+
+        # Another report while the same step runs keeps its clock going.
+        await feed(session, pilot, report("running", "pending"))
+        assert steps(app).startswith("🔍 Unit tests · 12s")
+
+        # The next step starts its own clock.
+        await feed(session, pilot, report("passed", "running"))
+        now[0] = 115.0
+        panel.tick()
+        assert steps(app) == "✅ Unit tests\n🔍 Lint · 2s"
+
+        # With nothing running, ticking changes nothing.
+        await feed(session, pilot, report("passed", "passed"))
+        panel.tick()
+        assert steps(app) == "✅ Unit tests\n✅ Lint"
+
+
+async def test_verification_progress_is_reported_in_the_transcript() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
         await feed(
             session,
             pilot,
-            report,
+            report("pending", "pending"),
+            VerificationStarted(task_id="1", step=0),
             VerificationFinished(task_id="1", step=0, passed=True),
+            VerificationStarted(task_id="1", step=1),
             VerificationFinished(task_id="1", step=1, passed=False),
         )
-        [entry] = app.query(Entry)
-        assert str(entry.render()) == "Verification failed: Lint"
-        assert entry.has_class("error")
+        entries = [(str(e.render()), e.classes) for e in app.query(Entry)]
+        assert entries == [
+            ("🔍 Verifying: Unit tests…", frozenset({"verify"})),
+            ("✅ Verification passed: Unit tests", frozenset({"verify"})),
+            ("🔍 Verifying: Lint…", frozenset({"verify"})),
+            ("❌ Verification failed: Lint", frozenset({"error"})),
+        ]

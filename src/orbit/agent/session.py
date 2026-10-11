@@ -28,6 +28,7 @@ from orbit.protocol import (
     UpdateSettings,
     VerificationChanged,
     VerificationFinished,
+    VerificationStarted,
 )
 
 
@@ -157,6 +158,8 @@ class AgentSession:
             self._runner.new_context(), task.prompt, task.settings
         )
         if status == "completed" and self._steps:
+            self._board.set_status(task_id, "verifying")
+            await self._publish_tasks()
             try:
                 failure = await self._verify(task_id)
             except asyncio.CancelledError:
@@ -176,6 +179,7 @@ class AgentSession:
         for number, step in enumerate(self._steps):
             self._board.set_step(number, "running")
             await self._publish_steps()
+            await self._events.put(VerificationStarted(task_id=task_id, step=number))
             passed, output = await run_step(step)
             self._board.set_step(number, "passed" if passed else "failed")
             await self._publish_steps()

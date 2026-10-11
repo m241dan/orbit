@@ -64,13 +64,14 @@ async def open_task_list(pilot: Pilot[None]) -> None:
 def test_label_shows_status_title_and_settings() -> None:
     task = TaskSpec(prompt="Fix it\nlong details", settings=Settings(model="opus"))
     icons = {
-        "pending": "○",
-        "running": "▶",
-        "unverified": "⚠",
-        "completed": "✓",
-        "cancelled": "■",
-        "max_steps": "✗",
-        "error": "✗",
+        "pending": "⏳",
+        "running": "🔄",
+        "verifying": "🔍",
+        "completed": "✅",
+        "unverified": "❗",
+        "cancelled": "🛑",
+        "max_steps": "⌛",
+        "error": "❌",
     }
     for status, icon in icons.items():
         label = task_label(TaskState(id="1", task=task, status=status))  # type: ignore[arg-type]
@@ -93,8 +94,8 @@ async def test_list_shows_the_board_the_backend_reports() -> None:
     async with app.run_test() as pilot:
         await feed(session, pilot, board("one", "two", status="completed"))
         assert rows(app) == [
-            "✓ one\n  default · restricted",
-            "✓ two\n  default · restricted",
+            "✅ one\n  default · restricted",
+            "✅ two\n  default · restricted",
             "+ new task",
         ]
 

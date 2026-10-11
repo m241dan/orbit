@@ -32,6 +32,7 @@ from orbit.protocol import (
     UpdateSettings,
     VerificationChanged,
     VerificationFinished,
+    VerificationStarted,
 )
 from orbit.tui.tasks import TaskEditorScreen, TaskList
 from orbit.tui.widgets import (
@@ -237,10 +238,15 @@ class OrbitApp(App[None], inherit_bindings=False):
                 self._append(f"Task {position + 1}: {prompt}", "user")
             case VerificationChanged(steps=steps):
                 self.query_one(VerificationPanel).show(steps)
+            case VerificationStarted(step=step):
+                name = self.query_one(VerificationPanel).steps[step].name
+                self._append(f"🔍 Verifying: {name}…", "verify")
             case VerificationFinished(step=step, passed=passed):
-                if not passed:
-                    name = self.query_one(VerificationPanel).steps[step].name
-                    self._append(f"Verification failed: {name}", "error")
+                name = self.query_one(VerificationPanel).steps[step].name
+                if passed:
+                    self._append(f"✅ Verification passed: {name}", "verify")
+                else:
+                    self._append(f"❌ Verification failed: {name}", "error")
             case ErrorOccurred(message=message):
                 self._append(message, "error")
             case _:

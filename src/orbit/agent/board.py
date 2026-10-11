@@ -6,7 +6,7 @@ from collections.abc import Collection, Sequence
 from orbit.protocol import StepState, StepStatus, TaskSpec, TaskState, TaskStatus
 
 # Statuses a run leaves alone; any other task is worth (another) run.
-SETTLED: frozenset[TaskStatus] = frozenset({"running", "completed", "unverified"})
+SETTLED: frozenset[TaskStatus] = frozenset({"running", "verifying", "completed", "unverified"})
 
 
 class TaskBoard:
@@ -34,7 +34,7 @@ class TaskBoard:
 
     def edit(self, task_id: str, task: TaskSpec) -> None:
         """Replace a task and make it pending again. Raises ``ValueError`` if it can't be."""
-        if self.get(task_id).status == "running":
+        if self.get(task_id).status in ("running", "verifying"):
             raise ValueError(f"Task {task_id!r} can't be edited while it runs.")
         self._tasks[self.position(task_id)] = TaskState(id=task_id, task=task)
 

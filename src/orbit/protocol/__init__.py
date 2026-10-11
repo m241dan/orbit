@@ -29,6 +29,7 @@ from orbit.protocol.messages import (
     UpdateSettings,
     VerificationChanged,
     VerificationFinished,
+    VerificationStarted,
     command_adapter,
     event_adapter,
 )
@@ -64,6 +65,7 @@ __all__ = [
     "UpdateSettings",
     "VerificationChanged",
     "VerificationFinished",
+    "VerificationStarted",
     "command_adapter",
     "event_adapter",
 ]

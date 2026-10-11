@@ -50,22 +50,31 @@ def test_edit_rejects_unknown_and_running_tasks() -> None:
     first = board.add(ONE)
     with pytest.raises(ValueError, match="No task with id 'nope'"):
         board.edit("nope", TWO)
-    board.set_status(first, "running")
-    with pytest.raises(ValueError, match="can't be edited while it runs"):
-        board.edit(first, TWO)
+    for status in ("running", "verifying"):
+        board.set_status(first, status)
+        with pytest.raises(ValueError, match="can't be edited while it runs"):
+            board.edit(first, TWO)
     assert board.get(first).task == ONE
 
 
 def test_next_runnable_skips_done_running_and_already_tried_tasks() -> None:
     board = TaskBoard()
-    ids = [board.add(TaskSpec(prompt=str(i))) for i in range(6)]
-    statuses = ["completed", "unverified", "running", "error", "cancelled", "max_steps"]
+    ids = [board.add(TaskSpec(prompt=str(i))) for i in range(7)]
+    statuses = [
+        "completed",
+        "unverified",
+        "running",
+        "verifying",
+        "error",
+        "cancelled",
+        "max_steps",
+    ]
     for task_id, status in zip(ids, statuses, strict=True):
         board.set_status(task_id, status)  # type: ignore[arg-type]
     # Tasks that ended badly are worth another run; finished or running ones aren't.
-    assert board.next_runnable() == ids[3]
-    assert board.next_runnable(skip={ids[3]}) == ids[4]
-    assert board.next_runnable(skip=set(ids[3:])) is None
+    assert board.next_runnable() == ids[4]
+    assert board.next_runnable(skip={ids[4]}) == ids[5]
+    assert board.next_runnable(skip=set(ids[4:])) is None
 
 
 def test_step_statuses_follow_a_verification_and_reset() -> None:

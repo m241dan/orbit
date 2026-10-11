@@ -1,6 +1,7 @@
 """Building blocks of the orbit screen."""
 
-from collections.abc import Sequence
+import time
+from collections.abc import Callable, Sequence
 from typing import Any, ClassVar, get_args
 
 from rich.text import Text
@@ -33,6 +34,7 @@ class Entry(Static):
     Entry { margin: 0 0 1 0; }
     Entry.user { color: $text-accent; text-style: bold; }
     Entry.tool { color: $text-muted; }
+    Entry.verify { color: $text-warning; }
     Entry.error { color: $text-error; }
     """
 
@@ -81,27 +83,47 @@ class SidePanel(VerticalScroll):
 
 
 STEP_ICONS: dict[StepStatus, str] = {
-    "pending": "○",
-    "running": "▶",
-    "passed": "✓",
-    "failed": "✗",
-    "cancelled": "■",
+    "pending": "⏳",
+    "running": "🔍",
+    "passed": "✅",
+    "failed": "❌",
+    "cancelled": "🛑",
 }
 
 
 class VerificationPanel(SidePanel):
-    """The verification steps and how each fared after the current task, as reported."""
+    """The verification steps and how each fared after the current task, as reported.
+
+    A running step shows how long it has been running, updated every second, so
+    a slow step doesn't look stalled.
+    """
 
     def __init__(self, *, id: str) -> None:
         super().__init__("Verification steps", id=id)
         self.steps: tuple[StepState, ...] = ()
+        self.clock: Callable[[], float] = time.monotonic
+        # The running step and when it started, by ``clock``.
+        self._running_step: int | None = None
+        self._since = 0.0
 
     def compose(self) -> ComposeResult:
         yield Static("No verification steps")
 
+    def on_mount(self) -> None:
+        self.set_interval(1, self.tick)
+
     def show(self, steps: Sequence[StepState]) -> None:
         self.steps = tuple(steps)
+        running = next((i for i, s in enumerate(self.steps) if s.status == "running"), None)
+        if running is not None and running != self._running_step:
+            self._since = self.clock()
+        self._running_step = running
+        self.tick()
+
+    def tick(self) -> None:
         lines = [f"{STEP_ICONS[s.status]} {s.name}" for s in self.steps]
+        if self._running_step is not None:
+            lines[self._running_step] += f" · {int(self.clock() - self._since)}s"
         self.query_one(Static).update(Text("\n".join(lines)))
 
 

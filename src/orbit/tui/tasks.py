@@ -19,14 +19,16 @@ from orbit.tui.widgets import (
     PromptInput,
 )
 
+# Emoji drawn two cells wide on their own (no variation selector), so rows line up.
 STATUS_ICONS: dict[TaskStatus, str] = {
-    "pending": "○",
-    "running": "▶",
-    "unverified": "⚠",
-    "completed": "✓",
-    "cancelled": "■",
-    "max_steps": "✗",
-    "error": "✗",
+    "pending": "⏳",
+    "running": "🔄",
+    "verifying": "🔍",
+    "completed": "✅",
+    "unverified": "❗",
+    "cancelled": "🛑",
+    "max_steps": "⌛",
+    "error": "❌",
 }
 NEW_TASK_LABEL = "+ new task"
 

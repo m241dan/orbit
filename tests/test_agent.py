@@ -34,6 +34,7 @@ from orbit.protocol import (
     UpdateSettings,
     VerificationChanged,
     VerificationFinished,
+    VerificationStarted,
 )
 
 
@@ -549,14 +550,22 @@ async def test_passing_verification_marks_the_task_completed(tmp_path: Path) -> 
     def steps(status: str) -> VerificationChanged:
         return VerificationChanged(steps=(StepState(name="check", status=status),))  # type: ignore[arg-type]
 
-    # Each task starts with a clean slate, then the step reports its progress.
-    assert [e for e in events if not isinstance(e, TurnStarted | TurnFinished)][2:-1] == [
+    def task(status: str) -> TasksChanged:
+        state = TaskState(id=one, task=TaskSpec(prompt="one"), status=status)  # type: ignore[arg-type]
+        return TasksChanged(tasks=(state,))
+
+    # Each task starts with a clean slate; once its turn ends it shows as verifying
+    # while the step reports its progress.
+    assert [e for e in events if not isinstance(e, TurnStarted | TurnFinished)][1:-1] == [
+        task("running"),
         steps("pending"),
         TaskStarted(task_id=one),
+        task("verifying"),
         steps("running"),
+        VerificationStarted(task_id=one, step=0),
         steps("passed"),
         VerificationFinished(task_id=one, step=0, passed=True),
-        TasksChanged(tasks=(TaskState(id=one, task=TaskSpec(prompt="one"), status="completed"),)),
+        task("completed"),
     ]
 
 
