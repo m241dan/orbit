@@ -31,7 +31,8 @@ def chat(
 
     In the app: h/j/k/l move between windows; i jumps to the prompt to
     type and esc stops;
-    ctrl+o / ctrl+l open a picker for the model / tool access.
+    ctrl+o / ctrl+l open a picker for the model / tool access; enter on the
+    task list edits queued tasks and ctrl+r runs them, each in a fresh session.
     """
     # The only place the backend and frontend meet.
     session = AgentSession(

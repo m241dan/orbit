@@ -1,7 +1,7 @@
 """Building blocks of the orbit screen."""
 
 from collections.abc import Sequence
-from typing import Any, ClassVar
+from typing import Any, ClassVar, get_args
 
 from rich.text import Text
 from textual import on
@@ -13,6 +13,7 @@ from textual.widgets import Input, OptionList, Static
 
 from orbit.protocol import Settings, ToolAccess
 
+TOOL_ACCESS_OPTIONS: tuple[ToolAccess, ...] = get_args(ToolAccess)
 TOOL_ACCESS_LABELS: dict[ToolAccess, str] = {
     "off": "off",
     "restricted": "restricted",
@@ -42,6 +43,9 @@ class Entry(Static):
 class Transcript(VerticalScroll):
     """Main display: the running conversation, pinned to the latest output."""
 
+    # Windows are reached with h/j/k/l, not by clicking; the mouse wheel still scrolls.
+    can_focus = False
+
     DEFAULT_CSS = """
     Transcript {
         height: 1fr;
@@ -60,6 +64,8 @@ class Transcript(VerticalScroll):
 
 class SidePanel(VerticalScroll):
     """Titled pane in the right-hand column."""
+
+    can_focus = False
 
     DEFAULT_CSS = """
     SidePanel {

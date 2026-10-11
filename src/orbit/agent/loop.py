@@ -70,6 +70,9 @@ class ModelLoopRunner:
         self._max_steps = max_steps
         self.history: list[Message] = []
 
+    def new_context(self) -> "ModelLoopRunner":
+        return ModelLoopRunner(self._model, self._tools, self._max_steps)
+
     async def run_turn(self, turn_id: str, prompt: str, settings: Settings) -> AsyncIterator[Event]:
         """Run a turn. ``settings.model`` is ignored: the model client is fixed."""
         tools = ToolRegistry() if settings.tool_access == "off" else self._tools

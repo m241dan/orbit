@@ -53,7 +53,27 @@ class UpdateSettings(_Message):
     settings: Settings
 
 
-Command = Annotated[SubmitPrompt | CancelTurn | UpdateSettings, Field(discriminator="type")]
+class TaskSpec(_Message):
+    """One queued prompt, run in its own fresh context with its own settings."""
+
+    prompt: str = Field(min_length=1)
+    settings: Settings = Settings()
+
+
+class RunTasks(_Message):
+    """Run ``tasks`` one after another, each in a new context.
+
+    Like a turn, this is rejected while a turn is running. ``CancelTurn`` stops
+    the task in progress and skips the rest.
+    """
+
+    type: Literal["run_tasks"] = "run_tasks"
+    tasks: tuple[TaskSpec, ...] = Field(min_length=1)
+
+
+Command = Annotated[
+    SubmitPrompt | CancelTurn | UpdateSettings | RunTasks, Field(discriminator="type")
+]
 
 
 # Events: backend -> frontend
@@ -103,6 +123,19 @@ class TurnFinished(_Message):
     reason: TurnEndReason
 
 
+class TaskStarted(_Message):
+    """Task ``index`` of the current ``RunTasks`` begins; its turn's events follow."""
+
+    type: Literal["task_started"] = "task_started"
+    index: int
+
+
+class TaskFinished(_Message):
+    type: Literal["task_finished"] = "task_finished"
+    index: int
+    reason: TurnEndReason
+
+
 class ErrorOccurred(_Message):
     type: Literal["error_occurred"] = "error_occurred"
     turn_id: str | None = None
@@ -116,6 +149,8 @@ Event = Annotated[
     | ToolCallStarted
     | ToolCallFinished
     | TurnFinished
+    | TaskStarted
+    | TaskFinished
     | ErrorOccurred,
     Field(discriminator="type"),
 ]

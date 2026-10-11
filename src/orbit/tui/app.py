@@ -1,39 +1,42 @@
 """Textual frontend. Talks to the backend only through a protocol Session."""
 
 import json
-from typing import ClassVar, assert_never, get_args
+from typing import ClassVar, assert_never
 
 from textual import on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding, BindingType
 from textual.containers import Horizontal, Vertical
-from textual.widgets import Footer, Input
+from textual.widgets import Footer, Input, OptionList
 
 from orbit.protocol import (
     AssistantMessage,
     CancelTurn,
     ErrorOccurred,
     Event,
+    RunTasks,
     Session,
     Settings,
     SettingsChanged,
     SubmitPrompt,
-    ToolAccess,
+    TaskFinished,
+    TaskSpec,
+    TaskStarted,
     ToolCallFinished,
     ToolCallStarted,
     TurnFinished,
     TurnStarted,
     UpdateSettings,
 )
+from orbit.tui.tasks import TaskEditorScreen, TaskList
 from orbit.tui.widgets import (
     TOOL_ACCESS_DESCRIPTIONS,
+    TOOL_ACCESS_OPTIONS,
     PickerScreen,
     PromptInput,
     SidePanel,
     Transcript,
 )
-
-TOOL_ACCESS_OPTIONS: tuple[ToolAccess, ...] = get_args(ToolAccess)
 
 # Window reached from each window by h/j/k/l; missing means an edge.
 # Conversation over prompt on the left, task list over verification steps on the right.
@@ -53,7 +56,7 @@ class OrbitApp(App[None], inherit_bindings=False):
     CSS = """
     #side { width: 33%; }
     .selected { border: round $accent; }
-    PromptInput:focus { border: heavy $accent; }
+    PromptInput:focus, TaskList:focus { border: heavy $accent; }
     """
     BINDINGS: ClassVar[list[BindingType]] = [
         # Priority, so it beats the prompt's own ctrl+c (copy).
@@ -62,7 +65,9 @@ class OrbitApp(App[None], inherit_bindings=False):
         Binding("j", "move('j')", show=False),
         Binding("k", "move('k')", show=False),
         Binding("l", "move('l')", show=False),
+        Binding("enter", "activate", show=False),
         Binding("i", "insert_mode", "Type"),
+        Binding("ctrl+r", "run_tasks", "Run tasks"),
         Binding("escape", "cancel_turn", "Cancel turn"),
         Binding("ctrl+o", "pick_model", "Model"),
         Binding("ctrl+l", "pick_tool_access", "Tools"),
@@ -76,6 +81,8 @@ class OrbitApp(App[None], inherit_bindings=False):
         # Last settings reported by the backend; None until the first report.
         self._settings: Settings | None = None
         self._model_choices: tuple[str, ...] = ()
+        # Task-list index of each task in the running RunTasks; None when none runs.
+        self._batch: list[int] | None = None
         # Pickers are built once and installed so they open instantly.
         self._model_picker = PickerScreen("Model", ["default"])
         self._tool_picker = PickerScreen(
@@ -88,7 +95,7 @@ class OrbitApp(App[None], inherit_bindings=False):
                 yield Transcript(id="transcript")
                 yield PromptInput(placeholder="Press i to type, esc to stop", id="prompt")
             with Vertical(id="side"):
-                yield SidePanel("Task list", id="task-list")
+                yield TaskList(id="task-list")
                 yield SidePanel("Verification steps", id="verification-steps")
         yield Footer()
 
@@ -104,19 +111,53 @@ class OrbitApp(App[None], inherit_bindings=False):
         if not text:
             return
         message.input.clear()
-        self.query_one(PromptInput).action_normal_mode()
+        prompt = self.query_one(PromptInput)
+        prompt.action_normal_mode()
+        # Busy from now, not from TurnStarted, so ctrl+r can't race the turn.
+        prompt.disabled = True
         self._append(text, "user")
         await self._session.send(SubmitPrompt(text=text))
 
+    # Window navigation only applies at the top level, when no window is active.
+
     def action_move(self, direction: str) -> None:
         target = NEIGHBORS[self._selected].get(direction)
-        if target is not None:
+        if target is not None and self.focused is None:
             self._select(target)
+
+    def action_activate(self) -> None:
+        if self._selected == "task-list":
+            self.query_one(TaskList).enter_list_mode()
 
     def action_insert_mode(self) -> None:
         """Shortcut from any window: select the prompt and start typing."""
-        self._select("prompt")
-        self.query_one(PromptInput).enter_insert_mode()
+        if self.focused is None:
+            self._select("prompt")
+            self.query_one(PromptInput).enter_insert_mode()
+
+    @on(OptionList.OptionSelected, "#task-list")
+    def _edit_task(self, event: OptionList.OptionSelected) -> None:
+        tasks = self.query_one(TaskList)
+        index = event.option_index
+        task = tasks.tasks[index] if index < len(tasks.tasks) else None
+
+        def saved(result: TaskSpec | None) -> None:
+            if result is not None:
+                tasks.set_task(index, result)
+
+        editor = TaskEditorScreen(task, self._settings or Settings(), self._model_choices)
+        self.push_screen(editor, saved)
+
+    async def action_run_tasks(self) -> None:
+        """Run every task that hasn't completed, unless something is already running."""
+        tasks = self.query_one(TaskList)
+        prompt = self.query_one(PromptInput)
+        batch = [i for i, s in enumerate(tasks.statuses) if s != "completed"]
+        if not batch or prompt.disabled:
+            return
+        self._batch = batch
+        prompt.disabled = True
+        await self._session.send(RunTasks(tasks=tuple(tasks.tasks[i] for i in batch)))
 
     def _select(self, window_id: str) -> None:
         self.query_one(f"#{self._selected}").remove_class("selected")
@@ -180,7 +221,20 @@ class OrbitApp(App[None], inherit_bindings=False):
             case TurnFinished(reason=reason):
                 if reason not in ("completed", "error"):
                     self._append(f"[turn ended: {reason}]", "tool")
-                self.query_one(PromptInput).disabled = False
+                if self._batch is None:
+                    self.query_one(PromptInput).disabled = False
+            case TaskStarted(index=index):
+                assert self._batch is not None
+                tasks = self.query_one(TaskList)
+                position = self._batch[index]
+                tasks.set_status(position, "running")
+                self._append(f"Task {position + 1}: {tasks.tasks[position].prompt}", "user")
+            case TaskFinished(index=index, reason=reason):
+                assert self._batch is not None
+                self.query_one(TaskList).set_status(self._batch[index], reason)
+                if reason == "cancelled" or index == len(self._batch) - 1:
+                    self._batch = None
+                    self.query_one(PromptInput).disabled = False
             case ErrorOccurred(message=message):
                 self._append(message, "error")
             case _:

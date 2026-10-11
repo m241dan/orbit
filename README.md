@@ -24,12 +24,26 @@ In the app:
 |---|---|
 | `h` `j` `k` `l` | Move between windows (the selected one is highlighted) |
 | `i` | Jump to the prompt and start typing (vim-style insert mode) |
+| `enter` | On the task list: activate it (`j`/`k` move, `enter` edits a task or adds one on `+ new task`, `esc` leaves) |
+| `ctrl+r` | Run the tasks that haven't completed yet |
 | `ctrl+o` | Pick the model (default, fable, opus, sonnet, haiku) |
 | `ctrl+l` | Pick the tool access level (off, restricted, full) |
 | `esc` | Stop typing; otherwise cancel the running turn or close a picker |
 | `ctrl+c` | Quit |
 
 In a picker, `j`/`k` (or the arrow keys) move and `enter` chooses.
+
+### Tasks
+
+The task list queues prompts to run later. Each task has its own prompt, model and tool access,
+set in the task editor: `j`/`k` pick a field, `i` types in the prompt (`esc` or `enter` stops),
+`enter` on model or tools opens a picker, `ctrl+s` saves and `esc` discards.
+
+`ctrl+r` runs the tasks one after another, each in a fresh Claude session, so they don't share
+context with each other or with the conversation. Their output appears in the conversation and
+each row shows its status: `○` pending, `▶` running, `✓` done, `✗` failed, `■` cancelled. A failed
+task doesn't stop the rest; `esc` cancels the running task and skips the remaining ones. Running
+again skips tasks that already completed, and editing a task makes it pending again.
 
 Changes apply from the next prompt and keep the conversation.
 

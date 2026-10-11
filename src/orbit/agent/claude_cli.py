@@ -101,6 +101,10 @@ class ClaudeCliRunner:
         self._command = tuple(command)
         self.session_id: str | None = None
 
+    def new_context(self) -> "ClaudeCliRunner":
+        """Same CLI, new Claude session (no ``--resume``)."""
+        return ClaudeCliRunner(self._command)
+
     async def run_turn(self, turn_id: str, prompt: str, settings: Settings) -> AsyncIterator[Event]:
         yield TurnStarted(turn_id=turn_id)
         args = [*self._command, *STREAM_ARGS]

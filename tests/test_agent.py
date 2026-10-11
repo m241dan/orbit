@@ -10,9 +10,13 @@ from orbit.protocol import (
     CancelTurn,
     ErrorOccurred,
     Event,
+    RunTasks,
     Settings,
     SettingsChanged,
     SubmitPrompt,
+    TaskFinished,
+    TaskSpec,
+    TaskStarted,
     ToolAccess,
     ToolCallFinished,
     ToolCallStarted,
@@ -178,11 +182,18 @@ class RecordingModel:
 
 
 class RecordingRunner:
-    def __init__(self) -> None:
+    """Records each turn as (runner, prompt, settings) in a log shared with its new contexts."""
+
+    def __init__(self, log: list[tuple["RecordingRunner", str, Settings]] | None = None) -> None:
+        self.log = [] if log is None else log
         self.settings_seen: list[Settings] = []
+
+    def new_context(self) -> "RecordingRunner":
+        return RecordingRunner(self.log)
 
     async def run_turn(self, turn_id: str, prompt: str, settings: Settings) -> AsyncIterator[Event]:
         self.settings_seen.append(settings)
+        self.log.append((self, prompt, settings))
         yield TurnStarted(turn_id=turn_id)
         yield TurnFinished(turn_id=turn_id, reason="completed")
 
@@ -221,3 +232,113 @@ async def test_session_applies_updated_settings_to_next_turn() -> None:
 
     assert runner.settings_seen == [Settings(), new]
     assert session.settings == new
+
+
+async def collect_tasks(session: AgentSession, count: int) -> list[Event]:
+    """Events until task ``count - 1`` finishes or a task is cancelled."""
+    events: list[Event] = []
+    async for event in session.events():
+        if isinstance(event, SettingsChanged):
+            continue
+        events.append(event)
+        if isinstance(event, TaskFinished) and (
+            event.index == count - 1 or event.reason == "cancelled"
+        ):
+            return events
+    return events
+
+
+def kinds(events: list[Event]) -> list[str]:
+    return [e.type for e in events]
+
+
+async def test_run_tasks_runs_each_in_a_new_context_with_its_settings() -> None:
+    runner = RecordingRunner()
+    session = AgentSession(runner, Settings(model="sonnet"))
+    first = TaskSpec(prompt="one", settings=Settings(model="opus", tool_access="full"))
+    second = TaskSpec(prompt="two", settings=Settings(tool_access="off"))
+    await session.send(RunTasks(tasks=(first, second)))
+    events = await collect_tasks(session, 2)
+
+    assert kinds(events) == [
+        "task_started",
+        "turn_started",
+        "turn_finished",
+        "task_finished",
+        "task_started",
+        "turn_started",
+        "turn_finished",
+        "task_finished",
+    ]
+    assert events[0] == TaskStarted(index=0)
+    assert events[3] == TaskFinished(index=0, reason="completed")
+    assert events[7] == TaskFinished(index=1, reason="completed")
+
+    runners = [entry[0] for entry in runner.log]
+    assert [(p, s) for _, p, s in runner.log] == [
+        ("one", first.settings),
+        ("two", second.settings),
+    ]
+    assert runner not in runners
+    assert runners[0] is not runners[1]
+    # The session's own settings are untouched.
+    assert session.settings == Settings(model="sonnet")
+
+
+async def test_run_tasks_leaves_the_conversation_alone() -> None:
+    runner = ModelLoopRunner(EchoModel())
+    session = AgentSession(runner)
+    await session.send(SubmitPrompt(text="hello"))
+    await collect(session)
+    await session.send(RunTasks(tasks=(TaskSpec(prompt="task"),)))
+    events = await collect_tasks(session, 1)
+
+    assert any(isinstance(e, AssistantMessage) and e.text == "echo: task" for e in events)
+    assert [m.content for m in runner.history] == ["hello", "echo: hello"]
+
+
+async def test_cancel_stops_the_remaining_tasks() -> None:
+    session = AgentSession(ModelLoopRunner(HangingModel()))
+    await session.send(RunTasks(tasks=(TaskSpec(prompt="one"), TaskSpec(prompt="two"))))
+    await asyncio.sleep(0)
+    await session.send(CancelTurn())
+    events = await collect_tasks(session, 2)
+
+    assert kinds(events) == ["task_started", "turn_started", "turn_finished", "task_finished"]
+    assert events[-1] == TaskFinished(index=0, reason="cancelled")
+    await asyncio.sleep(0.01)
+    assert session._events.empty()
+
+
+async def test_failed_task_does_not_stop_the_next() -> None:
+    session = AgentSession(ModelLoopRunner(FailingModel()))
+    await session.send(RunTasks(tasks=(TaskSpec(prompt="one"), TaskSpec(prompt="two"))))
+    events = await collect_tasks(session, 2)
+
+    finished = [e for e in events if isinstance(e, TaskFinished)]
+    assert finished == [
+        TaskFinished(index=0, reason="error"),
+        TaskFinished(index=1, reason="error"),
+    ]
+    assert any(isinstance(e, ErrorOccurred) and e.message == "boom" for e in events)
+
+
+async def test_run_tasks_rejected_while_a_turn_runs() -> None:
+    session = AgentSession(ModelLoopRunner(HangingModel()))
+    await session.send(SubmitPrompt(text="one"))
+    await session.send(RunTasks(tasks=(TaskSpec(prompt="task"),)))
+    stream = session.events()
+    assert isinstance(await anext(stream), SettingsChanged)
+    assert await anext(stream) == ErrorOccurred(message="A turn is already running.")
+    await session.send(CancelTurn())
+
+
+async def test_loop_runner_new_context_has_empty_history_and_same_model() -> None:
+    model = RecordingModel()
+    runner = ModelLoopRunner(model, ToolRegistry([UpperTool()]), max_steps=3)
+    _ = [e async for e in runner.run_turn("t", "go", Settings())]
+    fresh = runner.new_context()
+    assert fresh.history == []
+    _ = [e async for e in fresh.run_turn("t", "again", Settings())]
+    assert [m.content for m in fresh.history] == ["again", "ok"]
+    assert model.tools_seen == [["upper"], ["upper"]]

@@ -283,3 +283,18 @@ async def test_cancel_kills_the_cli_process(tmp_path: Path) -> None:
     [call] = calls(scenario)
     with pytest.raises(ProcessLookupError):
         os.kill(call["pid"], 0)
+
+
+async def test_new_context_starts_a_fresh_claude_session(tmp_path: Path) -> None:
+    runner, scenario = make_runner(tmp_path, stdout=lines(*TRANSCRIPT))
+    await run(runner, "first")
+    fresh = runner.new_context()
+    assert fresh.session_id is None
+    await run(fresh, "task")
+    await run(runner, "second")
+
+    _, task, second = calls(scenario)
+    assert "--resume" not in task["argv"]
+    assert task["stdin"] == "task"
+    # The original keeps its own conversation.
+    assert second["argv"][-2:] == ["--resume", SESSION_ID]

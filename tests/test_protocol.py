@@ -2,9 +2,13 @@ import pytest
 from pydantic import ValidationError
 
 from orbit.protocol import (
+    RunTasks,
     Settings,
     SettingsChanged,
     SubmitPrompt,
+    TaskFinished,
+    TaskSpec,
+    TaskStarted,
     ToolCallStarted,
     UpdateSettings,
     command_adapter,
@@ -49,3 +53,26 @@ def test_settings_changed_round_trip() -> None:
 def test_rejects_unknown_tool_access() -> None:
     with pytest.raises(ValidationError):
         Settings.model_validate({"tool_access": "sometimes"})
+
+
+def test_run_tasks_round_trip() -> None:
+    command = RunTasks(
+        tasks=(
+            TaskSpec(prompt="fix the bug", settings=Settings(model="opus", tool_access="full")),
+            TaskSpec(prompt="write docs"),
+        )
+    )
+    assert command_adapter.validate_json(command.model_dump_json()) == command
+    assert command.tasks[1].settings == Settings()
+
+
+def test_run_tasks_rejects_empty_list_and_empty_prompt() -> None:
+    with pytest.raises(ValidationError):
+        RunTasks(tasks=())
+    with pytest.raises(ValidationError):
+        TaskSpec(prompt="")
+
+
+def test_task_events_round_trip() -> None:
+    for event in (TaskStarted(index=0), TaskFinished(index=2, reason="error")):
+        assert event_adapter.validate_json(event.model_dump_json()) == event

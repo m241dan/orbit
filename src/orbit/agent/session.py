@@ -2,17 +2,22 @@
 
 import asyncio
 import uuid
-from collections.abc import AsyncIterator, Sequence
-from typing import Protocol, assert_never
+from collections.abc import AsyncIterator, Coroutine, Sequence
+from typing import Any, Protocol, assert_never
 
 from orbit.protocol import (
     CancelTurn,
     Command,
     ErrorOccurred,
     Event,
+    RunTasks,
     Settings,
     SettingsChanged,
     SubmitPrompt,
+    TaskFinished,
+    TaskSpec,
+    TaskStarted,
+    TurnEndReason,
     TurnFinished,
     UpdateSettings,
 )
@@ -26,6 +31,10 @@ class TurnRunner(Protocol):
     """
 
     def run_turn(self, turn_id: str, prompt: str, settings: Settings) -> AsyncIterator[Event]: ...
+
+    def new_context(self) -> "TurnRunner":
+        """A runner with the same configuration and an empty conversation."""
+        ...
 
 
 class AgentSession:
@@ -42,7 +51,7 @@ class AgentSession:
         self._model_choices = tuple(model_choices)
         self._events: asyncio.Queue[Event] = asyncio.Queue()
         self._events.put_nowait(self._settings_changed())
-        self._turn: asyncio.Task[None] | None = None
+        self._turn: asyncio.Task[object] | None = None
 
     @property
     def runner(self) -> TurnRunner:
@@ -59,10 +68,9 @@ class AgentSession:
     async def send(self, command: Command) -> None:
         match command:
             case SubmitPrompt(text=text):
-                if self._turn is not None and not self._turn.done():
-                    await self._events.put(ErrorOccurred(message="A turn is already running."))
-                    return
-                self._turn = asyncio.create_task(self._run(text))
+                await self._start(self._run_turn(self._runner, text, self._settings))
+            case RunTasks(tasks=tasks):
+                await self._start(self._run_tasks(tasks))
             case CancelTurn():
                 if self._turn is not None and not self._turn.done():
                     self._turn.cancel()
@@ -76,16 +84,39 @@ class AgentSession:
         while True:
             yield await self._events.get()
 
-    async def _run(self, text: str) -> None:
+    async def _start(self, work: Coroutine[Any, Any, object]) -> None:
+        if self._turn is not None and not self._turn.done():
+            work.close()
+            await self._events.put(ErrorOccurred(message="A turn is already running."))
+            return
+        self._turn = asyncio.create_task(work)
+
+    async def _run_tasks(self, tasks: Sequence[TaskSpec]) -> None:
+        for index, task in enumerate(tasks):
+            await self._events.put(TaskStarted(index=index))
+            runner = self._runner.new_context()
+            reason = await self._run_turn(runner, task.prompt, task.settings)
+            await self._events.put(TaskFinished(index=index, reason=reason))
+            if reason == "cancelled":
+                return
+
+    async def _run_turn(self, runner: TurnRunner, text: str, settings: Settings) -> TurnEndReason:
+        """Run one turn, publishing its events; returns how it ended."""
         turn_id = uuid.uuid4().hex
+        reason: TurnEndReason = "completed"
         try:
-            async for event in self._runner.run_turn(turn_id, text, self._settings):
+            async for event in runner.run_turn(turn_id, text, settings):
+                if isinstance(event, TurnFinished):
+                    reason = event.reason
                 await self._events.put(event)
         except asyncio.CancelledError:
-            await self._events.put(TurnFinished(turn_id=turn_id, reason="cancelled"))
+            reason = "cancelled"
+            await self._events.put(TurnFinished(turn_id=turn_id, reason=reason))
         except Exception as exc:
+            reason = "error"
             await self._events.put(ErrorOccurred(turn_id=turn_id, message=str(exc)))
-            await self._events.put(TurnFinished(turn_id=turn_id, reason="error"))
+            await self._events.put(TurnFinished(turn_id=turn_id, reason=reason))
+        return reason
 
     def _settings_changed(self) -> SettingsChanged:
         return SettingsChanged(settings=self._settings, model_choices=self._model_choices)

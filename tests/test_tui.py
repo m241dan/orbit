@@ -400,7 +400,7 @@ async def test_side_panels_fill_right_third_top_and_bottom() -> None:
     app = OrbitApp(FakeSession())
     async with app.run_test(size=(120, 41)) as pilot:
         await pilot.pause()
-        tasks = app.query_one("#task-list", SidePanel)
+        tasks = app.query_one("#task-list")
         steps = app.query_one("#verification-steps", SidePanel)
         transcript = app.query_one(Transcript).region
         prompt = app.query_one(PromptInput).region
