@@ -1,7 +1,7 @@
 """Building blocks of the orbit screen."""
 
 from collections.abc import Sequence
-from typing import Any, ClassVar, Literal, get_args
+from typing import Any, ClassVar, get_args
 
 from rich.text import Text
 from textual import on
@@ -11,7 +11,7 @@ from textual.containers import VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import Input, OptionList, Static
 
-from orbit.protocol import Settings, ToolAccess
+from orbit.protocol import Settings, StepState, StepStatus, ToolAccess
 
 TOOL_ACCESS_OPTIONS: tuple[ToolAccess, ...] = get_args(ToolAccess)
 TOOL_ACCESS_LABELS: dict[ToolAccess, str] = {
@@ -80,7 +80,6 @@ class SidePanel(VerticalScroll):
         self.border_title = title
 
 
-StepStatus = Literal["pending", "running", "passed", "failed", "cancelled"]
 STEP_ICONS: dict[StepStatus, str] = {
     "pending": "○",
     "running": "▶",
@@ -91,36 +90,18 @@ STEP_ICONS: dict[StepStatus, str] = {
 
 
 class VerificationPanel(SidePanel):
-    """The verification steps and how each fared after the current task."""
+    """The verification steps and how each fared after the current task, as reported."""
 
     def __init__(self, *, id: str) -> None:
         super().__init__("Verification steps", id=id)
-        self.steps: tuple[str, ...] = ()
-        self.statuses: list[StepStatus] = []
+        self.steps: tuple[StepState, ...] = ()
 
     def compose(self) -> ComposeResult:
         yield Static("No verification steps")
 
-    def set_steps(self, steps: Sequence[str]) -> None:
+    def show(self, steps: Sequence[StepState]) -> None:
         self.steps = tuple(steps)
-        self.reset()
-
-    def reset(self) -> None:
-        self.statuses = ["pending"] * len(self.steps)
-        self._show()
-
-    def set_status(self, step: int, status: StepStatus) -> None:
-        self.statuses[step] = status
-        self._show()
-
-    def cancel_running(self) -> None:
-        self.statuses = ["cancelled" if s == "running" else s for s in self.statuses]
-        self._show()
-
-    def _show(self) -> None:
-        lines = [
-            f"{STEP_ICONS[s]} {name}" for name, s in zip(self.steps, self.statuses, strict=True)
-        ]
+        lines = [f"{STEP_ICONS[s.status]} {s.name}" for s in self.steps]
         self.query_one(Static).update(Text("\n".join(lines)))
 
 

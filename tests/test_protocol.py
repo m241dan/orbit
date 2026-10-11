@@ -2,19 +2,22 @@ import pytest
 from pydantic import ValidationError
 
 from orbit.protocol import (
+    AddTask,
+    BusyChanged,
+    EditTask,
     RunTasks,
     Settings,
     SettingsChanged,
+    StepState,
     SubmitPrompt,
-    TaskFinished,
-    TaskInserted,
+    TasksChanged,
     TaskSpec,
     TaskStarted,
+    TaskState,
     ToolCallStarted,
     UpdateSettings,
-    VerificationConfigured,
+    VerificationChanged,
     VerificationFinished,
-    VerificationStarted,
     command_adapter,
     event_adapter,
 )
@@ -59,40 +62,40 @@ def test_rejects_unknown_tool_access() -> None:
         Settings.model_validate({"tool_access": "sometimes"})
 
 
-def test_run_tasks_round_trip() -> None:
-    command = RunTasks(
-        tasks=(
-            TaskSpec(prompt="fix the bug", settings=Settings(model="opus", tool_access="full")),
-            TaskSpec(prompt="write docs"),
-        )
-    )
-    assert command_adapter.validate_json(command.model_dump_json()) == command
-    assert command.tasks[1].settings == Settings()
+def test_task_commands_round_trip() -> None:
+    task = TaskSpec(prompt="fix the bug", settings=Settings(model="opus", tool_access="full"))
+    for command in (AddTask(task=task), EditTask(task_id="1", task=task), RunTasks()):
+        assert command_adapter.validate_json(command.model_dump_json()) == command
+    assert TaskSpec(prompt="write docs").settings == Settings()
 
 
-def test_run_tasks_rejects_empty_list_and_empty_prompt() -> None:
-    with pytest.raises(ValidationError):
-        RunTasks(tasks=())
+def test_rejects_empty_task_prompt() -> None:
     with pytest.raises(ValidationError):
         TaskSpec(prompt="")
 
 
-def test_task_events_round_trip() -> None:
-    for event in (TaskStarted(index=0), TaskFinished(index=2, reason="error")):
-        assert event_adapter.validate_json(event.model_dump_json()) == event
+def test_task_state_starts_pending() -> None:
+    assert TaskState(id="1", task=TaskSpec(prompt="x")).status == "pending"
+    assert StepState(name="Unit tests").status == "pending"
 
 
-def test_verification_events_round_trip() -> None:
+def test_state_and_log_events_round_trip() -> None:
     events = (
-        VerificationConfigured(steps=("Unit tests",)),
-        VerificationStarted(index=0, step=0),
-        VerificationFinished(index=0, step=0, passed=False),
-        TaskInserted(index=1, task=TaskSpec(prompt="fix it")),
-        TaskFinished(index=0, reason="completed", verified=False),
+        BusyChanged(busy=True),
+        TasksChanged(
+            tasks=(
+                TaskState(id="1", task=TaskSpec(prompt="one"), status="unverified"),
+                TaskState(id="2", task=TaskSpec(prompt="fix it")),
+            )
+        ),
+        TaskStarted(task_id="2"),
+        VerificationChanged(steps=(StepState(name="Unit tests", status="failed"),)),
+        VerificationFinished(task_id="1", step=0, passed=False),
     )
     for event in events:
         assert event_adapter.validate_json(event.model_dump_json()) == event
 
 
-def test_task_finished_is_unverified_by_default() -> None:
-    assert TaskFinished(index=0, reason="error").verified is None
+def test_rejects_unknown_task_status() -> None:
+    with pytest.raises(ValidationError):
+        TaskState.model_validate({"id": "1", "task": {"prompt": "x"}, "status": "sleeping"})

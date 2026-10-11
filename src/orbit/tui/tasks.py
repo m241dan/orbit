@@ -1,7 +1,7 @@
 """The task list window and the modal that edits one task."""
 
 from collections.abc import Callable, Sequence
-from typing import ClassVar, Literal
+from typing import ClassVar
 
 from rich.text import Text
 from textual import events, on
@@ -11,7 +11,7 @@ from textual.containers import Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Input, OptionList, Static
 
-from orbit.protocol import Settings, TaskSpec, TurnEndReason
+from orbit.protocol import Settings, TaskSpec, TaskState, TaskStatus
 from orbit.tui.widgets import (
     TOOL_ACCESS_DESCRIPTIONS,
     TOOL_ACCESS_OPTIONS,
@@ -19,8 +19,6 @@ from orbit.tui.widgets import (
     PromptInput,
 )
 
-# "unverified": the turn completed but a verification step failed after it.
-TaskStatus = Literal["pending", "running", "unverified"] | TurnEndReason
 STATUS_ICONS: dict[TaskStatus, str] = {
     "pending": "○",
     "running": "▶",
@@ -34,7 +32,7 @@ NEW_TASK_LABEL = "+ new task"
 
 
 class TaskList(OptionList):
-    """Queued tasks plus a trailing "new task" row.
+    """The backend's task list plus a trailing "new task" row.
 
     Like the prompt, it only takes focus once activated (``enter_list_mode``);
     then j/k move, enter picks a row and escape returns to window navigation.
@@ -56,12 +54,11 @@ class TaskList(OptionList):
     def __init__(self, *, id: str) -> None:
         super().__init__(id=id)
         self.can_focus = False
-        self.tasks: list[TaskSpec] = []
-        self.statuses: list[TaskStatus] = []
+        self.tasks: tuple[TaskState, ...] = ()
 
     def on_mount(self) -> None:
         self.border_title = "Task list"
-        self._show()
+        self._show(None)
 
     def enter_list_mode(self) -> None:
         self.can_focus = True
@@ -80,47 +77,36 @@ class TaskList(OptionList):
         if not self.has_focus:
             event.prevent_default()
 
-    def set_task(self, index: int, task: TaskSpec) -> None:
-        """Replace task ``index``, or add one when ``index`` is the new-task row."""
-        if index == len(self.tasks):
-            self.tasks.append(task)
-            self.statuses.append("pending")
-            self._show(highlight=index + 1)
-        else:
-            self.tasks[index] = task
-            self.statuses[index] = "pending"
-            self._show()
-
-    def insert_task(self, index: int, task: TaskSpec) -> None:
-        """Insert a pending ``task`` at ``index``; the highlight stays on its row."""
-        self.tasks.insert(index, task)
-        self.statuses.insert(index, "pending")
+    def show(self, tasks: Sequence[TaskState]) -> None:
+        """Show ``tasks``; the highlight stays on its task, or on the new-task row."""
         highlight = self.highlighted
-        if highlight is not None and highlight >= index:
-            highlight += 1
-        self._show(highlight=highlight)
+        if highlight is not None:
+            positions = {t.id: i for i, t in enumerate(tasks)}
+            highlight = (
+                positions.get(self.tasks[highlight].id, highlight)
+                if highlight < len(self.tasks)
+                else len(tasks)
+            )
+        self.tasks = tuple(tasks)
+        self._show(highlight)
 
-    def set_status(self, index: int, status: TaskStatus) -> None:
-        self.statuses[index] = status
-        self._show()
+    def position(self, task_id: str) -> int:
+        return next(i for i, t in enumerate(self.tasks) if t.id == task_id)
 
-    def _show(self, highlight: int | None = None) -> None:
-        if highlight is None:
-            highlight = self.highlighted
+    def _show(self, highlight: int | None) -> None:
         self.clear_options()
         self.add_options(
-            [task_label(t, s) for t, s in zip(self.tasks, self.statuses, strict=True)]
-            + [Text(NEW_TASK_LABEL, style="dim italic")]
+            [task_label(t) for t in self.tasks] + [Text(NEW_TASK_LABEL, style="dim italic")]
         )
         self.highlighted = highlight
 
 
-def task_label(task: TaskSpec, status: TaskStatus) -> Text:
-    model = task.settings.model or "default"
+def task_label(state: TaskState) -> Text:
+    settings = state.task.settings
     # Long prompts (like fix tasks) are titled by their first line.
-    title = task.prompt.split("\n", 1)[0]
-    label = Text(f"{STATUS_ICONS[status]} {title}\n")
-    label.append(f"  {model} · {task.settings.tool_access}", style="dim")
+    title = state.task.prompt.split("\n", 1)[0]
+    label = Text(f"{STATUS_ICONS[state.status]} {title}\n")
+    label.append(f"  {settings.model or 'default'} · {settings.tool_access}", style="dim")
     return label
 
 

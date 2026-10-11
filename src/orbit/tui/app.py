@@ -10,8 +10,11 @@ from textual.containers import Horizontal, Vertical
 from textual.widgets import Footer, Input, OptionList
 
 from orbit.protocol import (
+    AddTask,
     AssistantMessage,
+    BusyChanged,
     CancelTurn,
+    EditTask,
     ErrorOccurred,
     Event,
     RunTasks,
@@ -19,8 +22,7 @@ from orbit.protocol import (
     Settings,
     SettingsChanged,
     SubmitPrompt,
-    TaskFinished,
-    TaskInserted,
+    TasksChanged,
     TaskSpec,
     TaskStarted,
     ToolCallFinished,
@@ -28,9 +30,8 @@ from orbit.protocol import (
     TurnFinished,
     TurnStarted,
     UpdateSettings,
-    VerificationConfigured,
+    VerificationChanged,
     VerificationFinished,
-    VerificationStarted,
 )
 from orbit.tui.tasks import TaskEditorScreen, TaskList
 from orbit.tui.widgets import (
@@ -85,8 +86,6 @@ class OrbitApp(App[None], inherit_bindings=False):
         # Last settings reported by the backend; None until the first report.
         self._settings: Settings | None = None
         self._model_choices: tuple[str, ...] = ()
-        # Task-list index of each task in the running RunTasks; None when none runs.
-        self._batch: list[int] | None = None
         # Pickers are built once and installed so they open instantly.
         self._model_picker = PickerScreen("Model", ["default"])
         self._tool_picker = PickerScreen(
@@ -141,30 +140,29 @@ class OrbitApp(App[None], inherit_bindings=False):
 
     @on(OptionList.OptionSelected, "#task-list")
     def _edit_task(self, event: OptionList.OptionSelected) -> None:
-        tasks = self.query_one(TaskList)
-        index = event.option_index
-        task = tasks.tasks[index] if index < len(tasks.tasks) else None
+        tasks = self.query_one(TaskList).tasks
+        current = tasks[event.option_index] if event.option_index < len(tasks) else None
 
-        def saved(result: TaskSpec | None) -> None:
-            if result is not None:
-                tasks.set_task(index, result)
+        # The list changes when the backend reports the new task list.
+        async def saved(result: TaskSpec | None) -> None:
+            if result is None:
+                return
+            if current is None:
+                await self._session.send(AddTask(task=result))
+            else:
+                await self._session.send(EditTask(task_id=current.id, task=result))
 
-        editor = TaskEditorScreen(task, self._settings or Settings(), self._model_choices)
+        editor = TaskEditorScreen(
+            None if current is None else current.task,
+            self._settings or Settings(),
+            self._model_choices,
+        )
         self.push_screen(editor, saved)
 
     async def action_run_tasks(self) -> None:
-        """Run every task that hasn't completed, unless something is already running.
-
-        Unverified tasks count as completed: a fix task was queued after them.
-        """
-        tasks = self.query_one(TaskList)
-        prompt = self.query_one(PromptInput)
-        batch = [i for i, s in enumerate(tasks.statuses) if s not in ("completed", "unverified")]
-        if not batch or prompt.disabled:
-            return
-        self._batch = batch
-        prompt.disabled = True
-        await self._session.send(RunTasks(tasks=tuple(tasks.tasks[i] for i in batch)))
+        """Ask the backend to run the task list, unless something is already running."""
+        if not self.query_one(PromptInput).disabled:
+            await self._session.send(RunTasks())
 
     def _select(self, window_id: str) -> None:
         self.query_one(f"#{self._selected}").remove_class("selected")
@@ -218,7 +216,7 @@ class OrbitApp(App[None], inherit_bindings=False):
                 self._settings, self._model_choices = settings, choices
                 self.query_one(PromptInput).show_settings(settings)
             case TurnStarted():
-                self.query_one(PromptInput).disabled = True
+                pass  # The prompt follows BusyChanged, which also covers task runs.
             case AssistantMessage(text=text):
                 self._append(text, "assistant")
             case ToolCallStarted(name=name, arguments=arguments):
@@ -228,40 +226,21 @@ class OrbitApp(App[None], inherit_bindings=False):
             case TurnFinished(reason=reason):
                 if reason not in ("completed", "error"):
                     self._append(f"[turn ended: {reason}]", "tool")
-                if self._batch is None:
-                    self.query_one(PromptInput).disabled = False
-            case TaskStarted(index=index):
-                assert self._batch is not None
-                tasks = self.query_one(TaskList)
-                position = self._batch[index]
-                tasks.set_status(position, "running")
-                self.query_one(VerificationPanel).reset()
-                self._append(f"Task {position + 1}: {tasks.tasks[position].prompt}", "user")
-            case TaskInserted(index=index, task=task):
-                # Goes on the row after the batch's previous task; later rows shift down.
-                assert self._batch is not None
-                position = self._batch[index - 1] + 1
-                self.query_one(TaskList).insert_task(position, task)
-                self._batch[index:] = [p + 1 for p in self._batch[index:]]
-                self._batch.insert(index, position)
-            case TaskFinished(index=index, reason=reason, verified=verified):
-                assert self._batch is not None
-                status = "unverified" if verified is False else reason
-                self.query_one(TaskList).set_status(self._batch[index], status)
-                if reason == "cancelled":
-                    self.query_one(VerificationPanel).cancel_running()
-                if reason == "cancelled" or index == len(self._batch) - 1:
-                    self._batch = None
-                    self.query_one(PromptInput).disabled = False
-            case VerificationConfigured(steps=steps):
-                self.query_one(VerificationPanel).set_steps(steps)
-            case VerificationStarted(step=step):
-                self.query_one(VerificationPanel).set_status(step, "running")
+            case BusyChanged(busy=busy):
+                self.query_one(PromptInput).disabled = busy
+            case TasksChanged(tasks=tasks):
+                self.query_one(TaskList).show(tasks)
+            case TaskStarted(task_id=task_id):
+                task_list = self.query_one(TaskList)
+                position = task_list.position(task_id)
+                prompt = task_list.tasks[position].task.prompt
+                self._append(f"Task {position + 1}: {prompt}", "user")
+            case VerificationChanged(steps=steps):
+                self.query_one(VerificationPanel).show(steps)
             case VerificationFinished(step=step, passed=passed):
-                panel = self.query_one(VerificationPanel)
-                panel.set_status(step, "passed" if passed else "failed")
                 if not passed:
-                    self._append(f"Verification failed: {panel.steps[step]}", "error")
+                    name = self.query_one(VerificationPanel).steps[step].name
+                    self._append(f"Verification failed: {name}", "error")
             case ErrorOccurred(message=message):
                 self._append(message, "error")
             case _:

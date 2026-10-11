@@ -60,20 +60,64 @@ class TaskSpec(_Message):
     settings: Settings = Settings()
 
 
-class RunTasks(_Message):
-    """Run ``tasks`` one after another, each in a new context.
+class AddTask(_Message):
+    """Append ``task`` to the backend's task list."""
 
-    Like a turn, this is rejected while a turn is running. ``CancelTurn`` stops
-    the task in progress and skips the rest.
+    type: Literal["add_task"] = "add_task"
+    task: TaskSpec
+
+
+class EditTask(_Message):
+    """Replace task ``task_id`` with ``task`` and make it pending again.
+
+    Rejected while that task runs.
+    """
+
+    type: Literal["edit_task"] = "edit_task"
+    task_id: str
+    task: TaskSpec
+
+
+class RunTasks(_Message):
+    """Run the task list: every task that hasn't finished, in order, each in a new context.
+
+    Tasks added while it runs join in. Like a turn, this is rejected while
+    anything runs; ``CancelTurn`` stops the task in progress and the run.
     """
 
     type: Literal["run_tasks"] = "run_tasks"
-    tasks: tuple[TaskSpec, ...] = Field(min_length=1)
 
 
 Command = Annotated[
-    SubmitPrompt | CancelTurn | UpdateSettings | RunTasks, Field(discriminator="type")
+    SubmitPrompt | CancelTurn | UpdateSettings | AddTask | EditTask | RunTasks,
+    Field(discriminator="type"),
 ]
+
+
+# State the backend owns and reports whole, so the frontend only renders it.
+
+TurnEndReason = Literal["completed", "cancelled", "max_steps", "error"]
+
+TaskStatus = Literal["pending", "running", "unverified"] | TurnEndReason
+"""Where a task stands. ``unverified``: its turn completed but a verification step failed."""
+
+
+class TaskState(_Message):
+    """One entry of the task list. ``id`` stays the same while the list changes around it."""
+
+    id: str
+    task: TaskSpec
+    status: TaskStatus = "pending"
+
+
+StepStatus = Literal["pending", "running", "passed", "failed", "cancelled"]
+
+
+class StepState(_Message):
+    """One verification step and how it fared after the current task."""
+
+    name: str
+    status: StepStatus = "pending"
 
 
 # Events: backend -> frontend
@@ -114,64 +158,48 @@ class ToolCallFinished(_Message):
     is_error: bool = False
 
 
-TurnEndReason = Literal["completed", "cancelled", "max_steps", "error"]
-
-
 class TurnFinished(_Message):
     type: Literal["turn_finished"] = "turn_finished"
     turn_id: str
     reason: TurnEndReason
 
 
+class BusyChanged(_Message):
+    """Whether a turn or a task run is in progress; new work is rejected while busy."""
+
+    type: Literal["busy_changed"] = "busy_changed"
+    busy: bool
+
+
+class TasksChanged(_Message):
+    """The whole task list, sent after every change to it."""
+
+    type: Literal["tasks_changed"] = "tasks_changed"
+    tasks: tuple[TaskState, ...]
+
+
 class TaskStarted(_Message):
-    """Task ``index`` of the current ``RunTasks`` begins; its turn's events follow."""
+    """Task ``task_id`` begins; its turn's events follow."""
 
     type: Literal["task_started"] = "task_started"
-    index: int
+    task_id: str
 
 
-class TaskFinished(_Message):
-    """Task ``index`` is done.
+class VerificationChanged(_Message):
+    """The verification steps and their progress, sent on connect and after every change.
 
-    ``verified`` says whether the verification steps passed after it; ``None``
-    when none ran (no steps configured, or the task's turn didn't complete).
+    Not sent when no steps are configured.
     """
 
-    type: Literal["task_finished"] = "task_finished"
-    index: int
-    reason: TurnEndReason
-    verified: bool | None = None
-
-
-class TaskInserted(_Message):
-    """``task`` joins the running batch at ``index``; tasks from there on shift down one.
-
-    Sent before the ``TaskFinished`` of the task it follows.
-    """
-
-    type: Literal["task_inserted"] = "task_inserted"
-    index: int
-    task: TaskSpec
-
-
-class VerificationConfigured(_Message):
-    """Names of the steps run after each task, sent on connect when there are any."""
-
-    type: Literal["verification_configured"] = "verification_configured"
-    steps: tuple[str, ...]
-
-
-class VerificationStarted(_Message):
-    """Step ``step`` (an index into the configured steps) begins checking task ``index``."""
-
-    type: Literal["verification_started"] = "verification_started"
-    index: int
-    step: int
+    type: Literal["verification_changed"] = "verification_changed"
+    steps: tuple[StepState, ...]
 
 
 class VerificationFinished(_Message):
+    """Step ``step`` (an index into the steps) finished checking task ``task_id``."""
+
     type: Literal["verification_finished"] = "verification_finished"
-    index: int
+    task_id: str
     step: int
     passed: bool
 
@@ -189,11 +217,10 @@ Event = Annotated[
     | ToolCallStarted
     | ToolCallFinished
     | TurnFinished
+    | BusyChanged
+    | TasksChanged
     | TaskStarted
-    | TaskFinished
-    | TaskInserted
-    | VerificationConfigured
-    | VerificationStarted
+    | VerificationChanged
     | VerificationFinished
     | ErrorOccurred,
     Field(discriminator="type"),

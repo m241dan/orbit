@@ -11,6 +11,7 @@ from orbit.agent import AgentSession, ClaudeCliRunner
 from orbit.agent.claude_cli import translate
 from orbit.protocol import (
     AssistantMessage,
+    BusyChanged,
     CancelTurn,
     ErrorOccurred,
     Event,
@@ -273,6 +274,7 @@ async def test_cancel_kills_the_cli_process(tmp_path: Path) -> None:
     assert isinstance(await anext(stream), SettingsChanged)
 
     await session.send(SubmitPrompt(text="hi"))
+    assert await anext(stream) == BusyChanged(busy=True)
     assert isinstance(await anext(stream), TurnStarted)
     while not Path(f"{scenario}.calls").exists():
         await asyncio.sleep(0.01)

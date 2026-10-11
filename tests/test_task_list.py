@@ -1,18 +1,20 @@
 from textual.pilot import Pilot
 
 from orbit.protocol import (
-    CancelTurn,
+    AddTask,
+    BusyChanged,
+    EditTask,
     Event,
     RunTasks,
     Settings,
-    TaskFinished,
+    TasksChanged,
     TaskSpec,
     TaskStarted,
-    TurnFinished,
-    TurnStarted,
+    TaskState,
+    TaskStatus,
 )
 from orbit.tui import OrbitApp
-from orbit.tui.tasks import TaskEditorScreen, TaskList
+from orbit.tui.tasks import TaskEditorScreen, TaskList, task_label
 from orbit.tui.widgets import Entry, PickerScreen, PromptInput
 from tests.test_tui import FakeSession, picker, selected, show_settings
 
@@ -44,20 +46,84 @@ async def feed(session: FakeSession, pilot: Pilot[None], *events: Event) -> None
     await pilot.pause()
 
 
+def board(*prompts: str, status: TaskStatus = "pending") -> TasksChanged:
+    """A board whose tasks have ids "1", "2", … and the given prompts."""
+    return TasksChanged(
+        tasks=tuple(
+            TaskState(id=str(i), task=TaskSpec(prompt=p), status=status)
+            for i, p in enumerate(prompts, 1)
+        )
+    )
+
+
 async def open_task_list(pilot: Pilot[None]) -> None:
     """From the default selection (prompt), go to the task list and activate it."""
     await pilot.press("l", "k", "enter")
 
 
-async def add_task(pilot: Pilot[None], text: str, *keys: str) -> None:
-    """With the task list active on the new-task row: create a task typing ``text``."""
-    await pilot.press("enter", "i", *text, "escape", *keys, "ctrl+s")
+def test_label_shows_status_title_and_settings() -> None:
+    task = TaskSpec(prompt="Fix it\nlong details", settings=Settings(model="opus"))
+    icons = {
+        "pending": "○",
+        "running": "▶",
+        "unverified": "⚠",
+        "completed": "✓",
+        "cancelled": "■",
+        "max_steps": "✗",
+        "error": "✗",
+    }
+    for status, icon in icons.items():
+        label = task_label(TaskState(id="1", task=task, status=status))  # type: ignore[arg-type]
+        # Long prompts (like fix tasks) are titled by their first line.
+        assert str(label) == f"{icon} Fix it\n  opus · restricted"
+    assert str(task_label(TaskState(id="1", task=TaskSpec(prompt="x")))).endswith(
+        "default · restricted"
+    )
 
 
 async def test_task_list_starts_with_only_the_new_task_row() -> None:
     app = OrbitApp(FakeSession())
     async with app.run_test():
         assert rows(app) == ["+ new task"]
+
+
+async def test_list_shows_the_board_the_backend_reports() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed(session, pilot, board("one", "two", status="completed"))
+        assert rows(app) == [
+            "✓ one\n  default · restricted",
+            "✓ two\n  default · restricted",
+            "+ new task",
+        ]
+
+
+async def test_highlight_stays_on_its_task_as_the_board_changes() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed(session, pilot, board("one", "two"))
+        await open_task_list(pilot)
+        tasks = app.query_one(TaskList)
+        await pilot.press("j")
+        assert tasks.highlighted == 1  # on "two"
+
+        # A fix task appears before it: the highlight follows "two" down.
+        fix = TaskState(id="9", task=TaskSpec(prompt="fix"))
+        one, two = board("one", "two").tasks
+        await feed(session, pilot, TasksChanged(tasks=(one, fix, two)))
+        assert tasks.highlighted == 2
+
+        # On the new-task row, it stays there as tasks are added.
+        await pilot.press("j")
+        new = TaskState(id="10", task=TaskSpec(prompt="three"))
+        await feed(session, pilot, TasksChanged(tasks=(one, fix, two, new)))
+        assert tasks.highlighted == 4
+
+        # Leaving and re-entering the list keeps the highlight where it was.
+        await pilot.press("escape", "enter")
+        assert tasks.highlighted == 4
 
 
 async def test_enter_activates_the_task_list() -> None:
@@ -132,24 +198,26 @@ async def test_editor_builds_a_task_with_vim_keys() -> None:
 
         await pilot.press("k", "k", "j", "j", "ctrl+s")
         assert not isinstance(app.screen, TaskEditorScreen)
-        assert rows(app) == ["○ fix it!\n  opus · full", "+ new task"]
-        # Ready to add the next one.
-        assert app.query_one(TaskList).highlighted == 1
+        task = TaskSpec(prompt="fix it!", settings=Settings(model="opus", tool_access="full"))
+        assert session.commands == [AddTask(task=task)]
+        # The row appears once the backend reports it.
+        assert rows(app) == ["+ new task"]
         assert app.focused is app.query_one(TaskList)
 
 
 async def test_editor_escape_discards_and_empty_prompt_is_not_saved() -> None:
-    app = OrbitApp(FakeSession())
+    session = FakeSession()
+    app = OrbitApp(session)
     async with app.run_test() as pilot:
         await open_task_list(pilot)
         await pilot.press("enter", "i", *"draft", "escape", "escape")
         assert not isinstance(app.screen, TaskEditorScreen)
-        assert rows(app) == ["+ new task"]
 
         await pilot.press("enter", "ctrl+s")
         assert isinstance(app.screen, TaskEditorScreen)
         await pilot.press("i", " ", "escape", "ctrl+s")
         assert isinstance(app.screen, TaskEditorScreen)
+        assert session.commands == []
 
 
 async def test_editor_picker_escape_keeps_value() -> None:
@@ -181,120 +249,40 @@ async def test_enter_on_existing_task_edits_it() -> None:
     app = OrbitApp(session)
     async with app.run_test() as pilot:
         await show_settings(session, pilot, Settings())
+        await feed(session, pilot, board("one", "two"))
         await open_task_list(pilot)
-        await add_task(pilot, "one")
-        await add_task(pilot, "two")
-        assert rows(app)[:2] == ["○ one\n  default · restricted", "○ two\n  default · restricted"]
-
-        await pilot.press("k", "k", "enter")
+        await pilot.press("j", "enter")
         assert editor(app).title_text == "Edit task"
-        assert editor_fields(app)[0] == "one"
+        assert editor_fields(app)[0] == "two"
         await pilot.press("i", "!", "escape", "j", "j", "enter", "k", "enter", "ctrl+s")
-        assert rows(app)[0] == "○ one!\n  default · off"
-        assert app.query_one(TaskList).highlighted == 0
+        edited = TaskSpec(prompt="two!", settings=Settings(tool_access="off"))
+        assert session.commands == [EditTask(task_id="2", task=edited)]
 
 
-async def run_two_tasks(session: FakeSession, pilot: Pilot[None]) -> None:
-    await show_settings(session, pilot, Settings())
-    await open_task_list(pilot)
-    await add_task(pilot, "one", "j", "enter", "j", "enter")
-    await add_task(pilot, "two")
-    await pilot.press("escape", "ctrl+r")
-
-
-async def test_ctrl_r_runs_tasks_and_shows_progress() -> None:
+async def test_ctrl_r_asks_the_backend_to_run_unless_busy() -> None:
     session = FakeSession()
     app = OrbitApp(session)
     async with app.run_test() as pilot:
-        await run_two_tasks(session, pilot)
-        assert session.commands == [
-            RunTasks(
-                tasks=(
-                    TaskSpec(prompt="one", settings=Settings(model="opus")),
-                    TaskSpec(prompt="two"),
-                )
-            )
-        ]
-        prompt = app.query_one(PromptInput)
-        assert prompt.disabled
-
-        await feed(session, pilot, TaskStarted(index=0), TurnStarted(turn_id="a"))
-        assert rows(app)[0].startswith("▶ one")
-        assert [str(e.render()) for e in app.query(Entry)] == ["Task 1: one"]
-
-        await feed(session, pilot, TurnFinished(turn_id="a", reason="completed"))
-        assert prompt.disabled  # still running the batch
-
-        await feed(
-            session,
-            pilot,
-            TaskFinished(index=0, reason="completed"),
-            TaskStarted(index=1),
-            TurnStarted(turn_id="b"),
-            TurnFinished(turn_id="b", reason="error"),
-            TaskFinished(index=1, reason="error"),
-        )
-        assert [r.split("\n")[0] for r in rows(app)] == ["✓ one", "✗ two", "+ new task"]
-        assert not prompt.disabled
-
-        # Running again skips the completed task.
         await pilot.press("ctrl+r")
-        assert session.commands[-1] == RunTasks(tasks=(TaskSpec(prompt="two"),))
-        await feed(session, pilot, TaskStarted(index=0))
-        assert rows(app)[1].startswith("▶ two")
+        assert session.commands == [RunTasks()]
 
-
-async def test_cancelled_batch_ends_and_leaves_rest_pending() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        await run_two_tasks(session, pilot)
-        await pilot.press("escape")
-        assert session.commands[-1] == CancelTurn()
-        await feed(
-            session,
-            pilot,
-            TaskStarted(index=0),
-            TurnStarted(turn_id="a"),
-            TurnFinished(turn_id="a", reason="cancelled"),
-            TaskFinished(index=0, reason="cancelled"),
-        )
-        assert [r.split("\n")[0] for r in rows(app)] == ["■ one", "○ two", "+ new task"]
-        assert not app.query_one(PromptInput).disabled
-
-
-async def test_ctrl_r_does_nothing_without_tasks_or_while_busy() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        await show_settings(session, pilot, Settings())
+        await feed(session, pilot, BusyChanged(busy=True))
         await pilot.press("ctrl+r")
-        assert session.commands == []
+        assert session.commands == [RunTasks()]
 
-        await open_task_list(pilot)
-        await add_task(pilot, "one")
-        await pilot.press("escape", "i", *"hi", "enter", "ctrl+r")
-        assert len(session.commands) == 1  # just the prompt; a turn is running
-
-        await feed(
-            session, pilot, TurnStarted(turn_id="t"), TurnFinished(turn_id="t", reason="completed")
-        )
-        await pilot.press("ctrl+r", "ctrl+r")
-        assert [type(c) for c in session.commands[1:]] == [RunTasks]
+        await feed(session, pilot, BusyChanged(busy=False))
+        await pilot.press("ctrl+r")
+        assert session.commands == [RunTasks(), RunTasks()]
 
 
-async def test_editing_a_task_resets_it_to_pending() -> None:
+async def test_started_task_is_announced_in_the_transcript() -> None:
     session = FakeSession()
     app = OrbitApp(session)
     async with app.run_test() as pilot:
-        await show_settings(session, pilot, Settings())
-        await open_task_list(pilot)
-        await add_task(pilot, "one")
-        await pilot.press("escape", "ctrl+r")
-        await feed(session, pilot, TaskStarted(index=0), TaskFinished(index=0, reason="completed"))
-        assert rows(app)[0].startswith("✓")
-        await pilot.press("enter", "k", "enter", "ctrl+s")
-        assert rows(app)[0].startswith("○")
+        await feed(session, pilot, board("one", "two"), TaskStarted(task_id="2"))
+        [entry] = app.query(Entry)
+        assert str(entry.render()) == "Task 2: two"
+        assert entry.has_class("user")
 
 
 async def test_side_windows_do_not_take_focus_on_click() -> None:

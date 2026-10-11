@@ -7,6 +7,7 @@ from textual.widgets import Footer, Input, OptionList
 
 from orbit.protocol import (
     AssistantMessage,
+    BusyChanged,
     CancelTurn,
     Command,
     ErrorOccurred,
@@ -43,20 +44,36 @@ async def test_submit_sends_command_and_renders_events() -> None:
     session = FakeSession()
     app = OrbitApp(session)
     async with app.run_test() as pilot:
+        prompt = app.query_one("#prompt", Input)
         await pilot.press("i", *"hi", "enter")
         assert session.commands == [SubmitPrompt(text="hi")]
+        # Busy from now, not from the backend's notice, so a second prompt can't race it.
+        assert prompt.disabled
 
-        await session.queue.put(TurnStarted(turn_id="t"))
+        for event in (
+            BusyChanged(busy=True),
+            TurnStarted(turn_id="t"),
+            AssistantMessage(turn_id="t", text="hello back"),
+            TurnFinished(turn_id="t", reason="completed"),
+        ):
+            await session.queue.put(event)
         await pilot.pause()
-        assert app.query_one("#prompt", Input).disabled
-
-        await session.queue.put(AssistantMessage(turn_id="t", text="hello back"))
-        await session.queue.put(TurnFinished(turn_id="t", reason="completed"))
-        await pilot.pause()
-
         texts = [str(entry.render()) for entry in app.query(Entry)]
         assert texts == ["hi", "hello back"]
-        assert not app.query_one("#prompt", Input).disabled
+        assert prompt.disabled
+
+        await session.queue.put(BusyChanged(busy=False))
+        await pilot.pause()
+        assert not prompt.disabled
+
+
+async def test_backend_busy_disables_the_prompt() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await session.queue.put(BusyChanged(busy=True))
+        await pilot.pause()
+        assert app.query_one(PromptInput).disabled
 
 
 async def test_escape_sends_cancel() -> None:
@@ -185,12 +202,12 @@ async def test_submit_returns_to_normal_mode_and_finished_turn_stays_there() -> 
         await pilot.press("i", *"hi", "enter")
         assert app.focused is None
 
-        await session.queue.put(TurnStarted(turn_id="t"))
+        await session.queue.put(BusyChanged(busy=True))
         await pilot.pause()
         await pilot.press("i")
         assert app.focused is None  # can't edit while a turn runs
 
-        await session.queue.put(TurnFinished(turn_id="t", reason="completed"))
+        await session.queue.put(BusyChanged(busy=False))
         await pilot.pause()
         assert app.focused is None
         await pilot.press("i")

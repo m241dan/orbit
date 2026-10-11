@@ -44,7 +44,8 @@ set in the task editor: `j`/`k` pick a field, `i` types in the prompt (`esc` or 
 context with each other or with the conversation. Their output appears in the conversation and
 each row shows its status: `○` pending, `▶` running, `✓` done, `✗` failed, `■` cancelled. A failed
 task doesn't stop the rest; `esc` cancels the running task and skips the remaining ones. Running
-again skips tasks that already completed, and editing a task makes it pending again.
+again skips tasks that already completed, and editing a task makes it pending again. Tasks added
+while a run is going join it; the running task can't be edited.
 
 ### Verification steps
 
