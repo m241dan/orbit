@@ -1,6 +1,5 @@
 """Textual frontend. Talks to the backend only through a protocol Session."""
 
-import json
 from typing import ClassVar, assert_never
 
 from textual import on, work
@@ -21,7 +20,7 @@ from orbit.protocol import (
     Session,
     Settings,
     SettingsChanged,
-    SkipReason,
+    StepState,
     SubmitPrompt,
     TasksChanged,
     TaskSpec,
@@ -38,14 +37,18 @@ from orbit.protocol import (
     VerificationStarted,
 )
 from orbit.tui.tasks import TaskEditorScreen, TaskList
-from orbit.tui.widgets import (
+from orbit.tui.view import (
     TOOL_ACCESS_DESCRIPTIONS,
     TOOL_ACCESS_OPTIONS,
-    PickerScreen,
-    PromptInput,
-    Transcript,
-    VerificationPanel,
+    EntryKind,
+    output_entry,
+    task_started_entry,
+    turn_end_entry,
+    verification_finished_entry,
+    verification_skipped_entry,
+    verification_started_entry,
 )
+from orbit.tui.widgets import PickerScreen, PromptInput, Transcript, VerificationPanel
 
 # Window reached from each window by h/j/k/l; missing means an edge.
 # Conversation over prompt on the left, task list over verification steps on the right.
@@ -55,27 +58,6 @@ NEIGHBORS: dict[str, dict[str, str]] = {
     "task-list": {"h": "transcript", "j": "verification-steps"},
     "verification-steps": {"h": "prompt", "k": "task-list"},
 }
-
-
-SKIP_REASONS: dict[SkipReason, str] = {
-    "tools_off": "tools were off",
-    "no_changes": "no files changed",
-}
-
-
-def output_entry(event: AssistantMessage | ToolCallStarted | ToolCallFinished) -> tuple[str, str]:
-    """A piece of a turn's output as transcript text and the kind of entry to show it as."""
-    match event:
-        case AssistantMessage(text=text):
-            return text, "assistant"
-        case ToolCallStarted(name=name, arguments=arguments):
-            return f"→ {name} {json.dumps(arguments)}", "tool"
-        case ToolCallFinished(output=output, is_error=True):
-            return output, "error"
-        case ToolCallFinished(output=output):
-            return output, "tool"
-        case _:
-            assert_never(event)
 
 
 # Not inheriting App's bindings drops its ctrl+q quit and ctrl+c "how to quit" hint.
@@ -108,6 +90,8 @@ class OrbitApp(App[None], inherit_bindings=False):
         self._session = session
         # Id of the window h/j/k/l last moved to.
         self._selected = "prompt"
+        # Whether a turn or task run is in progress, as last reported (or just requested).
+        self._busy = False
         # Last settings reported by the backend; None until the first report.
         self._settings: Settings | None = None
         self._model_choices: tuple[str, ...] = ()
@@ -142,7 +126,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         prompt = self.query_one(PromptInput)
         prompt.action_normal_mode()
         # Busy from now, not from TurnStarted, so ctrl+r can't race the turn.
-        prompt.disabled = True
+        self._set_busy(True)
         self._append(text, "user")
         await self._session.send(SubmitPrompt(text=text))
 
@@ -186,7 +170,7 @@ class OrbitApp(App[None], inherit_bindings=False):
 
     async def action_run_tasks(self) -> None:
         """Ask the backend to run the task list, unless something is already running."""
-        if not self.query_one(PromptInput).disabled:
+        if not self._busy:
             await self._session.send(RunTasks())
 
     def _select(self, window_id: str) -> None:
@@ -264,7 +248,7 @@ class OrbitApp(App[None], inherit_bindings=False):
             case SettingsChanged(settings=settings, model_choices=choices):
                 self._show_settings(settings, choices)
             case BusyChanged(busy=busy):
-                self.query_one(PromptInput).disabled = busy
+                self._set_busy(busy)
             case TasksChanged(tasks=tasks):
                 self.query_one(TaskList).show(tasks)
             case VerificationChanged(steps=steps):
@@ -302,11 +286,11 @@ class OrbitApp(App[None], inherit_bindings=False):
             case TaskStarted(task_id=task_id):
                 self._announce_task(task_id)
             case VerificationStarted(step=step):
-                self._append(f"🔍 Verifying: {self._step_name(step)}…", "verify")
+                self._append(*verification_started_entry(self._step(step)))
             case VerificationSkipped(reason=reason):
-                self._append(f"⏩ Verification skipped: {SKIP_REASONS[reason]}", "verify")
+                self._append(*verification_skipped_entry(reason))
             case VerificationFinished(step=step, passed=passed):
-                self._verification_finished(step, passed)
+                self._append(*verification_finished_entry(self._step(step), passed))
             case _:
                 assert_never(event)
 
@@ -316,24 +300,22 @@ class OrbitApp(App[None], inherit_bindings=False):
         self._settings, self._model_choices = settings, choices
         self.query_one(PromptInput).show_settings(settings)
 
+    def _set_busy(self, busy: bool) -> None:
+        self._busy = busy
+        self.query_one(PromptInput).disabled = busy
+
     def _turn_finished(self, reason: TurnEndReason) -> None:
-        if reason not in ("completed", "error"):
-            self._append(f"[turn ended: {reason}]", "tool")
+        entry = turn_end_entry(reason)
+        if entry is not None:
+            self._append(*entry)
 
     def _announce_task(self, task_id: str) -> None:
         task_list = self.query_one(TaskList)
         index = task_list.position(task_id)
-        prompt = task_list.tasks[index].task.prompt
-        self._append(f"Task {task_list.numbers[index]}: {prompt}", "user")
+        self._append(*task_started_entry(task_list.numbers[index], task_list.tasks[index]))
 
-    def _step_name(self, step: int) -> str:
-        return self.query_one(VerificationPanel).steps[step].name
+    def _step(self, step: int) -> StepState:
+        return self.query_one(VerificationPanel).steps[step]
 
-    def _verification_finished(self, step: int, passed: bool) -> None:
-        if passed:
-            self._append(f"✅ Verification passed: {self._step_name(step)}", "verify")
-        else:
-            self._append(f"❌ Verification failed: {self._step_name(step)}", "error")
-
-    def _append(self, text: str, kind: str) -> None:
+    def _append(self, text: str, kind: EntryKind) -> None:
         self.query_one(Transcript).add_entry(text, kind)

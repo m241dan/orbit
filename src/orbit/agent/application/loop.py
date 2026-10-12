@@ -2,8 +2,9 @@
 
 from collections.abc import AsyncIterator
 
-from orbit.agent.model import Message, ModelClient
-from orbit.agent.tools import ToolRegistry
+from orbit.agent.application.ports import ModelClient
+from orbit.agent.application.tools import ToolRegistry
+from orbit.agent.domain.conversation import Message
 from orbit.protocol import (
     AssistantMessage,
     Event,

@@ -86,3 +86,24 @@ name = "Backend has no UI dependencies"
 type = "forbidden"
 source_modules = ["orbit.agent"]
 forbidden_modules = ["textual", "rich", "typer"]
+
+# Inside the backend: external adapters over the application over the domain. A layer may
+# import the ones below it, never above.
+[[tool.importlinter.contracts]]
+name = "Backend layers: external > application > domain"
+type = "layers"
+containers = ["orbit.agent"]
+layers = ["external", "application", "domain"]
+
+[[tool.importlinter.contracts]]
+name = "Domain does no I/O"
+type = "forbidden"
+source_modules = ["orbit.agent.domain"]
+forbidden_modules = ["asyncio", "subprocess", "os", "pathlib", "json", "uuid", "time"]
+
+# The frontend's presentation rules are plain functions; the widgets are what touch Textual.
+[[tool.importlinter.contracts]]
+name = "TUI view is independent of Textual"
+type = "forbidden"
+source_modules = ["orbit.tui.view"]
+forbidden_modules = ["textual", "orbit.tui.app", "orbit.tui.tasks", "orbit.tui.widgets"]

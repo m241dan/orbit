@@ -1,60 +1,63 @@
-import asyncio
 import sys
 
-from orbit.agent.verify import (
-    DEFAULT_STEPS,
+from orbit.agent.domain.verification import (
     OUTPUT_LIMIT,
+    FixAttempts,
     VerificationStep,
     fix_prompt,
-    run_step,
+    may_change_files,
+    skip_reason,
 )
+from orbit.protocol import Settings, TaskSpec
 
 
 def python_step(code: str, name: str = "check") -> VerificationStep:
     return VerificationStep(name=name, command=(sys.executable, "-c", code))
 
 
-def test_default_steps_run_the_quick_checks_before_the_tests() -> None:
-    assert [(s.name, s.command) for s in DEFAULT_STEPS] == [
-        ("Ruff lint", ("uv", "run", "ruff", "check")),
-        ("Ruff format", ("uv", "run", "ruff", "format", "--check")),
-        ("Type check (mypy)", ("uv", "run", "mypy")),
-        ("Import contracts", ("uv", "run", "lint-imports")),
-        (
-            "Code quality (Lizard)",
-            ("uv", "run", "lizard", "src", "tests", "-w", "-C", "6", "-L", "100", "-a", "5"),
-        ),
-        ("Unit tests, 100% coverage", ("uv", "run", "pytest", "--cov", "--cov-fail-under=100")),
-    ]
+def task(tool_access: str = "restricted") -> TaskSpec:
+    return TaskSpec(prompt="go", settings=Settings(tool_access=tool_access))  # type: ignore[arg-type]
 
 
-async def test_step_passes_on_zero_exit_and_captures_both_streams() -> None:
-    step = python_step("import sys; print('out'); print('err', file=sys.stderr)")
-    passed, output = await run_step(step)
-    assert passed
-    assert sorted(output.split()) == ["err", "out"]
+def test_only_tasks_with_tools_can_change_files() -> None:
+    assert may_change_files(task("restricted"))
+    assert may_change_files(task("full"))
+    assert not may_change_files(task("off"))
 
 
-async def test_step_fails_on_nonzero_exit() -> None:
-    passed, output = await run_step(python_step("import sys; print('3 failed'); sys.exit(1)"))
-    assert not passed
-    assert output.strip() == "3 failed"
+def test_tasks_with_tools_off_skip_verification() -> None:
+    assert skip_reason(task("off"), None, None) == "tools_off"
 
 
-async def test_missing_command_fails_the_step() -> None:
-    step = VerificationStep(name="check", command=("orbit-no-such-command",))
-    passed, output = await run_step(step)
-    assert not passed
-    assert output == "Could not run 'orbit-no-such-command': command not found."
+def test_tasks_that_leave_the_tree_alone_skip_verification() -> None:
+    assert skip_reason(task(), "tree", "tree") == "no_changes"
 
 
-async def test_cancelling_a_step_kills_its_process() -> None:
-    marker = "import time; time.sleep(60)"
-    task = asyncio.create_task(run_step(python_step(marker)))
-    await asyncio.sleep(0.2)
-    task.cancel()
-    await asyncio.wait_for(asyncio.gather(task, return_exceptions=True), timeout=5)
-    assert task.cancelled()
+def test_tasks_that_change_the_tree_are_verified() -> None:
+    assert skip_reason(task(), "before", "after") is None
+
+
+def test_tasks_are_verified_when_the_tree_cannot_be_read() -> None:
+    assert skip_reason(task(), None, None) is None
+
+
+def test_fix_attempts_follow_the_chain_per_step() -> None:
+    attempts = FixAttempts()
+    assert not attempts.exhausted("1", "lint", 1)
+    attempts.record("2", "1", "lint")
+    # The fix carries its chain's count; the task the user queued keeps none.
+    assert attempts.exhausted("2", "lint", 1)
+    assert not attempts.exhausted("1", "lint", 1)
+    # Other steps have their own counts.
+    assert not attempts.exhausted("2", "types", 1)
+    attempts.record("3", "2", "types")
+    assert attempts.exhausted("3", "lint", 1)
+    assert attempts.exhausted("3", "types", 1)
+    assert not attempts.exhausted("3", "lint", 2)
+
+
+def test_no_fixes_are_allowed_with_a_limit_of_zero() -> None:
+    assert FixAttempts().exhausted("1", "lint", 0)
 
 
 def test_fix_prompt_names_the_step_command_and_output() -> None:

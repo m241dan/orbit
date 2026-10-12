@@ -4,10 +4,15 @@ import pytest
 from typer.testing import CliRunner
 
 from orbit import __version__
-from orbit.agent import AgentSession, ClaudeCliRunner
-from orbit.agent.claude_cli import MODEL_ALIASES
-from orbit.agent.verify import DEFAULT_STEPS
-from orbit.agent.workspace import workspace_state
+from orbit.agent import (
+    DEFAULT_STEPS,
+    MODEL_ALIASES,
+    AgentSession,
+    ClaudeCliRunner,
+    Verification,
+    run_step,
+    workspace_state,
+)
 from orbit.cli import app
 from orbit.protocol import Settings
 
@@ -79,9 +84,9 @@ def test_chat_verifies_tasks_by_default(launched: list[AgentSession]) -> None:
 
     assert result.exit_code == 0
     [session] = launched
-    assert session.verification_steps == DEFAULT_STEPS
-    # Tasks that change no files in the working tree skip verification.
-    assert session.workspace is workspace_state
+    # The default checks run as processes; tasks that change no files in the working tree
+    # skip them.
+    assert session.verification == Verification(DEFAULT_STEPS, run_step, workspace_state)
 
 
 def test_chat_can_turn_verification_off(launched: list[AgentSession]) -> None:
@@ -89,4 +94,4 @@ def test_chat_can_turn_verification_off(launched: list[AgentSession]) -> None:
 
     assert result.exit_code == 0
     [session] = launched
-    assert session.verification_steps == ()
+    assert session.verification is None

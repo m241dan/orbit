@@ -55,6 +55,12 @@ class TaskBoard:
         index = self.position(task_id)
         self._tasks[index] = self._tasks[index].model_copy(update={"status": status})
 
+    def finish(self, task_id: str, status: TaskStatus) -> None:
+        """Record how task ``task_id`` ended; a completed fix also completes what it fixed."""
+        self.set_status(task_id, status)
+        if status == "completed":
+            self.mark_fixed(task_id)
+
     def mark_fixed(self, task_id: str) -> None:
         """Task ``task_id`` passed verification, so the tasks it was fixing are completed too.
 

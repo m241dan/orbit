@@ -4,10 +4,19 @@ from collections.abc import AsyncIterator, Callable, Sequence
 from pathlib import Path
 from typing import Any
 
-from orbit.agent import AgentSession, EchoModel, ModelLoopRunner, ToolRegistry
-from orbit.agent.loop import run_turn
-from orbit.agent.model import Message, ModelResponse, ToolCall, ToolSpec
-from orbit.agent.verify import VerificationStep
+from orbit.agent import (
+    AgentSession,
+    EchoModel,
+    ModelLoopRunner,
+    ToolRegistry,
+    Verification,
+    VerificationStep,
+    Workspace,
+    run_step,
+)
+from orbit.agent.application.loop import run_turn
+from orbit.agent.domain.conversation import Message, ModelResponse, ToolCall, ToolSpec
+from orbit.agent.domain.verification import MAX_FIX_ATTEMPTS
 from orbit.protocol import (
     AddTask,
     AssistantMessage,
@@ -501,6 +510,15 @@ async def test_loop_runner_new_context_has_empty_history_and_same_model() -> Non
     assert model.tools_seen == [["upper"], ["upper"]]
 
 
+def verified(
+    steps: Sequence[VerificationStep],
+    max_fix_attempts: int = MAX_FIX_ATTEMPTS,
+    workspace: Workspace | None = None,
+) -> Verification:
+    """Verification that runs ``steps`` as real processes."""
+    return Verification(tuple(steps), run_step, workspace, max_fix_attempts)
+
+
 def file_exists_step(path: Path, name: str = "check") -> VerificationStep:
     """Passes once ``path`` exists."""
     code = f"import os, sys; sys.exit(0 if os.path.exists({str(path)!r}) else 1)"
@@ -532,17 +550,26 @@ class FixingRunner(RecordingRunner):
 
 
 async def test_session_announces_verification_steps() -> None:
-    session = AgentSession(RecordingRunner(), verification_steps=(FAILING_STEP,))
-    assert session.verification_steps == (FAILING_STEP,)
+    session = AgentSession(RecordingRunner(), verification=verified((FAILING_STEP,)))
+    assert session.verification == verified((FAILING_STEP,))
     stream = session.events()
     assert isinstance(await anext(stream), SettingsChanged)
     assert await anext(stream) == VerificationChanged(steps=(StepState(name="always fails"),))
 
 
+async def test_verification_without_steps_counts_as_none() -> None:
+    session = AgentSession(RecordingRunner(), verification=verified(()))
+    assert session.verification is None
+    # No steps to announce.
+    assert isinstance(await anext(session.events()), SettingsChanged)
+    assert session._events.empty()
+
+
 async def test_passing_verification_marks_the_task_completed(tmp_path: Path) -> None:
     (tmp_path / "ok").touch()
     session = AgentSession(
-        RecordingRunner(), verification_steps=(file_exists_step(tmp_path / "ok"),)
+        RecordingRunner(),
+        verification=verified((file_exists_step(tmp_path / "ok"),)),
     )
     [one] = await add_tasks(session, TaskSpec(prompt="one"))
     await session.send(RunTasks())
@@ -592,7 +619,7 @@ async def run_with_a_fix(tmp_path: Path) -> tuple[FixingRunner, list[str], list[
     """
     fixed = tmp_path / "fixed"
     runner = FixingRunner(fixed)
-    session = AgentSession(runner, verification_steps=(file_exists_step(fixed),))
+    session = AgentSession(runner, verification=verified((file_exists_step(fixed),)))
     ids = await add_tasks(
         session, TaskSpec(prompt="one", settings=FIX_SETTINGS), TaskSpec(prompt="two")
     )
@@ -632,8 +659,7 @@ async def test_a_passing_fix_completes_the_task_it_fixed(tmp_path: Path) -> None
 async def test_verification_stops_at_the_first_failing_step(tmp_path: Path) -> None:
     session = AgentSession(
         RecordingRunner(),
-        verification_steps=(FAILING_STEP, file_exists_step(tmp_path)),
-        max_fix_attempts=0,
+        verification=verified((FAILING_STEP, file_exists_step(tmp_path)), max_fix_attempts=0),
     )
     await add_tasks(session, TaskSpec(prompt="one"))
     await session.send(RunTasks())
@@ -683,8 +709,7 @@ async def test_fix_attempts_are_counted_per_step(tmp_path: Path) -> None:
     runner = StepFixingRunner(tmp_path)
     session = AgentSession(
         runner,
-        verification_steps=file_steps(tmp_path, "lint", "types", "tests"),
-        max_fix_attempts=1,
+        verification=verified(file_steps(tmp_path, "lint", "types", "tests"), max_fix_attempts=1),
     )
     _, events = await run_one(session)
 
@@ -699,7 +724,8 @@ async def test_per_step_counts_carry_on_when_fixes_undo_each_other(tmp_path: Pat
     # Fixing "types" deletes lint's file, so the chain bounces back to a step it fixed.
     runner = StepFixingRunner(tmp_path, breaks={"types": "lint"})
     session = AgentSession(
-        runner, verification_steps=file_steps(tmp_path, "lint", "types"), max_fix_attempts=1
+        runner,
+        verification=verified(file_steps(tmp_path, "lint", "types"), max_fix_attempts=1),
     )
     _, events = await run_one(session)
 
@@ -712,7 +738,7 @@ async def test_per_step_counts_carry_on_when_fixes_undo_each_other(tmp_path: Pat
 
 async def test_fix_tasks_stop_after_max_attempts() -> None:
     runner = RecordingRunner()
-    session = AgentSession(runner, verification_steps=(FAILING_STEP,), max_fix_attempts=2)
+    session = AgentSession(runner, verification=verified((FAILING_STEP,), max_fix_attempts=2))
     await add_tasks(session, TaskSpec(prompt="one"), TaskSpec(prompt="two"))
     await session.send(RunTasks())
     events = await collect_run(session)
@@ -737,7 +763,7 @@ async def test_fix_tasks_stop_after_max_attempts() -> None:
 
 
 async def test_tasks_that_do_not_complete_are_not_verified() -> None:
-    session = AgentSession(ModelLoopRunner(FailingModel()), verification_steps=(FAILING_STEP,))
+    session = AgentSession(ModelLoopRunner(FailingModel()), verification=verified((FAILING_STEP,)))
     await add_tasks(session, TaskSpec(prompt="one"))
     await session.send(RunTasks())
     events = await collect_run(session)
@@ -751,7 +777,7 @@ async def test_cancel_during_verification_cancels_the_task_and_run() -> None:
     slow = VerificationStep(
         name="slow", command=(sys.executable, "-c", "import time; time.sleep(60)")
     )
-    session = AgentSession(RecordingRunner(), verification_steps=(slow,))
+    session = AgentSession(RecordingRunner(), verification=verified((slow,)))
     await add_tasks(session, TaskSpec(prompt="one"), TaskSpec(prompt="two"))
     await session.send(RunTasks())
     async for event in session.events():
@@ -791,9 +817,11 @@ async def run_one(
 async def test_tasks_with_tools_off_skip_verification() -> None:
     workspace = FakeWorkspace()
     session = AgentSession(
-        RecordingRunner(), verification_steps=(FAILING_STEP,), workspace=workspace
+        RecordingRunner(),
+        verification=verified((FAILING_STEP,), workspace=workspace),
     )
-    assert session.workspace is workspace
+    assert session.verification is not None
+    assert session.verification.workspace is workspace
     one, events = await run_one(session, Settings(tool_access="off"))
 
     assert VerificationSkipped(task_id=one, reason="tools_off") in events
@@ -808,7 +836,8 @@ async def test_tasks_with_tools_off_skip_verification() -> None:
 async def test_tasks_that_change_no_files_skip_verification() -> None:
     workspace = FakeWorkspace("tree", "tree")
     session = AgentSession(
-        RecordingRunner(), verification_steps=(FAILING_STEP,), workspace=workspace
+        RecordingRunner(),
+        verification=verified((FAILING_STEP,), workspace=workspace),
     )
     one, events = await run_one(session)
 
@@ -822,9 +851,9 @@ async def test_tasks_that_change_no_files_skip_verification() -> None:
 async def test_tasks_that_change_files_are_verified() -> None:
     session = AgentSession(
         RecordingRunner(),
-        verification_steps=(FAILING_STEP,),
-        max_fix_attempts=0,
-        workspace=FakeWorkspace("before", "after"),
+        verification=verified(
+            (FAILING_STEP,), max_fix_attempts=0, workspace=FakeWorkspace("before", "after")
+        ),
     )
     _, events = await run_one(session)
     assert not any(isinstance(e, VerificationSkipped) for e in events)
@@ -834,16 +863,16 @@ async def test_tasks_that_change_files_are_verified() -> None:
 async def test_tasks_are_verified_when_the_tree_cannot_be_read() -> None:
     session = AgentSession(
         RecordingRunner(),
-        verification_steps=(FAILING_STEP,),
-        max_fix_attempts=0,
-        workspace=FakeWorkspace(None, None),
+        verification=verified(
+            (FAILING_STEP,), max_fix_attempts=0, workspace=FakeWorkspace(None, None)
+        ),
     )
     _, events = await run_one(session)
     assert statuses(events) == ["unverified"]
 
 
 async def test_conversation_turns_are_not_verified() -> None:
-    session = AgentSession(ModelLoopRunner(EchoModel()), verification_steps=(FAILING_STEP,))
+    session = AgentSession(ModelLoopRunner(EchoModel()), verification=verified((FAILING_STEP,)))
     await session.send(SubmitPrompt(text="hello"))
     events = await collect_run(session)
 

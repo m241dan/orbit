@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 
 from orbit.agent import AgentSession, ClaudeCliRunner
-from orbit.agent.claude_cli import translate
+from orbit.agent.external.claude_cli import translate
 from orbit.protocol import (
     AssistantMessage,
     BusyChanged,

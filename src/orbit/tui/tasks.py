@@ -1,11 +1,9 @@
 """The task list window and the modal that edits one task."""
 
 import time
-from collections import Counter
 from collections.abc import Callable, Sequence
 from typing import ClassVar
 
-from rich.cells import cell_len
 from rich.text import Text
 from textual import events, on
 from textual.app import ComposeResult
@@ -14,27 +12,18 @@ from textual.containers import Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Input, OptionList, Static
 
-from orbit.protocol import Settings, TaskSpec, TaskState, TaskStatus
-from orbit.tui.widgets import (
+from orbit.protocol import Settings, TaskSpec, TaskState
+from orbit.tui.view import (
     SPINNER_FPS,
     TOOL_ACCESS_DESCRIPTIONS,
     TOOL_ACCESS_OPTIONS,
-    PickerScreen,
-    PromptInput,
+    model_label,
     spinner_frame,
+    task_label,
+    task_numbers,
 )
+from orbit.tui.widgets import PickerScreen, PromptInput
 
-# Emoji drawn two cells wide on their own (no variation selector), so rows line up.
-# Running tasks show the spinner instead.
-STATUS_ICONS: dict[TaskStatus, str] = {
-    "pending": "⏳",
-    "verifying": "🔍",
-    "completed": "✅",
-    "unverified": "❗",
-    "cancelled": "🛑",
-    "max_steps": "⌛",
-    "error": "❌",
-}
 NEW_TASK_LABEL = "+ new task"
 
 
@@ -121,46 +110,6 @@ class TaskList(OptionList):
         self.highlighted = highlight
 
 
-def task_numbers(tasks: Sequence[TaskState]) -> list[str]:
-    """Outline numbers: "1", "2", … for tasks, and "2.1", "2.2", … for the fixes under task 2.
-
-    Every fix in a chain (a fix of a fix, too) is numbered under the task that started it.
-    """
-    numbers: list[str] = []
-    top_number: dict[str, str] = {}  # top-level task id -> its number
-    top_of: dict[str, str] = {}  # task id -> id of the top-level task it belongs to
-    fixes_so_far: Counter[str] = Counter()
-    for state in tasks:
-        if state.fixes is None:
-            top = state.id
-            top_number[top] = str(len(top_number) + 1)
-            numbers.append(top_number[top])
-        else:
-            # A fix comes after the task it fixes, so that one is already placed.
-            top = top_of[state.fixes]
-            fixes_so_far[top] += 1
-            numbers.append(f"{top_number[top]}.{fixes_so_far[top]}")
-        top_of[state.id] = top
-    return numbers
-
-
-def task_label(state: TaskState, number: str, frame: str) -> Text:
-    """A row: number, status and title, with the settings lined up under the title.
-
-    Fix tasks are indented under the task they belong to. A running task shows the
-    spinner ``frame``.
-    """
-    settings = state.task.settings
-    head = f"{number}. " if state.fixes is None else f"   {number} "
-    icon = frame if state.status == "running" else STATUS_ICONS[state.status]
-    # Long prompts (like fix tasks) are titled by their first line.
-    title = state.task.prompt.split("\n", 1)[0]
-    label = Text(f"{head}{icon} {title}\n")
-    indent = " " * (len(head) + cell_len(icon) + 1)
-    label.append(f"{indent}{settings.model or 'default'} · {settings.tool_access}", style="dim")
-    return label
-
-
 class FieldBox(Static):
     """A labelled, selectable value in the task editor."""
 
@@ -221,7 +170,7 @@ class TaskEditorScreen(ModalScreen[TaskSpec | None]):
             box.border_title = self.title_text
             box.border_subtitle = "j/k move · i type · enter choose · ctrl+s save · esc cancel"
             yield PromptInput(value=self._prompt, placeholder="Press i to type", id="task-prompt")
-            yield FieldBox("Model", self._settings.model or "default", id="task-model")
+            yield FieldBox("Model", model_label(self._settings), id="task-model")
             yield FieldBox("Tools", self._settings.tool_access, id="task-tools")
 
     def on_mount(self) -> None:
@@ -281,5 +230,5 @@ class TaskEditorScreen(ModalScreen[TaskSpec | None]):
 
     def _update(self, **changes: object) -> None:
         self._settings = self._settings.model_copy(update=changes)
-        self.query_one("#task-model", FieldBox).update(self._settings.model or "default")
+        self.query_one("#task-model", FieldBox).update(model_label(self._settings))
         self.query_one("#task-tools", FieldBox).update(self._settings.tool_access)

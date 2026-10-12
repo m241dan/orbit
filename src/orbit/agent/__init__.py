@@ -1,23 +1,37 @@
-"""Backend: the agentic loop. Must not depend on any frontend."""
+"""Backend: the agentic loop. Must not depend on any frontend.
 
-from orbit.agent.claude_cli import ClaudeCliRunner
-from orbit.agent.loop import ModelLoopRunner
-from orbit.agent.model import EchoModel, ModelClient
-from orbit.agent.session import AgentSession, TurnRunner
-from orbit.agent.tools import Tool, ToolRegistry
-from orbit.agent.verify import DEFAULT_STEPS, VerificationStep
-from orbit.agent.workspace import workspace_state
+Layered, outermost first; each layer may import only the ones below it:
+
+- ``external``: adapters that reach outside the backend (the Claude CLI, processes, git).
+- ``application``: the session, which handles commands and drives the ports.
+- ``domain``: the rules the application decides by. Pure.
+"""
+
+from orbit.agent.application.loop import ModelLoopRunner
+from orbit.agent.application.ports import ModelClient, StepRunner, Tool, TurnRunner, Workspace
+from orbit.agent.application.session import AgentSession, Verification
+from orbit.agent.application.tools import ToolRegistry
+from orbit.agent.domain.verification import VerificationStep
+from orbit.agent.external.checks import DEFAULT_STEPS, run_step
+from orbit.agent.external.claude_cli import MODEL_ALIASES, ClaudeCliRunner
+from orbit.agent.external.echo import EchoModel
+from orbit.agent.external.workspace import workspace_state
 
 __all__ = [
     "DEFAULT_STEPS",
+    "MODEL_ALIASES",
     "AgentSession",
     "ClaudeCliRunner",
     "EchoModel",
     "ModelClient",
     "ModelLoopRunner",
+    "StepRunner",
     "Tool",
     "ToolRegistry",
     "TurnRunner",
+    "Verification",
     "VerificationStep",
+    "Workspace",
+    "run_step",
     "workspace_state",
 ]

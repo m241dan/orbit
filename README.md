@@ -63,7 +63,7 @@ successfully:
 4. Import contracts: `uv run lint-imports`
 5. Code quality (Lizard): `uv run lizard src tests -w -C 6 -L 100 -a 5`. Every function, tests
    included, must have a cyclomatic complexity of at most 6, at most 100 lines and at most 5
-   parameters (`LIZARD_MAX_*` in `src/orbit/agent/verify.py`).
+   parameters (`LIZARD_MAX_*` in `src/orbit/agent/external/checks.py`).
 6. Unit tests, 100% coverage: `uv run pytest --cov --cov-fail-under=100`
 
 When a step fails, the task is marked ❗ and a fix task is inserted right after it, indented and
@@ -116,11 +116,20 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
 
 - `orbit.protocol`: pydantic models (`Command`s in, `Event`s out) and the `Session`
   interface. It imports no other orbit package.
-- `orbit.agent`: backend. `AgentSession` implements `Session` and delegates each turn to a
-  `TurnRunner`. `ClaudeCliRunner` (used by `orbit chat`) streams `claude -p --output-format
-  stream-json` and resumes the same Claude session across turns; `ModelLoopRunner` is an in-house
-  model/tool loop for direct API use. Has no UI imports.
+- `orbit.agent`: backend, with no UI imports. Three layers, each importing only the ones below:
+  - `external`: adapters that reach outside the backend. `ClaudeCliRunner` streams `claude -p
+    --output-format stream-json` and resumes the same Claude session across turns; `checks` runs
+    the verification steps as processes (`DEFAULT_STEPS`, `run_step`); `workspace` fingerprints
+    the git working tree; `EchoModel` is a stand-in model.
+  - `application`: `AgentSession` implements `Session`: it takes commands, asks the domain what
+    follows, drives the ports and publishes events. `ports` defines what it needs from outside
+    (`TurnRunner`, `StepRunner`, `Workspace`, `ModelClient`, `Tool`); `ModelLoopRunner` is an
+    in-house model/tool loop for direct API use.
+  - `domain`: the rules, with no I/O: the `TaskBoard` (task order, statuses, fix chains), when a
+    task needs verifying, how many fixes to try per step, and the fix prompt.
 - `orbit.tui`: frontend. Sends commands and renders events. Imports only `orbit.protocol`.
-- `orbit.cli`: the only place the two sides are wired together.
+  `view` turns state and events into text and doesn't import Textual; the widgets lay it out.
+- `orbit.cli`: the composition root, and the only place the two sides are wired together: it
+  plugs the external adapters into `AgentSession` and hands that to the TUI.
 
 These rules are enforced by `lint-imports` (see `[tool.importlinter]` in `pyproject.toml`).

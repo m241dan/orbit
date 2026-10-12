@@ -5,8 +5,15 @@ from typing import Annotated
 import typer
 
 from orbit import __version__
-from orbit.agent import DEFAULT_STEPS, AgentSession, ClaudeCliRunner, workspace_state
-from orbit.agent.claude_cli import MODEL_ALIASES
+from orbit.agent import (
+    DEFAULT_STEPS,
+    MODEL_ALIASES,
+    AgentSession,
+    ClaudeCliRunner,
+    Verification,
+    run_step,
+    workspace_state,
+)
 from orbit.protocol import Settings, ToolAccess
 from orbit.tui import OrbitApp
 
@@ -42,13 +49,14 @@ def chat(
     task list edits queued tasks and ctrl+r runs them, each in a fresh session.
     Verification steps run after each task; a failing one queues a fix task.
     """
-    # The only place the backend and frontend meet.
+    # The only place the backend and frontend meet, and where the backend's external
+    # adapters are plugged into its ports.
+    verification = Verification(DEFAULT_STEPS, run_step, workspace_state) if verify else None
     session = AgentSession(
         ClaudeCliRunner(),
         Settings(model=model, tool_access=tools),
         model_choices=MODEL_ALIASES,
-        verification_steps=DEFAULT_STEPS if verify else (),
-        workspace=workspace_state,
+        verification=verification,
     )
     OrbitApp(session).run()
 

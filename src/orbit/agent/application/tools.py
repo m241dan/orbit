@@ -1,16 +1,10 @@
-"""Tools the agent can call."""
+"""The tools the agent can call, looked up by name."""
 
 from collections.abc import Iterable
-from typing import Any, Protocol
+from typing import Any
 
-from orbit.agent.model import ToolSpec
-
-
-class Tool(Protocol):
-    @property
-    def spec(self) -> ToolSpec: ...
-
-    async def run(self, arguments: dict[str, Any]) -> str: ...
+from orbit.agent.application.ports import Tool
+from orbit.agent.domain.conversation import ToolSpec
 
 
 class ToolRegistry:

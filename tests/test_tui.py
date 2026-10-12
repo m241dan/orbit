@@ -22,13 +22,13 @@ from orbit.protocol import (
     UpdateSettings,
 )
 from orbit.tui import OrbitApp
+from orbit.tui.view import spinner_frame
 from orbit.tui.widgets import (
     Entry,
     PickerScreen,
     PromptInput,
     SidePanel,
     Transcript,
-    spinner_frame,
 )
 
 

@@ -2,7 +2,7 @@
 
 import time
 from collections.abc import Callable, Sequence
-from typing import Any, ClassVar, get_args
+from typing import Any, ClassVar
 
 from rich.text import Text
 from textual import on
@@ -12,19 +12,8 @@ from textual.containers import VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import Input, OptionList, Static
 
-from orbit.protocol import Settings, StepState, StepStatus, ToolAccess
-
-TOOL_ACCESS_OPTIONS: tuple[ToolAccess, ...] = get_args(ToolAccess)
-TOOL_ACCESS_LABELS: dict[ToolAccess, str] = {
-    "off": "off",
-    "restricted": "restricted",
-    "full": "full (auto-approved)",
-}
-TOOL_ACCESS_DESCRIPTIONS: dict[ToolAccess, str] = {
-    "off": "off: no tools",
-    "restricted": "restricted: read-only; anything needing approval is refused",
-    "full": "full: auto-approve everything",
-}
+from orbit.protocol import Settings, StepState
+from orbit.tui.view import SPINNER_FPS, EntryKind, settings_summary, spinner_frame, step_lines
 
 
 class Entry(Static):
@@ -38,7 +27,7 @@ class Entry(Static):
     Entry.error { color: $text-error; }
     """
 
-    def __init__(self, text: str, kind: str) -> None:
+    def __init__(self, text: str, kind: EntryKind) -> None:
         super().__init__(Text(text), classes=kind)
 
 
@@ -59,7 +48,7 @@ class Transcript(VerticalScroll):
     def on_mount(self) -> None:
         self.border_title = "Conversation"
 
-    def add_entry(self, text: str, kind: str) -> None:
+    def add_entry(self, text: str, kind: EntryKind) -> None:
         self.mount(Entry(text, kind))
         self.scroll_end(animate=False)
 
@@ -80,26 +69,6 @@ class SidePanel(VerticalScroll):
     def __init__(self, title: str, *, id: str) -> None:
         super().__init__(id=id)
         self.border_title = title
-
-
-# The arc spinner beside work in progress, and how fast it turns.
-SPINNER_FRAMES = "◜◠◝◞◡◟"
-SPINNER_FPS = 8
-
-
-def spinner_frame(now: float) -> str:
-    """The spinner frame at ``now`` seconds, padded to two columns like the emoji beside it."""
-    return SPINNER_FRAMES[int(now * SPINNER_FPS) % len(SPINNER_FRAMES)] + " "
-
-
-# A running step shows the spinner.
-STEP_ICONS: dict[StepStatus, str] = {
-    "pending": "⏳",
-    "passed": "✅",
-    "failed": "❌",
-    "cancelled": "🛑",
-    "skipped": "⏩",
-}
 
 
 class VerificationPanel(SidePanel):
@@ -133,12 +102,7 @@ class VerificationPanel(SidePanel):
 
     def tick(self) -> None:
         now = self.clock()
-        lines = [
-            f"{spinner_frame(now) if s.status == 'running' else STEP_ICONS[s.status]} {s.name}"
-            for s in self.steps
-        ]
-        if self._running_step is not None:
-            lines[self._running_step] += f" · {int(now - self._since)}s"
+        lines = step_lines(self.steps, spinner_frame(now), int(now - self._since))
         self.query_one(Static).update(Text("\n".join(lines)))
 
 
@@ -180,9 +144,7 @@ class PromptInput(Input):
         self.can_focus = False
 
     def show_settings(self, settings: Settings) -> None:
-        model = settings.model or "default"
-        tools = TOOL_ACCESS_LABELS[settings.tool_access]
-        self.border_subtitle = f"model: {model} · tools: {tools}"
+        self.border_subtitle = settings_summary(settings)
 
 
 class PickerScreen(ModalScreen[int | None]):

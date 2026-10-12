@@ -1,6 +1,6 @@
 import pytest
 
-from orbit.agent.board import TaskBoard
+from orbit.agent.domain.board import TaskBoard
 from orbit.protocol import Settings, StepState, TaskSpec, TaskState
 
 ONE = TaskSpec(prompt="one")
@@ -109,6 +109,17 @@ def test_marking_fixed_leaves_tasks_that_changed_since_alone() -> None:
     # A task nobody queued a fix for has nothing to mark.
     board.mark_fixed(first)
     assert board.get(first).status == "pending"
+
+
+def test_finishing_a_fix_completes_what_it_fixed_but_other_endings_do_not() -> None:
+    board = TaskBoard()
+    first = board.add(ONE)
+    board.finish(first, "unverified")
+    fix = board.add(FIX, fixes=first)
+    board.finish(fix, "error")
+    assert [t.status for t in board.tasks] == ["unverified", "error"]
+    board.finish(fix, "completed")
+    assert [t.status for t in board.tasks] == ["completed", "completed"]
 
 
 def test_step_statuses_follow_a_verification_and_reset() -> None:

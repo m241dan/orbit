@@ -1,17 +1,8 @@
-"""Verification steps: checks run after each task, and the prompt that asks to fix a failure."""
+"""Verification steps as processes: the checks orbit runs by default, and how to run one."""
 
 import asyncio
-import shlex
-from dataclasses import dataclass
 
-
-@dataclass(frozen=True)
-class VerificationStep:
-    """A command run in the working directory; the step passes when it exits with status 0."""
-
-    name: str
-    command: tuple[str, ...]
-
+from orbit.agent.domain.verification import VerificationStep
 
 # Lizard's limits: cyclomatic complexity, lines per function and parameters per function.
 LIZARD_MAX_CCN = 6
@@ -46,10 +37,6 @@ DEFAULT_STEPS = (
         command=("uv", "run", "pytest", "--cov", "--cov-fail-under=100"),
     ),
 )
-# Fix tasks one task's chain of fixes may queue for each step before giving up on it.
-MAX_FIX_ATTEMPTS = 3
-# Characters of step output quoted in a fix prompt; the end (summary, coverage) matters most.
-OUTPUT_LIMIT = 8000
 
 
 async def run_step(step: VerificationStep) -> tuple[bool, str]:
@@ -70,17 +57,3 @@ async def run_step(step: VerificationStep) -> tuple[bool, str]:
             process.kill()
             await process.wait()
     return process.returncode == 0, output.decode(errors="replace")
-
-
-def fix_prompt(step: VerificationStep, output: str) -> str:
-    """A task prompt asking to fix why ``step`` failed. Its first line works as a title."""
-    output = output.strip()
-    if len(output) > OUTPUT_LIMIT:
-        output = "…" + output[-OUTPUT_LIMIT:]
-    return (
-        f"Fix the failed verification step: {step.name}\n\n"
-        f"This command must exit successfully:\n\n    {shlex.join(step.command)}\n\n"
-        f"It failed. The end of its output:\n\n{output}\n\n"
-        "Find and fix the cause so the command passes. Do not weaken the check: don't"
-        " lower thresholds, skip or delete tests, or exclude code from coverage."
-    )

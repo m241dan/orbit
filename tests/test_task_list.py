@@ -14,7 +14,8 @@ from orbit.protocol import (
     TaskStatus,
 )
 from orbit.tui import OrbitApp
-from orbit.tui.tasks import TaskEditorScreen, TaskList, task_label, task_numbers
+from orbit.tui.tasks import TaskEditorScreen, TaskList
+from orbit.tui.view import task_label, task_numbers
 from orbit.tui.widgets import Entry, PickerScreen, PromptInput
 from tests.test_tui import FakeSession, picker, selected, show_settings
 

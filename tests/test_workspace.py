@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from orbit.agent.workspace import workspace_state
+from orbit.agent.external.workspace import workspace_state
 
 
 @pytest.fixture
