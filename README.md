@@ -61,9 +61,9 @@ successfully:
 2. Ruff format: `uv run ruff format --check`
 3. Type check (mypy): `uv run mypy`
 4. Import contracts: `uv run lint-imports`
-5. Code quality (Lizard): `uv run lizard src -w` with limits on cyclomatic complexity, function
-   length and parameter count. They're set very high for now (`LIZARD_MAX_*` in
-   `src/orbit/agent/verify.py`), so it reports without failing; lower them to enforce them.
+5. Code quality (Lizard): `uv run lizard src tests -w -C 6 -L 100 -a 5`. Every function, tests
+   included, must have a cyclomatic complexity of at most 6, at most 100 lines and at most 5
+   parameters (`LIZARD_MAX_*` in `src/orbit/agent/verify.py`).
 6. Unit tests, 100% coverage: `uv run pytest --cov --cov-fail-under=100`
 
 When a step fails, the task is marked ❗ and a fix task is inserted right after it, indented and
@@ -104,7 +104,7 @@ uv run ruff check .     # lint
 uv run ruff format .    # format
 uv run mypy             # type-check
 uv run lint-imports     # enforce frontend/backend separation
-uv run lizard src       # code quality: complexity and size per function
+uv run lizard src tests -w -C 6 -L 100 -a 5   # code quality: complexity and size per function
 ```
 
 ## Architecture

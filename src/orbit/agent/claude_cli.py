@@ -96,6 +96,19 @@ def _result_events(turn_id: str, message: dict[str, Any]) -> list[Event]:
     return [TurnFinished(turn_id=turn_id, reason="completed")]
 
 
+def _pipes(
+    process: asyncio.subprocess.Process,
+) -> tuple[asyncio.StreamWriter, asyncio.StreamReader, asyncio.StreamReader]:
+    """The process's stdin, stdout and stderr; it was started with all three piped."""
+    assert process.stdin and process.stdout and process.stderr
+    return process.stdin, process.stdout, process.stderr
+
+
+def _crash(status: int, stderr: str) -> RuntimeError:
+    """The error for a CLI that exited without finishing the turn."""
+    return RuntimeError(stderr or f"claude exited with status {status}")
+
+
 class ClaudeCliRunner:
     def __init__(self, command: Sequence[str] = ("claude",)) -> None:
         self._command = tuple(command)
@@ -107,14 +120,28 @@ class ClaudeCliRunner:
 
     async def run_turn(self, turn_id: str, prompt: str, settings: Settings) -> AsyncIterator[Event]:
         yield TurnStarted(turn_id=turn_id)
+        process = await self._start(self._args(settings))
+        try:
+            async for event in self._converse(turn_id, process, prompt):
+                yield event
+        finally:
+            # Cancelled, or the CLI failed: don't leave it running.
+            if process.returncode is None:
+                process.kill()
+                await process.wait()
+
+    def _args(self, settings: Settings) -> list[str]:
         args = [*self._command, *STREAM_ARGS]
         if settings.model:
             args += ["--model", settings.model]
         args += TOOL_ACCESS_ARGS[settings.tool_access]
         if self.session_id:
             args += ["--resume", self.session_id]
+        return args
+
+    async def _start(self, args: Sequence[str]) -> asyncio.subprocess.Process:
         try:
-            process = await asyncio.create_subprocess_exec(
+            return await asyncio.create_subprocess_exec(
                 *args,
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
@@ -126,31 +153,38 @@ class ClaudeCliRunner:
                 f"Could not start {self._command[0]!r}; is the Claude CLI installed and on PATH?"
             ) from None
 
-        assert process.stdin and process.stdout and process.stderr
-        stderr = asyncio.create_task(process.stderr.read())
+    async def _converse(
+        self, turn_id: str, process: asyncio.subprocess.Process, prompt: str
+    ) -> AsyncIterator[Event]:
+        """Send ``prompt``, then translate the CLI's output until it exits.
+
+        Raises if it exits without reporting the turn's end, with its stderr as the message.
+        """
+        stdin, stdout, stderr_pipe = _pipes(process)
+        stderr = asyncio.create_task(stderr_pipe.read())
         try:
-            process.stdin.write(prompt.encode())
-            await process.stdin.drain()
-            process.stdin.close()
-
+            stdin.write(prompt.encode())
+            await stdin.drain()
+            stdin.close()
             finished = False
-            async for raw in process.stdout:
-                line = raw.decode().strip()
-                if not line:
-                    continue
-                for event in translate(turn_id, self._parse(line)):
-                    finished = finished or isinstance(event, TurnFinished)
-                    yield event
-
+            async for event in self._read_events(turn_id, stdout):
+                finished = finished or isinstance(event, TurnFinished)
+                yield event
+            # Let the CLI exit on its own once it's done, so it can save its session.
             status = await process.wait()
             if not finished:
-                message = (await stderr).decode().strip()
-                raise RuntimeError(message or f"claude exited with status {status}")
+                raise _crash(status, (await stderr).decode().strip())
         finally:
-            if process.returncode is None:
-                process.kill()
-                await process.wait()
             stderr.cancel()
+
+    async def _read_events(
+        self, turn_id: str, stdout: asyncio.StreamReader
+    ) -> AsyncIterator[Event]:
+        async for raw in stdout:
+            line = raw.decode().strip()
+            if line:
+                for event in translate(turn_id, self._parse(line)):
+                    yield event
 
     def _parse(self, line: str) -> dict[str, Any]:
         try:

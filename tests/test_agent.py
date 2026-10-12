@@ -1,6 +1,6 @@
 import asyncio
 import sys
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Callable, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -570,40 +570,63 @@ async def test_passing_verification_marks_the_task_completed(tmp_path: Path) -> 
     ]
 
 
-async def test_failed_verification_inserts_a_fix_task_after_the_task(tmp_path: Path) -> None:
+def board_when(
+    events: list[Event], test: Callable[[tuple[TaskState, ...]], bool]
+) -> tuple[TaskState, ...]:
+    """The first task list the session reported that passes ``test``."""
+    return next(e.tasks for e in events if isinstance(e, TasksChanged) and test(e.tasks))
+
+
+def started(events: list[Event]) -> list[str]:
+    """Ids of the tasks started, in order."""
+    return [e.task_id for e in events if isinstance(e, TaskStarted)]
+
+
+FIX_SETTINGS = Settings(model="opus", tool_access="full")
+
+
+async def run_with_a_fix(tmp_path: Path) -> tuple[FixingRunner, list[str], list[Event]]:
+    """Run tasks "one" (with FIX_SETTINGS) and "two"; "one" fails until a fix passes.
+
+    Returns the runner, the two tasks' ids and the run's events.
+    """
     fixed = tmp_path / "fixed"
     runner = FixingRunner(fixed)
     session = AgentSession(runner, verification_steps=(file_exists_step(fixed),))
-    settings = Settings(model="opus", tool_access="full")
-    one, two = await add_tasks(
-        session, TaskSpec(prompt="one", settings=settings), TaskSpec(prompt="two")
+    ids = await add_tasks(
+        session, TaskSpec(prompt="one", settings=FIX_SETTINGS), TaskSpec(prompt="two")
     )
     await session.send(RunTasks())
-    events = await collect_run(session)
+    return runner, ids, await collect_run(session)
+
+
+async def test_failed_verification_inserts_a_fix_task_after_the_task(tmp_path: Path) -> None:
+    runner, [one, two], events = await run_with_a_fix(tmp_path)
 
     assert VerificationFinished(task_id=one, step=0, passed=False) in events
     # One update marks the task unverified and adds its fix right behind it.
-    first_done = next(
-        e for e in events if isinstance(e, TasksChanged) and e.tasks[0].status == "unverified"
-    )
-    assert [(t.status, t.task.prompt.split("\n")[0]) for t in first_done.tasks] == [
+    first_done = board_when(events, lambda tasks: tasks[0].status == "unverified")
+    assert [(t.status, t.task.prompt.split("\n")[0]) for t in first_done] == [
         ("unverified", "one"),
         ("pending", "Fix the failed verification step: check"),
         ("pending", "two"),
     ]
-    fix = first_done.tasks[1]
+    fix = first_done[1]
     assert fix.fixes == one
     # The fix runs with the failed task's settings, next, in its own context.
-    assert fix.task.settings == settings
-    assert [e.task_id for e in events if isinstance(e, TaskStarted)] == [one, fix.id, two]
-    # Once the fix passes, the task it fixed counts as completed too.
-    fix_done = next(
-        e for e in events if isinstance(e, TasksChanged) and e.tasks[1].status == "completed"
-    )
-    assert [t.status for t in fix_done.tasks] == ["completed", "completed", "pending"]
-    assert statuses(events) == ["completed", "completed", "completed"]
+    assert fix.task.settings == FIX_SETTINGS
+    assert started(events) == [one, fix.id, two]
     assert [p for _, p, _ in runner.log] == ["one", fix.task.prompt, "two"]
     assert len({id(r) for r, _, _ in runner.log}) == 3
+
+
+async def test_a_passing_fix_completes_the_task_it_fixed(tmp_path: Path) -> None:
+    _, _, events = await run_with_a_fix(tmp_path)
+
+    # As soon as the fix passes, the task it fixed counts as completed too.
+    fix_done = board_when(events, lambda tasks: tasks[1].status == "completed")
+    assert [t.status for t in fix_done] == ["completed", "completed", "pending"]
+    assert statuses(events) == ["completed", "completed", "completed"]
 
 
 async def test_verification_stops_at_the_first_failing_step(tmp_path: Path) -> None:

@@ -14,10 +14,9 @@ class VerificationStep:
 
 
 # Lizard's limits: cyclomatic complexity, lines per function and parameters per function.
-# Set high for now so it reports without failing; lower them to start enforcing.
-LIZARD_MAX_CCN = 1000
-LIZARD_MAX_LENGTH = 10000
-LIZARD_MAX_ARGUMENTS = 100
+LIZARD_MAX_CCN = 6
+LIZARD_MAX_LENGTH = 100
+LIZARD_MAX_ARGUMENTS = 5
 
 # Quick checks first, so a failure shows up in seconds rather than after the tests.
 DEFAULT_STEPS = (
@@ -32,6 +31,7 @@ DEFAULT_STEPS = (
             "run",
             "lizard",
             "src",
+            "tests",
             "-w",
             "-C",
             str(LIZARD_MAX_CCN),

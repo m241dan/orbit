@@ -111,29 +111,51 @@ class AgentSession:
 
     async def send(self, command: Command) -> None:
         match command:
+            case SubmitPrompt() | CancelTurn() | UpdateSettings():
+                await self._handle_conversation(command)
+            case AddTask() | EditTask() | RunTasks():
+                await self._handle_tasks(command)
+            case _:
+                assert_never(command)
+
+    async def _handle_conversation(
+        self, command: SubmitPrompt | CancelTurn | UpdateSettings
+    ) -> None:
+        match command:
             case SubmitPrompt(text=text):
                 await self._start(self._run_turn(self._runner, text, self._settings))
-            case AddTask(task=task):
-                self._board.add(task)
-                await self._publish_tasks()
-            case EditTask(task_id=task_id, task=task):
-                try:
-                    self._board.edit(task_id, task)
-                except ValueError as exc:
-                    await self._events.put(ErrorOccurred(message=str(exc)))
-                else:
-                    await self._publish_tasks()
-            case RunTasks():
-                if self._board.next_runnable() is not None:
-                    await self._start(self._run_tasks())
             case CancelTurn():
-                if self._turn is not None and not self._turn.done():
-                    self._turn.cancel()
+                self._cancel()
             case UpdateSettings(settings=settings):
                 self._settings = settings
                 await self._events.put(self._settings_changed())
             case _:
                 assert_never(command)
+
+    async def _handle_tasks(self, command: AddTask | EditTask | RunTasks) -> None:
+        match command:
+            case AddTask(task=task):
+                self._board.add(task)
+                await self._publish_tasks()
+            case EditTask(task_id=task_id, task=task):
+                await self._edit_task(task_id, task)
+            case RunTasks():
+                if self._board.next_runnable() is not None:
+                    await self._start(self._run_tasks())
+            case _:
+                assert_never(command)
+
+    def _cancel(self) -> None:
+        if self._turn is not None and not self._turn.done():
+            self._turn.cancel()
+
+    async def _edit_task(self, task_id: str, task: TaskSpec) -> None:
+        try:
+            self._board.edit(task_id, task)
+        except ValueError as exc:
+            await self._events.put(ErrorOccurred(message=str(exc)))
+        else:
+            await self._publish_tasks()
 
     async def events(self) -> AsyncIterator[Event]:
         while True:

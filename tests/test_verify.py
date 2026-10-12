@@ -22,7 +22,7 @@ def test_default_steps_run_the_quick_checks_before_the_tests() -> None:
         ("Import contracts", ("uv", "run", "lint-imports")),
         (
             "Code quality (Lizard)",
-            ("uv", "run", "lizard", "src", "-w", "-C", "1000", "-L", "10000", "-a", "100"),
+            ("uv", "run", "lizard", "src", "tests", "-w", "-C", "6", "-L", "100", "-a", "5"),
         ),
         ("Unit tests, 100% coverage", ("uv", "run", "pytest", "--cov", "--cov-fail-under=100")),
     ]

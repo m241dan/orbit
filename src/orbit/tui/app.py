@@ -21,12 +21,14 @@ from orbit.protocol import (
     Session,
     Settings,
     SettingsChanged,
+    SkipReason,
     SubmitPrompt,
     TasksChanged,
     TaskSpec,
     TaskStarted,
     ToolCallFinished,
     ToolCallStarted,
+    TurnEndReason,
     TurnFinished,
     TurnStarted,
     UpdateSettings,
@@ -53,6 +55,27 @@ NEIGHBORS: dict[str, dict[str, str]] = {
     "task-list": {"h": "transcript", "j": "verification-steps"},
     "verification-steps": {"h": "prompt", "k": "task-list"},
 }
+
+
+SKIP_REASONS: dict[SkipReason, str] = {
+    "tools_off": "tools were off",
+    "no_changes": "no files changed",
+}
+
+
+def output_entry(event: AssistantMessage | ToolCallStarted | ToolCallFinished) -> tuple[str, str]:
+    """A piece of a turn's output as transcript text and the kind of entry to show it as."""
+    match event:
+        case AssistantMessage(text=text):
+            return text, "assistant"
+        case ToolCallStarted(name=name, arguments=arguments):
+            return f"→ {name} {json.dumps(arguments)}", "tool"
+        case ToolCallFinished(output=output, is_error=True):
+            return output, "error"
+        case ToolCallFinished(output=output):
+            return output, "tool"
+        case _:
+            assert_never(event)
 
 
 # Not inheriting App's bindings drops its ctrl+q quit and ctrl+c "how to quit" hint.
@@ -212,49 +235,105 @@ class OrbitApp(App[None], inherit_bindings=False):
 
     def _render_event(self, event: Event) -> None:
         match event:
+            case SettingsChanged() | BusyChanged() | TasksChanged() | VerificationChanged():
+                self._render_state(event)
+            case (
+                TurnStarted()
+                | TurnFinished()
+                | ErrorOccurred()
+                | AssistantMessage()
+                | ToolCallStarted()
+                | ToolCallFinished()
+            ):
+                self._render_conversation(event)
+            case (
+                TaskStarted()
+                | VerificationStarted()
+                | VerificationSkipped()
+                | VerificationFinished()
+            ):
+                self._render_progress(event)
+            case _:
+                assert_never(event)
+
+    def _render_state(
+        self, event: SettingsChanged | BusyChanged | TasksChanged | VerificationChanged
+    ) -> None:
+        """Show a snapshot of backend state."""
+        match event:
             case SettingsChanged(settings=settings, model_choices=choices):
-                if choices != self._model_choices:
-                    self._model_picker.set_labels(["default", *choices])
-                self._settings, self._model_choices = settings, choices
-                self.query_one(PromptInput).show_settings(settings)
-            case TurnStarted():
-                pass  # The prompt follows BusyChanged, which also covers task runs.
-            case AssistantMessage(text=text):
-                self._append(text, "assistant")
-            case ToolCallStarted(name=name, arguments=arguments):
-                self._append(f"→ {name} {json.dumps(arguments)}", "tool")
-            case ToolCallFinished(output=output, is_error=is_error):
-                self._append(output, "error" if is_error else "tool")
-            case TurnFinished(reason=reason):
-                if reason not in ("completed", "error"):
-                    self._append(f"[turn ended: {reason}]", "tool")
+                self._show_settings(settings, choices)
             case BusyChanged(busy=busy):
                 self.query_one(PromptInput).disabled = busy
             case TasksChanged(tasks=tasks):
                 self.query_one(TaskList).show(tasks)
-            case TaskStarted(task_id=task_id):
-                task_list = self.query_one(TaskList)
-                index = task_list.position(task_id)
-                prompt = task_list.tasks[index].task.prompt
-                self._append(f"Task {task_list.numbers[index]}: {prompt}", "user")
             case VerificationChanged(steps=steps):
                 self.query_one(VerificationPanel).show(steps)
-            case VerificationStarted(step=step):
-                name = self.query_one(VerificationPanel).steps[step].name
-                self._append(f"🔍 Verifying: {name}…", "verify")
-            case VerificationSkipped(reason=reason):
-                why = "tools were off" if reason == "tools_off" else "no files changed"
-                self._append(f"⏩ Verification skipped: {why}", "verify")
-            case VerificationFinished(step=step, passed=passed):
-                name = self.query_one(VerificationPanel).steps[step].name
-                if passed:
-                    self._append(f"✅ Verification passed: {name}", "verify")
-                else:
-                    self._append(f"❌ Verification failed: {name}", "error")
-            case ErrorOccurred(message=message):
-                self._append(message, "error")
             case _:
                 assert_never(event)
+
+    def _render_conversation(
+        self,
+        event: TurnStarted
+        | TurnFinished
+        | ErrorOccurred
+        | AssistantMessage
+        | ToolCallStarted
+        | ToolCallFinished,
+    ) -> None:
+        match event:
+            case TurnStarted():
+                pass  # The prompt follows BusyChanged, which also covers task runs.
+            case TurnFinished(reason=reason):
+                self._turn_finished(reason)
+            case ErrorOccurred(message=message):
+                self._append(message, "error")
+            case AssistantMessage() | ToolCallStarted() | ToolCallFinished():
+                self._append(*output_entry(event))
+            case _:
+                assert_never(event)
+
+    def _render_progress(
+        self,
+        event: TaskStarted | VerificationStarted | VerificationSkipped | VerificationFinished,
+    ) -> None:
+        """Note a task run's progress in the transcript."""
+        match event:
+            case TaskStarted(task_id=task_id):
+                self._announce_task(task_id)
+            case VerificationStarted(step=step):
+                self._append(f"🔍 Verifying: {self._step_name(step)}…", "verify")
+            case VerificationSkipped(reason=reason):
+                self._append(f"⏩ Verification skipped: {SKIP_REASONS[reason]}", "verify")
+            case VerificationFinished(step=step, passed=passed):
+                self._verification_finished(step, passed)
+            case _:
+                assert_never(event)
+
+    def _show_settings(self, settings: Settings, choices: tuple[str, ...]) -> None:
+        if choices != self._model_choices:
+            self._model_picker.set_labels(["default", *choices])
+        self._settings, self._model_choices = settings, choices
+        self.query_one(PromptInput).show_settings(settings)
+
+    def _turn_finished(self, reason: TurnEndReason) -> None:
+        if reason not in ("completed", "error"):
+            self._append(f"[turn ended: {reason}]", "tool")
+
+    def _announce_task(self, task_id: str) -> None:
+        task_list = self.query_one(TaskList)
+        index = task_list.position(task_id)
+        prompt = task_list.tasks[index].task.prompt
+        self._append(f"Task {task_list.numbers[index]}: {prompt}", "user")
+
+    def _step_name(self, step: int) -> str:
+        return self.query_one(VerificationPanel).steps[step].name
+
+    def _verification_finished(self, step: int, passed: bool) -> None:
+        if passed:
+            self._append(f"✅ Verification passed: {self._step_name(step)}", "verify")
+        else:
+            self._append(f"❌ Verification failed: {self._step_name(step)}", "error")
 
     def _append(self, text: str, kind: str) -> None:
         self.query_one(Transcript).add_entry(text, kind)
