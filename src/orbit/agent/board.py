@@ -14,6 +14,8 @@ class TaskBoard:
 
     def __init__(self, step_names: Sequence[str] = ()) -> None:
         self._tasks: list[TaskState] = []
+        # Fix task id -> id of the task it fixes.
+        self._fixes: dict[str, str] = {}
         self._ids = itertools.count(1)
         self._steps = tuple(StepState(name=name) for name in step_names)
 
@@ -25,11 +27,17 @@ class TaskBoard:
     def steps(self) -> tuple[StepState, ...]:
         return self._steps
 
-    def add(self, task: TaskSpec, after: str | None = None) -> str:
-        """Add a pending ``task`` at the end, or right after task ``after``; returns its id."""
+    def add(self, task: TaskSpec, fixes: str | None = None) -> str:
+        """Add a pending ``task`` at the end; returns its id.
+
+        A task that ``fixes`` another goes right after it instead.
+        """
         state = TaskState(id=str(next(self._ids)), task=task)
-        index = len(self._tasks) if after is None else self.position(after) + 1
-        self._tasks.insert(index, state)
+        if fixes is None:
+            self._tasks.append(state)
+        else:
+            self._tasks.insert(self.position(fixes) + 1, state)
+            self._fixes[state.id] = fixes
         return state.id
 
     def edit(self, task_id: str, task: TaskSpec) -> None:
@@ -50,6 +58,18 @@ class TaskBoard:
     def set_status(self, task_id: str, status: TaskStatus) -> None:
         index = self.position(task_id)
         self._tasks[index] = self._tasks[index].model_copy(update={"status": status})
+
+    def mark_fixed(self, task_id: str) -> None:
+        """Task ``task_id`` passed verification, so the tasks it was fixing are completed too.
+
+        Walks up the chain of fixes. Tasks that aren't unverified any more (say, edited
+        since) stay as they are.
+        """
+        fixed = self._fixes.get(task_id)
+        while fixed is not None:
+            if self.get(fixed).status == "unverified":
+                self.set_status(fixed, "completed")
+            fixed = self._fixes.get(fixed)
 
     def next_runnable(self, skip: Collection[str] = ()) -> str | None:
         """The first task that isn't settled or in ``skip``, if any."""

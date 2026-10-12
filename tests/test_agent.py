@@ -594,7 +594,12 @@ async def test_failed_verification_inserts_a_fix_task_after_the_task(tmp_path: P
     # The fix runs with the failed task's settings, next, in its own context.
     assert fix.task.settings == settings
     assert [e.task_id for e in events if isinstance(e, TaskStarted)] == [one, fix.id, two]
-    assert statuses(events) == ["unverified", "completed", "completed"]
+    # Once the fix passes, the task it fixed counts as completed too.
+    fix_done = next(
+        e for e in events if isinstance(e, TasksChanged) and e.tasks[1].status == "completed"
+    )
+    assert [t.status for t in fix_done.tasks] == ["completed", "completed", "pending"]
+    assert statuses(events) == ["completed", "completed", "completed"]
     assert [p for _, p, _ in runner.log] == ["one", fix.task.prompt, "two"]
     assert len({id(r) for r, _, _ in runner.log}) == 3
 

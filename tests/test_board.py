@@ -28,11 +28,11 @@ def test_add_appends_pending_tasks_with_distinct_ids() -> None:
     assert board.position(second) == 1
 
 
-def test_add_after_inserts_right_behind_that_task() -> None:
+def test_a_fix_goes_right_behind_the_task_it_fixes() -> None:
     board = TaskBoard()
     first = board.add(ONE)
     board.add(TWO)
-    fix = board.add(FIX, after=first)
+    fix = board.add(FIX, fixes=first)
     assert prompts(board) == ["one", "fix it", "two"]
     assert board.position(fix) == 1
 
@@ -75,6 +75,37 @@ def test_next_runnable_skips_done_running_and_already_tried_tasks() -> None:
     assert board.next_runnable() == ids[4]
     assert board.next_runnable(skip={ids[4]}) == ids[5]
     assert board.next_runnable(skip=set(ids[4:])) is None
+
+
+def test_a_passing_fix_completes_the_tasks_it_fixed() -> None:
+    board = TaskBoard()
+    first = board.add(ONE)
+    other = board.add(TWO)
+    board.set_status(first, "unverified")
+    board.set_status(other, "unverified")
+    # The first fix failed too, so a second one fixes it.
+    fix = board.add(FIX, fixes=first)
+    board.set_status(fix, "unverified")
+    fix_of_fix = board.add(FIX, fixes=fix)
+
+    board.set_status(fix_of_fix, "completed")
+    board.mark_fixed(fix_of_fix)
+    assert [t.status for t in board.tasks] == ["completed", "completed", "completed", "unverified"]
+
+
+def test_marking_fixed_leaves_tasks_that_changed_since_alone() -> None:
+    board = TaskBoard()
+    first = board.add(ONE)
+    board.set_status(first, "unverified")
+    fix = board.add(FIX, fixes=first)
+    board.edit(first, TWO)  # pending again, to be run as edited
+
+    board.set_status(fix, "completed")
+    board.mark_fixed(fix)
+    assert [t.status for t in board.tasks] == ["pending", "completed"]
+    # A task nobody queued a fix for has nothing to mark.
+    board.mark_fixed(first)
+    assert board.get(first).status == "pending"
 
 
 def test_step_statuses_follow_a_verification_and_reset() -> None:

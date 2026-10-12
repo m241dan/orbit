@@ -52,7 +52,8 @@ class AgentSession:
     The session owns the task list and reports it whole on every change. A run
     goes through it in order; after each task that completes,
     ``verification_steps`` run until one fails. A failure adds a task to fix it
-    right after the failed one, up to ``max_fix_attempts`` in a row.
+    right after the failed one, up to ``max_fix_attempts`` in a row; once a fix
+    passes, the tasks it fixed count as completed.
     """
 
     def __init__(
@@ -171,6 +172,8 @@ class AgentSession:
                     status = "unverified"
                     await self._queue_fix(task_id, attempts, *failure)
         self._board.set_status(task_id, status)
+        if status == "completed":
+            self._board.mark_fixed(task_id)
         await self._publish_tasks()
         return status
 
@@ -204,7 +207,7 @@ class AgentSession:
             return
         settings = self._board.get(task_id).task.settings
         fix = TaskSpec(prompt=fix_prompt(step, output), settings=settings)
-        attempts[self._board.add(fix, after=task_id)] = made + 1
+        attempts[self._board.add(fix, fixes=task_id)] = made + 1
 
     async def _publish_tasks(self) -> None:
         await self._events.put(TasksChanged(tasks=self._board.tasks))

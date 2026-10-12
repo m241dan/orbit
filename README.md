@@ -61,8 +61,9 @@ There is one step so far:
 When a step fails, the task is marked ❗ and a fix task is inserted right after it, with the same
 model and tool access. Its prompt quotes the end of the step's output and asks Claude to fix the
 cause without weakening the check. If the fix also fails verification, another fix is queued, up
-to 3 in a row; after that orbit reports the failure and moves on to the next task. Running again
-skips ❗ tasks, because their fix tasks follow them. Tasks that errored or were cancelled aren't
+to 3 in a row; after that orbit reports the failure and moves on to the next task. Once a fix
+passes, the task it fixed turns ✅, along with any earlier fixes in the chain. Running again skips
+❗ tasks, because their fix tasks follow them. Tasks that errored or were cancelled aren't
 verified, and neither is the conversation.
 
 Fix tasks need to edit files, so give tasks `full` tool access when you want them fixed
