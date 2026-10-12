@@ -77,6 +77,9 @@ class TaskBoard:
     def reset_steps(self) -> None:
         self._steps = tuple(StepState(name=s.name) for s in self._steps)
 
+    def skip_steps(self) -> None:
+        self._steps = tuple(s.model_copy(update={"status": "skipped"}) for s in self._steps)
+
     def set_step(self, step: int, status: StepStatus) -> None:
         steps = list(self._steps)
         steps[step] = steps[step].model_copy(update={"status": status})

@@ -98,6 +98,7 @@ STEP_ICONS: dict[StepStatus, str] = {
     "passed": "✅",
     "failed": "❌",
     "cancelled": "🛑",
+    "skipped": "⏩",
 }
 
 

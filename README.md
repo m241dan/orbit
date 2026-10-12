@@ -53,8 +53,9 @@ can't be edited.
 After each task completes, orbit runs the verification steps in the working directory, in order,
 stopping at the first failure. While that happens the task shows 🔍, the conversation notes each step
 as it starts and ends, and the panel under the task list shows each step's progress on the current
-task (⏳ pending, ◜ running (spinning) with its elapsed time, ✅ passed, ❌ failed, 🛑 cancelled). There
-are six, quick ones first so a failure shows up in seconds; each must exit successfully:
+task (⏳ pending, ◜ running (spinning) with its elapsed time, ✅ passed, ❌ failed, 🛑 cancelled,
+⏩ skipped). There are six, quick ones first so a failure shows up in seconds; each must exit
+successfully:
 
 1. Ruff lint: `uv run ruff check`
 2. Ruff format: `uv run ruff format --check`
@@ -68,10 +69,16 @@ are six, quick ones first so a failure shows up in seconds; each must exit succe
 When a step fails, the task is marked ❗ and a fix task is inserted right after it, indented and
 numbered under it (`1.1`, `1.2`, …), with the same model and tool access. Its prompt quotes the end
 of the step's output and asks Claude to fix the cause without weakening the check. If the fix also
-fails verification, another fix is queued, up to 3 in a row; after that orbit reports the failure
-and moves on to the next task. Once a fix passes, the task it fixed turns ✅, along with any earlier
-fixes in the chain. Running again skips ❗ tasks, because their fix tasks follow them. Tasks that
-errored or were cancelled aren't verified, and neither is the conversation.
+fails verification, another fix is queued. A task's chain of fixes gets up to 3 attempts per step,
+so a task broken in several ways is fixed one step after another; once a step has used its 3, orbit
+reports the failure and moves on to the next task. Once a fix passes, the task it fixed turns ✅,
+along with any earlier fixes in the chain. Running again skips ❗ tasks, because their fix tasks
+follow them. Tasks that errored or were cancelled aren't verified, and neither is the conversation.
+
+Verification is also skipped for tasks run with tools `off`, and for tasks that changed no files:
+orbit compares the files git sees (tracked, plus untracked ones that aren't ignored, by size and
+modification time) before and after the task. Outside a git work tree it can't tell, so it verifies.
+A skipped task still counts as done; the panel shows ⏩ for each step and the conversation says why.
 
 Fix tasks need to edit files, so give tasks `full` tool access when you want them fixed
 automatically. With `restricted` access, Claude can explain the failure but can't fix it.

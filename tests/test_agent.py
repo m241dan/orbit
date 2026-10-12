@@ -34,6 +34,7 @@ from orbit.protocol import (
     UpdateSettings,
     VerificationChanged,
     VerificationFinished,
+    VerificationSkipped,
     VerificationStarted,
 )
 
@@ -619,6 +620,73 @@ async def test_verification_stops_at_the_first_failing_step(tmp_path: Path) -> N
     assert step_statuses(events) == ["failed", "pending"]
 
 
+FIX_PREFIX = "Fix the failed verification step: "
+
+
+class StepFixingRunner(RecordingRunner):
+    """A fix for step X creates ``root / X``, so ``file_exists_step(root / X, X)`` passes.
+
+    ``breaks`` maps a step to the one whose file fixing it deletes again.
+    """
+
+    def __init__(
+        self,
+        root: Path,
+        breaks: dict[str, str] | None = None,
+        log: list[tuple[RecordingRunner, str, Settings]] | None = None,
+    ) -> None:
+        super().__init__(log)
+        self.root = root
+        self.breaks = breaks or {}
+
+    def new_context(self) -> "StepFixingRunner":
+        return StepFixingRunner(self.root, self.breaks, self.log)
+
+    async def run_turn(self, turn_id: str, prompt: str, settings: Settings) -> AsyncIterator[Event]:
+        if prompt.startswith(FIX_PREFIX):
+            step = prompt.split("\n", 1)[0].removeprefix(FIX_PREFIX)
+            (self.root / step).touch()
+            if step in self.breaks:
+                (self.root / self.breaks[step]).unlink()
+        async for event in super().run_turn(turn_id, prompt, settings):
+            yield event
+
+
+def file_steps(root: Path, *names: str) -> tuple[VerificationStep, ...]:
+    return tuple(file_exists_step(root / name, name) for name in names)
+
+
+async def test_fix_attempts_are_counted_per_step(tmp_path: Path) -> None:
+    runner = StepFixingRunner(tmp_path)
+    session = AgentSession(
+        runner,
+        verification_steps=file_steps(tmp_path, "lint", "types", "tests"),
+        max_fix_attempts=1,
+    )
+    _, events = await run_one(session)
+
+    # Each fix gets past its step and fails the next; each step still had an attempt left.
+    titles = [p.split("\n")[0] for _, p, _ in runner.log]
+    assert titles == ["one", FIX_PREFIX + "lint", FIX_PREFIX + "types", FIX_PREFIX + "tests"]
+    assert statuses(events) == ["completed"] * 4
+    assert not any(isinstance(e, ErrorOccurred) for e in events)
+
+
+async def test_per_step_counts_carry_on_when_fixes_undo_each_other(tmp_path: Path) -> None:
+    # Fixing "types" deletes lint's file, so the chain bounces back to a step it fixed.
+    runner = StepFixingRunner(tmp_path, breaks={"types": "lint"})
+    session = AgentSession(
+        runner, verification_steps=file_steps(tmp_path, "lint", "types"), max_fix_attempts=1
+    )
+    _, events = await run_one(session)
+
+    titles = [p.split("\n")[0] for _, p, _ in runner.log]
+    assert titles == ["one", FIX_PREFIX + "lint", FIX_PREFIX + "types"]
+    message = "Verification step 'lint' still fails after 1 fix attempts."
+    assert [e for e in events if isinstance(e, ErrorOccurred)] == [ErrorOccurred(message=message)]
+    assert statuses(events) == ["unverified"] * 3
+
+
 async def test_fix_tasks_stop_after_max_attempts() -> None:
     runner = RecordingRunner()
     session = AgentSession(runner, verification_steps=(FAILING_STEP,), max_fix_attempts=2)
@@ -673,6 +741,82 @@ async def test_cancel_during_verification_cancels_the_task_and_run() -> None:
     assert step_statuses(events) == ["cancelled"]
     await asyncio.sleep(0.01)
     assert session._events.empty()
+
+
+class FakeWorkspace:
+    """Reports ``states`` in turn as the working tree's state, counting the calls."""
+
+    def __init__(self, *states: object) -> None:
+        self.states = list(states)
+        self.calls = 0
+
+    async def __call__(self) -> object:
+        self.calls += 1
+        return self.states.pop(0)
+
+
+async def run_one(
+    session: AgentSession, settings: Settings | None = None
+) -> tuple[str, list[Event]]:
+    """Queue and run one task; returns its id and the run's events."""
+    task = TaskSpec(prompt="one", settings=settings or Settings())
+    [task_id] = await add_tasks(session, task)
+    await session.send(RunTasks())
+    return task_id, await collect_run(session)
+
+
+async def test_tasks_with_tools_off_skip_verification() -> None:
+    workspace = FakeWorkspace()
+    session = AgentSession(
+        RecordingRunner(), verification_steps=(FAILING_STEP,), workspace=workspace
+    )
+    assert session.workspace is workspace
+    one, events = await run_one(session, Settings(tool_access="off"))
+
+    assert VerificationSkipped(task_id=one, reason="tools_off") in events
+    assert not any(isinstance(e, VerificationStarted) for e in events)
+    shown = [t.status for e in events if isinstance(e, TasksChanged) for t in e.tasks]
+    assert "verifying" not in shown
+    assert statuses(events) == ["completed"]
+    assert step_statuses(events) == ["skipped"]
+    assert workspace.calls == 0  # nothing to look at
+
+
+async def test_tasks_that_change_no_files_skip_verification() -> None:
+    workspace = FakeWorkspace("tree", "tree")
+    session = AgentSession(
+        RecordingRunner(), verification_steps=(FAILING_STEP,), workspace=workspace
+    )
+    one, events = await run_one(session)
+
+    assert VerificationSkipped(task_id=one, reason="no_changes") in events
+    assert not any(isinstance(e, VerificationStarted) for e in events)
+    assert statuses(events) == ["completed"]
+    assert step_statuses(events) == ["skipped"]
+    assert workspace.calls == 2
+
+
+async def test_tasks_that_change_files_are_verified() -> None:
+    session = AgentSession(
+        RecordingRunner(),
+        verification_steps=(FAILING_STEP,),
+        max_fix_attempts=0,
+        workspace=FakeWorkspace("before", "after"),
+    )
+    _, events = await run_one(session)
+    assert not any(isinstance(e, VerificationSkipped) for e in events)
+    assert statuses(events) == ["unverified"]
+
+
+async def test_tasks_are_verified_when_the_tree_cannot_be_read() -> None:
+    session = AgentSession(
+        RecordingRunner(),
+        verification_steps=(FAILING_STEP,),
+        max_fix_attempts=0,
+        workspace=FakeWorkspace(None, None),
+    )
+    _, events = await run_one(session)
+    assert statuses(events) == ["unverified"]
 
 
 async def test_conversation_turns_are_not_verified() -> None:

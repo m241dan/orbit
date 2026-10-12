@@ -46,7 +46,7 @@ DEFAULT_STEPS = (
         command=("uv", "run", "pytest", "--cov", "--cov-fail-under=100"),
     ),
 )
-# Fix tasks queued in a row for one failing task before giving up.
+# Fix tasks one task's chain of fixes may queue for each step before giving up on it.
 MAX_FIX_ATTEMPTS = 3
 # Characters of step output quoted in a fix prompt; the end (summary, coverage) matters most.
 OUTPUT_LIMIT = 8000

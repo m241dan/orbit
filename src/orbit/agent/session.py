@@ -2,7 +2,7 @@
 
 import asyncio
 import uuid
-from collections.abc import AsyncIterator, Coroutine, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine, Sequence
 from typing import Any, Protocol, assert_never
 
 from orbit.agent.board import TaskBoard
@@ -18,6 +18,7 @@ from orbit.protocol import (
     RunTasks,
     Settings,
     SettingsChanged,
+    SkipReason,
     SubmitPrompt,
     TasksChanged,
     TaskSpec,
@@ -28,6 +29,7 @@ from orbit.protocol import (
     UpdateSettings,
     VerificationChanged,
     VerificationFinished,
+    VerificationSkipped,
     VerificationStarted,
 )
 
@@ -46,14 +48,23 @@ class TurnRunner(Protocol):
         ...
 
 
+# Per task: the fixes already queued for each step, by name, in the chain of fixes that
+# led to it. Tasks the user queued have none.
+Attempts = dict[str, dict[str, int]]
+
+
 class AgentSession:
     """Runs turns and task runs one at a time in the background and publishes their events.
 
     The session owns the task list and reports it whole on every change. A run
     goes through it in order; after each task that completes,
     ``verification_steps`` run until one fails. A failure adds a task to fix it
-    right after the failed one, up to ``max_fix_attempts`` in a row; once a fix
-    passes, the tasks it fixed count as completed.
+    right after the failed one; a task's chain of fixes gets ``max_fix_attempts``
+    for each step. Once a fix passes, the tasks it fixed count as completed.
+
+    Tasks with tools off aren't verified, and neither are tasks that leave
+    ``workspace`` (a fingerprint of the working tree) as it was. Without one,
+    every task counts as changing files.
     """
 
     def __init__(
@@ -63,12 +74,14 @@ class AgentSession:
         model_choices: Sequence[str] = (),
         verification_steps: Sequence[VerificationStep] = (),
         max_fix_attempts: int = MAX_FIX_ATTEMPTS,
+        workspace: Callable[[], Awaitable[object]] | None = None,
     ) -> None:
         self._runner = runner
         self._settings = settings or Settings()
         self._model_choices = tuple(model_choices)
         self._steps = tuple(verification_steps)
         self._max_fix_attempts = max_fix_attempts
+        self._workspace = workspace
         self._board = TaskBoard([s.name for s in self._steps])
         self._events: asyncio.Queue[Event] = asyncio.Queue()
         self._events.put_nowait(self._settings_changed())
@@ -79,6 +92,10 @@ class AgentSession:
     @property
     def runner(self) -> TurnRunner:
         return self._runner
+
+    @property
+    def workspace(self) -> Callable[[], Awaitable[object]] | None:
+        return self._workspace
 
     @property
     def settings(self) -> Settings:
@@ -139,16 +156,17 @@ class AgentSession:
 
     async def _run_tasks(self) -> None:
         tried: set[str] = set()
-        # Fix tasks in a row before each task: none for the ones the user queued.
-        attempts: dict[str, int] = {}
+        attempts: Attempts = {}
         while (task_id := self._board.next_runnable(skip=tried)) is not None:
             tried.add(task_id)
             if await self._run_task(task_id, attempts) == "cancelled":
                 return
 
-    async def _run_task(self, task_id: str, attempts: dict[str, int]) -> TaskStatus:
+    async def _run_task(self, task_id: str, attempts: Attempts) -> TaskStatus:
         """Run one task in a new context, then verify it; returns its final status."""
         task = self._board.get(task_id).task
+        # Before the task shows as running, so a cancel here leaves it pending.
+        before = await self._state_before(task)
         self._board.set_status(task_id, "running")
         await self._publish_tasks()
         if self._steps:
@@ -159,23 +177,52 @@ class AgentSession:
             self._runner.new_context(), task.prompt, task.settings
         )
         if status == "completed" and self._steps:
-            self._board.set_status(task_id, "verifying")
-            await self._publish_tasks()
             try:
-                failure = await self._verify(task_id)
+                status = await self._check(task_id, task, before, attempts)
             except asyncio.CancelledError:
                 status = "cancelled"
                 self._board.cancel_running_steps()
                 await self._publish_steps()
-            else:
-                if failure is not None:
-                    status = "unverified"
-                    await self._queue_fix(task_id, attempts, *failure)
         self._board.set_status(task_id, status)
         if status == "completed":
             self._board.mark_fixed(task_id)
         await self._publish_tasks()
         return status
+
+    async def _state_before(self, task: TaskSpec) -> object:
+        """The working tree's state, when it will tell whether ``task`` changed files."""
+        if self._workspace is None or not self._steps or task.settings.tool_access == "off":
+            return None
+        return await self._workspace()
+
+    async def _check(
+        self, task_id: str, task: TaskSpec, before: object, attempts: Attempts
+    ) -> TaskStatus:
+        """Verify a task whose turn completed, unless there's nothing to verify.
+
+        Returns its status: ``completed``, or ``unverified`` after queueing a fix.
+        """
+        reason = await self._skip_reason(task, before)
+        if reason is not None:
+            self._board.skip_steps()
+            await self._publish_steps()
+            await self._events.put(VerificationSkipped(task_id=task_id, reason=reason))
+            return "completed"
+        self._board.set_status(task_id, "verifying")
+        await self._publish_tasks()
+        failure = await self._verify(task_id)
+        if failure is None:
+            return "completed"
+        await self._queue_fix(task_id, attempts, *failure)
+        return "unverified"
+
+    async def _skip_reason(self, task: TaskSpec, before: object) -> SkipReason | None:
+        if task.settings.tool_access == "off":
+            return "tools_off"
+        if before is None:
+            return None  # Can't tell what changed, so verify.
+        assert self._workspace is not None  # It produced ``before``.
+        return "no_changes" if await self._workspace() == before else None
 
     async def _verify(self, task_id: str) -> tuple[VerificationStep, str] | None:
         """Run the steps after task ``task_id``; returns the first failure and its output."""
@@ -194,11 +241,11 @@ class AgentSession:
         return None
 
     async def _queue_fix(
-        self, task_id: str, attempts: dict[str, int], step: VerificationStep, output: str
+        self, task_id: str, attempts: Attempts, step: VerificationStep, output: str
     ) -> None:
-        """Add a task fixing ``step`` right after ``task_id``, unless attempts ran out."""
-        made = attempts.get(task_id, 0)
-        if made >= self._max_fix_attempts:
+        """Add a task fixing ``step`` right after ``task_id``, unless its attempts ran out."""
+        made = attempts.get(task_id, {})
+        if made.get(step.name, 0) >= self._max_fix_attempts:
             message = (
                 f"Verification step {step.name!r} still fails"
                 f" after {self._max_fix_attempts} fix attempts."
@@ -207,7 +254,8 @@ class AgentSession:
             return
         settings = self._board.get(task_id).task.settings
         fix = TaskSpec(prompt=fix_prompt(step, output), settings=settings)
-        attempts[self._board.add(fix, fixes=task_id)] = made + 1
+        fix_id = self._board.add(fix, fixes=task_id)
+        attempts[fix_id] = {**made, step.name: made.get(step.name, 0) + 1}
 
     async def _publish_tasks(self) -> None:
         await self._events.put(TasksChanged(tasks=self._board.tasks))

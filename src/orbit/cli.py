@@ -5,7 +5,7 @@ from typing import Annotated
 import typer
 
 from orbit import __version__
-from orbit.agent import DEFAULT_STEPS, AgentSession, ClaudeCliRunner
+from orbit.agent import DEFAULT_STEPS, AgentSession, ClaudeCliRunner, workspace_state
 from orbit.agent.claude_cli import MODEL_ALIASES
 from orbit.protocol import Settings, ToolAccess
 from orbit.tui import OrbitApp
@@ -48,6 +48,7 @@ def chat(
         Settings(model=model, tool_access=tools),
         model_choices=MODEL_ALIASES,
         verification_steps=DEFAULT_STEPS if verify else (),
+        workspace=workspace_state,
     )
     OrbitApp(session).run()
 

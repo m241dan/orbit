@@ -5,6 +5,7 @@ from orbit.protocol import (
     StepStatus,
     VerificationChanged,
     VerificationFinished,
+    VerificationSkipped,
     VerificationStarted,
 )
 from orbit.tui import OrbitApp
@@ -18,7 +19,7 @@ def steps(app: OrbitApp) -> str:
 
 
 def report(*statuses: StepStatus) -> VerificationChanged:
-    names = ("Unit tests", "Lint", "Types", "Docs", "Build")
+    names = ("Unit tests", "Lint", "Types", "Docs", "Build", "Size")
     return VerificationChanged(
         steps=tuple(StepState(name=n, status=s) for n, s in zip(names, statuses, strict=False))
     )
@@ -36,8 +37,12 @@ async def test_panel_shows_the_steps_the_backend_reports() -> None:
     app = OrbitApp(session)
     async with app.run_test() as pilot:
         app.query_one(VerificationPanel).clock = lambda: 0.0
-        await feed(session, pilot, report("pending", "running", "passed", "failed", "cancelled"))
-        assert steps(app) == "⏳ Unit tests\n◜  Lint · 0s\n✅ Types\n❌ Docs\n🛑 Build"
+        await feed(
+            session,
+            pilot,
+            report("pending", "running", "passed", "failed", "cancelled", "skipped"),
+        )
+        assert steps(app) == "⏳ Unit tests\n◜  Lint · 0s\n✅ Types\n❌ Docs\n🛑 Build\n⏩ Size"
 
 
 async def test_running_step_shows_how_long_it_has_been_running() -> None:
@@ -87,4 +92,21 @@ async def test_verification_progress_is_reported_in_the_transcript() -> None:
             ("✅ Verification passed: Unit tests", frozenset({"verify"})),
             ("🔍 Verifying: Lint…", frozenset({"verify"})),
             ("❌ Verification failed: Lint", frozenset({"error"})),
+        ]
+
+
+async def test_skipped_verification_says_why_in_the_transcript() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed(
+            session,
+            pilot,
+            VerificationSkipped(task_id="1", reason="tools_off"),
+            VerificationSkipped(task_id="2", reason="no_changes"),
+        )
+        entries = [(str(e.render()), e.classes) for e in app.query(Entry)]
+        assert entries == [
+            ("⏩ Verification skipped: tools were off", frozenset({"verify"})),
+            ("⏩ Verification skipped: no files changed", frozenset({"verify"})),
         ]

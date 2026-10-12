@@ -32,6 +32,7 @@ from orbit.protocol import (
     UpdateSettings,
     VerificationChanged,
     VerificationFinished,
+    VerificationSkipped,
     VerificationStarted,
 )
 from orbit.tui.tasks import TaskEditorScreen, TaskList
@@ -241,6 +242,9 @@ class OrbitApp(App[None], inherit_bindings=False):
             case VerificationStarted(step=step):
                 name = self.query_one(VerificationPanel).steps[step].name
                 self._append(f"🔍 Verifying: {name}…", "verify")
+            case VerificationSkipped(reason=reason):
+                why = "tools were off" if reason == "tools_off" else "no files changed"
+                self._append(f"⏩ Verification skipped: {why}", "verify")
             case VerificationFinished(step=step, passed=passed):
                 name = self.query_one(VerificationPanel).steps[step].name
                 if passed:

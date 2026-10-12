@@ -119,7 +119,7 @@ class TaskState(_Message):
     fixes: str | None = None
 
 
-StepStatus = Literal["pending", "running", "passed", "failed", "cancelled"]
+StepStatus = Literal["pending", "running", "passed", "failed", "cancelled", "skipped"]
 
 
 class StepState(_Message):
@@ -212,6 +212,18 @@ class VerificationStarted(_Message):
     step: int
 
 
+SkipReason = Literal["tools_off", "no_changes"]
+"""Why a task wasn't verified: it ran with tools off, or it changed no files."""
+
+
+class VerificationSkipped(_Message):
+    """Task ``task_id`` completed but has nothing to verify, so no step runs."""
+
+    type: Literal["verification_skipped"] = "verification_skipped"
+    task_id: str
+    reason: SkipReason
+
+
 class VerificationFinished(_Message):
     """Step ``step`` (an index into the steps) finished checking task ``task_id``."""
 
@@ -239,6 +251,7 @@ Event = Annotated[
     | TaskStarted
     | VerificationChanged
     | VerificationStarted
+    | VerificationSkipped
     | VerificationFinished
     | ErrorOccurred,
     Field(discriminator="type"),

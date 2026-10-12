@@ -119,3 +119,5 @@ def test_step_statuses_follow_a_verification_and_reset() -> None:
     assert [s.status for s in board.steps] == ["passed", "cancelled"]
     board.reset_steps()
     assert [s.status for s in board.steps] == ["pending", "pending"]
+    board.skip_steps()
+    assert [s.status for s in board.steps] == ["skipped", "skipped"]
