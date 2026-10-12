@@ -107,11 +107,16 @@ TaskStatus = Literal["pending", "running", "verifying", "unverified"] | TurnEndR
 
 
 class TaskState(_Message):
-    """One entry of the task list. ``id`` stays the same while the list changes around it."""
+    """One entry of the task list. ``id`` stays the same while the list changes around it.
+
+    ``fixes`` is the id of the task this one was added to fix, if any; it comes right
+    after that task.
+    """
 
     id: str
     task: TaskSpec
     status: TaskStatus = "pending"
+    fixes: str | None = None
 
 
 StepStatus = Literal["pending", "running", "passed", "failed", "cancelled"]

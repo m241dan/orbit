@@ -14,7 +14,7 @@ from orbit.protocol import (
     TaskStatus,
 )
 from orbit.tui import OrbitApp
-from orbit.tui.tasks import TaskEditorScreen, TaskList, task_label
+from orbit.tui.tasks import TaskEditorScreen, TaskList, task_label, task_numbers
 from orbit.tui.widgets import Entry, PickerScreen, PromptInput
 from tests.test_tui import FakeSession, picker, selected, show_settings
 
@@ -65,8 +65,6 @@ def test_label_shows_status_title_and_settings() -> None:
     task = TaskSpec(prompt="Fix it\nlong details", settings=Settings(model="opus"))
     icons = {
         "pending": "⏳",
-        "running": "🔄",
-        "verifying": "🔍",
         "completed": "✅",
         "unverified": "❗",
         "cancelled": "🛑",
@@ -74,12 +72,43 @@ def test_label_shows_status_title_and_settings() -> None:
         "error": "❌",
     }
     for status, icon in icons.items():
-        label = task_label(TaskState(id="1", task=task, status=status))  # type: ignore[arg-type]
-        # Long prompts (like fix tasks) are titled by their first line.
-        assert str(label) == f"{icon} Fix it\n  opus · restricted"
-    assert str(task_label(TaskState(id="1", task=TaskSpec(prompt="x")))).endswith(
-        "default · restricted"
+        state = TaskState(id="1", task=task, status=status)  # type: ignore[arg-type]
+        # Long prompts (like fix tasks) are titled by their first line; settings line up
+        # under the title.
+        label = task_label(state, "1", "◠ ")
+        assert str(label) == f"1. {icon} Fix it\n      opus · restricted"
+    assert str(task_label(TaskState(id="1", task=TaskSpec(prompt="x")), "12", "◠ ")) == (
+        "12. ⏳ x\n       default · restricted"
     )
+
+
+def test_running_tasks_show_the_spinner_frame() -> None:
+    running = TaskState(id="1", task=TaskSpec(prompt="go"), status="running")
+    assert str(task_label(running, "1", "◠ ")) == "1. ◠  go\n      default · restricted"
+    # Verifying shows the magnifying glass without a spinner; the verification panel spins.
+    verifying = running.model_copy(update={"status": "verifying"})
+    assert str(task_label(verifying, "1", "◠ ")) == "1. 🔍 go\n      default · restricted"
+
+
+def test_fix_tasks_are_indented_under_their_task() -> None:
+    fix = TaskState(id="2", task=TaskSpec(prompt="Fix it"), fixes="1")
+    assert str(task_label(fix, "1.1", "◠ ")) == "   1.1 ⏳ Fix it\n          default · restricted"
+
+
+def test_tasks_are_numbered_and_every_fix_in_a_chain_under_the_first_task() -> None:
+    def state(task_id: str, fixes: str | None = None) -> TaskState:
+        return TaskState(id=task_id, task=TaskSpec(prompt=task_id), fixes=fixes)
+
+    tasks = [
+        state("a"),
+        state("b"),
+        state("b-fix", fixes="b"),
+        state("b-fix-fix", fixes="b-fix"),
+        state("c"),
+        state("c-fix", fixes="c"),
+    ]
+    assert task_numbers(tasks) == ["1", "2", "2.1", "2.2", "3", "3.1"]
+    assert task_numbers([]) == []
 
 
 async def test_task_list_starts_with_only_the_new_task_row() -> None:
@@ -92,12 +121,56 @@ async def test_list_shows_the_board_the_backend_reports() -> None:
     session = FakeSession()
     app = OrbitApp(session)
     async with app.run_test() as pilot:
-        await feed(session, pilot, board("one", "two", status="completed"))
+        one, two = board("one", "two", status="completed").tasks
+        fix = TaskState(id="3", task=TaskSpec(prompt="fix one"), fixes="1")
+        await feed(session, pilot, TasksChanged(tasks=(one, fix, two)))
         assert rows(app) == [
-            "✅ one\n  default · restricted",
-            "✅ two\n  default · restricted",
+            "1. ✅ one\n      default · restricted",
+            "   1.1 ⏳ fix one\n          default · restricted",
+            "2. ✅ two\n      default · restricted",
             "+ new task",
         ]
+
+
+async def test_running_tasks_spin_in_place() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        tasks = app.query_one(TaskList)
+        now = [0.0]
+        tasks.clock = lambda: now[0]
+        one, two, three = board("one", "two", "three").tasks
+        await feed(
+            session,
+            pilot,
+            TasksChanged(
+                tasks=(
+                    one.model_copy(update={"status": "completed"}),
+                    two.model_copy(update={"status": "running"}),
+                    three.model_copy(update={"status": "verifying"}),
+                )
+            ),
+        )
+        await open_task_list(pilot)
+        await pilot.press("j", "j")
+        assert [r.split("\n")[0] for r in rows(app)[:3]] == [
+            "1. ✅ one",
+            "2. ◜  two",
+            "3. 🔍 three",
+        ]
+
+        now[0] = 0.25  # two frames on, at 8 a second
+        tasks.tick()
+        assert rows(app)[1].startswith("2. ◝  two")
+        assert rows(app)[2].startswith("3. 🔍 three")  # only running tasks spin
+        assert tasks.highlighted == 2  # redrawing a row leaves the highlight alone
+
+        # Nothing spins once nothing is in progress.
+        await feed(session, pilot, board("one", "two", "three", status="completed"))
+        before = rows(app)
+        now[0] = 0.5
+        tasks.tick()
+        assert rows(app) == before
 
 
 async def test_highlight_stays_on_its_task_as_the_board_changes() -> None:
@@ -280,10 +353,19 @@ async def test_started_task_is_announced_in_the_transcript() -> None:
     session = FakeSession()
     app = OrbitApp(session)
     async with app.run_test() as pilot:
-        await feed(session, pilot, board("one", "two"), TaskStarted(task_id="2"))
-        [entry] = app.query(Entry)
-        assert str(entry.render()) == "Task 2: two"
-        assert entry.has_class("user")
+        one, two = board("one", "two").tasks
+        fix = TaskState(id="3", task=TaskSpec(prompt="fix one"), fixes="1")
+        await feed(
+            session,
+            pilot,
+            TasksChanged(tasks=(one, fix, two)),
+            TaskStarted(task_id="2"),
+            TaskStarted(task_id="3"),
+        )
+        entries = list(app.query(Entry))
+        # Announced by the number the list shows.
+        assert [str(e.render()) for e in entries] == ["Task 2: two", "Task 1.1: fix one"]
+        assert entries[0].has_class("user")
 
 
 async def test_side_windows_do_not_take_focus_on_click() -> None:

@@ -591,6 +591,7 @@ async def test_failed_verification_inserts_a_fix_task_after_the_task(tmp_path: P
         ("pending", "two"),
     ]
     fix = first_done.tasks[1]
+    assert fix.fixes == one
     # The fix runs with the failed task's settings, next, in its own context.
     assert fix.task.settings == settings
     assert [e.task_id for e in events if isinstance(e, TaskStarted)] == [one, fix.id, two]

@@ -14,8 +14,6 @@ class TaskBoard:
 
     def __init__(self, step_names: Sequence[str] = ()) -> None:
         self._tasks: list[TaskState] = []
-        # Fix task id -> id of the task it fixes.
-        self._fixes: dict[str, str] = {}
         self._ids = itertools.count(1)
         self._steps = tuple(StepState(name=name) for name in step_names)
 
@@ -32,19 +30,17 @@ class TaskBoard:
 
         A task that ``fixes`` another goes right after it instead.
         """
-        state = TaskState(id=str(next(self._ids)), task=task)
-        if fixes is None:
-            self._tasks.append(state)
-        else:
-            self._tasks.insert(self.position(fixes) + 1, state)
-            self._fixes[state.id] = fixes
+        state = TaskState(id=str(next(self._ids)), task=task, fixes=fixes)
+        index = len(self._tasks) if fixes is None else self.position(fixes) + 1
+        self._tasks.insert(index, state)
         return state.id
 
     def edit(self, task_id: str, task: TaskSpec) -> None:
         """Replace a task and make it pending again. Raises ``ValueError`` if it can't be."""
-        if self.get(task_id).status in ("running", "verifying"):
+        current = self.get(task_id)
+        if current.status in ("running", "verifying"):
             raise ValueError(f"Task {task_id!r} can't be edited while it runs.")
-        self._tasks[self.position(task_id)] = TaskState(id=task_id, task=task)
+        self._tasks[self.position(task_id)] = TaskState(id=task_id, task=task, fixes=current.fixes)
 
     def get(self, task_id: str) -> TaskState:
         return self._tasks[self.position(task_id)]
@@ -65,11 +61,11 @@ class TaskBoard:
         Walks up the chain of fixes. Tasks that aren't unverified any more (say, edited
         since) stay as they are.
         """
-        fixed = self._fixes.get(task_id)
+        fixed = self.get(task_id).fixes
         while fixed is not None:
             if self.get(fixed).status == "unverified":
                 self.set_status(fixed, "completed")
-            fixed = self._fixes.get(fixed)
+            fixed = self.get(fixed).fixes
 
     def next_runnable(self, skip: Collection[str] = ()) -> str | None:
         """The first task that isn't settled or in ``skip``, if any."""

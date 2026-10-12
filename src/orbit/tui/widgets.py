@@ -82,9 +82,19 @@ class SidePanel(VerticalScroll):
         self.border_title = title
 
 
+# The arc spinner beside work in progress, and how fast it turns.
+SPINNER_FRAMES = "◜◠◝◞◡◟"
+SPINNER_FPS = 8
+
+
+def spinner_frame(now: float) -> str:
+    """The spinner frame at ``now`` seconds, padded to two columns like the emoji beside it."""
+    return SPINNER_FRAMES[int(now * SPINNER_FPS) % len(SPINNER_FRAMES)] + " "
+
+
+# A running step shows the spinner.
 STEP_ICONS: dict[StepStatus, str] = {
     "pending": "⏳",
-    "running": "🔍",
     "passed": "✅",
     "failed": "❌",
     "cancelled": "🛑",
@@ -94,8 +104,8 @@ STEP_ICONS: dict[StepStatus, str] = {
 class VerificationPanel(SidePanel):
     """The verification steps and how each fared after the current task, as reported.
 
-    A running step shows how long it has been running, updated every second, so
-    a slow step doesn't look stalled.
+    A running step spins and shows how long it has been running, so a slow step
+    doesn't look stalled.
     """
 
     def __init__(self, *, id: str) -> None:
@@ -110,7 +120,7 @@ class VerificationPanel(SidePanel):
         yield Static("No verification steps")
 
     def on_mount(self) -> None:
-        self.set_interval(1, self.tick)
+        self.set_interval(1 / SPINNER_FPS, self.tick)
 
     def show(self, steps: Sequence[StepState]) -> None:
         self.steps = tuple(steps)
@@ -121,9 +131,13 @@ class VerificationPanel(SidePanel):
         self.tick()
 
     def tick(self) -> None:
-        lines = [f"{STEP_ICONS[s.status]} {s.name}" for s in self.steps]
+        now = self.clock()
+        lines = [
+            f"{spinner_frame(now) if s.status == 'running' else STEP_ICONS[s.status]} {s.name}"
+            for s in self.steps
+        ]
         if self._running_step is not None:
-            lines[self._running_step] += f" · {int(self.clock() - self._since)}s"
+            lines[self._running_step] += f" · {int(now - self._since)}s"
         self.query_one(Static).update(Text("\n".join(lines)))
 
 

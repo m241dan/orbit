@@ -1,8 +1,11 @@
 """The task list window and the modal that edits one task."""
 
+import time
+from collections import Counter
 from collections.abc import Callable, Sequence
 from typing import ClassVar
 
+from rich.cells import cell_len
 from rich.text import Text
 from textual import events, on
 from textual.app import ComposeResult
@@ -13,16 +16,18 @@ from textual.widgets import Input, OptionList, Static
 
 from orbit.protocol import Settings, TaskSpec, TaskState, TaskStatus
 from orbit.tui.widgets import (
+    SPINNER_FPS,
     TOOL_ACCESS_DESCRIPTIONS,
     TOOL_ACCESS_OPTIONS,
     PickerScreen,
     PromptInput,
+    spinner_frame,
 )
 
 # Emoji drawn two cells wide on their own (no variation selector), so rows line up.
+# Running tasks show the spinner instead.
 STATUS_ICONS: dict[TaskStatus, str] = {
     "pending": "⏳",
-    "running": "🔄",
     "verifying": "🔍",
     "completed": "✅",
     "unverified": "❗",
@@ -57,10 +62,13 @@ class TaskList(OptionList):
         super().__init__(id=id)
         self.can_focus = False
         self.tasks: tuple[TaskState, ...] = ()
+        self.numbers: list[str] = []
+        self.clock: Callable[[], float] = time.monotonic
 
     def on_mount(self) -> None:
         self.border_title = "Task list"
         self._show(None)
+        self.set_interval(1 / SPINNER_FPS, self.tick)
 
     def enter_list_mode(self) -> None:
         self.can_focus = True
@@ -90,25 +98,66 @@ class TaskList(OptionList):
                 else len(tasks)
             )
         self.tasks = tuple(tasks)
+        self.numbers = task_numbers(self.tasks)
         self._show(highlight)
 
     def position(self, task_id: str) -> int:
         return next(i for i, t in enumerate(self.tasks) if t.id == task_id)
 
+    def tick(self) -> None:
+        """Turn the spinners: redraw just the rows of running tasks."""
+        frame = spinner_frame(self.clock())
+        for index, (state, number) in enumerate(zip(self.tasks, self.numbers, strict=True)):
+            if state.status == "running":
+                self.replace_option_prompt_at_index(index, task_label(state, number, frame))
+
     def _show(self, highlight: int | None) -> None:
+        frame = spinner_frame(self.clock())
         self.clear_options()
         self.add_options(
-            [task_label(t) for t in self.tasks] + [Text(NEW_TASK_LABEL, style="dim italic")]
+            [task_label(t, n, frame) for t, n in zip(self.tasks, self.numbers, strict=True)]
+            + [Text(NEW_TASK_LABEL, style="dim italic")]
         )
         self.highlighted = highlight
 
 
-def task_label(state: TaskState) -> Text:
+def task_numbers(tasks: Sequence[TaskState]) -> list[str]:
+    """Outline numbers: "1", "2", … for tasks, and "2.1", "2.2", … for the fixes under task 2.
+
+    Every fix in a chain (a fix of a fix, too) is numbered under the task that started it.
+    """
+    numbers: list[str] = []
+    top_number: dict[str, str] = {}  # top-level task id -> its number
+    top_of: dict[str, str] = {}  # task id -> id of the top-level task it belongs to
+    fixes_so_far: Counter[str] = Counter()
+    for state in tasks:
+        if state.fixes is None:
+            top = state.id
+            top_number[top] = str(len(top_number) + 1)
+            numbers.append(top_number[top])
+        else:
+            # A fix comes after the task it fixes, so that one is already placed.
+            top = top_of[state.fixes]
+            fixes_so_far[top] += 1
+            numbers.append(f"{top_number[top]}.{fixes_so_far[top]}")
+        top_of[state.id] = top
+    return numbers
+
+
+def task_label(state: TaskState, number: str, frame: str) -> Text:
+    """A row: number, status and title, with the settings lined up under the title.
+
+    Fix tasks are indented under the task they belong to. A running task shows the
+    spinner ``frame``.
+    """
     settings = state.task.settings
+    head = f"{number}. " if state.fixes is None else f"   {number} "
+    icon = frame if state.status == "running" else STATUS_ICONS[state.status]
     # Long prompts (like fix tasks) are titled by their first line.
     title = state.task.prompt.split("\n", 1)[0]
-    label = Text(f"{STATUS_ICONS[state.status]} {title}\n")
-    label.append(f"  {settings.model or 'default'} · {settings.tool_access}", style="dim")
+    label = Text(f"{head}{icon} {title}\n")
+    indent = " " * (len(head) + cell_len(icon) + 1)
+    label.append(f"{indent}{settings.model or 'default'} · {settings.tool_access}", style="dim")
     return label
 
 

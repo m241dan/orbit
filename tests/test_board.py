@@ -34,6 +34,7 @@ def test_a_fix_goes_right_behind_the_task_it_fixes() -> None:
     board.add(TWO)
     fix = board.add(FIX, fixes=first)
     assert prompts(board) == ["one", "fix it", "two"]
+    assert board.get(fix).fixes == first
     assert board.position(fix) == 1
 
 
@@ -99,6 +100,8 @@ def test_marking_fixed_leaves_tasks_that_changed_since_alone() -> None:
     board.set_status(first, "unverified")
     fix = board.add(FIX, fixes=first)
     board.edit(first, TWO)  # pending again, to be run as edited
+    board.edit(fix, FIX)  # still the fix for that task
+    assert board.get(fix).fixes == first
 
     board.set_status(fix, "completed")
     board.mark_fixed(fix)

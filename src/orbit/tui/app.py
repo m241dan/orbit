@@ -233,9 +233,9 @@ class OrbitApp(App[None], inherit_bindings=False):
                 self.query_one(TaskList).show(tasks)
             case TaskStarted(task_id=task_id):
                 task_list = self.query_one(TaskList)
-                position = task_list.position(task_id)
-                prompt = task_list.tasks[position].task.prompt
-                self._append(f"Task {position + 1}: {prompt}", "user")
+                index = task_list.position(task_id)
+                prompt = task_list.tasks[index].task.prompt
+                self._append(f"Task {task_list.numbers[index]}: {prompt}", "user")
             case VerificationChanged(steps=steps):
                 self.query_one(VerificationPanel).show(steps)
             case VerificationStarted(step=step):

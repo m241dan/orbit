@@ -22,7 +22,14 @@ from orbit.protocol import (
     UpdateSettings,
 )
 from orbit.tui import OrbitApp
-from orbit.tui.widgets import Entry, PickerScreen, PromptInput, SidePanel, Transcript
+from orbit.tui.widgets import (
+    Entry,
+    PickerScreen,
+    PromptInput,
+    SidePanel,
+    Transcript,
+    spinner_frame,
+)
 
 
 class FakeSession:
@@ -555,3 +562,9 @@ async def test_pickers_move_with_j_and_k() -> None:
         assert session.commands == [
             UpdateSettings(settings=Settings(model="opus", tool_access="restricted"))
         ]
+
+
+def test_spinner_cycles_the_arc_eight_frames_a_second() -> None:
+    frames = [spinner_frame(i / 8) for i in range(7)]
+    # Padded to two columns, like the emoji it stands beside.
+    assert frames == ["◜ ", "◠ ", "◝ ", "◞ ", "◡ ", "◟ ", "◜ "]

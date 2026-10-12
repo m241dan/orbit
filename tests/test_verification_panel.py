@@ -37,7 +37,7 @@ async def test_panel_shows_the_steps_the_backend_reports() -> None:
     async with app.run_test() as pilot:
         app.query_one(VerificationPanel).clock = lambda: 0.0
         await feed(session, pilot, report("pending", "running", "passed", "failed", "cancelled"))
-        assert steps(app) == "⏳ Unit tests\n🔍 Lint · 0s\n✅ Types\n❌ Docs\n🛑 Build"
+        assert steps(app) == "⏳ Unit tests\n◜  Lint · 0s\n✅ Types\n❌ Docs\n🛑 Build"
 
 
 async def test_running_step_shows_how_long_it_has_been_running() -> None:
@@ -48,19 +48,19 @@ async def test_running_step_shows_how_long_it_has_been_running() -> None:
         now = [100.0]
         panel.clock = lambda: now[0]
         await feed(session, pilot, report("running", "pending"))
-        now[0] = 112.7
+        now[0] = 112.625  # frame 901: the arc moves 8 frames a second, 6 to a turn
         panel.tick()
-        assert steps(app) == "🔍 Unit tests · 12s\n⏳ Lint"
+        assert steps(app) == "◠  Unit tests · 12s\n⏳ Lint"
 
         # Another report while the same step runs keeps its clock going.
         await feed(session, pilot, report("running", "pending"))
-        assert steps(app).startswith("🔍 Unit tests · 12s")
+        assert steps(app).startswith("◠  Unit tests · 12s")
 
         # The next step starts its own clock.
         await feed(session, pilot, report("passed", "running"))
-        now[0] = 115.0
+        now[0] = 114.75  # frame 918, back to the start of the arc
         panel.tick()
-        assert steps(app) == "✅ Unit tests\n🔍 Lint · 2s"
+        assert steps(app) == "✅ Unit tests\n◜  Lint · 2s"
 
         # With nothing running, ticking changes nothing.
         await feed(session, pilot, report("passed", "passed"))

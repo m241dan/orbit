@@ -77,6 +77,7 @@ def test_rejects_empty_task_prompt() -> None:
 
 def test_task_state_starts_pending() -> None:
     assert TaskState(id="1", task=TaskSpec(prompt="x")).status == "pending"
+    assert TaskState(id="1", task=TaskSpec(prompt="x")).fixes is None
     assert StepState(name="Unit tests").status == "pending"
 
 
@@ -86,7 +87,7 @@ def test_state_and_log_events_round_trip() -> None:
         TasksChanged(
             tasks=(
                 TaskState(id="1", task=TaskSpec(prompt="one"), status="unverified"),
-                TaskState(id="2", task=TaskSpec(prompt="fix it")),
+                TaskState(id="2", task=TaskSpec(prompt="fix it"), fixes="1"),
                 TaskState(id="3", task=TaskSpec(prompt="three"), status="verifying"),
             )
         ),
