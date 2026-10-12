@@ -54,9 +54,16 @@ After each task completes, orbit runs the verification steps in the working dire
 stopping at the first failure. While that happens the task shows 🔍, the conversation notes each step
 as it starts and ends, and the panel under the task list shows each step's progress on the current
 task (⏳ pending, ◜ running (spinning) with its elapsed time, ✅ passed, ❌ failed, 🛑 cancelled). There
-is one step so far:
+are six, quick ones first so a failure shows up in seconds; each must exit successfully:
 
-- Unit tests, 100% coverage: `uv run pytest --cov --cov-fail-under=100` must exit successfully.
+1. Ruff lint: `uv run ruff check`
+2. Ruff format: `uv run ruff format --check`
+3. Type check (mypy): `uv run mypy`
+4. Import contracts: `uv run lint-imports`
+5. Code quality (Lizard): `uv run lizard src -w` with limits on cyclomatic complexity, function
+   length and parameter count. They're set very high for now (`LIZARD_MAX_*` in
+   `src/orbit/agent/verify.py`), so it reports without failing; lower them to enforce them.
+6. Unit tests, 100% coverage: `uv run pytest --cov --cov-fail-under=100`
 
 When a step fails, the task is marked ❗ and a fix task is inserted right after it, indented and
 numbered under it (`1.1`, `1.2`, …), with the same model and tool access. Its prompt quotes the end
@@ -90,6 +97,7 @@ uv run ruff check .     # lint
 uv run ruff format .    # format
 uv run mypy             # type-check
 uv run lint-imports     # enforce frontend/backend separation
+uv run lizard src       # code quality: complexity and size per function
 ```
 
 ## Architecture

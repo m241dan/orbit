@@ -13,7 +13,34 @@ class VerificationStep:
     command: tuple[str, ...]
 
 
+# Lizard's limits: cyclomatic complexity, lines per function and parameters per function.
+# Set high for now so it reports without failing; lower them to start enforcing.
+LIZARD_MAX_CCN = 1000
+LIZARD_MAX_LENGTH = 10000
+LIZARD_MAX_ARGUMENTS = 100
+
+# Quick checks first, so a failure shows up in seconds rather than after the tests.
 DEFAULT_STEPS = (
+    VerificationStep(name="Ruff lint", command=("uv", "run", "ruff", "check")),
+    VerificationStep(name="Ruff format", command=("uv", "run", "ruff", "format", "--check")),
+    VerificationStep(name="Type check (mypy)", command=("uv", "run", "mypy")),
+    VerificationStep(name="Import contracts", command=("uv", "run", "lint-imports")),
+    VerificationStep(
+        name="Code quality (Lizard)",
+        command=(
+            "uv",
+            "run",
+            "lizard",
+            "src",
+            "-w",
+            "-C",
+            str(LIZARD_MAX_CCN),
+            "-L",
+            str(LIZARD_MAX_LENGTH),
+            "-a",
+            str(LIZARD_MAX_ARGUMENTS),
+        ),
+    ),
     VerificationStep(
         name="Unit tests, 100% coverage",
         command=("uv", "run", "pytest", "--cov", "--cov-fail-under=100"),

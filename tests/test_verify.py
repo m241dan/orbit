@@ -14,9 +14,18 @@ def python_step(code: str, name: str = "check") -> VerificationStep:
     return VerificationStep(name=name, command=(sys.executable, "-c", code))
 
 
-def test_default_step_requires_tests_to_pass_with_full_coverage() -> None:
-    [step] = DEFAULT_STEPS
-    assert step.command == ("uv", "run", "pytest", "--cov", "--cov-fail-under=100")
+def test_default_steps_run_the_quick_checks_before_the_tests() -> None:
+    assert [(s.name, s.command) for s in DEFAULT_STEPS] == [
+        ("Ruff lint", ("uv", "run", "ruff", "check")),
+        ("Ruff format", ("uv", "run", "ruff", "format", "--check")),
+        ("Type check (mypy)", ("uv", "run", "mypy")),
+        ("Import contracts", ("uv", "run", "lint-imports")),
+        (
+            "Code quality (Lizard)",
+            ("uv", "run", "lizard", "src", "-w", "-C", "1000", "-L", "10000", "-a", "100"),
+        ),
+        ("Unit tests, 100% coverage", ("uv", "run", "pytest", "--cov", "--cov-fail-under=100")),
+    ]
 
 
 async def test_step_passes_on_zero_exit_and_captures_both_streams() -> None:

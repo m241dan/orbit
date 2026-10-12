@@ -29,8 +29,8 @@ def chat(
     verify: Annotated[
         bool,
         typer.Option(
-            help="After each task, run the unit tests and require 100% coverage; a failure"
-            " queues a task to fix it."
+            help="After each task, run the linters, type check, code quality check and unit"
+            " tests (100% coverage); a failure queues a task to fix it."
         ),
     ] = True,
 ) -> None:
