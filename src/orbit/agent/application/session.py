@@ -9,6 +9,7 @@ import uuid
 from collections.abc import AsyncIterator, Coroutine, Sequence
 from typing import Any, assert_never
 
+from orbit.agent.application.agent_run import AgentDesk, AgentRun, Agents
 from orbit.agent.application.ports import TurnRunner
 from orbit.agent.application.verifier import Verification, Verifier
 from orbit.agent.domain.board import TaskBoard
@@ -63,6 +64,7 @@ class AgentSession:
         settings: Settings | None = None,
         model_choices: Sequence[str] = (),
         verification: Verification | None = None,
+        agents: Agents | None = None,
     ) -> None:
         self._runner = runner
         self._settings = settings or Settings()
@@ -71,6 +73,7 @@ class AgentSession:
         self._board = TaskBoard([s.name for s in steps])
         self._events: asyncio.Queue[Event] = asyncio.Queue()
         self._verifier = _verifier(verification, self._board, self._events)
+        self._desk = AgentDesk(agents, self._events.put) if agents else None
         self._events.put_nowait(self._settings_changed())
         if self._verifier:
             self._events.put_nowait(VerificationChanged(steps=self._board.steps))
@@ -183,6 +186,18 @@ class AgentSession:
             self._board.reset_steps()
             await self._checks.publish_steps()
         await self._events.put(TaskStarted(task_id=task_id))
+        if self._desk is not None:
+            status = await self._run_agent(self._desk, task_id, before, attempts)
+        else:
+            status = await self._run_task_turn(task_id, task, before, attempts)
+        self._board.finish(task_id, status)
+        await self._publish_tasks()
+        return status
+
+    async def _run_task_turn(
+        self, task_id: str, task: TaskSpec, before: object, attempts: FixAttempts
+    ) -> TaskStatus:
+        """Run ``task`` as a turn of a new context, then verify it."""
         status: TaskStatus = await self._run_turn(
             self._runner.new_context(), task.prompt, task.settings
         )
@@ -192,9 +207,21 @@ class AgentSession:
             except asyncio.CancelledError:
                 status = "cancelled"
                 await self._checks.cancel()
-        self._board.finish(task_id, status)
-        await self._publish_tasks()
         return status
+
+    async def _run_agent(
+        self, desk: AgentDesk, task_id: str, before: object, attempts: FixAttempts
+    ) -> TaskStatus:
+        """Run task ``task_id`` through a new agent; a fallback queues a fix for a fresh one."""
+        try:
+            outcome = await AgentRun(task_id, self._board, self._verifier, desk).run(before)
+        except asyncio.CancelledError:
+            if self._verifier:
+                await self._verifier.cancel()
+            return "cancelled"
+        if outcome.failure is not None and outcome.status == "unverified":
+            await self._queue_fix(task_id, attempts, *outcome.failure)
+        return outcome.status
 
     async def _check(self, task_id: str, before: object, attempts: FixAttempts) -> TaskStatus:
         """Verify a task whose turn completed.

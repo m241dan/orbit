@@ -52,3 +52,11 @@ class AgentRegistry:
     def revoke(self, agent_id: str) -> None:
         """Stop agent ``agent_id``'s token from resolving; harmless if it already doesn't."""
         self._by_token = {t: a for t, a in self._by_token.items() if a.id != agent_id}
+
+
+def bootstrap_prompt(agent: Agent) -> str:
+    """What a new agent is told: who it is, and to fetch its task from orbit."""
+    return (
+        f"You are {agent.id}, orbit's {agent.role}. Call orbit's get_task tool to get your"
+        " task, then follow the instructions in its reply."
+    )

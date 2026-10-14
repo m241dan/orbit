@@ -7,6 +7,7 @@ Layered, outermost first; each layer may import only the ones below it:
 - ``domain``: the rules the application decides by. Pure.
 """
 
+from orbit.agent.application.agent_run import Agents
 from orbit.agent.application.loop import ModelLoopRunner
 from orbit.agent.application.ports import ModelClient, StepRunner, Tool, TurnRunner, Workspace
 from orbit.agent.application.session import AgentSession
@@ -22,6 +23,7 @@ __all__ = [
     "DEFAULT_STEPS",
     "MODEL_ALIASES",
     "AgentSession",
+    "Agents",
     "ClaudeCliRunner",
     "EchoModel",
     "ModelClient",

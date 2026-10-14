@@ -57,6 +57,12 @@ class TaskBoard:
         index = self.position(task_id)
         self._tasks[index] = self._tasks[index].model_copy(update={"status": status})
 
+    def set_attempt(self, task_id: str, attempt: int, max_attempts: int) -> None:
+        """Task ``task_id``'s agent has been asked for fix ``attempt`` of ``max_attempts``."""
+        index = self.position(task_id)
+        update = {"attempt": attempt, "max_attempts": max_attempts}
+        self._tasks[index] = self._tasks[index].model_copy(update=update)
+
     def finish(self, task_id: str, status: TaskStatus) -> None:
         """Record how task ``task_id`` ended; a completed fix also completes what it fixed."""
         self.set_status(task_id, status)

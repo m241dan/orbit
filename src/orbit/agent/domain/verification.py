@@ -58,11 +58,15 @@ class FixAttempts:
         self._made[fix_id] = {**made, step: made.get(step, 0) + 1}
 
 
+def trim_output(output: str) -> str:
+    """``output`` without surrounding whitespace, keeping only its end if it's long."""
+    output = output.strip()
+    return "…" + output[-OUTPUT_LIMIT:] if len(output) > OUTPUT_LIMIT else output
+
+
 def fix_prompt(step: VerificationStep, output: str) -> str:
     """A task prompt asking to fix why ``step`` failed. Its first line works as a title."""
-    output = output.strip()
-    if len(output) > OUTPUT_LIMIT:
-        output = "…" + output[-OUTPUT_LIMIT:]
+    output = trim_output(output)
     return (
         f"Fix the failed verification step: {step.name}\n\n"
         f"This command must exit successfully:\n\n    {shlex.join(step.command)}\n\n"
