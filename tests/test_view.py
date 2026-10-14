@@ -21,8 +21,10 @@ from orbit.protocol import (
     ToolCallStarted,
 )
 from orbit.tui.view import (
+    ALL_TAB_LABEL,
     STATUS_ICONS,
     AgentRow,
+    ConversationTab,
     activity_entry,
     agent_entry,
     agent_line,
@@ -33,8 +35,10 @@ from orbit.tui.view import (
     review_line,
     settings_summary,
     step_lines,
+    tab_labels,
     task_started_entry,
     track_agents,
+    track_tabs,
     turn_end_entry,
     verification_finished_entry,
     verification_skipped_entry,
@@ -190,3 +194,27 @@ def test_the_filter_cycles_through_everything_and_each_agent() -> None:
     assert next_filter("agent-2", seen) is None
     assert next_filter(None, ()) is None
     assert next_filter("agent-9", seen) is None
+
+
+def test_each_started_agent_gets_a_tab_until_it_exits() -> None:
+    tabs: tuple[ConversationTab, ...] = ()
+    tabs = track_tabs(tabs, AgentStarted(agent_id="agent-1", role="coder", task_id="1"))
+    tabs = track_tabs(tabs, AgentStarted(agent_id="agent-2", role="reviewer", task_id="2"))
+    assert tabs == (ConversationTab("agent-1", "coder"), ConversationTab("agent-2", "reviewer"))
+    tabs = track_tabs(tabs, AgentExited(agent_id="agent-1", reason="finished"))
+    assert tabs == (ConversationTab("agent-2", "reviewer"),)
+    assert track_tabs(tabs, Notice(message="x")) is tabs
+
+
+def test_tabs_are_named_by_role_and_numbered_among_those_open() -> None:
+    assert ALL_TAB_LABEL == "All"
+    assert tab_labels(()) == []
+    tabs: tuple[ConversationTab, ...] = (
+        ConversationTab("agent-1", "coder"),
+        ConversationTab("agent-2", "reviewer"),
+        ConversationTab("agent-3", "coder"),
+        ConversationTab("agent-4", "coder"),
+    )
+    assert tab_labels(tabs) == ["coder", "reviewer", "coder 2", "coder 3"]
+    tabs = track_tabs(tabs, AgentExited(agent_id="agent-1", reason="finished"))
+    assert tab_labels(tabs) == ["reviewer", "coder", "coder 2"]

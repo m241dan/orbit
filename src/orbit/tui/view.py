@@ -325,6 +325,41 @@ def review_line(status: ReviewStatus | None) -> str:
     return "review: active" + (f" · {status.open_batches} open" if status.open_batches else "")
 
 
+# Conversation tabs
+
+ALL_TAB_LABEL = "All"
+"""The fixed first tab, showing every conversation; it isn't one of the tracked tabs."""
+
+
+@dataclass(frozen=True)
+class ConversationTab:
+    """A running agent's conversation tab, and whether it has output not yet looked at."""
+
+    agent_id: str
+    role: str
+    unread: bool = False
+
+
+def track_tabs(tabs: tuple[ConversationTab, ...], event: Event) -> tuple[ConversationTab, ...]:
+    """The open conversation tabs after ``event``."""
+    if isinstance(event, AgentStarted):
+        return (*tabs, ConversationTab(event.agent_id, event.role))
+    if isinstance(event, AgentExited):
+        return tuple(tab for tab in tabs if tab.agent_id != event.agent_id)
+    return tabs
+
+
+def tab_labels(tabs: Sequence[ConversationTab]) -> list[str]:
+    """Tabs named by role: the first of a role is just the role, later ones "coder 2", …"""
+    seen: Counter[str] = Counter()
+    labels: list[str] = []
+    for tab in tabs:
+        seen[tab.role] += 1
+        count = seen[tab.role]
+        labels.append(tab.role if count == 1 else f"{tab.role} {count}")
+    return labels
+
+
 def next_filter(current: str | None, agents: Sequence[str]) -> str | None:
     """The agent to show the transcript of after ``current``: each in turn, then all (``None``)."""
     order: list[str | None] = [None, *agents]
