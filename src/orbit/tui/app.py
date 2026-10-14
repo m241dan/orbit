@@ -103,6 +103,10 @@ class OrbitApp(App[None], inherit_bindings=False):
         Binding("k", "move('k')", show=False),
         Binding("l", "move('l')", show=False),
         Binding("enter", "activate", show=False),
+        # Priority, to beat the screen's focus_next; check_action lets it through
+        # to that everywhere but normal mode.
+        Binding("tab", "cycle_tab(1)", "Next agent", key_display="Tab", priority=True),
+        Binding("shift+tab", "cycle_tab(-1)", show=False, priority=True),
         Binding("i", "insert_mode", "Type"),
         Binding("ctrl+r", "run_tasks", "Run tasks"),
         Binding("ctrl+g", "super_review", "Super review"),
@@ -169,6 +173,22 @@ class OrbitApp(App[None], inherit_bindings=False):
         target = NEIGHBORS[self._selected].get(direction)
         if target is not None and self.focused is None:
             self._select(target)
+
+    def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
+        if action == "cycle_tab":
+            return self._normal_mode()
+        return True
+
+    def _normal_mode(self) -> bool:
+        """Nothing focused on the main screen: no typing, list mode or modal screen."""
+        return len(self.screen_stack) == 1 and self.focused is None
+
+    def action_cycle_tab(self, step: int) -> None:
+        tabs = self.query_one(ConversationTabs)
+        if step > 0:
+            tabs.action_next_tab()
+        else:
+            tabs.action_previous_tab()
 
     def action_activate(self) -> None:
         if self._selected == "task-list":

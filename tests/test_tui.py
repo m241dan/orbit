@@ -26,6 +26,7 @@ from orbit.protocol import (
     UpdateSettings,
 )
 from orbit.tui import OrbitApp
+from orbit.tui.tasks import TaskList
 from orbit.tui.view import spinner_frame
 from orbit.tui.widgets import (
     ConversationTabs,
@@ -747,3 +748,76 @@ async def test_f_no_longer_filters() -> None:
         await pilot.press("f")
         assert app.query_one(Transcript).only is None
         assert len(shown(app)) == 2
+
+
+def active_tab(app: OrbitApp) -> str:
+    tab = app.query_one(ConversationTabs).active_tab
+    assert tab is not None
+    return tab.label_text
+
+
+async def test_tab_and_shift_tab_cycle_the_conversation_tabs_and_wrap() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test(size=(120, 30)) as pilot:
+        await feed_events(session, pilot, started("agent-1"), started("agent-2", "reviewer"))
+        transcript = app.query_one(Transcript)
+
+        await pilot.press("tab")
+        assert active_tab(app) == "coder"
+        assert transcript.only == "agent-1"
+        await pilot.press("tab")
+        assert active_tab(app) == "reviewer"
+        await pilot.press("tab")
+        assert active_tab(app) == "All"
+        assert transcript.only is None
+        await pilot.press("shift+tab")
+        assert active_tab(app) == "reviewer"
+        assert transcript.only == "agent-2"
+        await pilot.press("shift+tab", "shift+tab")
+        assert active_tab(app) == "All"
+        assert app.focused is None
+
+
+async def test_tab_with_no_agents_stays_on_all() -> None:
+    app = OrbitApp(FakeSession())
+    async with app.run_test() as pilot:
+        await pilot.press("tab", "shift+tab")
+        assert active_tab(app) == "All"
+        assert app.focused is None
+        assert app.query_one(Transcript).only is None
+
+
+async def test_tab_shows_in_the_footer() -> None:
+    app = OrbitApp(FakeSession())
+    async with app.run_test(size=(200, 30)):
+        keys = {b.binding.description for b in app.active_bindings.values() if b.binding.show}
+        assert "Next agent" in keys
+
+
+async def test_tab_keeps_its_normal_behaviour_outside_normal_mode() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test(size=(120, 30)) as pilot:
+        await feed_events(session, pilot, started("agent-1"))
+
+        # Typing in the prompt.
+        await pilot.press("i", "tab")
+        assert active_tab(app) == "All"
+        assert app.focused is not None
+        await pilot.press("escape")
+        assert app.focused is None
+
+        # The task list in list mode, then its editor, where j/k still move between fields.
+        await pilot.press("l", "k", "enter")
+        assert app.focused is app.query_one(TaskList)
+        await pilot.press("shift+tab")
+        assert active_tab(app) == "All"
+        app.set_focus(None)
+        await pilot.press("l", "k", "enter", "enter")
+        assert len(app.screen_stack) == 2
+        await pilot.press("tab", "shift+tab", "j")
+        assert active_tab(app) == "All"
+        assert app.screen.query_one("#task-model").has_class("selected")
+        await pilot.press("i", "tab")
+        assert active_tab(app) == "All"
