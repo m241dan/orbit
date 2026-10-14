@@ -6,7 +6,9 @@ from collections.abc import Collection, Sequence
 from orbit.protocol import StepState, StepStatus, TaskSpec, TaskState, TaskStatus
 
 # Statuses a run leaves alone; any other task is worth (another) run.
-SETTLED: frozenset[TaskStatus] = frozenset({"running", "verifying", "completed", "unverified"})
+SETTLED: frozenset[TaskStatus] = frozenset(
+    {"running", "verifying", "completed", "unverified", "gave_up"}
+)
 
 
 class TaskBoard:
@@ -73,10 +75,12 @@ class TaskBoard:
                 self.set_status(fixed, "completed")
             fixed = self.get(fixed).fixes
 
-    def next_runnable(self, skip: Collection[str] = ()) -> str | None:
-        """The first task that isn't settled or in ``skip``, if any."""
+    def next_runnable(self, skip: Collection[str] = (), role: str | None = None) -> str | None:
+        """The first task that isn't settled or in ``skip``, if any; only ``role``'s if given."""
         for state in self._tasks:
-            if state.status not in SETTLED and state.id not in skip:
+            if state.status in SETTLED or state.id in skip:
+                continue
+            if role is None or state.task.role == role:
                 return state.id
         return None
 

@@ -132,3 +132,18 @@ def test_step_statuses_follow_a_verification_and_reset() -> None:
     assert [s.status for s in board.steps] == ["pending", "pending"]
     board.skip_steps()
     assert [s.status for s in board.steps] == ["skipped", "skipped"]
+
+
+def test_next_runnable_can_be_limited_to_a_role() -> None:
+    board = TaskBoard()
+    board.add(TaskSpec(prompt="review", role="reviewer"))
+    code = board.add(TaskSpec(prompt="code"))
+    assert board.next_runnable(role="coder") == code
+    assert board.next_runnable(role="planner") is None
+
+
+def test_tasks_given_up_on_are_not_run_again() -> None:
+    board = TaskBoard()
+    task_id = board.add(ONE)
+    board.set_status(task_id, "gave_up")
+    assert board.next_runnable() is None
