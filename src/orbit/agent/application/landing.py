@@ -1,6 +1,6 @@
 """Landing a task's verified work: committing it in the coder's tree and merging it."""
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 
 from orbit.agent.application.ports import CoderTree, Merge
 from orbit.agent.application.verifier import Failure, Verifier
@@ -27,10 +27,10 @@ class Lander:
         self._verifier = verifier
         self._publish = publish
 
-    async def land(self, task_id: str, summary: str | None, root: str) -> Failure | None:
+    async def land(self, task_id: str, summaries: Sequence[str], root: str) -> Failure | None:
         """Commit task ``task_id``'s work and merge it; returns why it failed verification
         after being rebased onto a moved base, if it did."""
-        await self._tree.commit(commit_message(self._board.get(task_id).task, summary))
+        await self._tree.commit(commit_message(self._board.get(task_id).task, summaries))
         merge = await self._tree.integrate()
         for _ in range(MAX_REBASES):
             if merge.result != "rebased":

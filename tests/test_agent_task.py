@@ -179,3 +179,11 @@ def test_giving_up_or_checking_outside_work_is_refused_by_phase() -> None:
     assert "finished" in finished.give_up("no")
     assert "finished" in (finished.request_check() or "")
     assert finished.phase == "done"
+
+
+def test_every_accepted_claim_keeps_its_summary_and_the_first_names_the_work() -> None:
+    agent_task = verifying()
+    agent_task.failed(STEP, "1 failed")
+    agent_task.claim_done("fixed the test")
+    assert agent_task.summaries == ["added it", "fixed the test"]
+    assert agent_task.summary == "added it"

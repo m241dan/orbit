@@ -159,3 +159,18 @@ async def test_without_verification_rebased_work_is_merged_straight_away() -> No
     session, _, _ = session_for(claims_done, tree=tree)
     events = await asyncio.wait_for(run(session), 5)
     assert TaskMerged(task_id="1", result="merged") in events
+
+
+async def test_the_commit_lists_the_fixes_made_after_verification() -> None:
+    async def fixes_once(call: Call) -> TurnEndReason:
+        await call("get_task")
+        await call("complete_task", summary="Add the --fast flag")
+        await call("complete_task", summary="Fix the failing test")
+        return "completed"
+
+    tree = FakeTree()
+    session, _, _ = session_for(fixes_once, verification=verified(Steps(False, True)), tree=tree)
+    await asyncio.wait_for(run(session), 5)
+    [message] = tree.commits
+    assert message.startswith("Add the --fast flag\n")
+    assert message.endswith("Fixed after verification:\n- Fix the failing test")

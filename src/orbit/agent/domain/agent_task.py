@@ -75,7 +75,7 @@ class AgentTask:
         self.alive = True
         self.attempt = 0
         self.checks = 0
-        self.summary: str | None = None
+        self.summaries: list[str] = []  # One per claim orbit accepted, in order.
         self.reason: str | None = None
 
     def get_task(self) -> str:
@@ -86,8 +86,14 @@ class AgentTask:
     def claim_done(self, summary: str) -> Claim:
         if self.phase != "working":
             return Claim(verify=False, reply=REFUSALS[self.phase])
-        self.phase, self.summary = "verifying", summary
+        self.phase = "verifying"
+        self.summaries.append(summary)
         return Claim(verify=True)
+
+    @property
+    def summary(self) -> str | None:
+        """What the agent said it did when it first claimed the task was done."""
+        return self.summaries[0] if self.summaries else None
 
     def passed(self) -> str:
         self.phase = "done"

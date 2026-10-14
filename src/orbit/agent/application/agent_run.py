@@ -79,11 +79,11 @@ class Agents:
 @dataclass(frozen=True)
 class Outcome:
     """How a task ended: its status, the failure to hand a fresh agent if it fell back, and
-    the agent's summary of what it did."""
+    the agent's summaries of what it did, one per claim."""
 
     status: TaskStatus
     failure: Failure | None = None
-    summary: str | None = None
+    summaries: tuple[str, ...] = ()
 
 
 def _answer(claim: "asyncio.Future[Reply] | None", reply: Reply) -> None:
@@ -188,7 +188,7 @@ class AgentRun:
         finally:
             await self._stop(stream)
             self._desk.close(self.agent)
-        return Outcome(STATUSES[self._work.phase], self._failure, self._work.summary)
+        return Outcome(STATUSES[self._work.phase], self._failure, tuple(self._work.summaries))
 
     async def handle(self, tool: str, arguments: dict[str, Any]) -> Reply:
         answer = self._tools.get(tool)

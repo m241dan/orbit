@@ -1,5 +1,7 @@
 """Commit messages for the work agents finish."""
 
+from collections.abc import Sequence
+
 from orbit.protocol import TaskSpec
 
 # Git's conventional limit for a subject line, and how much of the task to quote below it.
@@ -7,16 +9,26 @@ SUBJECT_LIMIT = 72
 PROMPT_LIMIT = 2000
 
 
-def commit_message(task: TaskSpec, summary: str | None) -> str:
-    """The agent's summary as the subject (or the task's first line without one), and the
-    task's prompt as the body."""
-    subject = _first_line(summary or "") or _first_line(task.prompt)
-    if len(subject) > SUBJECT_LIMIT:
-        subject = subject[: SUBJECT_LIMIT - 1] + "…"
-    prompt = task.prompt.strip()
-    if len(prompt) > PROMPT_LIMIT:
-        prompt = prompt[:PROMPT_LIMIT] + "…"
-    return f"{subject}\n\nOrbit task:\n\n{prompt}"
+def commit_message(task: TaskSpec, summaries: Sequence[str]) -> str:
+    """The agent's first summary as the subject (or the task's first line without one), the
+    task's prompt as the body, and any later summaries, of fixes made after verification
+    failed, listed below it."""
+    message = (
+        f"{_subject(task, summaries)}\n\nOrbit task:\n\n{_trim(task.prompt.strip(), PROMPT_LIMIT)}"
+    )
+    fixes = [line for line in map(_first_line, summaries[1:]) if line]
+    if fixes:
+        message += "\n\nFixed after verification:\n" + "\n".join(f"- {fix}" for fix in fixes)
+    return message
+
+
+def _subject(task: TaskSpec, summaries: Sequence[str]) -> str:
+    first = _first_line(summaries[0]) if summaries else ""
+    return _trim(first or _first_line(task.prompt), SUBJECT_LIMIT - 1)
+
+
+def _trim(text: str, limit: int) -> str:
+    return text[:limit] + "…" if len(text) > limit else text
 
 
 def _first_line(text: str) -> str:

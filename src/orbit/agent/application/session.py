@@ -246,7 +246,7 @@ class AgentSession:
         if desk.agents.tree is None:
             return outcome
         lander = Lander(desk.agents.tree, self._board, self._verifier, self._events.put)
-        failure = await lander.land(task_id, outcome.summary, root)
+        failure = await lander.land(task_id, outcome.summaries, root)
         return outcome if failure is None else Outcome("unverified", failure)
 
     async def _prepare(self, desk: AgentDesk, task_id: str) -> str:
