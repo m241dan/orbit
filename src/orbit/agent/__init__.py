@@ -9,8 +9,9 @@ Layered, outermost first; each layer may import only the ones below it:
 
 from orbit.agent.application.loop import ModelLoopRunner
 from orbit.agent.application.ports import ModelClient, StepRunner, Tool, TurnRunner, Workspace
-from orbit.agent.application.session import AgentSession, Verification
+from orbit.agent.application.session import AgentSession
 from orbit.agent.application.tools import ToolRegistry
+from orbit.agent.application.verifier import Verification
 from orbit.agent.domain.verification import VerificationStep
 from orbit.agent.external.checks import DEFAULT_STEPS, run_step
 from orbit.agent.external.claude_cli import MODEL_ALIASES, ClaudeCliRunner

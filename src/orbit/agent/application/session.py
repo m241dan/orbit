@@ -7,19 +7,12 @@ ports to do it, and reports what happened as events.
 import asyncio
 import uuid
 from collections.abc import AsyncIterator, Coroutine, Sequence
-from dataclasses import dataclass
 from typing import Any, assert_never
 
-from orbit.agent.application.ports import StepRunner, TurnRunner, Workspace
+from orbit.agent.application.ports import TurnRunner
+from orbit.agent.application.verifier import Verification, Verifier
 from orbit.agent.domain.board import TaskBoard
-from orbit.agent.domain.verification import (
-    MAX_FIX_ATTEMPTS,
-    FixAttempts,
-    VerificationStep,
-    fix_prompt,
-    may_change_files,
-    skip_reason,
-)
+from orbit.agent.domain.verification import FixAttempts, VerificationStep, fix_prompt
 from orbit.protocol import (
     AddTask,
     BusyChanged,
@@ -40,25 +33,16 @@ from orbit.protocol import (
     TurnFinished,
     UpdateSettings,
     VerificationChanged,
-    VerificationFinished,
-    VerificationSkipped,
-    VerificationStarted,
 )
 
 
-@dataclass(frozen=True)
-class Verification:
-    """How tasks are checked once their turn completes.
-
-    ``steps`` run in order through ``run_step`` until one fails. ``workspace`` tells
-    whether a task changed any files; without it, every task counts as changing them.
-    A task's chain of fixes gets ``max_fix_attempts`` for each step.
-    """
-
-    steps: tuple[VerificationStep, ...]
-    run_step: StepRunner
-    workspace: Workspace | None = None
-    max_fix_attempts: int = MAX_FIX_ATTEMPTS
+def _verifier(
+    verification: Verification | None, board: TaskBoard, events: "asyncio.Queue[Event]"
+) -> Verifier | None:
+    """What checks tasks on ``board``; none when ``verification`` has no steps."""
+    if verification is None or not verification.steps:
+        return None
+    return Verifier(verification, board, events.put)
 
 
 class AgentSession:
@@ -84,11 +68,11 @@ class AgentSession:
         self._settings = settings or Settings()
         self._model_choices = tuple(model_choices)
         steps = verification.steps if verification else ()
-        self._verification = verification if steps else None
         self._board = TaskBoard([s.name for s in steps])
         self._events: asyncio.Queue[Event] = asyncio.Queue()
+        self._verifier = _verifier(verification, self._board, self._events)
         self._events.put_nowait(self._settings_changed())
-        if self._verification:
+        if self._verifier:
             self._events.put_nowait(VerificationChanged(steps=self._board.steps))
         self._turn: asyncio.Task[object] | None = None
 
@@ -106,12 +90,12 @@ class AgentSession:
 
     @property
     def verification(self) -> Verification | None:
-        return self._verification
+        return self._verifier.verification if self._verifier else None
 
     @property
-    def _checks(self) -> Verification:
-        assert self._verification is not None  # Only used while verifying a task.
-        return self._verification
+    def _checks(self) -> Verifier:
+        assert self._verifier is not None  # Only used while verifying a task.
+        return self._verifier
 
     async def send(self, command: Command) -> None:
         match command:
@@ -192,83 +176,42 @@ class AgentSession:
         """Run one task in a new context, then verify it; returns its final status."""
         task = self._board.get(task_id).task
         # Before the task shows as running, so a cancel here leaves it pending.
-        before = await self._state_before(task)
+        before = await self._verifier.state_before(task) if self._verifier else None
         self._board.set_status(task_id, "running")
         await self._publish_tasks()
-        if self._verification:
+        if self._verifier:
             self._board.reset_steps()
-            await self._publish_steps()
+            await self._checks.publish_steps()
         await self._events.put(TaskStarted(task_id=task_id))
         status: TaskStatus = await self._run_turn(
             self._runner.new_context(), task.prompt, task.settings
         )
-        if status == "completed" and self._verification:
+        if status == "completed" and self._verifier:
             try:
-                status = await self._check(task_id, task, before, attempts)
+                status = await self._check(task_id, before, attempts)
             except asyncio.CancelledError:
                 status = "cancelled"
-                self._board.cancel_running_steps()
-                await self._publish_steps()
+                await self._checks.cancel()
         self._board.finish(task_id, status)
         await self._publish_tasks()
         return status
 
-    async def _state_before(self, task: TaskSpec) -> object:
-        """The working tree's state, when it will tell whether ``task`` changed files."""
-        if self._verification is None or not may_change_files(task):
-            return None
-        workspace = self._verification.workspace
-        return None if workspace is None else await workspace()
-
-    async def _state_after(self, before: object) -> object:
-        if before is None:
-            return None  # Nothing to compare with, so don't look.
-        workspace = self._checks.workspace
-        assert workspace is not None  # It produced ``before``.
-        return await workspace()
-
-    async def _check(
-        self, task_id: str, task: TaskSpec, before: object, attempts: FixAttempts
-    ) -> TaskStatus:
-        """Verify a task whose turn completed, unless there's nothing to verify.
+    async def _check(self, task_id: str, before: object, attempts: FixAttempts) -> TaskStatus:
+        """Verify a task whose turn completed.
 
         Returns its status: ``completed``, or ``unverified`` after queueing a fix.
         """
-        reason = skip_reason(task, before, await self._state_after(before))
-        if reason is not None:
-            self._board.skip_steps()
-            await self._publish_steps()
-            await self._events.put(VerificationSkipped(task_id=task_id, reason=reason))
-            return "completed"
-        self._board.set_status(task_id, "verifying")
-        await self._publish_tasks()
-        failure = await self._verify(task_id)
+        failure = await self._checks.check(task_id, before)
         if failure is None:
             return "completed"
         await self._queue_fix(task_id, attempts, *failure)
         return "unverified"
 
-    async def _verify(self, task_id: str) -> tuple[VerificationStep, str] | None:
-        """Run the steps after task ``task_id``; returns the first failure and its output."""
-        for number, step in enumerate(self._checks.steps):
-            self._board.set_step(number, "running")
-            await self._publish_steps()
-            await self._events.put(VerificationStarted(task_id=task_id, step=number))
-            passed, output = await self._checks.run_step(step)
-            self._board.set_step(number, "passed" if passed else "failed")
-            await self._publish_steps()
-            await self._events.put(
-                VerificationFinished(task_id=task_id, step=number, passed=passed)
-            )
-            if not passed:
-                return step, output
-        return None
-
     async def _queue_fix(
         self, task_id: str, attempts: FixAttempts, step: VerificationStep, output: str
     ) -> None:
         """Add a task fixing ``step`` right after ``task_id``, unless its attempts ran out."""
-        limit = self._checks.max_fix_attempts
+        limit = self._checks.verification.max_fix_attempts
         if attempts.exhausted(task_id, step.name, limit):
             message = f"Verification step {step.name!r} still fails after {limit} fix attempts."
             await self._events.put(ErrorOccurred(message=message))
@@ -279,9 +222,6 @@ class AgentSession:
 
     async def _publish_tasks(self) -> None:
         await self._events.put(TasksChanged(tasks=self._board.tasks))
-
-    async def _publish_steps(self) -> None:
-        await self._events.put(VerificationChanged(steps=self._board.steps))
 
     async def _run_turn(self, runner: TurnRunner, text: str, settings: Settings) -> TurnEndReason:
         """Run one turn, publishing its events; returns how it ended."""
