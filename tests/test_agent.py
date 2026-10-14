@@ -1,7 +1,6 @@
 import asyncio
 import sys
-from collections.abc import AsyncIterator, Callable, Sequence
-from pathlib import Path
+from collections.abc import AsyncIterator, Sequence
 from typing import Any
 
 from orbit.agent import (
@@ -25,14 +24,12 @@ from orbit.protocol import (
     EditTask,
     ErrorOccurred,
     Event,
-    RunTasks,
     Settings,
     SettingsChanged,
     StepState,
     SubmitPrompt,
     TasksChanged,
     TaskSpec,
-    TaskStarted,
     TaskState,
     ToolAccess,
     ToolCallFinished,
@@ -43,8 +40,6 @@ from orbit.protocol import (
     UpdateSettings,
     VerificationChanged,
     VerificationFinished,
-    VerificationSkipped,
-    VerificationStarted,
 )
 
 
@@ -214,9 +209,6 @@ class RecordingRunner:
         self.log = [] if log is None else log
         self.settings_seen: list[Settings] = []
 
-    def new_context(self) -> "RecordingRunner":
-        return RecordingRunner(self.log)
-
     async def run_turn(self, turn_id: str, prompt: str, settings: Settings) -> AsyncIterator[Event]:
         self.settings_seen.append(settings)
         self.log.append((self, prompt, settings))
@@ -273,34 +265,8 @@ async def collect_run(session: AgentSession) -> list[Event]:
     return events
 
 
-async def add_tasks(session: AgentSession, *tasks: TaskSpec) -> list[str]:
-    """Queue ``tasks``; returns their ids and drains the board updates."""
-    stream = session.events()
-    for task in tasks:
-        await session.send(AddTask(task=task))
-    board: tuple[TaskState, ...] = ()
-    while len(board) < len(tasks):
-        event = await anext(stream)
-        if isinstance(event, TasksChanged):
-            board = event.tasks
-    return [t.id for t in board]
-
-
 def kinds(events: list[Event]) -> list[str]:
     return [e.type for e in events]
-
-
-def last_board(events: list[Event]) -> tuple[TaskState, ...]:
-    return [e for e in events if isinstance(e, TasksChanged)][-1].tasks
-
-
-def statuses(events: list[Event]) -> list[str]:
-    return [t.status for t in last_board(events)]
-
-
-def step_statuses(events: list[Event]) -> list[str]:
-    last = [e for e in events if isinstance(e, VerificationChanged)][-1]
-    return [s.status for s in last.steps]
 
 
 async def test_add_and_edit_tasks_publish_the_board() -> None:
@@ -346,170 +312,6 @@ async def test_work_started_as_the_last_ends_is_not_reported_idle() -> None:
     assert kinds(events).count("turn_finished") == 2
 
 
-async def test_run_tasks_runs_each_in_a_new_context_with_its_settings() -> None:
-    runner = RecordingRunner()
-    session = AgentSession(runner, Settings(model="sonnet"))
-    first = TaskSpec(prompt="one", settings=Settings(model="opus", tool_access="full"))
-    second = TaskSpec(prompt="two", settings=Settings(tool_access="off"))
-    ids = await add_tasks(session, first, second)
-    await session.send(RunTasks())
-    events = await collect_run(session)
-
-    assert kinds(events) == [
-        "busy_changed",
-        "tasks_changed",
-        "task_started",
-        "turn_started",
-        "turn_finished",
-        "tasks_changed",
-        "tasks_changed",
-        "task_started",
-        "turn_started",
-        "turn_finished",
-        "tasks_changed",
-        "busy_changed",
-    ]
-    assert events[1] == TasksChanged(
-        tasks=(
-            TaskState(id=ids[0], task=first, status="running"),
-            TaskState(id=ids[1], task=second),
-        )
-    )
-    assert events[2] == TaskStarted(task_id=ids[0])
-    assert events[7] == TaskStarted(task_id=ids[1])
-    assert statuses(events) == ["completed", "completed"]
-
-    runners = [entry[0] for entry in runner.log]
-    assert [(p, s) for _, p, s in runner.log] == [
-        ("one", first.settings),
-        ("two", second.settings),
-    ]
-    assert runner not in runners
-    assert runners[0] is not runners[1]
-    # The session's own settings are untouched.
-    assert session.settings == Settings(model="sonnet")
-
-
-async def test_run_tasks_leaves_the_conversation_alone() -> None:
-    runner = ModelLoopRunner(EchoModel())
-    session = AgentSession(runner)
-    await session.send(SubmitPrompt(text="hello"))
-    await collect_run(session)
-    await add_tasks(session, TaskSpec(prompt="task"))
-    await session.send(RunTasks())
-    events = await collect_run(session)
-
-    assert any(isinstance(e, AssistantMessage) and e.text == "echo: task" for e in events)
-    assert [m.content for m in runner.history] == ["hello", "echo: hello"]
-
-
-async def test_running_again_runs_only_tasks_that_did_not_finish() -> None:
-    runner = RecordingRunner()
-    session = AgentSession(runner)
-    await add_tasks(session, TaskSpec(prompt="one"), TaskSpec(prompt="bad"))
-    await session.send(RunTasks())
-    assert statuses(await collect_run(session)) == ["completed", "error"]
-
-    await session.send(RunTasks())
-    assert statuses(await collect_run(session)) == ["completed", "error"]
-    assert [p for _, p, _ in runner.log] == ["one", "bad", "bad"]
-
-
-async def test_run_tasks_does_nothing_when_nothing_is_runnable() -> None:
-    session = AgentSession(RecordingRunner())
-    await session.send(RunTasks())
-    assert isinstance(await anext(session.events()), SettingsChanged)
-    assert session._events.empty()
-
-
-async def test_cancel_stops_the_remaining_tasks() -> None:
-    session = AgentSession(ModelLoopRunner(HangingModel()))
-    await add_tasks(session, TaskSpec(prompt="one"), TaskSpec(prompt="two"))
-    await session.send(RunTasks())
-    await asyncio.sleep(0)
-    await session.send(CancelTurn())
-    events = await collect_run(session)
-
-    assert statuses(events) == ["cancelled", "pending"]
-    assert [e for e in events if isinstance(e, TaskStarted)] == events[2:3]
-    await asyncio.sleep(0.01)
-    assert session._events.empty()
-
-
-async def test_failed_task_does_not_stop_the_next() -> None:
-    session = AgentSession(ModelLoopRunner(FailingModel()))
-    await add_tasks(session, TaskSpec(prompt="one"), TaskSpec(prompt="two"))
-    await session.send(RunTasks())
-    events = await collect_run(session)
-
-    assert statuses(events) == ["error", "error"]
-    assert any(isinstance(e, ErrorOccurred) and e.message == "boom" for e in events)
-
-
-async def test_run_tasks_rejected_while_a_turn_runs() -> None:
-    session = AgentSession(ModelLoopRunner(HangingModel()))
-    await add_tasks(session, TaskSpec(prompt="task"))
-    await session.send(SubmitPrompt(text="one"))
-    await session.send(RunTasks())
-    stream = session.events()
-    assert await anext(stream) == BusyChanged(busy=True)
-    assert await anext(stream) == ErrorOccurred(message="A turn is already running.")
-    await session.send(CancelTurn())
-
-
-class GatedRunner(RecordingRunner):
-    """Turns wait for ``gate`` before finishing."""
-
-    def __init__(
-        self,
-        gate: asyncio.Event,
-        log: list[tuple[RecordingRunner, str, Settings]] | None = None,
-    ) -> None:
-        super().__init__(log)
-        self.gate = gate
-
-    def new_context(self) -> "GatedRunner":
-        return GatedRunner(self.gate, self.log)
-
-    async def run_turn(self, turn_id: str, prompt: str, settings: Settings) -> AsyncIterator[Event]:
-        await self.gate.wait()
-        async for event in super().run_turn(turn_id, prompt, settings):
-            yield event
-
-
-async def test_tasks_added_during_a_run_join_it_and_running_ones_cannot_be_edited() -> None:
-    gate = asyncio.Event()
-    runner = GatedRunner(gate)
-    session = AgentSession(runner)
-    [one] = await add_tasks(session, TaskSpec(prompt="one"))
-    await session.send(RunTasks())
-    events: list[Event] = []
-    async for event in session.events():
-        events.append(event)
-        if isinstance(event, TaskStarted):
-            break
-
-    await session.send(EditTask(task_id=one, task=TaskSpec(prompt="changed")))
-    await session.send(AddTask(task=TaskSpec(prompt="two")))
-    gate.set()
-    events += await collect_run(session)
-
-    assert ErrorOccurred(message=f"Task '{one}' can't be edited while it runs.") in events
-    assert [p for _, p, _ in runner.log] == ["one", "two"]
-    assert statuses(events) == ["completed", "completed"]
-
-
-async def test_loop_runner_new_context_has_empty_history_and_same_model() -> None:
-    model = RecordingModel()
-    runner = ModelLoopRunner(model, ToolRegistry([UpperTool()]), max_steps=3)
-    _ = [e async for e in runner.run_turn("t", "go", Settings())]
-    fresh = runner.new_context()
-    assert fresh.history == []
-    _ = [e async for e in fresh.run_turn("t", "again", Settings())]
-    assert [m.content for m in fresh.history] == ["again", "ok"]
-    assert model.tools_seen == [["upper"], ["upper"]]
-
-
 def verified(
     steps: Sequence[VerificationStep],
     max_fix_attempts: int = MAX_FIX_ATTEMPTS,
@@ -519,34 +321,9 @@ def verified(
     return Verification(tuple(steps), run_step, workspace, max_fix_attempts)
 
 
-def file_exists_step(path: Path, name: str = "check") -> VerificationStep:
-    """Passes once ``path`` exists."""
-    code = f"import os, sys; sys.exit(0 if os.path.exists({str(path)!r}) else 1)"
-    return VerificationStep(name=name, command=(sys.executable, "-c", code))
-
-
 FAILING_STEP = VerificationStep(
     name="always fails", command=(sys.executable, "-c", "print('nope'); raise SystemExit(1)")
 )
-
-
-class FixingRunner(RecordingRunner):
-    """Creates ``path`` when asked to fix something, so a file_exists_step then passes."""
-
-    def __init__(
-        self, path: Path, log: list[tuple[RecordingRunner, str, Settings]] | None = None
-    ) -> None:
-        super().__init__(log)
-        self.path = path
-
-    def new_context(self) -> "FixingRunner":
-        return FixingRunner(self.path, self.log)
-
-    async def run_turn(self, turn_id: str, prompt: str, settings: Settings) -> AsyncIterator[Event]:
-        if prompt.startswith("Fix"):
-            self.path.touch()
-        async for event in super().run_turn(turn_id, prompt, settings):
-            yield event
 
 
 async def test_session_announces_verification_steps() -> None:
@@ -563,312 +340,6 @@ async def test_verification_without_steps_counts_as_none() -> None:
     # No steps to announce.
     assert isinstance(await anext(session.events()), SettingsChanged)
     assert session._events.empty()
-
-
-async def test_passing_verification_marks_the_task_completed(tmp_path: Path) -> None:
-    (tmp_path / "ok").touch()
-    session = AgentSession(
-        RecordingRunner(),
-        verification=verified((file_exists_step(tmp_path / "ok"),)),
-    )
-    [one] = await add_tasks(session, TaskSpec(prompt="one"))
-    await session.send(RunTasks())
-    events = await collect_run(session)
-
-    def steps(status: str) -> VerificationChanged:
-        return VerificationChanged(steps=(StepState(name="check", status=status),))  # type: ignore[arg-type]
-
-    def task(status: str) -> TasksChanged:
-        state = TaskState(id=one, task=TaskSpec(prompt="one"), status=status)  # type: ignore[arg-type]
-        return TasksChanged(tasks=(state,))
-
-    # Each task starts with a clean slate; once its turn ends it shows as verifying
-    # while the step reports its progress.
-    assert [e for e in events if not isinstance(e, TurnStarted | TurnFinished)][1:-1] == [
-        task("running"),
-        steps("pending"),
-        TaskStarted(task_id=one),
-        task("verifying"),
-        steps("running"),
-        VerificationStarted(task_id=one, step=0),
-        steps("passed"),
-        VerificationFinished(task_id=one, step=0, passed=True),
-        task("completed"),
-    ]
-
-
-def board_when(
-    events: list[Event], test: Callable[[tuple[TaskState, ...]], bool]
-) -> tuple[TaskState, ...]:
-    """The first task list the session reported that passes ``test``."""
-    return next(e.tasks for e in events if isinstance(e, TasksChanged) and test(e.tasks))
-
-
-def started(events: list[Event]) -> list[str]:
-    """Ids of the tasks started, in order."""
-    return [e.task_id for e in events if isinstance(e, TaskStarted)]
-
-
-FIX_SETTINGS = Settings(model="opus", tool_access="full")
-
-
-async def run_with_a_fix(tmp_path: Path) -> tuple[FixingRunner, list[str], list[Event]]:
-    """Run tasks "one" (with FIX_SETTINGS) and "two"; "one" fails until a fix passes.
-
-    Returns the runner, the two tasks' ids and the run's events.
-    """
-    fixed = tmp_path / "fixed"
-    runner = FixingRunner(fixed)
-    session = AgentSession(runner, verification=verified((file_exists_step(fixed),)))
-    ids = await add_tasks(
-        session, TaskSpec(prompt="one", settings=FIX_SETTINGS), TaskSpec(prompt="two")
-    )
-    await session.send(RunTasks())
-    return runner, ids, await collect_run(session)
-
-
-async def test_failed_verification_inserts_a_fix_task_after_the_task(tmp_path: Path) -> None:
-    runner, [one, two], events = await run_with_a_fix(tmp_path)
-
-    assert VerificationFinished(task_id=one, step=0, passed=False) in events
-    # One update marks the task unverified and adds its fix right behind it.
-    first_done = board_when(events, lambda tasks: tasks[0].status == "unverified")
-    assert [(t.status, t.task.prompt.split("\n")[0]) for t in first_done] == [
-        ("unverified", "one"),
-        ("pending", "Fix the failed verification step: check"),
-        ("pending", "two"),
-    ]
-    fix = first_done[1]
-    assert fix.fixes == one
-    # The fix runs with the failed task's settings, next, in its own context.
-    assert fix.task.settings == FIX_SETTINGS
-    assert started(events) == [one, fix.id, two]
-    assert [p for _, p, _ in runner.log] == ["one", fix.task.prompt, "two"]
-    assert len({id(r) for r, _, _ in runner.log}) == 3
-
-
-async def test_a_passing_fix_completes_the_task_it_fixed(tmp_path: Path) -> None:
-    _, _, events = await run_with_a_fix(tmp_path)
-
-    # As soon as the fix passes, the task it fixed counts as completed too.
-    fix_done = board_when(events, lambda tasks: tasks[1].status == "completed")
-    assert [t.status for t in fix_done] == ["completed", "completed", "pending"]
-    assert statuses(events) == ["completed", "completed", "completed"]
-
-
-async def test_verification_stops_at_the_first_failing_step(tmp_path: Path) -> None:
-    session = AgentSession(
-        RecordingRunner(),
-        verification=verified((FAILING_STEP, file_exists_step(tmp_path)), max_fix_attempts=0),
-    )
-    await add_tasks(session, TaskSpec(prompt="one"))
-    await session.send(RunTasks())
-    events = await collect_run(session)
-
-    assert [e.step for e in events if isinstance(e, VerificationFinished)] == [0]
-    assert step_statuses(events) == ["failed", "pending"]
-
-
-FIX_PREFIX = "Fix the failed verification step: "
-
-
-class StepFixingRunner(RecordingRunner):
-    """A fix for step X creates ``root / X``, so ``file_exists_step(root / X, X)`` passes.
-
-    ``breaks`` maps a step to the one whose file fixing it deletes again.
-    """
-
-    def __init__(
-        self,
-        root: Path,
-        breaks: dict[str, str] | None = None,
-        log: list[tuple[RecordingRunner, str, Settings]] | None = None,
-    ) -> None:
-        super().__init__(log)
-        self.root = root
-        self.breaks = breaks or {}
-
-    def new_context(self) -> "StepFixingRunner":
-        return StepFixingRunner(self.root, self.breaks, self.log)
-
-    async def run_turn(self, turn_id: str, prompt: str, settings: Settings) -> AsyncIterator[Event]:
-        if prompt.startswith(FIX_PREFIX):
-            step = prompt.split("\n", 1)[0].removeprefix(FIX_PREFIX)
-            (self.root / step).touch()
-            if step in self.breaks:
-                (self.root / self.breaks[step]).unlink()
-        async for event in super().run_turn(turn_id, prompt, settings):
-            yield event
-
-
-def file_steps(root: Path, *names: str) -> tuple[VerificationStep, ...]:
-    return tuple(file_exists_step(root / name, name) for name in names)
-
-
-async def test_fix_attempts_are_counted_per_step(tmp_path: Path) -> None:
-    runner = StepFixingRunner(tmp_path)
-    session = AgentSession(
-        runner,
-        verification=verified(file_steps(tmp_path, "lint", "types", "tests"), max_fix_attempts=1),
-    )
-    _, events = await run_one(session)
-
-    # Each fix gets past its step and fails the next; each step still had an attempt left.
-    titles = [p.split("\n")[0] for _, p, _ in runner.log]
-    assert titles == ["one", FIX_PREFIX + "lint", FIX_PREFIX + "types", FIX_PREFIX + "tests"]
-    assert statuses(events) == ["completed"] * 4
-    assert not any(isinstance(e, ErrorOccurred) for e in events)
-
-
-async def test_per_step_counts_carry_on_when_fixes_undo_each_other(tmp_path: Path) -> None:
-    # Fixing "types" deletes lint's file, so the chain bounces back to a step it fixed.
-    runner = StepFixingRunner(tmp_path, breaks={"types": "lint"})
-    session = AgentSession(
-        runner,
-        verification=verified(file_steps(tmp_path, "lint", "types"), max_fix_attempts=1),
-    )
-    _, events = await run_one(session)
-
-    titles = [p.split("\n")[0] for _, p, _ in runner.log]
-    assert titles == ["one", FIX_PREFIX + "lint", FIX_PREFIX + "types"]
-    message = "Verification step 'lint' still fails after 1 fix attempts."
-    assert [e for e in events if isinstance(e, ErrorOccurred)] == [ErrorOccurred(message=message)]
-    assert statuses(events) == ["unverified"] * 3
-
-
-async def test_fix_tasks_stop_after_max_attempts() -> None:
-    runner = RecordingRunner()
-    session = AgentSession(runner, verification=verified((FAILING_STEP,), max_fix_attempts=2))
-    await add_tasks(session, TaskSpec(prompt="one"), TaskSpec(prompt="two"))
-    await session.send(RunTasks())
-    events = await collect_run(session)
-
-    # Each original task gets its own two attempts, then the run moves on.
-    prompts = [p for _, p, _ in runner.log]
-    fix_title = "Fix the failed verification step: always fails"
-    assert [p.split("\n")[0] for p in prompts] == [
-        "one",
-        fix_title,
-        fix_title,
-        "two",
-        fix_title,
-        fix_title,
-    ]
-    assert statuses(events) == ["unverified"] * 6
-    message = "Verification step 'always fails' still fails after 2 fix attempts."
-    assert [e for e in events if isinstance(e, ErrorOccurred)] == [
-        ErrorOccurred(message=message)
-    ] * 2
-    assert "nope" in prompts[1]
-
-
-async def test_tasks_that_do_not_complete_are_not_verified() -> None:
-    session = AgentSession(ModelLoopRunner(FailingModel()), verification=verified((FAILING_STEP,)))
-    await add_tasks(session, TaskSpec(prompt="one"))
-    await session.send(RunTasks())
-    events = await collect_run(session)
-
-    assert not any(isinstance(e, VerificationFinished) for e in events)
-    assert statuses(events) == ["error"]
-    assert step_statuses(events) == ["pending"]
-
-
-async def test_cancel_during_verification_cancels_the_task_and_run() -> None:
-    slow = VerificationStep(
-        name="slow", command=(sys.executable, "-c", "import time; time.sleep(60)")
-    )
-    session = AgentSession(RecordingRunner(), verification=verified((slow,)))
-    await add_tasks(session, TaskSpec(prompt="one"), TaskSpec(prompt="two"))
-    await session.send(RunTasks())
-    async for event in session.events():
-        if isinstance(event, VerificationChanged) and event.steps[0].status == "running":
-            break
-    await session.send(CancelTurn())
-    events = await asyncio.wait_for(collect_run(session), timeout=5)
-
-    assert statuses(events) == ["cancelled", "pending"]
-    assert step_statuses(events) == ["cancelled"]
-    await asyncio.sleep(0.01)
-    assert session._events.empty()
-
-
-class FakeWorkspace:
-    """Reports ``states`` in turn as the working tree's state, counting the calls."""
-
-    def __init__(self, *states: object) -> None:
-        self.states = list(states)
-        self.calls = 0
-
-    async def __call__(self) -> object:
-        self.calls += 1
-        return self.states.pop(0)
-
-
-async def run_one(
-    session: AgentSession, settings: Settings | None = None
-) -> tuple[str, list[Event]]:
-    """Queue and run one task; returns its id and the run's events."""
-    task = TaskSpec(prompt="one", settings=settings or Settings())
-    [task_id] = await add_tasks(session, task)
-    await session.send(RunTasks())
-    return task_id, await collect_run(session)
-
-
-async def test_tasks_with_tools_off_skip_verification() -> None:
-    workspace = FakeWorkspace()
-    session = AgentSession(
-        RecordingRunner(),
-        verification=verified((FAILING_STEP,), workspace=workspace),
-    )
-    assert session.verification is not None
-    assert session.verification.workspace is workspace
-    one, events = await run_one(session, Settings(tool_access="off"))
-
-    assert VerificationSkipped(task_id=one, reason="tools_off") in events
-    assert not any(isinstance(e, VerificationStarted) for e in events)
-    shown = [t.status for e in events if isinstance(e, TasksChanged) for t in e.tasks]
-    assert "verifying" not in shown
-    assert statuses(events) == ["completed"]
-    assert step_statuses(events) == ["skipped"]
-    assert workspace.calls == 0  # nothing to look at
-
-
-async def test_tasks_that_change_no_files_skip_verification() -> None:
-    workspace = FakeWorkspace("tree", "tree")
-    session = AgentSession(
-        RecordingRunner(),
-        verification=verified((FAILING_STEP,), workspace=workspace),
-    )
-    one, events = await run_one(session)
-
-    assert VerificationSkipped(task_id=one, reason="no_changes") in events
-    assert not any(isinstance(e, VerificationStarted) for e in events)
-    assert statuses(events) == ["completed"]
-    assert step_statuses(events) == ["skipped"]
-    assert workspace.calls == 2
-
-
-async def test_tasks_that_change_files_are_verified() -> None:
-    session = AgentSession(
-        RecordingRunner(),
-        verification=verified(
-            (FAILING_STEP,), max_fix_attempts=0, workspace=FakeWorkspace("before", "after")
-        ),
-    )
-    _, events = await run_one(session)
-    assert not any(isinstance(e, VerificationSkipped) for e in events)
-    assert statuses(events) == ["unverified"]
-
-
-async def test_tasks_are_verified_when_the_tree_cannot_be_read() -> None:
-    session = AgentSession(
-        RecordingRunner(),
-        verification=verified(
-            (FAILING_STEP,), max_fix_attempts=0, workspace=FakeWorkspace(None, None)
-        ),
-    )
-    _, events = await run_one(session)
-    assert statuses(events) == ["unverified"]
 
 
 async def test_conversation_turns_are_not_verified() -> None:

@@ -135,10 +135,15 @@ class AgentSession:
             case EditTask(task_id=task_id, task=task):
                 await self._edit_task(task_id, task)
             case RunTasks():
-                if self._board.next_runnable() is not None:
-                    await self._start(self._run_tasks())
+                await self._run_tasks_if_possible()
             case _:
                 assert_never(command)
+
+    async def _run_tasks_if_possible(self) -> None:
+        if self._desk is None:
+            await self._events.put(ErrorOccurred(message="Tasks need agents, and none are set up."))
+        elif self._board.next_runnable() is not None:
+            await self._start(self._run_tasks())
 
     def _cancel(self) -> None:
         if self._turn is not None and not self._turn.done():
@@ -180,7 +185,7 @@ class AgentSession:
                 return
 
     async def _run_task(self, task_id: str, attempts: FixAttempts) -> TaskStatus:
-        """Run one task in a new context, then verify it; returns its final status."""
+        """Run one task through a new agent; returns its final status."""
         task = self._board.get(task_id).task
         # Before the task shows as running, so a cancel here leaves it pending.
         before = await self._verifier.state_before(task) if self._verifier else None
@@ -190,27 +195,10 @@ class AgentSession:
             self._board.reset_steps()
             await self._checks.publish_steps()
         await self._events.put(TaskStarted(task_id=task_id))
-        if self._desk is not None:
-            status = await self._run_agent(self._desk, task_id, before, attempts)
-        else:
-            status = await self._run_task_turn(task_id, task, before, attempts)
+        assert self._desk is not None  # Runs only start with agents.
+        status = await self._run_agent(self._desk, task_id, before, attempts)
         self._board.finish(task_id, status)
         await self._publish_tasks()
-        return status
-
-    async def _run_task_turn(
-        self, task_id: str, task: TaskSpec, before: object, attempts: FixAttempts
-    ) -> TaskStatus:
-        """Run ``task`` as a turn of a new context, then verify it."""
-        status: TaskStatus = await self._run_turn(
-            self._runner.new_context(), task.prompt, task.settings
-        )
-        if status == "completed" and self._verifier:
-            try:
-                status = await self._check(task_id, before, attempts)
-            except asyncio.CancelledError:
-                status = "cancelled"
-                await self._checks.cancel()
         return status
 
     async def _run_agent(
@@ -226,17 +214,6 @@ class AgentSession:
         if outcome.failure is not None and outcome.status == "unverified":
             await self._queue_fix(task_id, attempts, *outcome.failure)
         return outcome.status
-
-    async def _check(self, task_id: str, before: object, attempts: FixAttempts) -> TaskStatus:
-        """Verify a task whose turn completed.
-
-        Returns its status: ``completed``, or ``unverified`` after queueing a fix.
-        """
-        failure = await self._checks.check(task_id, before)
-        if failure is None:
-            return "completed"
-        await self._queue_fix(task_id, attempts, *failure)
-        return "unverified"
 
     async def _queue_fix(
         self, task_id: str, attempts: FixAttempts, step: VerificationStep, output: str

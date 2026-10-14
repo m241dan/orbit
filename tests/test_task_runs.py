@@ -1,0 +1,311 @@
+"""How a session runs its task list, now that every task runs through an agent."""
+
+import asyncio
+import sys
+from collections.abc import AsyncIterator, Awaitable, Callable
+from pathlib import Path
+
+from orbit.agent import AgentSession, ModelLoopRunner, Verification, VerificationStep, run_step
+from orbit.agent.domain.agent_task import Limits
+from orbit.agent.external.echo import EchoModel
+from orbit.protocol import (
+    AddTask,
+    BusyChanged,
+    EditTask,
+    ErrorOccurred,
+    Event,
+    RunTasks,
+    Settings,
+    StepState,
+    SubmitPrompt,
+    TasksChanged,
+    TaskSpec,
+    TaskStarted,
+    TaskState,
+    TurnEndReason,
+    TurnFinished,
+    VerificationChanged,
+    VerificationFinished,
+    VerificationSkipped,
+    VerificationStarted,
+)
+from tests.agent_fakes import Call, FakeWorkspace, Steps, board, run, session_for, verified
+
+
+async def claims_done(call: Call) -> TurnEndReason:
+    await call("get_task")
+    await call("complete_task", summary="done")
+    return "completed"
+
+
+async def never_starts(call: Call) -> TurnEndReason:
+    return "completed"
+
+
+async def keeps_claiming(call: Call) -> TurnEndReason:
+    await call("get_task")
+    while "another agent" not in (await call("complete_task", summary="try")).text:
+        pass
+    return "completed"
+
+
+async def idle(session: AgentSession) -> list[Event]:
+    """The session's events until it next goes idle."""
+    events: list[Event] = []
+    async for event in session.events():
+        events.append(event)
+        if event == BusyChanged(busy=False):
+            return events
+    raise AssertionError("unreachable")
+
+
+def statuses(events: list[Event]) -> list[str]:
+    return [t.status for t in board(events)]
+
+
+async def test_each_task_gets_its_own_agent_with_its_settings() -> None:
+    session, _, launcher = session_for(claims_done, claims_done)
+    first = TaskSpec(prompt="one", settings=Settings(model="opus", tool_access="full"))
+    second = TaskSpec(prompt="two", settings=Settings(tool_access="off"))
+    events = await asyncio.wait_for(run(session, first, second), 5)
+
+    assert [(a.id, a.task_id, s) for a, _, _, s in launcher.launches] == [
+        ("agent-1", "1", first.settings),
+        ("agent-2", "2", second.settings),
+    ]
+    running = TasksChanged(
+        tasks=(TaskState(id="1", task=first, status="running"), TaskState(id="2", task=second))
+    )
+    assert events.index(running) < events.index(TaskStarted(task_id="1"))
+    assert statuses(events) == ["completed", "completed"]
+    assert session.settings == Settings()
+
+
+async def test_tasks_leave_the_conversation_alone() -> None:
+    chat = ModelLoopRunner(EchoModel())
+    session, _, _ = session_for(claims_done, runner=chat)
+    await session.send(SubmitPrompt(text="hello"))
+    await idle(session)
+    await asyncio.wait_for(run(session), 5)
+    assert [m.content for m in chat.history] == ["hello", "echo: hello"]
+
+
+async def test_running_again_runs_only_tasks_that_did_not_finish() -> None:
+    session, _, launcher = session_for(claims_done, never_starts, claims_done)
+    events = await asyncio.wait_for(run(session, TaskSpec(prompt="a"), TaskSpec(prompt="b")), 5)
+    assert statuses(events) == ["completed", "error"]
+
+    await session.send(RunTasks())
+    assert statuses(await asyncio.wait_for(idle(session), 5)) == ["completed", "completed"]
+    assert [a.task_id for a, *_ in launcher.launches] == ["1", "2", "2"]
+
+
+async def test_running_does_nothing_when_nothing_is_runnable() -> None:
+    session, _, launcher = session_for()
+    stream = session.events()
+    await anext(stream)  # Settings.
+    await session.send(RunTasks())
+    await asyncio.sleep(0.01)
+    assert session._events.empty()
+    assert launcher.launches == []
+
+
+async def test_running_without_agents_is_refused() -> None:
+    session = AgentSession(ModelLoopRunner(EchoModel()))
+    await session.send(AddTask(task=TaskSpec(prompt="a")))
+    await session.send(RunTasks())
+    stream = session.events()
+    events = [await anext(stream) for _ in range(3)]
+    assert ErrorOccurred(message="Tasks need agents, and none are set up.") in events
+
+
+async def test_a_failed_task_does_not_stop_the_next() -> None:
+    session, _, _ = session_for(never_starts, claims_done)
+    events = await asyncio.wait_for(run(session, TaskSpec(prompt="a"), TaskSpec(prompt="b")), 5)
+    assert statuses(events) == ["error", "completed"]
+
+
+class GatedRunner:
+    """A conversation whose turns wait for ``gate``."""
+
+    def __init__(self) -> None:
+        self.gate = asyncio.Event()
+
+    async def run_turn(self, turn_id: str, prompt: str, settings: Settings) -> AsyncIterator[Event]:
+        await self.gate.wait()
+        yield TurnFinished(turn_id=turn_id, reason="completed")
+
+
+async def test_running_is_refused_while_a_turn_runs() -> None:
+    chat = GatedRunner()
+    session, _, launcher = session_for(claims_done, runner=chat)
+    await session.send(AddTask(task=TaskSpec(prompt="a")))
+    await session.send(SubmitPrompt(text="hi"))
+    await session.send(RunTasks())
+    events: list[Event] = []
+    async for event in session.events():
+        events.append(event)
+        if isinstance(event, ErrorOccurred):
+            break
+    assert events[-1] == ErrorOccurred(message="A turn is already running.")
+    assert launcher.launches == []
+    chat.gate.set()
+
+
+async def test_tasks_added_during_a_run_join_it_and_running_ones_cannot_be_edited() -> None:
+    started = asyncio.Event()
+    proceed = asyncio.Event()
+
+    async def waits(call: Call) -> TurnEndReason:
+        await call("get_task")
+        started.set()
+        await proceed.wait()
+        await call("complete_task", summary="done")
+        return "completed"
+
+    session, _, launcher = session_for(waits, claims_done)
+    await session.send(AddTask(task=TaskSpec(prompt="one")))
+    await session.send(RunTasks())
+    await asyncio.wait_for(started.wait(), 5)
+    await session.send(EditTask(task_id="1", task=TaskSpec(prompt="changed")))
+    await session.send(AddTask(task=TaskSpec(prompt="two")))
+    proceed.set()
+    events = await asyncio.wait_for(idle(session), 5)
+
+    assert ErrorOccurred(message="Task '1' can't be edited while it runs.") in events
+    assert [a.task_id for a, *_ in launcher.launches] == ["1", "2"]
+    assert statuses(events) == ["completed", "completed"]
+
+
+async def test_verification_progress_is_reported_step_by_step() -> None:
+    session, _, _ = session_for(claims_done, verification=verified(Steps(True)))
+    await session.send(AddTask(task=TaskSpec(prompt="one")))
+    await session.send(RunTasks())
+    events = await asyncio.wait_for(idle(session), 5)
+
+    def steps(status: str) -> VerificationChanged:
+        return VerificationChanged(steps=(StepState(name="Unit tests", status=status),))  # type: ignore[arg-type]
+
+    def task(status: str) -> TasksChanged:
+        state = TaskState(id="1", task=TaskSpec(prompt="one"), status=status)  # type: ignore[arg-type]
+        return TasksChanged(tasks=(state,))
+
+    run_events = events[events.index(BusyChanged(busy=True)) :]
+    shown = [
+        e
+        for e in run_events
+        if isinstance(
+            e,
+            TasksChanged
+            | VerificationChanged
+            | TaskStarted
+            | VerificationStarted
+            | VerificationFinished,
+        )
+    ]
+    assert shown == [
+        task("running"),
+        steps("pending"),
+        TaskStarted(task_id="1"),
+        task("verifying"),
+        steps("running"),
+        VerificationStarted(task_id="1", step=0),
+        steps("passed"),
+        VerificationFinished(task_id="1", step=0, passed=True),
+        task("completed"),
+    ]
+
+
+async def test_a_fallback_fix_runs_next_with_the_failed_tasks_settings() -> None:
+    settings = Settings(model="opus", tool_access="full")
+    session, _, launcher = session_for(
+        keeps_claiming,
+        claims_done,
+        claims_done,
+        verification=verified(Steps(False, False, True, True)),
+        limits=Limits(max_attempts=1),
+    )
+    events = await asyncio.wait_for(
+        run(session, TaskSpec(prompt="one", settings=settings), TaskSpec(prompt="two")), 5
+    )
+    # keeps_claiming is asked for a fix it doesn't make, so its work falls back.
+    one, fix, two = board(events)
+    assert (fix.fixes, fix.task.settings) == (one.id, settings)
+    assert [a.task_id for a, *_ in launcher.launches] == [one.id, fix.id, two.id]
+    assert statuses(events) == ["completed", "completed", "completed"]
+
+
+def file_step(path: Path, name: str) -> VerificationStep:
+    code = f"import os, sys; sys.exit(0 if os.path.exists({str(path)!r}) else 1)"
+    return VerificationStep(name=name, command=(sys.executable, "-c", code))
+
+
+def step_fixer(root: Path) -> Callable[[Call], Awaitable[TurnEndReason]]:
+    """An agent that fixes whichever step orbit says failed by creating its file."""
+    prefix = "Fix the failed verification step: "
+
+    async def fixer(call: Call) -> TurnEndReason:
+        await call("get_task")
+        reply = (await call("complete_task", summary="done")).text
+        while reply.startswith(prefix):
+            (root / reply.split("\n", 1)[0].removeprefix(prefix)).touch()
+            reply = (await call("complete_task", summary="fixed")).text
+        return "completed"
+
+    return fixer
+
+
+async def test_one_agent_fixes_failing_steps_one_after_another(tmp_path: Path) -> None:
+    steps = tuple(file_step(tmp_path / name, name) for name in ("lint", "types", "tests"))
+    session, _, launcher = session_for(
+        step_fixer(tmp_path), verification=Verification(steps, run_step)
+    )
+    events = await asyncio.wait_for(run(session), 10)
+
+    assert len(launcher.launches) == 1
+    failed = [e.step for e in events if isinstance(e, VerificationFinished) and not e.passed]
+    assert failed == [0, 1, 2]
+    assert statuses(events) == ["completed"]
+    assert board(events)[0].attempt == 3
+
+
+async def test_verification_stops_at_the_first_failing_step(tmp_path: Path) -> None:
+    steps = (file_step(tmp_path / "missing", "first"), file_step(tmp_path, "second"))
+    session, _, _ = session_for(
+        keeps_claiming,
+        verification=Verification(steps, run_step, max_fix_attempts=0),
+        limits=Limits(max_attempts=1),
+    )
+    events = await asyncio.wait_for(run(session), 10)
+    assert {e.step for e in events if isinstance(e, VerificationFinished)} == {0}
+
+
+async def test_tasks_with_tools_off_skip_verification() -> None:
+    workspace = FakeWorkspace()
+    steps = Steps()
+    session, _, _ = session_for(claims_done, verification=verified(steps, workspace))
+    events = await asyncio.wait_for(
+        run(session, TaskSpec(prompt="a", settings=Settings(tool_access="off"))), 5
+    )
+    assert VerificationSkipped(task_id="1", reason="tools_off") in events
+    assert steps.runs == [] and workspace.states == []
+    assert statuses(events) == ["completed"]
+
+
+async def test_tasks_that_change_no_files_skip_verification() -> None:
+    steps = Steps()
+    session, _, _ = session_for(claims_done, verification=verified(steps, FakeWorkspace("t", "t")))
+    events = await asyncio.wait_for(run(session), 5)
+    assert VerificationSkipped(task_id="1", reason="no_changes") in events
+    assert steps.runs == []
+    assert statuses(events) == ["completed"]
+
+
+async def test_tasks_are_verified_when_the_tree_cannot_be_read() -> None:
+    steps = Steps(True)
+    session, _, _ = session_for(
+        claims_done, verification=verified(steps, FakeWorkspace(None, None))
+    )
+    events = await asyncio.wait_for(run(session), 5)
+    assert steps.runs == ["Unit tests"]
+    assert statuses(events) == ["completed"]

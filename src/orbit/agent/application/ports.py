@@ -21,10 +21,6 @@ class TurnRunner(Protocol):
 
     def run_turn(self, turn_id: str, prompt: str, settings: Settings) -> AsyncIterator[Event]: ...
 
-    def new_context(self) -> "TurnRunner":
-        """A runner with the same configuration and an empty conversation."""
-        ...
-
 
 class ModelClient(Protocol):
     async def complete(

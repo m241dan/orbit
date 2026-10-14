@@ -17,6 +17,7 @@ uv run pre-commit install
 uv run orbit chat                              # interactive agent session
 uv run orbit chat --model opus --tools full    # pick model and tool access up front
 uv run orbit chat --no-verify                  # don't verify tasks
+uv run orbit chat --fix-attempts 3             # fixes an agent gets before a fresh one takes over
 ```
 
 In the app:
@@ -40,22 +41,48 @@ The task list queues prompts to run later. Each task has its own prompt, model a
 set in the task editor: `j`/`k` pick a field, `i` types in the prompt (`esc` or `enter` stops),
 `enter` on model or tools opens a picker, `ctrl+s` saves and `esc` discards.
 
-`ctrl+r` runs the tasks one after another, each in a fresh Claude session, so they don't share
-context with each other or with the conversation. Their output appears in the conversation and each
-row shows its status: ⏳ pending, ◜ running (spinning), 🔍 verifying, ✅ done, ❗ failed verification,
-❌ failed, ⌛ ran out of steps, 🛑 cancelled. A failed task doesn't stop the rest; `esc` cancels the
-running task and skips the remaining ones. Running again skips tasks that already completed, and
-editing a task makes it pending again. Tasks added while a run is going join it; the running task
-can't be edited.
+`ctrl+r` runs the tasks one after another, each through a fresh **agent**: a new `claude -p`
+session connected to orbit's MCP server, so tasks don't share context with each other or with the
+conversation. The agent is told only who it is (`agent-1`, `agent-2`, …) and to fetch its task:
+
+1. It calls orbit's `get_task` tool and gets the task's prompt.
+2. When it thinks it's done, it calls `complete_task` with a one-line summary. Orbit runs the
+   verification steps while that call waits, and replies with the result.
+3. If a step failed, the reply quotes the end of its output and asks the same agent to fix the cause
+   without weakening the check, then call `complete_task` again. The row shows `fix 1/5`, `fix 2/5`, …
+4. Once verification passes, the agent is told to stop. It gets a few seconds to exit on its own
+   before orbit stops it.
+
+An agent may also run a single step itself with `run_check` (up to 20 times per task), note what it's
+doing with `report_progress`, or call `give_up` with a reason when the task can't be done.
+
+The conversation shows everything in one timeline: the agent's own messages and tool calls, prefixed
+with its id, and its exchanges with orbit (`agent-1 → orbit: complete_task …`, `orbit → agent-1: …`)
+in their own colour. Each row shows its status: ⏳ pending, ◜ running (spinning), 🔍 verifying, ✅ done,
+❗ failed verification, ❌ failed, ⌛ ran out of steps, 🏳 the agent gave up, 🛑 cancelled. A failed task
+doesn't stop the rest; `esc` cancels the running task (stopping its agent) and skips the remaining
+ones. Running again skips tasks that completed, failed verification or were given up on, and editing
+a task makes it pending again. Tasks added while a run is going join it; the running task can't be
+edited.
+
+Edge cases:
+
+- An agent that ends its turn without calling `complete_task` is taken to have finished, and its
+  work is verified. If it stops after being asked for a fix without changing anything, it isn't
+  verified again; the task falls back straight away (see below).
+- An agent that exits without ever calling `get_task`, or can't reach orbit's MCP server, fails the
+  task with an error.
+- Calls out of order (claiming done before fetching the task, or twice while verification runs) get
+  an error reply and change nothing.
 
 ### Verification steps
 
-After each task completes, orbit runs the verification steps in the working directory, in order,
-stopping at the first failure. While that happens the task shows 🔍, the conversation notes each step
-as it starts and ends, and the panel under the task list shows each step's progress on the current
-task (⏳ pending, ◜ running (spinning) with its elapsed time, ✅ passed, ❌ failed, 🛑 cancelled,
-⏩ skipped). There are six, quick ones first so a failure shows up in seconds; each must exit
-successfully:
+When an agent claims its task is done, orbit runs the verification steps in the working directory, in
+order, stopping at the first failure. While that happens the task shows 🔍, the conversation notes
+each step as it starts and ends, and the panel under the task list shows each step's progress on the
+current task (⏳ pending, ◜ running (spinning) with its elapsed time, ✅ passed, ❌ failed,
+🛑 cancelled, ⏩ skipped). There are six, quick ones first so a failure shows up in seconds; each must
+exit successfully:
 
 1. Ruff lint: `uv run ruff check`
 2. Ruff format: `uv run ruff format --check`
@@ -66,28 +93,37 @@ successfully:
    parameters (`LIZARD_MAX_*` in `src/orbit/agent/external/checks.py`).
 6. Unit tests, 100% coverage: `uv run pytest --cov --cov-fail-under=100`
 
-When a step fails, the task is marked ❗ and a fix task is inserted right after it, indented and
-numbered under it (`1.1`, `1.2`, …), with the same model and tool access. Its prompt quotes the end
-of the step's output and asks Claude to fix the cause without weakening the check. If the fix also
-fails verification, another fix is queued. A task's chain of fixes gets up to 3 attempts per step,
-so a task broken in several ways is fixed one step after another; once a step has used its 3, orbit
-reports the failure and moves on to the next task. Once a fix passes, the task it fixed turns ✅,
-along with any earlier fixes in the chain. Running again skips ❗ tasks, because their fix tasks
-follow them. Tasks that errored or were cancelled aren't verified, and neither is the conversation.
+Failures go back to the same agent, which keeps the context of what it just did. After
+`--fix-attempts` fixes (default 5), or if the agent has exited, the task **falls back**: it is marked
+❗ and a fix task is inserted right after it, indented and numbered under it (`1.1`, `1.2`, …), with
+the same model and tool access, for a fresh agent. A task's chain of fallbacks gets up to 3 per step;
+once a step has used its 3, orbit reports the failure and moves on to the next task. Once a fix
+passes, the task it fixed turns ✅, along with any earlier fixes in the chain.
 
-Verification is also skipped for tasks run with tools `off`, and for tasks that changed no files:
-orbit compares the files git sees (tracked, plus untracked ones that aren't ignored, by size and
-modification time) before and after the task. Outside a git work tree it can't tell, so it verifies.
-A skipped task still counts as done; the panel shows ⏩ for each step and the conversation says why.
+Verification is skipped for tasks run with tools `off`, for tasks that changed no files, and for an
+agent that stopped without changing anything since its last failed check (that one falls back
+instead). Orbit compares the files git sees (tracked, plus untracked ones that aren't ignored, by
+size and modification time). Outside a git work tree it can't tell, so it verifies. A skipped task
+still counts as done; the panel shows ⏩ for each step and the conversation says why.
 
-Fix tasks need to edit files, so give tasks `full` tool access when you want them fixed
-automatically. With `restricted` access, Claude can explain the failure but can't fix it.
+Fixes need to edit files, so give tasks `full` tool access when you want them fixed automatically.
+With `restricted` access, an agent can explain the failure but can't fix it.
+
+### How agents reach orbit
+
+Orbit starts its MCP server the first time a task runs, on a random port on `127.0.0.1`. Each agent
+gets its own unguessable token, sent as `Authorization: Bearer …` with every call; orbit ignores calls
+whose token it didn't issue, and revokes a token when its agent's run ends. The token is passed to
+the CLI in the `ORBIT_AGENT_TOKEN` environment variable, which the MCP config references, so it never
+appears in the process list. Agents are started with `--strict-mcp-config` (only orbit's server),
+`--allowedTools 'mcp__orbit__*'` (orbit's tools are allowed at every access level), and
+`ENABLE_TOOL_SEARCH=false` (orbit's tools are loaded up front).
 
 Changes apply from the next prompt and keep the conversation.
 
 Tool access levels:
 
-- `off`: no tools.
+- `off`: no tools (agents still have orbit's tools).
 - `restricted` (default): Claude Code's normal permissions; anything that would need approval
   is refused, read-only actions still work.
 - `full`: every tool call is auto-approved (`--permission-mode bypassPermissions`). Claude can
@@ -118,15 +154,19 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
   interface. It imports no other orbit package.
 - `orbit.agent`: backend, with no UI imports. Three layers, each importing only the ones below:
   - `external`: adapters that reach outside the backend. `ClaudeCliRunner` streams `claude -p
-    --output-format stream-json` and resumes the same Claude session across turns; `checks` runs
+    --output-format stream-json`, resumes the same Claude session across turns, and launches
+    agents connected to orbit (`run_agent`); `McpHost` is orbit's MCP server; `checks` runs
     the verification steps as processes (`DEFAULT_STEPS`, `run_step`); `workspace` fingerprints
     the git working tree; `EchoModel` is a stand-in model.
   - `application`: `AgentSession` implements `Session`: it takes commands, asks the domain what
-    follows, drives the ports and publishes events. `ports` defines what it needs from outside
-    (`TurnRunner`, `StepRunner`, `Workspace`, `ModelClient`, `Tool`); `ModelLoopRunner` is an
-    in-house model/tool loop for direct API use.
-  - `domain`: the rules, with no I/O: the `TaskBoard` (task order, statuses, fix chains), when a
-    task needs verifying, how many fixes to try per step, and the fix prompt.
+    follows, drives the ports and publishes events. `AgentRun` sees one task through one agent and
+    `AgentDesk` routes agents' calls to their runs; `Verifier` runs the steps. `ports` defines what
+    it needs from outside (`AgentHost`, `AgentLauncher`, `TurnRunner`, `StepRunner`, `Workspace`,
+    `ModelClient`, `Tool`); `ModelLoopRunner` is an in-house model/tool loop for direct API use.
+  - `domain`: the rules, with no I/O: the `TaskBoard` (task order, statuses, fix chains),
+    `AgentTask` (what orbit replies to an agent, and when its work is verified), the
+    `AgentRegistry` (agent ids and tokens), when a task needs verifying, how many fixes to try per
+    step, and the fix prompt.
 - `orbit.tui`: frontend. Sends commands and renders events. Imports only `orbit.protocol`.
   `view` turns state and events into text and doesn't import Textual; the widgets lay it out.
 - `orbit.cli`: the composition root, and the only place the two sides are wired together: it
