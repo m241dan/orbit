@@ -2,7 +2,7 @@
 CLI, and a step runner and workspace for verification."""
 
 import asyncio
-from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Collection, Sequence
 from typing import Any
 
 from orbit.agent import Agents, AgentSession, TurnRunner, Verification, VerificationStep
@@ -114,6 +114,9 @@ class FakeTree:
         self, *merges: Merge, leftovers: tuple[str, ...] = (), broken: str = "", empty: bool = False
     ) -> None:
         self.empty = empty  # Tasks change nothing, so there's nothing to commit.
+        self.agent_commits = 0  # Commits agents made themselves.
+        self.untracked_sets: list[frozenset[str]] = []  # Scripted answers to untracked().
+        self.ignored: list[set[str]] = []
         self.merges = list(merges)
         self.notes = list(leftovers)
         self.broken = broken
@@ -138,7 +141,7 @@ class FakeTree:
         return self.merges.pop(0) if self.merges else Merge("merged")
 
     async def head(self) -> str:
-        return f"c{len(self.commits)}"
+        return f"c{len(self.commits) + self.agent_commits}"
 
     async def show(self, commits: Sequence[str]) -> str:
         return "\n".join(f"diff of {commit}" for commit in commits)
@@ -149,6 +152,12 @@ class FakeTree:
 
     async def drop(self, path: str) -> None:
         self.dropped.append(path)
+
+    async def untracked(self) -> frozenset[str]:
+        return self.untracked_sets.pop(0) if self.untracked_sets else frozenset()
+
+    async def ignore(self, paths: Collection[str]) -> None:
+        self.ignored.append(set(paths))
 
     async def leftovers(self) -> list[str]:
         return self.notes

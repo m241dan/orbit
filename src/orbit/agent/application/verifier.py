@@ -2,8 +2,9 @@
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from typing import TypeVar
 
-from orbit.agent.application.ports import StepRunner, Workspace
+from orbit.agent.application.ports import CoderTree, StepRunner, Workspace
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.verification import (
     MAX_FIX_ATTEMPTS,
@@ -13,6 +14,7 @@ from orbit.agent.domain.verification import (
 )
 from orbit.protocol import (
     Event,
+    Notice,
     TasksChanged,
     TaskSpec,
     VerificationChanged,
@@ -20,6 +22,8 @@ from orbit.protocol import (
     VerificationSkipped,
     VerificationStarted,
 )
+
+T = TypeVar("T")
 
 Failure = tuple[VerificationStep, str]
 """The step that failed and its output."""
@@ -48,10 +52,12 @@ class Verifier:
         verification: Verification,
         board: TaskBoard,
         publish: Callable[[Event], Awaitable[None]],
+        tree: CoderTree | None = None,
     ) -> None:
         self.verification = verification
         self._board = board
         self._publish = publish
+        self._tree = tree
 
     async def state_before(self, task: TaskSpec, root: str) -> object:
         """The tree's state at ``root``, when it will tell whether ``task`` changed files."""
@@ -75,7 +81,28 @@ class Verifier:
             return None
         self._board.set_status(task_id, "verifying")
         await self._publish(TasksChanged(tasks=self._board.tasks))
-        return await self._verify(task_id, root)
+        return await self._tidily(self._verify(task_id, root))
+
+    async def run_one(self, step: VerificationStep, root: str) -> tuple[bool, str]:
+        """Run ``step`` at ``root`` on its own, as an agent asked; returns its result."""
+        return await self._tidily(self.verification.run_step(step, root))
+
+    async def _tidily(self, checks: Awaitable[T]) -> T:
+        """Run ``checks`` in the coder's tree, then have git ignore files they created."""
+        if self._tree is None:
+            return await checks
+        before = await self._tree.untracked()
+        result = await checks
+        created = await self._tree.untracked() - before
+        if created:
+            await self._tree.ignore(created)
+            files = ", ".join(sorted(created))
+            message = (
+                f"Orbit's checks created files git doesn't ignore ({files}); orbit now ignores"
+                " them in .git/info/exclude. Consider adding them to .gitignore."
+            )
+            await self._publish(Notice(message=message))
+        return result
 
     async def fingerprint(self, root: str) -> object:
         """The state of the tree at ``root`` now; ``None`` when it can't be told."""

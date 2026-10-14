@@ -37,10 +37,10 @@ class Lander:
         self._verifier = verifier
         self._publish = publish
 
-    async def land(self, task_id: str, summaries: Sequence[str], root: str) -> Landing:
-        """Commit task ``task_id``'s work and merge it."""
-        message = commit_message(self._board.get(task_id).task, summaries)
-        committed = await self._tree.commit(message)
+    async def land(self, task_id: str, summaries: Sequence[str], root: str, start: str) -> Landing:
+        """Commit task ``task_id``'s work and merge it; ``start`` is the tree's head before the
+        task, so commits the agent made itself count too."""
+        await self._tree.commit(commit_message(self._board.get(task_id).task, summaries))
         merge = await self._tree.integrate()
         for _ in range(MAX_REBASES):
             if merge.result != "rebased":
@@ -51,8 +51,9 @@ class Lander:
             merge = await self._tree.integrate()
         else:
             merge = Merge("rebased", "The base branch kept moving; the work is on orbit/coder.")
-        # Read after any rebase, which rewrites the commit.
-        commit = await self._tree.head() if committed else None
+        # Read after any rebase, which rewrites the commits.
+        head = await self._tree.head()
+        commit = head if head != start else None
         await self._publish(
             TaskMerged(
                 task_id=task_id, result=merge.result, detail=merge.detail, commit=commit or ""

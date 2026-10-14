@@ -43,12 +43,16 @@ from orbit.protocol import (
 
 
 def _verifier(
-    verification: Verification | None, board: TaskBoard, events: "asyncio.Queue[Event]"
+    verification: Verification | None,
+    board: TaskBoard,
+    events: "asyncio.Queue[Event]",
+    agents: Agents | None,
 ) -> Verifier | None:
-    """What checks tasks on ``board``; none when ``verification`` has no steps."""
+    """What checks tasks on ``board`` (in the agents' tree, if any); none when
+    ``verification`` has no steps."""
     if verification is None or not verification.steps:
         return None
-    return Verifier(verification, board, events.put)
+    return Verifier(verification, board, events.put, agents.tree if agents else None)
 
 
 class AgentSession:
@@ -77,11 +81,12 @@ class AgentSession:
         steps = verification.steps if verification else ()
         self._board = TaskBoard([s.name for s in steps])
         self._events: asyncio.Queue[Event] = asyncio.Queue()
-        self._verifier = _verifier(verification, self._board, self._events)
+        self._verifier = _verifier(verification, self._board, self._events, agents)
         self._desk = AgentDesk(agents, self._events.put) if agents else None
         self._announced = False
         self._lane = self._review_lane()
         self._landed: dict[str, str] = {}  # Task id -> the commit it landed, until reported.
+        self._starts: dict[str, str] = {}  # Task id -> the tree's head when it started.
         self._held = False  # The user cancelled: don't start work by itself.
         self._events.put_nowait(self._settings_changed())
         if self._verifier:
@@ -290,7 +295,7 @@ class AgentSession:
         if desk.agents.tree is None:
             return outcome
         lander = Lander(desk.agents.tree, self._board, self._verifier, self._events.put)
-        landing = await lander.land(task_id, outcome.summaries, root)
+        landing = await lander.land(task_id, outcome.summaries, root, self._starts.pop(task_id))
         if landing.failure is not None:
             return Outcome("unverified", landing.failure)
         if landing.commit is not None:
@@ -302,7 +307,10 @@ class AgentSession:
         if desk.agents.tree is None:
             return "."
         # A fix carries on from the work it fixes.
-        return await desk.agents.tree.prepare(keep=self._board.get(task_id).fixes is not None)
+        tree = desk.agents.tree
+        root = await tree.prepare(keep=self._board.get(task_id).fixes is not None)
+        self._starts[task_id] = await tree.head()
+        return root
 
     async def _queue_fix(
         self, task_id: str, attempts: FixAttempts, step: VerificationStep, output: str

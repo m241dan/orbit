@@ -29,6 +29,7 @@ def test_built_in_roles_cover_coding_reviewing_and_planning() -> None:
     assert "suggest_task" not in coder.tools
     assert BUILT_IN_ROLES["super-reviewer"].model == "opus"
     assert all(role.instructions for role in BUILT_IN_ROLES.values())
+    assert "don't commit" in coder.instructions.lower()
     assert all(set(role.tools) <= set(ORBIT_TOOLS) for role in BUILT_IN_ROLES.values())
 
 

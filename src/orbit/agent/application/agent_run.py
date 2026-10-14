@@ -354,7 +354,7 @@ class AgentRun:
         if refusal is not None:
             return Reply(refusal, is_error=True)
         async with self._checking:
-            passed, output = await self._verifier.verification.run_step(step, self._root)
+            passed, output = await self._verifier.run_one(step, self._root)
         return Reply(f"{step.name}: {'passed' if passed else 'failed'}\n\n{trim_output(output)}")
 
     async def _report_progress(self, arguments: dict[str, Any]) -> Reply:

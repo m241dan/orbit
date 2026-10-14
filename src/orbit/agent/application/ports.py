@@ -2,7 +2,7 @@
 :mod:`orbit.agent.external` (or tests) implement them; the CLI picks which.
 """
 
-from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Collection, Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -132,6 +132,14 @@ class CoderTree(Protocol):
 
     async def drop(self, path: str) -> None:
         """Remove the snapshot at ``path``."""
+        ...
+
+    async def untracked(self) -> frozenset[str]:
+        """Files in the tree git neither tracks nor ignores (a new directory as one entry)."""
+        ...
+
+    async def ignore(self, paths: Collection[str]) -> None:
+        """Have git ignore ``paths`` from now on, without changing any tracked file."""
         ...
 
     async def leftovers(self) -> list[str]:

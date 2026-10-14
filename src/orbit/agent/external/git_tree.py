@@ -11,7 +11,7 @@ import datetime
 import hashlib
 import itertools
 import subprocess
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from pathlib import Path
 
 from orbit.agent.application.ports import Merge
@@ -21,6 +21,7 @@ STASH_MESSAGE = "orbit: unverified work"
 # Run in the tree when its lock file changes, so its environment matches.
 DEFAULT_SETUP = ("uv", "sync", "--frozen")
 LOCK_FILE = "uv.lock"
+IGNORE_HEADER = "# Created by orbit's verification checks:"
 
 
 def in_git_work_tree(path: str) -> bool:
@@ -108,6 +109,21 @@ class GitCoderTree:
 
     async def drop(self, path: str) -> None:
         await self._git(self._root, "worktree", "remove", "--force", path)
+
+    async def untracked(self) -> frozenset[str]:
+        listed = await self._git(
+            await self._path(), "ls-files", "--others", "--exclude-standard", "--directory"
+        )
+        return frozenset(listed.splitlines())
+
+    async def ignore(self, paths: Collection[str]) -> None:
+        exclude = (await self._path()).parent.parent / "info" / "exclude"
+        exclude.parent.mkdir(exist_ok=True)
+        lines = exclude.read_text().splitlines() if exclude.exists() else []
+        new = sorted(set(paths) - set(lines))
+        if IGNORE_HEADER not in lines:
+            new.insert(0, IGNORE_HEADER)
+        exclude.write_text("\n".join([*lines, *new]) + "\n")
 
     async def leftovers(self) -> list[str]:
         notes = [await self._unmerged(), await self._stashed()]

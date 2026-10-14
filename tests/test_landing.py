@@ -174,3 +174,42 @@ async def test_the_commit_lists_the_fixes_made_after_verification() -> None:
     [message] = tree.commits
     assert message.startswith("Add the --fast flag\n")
     assert message.endswith("Fixed after verification:\n- Fix the failing test")
+
+
+async def test_commits_an_agent_made_itself_count_as_its_work() -> None:
+    tree = FakeTree(empty=True)
+
+    async def commits_itself(call: Call) -> TurnEndReason:
+        await call("get_task")
+        tree.agent_commits += 1
+        await call("complete_task", summary="Did it and committed")
+        return "completed"
+
+    session, _, _ = session_for(commits_itself, tree=tree)
+    events = await asyncio.wait_for(run(session), 5)
+    assert TaskMerged(task_id="1", result="merged", commit="c1") in events
+
+
+async def test_no_new_commit_means_nothing_landed() -> None:
+    tree = FakeTree(empty=True)
+    session, _, _ = session_for(claims_done, tree=tree)
+    events = await asyncio.wait_for(run(session), 5)
+    assert TaskMerged(task_id="1", result="merged", commit="") in events
+
+
+async def test_files_the_checks_create_are_ignored_with_a_notice() -> None:
+    tree = FakeTree()
+    tree.untracked_sets = [frozenset({"notes.md"}), frozenset({"notes.md", "__pycache__/"})]
+    session, _, _ = session_for(claims_done, verification=verified(Steps(True)), tree=tree)
+    events = await asyncio.wait_for(run(session), 5)
+    assert tree.ignored == [{"__pycache__/"}]
+    notices = [e.message for e in events if isinstance(e, Notice)]
+    assert len(notices) == 1 and "__pycache__/" in notices[0] and ".gitignore" in notices[0]
+
+
+async def test_checks_that_create_nothing_need_no_notice() -> None:
+    tree = FakeTree()
+    session, _, _ = session_for(claims_done, verification=verified(Steps(True)), tree=tree)
+    events = await asyncio.wait_for(run(session), 5)
+    assert tree.ignored == []
+    assert not any(isinstance(e, Notice) for e in events)

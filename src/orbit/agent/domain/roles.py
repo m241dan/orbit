@@ -54,7 +54,8 @@ BUILT_IN_ROLES: dict[str, Role] = {
         instructions=(
             "You are orbit's coder. Make the change your task asks for in the working directory,"
             " keeping the project's checks passing. You may run a single check with run_check"
-            " before claiming you're done."
+            " before claiming you're done. Don't commit: orbit commits your work once it's"
+            " verified."
         ),
         tool_access="full",
         tools=("get_task", "complete_task", "run_check", "report_progress", "give_up"),

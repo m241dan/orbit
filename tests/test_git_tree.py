@@ -339,3 +339,28 @@ async def test_two_snapshots_of_one_commit_are_separate(repo: Path) -> None:
     commit = await tree.head()
     first, second = await tree.snapshot(commit), await tree.snapshot(commit)
     assert first != second
+
+
+async def test_untracked_lists_new_files_with_new_directories_collapsed(repo: Path) -> None:
+    tree = GitCoderTree(str(repo))
+    path = Path(await tree.prepare(keep=False))
+    assert await tree.untracked() == frozenset()
+    (path / "__pycache__").mkdir()
+    (path / "__pycache__" / "x.pyc").write_text("")
+    (path / ".coverage").write_text("")
+    assert await tree.untracked() == frozenset({"__pycache__/", ".coverage"})
+
+
+async def test_ignored_paths_are_no_longer_committed_stashed_or_listed(repo: Path) -> None:
+    tree = GitCoderTree(str(repo))
+    path = Path(await tree.prepare(keep=False))
+    (path / "__pycache__").mkdir()
+    (path / "__pycache__" / "x.pyc").write_text("")
+    await tree.ignore({"__pycache__/"})
+    await tree.ignore({"__pycache__/"})  # Ignoring again doesn't repeat it.
+
+    assert await tree.untracked() == frozenset()
+    assert not await tree.commit("nothing to commit")
+    exclude = (repo / ".git" / "info" / "exclude").read_text()
+    assert exclude.count("__pycache__/") == 1
+    assert "orbit" in exclude
