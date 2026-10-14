@@ -113,6 +113,13 @@ class SetPlanning(_Message):
     on: bool
 
 
+class CancelAgent(_Message):
+    """Stop agent ``agent_id``'s work: a review on its own, or the run (or planner turn) it's in."""
+
+    type: Literal["cancel_agent"] = "cancel_agent"
+    agent_id: str
+
+
 class RequestSuperReview(_Message):
     """Ask for a super review of the whole codebase now, without waiting for its turn."""
 
@@ -129,7 +136,8 @@ Command = Annotated[
     | RequestSuperReview
     | AcceptTask
     | RemoveTask
-    | SetPlanning,
+    | SetPlanning
+    | CancelAgent,
     Field(discriminator="type"),
 ]
 
@@ -323,6 +331,14 @@ class TaskMerged(_Message):
     commit: str = ""
 
 
+class ReviewStatus(_Message):
+    """Whether review is paused, and how many review batches are still open; sent on changes."""
+
+    type: Literal["review_status"] = "review_status"
+    paused: bool
+    open_batches: int
+
+
 class PlanningChanged(_Message):
     """Whether prompts now go to the planner; sent after every change."""
 
@@ -420,7 +436,8 @@ Event = Annotated[
     | AgentExited
     | TaskMerged
     | Notice
-    | PlanningChanged,
+    | PlanningChanged
+    | ReviewStatus,
     Field(discriminator="type"),
 ]
 

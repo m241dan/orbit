@@ -23,6 +23,7 @@ from orbit.protocol import (
     AcceptTask,
     AddTask,
     BusyChanged,
+    CancelAgent,
     CancelTurn,
     Command,
     EditTask,
@@ -134,8 +135,8 @@ class AgentSession:
                 await self._handle_tasks(command)
             case EditTask() | AcceptTask() | RemoveTask():
                 await self._handle_board(command)
-            case RequestSuperReview():
-                await self._super_review()
+            case RequestSuperReview() | CancelAgent():
+                await self._handle_agents(command)
             case _:
                 assert_never(command)
 
@@ -191,6 +192,23 @@ class AgentSession:
             self._lane.kick()
         if self._next_work(()) is not None:
             await self._start(self._run_tasks())
+
+    async def _handle_agents(self, command: RequestSuperReview | CancelAgent) -> None:
+        if isinstance(command, CancelAgent):
+            await self._cancel_agent(command.agent_id)
+        else:
+            await self._super_review()
+
+    async def _cancel_agent(self, agent_id: str) -> None:
+        """Stop a reviewer's review on its own; any other agent's work, like esc."""
+        agent = self._desk.find(agent_id) if self._desk else None
+        if agent is None:
+            await self._events.put(ErrorOccurred(message=f"No running agent {agent_id!r}."))
+        elif agent.role in REVIEW_ROLES and self._lane is not None:
+            self._lane.cancel(agent.task_id)
+        else:
+            self._held = True
+            self._cancel()
 
     async def _super_review(self) -> None:
         if self._lane is None:

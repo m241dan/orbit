@@ -29,6 +29,8 @@ In the app:
 | `i` | Jump to the prompt and start typing (vim-style insert mode) |
 | `enter` | On the task list: activate it (`j`/`k` move, `enter` edits a task or adds one on `+ new task`, `a` accepts a draft, `x` removes a task, `esc` leaves) |
 | `ctrl+t` | Switch the prompt between the conversation and the planner |
+| `f` | Show only one agent's part of the conversation; press again for the next agent, then everything |
+| `enter` | On the agents pane: activate it (`j`/`k` move, `c` cancels the highlighted agent's work, `esc` leaves) |
 | `ctrl+r` | Run the tasks that haven't completed yet |
 | `ctrl+g` | Ask for a super review of the whole codebase now (works while tasks run) |
 | `ctrl+o` | Pick the model (default, fable, opus, sonnet, haiku) |
@@ -59,9 +61,15 @@ conversation. The agent is told only who it is (`agent-1`, `agent-2`, …) and t
 An agent may also run a single step itself with `run_check` (up to 20 times per task), note what it's
 doing with `report_progress`, or call `give_up` with a reason when the task can't be done.
 
+The **agents pane** (bottom right) lists the agents running now: each one's role, its task, and
+whether it's working or waiting on orbit (say, `waiting on complete_task` while its work is
+verified). Its subtitle says whether review is active or paused. Activate it with `enter` and press
+`c` on an agent to cancel its work: for a reviewer, just that review (the next one starts); for the
+coder or the planner, the same as `esc`.
+
 The conversation shows everything in one timeline: the agent's own messages and tool calls, prefixed
 with its id, and its exchanges with orbit (`agent-1 → orbit: complete_task …`, `orbit → agent-1: …`)
-in their own colour. Each row shows its status: ⏳ pending, ◜ running (spinning), 🔍 verifying, ✅ done,
+in their own colour; `f` narrows it to one agent at a time. Each row shows its status: ⏳ pending, ◜ running (spinning), 🔍 verifying, ✅ done,
 ❗ failed verification, ❌ failed, ⌛ ran out of steps, 🏳 the agent gave up, 🛑 cancelled,
 📝 a draft the planner proposed. A failed task
 doesn't stop the rest; `esc` cancels the running task (stopping its agent) and skips the remaining

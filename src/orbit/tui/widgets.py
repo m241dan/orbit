@@ -28,8 +28,9 @@ class Entry(Static):
     Entry.error { color: $text-error; }
     """
 
-    def __init__(self, text: str, kind: EntryKind) -> None:
+    def __init__(self, text: str, kind: EntryKind, agent: str | None = None) -> None:
         super().__init__(Text(text), classes=kind)
+        self.agent = agent
 
 
 class Transcript(VerticalScroll):
@@ -46,11 +47,25 @@ class Transcript(VerticalScroll):
     }
     """
 
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.only: str | None = None  # Show only this agent's entries, or all.
+
     def on_mount(self) -> None:
         self.border_title = "Conversation"
 
-    def add_entry(self, text: str, kind: EntryKind) -> None:
-        self.mount(Entry(text, kind))
+    def add_entry(self, text: str, kind: EntryKind, agent: str | None = None) -> None:
+        entry = Entry(text, kind, agent)
+        entry.display = self.only is None or agent == self.only
+        self.mount(entry)
+        self.scroll_end(animate=False)
+
+    def show_only(self, agent: str | None) -> None:
+        """Show only ``agent``'s entries, or all of them."""
+        self.only = agent
+        self.border_title = "Conversation" if agent is None else f"Conversation · {agent}"
+        for entry in self.query(Entry):
+            entry.display = agent is None or entry.agent == agent
         self.scroll_end(animate=False)
 
 

@@ -13,7 +13,15 @@ from orbit.agent.application.agent_run import AgentDesk, AgentRun
 from orbit.agent.application.ports import CoderTree, Reply
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.reviews import ReviewJob, ReviewPlanner, review_prompt
-from orbit.protocol import Notice, Settings, TaskOrigin, TasksChanged, TaskSpec, TaskStatus
+from orbit.protocol import (
+    Notice,
+    ReviewStatus,
+    Settings,
+    TaskOrigin,
+    TasksChanged,
+    TaskSpec,
+    TaskStatus,
+)
 
 REVIEW_ROLES = frozenset({"reviewer", "super-reviewer"})
 
@@ -41,7 +49,9 @@ class ReviewLane:
         self._jobs: dict[str, ReviewJob] = {}  # Review task id -> what it reviews.
         self._batches: dict[str, str] = {}  # Review task id -> the batch it suggests into.
         self._running: asyncio.Task[None] | None = None
+        self._current: tuple[str, asyncio.Task[TaskStatus]] | None = None  # The review running.
         self._paused_noted = False
+        self._status: ReviewStatus | None = None
 
     async def landed(self, task_id: str, commit: str) -> None:
         """Task ``task_id`` landed ``commit``."""
@@ -82,6 +92,11 @@ class ReviewLane:
         await self._publish(TasksChanged(tasks=self._board.tasks))
         return Reply(f"Queued as task {new_id}.")
 
+    def cancel(self, task_id: str) -> None:
+        """Stop review task ``task_id`` if it's the one running; the lane carries on."""
+        if self._current is not None and self._current[0] == task_id:
+            self._current[1].cancel()
+
     def kick(self) -> None:
         """Run the reviews waiting, if they aren't being run already."""
         if self._running is None or self._running.done():
@@ -96,6 +111,7 @@ class ReviewLane:
     async def _queue(self, job: ReviewJob | None) -> None:
         await self._note_pause()
         if job is None:
+            await self._publish_status()
             return
         diff = "" if job.whole else await self._tree.show(job.commits)
         batch = self.planner.open_batch(job)
@@ -110,7 +126,16 @@ class ReviewLane:
         task_id = self._board.add_review(task)
         self._jobs[task_id], self._batches[task_id] = job, batch
         await self._publish(TasksChanged(tasks=self._board.tasks))
+        await self._publish_status()
         self.kick()
+
+    async def _publish_status(self) -> None:
+        status = ReviewStatus(
+            paused=self.planner.paused, open_batches=len(self.planner.open_batches)
+        )
+        if status != self._status:
+            self._status = status
+            await self._publish(status)
 
     async def _note_pause(self) -> None:
         if self.planner.paused and not self._paused_noted:
@@ -132,9 +157,17 @@ class ReviewLane:
         self._board.set_status(task_id, "running")
         await self._publish(TasksChanged(tasks=self._board.tasks))
         status: TaskStatus = "cancelled"
+        reviewer = asyncio.create_task(
+            self._run_reviewer(task_id, job.commits[-1] if job else None)
+        )
+        self._current = (task_id, reviewer)
         try:
-            status = await self._run_reviewer(task_id, job.commits[-1] if job else None)
+            status = await reviewer
+        except asyncio.CancelledError:
+            if _being_cancelled():  # The lane itself is stopping, not just this review.
+                raise
         finally:
+            self._current = None
             self._board.finish(task_id, status)
             await self._publish(TasksChanged(tasks=self._board.tasks))
         await self._after(self._batches.get(task_id))
@@ -153,5 +186,11 @@ class ReviewLane:
         if batch is None:
             return
         self.planner.close_if_empty(batch)
+        await self._publish_status()
         if batch in self.planner.open_batches:
             await self._wake_work()
+
+
+def _being_cancelled() -> bool:
+    task = asyncio.current_task()
+    return task is not None and task.cancelling() > 0

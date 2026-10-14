@@ -17,6 +17,7 @@ from orbit.protocol import (
     AgentStarted,
     AssistantMessage,
     BusyChanged,
+    CancelAgent,
     CancelTurn,
     EditTask,
     ErrorOccurred,
@@ -26,6 +27,7 @@ from orbit.protocol import (
     ProgressNoted,
     RemoveTask,
     RequestSuperReview,
+    ReviewStatus,
     RunTasks,
     Session,
     SetPlanning,
@@ -38,6 +40,7 @@ from orbit.protocol import (
     TasksChanged,
     TaskSpec,
     TaskStarted,
+    TaskState,
     ToolCallFinished,
     ToolCallStarted,
     TurnEndReason,
@@ -49,12 +52,14 @@ from orbit.protocol import (
     VerificationSkipped,
     VerificationStarted,
 )
+from orbit.tui.agents import AgentsPane
 from orbit.tui.tasks import TaskEditorScreen, TaskList
 from orbit.tui.view import (
     TOOL_ACCESS_DESCRIPTIONS,
     TOOL_ACCESS_OPTIONS,
     EntryKind,
     activity_entry,
+    next_filter,
     output_entry,
     task_started_entry,
     turn_end_entry,
@@ -70,7 +75,8 @@ NEIGHBORS: dict[str, dict[str, str]] = {
     "transcript": {"j": "prompt", "l": "task-list"},
     "prompt": {"k": "transcript", "l": "verification-steps"},
     "task-list": {"h": "transcript", "j": "verification-steps"},
-    "verification-steps": {"h": "prompt", "k": "task-list"},
+    "verification-steps": {"h": "prompt", "k": "task-list", "j": "agents"},
+    "agents": {"h": "prompt", "k": "verification-steps"},
 }
 
 
@@ -96,6 +102,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         Binding("ctrl+r", "run_tasks", "Run tasks"),
         Binding("ctrl+g", "super_review", "Super review"),
         Binding("ctrl+t", "toggle_planning", "Plan"),
+        Binding("f", "filter", "Filter by agent", show=False),
         Binding("escape", "cancel_turn", "Cancel turn"),
         Binding("ctrl+o", "pick_model", "Model"),
         Binding("ctrl+l", "pick_tool_access", "Tools"),
@@ -109,6 +116,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         # Whether a turn or task run is in progress, as last reported (or just requested).
         self._busy = False
         self._planning = False
+        self._agents_seen: list[str] = []  # In the order they started, for the filter.
         # Last settings reported by the backend; None until the first report.
         self._settings: Settings | None = None
         self._model_choices: tuple[str, ...] = ()
@@ -126,6 +134,7 @@ class OrbitApp(App[None], inherit_bindings=False):
             with Vertical(id="side"):
                 yield TaskList(id="task-list")
                 yield VerificationPanel(id="verification-steps")
+                yield AgentsPane(id="agents")
         yield Footer()
 
     async def on_unmount(self) -> None:
@@ -160,6 +169,8 @@ class OrbitApp(App[None], inherit_bindings=False):
     def action_activate(self) -> None:
         if self._selected == "task-list":
             self.query_one(TaskList).enter_list_mode()
+        elif self._selected == "agents":
+            self.query_one(AgentsPane).enter_list_mode()
 
     def action_insert_mode(self) -> None:
         """Shortcut from any window: select the prompt and start typing."""
@@ -197,6 +208,14 @@ class OrbitApp(App[None], inherit_bindings=False):
         self.query_one(f"#{self._selected}").remove_class("selected")
         self.query_one(f"#{window_id}").add_class("selected")
         self._selected = window_id
+
+    def action_filter(self) -> None:
+        transcript = self.query_one(Transcript)
+        transcript.show_only(next_filter(transcript.only, self._agents_seen))
+
+    @on(AgentsPane.Cancel)
+    async def _cancel_agent(self, message: AgentsPane.Cancel) -> None:
+        await self._session.send(CancelAgent(agent_id=message.agent_id))
 
     async def action_toggle_planning(self) -> None:
         await self._session.send(SetPlanning(on=not self._planning))
@@ -253,6 +272,7 @@ class OrbitApp(App[None], inherit_bindings=False):
             self._render_event(event)
 
     def _render_event(self, event: Event) -> None:
+        self._follow_agents(event)
         match event:
             case (
                 SettingsChanged()
@@ -260,6 +280,7 @@ class OrbitApp(App[None], inherit_bindings=False):
                 | TasksChanged()
                 | VerificationChanged()
                 | PlanningChanged()
+                | ReviewStatus()
             ):
                 self._render_state(event)
             case (
@@ -288,13 +309,18 @@ class OrbitApp(App[None], inherit_bindings=False):
                 | TaskMerged()
                 | Notice()
             ):
-                self._append(*activity_entry(event))
+                self._append(*activity_entry(event), getattr(event, "agent_id", None))
             case _:
                 assert_never(event)
 
     def _render_state(
         self,
-        event: SettingsChanged | BusyChanged | TasksChanged | VerificationChanged | PlanningChanged,
+        event: SettingsChanged
+        | BusyChanged
+        | TasksChanged
+        | VerificationChanged
+        | PlanningChanged
+        | ReviewStatus,
     ) -> None:
         """Show a snapshot of backend state."""
         match event:
@@ -303,9 +329,9 @@ class OrbitApp(App[None], inherit_bindings=False):
             case BusyChanged(busy=busy):
                 self._set_busy(busy)
             case TasksChanged(tasks=tasks):
-                self.query_one(TaskList).show(tasks)
-            case VerificationChanged(steps=steps):
-                self.query_one(VerificationPanel).show(steps)
+                self._show_tasks(tasks)
+            case VerificationChanged() | ReviewStatus():
+                self._show_progress(event)
             case _:
                 assert_never(event)
 
@@ -326,7 +352,7 @@ class OrbitApp(App[None], inherit_bindings=False):
             case ErrorOccurred(message=message):
                 self._append(message, "error")
             case AssistantMessage() | ToolCallStarted() | ToolCallFinished():
-                self._append(*output_entry(event))
+                self._append(*output_entry(event), event.agent_id)
             case _:
                 assert_never(event)
 
@@ -346,6 +372,24 @@ class OrbitApp(App[None], inherit_bindings=False):
                 self._append(*verification_finished_entry(self._step(step), passed))
             case _:
                 assert_never(event)
+
+    def _follow_agents(self, event: Event) -> None:
+        self.query_one(AgentsPane).track(event)
+        if isinstance(event, AgentStarted):
+            self._agents_seen.append(event.agent_id)
+
+    def _show_tasks(self, tasks: tuple[TaskState, ...]) -> None:
+        task_list = self.query_one(TaskList)
+        task_list.show(tasks)
+        numbers = dict(zip((t.id for t in task_list.tasks), task_list.numbers, strict=True))
+        self.query_one(AgentsPane).number_tasks(numbers)
+
+    def _show_progress(self, event: VerificationChanged | ReviewStatus) -> None:
+        """Show the verification steps' progress, or whether review is paused."""
+        if isinstance(event, VerificationChanged):
+            self.query_one(VerificationPanel).show(event.steps)
+        else:
+            self.query_one(AgentsPane).show_review(event)
 
     def _show_session(self, event: SettingsChanged | PlanningChanged) -> None:
         """Show the session's settings, or whether prompts go to the planner."""
@@ -378,5 +422,5 @@ class OrbitApp(App[None], inherit_bindings=False):
     def _step(self, step: int) -> StepState:
         return self.query_one(VerificationPanel).steps[step]
 
-    def _append(self, text: str, kind: EntryKind) -> None:
-        self.query_one(Transcript).add_entry(text, kind)
+    def _append(self, text: str, kind: EntryKind, agent: str | None = None) -> None:
+        self.query_one(Transcript).add_entry(text, kind, agent)

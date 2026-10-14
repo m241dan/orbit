@@ -9,6 +9,7 @@ from orbit.protocol import (
     AssistantMessage,
     Notice,
     ProgressNoted,
+    ReviewStatus,
     Settings,
     StepState,
     TaskGaveUp,
@@ -21,14 +22,19 @@ from orbit.protocol import (
 )
 from orbit.tui.view import (
     STATUS_ICONS,
+    AgentRow,
     activity_entry,
     agent_entry,
+    agent_line,
     exchange_entry,
+    next_filter,
     note_entry,
     output_entry,
+    review_line,
     settings_summary,
     step_lines,
     task_started_entry,
+    track_agents,
     turn_end_entry,
     verification_finished_entry,
     verification_skipped_entry,
@@ -141,3 +147,46 @@ def test_activity_entries_cover_agents_exchanges_merges_and_notices() -> None:
     assert activity_entry(note) == exchange_entry(note)
     merged = TaskMerged(task_id="1", result="merged")
     assert activity_entry(merged) == note_entry(merged)
+
+
+def test_agents_are_tracked_from_their_events() -> None:
+    rows: tuple[AgentRow, ...] = ()
+    for event in (
+        AgentStarted(agent_id="agent-1", role="coder", task_id="1"),
+        AgentStarted(agent_id="agent-2", role="reviewer", task_id="2"),
+        AgentRequest(agent_id="agent-1", request_id="r", tool="complete_task", arguments={}),
+    ):
+        rows = track_agents(rows, event)
+    assert rows == (
+        AgentRow("agent-1", "coder", "1", waiting_on="complete_task"),
+        AgentRow("agent-2", "reviewer", "2"),
+    )
+    rows = track_agents(rows, AgentReply(agent_id="agent-1", request_id="r", text="ok"))
+    assert rows[0].waiting_on is None
+    rows = track_agents(rows, AgentExited(agent_id="agent-2", reason="finished"))
+    assert [r.agent_id for r in rows] == ["agent-1"]
+    assert track_agents(rows, Notice(message="x")) == rows
+
+
+def test_agent_lines_say_what_each_is_doing() -> None:
+    assert agent_line(AgentRow("agent-1", "coder", "4"), "2") == "agent-1 coder · task 2 · working"
+    waiting = AgentRow("agent-3", "reviewer", "5", waiting_on="complete_task")
+    assert agent_line(waiting, "3") == "agent-3 reviewer · task 3 · waiting on complete_task"
+    planner = AgentRow("agent-4", "planner", "plan")
+    assert agent_line(planner, None) == "agent-4 planner · planning · working"
+
+
+def test_the_review_line_says_whether_review_is_paused() -> None:
+    assert review_line(None) == ""
+    assert review_line(ReviewStatus(paused=False, open_batches=0)) == "review: active"
+    assert review_line(ReviewStatus(paused=False, open_batches=2)) == "review: active · 2 open"
+    assert review_line(ReviewStatus(paused=True, open_batches=0)) == "review: paused"
+
+
+def test_the_filter_cycles_through_everything_and_each_agent() -> None:
+    seen = ("agent-1", "agent-2")
+    assert next_filter(None, seen) == "agent-1"
+    assert next_filter("agent-1", seen) == "agent-2"
+    assert next_filter("agent-2", seen) is None
+    assert next_filter(None, ()) is None
+    assert next_filter("agent-9", seen) is None

@@ -1,6 +1,7 @@
 """Reviews: queued as work lands, run beside the work in snapshots, suggestions run after."""
 
 import asyncio
+import itertools
 from collections.abc import Callable
 
 from orbit.agent import AgentSession
@@ -9,11 +10,13 @@ from orbit.agent.domain.agent_task import Limits
 from orbit.protocol import (
     AddTask,
     AgentExited,
+    CancelAgent,
     CancelTurn,
     ErrorOccurred,
     Event,
     Notice,
     RequestSuperReview,
+    ReviewStatus,
     RunTasks,
     TasksChanged,
     TaskSpec,
@@ -84,6 +87,14 @@ async def _quiet(events: list[Event], done: Callable[[list[Event]], bool]) -> No
 def _finished(events: list[Event]) -> bool:
     tasks = [e for e in events if isinstance(e, TasksChanged)]
     return bool(tasks) and all(t.status in SETTLED for t in tasks[-1].tasks)
+
+
+def reviewers_of(launcher: ScriptedLauncher) -> list[str]:
+    return [la.agent.id for la in launcher.launches if la.agent.role == "reviewer"]
+
+
+def statuses_of(events: list[Event], role: str) -> list[str]:
+    return [t.status for t in board(events) if t.task.role == role]
 
 
 def board(events: list[Event]) -> tuple[TaskState, ...]:
@@ -388,3 +399,79 @@ async def test_without_reviews_a_super_review_is_refused() -> None:
     stream = session.events()
     events = [await anext(stream), await anext(stream)]
     assert any(isinstance(e, ErrorOccurred) and "Super reviews" in e.message for e in events)
+
+
+async def test_review_status_follows_batches_and_the_pause() -> None:
+    session, _, _ = session_for(
+        claims_done,
+        claims_done,
+        reviewers=(suggests("Add tests"),),
+        tree=FakeTree(),
+        review=True,
+        review_rounds=1,
+    )
+    await start(session)
+    events = await asyncio.wait_for(settle(session), 10)
+    statuses = [e for e in events if isinstance(e, ReviewStatus)]
+    assert statuses[0] == ReviewStatus(paused=False, open_batches=1)
+    assert statuses[-1] == ReviewStatus(paused=True, open_batches=0)
+    assert all(a != b for a, b in itertools.pairwise(statuses))  # Only changes.
+
+
+async def test_cancelling_a_reviewer_stops_its_review_and_the_lane_carries_on() -> None:
+    reviewing = asyncio.Event()
+
+    async def endless(call: Call) -> TurnEndReason:
+        await call("get_task")
+        reviewing.set()
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+    session, _, launcher = session_for(
+        claims_done, claims_done, reviewers=(endless, suggests()), tree=FakeTree(), review=True
+    )
+    await start(session, "one", "two")
+    events: list[Event] = []
+    collecting = asyncio.ensure_future(settle(session, events))
+    await asyncio.wait_for(reviewing.wait(), 10)
+    [reviewer] = reviewers_of(launcher)
+    await session.send(CancelAgent(agent_id=reviewer))
+    await asyncio.wait_for(collecting, 10)
+    assert statuses_of(events, "reviewer") == ["cancelled", "completed"]
+    assert AgentExited(agent_id=reviewer, reason="killed") in events
+    assert statuses_of(events, "coder") == ["completed", "completed"]
+
+
+async def test_cancelling_the_coder_is_like_escape() -> None:
+    working = asyncio.Event()
+
+    async def endless(call: Call) -> TurnEndReason:
+        await call("get_task")
+        working.set()
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+    session, _, _ = session_for(endless)
+    await start(session, "one", "two")
+    await asyncio.wait_for(working.wait(), 5)
+    await session.send(CancelAgent(agent_id="agent-1"))
+    events = await asyncio.wait_for(
+        settle(session, until=lambda ev: [t.status for t in board(ev)] == ["cancelled", "pending"]),
+        10,
+    )
+    assert [t.status for t in board(events)] == ["cancelled", "pending"]
+
+
+async def test_cancelling_an_unknown_agent_is_reported() -> None:
+    session, _, _ = session_for()
+    await session.send(CancelAgent(agent_id="agent-7"))
+    stream = session.events()
+    events = [await anext(stream), await anext(stream)]
+    assert ErrorOccurred(message="No running agent 'agent-7'.") in events
+
+
+async def test_cancelling_a_review_that_is_not_running_does_nothing() -> None:
+    session, _, _ = session_for(tree=FakeTree(), review=True)
+    lane = session._lane
+    assert lane is not None
+    lane.cancel("42")

@@ -138,6 +138,10 @@ class AgentDesk:
         self._runs[agent.id] = run
         return agent
 
+    def find(self, agent_id: str) -> Agent | None:
+        """Running agent ``agent_id``, if there is one."""
+        return next((agent for agent in self.registry.live if agent.id == agent_id), None)
+
     def close(self, agent: Agent) -> None:
         self.registry.revoke(agent.id)
         self._runs.pop(agent.id, None)

@@ -10,12 +10,14 @@ from orbit.protocol import (
     AgentStarted,
     AssistantMessage,
     BusyChanged,
+    CancelAgent,
     EditTask,
     ErrorOccurred,
     PlanningChanged,
     ProgressNoted,
     RemoveTask,
     RequestSuperReview,
+    ReviewStatus,
     RunTasks,
     SetPlanning,
     Settings,
@@ -213,3 +215,10 @@ def test_planning_and_draft_messages_round_trip() -> None:
     assert event_adapter.validate_json(event.model_dump_json()) == event
     draft = TaskState(id="1", task=TaskSpec(prompt="x"), status="draft", origin="planner")
     assert TaskState.model_validate(draft.model_dump()) == draft
+
+
+def test_agent_cancelling_and_review_status_round_trip() -> None:
+    command = CancelAgent(agent_id="agent-2")
+    assert command_adapter.validate_json(command.model_dump_json()) == command
+    event = ReviewStatus(paused=True, open_batches=2)
+    assert event_adapter.validate_json(event.model_dump_json()) == event

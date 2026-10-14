@@ -462,14 +462,17 @@ async def test_side_panels_fill_right_third_top_and_bottom() -> None:
         prompt = app.query_one(PromptInput).region
         assert (tasks.border_title, steps.border_title) == ("Task list", "Verification steps")
 
-        # 33% of the width (39.6 rounds down), split top/bottom above the footer.
-        for panel in (tasks, steps):
+        agents = app.query_one("#agents")
+        # 33% of the width (39.6 rounds down): the task list and steps share the height above
+        # the agents pane, which sits at the bottom, above the footer.
+        for panel in (tasks, steps, agents):
             assert panel.region.width == 39
             assert panel.region.right == 120
         assert tasks.region.y == 0
         assert steps.region.y == tasks.region.bottom
-        assert steps.region.bottom == 40
-        assert tasks.region.height == steps.region.height
+        assert agents.region.y == steps.region.bottom
+        assert agents.region.bottom == 40
+        assert abs(tasks.region.height - steps.region.height) <= 1  # An odd row goes to one.
 
         # Conversation and prompt take the rest of the width on the left.
         assert transcript.width == prompt.width == 81
@@ -508,7 +511,11 @@ async def test_prompt_window_is_selected_on_start_and_highlighted() -> None:
         ("kk", "transcript"),
         ("kh", "transcript"),
         ("kll", "task-list"),
-        ("lj", "verification-steps"),
+        ("lj", "agents"),
+        ("ljk", "verification-steps"),
+        ("ljh", "prompt"),
+        ("ljj", "agents"),
+        ("ljl", "agents"),
     ],
 )
 async def test_hjkl_moves_selection_between_windows(keys: str, expected: str) -> None:
