@@ -10,10 +10,20 @@ from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
 from textual.containers import VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Input, OptionList, Static
+from textual.widgets import Input, OptionList, Static, Tab, Tabs
 
-from orbit.protocol import Settings, StepState
-from orbit.tui.view import SPINNER_FPS, EntryKind, settings_summary, spinner_frame, step_lines
+from orbit.protocol import Event, Settings, StepState
+from orbit.tui.view import (
+    ALL_TAB_LABEL,
+    SPINNER_FPS,
+    ConversationTab,
+    EntryKind,
+    settings_summary,
+    spinner_frame,
+    step_lines,
+    tab_labels,
+    track_tabs,
+)
 
 
 class Entry(Static):
@@ -60,13 +70,69 @@ class Transcript(VerticalScroll):
         self.mount(entry)
         self.scroll_end(animate=False)
 
-    def show_only(self, agent: str | None) -> None:
-        """Show only ``agent``'s entries, or all of them."""
+    def show_only(self, agent: str | None, label: str = "") -> None:
+        """Show only ``agent``'s entries, titled by its tab ``label``, or all of them."""
         self.only = agent
-        self.border_title = "Conversation" if agent is None else f"Conversation · {agent}"
+        self.border_title = "Conversation" if agent is None else f"Conversation · {label}"
         for entry in self.query(Entry):
             entry.display = agent is None or entry.agent == agent
         self.scroll_end(animate=False)
+
+
+class ConversationTabs(Tabs):
+    """Strip of tabs above the transcript: "All", then one per running agent.
+
+    Clicking a tab activates it; like the transcript, it never takes focus.
+    """
+
+    can_focus = False
+
+    ALL_TAB_ID = "tab-all"
+
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(Tab(ALL_TAB_LABEL, id=self.ALL_TAB_ID), **kwargs)
+        self.tabs: tuple[ConversationTab, ...] = ()
+        self._tab_ids: dict[str, str] = {}  # Agent id to its tab's id.
+        self._next_id = 1
+
+    def agent_of(self, tab_id: str) -> str | None:
+        """The agent whose tab has id ``tab_id``; None for All."""
+        return next((agent for agent, tid in self._tab_ids.items() if tid == tab_id), None)
+
+    def track(self, event: Event) -> None:
+        """Add a tab for an agent that started, and remove an exited agent's tab."""
+        tabs = track_tabs(self.tabs, event)
+        if tabs == self.tabs:
+            return
+        for gone in set(self._tab_ids) - {t.agent_id for t in tabs}:
+            self._remove(gone)
+        for tab, label in zip(tabs, tab_labels(tabs), strict=True):
+            if tab.agent_id in self._tab_ids:
+                self._relabel(self._tab_ids[tab.agent_id], label)
+            else:
+                self._add(tab.agent_id, label)
+        self.tabs = tabs
+
+    def _add(self, agent: str, label: str) -> None:
+        tab_id = f"agent-tab-{self._next_id}"
+        self._next_id += 1
+        self._tab_ids[agent] = tab_id
+        self.add_tab(Tab(label, id=tab_id))
+
+    def _remove(self, agent: str) -> None:
+        """Remove ``agent``'s tab, showing All instead if it was active."""
+        tab_id = self._tab_ids.pop(agent)
+        if self.active == tab_id:
+            self.active = self.ALL_TAB_ID
+        self.remove_tab(tab_id)
+
+    def _relabel(self, tab_id: str, label: str) -> None:
+        tab = self.query_one(f"#{tab_id}", Tab)
+        if tab.label_text != label:
+            tab.label = label
+            if self.active == tab_id:
+                # Let the transcript's title follow the new label.
+                self.post_message(self.TabActivated(self, tab))
 
 
 class SidePanel(VerticalScroll):

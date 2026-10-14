@@ -6,7 +6,7 @@ from textual import on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding, BindingType
 from textual.containers import Horizontal, Vertical
-from textual.widgets import Footer, Input, OptionList
+from textual.widgets import Footer, Input, OptionList, Tabs
 
 from orbit.protocol import (
     AcceptTask,
@@ -59,7 +59,6 @@ from orbit.tui.view import (
     TOOL_ACCESS_OPTIONS,
     EntryKind,
     activity_entry,
-    next_filter,
     output_entry,
     task_started_entry,
     turn_end_entry,
@@ -67,7 +66,13 @@ from orbit.tui.view import (
     verification_skipped_entry,
     verification_started_entry,
 )
-from orbit.tui.widgets import PickerScreen, PromptInput, Transcript, VerificationPanel
+from orbit.tui.widgets import (
+    ConversationTabs,
+    PickerScreen,
+    PromptInput,
+    Transcript,
+    VerificationPanel,
+)
 
 # Window reached from each window by h/j/k/l; missing means an edge.
 # Conversation over prompt on the left, task list over verification steps on the right.
@@ -102,7 +107,6 @@ class OrbitApp(App[None], inherit_bindings=False):
         Binding("ctrl+r", "run_tasks", "Run tasks"),
         Binding("ctrl+g", "super_review", "Super review"),
         Binding("ctrl+t", "toggle_planning", "Plan"),
-        Binding("f", "filter", "Filter by agent", show=False),
         Binding("escape", "cancel_turn", "Cancel turn"),
         Binding("ctrl+o", "pick_model", "Model"),
         Binding("ctrl+l", "pick_tool_access", "Tools"),
@@ -116,7 +120,6 @@ class OrbitApp(App[None], inherit_bindings=False):
         # Whether a turn or task run is in progress, as last reported (or just requested).
         self._busy = False
         self._planning = False
-        self._agents_seen: list[str] = []  # In the order they started, for the filter.
         # Last settings reported by the backend; None until the first report.
         self._settings: Settings | None = None
         self._model_choices: tuple[str, ...] = ()
@@ -129,6 +132,7 @@ class OrbitApp(App[None], inherit_bindings=False):
     def compose(self) -> ComposeResult:
         with Horizontal():
             with Vertical():
+                yield ConversationTabs(id="conversation-tabs")
                 yield Transcript(id="transcript")
                 yield PromptInput(placeholder="Press i to type, esc to stop", id="prompt")
             with Vertical(id="side"):
@@ -209,9 +213,10 @@ class OrbitApp(App[None], inherit_bindings=False):
         self.query_one(f"#{window_id}").add_class("selected")
         self._selected = window_id
 
-    def action_filter(self) -> None:
-        transcript = self.query_one(Transcript)
-        transcript.show_only(next_filter(transcript.only, self._agents_seen))
+    @on(Tabs.TabActivated, "#conversation-tabs")
+    def _show_tab(self, event: Tabs.TabActivated) -> None:
+        agent = self.query_one(ConversationTabs).agent_of(event.tab.id or "")
+        self.query_one(Transcript).show_only(agent, event.tab.label_text)
 
     @on(AgentsPane.Cancel)
     async def _cancel_agent(self, message: AgentsPane.Cancel) -> None:
@@ -375,8 +380,7 @@ class OrbitApp(App[None], inherit_bindings=False):
 
     def _follow_agents(self, event: Event) -> None:
         self.query_one(AgentsPane).track(event)
-        if isinstance(event, AgentStarted):
-            self._agents_seen.append(event.agent_id)
+        self.query_one(ConversationTabs).track(event)
 
     def _show_tasks(self, tasks: tuple[TaskState, ...]) -> None:
         task_list = self.query_one(TaskList)

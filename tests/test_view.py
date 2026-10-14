@@ -29,7 +29,6 @@ from orbit.tui.view import (
     agent_entry,
     agent_line,
     exchange_entry,
-    next_filter,
     note_entry,
     output_entry,
     review_line,
@@ -185,15 +184,6 @@ def test_the_review_line_says_whether_review_is_paused() -> None:
     assert review_line(ReviewStatus(paused=False, open_batches=0)) == "review: active"
     assert review_line(ReviewStatus(paused=False, open_batches=2)) == "review: active · 2 open"
     assert review_line(ReviewStatus(paused=True, open_batches=0)) == "review: paused"
-
-
-def test_the_filter_cycles_through_everything_and_each_agent() -> None:
-    seen = ("agent-1", "agent-2")
-    assert next_filter(None, seen) == "agent-1"
-    assert next_filter("agent-1", seen) == "agent-2"
-    assert next_filter("agent-2", seen) is None
-    assert next_filter(None, ()) is None
-    assert next_filter("agent-9", seen) is None
 
 
 def test_each_started_agent_gets_a_tab_until_it_exits() -> None:

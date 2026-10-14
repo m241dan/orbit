@@ -3,7 +3,6 @@ from orbit.protocol import (
     AgentReply,
     AgentRequest,
     AgentStarted,
-    AssistantMessage,
     CancelAgent,
     ReviewStatus,
     TasksChanged,
@@ -12,7 +11,6 @@ from orbit.protocol import (
 )
 from orbit.tui import OrbitApp
 from orbit.tui.agents import AgentsPane
-from orbit.tui.widgets import Entry, Transcript
 from tests.test_task_list import feed
 from tests.test_tui import FakeSession
 
@@ -77,35 +75,6 @@ async def test_c_with_no_agents_cancels_nothing() -> None:
     async with app.run_test() as pilot:
         await pilot.press("l", "j", "enter", "c")
         assert session.commands == []
-
-
-async def test_f_shows_one_agent_at_a_time_then_everything() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        await feed(
-            session,
-            pilot,
-            AssistantMessage(turn_id="t", text="chat"),
-            AgentStarted(agent_id="agent-1", role="coder", task_id="7"),
-            AssistantMessage(turn_id="a", text="coding", agent_id="agent-1"),
-            AgentStarted(agent_id="agent-2", role="reviewer", task_id="8"),
-            AssistantMessage(turn_id="b", text="reviewing", agent_id="agent-2"),
-        )
-        transcript = app.query_one(Transcript)
-
-        def shown() -> list[str]:
-            return [str(e.render()) for e in app.query(Entry) if e.display]
-
-        await pilot.press("f")
-        assert transcript.border_title == "Conversation · agent-1"
-        assert shown() == ["▶ agent-1 (coder) started", "agent-1: coding"]
-        await pilot.press("f")
-        await feed(session, pilot, AssistantMessage(turn_id="a", text="more", agent_id="agent-1"))
-        assert shown() == ["▶ agent-2 (reviewer) started", "agent-2: reviewing"]
-        await pilot.press("f")
-        assert transcript.border_title == "Conversation"
-        assert len(shown()) == 6
 
 
 async def test_the_highlight_stays_in_range_as_agents_exit() -> None:

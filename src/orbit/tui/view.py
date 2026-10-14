@@ -358,10 +358,3 @@ def tab_labels(tabs: Sequence[ConversationTab]) -> list[str]:
         count = seen[tab.role]
         labels.append(tab.role if count == 1 else f"{tab.role} {count}")
     return labels
-
-
-def next_filter(current: str | None, agents: Sequence[str]) -> str | None:
-    """The agent to show the transcript of after ``current``: each in turn, then all (``None``)."""
-    order: list[str | None] = [None, *agents]
-    position = order.index(current) if current in order else len(order) - 1
-    return order[(position + 1) % len(order)]

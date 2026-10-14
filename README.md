@@ -29,7 +29,6 @@ In the app:
 | `i` | Jump to the prompt and start typing (vim-style insert mode) |
 | `enter` | On the task list: activate it (`j`/`k` move, `enter` edits a task or adds one on `+ new task`, `a` accepts a draft, `x` removes a task, `esc` leaves) |
 | `ctrl+t` | Switch the prompt between the conversation and the planner |
-| `f` | Show only one agent's part of the conversation; press again for the next agent, then everything |
 | `enter` | On the agents pane: activate it (`j`/`k` move, `c` cancels the highlighted agent's work, `esc` leaves) |
 | `ctrl+r` | Run the tasks that haven't completed yet |
 | `ctrl+g` | Ask for a super review of the whole codebase now (works while tasks run) |
@@ -70,7 +69,8 @@ coder or the planner, the same as `esc`.
 
 The conversation shows everything in one timeline: each agent's own messages and tool calls,
 prefixed with its id, and its exchanges with orbit (`agent-1 → orbit: complete_task …`,
-`orbit → agent-1: …`) in their own colour; `f` narrows it to one agent at a time.
+`orbit → agent-1: …`) in their own colour. The tabs above it narrow it to one running agent;
+click one to switch, or **All** for everything.
 
 Each row of the task list shows its status: ⏳ pending, ◜ running (spinning), 🔍 verifying, ✅ done,
 ❗ failed verification, ❌ failed, ⌛ ran out of steps, 🏳 the agent gave up, 🛑 cancelled, 📝 a draft

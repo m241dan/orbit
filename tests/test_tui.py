@@ -3,9 +3,10 @@ from collections.abc import AsyncIterator
 
 import pytest
 from textual.pilot import Pilot
-from textual.widgets import Footer, Input, OptionList
+from textual.widgets import Footer, Input, OptionList, Tab
 
 from orbit.protocol import (
+    AgentExited,
     AgentReply,
     AgentStarted,
     AssistantMessage,
@@ -27,6 +28,7 @@ from orbit.protocol import (
 from orbit.tui import OrbitApp
 from orbit.tui.view import spinner_frame
 from orbit.tui.widgets import (
+    ConversationTabs,
     Entry,
     PickerScreen,
     PromptInput,
@@ -159,11 +161,14 @@ async def test_renders_agent_activity() -> None:
 async def test_layout_stacks_display_over_prompt_over_footer() -> None:
     app = OrbitApp(FakeSession())
     async with app.run_test(size=(80, 24)):
+        tabs = app.query_one(ConversationTabs)
         transcript = app.query_one(Transcript)
         prompt = app.query_one(PromptInput)
         footer = app.query_one(Footer)
 
-        assert transcript.region.y == 0
+        assert tabs.region.y == 0
+        assert tabs.region.bottom == transcript.region.y
+        assert tabs.region.width == transcript.region.width
         assert transcript.region.bottom == prompt.region.y
         assert prompt.region.bottom == footer.region.y
         assert footer.region.bottom == 24
@@ -607,3 +612,138 @@ def test_spinner_cycles_the_arc_eight_frames_a_second() -> None:
     frames = [spinner_frame(i / 8) for i in range(7)]
     # Padded to two columns, like the emoji it stands beside.
     assert frames == ["◜ ", "◠ ", "◝ ", "◞ ", "◡ ", "◟ ", "◜ "]
+
+
+async def feed_events(session: FakeSession, pilot: Pilot[None], *events: Event) -> None:
+    for event in events:
+        await session.queue.put(event)
+    await pilot.pause()
+
+
+def tab_strip(app: OrbitApp) -> list[str]:
+    return [tab.label_text for tab in app.query_one(ConversationTabs).query(Tab)]
+
+
+def shown(app: OrbitApp) -> list[str]:
+    return [str(e.render()) for e in app.query(Entry) if e.display]
+
+
+def started(agent_id: str, role: str = "coder") -> AgentStarted:
+    return AgentStarted(agent_id=agent_id, role=role, task_id="1")
+
+
+def said(agent_id: str, text: str) -> AssistantMessage:
+    return AssistantMessage(turn_id="t", text=text, agent_id=agent_id)
+
+
+async def test_the_tab_strip_starts_with_only_all_and_never_takes_focus() -> None:
+    app = OrbitApp(FakeSession())
+    async with app.run_test() as pilot:
+        tabs = app.query_one(ConversationTabs)
+        assert tab_strip(app) == ["All"]
+        assert tabs.active_tab is not None and tabs.active_tab.label_text == "All"
+        assert not tabs.focusable
+        assert app.query_one(Transcript).border_title == "Conversation"
+        await pilot.click(Tab)
+        assert app.focused is None
+        # h/j/k/l still move straight between the conversation and the prompt.
+        await pilot.press("k")
+        assert app.query_one(Transcript).has_class("selected")
+        await pilot.press("j")
+        assert app.query_one(PromptInput).has_class("selected")
+
+
+async def test_each_started_agent_adds_a_tab_labelled_by_role() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(
+            session, pilot, started("agent-1"), started("agent-2", "reviewer"), started("agent-3")
+        )
+        assert tab_strip(app) == ["All", "coder", "reviewer", "coder 2"]
+        assert app.query_one(Transcript).only is None
+        await feed_events(session, pilot, AgentExited(agent_id="agent-1", reason="finished"))
+        assert tab_strip(app) == ["All", "reviewer", "coder"]
+        assert app.query_one(Transcript).border_title == "Conversation"
+
+
+async def test_clicking_a_tab_shows_only_that_agents_conversation() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test(size=(120, 30)) as pilot:
+        await feed_events(
+            session,
+            pilot,
+            AssistantMessage(turn_id="t", text="chat"),
+            started("agent-1"),
+            said("agent-1", "coding"),
+            started("agent-2", "reviewer"),
+            said("agent-2", "reviewing"),
+        )
+        transcript = app.query_one(Transcript)
+        tabs = list(app.query_one(ConversationTabs).query(Tab))
+
+        await pilot.click(tabs[2])
+        await pilot.pause()
+        assert app.focused is None
+        assert transcript.only == "agent-2"
+        assert transcript.border_title == "Conversation · reviewer"
+        assert shown(app) == ["▶ agent-2 (reviewer) started", "agent-2: reviewing"]
+        await feed_events(session, pilot, said("agent-1", "more"))
+        assert shown(app) == ["▶ agent-2 (reviewer) started", "agent-2: reviewing"]
+
+        await pilot.click(tabs[0])
+        await pilot.pause()
+        assert transcript.only is None
+        assert transcript.border_title == "Conversation"
+        assert len(shown(app)) == 6
+
+
+async def test_an_exited_agents_tab_goes_and_its_entries_stay_under_all() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test(size=(120, 30)) as pilot:
+        await feed_events(
+            session, pilot, started("agent-1"), said("agent-1", "coding"), started("agent-2")
+        )
+        transcript = app.query_one(Transcript)
+        await pilot.click(list(app.query_one(ConversationTabs).query(Tab))[1])
+        await pilot.pause()
+        assert transcript.only == "agent-1"
+
+        # Another agent leaving doesn't change what's shown.
+        await feed_events(session, pilot, AgentExited(agent_id="agent-2", reason="finished"))
+        assert tab_strip(app) == ["All", "coder"]
+        assert transcript.only == "agent-1"
+
+        await feed_events(session, pilot, AgentExited(agent_id="agent-1", reason="finished"))
+        assert tab_strip(app) == ["All"]
+        assert transcript.only is None
+        assert transcript.border_title == "Conversation"
+        assert "agent-1: coding" in shown(app)
+
+
+async def test_the_shown_tabs_title_follows_its_relabelling() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test(size=(120, 30)) as pilot:
+        await feed_events(session, pilot, started("agent-1"), started("agent-2"))
+        transcript = app.query_one(Transcript)
+        await pilot.click(list(app.query_one(ConversationTabs).query(Tab))[2])
+        await pilot.pause()
+        assert transcript.border_title == "Conversation · coder 2"
+
+        await feed_events(session, pilot, AgentExited(agent_id="agent-1", reason="finished"))
+        assert tab_strip(app) == ["All", "coder"]
+        assert transcript.only == "agent-2"
+        assert transcript.border_title == "Conversation · coder"
+
+
+async def test_f_no_longer_filters() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, started("agent-1"), said("agent-1", "coding"))
+        await pilot.press("f")
+        assert app.query_one(Transcript).only is None
+        assert len(shown(app)) == 2
