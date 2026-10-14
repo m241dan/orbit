@@ -58,8 +58,8 @@ conversation. The agent is told only who it is (`agent-1`, `agent-2`, …) and t
 4. Once verification passes, the agent is told to stop. It gets a few seconds to exit on its own
    before orbit stops it.
 
-An agent may also run a single step itself with `run_check` (up to 20 times per task), note what it's
-doing with `report_progress`, or call `give_up` with a reason when the task can't be done.
+An agent may also run a single step itself with `run_check` (up to 20 times per task), note what
+it's doing with `report_progress`, or call `give_up` with a reason when the task can't be done.
 
 The **agents pane** (bottom right) lists the agents running now: each one's role, its task, and
 whether it's working or waiting on orbit (say, `waiting on complete_task` while its work is
@@ -67,15 +67,16 @@ verified). Its subtitle says whether review is active or paused. Activate it wit
 `c` on an agent to cancel its work: for a reviewer, just that review (the next one starts); for the
 coder or the planner, the same as `esc`.
 
-The conversation shows everything in one timeline: the agent's own messages and tool calls, prefixed
-with its id, and its exchanges with orbit (`agent-1 → orbit: complete_task …`, `orbit → agent-1: …`)
-in their own colour; `f` narrows it to one agent at a time. Each row shows its status: ⏳ pending, ◜ running (spinning), 🔍 verifying, ✅ done,
-❗ failed verification, ❌ failed, ⌛ ran out of steps, 🏳 the agent gave up, 🛑 cancelled,
-📝 a draft the planner proposed. A failed task
-doesn't stop the rest; `esc` cancels the running task (stopping its agent) and skips the remaining
-ones. Running again skips tasks that completed, failed verification or were given up on, and editing
-a task makes it pending again. Tasks added while a run is going join it; the running task can't be
-edited.
+The conversation shows everything in one timeline: each agent's own messages and tool calls,
+prefixed with its id, and its exchanges with orbit (`agent-1 → orbit: complete_task …`,
+`orbit → agent-1: …`) in their own colour; `f` narrows it to one agent at a time.
+
+Each row of the task list shows its status: ⏳ pending, ◜ running (spinning), 🔍 verifying, ✅ done,
+❗ failed verification, ❌ failed, ⌛ ran out of steps, 🏳 the agent gave up, 🛑 cancelled, 📝 a draft
+the planner proposed. A failed task doesn't stop the rest; `esc` cancels the running task (stopping
+its agent) and skips the remaining ones. Running again skips tasks that completed, failed
+verification or were given up on, and editing a task makes it pending again. Tasks added while a
+run is going join it; the running task can't be edited.
 
 Edge cases:
 
@@ -275,20 +276,25 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
 - `orbit.agent`: backend, with no UI imports. Three layers, each importing only the ones below:
   - `external`: adapters that reach outside the backend. `ClaudeCliRunner` streams `claude -p
     --output-format stream-json`, resumes the same Claude session across turns, and launches
-    agents connected to orbit (`run_agent`); `McpHost` is orbit's MCP server; `GitCoderTree` is the coder's worktree; `checks` runs
-    the verification steps as processes (`DEFAULT_STEPS`, `run_step`); `workspace` fingerprints
-    the git working tree; `EchoModel` is a stand-in model.
+    agents connected to orbit (`run_agent`, and `converse` for the planner); `McpHost` is orbit's
+    MCP server; `GitCoderTree` is the coder's worktree and its snapshots; `config_file` reads
+    `.orbit/roles.toml`; `checks` runs the verification steps as processes (`DEFAULT_STEPS`,
+    `run_step`); `workspace` fingerprints the git working tree; `EchoModel` is a stand-in model.
   - `application`: `AgentSession` implements `Session`: it takes commands, asks the domain what
     follows, drives the ports and publishes events. `AgentRun` sees one task through one agent and
-    `AgentDesk` routes agents' calls to their runs; `Verifier` runs the steps. `ports` defines what
-    it needs from outside (`AgentHost`, `AgentLauncher`, `TurnRunner`, `StepRunner`, `Workspace`,
-    `ModelClient`, `Tool`); `ModelLoopRunner` is an in-house model/tool loop for direct API use.
+    `AgentDesk` routes agents' calls by token; `Verifier` runs the steps; `Lander` commits and
+    merges verified work; `ReviewLane` runs reviews beside the work; `PlannerChat` is the
+    planner's conversation. `ports` defines what it needs from outside (`AgentHost`,
+    `AgentLauncher`, `CoderTree`, `TurnRunner`, `StepRunner`, `Workspace`, `ModelClient`, `Tool`);
+    `ModelLoopRunner` is an in-house model/tool loop for direct API use.
   - `domain`: the rules, with no I/O: the `TaskBoard` (task order, statuses, fix chains),
     `AgentTask` (what orbit replies to an agent, and when its work is verified), the
-    `AgentRegistry` (agent ids and tokens), when a task needs verifying, how many fixes to try per
-    step, and the fix prompt.
+    `AgentRegistry` (agent ids and tokens), `roles` (built-in roles and orbit's limits),
+    `ReviewPlanner` (when to review, batches, rounds and caps), commit messages, when a task needs
+    verifying, how many fixes to try per step, and the fix prompt.
 - `orbit.tui`: frontend. Sends commands and renders events. Imports only `orbit.protocol`.
-  `view` turns state and events into text and doesn't import Textual; the widgets lay it out.
+  `view` turns state and events into text and doesn't import Textual; the widgets (`tasks`,
+  `agents`, `widgets`) lay it out.
 - `orbit.cli`: the composition root, and the only place the two sides are wired together: it
   plugs the external adapters into `AgentSession` and hands that to the TUI.
 
