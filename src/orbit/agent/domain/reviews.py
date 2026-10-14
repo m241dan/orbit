@@ -15,6 +15,8 @@ from orbit.protocol import TaskState
 
 # Statuses of tasks that are still to run or running, so a duplicate of one is refused.
 UNFINISHED = frozenset({"pending", "running", "verifying"})
+# Characters of diff quoted in a review task; a reviewer can read files for more.
+DIFF_LIMIT = 30000
 
 
 @dataclass(frozen=True)
@@ -125,3 +127,27 @@ class ReviewPlanner:
 
 def _normalized(text: str) -> str:
     return " ".join(text.strip().split("\n", 1)[0].lower().split())
+
+
+def review_prompt(job: ReviewJob, diff: str, cap: int) -> str:
+    """The task for the reviewer of ``job``, whose commits' messages and diffs are ``diff``.
+
+    Its first line titles it.
+    """
+    if job.batch is None:
+        title = f"Review commit {job.commits[0][:7]}"
+    else:
+        title = f"Review the {len(job.commits)} commits made for review {job.batch}"
+    missing = "".join(
+        f"\ntask {task} of that review ended without a commit." for task in job.missing
+    )
+    if len(diff) > DIFF_LIMIT:
+        diff = diff[:DIFF_LIMIT] + "\n… (diff trimmed)"
+    return (
+        f"{title}\n{missing}\n"
+        "Look for bugs, missing tests and unclear code. For each problem worth fixing, call"
+        f" suggest_task with a short title and a prompt a coder can act on: at most {cap},"
+        " most important first. Suggest nothing if it's fine. Then call complete_task with a"
+        " one-line summary of your review.\n\n"
+        f"{diff}"
+    )

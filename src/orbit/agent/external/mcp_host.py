@@ -15,12 +15,13 @@ from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 
 from orbit.agent.application.ports import CallHandler
+from orbit.agent.domain.roles import ORBIT_TOOLS
 
 INSTRUCTIONS = (
     "Orbit hands out your task and verifies your work. Call get_task first; when you're done,"
     " call complete_task and wait for its reply, which says whether verification passed."
 )
-TOOL_NAMES = ("get_task", "complete_task", "run_check", "report_progress", "give_up")
+TOOL_NAMES = ORBIT_TOOLS
 
 
 def bearer_token(headers: Mapping[str, str] | None) -> str:
@@ -67,6 +68,12 @@ def build_server(handler: CallHandler) -> MCPServer:
     async def give_up(reason: str, ctx: Context) -> str:
         """Report that you can't do the task, and why. Use only when it's truly blocked."""
         return await call(ctx, "give_up", {"reason": reason})
+
+    @server.tool(structured_output=False)
+    async def suggest_task(title: str, prompt: str, ctx: Context) -> str:
+        """Suggest a follow-up task for a coder: a short title, and a prompt saying what to
+        change and how to tell it's done. Suggest the most important first."""
+        return await call(ctx, "suggest_task", {"title": title, "prompt": prompt})
 
     return server
 

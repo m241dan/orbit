@@ -11,7 +11,14 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 
 from orbit.protocol import ToolAccess
 
-ORBIT_TOOLS = ("get_task", "complete_task", "run_check", "report_progress", "give_up")
+ORBIT_TOOLS = (
+    "get_task",
+    "complete_task",
+    "run_check",
+    "report_progress",
+    "give_up",
+    "suggest_task",
+)
 """Every tool orbit's MCP server offers agents."""
 
 
@@ -55,17 +62,21 @@ BUILT_IN_ROLES: dict[str, Role] = {
     "reviewer": Role(
         instructions=(
             "You are orbit's reviewer. Review the change your task names: look for bugs, missing"
-            " tests and unclear code. Don't edit files. Call complete_task with your findings."
+            " tests and unclear code. Don't edit files. Suggest fixes worth making with"
+            " suggest_task, then call complete_task with your findings."
         ),
+        tools=("get_task", "complete_task", "report_progress", "give_up", "suggest_task"),
         verify=False,
     ),
     "super-reviewer": Role(
         instructions=(
             "You are orbit's super reviewer. Review the whole codebase, not only recent changes:"
             " look for duplication, structure that no longer fits, and gaps in tests. Don't edit"
-            " files. Call complete_task with your findings."
+            " files. Suggest improvements worth making with suggest_task, then call complete_task"
+            " with your findings."
         ),
         model="opus",
+        tools=("get_task", "complete_task", "report_progress", "give_up", "suggest_task"),
         verify=False,
     ),
     "planner": Role(

@@ -1,6 +1,6 @@
 """When reviews happen and what they may suggest: rounds, batches, the breaker and caps."""
 
-from orbit.agent.domain.reviews import ReviewJob, ReviewPlanner
+from orbit.agent.domain.reviews import DIFF_LIMIT, ReviewJob, ReviewPlanner, review_prompt
 from orbit.protocol import TaskSpec, TaskState, TaskStatus
 
 
@@ -149,3 +149,24 @@ def test_landing_after_its_batch_closed_is_not_reviewed_again() -> None:
     reviews.added(batch, "2")
     reviews.landed(state("2", origin="review", batch=batch), "c2")
     assert reviews.landed(state("2", origin="review", batch=batch), "c2") is None
+
+
+def test_a_commit_review_prompt_asks_for_suggestions_and_includes_the_diff() -> None:
+    prompt = review_prompt(ReviewJob(commits=("abc1234def",), round=0, batch=None), "+new", 5)
+    assert prompt.startswith("Review commit abc1234\n")
+    assert "suggest_task" in prompt and "at most 5" in prompt and "complete_task" in prompt
+    assert prompt.endswith("+new")
+
+
+def test_a_batch_review_prompt_names_its_commits_and_what_did_not_land() -> None:
+    job = ReviewJob(commits=("a" * 10, "b" * 10), round=1, batch="batch-1", missing=("7",))
+    prompt = review_prompt(job, "diffs", 3)
+    assert prompt.startswith("Review the 2 commits made for review batch-1\n")
+    assert "task 7" in prompt
+
+
+def test_long_diffs_are_trimmed_from_the_end() -> None:
+    prompt = review_prompt(
+        ReviewJob(commits=("a",), round=0, batch=None), "d" * (DIFF_LIMIT + 50), 5
+    )
+    assert prompt.endswith("d" * DIFF_LIMIT + "\n… (diff trimmed)")

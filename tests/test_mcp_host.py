@@ -64,6 +64,7 @@ async def test_offers_orbit_tools_with_their_arguments() -> None:
         assert set(tools) == set(TOOL_NAMES)
         assert tools["complete_task"].input_schema["required"] == ["summary"]
         assert tools["run_check"].input_schema["required"] == ["step"]
+        assert tools["suggest_task"].input_schema["required"] == ["title", "prompt"]
         assert all(tool.description for tool in tools.values())
 
 
@@ -85,6 +86,7 @@ async def test_passes_calls_with_the_token_to_the_handler_and_returns_its_text()
         ("run_check", {"step": "Unit tests"}),
         ("report_progress", {"note": "halfway"}),
         ("give_up", {"reason": "blocked"}),
+        ("suggest_task", {"title": "Add tests", "prompt": "Cover parse()."}),
     ],
 )
 async def test_every_tool_passes_its_call_through(tool: str, arguments: dict[str, Any]) -> None:

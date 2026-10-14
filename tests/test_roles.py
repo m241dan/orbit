@@ -24,6 +24,9 @@ def test_built_in_roles_cover_coding_reviewing_and_planning() -> None:
     reviewer = BUILT_IN_ROLES["reviewer"]
     assert not reviewer.verify and reviewer.tool_access == "restricted"
     assert "run_check" not in reviewer.tools
+    assert "suggest_task" in reviewer.tools
+    assert "suggest_task" in BUILT_IN_ROLES["super-reviewer"].tools
+    assert "suggest_task" not in coder.tools
     assert BUILT_IN_ROLES["super-reviewer"].model == "opus"
     assert all(role.instructions for role in BUILT_IN_ROLES.values())
     assert all(set(role.tools) <= set(ORBIT_TOOLS) for role in BUILT_IN_ROLES.values())
