@@ -170,3 +170,46 @@ def test_long_diffs_are_trimmed_from_the_end() -> None:
         ReviewJob(commits=("a",), round=0, batch=None), "d" * (DIFF_LIMIT + 50), 5
     )
     assert prompt.endswith("d" * DIFF_LIMIT + "\n… (diff trimmed)")
+
+
+def test_a_super_review_is_due_every_so_many_commits() -> None:
+    reviews = ReviewPlanner(rounds=3, cap=5, super_every=3, super_cap=10)
+    assert [reviews.count() for _ in range(7)] == [False, False, True, False, False, True, False]
+
+
+def test_a_super_review_due_while_paused_waits_until_review_resumes() -> None:
+    reviews = ReviewPlanner(rounds=1, cap=5, super_every=1, super_cap=10)
+    batch = reviews.open_batch(ReviewJob(commits=("a",), round=0, batch=None))
+    reviews.added(batch, "2")
+    reviews.landed(state("2", origin="review", batch=batch), "c2")
+    assert reviews.paused
+    assert not reviews.count()
+    reviews.landed(state("9"), "c9")
+    assert reviews.count()
+
+
+def test_asking_for_a_super_review_restarts_the_count() -> None:
+    reviews = ReviewPlanner(rounds=3, cap=5, super_every=2, super_cap=10)
+    assert not reviews.count()
+    job = reviews.super_review("abc")
+    assert job == ReviewJob(commits=("abc",), round=0, batch=None, whole=True)
+    assert not reviews.count()
+    assert reviews.count()
+
+
+def test_a_super_reviews_batch_has_its_own_cap() -> None:
+    reviews = ReviewPlanner(rounds=3, cap=1, super_every=10, super_cap=2)
+    batch = reviews.open_batch(reviews.super_review("abc"))
+    assert reviews.round_of(batch) == 1
+    for task_id in ("2", "3"):
+        assert reviews.refusal(batch, f"Task {task_id}", queued=()) is None
+        reviews.added(batch, task_id)
+    refusal = reviews.refusal(batch, "Task 4", queued=())
+    assert refusal is not None and "2 tasks" in refusal
+
+
+def test_a_super_review_prompt_asks_about_the_whole_codebase() -> None:
+    job = ReviewJob(commits=("abc1234def",), round=0, batch=None, whole=True)
+    prompt = review_prompt(job, "", 10)
+    assert prompt.startswith("Super review of the codebase at abc1234\n")
+    assert "whole codebase" in prompt and "at most 10" in prompt and "suggest_task" in prompt

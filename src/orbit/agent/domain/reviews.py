@@ -24,18 +24,21 @@ class ReviewJob:
     """A review to run: of ``commits``, which are work at ``round``.
 
     ``batch`` is the batch whose work it is (``None`` for a commit of the user's task), and
-    ``missing`` the batch's tasks that ended without a commit.
+    ``missing`` the batch's tasks that ended without a commit. A ``whole`` review is a super
+    review: of the whole codebase at its one commit.
     """
 
     commits: tuple[str, ...]
     round: int
     batch: str | None
     missing: tuple[str, ...] = ()
+    whole: bool = False
 
 
 @dataclass
 class _Batch:
     round: int
+    cap: int
     tasks: list[str] = field(default_factory=list)
     finished: set[str] = field(default_factory=set)
     commits: list[str] = field(default_factory=list)
@@ -44,12 +47,16 @@ class _Batch:
 
 class ReviewPlanner:
     """Tracks batches and decides when to review; ``rounds`` is the last round reviewed by
-    itself, and ``cap`` the tasks one review may suggest."""
+    itself, and ``cap`` the tasks one review may suggest. A super review is due every
+    ``super_every`` commits, and may suggest ``super_cap`` tasks."""
 
-    def __init__(self, rounds: int, cap: int) -> None:
+    def __init__(self, rounds: int, cap: int, super_every: int = 10, super_cap: int = 10) -> None:
         self.rounds = rounds
         self.cap = cap
+        self.super_every = super_every
+        self.super_cap = super_cap
         self.paused = False
+        self._since_super = 0
         self._ids = itertools.count(1)
         self._open: dict[str, _Batch] = {}
         self._rounds: dict[str, int] = {}
@@ -64,7 +71,8 @@ class ReviewPlanner:
     def open_batch(self, job: ReviewJob) -> str:
         """Start the batch for ``job``'s suggestions; returns its id."""
         batch = f"batch-{next(self._ids)}"
-        self._open[batch] = _Batch(round=job.round + 1)
+        cap = self.super_cap if job.whole else self.cap
+        self._open[batch] = _Batch(round=job.round + 1, cap=cap)
         self._rounds[batch] = job.round + 1
         return batch
 
@@ -79,13 +87,28 @@ class ReviewPlanner:
 
     def refusal(self, batch: str, title: str, queued: Sequence[TaskState]) -> str | None:
         """Why a suggestion titled ``title`` can't join ``batch``; ``None`` if it can."""
-        if len(self._open[batch].tasks) >= self.cap:
-            return f"This review has already suggested {self.cap} tasks, the most allowed."
+        cap = self._open[batch].cap
+        if len(self._open[batch].tasks) >= cap:
+            return f"This review has already suggested {cap} tasks, the most allowed."
         wanted = _normalized(title)
         for state in queued:
             if state.status in UNFINISHED and _normalized(state.task.prompt) == wanted:
                 return f"Task {state.id} already covers that."
         return None
+
+    def count(self) -> bool:
+        """A commit landed; returns whether a super review is due now. One that falls due
+        while review is paused waits until it resumes."""
+        self._since_super += 1
+        if self._since_super < self.super_every or self.paused:
+            return False
+        self._since_super = 0
+        return True
+
+    def super_review(self, commit: str) -> ReviewJob:
+        """A super review of the codebase at ``commit``; the count starts again."""
+        self._since_super = 0
+        return ReviewJob(commits=(commit,), round=0, batch=None, whole=True)
 
     def landed(self, state: TaskState, commit: str) -> ReviewJob | None:
         """Task ``state`` landed ``commit``; returns the review that's due, if any."""
@@ -134,6 +157,8 @@ def review_prompt(job: ReviewJob, diff: str, cap: int) -> str:
 
     Its first line titles it.
     """
+    if job.whole:
+        return _super_review_prompt(job.commits[0], cap)
     if job.batch is None:
         title = f"Review commit {job.commits[0][:7]}"
     else:
@@ -150,4 +175,15 @@ def review_prompt(job: ReviewJob, diff: str, cap: int) -> str:
         " most important first. Suggest nothing if it's fine. Then call complete_task with a"
         " one-line summary of your review.\n\n"
         f"{diff}"
+    )
+
+
+def _super_review_prompt(commit: str, cap: int) -> str:
+    return (
+        f"Super review of the codebase at {commit[:7]}\n\n"
+        "Review the whole codebase, not only recent changes: look for duplication, structure"
+        " that no longer fits, missing tests and unclear code. Read the files you need. For each"
+        " improvement worth making, call suggest_task with a short title and a prompt a coder"
+        f" can act on: at most {cap}, most important first. Then call complete_task with a"
+        " one-line summary of your review."
     )
