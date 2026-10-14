@@ -1,4 +1,5 @@
-"""Roles agents work in, and orbit's limits: built-in defaults a project file can change.
+"""Roles agents work in, orbit's limits and its verification steps: built-in defaults a project
+file can change.
 
 A role says what an agent is told about its job, which of orbit's tools it may call, whether its
 claims of being done are verified, and how long it may take. Its model and tool access are the
@@ -9,6 +10,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
+from orbit.agent.domain.verification import VerificationStep
 from orbit.protocol import ToolAccess
 
 ORBIT_TOOLS = (
@@ -97,6 +99,22 @@ BUILT_IN_ROLES: dict[str, Role] = {
 }
 
 
+class VerificationConfig(_Config):
+    """The steps that verify a task, run in order; with none, nothing is verified."""
+
+    steps: tuple[VerificationStep, ...] = ()
+
+    @field_validator("steps")
+    @classmethod
+    def _complete_steps(cls, steps: tuple[VerificationStep, ...]) -> tuple[VerificationStep, ...]:
+        for number, step in enumerate(steps, start=1):
+            if not step.name:
+                raise ValueError(f"step {number} has no name")
+            if not step.command:
+                raise ValueError(f"step {number} has no command")
+        return steps
+
+
 class OrbitConfig(_Config):
     """Orbit's limits and roles.
 
@@ -104,6 +122,7 @@ class OrbitConfig(_Config):
     ``review_rounds``: rounds of review-suggested work after which review pauses.
     ``super_review_every``: commits between super reviews.
     ``review_suggestions`` / ``super_review_suggestions``: tasks one review may suggest.
+    ``verification``: how tasks are verified.
     """
 
     fix_attempts: int = Field(default=5, ge=1)
@@ -112,6 +131,7 @@ class OrbitConfig(_Config):
     review_suggestions: int = Field(default=5, ge=1)
     super_review_suggestions: int = Field(default=10, ge=1)
     roles: dict[str, Role] = Field(default_factory=lambda: dict(BUILT_IN_ROLES))
+    verification: VerificationConfig = VerificationConfig()
 
 
 def load_config(data: dict[str, Any]) -> OrbitConfig:

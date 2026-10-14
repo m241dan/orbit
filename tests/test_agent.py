@@ -4,6 +4,7 @@ from collections.abc import AsyncIterator, Sequence
 from typing import Any
 
 from orbit.agent import (
+    NO_STEPS_NOTE,
     AgentSession,
     EchoModel,
     ModelLoopRunner,
@@ -24,6 +25,7 @@ from orbit.protocol import (
     EditTask,
     ErrorOccurred,
     Event,
+    Notice,
     Settings,
     SettingsChanged,
     StepState,
@@ -334,11 +336,13 @@ async def test_session_announces_verification_steps() -> None:
     assert await anext(stream) == VerificationChanged(steps=(StepState(name="always fails"),))
 
 
-async def test_verification_without_steps_counts_as_none() -> None:
+async def test_verification_without_steps_notes_that_nothing_is_verified() -> None:
     session = AgentSession(RecordingRunner(), verification=verified(()))
-    assert session.verification is None
-    # No steps to announce.
-    assert isinstance(await anext(session.events()), SettingsChanged)
+    assert session.verification == verified(())
+    stream = session.events()
+    assert isinstance(await anext(stream), SettingsChanged)
+    # No steps to announce, just the note.
+    assert await anext(stream) == Notice(message=NO_STEPS_NOTE)
     assert session._events.empty()
 
 

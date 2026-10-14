@@ -95,8 +95,20 @@ When an agent claims its task is done, orbit runs the verification steps in the 
 in order, stopping at the first failure. While that happens the task shows 🔍, the conversation notes
 each step as it starts and ends, and the panel under the task list shows each step's progress on the
 current task (⏳ pending, ◜ running (spinning) with its elapsed time, ✅ passed, ❌ failed,
-🛑 cancelled, ⏩ skipped). There are six, quick ones first so a failure shows up in seconds; each must
-exit successfully:
+🛑 cancelled, ⏩ skipped). Each step is a command that must exit successfully.
+
+The steps come from the project's `.orbit/config.toml`, one `[[verification.steps]]` table each, run
+in the order listed. Each needs a non-empty `name` and `command` (the program and its arguments,
+run without a shell):
+
+```toml
+[[verification.steps]]
+name = "Ruff lint"
+command = ["uv", "run", "ruff", "check"]
+```
+
+Orbit's own [`.orbit/config.toml`](.orbit/config.toml) lists six, quick ones first so a failure
+shows up in seconds:
 
 1. Ruff lint: `uv run ruff check`
 2. Ruff format: `uv run ruff format --check`
@@ -104,8 +116,13 @@ exit successfully:
 4. Import contracts: `uv run lint-imports`
 5. Code quality (Lizard): `uv run lizard src tests -w -C 6 -L 100 -a 5`. Every function, tests
    included, must have a cyclomatic complexity of at most 6, at most 100 lines and at most 5
-   parameters (`LIZARD_MAX_*` in `src/orbit/agent/external/checks.py`).
+   parameters.
 6. Unit tests, 100% coverage: `uv run pytest --cov --cov-fail-under=100`
+
+With no steps configured, nothing is verified: the conversation says so at startup (`No verification
+steps configured in .orbit/config.toml; tasks won't be verified.`), and each task that would have
+been verified is skipped, with the reason in the conversation. `--no-verify` turns verification off
+whatever the file says.
 
 Failures go back to the same agent, which keeps the context of what it just did. After
 `fix_attempts` fixes (default 5, set in `.orbit/config.toml`), or if the agent has exited, the task
@@ -207,7 +224,8 @@ defaults for tasks orbit queues in that role; a task you queue keeps its own set
 An agent calling a tool its role doesn't have gets an error reply (the CLI only allows its role's
 tools, too); an agent still working when its role's time runs out is stopped and the task fails.
 
-A project can change these, and orbit's limits, in `.orbit/config.toml`. A role it names that's built
+A project can change these, orbit's limits and its verification steps (see
+[Verification steps](#verification-steps)), in `.orbit/config.toml`. A role it names that's built
 in keeps the fields it doesn't set; any other name adds a role. Every field is optional:
 
 ```toml
@@ -279,8 +297,8 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     --output-format stream-json`, resumes the same Claude session across turns, and launches
     agents connected to orbit (`run_agent`, and `converse` for the planner); `McpHost` is orbit's
     MCP server; `GitCoderTree` is the coder's worktree and its snapshots; `config_file` reads
-    `.orbit/config.toml`; `checks` runs the verification steps as processes (`DEFAULT_STEPS`,
-    `run_step`); `workspace` fingerprints the git working tree; `EchoModel` is a stand-in model.
+    `.orbit/config.toml`; `checks` runs a verification step as a process (`run_step`);
+    `workspace` fingerprints the git working tree; `EchoModel` is a stand-in model.
   - `application`: `AgentSession` implements `Session`: it takes commands, asks the domain what
     follows, drives the ports and publishes events. `AgentRun` sees one task through one agent and
     `AgentDesk` routes agents' calls by token; `Verifier` runs the steps; `Lander` commits and

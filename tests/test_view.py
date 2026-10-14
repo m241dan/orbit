@@ -121,6 +121,12 @@ def test_agent_exchanges_become_transcript_entries() -> None:
     assert exchange_entry(note) == ("agent-1: tests written", "agent")
 
 
+def test_no_steps_skip_reason_reads_naturally() -> None:
+    text, kind = verification_skipped_entry("no_steps")
+    assert text == "⏩ Verification skipped: no verification steps configured"
+    assert kind == "verify"
+
+
 def test_unchanged_skip_reason_reads_naturally() -> None:
     text, kind = verification_skipped_entry("unchanged")
     assert "unchanged" in text and kind == "verify"

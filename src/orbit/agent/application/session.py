@@ -48,6 +48,8 @@ from orbit.protocol import (
     VerificationChanged,
 )
 
+NO_STEPS_NOTE = "No verification steps configured in .orbit/config.toml; tasks won't be verified."
+
 
 def _verifier(
     verification: Verification | None,
@@ -55,9 +57,9 @@ def _verifier(
     events: "asyncio.Queue[Event]",
     agents: Agents | None,
 ) -> Verifier | None:
-    """What checks tasks on ``board`` (in the agents' tree, if any); none when
-    ``verification`` has no steps."""
-    if verification is None or not verification.steps:
+    """What checks tasks on ``board`` (in the agents' tree, if any); none without
+    ``verification``."""
+    if verification is None:
         return None
     return Verifier(verification, board, events.put, agents.tree if agents else None)
 
@@ -71,7 +73,8 @@ class AgentSession:
     failed one. Once a fix passes, the tasks it fixed count as completed.
 
     Tasks with tools off aren't verified, and neither are tasks that leave the
-    working tree as it was. A ``verification`` without steps counts as none.
+    working tree as it was. With a ``verification`` without steps, no task is: a note
+    says so at startup, and each task that would have been verified is skipped.
     """
 
     def __init__(
@@ -98,9 +101,15 @@ class AgentSession:
         self._planning = False
         self._planner = self._planner_chat()
         self._events.put_nowait(self._settings_changed())
-        if self._verifier:
-            self._events.put_nowait(VerificationChanged(steps=self._board.steps))
+        self._announce_steps()
         self._turn: asyncio.Task[object] | None = None
+
+    def _announce_steps(self) -> None:
+        """Show the steps that will verify tasks, or note that none will."""
+        if self._board.steps:
+            self._events.put_nowait(VerificationChanged(steps=self._board.steps))
+        elif self._verifier:
+            self._events.put_nowait(Notice(message=NO_STEPS_NOTE))
 
     @property
     def runner(self) -> TurnRunner:

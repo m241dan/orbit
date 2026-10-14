@@ -6,7 +6,6 @@ from typer.testing import CliRunner
 
 from orbit import __version__
 from orbit.agent import (
-    DEFAULT_STEPS,
     MODEL_ALIASES,
     AgentSession,
     ClaudeCliRunner,
@@ -14,6 +13,7 @@ from orbit.agent import (
     Limits,
     McpHost,
     Verification,
+    VerificationStep,
     run_step,
     workspace_state,
 )
@@ -83,14 +83,32 @@ def test_chat_rejects_unknown_tool_access(launched: list[AgentSession]) -> None:
     assert launched == []
 
 
-def test_chat_verifies_tasks_by_default(launched: list[AgentSession]) -> None:
+def test_chat_verifies_tasks_with_the_project_files_steps(
+    launched: list[AgentSession], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    (tmp_path / ".orbit").mkdir()
+    (tmp_path / ".orbit" / "config.toml").write_text(
+        '[[verification.steps]]\nname = "Lint"\ncommand = ["ruff", "check"]\n'
+    )
+    monkeypatch.chdir(tmp_path)
     result = runner.invoke(app, ["chat"])
 
     assert result.exit_code == 0
     [session] = launched
-    # The default checks run as processes; tasks that change no files in the working tree
-    # skip them.
-    assert session.verification == Verification(DEFAULT_STEPS, run_step, workspace_state)
+    # The checks run as processes; tasks that change no files in the working tree skip them.
+    steps = (VerificationStep(name="Lint", command=("ruff", "check")),)
+    assert session.verification == Verification(steps, run_step, workspace_state)
+
+
+def test_chat_without_steps_verifies_nothing(
+    launched: list[AgentSession], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    result = runner.invoke(app, ["chat"])
+
+    assert result.exit_code == 0
+    [session] = launched
+    assert session.verification == Verification((), run_step, workspace_state)
 
 
 def test_chat_can_turn_verification_off(launched: list[AgentSession]) -> None:

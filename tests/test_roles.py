@@ -8,6 +8,7 @@ from orbit.agent.domain.roles import (
     Role,
     load_config,
 )
+from orbit.agent.domain.verification import VerificationStep
 
 
 def test_built_in_roles_cover_coding_reviewing_and_planning() -> None:
@@ -41,6 +42,7 @@ def test_defaults_without_a_file() -> None:
     assert config.roles == BUILT_IN_ROLES
     assert (config.fix_attempts, config.review_rounds, config.super_review_every) == (5, 3, 10)
     assert (config.review_suggestions, config.super_review_suggestions) == (5, 10)
+    assert config.verification.steps == ()
 
 
 def test_a_file_overrides_settings_and_role_fields() -> None:
@@ -76,6 +78,23 @@ def test_a_file_can_add_a_role() -> None:
     assert writer.tool_access == "restricted"
 
 
+def test_a_file_lists_verification_steps_in_order() -> None:
+    config = load_config(
+        {
+            "verification": {
+                "steps": [
+                    {"name": "Lint", "command": ["ruff", "check"]},
+                    {"name": "Tests", "command": ["pytest"]},
+                ]
+            }
+        }
+    )
+    assert config.verification.steps == (
+        VerificationStep(name="Lint", command=("ruff", "check")),
+        VerificationStep(name="Tests", command=("pytest",)),
+    )
+
+
 @pytest.mark.parametrize(
     ("data", "message"),
     [
@@ -85,6 +104,11 @@ def test_a_file_can_add_a_role() -> None:
         ({"roles": {"coder": {"tool_access": "sometimes"}}}, "roles.coder.tool_access"),
         ({"roles": {"new": {"tools": ["get_task"]}}}, "roles.new.instructions"),
         ({"roles": {"coder": {"timeout_minutes": 0}}}, "timeout_minutes"),
+        ({"verification": {"steps": [{"name": "", "command": ["x"]}]}}, "step 1 has no name"),
+        ({"verification": {"steps": [{"name": "a", "command": []}]}}, "step 1 has no command"),
+        ({"verification": {"steps": [{"name": "a"}]}}, "verification.steps.0.command"),
+        ({"verification": {"steps": [{"name": "a", "command": "x", "b": 1}]}}, "steps.0.b"),
+        ({"verification": {"surprise": 1}}, "verification.surprise"),
     ],
 )
 def test_mistakes_are_reported_readably(data: dict[str, object], message: str) -> None:

@@ -56,6 +56,7 @@ SKIP_REASONS: dict[SkipReason, str] = {
     "tools_off": "tools were off",
     "no_changes": "no files changed",
     "unchanged": "unchanged since the last failed check",
+    "no_steps": "no verification steps configured",
 }
 
 # The arc spinner beside work in progress, and how fast it turns.

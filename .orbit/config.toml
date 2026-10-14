@@ -1,0 +1,28 @@
+# Orbit's own configuration: how orbit verifies changes to itself.
+
+# Quick checks first, so a failure shows up in seconds rather than after the tests.
+[[verification.steps]]
+name = "Ruff lint"
+command = ["uv", "run", "ruff", "check"]
+
+[[verification.steps]]
+name = "Ruff format"
+command = ["uv", "run", "ruff", "format", "--check"]
+
+[[verification.steps]]
+name = "Type check (mypy)"
+command = ["uv", "run", "mypy"]
+
+[[verification.steps]]
+name = "Import contracts"
+command = ["uv", "run", "lint-imports"]
+
+# Every function, tests included: cyclomatic complexity at most 6, at most 100 lines and at
+# most 5 parameters.
+[[verification.steps]]
+name = "Code quality (Lizard)"
+command = ["uv", "run", "lizard", "src", "tests", "-w", "-C", "6", "-L", "100", "-a", "5"]
+
+[[verification.steps]]
+name = "Unit tests, 100% coverage"
+command = ["uv", "run", "pytest", "--cov", "--cov-fail-under=100"]

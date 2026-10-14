@@ -74,6 +74,8 @@ class Verifier:
         task = self._board.get(task_id).task
         after = None if before is None else await self.fingerprint(root)
         reason = skip_reason(task, before, after)
+        if reason is None and not self.verification.steps:
+            reason = "no_steps"
         if reason is not None:
             self._board.skip_steps()
             await self.publish_steps()
@@ -121,7 +123,9 @@ class Verifier:
         await self.publish_steps()
 
     async def publish_steps(self) -> None:
-        await self._publish(VerificationChanged(steps=self._board.steps))
+        """Report the steps' progress; there's none to report without steps."""
+        if self.verification.steps:
+            await self._publish(VerificationChanged(steps=self._board.steps))
 
     async def _verify(self, task_id: str, root: str) -> Failure | None:
         """Run the steps at ``root`` after task ``task_id``; returns the first failure."""

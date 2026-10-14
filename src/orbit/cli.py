@@ -7,7 +7,6 @@ import typer
 
 from orbit import __version__
 from orbit.agent import (
-    DEFAULT_STEPS,
     MODEL_ALIASES,
     Agents,
     AgentSession,
@@ -44,8 +43,8 @@ def chat(
     verify: Annotated[
         bool,
         typer.Option(
-            help="After each task, run the linters, type check, code quality check and unit"
-            " tests (100% coverage); a failure queues a task to fix it."
+            help="After each task, run the verification steps in .orbit/config.toml; a failure"
+            " goes back to the agent to fix."
         ),
     ] = True,
     worktree: Annotated[
@@ -74,12 +73,13 @@ def chat(
     """
     # The only place the backend and frontend meet, and where the backend's external
     # adapters are plugged into its ports.
-    verification = Verification(DEFAULT_STEPS, run_step, workspace_state) if verify else None
     try:
         config = read_config()
     except ConfigError as exc:
         typer.echo(f"Invalid orbit configuration: {exc}", err=True)
         raise typer.Exit(2) from None
+    steps = config.verification.steps
+    verification = Verification(steps, run_step, workspace_state) if verify else None
     tree = GitCoderTree(".") if worktree and in_git_work_tree(".") else None
     agents = Agents(
         McpHost(),

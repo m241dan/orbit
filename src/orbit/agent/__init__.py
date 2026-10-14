@@ -10,13 +10,13 @@ Layered, outermost first; each layer may import only the ones below it:
 from orbit.agent.application.agent_run import Agents
 from orbit.agent.application.loop import ModelLoopRunner
 from orbit.agent.application.ports import ModelClient, StepRunner, Tool, TurnRunner, Workspace
-from orbit.agent.application.session import AgentSession
+from orbit.agent.application.session import NO_STEPS_NOTE, AgentSession
 from orbit.agent.application.tools import ToolRegistry
 from orbit.agent.application.verifier import Verification
 from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.roles import ConfigError, OrbitConfig, Role
 from orbit.agent.domain.verification import VerificationStep
-from orbit.agent.external.checks import DEFAULT_STEPS, run_step
+from orbit.agent.external.checks import run_step
 from orbit.agent.external.claude_cli import MODEL_ALIASES, ClaudeCliRunner
 from orbit.agent.external.config_file import read_config
 from orbit.agent.external.echo import EchoModel
@@ -25,8 +25,8 @@ from orbit.agent.external.mcp_host import McpHost
 from orbit.agent.external.workspace import workspace_state
 
 __all__ = [
-    "DEFAULT_STEPS",
     "MODEL_ALIASES",
+    "NO_STEPS_NOTE",
     "AgentSession",
     "Agents",
     "ClaudeCliRunner",

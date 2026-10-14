@@ -5,7 +5,14 @@ import sys
 from collections.abc import AsyncIterator, Awaitable, Callable
 from pathlib import Path
 
-from orbit.agent import AgentSession, ModelLoopRunner, Verification, VerificationStep, run_step
+from orbit.agent import (
+    NO_STEPS_NOTE,
+    AgentSession,
+    ModelLoopRunner,
+    Verification,
+    VerificationStep,
+    run_step,
+)
 from orbit.agent.domain.agent_task import Limits
 from orbit.agent.external.echo import EchoModel
 from orbit.protocol import (
@@ -14,6 +21,7 @@ from orbit.protocol import (
     EditTask,
     ErrorOccurred,
     Event,
+    Notice,
     RunTasks,
     Settings,
     StepState,
@@ -301,6 +309,29 @@ async def test_tasks_that_change_no_files_skip_verification() -> None:
     assert VerificationSkipped(task_id="1", reason="no_changes") in events
     assert steps.runs == []
     assert statuses(events) == ["completed"]
+
+
+async def test_without_steps_tasks_skip_verification_and_say_so() -> None:
+    workspace = FakeWorkspace("a", "b")
+    session, _, _ = session_for(claims_done, verification=Verification((), Steps(), workspace))
+    events = await asyncio.wait_for(run(session), 5)
+    assert events[0] == Notice(message=NO_STEPS_NOTE)
+    assert [e for e in events if isinstance(e, Notice)] == [Notice(message=NO_STEPS_NOTE)]
+    assert VerificationSkipped(task_id="1", reason="no_steps") in events
+    assert statuses(events) == ["completed"]
+
+
+async def test_without_steps_unchanged_tasks_skip_for_that_reason() -> None:
+    workspace = FakeWorkspace("a", "a")
+    session, _, _ = session_for(claims_done, verification=Verification((), Steps(), workspace))
+    events = await asyncio.wait_for(run(session), 5)
+    assert VerificationSkipped(task_id="1", reason="no_changes") in events
+
+
+async def test_with_verification_off_there_is_no_note() -> None:
+    session, _, _ = session_for(claims_done)
+    events = await asyncio.wait_for(run(session), 5)
+    assert not any(isinstance(e, Notice | VerificationSkipped) for e in events)
 
 
 async def test_tasks_are_verified_when_the_tree_cannot_be_read() -> None:
