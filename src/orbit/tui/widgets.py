@@ -162,6 +162,9 @@ class SidePanel(VerticalScroll):
         self.border_title = title
 
 
+NO_STEPS_TEXT = "No verification steps"
+
+
 class VerificationPanel(SidePanel):
     """The verification steps and how each fared after the current task, as reported.
 
@@ -178,7 +181,7 @@ class VerificationPanel(SidePanel):
         self._since = 0.0
 
     def compose(self) -> ComposeResult:
-        yield Static("No verification steps")
+        yield Static(NO_STEPS_TEXT)
 
     def on_mount(self) -> None:
         self.set_interval(1 / SPINNER_FPS, self.tick)
@@ -194,7 +197,7 @@ class VerificationPanel(SidePanel):
     def tick(self) -> None:
         now = self.clock()
         lines = step_lines(self.steps, spinner_frame(now), int(now - self._since))
-        self.query_one(Static).update(Text("\n".join(lines)))
+        self.query_one(Static).update(Text("\n".join(lines) or NO_STEPS_TEXT))
 
 
 class PromptInput(Input):

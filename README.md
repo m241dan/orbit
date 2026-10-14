@@ -55,6 +55,7 @@ In the app:
 | `ctrl+o` | Pick the model (default, fable, opus, sonnet, haiku) |
 | `ctrl+l` | Pick the tool access level (off, restricted, full) |
 | `esc` | Stop typing; otherwise cancel the running turn or close a picker |
+| `a` / `r` / `x` | On a proposal of checks: accept it, ask for changes (type them, `enter` sends, `esc` goes back), or end the task (see [Setting up verification](#setting-up-verification)) |
 | `ctrl+c` | Quit |
 
 In a picker, `j`/`k` (or the arrow keys) move and `enter` chooses.
@@ -161,6 +162,31 @@ still counts as done; the panel shows ⏩ for each step and the conversation say
 Fixes need to edit files, so give tasks `full` tool access when you want them fixed automatically.
 With `restricted` access, an agent can explain the failure but can't fix it.
 
+### Setting up verification
+
+A task in the `configurator` role works out a project's verification steps for you. Its agent
+inspects the repository (CI workflows, `.pre-commit-config.yaml`, `package.json` scripts,
+`pyproject.toml`, the Makefile and so on) and proposes the checks the project already uses, quick
+ones first, plus a setup command and the files whose changes should rerun it. It doesn't edit
+files.
+
+Orbit tries each proposal in the agent's working directory first: the setup, then each step in
+order. If one fails, the agent gets the step's name and the end of its output and is asked to
+revise, without bothering you. Once everything passes, a window shows the proposal: the setup
+command and the files it watches, then the steps in order, each with its name and command, and a
+line saying they all passed on the current code. Then:
+
+| Key | Action |
+|---|---|
+| `a` | Accept the proposal; the task completes |
+| `r` | Ask for changes: type what should change, `enter` sends it to the agent, `esc` goes back to the proposal |
+| `x` | End the task; it's marked 🛑 cancelled |
+
+Your decision is noted in the conversation (`orbit → agent-3: proposal accepted`, `… changes
+asked for: add mypy`, `… task ended`), followed by orbit's reply to the agent. The agent revises
+up to `fix_attempts` times. If it's cancelled or exits while its proposal is showing, the window
+closes and the task is cancelled.
+
 ### Where tasks run, and how their work lands
 
 Inside a git repository, agents don't touch your checkout. They work in orbit's own worktree,
@@ -247,6 +273,7 @@ defaults for tasks orbit queues in that role; a task you queue keeps its own set
 | `reviewer` | `get_task`, `complete_task`, `report_progress`, `give_up` | no | default / `restricted` |
 | `super-reviewer` | same as `reviewer` | no | `opus` / `restricted` |
 | `planner` | same as `reviewer` | no | default / `restricted` |
+| `configurator` | `get_task`, `propose_checks`, `report_progress`, `give_up` | no | default / `restricted` |
 
 An agent calling a tool its role doesn't have gets an error reply (the CLI only allows its role's
 tools, too); an agent still working when its role's time runs out is stopped and the task fails.

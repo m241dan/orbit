@@ -19,6 +19,8 @@ from orbit.protocol import (
     BusyChanged,
     CancelAgent,
     CancelTurn,
+    ChecksProposed,
+    DecideProposal,
     EditTask,
     ErrorOccurred,
     Event,
@@ -53,12 +55,14 @@ from orbit.protocol import (
     VerificationStarted,
 )
 from orbit.tui.agents import AgentsPane
+from orbit.tui.proposals import ProposalScreen
 from orbit.tui.tasks import TaskEditorScreen, TaskList
 from orbit.tui.view import (
     TOOL_ACCESS_DESCRIPTIONS,
     TOOL_ACCESS_OPTIONS,
     EntryKind,
     activity_entry,
+    decision_entry,
     output_entry,
     task_started_entry,
     turn_end_entry,
@@ -127,6 +131,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         # Last settings reported by the backend; None until the first report.
         self._settings: Settings | None = None
         self._model_choices: tuple[str, ...] = ()
+        self._proposal: ProposalScreen | None = None  # The proposal being shown, if any.
         # Pickers are built once and installed so they open instantly.
         self._model_picker = PickerScreen("Model", ["default"])
         self._tool_picker = PickerScreen(
@@ -308,6 +313,7 @@ class OrbitApp(App[None], inherit_bindings=False):
                 | VerificationChanged()
                 | PlanningChanged()
                 | ReviewStatus()
+                | ChecksProposed()
             ):
                 self._render_state(event)
             case (
@@ -347,9 +353,10 @@ class OrbitApp(App[None], inherit_bindings=False):
         | TasksChanged
         | VerificationChanged
         | PlanningChanged
-        | ReviewStatus,
+        | ReviewStatus
+        | ChecksProposed,
     ) -> None:
-        """Show a snapshot of backend state."""
+        """Show a snapshot of backend state, or a decision it waits for."""
         match event:
             case SettingsChanged() | PlanningChanged():
                 self._show_session(event)
@@ -357,7 +364,7 @@ class OrbitApp(App[None], inherit_bindings=False):
                 self._set_busy(busy)
             case TasksChanged(tasks=tasks):
                 self._show_tasks(tasks)
-            case VerificationChanged() | ReviewStatus():
+            case VerificationChanged() | ReviewStatus() | ChecksProposed():
                 self._show_progress(event)
             case _:
                 assert_never(event)
@@ -403,6 +410,7 @@ class OrbitApp(App[None], inherit_bindings=False):
     def _follow_agents(self, event: Event) -> None:
         self.query_one(AgentsPane).track(event)
         self.query_one(ConversationTabs).track(event)
+        self._withdraw_proposal(event)
 
     def _show_tasks(self, tasks: tuple[TaskState, ...]) -> None:
         task_list = self.query_one(TaskList)
@@ -410,12 +418,32 @@ class OrbitApp(App[None], inherit_bindings=False):
         numbers = dict(zip((t.id for t in task_list.tasks), task_list.numbers, strict=True))
         self.query_one(AgentsPane).number_tasks(numbers)
 
-    def _show_progress(self, event: VerificationChanged | ReviewStatus) -> None:
-        """Show the verification steps' progress, or whether review is paused."""
+    def _show_progress(self, event: VerificationChanged | ReviewStatus | ChecksProposed) -> None:
+        """Show the verification steps' progress, whether review is paused, or proposed steps."""
         if isinstance(event, VerificationChanged):
             self.query_one(VerificationPanel).show(event.steps)
-        else:
+        elif isinstance(event, ReviewStatus):
             self.query_one(AgentsPane).show_review(event)
+        else:
+            self._show_proposal(event)
+
+    def _show_proposal(self, event: ChecksProposed) -> None:
+        """Ask the user about ``event``'s proposal; their decision goes to the backend."""
+        screen = self._proposal = ProposalScreen(event)
+
+        async def decided(decision: DecideProposal | None) -> None:
+            self._proposal = None
+            if decision is not None:
+                self._append(*decision_entry(event.agent_id, decision), event.agent_id)
+                await self._session.send(decision)
+
+        self.push_screen(screen, decided)
+
+    def _withdraw_proposal(self, event: Event) -> None:
+        """Close the proposal shown, if ``event`` is its agent exiting."""
+        screen = self._proposal
+        if isinstance(event, AgentExited) and screen and screen.proposal.agent_id == event.agent_id:
+            screen.dismiss(None)
 
     def _show_session(self, event: SettingsChanged | PlanningChanged) -> None:
         """Show the session's settings, or whether prompts go to the planner."""

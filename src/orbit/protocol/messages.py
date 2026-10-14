@@ -126,6 +126,20 @@ class RequestSuperReview(_Message):
     type: Literal["request_super_review"] = "request_super_review"
 
 
+ProposalAction = Literal["accept", "revise", "end"]
+"""What the user made of proposed checks: take them, ask for changes, or end the task."""
+
+
+class DecideProposal(_Message):
+    """The user's decision on the checks proposed for task ``task_id``; ``feedback`` says what
+    to change when the ``action`` is ``revise``."""
+
+    type: Literal["decide_proposal"] = "decide_proposal"
+    task_id: str
+    action: ProposalAction
+    feedback: str = ""
+
+
 Command = Annotated[
     SubmitPrompt
     | CancelTurn
@@ -137,7 +151,8 @@ Command = Annotated[
     | AcceptTask
     | RemoveTask
     | SetPlanning
-    | CancelAgent,
+    | CancelAgent
+    | DecideProposal,
     Field(discriminator="type"),
 ]
 
@@ -413,6 +428,31 @@ class AgentExited(_Message):
     reason: AgentExitReason
 
 
+class ProposedStep(_Message):
+    """A verification step an agent proposed: its ``name`` and ``command``."""
+
+    name: str
+    command: tuple[str, ...]
+
+
+class ProposedSetup(_Message):
+    """The setup an agent proposed: its ``command``, and the files whose changes rerun it."""
+
+    command: tuple[str, ...]
+    watch: tuple[str, ...] = ()
+
+
+class ChecksProposed(_Message):
+    """Agent ``agent_id`` proposed these checks for task ``task_id``, and they all passed on
+    the current code; the user decides on them with ``DecideProposal``."""
+
+    type: Literal["checks_proposed"] = "checks_proposed"
+    agent_id: str
+    task_id: str
+    steps: tuple[ProposedStep, ...]
+    setup: ProposedSetup | None = None
+
+
 Event = Annotated[
     SettingsChanged
     | TurnStarted
@@ -437,7 +477,8 @@ Event = Annotated[
     | TaskMerged
     | Notice
     | PlanningChanged
-    | ReviewStatus,
+    | ReviewStatus
+    | ChecksProposed,
     Field(discriminator="type"),
 ]
 

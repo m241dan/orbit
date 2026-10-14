@@ -8,12 +8,14 @@ import asyncio
 import uuid
 from collections.abc import AsyncIterator, Callable, Collection, Coroutine, Sequence
 from contextlib import suppress
+from dataclasses import replace
 from typing import Any, assert_never
 
 from orbit.agent.application.agent_run import AgentDesk, AgentRun, Agents, Outcome
 from orbit.agent.application.landing import Lander
 from orbit.agent.application.planner import PlannerChat
-from orbit.agent.application.ports import TurnRunner
+from orbit.agent.application.ports import ProposalReview, TurnRunner
+from orbit.agent.application.proposals import FrontendReview
 from orbit.agent.application.review_lane import REVIEW_ROLES, ReviewLane
 from orbit.agent.application.verifier import Verification, Verifier
 from orbit.agent.domain.board import TaskBoard
@@ -26,6 +28,7 @@ from orbit.protocol import (
     CancelAgent,
     CancelTurn,
     Command,
+    DecideProposal,
     EditTask,
     ErrorOccurred,
     Event,
@@ -64,6 +67,13 @@ def _verifier(
     return Verifier(verification, board, events.put, agents.tree if agents else None)
 
 
+def _reviewed(agents: Agents | None, review: ProposalReview) -> Agents | None:
+    """``agents``, with proposals going to ``review`` unless they already go somewhere."""
+    if agents is None or agents.proposal_review is not None:
+        return agents
+    return replace(agents, proposal_review=review)
+
+
 class AgentSession:
     """Runs turns and task runs one at a time in the background and publishes their events.
 
@@ -92,6 +102,8 @@ class AgentSession:
         steps = verification.steps if verification else ()
         self._board = TaskBoard([s.name for s in steps])
         self._events: asyncio.Queue[Event] = asyncio.Queue()
+        self._proposals = FrontendReview(self._events.put, self._agent_on)
+        agents = _reviewed(agents, self._proposals)
         self._verifier = _verifier(verification, self._board, self._events, agents)
         self._desk = AgentDesk(agents, self._events.put) if agents else None
         self._announced = False
@@ -147,7 +159,7 @@ class AgentSession:
                 await self._handle_tasks(command)
             case EditTask() | AcceptTask() | RemoveTask():
                 await self._handle_board(command)
-            case RequestSuperReview() | CancelAgent():
+            case RequestSuperReview() | CancelAgent() | DecideProposal():
                 await self._handle_agents(command)
             case _:
                 assert_never(command)
@@ -205,11 +217,25 @@ class AgentSession:
         if self._next_work(()) is not None:
             await self._start(self._run_tasks())
 
-    async def _handle_agents(self, command: RequestSuperReview | CancelAgent) -> None:
+    async def _handle_agents(
+        self, command: RequestSuperReview | CancelAgent | DecideProposal
+    ) -> None:
         if isinstance(command, CancelAgent):
             await self._cancel_agent(command.agent_id)
+        elif isinstance(command, DecideProposal):
+            await self._decide(command)
         else:
             await self._super_review()
+
+    async def _decide(self, command: DecideProposal) -> None:
+        if not self._proposals.decide(command):
+            message = f"No proposal is waiting for task {command.task_id!r}."
+            await self._events.put(ErrorOccurred(message=message))
+
+    def _agent_on(self, task_id: str) -> str:
+        """The agent working on task ``task_id``; only asked while one is."""
+        assert self._desk is not None  # Only agents propose.
+        return self._desk.working_on(task_id).id
 
     async def _cancel_agent(self, agent_id: str) -> None:
         """Stop a reviewer's review on its own; any other agent's work, like esc."""

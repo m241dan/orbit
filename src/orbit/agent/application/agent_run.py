@@ -19,6 +19,7 @@ from orbit.agent.application.ports import (
     AgentLaunch,
     AgentLauncher,
     CoderTree,
+    ProposalDecision,
     ProposalReview,
     Reply,
 )
@@ -161,6 +162,10 @@ class AgentDesk:
         """Running agent ``agent_id``, if there is one."""
         return next((agent for agent in self.registry.live if agent.id == agent_id), None)
 
+    def working_on(self, task_id: str) -> Agent:
+        """The running agent working on task ``task_id``; there must be one."""
+        return next(agent for agent in self.registry.live if agent.task_id == task_id)
+
     def close(self, agent: Agent) -> None:
         self.registry.revoke(agent.id)
         self._runs.pop(agent.id, None)
@@ -225,7 +230,7 @@ class AgentRun:
             return Outcome("error")
         self._role, self._root = role, root
         self._agent = self._desk.open(self, task.role, self._task_id)
-        stream = await self._launch()
+        stream = self._stream_task = await self._launch()
         try:
             await self._serve_in_time(before)
             if self._work.phase in FINISHED:
@@ -378,14 +383,25 @@ class AgentRun:
         failure = await self._try(checks)
         if failure is not None:
             return self._work.proposal_failed(*failure)
-        review = self._desk.agents.proposal_review
-        assert review is not None  # Proposals are refused without one.
-        decision = await review.review(self._task_id, checks)
+        decision = await self._review(checks)
+        if decision is None:
+            return self._work.ended()
         if decision.action == "accept":
             return self._work.accepted()
         if decision.action == "revise":
             return self._work.revise(decision.feedback)
         return self._work.ended()
+
+    async def _review(self, checks: ChecksProposal) -> ProposalDecision | None:
+        """The user's decision on ``checks``; ``None`` if the agent exits before they decide."""
+        review = self._desk.agents.proposal_review
+        assert review is not None  # Proposals are refused without one.
+        decision = asyncio.ensure_future(review.review(self._task_id, checks))
+        try:
+            await asyncio.wait({decision, self._stream_task}, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            decision.cancel()
+        return decision.result() if decision.done() else None
 
     async def _try(self, checks: ChecksProposal) -> Failure | None:
         """Run ``checks``' setup, then each step, in the agent's tree; returns the first

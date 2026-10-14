@@ -30,6 +30,9 @@ async def test_panel_says_so_when_there_are_no_steps() -> None:
     async with app.run_test():
         assert app.query_one(VerificationPanel).border_title == "Verification steps"
         assert steps(app) == "No verification steps"
+        # The spinner's redraws keep saying so.
+        app.query_one(VerificationPanel).tick()
+        assert steps(app) == "No verification steps"
 
 
 async def test_panel_shows_the_steps_the_backend_reports() -> None:

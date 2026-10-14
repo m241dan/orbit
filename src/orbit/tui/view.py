@@ -4,6 +4,7 @@ The widgets decide where things go and when they redraw; this module decides wha
 """
 
 import json
+import shlex
 from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
@@ -19,9 +20,12 @@ from orbit.protocol import (
     AgentRequest,
     AgentStarted,
     AssistantMessage,
+    ChecksProposed,
+    DecideProposal,
     Event,
     Notice,
     ProgressNoted,
+    ProposalAction,
     ReviewStatus,
     Settings,
     SkipReason,
@@ -220,6 +224,35 @@ def verification_finished_entry(step: StepState, passed: bool) -> tuple[str, Ent
     if passed:
         return f"✅ Verification passed: {step.name}", "verify"
     return f"❌ Verification failed: {step.name}", "error"
+
+
+# Proposed checks
+
+DECISION_NOTES: dict[ProposalAction, str] = {
+    "accept": "proposal accepted",
+    "revise": "changes asked for: ",
+    "end": "task ended",
+}
+
+
+def proposal_text(event: ChecksProposed) -> str:
+    """The proposed setup, then each step in order, and that they all passed."""
+    setup = event.setup
+    lines = [f"Setup: {'none' if setup is None else shlex.join(setup.command)}"]
+    if setup is not None and setup.watch:
+        lines.append(f"  reruns when these change: {', '.join(setup.watch)}")
+    lines += ["", "Steps:"]
+    lines += [f"  {i}. {s.name}: {shlex.join(s.command)}" for i, s in enumerate(event.steps, 1)]
+    lines += ["", "✅ All passed on the current code."]
+    return "\n".join(lines)
+
+
+def decision_entry(agent: str, decision: DecideProposal) -> tuple[str, EntryKind]:
+    """The user's ``decision`` on ``agent``'s proposal, as a transcript entry."""
+    note = DECISION_NOTES[decision.action]
+    if decision.action == "revise":
+        note += decision.feedback
+    return f"orbit → {agent}: {note}", "agent"
 
 
 # The task list

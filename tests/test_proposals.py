@@ -1,13 +1,32 @@
 """The configurator at work: orbit tries the checks it proposes, then the user decides."""
 
 import asyncio
+from collections.abc import Callable, Iterator
 from typing import Any
 
 from orbit.agent.application.ports import ProposalDecision
+from orbit.agent.application.session import AgentSession
 from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.roles import ChecksProposal, Setup
 from orbit.agent.domain.verification import VerificationStep
-from orbit.protocol import CancelTurn, Event, TaskSpec, TurnEndReason
+from orbit.protocol import (
+    AddTask,
+    AgentExited,
+    AgentReply,
+    BusyChanged,
+    CancelTurn,
+    ChecksProposed,
+    Command,
+    DecideProposal,
+    ErrorOccurred,
+    Event,
+    ProposalAction,
+    ProposedSetup,
+    ProposedStep,
+    RunTasks,
+    TaskSpec,
+    TurnEndReason,
+)
 from tests.agent_fakes import Call, FakeTree, Steps, board, run, session_for, verified
 
 LINT = {"name": "Lint", "command": ["ruff", "check"]}
@@ -163,7 +182,7 @@ async def test_invalid_proposals_are_refused_with_the_reason() -> None:
     assert status(events) == "gave_up"
 
 
-async def test_proposals_before_get_task_or_without_a_reviewer_are_refused() -> None:
+async def test_proposals_before_get_task_or_without_verification_are_refused() -> None:
     async def early(call: Call) -> TurnEndReason:
         reply = await call("propose_checks", steps=[LINT])
         assert reply.is_error and "get_task" in reply.text
@@ -179,8 +198,6 @@ async def test_proposals_before_get_task_or_without_a_reviewer_are_refused() -> 
         return "completed"
 
     session, _, _ = session_for(early, verification=verified(Steps()), proposal_review=Review())
-    await asyncio.wait_for(run(session, CONFIGURE), 5)
-    session, _, _ = session_for(unreviewed, verification=verified(Steps()))
     await asyncio.wait_for(run(session, CONFIGURE), 5)
     session, _, _ = session_for(unreviewed, proposal_review=Review())
     await asyncio.wait_for(run(session, CONFIGURE), 5)
@@ -201,3 +218,135 @@ async def test_a_task_cancelled_while_its_proposal_runs_answers_the_agent() -> N
     await session.send(CancelTurn())
     events = await asyncio.wait_for(running, 5)
     assert status(events) == "cancelled"
+
+
+class Blocked:
+    """A review that never decides, noting when it's shown a proposal and when it's dropped."""
+
+    def __init__(self) -> None:
+        self.shown = asyncio.Event()
+        self.dropped = False
+
+    async def review(self, task_id: str, proposal: ChecksProposal) -> ProposalDecision:
+        self.shown.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            self.dropped = True
+        raise AssertionError("unreachable")
+
+
+async def test_an_agent_exiting_while_its_proposal_is_shown_drops_it_and_cancels_the_task() -> None:
+    review = Blocked()
+
+    async def leaves(call: Call) -> TurnEndReason:
+        await call("get_task")
+        propose = asyncio.ensure_future(call("propose_checks", steps=[LINT]))
+        await review.shown.wait()
+        propose.cancel()
+        return "completed"
+
+    session, _, _ = session_for(leaves, verification=verified(Steps(True)), proposal_review=review)
+    events = await asyncio.wait_for(run(session, CONFIGURE), 5)
+    assert review.dropped
+    assert status(events) == "cancelled"
+
+
+Decide = Callable[[ChecksProposed], Command]
+
+
+async def decided(session: AgentSession, decide: Decide) -> list[Event]:
+    """Run a configurator task, answering each proposal it shows with ``decide``; returns the
+    events until the session goes idle."""
+    await session.send(AddTask(task=CONFIGURE))
+    await session.send(RunTasks())
+    events: list[Event] = []
+    async for event in session.events():
+        events.append(event)
+        if isinstance(event, ChecksProposed):
+            await session.send(decide(event))
+        if event == BusyChanged(busy=False):
+            return events
+    raise AssertionError("unreachable")
+
+
+def frontend(*arguments: dict[str, Any], replies: list[str], steps: Steps) -> AgentSession:
+    """A session without a review of its own, so its frontend decides on proposals."""
+    session, _, _ = session_for(
+        proposes(*arguments, replies=replies), verification=verified(steps), tree=FakeTree()
+    )
+    return session
+
+
+async def test_without_a_review_of_its_own_the_session_has_the_frontend_decide() -> None:
+    replies: list[str] = []
+    session = frontend(
+        {"steps": [LINT, TESTS], "setup": SETUP}, replies=replies, steps=Steps(True, True, True)
+    )
+    events = await asyncio.wait_for(
+        decided(session, lambda e: DecideProposal(task_id=e.task_id, action="accept")), 5
+    )
+    [shown] = [e for e in events if isinstance(e, ChecksProposed)]
+    assert shown.agent_id == "agent-1"
+    assert shown.steps == (
+        ProposedStep(name="Lint", command=("ruff", "check")),
+        ProposedStep(name="Tests", command=("pytest",)),
+    )
+    assert shown.setup == ProposedSetup(command=("uv", "sync"), watch=("uv.lock",))
+    assert "accepted" in replies[0]
+    assert status(events) == "completed"
+
+
+async def test_the_frontend_can_ask_for_changes_or_end_it() -> None:
+    replies: list[str] = []
+    session = frontend(
+        {"steps": [LINT]}, {"steps": [LINT]}, replies=replies, steps=Steps(True, True)
+    )
+    decisions: Iterator[ProposalAction] = iter(("revise", "end"))
+
+    def decide(event: ChecksProposed) -> Command:
+        assert event.setup is None
+        return DecideProposal(task_id=event.task_id, action=next(decisions), feedback="Add mypy.")
+
+    events = await asyncio.wait_for(decided(session, decide), 5)
+    assert "> Add mypy." in replies[0]
+    assert "ended" in replies[1]
+    assert status(events) == "cancelled"
+
+
+async def test_deciding_when_no_proposal_waits_is_an_error() -> None:
+    session, _, _ = session_for()
+    await session.send(DecideProposal(task_id="nope", action="accept"))
+
+    async def first_error() -> str:
+        async for event in session.events():
+            if isinstance(event, ErrorOccurred):
+                return event.message
+        raise AssertionError("unreachable")
+
+    assert await asyncio.wait_for(first_error(), 5) == "No proposal is waiting for task 'nope'."
+
+
+async def test_a_second_decision_on_the_same_proposal_is_an_error() -> None:
+    replies: list[str] = []
+    session = frontend({"steps": [LINT]}, replies=replies, steps=Steps(True))
+
+    def twice(event: ChecksProposed) -> Command:
+        accept = DecideProposal(task_id=event.task_id, action="accept")
+        asyncio.get_running_loop().create_task(session.send(accept))
+        return accept
+
+    events = await asyncio.wait_for(decided(session, twice), 5)
+    [task] = board(events)
+    errors = [e.message for e in events if isinstance(e, ErrorOccurred)]
+    assert errors == [f"No proposal is waiting for task {task.id!r}."]
+    assert task.status == "completed"
+
+
+async def test_cancelling_while_the_frontend_decides_cancels_the_task() -> None:
+    replies: list[str] = []
+    session = frontend({"steps": [LINT]}, replies=replies, steps=Steps(True))
+    events = await asyncio.wait_for(decided(session, lambda _: CancelTurn()), 5)
+    assert status(events) == "cancelled"
+    assert any(isinstance(e, AgentExited) for e in events)
+    assert not any(isinstance(e, AgentReply) and "accepted" in e.text for e in events)
