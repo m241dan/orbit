@@ -9,6 +9,7 @@ left behind are stashed, and commits that can't be merged stay on ``orbit/coder`
 import asyncio
 import datetime
 import hashlib
+import subprocess
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -19,6 +20,21 @@ STASH_MESSAGE = "orbit: unverified work"
 # Run in the tree when its lock file changes, so its environment matches.
 DEFAULT_SETUP = ("uv", "sync", "--frozen")
 LOCK_FILE = "uv.lock"
+
+
+def in_git_work_tree(path: str) -> bool:
+    """Whether ``path`` is inside a git work tree (and git can be run)."""
+    try:
+        result = subprocess.run(
+            ("git", "rev-parse", "--is-inside-work-tree"),
+            cwd=path,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except FileNotFoundError:
+        return False
+    return result.stdout.strip() == "true"
 
 
 async def _run(command: Sequence[str], cwd: Path) -> tuple[bool, str]:

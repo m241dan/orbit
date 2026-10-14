@@ -18,6 +18,7 @@ uv run orbit chat                              # interactive agent session
 uv run orbit chat --model opus --tools full    # pick model and tool access up front
 uv run orbit chat --no-verify                  # don't verify tasks
 uv run orbit chat --fix-attempts 3             # fixes an agent gets before a fresh one takes over
+uv run orbit chat --no-worktree                # tasks edit the current checkout; nothing is committed
 ```
 
 In the app:
@@ -109,6 +110,34 @@ still counts as done; the panel shows ⏩ for each step and the conversation say
 Fixes need to edit files, so give tasks `full` tool access when you want them fixed automatically.
 With `restricted` access, an agent can explain the failure but can't fix it.
 
+### Where tasks run, and how their work lands
+
+Inside a git repository, agents don't touch your checkout. They work in orbit's own worktree,
+`.git/orbit/coder` on the branch `orbit/coder` (inside `.git`, so your checkout never sees it), and
+the verification steps run there too. Before each task the worktree catches up with the branch you
+had checked out when orbit started (the **base**), and `uv sync --frozen` runs in it whenever its
+`uv.lock` changes.
+
+When a task passes verification, orbit commits its work there (the agent's summary as the subject,
+the task as the body) and fast-forwards the base to it, so the commit appears on your branch and in
+your checkout (`⇢ Merged into the base branch.`). If you committed to the base in the meantime, the
+work is rebased onto your commits and verified again before merging; if that fails, a fresh agent
+fixes it. When it can't be merged, it stays committed on `orbit/coder` and the conversation says why
+(`⚠ Not merged …`); orbit tries again after the next task:
+
+- `conflict`: it conflicts with your commits. Merge `orbit/coder` yourself.
+- `blocked`: uncommitted changes in your checkout are in the way. Commit or stash them.
+- `detached`: you started orbit on a detached HEAD, so there's no branch to merge into.
+
+Work is never thrown away. When a new task starts, changes a failed task left in the worktree are
+stashed (`git stash list` shows them as `orbit: unverified work …`); a fallback fix carries on from
+the work it fixes instead. At startup orbit mentions unmerged commits on `orbit/coder` and stashes
+it left behind. Outside a git repository, or with `--no-worktree`, agents work in the current
+directory and nothing is committed.
+
+With `full` tool access an agent can still run commands outside its worktree; the worktree keeps
+your checkout out of its way, it doesn't sandbox it.
+
 ### How agents reach orbit
 
 Orbit starts its MCP server the first time a task runs, on a random port on `127.0.0.1`. Each agent
@@ -155,7 +184,7 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
 - `orbit.agent`: backend, with no UI imports. Three layers, each importing only the ones below:
   - `external`: adapters that reach outside the backend. `ClaudeCliRunner` streams `claude -p
     --output-format stream-json`, resumes the same Claude session across turns, and launches
-    agents connected to orbit (`run_agent`); `McpHost` is orbit's MCP server; `checks` runs
+    agents connected to orbit (`run_agent`); `McpHost` is orbit's MCP server; `GitCoderTree` is the coder's worktree; `checks` runs
     the verification steps as processes (`DEFAULT_STEPS`, `run_step`); `workspace` fingerprints
     the git working tree; `EchoModel` is a stand-in model.
   - `application`: `AgentSession` implements `Session`: it takes commands, asks the domain what

@@ -9,6 +9,7 @@ from orbit.agent import (
     MODEL_ALIASES,
     AgentSession,
     ClaudeCliRunner,
+    GitCoderTree,
     Limits,
     McpHost,
     Verification,
@@ -128,3 +129,31 @@ def test_chat_rejects_fewer_than_one_fix_attempt(launched: list[AgentSession]) -
 
     assert result.exit_code == 2
     assert launched == []
+
+
+def test_chat_works_in_the_coder_tree_inside_a_git_repository(
+    launched: list[AgentSession], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("orbit.cli.in_git_work_tree", lambda path: True)
+    result = runner.invoke(app, ["chat"])
+    assert result.exit_code == 0
+    [session] = launched
+    assert session.agents is not None
+    assert isinstance(session.agents.tree, GitCoderTree)
+
+
+def test_chat_works_in_place_outside_a_git_repository(
+    launched: list[AgentSession], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("orbit.cli.in_git_work_tree", lambda path: False)
+    result = runner.invoke(app, ["chat"])
+    assert result.exit_code == 0
+    [session] = launched
+    assert session.agents is not None and session.agents.tree is None
+
+
+def test_chat_can_turn_the_coder_tree_off(launched: list[AgentSession]) -> None:
+    result = runner.invoke(app, ["chat", "--no-worktree"])
+    assert result.exit_code == 0
+    [session] = launched
+    assert session.agents is not None and session.agents.tree is None

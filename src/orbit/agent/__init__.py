@@ -18,6 +18,7 @@ from orbit.agent.domain.verification import VerificationStep
 from orbit.agent.external.checks import DEFAULT_STEPS, run_step
 from orbit.agent.external.claude_cli import MODEL_ALIASES, ClaudeCliRunner
 from orbit.agent.external.echo import EchoModel
+from orbit.agent.external.git_tree import GitCoderTree, in_git_work_tree
 from orbit.agent.external.mcp_host import McpHost
 from orbit.agent.external.workspace import workspace_state
 
@@ -28,6 +29,7 @@ __all__ = [
     "Agents",
     "ClaudeCliRunner",
     "EchoModel",
+    "GitCoderTree",
     "Limits",
     "McpHost",
     "ModelClient",
@@ -39,6 +41,7 @@ __all__ = [
     "Verification",
     "VerificationStep",
     "Workspace",
+    "in_git_work_tree",
     "run_step",
     "workspace_state",
 ]

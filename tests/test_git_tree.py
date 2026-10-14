@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from orbit.agent.external.git_tree import GitCoderTree
+from orbit.agent.external.git_tree import GitCoderTree, in_git_work_tree
 
 
 def git(cwd: Path, *args: str) -> str:
@@ -276,3 +276,18 @@ async def test_no_leftovers_once_everything_is_merged(repo: Path) -> None:
     await tree.commit("Add b")
     await tree.integrate()
     assert await tree.leftovers() == []
+
+
+def test_in_git_work_tree_tells_repositories_apart(repo: Path, tmp_path: Path) -> None:
+    outside = tmp_path / "plain"
+    outside.mkdir()
+    assert in_git_work_tree(str(repo))
+    assert not in_git_work_tree(str(outside))
+
+
+def test_without_git_nothing_is_a_work_tree(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
+    def missing(*args: object, **kwargs: object) -> None:
+        raise FileNotFoundError("git")
+
+    monkeypatch.setattr(subprocess, "run", missing)
+    assert not in_git_work_tree(str(repo))

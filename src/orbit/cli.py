@@ -12,9 +12,11 @@ from orbit.agent import (
     Agents,
     AgentSession,
     ClaudeCliRunner,
+    GitCoderTree,
     Limits,
     McpHost,
     Verification,
+    in_git_work_tree,
     run_step,
     workspace_state,
 )
@@ -52,6 +54,13 @@ def chat(
             " fresh agent takes over.",
         ),
     ] = Limits().max_attempts,
+    worktree: Annotated[
+        bool,
+        typer.Option(
+            help="Run tasks in a separate git worktree and merge their verified commits into"
+            " the current branch (only inside a git repository).",
+        ),
+    ] = True,
 ) -> None:
     """Start an interactive agent session.
 
@@ -65,8 +74,13 @@ def chat(
     # The only place the backend and frontend meet, and where the backend's external
     # adapters are plugged into its ports.
     verification = Verification(DEFAULT_STEPS, run_step, workspace_state) if verify else None
+    tree = GitCoderTree(".") if worktree and in_git_work_tree(".") else None
     agents = Agents(
-        McpHost(), ClaudeCliRunner(), secrets.token_urlsafe, Limits(max_attempts=fix_attempts)
+        McpHost(),
+        ClaudeCliRunner(),
+        secrets.token_urlsafe,
+        Limits(max_attempts=fix_attempts),
+        tree=tree,
     )
     session = AgentSession(
         ClaudeCliRunner(),
