@@ -308,6 +308,7 @@ async def test_new_context_starts_a_fresh_claude_session(tmp_path: Path) -> None
 
 AGENT = Agent(id="agent-3", role="coder", task_id="7", token="s3cret")
 URL = "http://127.0.0.1:5555/mcp"
+TOOLS = ("get_task", "complete_task")
 
 
 def init(status: str | None) -> dict[str, Any]:
@@ -318,7 +319,9 @@ def init(status: str | None) -> dict[str, Any]:
 async def run_agent(
     runner: ClaudeCliRunner, settings: Settings | None = None, cwd: str = "."
 ) -> list[Event]:
-    launch = AgentLaunch(AGENT, URL, "You are agent-3.", settings or Settings(), cwd)
+    launch = AgentLaunch(
+        AGENT, URL, "You are agent-3.", settings or Settings(), cwd, "Write code.", TOOLS
+    )
     return [e async for e in runner.run_agent(launch)]
 
 
@@ -346,8 +349,9 @@ async def test_an_agent_runs_connected_to_orbit(tmp_path: Path) -> None:
         }
     }
     assert "--strict-mcp-config" in argv
-    assert argv[argv.index("--allowedTools") + 1] == "mcp__orbit__*"
-    assert argv[argv.index("--append-system-prompt") + 1] == AGENT_RULES
+    allowed = "mcp__orbit__get_task,mcp__orbit__complete_task"
+    assert argv[argv.index("--allowedTools") + 1] == allowed
+    assert argv[argv.index("--append-system-prompt") + 1] == f"{AGENT_RULES}\n\nWrite code."
     assert "--resume" not in argv
 
 
@@ -368,7 +372,7 @@ async def test_agents_keep_tool_access_flags_and_orbit_tools(tmp_path: Path) -> 
     await run_agent(runner, Settings(tool_access="off"))
     argv = calls(scenario)[0]["argv"]
     assert argv[argv.index("--tools") + 1] == ""
-    assert argv[argv.index("--allowedTools") + 1] == "mcp__orbit__*"
+    assert argv[argv.index("--allowedTools") + 1].startswith("mcp__orbit__get_task")
 
 
 async def test_an_agent_run_leaves_the_conversation_session_alone(tmp_path: Path) -> None:

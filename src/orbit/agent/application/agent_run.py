@@ -8,7 +8,7 @@ disconnects while waiting for the result.
 
 import asyncio
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from contextlib import suppress
 from dataclasses import dataclass, field
 from typing import Any, Literal
@@ -24,6 +24,7 @@ from orbit.agent.application.verifier import Failure, Verifier
 from orbit.agent.domain.agent_task import FINISHED, AgentTask, Limits, Phase
 from orbit.agent.domain.agents import Agent, AgentRegistry, bootstrap_prompt
 from orbit.agent.domain.board import TaskBoard
+from orbit.agent.domain.roles import BUILT_IN_ROLES, Role
 from orbit.agent.domain.verification import trim_output
 from orbit.protocol import (
     AgentExited,
@@ -65,7 +66,7 @@ class Agents:
     makes the unguessable tokens they identify themselves with. ``exit_grace`` is how
     long, in seconds, an agent may take to exit once its task is finished before it's stopped.
     ``tree`` is where they work and their work is merged from; without one they work in the
-    current directory and nothing is committed.
+    current directory and nothing is committed. ``roles`` are the roles tasks can name.
     """
 
     host: AgentHost
@@ -74,6 +75,7 @@ class Agents:
     limits: Limits = field(default_factory=Limits)
     exit_grace: float = 10.0
     tree: CoderTree | None = None
+    roles: Mapping[str, Role] = field(default_factory=lambda: dict(BUILT_IN_ROLES))
 
 
 @dataclass(frozen=True)
@@ -174,26 +176,46 @@ class AgentRun:
     async def run(self, before: object, root: str) -> Outcome:
         """Launch the agent in ``root`` and see the task through; ``before`` is the tree's
         state there beforehand."""
-        self._root = root
         task = self._work.task
+        role = self._desk.agents.roles.get(task.role)
+        if role is None:
+            await self._publish(ErrorOccurred(message=f"No role named {task.role!r}."))
+            return Outcome("error")
+        self._role, self._root = role, root
         self._agent = self._desk.open(self, task.role, self._task_id)
-        url = await self._desk.url()
-        await self._publish(
-            AgentStarted(agent_id=self.agent.id, role=task.role, task_id=self._task_id)
-        )
-        stream = asyncio.create_task(self._stream(url))
+        stream = await self._launch()
         try:
-            await self._serve(before)
-            await self._await_exit(stream)
+            await self._serve_in_time(before)
+            if self._work.phase in FINISHED:
+                await self._await_exit(stream)
         finally:
             await self._stop(stream)
             self._desk.close(self.agent)
         return Outcome(STATUSES[self._work.phase], self._failure, tuple(self._work.summaries))
 
+    async def _launch(self) -> "asyncio.Task[None]":
+        url = await self._desk.url()
+        role = self._work.task.role
+        await self._publish(AgentStarted(agent_id=self.agent.id, role=role, task_id=self._task_id))
+        return asyncio.create_task(self._stream(url))
+
+    async def _serve_in_time(self, before: object) -> None:
+        """Serve the agent until it's done, or its role's time runs out."""
+        minutes = self._role.timeout_minutes
+        try:
+            async with asyncio.timeout(None if minutes is None else minutes * 60):
+                await self._serve(before)
+        except TimeoutError:
+            message = f"{self.agent.id} ran out of time ({minutes:g} minutes)."
+            await self._publish(ErrorOccurred(agent_id=self.agent.id, message=message))
+
     async def handle(self, tool: str, arguments: dict[str, Any]) -> Reply:
         answer = self._tools.get(tool)
         if answer is None:
             return Reply(f"Orbit has no tool {tool!r}.", is_error=True)
+        if tool not in self._role.tools:
+            role = self._work.task.role
+            return Reply(f"Your role ({role}) can't use {tool}.", is_error=True)
         return await answer(arguments)
 
     # The agent's process
@@ -215,7 +237,13 @@ class AgentRun:
     async def _follow(self, url: str) -> AgentExitReason:
         reason: AgentExitReason = "finished"
         launch = AgentLaunch(
-            self.agent, url, bootstrap_prompt(self.agent), self._work.task.settings, self._root
+            self.agent,
+            url,
+            bootstrap_prompt(self.agent),
+            self._work.task.settings,
+            self._root,
+            self._role.instructions,
+            self._role.tools,
         )
         events = self._desk.agents.launcher.run_agent(launch)
         async for event in events:
@@ -275,7 +303,7 @@ class AgentRun:
         _answer(claim, Reply(reply))
 
     async def _check(self, before: object) -> Failure | None:
-        if self._verifier is None:
+        if self._verifier is None or not self._role.verify:
             return None
         async with self._checking:
             return await self._verifier.check(self._task_id, before, self._root)

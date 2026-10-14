@@ -54,13 +54,16 @@ AGENT_RULES = (
 )
 
 
-def agent_args(url: str) -> list[str]:
-    """Flags connecting a CLI to orbit's MCP server at ``url``, and only to it."""
+def agent_args(launch: AgentLaunch) -> list[str]:
+    """Flags connecting a CLI to orbit's MCP server, and only to it, allowing the role's tools
+    and telling it the rules and its role."""
     headers = {"Authorization": f"Bearer ${{{TOKEN_VARIABLE}}}"}
-    config = {"mcpServers": {"orbit": {"type": "http", "url": url, "headers": headers}}}
+    config = {"mcpServers": {"orbit": {"type": "http", "url": launch.url, "headers": headers}}}
+    allowed = ",".join(f"mcp__orbit__{tool}" for tool in launch.tools)
+    rules = f"{AGENT_RULES}\n\n{launch.instructions}"
     return [
         *("--mcp-config", json.dumps(config), "--strict-mcp-config"),
-        *("--allowedTools", "mcp__orbit__*", "--append-system-prompt", AGENT_RULES),
+        *("--allowedTools", allowed, "--append-system-prompt", rules),
     ]
 
 
@@ -179,7 +182,7 @@ class ClaudeCliRunner:
         runner = self.new_context()
         runner._needs_orbit = True
         runner._env, runner._cwd = agent_env(agent), launch.cwd
-        args = [*runner._args(launch.settings), *agent_args(launch.url)]
+        args = [*runner._args(launch.settings), *agent_args(launch)]
         async for event in runner._run(agent.id, args, launch.prompt):
             yield event.model_copy(update={"agent_id": agent.id})
 

@@ -14,9 +14,11 @@ from orbit.agent.application.session import AgentSession
 from orbit.agent.application.tools import ToolRegistry
 from orbit.agent.application.verifier import Verification
 from orbit.agent.domain.agent_task import Limits
+from orbit.agent.domain.roles import ConfigError, OrbitConfig, Role
 from orbit.agent.domain.verification import VerificationStep
 from orbit.agent.external.checks import DEFAULT_STEPS, run_step
 from orbit.agent.external.claude_cli import MODEL_ALIASES, ClaudeCliRunner
+from orbit.agent.external.config_file import read_config
 from orbit.agent.external.echo import EchoModel
 from orbit.agent.external.git_tree import GitCoderTree, in_git_work_tree
 from orbit.agent.external.mcp_host import McpHost
@@ -28,12 +30,15 @@ __all__ = [
     "AgentSession",
     "Agents",
     "ClaudeCliRunner",
+    "ConfigError",
     "EchoModel",
     "GitCoderTree",
     "Limits",
     "McpHost",
     "ModelClient",
     "ModelLoopRunner",
+    "OrbitConfig",
+    "Role",
     "StepRunner",
     "Tool",
     "ToolRegistry",
@@ -42,6 +47,7 @@ __all__ = [
     "VerificationStep",
     "Workspace",
     "in_git_work_tree",
+    "read_config",
     "run_step",
     "workspace_state",
 ]

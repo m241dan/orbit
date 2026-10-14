@@ -12,11 +12,13 @@ from orbit.agent import (
     Agents,
     AgentSession,
     ClaudeCliRunner,
+    ConfigError,
     GitCoderTree,
     Limits,
     McpHost,
     Verification,
     in_git_work_tree,
+    read_config,
     run_step,
     workspace_state,
 )
@@ -47,13 +49,14 @@ def chat(
         ),
     ] = True,
     fix_attempts: Annotated[
-        int,
+        int | None,
         typer.Option(
             min=1,
             help="Fixes asked of the agent working on a task, in the same session, before a"
-            " fresh agent takes over.",
+            " fresh agent takes over. [default: fix_attempts in .orbit/roles.toml, or 5]",
+            show_default=False,
         ),
-    ] = Limits().max_attempts,
+    ] = None,
     worktree: Annotated[
         bool,
         typer.Option(
@@ -74,13 +77,19 @@ def chat(
     # The only place the backend and frontend meet, and where the backend's external
     # adapters are plugged into its ports.
     verification = Verification(DEFAULT_STEPS, run_step, workspace_state) if verify else None
+    try:
+        config = read_config()
+    except ConfigError as exc:
+        typer.echo(f"Invalid orbit configuration: {exc}", err=True)
+        raise typer.Exit(2) from None
     tree = GitCoderTree(".") if worktree and in_git_work_tree(".") else None
     agents = Agents(
         McpHost(),
         ClaudeCliRunner(),
         secrets.token_urlsafe,
-        Limits(max_attempts=fix_attempts),
+        Limits(max_attempts=fix_attempts or config.fix_attempts),
         tree=tree,
+        roles=config.roles,
     )
     session = AgentSession(
         ClaudeCliRunner(),

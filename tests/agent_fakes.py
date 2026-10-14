@@ -141,17 +141,18 @@ def verified(
 def session_for(
     *scripts: Script,
     verification: Verification | None = None,
-    limits: Limits | None = None,
     runner: TurnRunner | None = None,
-    tree: FakeTree | None = None,
+    **options: Any,
 ) -> tuple[AgentSession, FakeHost, ScriptedLauncher]:
-    """A session whose tasks run through agents playing ``scripts``, one per launch."""
+    """A session whose tasks run through agents playing ``scripts``, one per launch.
+
+    ``options`` go to :class:`Agents`, such as ``limits``, ``tree`` or ``roles``.
+    """
     host = FakeHost()
     launcher = ScriptedLauncher(host, *scripts)
     tokens = iter(f"token-{n}" for n in range(1, 100))
-    agents = Agents(
-        host, launcher, lambda: next(tokens), limits or Limits(), exit_grace=0.5, tree=tree
-    )
+    options = {"limits": Limits(), "exit_grace": 0.5, **options}
+    agents = Agents(host, launcher, lambda: next(tokens), **options)
     chat = runner or object()  # Tasks never use the conversation's runner.
     session = AgentSession(chat, verification=verification, agents=agents)  # type: ignore[arg-type]
     return session, host, launcher

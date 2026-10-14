@@ -138,6 +138,48 @@ directory and nothing is committed.
 With `full` tool access an agent can still run commands outside its worktree; the worktree keeps
 your checkout out of its way, it doesn't sandbox it.
 
+### Roles and `.orbit/roles.toml`
+
+Every task names a **role**, the kind of agent that takes it (`coder` unless it says otherwise).
+A role sets what the agent is told about its job, which of orbit's tools it may call, whether its
+claims of being done are verified, and an optional time limit. Its model and tool access are the
+defaults for tasks orbit queues in that role; a task you queue keeps its own settings. Built in:
+
+| Role | Tools | Verified | Default model / access |
+|---|---|---|---|
+| `coder` | `get_task`, `complete_task`, `run_check`, `report_progress`, `give_up` | yes | default / `full` |
+| `reviewer` | `get_task`, `complete_task`, `report_progress`, `give_up` | no | default / `restricted` |
+| `super-reviewer` | same as `reviewer` | no | `opus` / `restricted` |
+| `planner` | same as `reviewer` | no | default / `restricted` |
+
+An agent calling a tool its role doesn't have gets an error reply (the CLI only allows its role's
+tools, too); an agent still working when its role's time runs out is stopped and the task fails.
+
+A project can change these, and orbit's limits, in `.orbit/roles.toml`. A role it names that's built
+in keeps the fields it doesn't set; any other name adds a role. Every field is optional:
+
+```toml
+fix_attempts = 5               # fixes asked of one agent before a fresh one takes over
+review_rounds = 3              # rounds of review-suggested work before review pauses
+super_review_every = 10        # commits between super reviews
+review_suggestions = 5         # tasks one review may suggest
+super_review_suggestions = 10  # tasks one super review may suggest
+
+[roles.coder]
+model = "sonnet"
+timeout_minutes = 45
+
+[roles.docs-writer]
+instructions = "You write and update the project's documentation."
+tools = ["get_task", "complete_task", "report_progress", "give_up"]
+tool_access = "full"
+verify = false
+```
+
+`orbit chat` reads it at startup and refuses to start if it's invalid, naming each problem (for
+example `roles.coder.tool_access: Input should be 'off', 'restricted' or 'full'`). `--fix-attempts`
+on the command line overrides `fix_attempts`.
+
 ### How agents reach orbit
 
 Orbit starts its MCP server the first time a task runs, on a random port on `127.0.0.1`. Each agent

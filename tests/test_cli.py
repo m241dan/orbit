@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import ClassVar
 
 import pytest
@@ -157,3 +158,43 @@ def test_chat_can_turn_the_coder_tree_off(launched: list[AgentSession]) -> None:
     assert result.exit_code == 0
     [session] = launched
     assert session.agents is not None and session.agents.tree is None
+
+
+def test_chat_reads_roles_and_limits_from_the_project_file(
+    launched: list[AgentSession], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    (tmp_path / ".orbit").mkdir()
+    (tmp_path / ".orbit" / "roles.toml").write_text(
+        'fix_attempts = 2\n[roles.coder]\nmodel = "sonnet"\n'
+    )
+    monkeypatch.chdir(tmp_path)
+    result = runner.invoke(app, ["chat"])
+    assert result.exit_code == 0
+    [session] = launched
+    assert session.agents is not None
+    assert session.agents.limits == Limits(max_attempts=2)
+    assert session.agents.roles["coder"].model == "sonnet"
+
+
+def test_the_command_line_overrides_the_files_fix_attempts(
+    launched: list[AgentSession], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    (tmp_path / ".orbit").mkdir()
+    (tmp_path / ".orbit" / "roles.toml").write_text("fix_attempts = 2\n")
+    monkeypatch.chdir(tmp_path)
+    runner.invoke(app, ["chat", "--fix-attempts", "4"])
+    [session] = launched
+    assert session.agents is not None
+    assert session.agents.limits == Limits(max_attempts=4)
+
+
+def test_an_invalid_project_file_stops_chat_with_its_problems(
+    launched: list[AgentSession], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    (tmp_path / ".orbit").mkdir()
+    (tmp_path / ".orbit" / "roles.toml").write_text("[roles.coder]\ntool_access = 'maybe'\n")
+    monkeypatch.chdir(tmp_path)
+    result = runner.invoke(app, ["chat"])
+    assert result.exit_code == 2
+    assert "roles.coder.tool_access" in result.output
+    assert launched == []

@@ -70,13 +70,16 @@ class AgentHost(Protocol):
 @dataclass(frozen=True)
 class AgentLaunch:
     """How to start ``agent``: connected to orbit at ``url``, told ``prompt``, with ``settings``,
-    working in the directory ``cwd``."""
+    working in the directory ``cwd``. ``instructions`` describe its role, and ``tools`` are the
+    orbit tools it may call."""
 
     agent: Agent
     url: str
     prompt: str
     settings: Settings
     cwd: str
+    instructions: str
+    tools: tuple[str, ...]
 
 
 class AgentLauncher(Protocol):
