@@ -92,6 +92,10 @@ class AgentSession:
         return self._model_choices
 
     @property
+    def agents(self) -> Agents | None:
+        return self._desk.agents if self._desk else None
+
+    @property
     def verification(self) -> Verification | None:
         return self._verifier.verification if self._verifier else None
 

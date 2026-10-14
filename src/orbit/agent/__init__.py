@@ -13,10 +13,12 @@ from orbit.agent.application.ports import ModelClient, StepRunner, Tool, TurnRun
 from orbit.agent.application.session import AgentSession
 from orbit.agent.application.tools import ToolRegistry
 from orbit.agent.application.verifier import Verification
+from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.verification import VerificationStep
 from orbit.agent.external.checks import DEFAULT_STEPS, run_step
 from orbit.agent.external.claude_cli import MODEL_ALIASES, ClaudeCliRunner
 from orbit.agent.external.echo import EchoModel
+from orbit.agent.external.mcp_host import McpHost
 from orbit.agent.external.workspace import workspace_state
 
 __all__ = [
@@ -26,6 +28,8 @@ __all__ = [
     "Agents",
     "ClaudeCliRunner",
     "EchoModel",
+    "Limits",
+    "McpHost",
     "ModelClient",
     "ModelLoopRunner",
     "StepRunner",

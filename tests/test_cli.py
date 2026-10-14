@@ -9,6 +9,8 @@ from orbit.agent import (
     MODEL_ALIASES,
     AgentSession,
     ClaudeCliRunner,
+    Limits,
+    McpHost,
     Verification,
     run_step,
     workspace_state,
@@ -95,3 +97,34 @@ def test_chat_can_turn_verification_off(launched: list[AgentSession]) -> None:
     assert result.exit_code == 0
     [session] = launched
     assert session.verification is None
+
+
+def test_chat_runs_tasks_through_agents_connected_over_mcp(launched: list[AgentSession]) -> None:
+    result = runner.invoke(app, ["chat"])
+
+    assert result.exit_code == 0
+    [session] = launched
+    agents = session.agents
+    assert agents is not None
+    assert isinstance(agents.host, McpHost)
+    assert isinstance(agents.launcher, ClaudeCliRunner)
+    assert agents.launcher is not session.runner
+    assert agents.limits == Limits(max_attempts=5)
+    first, second = agents.new_token(), agents.new_token()
+    assert first != second and len(first) >= 32
+
+
+def test_chat_sets_the_fixes_an_agent_gets(launched: list[AgentSession]) -> None:
+    result = runner.invoke(app, ["chat", "--fix-attempts", "2"])
+
+    assert result.exit_code == 0
+    [session] = launched
+    assert session.agents is not None
+    assert session.agents.limits == Limits(max_attempts=2)
+
+
+def test_chat_rejects_fewer_than_one_fix_attempt(launched: list[AgentSession]) -> None:
+    result = runner.invoke(app, ["chat", "--fix-attempts", "0"])
+
+    assert result.exit_code == 2
+    assert launched == []
