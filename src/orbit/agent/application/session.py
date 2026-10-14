@@ -27,6 +27,7 @@ from orbit.protocol import (
     ErrorOccurred,
     Event,
     Notice,
+    RequestSuperReview,
     RunTasks,
     Settings,
     SettingsChanged,
@@ -124,6 +125,8 @@ class AgentSession:
                 await self._handle_conversation(command)
             case AddTask() | EditTask() | RunTasks():
                 await self._handle_tasks(command)
+            case RequestSuperReview():
+                await self._super_review()
             case _:
                 assert_never(command)
 
@@ -164,6 +167,13 @@ class AgentSession:
         if self._next_work(()) is not None:
             await self._start(self._run_tasks())
 
+    async def _super_review(self) -> None:
+        if self._lane is None:
+            message = "Super reviews need reviews turned on, inside a git repository."
+            await self._events.put(ErrorOccurred(message=message))
+        else:
+            await self._lane.super_review()
+
     def _next_work(self, tried: Collection[str]) -> str | None:
         """The next task for the work lane; reviews have their own lane, if there is one."""
         exclude = REVIEW_ROLES if self._lane is not None else ()
@@ -180,7 +190,12 @@ class AgentSession:
         if desk is None or not desk.agents.review or desk.agents.tree is None:
             return None
         agents = desk.agents
-        planner = ReviewPlanner(agents.review_rounds, agents.review_suggestions)
+        planner = ReviewPlanner(
+            agents.review_rounds,
+            agents.review_suggestions,
+            agents.super_review_every,
+            agents.super_review_suggestions,
+        )
         lane = ReviewLane(desk, self._board, planner, self._wake_work)
         desk.suggest = lane.suggest
         return lane

@@ -3,7 +3,7 @@
 import itertools
 from collections.abc import Collection, Sequence
 
-from orbit.protocol import StepState, StepStatus, TaskSpec, TaskState, TaskStatus
+from orbit.protocol import StepState, StepStatus, TaskOrigin, TaskSpec, TaskState, TaskStatus
 
 # Statuses a run leaves alone; any other task is worth (another) run.
 SETTLED: frozenset[TaskStatus] = frozenset(
@@ -46,10 +46,12 @@ class TaskBoard:
         self._tasks.insert(self.position(fixes) + 1, state.model_copy(update=inherited))
         return state.id
 
-    def add_suggestion(self, task: TaskSpec, batch: str, round: int) -> str:
+    def add_suggestion(
+        self, task: TaskSpec, batch: str, round: int, origin: TaskOrigin = "review"
+    ) -> str:
         """Add ``task``, suggested by the review behind ``batch``, at the end; returns its id."""
         state = TaskState(
-            id=str(next(self._ids)), task=task, origin="review", batch=batch, round=round
+            id=str(next(self._ids)), task=task, origin=origin, batch=batch, round=round
         )
         self._tasks.append(state)
         return state.id

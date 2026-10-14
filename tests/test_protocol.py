@@ -12,6 +12,7 @@ from orbit.protocol import (
     EditTask,
     ErrorOccurred,
     ProgressNoted,
+    RequestSuperReview,
     RunTasks,
     Settings,
     SettingsChanged,
@@ -192,3 +193,10 @@ def test_task_state_carries_its_review_batch_and_round() -> None:
     event = TasksChanged(tasks=(state,))
     assert event_adapter.validate_json(event.model_dump_json()) == event
     assert TaskState(id="1", task=TaskSpec(prompt="x")).round == 0
+
+
+def test_request_super_review_round_trips() -> None:
+    assert (
+        command_adapter.validate_json(RequestSuperReview().model_dump_json())
+        == RequestSuperReview()
+    )

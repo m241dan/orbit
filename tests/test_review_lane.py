@@ -10,8 +10,10 @@ from orbit.protocol import (
     AddTask,
     AgentExited,
     CancelTurn,
+    ErrorOccurred,
     Event,
     Notice,
+    RequestSuperReview,
     RunTasks,
     TasksChanged,
     TaskSpec,
@@ -347,3 +349,42 @@ async def test_reviews_queued_while_one_runs_wait_their_turn() -> None:
     roles = [t.task.role for t in board(events)]
     assert roles.count("reviewer") == 2
     assert [la.agent.role for la in launcher.launches].count("reviewer") == 2
+
+
+async def test_every_so_many_commits_the_whole_codebase_is_super_reviewed() -> None:
+    tree = FakeTree()
+    session, _, _ = session_for(
+        claims_done,
+        claims_done,
+        reviewers=(suggests(), suggests(), suggests("Split the parser")),
+        tree=tree,
+        review=True,
+        super_review_every=2,
+    )
+    await start(session, "one", "two")
+    events = await asyncio.wait_for(settle(session), 10)
+    tasks = board(events)
+    supers = [t for t in tasks if t.task.role == "super-reviewer"]
+    assert len(supers) == 1
+    assert supers[0].task.prompt.startswith("Super review of the codebase at c2")
+    assert supers[0].task.settings.model == "opus"  # The super reviewer's default.
+    [suggestion] = [t for t in tasks if t.batch]
+    assert (suggestion.origin, suggestion.round) == ("super_review", 1)
+    assert "c2" in tree.snapshots
+
+
+async def test_a_super_review_can_be_asked_for() -> None:
+    tree = FakeTree()
+    session, _, _ = session_for(reviewers=(suggests(),), tree=tree, review=True)
+    await session.send(RequestSuperReview())
+    events = await asyncio.wait_for(settle(session), 10)
+    assert [t.task.role for t in board(events)] == ["super-reviewer"]
+    assert tree.snapshots == ["c0"]
+
+
+async def test_without_reviews_a_super_review_is_refused() -> None:
+    session, _, _ = session_for(tree=FakeTree())
+    await session.send(RequestSuperReview())
+    stream = session.events()
+    events = [await anext(stream), await anext(stream)]
+    assert any(isinstance(e, ErrorOccurred) and "Super reviews" in e.message for e in events)

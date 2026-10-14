@@ -13,7 +13,7 @@ from orbit.agent.application.agent_run import AgentDesk, AgentRun
 from orbit.agent.application.ports import CoderTree, Reply
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.reviews import ReviewJob, ReviewPlanner, review_prompt
-from orbit.protocol import Notice, Settings, TasksChanged, TaskSpec, TaskStatus
+from orbit.protocol import Notice, Settings, TaskOrigin, TasksChanged, TaskSpec, TaskStatus
 
 REVIEW_ROLES = frozenset({"reviewer", "super-reviewer"})
 
@@ -38,13 +38,20 @@ class ReviewLane:
         self.planner = planner
         self._wake_work = wake_work
         self._publish = desk.publish
-        self._jobs: dict[str, tuple[str, str]] = {}  # Review task id -> its batch and commit.
+        self._jobs: dict[str, ReviewJob] = {}  # Review task id -> what it reviews.
+        self._batches: dict[str, str] = {}  # Review task id -> the batch it suggests into.
         self._running: asyncio.Task[None] | None = None
         self._paused_noted = False
 
     async def landed(self, task_id: str, commit: str) -> None:
         """Task ``task_id`` landed ``commit``."""
         await self._queue(self.planner.landed(self._board.get(task_id), commit))
+        if self.planner.count():
+            await self._queue(self.planner.super_review(commit))
+
+    async def super_review(self) -> None:
+        """Queue a super review of the codebase as it is now."""
+        await self._queue(self.planner.super_review(await self._tree.head()))
 
     async def ended(self, task_id: str) -> None:
         """Task ``task_id`` finished without landing anything."""
@@ -58,10 +65,9 @@ class ReviewLane:
 
     async def suggest(self, task_id: str, title: str, prompt: str) -> Reply:
         """Review task ``task_id`` suggests a task; queue it unless it's refused."""
-        job = self._jobs.get(task_id)
-        if job is None:
+        batch = self._batches.get(task_id)
+        if batch is None:
             return Reply("Only reviews orbit queued itself can suggest tasks.", is_error=True)
-        batch = job[0]
         refusal = self.planner.refusal(batch, title, self._board.tasks)
         if refusal is not None:
             return Reply(refusal, is_error=True)
@@ -70,7 +76,8 @@ class ReviewLane:
             prompt=f"{title.strip()}\n\n{prompt.strip()}",
             settings=Settings(model=coder.model, tool_access=coder.tool_access),
         )
-        new_id = self._board.add_suggestion(task, batch, self.planner.round_of(batch))
+        origin: TaskOrigin = "super_review" if self._jobs[task_id].whole else "review"
+        new_id = self._board.add_suggestion(task, batch, self.planner.round_of(batch), origin)
         self.planner.added(batch, new_id)
         await self._publish(TasksChanged(tasks=self._board.tasks))
         return Reply(f"Queued as task {new_id}.")
@@ -90,16 +97,18 @@ class ReviewLane:
         await self._note_pause()
         if job is None:
             return
-        diff = await self._tree.show(job.commits)
+        diff = "" if job.whole else await self._tree.show(job.commits)
         batch = self.planner.open_batch(job)
-        reviewer = self._desk.agents.roles["reviewer"]
+        role = "super-reviewer" if job.whole else "reviewer"
+        reviewer = self._desk.agents.roles[role]
+        cap = self.planner.super_cap if job.whole else self.planner.cap
         task = TaskSpec(
-            prompt=review_prompt(job, diff, self.planner.cap),
-            role="reviewer",
+            prompt=review_prompt(job, diff, cap),
+            role=role,
             settings=Settings(model=reviewer.model, tool_access=reviewer.tool_access),
         )
         task_id = self._board.add_review(task)
-        self._jobs[task_id] = (batch, job.commits[-1])
+        self._jobs[task_id], self._batches[task_id] = job, batch
         await self._publish(TasksChanged(tasks=self._board.tasks))
         self.kick()
 
@@ -119,19 +128,30 @@ class ReviewLane:
             await self._review(task_id)
 
     async def _review(self, task_id: str) -> None:
-        batch, commit = self._jobs.get(task_id, (None, None))
+        job = self._jobs.get(task_id)
         self._board.set_status(task_id, "running")
         await self._publish(TasksChanged(tasks=self._board.tasks))
-        root = await self._tree.snapshot(commit) if commit else "."
         status: TaskStatus = "cancelled"
         try:
-            status = (await AgentRun(task_id, self._board, None, self._desk).run(None, root)).status
+            status = await self._run_reviewer(task_id, job.commits[-1] if job else None)
+        finally:
+            self._board.finish(task_id, status)
+            await self._publish(TasksChanged(tasks=self._board.tasks))
+        await self._after(self._batches.get(task_id))
+
+    async def _run_reviewer(self, task_id: str, commit: str | None) -> TaskStatus:
+        """Run the reviewer in a snapshot of ``commit``; a review the user queued works in place."""
+        root = await self._tree.snapshot(commit) if commit else "."
+        try:
+            return (await AgentRun(task_id, self._board, None, self._desk).run(None, root)).status
         finally:
             if commit:
                 await self._tree.drop(root)
-            self._board.finish(task_id, status)
-            await self._publish(TasksChanged(tasks=self._board.tasks))
-        if batch is not None:
-            self.planner.close_if_empty(batch)
-            if batch in self.planner.open_batches:
-                await self._wake_work()
+
+    async def _after(self, batch: str | None) -> None:
+        """A review ended: wait on its batch's suggestions, and run them, if it made any."""
+        if batch is None:
+            return
+        self.planner.close_if_empty(batch)
+        if batch in self.planner.open_batches:
+            await self._wake_work()

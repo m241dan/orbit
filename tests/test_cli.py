@@ -176,7 +176,10 @@ def test_chat_reviews_landed_work_with_the_files_limits(
     launched: list[AgentSession], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     (tmp_path / ".orbit").mkdir()
-    (tmp_path / ".orbit" / "roles.toml").write_text("review_rounds = 2\nreview_suggestions = 4\n")
+    (tmp_path / ".orbit" / "roles.toml").write_text(
+        "review_rounds = 2\nreview_suggestions = 4\nsuper_review_every = 7\n"
+        "super_review_suggestions = 6\n"
+    )
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("orbit.cli.in_git_work_tree", lambda path: True)
     runner.invoke(app, ["chat"])
@@ -184,6 +187,7 @@ def test_chat_reviews_landed_work_with_the_files_limits(
     agents = session.agents
     assert agents is not None
     assert (agents.review, agents.review_rounds, agents.review_suggestions) == (True, 2, 4)
+    assert (agents.super_review_every, agents.super_review_suggestions) == (7, 6)
 
 
 def test_chat_can_turn_review_off(launched: list[AgentSession]) -> None:

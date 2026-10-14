@@ -92,8 +92,14 @@ class RunTasks(_Message):
     type: Literal["run_tasks"] = "run_tasks"
 
 
+class RequestSuperReview(_Message):
+    """Ask for a super review of the whole codebase now, without waiting for its turn."""
+
+    type: Literal["request_super_review"] = "request_super_review"
+
+
 Command = Annotated[
-    SubmitPrompt | CancelTurn | UpdateSettings | AddTask | EditTask | RunTasks,
+    SubmitPrompt | CancelTurn | UpdateSettings | AddTask | EditTask | RunTasks | RequestSuperReview,
     Field(discriminator="type"),
 ]
 

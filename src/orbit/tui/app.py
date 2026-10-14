@@ -22,6 +22,7 @@ from orbit.protocol import (
     Event,
     Notice,
     ProgressNoted,
+    RequestSuperReview,
     RunTasks,
     Session,
     Settings,
@@ -89,6 +90,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         Binding("enter", "activate", show=False),
         Binding("i", "insert_mode", "Type"),
         Binding("ctrl+r", "run_tasks", "Run tasks"),
+        Binding("ctrl+g", "super_review", "Super review"),
         Binding("escape", "cancel_turn", "Cancel turn"),
         Binding("ctrl+o", "pick_model", "Model"),
         Binding("ctrl+l", "pick_tool_access", "Tools"),
@@ -189,6 +191,10 @@ class OrbitApp(App[None], inherit_bindings=False):
         self.query_one(f"#{self._selected}").remove_class("selected")
         self.query_one(f"#{window_id}").add_class("selected")
         self._selected = window_id
+
+    async def action_super_review(self) -> None:
+        # Reviews have their own lane, so this works while tasks run.
+        await self._session.send(RequestSuperReview())
 
     async def action_cancel_turn(self) -> None:
         await self._session.send(CancelTurn())

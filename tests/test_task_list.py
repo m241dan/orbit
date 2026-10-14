@@ -5,6 +5,7 @@ from orbit.protocol import (
     BusyChanged,
     EditTask,
     Event,
+    RequestSuperReview,
     RunTasks,
     Settings,
     TasksChanged,
@@ -392,3 +393,12 @@ def test_tasks_being_fixed_show_which_fix_they_are_on() -> None:
         id="1", task=TaskSpec(prompt="go"), status="running", attempt=2, max_attempts=5
     )
     assert str(task_label(state, "1", "◠ ")) == "1. ◠  go\n      default · restricted · fix 2/5"
+
+
+async def test_ctrl_g_asks_for_a_super_review_even_while_busy() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed(session, pilot, BusyChanged(busy=True))
+        await pilot.press("ctrl+g")
+        assert session.commands == [RequestSuperReview()]

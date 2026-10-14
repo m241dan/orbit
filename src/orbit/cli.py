@@ -91,6 +91,8 @@ def chat(
         review=review,
         review_rounds=config.review_rounds,
         review_suggestions=config.review_suggestions,
+        super_review_every=config.super_review_every,
+        super_review_suggestions=config.super_review_suggestions,
     )
     session = AgentSession(
         ClaudeCliRunner(),

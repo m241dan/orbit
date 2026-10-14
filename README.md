@@ -29,6 +29,7 @@ In the app:
 | `i` | Jump to the prompt and start typing (vim-style insert mode) |
 | `enter` | On the task list: activate it (`j`/`k` move, `enter` edits a task or adds one on `+ new task`, `esc` leaves) |
 | `ctrl+r` | Run the tasks that haven't completed yet |
+| `ctrl+g` | Ask for a super review of the whole codebase now (works while tasks run) |
 | `ctrl+o` | Pick the model (default, fable, opus, sonnet, haiku) |
 | `ctrl+l` | Pick the tool access level (off, restricted, full) |
 | `esc` | Stop typing; otherwise cancel the running turn or close a picker |
@@ -154,6 +155,13 @@ review pauses, with a note in the conversation; it resumes with the next commit 
 tasks. A review may suggest at most `review_suggestions` tasks (default 5), and a suggestion that
 an unfinished task already covers is refused. With the defaults, one of your commits can lead to at
 most 15 suggested tasks.
+
+Every `super_review_every` commits (default 10, counting every commit orbit lands), a
+`super-reviewer` (Opus by default) reviews the **whole codebase** at the latest commit, looking for
+duplication, structure that no longer fits and gaps in tests, and may suggest up to
+`super_review_suggestions` tasks (default 10). Those form a batch at round 1 and carry on like any
+other review's. `ctrl+g` asks for one straight away and restarts the count. A super review that
+falls due while review is paused waits until it resumes.
 
 Reviews need the worktree; `--no-review` turns them off.
 

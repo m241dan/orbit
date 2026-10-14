@@ -68,7 +68,9 @@ class Agents:
     ``tree`` is where they work and their work is merged from; without one they work in the
     current directory and nothing is committed. ``roles`` are the roles tasks can name.
     With ``review`` (and a tree), landed work is reviewed; ``review_rounds`` and
-    ``review_suggestions`` bound what reviews suggest.
+    ``review_suggestions`` bound what reviews suggest, and the whole codebase is super
+    reviewed every ``super_review_every`` commits, suggesting up to
+    ``super_review_suggestions`` tasks.
     """
 
     host: AgentHost
@@ -81,6 +83,8 @@ class Agents:
     review: bool = False
     review_rounds: int = 3
     review_suggestions: int = 5
+    super_review_every: int = 10
+    super_review_suggestions: int = 10
 
 
 @dataclass(frozen=True)
