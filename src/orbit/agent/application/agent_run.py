@@ -138,6 +138,7 @@ class AgentRun:
         self._inbox: asyncio.Queue[asyncio.Future[Reply] | Wake] = asyncio.Queue()
         self._checking = asyncio.Lock()  # One verification step at a time.
         self._failure: Failure | None = None
+        self._failed_state: object = None  # The tree when verification last failed.
         self._agent: Agent | None = None
         self._tools: dict[str, Callable[[dict[str, Any]], Awaitable[Reply]]] = {
             "get_task": self._get_task,
@@ -225,11 +226,22 @@ class AgentRun:
                 await self._verify(before, item)
 
     async def _exited(self, before: object) -> None:
-        if self._work.exited():
-            await self._verify(before, None)
-        else:  # The loop only waits while working or before the task was fetched.
+        if not self._work.exited():
             message = f"{self.agent.id} exited without calling get_task."
             await self._publish(ErrorOccurred(agent_id=self.agent.id, message=message))
+        elif await self._unchanged_since_failure():
+            assert self._verifier is not None and self._failure is not None
+            await self._verifier.skip_unchanged(self._task_id)
+            self._work.failed(*self._failure)  # The agent is gone, so this falls back.
+        else:
+            await self._verify(before, None)
+
+    async def _unchanged_since_failure(self) -> bool:
+        """Whether the agent stopped after a failed verification without changing anything."""
+        if self._failed_state is None:
+            return False
+        assert self._verifier is not None  # Only a verification failure records a state.
+        return await self._verifier.fingerprint() == self._failed_state
 
     async def _verify(self, before: object, claim: "asyncio.Future[Reply] | None") -> None:
         """Check the work, then answer ``claim`` (if the agent made one) with the verdict."""
@@ -251,6 +263,8 @@ class AgentRun:
         reply = self._work.failed(*failure)
         self._failure = failure
         if self._work.phase == "working":
+            assert self._verifier is not None  # Only verification fails.
+            self._failed_state = await self._verifier.fingerprint()
             self._board.set_attempt(
                 self._task_id, self._work.attempt, self._work.limits.max_attempts
             )

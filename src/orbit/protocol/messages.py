@@ -232,8 +232,9 @@ class VerificationStarted(_Message):
     step: int
 
 
-SkipReason = Literal["tools_off", "no_changes"]
-"""Why a task wasn't verified: it ran with tools off, or it changed no files."""
+SkipReason = Literal["tools_off", "no_changes", "unchanged"]
+"""Why a task wasn't verified: it ran with tools off, it changed no files, or its agent stopped
+without changing anything since its last failed verification."""
 
 
 class VerificationSkipped(_Message):

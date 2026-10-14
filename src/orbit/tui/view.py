@@ -50,6 +50,7 @@ TOOL_ACCESS_DESCRIPTIONS: dict[ToolAccess, str] = {
 SKIP_REASONS: dict[SkipReason, str] = {
     "tools_off": "tools were off",
     "no_changes": "no files changed",
+    "unchanged": "unchanged since the last failed check",
 }
 
 # The arc spinner beside work in progress, and how fast it turns.

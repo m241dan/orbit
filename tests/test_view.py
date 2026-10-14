@@ -103,3 +103,8 @@ def test_agent_exchanges_become_transcript_entries() -> None:
     assert exchange_entry(refused) == ("orbit → agent-1: No task.", "error")
     note = ProgressNoted(agent_id="agent-1", task_id="1", note="tests written")
     assert exchange_entry(note) == ("agent-1: tests written", "agent")
+
+
+def test_unchanged_skip_reason_reads_naturally() -> None:
+    text, kind = verification_skipped_entry("unchanged")
+    assert "unchanged" in text and kind == "verify"

@@ -31,6 +31,7 @@ from orbit.protocol import (
     TurnFinished,
     TurnStarted,
     VerificationChanged,
+    VerificationSkipped,
 )
 
 URL = "http://orbit.test/mcp"
@@ -95,20 +96,32 @@ class Steps:
 STEP = VerificationStep(name="Unit tests", command=("pytest",))
 
 
+class FakeWorkspace:
+    """Reports ``states`` in turn as the working tree's state."""
+
+    def __init__(self, *states: object) -> None:
+        self.states = list(states)
+
+    async def __call__(self) -> object:
+        return self.states.pop(0)
+
+
+def verified(
+    steps: Steps, workspace: FakeWorkspace | None = None, max_fix_attempts: int = 3
+) -> Verification:
+    return Verification((STEP,), steps, workspace, max_fix_attempts)
+
+
 def session_for(
     *scripts: Script,
-    steps: Steps | None = None,
+    verification: Verification | None = None,
     limits: Limits | None = None,
-    max_fix_attempts: int = 3,
     exit_grace: float = 1.0,
 ) -> tuple[AgentSession, FakeHost, ScriptedLauncher]:
     host = FakeHost()
     launcher = ScriptedLauncher(host, *scripts)
     tokens = iter(f"token-{n}" for n in range(1, 100))
     agents = Agents(host, launcher, lambda: next(tokens), limits or Limits(), exit_grace)
-    verification = (
-        Verification((STEP,), steps, max_fix_attempts=max_fix_attempts) if steps else None
-    )
     session = AgentSession(object(), verification=verification, agents=agents)  # type: ignore[arg-type]
     return session, host, launcher
 
@@ -144,7 +157,7 @@ async def claims_done(call: Call) -> TurnEndReason:
 
 
 async def test_an_agent_gets_its_task_claims_done_and_passes() -> None:
-    session, _, launcher = session_for(claims_done, steps=Steps(True))
+    session, _, launcher = session_for(claims_done, verification=verified(Steps(True)))
     events = await asyncio.wait_for(run(session), 5)
 
     [(agent, url, prompt, settings)] = launcher.launches
@@ -168,7 +181,7 @@ async def test_an_agent_gets_its_task_claims_done_and_passes() -> None:
 
 
 async def test_the_token_stops_working_once_the_agent_is_done() -> None:
-    session, host, _ = session_for(claims_done, steps=Steps(True))
+    session, host, _ = session_for(claims_done, verification=verified(Steps(True)))
     await asyncio.wait_for(run(session), 5)
     reply = await host.call("token-1", "get_task")
     assert reply.is_error and "token" in reply.text
@@ -183,7 +196,7 @@ async def test_failed_checks_go_back_to_the_same_agent_to_fix() -> None:
         assert "passed" in second.text
         return "completed"
 
-    session, _, launcher = session_for(fixes_once, steps=Steps(False, True))
+    session, _, launcher = session_for(fixes_once, verification=verified(Steps(False, True)))
     events = await asyncio.wait_for(run(session), 5)
 
     assert len(launcher.launches) == 1
@@ -208,7 +221,7 @@ async def test_once_its_fixes_run_out_a_fresh_agent_takes_over() -> None:
     session, _, launcher = session_for(
         keeps_claiming,
         claims_done,
-        steps=Steps(False, False, True),
+        verification=verified(Steps(False, False, True)),
         limits=Limits(max_attempts=1),
     )
     events = await asyncio.wait_for(run(session), 5)
@@ -223,9 +236,8 @@ async def test_fallbacks_stop_after_the_chain_runs_out_of_fixes() -> None:
     session, _, launcher = session_for(
         keeps_claiming,
         keeps_claiming,
-        steps=Steps(False, False, False, False),
+        verification=verified(Steps(False, False, False, False), max_fix_attempts=1),
         limits=Limits(max_attempts=1),
-        max_fix_attempts=1,
     )
     events = await asyncio.wait_for(run(session), 5)
 
@@ -240,7 +252,7 @@ async def test_an_agent_that_exits_without_claiming_done_is_verified() -> None:
         return "completed"
 
     steps = Steps(True)
-    session, _, _ = session_for(just_works, steps=steps)
+    session, _, _ = session_for(just_works, verification=verified(steps))
     events = await asyncio.wait_for(run(session), 5)
 
     assert steps.runs == ["Unit tests"]
@@ -252,7 +264,7 @@ async def test_an_agent_that_never_asks_for_its_task_errors() -> None:
         return "completed"
 
     steps = Steps()
-    session, _, _ = session_for(wanders_off, steps=steps)
+    session, _, _ = session_for(wanders_off, verification=verified(steps))
     events = await asyncio.wait_for(run(session), 5)
 
     assert steps.runs == []
@@ -265,7 +277,7 @@ async def test_a_crashing_agent_is_reported_and_its_work_still_verified() -> Non
         await call("get_task")
         raise RuntimeError("claude exited with status 1")
 
-    session, _, _ = session_for(crashes, steps=Steps(True))
+    session, _, _ = session_for(crashes, verification=verified(Steps(True)))
     events = await asyncio.wait_for(run(session), 5)
 
     error = ErrorOccurred(agent_id="agent-1", message="claude exited with status 1")
@@ -281,7 +293,7 @@ async def test_giving_up_ends_the_task() -> None:
         assert "given up" in reply.text
         return "completed"
 
-    session, _, _ = session_for(gives_up, steps=Steps())
+    session, _, _ = session_for(gives_up, verification=verified(Steps()))
     events = await asyncio.wait_for(run(session), 5)
 
     assert (
@@ -303,7 +315,9 @@ async def test_agents_can_run_a_check_themselves() -> None:
         return "completed"
 
     steps = Steps(False, True)
-    session, _, _ = session_for(checks_first, steps=steps, limits=Limits(max_checks=1))
+    session, _, _ = session_for(
+        checks_first, verification=verified(steps), limits=Limits(max_checks=1)
+    )
     events = await asyncio.wait_for(run(session), 5)
     assert steps.runs == ["Unit tests", "Unit tests"]
     assert [t.status for t in board(events)] == ["completed"]
@@ -370,7 +384,7 @@ async def test_a_second_claim_while_verifying_is_refused() -> None:
         assert "passed" in (await first).text
         return "completed"
 
-    session, _, _ = session_for(claims_twice, steps=steps)
+    session, _, _ = session_for(claims_twice, verification=verified(steps))
     events = await asyncio.wait_for(run(session), 5)
     assert [t.status for t in board(events)] == ["completed"]
 
@@ -397,7 +411,7 @@ async def test_cancelling_during_verification_stops_the_agent_and_the_run() -> N
         await call("complete_task", summary="done")
         return "completed"
 
-    session, _, launcher = session_for(waits, claims_done, steps=steps)
+    session, _, launcher = session_for(waits, claims_done, verification=verified(steps))
     for prompt in ("one", "two"):
         await session.send(AddTask(task=TaskSpec(prompt=prompt)))
     await session.send(RunTasks())
@@ -416,7 +430,9 @@ async def test_cancelling_during_verification_stops_the_agent_and_the_run() -> N
 
 
 async def test_the_host_is_started_once_for_all_tasks() -> None:
-    session, host, launcher = session_for(claims_done, claims_done, steps=Steps(True, True))
+    session, host, launcher = session_for(
+        claims_done, claims_done, verification=verified(Steps(True, True))
+    )
     events = await asyncio.wait_for(run(session, TaskSpec(prompt="a"), TaskSpec(prompt="b")), 5)
     assert host.starts == 1
     assert [a.id for a, *_ in launcher.launches] == ["agent-1", "agent-2"]
@@ -455,3 +471,37 @@ async def test_cancelling_a_working_agent_without_verification() -> None:
             break
     assert [t.status for t in board(events)] == ["cancelled"]
     assert AgentExited(agent_id="agent-1", reason="killed") in events
+
+
+async def stops_after_a_fix_request(call: Call) -> TurnEndReason:
+    await call("get_task")
+    assert "1 test failed" in (await call("complete_task", summary="done")).text
+    return "completed"
+
+
+async def test_an_agent_that_stops_without_changing_anything_falls_back_unverified() -> None:
+    steps = Steps(False, True)
+    # Before the task, after it, after the failed check, and when the agent exits.
+    workspace = FakeWorkspace("before", "edited", "edited", "edited", "fix-before", "fixed")
+    session, _, launcher = session_for(
+        stops_after_a_fix_request, claims_done, verification=verified(steps, workspace)
+    )
+    events = await asyncio.wait_for(run(session), 5)
+
+    assert steps.runs == ["Unit tests", "Unit tests"]  # Once for each agent's claim.
+    assert VerificationSkipped(task_id="1", reason="unchanged") in events
+    assert [a.id for a, *_ in launcher.launches] == ["agent-1", "agent-2"]
+    assert [t.status for t in board(events)] == ["completed", "completed"]
+
+
+async def test_an_agent_that_stops_after_changing_files_is_verified_again() -> None:
+    steps = Steps(False, True)
+    workspace = FakeWorkspace("before", "edited", "edited", "edited again", "edited again")
+    session, _, launcher = session_for(
+        stops_after_a_fix_request, verification=verified(steps, workspace)
+    )
+    events = await asyncio.wait_for(run(session), 5)
+
+    assert steps.runs == ["Unit tests", "Unit tests"]
+    assert len(launcher.launches) == 1
+    assert [t.status for t in board(events)] == ["completed"]

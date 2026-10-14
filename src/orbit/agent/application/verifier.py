@@ -76,6 +76,17 @@ class Verifier:
         await self._publish(TasksChanged(tasks=self._board.tasks))
         return await self._verify(task_id)
 
+    async def fingerprint(self) -> object:
+        """The working tree's state now; ``None`` when it can't be told."""
+        workspace = self.verification.workspace
+        return None if workspace is None else await workspace()
+
+    async def skip_unchanged(self, task_id: str) -> None:
+        """Report that task ``task_id`` isn't verified again: nothing changed since it failed."""
+        self._board.skip_steps()
+        await self.publish_steps()
+        await self._publish(VerificationSkipped(task_id=task_id, reason="unchanged"))
+
     async def cancel(self) -> None:
         """The task was cancelled while verifying: mark the step in progress cancelled."""
         self._board.cancel_running_steps()
