@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from orbit.agent.domain.roles import Setup
-from orbit.agent.external.git_tree import GitCoderTree, in_git_work_tree
+from orbit.agent.external.git_tree import GitCoderTree, git_top_level, in_git_work_tree
 
 
 def git(cwd: Path, *args: str) -> str:
@@ -332,6 +332,17 @@ def test_without_git_nothing_is_a_work_tree(monkeypatch: pytest.MonkeyPatch, rep
 
     monkeypatch.setattr(subprocess, "run", missing)
     assert not in_git_work_tree(str(repo))
+    assert git_top_level(str(repo)) is None
+
+
+def test_git_top_level_is_the_work_trees_root(repo: Path, tmp_path: Path) -> None:
+    sub = repo / "sub" / "deeper"
+    sub.mkdir(parents=True)
+    outside = tmp_path / "plain"
+    outside.mkdir()
+    assert git_top_level(str(sub)) == str(repo.resolve())
+    assert git_top_level(str(repo)) == str(repo.resolve())
+    assert git_top_level(str(outside)) is None
 
 
 async def test_head_is_the_trees_latest_commit(repo: Path) -> None:

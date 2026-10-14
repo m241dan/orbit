@@ -346,6 +346,14 @@ async def test_verification_without_steps_notes_that_nothing_is_verified() -> No
     assert session._events.empty()
 
 
+async def test_session_notes_its_workspace_at_startup() -> None:
+    session = AgentSession(RecordingRunner(), workspace="/code/project")
+    stream = session.events()
+    assert isinstance(await anext(stream), SettingsChanged)
+    assert await anext(stream) == Notice(message="Workspace: /code/project")
+    assert session._events.empty()
+
+
 async def test_conversation_turns_are_not_verified() -> None:
     session = AgentSession(ModelLoopRunner(EchoModel()), verification=verified((FAILING_STEP,)))
     await session.send(SubmitPrompt(text="hello"))

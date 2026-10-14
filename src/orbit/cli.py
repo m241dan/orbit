@@ -1,6 +1,8 @@
 """Command-line interface for orbit."""
 
+import os
 import secrets
+from pathlib import Path
 from typing import Annotated
 
 import typer
@@ -16,6 +18,7 @@ from orbit.agent import (
     Limits,
     McpHost,
     Verification,
+    git_top_level,
     in_git_work_tree,
     read_config,
     run_step,
@@ -27,8 +30,33 @@ from orbit.tui import OrbitApp
 app = typer.Typer(help="Orbit command-line tool.", no_args_is_help=True)
 
 
+def _workspace(path: Path) -> Path:
+    """The project directory at ``path``: its git work tree's top level, if it's in one.
+
+    Exits with status 2 if ``path`` doesn't exist or isn't a directory.
+    """
+    resolved = path.expanduser().resolve()
+    if not resolved.exists():
+        typer.echo(f"Workspace {resolved} doesn't exist.", err=True)
+        raise typer.Exit(2)
+    if not resolved.is_dir():
+        typer.echo(f"Workspace {resolved} isn't a directory.", err=True)
+        raise typer.Exit(2)
+    top = git_top_level(str(resolved))
+    return Path(top) if top else resolved
+
+
 @app.command()
 def chat(
+    workspace: Annotated[
+        Path,
+        typer.Option(
+            "-C",
+            "--workspace",
+            help="The project to work on (default: the current directory). Inside a git"
+            " repository, its top level.",
+        ),
+    ] = Path("."),
     model: Annotated[
         str | None,
         typer.Option(help=f"Model alias ({', '.join(MODEL_ALIASES)}) or full model name."),
@@ -72,7 +100,10 @@ def chat(
     steps run when it says it's done, and failures go back to it to fix.
     """
     # The only place the backend and frontend meet, and where the backend's external
-    # adapters are plugged into its ports.
+    # adapters are plugged into its ports. Every adapter works relative to the current
+    # directory, so move into the workspace before anything reads the filesystem.
+    root = _workspace(workspace)
+    os.chdir(root)
     try:
         config = read_config()
     except ConfigError as exc:
@@ -100,6 +131,7 @@ def chat(
         model_choices=MODEL_ALIASES,
         verification=verification,
         agents=agents,
+        workspace=str(root),
     )
     OrbitApp(session).run()
 

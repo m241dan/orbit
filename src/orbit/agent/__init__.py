@@ -20,7 +20,7 @@ from orbit.agent.external.checks import run_step
 from orbit.agent.external.claude_cli import MODEL_ALIASES, ClaudeCliRunner
 from orbit.agent.external.config_file import read_config
 from orbit.agent.external.echo import EchoModel
-from orbit.agent.external.git_tree import GitCoderTree, in_git_work_tree
+from orbit.agent.external.git_tree import GitCoderTree, git_top_level, in_git_work_tree
 from orbit.agent.external.mcp_host import McpHost
 from orbit.agent.external.workspace import workspace_state
 
@@ -47,6 +47,7 @@ __all__ = [
     "Verification",
     "VerificationStep",
     "Workspace",
+    "git_top_level",
     "in_git_work_tree",
     "read_config",
     "run_step",

@@ -84,6 +84,7 @@ class AgentSession:
         model_choices: Sequence[str] = (),
         verification: Verification | None = None,
         agents: Agents | None = None,
+        workspace: str | None = None,
     ) -> None:
         self._runner = runner
         self._settings = settings or Settings()
@@ -101,6 +102,8 @@ class AgentSession:
         self._planning = False
         self._planner = self._planner_chat()
         self._events.put_nowait(self._settings_changed())
+        if workspace is not None:
+            self._events.put_nowait(Notice(message=f"Workspace: {workspace}"))
         self._announce_steps()
         self._turn: asyncio.Task[object] | None = None
 

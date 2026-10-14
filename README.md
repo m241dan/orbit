@@ -2,9 +2,26 @@
 
 Orbit command-line tool.
 
-## Setup
+## Install
 
 Requires [uv](https://docs.astral.sh/uv/) and the [Claude Code CLI](https://docs.claude.com/en/docs/claude-code) (`claude`) on your `PATH`.
+
+Install orbit once, from a clone or straight from git, and use it on any project:
+
+```sh
+uv tool install /path/to/orbit        # or: uv tool install git+<repository-url>
+cd ~/code/project && orbit chat       # work on the project you're in
+orbit chat -C ~/code/other            # or point it at another one
+```
+
+`-C`/`--workspace` names the project (the current directory by default). Inside a git repository,
+orbit works from its top level, so a subdirectory picks the whole repository; the conversation
+notes the workspace at startup. Each project brings its own verification steps, worktree setup,
+roles and limits in its `.orbit/config.toml` (see [Verification steps](#verification-steps) and
+[Roles and `.orbit/config.toml`](#roles-and-orbitconfigtoml)); without one, nothing is verified and
+no setup runs.
+
+To develop orbit itself, work in a clone and run it with `uv run`:
 
 ```sh
 uv sync
@@ -15,11 +32,14 @@ uv run pre-commit install
 
 ```sh
 uv run orbit chat                              # interactive agent session
+uv run orbit chat -C ~/code/other              # work on another project
 uv run orbit chat --model opus --tools full    # pick model and tool access up front
 uv run orbit chat --no-verify                  # don't verify tasks
 uv run orbit chat --no-review                  # don't review landed work
 uv run orbit chat --no-worktree                # tasks edit the current checkout; nothing is committed
 ```
+
+With orbit installed as a tool, drop the `uv run`.
 
 In the app:
 

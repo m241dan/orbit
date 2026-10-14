@@ -1,3 +1,4 @@
+import subprocess
 from pathlib import Path
 from typing import ClassVar
 
@@ -19,7 +20,7 @@ from orbit.agent import (
     workspace_state,
 )
 from orbit.cli import app
-from orbit.protocol import Settings
+from orbit.protocol import Notice, Settings
 
 runner = CliRunner()
 
@@ -57,6 +58,104 @@ def launched(monkeypatch: pytest.MonkeyPatch) -> list[AgentSession]:
     monkeypatch.setattr("orbit.cli.OrbitApp", FakeApp)
     FakeApp.launched = []
     return FakeApp.launched
+
+
+@pytest.fixture(autouse=True)
+def restore_cwd(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Chat changes into its workspace; put the working directory back afterwards."""
+    monkeypatch.chdir(Path.cwd())
+
+
+def notices(session: AgentSession) -> list[str]:
+    events = []
+    while not session._events.empty():
+        events.append(session._events.get_nowait())
+    return [e.message for e in events if isinstance(e, Notice)]
+
+
+def test_chat_works_in_the_current_directory_by_default(
+    launched: list[AgentSession], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    result = runner.invoke(app, ["chat"])
+
+    assert result.exit_code == 0
+    assert Path.cwd() == tmp_path.resolve()
+    [session] = launched
+    assert f"Workspace: {tmp_path.resolve()}" in notices(session)
+
+
+@pytest.mark.parametrize("flag", ["-C", "--workspace"])
+def test_chat_works_in_the_workspace_it_is_given(
+    launched: list[AgentSession], monkeypatch: pytest.MonkeyPatch, tmp_path: Path, flag: str
+) -> None:
+    project = tmp_path / "project"
+    (project / ".orbit").mkdir(parents=True)
+    (project / ".orbit" / "config.toml").write_text("fix_attempts = 3\n")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    result = runner.invoke(app, ["chat", flag, str(project)])
+
+    assert result.exit_code == 0
+    assert Path.cwd() == project.resolve()
+    [session] = launched
+    # The project's own configuration is read, from the workspace.
+    assert session.agents is not None
+    assert session.agents.limits == Limits(max_attempts=3)
+    assert f"Workspace: {project.resolve()}" in notices(session)
+
+
+def test_a_workspace_inside_a_git_repository_is_its_top_level(
+    launched: list[AgentSession], tmp_path: Path
+) -> None:
+    repo = tmp_path / "repo"
+    sub = repo / "src" / "pkg"
+    sub.mkdir(parents=True)
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    result = runner.invoke(app, ["chat", "-C", str(sub)])
+
+    assert result.exit_code == 0
+    assert Path.cwd() == repo.resolve()
+    [session] = launched
+    assert session.agents is not None
+    assert isinstance(session.agents.tree, GitCoderTree)
+    assert f"Workspace: {repo.resolve()}" in notices(session)
+
+
+def test_a_workspace_outside_git_is_used_as_given(
+    launched: list[AgentSession], tmp_path: Path
+) -> None:
+    plain = tmp_path / "plain" / "sub"
+    plain.mkdir(parents=True)
+    result = runner.invoke(app, ["chat", "-C", str(plain)])
+
+    assert result.exit_code == 0
+    assert Path.cwd() == plain.resolve()
+    [session] = launched
+    assert session.agents is not None and session.agents.tree is None
+
+
+def test_a_missing_workspace_stops_chat(launched: list[AgentSession], tmp_path: Path) -> None:
+    before = Path.cwd()
+    result = runner.invoke(app, ["chat", "-C", str(tmp_path / "nowhere")])
+
+    assert result.exit_code == 2
+    assert "doesn't exist" in result.output
+    assert Path.cwd() == before
+    assert launched == []
+
+
+def test_a_workspace_that_is_a_file_stops_chat(
+    launched: list[AgentSession], tmp_path: Path
+) -> None:
+    file = tmp_path / "notes.txt"
+    file.write_text("hi\n")
+    result = runner.invoke(app, ["chat", "--workspace", str(file)])
+
+    assert result.exit_code == 2
+    assert "isn't a directory" in result.output
+    assert launched == []
 
 
 def test_chat_runs_tui_against_claude_cli(launched: list[AgentSession]) -> None:

@@ -37,6 +37,21 @@ def in_git_work_tree(path: str) -> bool:
     return result.stdout.strip() == "true"
 
 
+def git_top_level(path: str) -> str | None:
+    """The top level of the git work tree ``path`` is in; none outside one (or without git)."""
+    try:
+        result = subprocess.run(
+            ("git", "rev-parse", "--show-toplevel"),
+            cwd=path,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except FileNotFoundError:
+        return None
+    return result.stdout.strip() if result.returncode == 0 else None
+
+
 async def _run(command: Sequence[str], cwd: Path) -> tuple[bool, str]:
     """Run ``command`` in ``cwd``; returns whether it succeeded and its combined output."""
     process = await asyncio.create_subprocess_exec(
