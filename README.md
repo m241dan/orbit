@@ -53,8 +53,9 @@ conversation. The agent is told only who it is (`agent-1`, `agent-2`, …) and t
 1. It calls orbit's `get_task` tool and gets the task's prompt.
 2. When it thinks it's done, it calls `complete_task` with a one-line summary. Orbit runs the
    verification steps while that call waits, and replies with the result.
-3. If a step failed, the reply quotes the end of its output and asks the same agent to fix the cause
-   without weakening the check, then call `complete_task` again. The row shows `fix 1/5`, `fix 2/5`, …
+3. If a step failed, the reply quotes the end of its output and asks the same agent to fix the
+   cause without weakening the check, then call `complete_task` again. The row shows `fix 1/5`,
+   `fix 2/5`, …
 4. Once verification passes, the agent is told to stop. It gets a few seconds to exit on its own
    before orbit stops it.
 
@@ -90,11 +91,11 @@ Edge cases:
 
 ### Verification steps
 
-When an agent claims its task is done, orbit runs the verification steps in the working directory, in
-order, stopping at the first failure. While that happens the task shows 🔍, the conversation notes
+When an agent claims its task is done, orbit runs the verification steps in the working directory,
+in order, stopping at the first failure. While that happens the task shows 🔍, the conversation notes
 each step as it starts and ends, and the panel under the task list shows each step's progress on the
-current task (⏳ pending, ◜ running (spinning) with its elapsed time, ✅ passed, ❌ failed,
-🛑 cancelled, ⏩ skipped). There are six, quick ones first so a failure shows up in seconds; each must
+current task (⏳ pending, ◜ running (spinning) with its elapsed time, ✅ passed, ❌ failed, 🛑
+cancelled, ⏩ skipped). There are six, quick ones first so a failure shows up in seconds; each must
 exit successfully:
 
 1. Ruff lint: `uv run ruff check`
