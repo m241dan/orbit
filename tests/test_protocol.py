@@ -185,3 +185,10 @@ def test_turn_events_name_their_agent_when_one_runs_them() -> None:
     )
     for event in events:
         assert event_adapter.validate_json(event.model_dump_json()) == event
+
+
+def test_task_state_carries_its_review_batch_and_round() -> None:
+    state = TaskState(id="1", task=TaskSpec(prompt="x"), origin="review", batch="b", round=2)
+    event = TasksChanged(tasks=(state,))
+    assert event_adapter.validate_json(event.model_dump_json()) == event
+    assert TaskState(id="1", task=TaskSpec(prompt="x")).round == 0

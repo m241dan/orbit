@@ -30,11 +30,24 @@ class TaskBoard:
     def add(self, task: TaskSpec, fixes: str | None = None) -> str:
         """Add a pending ``task`` at the end; returns its id.
 
-        A task that ``fixes`` another goes right after it instead.
+        A task that ``fixes`` another goes right after it instead, and belongs where that
+        one does: the same origin, review batch and round.
         """
         state = TaskState(id=str(next(self._ids)), task=task, fixes=fixes)
-        index = len(self._tasks) if fixes is None else self.position(fixes) + 1
-        self._tasks.insert(index, state)
+        if fixes is None:
+            self._tasks.append(state)
+            return state.id
+        fixed = self.get(fixes)
+        inherited = {"origin": fixed.origin, "batch": fixed.batch, "round": fixed.round}
+        self._tasks.insert(self.position(fixes) + 1, state.model_copy(update=inherited))
+        return state.id
+
+    def add_suggestion(self, task: TaskSpec, batch: str, round: int) -> str:
+        """Add ``task``, suggested by the review behind ``batch``, at the end; returns its id."""
+        state = TaskState(
+            id=str(next(self._ids)), task=task, origin="review", batch=batch, round=round
+        )
+        self._tasks.append(state)
         return state.id
 
     def edit(self, task_id: str, task: TaskSpec) -> None:
@@ -42,7 +55,8 @@ class TaskBoard:
         current = self.get(task_id)
         if current.status in ("running", "verifying"):
             raise ValueError(f"Task {task_id!r} can't be edited while it runs.")
-        self._tasks[self.position(task_id)] = TaskState(id=task_id, task=task, fixes=current.fixes)
+        fresh = {"task": task, "status": "pending", "attempt": 0, "max_attempts": 0}
+        self._tasks[self.position(task_id)] = current.model_copy(update=fresh)
 
     def get(self, task_id: str) -> TaskState:
         return self._tasks[self.position(task_id)]

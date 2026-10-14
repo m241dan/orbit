@@ -119,7 +119,8 @@ class TaskState(_Message):
 
     ``fixes`` is the id of the task this one was added to fix, if any; it comes right
     after that task. ``attempt`` counts the fixes asked of the agent working on it, out
-    of ``max_attempts``; both are 0 until verification first fails.
+    of ``max_attempts``; both are 0 until verification first fails. A task a review
+    suggested belongs to that review's ``batch``, at review ``round`` (0 otherwise).
     """
 
     id: str
@@ -129,6 +130,8 @@ class TaskState(_Message):
     origin: TaskOrigin = "manual"
     attempt: int = Field(default=0, ge=0)
     max_attempts: int = Field(default=0, ge=0)
+    batch: str | None = None
+    round: int = Field(default=0, ge=0)
 
 
 StepStatus = Literal["pending", "running", "passed", "failed", "cancelled", "skipped"]
@@ -271,13 +274,14 @@ has changes in the way. ``detached``: there's no base branch to merge into.
 
 
 class TaskMerged(_Message):
-    """Task ``task_id``'s work was committed, and this came of merging it; ``detail`` says why
-    when it wasn't merged."""
+    """Task ``task_id``'s work was committed as ``commit``, and this came of merging it;
+    ``detail`` says why when it wasn't merged."""
 
     type: Literal["task_merged"] = "task_merged"
     task_id: str
     result: MergeResult
     detail: str = ""
+    commit: str = ""
 
 
 class Notice(_Message):

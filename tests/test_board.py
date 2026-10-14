@@ -147,3 +147,30 @@ def test_tasks_given_up_on_are_not_run_again() -> None:
     task_id = board.add(ONE)
     board.set_status(task_id, "gave_up")
     assert board.next_runnable() is None
+
+
+def test_fixes_inherit_the_origin_batch_and_round_of_what_they_fix() -> None:
+    board = TaskBoard()
+    suggestion = board.add_suggestion(TaskSpec(prompt="tidy"), batch="batch-1", round=2)
+    assert board.get(suggestion).origin == "review"
+    fix = board.add(FIX, fixes=suggestion)
+    state = board.get(fix)
+    assert (state.origin, state.batch, state.round) == ("review", "batch-1", 2)
+
+
+def test_suggestions_join_the_end_of_the_queue() -> None:
+    board = TaskBoard()
+    first = board.add(ONE)
+    suggestion = board.add_suggestion(TaskSpec(prompt="tidy"), batch="batch-1", round=1)
+    assert [t.id for t in board.tasks] == [first, suggestion]
+
+
+def test_editing_a_suggestion_keeps_where_it_came_from() -> None:
+    board = TaskBoard()
+    suggestion = board.add_suggestion(TaskSpec(prompt="tidy"), batch="batch-1", round=1)
+    board.set_status(suggestion, "error")
+    board.set_attempt(suggestion, 2, 5)
+    board.edit(suggestion, TaskSpec(prompt="tidy more"))
+    state = board.get(suggestion)
+    assert (state.origin, state.batch, state.round) == ("review", "batch-1", 1)
+    assert (state.status, state.attempt, state.task.prompt) == ("pending", 0, "tidy more")
