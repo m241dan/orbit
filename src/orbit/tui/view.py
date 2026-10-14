@@ -98,7 +98,17 @@ def settings_summary(settings: Settings) -> str:
 def output_entry(
     event: AssistantMessage | ToolCallStarted | ToolCallFinished,
 ) -> tuple[str, EntryKind]:
-    """A piece of a turn's output as transcript text and the kind of entry to show it as."""
+    """A piece of a turn's output as transcript text and the kind of entry to show it as.
+
+    An agent's output is labelled with the agent, to tell it from the conversation's.
+    """
+    text, kind = _output(event)
+    return (text if event.agent_id is None else f"{event.agent_id}: {text}"), kind
+
+
+def _output(
+    event: AssistantMessage | ToolCallStarted | ToolCallFinished,
+) -> tuple[str, EntryKind]:
     match event:
         case AssistantMessage(text=text):
             return text, "assistant"
@@ -210,7 +220,10 @@ def task_label(state: TaskState, number: str, frame: str) -> Text:
     title = state.task.prompt.split("\n", 1)[0]
     label = Text(f"{head}{icon} {title}\n")
     indent = " " * (len(head) + cell_len(icon) + 1)
-    label.append(f"{indent}{model_label(settings)} · {settings.tool_access}", style="dim")
+    details = f"{indent}{model_label(settings)} · {settings.tool_access}"
+    if state.attempt:
+        details += f" · fix {state.attempt}/{state.max_attempts}"
+    label.append(details, style="dim")
     return label
 
 

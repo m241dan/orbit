@@ -108,3 +108,14 @@ def test_agent_exchanges_become_transcript_entries() -> None:
 def test_unchanged_skip_reason_reads_naturally() -> None:
     text, kind = verification_skipped_entry("unchanged")
     assert "unchanged" in text and kind == "verify"
+
+
+def test_agent_output_is_labelled_with_its_agent() -> None:
+    said = AssistantMessage(turn_id="t", text="on it", agent_id="agent-2")
+    assert output_entry(said) == ("agent-2: on it", "assistant")
+    started = ToolCallStarted(
+        turn_id="t", call_id="c", name="Read", arguments={}, agent_id="agent-2"
+    )
+    assert output_entry(started) == ("agent-2: → Read {}", "tool")
+    failed = ToolCallFinished(turn_id="t", call_id="c", output="no", is_error=True, agent_id="a")
+    assert output_entry(failed) == ("a: no", "error")

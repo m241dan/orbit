@@ -385,3 +385,10 @@ async def test_clicking_a_row_of_the_active_list_opens_it() -> None:
         await open_task_list(pilot)
         await pilot.click("#task-list", offset=(3, 1))
         assert editor(app).title_text == "New task"
+
+
+def test_tasks_being_fixed_show_which_fix_they_are_on() -> None:
+    state = TaskState(
+        id="1", task=TaskSpec(prompt="go"), status="running", attempt=2, max_attempts=5
+    )
+    assert str(task_label(state, "1", "◠ ")) == "1. ◠  go\n      default · restricted · fix 2/5"
