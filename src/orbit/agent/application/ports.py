@@ -4,7 +4,7 @@
 
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 from orbit.agent.domain.agents import Agent
 from orbit.agent.domain.conversation import Message, ModelResponse, ToolSpec
@@ -85,4 +85,42 @@ class AgentLauncher(Protocol):
         Raising signals a crash. Cancellation arrives as ``asyncio.CancelledError``; the
         launcher must stop the process and re-raise.
         """
+        ...
+
+
+MergeResult = Literal["merged", "rebased", "conflict", "blocked", "detached"]
+"""What came of merging the coder's commits into the base branch.
+
+``merged``: the base now has them (or already did). ``rebased``: the base had moved, so they
+were replayed on top of it and must be verified again before merging. ``conflict``: they
+couldn't be replayed. ``blocked``: the base's checkout has changes in the way. ``detached``:
+there's no base branch to merge into.
+"""
+
+
+@dataclass(frozen=True)
+class Merge:
+    result: MergeResult
+    detail: str = ""
+
+
+class CoderTree(Protocol):
+    """The working tree the coding agent works in, apart from the user's checkout, and the
+    branch its commits are merged into from there."""
+
+    async def prepare(self, keep: bool) -> str:
+        """Get the tree ready for a task and return its path. It catches up with the base
+        branch; unless ``keep``, changes left in it are put aside (never deleted) first."""
+        ...
+
+    async def commit(self, message: str) -> bool:
+        """Commit everything in the tree; returns whether there was anything to commit."""
+        ...
+
+    async def integrate(self) -> Merge:
+        """Merge the tree's commits into the base branch, fast-forward only."""
+        ...
+
+    async def leftovers(self) -> list[str]:
+        """Notes on work left behind by earlier runs: unmerged commits, put-aside changes."""
         ...
