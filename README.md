@@ -94,8 +94,8 @@ Edge cases:
 When an agent claims its task is done, orbit runs the verification steps in the working directory,
 in order, stopping at the first failure. While that happens the task shows 🔍, the conversation notes
 each step as it starts and ends, and the panel under the task list shows each step's progress on the
-current task (⏳ pending, ◜ running (spinning) with its elapsed time, ✅ passed, ❌ failed, 🛑
-cancelled, ⏩ skipped). There are six, quick ones first so a failure shows up in seconds; each must
+current task (⏳ pending, ◜ running (spinning) with its elapsed time, ✅ passed, ❌ failed,
+🛑 cancelled, ⏩ skipped). There are six, quick ones first so a failure shows up in seconds; each must
 exit successfully:
 
 1. Ruff lint: `uv run ruff check`
