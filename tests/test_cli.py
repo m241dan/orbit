@@ -116,22 +116,6 @@ def test_chat_runs_tasks_through_agents_connected_over_mcp(launched: list[AgentS
     assert first != second and len(first) >= 32
 
 
-def test_chat_sets_the_fixes_an_agent_gets(launched: list[AgentSession]) -> None:
-    result = runner.invoke(app, ["chat", "--fix-attempts", "2"])
-
-    assert result.exit_code == 0
-    [session] = launched
-    assert session.agents is not None
-    assert session.agents.limits == Limits(max_attempts=2)
-
-
-def test_chat_rejects_fewer_than_one_fix_attempt(launched: list[AgentSession]) -> None:
-    result = runner.invoke(app, ["chat", "--fix-attempts", "0"])
-
-    assert result.exit_code == 2
-    assert launched == []
-
-
 def test_chat_works_in_the_coder_tree_inside_a_git_repository(
     launched: list[AgentSession], monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -176,18 +160,6 @@ def test_chat_reads_roles_and_limits_from_the_project_file(
     assert session.agents.roles["coder"].model == "sonnet"
 
 
-def test_the_command_line_overrides_the_files_fix_attempts(
-    launched: list[AgentSession], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    (tmp_path / ".orbit").mkdir()
-    (tmp_path / ".orbit" / "roles.toml").write_text("fix_attempts = 2\n")
-    monkeypatch.chdir(tmp_path)
-    runner.invoke(app, ["chat", "--fix-attempts", "4"])
-    [session] = launched
-    assert session.agents is not None
-    assert session.agents.limits == Limits(max_attempts=4)
-
-
 def test_an_invalid_project_file_stops_chat_with_its_problems(
     launched: list[AgentSession], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -198,3 +170,23 @@ def test_an_invalid_project_file_stops_chat_with_its_problems(
     assert result.exit_code == 2
     assert "roles.coder.tool_access" in result.output
     assert launched == []
+
+
+def test_chat_reviews_landed_work_with_the_files_limits(
+    launched: list[AgentSession], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    (tmp_path / ".orbit").mkdir()
+    (tmp_path / ".orbit" / "roles.toml").write_text("review_rounds = 2\nreview_suggestions = 4\n")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("orbit.cli.in_git_work_tree", lambda path: True)
+    runner.invoke(app, ["chat"])
+    [session] = launched
+    agents = session.agents
+    assert agents is not None
+    assert (agents.review, agents.review_rounds, agents.review_suggestions) == (True, 2, 4)
+
+
+def test_chat_can_turn_review_off(launched: list[AgentSession]) -> None:
+    runner.invoke(app, ["chat", "--no-review"])
+    [session] = launched
+    assert session.agents is not None and not session.agents.review

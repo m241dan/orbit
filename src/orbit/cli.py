@@ -48,20 +48,18 @@ def chat(
             " tests (100% coverage); a failure queues a task to fix it."
         ),
     ] = True,
-    fix_attempts: Annotated[
-        int | None,
-        typer.Option(
-            min=1,
-            help="Fixes asked of the agent working on a task, in the same session, before a"
-            " fresh agent takes over. [default: fix_attempts in .orbit/roles.toml, or 5]",
-            show_default=False,
-        ),
-    ] = None,
     worktree: Annotated[
         bool,
         typer.Option(
             help="Run tasks in a separate git worktree and merge their verified commits into"
             " the current branch (only inside a git repository).",
+        ),
+    ] = True,
+    review: Annotated[
+        bool,
+        typer.Option(
+            help="Review each landed commit in the background and queue the reviewer's"
+            " suggestions as tasks (needs the worktree).",
         ),
     ] = True,
 ) -> None:
@@ -87,9 +85,12 @@ def chat(
         McpHost(),
         ClaudeCliRunner(),
         secrets.token_urlsafe,
-        Limits(max_attempts=fix_attempts or config.fix_attempts),
+        Limits(max_attempts=config.fix_attempts),
         tree=tree,
         roles=config.roles,
+        review=review,
+        review_rounds=config.review_rounds,
+        review_suggestions=config.review_suggestions,
     )
     session = AgentSession(
         ClaudeCliRunner(),

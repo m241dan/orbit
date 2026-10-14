@@ -17,7 +17,7 @@ uv run pre-commit install
 uv run orbit chat                              # interactive agent session
 uv run orbit chat --model opus --tools full    # pick model and tool access up front
 uv run orbit chat --no-verify                  # don't verify tasks
-uv run orbit chat --fix-attempts 3             # fixes an agent gets before a fresh one takes over
+uv run orbit chat --no-review                  # don't review landed work
 uv run orbit chat --no-worktree                # tasks edit the current checkout; nothing is committed
 ```
 
@@ -95,11 +95,12 @@ exit successfully:
 6. Unit tests, 100% coverage: `uv run pytest --cov --cov-fail-under=100`
 
 Failures go back to the same agent, which keeps the context of what it just did. After
-`--fix-attempts` fixes (default 5), or if the agent has exited, the task **falls back**: it is marked
-❗ and a fix task is inserted right after it, indented and numbered under it (`1.1`, `1.2`, …), with
-the same model and tool access, for a fresh agent. A task's chain of fallbacks gets up to 3 per step;
-once a step has used its 3, orbit reports the failure and moves on to the next task. Once a fix
-passes, the task it fixed turns ✅, along with any earlier fixes in the chain.
+`fix_attempts` fixes (default 5, set in `.orbit/roles.toml`), or if the agent has exited, the task
+**falls back**: it is marked ❗ and a fix task is inserted right after it, indented and numbered under
+it (`1.1`, `1.2`, …), with the same model and tool access, for a fresh agent. A task's chain of
+fallbacks gets up to 3 per step; once a step has used its 3, orbit reports the failure and moves on
+to the next task. Once a fix passes, the task it fixed turns ✅, along with any earlier fixes in the
+chain.
 
 Verification is skipped for tasks run with tools `off`, for tasks that changed no files, and for an
 agent that stopped without changing anything since its last failed check (that one falls back
@@ -137,6 +138,24 @@ directory and nothing is committed.
 
 With `full` tool access an agent can still run commands outside its worktree; the worktree keeps
 your checkout out of its way, it doesn't sandbox it.
+
+### Reviews
+
+Every commit from one of your tasks is reviewed in the background while the next task runs. Orbit
+queues a `reviewer` task (it shows in the task list) carrying the commit's diff, and runs it in a
+read-only snapshot of that commit. The reviewer suggests follow-ups with `suggest_task`: each becomes
+a task at the end of the queue (with the `coder` role's default settings), and once the review ends
+orbit runs them, unless you pressed `esc` since your last `ctrl+r`.
+
+Suggestions from one review form a **batch**. When every task in a batch has finished, the batch's
+commits are reviewed together, which may suggest more. To keep this from going on forever, each
+batch is a round further from your own work, and once the batches reach `review_rounds` (default 3)
+review pauses, with a note in the conversation; it resumes with the next commit from one of your
+tasks. A review may suggest at most `review_suggestions` tasks (default 5), and a suggestion that
+an unfinished task already covers is refused. With the defaults, one of your commits can lead to at
+most 15 suggested tasks.
+
+Reviews need the worktree; `--no-review` turns them off.
 
 ### Roles and `.orbit/roles.toml`
 
@@ -177,8 +196,7 @@ verify = false
 ```
 
 `orbit chat` reads it at startup and refuses to start if it's invalid, naming each problem (for
-example `roles.coder.tool_access: Input should be 'off', 'restricted' or 'full'`). `--fix-attempts`
-on the command line overrides `fix_attempts`.
+example `roles.coder.tool_access: Input should be 'off', 'restricted' or 'full'`).
 
 ### How agents reach orbit
 
