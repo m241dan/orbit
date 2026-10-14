@@ -12,11 +12,18 @@ from rich.cells import cell_len
 from rich.text import Text
 
 from orbit.protocol import (
+    AgentExited,
+    AgentExitReason,
+    AgentReply,
+    AgentRequest,
+    AgentStarted,
     AssistantMessage,
+    ProgressNoted,
     Settings,
     SkipReason,
     StepState,
     StepStatus,
+    TaskGaveUp,
     TaskState,
     TaskStatus,
     ToolAccess,
@@ -25,7 +32,7 @@ from orbit.protocol import (
     TurnEndReason,
 )
 
-EntryKind = Literal["user", "assistant", "tool", "verify", "error"]
+EntryKind = Literal["user", "assistant", "tool", "verify", "agent", "error"]
 """How a transcript entry is styled."""
 
 TOOL_ACCESS_OPTIONS: tuple[ToolAccess, ...] = get_args(ToolAccess)
@@ -59,6 +66,7 @@ STATUS_ICONS: dict[TaskStatus, str] = {
     "cancelled": "🛑",
     "max_steps": "⌛",
     "error": "❌",
+    "gave_up": "🏳",
 }
 STEP_ICONS: dict[StepStatus, str] = {
     "pending": "⏳",
@@ -99,6 +107,40 @@ def output_entry(
             return output, "error"
         case ToolCallFinished(output=output):
             return output, "tool"
+        case _:
+            assert_never(event)
+
+
+EXIT_ENTRIES: dict[AgentExitReason, tuple[str, EntryKind]] = {
+    "finished": ("exited", "agent"),
+    "killed": ("stopped", "agent"),
+    "crashed": ("crashed", "error"),
+}
+
+
+def agent_entry(event: AgentStarted | TaskGaveUp | AgentExited) -> tuple[str, EntryKind]:
+    """An agent starting, giving up or ending, as a transcript entry."""
+    match event:
+        case AgentStarted(agent_id=agent, role=role):
+            return f"▶ {agent} ({role}) started", "agent"
+        case TaskGaveUp(agent_id=agent, reason=reason):
+            return f"🏳 {agent} gave up: {reason}", "error"
+        case AgentExited(agent_id=agent, reason=reason):
+            text, kind = EXIT_ENTRIES[reason]
+            return f"■ {agent} {text}", kind
+        case _:
+            assert_never(event)
+
+
+def exchange_entry(event: AgentRequest | AgentReply | ProgressNoted) -> tuple[str, EntryKind]:
+    """A message between an agent and orbit, as a transcript entry."""
+    match event:
+        case AgentRequest(agent_id=agent, tool=tool, arguments=arguments):
+            return f"{agent} → orbit: {tool} {json.dumps(arguments)}", "agent"
+        case AgentReply(agent_id=agent, text=text, is_error=is_error):
+            return f"orbit → {agent}: {text}", "error" if is_error else "agent"
+        case ProgressNoted(agent_id=agent, note=note):
+            return f"{agent}: {note}", "agent"
         case _:
             assert_never(event)
 

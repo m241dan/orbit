@@ -3,18 +3,29 @@ from pydantic import ValidationError
 
 from orbit.protocol import (
     AddTask,
+    AgentExited,
+    AgentReply,
+    AgentRequest,
+    AgentStarted,
+    AssistantMessage,
     BusyChanged,
     EditTask,
+    ErrorOccurred,
+    ProgressNoted,
     RunTasks,
     Settings,
     SettingsChanged,
     StepState,
     SubmitPrompt,
+    TaskGaveUp,
     TasksChanged,
     TaskSpec,
     TaskStarted,
     TaskState,
+    ToolCallFinished,
     ToolCallStarted,
+    TurnFinished,
+    TurnStarted,
     UpdateSettings,
     VerificationChanged,
     VerificationFinished,
@@ -106,3 +117,71 @@ def test_state_and_log_events_round_trip() -> None:
 def test_rejects_unknown_task_status() -> None:
     with pytest.raises(ValidationError):
         TaskState.model_validate({"id": "1", "task": {"prompt": "x"}, "status": "sleeping"})
+
+
+def test_task_spec_defaults_to_coder_role() -> None:
+    assert TaskSpec(prompt="x").role == "coder"
+    task = TaskSpec(prompt="review it", role="reviewer")
+    assert command_adapter.validate_json(AddTask(task=task).model_dump_json()) == AddTask(task=task)
+
+
+def test_rejects_empty_role() -> None:
+    with pytest.raises(ValidationError):
+        TaskSpec(prompt="x", role="")
+
+
+def test_task_state_defaults_to_manual_origin_and_no_attempts() -> None:
+    state = TaskState(id="1", task=TaskSpec(prompt="x"))
+    assert (state.origin, state.attempt, state.max_attempts) == ("manual", 0, 0)
+
+
+def test_rejects_unknown_task_origin() -> None:
+    with pytest.raises(ValidationError):
+        TaskState.model_validate({"id": "1", "task": {"prompt": "x"}, "origin": "magic"})
+
+
+def test_task_state_with_origin_attempts_and_gave_up_round_trips() -> None:
+    state = TaskState(
+        id="4",
+        task=TaskSpec(prompt="tidy"),
+        status="gave_up",
+        origin="review",
+        attempt=2,
+        max_attempts=5,
+    )
+    event = TasksChanged(tasks=(state,))
+    assert event_adapter.validate_json(event.model_dump_json()) == event
+
+
+def test_agent_events_round_trip() -> None:
+    events = (
+        AgentStarted(agent_id="agent-1", role="coder", task_id="1"),
+        AgentRequest(
+            agent_id="agent-1", request_id="r1", tool="complete_task", arguments={"summary": "done"}
+        ),
+        AgentReply(agent_id="agent-1", request_id="r1", text="Checks failed", is_error=True),
+        ProgressNoted(agent_id="agent-1", task_id="1", note="tests written"),
+        TaskGaveUp(agent_id="agent-1", task_id="1", reason="needs a decision"),
+        AgentExited(agent_id="agent-1", reason="crashed"),
+    )
+    for event in events:
+        assert event_adapter.validate_json(event.model_dump_json()) == event
+
+
+def test_rejects_unknown_agent_exit_reason() -> None:
+    with pytest.raises(ValidationError):
+        AgentExited.model_validate({"agent_id": "a", "reason": "vanished"})
+
+
+def test_turn_events_name_their_agent_when_one_runs_them() -> None:
+    assert TurnStarted(turn_id="t").agent_id is None
+    events = (
+        TurnStarted(turn_id="t", agent_id="agent-1"),
+        AssistantMessage(turn_id="t", text="hi", agent_id="agent-1"),
+        ToolCallStarted(turn_id="t", call_id="c", name="Read", arguments={}, agent_id="agent-1"),
+        ToolCallFinished(turn_id="t", call_id="c", output="", agent_id="agent-1"),
+        TurnFinished(turn_id="t", reason="completed", agent_id="agent-1"),
+        ErrorOccurred(turn_id="t", message="boom", agent_id="agent-1"),
+    )
+    for event in events:
+        assert event_adapter.validate_json(event.model_dump_json()) == event

@@ -24,6 +24,7 @@ class Entry(Static):
     Entry.user { color: $text-accent; text-style: bold; }
     Entry.tool { color: $text-muted; }
     Entry.verify { color: $text-warning; }
+    Entry.agent { color: $text-accent; }
     Entry.error { color: $text-error; }
     """
 

@@ -1,13 +1,26 @@
+from typing import get_args
+
 from orbit.protocol import (
+    AgentExited,
+    AgentExitReason,
+    AgentReply,
+    AgentRequest,
+    AgentStarted,
     AssistantMessage,
+    ProgressNoted,
     Settings,
     StepState,
+    TaskGaveUp,
     TaskSpec,
     TaskState,
+    TaskStatus,
     ToolCallFinished,
     ToolCallStarted,
 )
 from orbit.tui.view import (
+    STATUS_ICONS,
+    agent_entry,
+    exchange_entry,
     output_entry,
     settings_summary,
     step_lines,
@@ -57,3 +70,36 @@ def test_settings_summary_names_the_model_and_tool_access() -> None:
 def test_step_lines_time_only_the_running_step() -> None:
     steps = (StepState(name="Lint", status="passed"), StepState(name="Tests", status="running"))
     assert step_lines(steps, "◜ ", 12) == ["✅ Lint", "◜  Tests · 12s"]
+
+
+def test_every_task_status_has_an_icon_except_running_which_spins() -> None:
+    statuses = {status for part in get_args(TaskStatus) for status in get_args(part)}
+    assert statuses - set(STATUS_ICONS) == {"running"}
+    assert STATUS_ICONS["gave_up"] == "🏳"
+
+
+def test_agent_lifecycle_becomes_transcript_entries() -> None:
+    started = AgentStarted(agent_id="agent-1", role="coder", task_id="1")
+    assert agent_entry(started) == ("▶ agent-1 (coder) started", "agent")
+    gave_up = TaskGaveUp(agent_id="agent-1", task_id="1", reason="unclear spec")
+    assert agent_entry(gave_up) == ("🏳 agent-1 gave up: unclear spec", "error")
+    exits: dict[AgentExitReason, tuple[str, str]] = {
+        "finished": ("■ agent-1 exited", "agent"),
+        "killed": ("■ agent-1 stopped", "agent"),
+        "crashed": ("■ agent-1 crashed", "error"),
+    }
+    for reason, entry in exits.items():
+        assert agent_entry(AgentExited(agent_id="agent-1", reason=reason)) == entry
+
+
+def test_agent_exchanges_become_transcript_entries() -> None:
+    request = AgentRequest(
+        agent_id="agent-1", request_id="r", tool="complete_task", arguments={"summary": "ok"}
+    )
+    assert exchange_entry(request) == ('agent-1 → orbit: complete_task {"summary": "ok"}', "agent")
+    reply = AgentReply(agent_id="agent-1", request_id="r", text="Checks passed.")
+    assert exchange_entry(reply) == ("orbit → agent-1: Checks passed.", "agent")
+    refused = AgentReply(agent_id="agent-1", request_id="r", text="No task.", is_error=True)
+    assert exchange_entry(refused) == ("orbit → agent-1: No task.", "error")
+    note = ProgressNoted(agent_id="agent-1", task_id="1", note="tests written")
+    assert exchange_entry(note) == ("agent-1: tests written", "agent")

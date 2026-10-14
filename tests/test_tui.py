@@ -6,6 +6,8 @@ from textual.pilot import Pilot
 from textual.widgets import Footer, Input, OptionList
 
 from orbit.protocol import (
+    AgentReply,
+    AgentStarted,
     AssistantMessage,
     BusyChanged,
     CancelTurn,
@@ -121,6 +123,21 @@ async def test_renders_tool_calls_errors_and_cancellation() -> None:
             ("KeyError", frozenset({"error"})),
             ("boom", frozenset({"error"})),
             ("[turn ended: cancelled]", frozenset({"tool"})),
+        ]
+
+
+async def test_renders_agent_activity() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await session.queue.put(AgentStarted(agent_id="agent-1", role="coder", task_id="1"))
+        await session.queue.put(AgentReply(agent_id="agent-1", request_id="r", text="Do X."))
+        await pilot.pause()
+
+        rendered = [(str(e.render()), e.classes) for e in app.query(Entry)]
+        assert rendered == [
+            ("▶ agent-1 (coder) started", frozenset({"agent"})),
+            ("orbit → agent-1: Do X.", frozenset({"agent"})),
         ]
 
 
