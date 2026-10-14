@@ -6,12 +6,13 @@ ports to do it, and reports what happened as events.
 
 import asyncio
 import uuid
-from collections.abc import AsyncIterator, Collection, Coroutine, Sequence
+from collections.abc import AsyncIterator, Callable, Collection, Coroutine, Sequence
 from contextlib import suppress
 from typing import Any, assert_never
 
 from orbit.agent.application.agent_run import AgentDesk, AgentRun, Agents, Outcome
 from orbit.agent.application.landing import Lander
+from orbit.agent.application.planner import PlannerChat
 from orbit.agent.application.ports import TurnRunner
 from orbit.agent.application.review_lane import REVIEW_ROLES, ReviewLane
 from orbit.agent.application.verifier import Verification, Verifier
@@ -19,6 +20,7 @@ from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.reviews import ReviewPlanner
 from orbit.agent.domain.verification import FixAttempts, VerificationStep, fix_prompt
 from orbit.protocol import (
+    AcceptTask,
     AddTask,
     BusyChanged,
     CancelTurn,
@@ -27,8 +29,11 @@ from orbit.protocol import (
     ErrorOccurred,
     Event,
     Notice,
+    PlanningChanged,
+    RemoveTask,
     RequestSuperReview,
     RunTasks,
+    SetPlanning,
     Settings,
     SettingsChanged,
     SubmitPrompt,
@@ -89,6 +94,8 @@ class AgentSession:
         self._landed: dict[str, str] = {}  # Task id -> the commit it landed, until reported.
         self._starts: dict[str, str] = {}  # Task id -> the tree's head when it started.
         self._held = False  # The user cancelled: don't start work by itself.
+        self._planning = False
+        self._planner = self._planner_chat()
         self._events.put_nowait(self._settings_changed())
         if self._verifier:
             self._events.put_nowait(VerificationChanged(steps=self._board.steps))
@@ -121,21 +128,25 @@ class AgentSession:
 
     async def send(self, command: Command) -> None:
         match command:
-            case SubmitPrompt() | CancelTurn() | UpdateSettings():
+            case SubmitPrompt() | CancelTurn() | UpdateSettings() | SetPlanning():
                 await self._handle_conversation(command)
-            case AddTask() | EditTask() | RunTasks():
+            case AddTask() | RunTasks():
                 await self._handle_tasks(command)
+            case EditTask() | AcceptTask() | RemoveTask():
+                await self._handle_board(command)
             case RequestSuperReview():
                 await self._super_review()
             case _:
                 assert_never(command)
 
     async def _handle_conversation(
-        self, command: SubmitPrompt | CancelTurn | UpdateSettings
+        self, command: SubmitPrompt | CancelTurn | UpdateSettings | SetPlanning
     ) -> None:
         match command:
             case SubmitPrompt(text=text):
-                await self._start(self._run_turn(self._runner, text, self._settings))
+                await self._submit(text)
+            case SetPlanning(on=on):
+                await self._set_planning(on)
             case CancelTurn():
                 self._held = True
                 self._cancel()
@@ -145,15 +156,29 @@ class AgentSession:
             case _:
                 assert_never(command)
 
-    async def _handle_tasks(self, command: AddTask | EditTask | RunTasks) -> None:
+    async def _submit(self, text: str) -> None:
+        """Start a turn of the conversation, or of the planner's while planning."""
+        runner = self._planner if self._planning and self._planner else self._runner
+        await self._start(self._run_turn(runner, text, self._settings))
+
+    async def _handle_tasks(self, command: AddTask | RunTasks) -> None:
         match command:
             case AddTask(task=task):
                 self._board.add(task)
                 await self._publish_tasks()
-            case EditTask(task_id=task_id, task=task):
-                await self._edit_task(task_id, task)
             case RunTasks():
                 await self._run_tasks_if_possible()
+            case _:
+                assert_never(command)
+
+    async def _handle_board(self, command: EditTask | AcceptTask | RemoveTask) -> None:
+        match command:
+            case EditTask(task_id=task_id, task=task):
+                await self._change(self._board.edit, task_id, task)
+            case AcceptTask(task_id=task_id):
+                await self._change(self._board.accept, task_id)
+            case RemoveTask(task_id=task_id):
+                await self._change(self._board.remove, task_id)
             case _:
                 assert_never(command)
 
@@ -204,13 +229,27 @@ class AgentSession:
         if self._turn is not None and not self._turn.done():
             self._turn.cancel()
 
-    async def _edit_task(self, task_id: str, task: TaskSpec) -> None:
+    async def _change(self, change: Callable[..., None], *arguments: Any) -> None:
+        """Change the board, publishing it, or report why the change was refused."""
         try:
-            self._board.edit(task_id, task)
+            change(*arguments)
         except ValueError as exc:
             await self._events.put(ErrorOccurred(message=str(exc)))
         else:
             await self._publish_tasks()
+
+    async def _set_planning(self, on: bool) -> None:
+        if on and self._planner is None:
+            message = "Planning needs agents and a planner role."
+            await self._events.put(ErrorOccurred(message=message))
+            return
+        self._planning = on
+        await self._events.put(PlanningChanged(on=on))
+
+    def _planner_chat(self) -> PlannerChat | None:
+        if self._desk is None or "planner" not in self._desk.agents.roles:
+            return None
+        return PlannerChat(self._desk, self._board)
 
     async def close(self) -> None:
         """Cancel the work in progress, which stops its agent, and stop the agents' host."""
@@ -220,6 +259,8 @@ class AgentSession:
                 await self._turn
         if self._lane is not None:
             await self._lane.close()
+        if self._planner is not None:
+            self._planner.close()
         if self._desk is not None:
             await self._desk.stop()
 

@@ -27,7 +27,8 @@ In the app:
 |---|---|
 | `h` `j` `k` `l` | Move between windows (the selected one is highlighted) |
 | `i` | Jump to the prompt and start typing (vim-style insert mode) |
-| `enter` | On the task list: activate it (`j`/`k` move, `enter` edits a task or adds one on `+ new task`, `esc` leaves) |
+| `enter` | On the task list: activate it (`j`/`k` move, `enter` edits a task or adds one on `+ new task`, `a` accepts a draft, `x` removes a task, `esc` leaves) |
+| `ctrl+t` | Switch the prompt between the conversation and the planner |
 | `ctrl+r` | Run the tasks that haven't completed yet |
 | `ctrl+g` | Ask for a super review of the whole codebase now (works while tasks run) |
 | `ctrl+o` | Pick the model (default, fable, opus, sonnet, haiku) |
@@ -61,7 +62,8 @@ doing with `report_progress`, or call `give_up` with a reason when the task can'
 The conversation shows everything in one timeline: the agent's own messages and tool calls, prefixed
 with its id, and its exchanges with orbit (`agent-1 → orbit: complete_task …`, `orbit → agent-1: …`)
 in their own colour. Each row shows its status: ⏳ pending, ◜ running (spinning), 🔍 verifying, ✅ done,
-❗ failed verification, ❌ failed, ⌛ ran out of steps, 🏳 the agent gave up, 🛑 cancelled. A failed task
+❗ failed verification, ❌ failed, ⌛ ran out of steps, 🏳 the agent gave up, 🛑 cancelled,
+📝 a draft the planner proposed. A failed task
 doesn't stop the rest; `esc` cancels the running task (stopping its agent) and skips the remaining
 ones. Running again skips tasks that completed, failed verification or were given up on, and editing
 a task makes it pending again. Tasks added while a run is going join it; the running task can't be
@@ -139,6 +141,19 @@ directory and nothing is committed.
 
 With `full` tool access an agent can still run commands outside its worktree; the worktree keeps
 your checkout out of its way, it doesn't sandbox it.
+
+### Planning with the planner
+
+`ctrl+t` switches the prompt to the **planner** (its title reads `Prompt · planner`), and back. Tell it
+what you want to build; it asks what's unclear and breaks the goal into small tasks, proposing each
+with `propose_task`. Proposals appear in the task list as 📝 drafts, with the `coder` role's default
+settings, and never run on their own: on the task list, `a` accepts the highlighted draft (or edit
+it with `enter` and save, which accepts it too), and `x` removes it. Accepted tasks run with the
+rest when you press `ctrl+r`.
+
+The planner is one agent for the whole session: each prompt resumes its conversation, so it
+remembers what you discussed. It reads your checkout but can't edit it, uses the model you picked
+with `ctrl+o`, and its conversation is separate from the plain one.
 
 ### Reviews
 

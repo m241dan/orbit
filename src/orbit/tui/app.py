@@ -9,6 +9,7 @@ from textual.containers import Horizontal, Vertical
 from textual.widgets import Footer, Input, OptionList
 
 from orbit.protocol import (
+    AcceptTask,
     AddTask,
     AgentExited,
     AgentReply,
@@ -21,10 +22,13 @@ from orbit.protocol import (
     ErrorOccurred,
     Event,
     Notice,
+    PlanningChanged,
     ProgressNoted,
+    RemoveTask,
     RequestSuperReview,
     RunTasks,
     Session,
+    SetPlanning,
     Settings,
     SettingsChanged,
     StepState,
@@ -91,6 +95,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         Binding("i", "insert_mode", "Type"),
         Binding("ctrl+r", "run_tasks", "Run tasks"),
         Binding("ctrl+g", "super_review", "Super review"),
+        Binding("ctrl+t", "toggle_planning", "Plan"),
         Binding("escape", "cancel_turn", "Cancel turn"),
         Binding("ctrl+o", "pick_model", "Model"),
         Binding("ctrl+l", "pick_tool_access", "Tools"),
@@ -103,6 +108,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         self._selected = "prompt"
         # Whether a turn or task run is in progress, as last reported (or just requested).
         self._busy = False
+        self._planning = False
         # Last settings reported by the backend; None until the first report.
         self._settings: Settings | None = None
         self._model_choices: tuple[str, ...] = ()
@@ -192,6 +198,17 @@ class OrbitApp(App[None], inherit_bindings=False):
         self.query_one(f"#{window_id}").add_class("selected")
         self._selected = window_id
 
+    async def action_toggle_planning(self) -> None:
+        await self._session.send(SetPlanning(on=not self._planning))
+
+    @on(TaskList.Accept)
+    async def _accept_task(self, message: TaskList.Accept) -> None:
+        await self._session.send(AcceptTask(task_id=message.task_id))
+
+    @on(TaskList.Remove)
+    async def _remove_task(self, message: TaskList.Remove) -> None:
+        await self._session.send(RemoveTask(task_id=message.task_id))
+
     async def action_super_review(self) -> None:
         # Reviews have their own lane, so this works while tasks run.
         await self._session.send(RequestSuperReview())
@@ -237,7 +254,13 @@ class OrbitApp(App[None], inherit_bindings=False):
 
     def _render_event(self, event: Event) -> None:
         match event:
-            case SettingsChanged() | BusyChanged() | TasksChanged() | VerificationChanged():
+            case (
+                SettingsChanged()
+                | BusyChanged()
+                | TasksChanged()
+                | VerificationChanged()
+                | PlanningChanged()
+            ):
                 self._render_state(event)
             case (
                 TurnStarted()
@@ -270,12 +293,13 @@ class OrbitApp(App[None], inherit_bindings=False):
                 assert_never(event)
 
     def _render_state(
-        self, event: SettingsChanged | BusyChanged | TasksChanged | VerificationChanged
+        self,
+        event: SettingsChanged | BusyChanged | TasksChanged | VerificationChanged | PlanningChanged,
     ) -> None:
         """Show a snapshot of backend state."""
         match event:
-            case SettingsChanged(settings=settings, model_choices=choices):
-                self._show_settings(settings, choices)
+            case SettingsChanged() | PlanningChanged():
+                self._show_session(event)
             case BusyChanged(busy=busy):
                 self._set_busy(busy)
             case TasksChanged(tasks=tasks):
@@ -322,6 +346,14 @@ class OrbitApp(App[None], inherit_bindings=False):
                 self._append(*verification_finished_entry(self._step(step), passed))
             case _:
                 assert_never(event)
+
+    def _show_session(self, event: SettingsChanged | PlanningChanged) -> None:
+        """Show the session's settings, or whether prompts go to the planner."""
+        if isinstance(event, SettingsChanged):
+            self._show_settings(event.settings, event.model_choices)
+        else:
+            self._planning = event.on
+            self.query_one(PromptInput).show_planning(event.on)
 
     def _show_settings(self, settings: Settings, choices: tuple[str, ...]) -> None:
         if choices != self._model_choices:

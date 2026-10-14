@@ -7,7 +7,7 @@ from orbit.protocol import StepState, StepStatus, TaskOrigin, TaskSpec, TaskStat
 
 # Statuses a run leaves alone; any other task is worth (another) run.
 SETTLED: frozenset[TaskStatus] = frozenset(
-    {"running", "verifying", "completed", "unverified", "gave_up"}
+    {"draft", "running", "verifying", "completed", "unverified", "gave_up"}
 )
 
 
@@ -114,6 +114,24 @@ class TaskBoard:
             if unsettled and _in_roles(state.task.role, roles, exclude):
                 return state.id
         return None
+
+    def add_draft(self, task: TaskSpec) -> str:
+        """Add ``task``, which the planner proposed, at the end as a draft; returns its id."""
+        state = TaskState(id=str(next(self._ids)), task=task, status="draft", origin="planner")
+        self._tasks.append(state)
+        return state.id
+
+    def accept(self, task_id: str) -> None:
+        """Make draft ``task_id`` pending. Raises ``ValueError`` if it isn't a draft."""
+        if self.get(task_id).status != "draft":
+            raise ValueError(f"Task {task_id!r} isn't a draft.")
+        self.set_status(task_id, "pending")
+
+    def remove(self, task_id: str) -> None:
+        """Take ``task_id`` off the list. Raises ``ValueError`` if it can't be."""
+        if self.get(task_id).status in ("running", "verifying"):
+            raise ValueError(f"Task {task_id!r} can't be removed while it runs.")
+        del self._tasks[self.position(task_id)]
 
     def add_review(self, task: TaskSpec) -> str:
         """Add a review orbit queued itself, at the end; returns its id."""

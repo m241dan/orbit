@@ -70,6 +70,7 @@ STATUS_ICONS: dict[TaskStatus, str] = {
     "max_steps": "⌛",
     "error": "❌",
     "gave_up": "🏳",
+    "draft": "📝",
 }
 STEP_ICONS: dict[StepStatus, str] = {
     "pending": "⏳",

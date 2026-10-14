@@ -80,6 +80,7 @@ def test_every_task_status_has_an_icon_except_running_which_spins() -> None:
     statuses = {status for part in get_args(TaskStatus) for status in get_args(part)}
     assert statuses - set(STATUS_ICONS) == {"running"}
     assert STATUS_ICONS["gave_up"] == "🏳"
+    assert STATUS_ICONS["draft"] == "📝"
 
 
 def test_agent_lifecycle_becomes_transcript_entries() -> None:

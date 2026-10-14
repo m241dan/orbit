@@ -182,3 +182,30 @@ def test_editing_a_suggestion_keeps_where_it_came_from() -> None:
     state = board.get(suggestion)
     assert (state.origin, state.batch, state.round) == ("review", "batch-1", 1)
     assert (state.status, state.attempt, state.task.prompt) == ("pending", 0, "tidy more")
+
+
+def test_drafts_wait_until_accepted() -> None:
+    board = TaskBoard()
+    draft = board.add_draft(TaskSpec(prompt="plan step"))
+    assert (board.get(draft).status, board.get(draft).origin) == ("draft", "planner")
+    assert board.next_runnable() is None
+    board.accept(draft)
+    assert board.get(draft).status == "pending"
+    assert board.next_runnable() == draft
+
+
+def test_only_drafts_can_be_accepted() -> None:
+    board = TaskBoard()
+    task_id = board.add(ONE)
+    with pytest.raises(ValueError, match="isn't a draft"):
+        board.accept(task_id)
+
+
+def test_tasks_can_be_removed_unless_they_run() -> None:
+    board = TaskBoard()
+    first, second = board.add(ONE), board.add(TWO)
+    board.remove(first)
+    assert [t.id for t in board.tasks] == [second]
+    board.set_status(second, "running")
+    with pytest.raises(ValueError, match="while it runs"):
+        board.remove(second)

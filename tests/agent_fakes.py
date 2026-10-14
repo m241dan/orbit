@@ -58,6 +58,7 @@ class ScriptedLauncher:
         self.scripts = list(scripts)
         self.reviewers = list(reviewers)
         self.launches: list[AgentLaunch] = []
+        self.planner_turns: list[Script] = []  # Played by converse(), one per turn.
 
     async def run_agent(self, launch: AgentLaunch) -> AsyncIterator[Event]:
         self.launches.append(launch)
@@ -72,6 +73,17 @@ class ScriptedLauncher:
 
         reason = await script(call)
         yield TurnFinished(turn_id=agent.id, reason=reason, agent_id=agent.id)
+
+    async def converse(self, turn_id: str, launch: AgentLaunch) -> AsyncIterator[Event]:
+        self.launches.append(launch)
+        agent = launch.agent
+        yield TurnStarted(turn_id=turn_id, agent_id=agent.id)
+
+        async def call(tool: str, **arguments: Any) -> Reply:
+            return await self.host.call(agent.token, tool, **arguments)
+
+        reason = await self.planner_turns.pop(0)(call)
+        yield TurnFinished(turn_id=turn_id, reason=reason, agent_id=agent.id)
 
 
 class Steps:

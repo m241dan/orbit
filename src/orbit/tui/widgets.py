@@ -147,6 +147,9 @@ class PromptInput(Input):
     def show_settings(self, settings: Settings) -> None:
         self.border_subtitle = settings_summary(settings)
 
+    def show_planning(self, on: bool) -> None:
+        self.border_title = "Prompt · planner" if on else "Prompt"
+
 
 class PickerScreen(ModalScreen[int | None]):
     """Pop-up list of options. Dismisses with the chosen index, or None on escape.

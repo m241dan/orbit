@@ -11,7 +11,7 @@ import uuid
 from collections.abc import Awaitable, Callable, Mapping
 from contextlib import suppress
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any, Literal, Protocol
 
 from orbit.agent.application.ports import (
     AgentHost,
@@ -103,6 +103,12 @@ def _answer(claim: "asyncio.Future[Reply] | None", reply: Reply) -> None:
         claim.set_result(reply)
 
 
+class CallTarget(Protocol):
+    """Whatever answers an agent's calls: its run, or the planner's conversation."""
+
+    async def handle(self, tool: str, arguments: dict[str, Any]) -> Reply: ...
+
+
 class AgentDesk:
     """Answers agents' calls by passing them to their runs, publishing each call and reply."""
 
@@ -112,7 +118,7 @@ class AgentDesk:
         self.publish = publish
         # Takes a review task's suggestions: its id, then the suggestion's title and prompt.
         self.suggest: Callable[[str, str, str], Awaitable[Reply]] | None = None
-        self._runs: dict[str, AgentRun] = {}
+        self._runs: dict[str, CallTarget] = {}
         self._url: str | None = None
 
     async def url(self) -> str:
@@ -127,7 +133,7 @@ class AgentDesk:
             self._url = None
             await self.agents.host.stop()
 
-    def open(self, run: "AgentRun", role: str, task_id: str) -> Agent:
+    def open(self, run: CallTarget, role: str, task_id: str) -> Agent:
         agent = self.registry.register(role, task_id)
         self._runs[agent.id] = run
         return agent

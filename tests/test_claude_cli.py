@@ -403,3 +403,27 @@ async def test_an_agent_runs_in_its_working_directory(tmp_path: Path) -> None:
     runner, scenario = make_runner(tmp_path, stdout=lines(init("connected"), RESULT))
     await run_agent(runner, cwd=str(work))
     assert calls(scenario)[0]["cwd"] == str(work)
+
+
+async def converse(runner: ClaudeCliRunner, prompt: str, agent: Agent = AGENT) -> list[Event]:
+    launch = AgentLaunch(agent, URL, prompt, Settings(), ".", "Plan.", ("propose_task",))
+    return [e async for e in runner.converse("turn-1", launch)]
+
+
+async def test_a_conversation_resumes_its_own_session_turn_after_turn(tmp_path: Path) -> None:
+    runner, scenario = make_runner(tmp_path, stdout=lines(init("connected"), TEXT, RESULT))
+    first = await converse(runner, "Plan a CLI.")
+    await converse(runner, "Smaller steps, please.")
+    other = Agent(id="agent-9", role="planner", task_id="plan", token="t9")
+    await converse(runner, "Hello.", other)
+
+    assert first[0] == TurnStarted(turn_id="turn-1", agent_id="agent-3")
+    assert first[-1] == TurnFinished(turn_id="turn-1", reason="completed", agent_id="agent-3")
+    one, two, three = calls(scenario)
+    assert "--resume" not in one["argv"]
+    assert two["argv"][two["argv"].index("--resume") + 1] == SESSION_ID
+    assert "--resume" not in three["argv"]  # Another agent's conversation.
+    assert two["stdin"] == "Smaller steps, please."
+    assert two["argv"][two["argv"].index("--allowedTools") + 1] == "mcp__orbit__propose_task"
+    assert two["env"]["ORBIT_AGENT_TOKEN"] == "s3cret"
+    assert runner.session_id is None

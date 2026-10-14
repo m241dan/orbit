@@ -27,6 +27,8 @@ def test_built_in_roles_cover_coding_reviewing_and_planning() -> None:
     assert "suggest_task" in reviewer.tools
     assert "suggest_task" in BUILT_IN_ROLES["super-reviewer"].tools
     assert "suggest_task" not in coder.tools
+    planner = BUILT_IN_ROLES["planner"]
+    assert set(planner.tools) == {"propose_task", "report_progress"}
     assert BUILT_IN_ROLES["super-reviewer"].model == "opus"
     assert all(role.instructions for role in BUILT_IN_ROLES.values())
     assert "don't commit" in coder.instructions.lower()
@@ -95,3 +97,8 @@ def test_mistakes_are_reported_readably(data: dict[str, object], message: str) -
 def test_a_new_role_must_be_able_to_fetch_its_task() -> None:
     with pytest.raises(ConfigError, match="get_task"):
         load_config({"roles": {"new": {"instructions": "x", "tools": ["complete_task"]}}})
+
+
+def test_a_conversational_role_plans_instead_of_fetching_a_task() -> None:
+    config = load_config({"roles": {"architect": {"instructions": "x", "tools": ["propose_task"]}}})
+    assert config.roles["architect"].tools == ("propose_task",)

@@ -167,6 +167,7 @@ class ClaudeCliRunner:
         self._needs_orbit = False
         self._env: Mapping[str, str] | None = None
         self._cwd: str | None = None
+        self._conversations: dict[str, ClaudeCliRunner] = {}  # Agent id -> its session.
 
     def new_context(self) -> "ClaudeCliRunner":
         """Same CLI, new Claude session (no ``--resume``)."""
@@ -178,12 +179,24 @@ class ClaudeCliRunner:
 
     async def run_agent(self, launch: AgentLaunch) -> AsyncIterator[Event]:
         """Run the agent as a new Claude session connected to orbit, as ``launch`` says."""
+        async for event in self._agent_turn(self.new_context(), launch.agent.id, launch):
+            yield event
+
+    async def converse(self, turn_id: str, launch: AgentLaunch) -> AsyncIterator[Event]:
+        """A turn of the agent's conversation: its first starts a Claude session, later ones
+        resume it, apart from the conversation this runner has itself."""
+        runner = self._conversations.setdefault(launch.agent.id, self.new_context())
+        async for event in self._agent_turn(runner, turn_id, launch):
+            yield event
+
+    async def _agent_turn(
+        self, runner: "ClaudeCliRunner", turn_id: str, launch: AgentLaunch
+    ) -> AsyncIterator[Event]:
         agent = launch.agent
-        runner = self.new_context()
         runner._needs_orbit = True
         runner._env, runner._cwd = agent_env(agent), launch.cwd
         args = [*runner._args(launch.settings), *agent_args(launch)]
-        async for event in runner._run(agent.id, args, launch.prompt):
+        async for event in runner._run(turn_id, args, launch.prompt):
             yield event.model_copy(update={"agent_id": agent.id})
 
     async def _run(self, turn_id: str, args: Sequence[str], prompt: str) -> AsyncIterator[Event]:

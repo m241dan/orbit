@@ -92,6 +92,27 @@ class RunTasks(_Message):
     type: Literal["run_tasks"] = "run_tasks"
 
 
+class AcceptTask(_Message):
+    """Make draft task ``task_id`` (one the planner proposed) a real task, to be run."""
+
+    type: Literal["accept_task"] = "accept_task"
+    task_id: str
+
+
+class RemoveTask(_Message):
+    """Take task ``task_id`` off the list; rejected while it runs."""
+
+    type: Literal["remove_task"] = "remove_task"
+    task_id: str
+
+
+class SetPlanning(_Message):
+    """Send prompts to the planner (``on``) or the plain conversation."""
+
+    type: Literal["set_planning"] = "set_planning"
+    on: bool
+
+
 class RequestSuperReview(_Message):
     """Ask for a super review of the whole codebase now, without waiting for its turn."""
 
@@ -99,7 +120,16 @@ class RequestSuperReview(_Message):
 
 
 Command = Annotated[
-    SubmitPrompt | CancelTurn | UpdateSettings | AddTask | EditTask | RunTasks | RequestSuperReview,
+    SubmitPrompt
+    | CancelTurn
+    | UpdateSettings
+    | AddTask
+    | EditTask
+    | RunTasks
+    | RequestSuperReview
+    | AcceptTask
+    | RemoveTask
+    | SetPlanning,
     Field(discriminator="type"),
 ]
 
@@ -108,12 +138,15 @@ Command = Annotated[
 
 TurnEndReason = Literal["completed", "cancelled", "max_steps", "error"]
 
-TaskStatus = Literal["pending", "running", "verifying", "unverified", "gave_up"] | TurnEndReason
+TaskStatus = (
+    Literal["draft", "pending", "running", "verifying", "unverified", "gave_up"] | TurnEndReason
+)
 """Where a task stands.
 
 ``verifying``: its turn completed and the verification steps are checking it.
 ``unverified``: its turn completed but a verification step failed.
 ``gave_up``: the agent reported it couldn't do the task.
+``draft``: the planner proposed it; it waits to be accepted.
 """
 
 TaskOrigin = Literal["manual", "planner", "review", "super_review"]
@@ -290,6 +323,13 @@ class TaskMerged(_Message):
     commit: str = ""
 
 
+class PlanningChanged(_Message):
+    """Whether prompts now go to the planner; sent after every change."""
+
+    type: Literal["planning_changed"] = "planning_changed"
+    on: bool
+
+
 class Notice(_Message):
     """Something worth the user's attention that isn't an error."""
 
@@ -379,7 +419,8 @@ Event = Annotated[
     | TaskGaveUp
     | AgentExited
     | TaskMerged
-    | Notice,
+    | Notice
+    | PlanningChanged,
     Field(discriminator="type"),
 ]
 

@@ -2,6 +2,7 @@ import pytest
 from pydantic import ValidationError
 
 from orbit.protocol import (
+    AcceptTask,
     AddTask,
     AgentExited,
     AgentReply,
@@ -11,9 +12,12 @@ from orbit.protocol import (
     BusyChanged,
     EditTask,
     ErrorOccurred,
+    PlanningChanged,
     ProgressNoted,
+    RemoveTask,
     RequestSuperReview,
     RunTasks,
+    SetPlanning,
     Settings,
     SettingsChanged,
     StepState,
@@ -200,3 +204,12 @@ def test_request_super_review_round_trips() -> None:
         command_adapter.validate_json(RequestSuperReview().model_dump_json())
         == RequestSuperReview()
     )
+
+
+def test_planning_and_draft_messages_round_trip() -> None:
+    for command in (AcceptTask(task_id="3"), RemoveTask(task_id="3"), SetPlanning(on=True)):
+        assert command_adapter.validate_json(command.model_dump_json()) == command
+    event = PlanningChanged(on=True)
+    assert event_adapter.validate_json(event.model_dump_json()) == event
+    draft = TaskState(id="1", task=TaskSpec(prompt="x"), status="draft", origin="planner")
+    assert TaskState.model_validate(draft.model_dump()) == draft

@@ -94,6 +94,12 @@ class AgentLauncher(Protocol):
         """
         ...
 
+    def converse(self, turn_id: str, launch: AgentLaunch) -> AsyncIterator[Event]:
+        """Run one turn, ``turn_id``, of the agent's ongoing conversation, ``launch.prompt``
+        being what it's told: the first turn starts it, and later ones carry it on. Yields and
+        stops like :meth:`run_agent`."""
+        ...
+
 
 @dataclass(frozen=True)
 class Merge:

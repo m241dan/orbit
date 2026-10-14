@@ -1,12 +1,16 @@
 from textual.pilot import Pilot
 
 from orbit.protocol import (
+    AcceptTask,
     AddTask,
     BusyChanged,
     EditTask,
     Event,
+    PlanningChanged,
+    RemoveTask,
     RequestSuperReview,
     RunTasks,
+    SetPlanning,
     Settings,
     TasksChanged,
     TaskSpec,
@@ -402,3 +406,32 @@ async def test_ctrl_g_asks_for_a_super_review_even_while_busy() -> None:
         await feed(session, pilot, BusyChanged(busy=True))
         await pilot.press("ctrl+g")
         assert session.commands == [RequestSuperReview()]
+
+
+async def test_a_accepts_the_highlighted_draft_and_x_removes_a_task() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        draft = TaskState(id="1", task=TaskSpec(prompt="plan step"), status="draft")
+        queued = TaskState(id="2", task=TaskSpec(prompt="queued"))
+        await feed(session, pilot, TasksChanged(tasks=(draft, queued)))
+        await open_task_list(pilot)
+        await pilot.press("a")
+        await pilot.press("j", "a")  # Not a draft: nothing to accept.
+        await pilot.press("x")
+        await pilot.press("j", "a", "x")  # The new-task row.
+        assert session.commands == [AcceptTask(task_id="1"), RemoveTask(task_id="2")]
+
+
+async def test_ctrl_t_toggles_planning_and_the_prompt_says_so() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await pilot.press("ctrl+t")
+        assert session.commands == [SetPlanning(on=True)]
+        await feed(session, pilot, PlanningChanged(on=True))
+        assert app.query_one(PromptInput).border_title == "Prompt · planner"
+        await pilot.press("ctrl+t")
+        assert session.commands[-1] == SetPlanning(on=False)
+        await feed(session, pilot, PlanningChanged(on=False))
+        assert app.query_one(PromptInput).border_title == "Prompt"

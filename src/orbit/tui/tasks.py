@@ -9,6 +9,7 @@ from textual import events, on
 from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
 from textual.containers import Vertical
+from textual.message import Message
 from textual.screen import ModalScreen
 from textual.widgets import Input, OptionList, Static
 
@@ -31,8 +32,23 @@ class TaskList(OptionList):
     """The backend's task list plus a trailing "new task" row.
 
     Like the prompt, it only takes focus once activated (``enter_list_mode``);
-    then j/k move, enter picks a row and escape returns to window navigation.
+    then j/k move, enter picks a row, ``a`` accepts a draft, ``x`` removes a task and
+    escape returns to window navigation.
     """
+
+    class Accept(Message):
+        """The user accepted draft task ``task_id``."""
+
+        def __init__(self, task_id: str) -> None:
+            super().__init__()
+            self.task_id = task_id
+
+    class Remove(Message):
+        """The user asked to remove task ``task_id``."""
+
+        def __init__(self, task_id: str) -> None:
+            super().__init__()
+            self.task_id = task_id
 
     DEFAULT_CSS = """
     TaskList {
@@ -45,6 +61,8 @@ class TaskList(OptionList):
         Binding("j", "cursor_down", show=False),
         Binding("k", "cursor_up", show=False),
         Binding("escape", "normal_mode", show=False),
+        Binding("a", "accept", show=False),
+        Binding("x", "remove", show=False),
     ]
 
     def __init__(self, *, id: str) -> None:
@@ -70,6 +88,21 @@ class TaskList(OptionList):
 
     def on_blur(self) -> None:
         self.can_focus = False
+
+    def action_accept(self) -> None:
+        state = self._highlighted_task()
+        if state is not None and state.status == "draft":
+            self.post_message(self.Accept(state.id))
+
+    def action_remove(self) -> None:
+        state = self._highlighted_task()
+        if state is not None:
+            self.post_message(self.Remove(state.id))
+
+    def _highlighted_task(self) -> TaskState | None:
+        """The task the highlight is on; ``None`` on the new-task row."""
+        index = self.highlighted
+        return self.tasks[index] if index is not None and index < len(self.tasks) else None
 
     def on_click(self, event: events.Click) -> None:
         # Clicks don't pick rows unless the list is active.

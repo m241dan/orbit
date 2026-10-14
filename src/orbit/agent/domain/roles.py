@@ -18,6 +18,7 @@ ORBIT_TOOLS = (
     "report_progress",
     "give_up",
     "suggest_task",
+    "propose_task",
 )
 """Every tool orbit's MCP server offers agents."""
 
@@ -44,8 +45,10 @@ class Role(_Config):
         unknown = [tool for tool in tools if tool not in ORBIT_TOOLS]
         if unknown:
             raise ValueError(f"unknown tools {unknown}; orbit's tools are {list(ORBIT_TOOLS)}")
-        if "get_task" not in tools:
-            raise ValueError("an agent needs get_task to fetch its task")
+        if "get_task" not in tools and "propose_task" not in tools:
+            raise ValueError(
+                "an agent needs get_task to fetch its task, or propose_task to plan in conversation"
+            )
         return tools
 
 
@@ -82,9 +85,13 @@ BUILT_IN_ROLES: dict[str, Role] = {
     ),
     "planner": Role(
         instructions=(
-            "You are orbit's planner. Help break the user's goal into small tasks a coder can do"
-            " one at a time, each with a clear way to tell it's done. Don't edit files."
+            "You are orbit's planner, in conversation with the user. Help them break their goal"
+            " into small tasks a coder can do one at a time, in order, each with a clear way to"
+            " tell it's done. Propose each with propose_task (a short title, and a prompt saying"
+            " what to change and how to check it); they appear as drafts the user accepts or"
+            " drops. Ask when something is unclear. Don't edit files."
         ),
+        tools=("propose_task", "report_progress"),
         verify=False,
     ),
 }

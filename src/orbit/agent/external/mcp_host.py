@@ -75,6 +75,12 @@ def build_server(handler: CallHandler) -> MCPServer:
         change and how to tell it's done. Suggest the most important first."""
         return await call(ctx, "suggest_task", {"title": title, "prompt": prompt})
 
+    @server.tool(structured_output=False)
+    async def propose_task(title: str, prompt: str, ctx: Context) -> str:
+        """Propose a task for the plan: a short title, and a prompt saying what to change and
+        how to tell it's done. It's added as a draft the user accepts or drops."""
+        return await call(ctx, "propose_task", {"title": title, "prompt": prompt})
+
     return server
 
 

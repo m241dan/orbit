@@ -1,6 +1,7 @@
 """Shared contract between the frontend and the backend."""
 
 from orbit.protocol.messages import (
+    AcceptTask,
     AddTask,
     AgentExited,
     AgentExitReason,
@@ -16,9 +17,12 @@ from orbit.protocol.messages import (
     Event,
     MergeResult,
     Notice,
+    PlanningChanged,
     ProgressNoted,
+    RemoveTask,
     RequestSuperReview,
     RunTasks,
+    SetPlanning,
     Settings,
     SettingsChanged,
     SkipReason,
@@ -50,6 +54,7 @@ from orbit.protocol.messages import (
 from orbit.protocol.session import Session
 
 __all__ = [
+    "AcceptTask",
     "AddTask",
     "AgentExitReason",
     "AgentExited",
@@ -65,10 +70,13 @@ __all__ = [
     "Event",
     "MergeResult",
     "Notice",
+    "PlanningChanged",
     "ProgressNoted",
+    "RemoveTask",
     "RequestSuperReview",
     "RunTasks",
     "Session",
+    "SetPlanning",
     "Settings",
     "SettingsChanged",
     "SkipReason",
