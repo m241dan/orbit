@@ -261,6 +261,32 @@ class ErrorOccurred(_Message):
     message: str
 
 
+MergeResult = Literal["merged", "rebased", "conflict", "blocked", "detached"]
+"""What came of merging a task's commit into the base branch.
+
+``merged``: the base now has it. ``rebased``: the base had moved, so it was replayed on top and
+must be verified again. ``conflict``: it couldn't be replayed. ``blocked``: the base's checkout
+has changes in the way. ``detached``: there's no base branch to merge into.
+"""
+
+
+class TaskMerged(_Message):
+    """Task ``task_id``'s work was committed, and this came of merging it; ``detail`` says why
+    when it wasn't merged."""
+
+    type: Literal["task_merged"] = "task_merged"
+    task_id: str
+    result: MergeResult
+    detail: str = ""
+
+
+class Notice(_Message):
+    """Something worth the user's attention that isn't an error."""
+
+    type: Literal["notice"] = "notice"
+    message: str
+
+
 AgentExitReason = Literal["finished", "crashed", "killed"]
 """How an agent's process ended: on its own, with a failure, or stopped by orbit."""
 
@@ -341,7 +367,9 @@ Event = Annotated[
     | AgentReply
     | ProgressNoted
     | TaskGaveUp
-    | AgentExited,
+    | AgentExited
+    | TaskMerged
+    | Notice,
     Field(discriminator="type"),
 ]
 

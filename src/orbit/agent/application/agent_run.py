@@ -13,7 +13,13 @@ from contextlib import suppress
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-from orbit.agent.application.ports import AgentHost, AgentLaunch, AgentLauncher, Reply
+from orbit.agent.application.ports import (
+    AgentHost,
+    AgentLaunch,
+    AgentLauncher,
+    CoderTree,
+    Reply,
+)
 from orbit.agent.application.verifier import Failure, Verifier
 from orbit.agent.domain.agent_task import FINISHED, AgentTask, Limits, Phase
 from orbit.agent.domain.agents import Agent, AgentRegistry, bootstrap_prompt
@@ -58,6 +64,8 @@ class Agents:
     ``host`` is where agents reach orbit, ``launcher`` starts them, and ``new_token``
     makes the unguessable tokens they identify themselves with. ``exit_grace`` is how
     long, in seconds, an agent may take to exit once its task is finished before it's stopped.
+    ``tree`` is where they work and their work is merged from; without one they work in the
+    current directory and nothing is committed.
     """
 
     host: AgentHost
@@ -65,14 +73,17 @@ class Agents:
     new_token: Callable[[], str]
     limits: Limits = field(default_factory=Limits)
     exit_grace: float = 10.0
+    tree: CoderTree | None = None
 
 
 @dataclass(frozen=True)
 class Outcome:
-    """How a task ended: its status, and the failure to hand a fresh agent if it fell back."""
+    """How a task ended: its status, the failure to hand a fresh agent if it fell back, and
+    the agent's summary of what it did."""
 
     status: TaskStatus
     failure: Failure | None = None
+    summary: str | None = None
 
 
 def _answer(claim: "asyncio.Future[Reply] | None", reply: Reply) -> None:
@@ -171,7 +182,7 @@ class AgentRun:
         finally:
             await self._stop(stream)
             self._desk.close(self.agent)
-        return Outcome(STATUSES[self._work.phase], self._failure)
+        return Outcome(STATUSES[self._work.phase], self._failure, self._work.summary)
 
     async def handle(self, tool: str, arguments: dict[str, Any]) -> Reply:
         answer = self._tools.get(tool)

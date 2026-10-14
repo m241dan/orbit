@@ -14,6 +14,7 @@ from orbit.protocol import (
     Command,
     ErrorOccurred,
     Event,
+    Notice,
     Settings,
     SettingsChanged,
     SubmitPrompt,
@@ -132,12 +133,14 @@ async def test_renders_agent_activity() -> None:
     async with app.run_test() as pilot:
         await session.queue.put(AgentStarted(agent_id="agent-1", role="coder", task_id="1"))
         await session.queue.put(AgentReply(agent_id="agent-1", request_id="r", text="Do X."))
+        await session.queue.put(Notice(message="1 stash"))
         await pilot.pause()
 
         rendered = [(str(e.render()), e.classes) for e in app.query(Entry)]
         assert rendered == [
             ("▶ agent-1 (coder) started", frozenset({"agent"})),
             ("orbit → agent-1: Do X.", frozenset({"agent"})),
+            ("📌 1 stash", frozenset({"verify"})),
         ]
 
 

@@ -6,7 +6,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
 
 from orbit.agent import Agents, AgentSession, TurnRunner, Verification, VerificationStep
-from orbit.agent.application.ports import AgentLaunch, CallHandler, Reply
+from orbit.agent.application.ports import AgentLaunch, CallHandler, Merge, Reply
 from orbit.agent.domain.agent_task import Limits
 from orbit.protocol import (
     AddTask,
@@ -99,6 +99,35 @@ class FakeWorkspace:
         return self.states.pop(0)
 
 
+class FakeTree:
+    """A coder tree that records what it's asked to do and merges as scripted."""
+
+    path = "/work/coder"
+
+    def __init__(self, *merges: Merge, leftovers: tuple[str, ...] = (), broken: str = "") -> None:
+        self.merges = list(merges)
+        self.notes = list(leftovers)
+        self.broken = broken
+        self.prepared: list[bool] = []
+        self.commits: list[str] = []
+
+    async def prepare(self, keep: bool) -> str:
+        self.prepared.append(keep)
+        if self.broken:
+            raise RuntimeError(self.broken)
+        return self.path
+
+    async def commit(self, message: str) -> bool:
+        self.commits.append(message)
+        return True
+
+    async def integrate(self) -> Merge:
+        return self.merges.pop(0) if self.merges else Merge("merged")
+
+    async def leftovers(self) -> list[str]:
+        return self.notes
+
+
 def verified(
     steps: Steps, workspace: FakeWorkspace | None = None, max_fix_attempts: int = 3
 ) -> Verification:
@@ -110,12 +139,15 @@ def session_for(
     verification: Verification | None = None,
     limits: Limits | None = None,
     runner: TurnRunner | None = None,
+    tree: FakeTree | None = None,
 ) -> tuple[AgentSession, FakeHost, ScriptedLauncher]:
     """A session whose tasks run through agents playing ``scripts``, one per launch."""
     host = FakeHost()
     launcher = ScriptedLauncher(host, *scripts)
     tokens = iter(f"token-{n}" for n in range(1, 100))
-    agents = Agents(host, launcher, lambda: next(tokens), limits or Limits(), exit_grace=0.5)
+    agents = Agents(
+        host, launcher, lambda: next(tokens), limits or Limits(), exit_grace=0.5, tree=tree
+    )
     chat = runner or object()  # Tasks never use the conversation's runner.
     session = AgentSession(chat, verification=verification, agents=agents)  # type: ignore[arg-type]
     return session, host, launcher

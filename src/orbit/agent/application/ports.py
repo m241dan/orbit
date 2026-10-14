@@ -4,12 +4,12 @@
 
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from dataclasses import dataclass
-from typing import Any, Literal, Protocol
+from typing import Any, Protocol
 
 from orbit.agent.domain.agents import Agent
 from orbit.agent.domain.conversation import Message, ModelResponse, ToolSpec
 from orbit.agent.domain.verification import VerificationStep
-from orbit.protocol import Event, Settings
+from orbit.protocol import Event, MergeResult, Settings
 
 
 class TurnRunner(Protocol):
@@ -86,16 +86,6 @@ class AgentLauncher(Protocol):
         launcher must stop the process and re-raise.
         """
         ...
-
-
-MergeResult = Literal["merged", "rebased", "conflict", "blocked", "detached"]
-"""What came of merging the coder's commits into the base branch.
-
-``merged``: the base now has them (or already did). ``rebased``: the base had moved, so they
-were replayed on top of it and must be verified again before merging. ``conflict``: they
-couldn't be replayed. ``blocked``: the base's checkout has changes in the way. ``detached``:
-there's no base branch to merge into.
-"""
 
 
 @dataclass(frozen=True)

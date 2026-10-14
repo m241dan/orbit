@@ -18,12 +18,14 @@ from orbit.protocol import (
     AgentRequest,
     AgentStarted,
     AssistantMessage,
+    Notice,
     ProgressNoted,
     Settings,
     SkipReason,
     StepState,
     StepStatus,
     TaskGaveUp,
+    TaskMerged,
     TaskState,
     TaskStatus,
     ToolAccess,
@@ -154,6 +156,40 @@ def exchange_entry(event: AgentRequest | AgentReply | ProgressNoted) -> tuple[st
             return f"{agent}: {note}", "agent"
         case _:
             assert_never(event)
+
+
+def note_entry(event: TaskMerged | Notice) -> tuple[str, EntryKind]:
+    """What came of merging a task's work, or a notice, as a transcript entry."""
+    match event:
+        case TaskMerged(result="merged"):
+            return "⇢ Merged into the base branch.", "verify"
+        case TaskMerged(result=result, detail=detail):
+            return f"⚠ Not merged ({result}): {detail}", "verify"
+        case Notice(message=message):
+            return f"📌 {message}", "verify"
+        case _:
+            assert_never(event)
+
+
+AgentNote = (
+    AgentStarted
+    | TaskGaveUp
+    | AgentExited
+    | AgentRequest
+    | AgentReply
+    | ProgressNoted
+    | TaskMerged
+    | Notice
+)
+"""Events shown as a single transcript entry each: agents' activity, merges and notices."""
+
+
+def activity_entry(event: AgentNote) -> tuple[str, EntryKind]:
+    if isinstance(event, AgentStarted | TaskGaveUp | AgentExited):
+        return agent_entry(event)
+    if isinstance(event, AgentRequest | AgentReply | ProgressNoted):
+        return exchange_entry(event)
+    return note_entry(event)
 
 
 def turn_end_entry(reason: TurnEndReason) -> tuple[str, EntryKind] | None:

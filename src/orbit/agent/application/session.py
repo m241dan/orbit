@@ -9,7 +9,8 @@ import uuid
 from collections.abc import AsyncIterator, Coroutine, Sequence
 from typing import Any, assert_never
 
-from orbit.agent.application.agent_run import AgentDesk, AgentRun, Agents
+from orbit.agent.application.agent_run import AgentDesk, AgentRun, Agents, Outcome
+from orbit.agent.application.landing import Lander
 from orbit.agent.application.ports import TurnRunner
 from orbit.agent.application.verifier import Verification, Verifier
 from orbit.agent.domain.board import TaskBoard
@@ -22,6 +23,7 @@ from orbit.protocol import (
     EditTask,
     ErrorOccurred,
     Event,
+    Notice,
     RunTasks,
     Settings,
     SettingsChanged,
@@ -74,6 +76,7 @@ class AgentSession:
         self._events: asyncio.Queue[Event] = asyncio.Queue()
         self._verifier = _verifier(verification, self._board, self._events)
         self._desk = AgentDesk(agents, self._events.put) if agents else None
+        self._announced = False
         self._events.put_nowait(self._settings_changed())
         if self._verifier:
             self._events.put_nowait(VerificationChanged(steps=self._board.steps))
@@ -158,8 +161,17 @@ class AgentSession:
             await self._publish_tasks()
 
     async def events(self) -> AsyncIterator[Event]:
+        if not self._announced:
+            self._announced = True
+            await self._announce_leftovers()
         while True:
             yield await self._events.get()
+
+    async def _announce_leftovers(self) -> None:
+        """Tell the user about work earlier runs left in the coder's tree."""
+        tree = self._desk.agents.tree if self._desk else None
+        for note in await tree.leftovers() if tree else []:
+            await self._events.put(Notice(message=note))
 
     async def _start(self, work: Coroutine[Any, Any, object]) -> None:
         if self._turn is not None and not self._turn.done():
@@ -186,9 +198,6 @@ class AgentSession:
 
     async def _run_task(self, task_id: str, attempts: FixAttempts) -> TaskStatus:
         """Run one task through a new agent; returns its final status."""
-        task = self._board.get(task_id).task
-        # Before the task shows as running, so a cancel here leaves it pending.
-        before = await self._verifier.state_before(task, ".") if self._verifier else None
         self._board.set_status(task_id, "running")
         await self._publish_tasks()
         if self._verifier:
@@ -196,24 +205,46 @@ class AgentSession:
             await self._checks.publish_steps()
         await self._events.put(TaskStarted(task_id=task_id))
         assert self._desk is not None  # Runs only start with agents.
-        status = await self._run_agent(self._desk, task_id, before, attempts)
+        try:
+            status = await self._run_agent(self._desk, task_id, attempts)
+        except asyncio.CancelledError:
+            if self._verifier:
+                await self._verifier.cancel()
+            status = "cancelled"
+        except RuntimeError as exc:  # Git or the tree's setup failed.
+            await self._events.put(ErrorOccurred(message=str(exc)))
+            status = "error"
         self._board.finish(task_id, status)
         await self._publish_tasks()
         return status
 
-    async def _run_agent(
-        self, desk: AgentDesk, task_id: str, before: object, attempts: FixAttempts
-    ) -> TaskStatus:
-        """Run task ``task_id`` through a new agent; a fallback queues a fix for a fresh one."""
-        try:
-            outcome = await AgentRun(task_id, self._board, self._verifier, desk).run(before, ".")
-        except asyncio.CancelledError:
-            if self._verifier:
-                await self._verifier.cancel()
-            return "cancelled"
+    async def _run_agent(self, desk: AgentDesk, task_id: str, attempts: FixAttempts) -> TaskStatus:
+        """Run task ``task_id`` through a new agent and land its work; a fallback queues a fix
+        for a fresh one."""
+        root = await self._prepare(desk, task_id)
+        task = self._board.get(task_id).task
+        before = await self._verifier.state_before(task, root) if self._verifier else None
+        outcome = await AgentRun(task_id, self._board, self._verifier, desk).run(before, root)
+        if outcome.status == "completed":
+            outcome = await self._land(desk, task_id, outcome, root)
         if outcome.failure is not None and outcome.status == "unverified":
             await self._queue_fix(task_id, attempts, *outcome.failure)
         return outcome.status
+
+    async def _land(self, desk: AgentDesk, task_id: str, outcome: Outcome, root: str) -> Outcome:
+        """Commit and merge a completed task's work, when there's a tree to do it from."""
+        if desk.agents.tree is None:
+            return outcome
+        lander = Lander(desk.agents.tree, self._board, self._verifier, self._events.put)
+        failure = await lander.land(task_id, outcome.summary, root)
+        return outcome if failure is None else Outcome("unverified", failure)
+
+    async def _prepare(self, desk: AgentDesk, task_id: str) -> str:
+        """Where task ``task_id`` is worked on: the coder's tree, readied for it."""
+        if desk.agents.tree is None:
+            return "."
+        # A fix carries on from the work it fixes.
+        return await desk.agents.tree.prepare(keep=self._board.get(task_id).fixes is not None)
 
     async def _queue_fix(
         self, task_id: str, attempts: FixAttempts, step: VerificationStep, output: str

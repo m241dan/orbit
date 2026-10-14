@@ -7,10 +7,12 @@ from orbit.protocol import (
     AgentRequest,
     AgentStarted,
     AssistantMessage,
+    Notice,
     ProgressNoted,
     Settings,
     StepState,
     TaskGaveUp,
+    TaskMerged,
     TaskSpec,
     TaskState,
     TaskStatus,
@@ -19,8 +21,10 @@ from orbit.protocol import (
 )
 from orbit.tui.view import (
     STATUS_ICONS,
+    activity_entry,
     agent_entry,
     exchange_entry,
+    note_entry,
     output_entry,
     settings_summary,
     step_lines,
@@ -119,3 +123,20 @@ def test_agent_output_is_labelled_with_its_agent() -> None:
     assert output_entry(started) == ("agent-2: → Read {}", "tool")
     failed = ToolCallFinished(turn_id="t", call_id="c", output="no", is_error=True, agent_id="a")
     assert output_entry(failed) == ("a: no", "error")
+
+
+def test_merges_and_notices_become_transcript_entries() -> None:
+    merged = TaskMerged(task_id="1", result="merged")
+    assert note_entry(merged) == ("⇢ Merged into the base branch.", "verify")
+    blocked = TaskMerged(task_id="1", result="blocked", detail="a.txt has local changes")
+    assert note_entry(blocked) == ("⚠ Not merged (blocked): a.txt has local changes", "verify")
+    assert note_entry(Notice(message="2 stashes")) == ("📌 2 stashes", "verify")
+
+
+def test_activity_entries_cover_agents_exchanges_merges_and_notices() -> None:
+    started = AgentStarted(agent_id="a", role="coder", task_id="1")
+    assert activity_entry(started) == agent_entry(started)
+    note = ProgressNoted(agent_id="a", task_id="1", note="hi")
+    assert activity_entry(note) == exchange_entry(note)
+    merged = TaskMerged(task_id="1", result="merged")
+    assert activity_entry(merged) == note_entry(merged)

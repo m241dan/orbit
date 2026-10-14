@@ -20,6 +20,7 @@ from orbit.protocol import (
     EditTask,
     ErrorOccurred,
     Event,
+    Notice,
     ProgressNoted,
     RunTasks,
     Session,
@@ -28,6 +29,7 @@ from orbit.protocol import (
     StepState,
     SubmitPrompt,
     TaskGaveUp,
+    TaskMerged,
     TasksChanged,
     TaskSpec,
     TaskStarted,
@@ -47,8 +49,7 @@ from orbit.tui.view import (
     TOOL_ACCESS_DESCRIPTIONS,
     TOOL_ACCESS_OPTIONS,
     EntryKind,
-    agent_entry,
-    exchange_entry,
+    activity_entry,
     output_entry,
     task_started_entry,
     turn_end_entry,
@@ -252,8 +253,10 @@ class OrbitApp(App[None], inherit_bindings=False):
                 | AgentRequest()
                 | AgentReply()
                 | ProgressNoted()
+                | TaskMerged()
+                | Notice()
             ):
-                self._render_agent(event)
+                self._append(*activity_entry(event))
             case _:
                 assert_never(event)
 
@@ -310,16 +313,6 @@ class OrbitApp(App[None], inherit_bindings=False):
                 self._append(*verification_finished_entry(self._step(step), passed))
             case _:
                 assert_never(event)
-
-    def _render_agent(
-        self,
-        event: AgentStarted | TaskGaveUp | AgentExited | AgentRequest | AgentReply | ProgressNoted,
-    ) -> None:
-        """Note what an agent did, or said to orbit, in the transcript."""
-        if isinstance(event, AgentStarted | TaskGaveUp | AgentExited):
-            self._append(*agent_entry(event))
-        else:
-            self._append(*exchange_entry(event))
 
     def _show_settings(self, settings: Settings, choices: tuple[str, ...]) -> None:
         if choices != self._model_choices:
