@@ -6,6 +6,8 @@ claims of being done are verified, and how long it may take. Its model and tool 
 defaults for tasks orbit queues in that role; a task the user queues keeps its own settings.
 """
 
+import shlex
+from collections.abc import Sequence
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
@@ -150,6 +152,32 @@ class ChecksProposal(VerificationConfig):
 
     steps: tuple[VerificationStep, ...] = Field(min_length=1)
     setup: Setup | None = None
+
+
+def describe_checks(steps: Sequence[VerificationStep], setup: Setup | None) -> str:
+    """``steps``, one per line, then ``setup``; each part only if there is one."""
+    parts = []
+    if steps:
+        lines = [f"- {step.name}: {shlex.join(step.command)}" for step in steps]
+        parts.append("Steps:\n" + "\n".join(lines))
+    if setup is not None:
+        line = f"Setup: {shlex.join(setup.command)}"
+        if setup.watch:
+            line += f" (again when {', '.join(setup.watch)} changes)"
+        parts.append(line)
+    return "\n\n".join(parts)
+
+
+def configure_prompt(steps: Sequence[VerificationStep], setup: Setup | None) -> str:
+    """The task for a configurator asked for from the frontend, told what's configured now."""
+    prompt = (
+        "Set up this project's verification steps: work out the checks it uses and propose"
+        " them with propose_checks."
+    )
+    current = describe_checks(steps, setup)
+    if not current:
+        return prompt + " Nothing is configured yet."
+    return prompt + " Configured now (build on these):\n\n" + current
 
 
 def parse_proposal(data: dict[str, Any]) -> ChecksProposal:

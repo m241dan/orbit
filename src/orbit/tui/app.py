@@ -20,6 +20,7 @@ from orbit.protocol import (
     CancelAgent,
     CancelTurn,
     ChecksProposed,
+    ConfigureChecks,
     DecideProposal,
     EditTask,
     ErrorOccurred,
@@ -114,6 +115,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         Binding("i", "insert_mode", "Type"),
         Binding("ctrl+r", "run_tasks", "Run tasks"),
         Binding("ctrl+g", "super_review", "Super review"),
+        Binding("ctrl+e", "configure_checks", "Set up checks"),
         Binding("ctrl+t", "toggle_planning", "Plan"),
         Binding("escape", "cancel_turn", "Cancel turn"),
         Binding("ctrl+o", "pick_model", "Model"),
@@ -263,6 +265,10 @@ class OrbitApp(App[None], inherit_bindings=False):
     async def action_super_review(self) -> None:
         # Reviews have their own lane, so this works while tasks run.
         await self._session.send(RequestSuperReview())
+
+    async def action_configure_checks(self) -> None:
+        # The backend queues it first and runs it, or says one is already on its way.
+        await self._session.send(ConfigureChecks())
 
     async def action_cancel_turn(self) -> None:
         await self._session.send(CancelTurn())

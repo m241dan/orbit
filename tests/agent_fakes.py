@@ -138,6 +138,7 @@ class FakeTree:
         self.snapshots: list[str] = []
         self.dropped: list[str] = []
         self.setups: list[Setup | None] = []  # Each setup it was told to use, in order.
+        self.setup: Setup | None = None
 
     async def prepare(self, keep: bool) -> str:
         self.prepared.append(keep)
@@ -178,6 +179,7 @@ class FakeTree:
 
     def use_setup(self, setup: Setup | None) -> None:
         self.setups.append(setup)
+        self.setup = setup
 
 
 def verified(

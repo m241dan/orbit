@@ -113,7 +113,12 @@ class Merge:
 
 class CoderTree(Protocol):
     """The working tree the coding agent works in, apart from the user's checkout, and the
-    branch its commits are merged into from there."""
+    branch its commits are merged into from there.
+
+    ``setup`` is what sets it up now.
+    """
+
+    setup: Setup | None
 
     async def prepare(self, keep: bool) -> str:
         """Get the tree ready for a task and return its path. It catches up with the base

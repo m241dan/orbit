@@ -21,7 +21,7 @@ from orbit.agent.application.verifier import Verification, Verifier
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.commits import commit_message, configure_message
 from orbit.agent.domain.reviews import ReviewPlanner
-from orbit.agent.domain.roles import ChecksProposal
+from orbit.agent.domain.roles import ChecksProposal, configure_prompt
 from orbit.agent.domain.verification import FixAttempts, VerificationStep, fix_prompt
 from orbit.protocol import (
     AcceptTask,
@@ -30,6 +30,7 @@ from orbit.protocol import (
     CancelAgent,
     CancelTurn,
     Command,
+    ConfigureChecks,
     DecideProposal,
     EditTask,
     ErrorOccurred,
@@ -53,7 +54,10 @@ from orbit.protocol import (
     VerificationChanged,
 )
 
-NO_STEPS_NOTE = "No verification steps configured in .orbit/config.toml; tasks won't be verified."
+NO_STEPS_NOTE = "No verification steps configured. Press ctrl+e to set them up."
+CONFIGURING_NOTE = "A configurator task is already queued or running."
+# Statuses of a task that's yet to finish.
+WAITING: frozenset[TaskStatus] = frozenset({"pending", "running", "verifying"})
 
 
 def _verifier(
@@ -157,7 +161,7 @@ class AgentSession:
         match command:
             case SubmitPrompt() | CancelTurn() | UpdateSettings() | SetPlanning():
                 await self._handle_conversation(command)
-            case AddTask() | RunTasks():
+            case AddTask() | RunTasks() | ConfigureChecks():
                 await self._handle_tasks(command)
             case EditTask() | AcceptTask() | RemoveTask():
                 await self._handle_board(command)
@@ -188,15 +192,44 @@ class AgentSession:
         runner = self._planner if self._planning and self._planner else self._runner
         await self._start(self._run_turn(runner, text, self._settings))
 
-    async def _handle_tasks(self, command: AddTask | RunTasks) -> None:
+    async def _handle_tasks(self, command: AddTask | RunTasks | ConfigureChecks) -> None:
         match command:
             case AddTask(task=task):
                 self._board.add(task)
                 await self._publish_tasks()
             case RunTasks():
                 await self._run_tasks_if_possible()
+            case ConfigureChecks():
+                await self._configure_checks()
             case _:
                 assert_never(command)
+
+    async def _configure_checks(self) -> None:
+        """Queue a configurator first and run it, unless work is running already (then it goes
+        next); refused while one is queued or running."""
+        if self._desk is None:
+            await self._events.put(ErrorOccurred(message="Tasks need agents, and none are set up."))
+            return
+        if self._configuring():
+            await self._events.put(Notice(message=CONFIGURING_NOTE))
+            return
+        self._board.add_first(self._configurator_task(self._desk.agents))
+        await self._publish_tasks()
+        if self._turn is None or self._turn.done():
+            self._held = False
+            await self._start(self._run_tasks())
+
+    def _configuring(self) -> bool:
+        """Whether a configurator task is queued or running."""
+        return any(t.task.role == "configurator" and t.status in WAITING for t in self._board.tasks)
+
+    def _configurator_task(self, agents: Agents) -> TaskSpec:
+        """A configurator's task, told the steps and setup configured now."""
+        steps = self.verification.steps if self.verification else ()
+        prompt = configure_prompt(steps, agents.tree.setup if agents.tree else None)
+        role = agents.roles["configurator"]
+        settings = Settings(model=role.model, tool_access=role.tool_access)
+        return TaskSpec(prompt=prompt, settings=settings, role="configurator")
 
     async def _handle_board(self, command: EditTask | AcceptTask | RemoveTask) -> None:
         match command:

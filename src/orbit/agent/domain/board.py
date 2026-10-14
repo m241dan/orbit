@@ -46,6 +46,12 @@ class TaskBoard:
         self._tasks.insert(self.position(fixes) + 1, state.model_copy(update=inherited))
         return state.id
 
+    def add_first(self, task: TaskSpec) -> str:
+        """Add a pending ``task`` at the front, to run next; returns its id."""
+        state = TaskState(id=str(next(self._ids)), task=task)
+        self._tasks.insert(0, state)
+        return state.id
+
     def add_suggestion(
         self, task: TaskSpec, batch: str, round: int, origin: TaskOrigin = "review"
     ) -> str:

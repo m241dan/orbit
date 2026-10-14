@@ -126,6 +126,13 @@ class RequestSuperReview(_Message):
     type: Literal["request_super_review"] = "request_super_review"
 
 
+class ConfigureChecks(_Message):
+    """Queue a configurator task at the front of the task list and run it now, told the steps
+    and setup configured so far; refused while one is queued or running."""
+
+    type: Literal["configure_checks"] = "configure_checks"
+
+
 ProposalAction = Literal["accept", "revise", "end"]
 """What the user made of proposed checks: take them, ask for changes, or end the task."""
 
@@ -152,7 +159,8 @@ Command = Annotated[
     | RemoveTask
     | SetPlanning
     | CancelAgent
-    | DecideProposal,
+    | DecideProposal
+    | ConfigureChecks,
     Field(discriminator="type"),
 ]
 

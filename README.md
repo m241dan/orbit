@@ -52,6 +52,7 @@ In the app:
 | `enter` | On the agents pane: activate it (`j`/`k` move, `c` cancels the highlighted agent's work, `esc` leaves) |
 | `ctrl+r` | Run the tasks that haven't completed yet |
 | `ctrl+g` | Ask for a super review of the whole codebase now (works while tasks run) |
+| `ctrl+e` | Set up (or redo) the verification steps: queue a configurator task first and run it (see [Setting up verification](#setting-up-verification)) |
 | `ctrl+o` | Pick the model (default, fable, opus, sonnet, haiku) |
 | `ctrl+l` | Pick the tool access level (off, restricted, full) |
 | `esc` | Stop typing; otherwise cancel the running turn or close a picker |
@@ -141,7 +142,7 @@ shows up in seconds:
 6. Unit tests, 100% coverage: `uv run pytest --cov --cov-fail-under=100`
 
 With no steps configured, nothing is verified: the conversation says so at startup (`No verification
-steps configured in .orbit/config.toml; tasks won't be verified.`), and each task that would have
+steps configured. Press ctrl+e to set them up.`), and each task that would have
 been verified is skipped, with the reason in the conversation. `--no-verify` turns verification off
 whatever the file says.
 
@@ -169,6 +170,12 @@ inspects the repository (CI workflows, `.pre-commit-config.yaml`, `package.json`
 `pyproject.toml`, the Makefile and so on) and proposes the checks the project already uses, quick
 ones first, plus a setup command and the files whose changes should rerun it. It doesn't edit
 files.
+
+Press `ctrl+e` to start one. It goes to the front of the task list and runs straight away (if
+tasks are already running, it runs next). It works whether or not steps are configured: its prompt
+lists the steps and setup configured now, if any, so the agent builds on them, which makes `ctrl+e`
+the way to reconfigure too. While a configurator task is queued or running, `ctrl+e` doesn't add
+another; the conversation says `A configurator task is already queued or running.`
 
 Orbit tries each proposal in the agent's working directory first: the setup, then each step in
 order. If one fails, the agent gets the step's name and the end of its output and is asked to
