@@ -8,6 +8,7 @@ from typing import Any
 from orbit.agent import Agents, AgentSession, TurnRunner, Verification, VerificationStep
 from orbit.agent.application.ports import AgentLaunch, CallHandler, Merge, Reply
 from orbit.agent.domain.agent_task import Limits
+from orbit.agent.domain.roles import Setup
 from orbit.protocol import (
     AddTask,
     AgentReply,
@@ -136,6 +137,7 @@ class FakeTree:
         self.commits: list[str] = []
         self.snapshots: list[str] = []
         self.dropped: list[str] = []
+        self.setups: list[Setup | None] = []  # Each setup it was told to use, in order.
 
     async def prepare(self, keep: bool) -> str:
         self.prepared.append(keep)
@@ -173,6 +175,9 @@ class FakeTree:
 
     async def leftovers(self) -> list[str]:
         return self.notes
+
+    def use_setup(self, setup: Setup | None) -> None:
+        self.setups.append(setup)
 
 
 def verified(

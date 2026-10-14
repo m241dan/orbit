@@ -8,7 +8,7 @@ from typing import Any, Literal, Protocol
 
 from orbit.agent.domain.agents import Agent
 from orbit.agent.domain.conversation import Message, ModelResponse, ToolSpec
-from orbit.agent.domain.roles import ChecksProposal
+from orbit.agent.domain.roles import ChecksProposal, Setup
 from orbit.agent.domain.verification import VerificationStep
 from orbit.protocol import Event, MergeResult, Settings
 
@@ -38,6 +38,9 @@ class Tool(Protocol):
 
 StepRunner = Callable[[VerificationStep, str], Awaitable[tuple[bool, str]]]
 """Runs a verification step in a directory; returns whether it passed and its output."""
+
+ConfigWriter = Callable[[str, ChecksProposal], None]
+"""Makes accepted checks the verification steps and setup in the project config in a directory."""
 
 Workspace = Callable[[str], Awaitable[object]]
 """A fingerprint of the working tree in a directory, equal before and after a task that
@@ -151,6 +154,10 @@ class CoderTree(Protocol):
 
     async def leftovers(self) -> list[str]:
         """Notes on work left behind by earlier runs: unmerged commits, put-aside changes."""
+        ...
+
+    def use_setup(self, setup: Setup | None) -> None:
+        """Set the tree up with ``setup`` from the next :meth:`prepare` on."""
         ...
 
 

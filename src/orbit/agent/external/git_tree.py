@@ -148,6 +148,9 @@ class GitCoderTree:
             new.insert(0, IGNORE_HEADER)
         exclude.write_text("\n".join([*lines, *new]) + "\n")
 
+    def use_setup(self, setup: Setup | None) -> None:
+        self.setup = setup
+
     async def leftovers(self) -> list[str]:
         notes = [await self._unmerged(), await self._stashed()]
         return [note for note in notes if note]

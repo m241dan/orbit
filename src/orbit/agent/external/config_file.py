@@ -3,7 +3,10 @@
 import tomllib
 from pathlib import Path
 
-from orbit.agent.domain.roles import ConfigError, OrbitConfig, load_config
+import tomlkit
+from tomlkit.items import AoT, Table
+
+from orbit.agent.domain.roles import ChecksProposal, ConfigError, OrbitConfig, load_config
 
 CONFIG_PATH = ".orbit/config.toml"
 
@@ -20,3 +23,34 @@ def read_config(root: str = ".") -> OrbitConfig:
         return load_config(tomllib.loads(path.read_text()))
     except (tomllib.TOMLDecodeError, ConfigError) as exc:
         raise ConfigError(f"{path}: {exc}") from None
+
+
+def write_checks(root: str, checks: ChecksProposal) -> None:
+    """Make ``checks`` the verification steps and setup in ``root``'s file, creating it if it's
+    missing. The file's steps and setup are replaced; everything else in it stays as it was."""
+    path = Path(root) / CONFIG_PATH
+    path.parent.mkdir(parents=True, exist_ok=True)
+    document = tomlkit.parse(path.read_text()) if path.exists() else tomlkit.document()
+    verification = tomlkit.table(is_super_table=True)
+    verification["steps"] = _steps(checks)
+    document["verification"] = verification
+    if checks.setup is None:
+        document.pop("setup", None)
+    else:
+        setup = tomlkit.table()
+        setup["command"] = list(checks.setup.command)
+        if checks.setup.watch:
+            setup["watch"] = list(checks.setup.watch)
+        document["setup"] = setup
+    path.write_text(tomlkit.dumps(document))
+
+
+def _steps(checks: ChecksProposal) -> AoT:
+    steps = tomlkit.aot()
+    for step in checks.steps:
+        table: Table = tomlkit.table()
+        table["name"] = step.name
+        table["command"] = list(step.command)
+        steps.append(table)
+    steps[-1].add(tomlkit.nl())  # A blank line before whatever follows.
+    return steps

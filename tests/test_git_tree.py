@@ -416,3 +416,15 @@ async def test_ignored_paths_are_no_longer_committed_stashed_or_listed(repo: Pat
     exclude = (repo / ".git" / "info" / "exclude").read_text()
     assert exclude.count("__pycache__/") == 1
     assert "orbit" in exclude
+
+
+async def test_a_setup_swapped_in_runs_at_the_next_prepare(repo: Path) -> None:
+    tree = GitCoderTree(str(repo))
+    await tree.prepare(keep=False)
+    setup, runs = counting_setup(repo)
+    tree.use_setup(setup)
+    await tree.prepare(keep=False)
+    assert runs.read_text() == "x"
+    tree.use_setup(None)
+    await tree.prepare(keep=False)
+    assert runs.read_text() == "x"

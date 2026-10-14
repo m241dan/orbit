@@ -187,6 +187,14 @@ asked for: add mypy`, `… task ended`), followed by orbit's reply to the agent.
 up to `fix_attempts` times. If it's cancelled or exits while its proposal is showing, the window
 closes and the task is cancelled.
 
+Accepted checks take effect at once. Orbit itself (not the agent) writes them into
+`.orbit/config.toml`, replacing its `[[verification.steps]]` and `[setup]` and keeping every other
+key and comment, creating the file if it's missing. In the worktree the change is committed as
+"Configure verification steps", with the steps listed in the body, and lands on the base like any
+task's work; with `--no-worktree` the file is written in the current directory and not committed.
+The next task is verified with the new steps, and its worktree set up with the new setup, without
+a restart. Agents can't change their checks any other way: orbit reads the file only at startup.
+
 ### Where tasks run, and how their work lands
 
 Inside a git repository, agents don't touch your checkout. They work in orbit's own worktree,

@@ -19,7 +19,9 @@ from orbit.agent.application.proposals import FrontendReview
 from orbit.agent.application.review_lane import REVIEW_ROLES, ReviewLane
 from orbit.agent.application.verifier import Verification, Verifier
 from orbit.agent.domain.board import TaskBoard
+from orbit.agent.domain.commits import commit_message, configure_message
 from orbit.agent.domain.reviews import ReviewPlanner
+from orbit.agent.domain.roles import ChecksProposal
 from orbit.agent.domain.verification import FixAttempts, VerificationStep, fix_prompt
 from orbit.protocol import (
     AcceptTask,
@@ -396,18 +398,36 @@ class AgentSession:
         task = self._board.get(task_id).task
         before = await self._verifier.state_before(task, root) if self._verifier else None
         outcome = await AgentRun(task_id, self._board, self._verifier, desk).run(before, root)
+        if outcome.checks is not None:
+            await self._configure(desk, outcome.checks, root)
         if outcome.status == "completed":
             outcome = await self._land(desk, task_id, outcome, root)
         if outcome.failure is not None and outcome.status == "unverified":
             await self._queue_fix(task_id, attempts, *outcome.failure)
         return outcome.status
 
+    async def _configure(self, desk: AgentDesk, checks: ChecksProposal, root: str) -> None:
+        """Save the ``checks`` the user accepted into the config at ``root``, and use them from
+        the next task on. This, or a restart, is the only way the checks change."""
+        if desk.agents.write_config is not None:
+            desk.agents.write_config(root, checks)
+        if desk.agents.tree is not None:
+            desk.agents.tree.use_setup(checks.setup)
+        self._checks.verification = replace(self._checks.verification, steps=checks.steps)
+        self._board.set_steps([step.name for step in checks.steps])
+        await self._checks.publish_steps()
+
     async def _land(self, desk: AgentDesk, task_id: str, outcome: Outcome, root: str) -> Outcome:
-        """Commit and merge a completed task's work, when there's a tree to do it from."""
+        """Commit and merge a completed task's work, when there's a tree to do it from: the
+        checks the user accepted from it, or else the work itself."""
         if desk.agents.tree is None:
             return outcome
+        if outcome.checks is not None:
+            message = configure_message(outcome.checks)
+        else:
+            message = commit_message(self._board.get(task_id).task, outcome.summaries)
         lander = Lander(desk.agents.tree, self._board, self._verifier, self._events.put)
-        landing = await lander.land(task_id, outcome.summaries, root, self._starts.pop(task_id))
+        landing = await lander.land(task_id, message, root, self._starts.pop(task_id))
         if landing.failure is not None:
             return Outcome("unverified", landing.failure)
         if landing.commit is not None:

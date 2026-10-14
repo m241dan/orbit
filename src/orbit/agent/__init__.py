@@ -10,6 +10,7 @@ Layered, outermost first; each layer may import only the ones below it:
 from orbit.agent.application.agent_run import Agents
 from orbit.agent.application.loop import ModelLoopRunner
 from orbit.agent.application.ports import (
+    ConfigWriter,
     ModelClient,
     ProposalDecision,
     ProposalReview,
@@ -26,7 +27,7 @@ from orbit.agent.domain.roles import ChecksProposal, ConfigError, OrbitConfig, R
 from orbit.agent.domain.verification import VerificationStep
 from orbit.agent.external.checks import run_step
 from orbit.agent.external.claude_cli import MODEL_ALIASES, ClaudeCliRunner
-from orbit.agent.external.config_file import read_config
+from orbit.agent.external.config_file import read_config, write_checks
 from orbit.agent.external.echo import EchoModel
 from orbit.agent.external.git_tree import GitCoderTree, git_top_level, in_git_work_tree
 from orbit.agent.external.mcp_host import McpHost
@@ -40,6 +41,7 @@ __all__ = [
     "ChecksProposal",
     "ClaudeCliRunner",
     "ConfigError",
+    "ConfigWriter",
     "EchoModel",
     "GitCoderTree",
     "Limits",
@@ -63,4 +65,5 @@ __all__ = [
     "read_config",
     "run_step",
     "workspace_state",
+    "write_checks",
 ]

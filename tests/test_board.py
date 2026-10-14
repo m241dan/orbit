@@ -209,3 +209,10 @@ def test_tasks_can_be_removed_unless_they_run() -> None:
     board.set_status(second, "running")
     with pytest.raises(ValueError, match="while it runs"):
         board.remove(second)
+
+
+def test_steps_can_be_replaced_none_of_them_run() -> None:
+    board = TaskBoard(["Old"])
+    board.set_step(0, "passed")
+    board.set_steps(["Lint", "Tests"])
+    assert board.steps == (StepState(name="Lint"), StepState(name="Tests"))

@@ -2,9 +2,9 @@ from pathlib import Path
 
 import pytest
 
-from orbit.agent.domain.roles import BUILT_IN_ROLES, ConfigError, OrbitConfig, Setup
+from orbit.agent.domain.roles import BUILT_IN_ROLES, ChecksProposal, ConfigError, OrbitConfig, Setup
 from orbit.agent.domain.verification import VerificationStep
-from orbit.agent.external.config_file import CONFIG_PATH, read_config
+from orbit.agent.external.config_file import CONFIG_PATH, read_config, write_checks
 
 
 def write(root: Path, text: str) -> Path:
@@ -116,3 +116,86 @@ def test_orbit_syncs_its_worktree_whenever_uv_lock_changes() -> None:
     root = Path(__file__).parent.parent
     setup = read_config(str(root)).setup
     assert setup == Setup(command=("uv", "sync", "--frozen"), watch=("uv.lock",))
+
+
+LINT = VerificationStep(name="Lint", command=("ruff", "check"))
+TESTS = VerificationStep(name="Tests", command=("pytest", "-q"))
+SYNC = Setup(command=("uv", "sync"), watch=("uv.lock",))
+
+
+def test_writing_checks_creates_the_file_and_its_directory(tmp_path: Path) -> None:
+    write_checks(str(tmp_path), ChecksProposal(steps=(LINT, TESTS), setup=SYNC))
+    config = read_config(str(tmp_path))
+    assert config.verification.steps == (LINT, TESTS)
+    assert config.setup == SYNC
+
+
+def test_writing_checks_keeps_every_other_key_and_comment(tmp_path: Path) -> None:
+    path = write(
+        tmp_path,
+        """# Orbit's settings.
+fix_attempts = 3  # Plenty.
+
+[roles.coder]
+# Cheaper.
+model = "sonnet"
+""",
+    )
+    write_checks(str(tmp_path), ChecksProposal(steps=(LINT,)))
+    text = path.read_text()
+    assert text.startswith("# Orbit's settings.\nfix_attempts = 3  # Plenty.\n\n[roles.coder]\n")
+    assert '# Cheaper.\nmodel = "sonnet"\n' in text
+    config = read_config(str(tmp_path))
+    assert config.fix_attempts == 3
+    assert config.roles["coder"].model == "sonnet"
+    assert config.verification.steps == (LINT,)
+    assert config.setup is None
+
+
+def test_writing_checks_replaces_the_steps_and_setup_configured_before(tmp_path: Path) -> None:
+    path = write(
+        tmp_path,
+        """fix_attempts = 2
+
+# Quick ones first.
+[[verification.steps]]
+name = "Old lint"
+command = ["flake8"]
+
+[[verification.steps]]
+name = "Old tests"
+command = ["nose"]
+
+[setup]
+command = ["pip", "install", "-e", "."]
+watch = ["setup.py"]
+
+[roles.coder]
+model = "sonnet"
+""",
+    )
+    write_checks(str(tmp_path), ChecksProposal(steps=(TESTS, LINT), setup=SYNC))
+    text = path.read_text()
+    assert "flake8" not in text and "nose" not in text and "setup.py" not in text
+    assert "# Quick ones first.\n[[verification.steps]]" in text
+    config = read_config(str(tmp_path))
+    assert config.fix_attempts == 2
+    assert config.roles["coder"].model == "sonnet"
+    assert config.verification.steps == (TESTS, LINT)
+    assert config.setup == SYNC
+
+
+def test_writing_checks_without_setup_removes_the_old_one(tmp_path: Path) -> None:
+    write(tmp_path, '[setup]\ncommand = ["make"]\n')
+    write_checks(str(tmp_path), ChecksProposal(steps=(LINT,)))
+    config = read_config(str(tmp_path))
+    assert config.setup is None
+    assert config.verification.steps == (LINT,)
+
+
+def test_writing_checks_twice_gives_the_same_file(tmp_path: Path) -> None:
+    checks = ChecksProposal(steps=(LINT, TESTS), setup=SYNC)
+    write_checks(str(tmp_path), checks)
+    first = (tmp_path / CONFIG_PATH).read_text()
+    write_checks(str(tmp_path), checks)
+    assert (tmp_path / CONFIG_PATH).read_text() == first

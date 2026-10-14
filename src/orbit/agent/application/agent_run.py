@@ -19,6 +19,7 @@ from orbit.agent.application.ports import (
     AgentLaunch,
     AgentLauncher,
     CoderTree,
+    ConfigWriter,
     ProposalDecision,
     ProposalReview,
     Reply,
@@ -81,7 +82,8 @@ class Agents:
     ``review_suggestions`` bound what reviews suggest, and the whole codebase is super
     reviewed every ``super_review_every`` commits, suggesting up to
     ``super_review_suggestions`` tasks. ``proposal_review`` is where the user decides on
-    proposed checks; without it, proposals are refused.
+    proposed checks; without it, proposals are refused. ``write_config`` saves the checks the
+    user accepts into the project's config; without it, they're used but not saved.
     """
 
     host: AgentHost
@@ -97,16 +99,18 @@ class Agents:
     super_review_every: int = 10
     super_review_suggestions: int = 10
     proposal_review: ProposalReview | None = None
+    write_config: ConfigWriter | None = None
 
 
 @dataclass(frozen=True)
 class Outcome:
-    """How a task ended: its status, the failure to hand a fresh agent if it fell back, and
-    the agent's summaries of what it did, one per claim."""
+    """How a task ended: its status, the failure to hand a fresh agent if it fell back, the
+    agent's summaries of what it did, one per claim, and the checks the user accepted from it."""
 
     status: TaskStatus
     failure: Failure | None = None
     summaries: tuple[str, ...] = ()
+    checks: ChecksProposal | None = None
 
 
 @dataclass(frozen=True)
@@ -203,6 +207,7 @@ class AgentRun:
         self._checking = asyncio.Lock()  # One verification step at a time.
         self._failure: Failure | None = None
         self._failed_state: object = None  # The tree when verification last failed.
+        self._accepted: ChecksProposal | None = None
         self._agent: Agent | None = None
         self._root = "."
         self._tools: dict[str, Callable[[dict[str, Any]], Awaitable[Reply]]] = {
@@ -238,7 +243,8 @@ class AgentRun:
         finally:
             await self._stop(stream)
             self._desk.close(self.agent)
-        return Outcome(STATUSES[self._work.phase], self._failure, tuple(self._work.summaries))
+        status = STATUSES[self._work.phase]
+        return Outcome(status, self._failure, tuple(self._work.summaries), self._accepted)
 
     async def _launch(self) -> "asyncio.Task[None]":
         url = await self._desk.url()
@@ -387,6 +393,7 @@ class AgentRun:
         if decision is None:
             return self._work.ended()
         if decision.action == "accept":
+            self._accepted = checks
             return self._work.accepted()
         if decision.action == "revise":
             return self._work.revise(decision.feedback)

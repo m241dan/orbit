@@ -23,6 +23,7 @@ from orbit.agent import (
     read_config,
     run_step,
     workspace_state,
+    write_checks,
 )
 from orbit.protocol import Settings, ToolAccess
 from orbit.tui import OrbitApp
@@ -124,6 +125,7 @@ def chat(
         review_suggestions=config.review_suggestions,
         super_review_every=config.super_review_every,
         super_review_suggestions=config.super_review_suggestions,
+        write_config=write_checks,
     )
     session = AgentSession(
         ClaudeCliRunner(),

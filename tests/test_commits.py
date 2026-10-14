@@ -1,4 +1,6 @@
-from orbit.agent.domain.commits import commit_message
+from orbit.agent.domain.commits import commit_message, configure_message
+from orbit.agent.domain.roles import ChecksProposal, Setup
+from orbit.agent.domain.verification import VerificationStep
 from orbit.protocol import TaskSpec
 
 
@@ -26,3 +28,25 @@ def test_long_subjects_and_prompts_are_trimmed() -> None:
     subject, _, body = message.partition("\n\n")
     assert subject == "s" * 71 + "…"
     assert body.endswith("p" * 2000 + "…")
+
+
+def test_accepted_checks_are_committed_with_each_step_listed() -> None:
+    checks = ChecksProposal(
+        steps=(
+            VerificationStep("Lint", ("ruff", "check")),
+            VerificationStep("Tests", ("pytest", "-k", "not slow")),
+        ),
+        setup=Setup(command=("uv", "sync"), watch=("uv.lock", "pyproject.toml")),
+    )
+    assert configure_message(checks) == (
+        "Configure verification steps\n\n"
+        "Steps:\n- Lint: ruff check\n- Tests: pytest -k 'not slow'\n\n"
+        "Setup: uv sync (again when uv.lock, pyproject.toml changes)"
+    )
+
+
+def test_a_setup_without_watched_files_is_listed_alone_and_none_is_left_out() -> None:
+    steps = (VerificationStep("Lint", ("ruff",)),)
+    with_setup = ChecksProposal(steps=steps, setup=Setup(command=("make",)))
+    assert configure_message(with_setup).endswith("- Lint: ruff\n\nSetup: make")
+    assert configure_message(ChecksProposal(steps=steps)).endswith("- Lint: ruff")

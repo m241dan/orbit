@@ -139,6 +139,10 @@ class TaskBoard:
         self._tasks.append(state)
         return state.id
 
+    def set_steps(self, step_names: Sequence[str]) -> None:
+        """Track ``step_names`` from now on, none of them run yet."""
+        self._steps = tuple(StepState(name=name) for name in step_names)
+
     def reset_steps(self) -> None:
         self._steps = tuple(StepState(name=s.name) for s in self._steps)
 

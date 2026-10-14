@@ -1,12 +1,11 @@
 """Landing a task's verified work: committing it in the coder's tree and merging it."""
 
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 from orbit.agent.application.ports import CoderTree, Merge
 from orbit.agent.application.verifier import Failure, Verifier
 from orbit.agent.domain.board import TaskBoard
-from orbit.agent.domain.commits import commit_message
 from orbit.protocol import Event, TaskMerged
 
 # Times the work is rebased onto a base that keeps moving before orbit stops trying.
@@ -37,10 +36,10 @@ class Lander:
         self._verifier = verifier
         self._publish = publish
 
-    async def land(self, task_id: str, summaries: Sequence[str], root: str, start: str) -> Landing:
-        """Commit task ``task_id``'s work and merge it; ``start`` is the tree's head before the
-        task, so commits the agent made itself count too."""
-        await self._tree.commit(commit_message(self._board.get(task_id).task, summaries))
+    async def land(self, task_id: str, message: str, root: str, start: str) -> Landing:
+        """Commit task ``task_id``'s work with ``message`` and merge it; ``start`` is the tree's
+        head before the task, so commits the agent made itself count too."""
+        await self._tree.commit(message)
         merge = await self._tree.integrate()
         for _ in range(MAX_REBASES):
             if merge.result != "rebased":
