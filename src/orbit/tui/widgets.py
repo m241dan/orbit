@@ -18,6 +18,7 @@ from orbit.tui.view import (
     SPINNER_FPS,
     ConversationTab,
     EntryKind,
+    mark_tab_read,
     settings_summary,
     spinner_frame,
     step_lines,
@@ -100,8 +101,16 @@ class ConversationTabs(Tabs):
         return next((agent for agent, tid in self._tab_ids.items() if tid == tab_id), None)
 
     def track(self, event: Event) -> None:
-        """Add a tab for an agent that started, and remove an exited agent's tab."""
-        tabs = track_tabs(self.tabs, event)
+        """Add a tab for an agent that started, remove an exited agent's tab, and mark a tab
+        not being shown when its agent has new output."""
+        self._update(track_tabs(self.tabs, event, self.agent_of(self.active)))
+
+    def mark_read(self, agent: str | None) -> None:
+        """Clear ``agent``'s unread marker; None (All) has none."""
+        if agent is not None:
+            self._update(mark_tab_read(self.tabs, agent))
+
+    def _update(self, tabs: tuple[ConversationTab, ...]) -> None:
         if tabs == self.tabs:
             return
         for gone in set(self._tab_ids) - {t.agent_id for t in tabs}:

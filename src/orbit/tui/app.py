@@ -235,7 +235,9 @@ class OrbitApp(App[None], inherit_bindings=False):
 
     @on(Tabs.TabActivated, "#conversation-tabs")
     def _show_tab(self, event: Tabs.TabActivated) -> None:
-        agent = self.query_one(ConversationTabs).agent_of(event.tab.id or "")
+        tabs = self.query_one(ConversationTabs)
+        agent = tabs.agent_of(event.tab.id or "")
+        tabs.mark_read(agent)
         self.query_one(Transcript).show_only(agent, event.tab.label_text)
 
     @on(AgentsPane.Cancel)

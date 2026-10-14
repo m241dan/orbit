@@ -340,21 +340,58 @@ class ConversationTab:
     unread: bool = False
 
 
-def track_tabs(tabs: tuple[ConversationTab, ...], event: Event) -> tuple[ConversationTab, ...]:
-    """The open conversation tabs after ``event``."""
+_TAB_OUTPUT = (
+    AssistantMessage,
+    ToolCallStarted,
+    ToolCallFinished,
+    AgentRequest,
+    AgentReply,
+    ProgressNoted,
+    TaskGaveUp,
+)
+"""Events that add an entry to their agent's conversation."""
+
+
+def track_tabs(
+    tabs: tuple[ConversationTab, ...], event: Event, active: str | None = None
+) -> tuple[ConversationTab, ...]:
+    """The open conversation tabs after ``event``; output for an agent other than ``active``,
+    the one being shown, marks its tab unread."""
     if isinstance(event, AgentStarted):
         return (*tabs, ConversationTab(event.agent_id, event.role))
     if isinstance(event, AgentExited):
         return tuple(tab for tab in tabs if tab.agent_id != event.agent_id)
+    if isinstance(event, _TAB_OUTPUT):
+        return _mark_unread(tabs, event.agent_id, active)
     return tabs
 
 
+def _mark_unread(
+    tabs: tuple[ConversationTab, ...], agent: str | None, active: str | None
+) -> tuple[ConversationTab, ...]:
+    """``tabs`` with ``agent``'s tab unread, unless it's the one being shown."""
+    return tabs if agent == active else _set_unread(tabs, agent, True)
+
+
+def mark_tab_read(tabs: tuple[ConversationTab, ...], agent: str) -> tuple[ConversationTab, ...]:
+    """``tabs`` with ``agent``'s tab no longer unread."""
+    return _set_unread(tabs, agent, False)
+
+
+def _set_unread(
+    tabs: tuple[ConversationTab, ...], agent: str | None, unread: bool
+) -> tuple[ConversationTab, ...]:
+    return tuple(replace(tab, unread=unread) if tab.agent_id == agent else tab for tab in tabs)
+
+
 def tab_labels(tabs: Sequence[ConversationTab]) -> list[str]:
-    """Tabs named by role: the first of a role is just the role, later ones "coder 2", …"""
+    """Tabs named by role: the first of a role is just the role, later ones "coder 2", …;
+    unread tabs end in " *"."""
     seen: Counter[str] = Counter()
     labels: list[str] = []
     for tab in tabs:
         seen[tab.role] += 1
         count = seen[tab.role]
-        labels.append(tab.role if count == 1 else f"{tab.role} {count}")
+        label = tab.role if count == 1 else f"{tab.role} {count}"
+        labels.append(f"{label} *" if tab.unread else label)
     return labels

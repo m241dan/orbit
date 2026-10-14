@@ -750,6 +750,30 @@ async def test_f_no_longer_filters() -> None:
         assert len(shown(app)) == 2
 
 
+async def test_background_output_marks_a_tab_until_it_is_shown() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test(size=(120, 30)) as pilot:
+        await feed_events(session, pilot, started("agent-1"), started("agent-2", "reviewer"))
+        await feed_events(session, pilot, said("agent-1", "coding"), said("agent-2", "hmm"))
+        assert tab_strip(app) == ["All", "coder *", "reviewer *"]
+        await feed_events(session, pilot, AssistantMessage(turn_id="t", text="chat"))
+        assert tab_strip(app) == ["All", "coder *", "reviewer *"]
+
+        await pilot.press("tab")
+        await pilot.pause()
+        assert tab_strip(app) == ["All", "coder", "reviewer *"]
+        assert app.query_one(Transcript).border_title == "Conversation · coder"
+        # Output for the tab being shown doesn't mark it.
+        await feed_events(session, pilot, said("agent-1", "more"))
+        assert tab_strip(app) == ["All", "coder", "reviewer *"]
+
+        await pilot.press("shift+tab")
+        await pilot.pause()
+        await feed_events(session, pilot, said("agent-1", "again"))
+        assert tab_strip(app) == ["All", "coder *", "reviewer *"]
+
+
 def active_tab(app: OrbitApp) -> str:
     tab = app.query_one(ConversationTabs).active_tab
     assert tab is not None

@@ -7,6 +7,7 @@ from orbit.protocol import (
     AgentRequest,
     AgentStarted,
     AssistantMessage,
+    Event,
     Notice,
     ProgressNoted,
     ReviewStatus,
@@ -29,6 +30,7 @@ from orbit.tui.view import (
     agent_entry,
     agent_line,
     exchange_entry,
+    mark_tab_read,
     note_entry,
     output_entry,
     review_line,
@@ -208,3 +210,37 @@ def test_tabs_are_named_by_role_and_numbered_among_those_open() -> None:
     assert tab_labels(tabs) == ["coder", "reviewer", "coder 2", "coder 3"]
     tabs = track_tabs(tabs, AgentExited(agent_id="agent-1", reason="finished"))
     assert tab_labels(tabs) == ["reviewer", "coder", "coder 2"]
+
+
+def test_output_from_a_background_agent_marks_its_tab_unread() -> None:
+    tabs = (ConversationTab("agent-1", "coder"), ConversationTab("agent-2", "coder"))
+    outputs: list[Event] = [
+        AssistantMessage(turn_id="t", text="hi", agent_id="agent-2"),
+        ToolCallStarted(turn_id="t", call_id="c", name="Read", arguments={}, agent_id="agent-2"),
+        ToolCallFinished(turn_id="t", call_id="c", output="ok", agent_id="agent-2"),
+        AgentRequest(agent_id="agent-2", request_id="r", tool="get_task", arguments={}),
+        AgentReply(agent_id="agent-2", request_id="r", text="ok"),
+        ProgressNoted(agent_id="agent-2", task_id="1", note="n"),
+        TaskGaveUp(agent_id="agent-2", task_id="1", reason="r"),
+    ]
+    for event in outputs:
+        marked = track_tabs(tabs, event, active="agent-1")
+        assert marked == (tabs[0], ConversationTab("agent-2", "coder", True))
+        assert tab_labels(marked) == ["coder", "coder 2 *"]
+        # Output for the tab being looked at isn't unread.
+        assert track_tabs(tabs, event, active="agent-2") == tabs
+
+
+def test_events_with_no_agent_mark_nothing() -> None:
+    tabs = (ConversationTab("agent-1", "coder"),)
+    assert track_tabs(tabs, AssistantMessage(turn_id="t", text="hi")) is tabs
+    assert track_tabs(tabs, Notice(message="x"), active=None) is tabs
+
+
+def test_marking_a_tab_read_clears_only_its_marker() -> None:
+    tabs = (ConversationTab("agent-1", "coder", True), ConversationTab("agent-2", "coder", True))
+    assert mark_tab_read(tabs, "agent-1") == (
+        ConversationTab("agent-1", "coder"),
+        ConversationTab("agent-2", "coder", True),
+    )
+    assert tab_labels(mark_tab_read(tabs, "agent-1")) == ["coder", "coder 2 *"]
