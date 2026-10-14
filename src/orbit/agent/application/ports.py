@@ -4,10 +4,11 @@
 
 from collections.abc import AsyncIterator, Awaitable, Callable, Collection, Sequence
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 from orbit.agent.domain.agents import Agent
 from orbit.agent.domain.conversation import Message, ModelResponse, ToolSpec
+from orbit.agent.domain.roles import ChecksProposal
 from orbit.agent.domain.verification import VerificationStep
 from orbit.protocol import Event, MergeResult, Settings
 
@@ -150,4 +151,22 @@ class CoderTree(Protocol):
 
     async def leftovers(self) -> list[str]:
         """Notes on work left behind by earlier runs: unmerged commits, put-aside changes."""
+        ...
+
+
+@dataclass(frozen=True)
+class ProposalDecision:
+    """What the user made of a proposal: ``accept`` it, have the agent ``revise`` it as
+    ``feedback`` says, or ``end`` the task."""
+
+    action: Literal["accept", "revise", "end"]
+    feedback: str = ""
+
+
+class ProposalReview(Protocol):
+    """Where the user decides on the checks an agent proposed."""
+
+    async def review(self, task_id: str, proposal: ChecksProposal) -> ProposalDecision:
+        """Show the user ``proposal``, which task ``task_id``'s agent made and orbit tried;
+        returns their decision."""
         ...

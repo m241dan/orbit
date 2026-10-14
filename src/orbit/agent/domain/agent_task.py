@@ -8,18 +8,22 @@ agent. An agent that exits without claiming done is taken to have finished.
 from dataclasses import dataclass
 from typing import Literal
 
-from orbit.agent.domain.verification import VerificationStep, fix_prompt
+from orbit.agent.domain.verification import VerificationStep, failure_report, fix_prompt
 from orbit.protocol import TaskSpec
 
-Phase = Literal["assigned", "working", "verifying", "done", "fallback", "gave_up"]
+Phase = Literal["assigned", "working", "verifying", "done", "fallback", "gave_up", "ended"]
 """Where the agent's work stands.
 
 ``assigned``: started, hasn't asked for the task yet. ``working``: has it. ``verifying``: claimed
 it's done, and the checks are running. ``done``: the checks passed. ``fallback``: they failed with
 no fixes left to ask of this agent, so another one takes over. ``gave_up``: the agent said it can't.
+``ended``: the user ended it while deciding on the agent's proposal.
+
+A proposal goes through the same phases: ``verifying`` while orbit tries it and the user
+decides, ``done`` once accepted, and ``fallback`` when revisions run out.
 """
 
-FINISHED: frozenset[Phase] = frozenset({"done", "fallback", "gave_up"})
+FINISHED: frozenset[Phase] = frozenset({"done", "fallback", "gave_up", "ended"})
 
 STOP = "End your turn now."
 REFUSALS: dict[Phase, str] = {
@@ -28,6 +32,7 @@ REFUSALS: dict[Phase, str] = {
     "done": "This task is finished. " + STOP,
     "fallback": "This task is finished. " + STOP,
     "gave_up": "This task is finished. " + STOP,
+    "ended": "This task is finished. " + STOP,
 }
 
 
@@ -35,7 +40,8 @@ REFUSALS: dict[Phase, str] = {
 class Limits:
     """How much one agent may ask of orbit on one task.
 
-    ``max_attempts``: fixes asked of it before falling back to a fresh agent.
+    ``max_attempts``: fixes asked of it before falling back to a fresh agent, or revisions of
+    its proposal before orbit stops asking.
     ``max_checks``: verification steps it may run itself before claiming done.
     """
 
@@ -126,6 +132,46 @@ class AgentTask:
             return REFUSALS[self.phase]
         self.phase, self.reason = "gave_up", reason
         return f"Understood; the task is marked as given up. {STOP}"
+
+    def propose(self) -> str | None:
+        """Whether the agent may submit a proposal now; ``None`` if so, else why not."""
+        if self.phase != "working":
+            return REFUSALS[self.phase]
+        self.phase = "verifying"
+        return None
+
+    def proposal_failed(self, step: VerificationStep, output: str) -> str:
+        """Trying the proposal failed at ``step``: ask for a revision."""
+        return self._revise(
+            f"Your proposed step {step.name!r} failed.\n\n{failure_report(step, output)}"
+        )
+
+    def revise(self, feedback: str) -> str:
+        """The user asked for changes to the proposal: pass on their ``feedback``."""
+        quoted = "\n".join(f"> {line}" for line in feedback.strip().splitlines())
+        return self._revise(f"The user asked for changes to your proposal:\n\n{quoted}")
+
+    def _revise(self, reason: str) -> str:
+        if not self.alive or self.attempt >= self.limits.max_attempts:
+            self.phase = "fallback"
+            return (
+                f"{reason}\n\nYou have used all {self.limits.max_attempts} revisions, so orbit"
+                f" stops here. {STOP}"
+            )
+        self.phase = "working"
+        self.attempt += 1
+        return (
+            f"{reason}\n\nRevise your proposal and call propose_checks again."
+            f" (Revision {self.attempt} of {self.limits.max_attempts}.)"
+        )
+
+    def accepted(self) -> str:
+        self.phase = "done"
+        return "The user accepted your proposal. " + STOP
+
+    def ended(self) -> str:
+        self.phase = "ended"
+        return "The user ended this task. " + STOP
 
     def request_check(self) -> str | None:
         """Whether the agent may run a verification step now; ``None`` if so, else why not."""

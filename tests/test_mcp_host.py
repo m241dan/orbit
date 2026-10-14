@@ -65,6 +65,7 @@ async def test_offers_orbit_tools_with_their_arguments() -> None:
         assert tools["complete_task"].input_schema["required"] == ["summary"]
         assert tools["run_check"].input_schema["required"] == ["step"]
         assert tools["suggest_task"].input_schema["required"] == ["title", "prompt"]
+        assert tools["propose_checks"].input_schema["required"] == ["steps"]
         assert all(tool.description for tool in tools.values())
 
 
@@ -88,6 +89,13 @@ async def test_passes_calls_with_the_token_to_the_handler_and_returns_its_text()
         ("give_up", {"reason": "blocked"}),
         ("suggest_task", {"title": "Add tests", "prompt": "Cover parse()."}),
         ("propose_task", {"title": "Add a CLI flag", "prompt": "Add --fast."}),
+        (
+            "propose_checks",
+            {
+                "steps": [{"name": "Lint", "command": ["ruff", "check"]}],
+                "setup": {"command": ["uv", "sync"], "watch": ["uv.lock"]},
+            },
+        ),
     ],
 )
 async def test_every_tool_passes_its_call_through(tool: str, arguments: dict[str, Any]) -> None:
@@ -95,6 +103,14 @@ async def test_every_tool_passes_its_call_through(tool: str, arguments: dict[str
     async with serving(handler) as url, connected(url) as client:
         await client.call_tool(tool, arguments)
     assert handler.calls == [("tok-1", tool, arguments)]
+
+
+async def test_a_proposal_without_setup_passes_none() -> None:
+    handler = RecordingHandler()
+    steps = [{"name": "Tests", "command": ["pytest"]}]
+    async with serving(handler) as url, connected(url) as client:
+        await client.call_tool("propose_checks", {"steps": steps})
+    assert handler.calls == [("tok-1", "propose_checks", {"steps": steps, "setup": None})]
 
 
 async def test_error_replies_become_tool_errors() -> None:

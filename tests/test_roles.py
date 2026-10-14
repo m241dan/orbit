@@ -3,17 +3,25 @@ import pytest
 from orbit.agent.domain.roles import (
     BUILT_IN_ROLES,
     ORBIT_TOOLS,
+    ChecksProposal,
     ConfigError,
     OrbitConfig,
     Role,
     Setup,
     load_config,
+    parse_proposal,
 )
 from orbit.agent.domain.verification import VerificationStep
 
 
 def test_built_in_roles_cover_coding_reviewing_and_planning() -> None:
-    assert set(BUILT_IN_ROLES) == {"coder", "reviewer", "super-reviewer", "planner"}
+    assert set(BUILT_IN_ROLES) == {
+        "coder",
+        "reviewer",
+        "super-reviewer",
+        "planner",
+        "configurator",
+    }
     coder = BUILT_IN_ROLES["coder"]
     assert coder.verify and coder.tool_access == "full"
     assert set(coder.tools) == {
@@ -35,6 +43,47 @@ def test_built_in_roles_cover_coding_reviewing_and_planning() -> None:
     assert all(role.instructions for role in BUILT_IN_ROLES.values())
     assert "don't commit" in coder.instructions.lower()
     assert all(set(role.tools) <= set(ORBIT_TOOLS) for role in BUILT_IN_ROLES.values())
+
+
+def test_the_configurator_proposes_checks_without_editing_or_being_verified() -> None:
+    configurator = BUILT_IN_ROLES["configurator"]
+    assert configurator.tool_access == "restricted" and not configurator.verify
+    assert configurator.tools == ("get_task", "propose_checks", "report_progress", "give_up")
+    assert "propose_checks" in ORBIT_TOOLS
+    instructions = configurator.instructions
+    for hint in ("pre-commit", "package.json", "pyproject.toml", "Makefile", "quick", "setup"):
+        assert hint in instructions
+    assert "don't edit files" in instructions.lower()
+
+
+def test_a_proposal_reads_like_the_config() -> None:
+    proposal = parse_proposal(
+        {
+            "steps": [{"name": "Lint", "command": ["ruff", "check"]}],
+            "setup": {"command": ["uv", "sync"], "watch": ["uv.lock"]},
+        }
+    )
+    assert proposal == ChecksProposal(
+        steps=(VerificationStep("Lint", ("ruff", "check")),),
+        setup=Setup(command=("uv", "sync"), watch=("uv.lock",)),
+    )
+    assert parse_proposal({"steps": [{"name": "T", "command": ["t"]}], "setup": None}).setup is None
+
+
+@pytest.mark.parametrize(
+    ("data", "message"),
+    [
+        ({}, "steps"),
+        ({"steps": []}, "steps"),
+        ({"steps": [{"name": "", "command": ["x"]}]}, "step 1 has no name"),
+        ({"steps": [{"name": "a", "command": []}]}, "step 1 has no command"),
+        ({"steps": [{"name": "a", "command": ["x"]}], "setup": {"command": []}}, "setup.command"),
+        ({"steps": [{"name": "a", "command": ["x"]}], "extra": 1}, "extra"),
+    ],
+)
+def test_invalid_proposals_are_reported_readably(data: dict[str, object], message: str) -> None:
+    with pytest.raises(ConfigError, match=message):
+        parse_proposal(data)
 
 
 def test_defaults_without_a_file() -> None:

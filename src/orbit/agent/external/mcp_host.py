@@ -8,7 +8,7 @@ token, which decides who is asking.
 import asyncio
 import socket
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, NotRequired, TypedDict
 
 import uvicorn
 from mcp.server.mcpserver import Context, MCPServer
@@ -22,6 +22,20 @@ INSTRUCTIONS = (
     " call complete_task and wait for its reply, which says whether verification passed."
 )
 TOOL_NAMES = ORBIT_TOOLS
+
+
+class ProposedStep(TypedDict):
+    """A verification step: its name, and the command (program and arguments) it runs."""
+
+    name: str
+    command: list[str]
+
+
+class ProposedSetup(TypedDict):
+    """The command that readies a fresh checkout, and the files whose changes rerun it."""
+
+    command: list[str]
+    watch: NotRequired[list[str]]
 
 
 def bearer_token(headers: Mapping[str, str] | None) -> str:
@@ -80,6 +94,19 @@ def build_server(handler: CallHandler) -> MCPServer:
         """Propose a task for the plan: a short title, and a prompt saying what to change and
         how to tell it's done. It's added as a draft the user accepts or drops."""
         return await call(ctx, "propose_task", {"title": title, "prompt": prompt})
+
+    @server.tool(structured_output=False)
+    async def propose_checks(
+        steps: list[ProposedStep], ctx: Context, setup: ProposedSetup | None = None
+    ) -> str:
+        """Propose the project's verification steps, quick ones first, and optionally the
+        setup command that readies a fresh checkout with the files that should rerun it.
+
+        Orbit runs the setup and each step, which can take minutes, then the user decides:
+        wait for the reply. It says what failed, what the user wants changed, or that
+        they accepted or ended it.
+        """
+        return await call(ctx, "propose_checks", {"steps": steps, "setup": setup})
 
     return server
 

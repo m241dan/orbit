@@ -3,7 +3,8 @@
 The agent is a separate process that reaches orbit through the :class:`AgentHost`. Its calls
 arrive at the :class:`AgentDesk`, which passes each to the :class:`AgentRun` for that agent.
 Verification runs in the run's own task, not in a call's, so it carries on if the agent
-disconnects while waiting for the result.
+disconnects while waiting for the result. So does trying a proposal of checks, and asking the
+user what they make of it.
 """
 
 import asyncio
@@ -18,14 +19,21 @@ from orbit.agent.application.ports import (
     AgentLaunch,
     AgentLauncher,
     CoderTree,
+    ProposalReview,
     Reply,
 )
 from orbit.agent.application.verifier import Failure, Verifier
 from orbit.agent.domain.agent_task import FINISHED, AgentTask, Limits, Phase
 from orbit.agent.domain.agents import Agent, AgentRegistry, bootstrap_prompt
 from orbit.agent.domain.board import TaskBoard
-from orbit.agent.domain.roles import BUILT_IN_ROLES, Role
-from orbit.agent.domain.verification import trim_output
+from orbit.agent.domain.roles import (
+    BUILT_IN_ROLES,
+    ChecksProposal,
+    ConfigError,
+    Role,
+    parse_proposal,
+)
+from orbit.agent.domain.verification import VerificationStep, trim_output
 from orbit.protocol import (
     AgentExited,
     AgentExitReason,
@@ -55,6 +63,7 @@ STATUSES: dict[Phase, TaskStatus] = {
     "done": "completed",
     "fallback": "unverified",
     "gave_up": "gave_up",
+    "ended": "cancelled",
 }
 
 
@@ -70,7 +79,8 @@ class Agents:
     With ``review`` (and a tree), landed work is reviewed; ``review_rounds`` and
     ``review_suggestions`` bound what reviews suggest, and the whole codebase is super
     reviewed every ``super_review_every`` commits, suggesting up to
-    ``super_review_suggestions`` tasks.
+    ``super_review_suggestions`` tasks. ``proposal_review`` is where the user decides on
+    proposed checks; without it, proposals are refused.
     """
 
     host: AgentHost
@@ -85,6 +95,7 @@ class Agents:
     review_suggestions: int = 5
     super_review_every: int = 10
     super_review_suggestions: int = 10
+    proposal_review: ProposalReview | None = None
 
 
 @dataclass(frozen=True)
@@ -95,6 +106,14 @@ class Outcome:
     status: TaskStatus
     failure: Failure | None = None
     summaries: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class _Proposal:
+    """Checks the agent proposed, and the call waiting for orbit's answer."""
+
+    checks: ChecksProposal
+    answer: "asyncio.Future[Reply]"
 
 
 def _answer(claim: "asyncio.Future[Reply] | None", reply: Reply) -> None:
@@ -175,7 +194,7 @@ class AgentRun:
         self._desk = desk
         self._publish = desk.publish
         self._work = AgentTask(board.get(task_id).task, desk.agents.limits)
-        self._inbox: asyncio.Queue[asyncio.Future[Reply] | Wake] = asyncio.Queue()
+        self._inbox: asyncio.Queue[asyncio.Future[Reply] | _Proposal | Wake] = asyncio.Queue()
         self._checking = asyncio.Lock()  # One verification step at a time.
         self._failure: Failure | None = None
         self._failed_state: object = None  # The tree when verification last failed.
@@ -188,6 +207,7 @@ class AgentRun:
             "report_progress": self._report_progress,
             "give_up": self._give_up,
             "suggest_task": self._suggest_task,
+            "propose_checks": self._propose_checks,
         }
 
     @property
@@ -295,6 +315,8 @@ class AgentRun:
                 return
             if isinstance(item, asyncio.Future):
                 await self._verify(before, item)
+            elif isinstance(item, _Proposal):
+                await self._consider(item)
 
     async def _exited(self, before: object) -> None:
         if not self._work.exited():
@@ -343,6 +365,42 @@ class AgentRun:
             await self._publish(TasksChanged(tasks=self._board.tasks))
         return reply
 
+    async def _consider(self, proposal: _Proposal) -> None:
+        """Try ``proposal``, have the user decide on it if it works, and answer the agent."""
+        try:
+            reply = await self._decide(proposal.checks)
+        except asyncio.CancelledError:
+            _answer(proposal.answer, Reply("The task was cancelled.", is_error=True))
+            raise
+        _answer(proposal.answer, Reply(reply))
+
+    async def _decide(self, checks: ChecksProposal) -> str:
+        failure = await self._try(checks)
+        if failure is not None:
+            return self._work.proposal_failed(*failure)
+        review = self._desk.agents.proposal_review
+        assert review is not None  # Proposals are refused without one.
+        decision = await review.review(self._task_id, checks)
+        if decision.action == "accept":
+            return self._work.accepted()
+        if decision.action == "revise":
+            return self._work.revise(decision.feedback)
+        return self._work.ended()
+
+    async def _try(self, checks: ChecksProposal) -> Failure | None:
+        """Run ``checks``' setup, then each step, in the agent's tree; returns the first
+        failure."""
+        assert self._verifier is not None  # Proposals are refused without one.
+        steps = checks.steps
+        if checks.setup is not None:
+            steps = (VerificationStep("setup", checks.setup.command), *steps)
+        async with self._checking:
+            for step in steps:
+                passed, output = await self._verifier.run_one(step, self._root)
+                if not passed:
+                    return step, output
+        return None
+
     # Tools
 
     async def _get_task(self, arguments: dict[str, Any]) -> Reply:
@@ -383,6 +441,21 @@ class AgentRun:
             return Reply("Orbit isn't taking suggestions.", is_error=True)
         title, prompt = str(arguments.get("title", "")), str(arguments.get("prompt", ""))
         return await self._desk.suggest(self._task_id, title, prompt)
+
+    async def _propose_checks(self, arguments: dict[str, Any]) -> Reply:
+        if self._verifier is None or self._desk.agents.proposal_review is None:
+            return Reply("Orbit isn't taking check proposals.", is_error=True)
+        try:
+            checks = parse_proposal(arguments)
+        except ConfigError as exc:
+            return Reply(f"Invalid proposal: {exc}", is_error=True)
+        refusal = self._work.propose()
+        if refusal is not None:
+            return Reply(refusal, is_error=True)
+        answer: asyncio.Future[Reply] = asyncio.get_running_loop().create_future()
+        self._inbox.put_nowait(_Proposal(checks, answer))
+        # Shielded, like a claim: the user still decides if the agent disconnects.
+        return await asyncio.shield(answer)
 
     async def _give_up(self, arguments: dict[str, Any]) -> Reply:
         reason = str(arguments.get("reason", ""))

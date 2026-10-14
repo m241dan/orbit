@@ -9,12 +9,20 @@ Layered, outermost first; each layer may import only the ones below it:
 
 from orbit.agent.application.agent_run import Agents
 from orbit.agent.application.loop import ModelLoopRunner
-from orbit.agent.application.ports import ModelClient, StepRunner, Tool, TurnRunner, Workspace
+from orbit.agent.application.ports import (
+    ModelClient,
+    ProposalDecision,
+    ProposalReview,
+    StepRunner,
+    Tool,
+    TurnRunner,
+    Workspace,
+)
 from orbit.agent.application.session import NO_STEPS_NOTE, AgentSession
 from orbit.agent.application.tools import ToolRegistry
 from orbit.agent.application.verifier import Verification
 from orbit.agent.domain.agent_task import Limits
-from orbit.agent.domain.roles import ConfigError, OrbitConfig, Role, Setup
+from orbit.agent.domain.roles import ChecksProposal, ConfigError, OrbitConfig, Role, Setup
 from orbit.agent.domain.verification import VerificationStep
 from orbit.agent.external.checks import run_step
 from orbit.agent.external.claude_cli import MODEL_ALIASES, ClaudeCliRunner
@@ -29,6 +37,7 @@ __all__ = [
     "NO_STEPS_NOTE",
     "AgentSession",
     "Agents",
+    "ChecksProposal",
     "ClaudeCliRunner",
     "ConfigError",
     "EchoModel",
@@ -38,6 +47,8 @@ __all__ = [
     "ModelClient",
     "ModelLoopRunner",
     "OrbitConfig",
+    "ProposalDecision",
+    "ProposalReview",
     "Role",
     "Setup",
     "StepRunner",

@@ -21,6 +21,7 @@ ORBIT_TOOLS = (
     "give_up",
     "suggest_task",
     "propose_task",
+    "propose_checks",
 )
 """Every tool orbit's MCP server offers agents."""
 
@@ -96,6 +97,19 @@ BUILT_IN_ROLES: dict[str, Role] = {
         tools=("propose_task", "report_progress"),
         verify=False,
     ),
+    "configurator": Role(
+        instructions=(
+            "You are orbit's configurator. Work out how this project checks its code: inspect"
+            " the repository (CI workflows, .pre-commit-config.yaml, package.json scripts,"
+            " pyproject.toml, the Makefile and so on) to find the checks it already uses."
+            " Propose them with propose_checks, quick ones first, plus a setup command that"
+            " makes a fresh checkout ready and the files whose changes should rerun it. Orbit"
+            " runs your proposal, then shows it to the user. Don't edit files. When orbit"
+            " reports a failure or the user asks for changes, revise and propose again."
+        ),
+        tools=("get_task", "propose_checks", "report_progress", "give_up"),
+        verify=False,
+    ),
 }
 
 
@@ -129,6 +143,22 @@ class Setup(_Config):
             if not path or path.startswith("/") or ".." in path.split("/"):
                 raise ValueError(f"{path!r} isn't a relative path inside the project")
         return watch
+
+
+class ChecksProposal(VerificationConfig):
+    """Verification steps, at least one, and a setup, as an agent proposes them."""
+
+    steps: tuple[VerificationStep, ...] = Field(min_length=1)
+    setup: Setup | None = None
+
+
+def parse_proposal(data: dict[str, Any]) -> ChecksProposal:
+    """The proposal ``data`` (an agent's arguments) describes; raises :class:`ConfigError` if
+    it's invalid."""
+    try:
+        return ChecksProposal.model_validate(data)
+    except ValidationError as exc:
+        raise ConfigError(_describe(exc)) from None
 
 
 class OrbitConfig(_Config):
