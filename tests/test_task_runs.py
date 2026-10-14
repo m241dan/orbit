@@ -69,7 +69,9 @@ async def test_each_task_gets_its_own_agent_with_its_settings() -> None:
     second = TaskSpec(prompt="two", settings=Settings(tool_access="off"))
     events = await asyncio.wait_for(run(session, first, second), 5)
 
-    assert [(a.id, a.task_id, s) for a, _, _, s in launcher.launches] == [
+    assert [
+        (launch.agent.id, launch.agent.task_id, launch.settings) for launch in launcher.launches
+    ] == [
         ("agent-1", "1", first.settings),
         ("agent-2", "2", second.settings),
     ]
@@ -97,7 +99,7 @@ async def test_running_again_runs_only_tasks_that_did_not_finish() -> None:
 
     await session.send(RunTasks())
     assert statuses(await asyncio.wait_for(idle(session), 5)) == ["completed", "completed"]
-    assert [a.task_id for a, *_ in launcher.launches] == ["1", "2", "2"]
+    assert [launch.agent.task_id for launch in launcher.launches] == ["1", "2", "2"]
 
 
 async def test_running_does_nothing_when_nothing_is_runnable() -> None:
@@ -173,7 +175,7 @@ async def test_tasks_added_during_a_run_join_it_and_running_ones_cannot_be_edite
     events = await asyncio.wait_for(idle(session), 5)
 
     assert ErrorOccurred(message="Task '1' can't be edited while it runs.") in events
-    assert [a.task_id for a, *_ in launcher.launches] == ["1", "2"]
+    assert [launch.agent.task_id for launch in launcher.launches] == ["1", "2"]
     assert statuses(events) == ["completed", "completed"]
 
 
@@ -231,7 +233,7 @@ async def test_a_fallback_fix_runs_next_with_the_failed_tasks_settings() -> None
     # keeps_claiming is asked for a fix it doesn't make, so its work falls back.
     one, fix, two = board(events)
     assert (fix.fixes, fix.task.settings) == (one.id, settings)
-    assert [a.task_id for a, *_ in launcher.launches] == [one.id, fix.id, two.id]
+    assert [launch.agent.task_id for launch in launcher.launches] == [one.id, fix.id, two.id]
     assert statuses(events) == ["completed", "completed", "completed"]
 
 

@@ -15,6 +15,7 @@ import os
 from collections.abc import AsyncIterator, Mapping, Sequence
 from typing import Any
 
+from orbit.agent.application.ports import AgentLaunch
 from orbit.agent.domain.agents import Agent
 from orbit.protocol import (
     AssistantMessage,
@@ -159,7 +160,10 @@ class ClaudeCliRunner:
     def __init__(self, command: Sequence[str] = ("claude",)) -> None:
         self._command = tuple(command)
         self.session_id: str | None = None
+        # Agents' runs only: orbit must be reachable, and where and how the process runs.
         self._needs_orbit = False
+        self._env: Mapping[str, str] | None = None
+        self._cwd: str | None = None
 
     def new_context(self) -> "ClaudeCliRunner":
         """Same CLI, new Claude session (no ``--resume``)."""
@@ -169,21 +173,19 @@ class ClaudeCliRunner:
         async for event in self._run(turn_id, self._args(settings), prompt):
             yield event
 
-    async def run_agent(
-        self, agent: Agent, url: str, prompt: str, settings: Settings
-    ) -> AsyncIterator[Event]:
-        """Run ``agent`` as a new Claude session connected to orbit at ``url``."""
+    async def run_agent(self, launch: AgentLaunch) -> AsyncIterator[Event]:
+        """Run the agent as a new Claude session connected to orbit, as ``launch`` says."""
+        agent = launch.agent
         runner = self.new_context()
         runner._needs_orbit = True
-        args = [*runner._args(settings), *agent_args(url)]
-        async for event in runner._run(agent.id, args, prompt, agent_env(agent)):
+        runner._env, runner._cwd = agent_env(agent), launch.cwd
+        args = [*runner._args(launch.settings), *agent_args(launch.url)]
+        async for event in runner._run(agent.id, args, launch.prompt):
             yield event.model_copy(update={"agent_id": agent.id})
 
-    async def _run(
-        self, turn_id: str, args: Sequence[str], prompt: str, env: Mapping[str, str] | None = None
-    ) -> AsyncIterator[Event]:
+    async def _run(self, turn_id: str, args: Sequence[str], prompt: str) -> AsyncIterator[Event]:
         yield TurnStarted(turn_id=turn_id)
-        process = await self._start(args, env)
+        process = await self._start(args)
         try:
             async for event in self._converse(turn_id, process, prompt):
                 yield event
@@ -202,13 +204,12 @@ class ClaudeCliRunner:
             args += ["--resume", self.session_id]
         return args
 
-    async def _start(
-        self, args: Sequence[str], env: Mapping[str, str] | None = None
-    ) -> asyncio.subprocess.Process:
+    async def _start(self, args: Sequence[str]) -> asyncio.subprocess.Process:
         try:
             return await asyncio.create_subprocess_exec(
                 *args,
-                env=env,
+                env=self._env,
+                cwd=self._cwd,
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,

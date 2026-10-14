@@ -53,20 +53,21 @@ class Verifier:
         self._board = board
         self._publish = publish
 
-    async def state_before(self, task: TaskSpec) -> object:
-        """The working tree's state, when it will tell whether ``task`` changed files."""
-        workspace = self.verification.workspace
-        if workspace is None or not may_change_files(task):
+    async def state_before(self, task: TaskSpec, root: str) -> object:
+        """The tree's state at ``root``, when it will tell whether ``task`` changed files."""
+        if not may_change_files(task):
             return None
-        return await workspace()
+        return await self.fingerprint(root)
 
-    async def check(self, task_id: str, before: object) -> Failure | None:
-        """Verify task ``task_id``, unless there's nothing to verify; returns the first failure.
+    async def check(self, task_id: str, before: object, root: str) -> Failure | None:
+        """Verify task ``task_id`` at ``root``, unless there's nothing to verify; returns the
+        first failure.
 
         ``before`` is what :meth:`state_before` returned when the task started.
         """
         task = self._board.get(task_id).task
-        reason = skip_reason(task, before, await self._state_after(before))
+        after = None if before is None else await self.fingerprint(root)
+        reason = skip_reason(task, before, after)
         if reason is not None:
             self._board.skip_steps()
             await self.publish_steps()
@@ -74,12 +75,12 @@ class Verifier:
             return None
         self._board.set_status(task_id, "verifying")
         await self._publish(TasksChanged(tasks=self._board.tasks))
-        return await self._verify(task_id)
+        return await self._verify(task_id, root)
 
-    async def fingerprint(self) -> object:
-        """The working tree's state now; ``None`` when it can't be told."""
+    async def fingerprint(self, root: str) -> object:
+        """The state of the tree at ``root`` now; ``None`` when it can't be told."""
         workspace = self.verification.workspace
-        return None if workspace is None else await workspace()
+        return None if workspace is None else await workspace(root)
 
     async def skip_unchanged(self, task_id: str) -> None:
         """Report that task ``task_id`` isn't verified again: nothing changed since it failed."""
@@ -95,20 +96,13 @@ class Verifier:
     async def publish_steps(self) -> None:
         await self._publish(VerificationChanged(steps=self._board.steps))
 
-    async def _state_after(self, before: object) -> object:
-        if before is None:
-            return None  # Nothing to compare with, so don't look.
-        workspace = self.verification.workspace
-        assert workspace is not None  # It produced ``before``.
-        return await workspace()
-
-    async def _verify(self, task_id: str) -> Failure | None:
-        """Run the steps after task ``task_id``; returns the first failure and its output."""
+    async def _verify(self, task_id: str, root: str) -> Failure | None:
+        """Run the steps at ``root`` after task ``task_id``; returns the first failure."""
         for number, step in enumerate(self.verification.steps):
             self._board.set_step(number, "running")
             await self.publish_steps()
             await self._publish(VerificationStarted(task_id=task_id, step=number))
-            passed, output = await self.verification.run_step(step)
+            passed, output = await self.verification.run_step(step, root)
             self._board.set_step(number, "passed" if passed else "failed")
             await self.publish_steps()
             await self._publish(VerificationFinished(task_id=task_id, step=number, passed=passed))

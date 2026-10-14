@@ -1,5 +1,6 @@
 import asyncio
 import sys
+from pathlib import Path
 
 from orbit.agent.domain.verification import VerificationStep
 from orbit.agent.external.checks import DEFAULT_STEPS, run_step
@@ -50,3 +51,9 @@ async def test_cancelling_a_step_kills_its_process() -> None:
     task.cancel()
     await asyncio.wait_for(asyncio.gather(task, return_exceptions=True), timeout=5)
     assert task.cancelled()
+
+
+async def test_step_runs_in_the_directory_it_is_given(tmp_path: Path) -> None:
+    passed, output = await run_step(python_step("import os; print(os.getcwd())"), str(tmp_path))
+    assert passed
+    assert output.strip() == str(tmp_path)

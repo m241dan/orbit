@@ -188,7 +188,7 @@ class AgentSession:
         """Run one task through a new agent; returns its final status."""
         task = self._board.get(task_id).task
         # Before the task shows as running, so a cancel here leaves it pending.
-        before = await self._verifier.state_before(task) if self._verifier else None
+        before = await self._verifier.state_before(task, ".") if self._verifier else None
         self._board.set_status(task_id, "running")
         await self._publish_tasks()
         if self._verifier:
@@ -206,7 +206,7 @@ class AgentSession:
     ) -> TaskStatus:
         """Run task ``task_id`` through a new agent; a fallback queues a fix for a fresh one."""
         try:
-            outcome = await AgentRun(task_id, self._board, self._verifier, desk).run(before)
+            outcome = await AgentRun(task_id, self._board, self._verifier, desk).run(before, ".")
         except asyncio.CancelledError:
             if self._verifier:
                 await self._verifier.cancel()

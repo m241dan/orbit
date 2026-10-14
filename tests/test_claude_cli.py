@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 from orbit.agent import AgentSession, ClaudeCliRunner
+from orbit.agent.application.ports import AgentLaunch
 from orbit.agent.domain.agents import Agent
 from orbit.agent.external.claude_cli import AGENT_RULES, TOOL_TIMEOUT_MS, translate
 from orbit.protocol import (
@@ -314,9 +315,11 @@ def init(status: str | None) -> dict[str, Any]:
     return {**INIT, "mcp_servers": servers}
 
 
-async def run_agent(runner: ClaudeCliRunner, settings: Settings | None = None) -> list[Event]:
-    events = runner.run_agent(AGENT, URL, "You are agent-3.", settings or Settings())
-    return [e async for e in events]
+async def run_agent(
+    runner: ClaudeCliRunner, settings: Settings | None = None, cwd: str = "."
+) -> list[Event]:
+    launch = AgentLaunch(AGENT, URL, "You are agent-3.", settings or Settings(), cwd)
+    return [e async for e in runner.run_agent(launch)]
 
 
 async def test_an_agent_runs_connected_to_orbit(tmp_path: Path) -> None:
@@ -388,3 +391,11 @@ async def test_a_pending_connection_is_not_a_failure(tmp_path: Path) -> None:
     runner, _ = make_runner(tmp_path, stdout=lines(init("pending"), RESULT))
     events = await run_agent(runner)
     assert events[-1] == TurnFinished(turn_id="agent-3", reason="completed", agent_id="agent-3")
+
+
+async def test_an_agent_runs_in_its_working_directory(tmp_path: Path) -> None:
+    work = tmp_path / "tree"
+    work.mkdir()
+    runner, scenario = make_runner(tmp_path, stdout=lines(init("connected"), RESULT))
+    await run_agent(runner, cwd=str(work))
+    assert calls(scenario)[0]["cwd"] == str(work)

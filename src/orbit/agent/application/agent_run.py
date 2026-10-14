@@ -13,7 +13,7 @@ from contextlib import suppress
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-from orbit.agent.application.ports import AgentHost, AgentLauncher, Reply
+from orbit.agent.application.ports import AgentHost, AgentLaunch, AgentLauncher, Reply
 from orbit.agent.application.verifier import Failure, Verifier
 from orbit.agent.domain.agent_task import FINISHED, AgentTask, Limits, Phase
 from orbit.agent.domain.agents import Agent, AgentRegistry, bootstrap_prompt
@@ -140,6 +140,7 @@ class AgentRun:
         self._failure: Failure | None = None
         self._failed_state: object = None  # The tree when verification last failed.
         self._agent: Agent | None = None
+        self._root = "."
         self._tools: dict[str, Callable[[dict[str, Any]], Awaitable[Reply]]] = {
             "get_task": self._get_task,
             "complete_task": self._complete_task,
@@ -153,8 +154,10 @@ class AgentRun:
         assert self._agent is not None  # Set when the run starts.
         return self._agent
 
-    async def run(self, before: object) -> Outcome:
-        """Launch the agent and see the task through; ``before`` is the tree's prior state."""
+    async def run(self, before: object, root: str) -> Outcome:
+        """Launch the agent in ``root`` and see the task through; ``before`` is the tree's
+        state there beforehand."""
+        self._root = root
         task = self._work.task
         self._agent = self._desk.open(self, task.role, self._task_id)
         url = await self._desk.url()
@@ -194,9 +197,10 @@ class AgentRun:
 
     async def _follow(self, url: str) -> AgentExitReason:
         reason: AgentExitReason = "finished"
-        events = self._desk.agents.launcher.run_agent(
-            self.agent, url, bootstrap_prompt(self.agent), self._work.task.settings
+        launch = AgentLaunch(
+            self.agent, url, bootstrap_prompt(self.agent), self._work.task.settings, self._root
         )
+        events = self._desk.agents.launcher.run_agent(launch)
         async for event in events:
             if isinstance(event, TurnFinished) and event.reason == "error":
                 reason = "crashed"
@@ -241,7 +245,7 @@ class AgentRun:
         if self._failed_state is None:
             return False
         assert self._verifier is not None  # Only a verification failure records a state.
-        return await self._verifier.fingerprint() == self._failed_state
+        return await self._verifier.fingerprint(self._root) == self._failed_state
 
     async def _verify(self, before: object, claim: "asyncio.Future[Reply] | None") -> None:
         """Check the work, then answer ``claim`` (if the agent made one) with the verdict."""
@@ -257,14 +261,14 @@ class AgentRun:
         if self._verifier is None:
             return None
         async with self._checking:
-            return await self._verifier.check(self._task_id, before)
+            return await self._verifier.check(self._task_id, before, self._root)
 
     async def _failed(self, failure: Failure) -> str:
         reply = self._work.failed(*failure)
         self._failure = failure
         if self._work.phase == "working":
             assert self._verifier is not None  # Only verification fails.
-            self._failed_state = await self._verifier.fingerprint()
+            self._failed_state = await self._verifier.fingerprint(self._root)
             self._board.set_attempt(
                 self._task_id, self._work.attempt, self._work.limits.max_attempts
             )
@@ -297,7 +301,7 @@ class AgentRun:
         if refusal is not None:
             return Reply(refusal, is_error=True)
         async with self._checking:
-            passed, output = await self._verifier.verification.run_step(step)
+            passed, output = await self._verifier.verification.run_step(step, self._root)
         return Reply(f"{step.name}: {'passed' if passed else 'failed'}\n\n{trim_output(output)}")
 
     async def _report_progress(self, arguments: dict[str, Any]) -> Reply:

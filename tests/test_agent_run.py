@@ -46,7 +46,8 @@ async def test_an_agent_gets_its_task_claims_done_and_passes() -> None:
     session, _, launcher = session_for(claims_done, verification=verified(Steps(True)))
     events = await asyncio.wait_for(run(session), 5)
 
-    [(agent, url, prompt, settings)] = launcher.launches
+    [launch] = launcher.launches
+    agent, url, prompt, settings = launch.agent, launch.url, launch.prompt, launch.settings
     assert (agent.id, agent.role, url, settings) == (
         "agent-1",
         "coder",
@@ -112,7 +113,7 @@ async def test_once_its_fixes_run_out_a_fresh_agent_takes_over() -> None:
     )
     events = await asyncio.wait_for(run(session), 5)
 
-    assert [a.id for a, *_ in launcher.launches] == ["agent-1", "agent-2"]
+    assert [launch.agent.id for launch in launcher.launches] == ["agent-1", "agent-2"]
     first, fix = board(events)
     assert (first.status, fix.status, fix.fixes) == ("completed", "completed", first.id)
     assert fix.task.prompt.startswith("Fix the failed verification step: Unit tests")
@@ -321,7 +322,7 @@ async def test_the_host_is_started_once_for_all_tasks() -> None:
     )
     events = await asyncio.wait_for(run(session, TaskSpec(prompt="a"), TaskSpec(prompt="b")), 5)
     assert host.starts == 1
-    assert [a.id for a, *_ in launcher.launches] == ["agent-1", "agent-2"]
+    assert [launch.agent.id for launch in launcher.launches] == ["agent-1", "agent-2"]
     assert [t.status for t in board(events)] == ["completed", "completed"]
 
 
@@ -376,7 +377,7 @@ async def test_an_agent_that_stops_without_changing_anything_falls_back_unverifi
 
     assert steps.runs == ["Unit tests", "Unit tests"]  # Once for each agent's claim.
     assert VerificationSkipped(task_id="1", reason="unchanged") in events
-    assert [a.id for a, *_ in launcher.launches] == ["agent-1", "agent-2"]
+    assert [launch.agent.id for launch in launcher.launches] == ["agent-1", "agent-2"]
     assert [t.status for t in board(events)] == ["completed", "completed"]
 
 

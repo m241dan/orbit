@@ -35,12 +35,12 @@ class Tool(Protocol):
     async def run(self, arguments: dict[str, Any]) -> str: ...
 
 
-StepRunner = Callable[[VerificationStep], Awaitable[tuple[bool, str]]]
-"""Runs a verification step; returns whether it passed and its output."""
+StepRunner = Callable[[VerificationStep, str], Awaitable[tuple[bool, str]]]
+"""Runs a verification step in a directory; returns whether it passed and its output."""
 
-Workspace = Callable[[], Awaitable[object]]
-"""A fingerprint of the working tree, equal before and after a task that changed no files;
-``None`` when it can't be told."""
+Workspace = Callable[[str], Awaitable[object]]
+"""A fingerprint of the working tree in a directory, equal before and after a task that
+changed no files; ``None`` when it can't be told."""
 
 
 @dataclass(frozen=True)
@@ -63,14 +63,24 @@ class AgentHost(Protocol):
         ...
 
 
+@dataclass(frozen=True)
+class AgentLaunch:
+    """How to start ``agent``: connected to orbit at ``url``, told ``prompt``, with ``settings``,
+    working in the directory ``cwd``."""
+
+    agent: Agent
+    url: str
+    prompt: str
+    settings: Settings
+    cwd: str
+
+
 class AgentLauncher(Protocol):
     """Starts agents as processes."""
 
-    def run_agent(
-        self, agent: Agent, url: str, prompt: str, settings: Settings
-    ) -> AsyncIterator[Event]:
-        """Start ``agent``, connected to orbit at ``url`` and told ``prompt``, and yield
-        what it does until its process exits: ``TurnStarted`` first, ``TurnFinished`` last.
+    def run_agent(self, launch: AgentLaunch) -> AsyncIterator[Event]:
+        """Start the agent as ``launch`` says, and yield what it does until its process
+        exits: ``TurnStarted`` first, ``TurnFinished`` last.
 
         Raising signals a crash. Cancellation arrives as ``asyncio.CancelledError``; the
         launcher must stop the process and re-raise.

@@ -39,11 +39,12 @@ DEFAULT_STEPS = (
 )
 
 
-async def run_step(step: VerificationStep) -> tuple[bool, str]:
-    """Run ``step``; returns whether it passed and its combined stdout and stderr."""
+async def run_step(step: VerificationStep, root: str = ".") -> tuple[bool, str]:
+    """Run ``step`` in ``root``; returns whether it passed and its combined stdout and stderr."""
     try:
         process = await asyncio.create_subprocess_exec(
             *step.command,
+            cwd=root,
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
