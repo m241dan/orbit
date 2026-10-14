@@ -1,11 +1,11 @@
-"""Orbit's project configuration file, ``.orbit/roles.toml``."""
+"""Orbit's project configuration file, ``.orbit/config.toml``."""
 
 import tomllib
 from pathlib import Path
 
 from orbit.agent.domain.roles import ConfigError, OrbitConfig, load_config
 
-CONFIG_PATH = ".orbit/roles.toml"
+CONFIG_PATH = ".orbit/config.toml"
 
 
 def read_config(root: str = ".") -> OrbitConfig:

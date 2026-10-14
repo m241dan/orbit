@@ -108,7 +108,7 @@ exit successfully:
 6. Unit tests, 100% coverage: `uv run pytest --cov --cov-fail-under=100`
 
 Failures go back to the same agent, which keeps the context of what it just did. After
-`fix_attempts` fixes (default 5, set in `.orbit/roles.toml`), or if the agent has exited, the task
+`fix_attempts` fixes (default 5, set in `.orbit/config.toml`), or if the agent has exited, the task
 **falls back**: it is marked ❗ and a fix task is inserted right after it, indented and numbered under
 it (`1.1`, `1.2`, …), with the same model and tool access, for a fresh agent. A task's chain of
 fallbacks gets up to 3 per step; once a step has used its 3, orbit reports the failure and moves on
@@ -190,7 +190,7 @@ falls due while review is paused waits until it resumes.
 
 Reviews need the worktree; `--no-review` turns them off.
 
-### Roles and `.orbit/roles.toml`
+### Roles and `.orbit/config.toml`
 
 Every task names a **role**, the kind of agent that takes it (`coder` unless it says otherwise).
 A role sets what the agent is told about its job, which of orbit's tools it may call, whether its
@@ -207,7 +207,7 @@ defaults for tasks orbit queues in that role; a task you queue keeps its own set
 An agent calling a tool its role doesn't have gets an error reply (the CLI only allows its role's
 tools, too); an agent still working when its role's time runs out is stopped and the task fails.
 
-A project can change these, and orbit's limits, in `.orbit/roles.toml`. A role it names that's built
+A project can change these, and orbit's limits, in `.orbit/config.toml`. A role it names that's built
 in keeps the fields it doesn't set; any other name adds a role. Every field is optional:
 
 ```toml
@@ -279,7 +279,7 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     --output-format stream-json`, resumes the same Claude session across turns, and launches
     agents connected to orbit (`run_agent`, and `converse` for the planner); `McpHost` is orbit's
     MCP server; `GitCoderTree` is the coder's worktree and its snapshots; `config_file` reads
-    `.orbit/roles.toml`; `checks` runs the verification steps as processes (`DEFAULT_STEPS`,
+    `.orbit/config.toml`; `checks` runs the verification steps as processes (`DEFAULT_STEPS`,
     `run_step`); `workspace` fingerprints the git working tree; `EchoModel` is a stand-in model.
   - `application`: `AgentSession` implements `Session`: it takes commands, asks the domain what
     follows, drives the ports and publishes events. `AgentRun` sees one task through one agent and

@@ -148,7 +148,7 @@ def test_chat_reads_roles_and_limits_from_the_project_file(
     launched: list[AgentSession], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     (tmp_path / ".orbit").mkdir()
-    (tmp_path / ".orbit" / "roles.toml").write_text(
+    (tmp_path / ".orbit" / "config.toml").write_text(
         'fix_attempts = 2\n[roles.coder]\nmodel = "sonnet"\n'
     )
     monkeypatch.chdir(tmp_path)
@@ -164,7 +164,7 @@ def test_an_invalid_project_file_stops_chat_with_its_problems(
     launched: list[AgentSession], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     (tmp_path / ".orbit").mkdir()
-    (tmp_path / ".orbit" / "roles.toml").write_text("[roles.coder]\ntool_access = 'maybe'\n")
+    (tmp_path / ".orbit" / "config.toml").write_text("[roles.coder]\ntool_access = 'maybe'\n")
     monkeypatch.chdir(tmp_path)
     result = runner.invoke(app, ["chat"])
     assert result.exit_code == 2
@@ -176,7 +176,7 @@ def test_chat_reviews_landed_work_with_the_files_limits(
     launched: list[AgentSession], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     (tmp_path / ".orbit").mkdir()
-    (tmp_path / ".orbit" / "roles.toml").write_text(
+    (tmp_path / ".orbit" / "config.toml").write_text(
         "review_rounds = 2\nreview_suggestions = 4\nsuper_review_every = 7\n"
         "super_review_suggestions = 6\n"
     )
