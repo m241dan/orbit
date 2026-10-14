@@ -53,15 +53,17 @@ class FakeHost:
 class ScriptedLauncher:
     """Each launch plays the next script as the agent, calling orbit through the host."""
 
-    def __init__(self, host: FakeHost, *scripts: Script) -> None:
+    def __init__(self, host: FakeHost, *scripts: Script, reviewers: Sequence[Script] = ()) -> None:
         self.host = host
         self.scripts = list(scripts)
+        self.reviewers = list(reviewers)
         self.launches: list[AgentLaunch] = []
 
     async def run_agent(self, launch: AgentLaunch) -> AsyncIterator[Event]:
         self.launches.append(launch)
         agent = launch.agent
-        script = self.scripts.pop(0)
+        reviewing = agent.role in ("reviewer", "super-reviewer")
+        script = (self.reviewers if reviewing else self.scripts).pop(0)
         yield TurnStarted(turn_id=agent.id, agent_id=agent.id)
         yield AssistantMessage(turn_id=agent.id, text="on it", agent_id=agent.id)
 
@@ -108,7 +110,10 @@ class FakeTree:
 
     path = "/work/coder"
 
-    def __init__(self, *merges: Merge, leftovers: tuple[str, ...] = (), broken: str = "") -> None:
+    def __init__(
+        self, *merges: Merge, leftovers: tuple[str, ...] = (), broken: str = "", empty: bool = False
+    ) -> None:
+        self.empty = empty  # Tasks change nothing, so there's nothing to commit.
         self.merges = list(merges)
         self.notes = list(leftovers)
         self.broken = broken
@@ -124,6 +129,8 @@ class FakeTree:
         return self.path
 
     async def commit(self, message: str) -> bool:
+        if self.empty:
+            return False
         self.commits.append(message)
         return True
 
@@ -157,14 +164,16 @@ def session_for(
     *scripts: Script,
     verification: Verification | None = None,
     runner: TurnRunner | None = None,
+    reviewers: Sequence[Script] = (),
     **options: Any,
 ) -> tuple[AgentSession, FakeHost, ScriptedLauncher]:
-    """A session whose tasks run through agents playing ``scripts``, one per launch.
+    """A session whose tasks run through agents playing ``scripts``, one per launch, and
+    whose reviews run through agents playing ``reviewers``.
 
     ``options`` go to :class:`Agents`, such as ``limits``, ``tree`` or ``roles``.
     """
     host = FakeHost()
-    launcher = ScriptedLauncher(host, *scripts)
+    launcher = ScriptedLauncher(host, *scripts, reviewers=reviewers)
     tokens = iter(f"token-{n}" for n in range(1, 100))
     options = {"limits": Limits(), "exit_grace": 0.5, **options}
     agents = Agents(host, launcher, lambda: next(tokens), **options)

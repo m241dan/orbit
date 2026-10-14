@@ -6,15 +6,17 @@ ports to do it, and reports what happened as events.
 
 import asyncio
 import uuid
-from collections.abc import AsyncIterator, Coroutine, Sequence
+from collections.abc import AsyncIterator, Collection, Coroutine, Sequence
 from contextlib import suppress
 from typing import Any, assert_never
 
 from orbit.agent.application.agent_run import AgentDesk, AgentRun, Agents, Outcome
 from orbit.agent.application.landing import Lander
 from orbit.agent.application.ports import TurnRunner
+from orbit.agent.application.review_lane import REVIEW_ROLES, ReviewLane
 from orbit.agent.application.verifier import Verification, Verifier
 from orbit.agent.domain.board import TaskBoard
+from orbit.agent.domain.reviews import ReviewPlanner
 from orbit.agent.domain.verification import FixAttempts, VerificationStep, fix_prompt
 from orbit.protocol import (
     AddTask,
@@ -78,6 +80,9 @@ class AgentSession:
         self._verifier = _verifier(verification, self._board, self._events)
         self._desk = AgentDesk(agents, self._events.put) if agents else None
         self._announced = False
+        self._lane = self._review_lane()
+        self._landed: dict[str, str] = {}  # Task id -> the commit it landed, until reported.
+        self._held = False  # The user cancelled: don't start work by itself.
         self._events.put_nowait(self._settings_changed())
         if self._verifier:
             self._events.put_nowait(VerificationChanged(steps=self._board.steps))
@@ -124,6 +129,7 @@ class AgentSession:
             case SubmitPrompt(text=text):
                 await self._start(self._run_turn(self._runner, text, self._settings))
             case CancelTurn():
+                self._held = True
                 self._cancel()
             case UpdateSettings(settings=settings):
                 self._settings = settings
@@ -146,8 +152,33 @@ class AgentSession:
     async def _run_tasks_if_possible(self) -> None:
         if self._desk is None:
             await self._events.put(ErrorOccurred(message="Tasks need agents, and none are set up."))
-        elif self._board.next_runnable() is not None:
+            return
+        self._held = False
+        if self._lane is not None:
+            self._lane.kick()
+        if self._next_work(()) is not None:
             await self._start(self._run_tasks())
+
+    def _next_work(self, tried: Collection[str]) -> str | None:
+        """The next task for the work lane; reviews have their own lane, if there is one."""
+        exclude = REVIEW_ROLES if self._lane is not None else ()
+        return self._board.next_runnable(skip=tried, exclude=exclude)
+
+    async def _wake_work(self) -> None:
+        """Run the work a review queued, unless something runs or the user cancelled."""
+        busy = self._turn is not None and not self._turn.done()
+        if not (busy or self._held) and self._next_work(()) is not None:
+            await self._start(self._run_tasks())
+
+    def _review_lane(self) -> ReviewLane | None:
+        desk = self._desk
+        if desk is None or not desk.agents.review or desk.agents.tree is None:
+            return None
+        agents = desk.agents
+        planner = ReviewPlanner(agents.review_rounds, agents.review_suggestions)
+        lane = ReviewLane(desk, self._board, planner, self._wake_work)
+        desk.suggest = lane.suggest
+        return lane
 
     def _cancel(self) -> None:
         if self._turn is not None and not self._turn.done():
@@ -167,6 +198,8 @@ class AgentSession:
             self._turn.cancel()
             with suppress(asyncio.CancelledError):
                 await self._turn
+        if self._lane is not None:
+            await self._lane.close()
         if self._desk is not None:
             await self._desk.stop()
 
@@ -201,7 +234,7 @@ class AgentSession:
     async def _run_tasks(self) -> None:
         tried: set[str] = set()
         attempts = FixAttempts()
-        while (task_id := self._board.next_runnable(skip=tried)) is not None:
+        while (task_id := self._next_work(tried)) is not None:
             tried.add(task_id)
             if await self._run_task(task_id, attempts) == "cancelled":
                 return
@@ -226,7 +259,18 @@ class AgentSession:
             status = "error"
         self._board.finish(task_id, status)
         await self._publish_tasks()
+        await self._report_to_review(task_id)
         return status
+
+    async def _report_to_review(self, task_id: str) -> None:
+        """Tell the review lane how task ``task_id`` ended."""
+        if self._lane is None:
+            return
+        commit = self._landed.pop(task_id, None)
+        if commit is not None:
+            await self._lane.landed(task_id, commit)
+        else:
+            await self._lane.ended(task_id)
 
     async def _run_agent(self, desk: AgentDesk, task_id: str, attempts: FixAttempts) -> TaskStatus:
         """Run task ``task_id`` through a new agent and land its work; a fallback queues a fix
@@ -246,8 +290,12 @@ class AgentSession:
         if desk.agents.tree is None:
             return outcome
         lander = Lander(desk.agents.tree, self._board, self._verifier, self._events.put)
-        failure = await lander.land(task_id, outcome.summaries, root)
-        return outcome if failure is None else Outcome("unverified", failure)
+        landing = await lander.land(task_id, outcome.summaries, root)
+        if landing.failure is not None:
+            return Outcome("unverified", landing.failure)
+        if landing.commit is not None:
+            self._landed[task_id] = landing.commit
+        return outcome
 
     async def _prepare(self, desk: AgentDesk, task_id: str) -> str:
         """Where task ``task_id`` is worked on: the coder's tree, readied for it."""
@@ -267,7 +315,10 @@ class AgentSession:
             return
         settings = self._board.get(task_id).task.settings
         fix = TaskSpec(prompt=fix_prompt(step, output), settings=settings)
-        attempts.record(self._board.add(fix, fixes=task_id), task_id, step.name)
+        fix_id = self._board.add(fix, fixes=task_id)
+        attempts.record(fix_id, task_id, step.name)
+        if self._lane is not None:
+            self._lane.joined(fix_id)
 
     async def _publish_tasks(self) -> None:
         await self._events.put(TasksChanged(tasks=self._board.tasks))

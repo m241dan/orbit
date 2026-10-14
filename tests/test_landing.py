@@ -51,7 +51,7 @@ async def test_finished_work_is_done_in_the_tree_then_committed_and_merged() -> 
     [message] = tree.commits
     assert message.startswith("Add the --fast flag\n\n")
     assert "Make it faster." in message
-    assert TaskMerged(task_id="1", result="merged") in events
+    assert TaskMerged(task_id="1", result="merged", commit="c1") in events
     assert statuses(events) == ["completed"]
 
 
@@ -85,7 +85,7 @@ async def test_work_rebased_onto_a_moved_base_is_verified_again_before_merging()
     session, _, _ = session_for(claims_done, verification=verified(steps), tree=tree)
     events = await asyncio.wait_for(run(session), 5)
     assert steps.runs == ["Unit tests", "Unit tests"]
-    assert TaskMerged(task_id="1", result="merged") in events
+    assert TaskMerged(task_id="1", result="merged", commit="c1") in events
     assert statuses(events) == ["completed"]
 
 
@@ -108,7 +108,7 @@ async def test_work_that_cannot_be_merged_stays_completed_with_the_reason() -> N
         tree = FakeTree(Merge(result, "why it didn't merge"))
         session, _, _ = session_for(claims_done, tree=tree)
         events = await asyncio.wait_for(run(session), 5)
-        merged = TaskMerged(task_id="1", result=result, detail="why it didn't merge")
+        merged = TaskMerged(task_id="1", result=result, detail="why it didn't merge", commit="c1")
         assert merged in events
         assert statuses(events) == ["completed"]
 
@@ -158,7 +158,7 @@ async def test_without_verification_rebased_work_is_merged_straight_away() -> No
     tree = FakeTree(Merge("rebased"), Merge("merged"))
     session, _, _ = session_for(claims_done, tree=tree)
     events = await asyncio.wait_for(run(session), 5)
-    assert TaskMerged(task_id="1", result="merged") in events
+    assert TaskMerged(task_id="1", result="merged", commit="c1") in events
 
 
 async def test_the_commit_lists_the_fixes_made_after_verification() -> None:

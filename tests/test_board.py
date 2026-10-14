@@ -134,12 +134,20 @@ def test_step_statuses_follow_a_verification_and_reset() -> None:
     assert [s.status for s in board.steps] == ["skipped", "skipped"]
 
 
-def test_next_runnable_can_be_limited_to_a_role() -> None:
+def test_next_runnable_can_be_limited_to_roles_or_exclude_them() -> None:
     board = TaskBoard()
-    board.add(TaskSpec(prompt="review", role="reviewer"))
+    review = board.add(TaskSpec(prompt="review", role="reviewer"))
     code = board.add(TaskSpec(prompt="code"))
-    assert board.next_runnable(role="coder") == code
-    assert board.next_runnable(role="planner") is None
+    assert board.next_runnable(roles={"coder"}) == code
+    assert board.next_runnable(roles={"planner"}) is None
+    assert board.next_runnable(exclude={"reviewer"}) == code
+    assert board.next_runnable(roles={"reviewer", "super-reviewer"}) == review
+
+
+def test_reviews_orbit_queues_are_marked_as_from_review() -> None:
+    board = TaskBoard()
+    review = board.add_review(TaskSpec(prompt="Review commit abc", role="reviewer"))
+    assert board.get(review).origin == "review"
 
 
 def test_tasks_given_up_on_are_not_run_again() -> None:

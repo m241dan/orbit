@@ -67,6 +67,8 @@ class Agents:
     long, in seconds, an agent may take to exit once its task is finished before it's stopped.
     ``tree`` is where they work and their work is merged from; without one they work in the
     current directory and nothing is committed. ``roles`` are the roles tasks can name.
+    With ``review`` (and a tree), landed work is reviewed; ``review_rounds`` and
+    ``review_suggestions`` bound what reviews suggest.
     """
 
     host: AgentHost
@@ -76,6 +78,9 @@ class Agents:
     exit_grace: float = 10.0
     tree: CoderTree | None = None
     roles: Mapping[str, Role] = field(default_factory=lambda: dict(BUILT_IN_ROLES))
+    review: bool = False
+    review_rounds: int = 3
+    review_suggestions: int = 5
 
 
 @dataclass(frozen=True)
@@ -101,6 +106,8 @@ class AgentDesk:
         self.agents = agents
         self.registry = AgentRegistry(agents.new_token)
         self.publish = publish
+        # Takes a review task's suggestions: its id, then the suggestion's title and prompt.
+        self.suggest: Callable[[str, str, str], Awaitable[Reply]] | None = None
         self._runs: dict[str, AgentRun] = {}
         self._url: str | None = None
 
@@ -166,6 +173,7 @@ class AgentRun:
             "run_check": self._run_check,
             "report_progress": self._report_progress,
             "give_up": self._give_up,
+            "suggest_task": self._suggest_task,
         }
 
     @property
@@ -355,6 +363,12 @@ class AgentRun:
             note = note[: NOTE_LIMIT - 1] + "…"
         await self._publish(ProgressNoted(agent_id=self.agent.id, task_id=self._task_id, note=note))
         return Reply("Noted.")
+
+    async def _suggest_task(self, arguments: dict[str, Any]) -> Reply:
+        if self._desk.suggest is None:
+            return Reply("Orbit isn't taking suggestions.", is_error=True)
+        title, prompt = str(arguments.get("title", "")), str(arguments.get("prompt", ""))
+        return await self._desk.suggest(self._task_id, title, prompt)
 
     async def _give_up(self, arguments: dict[str, Any]) -> Reply:
         reason = str(arguments.get("reason", ""))

@@ -11,6 +11,10 @@ SETTLED: frozenset[TaskStatus] = frozenset(
 )
 
 
+def _in_roles(role: str, roles: Collection[str] | None, exclude: Collection[str]) -> bool:
+    return role not in exclude and (roles is None or role in roles)
+
+
 class TaskBoard:
     """Tasks in run order, each with a stable id, plus the verification steps' statuses."""
 
@@ -95,14 +99,25 @@ class TaskBoard:
                 self.set_status(fixed, "completed")
             fixed = self.get(fixed).fixes
 
-    def next_runnable(self, skip: Collection[str] = (), role: str | None = None) -> str | None:
-        """The first task that isn't settled or in ``skip``, if any; only ``role``'s if given."""
+    def next_runnable(
+        self,
+        skip: Collection[str] = (),
+        roles: Collection[str] | None = None,
+        exclude: Collection[str] = (),
+    ) -> str | None:
+        """The first task that isn't settled or in ``skip``, if any: only in ``roles`` if
+        given, and never in ``exclude``."""
         for state in self._tasks:
-            if state.status in SETTLED or state.id in skip:
-                continue
-            if role is None or state.task.role == role:
+            unsettled = state.status not in SETTLED and state.id not in skip
+            if unsettled and _in_roles(state.task.role, roles, exclude):
                 return state.id
         return None
+
+    def add_review(self, task: TaskSpec) -> str:
+        """Add a review orbit queued itself, at the end; returns its id."""
+        state = TaskState(id=str(next(self._ids)), task=task, origin="review")
+        self._tasks.append(state)
+        return state.id
 
     def reset_steps(self) -> None:
         self._steps = tuple(StepState(name=s.name) for s in self._steps)

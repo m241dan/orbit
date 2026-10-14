@@ -36,7 +36,7 @@ async def test_tools_outside_the_role_are_refused_and_unverified_roles_finish_on
         return "completed"
 
     steps = Steps()
-    session, _, _ = session_for(reviews, verification=verified(steps))
+    session, _, _ = session_for(verification=verified(steps), reviewers=(reviews,))
     events = await asyncio.wait_for(run(session, TaskSpec(prompt="Review", role="reviewer")), 5)
     assert steps.runs == []
     assert statuses(events) == ["completed"]
@@ -69,3 +69,16 @@ def test_roles_default_to_the_built_in_ones() -> None:
     assert session.agents is not None
     assert session.agents.roles == BUILT_IN_ROLES
     assert isinstance(next(iter(session.agents.roles.values())), Role)
+
+
+async def test_without_reviews_suggestions_are_refused() -> None:
+    async def suggests(call: Call) -> TurnEndReason:
+        await call("get_task")
+        reply = await call("suggest_task", title="Add tests", prompt="Please.")
+        assert reply.is_error and "suggestions" in reply.text
+        await call("complete_task", summary="Reviewed")
+        return "completed"
+
+    session, _, _ = session_for(reviewers=(suggests,))
+    events = await asyncio.wait_for(run(session, TaskSpec(prompt="Review", role="reviewer")), 5)
+    assert statuses(events) == ["completed"]
