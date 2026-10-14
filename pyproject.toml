@@ -8,6 +8,7 @@ authors = [
 ]
 requires-python = ">=3.13"
 dependencies = [
+    "mcp>=2.3.0",
     "pydantic>=2.14.0",
     "textual>=8.2.8",
     "typer>=0.27.3",
@@ -100,6 +101,21 @@ name = "Domain does no I/O"
 type = "forbidden"
 source_modules = ["orbit.agent.domain"]
 forbidden_modules = ["asyncio", "subprocess", "os", "pathlib", "json", "uuid", "time"]
+
+# MCP and the web server it runs on are details of the external adapters. The CLI wires
+# the adapters up, so it reaches them indirectly.
+[[tool.importlinter.contracts]]
+name = "Only external adapters use MCP"
+type = "forbidden"
+source_modules = [
+    "orbit.agent.application",
+    "orbit.agent.domain",
+    "orbit.protocol",
+    "orbit.tui",
+    "orbit.cli",
+]
+forbidden_modules = ["mcp", "uvicorn", "starlette"]
+allow_indirect_imports = true
 
 # The frontend's presentation rules are plain functions; the widgets are what touch Textual.
 [[tool.importlinter.contracts]]
