@@ -146,8 +146,15 @@ With `restricted` access, an agent can explain the failure but can't fix it.
 Inside a git repository, agents don't touch your checkout. They work in orbit's own worktree,
 `.git/orbit/coder` on the branch `orbit/coder` (inside `.git`, so your checkout never sees it), and
 the verification steps run there too. Before each task the worktree catches up with the branch you
-had checked out when orbit started (the **base**), and `uv sync --frozen` runs in it whenever its
-`uv.lock` changes.
+had checked out when orbit started (the **base**), and the project's setup command runs in it: once
+when the worktree is first prepared, and again whenever a file it watches changes. Set it in
+`.orbit/config.toml` (without a `[setup]` table, nothing runs):
+
+```toml
+[setup]
+command = ["uv", "sync", "--frozen"]
+watch = ["uv.lock"]   # rerun when any of these files change
+```
 
 When a task passes verification, orbit commits its work there (the agent's summary as the subject,
 the task as the body) and fast-forwards the base to it, so the commit appears on your branch and in

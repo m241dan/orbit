@@ -1,5 +1,5 @@
-"""Roles agents work in, orbit's limits and its verification steps: built-in defaults a project
-file can change.
+"""Roles agents work in, orbit's limits, its verification steps and worktree setup: built-in
+defaults a project file can change.
 
 A role says what an agent is told about its job, which of orbit's tools it may call, whether its
 claims of being done are verified, and how long it may take. Its model and tool access are the
@@ -115,6 +115,22 @@ class VerificationConfig(_Config):
         return steps
 
 
+class Setup(_Config):
+    """What makes a fresh worktree ready to work in: ``command`` runs there when it's first
+    prepared, and again whenever a file in ``watch`` (paths relative to the tree) changes."""
+
+    command: tuple[str, ...] = Field(min_length=1)
+    watch: tuple[str, ...] = ()
+
+    @field_validator("watch")
+    @classmethod
+    def _relative_paths(cls, watch: tuple[str, ...]) -> tuple[str, ...]:
+        for path in watch:
+            if not path or path.startswith("/") or ".." in path.split("/"):
+                raise ValueError(f"{path!r} isn't a relative path inside the project")
+        return watch
+
+
 class OrbitConfig(_Config):
     """Orbit's limits and roles.
 
@@ -123,6 +139,7 @@ class OrbitConfig(_Config):
     ``super_review_every``: commits between super reviews.
     ``review_suggestions`` / ``super_review_suggestions``: tasks one review may suggest.
     ``verification``: how tasks are verified.
+    ``setup``: how the coder's worktree is set up; ``None`` sets nothing up.
     """
 
     fix_attempts: int = Field(default=5, ge=1)
@@ -132,6 +149,7 @@ class OrbitConfig(_Config):
     super_review_suggestions: int = Field(default=10, ge=1)
     roles: dict[str, Role] = Field(default_factory=lambda: dict(BUILT_IN_ROLES))
     verification: VerificationConfig = VerificationConfig()
+    setup: Setup | None = None
 
 
 def load_config(data: dict[str, Any]) -> OrbitConfig:

@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from orbit.agent.domain.roles import BUILT_IN_ROLES, ConfigError, OrbitConfig
+from orbit.agent.domain.roles import BUILT_IN_ROLES, ConfigError, OrbitConfig, Setup
 from orbit.agent.domain.verification import VerificationStep
 from orbit.agent.external.config_file import CONFIG_PATH, read_config
 
@@ -104,3 +104,15 @@ def test_orbit_verifies_itself_with_its_six_steps_quick_ones_first() -> None:
     root = Path(__file__).parent.parent
     steps = read_config(str(root)).verification.steps
     assert [(s.name, s.command) for s in steps] == ORBITS_OWN_STEPS
+
+
+def test_the_file_sets_up_the_worktree(tmp_path: Path) -> None:
+    write(tmp_path, '[setup]\ncommand = ["uv", "sync", "--frozen"]\nwatch = ["uv.lock"]\n')
+    setup = read_config(str(tmp_path)).setup
+    assert setup == Setup(command=("uv", "sync", "--frozen"), watch=("uv.lock",))
+
+
+def test_orbit_syncs_its_worktree_whenever_uv_lock_changes() -> None:
+    root = Path(__file__).parent.parent
+    setup = read_config(str(root)).setup
+    assert setup == Setup(command=("uv", "sync", "--frozen"), watch=("uv.lock",))

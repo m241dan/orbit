@@ -14,7 +14,7 @@ from orbit.agent.application.session import NO_STEPS_NOTE, AgentSession
 from orbit.agent.application.tools import ToolRegistry
 from orbit.agent.application.verifier import Verification
 from orbit.agent.domain.agent_task import Limits
-from orbit.agent.domain.roles import ConfigError, OrbitConfig, Role
+from orbit.agent.domain.roles import ConfigError, OrbitConfig, Role, Setup
 from orbit.agent.domain.verification import VerificationStep
 from orbit.agent.external.checks import run_step
 from orbit.agent.external.claude_cli import MODEL_ALIASES, ClaudeCliRunner
@@ -39,6 +39,7 @@ __all__ = [
     "ModelLoopRunner",
     "OrbitConfig",
     "Role",
+    "Setup",
     "StepRunner",
     "Tool",
     "ToolRegistry",

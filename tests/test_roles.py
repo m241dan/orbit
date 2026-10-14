@@ -6,6 +6,7 @@ from orbit.agent.domain.roles import (
     ConfigError,
     OrbitConfig,
     Role,
+    Setup,
     load_config,
 )
 from orbit.agent.domain.verification import VerificationStep
@@ -95,6 +96,20 @@ def test_a_file_lists_verification_steps_in_order() -> None:
     )
 
 
+def test_without_a_setup_table_there_is_no_setup() -> None:
+    assert load_config({}).setup is None
+
+
+def test_setup_watches_nothing_unless_told() -> None:
+    config = load_config({"setup": {"command": ["make", "deps"]}})
+    assert config.setup == Setup(command=("make", "deps"), watch=())
+
+
+def test_setup_lists_the_files_it_watches() -> None:
+    config = load_config({"setup": {"command": ["uv", "sync"], "watch": ["uv.lock", "a/b.txt"]}})
+    assert config.setup == Setup(command=("uv", "sync"), watch=("uv.lock", "a/b.txt"))
+
+
 @pytest.mark.parametrize(
     ("data", "message"),
     [
@@ -109,6 +124,12 @@ def test_a_file_lists_verification_steps_in_order() -> None:
         ({"verification": {"steps": [{"name": "a"}]}}, "verification.steps.0.command"),
         ({"verification": {"steps": [{"name": "a", "command": "x", "b": 1}]}}, "steps.0.b"),
         ({"verification": {"surprise": 1}}, "verification.surprise"),
+        ({"setup": {}}, "setup.command"),
+        ({"setup": {"command": []}}, "setup.command"),
+        ({"setup": {"command": ["uv"], "watch": ["/etc/passwd"]}}, "relative"),
+        ({"setup": {"command": ["uv"], "watch": ["../uv.lock"]}}, "relative"),
+        ({"setup": {"command": ["uv"], "watch": [""]}}, "relative"),
+        ({"setup": {"command": ["uv"], "surprise": 1}}, "setup.surprise"),
     ],
 )
 def test_mistakes_are_reported_readably(data: dict[str, object], message: str) -> None:

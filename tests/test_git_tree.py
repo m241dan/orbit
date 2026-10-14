@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from orbit.agent.domain.roles import Setup
 from orbit.agent.external.git_tree import GitCoderTree, in_git_work_tree
 
 
@@ -217,13 +218,23 @@ async def test_prepare_leaves_unmerged_work_that_conflicts_with_the_base(repo: P
     assert git(path, "status", "--porcelain") == ""
 
 
-async def test_setup_runs_when_the_lock_file_changes(repo: Path) -> None:
-    commit_file(repo, "uv.lock", "v1\n", "lock")
+def counting_setup(repo: Path, watch: tuple[str, ...] = ()) -> tuple[Setup, Path]:
+    """A setup that appends an ``x`` to a file outside the repository each time it runs."""
     runs = repo.parent / "setup-runs"
-    setup = (sys.executable, "-c", f"open({str(runs)!r}, 'a').write('x')")
+    command = (sys.executable, "-c", f"open({str(runs)!r}, 'a').write('x')")
+    return Setup(command=command, watch=watch), runs
+
+
+async def test_setup_reruns_only_when_a_watched_file_changes(repo: Path) -> None:
+    commit_file(repo, "uv.lock", "v1\n", "lock")
+    setup, runs = counting_setup(repo, watch=("uv.lock",))
     tree = GitCoderTree(str(repo), setup=setup)
 
     await tree.prepare(keep=False)
+    await tree.prepare(keep=False)
+    assert runs.read_text() == "x"
+
+    commit_file(repo, "a.txt", "two\n", "unwatched change")
     await tree.prepare(keep=False)
     assert runs.read_text() == "x"
 
@@ -232,19 +243,49 @@ async def test_setup_runs_when_the_lock_file_changes(repo: Path) -> None:
     assert runs.read_text() == "xx"
 
 
-async def test_a_failing_setup_raises(repo: Path) -> None:
+async def test_any_of_several_watched_files_changing_reruns_setup(repo: Path) -> None:
     commit_file(repo, "uv.lock", "v1\n", "lock")
-    setup = (sys.executable, "-c", "import sys; print('no network'); sys.exit(1)")
+    setup, runs = counting_setup(repo, watch=("uv.lock", "deps/extra.txt"))
     tree = GitCoderTree(str(repo), setup=setup)
+    await tree.prepare(keep=False)
+    assert runs.read_text() == "x"
+
+    (repo / "deps").mkdir()
+    commit_file(repo, "deps/extra.txt", "pin\n", "a watched file appears")
+    await tree.prepare(keep=False)
+    assert runs.read_text() == "xx"
+
+
+async def test_setup_without_watched_files_runs_once(repo: Path) -> None:
+    setup, runs = counting_setup(repo)
+    tree = GitCoderTree(str(repo), setup=setup)
+    await tree.prepare(keep=False)
+    commit_file(repo, "uv.lock", "v1\n", "lock")
+    await tree.prepare(keep=False)
+    assert runs.read_text() == "x"
+
+
+async def test_a_changed_setup_command_runs_again(repo: Path) -> None:
+    setup, runs = counting_setup(repo)
+    await GitCoderTree(str(repo), setup=setup).prepare(keep=False)
+    other = Setup(command=(*setup.command, "again"))
+    await GitCoderTree(str(repo), setup=other).prepare(keep=False)
+    assert runs.read_text() == "xx"
+
+
+async def test_a_failing_setup_raises_and_runs_again_next_time(repo: Path) -> None:
+    command = (sys.executable, "-c", "import sys; print('no network'); sys.exit(1)")
+    tree = GitCoderTree(str(repo), setup=Setup(command=command))
+    with pytest.raises(RuntimeError, match="no network"):
+        await tree.prepare(keep=False)
     with pytest.raises(RuntimeError, match="no network"):
         await tree.prepare(keep=False)
 
 
-async def test_no_lock_file_means_no_setup(repo: Path) -> None:
-    runs = repo.parent / "setup-runs"
-    setup = (sys.executable, "-c", f"open({str(runs)!r}, 'a').write('x')")
-    await GitCoderTree(str(repo), setup=setup).prepare(keep=False)
-    assert not runs.exists()
+async def test_without_setup_nothing_runs(repo: Path) -> None:
+    commit_file(repo, "uv.lock", "v1\n", "lock")
+    path = Path(await GitCoderTree(str(repo)).prepare(keep=False))
+    assert not (path.parent / "coder.synced").exists()
 
 
 async def test_leftovers_report_unmerged_commits_and_stashed_work(repo: Path) -> None:

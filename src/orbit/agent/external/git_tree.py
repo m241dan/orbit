@@ -15,12 +15,10 @@ from collections.abc import Collection, Sequence
 from pathlib import Path
 
 from orbit.agent.application.ports import Merge
+from orbit.agent.domain.roles import Setup
 
 BRANCH = "orbit/coder"
 STASH_MESSAGE = "orbit: unverified work"
-# Run in the tree when its lock file changes, so its environment matches.
-DEFAULT_SETUP = ("uv", "sync", "--frozen")
-LOCK_FILE = "uv.lock"
 IGNORE_HEADER = "# Created by orbit's verification checks:"
 
 
@@ -52,15 +50,25 @@ async def _run(command: Sequence[str], cwd: Path) -> tuple[bool, str]:
     return process.returncode == 0, output.decode(errors="replace").strip()
 
 
+def _fingerprint(setup: Setup, path: Path) -> str:
+    """A digest of ``setup``'s command and its watched files in ``path``, missing ones included."""
+    digest = hashlib.sha256(repr(setup.command).encode())
+    for name in setup.watch:
+        file = path / name
+        content = file.read_bytes() if file.is_file() else None
+        digest.update(repr((name, content)).encode())
+    return digest.hexdigest()
+
+
 class GitCoderTree:
     """The coder's worktree of the repository at ``root``.
 
-    ``setup`` runs in the tree whenever its ``uv.lock`` changes; ``None`` skips it.
+    ``setup`` runs in the tree once, then whenever a file it watches changes; ``None`` skips it.
     """
 
-    def __init__(self, root: str, setup: Sequence[str] | None = DEFAULT_SETUP) -> None:
+    def __init__(self, root: str, setup: Setup | None = None) -> None:
         self._root = Path(root)
-        self._setup = tuple(setup) if setup else None
+        self.setup = setup
         self._started = False
         self._base: str | None = None
         self._snapshots = itertools.count(1)
@@ -175,14 +183,13 @@ class GitCoderTree:
             await self._rebase(path, base)  # A conflict leaves the work as it was.
 
     async def _set_up(self, path: Path) -> None:
-        lock = path / LOCK_FILE
-        if self._setup is None or not lock.exists():
+        if self.setup is None:
             return
-        digest = hashlib.sha256(lock.read_bytes()).hexdigest()
+        digest = _fingerprint(self.setup, path)
         stamp = path.parent / "coder.synced"
         if stamp.exists() and stamp.read_text() == digest:
             return
-        ok, output = await _run(self._setup, path)
+        ok, output = await _run(self.setup.command, path)
         if not ok:
             raise RuntimeError(f"Setting up the coder's tree failed: {output}")
         stamp.write_text(digest)

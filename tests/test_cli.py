@@ -12,6 +12,7 @@ from orbit.agent import (
     GitCoderTree,
     Limits,
     McpHost,
+    Setup,
     Verification,
     VerificationStep,
     run_step,
@@ -176,6 +177,22 @@ def test_chat_reads_roles_and_limits_from_the_project_file(
     assert session.agents is not None
     assert session.agents.limits == Limits(max_attempts=2)
     assert session.agents.roles["coder"].model == "sonnet"
+
+
+def test_chat_sets_up_the_coder_tree_as_the_project_file_says(
+    launched: list[AgentSession], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    (tmp_path / ".orbit").mkdir()
+    (tmp_path / ".orbit" / "config.toml").write_text(
+        '[setup]\ncommand = ["make", "deps"]\nwatch = ["deps.lock"]\n'
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("orbit.cli.in_git_work_tree", lambda path: True)
+    runner.invoke(app, ["chat"])
+    [session] = launched
+    assert session.agents is not None
+    assert isinstance(session.agents.tree, GitCoderTree)
+    assert session.agents.tree.setup == Setup(command=("make", "deps"), watch=("deps.lock",))
 
 
 def test_an_invalid_project_file_stops_chat_with_its_problems(

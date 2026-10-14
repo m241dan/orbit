@@ -26,3 +26,8 @@ command = ["uv", "run", "lizard", "src", "tests", "-w", "-C", "6", "-L", "100", 
 [[verification.steps]]
 name = "Unit tests, 100% coverage"
 command = ["uv", "run", "pytest", "--cov", "--cov-fail-under=100"]
+
+# Bring the worktree's environment in line with the lock file whenever it changes.
+[setup]
+command = ["uv", "sync", "--frozen"]
+watch = ["uv.lock"]

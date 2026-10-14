@@ -80,7 +80,7 @@ def chat(
         raise typer.Exit(2) from None
     steps = config.verification.steps
     verification = Verification(steps, run_step, workspace_state) if verify else None
-    tree = GitCoderTree(".") if worktree and in_git_work_tree(".") else None
+    tree = GitCoderTree(".", config.setup) if worktree and in_git_work_tree(".") else None
     agents = Agents(
         McpHost(),
         ClaudeCliRunner(),
