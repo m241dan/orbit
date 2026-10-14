@@ -350,3 +350,11 @@ async def test_conversation_turns_are_not_verified() -> None:
     assert not any(isinstance(e, VerificationChanged | VerificationFinished) for e in events[1:])
     await asyncio.sleep(0.01)
     assert session._events.empty()
+
+
+async def test_closing_a_session_cancels_its_turn() -> None:
+    session = AgentSession(ModelLoopRunner(HangingModel()))
+    await session.send(SubmitPrompt(text="hi"))
+    await asyncio.wait_for(session.close(), 5)
+    turn = session._turn
+    assert turn is not None and turn.done()

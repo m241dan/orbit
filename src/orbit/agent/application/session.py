@@ -7,6 +7,7 @@ ports to do it, and reports what happened as events.
 import asyncio
 import uuid
 from collections.abc import AsyncIterator, Coroutine, Sequence
+from contextlib import suppress
 from typing import Any, assert_never
 
 from orbit.agent.application.agent_run import AgentDesk, AgentRun, Agents, Outcome
@@ -159,6 +160,15 @@ class AgentSession:
             await self._events.put(ErrorOccurred(message=str(exc)))
         else:
             await self._publish_tasks()
+
+    async def close(self) -> None:
+        """Cancel the work in progress, which stops its agent, and stop the agents' host."""
+        if self._turn is not None and not self._turn.done():
+            self._turn.cancel()
+            with suppress(asyncio.CancelledError):
+                await self._turn
+        if self._desk is not None:
+            await self._desk.stop()
 
     async def events(self) -> AsyncIterator[Event]:
         if not self._announced:

@@ -392,3 +392,32 @@ async def test_an_agent_that_stops_after_changing_files_is_verified_again() -> N
     assert steps.runs == ["Unit tests", "Unit tests"]
     assert len(launcher.launches) == 1
     assert [t.status for t in board(events)] == ["completed"]
+
+
+async def test_closing_stops_the_running_agent_and_the_host() -> None:
+    fetched = asyncio.Event()
+
+    async def works_forever(call: Call) -> TurnEndReason:
+        await call("get_task")
+        fetched.set()
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+    session, host, _ = session_for(works_forever)
+    await session.send(AddTask(task=TaskSpec(prompt="one")))
+    await session.send(RunTasks())
+    await asyncio.wait_for(fetched.wait(), 5)
+    await asyncio.wait_for(session.close(), 5)
+    await session.close()  # Closing twice is harmless.
+
+    assert host.stops == 1
+    events: list[Event] = []
+    while not session._events.empty():
+        events.append(session._events.get_nowait())
+    assert AgentExited(agent_id="agent-1", reason="killed") in events
+
+
+async def test_closing_a_session_that_never_ran_a_task_starts_nothing() -> None:
+    session, host, _ = session_for()
+    await session.close()
+    assert (host.starts, host.stops) == (0, 0)

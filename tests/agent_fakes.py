@@ -35,11 +35,15 @@ class FakeHost:
     def __init__(self) -> None:
         self.handler: CallHandler | None = None
         self.starts = 0
+        self.stops = 0
 
     async def start(self, handler: CallHandler) -> str:
         self.starts += 1
         self.handler = handler
         return URL
+
+    async def stop(self) -> None:
+        self.stops += 1
 
     async def call(self, token: str, tool: str, **arguments: Any) -> Reply:
         assert self.handler is not None

@@ -108,6 +108,12 @@ class AgentDesk:
             self._url = await self.agents.host.start(self.handle)
         return self._url
 
+    async def stop(self) -> None:
+        """Stop the host, if it was started."""
+        if self._url is not None:
+            self._url = None
+            await self.agents.host.stop()
+
     def open(self, run: "AgentRun", role: str, task_id: str) -> Agent:
         agent = self.registry.register(role, task_id)
         self._runs[agent.id] = run

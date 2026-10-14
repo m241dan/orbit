@@ -62,6 +62,10 @@ class AgentHost(Protocol):
         """Start serving calls to ``handler``; returns the URL agents connect to."""
         ...
 
+    async def stop(self) -> None:
+        """Stop serving."""
+        ...
+
 
 @dataclass(frozen=True)
 class AgentLaunch:

@@ -41,6 +41,7 @@ class FakeSession:
     def __init__(self) -> None:
         self.commands: list[Command] = []
         self.queue: asyncio.Queue[Event] = asyncio.Queue()
+        self.closed = False
 
     async def send(self, command: Command) -> None:
         self.commands.append(command)
@@ -48,6 +49,17 @@ class FakeSession:
     async def events(self) -> AsyncIterator[Event]:
         while True:
             yield await self.queue.get()
+
+    async def close(self) -> None:
+        self.closed = True
+
+
+async def test_quitting_closes_the_session() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await pilot.press("ctrl+c")
+    assert session.closed
 
 
 async def test_submit_sends_command_and_renders_events() -> None:

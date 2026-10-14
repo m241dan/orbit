@@ -120,6 +120,9 @@ class OrbitApp(App[None], inherit_bindings=False):
                 yield VerificationPanel(id="verification-steps")
         yield Footer()
 
+    async def on_unmount(self) -> None:
+        await self._session.close()
+
     def on_mount(self) -> None:
         self.query_one(f"#{self._selected}").add_class("selected")
         self.install_screen(self._model_picker, "pick-model")
