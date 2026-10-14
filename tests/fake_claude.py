@@ -3,7 +3,8 @@
 Usage: python fake_claude.py SCENARIO.json [claude args...]
 
 The scenario is ``{"stdout": [str, ...], "stderr": str, "exit": int, "hang": bool}``.
-Each run appends ``{"argv": [...], "stdin": str, "pid": int}`` to ``SCENARIO.json.calls``.
+Each run appends ``{"argv": [...], "stdin": str, "pid": int, "env": {...}}`` to
+``SCENARIO.json.calls``; ``env`` holds the variables in ``RECORDED_ENV`` that are set.
 """
 
 import json
@@ -12,11 +13,14 @@ import sys
 import time
 from pathlib import Path
 
+RECORDED_ENV = ("ENABLE_TOOL_SEARCH", "MCP_TOOL_TIMEOUT", "ORBIT_AGENT_TOKEN")
+
 
 def main() -> int:
     scenario_path = Path(sys.argv[1])
     scenario = json.loads(scenario_path.read_text())
-    record = {"argv": sys.argv[2:], "stdin": sys.stdin.read(), "pid": os.getpid()}
+    env = {name: os.environ[name] for name in RECORDED_ENV if name in os.environ}
+    record = {"argv": sys.argv[2:], "stdin": sys.stdin.read(), "pid": os.getpid(), "env": env}
     with open(f"{scenario_path}.calls", "a") as calls:
         calls.write(json.dumps(record) + "\n")
     for line in scenario.get("stdout", []):

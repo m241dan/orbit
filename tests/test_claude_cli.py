@@ -8,7 +8,8 @@ from typing import Any
 import pytest
 
 from orbit.agent import AgentSession, ClaudeCliRunner
-from orbit.agent.external.claude_cli import translate
+from orbit.agent.domain.agents import Agent
+from orbit.agent.external.claude_cli import AGENT_RULES, TOOL_TIMEOUT_MS, translate
 from orbit.protocol import (
     AssistantMessage,
     BusyChanged,
@@ -300,3 +301,90 @@ async def test_new_context_starts_a_fresh_claude_session(tmp_path: Path) -> None
     assert task["stdin"] == "task"
     # The original keeps its own conversation.
     assert second["argv"][-2:] == ["--resume", SESSION_ID]
+
+
+# Agents: a CLI connected to orbit's MCP server
+
+AGENT = Agent(id="agent-3", role="coder", task_id="7", token="s3cret")
+URL = "http://127.0.0.1:5555/mcp"
+
+
+def init(status: str | None) -> dict[str, Any]:
+    servers = [] if status is None else [{"name": "orbit", "status": status, "source": "dynamic"}]
+    return {**INIT, "mcp_servers": servers}
+
+
+async def run_agent(runner: ClaudeCliRunner, settings: Settings | None = None) -> list[Event]:
+    events = runner.run_agent(AGENT, URL, "You are agent-3.", settings or Settings())
+    return [e async for e in events]
+
+
+async def test_an_agent_runs_connected_to_orbit(tmp_path: Path) -> None:
+    runner, scenario = make_runner(tmp_path, stdout=lines(init("connected"), TEXT, RESULT))
+    events = await run_agent(runner, Settings(model="opus"))
+
+    assert events == [
+        TurnStarted(turn_id="agent-3", agent_id="agent-3"),
+        AssistantMessage(turn_id="agent-3", text="3.13", agent_id="agent-3"),
+        TurnFinished(turn_id="agent-3", reason="completed", agent_id="agent-3"),
+    ]
+    [call] = calls(scenario)
+    assert call["stdin"] == "You are agent-3."
+    argv = call["argv"]
+    assert argv[:6] == ["-p", "--output-format", "stream-json", "--verbose", "--model", "opus"]
+    config = json.loads(argv[argv.index("--mcp-config") + 1])
+    assert config == {
+        "mcpServers": {
+            "orbit": {
+                "type": "http",
+                "url": URL,
+                "headers": {"Authorization": "Bearer ${ORBIT_AGENT_TOKEN}"},
+            }
+        }
+    }
+    assert "--strict-mcp-config" in argv
+    assert argv[argv.index("--allowedTools") + 1] == "mcp__orbit__*"
+    assert argv[argv.index("--append-system-prompt") + 1] == AGENT_RULES
+    assert "--resume" not in argv
+
+
+async def test_the_token_travels_in_the_environment_not_the_arguments(tmp_path: Path) -> None:
+    runner, scenario = make_runner(tmp_path, stdout=lines(init("connected"), RESULT))
+    await run_agent(runner)
+    [call] = calls(scenario)
+    assert not any("s3cret" in arg for arg in call["argv"])
+    assert call["env"] == {
+        "ORBIT_AGENT_TOKEN": "s3cret",
+        "ENABLE_TOOL_SEARCH": "false",
+        "MCP_TOOL_TIMEOUT": str(TOOL_TIMEOUT_MS),
+    }
+
+
+async def test_agents_keep_tool_access_flags_and_orbit_tools(tmp_path: Path) -> None:
+    runner, scenario = make_runner(tmp_path, stdout=lines(init("connected"), RESULT))
+    await run_agent(runner, Settings(tool_access="off"))
+    argv = calls(scenario)[0]["argv"]
+    assert argv[argv.index("--tools") + 1] == ""
+    assert argv[argv.index("--allowedTools") + 1] == "mcp__orbit__*"
+
+
+async def test_an_agent_run_leaves_the_conversation_session_alone(tmp_path: Path) -> None:
+    runner, _ = make_runner(tmp_path, stdout=lines(init("connected"), RESULT))
+    await run_agent(runner)
+    assert runner.session_id is None
+
+
+@pytest.mark.parametrize("status", ["failed", "needs-auth", None])
+async def test_an_agent_that_cannot_reach_orbit_fails_fast(
+    tmp_path: Path, status: str | None
+) -> None:
+    runner, _ = make_runner(tmp_path, stdout=lines(init(status), TEXT), hang=True)
+    with pytest.raises(RuntimeError, match="orbit's MCP server") as raised:
+        await asyncio.wait_for(run_agent(runner), 5)
+    assert str(status) in str(raised.value)
+
+
+async def test_a_pending_connection_is_not_a_failure(tmp_path: Path) -> None:
+    runner, _ = make_runner(tmp_path, stdout=lines(init("pending"), RESULT))
+    events = await run_agent(runner)
+    assert events[-1] == TurnFinished(turn_id="agent-3", reason="completed", agent_id="agent-3")

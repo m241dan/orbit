@@ -3,13 +3,19 @@
 Each turn spawns ``claude -p --output-format stream-json --verbose`` with the
 prompt on stdin and translates its JSON-lines output into protocol events.
 Later turns pass ``--resume <session_id>`` so Claude keeps the conversation.
+
+Agents are runs of the same CLI connected to orbit's MCP server, told to fetch their task
+from it. Their token travels in the environment, so other users can't read it from the
+process list.
 """
 
 import asyncio
 import json
-from collections.abc import AsyncIterator, Sequence
+import os
+from collections.abc import AsyncIterator, Mapping, Sequence
 from typing import Any
 
+from orbit.agent.domain.agents import Agent
 from orbit.protocol import (
     AssistantMessage,
     ErrorOccurred,
@@ -32,6 +38,46 @@ TOOL_ACCESS_ARGS: dict[ToolAccess, tuple[str, ...]] = {
 }
 # Tool results (e.g. whole files) arrive as single JSON lines; allow large ones.
 LINE_LIMIT = 64 * 1024 * 1024
+
+# How agents reach orbit, and what they're told about it.
+TOKEN_VARIABLE = "ORBIT_AGENT_TOKEN"
+# complete_task waits for verification, which can take minutes.
+TOOL_TIMEOUT_MS = 30 * 60 * 1000
+# Statuses the CLI reports for an MCP server that is, or is about to be, usable.
+LIVE_MCP_STATUSES = ("connected", "pending")
+AGENT_RULES = (
+    "You are an agent working for orbit, which hands out tasks and verifies the work. Talk to"
+    " orbit only through its MCP tools (mcp__orbit__*). Fetch your task with get_task, and when"
+    " you're done, call complete_task and wait for its reply: it says whether verification"
+    " passed, or what to fix. Once it says verification passed, end your turn immediately."
+)
+
+
+def agent_args(url: str) -> list[str]:
+    """Flags connecting a CLI to orbit's MCP server at ``url``, and only to it."""
+    headers = {"Authorization": f"Bearer ${{{TOKEN_VARIABLE}}}"}
+    config = {"mcpServers": {"orbit": {"type": "http", "url": url, "headers": headers}}}
+    return [
+        *("--mcp-config", json.dumps(config), "--strict-mcp-config"),
+        *("--allowedTools", "mcp__orbit__*", "--append-system-prompt", AGENT_RULES),
+    ]
+
+
+def agent_env(agent: Agent) -> dict[str, str]:
+    return {
+        **os.environ,
+        TOKEN_VARIABLE: agent.token,
+        "ENABLE_TOOL_SEARCH": "false",  # Load orbit's tools up front, not on first use.
+        "MCP_TOOL_TIMEOUT": str(TOOL_TIMEOUT_MS),
+    }
+
+
+def check_orbit_connected(message: dict[str, Any]) -> None:
+    """Raise unless the CLI's ``init`` message shows orbit's MCP server connecting."""
+    servers = {server["name"]: server["status"] for server in message.get("mcp_servers", [])}
+    status = servers.get("orbit")
+    if status not in LIVE_MCP_STATUSES:
+        raise RuntimeError(f"The agent couldn't reach orbit's MCP server (status: {status}).")
 
 
 def translate(turn_id: str, message: dict[str, Any]) -> list[Event]:
@@ -113,14 +159,31 @@ class ClaudeCliRunner:
     def __init__(self, command: Sequence[str] = ("claude",)) -> None:
         self._command = tuple(command)
         self.session_id: str | None = None
+        self._needs_orbit = False
 
     def new_context(self) -> "ClaudeCliRunner":
         """Same CLI, new Claude session (no ``--resume``)."""
         return ClaudeCliRunner(self._command)
 
     async def run_turn(self, turn_id: str, prompt: str, settings: Settings) -> AsyncIterator[Event]:
+        async for event in self._run(turn_id, self._args(settings), prompt):
+            yield event
+
+    async def run_agent(
+        self, agent: Agent, url: str, prompt: str, settings: Settings
+    ) -> AsyncIterator[Event]:
+        """Run ``agent`` as a new Claude session connected to orbit at ``url``."""
+        runner = self.new_context()
+        runner._needs_orbit = True
+        args = [*runner._args(settings), *agent_args(url)]
+        async for event in runner._run(agent.id, args, prompt, agent_env(agent)):
+            yield event.model_copy(update={"agent_id": agent.id})
+
+    async def _run(
+        self, turn_id: str, args: Sequence[str], prompt: str, env: Mapping[str, str] | None = None
+    ) -> AsyncIterator[Event]:
         yield TurnStarted(turn_id=turn_id)
-        process = await self._start(self._args(settings))
+        process = await self._start(args, env)
         try:
             async for event in self._converse(turn_id, process, prompt):
                 yield event
@@ -139,10 +202,13 @@ class ClaudeCliRunner:
             args += ["--resume", self.session_id]
         return args
 
-    async def _start(self, args: Sequence[str]) -> asyncio.subprocess.Process:
+    async def _start(
+        self, args: Sequence[str], env: Mapping[str, str] | None = None
+    ) -> asyncio.subprocess.Process:
         try:
             return await asyncio.create_subprocess_exec(
                 *args,
+                env=env,
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -193,4 +259,6 @@ class ClaudeCliRunner:
             raise RuntimeError(f"Unexpected output from claude: {line[:200]}") from None
         if session_id := message.get("session_id"):
             self.session_id = session_id
+        if self._needs_orbit and message.get("subtype") == "init":
+            check_orbit_connected(message)
         return message
