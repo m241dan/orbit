@@ -9,6 +9,7 @@ left behind are stashed, and commits that can't be merged stay on ``orbit/coder`
 import asyncio
 import datetime
 import hashlib
+import itertools
 import subprocess
 from collections.abc import Sequence
 from pathlib import Path
@@ -61,6 +62,7 @@ class GitCoderTree:
         self._setup = tuple(setup) if setup else None
         self._started = False
         self._base: str | None = None
+        self._snapshots = itertools.count(1)
 
     async def prepare(self, keep: bool) -> str:
         if not self._started:
@@ -92,6 +94,20 @@ class GitCoderTree:
         if not await self._is_ancestor(base, coder):
             return await self._rebase(await self._path(), base)
         return await self._fast_forward(base, coder)
+
+    async def head(self) -> str:
+        return await self._git(await self._path(), "rev-parse", "HEAD")
+
+    async def show(self, commits: Sequence[str]) -> str:
+        return await self._git(self._root, "show", "--stat", "--patch", "--format=medium", *commits)
+
+    async def snapshot(self, commit: str) -> str:
+        path = (await self._path()).parent / f"review-{commit[:12]}-{next(self._snapshots)}"
+        await self._git(self._root, "worktree", "add", "-q", "--detach", str(path), commit)
+        return str(path)
+
+    async def drop(self, path: str) -> None:
+        await self._git(self._root, "worktree", "remove", "--force", path)
 
     async def leftovers(self) -> list[str]:
         notes = [await self._unmerged(), await self._stashed()]

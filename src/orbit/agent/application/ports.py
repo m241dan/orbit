@@ -118,6 +118,22 @@ class CoderTree(Protocol):
         """Merge the tree's commits into the base branch, fast-forward only."""
         ...
 
+    async def head(self) -> str:
+        """The tree's latest commit."""
+        ...
+
+    async def show(self, commits: Sequence[str]) -> str:
+        """Each of ``commits``' message and diff."""
+        ...
+
+    async def snapshot(self, commit: str) -> str:
+        """A separate, detached tree at ``commit`` to read; returns its path."""
+        ...
+
+    async def drop(self, path: str) -> None:
+        """Remove the snapshot at ``path``."""
+        ...
+
     async def leftovers(self) -> list[str]:
         """Notes on work left behind by earlier runs: unmerged commits, put-aside changes."""
         ...

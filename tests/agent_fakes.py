@@ -2,7 +2,7 @@
 CLI, and a step runner and workspace for verification."""
 
 import asyncio
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from typing import Any
 
 from orbit.agent import Agents, AgentSession, TurnRunner, Verification, VerificationStep
@@ -114,6 +114,8 @@ class FakeTree:
         self.broken = broken
         self.prepared: list[bool] = []
         self.commits: list[str] = []
+        self.snapshots: list[str] = []
+        self.dropped: list[str] = []
 
     async def prepare(self, keep: bool) -> str:
         self.prepared.append(keep)
@@ -127,6 +129,19 @@ class FakeTree:
 
     async def integrate(self) -> Merge:
         return self.merges.pop(0) if self.merges else Merge("merged")
+
+    async def head(self) -> str:
+        return f"c{len(self.commits)}"
+
+    async def show(self, commits: Sequence[str]) -> str:
+        return "\n".join(f"diff of {commit}" for commit in commits)
+
+    async def snapshot(self, commit: str) -> str:
+        self.snapshots.append(commit)
+        return f"/work/review-{commit}"
+
+    async def drop(self, path: str) -> None:
+        self.dropped.append(path)
 
     async def leftovers(self) -> list[str]:
         return self.notes

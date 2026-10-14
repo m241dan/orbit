@@ -291,3 +291,51 @@ def test_without_git_nothing_is_a_work_tree(monkeypatch: pytest.MonkeyPatch, rep
 
     monkeypatch.setattr(subprocess, "run", missing)
     assert not in_git_work_tree(str(repo))
+
+
+async def test_head_is_the_trees_latest_commit(repo: Path) -> None:
+    tree = GitCoderTree(str(repo))
+    path = Path(await tree.prepare(keep=False))
+    (path / "b.txt").write_text("two\n")
+    await tree.commit("Add b")
+    assert await tree.head() == git(path, "rev-parse", "HEAD")
+
+
+async def test_show_gives_each_commits_message_and_diff(repo: Path) -> None:
+    tree = GitCoderTree(str(repo))
+    path = Path(await tree.prepare(keep=False))
+    (path / "b.txt").write_text("two\n")
+    await tree.commit("Add b")
+    first = await tree.head()
+    (path / "c.txt").write_text("three\n")
+    await tree.commit("Add c")
+    shown = await tree.show([first, await tree.head()])
+    assert shown.index("Add b") < shown.index("+two") < shown.index("Add c") < shown.index("+three")
+
+
+async def test_a_snapshot_is_a_detached_tree_at_the_commit_until_dropped(repo: Path) -> None:
+    tree = GitCoderTree(str(repo))
+    path = Path(await tree.prepare(keep=False))
+    (path / "b.txt").write_text("two\n")
+    await tree.commit("Add b")
+    commit = await tree.head()
+    (path / "c.txt").write_text("three\n")
+    await tree.commit("Add c")
+
+    snapshot = Path(await tree.snapshot(commit))
+    assert snapshot.parent == repo / ".git" / "orbit"
+    assert (snapshot / "b.txt").exists() and not (snapshot / "c.txt").exists()
+    assert git(snapshot, "rev-parse", "HEAD") == commit
+    assert git(snapshot, "branch", "--show-current") == ""
+
+    await tree.drop(str(snapshot))
+    assert not snapshot.exists()
+    assert str(snapshot) not in git(repo, "worktree", "list")
+
+
+async def test_two_snapshots_of_one_commit_are_separate(repo: Path) -> None:
+    tree = GitCoderTree(str(repo))
+    await tree.prepare(keep=False)
+    commit = await tree.head()
+    first, second = await tree.snapshot(commit), await tree.snapshot(commit)
+    assert first != second
