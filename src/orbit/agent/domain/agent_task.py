@@ -5,6 +5,7 @@ goes back to the same agent to fix, up to a limit, after which the task falls ba
 agent. An agent that exits without claiming done is taken to have finished.
 """
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Literal
 
@@ -62,14 +63,23 @@ class Claim:
     reply: str | None = None
 
 
-def task_brief(task: TaskSpec) -> str:
-    """The reply to ``get_task``: the task, and how to report back."""
-    return (
+def task_brief(task: TaskSpec, steps: Sequence[str] = (), max_checks: int = 0) -> str:
+    """The reply to ``get_task``: the task, the verification ``steps`` its work must pass, and
+    how to report back. With ``max_checks``, the agent may run that many steps itself."""
+    brief = (
         f"{task.prompt}\n\n"
         "When you have finished, call complete_task with a one-line summary of what you did;"
         " orbit then verifies your work and replies. If you can't do the task, call give_up"
         " with the reason."
     )
+    if steps:
+        brief += f"\n\nOrbit verifies your work with these checks, in order: {', '.join(steps)}."
+        if max_checks:
+            brief += (
+                " Before calling complete_task, you can run any of them with run_check, naming"
+                f" it, up to {max_checks} times in all."
+            )
+    return brief
 
 
 class AgentTask:
@@ -84,10 +94,12 @@ class AgentTask:
         self.checks = 0
         self.summaries: list[str] = []  # One per claim orbit accepted, in order.
 
-    def get_task(self) -> str:
+    def get_task(self, steps: Sequence[str] = (), can_check: bool = False) -> str:
+        """The task, naming the verification ``steps`` its work must pass, and whether the agent
+        ``can_check`` them itself."""
         if self.phase == "assigned":
             self.phase = "working"
-        return task_brief(self.task)
+        return task_brief(self.task, steps, self.limits.max_checks if can_check else 0)
 
     def claim_done(self, summary: str) -> Claim:
         if self.phase != "working":

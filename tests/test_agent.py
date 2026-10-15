@@ -73,7 +73,7 @@ async def test_a_prompt_starts_a_turn_of_the_planner() -> None:
     events = await asyncio.wait_for(collect_run(session), 5)
 
     [launch] = launcher.launches  # The planner's launcher was asked to converse.
-    assert (launch.agent.role, launch.prompt) == ("planner", "hello")
+    assert launch.agent.role == "planner" and launch.prompt.endswith("\n\nhello")
     assert [e.type for e in turns(events)] == [
         "busy_changed",
         "turn_started",

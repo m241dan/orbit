@@ -1,6 +1,7 @@
 """Verification rules: when a task needs checking, how many fixes to try, and what to ask for."""
 
 import shlex
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from orbit.protocol import SkipReason, TaskSpec
@@ -93,4 +94,14 @@ def startup_fix_prompt(step: VerificationStep, output: str) -> str:
         f"Fix failing check: {step.name}\n\n"
         "Orbit ran the verification steps on the base commit at startup, and this one"
         f" failed. {failure_report(step, output)}\n\n{FIX_INSTRUCTIONS}"
+    )
+
+
+def steps_note(steps: Sequence[str]) -> str:
+    """What the planner is told about the verification steps named ``steps``."""
+    if not steps:
+        return "Orbit note: No verification steps are configured yet, so tasks aren't verified."
+    return (
+        f"Orbit note: orbit verifies each task with these checks, in order: {', '.join(steps)}."
+        " Each task must leave them all passing on its own."
     )

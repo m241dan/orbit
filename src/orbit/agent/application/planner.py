@@ -2,7 +2,8 @@
 
 The planner is one agent for the whole session. Each prompt is a turn of its conversation,
 resumed from the last, so it remembers what was said; it proposes tasks with ``propose_task``,
-and they wait on the board as drafts until the user accepts them.
+and they wait on the board as drafts until the user accepts them. Its first prompt, and the first
+after the verification steps change, tells it the steps each task must pass.
 """
 
 from collections.abc import AsyncIterator
@@ -13,6 +14,7 @@ from orbit.agent.application.ports import Reply
 from orbit.agent.domain.agents import Agent
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.roles import CODER, PLANNER, suggested_task
+from orbit.agent.domain.verification import steps_note
 from orbit.protocol import (
     PLAN_TASK,
     AgentExited,
@@ -30,6 +32,7 @@ class PlannerChat:
         self._desk = desk
         self._board = board
         self._agent: Agent | None = None
+        self._told: tuple[str, ...] | None = None  # The steps the planner last heard about.
         self._tools: dict[str, Tool] = {
             "propose_task": self._propose_task,
             "report_progress": self._report_progress,
@@ -45,9 +48,17 @@ class PlannerChat:
             )
         role = self._desk.agents.roles[PLANNER]
         own = Settings(model=settings.model, tool_access=role.tool_access)
-        launch = await self._desk.launch(self._agent, prompt, own, ".")
+        launch = await self._desk.launch(self._agent, self._with_steps(prompt), own, ".")
         async for event in self._desk.agents.launcher.converse(turn_id, launch):
             yield event
+
+    def _with_steps(self, prompt: str) -> str:
+        """``prompt``, after a note of the verification steps if the planner hasn't heard them."""
+        steps = tuple(step.name for step in self._board.steps)
+        if steps == self._told:
+            return prompt
+        self._told = steps
+        return f"{steps_note(steps)}\n\n{prompt}"
 
     async def handle(self, tool: str, arguments: dict[str, Any]) -> Reply:
         role = self._desk.agents.roles[PLANNER]

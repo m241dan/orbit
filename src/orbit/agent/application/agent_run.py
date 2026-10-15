@@ -474,7 +474,10 @@ class AgentRun:
     # Tools
 
     async def _get_task(self, arguments: dict[str, Any]) -> Reply:
-        return Reply(self._work.get_task())
+        steps: list[str] = []
+        if self._verifier is not None and self.role.verify:
+            steps = [step.name for step in self._verifier.verification.steps]
+        return Reply(self._work.get_task(steps, "run_check" in self.role.tools))
 
     async def _complete_task(self, arguments: dict[str, Any]) -> Reply:
         claim = self._work.claim_done(str(arguments.get("summary", "")))

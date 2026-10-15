@@ -30,6 +30,23 @@ def test_hands_out_its_prompt_and_starts_working() -> None:
     assert agent_task.phase == "working"
 
 
+def test_without_steps_the_brief_names_no_checks() -> None:
+    brief = AgentTask(TaskSpec(prompt="Add a flag."), Limits()).get_task()
+    assert "checks" not in brief and "run_check" not in brief
+
+
+def test_the_brief_names_the_checks_and_how_many_the_agent_may_run() -> None:
+    agent_task = AgentTask(TaskSpec(prompt="Add a flag."), Limits(max_checks=7))
+    brief = agent_task.get_task(("Ruff lint", "Unit tests"), can_check=True)
+    assert "Orbit verifies your work with these checks, in order: Ruff lint, Unit tests." in brief
+    assert "run_check" in brief and "7" in brief
+
+
+def test_an_agent_without_run_check_is_told_the_checks_but_not_to_run_them() -> None:
+    brief = AgentTask(TaskSpec(prompt="Add a flag."), Limits()).get_task(("Unit tests",))
+    assert "Unit tests" in brief and "run_check" not in brief
+
+
 def test_asking_again_hands_out_the_same_task_without_changing_phase() -> None:
     agent_task = verifying()
     assert "Add a flag." in agent_task.get_task()

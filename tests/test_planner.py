@@ -2,7 +2,11 @@
 
 import asyncio
 
-from orbit.agent import AgentSession
+from orbit.agent import Agents, AgentSession
+from orbit.agent.application.agent_run import AgentDesk
+from orbit.agent.application.planner import PlannerChat
+from orbit.agent.domain.board import TaskBoard
+from orbit.agent.domain.verification import steps_note
 from orbit.protocol import (
     AcceptTask,
     AddTask,
@@ -14,6 +18,7 @@ from orbit.protocol import (
     ProgressNoted,
     RemoveTask,
     RunTasks,
+    Settings,
     SubmitPrompt,
     TasksChanged,
     TaskSpec,
@@ -21,7 +26,7 @@ from orbit.protocol import (
     TurnEndReason,
     TurnStarted,
 )
-from tests.agent_fakes import ROLES, Call, session_for
+from tests.agent_fakes import ROLES, Call, FakeHost, ScriptedLauncher, session_for
 
 
 async def until_idle(session: AgentSession) -> list[Event]:
@@ -62,12 +67,10 @@ async def test_prompts_to_the_planner_go_to_it_and_proposals_become_drafts() -> 
     assert BusyChanged(busy=True, lane="planner") in events
     assert events[-1] == BusyChanged(busy=False, lane="planner")
     first, second = launcher.launches
-    assert (first.agent.id, first.agent.role, first.prompt) == (
-        "agent-1",
-        "planner",
-        "I want a --fast flag.",
-    )
+    assert (first.agent.id, first.agent.role) == ("agent-1", "planner")
+    assert first.prompt == f"{steps_note(())}\n\nI want a --fast flag."
     assert second.agent.id == "agent-1"  # The same conversation, resumed.
+    assert second.prompt == "Thanks."
     assert first.tools == ROLES["planner"].tools and first.cwd == "."
     drafts = board(events)
     assert [(t.status, t.origin, t.task.prompt) for t in drafts] == [
@@ -190,3 +193,28 @@ async def test_closing_ends_the_planners_access() -> None:
     assert reply.is_error
     exited = AgentExited(agent_id="agent-1", reason="finished")
     assert await asyncio.wait_for(anext(session.events()), 5) == exited
+
+
+async def test_the_planner_hears_the_steps_on_its_first_turn_and_when_they_change() -> None:
+    host = FakeHost()
+    launcher = ScriptedLauncher(host)
+    launcher.planner_turns = [chats, chats, chats]
+    events: list[Event] = []
+
+    async def publish(event: Event) -> None:
+        events.append(event)
+
+    desk = AgentDesk(Agents(host, launcher, lambda: "token-1", ROLES), publish)
+    board = TaskBoard(["Ruff lint"])
+    chat = PlannerChat(desk, board)
+
+    async def turn(text: str) -> str:
+        async for _ in chat.run_turn("turn", text, Settings()):
+            pass
+        return launcher.launches[-1].prompt
+
+    first = await turn("Plan a flag.")
+    assert first.startswith(steps_note(("Ruff lint",))) and first.endswith("\n\nPlan a flag.")
+    assert await turn("And docs.") == "And docs."
+    board.set_steps(["Ruff lint", "Unit tests"])
+    assert await turn("More.") == f"{steps_note(('Ruff lint', 'Unit tests'))}\n\nMore."

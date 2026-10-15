@@ -23,6 +23,32 @@ async def test_an_agent_is_launched_with_its_roles_instructions_and_tools() -> N
     assert launch.tools == ROLES["coder"].tools
 
 
+async def test_a_verified_agent_is_told_the_checks_and_that_it_may_run_them() -> None:
+    briefs: list[str] = []
+
+    async def done(call: Call) -> TurnEndReason:
+        briefs.append((await call("get_task")).text)
+        await call("complete_task", summary="ok")
+        return "completed"
+
+    session, _, _ = session_for(done, verification=verified(Steps()))
+    await asyncio.wait_for(run(session), 5)
+    assert "these checks, in order: Unit tests." in briefs[0] and "run_check" in briefs[0]
+
+
+async def test_an_unverified_agent_is_told_no_checks() -> None:
+    briefs: list[str] = []
+
+    async def reviews(call: Call) -> TurnEndReason:
+        briefs.append((await call("get_task")).text)
+        await call("complete_task", summary="Looks fine.")
+        return "completed"
+
+    session, _, _ = session_for(verification=verified(Steps()), reviewers=(reviews,))
+    await asyncio.wait_for(run(session, TaskSpec(prompt="Review", role="reviewer")), 5)
+    assert "Unit tests" not in briefs[0] and "run_check" not in briefs[0]
+
+
 async def test_tools_outside_the_role_are_refused_and_unverified_roles_finish_on_their_claim() -> (
     None
 ):

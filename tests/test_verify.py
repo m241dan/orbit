@@ -10,6 +10,7 @@ from orbit.agent.domain.verification import (
     may_change_files,
     skip_reason,
     startup_fix_prompt,
+    steps_note,
 )
 from orbit.protocol import Settings, StepStatus, TaskSpec
 
@@ -123,3 +124,12 @@ async def test_first_failure_is_none_when_every_step_passes() -> None:
 
 def test_a_setup_runs_as_a_step_named_setup() -> None:
     assert setup_step(Setup(command=("make",))) == VerificationStep("setup", ("make",))
+
+
+def test_the_steps_note_lists_the_steps_each_task_must_pass() -> None:
+    note = steps_note(("Ruff lint", "Unit tests"))
+    assert "Ruff lint, Unit tests" in note and "each task" in note
+
+
+def test_the_steps_note_says_when_nothing_verifies_tasks() -> None:
+    assert "No verification steps" in steps_note(())

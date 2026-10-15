@@ -82,8 +82,9 @@ planner. The agent is told only who it is (`agent-1`, `agent-2`, …) and to fet
 4. Once verification passes, the agent is told to stop. It gets a few seconds to exit on its own
    before orbit stops it.
 
-An agent may also run a single step itself with `run_check` (up to 20 times per task), note what
-it's doing with `report_progress`, or call `give_up` with a reason when the task can't be done.
+`get_task`'s reply names the steps that will verify the agent's work. An agent may also run a
+single step itself with `run_check` (up to 20 times per task), note what it's doing with
+`report_progress`, or call `give_up` with a reason when the task can't be done.
 
 The **agents pane** (bottom right) lists the agents running now: each one's role, its task, and
 whether it's working or waiting on orbit (say, `waiting on complete_task` while its work is
@@ -263,10 +264,11 @@ and reviews, with no free-form chat besides. The **Planner** tab, always second 
 just the planner conversation: your prompts, and the planner's messages, tool calls and exchanges
 with orbit (`ctrl+t` jumps there, and pressed again goes back to the tab you were on). Tell it
 what you want to build; it asks what's unclear and breaks the goal into small tasks, proposing each
-with `propose_task`. Proposals appear in the task list as 📝 drafts, with the `coder` role's default
-settings, and never run on their own: on the task list, `a` accepts the highlighted draft (or edit
-it with `enter` and save, which accepts it too), and `x` removes it. Accepted tasks run with the
-rest when you press `ctrl+r`.
+with `propose_task`. Its first prompt, and the first after the verification steps change, tells it
+the steps each task must pass. Proposals appear in the task list as 📝 drafts, with the `coder`
+role's default settings, and never run on their own: on the task list, `a` accepts the highlighted
+draft (or edit it with `enter` and save, which accepts it too), and `x` removes it. Accepted tasks
+run with the rest when you press `ctrl+r`.
 
 The planner answers in a lane of its own, so you can plan while tasks run (and press `ctrl+r`
 while it answers); the prompt waits only for the planner's own reply. `ctrl+x` stops only the
