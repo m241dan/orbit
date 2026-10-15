@@ -337,6 +337,9 @@ class VerificationChanged(_Message):
 STARTUP_TASK = "startup"
 """The task the startup check's ``AgentStarted`` names; no task on the list has this id."""
 
+PLAN_TASK = "plan"
+"""The task the planner's ``AgentStarted`` names; it works on no task of the list."""
+
 
 class StartupChecked(_Message):
     """The verification steps ran once on the base commit at startup. Unless they all

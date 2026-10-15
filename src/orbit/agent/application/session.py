@@ -398,7 +398,7 @@ class AgentSession:
                     await turn
         await self._stop_background()
         if self._planner is not None:
-            self._planner.close()
+            await self._planner.close()
         if self._desk is not None:
             await self._desk.stop()
 

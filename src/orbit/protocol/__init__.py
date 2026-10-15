@@ -1,6 +1,7 @@
 """Shared contract between the frontend and the backend."""
 
 from orbit.protocol.messages import (
+    PLAN_TASK,
     STARTUP_TASK,
     AcceptTask,
     AddTask,
@@ -64,6 +65,7 @@ from orbit.protocol.messages import (
 from orbit.protocol.session import Session
 
 __all__ = [
+    "PLAN_TASK",
     "STARTUP_TASK",
     "AcceptTask",
     "AddTask",

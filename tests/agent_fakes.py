@@ -61,6 +61,7 @@ class ScriptedLauncher:
         self.reviewers = list(reviewers)
         self.launches: list[AgentLaunch] = []
         self.planner_turns: list[Script] = []  # Played by converse(), one per turn.
+        self.planner_replies: list[str] = []  # What the planner says, a turn at a time.
         # The usage of each launch's turns, one launch at a time; one unmetered turn if none.
         self.usages: list[tuple[Usage, ...]] = []
 
@@ -83,6 +84,9 @@ class ScriptedLauncher:
         self.launches.append(launch)
         agent = launch.agent
         yield TurnStarted(turn_id=turn_id, agent_id=agent.id)
+        if self.planner_replies:
+            text = self.planner_replies.pop(0)
+            yield AssistantMessage(turn_id=turn_id, text=text, agent_id=agent.id)
 
         async def call(tool: str, **arguments: Any) -> Reply:
             return await self.host.call(agent.token, tool, **arguments)

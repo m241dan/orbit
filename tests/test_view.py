@@ -191,6 +191,9 @@ def test_agent_lines_say_what_each_is_doing() -> None:
     assert agent_line(waiting, "3") == "agent-3 reviewer · task 3 · waiting on complete_task"
     planner = AgentRow("agent-4", "planner", "plan")
     assert agent_line(planner, None) == "agent-4 planner · planning · working"
+    # A task that has left the list is named by its id, not taken for planning.
+    gone = AgentRow("agent-5", "coder", "7")
+    assert agent_line(gone, None) == "agent-5 coder · task 7 · working"
 
 
 def test_the_review_line_says_whether_review_is_paused() -> None:

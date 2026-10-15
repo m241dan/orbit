@@ -7,6 +7,8 @@ from orbit.agent.domain.roles import BUILT_IN_ROLES
 from orbit.protocol import (
     AcceptTask,
     AddTask,
+    AgentExited,
+    AgentStarted,
     BusyChanged,
     ErrorOccurred,
     Event,
@@ -75,6 +77,17 @@ async def test_prompts_to_the_planner_go_to_it_and_proposals_become_drafts() -> 
     ]
     assert drafts[0].task.settings.tool_access == "full"  # The coder role's default.
     assert any(isinstance(e, TurnStarted) and e.agent_id == "agent-1" for e in events)
+
+
+async def test_the_first_turn_says_which_agent_is_the_planner() -> None:
+    # So the frontend can put the planner's output on the Planner tab.
+    session, _, launcher = session_for()
+    launcher.planner_turns = [chats, chats]
+    first = await plan(session, "Plan.")
+    later = await plan(session, "More.")
+    started = AgentStarted(agent_id="agent-1", role="planner", task_id="plan")
+    assert [e for e in first if isinstance(e, AgentStarted)] == [started]
+    assert not any(isinstance(e, AgentStarted) for e in later)
 
 
 async def refused_planning(session: AgentSession) -> list[Event]:
@@ -163,3 +176,5 @@ async def test_closing_ends_the_planners_access() -> None:
     await session.close()
     reply = await host.call("token-1", "propose_task", title="x", prompt="y")
     assert reply.is_error
+    exited = AgentExited(agent_id="agent-1", reason="finished")
+    assert await asyncio.wait_for(anext(session.events()), 5) == exited

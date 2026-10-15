@@ -12,10 +12,16 @@ from orbit.agent.application.agent_run import AgentDesk
 from orbit.agent.application.ports import AgentLaunch, Reply
 from orbit.agent.domain.agents import Agent
 from orbit.agent.domain.board import TaskBoard
-from orbit.protocol import Event, ProgressNoted, Settings, TasksChanged, TaskSpec
-
-# The planner's agent works on no task of the board; this stands in for one.
-PLAN = "plan"
+from orbit.protocol import (
+    PLAN_TASK,
+    AgentExited,
+    AgentStarted,
+    Event,
+    ProgressNoted,
+    Settings,
+    TasksChanged,
+    TaskSpec,
+)
 
 
 class PlannerChat:
@@ -33,7 +39,11 @@ class PlannerChat:
     async def run_turn(self, turn_id: str, prompt: str, settings: Settings) -> AsyncIterator[Event]:
         """Tell the planner ``prompt``, with the session's model, and yield what it does."""
         if self._agent is None:
-            self._agent = self._desk.open(self, "planner", PLAN)
+            self._agent = self._desk.open(self, "planner", PLAN_TASK)
+            # The frontend learns from this which agent's output is the planner's.
+            await self._desk.publish(
+                AgentStarted(agent_id=self._agent.id, role="planner", task_id=PLAN_TASK)
+            )
         role = self._desk.agents.roles["planner"]
         launch = AgentLaunch(
             self._agent,
@@ -54,9 +64,11 @@ class PlannerChat:
         assert self._agent is not None  # It called, so it was opened.
         return await answer(self._agent, arguments)
 
-    def close(self) -> None:
+    async def close(self) -> None:
+        """End the planner's conversation, at the session's end."""
         if self._agent is not None:
             self._desk.close(self._agent)
+            await self._desk.publish(AgentExited(agent_id=self._agent.id, reason="finished"))
 
     async def _propose_task(self, agent: Agent, arguments: dict[str, Any]) -> Reply:
         title = str(arguments.get("title", "")).strip()
@@ -72,5 +84,5 @@ class PlannerChat:
 
     async def _report_progress(self, agent: Agent, arguments: dict[str, Any]) -> Reply:
         note = str(arguments.get("note", "")).strip()
-        await self._desk.publish(ProgressNoted(agent_id=agent.id, task_id=PLAN, note=note))
+        await self._desk.publish(ProgressNoted(agent_id=agent.id, task_id=PLAN_TASK, note=note))
         return Reply("Noted.")

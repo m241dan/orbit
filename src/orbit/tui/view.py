@@ -14,6 +14,7 @@ from rich.cells import cell_len
 from rich.text import Text
 
 from orbit.protocol import (
+    PLAN_TASK,
     STARTUP_TASK,
     AgentExited,
     AgentExitReason,
@@ -395,8 +396,12 @@ def agent_line(row: AgentRow, number: str | None) -> str:
     """``row`` as a line; ``number`` is its task's number in the list, if it has one there."""
     if number is not None:
         task = f"task {number}"
+    elif row.task_id == STARTUP_TASK:
+        task = "base commit"
+    elif row.task_id == PLAN_TASK:
+        task = "planning"
     else:
-        task = "base commit" if row.task_id == STARTUP_TASK else "planning"
+        task = f"task {row.task_id}"
     doing = f"waiting on {row.waiting_on}" if row.waiting_on else "working"
     return f"{row.agent_id} {row.role} · {task} · {doing}"
 
