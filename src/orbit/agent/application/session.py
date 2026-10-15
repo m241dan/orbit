@@ -426,7 +426,7 @@ class AgentSession:
 
     async def _start(self, work: Coroutine[Any, Any, object]) -> None:
         """Run ``work`` in the work lane, where task runs go."""
-        turn = await self._launch(work, self._turn, "work", "A turn is already running.")
+        turn = await self._launch(work, self._turn, "work", "Tasks are already running.")
         if turn is not None:
             self._turn = turn
 

@@ -167,7 +167,7 @@ async def test_running_is_refused_while_a_run_runs() -> None:
         events.append(event)
         if isinstance(event, ErrorOccurred):
             break
-    assert events[-1] == ErrorOccurred(message="A turn is already running.")
+    assert events[-1] == ErrorOccurred(message="Tasks are already running.")
     gate.set()
     assert statuses(await asyncio.wait_for(idle(session), 5)) == ["completed", "completed"]
     assert len(launcher.launches) == 2
