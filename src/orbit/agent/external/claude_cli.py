@@ -81,6 +81,8 @@ def agent_env(agent: Agent) -> dict[str, str]:
         **os.environ,
         TOKEN_VARIABLE: agent.token,
         "ENABLE_TOOL_SEARCH": "false",  # Load orbit's tools up front, not on first use.
+        # The user's auto-memory is about their own sessions; an agent's context is its task.
+        "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1",
         "MCP_TOOL_TIMEOUT": str(TOOL_TIMEOUT_MS),
     }
 

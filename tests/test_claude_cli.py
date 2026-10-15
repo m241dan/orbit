@@ -387,11 +387,16 @@ async def test_the_token_travels_in_the_environment_not_the_arguments(tmp_path: 
     await run_agent(runner)
     [call] = calls(scenario)
     assert not any("s3cret" in arg for arg in call["argv"])
-    assert call["env"] == {
-        "ORBIT_AGENT_TOKEN": "s3cret",
-        "ENABLE_TOOL_SEARCH": "false",
-        "MCP_TOOL_TIMEOUT": str(TOOL_TIMEOUT_MS),
-    }
+    assert call["env"]["ORBIT_AGENT_TOKEN"] == "s3cret"
+    assert call["env"]["ENABLE_TOOL_SEARCH"] == "false"
+    assert call["env"]["MCP_TOOL_TIMEOUT"] == str(TOOL_TIMEOUT_MS)
+
+
+async def test_agents_start_without_the_users_auto_memory(tmp_path: Path) -> None:
+    runner, scenario = make_runner(tmp_path, stdout=lines(init("connected"), RESULT))
+    await run_agent(runner)
+    [call] = calls(scenario)
+    assert call["env"]["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] == "1"
 
 
 async def test_agents_keep_tool_access_flags_and_orbit_tools(tmp_path: Path) -> None:

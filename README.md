@@ -363,8 +363,10 @@ gets its own unguessable token, sent as `Authorization: Bearer …` with every c
 whose token it didn't issue, and revokes a token when its agent's run ends. The token is passed to
 the CLI in the `ORBIT_AGENT_TOKEN` environment variable, which the MCP config references, so it never
 appears in the process list. Agents are started with `--strict-mcp-config` (only orbit's server),
-`--allowedTools 'mcp__orbit__*'` (orbit's tools are allowed at every access level), and
-`ENABLE_TOOL_SEARCH=false` (orbit's tools are loaded up front).
+`--allowedTools 'mcp__orbit__*'` (orbit's tools are allowed at every access level),
+`ENABLE_TOOL_SEARCH=false` (orbit's tools are loaded up front), and
+`CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` (your Claude Code auto-memory, which worktrees share with the
+repository, stays out of agents' context).
 
 A model picked with `ctrl+o` applies from the planner's next prompt and keeps its conversation; the
 tool access picked with `ctrl+l` is what new tasks start with in the task editor.

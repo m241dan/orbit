@@ -13,7 +13,12 @@ import sys
 import time
 from pathlib import Path
 
-RECORDED_ENV = ("ENABLE_TOOL_SEARCH", "MCP_TOOL_TIMEOUT", "ORBIT_AGENT_TOKEN")
+RECORDED_ENV = (
+    "CLAUDE_CODE_DISABLE_AUTO_MEMORY",
+    "ENABLE_TOOL_SEARCH",
+    "MCP_TOOL_TIMEOUT",
+    "ORBIT_AGENT_TOKEN",
+)
 
 
 def main() -> int:
