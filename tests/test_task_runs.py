@@ -13,10 +13,13 @@ from orbit.agent import (
     VerificationStep,
     run_step,
 )
+from orbit.agent.application.agent_run import AgentDesk, AgentRun, Agents
 from orbit.agent.domain.agent_task import Limits
+from orbit.agent.domain.board import TaskBoard
 from orbit.agent.external.echo import EchoModel
 from orbit.protocol import (
     AddTask,
+    AgentExited,
     BusyChanged,
     EditTask,
     ErrorOccurred,
@@ -38,7 +41,17 @@ from orbit.protocol import (
     VerificationSkipped,
     VerificationStarted,
 )
-from tests.agent_fakes import Call, FakeWorkspace, Steps, board, run, session_for, verified
+from tests.agent_fakes import (
+    Call,
+    FakeHost,
+    FakeWorkspace,
+    ScriptedLauncher,
+    Steps,
+    board,
+    run,
+    session_for,
+    verified,
+)
 
 
 async def claims_done(call: Call) -> TurnEndReason:
@@ -354,3 +367,29 @@ async def test_tasks_are_verified_when_the_tree_cannot_be_read() -> None:
     events = await asyncio.wait_for(run(session), 5)
     assert steps.runs == ["Unit tests"]
     assert statuses(events) == ["completed"]
+
+
+async def test_usage_arriving_after_the_task_was_removed_is_skipped() -> None:
+    tasks = TaskBoard()
+    task_id = tasks.add(TaskSpec(prompt="a"))
+
+    async def claims_done_then_removed(call: Call) -> TurnEndReason:
+        reason = await claims_done(call)
+        # The task is completed now, so the user may remove it before the usage arrives.
+        tasks.set_status(task_id, "completed")
+        tasks.remove(task_id)
+        return reason
+
+    host = FakeHost()
+    launcher = ScriptedLauncher(host, claims_done_then_removed)
+    launcher.usages = [(Usage(input_tokens=10),)]
+    events: list[Event] = []
+
+    async def publish(event: Event) -> None:
+        events.append(event)
+
+    desk = AgentDesk(Agents(host, launcher, lambda: "token-1", exit_grace=0.5), publish)
+    outcome = await asyncio.wait_for(AgentRun(task_id, tasks, None, desk).run(None, "."), 5)
+    assert outcome.status == "completed"
+    assert AgentExited(agent_id="agent-1", reason="finished") in events
+    assert not [e for e in events if isinstance(e, ErrorOccurred | TasksChanged)]

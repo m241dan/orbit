@@ -309,8 +309,12 @@ class AgentRun:
         return reason
 
     async def _count(self, usage: Usage) -> None:
-        """Add what one of the agent's turns cost to its task's total."""
-        self._board.add_usage(self._task_id, usage)
+        """Add what one of the agent's turns cost to its task's total, unless the task was
+        removed once it finished: its last turn's usage arrives after it's completed."""
+        try:
+            self._board.add_usage(self._task_id, usage)
+        except ValueError:
+            return
         await self._publish(TasksChanged(tasks=self._board.tasks))
 
     async def _await_exit(self, stream: "asyncio.Task[None]") -> None:
