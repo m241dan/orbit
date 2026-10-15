@@ -123,8 +123,7 @@ def output_entry(
 
     An agent's output is labelled with the agent, to tell it from the conversation's.
     """
-    text, kind = _output(event)
-    return (text if event.agent_id is None else f"{event.agent_id}: {text}"), kind
+    return agent_labelled(_output(event), event.agent_id)
 
 
 def _output(
@@ -436,7 +435,9 @@ PLANNER = "planner"
 
 ROLE_TABS: tuple[str, ...] = ("planner", "coder", "reviewer", "super-reviewer", "configurator")
 """The built-in roles, in strip order, that each have a pinned tab shared by all their
-agents; a pinned tab's key and label are its role's name."""
+agents; a pinned tab's key and label are its role's name. Mirrors the backend's
+``BUILT_IN_ROLE_NAMES``, which the TUI can't import; ``tests/test_view.py`` keeps them in
+step."""
 
 
 RUNNING_MARK = "●"
