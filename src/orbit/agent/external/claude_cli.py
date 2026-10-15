@@ -40,15 +40,12 @@ TOOL_ACCESS_ARGS: dict[ToolAccess, tuple[str, ...]] = {
 }
 # What a ``result`` message reports about the turn's cost: token counts under ``usage``, and
 # totals named differently from Usage's fields.
-TOKEN_KINDS = {
-    kind: kind
-    for kind in (
-        "input_tokens",
-        "output_tokens",
-        "cache_creation_input_tokens",
-        "cache_read_input_tokens",
-    )
-}
+TOKEN_KINDS = (
+    "input_tokens",
+    "output_tokens",
+    "cache_creation_input_tokens",
+    "cache_read_input_tokens",
+)
 USAGE_TOTALS = {"total_cost_usd": "cost_usd", "num_turns": "turns", "duration_ms": "duration_ms"}
 # Tool results (e.g. whole files) arrive as single JSON lines; allow large ones.
 LINE_LIMIT = 64 * 1024 * 1024
@@ -167,9 +164,11 @@ def _usage(message: dict[str, Any]) -> Usage | None:
     return Usage(**fields) if fields else None
 
 
-def _known(values: dict[str, Any], names: Mapping[str, str]) -> dict[str, Any]:
-    """The ``values`` given under ``names``' keys, keyed by the Usage fields they name."""
-    return {field: values[key] for key, field in names.items() if values.get(key) is not None}
+def _known(values: dict[str, Any], names: Mapping[str, str] | tuple[str, ...]) -> dict[str, Any]:
+    """The ``values`` given under ``names``' keys, keyed by the Usage fields they name (a tuple
+    names fields of the same name)."""
+    fields = names if isinstance(names, Mapping) else {name: name for name in names}
+    return {field: values[key] for key, field in fields.items() if values.get(key) is not None}
 
 
 def _pipes(

@@ -335,8 +335,10 @@ def usage_label(usage: Usage) -> str:
 
 
 def _count_label(count: int) -> str:
+    # Pick the unit by what the next smaller one would round to, so 999,950 reads "1.0M", not
+    # "1000.0k".
     for size, suffix in ((1_000_000, "M"), (1_000, "k")):
-        if count >= size:
+        if round(count / (size // 1_000), 1) >= 1_000:
             return f"{count / size:.1f}{suffix}"
     return str(count)
 
