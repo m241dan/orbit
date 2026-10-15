@@ -117,6 +117,10 @@ class TaskList(ListPane):
     def position(self, task_id: str) -> int:
         return next(i for i, t in enumerate(self.tasks) if t.id == task_id)
 
+    def find(self, task_id: str) -> TaskState | None:
+        """The task with id ``task_id``, if it's on the list."""
+        return next((t for t in self.tasks if t.id == task_id), None)
+
     def tick(self) -> None:
         """Turn the spinners: redraw just the rows of running tasks."""
         frame = spinner_frame(self.clock())

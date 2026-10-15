@@ -22,6 +22,7 @@ from orbit.tui.view import (
     EntryKind,
     mark_planner_busy,
     mark_tab_read,
+    mark_tab_unread,
     settings_summary,
     spinner_frame,
     step_lines,
@@ -140,6 +141,11 @@ class ConversationTabs(Tabs):
         """Clear ``agent``'s unread marker; None (All) has none."""
         if agent is not None:
             self._update(mark_tab_read(self.tabs, agent))
+
+    def mark_unread(self, key: str | None) -> None:
+        """Mark the tab keyed ``key`` unread, as an entry with no agent landed in it, unless
+        it's being shown; None (All) has no marker."""
+        self._update(mark_tab_unread(self.tabs, key, self.agent_of(self.active)))
 
     def set_planner_busy(self, busy: bool) -> None:
         """Show the planner tab's running marker while the planner is ``busy`` answering."""

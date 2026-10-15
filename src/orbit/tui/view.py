@@ -248,7 +248,11 @@ def agent_labelled(entry: tuple[str, EntryKind], agent: str | None) -> tuple[str
     return entry if agent is None else (f"{agent}: {text}", kind)
 
 
-def task_started_entry(number: str, state: TaskState) -> tuple[str, EntryKind]:
+def task_started_entry(number: str, state: TaskState | None) -> tuple[str, EntryKind]:
+    """A task's header: its ``number`` and prompt; a task that isn't on the list (``state``
+    None) is headed by ``number`` alone, which is then its id."""
+    if state is None:
+        return f"Task {number}", "user"
     return f"Task {number}: {state.task.prompt}", "user"
 
 
@@ -487,6 +491,15 @@ def tab_key(agent: str | None, roles: Mapping[str, str]) -> str | None:
     return None if agent is None else roles.get(agent, agent)
 
 
+def task_tab_key(state: TaskState | None) -> str | None:
+    """Which pinned tab the notes on a task (its header, verification results and merge
+    notes) belong to: its role's, when the role has one. None, for All only, when the role
+    has no pinned tab or the task isn't on the list (``state`` None)."""
+    if state is None or state.task.role not in ROLE_TABS:
+        return None
+    return state.task.role
+
+
 def track_tabs(
     tabs: tuple[ConversationTab, ...],
     event: Event,
@@ -501,7 +514,7 @@ def track_tabs(
     if isinstance(event, AgentExited):
         return _close_tab(tabs, event.agent_id, roles)
     if _is_tab_output(event):
-        return _mark_unread(tabs, tab_key(event.agent_id, roles), active)
+        return mark_tab_unread(tabs, tab_key(event.agent_id, roles), active)
     return tabs
 
 
@@ -549,11 +562,12 @@ def mark_planner_busy(tabs: tuple[ConversationTab, ...], busy: bool) -> tuple[Co
     return tuple(replace(tab, running=int(busy)) if tab.key == PLANNER else tab for tab in tabs)
 
 
-def _mark_unread(
-    tabs: tuple[ConversationTab, ...], agent: str | None, active: str | None
+def mark_tab_unread(
+    tabs: tuple[ConversationTab, ...], key: str | None, active: str | None
 ) -> tuple[ConversationTab, ...]:
-    """``tabs`` with the tab keyed ``agent`` unread, unless it's the one being shown."""
-    return tabs if agent == active else _set_unread(tabs, agent, True)
+    """``tabs`` with the tab keyed ``key`` unread, unless it's ``active``, the one being
+    shown; nothing changes for None, an entry under All only."""
+    return tabs if key == active else _set_unread(tabs, key, True)
 
 
 def mark_tab_read(tabs: tuple[ConversationTab, ...], agent: str) -> tuple[ConversationTab, ...]:

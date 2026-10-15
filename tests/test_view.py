@@ -40,6 +40,7 @@ from orbit.tui.view import (
     exchange_entry,
     mark_planner_busy,
     mark_tab_read,
+    mark_tab_unread,
     note_entry,
     output_entry,
     review_line,
@@ -48,6 +49,7 @@ from orbit.tui.view import (
     tab_key,
     tab_labels,
     task_started_entry,
+    task_tab_key,
     track_agents,
     track_roles,
     track_tabs,
@@ -77,6 +79,8 @@ def test_only_unexpected_turn_endings_are_noted() -> None:
 def test_task_progress_entries() -> None:
     state = TaskState(id="7", task=TaskSpec(prompt="do it"))
     assert task_started_entry("1.2", state) == ("Task 1.2: do it", "user")
+    # A task that isn't on the list has no prompt to show, only its id.
+    assert task_started_entry("9", None) == ("Task 9", "user")
     step = StepState(name="Lint")
     assert verification_started_entry(step) == ("🔍 Verifying: Lint…", "verify")
     assert verification_skipped_entry("no_changes") == (
@@ -421,3 +425,25 @@ def test_the_running_marker_leads_and_the_unread_marker_trails() -> None:
     assert tab_labels(mark_planner_busy((PINNED_TABS[0],), True)) == ["● planner"]
     unread = track_tabs(tabs, AgentStarted(agent_id="a", role="coder", task_id="1"))
     assert tab_labels(unread) == ["● coder *"]
+
+
+def test_a_tasks_notes_are_keyed_to_its_roles_pinned_tab() -> None:
+    for role in ROLE_TABS:
+        assert task_tab_key(TaskState(id="1", task=TaskSpec(prompt="p", role=role))) == role
+
+
+def test_a_task_in_a_role_with_no_pinned_tab_has_no_tab_key() -> None:
+    assert task_tab_key(TaskState(id="1", task=TaskSpec(prompt="p", role="checker"))) is None
+
+
+def test_an_unknown_task_has_no_tab_key() -> None:
+    assert task_tab_key(None) is None
+
+
+def test_marking_a_tab_unread_skips_the_shown_tab_and_all() -> None:
+    marked = mark_tab_unread(PINNED_TABS, "coder", active="reviewer")
+    assert marked == tuple(
+        replace(tab, unread=True) if tab.key == "coder" else tab for tab in PINNED_TABS
+    )
+    assert mark_tab_unread(PINNED_TABS, "coder", active="coder") == PINNED_TABS
+    assert mark_tab_unread(PINNED_TABS, None, active=None) == PINNED_TABS

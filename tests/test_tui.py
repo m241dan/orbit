@@ -6,6 +6,7 @@ from textual.pilot import Pilot
 from textual.widgets import Footer, Input, OptionList, Tab
 
 from orbit.protocol import (
+    STARTUP_TASK,
     AgentExited,
     AgentReply,
     AgentStarted,
@@ -18,12 +19,22 @@ from orbit.protocol import (
     Notice,
     Settings,
     SettingsChanged,
+    StepState,
     SubmitPrompt,
+    TaskMerged,
+    TasksChanged,
+    TaskSpec,
+    TaskStarted,
+    TaskState,
     ToolCallFinished,
     ToolCallStarted,
     TurnFinished,
     TurnStarted,
     UpdateSettings,
+    VerificationChanged,
+    VerificationFinished,
+    VerificationSkipped,
+    VerificationStarted,
 )
 from orbit.tui import OrbitApp
 from orbit.tui.tasks import TaskList
@@ -1164,3 +1175,110 @@ async def test_the_planner_tab_shows_a_running_marker_while_it_answers() -> None
         # The work lane is the task run's, not the planner's.
         await feed_events(session, pilot, BusyChanged(busy=True, lane="work"))
         assert tab_strip(app) == STRIP
+
+
+def task(task_id: str, role: str = "coder") -> TaskState:
+    return TaskState(id=task_id, task=TaskSpec(prompt=f"do {task_id}", role=role))
+
+
+LINT_STEP = VerificationChanged(steps=(StepState(name="Lint"),))
+
+
+def task_notes(task_id: str) -> list[Event]:
+    """A task's whole run: its header, each kind of verification note, and its merge note."""
+    return [
+        TaskStarted(task_id=task_id),
+        VerificationStarted(task_id=task_id, step=0),
+        VerificationFinished(task_id=task_id, step=0, passed=False),
+        VerificationFinished(task_id=task_id, step=0, passed=True),
+        VerificationSkipped(task_id=task_id, reason="no_changes"),
+        TaskMerged(task_id=task_id, result="merged"),
+    ]
+
+
+NOTES_AFTER_HEADER = [
+    "🔍 Verifying: Lint…",
+    "❌ Verification failed: Lint",
+    "✅ Verification passed: Lint",
+    "⏩ Verification skipped: no files changed",
+    "⇢ Merged into the base branch.",
+]
+
+
+async def test_a_coder_tasks_notes_show_under_coder_and_all_and_mark_coder_unread() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test(size=(120, 30)) as pilot:
+        await feed_events(session, pilot, TasksChanged(tasks=(task("1"),)), LINT_STEP)
+        await pilot.press("tab")
+        assert active_tab(app) == "planner"
+        await feed_events(session, pilot, *task_notes("1"))
+        # Notes landing in a tab not being shown mark it, like agent output does.
+        assert tab_strip(app) == ["All", "planner", "coder *", *PINNED[2:]]
+        assert shown(app) == []
+
+        notes = ["Task 1: do 1", *NOTES_AFTER_HEADER]
+        await pilot.press("tab")
+        assert active_tab(app) == "coder"
+        assert tab_strip(app) == STRIP
+        assert shown(app) == notes
+        # Notes for the tab being shown don't mark it.
+        await feed_events(session, pilot, TaskMerged(task_id="1", result="conflict", detail="x"))
+        assert tab_strip(app) == STRIP
+        assert shown(app) == [*notes, "⚠ Not merged (conflict): x"]
+
+        await pilot.press("shift+tab", "shift+tab")
+        assert active_tab(app) == "All"
+        assert shown(app) == [*notes, "⚠ Not merged (conflict): x"]
+
+
+async def test_a_reviewer_tasks_notes_show_under_reviewer_not_coder() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test(size=(120, 30)) as pilot:
+        await feed_events(
+            session, pilot, TasksChanged(tasks=(task("1"), task("2", "reviewer"))), LINT_STEP
+        )
+        await feed_events(session, pilot, *task_notes("2"))
+        assert tab_strip(app) == ["All", "planner", "coder", "reviewer *", *PINNED[3:]]
+        await pilot.press("tab", "tab")
+        assert active_tab(app) == "coder"
+        assert shown(app) == []
+        await pilot.press("tab")
+        assert active_tab(app) == "reviewer"
+        assert shown(app) == ["Task 2: do 2", *NOTES_AFTER_HEADER]
+
+
+async def test_notes_on_no_listed_pinned_task_stay_under_all() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test(size=(120, 30)) as pilot:
+        await feed_events(session, pilot, TasksChanged(tasks=(task("1", "checker"),)), LINT_STEP)
+        await pilot.press("tab")
+        assert active_tab(app) == "planner"
+        await feed_events(
+            session,
+            pilot,
+            # The startup check verifies the base commit, not a task of the list.
+            VerificationStarted(task_id=STARTUP_TASK, step=0),
+            VerificationFinished(task_id=STARTUP_TASK, step=0, passed=True),
+            # A task removed meanwhile, or never listed.
+            *task_notes("9"),
+            # A task in a role with no pinned tab.
+            *task_notes("1"),
+        )
+        assert tab_strip(app) == STRIP
+        assert shown(app) == []
+        for _ in PINNED[1:]:
+            await pilot.press("tab")
+            assert shown(app) == []
+        await pilot.press("tab")
+        assert active_tab(app) == "All"
+        assert shown(app) == [
+            "🔍 Verifying: Lint…",
+            "✅ Verification passed: Lint",
+            "Task 9",
+            *NOTES_AFTER_HEADER,
+            "Task 1: do 1",
+            *NOTES_AFTER_HEADER,
+        ]
