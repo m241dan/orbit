@@ -168,6 +168,11 @@ class Setup(_Config):
         return watch
 
 
+def setup_step(setup: Setup) -> VerificationStep:
+    """``setup``'s command, as a step run before the others."""
+    return VerificationStep("setup", setup.command)
+
+
 class ChecksProposal(VerificationConfig):
     """Verification steps, at least one, and a setup, as an agent proposes them."""
 

@@ -1,5 +1,7 @@
 import sys
 
+from orbit.agent.application.verifier import first_failure
+from orbit.agent.domain.roles import Setup, setup_step
 from orbit.agent.domain.verification import (
     OUTPUT_LIMIT,
     FixAttempts,
@@ -9,7 +11,7 @@ from orbit.agent.domain.verification import (
     skip_reason,
     startup_fix_prompt,
 )
-from orbit.protocol import Settings, TaskSpec
+from orbit.protocol import Settings, StepStatus, TaskSpec
 
 
 def python_step(code: str, name: str = "check") -> VerificationStep:
@@ -92,3 +94,32 @@ def test_startup_fix_prompt_is_titled_by_the_step_and_quotes_its_output() -> Non
     assert "ruff check" in body
     assert "E501 line too long" in body
     assert "Do not weaken the check" in body
+
+
+async def test_first_failure_runs_steps_in_order_until_one_fails() -> None:
+    steps = (python_step("", "a"), python_step("", "b"), python_step("", "c"))
+    ran: list[str] = []
+    progress: list[tuple[int, StepStatus]] = []
+
+    async def run_step(step: VerificationStep, root: str) -> tuple[bool, str]:
+        ran.append(f"{step.name}@{root}")
+        return step.name != "b", f"{step.name} output"
+
+    async def on_step(number: int, status: StepStatus) -> None:
+        progress.append((number, status))
+
+    assert await first_failure(steps, run_step, "here", on_step) == (steps[1], "b output")
+    assert ran == ["a@here", "b@here"]
+    assert progress == [(0, "running"), (0, "passed"), (1, "running"), (1, "failed")]
+
+
+async def test_first_failure_is_none_when_every_step_passes() -> None:
+    async def run_step(step: VerificationStep, root: str) -> tuple[bool, str]:
+        return True, ""
+
+    assert await first_failure((python_step(""),), run_step, ".") is None
+    assert await first_failure((), run_step, ".") is None
+
+
+def test_a_setup_runs_as_a_step_named_setup() -> None:
+    assert setup_step(Setup(command=("make",))) == VerificationStep("setup", ("make",))

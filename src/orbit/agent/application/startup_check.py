@@ -11,7 +11,8 @@ from collections.abc import Awaitable, Callable
 from contextlib import suppress
 
 from orbit.agent.application.ports import CoderTree
-from orbit.agent.application.verifier import Failure, Verification
+from orbit.agent.application.verifier import Failure, Verification, first_failure
+from orbit.agent.domain.roles import setup_step
 from orbit.agent.domain.verification import VerificationStep, trim_output
 from orbit.protocol import (
     STARTUP_TASK,
@@ -116,22 +117,15 @@ class StartupCheck:
         failure = await self._set_up(root)
         if failure is not None:
             return failure
-        for number, step in enumerate(self._verification.steps):
-            await self._set(number, "running")
-            passed, output = await self._verification.run_step(step, root)
-            await self._set(number, "passed" if passed else "failed")
-            if not passed:
-                return step, output
-        return None
+        verification = self._verification
+        return await first_failure(verification.steps, verification.run_step, root, self._set)
 
     async def _set_up(self, root: str) -> Failure | None:
         """Run the tree's setup at ``root``, if it has one; returns its failure."""
         setup = self._tree.setup if self._tree else None
         if setup is None:
             return None
-        step = VerificationStep("setup", setup.command)
-        passed, output = await self._verification.run_step(step, root)
-        return None if passed else (step, output)
+        return await first_failure((setup_step(setup),), self._verification.run_step, root)
 
     async def _report(self, failure: Failure | None) -> None:
         if failure is None:

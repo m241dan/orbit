@@ -24,7 +24,7 @@ from orbit.agent.application.ports import (
     ProposalReview,
     Reply,
 )
-from orbit.agent.application.verifier import Failure, Verifier
+from orbit.agent.application.verifier import Failure, Verifier, first_failure
 from orbit.agent.domain.agent_task import FINISHED, AgentTask, Limits, Phase
 from orbit.agent.domain.agents import Agent, AgentRegistry, bootstrap_prompt
 from orbit.agent.domain.board import TaskBoard
@@ -34,8 +34,9 @@ from orbit.agent.domain.roles import (
     ConfigError,
     Role,
     parse_proposal,
+    setup_step,
 )
-from orbit.agent.domain.verification import VerificationStep, trim_output
+from orbit.agent.domain.verification import trim_output
 from orbit.protocol import (
     AgentExited,
     AgentExitReason,
@@ -439,13 +440,9 @@ class AgentRun:
         assert self._verifier is not None  # Proposals are refused without one.
         steps = checks.steps
         if checks.setup is not None:
-            steps = (VerificationStep("setup", checks.setup.command), *steps)
+            steps = (setup_step(checks.setup), *steps)
         async with self._checking:
-            for step in steps:
-                passed, output = await self._verifier.run_one(step, self._root)
-                if not passed:
-                    return step, output
-        return None
+            return await first_failure(steps, self._verifier.run_one, self._root)
 
     # Tools
 

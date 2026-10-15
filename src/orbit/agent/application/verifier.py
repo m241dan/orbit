@@ -1,6 +1,6 @@
 """Verifying a task once its agent is done: which steps run, and reporting their progress."""
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass
 from typing import TypeVar
 
@@ -15,6 +15,7 @@ from orbit.agent.domain.verification import (
 from orbit.protocol import (
     Event,
     Notice,
+    StepStatus,
     TasksChanged,
     TaskSpec,
     VerificationChanged,
@@ -27,6 +28,28 @@ T = TypeVar("T")
 
 Failure = tuple[VerificationStep, str]
 """The step that failed and its output."""
+
+OnStep = Callable[[int, StepStatus], Awaitable[None]]
+"""Told a step's number and its new status: ``running``, then ``passed`` or ``failed``."""
+
+
+async def first_failure(
+    steps: Iterable[VerificationStep],
+    run_step: StepRunner,
+    root: str,
+    on_step: OnStep | None = None,
+) -> Failure | None:
+    """Run ``steps`` in order at ``root`` through ``run_step`` until one fails; returns that
+    failure. ``on_step``, if given, hears of each step's progress."""
+    for number, step in enumerate(steps):
+        if on_step is not None:
+            await on_step(number, "running")
+        passed, output = await run_step(step, root)
+        if on_step is not None:
+            await on_step(number, "passed" if passed else "failed")
+        if not passed:
+            return step, output
+    return None
 
 
 @dataclass(frozen=True)
@@ -129,14 +152,18 @@ class Verifier:
 
     async def _verify(self, task_id: str, root: str) -> Failure | None:
         """Run the steps at ``root`` after task ``task_id``; returns the first failure."""
-        for number, step in enumerate(self.verification.steps):
-            self._board.set_step(number, "running")
+
+        async def on_step(number: int, status: StepStatus) -> None:
+            self._board.set_step(number, status)
             await self.publish_steps()
-            await self._publish(VerificationStarted(task_id=task_id, step=number))
-            passed, output = await self.verification.run_step(step, root)
-            self._board.set_step(number, "passed" if passed else "failed")
-            await self.publish_steps()
-            await self._publish(VerificationFinished(task_id=task_id, step=number, passed=passed))
-            if not passed:
-                return step, output
-        return None
+            if status == "running":
+                await self._publish(VerificationStarted(task_id=task_id, step=number))
+            else:
+                passed = status == "passed"
+                await self._publish(
+                    VerificationFinished(task_id=task_id, step=number, passed=passed)
+                )
+
+        return await first_failure(
+            self.verification.steps, self.verification.run_step, root, on_step
+        )
