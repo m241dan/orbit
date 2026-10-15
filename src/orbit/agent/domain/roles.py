@@ -125,10 +125,12 @@ class VerificationConfig(_Config):
     def _complete_steps(cls, steps: tuple[VerificationStep, ...]) -> tuple[VerificationStep, ...]:
         numbers: dict[str, int] = {}
         for number, step in enumerate(steps, start=1):
-            if not step.name:
+            if not step.name.strip():
                 raise ValueError(f"step {number} has no name")
             if not step.command:
                 raise ValueError(f"step {number} has no command")
+            if not step.command[0].strip():
+                raise ValueError(f"step {number} has no program")
             if step.name in numbers:
                 raise ValueError(f"step {number} has the same name as step {numbers[step.name]}")
             numbers[step.name] = number

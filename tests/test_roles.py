@@ -170,6 +170,12 @@ def test_setup_lists_the_files_it_watches() -> None:
         ({"roles": {"coder": {"timeout_minutes": 0}}}, "timeout_minutes"),
         ({"verification": {"steps": [{"name": "", "command": ["x"]}]}}, "step 1 has no name"),
         ({"verification": {"steps": [{"name": "a", "command": []}]}}, "step 1 has no command"),
+        ({"verification": {"steps": [{"name": "  ", "command": ["x"]}]}}, "step 1 has no name"),
+        ({"verification": {"steps": [{"name": "a", "command": [""]}]}}, "step 1 has no program"),
+        (
+            {"verification": {"steps": [{"name": "a", "command": ["  ", "x"]}]}},
+            "step 1 has no program",
+        ),
         ({"verification": {"steps": [{"name": "a"}]}}, "verification.steps.0.command"),
         (
             {
