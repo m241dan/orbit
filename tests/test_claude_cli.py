@@ -333,21 +333,6 @@ async def test_cancel_kills_the_cli_process(tmp_path: Path) -> None:
         os.kill(call["pid"], 0)
 
 
-async def test_new_context_starts_a_fresh_claude_session(tmp_path: Path) -> None:
-    runner, scenario = make_runner(tmp_path, stdout=lines(*TRANSCRIPT))
-    await run(runner, "first")
-    fresh = runner.new_context()
-    assert fresh.session_id is None
-    await run(fresh, "task")
-    await run(runner, "second")
-
-    _, task, second = calls(scenario)
-    assert "--resume" not in task["argv"]
-    assert task["stdin"] == "task"
-    # The original keeps its own conversations.
-    assert own_args(second)[-2:] == ["--resume", SESSION_ID]
-
-
 # Agents: a CLI connected to orbit's MCP server
 
 TOOLS = ("get_task", "complete_task")
@@ -417,10 +402,12 @@ async def test_agents_keep_tool_access_flags_and_orbit_tools(tmp_path: Path) -> 
     assert argv[argv.index("--allowedTools") + 1].startswith("mcp__orbit__get_task")
 
 
-async def test_an_agent_run_leaves_the_conversation_session_alone(tmp_path: Path) -> None:
-    runner, _ = make_runner(tmp_path, stdout=lines(init("connected"), RESULT))
+async def test_each_agent_run_is_a_fresh_session(tmp_path: Path) -> None:
+    runner, scenario = make_runner(tmp_path, stdout=lines(init("connected"), RESULT))
     await run_agent(runner)
-    assert runner.session_id is None
+    await run_agent(runner)
+    await run(runner, "hi")  # Nor does it resume an agent run's session.
+    assert all("--resume" not in call["argv"] for call in calls(scenario))
 
 
 @pytest.mark.parametrize("status", ["failed", "needs-auth", None])
@@ -468,4 +455,3 @@ async def test_a_conversation_resumes_its_own_session_turn_after_turn(tmp_path: 
     assert two["stdin"] == "Smaller steps, please."
     assert two["argv"][two["argv"].index("--allowedTools") + 1] == "mcp__orbit__propose_task"
     assert two["env"]["ORBIT_AGENT_TOKEN"] == "s3cret"
-    assert runner.session_id is None

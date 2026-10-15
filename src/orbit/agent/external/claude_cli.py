@@ -185,40 +185,43 @@ def _crash(status: int, stderr: str) -> RuntimeError:
 
 
 class ClaudeCliRunner:
+    """Runs agents as Claude CLI sessions connected to orbit."""
+
     def __init__(self, command: Sequence[str] = ("claude",)) -> None:
         self._command = tuple(command)
-        self.session_id: str | None = None
-        # Agents' runs only: orbit must be reachable, and where and how the process runs.
-        self._needs_orbit = False
-        self._env: Mapping[str, str] | None = None
-        self._cwd: str | None = None
-        self._conversations: dict[str, ClaudeCliRunner] = {}  # Agent id -> its session.
-
-    def new_context(self) -> "ClaudeCliRunner":
-        """Same CLI, new Claude session (no ``--resume``)."""
-        return ClaudeCliRunner(self._command)
+        self._conversations: dict[str, _CliSession] = {}  # Agent id -> its session.
 
     async def run_agent(self, launch: AgentLaunch) -> AsyncIterator[Event]:
         """Run the agent as a new Claude session connected to orbit, as ``launch`` says."""
-        async for event in self._agent_turn(self.new_context(), launch.agent.id, launch):
+        async for event in self._session(launch).turn(launch.agent.id, launch):
             yield event
 
     async def converse(self, turn_id: str, launch: AgentLaunch) -> AsyncIterator[Event]:
         """A turn of the agent's conversation: its first starts a Claude session, later ones
         resume it, each agent's apart from the others'."""
-        runner = self._conversations.setdefault(launch.agent.id, self.new_context())
-        async for event in self._agent_turn(runner, turn_id, launch):
+        session = self._conversations.get(launch.agent.id)
+        if session is None:
+            session = self._conversations[launch.agent.id] = self._session(launch)
+        async for event in session.turn(turn_id, launch):
             yield event
 
-    async def _agent_turn(
-        self, runner: "ClaudeCliRunner", turn_id: str, launch: AgentLaunch
-    ) -> AsyncIterator[Event]:
-        agent = launch.agent
-        runner._needs_orbit = True
-        runner._env, runner._cwd = agent_env(agent), launch.cwd
-        args = [*runner._args(launch.settings), *agent_args(launch)]
-        async for event in runner._run(turn_id, args, launch.prompt):
-            yield event.model_copy(update={"agent_id": agent.id})
+    def _session(self, launch: AgentLaunch) -> "_CliSession":
+        return _CliSession(self._command, agent_env(launch.agent), launch.cwd)
+
+
+class _CliSession:
+    """One Claude session of an agent: its first turn starts it, later ones resume it."""
+
+    def __init__(self, command: tuple[str, ...], env: Mapping[str, str], cwd: str) -> None:
+        self._command = command
+        self._env = env
+        self._cwd = cwd
+        self._session_id: str | None = None
+
+    async def turn(self, turn_id: str, launch: AgentLaunch) -> AsyncIterator[Event]:
+        args = [*self._args(launch.settings), *agent_args(launch)]
+        async for event in self._run(turn_id, args, launch.prompt):
+            yield event.model_copy(update={"agent_id": launch.agent.id})
 
     async def _run(self, turn_id: str, args: Sequence[str], prompt: str) -> AsyncIterator[Event]:
         yield TurnStarted(turn_id=turn_id)
@@ -237,8 +240,8 @@ class ClaudeCliRunner:
         if settings.model:
             args += ["--model", settings.model]
         args += TOOL_ACCESS_ARGS[settings.tool_access]
-        if self.session_id:
-            args += ["--resume", self.session_id]
+        if self._session_id:
+            args += ["--resume", self._session_id]
         return args
 
     async def _start(self, args: Sequence[str]) -> asyncio.subprocess.Process:
@@ -296,7 +299,7 @@ class ClaudeCliRunner:
         except json.JSONDecodeError:
             raise RuntimeError(f"Unexpected output from claude: {line[:200]}") from None
         if session_id := message.get("session_id"):
-            self.session_id = session_id
-        if self._needs_orbit and message.get("subtype") == "init":
+            self._session_id = session_id
+        if message.get("subtype") == "init":
             check_orbit_connected(message)
         return message
