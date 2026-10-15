@@ -997,3 +997,21 @@ async def test_ctrl_t_jumps_to_the_planner_tab_and_back() -> None:
         await pilot.press("ctrl+t")
         assert active_tab(app) == "All"
         assert session.commands == []
+
+
+async def test_ctrl_t_while_typing_keeps_the_prompt_and_its_text() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test(size=(120, 30)) as pilot:
+        await feed_events(session, pilot, started("agent-1"))
+        prompt = app.query_one(PromptInput)
+        await pilot.press("i", *"hello")
+        await pilot.press("ctrl+t")
+        assert active_tab(app) == "Planner"
+        assert app.focused is prompt
+        assert prompt.value == "hello"
+        await pilot.press("ctrl+t")
+        assert active_tab(app) == "All"
+        assert app.focused is prompt
+        assert prompt.value == "hello"
+        assert session.commands == []
