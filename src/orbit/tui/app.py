@@ -116,6 +116,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         Binding("ctrl+r", "run_tasks", "Run tasks"),
         Binding("ctrl+g", "super_review", "Super review"),
         Binding("ctrl+e", "configure_checks", "Set up checks"),
+        Binding("ctrl+t", "toggle_planner", "Planner"),
         Binding("escape", "cancel_turn", "Cancel run"),
         Binding("ctrl+x", "stop_planner", "Stop planner"),
         Binding("ctrl+o", "pick_model", "Model"),
@@ -251,6 +252,10 @@ class OrbitApp(App[None], inherit_bindings=False):
     @on(AgentsPane.Cancel)
     async def _cancel_agent(self, message: AgentsPane.Cancel) -> None:
         await self._session.send(CancelAgent(agent_id=message.agent_id))
+
+    def action_toggle_planner(self) -> None:
+        """Show the Planner tab, or go back to the tab shown before it."""
+        self.query_one(ConversationTabs).toggle_planner()
 
     @on(TaskList.Accept)
     async def _accept_task(self, message: TaskList.Accept) -> None:

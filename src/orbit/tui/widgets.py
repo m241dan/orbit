@@ -106,6 +106,7 @@ class ConversationTabs(Tabs):
         # Tab key (an agent id, or the planner's) to its tab's id.
         self._tab_ids: dict[str, str] = {PLANNER_TAB.agent_id: self.PLANNER_TAB_ID}
         self._next_id = 1
+        self._before_planner = self.ALL_TAB_ID  # Where ctrl+t goes back to from the planner.
 
     def agent_of(self, tab_id: str) -> str | None:
         """The key of the tab with id ``tab_id``: an agent's id, the planner's, or None for
@@ -115,6 +116,16 @@ class ConversationTabs(Tabs):
     def key_of(self, agent: str | None) -> str | None:
         """The key of the tab ``agent``'s entries belong to."""
         return tab_key(agent, self.planners)
+
+    def toggle_planner(self) -> None:
+        """Show the Planner tab, or from there, the tab shown before it (All if it's gone)."""
+        if self.active != self.PLANNER_TAB_ID:
+            self._before_planner = self.active
+            self.active = self.PLANNER_TAB_ID
+        elif self._before_planner in self._tab_ids.values():
+            self.active = self._before_planner
+        else:
+            self.active = self.ALL_TAB_ID
 
     def track(self, event: Event) -> None:
         """Add a tab for an agent that started, remove an exited agent's tab, and mark a tab

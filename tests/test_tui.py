@@ -946,10 +946,28 @@ async def test_the_prompt_is_enabled_while_a_run_is_busy() -> None:
         assert prompt.disabled
 
 
-async def test_ctrl_t_does_nothing() -> None:
+async def test_ctrl_t_jumps_to_the_planner_tab_and_back() -> None:
     session = FakeSession()
     app = OrbitApp(session)
     async with app.run_test(size=(120, 30)) as pilot:
+        await feed_events(session, pilot, started("agent-1"), started("agent-2", "reviewer"))
+        transcript = app.query_one(Transcript)
+        await pilot.press("ctrl+t")
+        assert active_tab(app) == "Planner"
+        assert transcript.border_title == "Conversation · Planner"
+        await pilot.press("ctrl+t")
+        assert active_tab(app) == "All"
+
+        await pilot.press("tab", "tab", "tab")
+        assert active_tab(app) == "reviewer"
+        await pilot.press("ctrl+t")
+        assert active_tab(app) == "Planner"
+        await pilot.press("ctrl+t")
+        assert active_tab(app) == "reviewer"
+
+        # Back to All when the tab it came from has gone.
+        await pilot.press("ctrl+t")
+        await feed_events(session, pilot, AgentExited(agent_id="agent-2", reason="finished"))
         await pilot.press("ctrl+t")
         assert active_tab(app) == "All"
         assert session.commands == []

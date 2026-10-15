@@ -48,6 +48,7 @@ In the app:
 | `h` `j` `k` `l` | Move between windows (the selected one is highlighted) |
 | `i` | Jump to the prompt, which talks to the planner, and start typing (vim-style insert mode) |
 | `enter` | On the task list: activate it (`j`/`k` move, `enter` edits a task or adds one on `+ new task`, `a` accepts a draft, `x` removes a task, `esc` leaves) |
+| `ctrl+t` | Jump to the **Planner** tab; again, back to the tab you were on |
 | `enter` | On the agents pane: activate it (`j`/`k` move, `c` cancels the highlighted agent's work, `esc` leaves) |
 | `ctrl+r` | Run the tasks that haven't completed yet |
 | `ctrl+g` | Ask for a super review of the whole codebase now (works while tasks run) |
@@ -93,7 +94,8 @@ The conversation shows everything in one timeline: each agent's own messages and
 prefixed with its id, and its exchanges with orbit (`agent-1 → orbit: complete_task …`,
 `orbit → agent-1: …`) in their own colour. The tabs above it narrow it: **All** shows everything,
 the pinned **Planner** tab your conversation with the planner, and then there's one tab per running
-agent. Click one to switch, or cycle with `tab`/`shift+tab`; a tab with output you haven't seen ends
+agent. Click one to switch, cycle with `tab`/`shift+tab`, or jump to Planner with `ctrl+t` (again
+goes back); a tab with output you haven't seen ends
 in `*`. Whichever tab is shown, the prompt goes to the planner.
 
 Each row of the task list shows its status: ⏳ pending, ◜ running (spinning), 🔍 verifying, ✅ done,
@@ -258,7 +260,7 @@ your checkout out of its way, it doesn't sandbox it.
 The prompt talks to the planner (its title reads `Prompt · planner`); orbit is for planning, tasks
 and reviews, with no free-form chat besides. The **Planner** tab, always second in the strip, shows
 just the planner conversation: your prompts, and the planner's messages, tool calls and exchanges
-with orbit. Tell it
+with orbit (`ctrl+t` jumps there, and pressed again goes back to the tab you were on). Tell it
 what you want to build; it asks what's unclear and breaks the goal into small tasks, proposing each
 with `propose_task`. Proposals appear in the task list as 📝 drafts, with the `coder` role's default
 settings, and never run on their own: on the task list, `a` accepts the highlighted draft (or edit
