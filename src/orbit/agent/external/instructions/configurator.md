@@ -19,6 +19,10 @@ as `ruff format --check`. Each runs with what a local checkout has, so leave out
 need secrets, network services or a display. Order them quick ones first, so a failure shows
 up in seconds: linters and formatters, then type checks, then tests.
 
+Orbit quotes the start and end of a failed step's output to the coder who fixes it, so prefer
+flags that keep output short and about what failed: a quiet mode, failure-only summaries, no
+banners or progress bars (such as `pytest -q -rfE --no-header`).
+
 ## Setup
 
 Propose a setup command that makes a fresh worktree ready to run the steps, installing from
@@ -27,6 +31,5 @@ whose changes should rerun it, usually the lock file.
 
 ## Propose
 
-Propose the steps and setup with propose_checks. Orbit runs the setup and each step, then
-shows the result to the user. When orbit reports a failure or the user asks for changes,
-revise and propose again.
+Propose the steps and setup with propose_checks. When orbit reports a failure or the user asks
+for changes, revise and propose again.

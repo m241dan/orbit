@@ -17,8 +17,11 @@ class VerificationStep:
 
 # Fix tasks one task's chain of fixes may queue for each step before giving up on it.
 MAX_FIX_ATTEMPTS = 3
-# Characters of step output quoted in a fix prompt; the end (summary, coverage) matters most.
+# Characters of step output quoted in a fix prompt, and how many of them come from its start:
+# the first failure is usually there, and the summary at the end.
 OUTPUT_LIMIT = 8000
+HEAD_LIMIT = 2000
+CUT = "\n\n[… output cut …]\n\n"
 
 
 def may_change_files(task: TaskSpec) -> bool:
@@ -60,17 +63,29 @@ class FixAttempts:
 
 
 def trim_output(output: str) -> str:
-    """``output`` without surrounding whitespace, keeping only its end if it's long."""
+    """``output`` without surrounding whitespace, keeping only its start and end if it's long."""
     output = output.strip()
-    return "…" + output[-OUTPUT_LIMIT:] if len(output) > OUTPUT_LIMIT else output
+    if len(output) <= OUTPUT_LIMIT:
+        return output
+    return output[:HEAD_LIMIT] + CUT + output[-(OUTPUT_LIMIT - HEAD_LIMIT) :]
 
 
 def failure_report(step: VerificationStep, output: str) -> str:
-    """What ``step`` runs, and the end of the ``output`` it failed with."""
+    """What ``step`` runs, and the ``output`` it failed with, trimmed. The command is in the
+    first paragraph, so a fix task's commit message can quote just that."""
     return (
-        f"This command must exit successfully:\n\n    {shlex.join(step.command)}\n\n"
-        f"It failed. The end of its output:\n\n{trim_output(output)}"
+        f"This command failed and must pass:\n    {shlex.join(step.command)}\n\n"
+        f"Its output:\n\n{trim_output(output)}"
     )
+
+
+def check_reply(step: VerificationStep, passed: bool, output: str) -> str:
+    """The reply to an agent that ran ``step`` itself: the trimmed ``output`` if it failed, else
+    just that it ``passed``, with the output's last line (usually a summary) if there is one."""
+    if not passed:
+        return f"{step.name}: failed\n\n{trim_output(output)}"
+    last = output.strip().rsplit("\n", 1)[-1].strip()
+    return f"{step.name}: passed" + (f" ({last})" if last else "")
 
 
 FIX_INSTRUCTIONS = (
@@ -101,7 +116,4 @@ def steps_note(steps: Sequence[str]) -> str:
     """What the planner is told about the verification steps named ``steps``."""
     if not steps:
         return "Orbit note: No verification steps are configured yet, so tasks aren't verified."
-    return (
-        f"Orbit note: orbit verifies each task with these checks, in order: {', '.join(steps)}."
-        " Each task must leave them all passing on its own."
-    )
+    return f"Orbit note: orbit verifies each task with these checks, in order: {', '.join(steps)}."

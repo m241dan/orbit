@@ -75,7 +75,10 @@ async def test_a_fallback_fix_continues_from_the_failed_work() -> None:
     )
     events = await asyncio.wait_for(run(session), 5)
     assert tree.prepared == [False, True]
-    assert len(tree.commits) == 1
+    [message] = tree.commits
+    # The fix's commit quotes the failed step and command, not the output in its prompt.
+    assert "Fix the failed verification step: Unit tests\n\n" in message
+    assert "pytest" in message and "1 test failed" not in message
     assert statuses(events) == ["completed", "completed"]
 
 

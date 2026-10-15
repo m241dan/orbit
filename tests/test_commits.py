@@ -1,6 +1,6 @@
 from orbit.agent.domain.commits import commit_message, configure_message
 from orbit.agent.domain.roles import ChecksProposal, Setup
-from orbit.agent.domain.verification import VerificationStep
+from orbit.agent.domain.verification import VerificationStep, fix_prompt
 from orbit.protocol import TaskSpec
 
 
@@ -28,6 +28,15 @@ def test_long_subjects_and_prompts_are_trimmed() -> None:
     subject, _, body = message.partition("\n\n")
     assert subject == "s" * 71 + "…"
     assert body.endswith("p" * 2000 + "…")
+
+
+def test_a_fix_tasks_body_is_the_step_and_command_without_the_output() -> None:
+    prompt = fix_prompt(VerificationStep("Lint", ("ruff", "check")), "E501 line too long\n")
+    message = commit_message(TaskSpec(prompt=prompt), ["Wrap the line"], fix=True)
+    assert message == (
+        "Wrap the line\n\nOrbit task:\n\nFix the failed verification step: Lint\n\n"
+        "This command failed and must pass:\n    ruff check"
+    )
 
 
 def test_accepted_checks_are_committed_with_each_step_listed() -> None:

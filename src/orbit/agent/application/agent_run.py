@@ -38,7 +38,7 @@ from orbit.agent.domain.roles import (
     parse_proposal,
     setup_step,
 )
-from orbit.agent.domain.verification import trim_output
+from orbit.agent.domain.verification import check_reply
 from orbit.protocol import (
     AgentExited,
     AgentExitReason,
@@ -500,7 +500,7 @@ class AgentRun:
             return Reply(refusal, is_error=True)
         async with self._checking:
             passed, output = await self._verifier.run_one(step, self._root)
-        return Reply(f"{step.name}: {'passed' if passed else 'failed'}\n\n{trim_output(output)}")
+        return Reply(check_reply(step, passed, output))
 
     async def _report_progress(self, arguments: dict[str, Any]) -> Reply:
         return await report_progress(self._publish, self.agent.id, self._task_id, arguments)

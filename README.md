@@ -76,15 +76,16 @@ planner. The agent is told only who it is (`agent-1`, `agent-2`, …) and to fet
 1. It calls orbit's `get_task` tool and gets the task's prompt.
 2. When it thinks it's done, it calls `complete_task` with a one-line summary. Orbit runs the
    verification steps while that call waits, and replies with the result.
-3. If a step failed, the reply quotes the end of its output and asks the same agent to fix the
-   cause without weakening the check, then call `complete_task` again. The row shows `fix 1/5`,
-   `fix 2/5`, …
+3. If a step failed, the reply quotes the start and end of its output and asks the same agent to
+   fix the cause without weakening the check, then call `complete_task` again. The row shows
+   `fix 1/5`, `fix 2/5`, …
 4. Once verification passes, the agent is told to stop. It gets a few seconds to exit on its own
    before orbit stops it.
 
 `get_task`'s reply names the steps that will verify the agent's work. An agent may also run a
-single step itself with `run_check` (up to 20 times per task), note what it's doing with
-`report_progress`, or call `give_up` with a reason when the task can't be done.
+single step itself with `run_check` (up to 20 times per task), which replies with the step's
+output if it failed and just its last line if it passed; note what it's doing with
+`report_progress`; or call `give_up` with a reason when the task can't be done.
 
 The **agents pane** (bottom right) lists the agents running now: each one's role, its task, and
 whether it's working or waiting on orbit (say, `waiting on complete_task` while its work is
@@ -167,7 +168,7 @@ The verification panel shows its progress under a "Startup check" heading, with 
 timing as a task's verification, until a task starts and its own verification takes the panel
 over. It's listed in the agents pane as `startup-check`, where `c` cancels it. When it finishes,
 the conversation notes `✅ Startup check passed`, or on a failure the step that failed (`setup`
-if the setup command did) and the end of its output, with a 📝 draft task "Fix failing check:
+if the setup command did) and its output, with a 📝 draft task "Fix failing check:
 <step>" whose prompt holds that output, and a reminder that `ctrl+e` reconfigures the steps if
 they're what's wrong. `--no-verify` skips it, as does having no steps.
 
@@ -208,8 +209,8 @@ the way to reconfigure too. While a configurator task is queued or running, `ctr
 another; the conversation says `A configurator task is already queued or running.`
 
 Orbit tries each proposal in the agent's working directory first: the setup, then each step in
-order. If one fails, the agent gets the step's name and the end of its output and is asked to
-revise, without bothering you. Once everything passes, a window shows the proposal: the setup
+order. If one fails, the agent gets the step's name and its output and is asked to revise,
+without bothering you. Once everything passes, a window shows the proposal: the setup
 command and the files it watches, then the steps in order, each with its name and command, and a
 line saying they all passed on the current code. Then:
 
@@ -337,7 +338,8 @@ What each built-in role is told, its instructions, is the Markdown file named fo
 role's instructions with `instructions` in `.orbit/config.toml`.
 
 An agent calling a tool its role doesn't have gets an error reply (the CLI only allows its role's
-tools, too); an agent still working when its role's time runs out is stopped and the task fails.
+tools, too, and orbit's others are disallowed so the agent doesn't see them); an agent still
+working when its role's time runs out is stopped and the task fails.
 
 A project can change these, orbit's limits, its verification steps (see
 [Verification steps](#verification-steps)) and its worktree setup (see
@@ -375,7 +377,8 @@ gets its own unguessable token, sent as `Authorization: Bearer …` with every c
 whose token it didn't issue, and revokes a token when its agent's run ends. The token is passed to
 the CLI in the `ORBIT_AGENT_TOKEN` environment variable, which the MCP config references, so it never
 appears in the process list. Agents are started with `--strict-mcp-config` (only orbit's server),
-`--allowedTools 'mcp__orbit__*'` (orbit's tools are allowed at every access level),
+`--allowedTools` naming the role's orbit tools (allowed at every access level) and
+`--disallowedTools` naming orbit's others,
 `ENABLE_TOOL_SEARCH=false` (orbit's tools are loaded up front), and
 `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` (your Claude Code auto-memory, which worktrees share with the
 repository, stays out of agents' context).

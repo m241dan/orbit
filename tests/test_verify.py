@@ -3,14 +3,18 @@ import sys
 from orbit.agent.application.verifier import first_failure
 from orbit.agent.domain.roles import Setup, setup_step
 from orbit.agent.domain.verification import (
+    CUT,
+    HEAD_LIMIT,
     OUTPUT_LIMIT,
     FixAttempts,
     VerificationStep,
+    check_reply,
     fix_prompt,
     may_change_files,
     skip_reason,
     startup_fix_prompt,
     steps_note,
+    trim_output,
 )
 from orbit.protocol import Settings, StepStatus, TaskSpec
 
@@ -76,12 +80,29 @@ def test_fix_prompt_names_the_step_command_and_output() -> None:
     assert "Do not weaken the check" in body
 
 
-def test_fix_prompt_keeps_only_the_end_of_long_output() -> None:
-    output = "x" * OUTPUT_LIMIT + "TAIL"
+def test_fix_prompt_keeps_the_start_and_end_of_long_output() -> None:
+    output = "HEAD" + "x" * OUTPUT_LIMIT + "TAIL"
     prompt = fix_prompt(python_step("", name="Unit tests"), output)
-    assert "TAIL" in prompt
-    assert "x" * OUTPUT_LIMIT not in prompt
-    assert "…" + "x" * (OUTPUT_LIMIT - 4) + "TAIL" in prompt
+    kept = "HEAD" + "x" * (HEAD_LIMIT - 4) + CUT + "x" * (OUTPUT_LIMIT - HEAD_LIMIT - 4) + "TAIL"
+    assert kept in prompt
+    assert "x" * (OUTPUT_LIMIT - 6) not in prompt
+
+
+def test_short_output_is_quoted_whole_without_surrounding_whitespace() -> None:
+    assert trim_output("  \nFAILED\n\n") == "FAILED"
+    assert trim_output("x" * OUTPUT_LIMIT) == "x" * OUTPUT_LIMIT
+
+
+def test_a_failed_check_replies_with_its_trimmed_output() -> None:
+    step = VerificationStep(name="Unit tests", command=("pytest",))
+    assert check_reply(step, False, " 1 failed\n") == "Unit tests: failed\n\n1 failed"
+
+
+def test_a_passed_check_replies_with_only_its_last_line() -> None:
+    step = VerificationStep(name="Unit tests", command=("pytest",))
+    output = "collected 3 items\n\n" + "." * 50 + "\n\n3 passed in 0.1s\n"
+    assert check_reply(step, True, output) == "Unit tests: passed (3 passed in 0.1s)"
+    assert check_reply(step, True, "\n") == "Unit tests: passed"
 
 
 def test_startup_fix_prompt_is_titled_by_the_step_and_quotes_its_output() -> None:
@@ -128,7 +149,8 @@ def test_a_setup_runs_as_a_step_named_setup() -> None:
 
 def test_the_steps_note_lists_the_steps_each_task_must_pass() -> None:
     note = steps_note(("Ruff lint", "Unit tests"))
-    assert "Ruff lint, Unit tests" in note and "each task" in note
+    assert note.endswith("with these checks, in order: Ruff lint, Unit tests.")
+    assert "must" not in note  # How to work is the planner's instructions, not the note.
 
 
 def test_the_steps_note_says_when_nothing_verifies_tasks() -> None:

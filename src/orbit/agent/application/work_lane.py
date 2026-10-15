@@ -135,7 +135,8 @@ class WorkLane:
         if outcome.checks is not None:
             message = configure_message(outcome.checks)
         else:
-            message = commit_message(self._board.get(task_id).task, outcome.summaries)
+            state = self._board.get(task_id)
+            message = commit_message(state.task, outcome.summaries, fix=state.fixes is not None)
         lander = Lander(self._desk.agents.tree, self._board, self._verifier, self._publish)
         landing = await lander.land(task_id, message, root, self._starts.pop(task_id))
         if landing.failure is not None:

@@ -17,8 +17,24 @@ from mcp.server.mcpserver.exceptions import ToolError
 from orbit.agent.application.ports import CallHandler
 
 INSTRUCTIONS = (
-    "Orbit hands out your task and verifies your work. Call get_task first; when you're done,"
-    " call complete_task and wait for its reply, which says whether verification passed."
+    "Orbit hands out tasks and verifies the work; these tools are how an agent talks to it."
+)
+
+# What a prompt handed to a fresh coder must cover; the tools that take one say so.
+PROMPT_RECIPE = (
+    "The coder starts fresh with only the prompt, so it must say where (the files and"
+    " functions), what to change and what must stay as it is, and how to tell it's done (the"
+    " tests that should exist and pass)."
+)
+SUGGEST_TASK = (
+    "Suggest a follow-up task for a coder, queued after the current work: a short title, and a"
+    f" prompt. Suggest the most important first. {PROMPT_RECIPE} Give the input or scenario"
+    " that shows each problem."
+)
+PROPOSE_TASK = (
+    "Propose a task for the plan: a short title, and a prompt. It's added as a draft the user"
+    f" accepts or drops. {PROMPT_RECIPE} Include the decisions made with the user that affect"
+    " it, and the edge cases it must handle."
 )
 
 
@@ -78,19 +94,16 @@ def build_server(handler: CallHandler) -> MCPServer:
 
     @server.tool(structured_output=False)
     async def give_up(reason: str, ctx: Context) -> str:
-        """Report that you can't do the task, and why. Use only when it's truly blocked."""
+        """Report that you can't do the task, and why: it contradicts itself or the code, or
+        needs a decision only the user can make. Use only when it's truly blocked."""
         return await call(ctx, "give_up", {"reason": reason})
 
-    @server.tool(structured_output=False)
+    @server.tool(structured_output=False, description=SUGGEST_TASK)
     async def suggest_task(title: str, prompt: str, ctx: Context) -> str:
-        """Suggest a follow-up task for a coder: a short title, and a prompt saying what to
-        change and how to tell it's done. Suggest the most important first."""
         return await call(ctx, "suggest_task", {"title": title, "prompt": prompt})
 
-    @server.tool(structured_output=False)
+    @server.tool(structured_output=False, description=PROPOSE_TASK)
     async def propose_task(title: str, prompt: str, ctx: Context) -> str:
-        """Propose a task for the plan: a short title, and a prompt saying what to change and
-        how to tell it's done. It's added as a draft the user accepts or drops."""
         return await call(ctx, "propose_task", {"title": title, "prompt": prompt})
 
     @server.tool(structured_output=False)

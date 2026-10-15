@@ -12,7 +12,7 @@ from mcp.types import TextContent
 
 from orbit.agent.application.ports import Reply
 from orbit.agent.domain.roles import ORBIT_TOOLS
-from orbit.agent.external.mcp_host import McpHost, bearer_token
+from orbit.agent.external.mcp_host import PROMPT_RECIPE, McpHost, bearer_token
 
 OK = Reply("ok")
 
@@ -68,6 +68,13 @@ async def test_offers_orbit_tools_with_their_arguments() -> None:
         assert tools["suggest_task"].input_schema["required"] == ["title", "prompt"]
         assert tools["propose_checks"].input_schema["required"] == ["steps"]
         assert all(tool.description for tool in tools.values())
+
+
+async def test_the_tools_that_take_a_coders_prompt_say_what_it_must_cover() -> None:
+    async with serving(RecordingHandler()) as url, connected(url) as client:
+        tools = {tool.name: tool for tool in (await client.list_tools()).tools}
+        for name in ("suggest_task", "propose_task"):
+            assert PROMPT_RECIPE in (tools[name].description or "")
 
 
 async def test_passes_calls_with_the_token_to_the_handler_and_returns_its_text() -> None:

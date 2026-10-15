@@ -23,6 +23,18 @@ async def test_step_fails_on_nonzero_exit() -> None:
     assert output.strip() == "3 failed"
 
 
+async def test_a_failure_without_output_says_so_with_the_exit_status() -> None:
+    passed, output = await run_step(python_step("import sys; sys.exit(2)"))
+    assert not passed
+    assert output == "No output; exit status 2."
+
+
+async def test_steps_run_with_colour_turned_off() -> None:
+    passed, output = await run_step(python_step("import os; print(os.environ['NO_COLOR'])"))
+    assert passed
+    assert output.strip() == "1"
+
+
 async def test_missing_command_fails_the_step() -> None:
     step = VerificationStep(name="check", command=("orbit-no-such-command",))
     passed, output = await run_step(step)

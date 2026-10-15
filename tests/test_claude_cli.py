@@ -10,6 +10,7 @@ import pytest
 from orbit.agent import ClaudeCliRunner
 from orbit.agent.application.ports import AgentLaunch
 from orbit.agent.domain.agents import Agent
+from orbit.agent.domain.roles import ORBIT_TOOLS
 from orbit.agent.external.claude_cli import AGENT_RULES, TOOL_TIMEOUT_MS, translate
 from orbit.protocol import (
     AssistantMessage,
@@ -408,7 +409,7 @@ async def test_restricted_agents_can_read_and_search_but_not_run_or_write(tmp_pa
     argv = call["argv"]
     assert "--restricted" in argv
     assert argv[argv.index("--allowedTools") + 1].endswith(",Read,Glob,Grep")
-    assert argv[argv.index("--disallowedTools") + 1] == "Edit,Write,NotebookEdit"
+    assert argv[argv.index("--disallowedTools") + 1].endswith(",Edit,Write,NotebookEdit")
     # --restricted skips CLAUDE.md discovery; naming the tree brings its CLAUDE.md back.
     assert argv[argv.index("--add-dir") + 1] == str(tmp_path / "tree")
     assert call["env"]["CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD"] == "1"
@@ -428,8 +429,26 @@ async def test_only_restricted_agents_get_the_read_only_flags(
     runner, scenario = make_runner(tmp_path, stdout=lines(init("connected"), RESULT))
     await run_agent(runner, Settings(tool_access=access))
     argv = calls(scenario)[0]["argv"]
-    assert not {"--restricted", "--disallowedTools", "--add-dir"} & set(argv)
+    assert not {"--restricted", "--add-dir"} & set(argv)
     assert "Read" not in argv[argv.index("--allowedTools") + 1]
+    assert "Edit" not in argv[argv.index("--disallowedTools") + 1]
+
+
+async def test_orbit_tools_the_role_lacks_are_hidden_from_the_agent(tmp_path: Path) -> None:
+    runner, scenario = make_runner(tmp_path, stdout=lines(init("connected"), RESULT))
+    await run_agent(runner, Settings(tool_access="full"))
+    argv = calls(scenario)[0]["argv"]
+    hidden = argv[argv.index("--disallowedTools") + 1].split(",")
+    assert hidden == [f"mcp__orbit__{tool}" for tool in ORBIT_TOOLS if tool not in TOOLS]
+    assert not set(hidden) & set(argv[argv.index("--allowedTools") + 1].split(","))
+
+
+async def test_an_agent_with_every_orbit_tool_has_none_hidden(tmp_path: Path) -> None:
+    runner, scenario = make_runner(tmp_path, stdout=lines(init("connected"), RESULT))
+    launch = AgentLaunch(AGENT, URL, "Go.", Settings(tool_access="full"), ".", "Code.", ORBIT_TOOLS)
+    async for _ in runner.run_agent(launch):
+        pass
+    assert "--disallowedTools" not in calls(scenario)[0]["argv"]
 
 
 async def test_agents_keep_tool_access_flags_and_orbit_tools(tmp_path: Path) -> None:

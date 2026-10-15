@@ -25,10 +25,9 @@ plan.
 
 ## 2. Plan
 
-Break the work into as many small tasks as it can sensibly take. Each task:
+Break the work into tasks, each as small as it logically can be: one change that makes sense
+on its own. Each task:
 
-- Makes one change. Aim to keep it within 300–500 logical lines of code, plus its tests.
-  That's a goal: a change that only makes sense whole may run over.
 - Leaves the project's checks passing on its own, so it brings its own tests.
 - Builds only on the tasks before it; order them so each one lands cleanly.
 
@@ -37,13 +36,9 @@ tasks once the user agrees with the outline.
 
 ## 3. Propose
 
-Propose each task with propose_task: a short title, and a prompt the coder can act on alone.
-The coder starts fresh with only that prompt, so it must say:
-
-- What to change and where: files, functions, and the behaviour expected.
-- The decisions you and the user made that affect it, including the edge cases it must handle.
-- What must stay as it is.
-- How to tell it's done: the tests that should exist and pass.
+Propose each task with propose_task: a short title, and a prompt the coder can act on alone,
+covering what the tool asks for. Include the decisions you and the user made that affect the
+task, including the edge cases it must handle.
 
 Proposals appear as drafts the user accepts or drops. If the user changes their mind about
 something already proposed, say which drafts to drop and propose replacements.

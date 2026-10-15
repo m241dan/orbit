@@ -30,6 +30,14 @@ async def test_runs_in_cwd_without_stdin(tmp_path: Path) -> None:
     assert output.decode().split() == [str(tmp_path.resolve()), "''"]
 
 
+async def test_runs_in_the_environment_given(tmp_path: Path) -> None:
+    code = "import os; print(os.environ.get('ORBIT_TEST_VAR'))"
+    _, output = await run_process(
+        (sys.executable, "-c", code), tmp_path, env={**os.environ, "ORBIT_TEST_VAR": "set"}
+    )
+    assert output.decode().strip() == "set"
+
+
 async def test_missing_program_raises(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError):
         await run_process(("orbit-no-such-command",), tmp_path)
