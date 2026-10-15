@@ -293,12 +293,15 @@ class AgentSession:
     async def _handle_agents(
         self, command: RequestSuperReview | CancelAgent | DecideProposal
     ) -> None:
-        if isinstance(command, CancelAgent):
-            await self._cancel_agent(command.agent_id)
-        elif isinstance(command, DecideProposal):
-            await self._decide(command)
-        else:
-            await self._super_review()
+        match command:
+            case CancelAgent(agent_id=agent_id):
+                await self._cancel_agent(agent_id)
+            case DecideProposal():
+                await self._decide(command)
+            case RequestSuperReview():
+                await self._super_review()
+            case _:
+                assert_never(command)
 
     async def _decide(self, command: DecideProposal) -> None:
         if not self._proposals.decide(command):

@@ -13,11 +13,11 @@ from orbit.agent.application.agent_run import AgentDesk, AgentRun, Outcome
 from orbit.agent.application.landing import Lander
 from orbit.agent.application.review_lane import ReviewLane
 from orbit.agent.application.startup_check import StartupCheck
-from orbit.agent.application.verifier import Verifier
+from orbit.agent.application.verifier import Failure, Verifier
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.commits import commit_message, configure_message
 from orbit.agent.domain.roles import REVIEW_ROLES, ChecksProposal
-from orbit.agent.domain.verification import FixAttempts, VerificationStep, fix_prompt
+from orbit.agent.domain.verification import FixAttempts, fix_prompt
 from orbit.protocol import (
     ErrorOccurred,
     TasksChanged,
@@ -50,11 +50,6 @@ class WorkLane:
         self._landed: dict[str, str] = {}  # Task id -> the commit it landed, until reported.
         self._starts: dict[str, str] = {}  # Task id -> the tree's head when it started.
 
-    @property
-    def _checks(self) -> Verifier:
-        assert self._verifier is not None  # Only used while verifying a task.
-        return self._verifier
-
     def next_work(self, tried: Collection[str] = ()) -> str | None:
         """The next task for the work lane; reviews have their own lane, if there is one."""
         exclude = REVIEW_ROLES if self._review is not None else ()
@@ -75,14 +70,14 @@ class WorkLane:
         await self._publish_tasks()
         if self.startup is not None:
             self.startup.release_panel()
-        if self._verifier:
+        if self._verifier is not None:
             self._board.reset_steps()
-            await self._checks.publish_steps()
+            await self._verifier.publish_steps()
         await self._publish(TaskStarted(task_id=task_id))
         try:
-            status = await self._run_agent(self._desk, task_id, attempts)
+            status = await self._run_agent(task_id, attempts)
         except asyncio.CancelledError:
-            if self._verifier:
+            if self._verifier is not None:
                 await self._verifier.cancel()
             status = "cancelled"
         except RuntimeError as exc:  # Git or the tree's setup failed.
@@ -103,42 +98,45 @@ class WorkLane:
         else:
             await self._review.ended(task_id)
 
-    async def _run_agent(self, desk: AgentDesk, task_id: str, attempts: FixAttempts) -> TaskStatus:
+    async def _run_agent(self, task_id: str, attempts: FixAttempts) -> TaskStatus:
         """Run task ``task_id`` through a new agent and land its work; a fallback queues a fix
         for a fresh one."""
-        root = await self._prepare(desk, task_id)
+        root = await self._prepare(task_id)
         task = self._board.get(task_id).task
-        before = await self._verifier.state_before(task, root) if self._verifier else None
-        outcome = await AgentRun(task_id, self._board, self._verifier, desk).run(before, root)
+        verifier = self._verifier
+        before = await verifier.state_before(task, root) if verifier is not None else None
+        outcome = await AgentRun(task_id, self._board, verifier, self._desk).run(before, root)
         if outcome.checks is not None:
-            await self._configure(desk, outcome.checks, root)
+            assert verifier is not None  # Checks are only proposed to a verifier.
+            await self._configure(verifier, outcome.checks, root)
         if outcome.status == "completed":
-            outcome = await self._land(desk, task_id, outcome, root)
+            outcome = await self._land(task_id, outcome, root)
         if outcome.failure is not None and outcome.status == "unverified":
-            await self._queue_fix(task_id, attempts, *outcome.failure)
+            assert verifier is not None  # Only verification fails.
+            await self._queue_fix(verifier, task_id, attempts, outcome.failure)
         return outcome.status
 
-    async def _configure(self, desk: AgentDesk, checks: ChecksProposal, root: str) -> None:
+    async def _configure(self, verifier: Verifier, checks: ChecksProposal, root: str) -> None:
         """Save the ``checks`` the user accepted into the config at ``root``, and use them from
         the next task on. This, or a restart, is the only way the checks change."""
-        if desk.agents.write_config is not None:
-            desk.agents.write_config(root, checks)
-        if desk.agents.tree is not None:
-            desk.agents.tree.use_setup(checks.setup)
-        self._checks.verification = replace(self._checks.verification, steps=checks.steps)
+        if self._desk.agents.write_config is not None:
+            self._desk.agents.write_config(root, checks)
+        if self._desk.agents.tree is not None:
+            self._desk.agents.tree.use_setup(checks.setup)
+        verifier.verification = replace(verifier.verification, steps=checks.steps)
         self._board.set_steps([step.name for step in checks.steps])
-        await self._checks.publish_steps()
+        await verifier.publish_steps()
 
-    async def _land(self, desk: AgentDesk, task_id: str, outcome: Outcome, root: str) -> Outcome:
+    async def _land(self, task_id: str, outcome: Outcome, root: str) -> Outcome:
         """Commit and merge a completed task's work, when there's a tree to do it from: the
         checks the user accepted from it, or else the work itself."""
-        if desk.agents.tree is None:
+        if self._desk.agents.tree is None:
             return outcome
         if outcome.checks is not None:
             message = configure_message(outcome.checks)
         else:
             message = commit_message(self._board.get(task_id).task, outcome.summaries)
-        lander = Lander(desk.agents.tree, self._board, self._verifier, self._publish)
+        lander = Lander(self._desk.agents.tree, self._board, self._verifier, self._publish)
         landing = await lander.land(task_id, message, root, self._starts.pop(task_id))
         if landing.failure is not None:
             return Outcome("unverified", landing.failure)
@@ -146,21 +144,23 @@ class WorkLane:
             self._landed[task_id] = landing.commit
         return outcome
 
-    async def _prepare(self, desk: AgentDesk, task_id: str) -> str:
+    async def _prepare(self, task_id: str) -> str:
         """Where task ``task_id`` is worked on: the coder's tree, readied for it."""
-        if desk.agents.tree is None:
+        if self._desk.agents.tree is None:
             return "."
         # A fix carries on from the work it fixes.
-        tree = desk.agents.tree
+        tree = self._desk.agents.tree
         root = await tree.prepare(keep=self._board.get(task_id).fixes is not None)
         self._starts[task_id] = await tree.head()
         return root
 
     async def _queue_fix(
-        self, task_id: str, attempts: FixAttempts, step: VerificationStep, output: str
+        self, verifier: Verifier, task_id: str, attempts: FixAttempts, failure: Failure
     ) -> None:
-        """Add a task fixing ``step`` right after ``task_id``, unless its attempts ran out."""
-        limit = self._checks.verification.max_fix_attempts
+        """Add a task fixing ``failure``'s step right after ``task_id``, unless its attempts
+        ran out."""
+        step, output = failure
+        limit = verifier.verification.max_fix_attempts
         if attempts.exhausted(task_id, step.name, limit):
             message = f"Verification step {step.name!r} still fails after {limit} fix attempts."
             await self._publish(ErrorOccurred(message=message))

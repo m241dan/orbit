@@ -247,6 +247,8 @@ class AgentRun:
         self._desk = desk
         self._publish = desk.publish
         self._work = AgentTask(board.get(task_id).task, desk.agents.limits)
+        self._role: Role | None = desk.agents.roles.get(self._work.task.role)
+        self._stream_task: asyncio.Task[None] | None = None  # The agent's process, once launched.
         self._inbox: asyncio.Queue[asyncio.Future[Reply] | _Proposal | Wake] = asyncio.Queue()
         self._checking = asyncio.Lock()  # One verification step at a time.
         self._failure: Failure | None = None
@@ -269,15 +271,19 @@ class AgentRun:
         assert self._agent is not None  # Set when the run starts.
         return self._agent
 
+    @property
+    def role(self) -> Role:
+        assert self._role is not None  # A run without its role ends before the agent starts.
+        return self._role
+
     async def run(self, before: object, root: str) -> Outcome:
         """Launch the agent in ``root`` and see the task through; ``before`` is the tree's
         state there beforehand."""
         task = self._work.task
-        role = self._desk.agents.roles.get(task.role)
-        if role is None:
+        if self._role is None:
             await self._publish(ErrorOccurred(message=f"No role named {task.role!r}."))
             return Outcome("error")
-        self._role, self._root = role, root
+        self._root = root
         self._agent = self._desk.open(self, task.role, self._task_id)
         stream = self._stream_task = await self._launch()
         try:
@@ -298,7 +304,7 @@ class AgentRun:
 
     async def _serve_in_time(self, before: object) -> None:
         """Serve the agent until it's done, or its role's time runs out."""
-        minutes = self._role.timeout_minutes
+        minutes = self.role.timeout_minutes
         try:
             async with asyncio.timeout(None if minutes is None else minutes * 60):
                 await self._serve(before)
@@ -307,7 +313,7 @@ class AgentRun:
             await self._publish(ErrorOccurred(agent_id=self.agent.id, message=message))
 
     async def handle(self, tool: str, arguments: dict[str, Any]) -> Reply:
-        return await dispatch(self._work.task.role, self._role, self._tools, tool, arguments)
+        return await dispatch(self._work.task.role, self.role, self._tools, tool, arguments)
 
     # The agent's process
 
@@ -380,7 +386,7 @@ class AgentRun:
             assert self._verifier is not None and self._failure is not None
             await self._verifier.skip_unchanged(self._task_id)
             self._work.failed(*self._failure)  # The agent is gone, so this falls back.
-        elif "propose_checks" in self._role.tools:
+        elif "propose_checks" in self.role.tools:
             self._work.unproposed()  # Its work is a proposal, and none was accepted.
         else:
             await self._verify(before, None)
@@ -403,7 +409,7 @@ class AgentRun:
         _answer(claim, Reply(reply))
 
     async def _check(self, before: object) -> Failure | None:
-        if self._verifier is None or not self._role.verify:
+        if self._verifier is None or not self.role.verify:
             return None
         async with self._checking:
             return await self._verifier.check(self._task_id, before, self._root)
@@ -448,6 +454,7 @@ class AgentRun:
         """The user's decision on ``checks``; ``None`` if the agent exits before they decide."""
         review = self._desk.agents.proposal_review
         assert review is not None  # Proposals are refused without one.
+        assert self._stream_task is not None  # Proposals come from a launched agent.
         decision = asyncio.ensure_future(review.review(self._task_id, checks))
         try:
             await asyncio.wait({decision, self._stream_task}, return_when=asyncio.FIRST_COMPLETED)
