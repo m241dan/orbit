@@ -4,8 +4,7 @@ command that decides it."""
 import asyncio
 from collections.abc import Callable
 
-from orbit.agent.application.agent_run import Publish
-from orbit.agent.application.ports import ProposalDecision
+from orbit.agent.application.ports import ProposalDecision, Publish
 from orbit.agent.domain.roles import ChecksProposal
 from orbit.protocol import ChecksProposed, DecideProposal, ProposedSetup, ProposedStep
 

@@ -11,6 +11,9 @@ from orbit.agent.domain.roles import ChecksProposal, Setup
 from orbit.agent.domain.verification import VerificationStep
 from orbit.protocol import Event, MergeResult, Settings
 
+Publish = Callable[[Event], Awaitable[None]]
+"""Publishes an event to the frontend."""
+
 StepRunner = Callable[[VerificationStep, str], Awaitable[tuple[bool, str]]]
 """Runs a verification step in a directory; returns whether it passed and its output."""
 

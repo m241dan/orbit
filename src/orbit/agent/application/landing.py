@@ -1,12 +1,11 @@
 """Landing a task's verified work: committing it in the coder's tree and merging it."""
 
-from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
-from orbit.agent.application.ports import CoderTree, Merge
+from orbit.agent.application.ports import CoderTree, Merge, Publish
 from orbit.agent.application.verifier import Failure, Verifier
 from orbit.agent.domain.board import TaskBoard
-from orbit.protocol import Event, TaskMerged
+from orbit.protocol import TaskMerged
 
 # Times the work is rebased onto a base that keeps moving before orbit stops trying.
 MAX_REBASES = 3
@@ -29,7 +28,7 @@ class Lander:
         tree: CoderTree,
         board: TaskBoard,
         verifier: Verifier | None,
-        publish: Callable[[Event], Awaitable[None]],
+        publish: Publish,
     ) -> None:
         self._tree = tree
         self._board = board

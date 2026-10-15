@@ -4,7 +4,7 @@ from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass
 from typing import TypeVar
 
-from orbit.agent.application.ports import CoderTree, StepRunner, Workspace
+from orbit.agent.application.ports import CoderTree, Publish, StepRunner, Workspace
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.verification import (
     MAX_FIX_ATTEMPTS,
@@ -13,7 +13,6 @@ from orbit.agent.domain.verification import (
     skip_reason,
 )
 from orbit.protocol import (
-    Event,
     Notice,
     StepStatus,
     TasksChanged,
@@ -74,7 +73,7 @@ class Verifier:
         self,
         verification: Verification,
         board: TaskBoard,
-        publish: Callable[[Event], Awaitable[None]],
+        publish: Publish,
         tree: CoderTree | None = None,
     ) -> None:
         self.verification = verification

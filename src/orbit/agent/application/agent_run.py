@@ -22,6 +22,7 @@ from orbit.agent.application.ports import (
     ConfigWriter,
     ProposalDecision,
     ProposalReview,
+    Publish,
     Reply,
 )
 from orbit.agent.application.verifier import Failure, Verifier, first_failure
@@ -31,6 +32,7 @@ from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.reviews import ReviewLimits
 from orbit.agent.domain.roles import (
     BUILT_IN_ROLES,
+    ORBIT_TOOLS,
     ChecksProposal,
     ConfigError,
     Role,
@@ -45,8 +47,8 @@ from orbit.protocol import (
     AgentRequest,
     AgentStarted,
     ErrorOccurred,
-    Event,
     ProgressNoted,
+    Settings,
     TaskGaveUp,
     TasksChanged,
     TaskStatus,
@@ -54,7 +56,6 @@ from orbit.protocol import (
     Usage,
 )
 
-Publish = Callable[[Event], Awaitable[None]]
 # Longest progress note shown; agents can be chatty.
 NOTE_LIMIT = 200
 
@@ -65,6 +66,36 @@ def progress_note(text: str) -> str:
     if len(note) > NOTE_LIMIT:
         note = note[: NOTE_LIMIT - 1] + "…"
     return note
+
+
+Tool = Callable[[dict[str, Any]], Awaitable[Reply]]
+"""Answers a call to one of orbit's tools, given its arguments."""
+
+
+async def dispatch(
+    role_name: str,
+    role: Role,
+    tools: Mapping[str, Tool],
+    tool: str,
+    arguments: dict[str, Any],
+) -> Reply:
+    """Answer a call to ``tool`` from ``tools``, refusing a tool orbit lacks, or one ``role``
+    (named ``role_name``) may not use or ``tools`` doesn't answer."""
+    if tool not in ORBIT_TOOLS:
+        return Reply(f"Orbit has no tool {tool!r}.", is_error=True)
+    answer = tools.get(tool)
+    if answer is None or tool not in role.tools:
+        return Reply(f"Your role ({role_name}) can't use {tool}.", is_error=True)
+    return await answer(arguments)
+
+
+async def report_progress(
+    publish: Publish, agent_id: str, task_id: str, arguments: dict[str, Any]
+) -> Reply:
+    """Publish agent ``agent_id``'s progress note on task ``task_id`` from ``arguments``."""
+    note = progress_note(str(arguments.get("note", "")))
+    await publish(ProgressNoted(agent_id=agent_id, task_id=task_id, note=note))
+    return Reply("Noted.")
 
 
 Wake = Literal["exited", "gave_up"]
@@ -164,6 +195,12 @@ class AgentDesk:
             self._url = None
             await self.agents.host.stop()
 
+    async def launch(self, agent: Agent, prompt: str, settings: Settings, cwd: str) -> AgentLaunch:
+        """How to start ``agent`` in its role: told ``prompt``, with ``settings``, in ``cwd``."""
+        role = self.agents.roles[agent.role]
+        url = await self.url()
+        return AgentLaunch(agent, url, prompt, settings, cwd, role.instructions, role.tools)
+
     def open(self, run: CallTarget, role: str, task_id: str) -> Agent:
         agent = self.registry.register(role, task_id)
         self._runs[agent.id] = run
@@ -217,7 +254,7 @@ class AgentRun:
         self._accepted: ChecksProposal | None = None
         self._agent: Agent | None = None
         self._root = "."
-        self._tools: dict[str, Callable[[dict[str, Any]], Awaitable[Reply]]] = {
+        self._tools: dict[str, Tool] = {
             "get_task": self._get_task,
             "complete_task": self._complete_task,
             "run_check": self._run_check,
@@ -254,10 +291,10 @@ class AgentRun:
         return Outcome(status, self._failure, tuple(self._work.summaries), self._accepted)
 
     async def _launch(self) -> "asyncio.Task[None]":
-        url = await self._desk.url()
+        await self._desk.url()  # Started before the agent is announced.
         role = self._work.task.role
         await self._publish(AgentStarted(agent_id=self.agent.id, role=role, task_id=self._task_id))
-        return asyncio.create_task(self._stream(url))
+        return asyncio.create_task(self._stream())
 
     async def _serve_in_time(self, before: object) -> None:
         """Serve the agent until it's done, or its role's time runs out."""
@@ -270,21 +307,15 @@ class AgentRun:
             await self._publish(ErrorOccurred(agent_id=self.agent.id, message=message))
 
     async def handle(self, tool: str, arguments: dict[str, Any]) -> Reply:
-        answer = self._tools.get(tool)
-        if answer is None:
-            return Reply(f"Orbit has no tool {tool!r}.", is_error=True)
-        if tool not in self._role.tools:
-            role = self._work.task.role
-            return Reply(f"Your role ({role}) can't use {tool}.", is_error=True)
-        return await answer(arguments)
+        return await dispatch(self._work.task.role, self._role, self._tools, tool, arguments)
 
     # The agent's process
 
-    async def _stream(self, url: str) -> None:
+    async def _stream(self) -> None:
         """Publish what the agent does until its process ends, then wake the run loop."""
         reason: AgentExitReason = "crashed"
         try:
-            reason = await self._follow(url)
+            reason = await self._follow()
         except asyncio.CancelledError:
             reason = "killed"
             raise
@@ -294,16 +325,10 @@ class AgentRun:
             await self._publish(AgentExited(agent_id=self.agent.id, reason=reason))
             self._inbox.put_nowait("exited")
 
-    async def _follow(self, url: str) -> AgentExitReason:
+    async def _follow(self) -> AgentExitReason:
         reason: AgentExitReason = "finished"
-        launch = AgentLaunch(
-            self.agent,
-            url,
-            bootstrap_prompt(self.agent),
-            self._work.task.settings,
-            self._root,
-            self._role.instructions,
-            self._role.tools,
+        launch = await self._desk.launch(
+            self.agent, bootstrap_prompt(self.agent), self._work.task.settings, self._root
         )
         events = self._desk.agents.launcher.run_agent(launch)
         async for event in events:
@@ -469,9 +494,7 @@ class AgentRun:
         return Reply(f"{step.name}: {'passed' if passed else 'failed'}\n\n{trim_output(output)}")
 
     async def _report_progress(self, arguments: dict[str, Any]) -> Reply:
-        note = progress_note(str(arguments.get("note", "")))
-        await self._publish(ProgressNoted(agent_id=self.agent.id, task_id=self._task_id, note=note))
-        return Reply("Noted.")
+        return await report_progress(self._publish, self.agent.id, self._task_id, arguments)
 
     async def _suggest_task(self, arguments: dict[str, Any]) -> Reply:
         if self._desk.suggest is None:

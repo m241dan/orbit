@@ -10,7 +10,7 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
 
-from orbit.agent.application.ports import CoderTree
+from orbit.agent.application.ports import CoderTree, Publish
 from orbit.agent.application.verifier import Failure, Verification, first_failure
 from orbit.agent.domain.roles import setup_step
 from orbit.agent.domain.verification import VerificationStep, trim_output
@@ -20,7 +20,6 @@ from orbit.protocol import (
     AgentExitReason,
     AgentStarted,
     ErrorOccurred,
-    Event,
     Notice,
     StartupChecked,
     StepState,
@@ -34,7 +33,6 @@ TITLE = "Startup check"
 BASE = "HEAD"  # The main checkout's commit: the base, as orbit starts.
 CANCELLED_NOTE = "Startup check cancelled."
 
-Publish = Callable[[Event], Awaitable[None]]
 AddFix = Callable[[VerificationStep, str], Awaitable[None]]
 """Adds a draft task to fix the step that failed, given its output."""
 

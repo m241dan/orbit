@@ -4,6 +4,7 @@ import asyncio
 from collections.abc import Callable
 
 from orbit.agent import AgentSession
+from orbit.agent.application.ports import Reply
 from orbit.protocol import (
     AddTask,
     BusyChanged,
@@ -156,3 +157,17 @@ async def test_closing_stops_the_planners_turn() -> None:
     await session.close()
     events = await until(session, lambda e: e == PLANNER_IDLE)
     assert any(isinstance(e, TurnFinished) and e.reason == "cancelled" for e in events)
+
+
+async def test_the_planner_calling_an_unknown_tool_is_refused() -> None:
+    replies: list[Reply] = []
+
+    async def calls_unknown(call: Call) -> TurnEndReason:
+        replies.append(await call("no_such_tool"))
+        return "completed"
+
+    session, _, launcher = session_for()
+    launcher.planner_turns = [calls_unknown]
+    await session.send(SubmitPrompt(text="Plan."))
+    await until(session, lambda e: e == PLANNER_IDLE)
+    assert replies == [Reply("Orbit has no tool 'no_such_tool'.", is_error=True)]
