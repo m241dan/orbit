@@ -33,17 +33,27 @@ class Settings(_Message):
 # Commands: frontend -> backend
 
 
+PromptTarget = Literal["conversation", "planner"]
+"""Who a prompt goes to: the plain conversation, or the planner."""
+
+
 class SubmitPrompt(_Message):
-    """Ask the agent to start a turn with the given user input."""
+    """Ask ``to`` to start a turn with the given user input.
+
+    The planner answers in its own lane, so it works while tasks run; the conversation
+    shares the work lane with task runs.
+    """
 
     type: Literal["submit_prompt"] = "submit_prompt"
     text: str = Field(min_length=1)
+    to: PromptTarget = "conversation"
 
 
 class CancelTurn(_Message):
-    """Ask the agent to stop the turn in progress, if any."""
+    """Ask ``to`` to stop: the planner's turn, or the conversation's turn or task run."""
 
     type: Literal["cancel_turn"] = "cancel_turn"
+    to: PromptTarget = "conversation"
 
 
 class UpdateSettings(_Message):
@@ -85,8 +95,9 @@ class EditTask(_Message):
 class RunTasks(_Message):
     """Run the task list: every task that hasn't finished, in order, each in a new context.
 
-    Tasks added while it runs join in. Like a turn, this is rejected while
-    anything runs; ``CancelTurn`` stops the task in progress and the run.
+    Tasks added while it runs join in. Like a conversation turn, this is rejected while
+    either runs (the planner's turns don't count); ``CancelTurn`` stops the task in progress
+    and the run.
     """
 
     type: Literal["run_tasks"] = "run_tasks"
@@ -104,13 +115,6 @@ class RemoveTask(_Message):
 
     type: Literal["remove_task"] = "remove_task"
     task_id: str
-
-
-class SetPlanning(_Message):
-    """Send prompts to the planner (``on``) or the plain conversation."""
-
-    type: Literal["set_planning"] = "set_planning"
-    on: bool
 
 
 class CancelAgent(_Message):
@@ -157,7 +161,6 @@ Command = Annotated[
     | RequestSuperReview
     | AcceptTask
     | RemoveTask
-    | SetPlanning
     | CancelAgent
     | DecideProposal
     | ConfigureChecks,
@@ -300,11 +303,16 @@ class TurnFinished(_Message):
     usage: Usage | None = None
 
 
+BusyLane = Literal["work", "planner"]
+"""Where work runs: conversation turns and task runs share ``work``; the planner has its own."""
+
+
 class BusyChanged(_Message):
-    """Whether a turn or a task run is in progress; new work is rejected while busy."""
+    """Whether ``lane`` has work in progress; new work for that lane is rejected while busy."""
 
     type: Literal["busy_changed"] = "busy_changed"
     busy: bool
+    lane: BusyLane = "work"
 
 
 class TasksChanged(_Message):
@@ -410,13 +418,6 @@ class ReviewStatus(_Message):
     type: Literal["review_status"] = "review_status"
     paused: bool
     open_batches: int
-
-
-class PlanningChanged(_Message):
-    """Whether prompts now go to the planner; sent after every change."""
-
-    type: Literal["planning_changed"] = "planning_changed"
-    on: bool
 
 
 class Notice(_Message):
@@ -535,7 +536,6 @@ Event = Annotated[
     | AgentExited
     | TaskMerged
     | Notice
-    | PlanningChanged
     | ReviewStatus
     | ChecksProposed,
     Field(discriminator="type"),

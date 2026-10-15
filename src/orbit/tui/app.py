@@ -17,6 +17,7 @@ from orbit.protocol import (
     AgentStarted,
     AssistantMessage,
     BusyChanged,
+    BusyLane,
     CancelAgent,
     CancelTurn,
     ChecksProposed,
@@ -26,14 +27,13 @@ from orbit.protocol import (
     ErrorOccurred,
     Event,
     Notice,
-    PlanningChanged,
     ProgressNoted,
+    PromptTarget,
     RemoveTask,
     RequestSuperReview,
     ReviewStatus,
     RunTasks,
     Session,
-    SetPlanning,
     Settings,
     SettingsChanged,
     StartupChecked,
@@ -127,9 +127,9 @@ class OrbitApp(App[None], inherit_bindings=False):
         self._session = session
         # Id of the window h/j/k/l last moved to.
         self._selected = "prompt"
-        # Whether a turn or task run is in progress, as last reported (or just requested).
-        self._busy = False
-        self._planning = False
+        # Which lanes have work in progress, as last reported (or just requested).
+        self._busy: dict[BusyLane, bool] = {"work": False, "planner": False}
+        self._planning = False  # Whether prompts go to the planner.
         # Last settings reported by the backend; None until the first report.
         self._settings: Settings | None = None
         self._model_choices: tuple[str, ...] = ()
@@ -170,9 +170,9 @@ class OrbitApp(App[None], inherit_bindings=False):
         prompt = self.query_one(PromptInput)
         prompt.action_normal_mode()
         # Busy from now, not from TurnStarted, so ctrl+r can't race the turn.
-        self._set_busy(True)
+        self._set_busy(self._lane, True)
         self._append(text, "user")
-        await self._session.send(SubmitPrompt(text=text))
+        await self._session.send(SubmitPrompt(text=text, to=self._target))
 
     # Window navigation only applies at the top level, when no window is active.
 
@@ -232,7 +232,7 @@ class OrbitApp(App[None], inherit_bindings=False):
 
     async def action_run_tasks(self) -> None:
         """Ask the backend to run the task list, unless something is already running."""
-        if not self._busy:
+        if not self._busy["work"]:
             await self._session.send(RunTasks())
 
     def _select(self, window_id: str) -> None:
@@ -251,8 +251,11 @@ class OrbitApp(App[None], inherit_bindings=False):
     async def _cancel_agent(self, message: AgentsPane.Cancel) -> None:
         await self._session.send(CancelAgent(agent_id=message.agent_id))
 
-    async def action_toggle_planning(self) -> None:
-        await self._session.send(SetPlanning(on=not self._planning))
+    def action_toggle_planning(self) -> None:
+        """Send prompts to the planner, or back to the conversation."""
+        self._planning = not self._planning
+        self.query_one(PromptInput).show_planning(self._planning)
+        self._update_prompt()
 
     @on(TaskList.Accept)
     async def _accept_task(self, message: TaskList.Accept) -> None:
@@ -271,7 +274,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         await self._session.send(ConfigureChecks())
 
     async def action_cancel_turn(self) -> None:
-        await self._session.send(CancelTurn())
+        await self._session.send(CancelTurn(to=self._target))
 
     def action_pick_model(self) -> None:
         if self._settings is not None:
@@ -317,7 +320,6 @@ class OrbitApp(App[None], inherit_bindings=False):
                 | BusyChanged()
                 | TasksChanged()
                 | VerificationChanged()
-                | PlanningChanged()
                 | ReviewStatus()
                 | ChecksProposed()
             ):
@@ -359,16 +361,15 @@ class OrbitApp(App[None], inherit_bindings=False):
         | BusyChanged
         | TasksChanged
         | VerificationChanged
-        | PlanningChanged
         | ReviewStatus
         | ChecksProposed,
     ) -> None:
         """Show a snapshot of backend state, or a decision it waits for."""
         match event:
-            case SettingsChanged() | PlanningChanged():
-                self._show_session(event)
-            case BusyChanged(busy=busy):
-                self._set_busy(busy)
+            case SettingsChanged(settings=settings, model_choices=choices):
+                self._show_settings(settings, choices)
+            case BusyChanged(busy=busy, lane=lane):
+                self._set_busy(lane, busy)
             case TasksChanged(tasks=tasks):
                 self._show_tasks(tasks)
             case VerificationChanged() | ReviewStatus() | ChecksProposed():
@@ -452,23 +453,28 @@ class OrbitApp(App[None], inherit_bindings=False):
         if isinstance(event, AgentExited) and screen and screen.proposal.agent_id == event.agent_id:
             screen.dismiss(None)
 
-    def _show_session(self, event: SettingsChanged | PlanningChanged) -> None:
-        """Show the session's settings, or whether prompts go to the planner."""
-        if isinstance(event, SettingsChanged):
-            self._show_settings(event.settings, event.model_choices)
-        else:
-            self._planning = event.on
-            self.query_one(PromptInput).show_planning(event.on)
-
     def _show_settings(self, settings: Settings, choices: tuple[str, ...]) -> None:
         if choices != self._model_choices:
             self._model_picker.set_labels(["default", *choices])
         self._settings, self._model_choices = settings, choices
         self.query_one(PromptInput).show_settings(settings)
 
-    def _set_busy(self, busy: bool) -> None:
-        self._busy = busy
-        self.query_one(PromptInput).disabled = busy
+    @property
+    def _target(self) -> PromptTarget:
+        return "planner" if self._planning else "conversation"
+
+    @property
+    def _lane(self) -> BusyLane:
+        """The lane prompts start work in now."""
+        return "planner" if self._planning else "work"
+
+    def _set_busy(self, lane: BusyLane, busy: bool) -> None:
+        self._busy[lane] = busy
+        self._update_prompt()
+
+    def _update_prompt(self) -> None:
+        """Take prompts only while the lane they'd go to is free."""
+        self.query_one(PromptInput).disabled = self._busy[self._lane]
 
     def _turn_finished(self, event: TurnFinished) -> None:
         if event.usage is not None:

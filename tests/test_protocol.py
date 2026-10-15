@@ -11,15 +11,14 @@ from orbit.protocol import (
     AssistantMessage,
     BusyChanged,
     CancelAgent,
+    CancelTurn,
     EditTask,
     ErrorOccurred,
-    PlanningChanged,
     ProgressNoted,
     RemoveTask,
     RequestSuperReview,
     ReviewStatus,
     RunTasks,
-    SetPlanning,
     Settings,
     SettingsChanged,
     StartupChecked,
@@ -211,10 +210,17 @@ def test_request_super_review_round_trips() -> None:
 
 
 def test_planning_and_draft_messages_round_trip() -> None:
-    for command in (AcceptTask(task_id="3"), RemoveTask(task_id="3"), SetPlanning(on=True)):
+    for command in (
+        AcceptTask(task_id="3"),
+        RemoveTask(task_id="3"),
+        SubmitPrompt(text="plan", to="planner"),
+        CancelTurn(to="planner"),
+    ):
         assert command_adapter.validate_json(command.model_dump_json()) == command
-    event = PlanningChanged(on=True)
+    event = BusyChanged(busy=True, lane="planner")
     assert event_adapter.validate_json(event.model_dump_json()) == event
+    assert BusyChanged(busy=True).lane == "work"
+    assert SubmitPrompt(text="hi").to == CancelTurn().to == "conversation"
     draft = TaskState(id="1", task=TaskSpec(prompt="x"), status="draft", origin="planner")
     assert TaskState.model_validate(draft.model_dump()) == draft
 

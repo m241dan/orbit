@@ -20,6 +20,7 @@ from orbit.agent.application.review_lane import REVIEW_ROLES, ReviewLane
 from orbit.agent.application.startup_check import AGENT_ID as STARTUP_AGENT
 from orbit.agent.application.startup_check import StartupCheck
 from orbit.agent.application.verifier import Verification, Verifier
+from orbit.agent.domain.agents import Agent
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.commits import commit_message, configure_message
 from orbit.agent.domain.reviews import ReviewPlanner
@@ -34,6 +35,7 @@ from orbit.protocol import (
     AcceptTask,
     AddTask,
     BusyChanged,
+    BusyLane,
     CancelAgent,
     CancelTurn,
     Command,
@@ -43,11 +45,10 @@ from orbit.protocol import (
     ErrorOccurred,
     Event,
     Notice,
-    PlanningChanged,
+    PromptTarget,
     RemoveTask,
     RequestSuperReview,
     RunTasks,
-    SetPlanning,
     Settings,
     SettingsChanged,
     SubmitPrompt,
@@ -87,8 +88,23 @@ def _reviewed(agents: Agents | None, review: ProposalReview) -> Agents | None:
     return replace(agents, proposal_review=review)
 
 
+def _running(turn: "asyncio.Task[object] | None") -> bool:
+    return turn is not None and not turn.done()
+
+
+def _cancel(turn: "asyncio.Task[object] | None") -> bool:
+    """Cancel ``turn`` if it still runs; returns whether it did."""
+    if turn is None or turn.done():
+        return False
+    turn.cancel()
+    return True
+
+
 class AgentSession:
-    """Runs turns and task runs one at a time in the background and publishes their events.
+    """Runs work in the background and publishes its events.
+
+    Conversation turns and task runs share the work lane, one at a time; the planner's turns
+    run in a lane of their own, alongside them.
 
     The session owns the task list and reports it whole on every change. A run
     goes through it in order; after each task that completes, the ``verification``
@@ -128,14 +144,14 @@ class AgentSession:
         self._landed: dict[str, str] = {}  # Task id -> the commit it landed, until reported.
         self._starts: dict[str, str] = {}  # Task id -> the tree's head when it started.
         self._held = False  # The user cancelled: don't start work by itself.
-        self._planning = False
         self._planner = self._planner_chat()
         self._events.put_nowait(self._settings_changed())
         if workspace is not None:
             self._events.put_nowait(Notice(message=f"Workspace: {workspace}"))
         self._announce_steps()
         self._startup = self._startup_check(verification, check_at_startup)
-        self._turn: asyncio.Task[object] | None = None
+        self._turn: asyncio.Task[object] | None = None  # The work lane's.
+        self._planner_turn: asyncio.Task[object] | None = None
 
     def _announce_steps(self) -> None:
         """Show the steps that will verify tasks, or note that none will."""
@@ -189,7 +205,7 @@ class AgentSession:
 
     async def send(self, command: Command) -> None:
         match command:
-            case SubmitPrompt() | CancelTurn() | UpdateSettings() | SetPlanning():
+            case SubmitPrompt() | CancelTurn() | UpdateSettings():
                 await self._handle_conversation(command)
             case AddTask() | RunTasks() | ConfigureChecks():
                 await self._handle_tasks(command)
@@ -201,26 +217,31 @@ class AgentSession:
                 assert_never(command)
 
     async def _handle_conversation(
-        self, command: SubmitPrompt | CancelTurn | UpdateSettings | SetPlanning
+        self, command: SubmitPrompt | CancelTurn | UpdateSettings
     ) -> None:
         match command:
-            case SubmitPrompt(text=text):
-                await self._submit(text)
-            case SetPlanning(on=on):
-                await self._set_planning(on)
+            case SubmitPrompt(text=text, to=to):
+                await self._submit(text, to)
+            case CancelTurn(to="planner"):
+                _cancel(self._planner_turn)
             case CancelTurn():
                 self._held = True
-                self._cancel()
+                _cancel(self._turn)
             case UpdateSettings(settings=settings):
                 self._settings = settings
                 await self._events.put(self._settings_changed())
             case _:
                 assert_never(command)
 
-    async def _submit(self, text: str) -> None:
-        """Start a turn of the conversation, or of the planner's while planning."""
-        runner = self._planner if self._planning and self._planner else self._runner
-        await self._start(self._run_turn(runner, text, self._settings))
+    async def _submit(self, text: str, to: PromptTarget) -> None:
+        """Start a turn of the conversation, in the work lane, or of the planner's, in its own."""
+        if to == "conversation":
+            await self._start(self._run_turn(self._runner, text, self._settings))
+        elif self._planner is None:
+            message = "Planning needs agents and a planner role."
+            await self._events.put(ErrorOccurred(message=message))
+        else:
+            await self._start_planner(self._run_turn(self._planner, text, self._settings))
 
     async def _handle_tasks(self, command: AddTask | RunTasks | ConfigureChecks) -> None:
         match command:
@@ -245,7 +266,7 @@ class AgentSession:
             return
         self._board.add_first(self._configurator_task(self._desk.agents))
         await self._publish_tasks()
-        if self._turn is None or self._turn.done():
+        if not _running(self._turn):
             self._held = False
             await self._start(self._run_tasks())
 
@@ -310,11 +331,18 @@ class AgentSession:
         agent = self._desk.find(agent_id) if self._desk else None
         if agent is None:
             await self._events.put(ErrorOccurred(message=f"No running agent {agent_id!r}."))
-        elif agent.role in REVIEW_ROLES and self._lane is not None:
+        else:
+            self._cancel_work_of(agent)
+
+    def _cancel_work_of(self, agent: Agent) -> None:
+        """Stop a reviewer's review, or the planner's turn, on its own; else the work lane's."""
+        if agent.role in REVIEW_ROLES and self._lane is not None:
             self._lane.cancel(agent.task_id)
+        elif agent.role == "planner":
+            _cancel(self._planner_turn)
         else:
             self._held = True
-            self._cancel()
+            _cancel(self._turn)
 
     def _cancel_startup(self, agent_id: str) -> bool:
         """Cancel the startup check if it's agent ``agent_id`` and still running; returns
@@ -339,8 +367,7 @@ class AgentSession:
 
     async def _wake_work(self) -> None:
         """Run the work a review queued, unless something runs or the user cancelled."""
-        busy = self._turn is not None and not self._turn.done()
-        if not (busy or self._held) and self._next_work(()) is not None:
+        if not (_running(self._turn) or self._held) and self._next_work(()) is not None:
             await self._start(self._run_tasks())
 
     def _review_lane(self) -> ReviewLane | None:
@@ -358,10 +385,6 @@ class AgentSession:
         desk.suggest = lane.suggest
         return lane
 
-    def _cancel(self) -> None:
-        if self._turn is not None and not self._turn.done():
-            self._turn.cancel()
-
     async def _change(self, change: Callable[..., None], *arguments: Any) -> None:
         """Change the board, publishing it, or report why the change was refused."""
         try:
@@ -371,14 +394,6 @@ class AgentSession:
         else:
             await self._publish_tasks()
 
-    async def _set_planning(self, on: bool) -> None:
-        if on and self._planner is None:
-            message = "Planning needs agents and a planner role."
-            await self._events.put(ErrorOccurred(message=message))
-            return
-        self._planning = on
-        await self._events.put(PlanningChanged(on=on))
-
     def _planner_chat(self) -> PlannerChat | None:
         if self._desk is None or "planner" not in self._desk.agents.roles:
             return None
@@ -386,10 +401,10 @@ class AgentSession:
 
     async def close(self) -> None:
         """Cancel the work in progress, which stops its agent, and stop the agents' host."""
-        if self._turn is not None and not self._turn.done():
-            self._turn.cancel()
-            with suppress(asyncio.CancelledError):
-                await self._turn
+        for turn in (self._turn, self._planner_turn):
+            if turn is not None and _cancel(turn):
+                with suppress(asyncio.CancelledError):
+                    await turn
         await self._stop_background()
         if self._planner is not None:
             self._planner.close()
@@ -419,19 +434,42 @@ class AgentSession:
             await self._events.put(Notice(message=note))
 
     async def _start(self, work: Coroutine[Any, Any, object]) -> None:
-        if self._turn is not None and not self._turn.done():
-            work.close()
-            await self._events.put(ErrorOccurred(message="A turn is already running."))
-            return
-        await self._events.put(BusyChanged(busy=True))
-        self._turn = asyncio.create_task(work)
-        # A callback, so it also runs if the work is cancelled before it starts.
-        self._turn.add_done_callback(self._idle)
+        """Run ``work`` in the work lane, shared by conversation turns and task runs."""
+        turn = await self._launch(work, self._turn, "work", "A turn is already running.")
+        if turn is not None:
+            self._turn = turn
 
-    def _idle(self, turn: "asyncio.Task[object]") -> None:
+    async def _start_planner(self, work: Coroutine[Any, Any, object]) -> None:
+        """Run ``work`` in the planner's lane, alongside whatever the work lane runs."""
+        turn = await self._launch(
+            work, self._planner_turn, "planner", "The planner is already answering."
+        )
+        if turn is not None:
+            self._planner_turn = turn
+
+    async def _launch(
+        self,
+        work: Coroutine[Any, Any, object],
+        current: "asyncio.Task[object] | None",
+        lane: BusyLane,
+        refusal: str,
+    ) -> "asyncio.Task[object] | None":
+        """Start ``work`` in ``lane``, unless ``current`` still runs there (then say
+        ``refusal``); returns the started work."""
+        if _running(current):
+            work.close()
+            await self._events.put(ErrorOccurred(message=refusal))
+            return None
+        await self._events.put(BusyChanged(busy=True, lane=lane))
+        turn = asyncio.create_task(work)
+        # A callback, so it also runs if the work is cancelled before it starts.
+        turn.add_done_callback(lambda done: self._idle(done, lane))
+        return turn
+
+    def _idle(self, turn: "asyncio.Task[object]", lane: BusyLane) -> None:
         # Work started since then reports its own end; staying quiet keeps it shown busy.
-        if turn is self._turn:
-            self._events.put_nowait(BusyChanged(busy=False))
+        if turn is (self._planner_turn if lane == "planner" else self._turn):
+            self._events.put_nowait(BusyChanged(busy=False, lane=lane))
 
     async def _run_tasks(self) -> None:
         tried: set[str] = set()

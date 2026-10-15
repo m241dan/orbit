@@ -48,14 +48,14 @@ In the app:
 | `h` `j` `k` `l` | Move between windows (the selected one is highlighted) |
 | `i` | Jump to the prompt and start typing (vim-style insert mode) |
 | `enter` | On the task list: activate it (`j`/`k` move, `enter` edits a task or adds one on `+ new task`, `a` accepts a draft, `x` removes a task, `esc` leaves) |
-| `ctrl+t` | Switch the prompt between the conversation and the planner |
+| `ctrl+t` | Switch the prompt between the conversation and the planner (which works while tasks run) |
 | `enter` | On the agents pane: activate it (`j`/`k` move, `c` cancels the highlighted agent's work, `esc` leaves) |
 | `ctrl+r` | Run the tasks that haven't completed yet |
 | `ctrl+g` | Ask for a super review of the whole codebase now (works while tasks run) |
 | `ctrl+e` | Set up (or redo) the verification steps: queue a configurator task first and run it (see [Setting up verification](#setting-up-verification)) |
 | `ctrl+o` | Pick the model (default, fable, opus, sonnet, haiku) |
 | `ctrl+l` | Pick the tool access level (off, restricted, full) |
-| `esc` | Stop typing; otherwise cancel the running turn or close a picker |
+| `esc` | Stop typing; otherwise cancel the running turn (while planning, only the planner's) or close a picker |
 | `a` / `r` / `x` | On a proposal of checks: accept it, ask for changes (type them, `enter` sends, `esc` goes back), or end the task (see [Setting up verification](#setting-up-verification)) |
 | `ctrl+c` | Quit |
 
@@ -87,7 +87,7 @@ The **agents pane** (bottom right) lists the agents running now: each one's role
 whether it's working or waiting on orbit (say, `waiting on complete_task` while its work is
 verified). Its subtitle says whether review is active or paused. Activate it with `enter` and press
 `c` on an agent to cancel its work: for a reviewer, just that review (the next one starts); for the
-coder or the planner, the same as `esc`.
+planner, just its turn; for the coder, the same as `esc`.
 
 The conversation shows everything in one timeline: each agent's own messages and tool calls,
 prefixed with its id, and its exchanges with orbit (`agent-1 → orbit: complete_task …`,
@@ -259,6 +259,11 @@ with `propose_task`. Proposals appear in the task list as 📝 drafts, with the 
 settings, and never run on their own: on the task list, `a` accepts the highlighted draft (or edit
 it with `enter` and save, which accepts it too), and `x` removes it. Accepted tasks run with the
 rest when you press `ctrl+r`.
+
+The planner answers in a lane of its own, so you can plan while tasks run (and press `ctrl+r`
+while it answers); the prompt waits only for the planner's own reply. `esc` while planning stops
+only the planner's turn and leaves the task run going; back in the conversation, `esc` stops the
+running turn or task run as before.
 
 The planner is one agent for the whole session: each prompt resumes its conversation, so it
 remembers what you discussed. It reads your checkout but can't edit it, uses the model you picked

@@ -4,14 +4,14 @@ from orbit.protocol import (
     AcceptTask,
     AddTask,
     BusyChanged,
+    CancelTurn,
     EditTask,
     Event,
-    PlanningChanged,
     RemoveTask,
     RequestSuperReview,
     RunTasks,
-    SetPlanning,
     Settings,
+    SubmitPrompt,
     TasksChanged,
     TaskSpec,
     TaskStarted,
@@ -377,6 +377,11 @@ async def test_ctrl_r_asks_the_backend_to_run_unless_busy() -> None:
         await pilot.press("ctrl+r")
         assert session.commands == [RunTasks(), RunTasks()]
 
+        # The planner has a lane of its own, so its turns don't hold up runs.
+        await feed(session, pilot, BusyChanged(busy=True, lane="planner"))
+        await pilot.press("ctrl+r")
+        assert session.commands == [RunTasks(), RunTasks(), RunTasks()]
+
 
 async def test_started_task_is_announced_in_the_transcript() -> None:
     session = FakeSession()
@@ -451,13 +456,37 @@ async def test_ctrl_t_toggles_planning_and_the_prompt_says_so() -> None:
     app = OrbitApp(session)
     async with app.run_test() as pilot:
         await pilot.press("ctrl+t")
-        assert session.commands == [SetPlanning(on=True)]
-        await feed(session, pilot, PlanningChanged(on=True))
         assert app.query_one(PromptInput).border_title == "Prompt · planner"
+        await pilot.press("i", *"plan", "enter", "escape")
+        assert session.commands == [
+            SubmitPrompt(text="plan", to="planner"),
+            CancelTurn(to="planner"),
+        ]
         await pilot.press("ctrl+t")
-        assert session.commands[-1] == SetPlanning(on=False)
-        await feed(session, pilot, PlanningChanged(on=False))
         assert app.query_one(PromptInput).border_title == "Prompt"
+        await pilot.press("escape")
+        assert session.commands[-1] == CancelTurn()
+
+
+async def test_the_prompt_waits_only_for_the_lane_it_targets() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        prompt = app.query_one(PromptInput)
+        await feed(session, pilot, BusyChanged(busy=True))
+        assert prompt.disabled
+        # Planning while tasks run: the planner's lane is free.
+        await pilot.press("ctrl+t")
+        assert not prompt.disabled
+        await pilot.press("i", *"plan", "enter")
+        assert prompt.disabled  # Until the planner answers.
+        await feed(session, pilot, BusyChanged(busy=False, lane="planner"))
+        assert not prompt.disabled
+        await feed(session, pilot, BusyChanged(busy=True, lane="planner"))
+        await pilot.press("ctrl+t")
+        assert prompt.disabled  # Back to the conversation, whose lane is still busy.
+        await feed(session, pilot, BusyChanged(busy=False))
+        assert not prompt.disabled
 
 
 async def test_list_shows_each_tasks_usage_and_the_sessions_total() -> None:

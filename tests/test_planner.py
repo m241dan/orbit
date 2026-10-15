@@ -10,11 +10,9 @@ from orbit.protocol import (
     BusyChanged,
     ErrorOccurred,
     Event,
-    PlanningChanged,
     ProgressNoted,
     RemoveTask,
     RunTasks,
-    SetPlanning,
     SubmitPrompt,
     TasksChanged,
     TaskSpec,
@@ -31,7 +29,7 @@ async def until_idle(session: AgentSession) -> list[Event]:
     events: list[Event] = []
     async for event in session.events():
         events.append(event)
-        if event == BusyChanged(busy=False):
+        if isinstance(event, BusyChanged) and not event.busy:
             return events
     raise AssertionError("unreachable")
 
@@ -52,18 +50,18 @@ async def chats(call: Call) -> TurnEndReason:
 
 
 async def plan(session: AgentSession, text: str) -> list[Event]:
-    await session.send(SubmitPrompt(text=text))
+    await session.send(SubmitPrompt(text=text, to="planner"))
     return await asyncio.wait_for(until_idle(session), 5)
 
 
-async def test_while_planning_prompts_go_to_the_planner_and_proposals_become_drafts() -> None:
+async def test_prompts_to_the_planner_go_to_it_and_proposals_become_drafts() -> None:
     session, _, launcher = session_for()
     launcher.planner_turns = [proposes_two, chats]
-    await session.send(SetPlanning(on=True))
     events = await plan(session, "I want a --fast flag.")
     await plan(session, "Thanks.")
 
-    assert PlanningChanged(on=True) in events
+    assert BusyChanged(busy=True, lane="planner") in events
+    assert events[-1] == BusyChanged(busy=False, lane="planner")
     first, second = launcher.launches
     assert (first.agent.id, first.agent.role, first.prompt) == (
         "agent-1",
@@ -81,20 +79,19 @@ async def test_while_planning_prompts_go_to_the_planner_and_proposals_become_dra
     assert any(isinstance(e, TurnStarted) and e.agent_id == "agent-1" for e in events)
 
 
-async def test_turning_planning_off_sends_prompts_to_the_conversation_again() -> None:
+async def test_prompts_go_to_the_conversation_by_default() -> None:
     chat = GatedRunner()
     chat.gate.set()
     session, _, launcher = session_for(runner=chat)
-    await session.send(SetPlanning(on=True))
-    await session.send(SetPlanning(on=False))
-    events = await plan(session, "hello")
-    assert PlanningChanged(on=False) in events
+    await session.send(SubmitPrompt(text="hello"))
+    events = await asyncio.wait_for(until_idle(session), 5)
+    assert events[-1] == BusyChanged(busy=False)
     assert launcher.launches == []
     assert any(isinstance(e, TurnFinished) and e.agent_id is None for e in events)
 
 
 async def refused_planning(session: AgentSession) -> list[Event]:
-    await session.send(SetPlanning(on=True))
+    await session.send(SubmitPrompt(text="Plan.", to="planner"))
     stream = session.events()
     return [await anext(stream), await anext(stream)]
 
@@ -119,7 +116,6 @@ async def test_accepted_drafts_run_and_dropped_ones_go() -> None:
 
     session, _, launcher = session_for(done)
     launcher.planner_turns = [proposes_two]
-    await session.send(SetPlanning(on=True))
     await plan(session, "Plan it.")
     await session.send(AcceptTask(task_id="1"))
     await session.send(RemoveTask(task_id="2"))
@@ -167,7 +163,6 @@ async def test_the_planner_may_only_use_its_roles_tools_and_can_note_progress() 
 
     session, _, launcher = session_for()
     launcher.planner_turns = [oversteps]
-    await session.send(SetPlanning(on=True))
     events = await plan(session, "Plan.")
     assert ProgressNoted(agent_id="agent-1", task_id="plan", note="reading the CLI") in events
 
@@ -175,7 +170,6 @@ async def test_the_planner_may_only_use_its_roles_tools_and_can_note_progress() 
 async def test_closing_ends_the_planners_access() -> None:
     session, host, launcher = session_for()
     launcher.planner_turns = [chats]
-    await session.send(SetPlanning(on=True))
     await plan(session, "Plan.")
     await session.close()
     reply = await host.call("token-1", "propose_task", title="x", prompt="y")
