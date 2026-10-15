@@ -88,7 +88,7 @@ async def test_it_queues_a_configurator_first_and_runs_it_straight_away() -> Non
     events = await asyncio.wait_for(until_idle(session), 5)
     tasks = board(events)
     assert [t.task.role for t in tasks] == ["configurator", "coder"]
-    assert [t.status for t in tasks] == ["completed", "completed"]
+    assert [t.status for t in tasks] == ["unverified", "completed"]
     assert [launch.agent.role for launch in launcher.launches] == ["configurator", "coder"]
     assert tasks[0].task.prompt == configure_prompt((STEP,), SETUP)
     assert tasks[0].task.settings.tool_access == "restricted"

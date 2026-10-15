@@ -350,3 +350,31 @@ async def test_cancelling_while_the_frontend_decides_cancels_the_task() -> None:
     assert status(events) == "cancelled"
     assert any(isinstance(e, AgentExited) for e in events)
     assert not any(isinstance(e, AgentReply) and "accepted" in e.text for e in events)
+
+
+async def test_a_configurator_that_exits_without_proposing_is_unverified() -> None:
+    async def leaves(call: Call) -> TurnEndReason:
+        await call("get_task")
+        return "completed"
+
+    session, _, _ = session_for(
+        leaves, verification=verified(Steps()), proposal_review=Review(), tree=FakeTree()
+    )
+    events = await asyncio.wait_for(run(session, CONFIGURE), 5)
+    assert status(events) == "unverified"
+
+
+async def test_a_configurator_that_exits_after_a_failure_or_revise_reply_is_unverified() -> None:
+    events, replies = await configure(
+        {"steps": [LINT]}, review=Review(), steps=Steps(False), tree=FakeTree()
+    )
+    assert "propose_checks again" in replies[0]
+    assert status(events) == "unverified"
+    events, replies = await configure(
+        {"steps": [LINT]},
+        review=Review(ProposalDecision("revise", "Add mypy.")),
+        steps=Steps(True),
+        tree=FakeTree(),
+    )
+    assert "> Add mypy." in replies[0]
+    assert status(events) == "unverified"

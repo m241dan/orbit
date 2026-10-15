@@ -337,6 +337,8 @@ class AgentRun:
             assert self._verifier is not None and self._failure is not None
             await self._verifier.skip_unchanged(self._task_id)
             self._work.failed(*self._failure)  # The agent is gone, so this falls back.
+        elif "propose_checks" in self._role.tools:
+            self._work.unproposed()  # Its work is a proposal, and none was accepted.
         else:
             await self._verify(before, None)
 

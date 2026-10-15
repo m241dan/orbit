@@ -20,7 +20,8 @@ no fixes left to ask of this agent, so another one takes over. ``gave_up``: the 
 ``ended``: the user ended it while deciding on the agent's proposal.
 
 A proposal goes through the same phases: ``verifying`` while orbit tries it and the user
-decides, ``done`` once accepted, and ``fallback`` when revisions run out.
+decides, ``done`` once accepted, and ``fallback`` when revisions run out or the agent exits
+without an accepted proposal (so the task ends ``unverified``, never ``completed``).
 """
 
 FINISHED: frozenset[Phase] = frozenset({"done", "fallback", "gave_up", "ended"})
@@ -164,6 +165,10 @@ class AgentTask:
             f"{reason}\n\nRevise your proposal and call propose_checks again."
             f" (Revision {self.attempt} of {self.limits.max_attempts}.)"
         )
+
+    def unproposed(self) -> None:
+        """The agent exited while its work was a proposal, and none was accepted."""
+        self.phase = "fallback"
 
     def accepted(self) -> str:
         self.phase = "done"
