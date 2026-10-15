@@ -116,7 +116,8 @@ class OrbitApp(App[None], inherit_bindings=False):
         Binding("ctrl+r", "run_tasks", "Run tasks"),
         Binding("ctrl+g", "super_review", "Super review"),
         Binding("ctrl+e", "configure_checks", "Set up checks"),
-        Binding("escape", "cancel_turn", "Cancel turn"),
+        Binding("escape", "cancel_turn", "Cancel run"),
+        Binding("ctrl+x", "stop_planner", "Stop planner"),
         Binding("ctrl+o", "pick_model", "Model"),
         Binding("ctrl+l", "pick_tool_access", "Tools"),
     ]
@@ -268,9 +269,11 @@ class OrbitApp(App[None], inherit_bindings=False):
         await self._session.send(ConfigureChecks())
 
     async def action_cancel_turn(self) -> None:
-        # The Planner tab's esc stops the planner; any other's, the task run.
-        lane: BusyLane = "planner" if self.query_one(ConversationTabs).on_planner else "work"
-        await self._session.send(CancelTurn(lane=lane))
+        # The planner has its own lane, stopped with ctrl+x; esc stops the task run.
+        await self._session.send(CancelTurn(lane="work"))
+
+    async def action_stop_planner(self) -> None:
+        await self._session.send(CancelTurn(lane="planner"))
 
     def action_pick_model(self) -> None:
         if self._settings is not None:

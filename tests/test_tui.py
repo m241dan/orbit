@@ -904,23 +904,26 @@ async def test_planner_output_shows_under_planner_and_all_but_not_other_tabs() -
         assert shown(app)[-1] == "■ agent-1 exited"
 
 
-async def test_the_prompt_talks_to_the_planner_and_esc_follows_the_tab() -> None:
+async def test_the_prompt_talks_to_the_planner_esc_stops_the_run_and_ctrl_x_the_planner() -> None:
     session = FakeSession()
     app = OrbitApp(session)
     async with app.run_test(size=(120, 30)) as pilot:
         prompt = app.query_one(PromptInput)
         await pilot.press("tab")
         assert prompt.border_title == "Prompt · planner"
-        await pilot.press("i", *"plan", "enter", "escape")
+        # esc stops the task run, even on the Planner tab; ctrl+x stops the planner.
+        await pilot.press("i", *"plan", "enter", "escape", "ctrl+x")
         await pilot.press("shift+tab")
         assert prompt.border_title == "Prompt · planner"
         await feed_events(session, pilot, BusyChanged(busy=False, lane="planner"))
-        await pilot.press("i", *"hi", "enter", "escape")
+        await pilot.press("i", *"hi", "enter", "escape", "ctrl+x")
         assert session.commands == [
             SubmitPrompt(text="plan"),
+            CancelTurn(lane="work"),
             CancelTurn(lane="planner"),
             SubmitPrompt(text="hi"),
             CancelTurn(lane="work"),
+            CancelTurn(lane="planner"),
         ]
         await pilot.press("tab")
         assert shown(app) == ["plan", "hi"]
@@ -937,6 +940,10 @@ async def test_the_prompt_is_enabled_while_a_run_is_busy() -> None:
         assert prompt.disabled  # Until the planner answers.
         await feed_events(session, pilot, BusyChanged(busy=False, lane="planner"))
         assert not prompt.disabled
+        # The work lane going idle doesn't free the prompt while the planner answers.
+        await pilot.press("i", *"more", "enter")
+        await feed_events(session, pilot, BusyChanged(busy=False, lane="work"))
+        assert prompt.disabled
 
 
 async def test_ctrl_t_does_nothing() -> None:

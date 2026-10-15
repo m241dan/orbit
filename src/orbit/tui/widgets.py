@@ -116,10 +116,6 @@ class ConversationTabs(Tabs):
         """The key of the tab ``agent``'s entries belong to."""
         return tab_key(agent, self.planners)
 
-    @property
-    def on_planner(self) -> bool:
-        return self.active == self.PLANNER_TAB_ID
-
     def track(self, event: Event) -> None:
         """Add a tab for an agent that started, remove an exited agent's tab, and mark a tab
         not being shown when its agent has new output."""

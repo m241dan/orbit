@@ -54,7 +54,8 @@ In the app:
 | `ctrl+e` | Set up (or redo) the verification steps: queue a configurator task first and run it (see [Setting up verification](#setting-up-verification)) |
 | `ctrl+o` | Pick the planner's model (default, fable, opus, sonnet, haiku) |
 | `ctrl+l` | Pick the tool access level new tasks start with in the task editor (off, restricted, full) |
-| `esc` | Stop typing; otherwise cancel the task run (on the Planner tab, the planner's turn instead) or close a picker |
+| `esc` | Stop typing; otherwise cancel the task run (on any tab) or close a picker |
+| `ctrl+x` | Stop the planner's turn, leaving the task run going |
 | `a` / `r` / `x` | On a proposal of checks: accept it, ask for changes (type them, `enter` sends, `esc` goes back), or end the task (see [Setting up verification](#setting-up-verification)) |
 | `ctrl+c` | Quit |
 
@@ -265,9 +266,9 @@ it with `enter` and save, which accepts it too), and `x` removes it. Accepted ta
 rest when you press `ctrl+r`.
 
 The planner answers in a lane of its own, so you can plan while tasks run (and press `ctrl+r`
-while it answers); the prompt waits only for the planner's own reply. `esc` on the Planner tab
-stops only the planner's turn and leaves the task run going; on any other tab, `esc` stops the task
-run. The task list beside it fills with
+while it answers); the prompt waits only for the planner's own reply. `ctrl+x` stops only the
+planner's turn and leaves the task run going; `esc` stops the task run, whichever tab is shown. The
+task list beside it fills with
 drafts as the planner proposes them; when it says something while you're on another tab, the
 Planner tab gets a `*`.
 
