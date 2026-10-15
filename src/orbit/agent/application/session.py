@@ -6,13 +6,12 @@ ports to do it, and reports what happened as events.
 
 import asyncio
 import uuid
-from collections.abc import AsyncIterator, Callable, Collection, Coroutine, Sequence
+from collections.abc import AsyncIterator, Callable, Coroutine, Sequence
 from contextlib import suppress
 from dataclasses import replace
 from typing import Any, assert_never
 
-from orbit.agent.application.agent_run import AgentDesk, AgentRun, Agents, Outcome
-from orbit.agent.application.landing import Lander
+from orbit.agent.application.agent_run import AgentDesk, Agents
 from orbit.agent.application.planner import PlannerChat
 from orbit.agent.application.ports import ProposalReview
 from orbit.agent.application.proposals import FrontendReview
@@ -20,17 +19,12 @@ from orbit.agent.application.review_lane import REVIEW_ROLES, ReviewLane
 from orbit.agent.application.startup_check import AGENT_ID as STARTUP_AGENT
 from orbit.agent.application.startup_check import StartupCheck
 from orbit.agent.application.verifier import Verification, Verifier
+from orbit.agent.application.work_lane import WorkLane
 from orbit.agent.domain.agents import Agent
 from orbit.agent.domain.board import TaskBoard
-from orbit.agent.domain.commits import commit_message, configure_message
 from orbit.agent.domain.reviews import ReviewPlanner
-from orbit.agent.domain.roles import ChecksProposal, configure_prompt, role_task
-from orbit.agent.domain.verification import (
-    FixAttempts,
-    VerificationStep,
-    fix_prompt,
-    startup_fix_prompt,
-)
+from orbit.agent.domain.roles import configure_prompt, role_task
+from orbit.agent.domain.verification import VerificationStep, startup_fix_prompt
 from orbit.protocol import (
     AcceptTask,
     AddTask,
@@ -53,7 +47,6 @@ from orbit.protocol import (
     SubmitPrompt,
     TasksChanged,
     TaskSpec,
-    TaskStarted,
     TaskStatus,
     TurnEndReason,
     TurnFinished,
@@ -62,6 +55,7 @@ from orbit.protocol import (
 )
 
 NO_STEPS_NOTE = "No verification steps configured. Press ctrl+e to set them up."
+NO_AGENTS_MESSAGE = "Tasks need agents, and none are set up."
 CONFIGURING_NOTE = "A configurator task is already queued or running."
 # Statuses of a task that's yet to finish.
 WAITING: frozenset[TaskStatus] = frozenset({"pending", "running", "verifying"})
@@ -138,8 +132,6 @@ class AgentSession:
         self._desk = AgentDesk(agents, self._events.put) if agents else None
         self._announced = False
         self._lane = self._review_lane()
-        self._landed: dict[str, str] = {}  # Task id -> the commit it landed, until reported.
-        self._starts: dict[str, str] = {}  # Task id -> the tree's head when it started.
         self._held = False  # The user cancelled: don't start work by itself.
         self._planner = self._planner_chat()
         self._events.put_nowait(self._settings_changed())
@@ -147,8 +139,16 @@ class AgentSession:
             self._events.put_nowait(Notice(message=f"Workspace: {workspace}"))
         self._announce_steps()
         self._startup = self._startup_check(verification, check_at_startup)
+        self._work = self._work_lane()
         self._turn: asyncio.Task[object] | None = None  # The work lane's.
         self._planner_turn: asyncio.Task[object] | None = None
+
+    def _work_lane(self) -> WorkLane | None:
+        if self._desk is None:
+            return None
+        lane = WorkLane(self._desk, self._board, self._verifier, self._lane)
+        lane.startup = self._startup
+        return lane
 
     def _announce_steps(self) -> None:
         """Show the steps that will verify tasks, or note that none will."""
@@ -189,11 +189,6 @@ class AgentSession:
     @property
     def verification(self) -> Verification | None:
         return self._verifier.verification if self._verifier else None
-
-    @property
-    def _checks(self) -> Verifier:
-        assert self._verifier is not None  # Only used while verifying a task.
-        return self._verifier
 
     async def send(self, command: Command) -> None:
         match command:
@@ -248,8 +243,8 @@ class AgentSession:
     async def _configure_checks(self) -> None:
         """Queue a configurator first and run it, unless work is running already (then it goes
         next); refused while one is queued or running."""
-        if self._desk is None:
-            await self._events.put(ErrorOccurred(message="Tasks need agents, and none are set up."))
+        if self._desk is None or self._work is None:
+            await self._events.put(ErrorOccurred(message=NO_AGENTS_MESSAGE))
             return
         if self._configuring():
             await self._events.put(Notice(message=CONFIGURING_NOTE))
@@ -258,7 +253,7 @@ class AgentSession:
         await self._publish_tasks()
         if not _running(self._turn):
             self._held = False
-            await self._start(self._run_tasks())
+            await self._start(self._work.run())
 
     def _configuring(self) -> bool:
         """Whether a configurator task is queued or running."""
@@ -282,14 +277,14 @@ class AgentSession:
                 assert_never(command)
 
     async def _run_tasks_if_possible(self) -> None:
-        if self._desk is None:
-            await self._events.put(ErrorOccurred(message="Tasks need agents, and none are set up."))
+        if self._work is None:
+            await self._events.put(ErrorOccurred(message=NO_AGENTS_MESSAGE))
             return
         self._held = False
         if self._lane is not None:
             self._lane.kick()
-        if self._next_work(()) is not None:
-            await self._start(self._run_tasks())
+        if self._work.next_work() is not None:
+            await self._start(self._work.run())
 
     async def _handle_agents(
         self, command: RequestSuperReview | CancelAgent | DecideProposal
@@ -348,15 +343,11 @@ class AgentSession:
         else:
             await self._lane.super_review()
 
-    def _next_work(self, tried: Collection[str]) -> str | None:
-        """The next task for the work lane; reviews have their own lane, if there is one."""
-        exclude = REVIEW_ROLES if self._lane is not None else ()
-        return self._board.next_runnable(skip=tried, exclude=exclude)
-
     async def _wake_work(self) -> None:
         """Run the work a review queued, unless something runs or the user cancelled."""
-        if not (_running(self._turn) or self._held) and self._next_work(()) is not None:
-            await self._start(self._run_tasks())
+        assert self._work is not None  # Only reviews wake it, and they need agents.
+        if not (_running(self._turn) or self._held) and self._work.next_work() is not None:
+            await self._start(self._work.run())
 
     def _review_lane(self) -> ReviewLane | None:
         desk = self._desk
@@ -458,118 +449,6 @@ class AgentSession:
         # Work started since then reports its own end; staying quiet keeps it shown busy.
         if turn is (self._planner_turn if lane == "planner" else self._turn):
             self._events.put_nowait(BusyChanged(busy=False, lane=lane))
-
-    async def _run_tasks(self) -> None:
-        tried: set[str] = set()
-        attempts = FixAttempts()
-        while (task_id := self._next_work(tried)) is not None:
-            tried.add(task_id)
-            if await self._run_task(task_id, attempts) == "cancelled":
-                return
-
-    async def _run_task(self, task_id: str, attempts: FixAttempts) -> TaskStatus:
-        """Run one task through a new agent; returns its final status."""
-        self._board.set_status(task_id, "running")
-        await self._publish_tasks()
-        if self._startup is not None:
-            self._startup.release_panel()
-        if self._verifier:
-            self._board.reset_steps()
-            await self._checks.publish_steps()
-        await self._events.put(TaskStarted(task_id=task_id))
-        assert self._desk is not None  # Runs only start with agents.
-        try:
-            status = await self._run_agent(self._desk, task_id, attempts)
-        except asyncio.CancelledError:
-            if self._verifier:
-                await self._verifier.cancel()
-            status = "cancelled"
-        except RuntimeError as exc:  # Git or the tree's setup failed.
-            await self._events.put(ErrorOccurred(message=str(exc)))
-            status = "error"
-        self._board.finish(task_id, status)
-        await self._publish_tasks()
-        await self._report_to_review(task_id)
-        return status
-
-    async def _report_to_review(self, task_id: str) -> None:
-        """Tell the review lane how task ``task_id`` ended."""
-        if self._lane is None:
-            return
-        commit = self._landed.pop(task_id, None)
-        if commit is not None:
-            await self._lane.landed(task_id, commit)
-        else:
-            await self._lane.ended(task_id)
-
-    async def _run_agent(self, desk: AgentDesk, task_id: str, attempts: FixAttempts) -> TaskStatus:
-        """Run task ``task_id`` through a new agent and land its work; a fallback queues a fix
-        for a fresh one."""
-        root = await self._prepare(desk, task_id)
-        task = self._board.get(task_id).task
-        before = await self._verifier.state_before(task, root) if self._verifier else None
-        outcome = await AgentRun(task_id, self._board, self._verifier, desk).run(before, root)
-        if outcome.checks is not None:
-            await self._configure(desk, outcome.checks, root)
-        if outcome.status == "completed":
-            outcome = await self._land(desk, task_id, outcome, root)
-        if outcome.failure is not None and outcome.status == "unverified":
-            await self._queue_fix(task_id, attempts, *outcome.failure)
-        return outcome.status
-
-    async def _configure(self, desk: AgentDesk, checks: ChecksProposal, root: str) -> None:
-        """Save the ``checks`` the user accepted into the config at ``root``, and use them from
-        the next task on. This, or a restart, is the only way the checks change."""
-        if desk.agents.write_config is not None:
-            desk.agents.write_config(root, checks)
-        if desk.agents.tree is not None:
-            desk.agents.tree.use_setup(checks.setup)
-        self._checks.verification = replace(self._checks.verification, steps=checks.steps)
-        self._board.set_steps([step.name for step in checks.steps])
-        await self._checks.publish_steps()
-
-    async def _land(self, desk: AgentDesk, task_id: str, outcome: Outcome, root: str) -> Outcome:
-        """Commit and merge a completed task's work, when there's a tree to do it from: the
-        checks the user accepted from it, or else the work itself."""
-        if desk.agents.tree is None:
-            return outcome
-        if outcome.checks is not None:
-            message = configure_message(outcome.checks)
-        else:
-            message = commit_message(self._board.get(task_id).task, outcome.summaries)
-        lander = Lander(desk.agents.tree, self._board, self._verifier, self._events.put)
-        landing = await lander.land(task_id, message, root, self._starts.pop(task_id))
-        if landing.failure is not None:
-            return Outcome("unverified", landing.failure)
-        if landing.commit is not None:
-            self._landed[task_id] = landing.commit
-        return outcome
-
-    async def _prepare(self, desk: AgentDesk, task_id: str) -> str:
-        """Where task ``task_id`` is worked on: the coder's tree, readied for it."""
-        if desk.agents.tree is None:
-            return "."
-        # A fix carries on from the work it fixes.
-        tree = desk.agents.tree
-        root = await tree.prepare(keep=self._board.get(task_id).fixes is not None)
-        self._starts[task_id] = await tree.head()
-        return root
-
-    async def _queue_fix(
-        self, task_id: str, attempts: FixAttempts, step: VerificationStep, output: str
-    ) -> None:
-        """Add a task fixing ``step`` right after ``task_id``, unless its attempts ran out."""
-        limit = self._checks.verification.max_fix_attempts
-        if attempts.exhausted(task_id, step.name, limit):
-            message = f"Verification step {step.name!r} still fails after {limit} fix attempts."
-            await self._events.put(ErrorOccurred(message=message))
-            return
-        settings = self._board.get(task_id).task.settings
-        fix = TaskSpec(prompt=fix_prompt(step, output), settings=settings)
-        fix_id = self._board.add(fix, fixes=task_id)
-        attempts.record(fix_id, task_id, step.name)
-        if self._lane is not None:
-            self._lane.joined(fix_id)
 
     async def _publish_tasks(self) -> None:
         await self._events.put(TasksChanged(tasks=self._board.tasks))
