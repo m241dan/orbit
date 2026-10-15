@@ -5,16 +5,16 @@ from typing import ClassVar
 
 from textual.binding import Binding, BindingType
 from textual.message import Message
-from textual.widgets import OptionList
 from textual.widgets.option_list import Option
 
 from orbit.protocol import Event, ReviewStatus
 from orbit.tui.view import AgentRow, agent_line, review_line, track_agents
+from orbit.tui.widgets import ListPane
 
 EMPTY_LABEL = "No agents running"
 
 
-class AgentsPane(OptionList):
+class AgentsPane(ListPane):
     """Running agents, one per row. Activated like the task list: j/k move, ``c`` cancels the
     highlighted agent's work and escape returns to window navigation."""
 
@@ -27,9 +27,6 @@ class AgentsPane(OptionList):
     }
     """
     BINDINGS: ClassVar[list[BindingType]] = [
-        Binding("j", "cursor_down", show=False),
-        Binding("k", "cursor_up", show=False),
-        Binding("escape", "normal_mode", show=False),
         Binding("c", "cancel_agent", show=False),
     ]
 
@@ -42,25 +39,12 @@ class AgentsPane(OptionList):
 
     def __init__(self, *, id: str) -> None:
         super().__init__(id=id)
-        self.can_focus = False
         self.rows: tuple[AgentRow, ...] = ()
         self._numbers: Mapping[str, str] = {}
 
     def on_mount(self) -> None:
         self.border_title = "Agents"
         self._redraw()
-
-    def enter_list_mode(self) -> None:
-        self.can_focus = True
-        self.focus()
-        if self.highlighted is None and self.rows:
-            self.highlighted = 0
-
-    def action_normal_mode(self) -> None:
-        self.screen.set_focus(None)
-
-    def on_blur(self) -> None:
-        self.can_focus = False
 
     def action_cancel_agent(self) -> None:
         if self.highlighted is not None and self.highlighted < len(self.rows):

@@ -11,7 +11,7 @@ from textual.binding import Binding, BindingType
 from textual.containers import Vertical
 from textual.message import Message
 from textual.screen import ModalScreen
-from textual.widgets import Input, OptionList, Static
+from textual.widgets import Input, Static
 
 from orbit.protocol import Settings, TaskSpec, TaskState, Usage
 from orbit.tui.view import (
@@ -24,12 +24,12 @@ from orbit.tui.view import (
     task_numbers,
     usage_label,
 )
-from orbit.tui.widgets import PickerScreen, PromptInput
+from orbit.tui.widgets import ListPane, PickerScreen, PromptInput
 
 NEW_TASK_LABEL = "+ new task"
 
 
-class TaskList(OptionList):
+class TaskList(ListPane):
     """The backend's task list plus a trailing "new task" row.
 
     Like the prompt, it only takes focus once activated (``enter_list_mode``);
@@ -59,16 +59,12 @@ class TaskList(OptionList):
     }
     """
     BINDINGS: ClassVar[list[BindingType]] = [
-        Binding("j", "cursor_down", show=False),
-        Binding("k", "cursor_up", show=False),
-        Binding("escape", "normal_mode", show=False),
         Binding("a", "accept", show=False),
         Binding("x", "remove", show=False),
     ]
 
     def __init__(self, *, id: str) -> None:
         super().__init__(id=id)
-        self.can_focus = False
         self.tasks: tuple[TaskState, ...] = ()
         self.numbers: list[str] = []
         self.clock: Callable[[], float] = time.monotonic
@@ -78,18 +74,6 @@ class TaskList(OptionList):
         self.border_title = "Task list"
         self._show(None)
         self.set_interval(1 / SPINNER_FPS, self.tick)
-
-    def enter_list_mode(self) -> None:
-        self.can_focus = True
-        self.focus()
-        if self.highlighted is None:
-            self.highlighted = 0
-
-    def action_normal_mode(self) -> None:
-        self.screen.set_focus(None)
-
-    def on_blur(self) -> None:
-        self.can_focus = False
 
     def action_accept(self) -> None:
         state = self._highlighted_task()

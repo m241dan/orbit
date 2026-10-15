@@ -271,6 +271,33 @@ class PromptInput(Input):
         self.border_subtitle = settings_summary(settings)
 
 
+class ListPane(OptionList):
+    """A window's list that only takes focus once activated (``enter_list_mode``);
+    then j/k move and escape returns to window navigation."""
+
+    BINDINGS: ClassVar[list[BindingType]] = [
+        Binding("j", "cursor_down", show=False),
+        Binding("k", "cursor_up", show=False),
+        Binding("escape", "normal_mode", show=False),
+    ]
+
+    def __init__(self, *, id: str | None = None) -> None:
+        super().__init__(id=id)
+        self.can_focus = False
+
+    def enter_list_mode(self) -> None:
+        self.can_focus = True
+        self.focus()
+        if self.highlighted is None and self.option_count:
+            self.highlighted = 0
+
+    def action_normal_mode(self) -> None:
+        self.screen.set_focus(None)
+
+    def on_blur(self) -> None:
+        self.can_focus = False
+
+
 class PickerScreen(ModalScreen[int | None]):
     """Pop-up list of options. Dismisses with the chosen index, or None on escape.
 
