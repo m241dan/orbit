@@ -637,11 +637,11 @@ def said(agent_id: str, text: str) -> AssistantMessage:
     return AssistantMessage(turn_id="t", text=text, agent_id=agent_id)
 
 
-async def test_the_tab_strip_starts_with_only_all_and_never_takes_focus() -> None:
+async def test_the_tab_strip_starts_with_all_and_planner_and_never_takes_focus() -> None:
     app = OrbitApp(FakeSession())
     async with app.run_test() as pilot:
         tabs = app.query_one(ConversationTabs)
-        assert tab_strip(app) == ["All"]
+        assert tab_strip(app) == ["All", "Planner"]
         assert tabs.active_tab is not None and tabs.active_tab.label_text == "All"
         assert not tabs.focusable
         assert app.query_one(Transcript).border_title == "Conversation"
@@ -661,10 +661,10 @@ async def test_each_started_agent_adds_a_tab_labelled_by_role() -> None:
         await feed_events(
             session, pilot, started("agent-1"), started("agent-2", "reviewer"), started("agent-3")
         )
-        assert tab_strip(app) == ["All", "coder", "reviewer", "coder 2"]
+        assert tab_strip(app) == ["All", "Planner", "coder", "reviewer", "coder 2"]
         assert app.query_one(Transcript).only is None
         await feed_events(session, pilot, AgentExited(agent_id="agent-1", reason="finished"))
-        assert tab_strip(app) == ["All", "reviewer", "coder"]
+        assert tab_strip(app) == ["All", "Planner", "reviewer", "coder"]
         assert app.query_one(Transcript).border_title == "Conversation"
 
 
@@ -684,7 +684,7 @@ async def test_clicking_a_tab_shows_only_that_agents_conversation() -> None:
         transcript = app.query_one(Transcript)
         tabs = list(app.query_one(ConversationTabs).query(Tab))
 
-        await pilot.click(tabs[2])
+        await pilot.click(tabs[3])
         await pilot.pause()
         assert app.focused is None
         assert transcript.only == "agent-2"
@@ -708,17 +708,17 @@ async def test_an_exited_agents_tab_goes_and_its_entries_stay_under_all() -> Non
             session, pilot, started("agent-1"), said("agent-1", "coding"), started("agent-2")
         )
         transcript = app.query_one(Transcript)
-        await pilot.click(list(app.query_one(ConversationTabs).query(Tab))[1])
+        await pilot.click(list(app.query_one(ConversationTabs).query(Tab))[2])
         await pilot.pause()
         assert transcript.only == "agent-1"
 
         # Another agent leaving doesn't change what's shown.
         await feed_events(session, pilot, AgentExited(agent_id="agent-2", reason="finished"))
-        assert tab_strip(app) == ["All", "coder"]
+        assert tab_strip(app) == ["All", "Planner", "coder"]
         assert transcript.only == "agent-1"
 
         await feed_events(session, pilot, AgentExited(agent_id="agent-1", reason="finished"))
-        assert tab_strip(app) == ["All"]
+        assert tab_strip(app) == ["All", "Planner"]
         assert transcript.only is None
         assert transcript.border_title == "Conversation"
         assert "agent-1: coding" in shown(app)
@@ -730,12 +730,12 @@ async def test_the_shown_tabs_title_follows_its_relabelling() -> None:
     async with app.run_test(size=(120, 30)) as pilot:
         await feed_events(session, pilot, started("agent-1"), started("agent-2"))
         transcript = app.query_one(Transcript)
-        await pilot.click(list(app.query_one(ConversationTabs).query(Tab))[2])
+        await pilot.click(list(app.query_one(ConversationTabs).query(Tab))[3])
         await pilot.pause()
         assert transcript.border_title == "Conversation · coder 2"
 
         await feed_events(session, pilot, AgentExited(agent_id="agent-1", reason="finished"))
-        assert tab_strip(app) == ["All", "coder"]
+        assert tab_strip(app) == ["All", "Planner", "coder"]
         assert transcript.only == "agent-2"
         assert transcript.border_title == "Conversation · coder"
 
@@ -756,22 +756,22 @@ async def test_background_output_marks_a_tab_until_it_is_shown() -> None:
     async with app.run_test(size=(120, 30)) as pilot:
         await feed_events(session, pilot, started("agent-1"), started("agent-2", "reviewer"))
         await feed_events(session, pilot, said("agent-1", "coding"), said("agent-2", "hmm"))
-        assert tab_strip(app) == ["All", "coder *", "reviewer *"]
+        assert tab_strip(app) == ["All", "Planner", "coder *", "reviewer *"]
         await feed_events(session, pilot, AssistantMessage(turn_id="t", text="chat"))
-        assert tab_strip(app) == ["All", "coder *", "reviewer *"]
+        assert tab_strip(app) == ["All", "Planner", "coder *", "reviewer *"]
 
-        await pilot.press("tab")
+        await pilot.press("tab", "tab")
         await pilot.pause()
-        assert tab_strip(app) == ["All", "coder", "reviewer *"]
+        assert tab_strip(app) == ["All", "Planner", "coder", "reviewer *"]
         assert app.query_one(Transcript).border_title == "Conversation · coder"
         # Output for the tab being shown doesn't mark it.
         await feed_events(session, pilot, said("agent-1", "more"))
-        assert tab_strip(app) == ["All", "coder", "reviewer *"]
+        assert tab_strip(app) == ["All", "Planner", "coder", "reviewer *"]
 
         await pilot.press("shift+tab")
         await pilot.pause()
         await feed_events(session, pilot, said("agent-1", "again"))
-        assert tab_strip(app) == ["All", "coder *", "reviewer *"]
+        assert tab_strip(app) == ["All", "Planner", "coder *", "reviewer *"]
 
 
 def active_tab(app: OrbitApp) -> str:
@@ -788,6 +788,9 @@ async def test_tab_and_shift_tab_cycle_the_conversation_tabs_and_wrap() -> None:
         transcript = app.query_one(Transcript)
 
         await pilot.press("tab")
+        assert active_tab(app) == "Planner"
+        assert transcript.only == "planner"
+        await pilot.press("tab")
         assert active_tab(app) == "coder"
         assert transcript.only == "agent-1"
         await pilot.press("tab")
@@ -798,15 +801,19 @@ async def test_tab_and_shift_tab_cycle_the_conversation_tabs_and_wrap() -> None:
         await pilot.press("shift+tab")
         assert active_tab(app) == "reviewer"
         assert transcript.only == "agent-2"
-        await pilot.press("shift+tab", "shift+tab")
+        await pilot.press("shift+tab", "shift+tab", "shift+tab")
         assert active_tab(app) == "All"
         assert app.focused is None
 
 
-async def test_tab_with_no_agents_stays_on_all() -> None:
+async def test_tab_with_no_agents_cycles_all_and_planner() -> None:
     app = OrbitApp(FakeSession())
     async with app.run_test() as pilot:
-        await pilot.press("tab", "shift+tab")
+        await pilot.press("tab")
+        assert active_tab(app) == "Planner"
+        await pilot.press("tab")
+        assert active_tab(app) == "All"
+        await pilot.press("shift+tab", "shift+tab")
         assert active_tab(app) == "All"
         assert app.focused is None
         assert app.query_one(Transcript).only is None
@@ -844,4 +851,117 @@ async def test_tab_keeps_its_normal_behaviour_outside_normal_mode() -> None:
         assert active_tab(app) == "All"
         assert app.screen.query_one("#task-model").has_class("selected")
         await pilot.press("i", "tab")
+        assert active_tab(app) == "All"
+
+
+async def test_planner_output_shows_under_planner_and_all_but_not_other_tabs() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test(size=(120, 30)) as pilot:
+        # The user's planner prompt is on the Planner tab before the planner starts.
+        await pilot.press("ctrl+t", "i", *"plan", "enter")
+        await feed_events(
+            session,
+            pilot,
+            started("agent-1", "planner"),
+            said("agent-1", "drafting"),
+            AgentReply(agent_id="agent-1", request_id="r", text="Added."),
+            started("agent-2"),
+            said("agent-2", "coding"),
+        )
+        # The planner gets no tab of its own.
+        assert tab_strip(app) == ["All", "Planner", "coder *"]
+        transcript = app.query_one(Transcript)
+        assert transcript.border_title == "Conversation · Planner"
+        planner = [
+            "plan",
+            "▶ agent-1 (planner) started",
+            "agent-1: drafting",
+            "orbit → agent-1: Added.",
+        ]
+        assert shown(app) == planner
+
+        await pilot.press("tab")
+        assert shown(app) == ["▶ agent-2 (coder) started", "agent-2: coding"]
+        # Output while another tab is shown marks the Planner tab.
+        await feed_events(session, pilot, said("agent-1", "more"))
+        assert tab_strip(app) == ["All", "Planner *", "coder"]
+
+        await pilot.press("tab")
+        assert active_tab(app) == "All"
+        assert shown(app) == [
+            *planner,
+            "▶ agent-2 (coder) started",
+            "agent-2: coding",
+            "agent-1: more",
+        ]
+
+        # The planner exiting leaves its tab.
+        await feed_events(session, pilot, AgentExited(agent_id="agent-1", reason="finished"))
+        await pilot.press("tab")
+        assert tab_strip(app) == ["All", "Planner", "coder"]
+        assert shown(app)[-1] == "■ agent-1 exited"
+
+
+async def test_the_prompt_follows_the_selected_tab() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test(size=(120, 30)) as pilot:
+        prompt = app.query_one(PromptInput)
+        await pilot.press("tab")
+        assert prompt.border_title == "Prompt · planner"
+        await pilot.press("i", *"plan", "enter", "escape")
+        await pilot.press("shift+tab")
+        assert prompt.border_title == "Prompt"
+        await feed_events(session, pilot, BusyChanged(busy=False, lane="planner"))
+        await pilot.press("i", *"hi", "enter", "escape")
+        assert session.commands == [
+            SubmitPrompt(text="plan", to="planner"),
+            CancelTurn(to="planner"),
+            SubmitPrompt(text="hi", to="conversation"),
+            CancelTurn(to="conversation"),
+        ]
+
+
+async def test_the_prompt_is_enabled_on_planner_while_a_run_is_busy() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test(size=(120, 30)) as pilot:
+        prompt = app.query_one(PromptInput)
+        await feed_events(session, pilot, BusyChanged(busy=True))
+        assert prompt.disabled
+        await pilot.press("tab")
+        assert not prompt.disabled
+        await pilot.press("i", *"plan", "enter")
+        assert prompt.disabled  # Until the planner answers.
+        await feed_events(session, pilot, BusyChanged(busy=False, lane="planner"))
+        assert not prompt.disabled
+        await feed_events(session, pilot, BusyChanged(busy=True, lane="planner"))
+        await pilot.press("tab")
+        assert prompt.disabled  # On All, whose lane is still busy.
+        await feed_events(session, pilot, BusyChanged(busy=False))
+        assert not prompt.disabled
+
+
+async def test_ctrl_t_jumps_to_the_planner_and_back() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test(size=(120, 30)) as pilot:
+        await feed_events(session, pilot, started("agent-1"), started("agent-2", "reviewer"))
+        await pilot.press("ctrl+t")
+        assert active_tab(app) == "Planner"
+        await pilot.press("ctrl+t")
+        assert active_tab(app) == "All"
+
+        await pilot.press("tab", "tab", "tab")
+        assert active_tab(app) == "reviewer"
+        await pilot.press("ctrl+t")
+        assert active_tab(app) == "Planner"
+        await pilot.press("ctrl+t")
+        assert active_tab(app) == "reviewer"
+
+        # Back to All when the tab it came from has gone.
+        await pilot.press("ctrl+t")
+        await feed_events(session, pilot, AgentExited(agent_id="agent-2", reason="finished"))
+        await pilot.press("ctrl+t")
         assert active_tab(app) == "All"

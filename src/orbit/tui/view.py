@@ -409,6 +409,11 @@ def review_line(status: ReviewStatus | None) -> str:
 ALL_TAB_LABEL = "All"
 """The fixed first tab, showing every conversation; it isn't one of the tracked tabs."""
 
+PLANNER = "planner"
+"""Key of the pinned Planner tab, and of the planner conversation's transcript entries."""
+
+PLANNER_TAB_LABEL = "Planner"
+
 
 @dataclass(frozen=True)
 class ConversationTab:
@@ -431,18 +436,47 @@ _TAB_OUTPUT = (
 """Events that add an entry to their agent's conversation."""
 
 
+PLANNER_TAB = ConversationTab(PLANNER, PLANNER_TAB_LABEL)
+"""The pinned tab for the planner conversation, there from the start and never removed."""
+
+
+def track_planners(planners: frozenset[str], event: Event) -> frozenset[str]:
+    """The ids of the agents that have run as the planner, after ``event``."""
+    if isinstance(event, AgentStarted) and event.role == PLANNER:
+        return planners | {event.agent_id}
+    return planners
+
+
+def tab_key(agent: str | None, planners: frozenset[str]) -> str | None:
+    """Which tab ``agent``'s entries belong to: the planner's go to the Planner tab."""
+    return PLANNER if agent in planners else agent
+
+
 def track_tabs(
-    tabs: tuple[ConversationTab, ...], event: Event, active: str | None = None
+    tabs: tuple[ConversationTab, ...],
+    event: Event,
+    active: str | None = None,
+    planners: frozenset[str] = frozenset(),
 ) -> tuple[ConversationTab, ...]:
-    """The open conversation tabs after ``event``; output for an agent other than ``active``,
-    the one being shown, marks its tab unread."""
+    """The open conversation tabs after ``event``; output for a tab other than ``active``,
+    the one being shown, marks it unread. The planner has the pinned tab, not one of its own,
+    and ``planners`` are the agents whose output belongs there."""
     if isinstance(event, AgentStarted):
-        return (*tabs, ConversationTab(event.agent_id, event.role))
+        return _open_tab(tabs, event)
     if isinstance(event, AgentExited):
         return tuple(tab for tab in tabs if tab.agent_id != event.agent_id)
     if isinstance(event, _TAB_OUTPUT):
-        return _mark_unread(tabs, event.agent_id, active)
+        return _mark_unread(tabs, tab_key(event.agent_id, planners), active)
     return tabs
+
+
+def _open_tab(
+    tabs: tuple[ConversationTab, ...], event: AgentStarted
+) -> tuple[ConversationTab, ...]:
+    """``tabs`` with one for the started agent, unless it's the planner, which has its own."""
+    if event.role == PLANNER:
+        return tabs
+    return (*tabs, ConversationTab(event.agent_id, event.role))
 
 
 def _mark_unread(

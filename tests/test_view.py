@@ -23,6 +23,8 @@ from orbit.protocol import (
 )
 from orbit.tui.view import (
     ALL_TAB_LABEL,
+    PLANNER,
+    PLANNER_TAB,
     STATUS_ICONS,
     AgentRow,
     ConversationTab,
@@ -36,9 +38,11 @@ from orbit.tui.view import (
     review_line,
     settings_summary,
     step_lines,
+    tab_key,
     tab_labels,
     task_started_entry,
     track_agents,
+    track_planners,
     track_tabs,
     turn_end_entry,
     verification_finished_entry,
@@ -250,3 +254,31 @@ def test_marking_a_tab_read_clears_only_its_marker() -> None:
         ConversationTab("agent-2", "coder", True),
     )
     assert tab_labels(mark_tab_read(tabs, "agent-1")) == ["coder", "coder 2 *"]
+
+
+def test_the_planner_has_the_pinned_tab_not_one_of_its_own() -> None:
+    planner = AgentStarted(agent_id="agent-1", role="planner", task_id="")
+    tabs: tuple[ConversationTab, ...] = (PLANNER_TAB,)
+    assert track_tabs(tabs, planner) is tabs
+    assert track_tabs(tabs, AgentExited(agent_id="agent-1", reason="finished")) == tabs
+    assert tab_labels(tabs) == ["Planner"]
+
+
+def test_planners_are_learned_from_their_start() -> None:
+    planners = track_planners(frozenset(), AgentStarted(agent_id="a1", role="planner", task_id=""))
+    assert planners == {"a1"}
+    assert (
+        track_planners(planners, AgentStarted(agent_id="a2", role="coder", task_id="1")) is planners
+    )
+    assert track_planners(planners, Notice(message="x")) is planners
+    assert tab_key("a1", planners) == PLANNER
+    assert tab_key("a2", planners) == "a2"
+    assert tab_key(None, planners) is None
+
+
+def test_planner_output_marks_the_planner_tab_unless_shown() -> None:
+    tabs = (PLANNER_TAB, ConversationTab("agent-2", "coder"))
+    said = AssistantMessage(turn_id="t", text="hi", agent_id="agent-1")
+    marked = track_tabs(tabs, said, active=None, planners=frozenset({"agent-1"}))
+    assert tab_labels(marked) == ["Planner *", "coder"]
+    assert track_tabs(tabs, said, active=PLANNER, planners=frozenset({"agent-1"})) == tabs

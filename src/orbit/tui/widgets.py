@@ -15,6 +15,7 @@ from textual.widgets import Input, OptionList, Static, Tab, Tabs
 from orbit.protocol import Event, Settings, StepState
 from orbit.tui.view import (
     ALL_TAB_LABEL,
+    PLANNER_TAB,
     SPINNER_FPS,
     ConversationTab,
     EntryKind,
@@ -22,7 +23,9 @@ from orbit.tui.view import (
     settings_summary,
     spinner_frame,
     step_lines,
+    tab_key,
     tab_labels,
+    track_planners,
     track_tabs,
 )
 
@@ -81,7 +84,8 @@ class Transcript(VerticalScroll):
 
 
 class ConversationTabs(Tabs):
-    """Strip of tabs above the transcript: "All", then one per running agent.
+    """Strip of tabs above the transcript: "All", the pinned "Planner", then one per running
+    agent.
 
     Clicking a tab activates it; like the transcript, it never takes focus.
     """
@@ -89,21 +93,49 @@ class ConversationTabs(Tabs):
     can_focus = False
 
     ALL_TAB_ID = "tab-all"
+    PLANNER_TAB_ID = "tab-planner"
 
     def __init__(self, **kwargs: Any) -> None:
-        super().__init__(Tab(ALL_TAB_LABEL, id=self.ALL_TAB_ID), **kwargs)
-        self.tabs: tuple[ConversationTab, ...] = ()
-        self._tab_ids: dict[str, str] = {}  # Agent id to its tab's id.
+        super().__init__(
+            Tab(ALL_TAB_LABEL, id=self.ALL_TAB_ID),
+            Tab(PLANNER_TAB.role, id=self.PLANNER_TAB_ID),
+            **kwargs,
+        )
+        self.tabs: tuple[ConversationTab, ...] = (PLANNER_TAB,)
+        self.planners: frozenset[str] = frozenset()  # Agents that ran as the planner.
+        # Tab key (an agent id, or the planner's) to its tab's id.
+        self._tab_ids: dict[str, str] = {PLANNER_TAB.agent_id: self.PLANNER_TAB_ID}
         self._next_id = 1
+        self._before_planner = self.ALL_TAB_ID  # Where ctrl+t goes back to from the planner.
 
     def agent_of(self, tab_id: str) -> str | None:
-        """The agent whose tab has id ``tab_id``; None for All."""
+        """The key of the tab with id ``tab_id``: an agent's id, the planner's, or None for
+        All."""
         return next((agent for agent, tid in self._tab_ids.items() if tid == tab_id), None)
+
+    def key_of(self, agent: str | None) -> str | None:
+        """The key of the tab ``agent``'s entries belong to."""
+        return tab_key(agent, self.planners)
+
+    @property
+    def on_planner(self) -> bool:
+        return self.active == self.PLANNER_TAB_ID
+
+    def toggle_planner(self) -> None:
+        """Show the Planner tab, or from there, the tab shown before it (All if it's gone)."""
+        if not self.on_planner:
+            self._before_planner = self.active
+            self.active = self.PLANNER_TAB_ID
+        elif self._before_planner in self._tab_ids.values():
+            self.active = self._before_planner
+        else:
+            self.active = self.ALL_TAB_ID
 
     def track(self, event: Event) -> None:
         """Add a tab for an agent that started, remove an exited agent's tab, and mark a tab
         not being shown when its agent has new output."""
-        self._update(track_tabs(self.tabs, event, self.agent_of(self.active)))
+        self.planners = track_planners(self.planners, event)
+        self._update(track_tabs(self.tabs, event, self.agent_of(self.active), self.planners))
 
     def mark_read(self, agent: str | None) -> None:
         """Clear ``agent``'s unread marker; None (All) has none."""

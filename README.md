@@ -48,14 +48,14 @@ In the app:
 | `h` `j` `k` `l` | Move between windows (the selected one is highlighted) |
 | `i` | Jump to the prompt and start typing (vim-style insert mode) |
 | `enter` | On the task list: activate it (`j`/`k` move, `enter` edits a task or adds one on `+ new task`, `a` accepts a draft, `x` removes a task, `esc` leaves) |
-| `ctrl+t` | Switch the prompt between the conversation and the planner (which works while tasks run) |
+| `ctrl+t` | Jump to the **Planner** tab (which works while tasks run); again, back to the tab you were on |
 | `enter` | On the agents pane: activate it (`j`/`k` move, `c` cancels the highlighted agent's work, `esc` leaves) |
 | `ctrl+r` | Run the tasks that haven't completed yet |
 | `ctrl+g` | Ask for a super review of the whole codebase now (works while tasks run) |
 | `ctrl+e` | Set up (or redo) the verification steps: queue a configurator task first and run it (see [Setting up verification](#setting-up-verification)) |
 | `ctrl+o` | Pick the model (default, fable, opus, sonnet, haiku) |
 | `ctrl+l` | Pick the tool access level (off, restricted, full) |
-| `esc` | Stop typing; otherwise cancel the running turn (while planning, only the planner's) or close a picker |
+| `esc` | Stop typing; otherwise cancel the running turn (on the Planner tab, only the planner's) or close a picker |
 | `a` / `r` / `x` | On a proposal of checks: accept it, ask for changes (type them, `enter` sends, `esc` goes back), or end the task (see [Setting up verification](#setting-up-verification)) |
 | `ctrl+c` | Quit |
 
@@ -91,8 +91,11 @@ planner, just its turn; for the coder, the same as `esc`.
 
 The conversation shows everything in one timeline: each agent's own messages and tool calls,
 prefixed with its id, and its exchanges with orbit (`agent-1 → orbit: complete_task …`,
-`orbit → agent-1: …`) in their own colour. The tabs above it narrow it to one running agent;
-click one to switch, or **All** for everything.
+`orbit → agent-1: …`) in their own colour. The tabs above it narrow it: **All** shows everything,
+the pinned **Planner** tab your conversation with the planner, and then there's one tab per running
+agent. Click one to switch, or cycle with `tab`/`shift+tab`; a tab with output you haven't seen ends
+in `*`. The prompt follows the tab: on **Planner** it goes to the planner, elsewhere to the
+conversation.
 
 Each row of the task list shows its status: ⏳ pending, ◜ running (spinning), 🔍 verifying, ✅ done,
 ❗ failed verification, ❌ failed, ⌛ ran out of steps, 🏳 the agent gave up, 🛑 cancelled, 📝 a draft
@@ -253,7 +256,10 @@ your checkout out of its way, it doesn't sandbox it.
 
 ### Planning with the planner
 
-`ctrl+t` switches the prompt to the **planner** (its title reads `Prompt · planner`), and back. Tell it
+The **Planner** tab, always second in the strip, is where you talk to the planner: switch to it
+(`ctrl+t` jumps there, and pressed again goes back to the tab you were on) and the prompt goes to
+the planner (its title reads `Prompt · planner`), while the tab shows just the planner
+conversation: your prompts, and the planner's messages, tool calls and exchanges with orbit. Tell it
 what you want to build; it asks what's unclear and breaks the goal into small tasks, proposing each
 with `propose_task`. Proposals appear in the task list as 📝 drafts, with the `coder` role's default
 settings, and never run on their own: on the task list, `a` accepts the highlighted draft (or edit
@@ -261,9 +267,11 @@ it with `enter` and save, which accepts it too), and `x` removes it. Accepted ta
 rest when you press `ctrl+r`.
 
 The planner answers in a lane of its own, so you can plan while tasks run (and press `ctrl+r`
-while it answers); the prompt waits only for the planner's own reply. `esc` while planning stops
-only the planner's turn and leaves the task run going; back in the conversation, `esc` stops the
-running turn or task run as before.
+while it answers); on the Planner tab the prompt waits only for the planner's own reply. `esc` on
+the Planner tab stops only the planner's turn and leaves the task run going; on any other tab, `esc`
+stops the running turn or task run as before. The task list beside it fills with
+drafts as the planner proposes them; when it says something while you're on another tab, the
+Planner tab gets a `*`.
 
 The planner is one agent for the whole session: each prompt resumes its conversation, so it
 remembers what you discussed. It reads your checkout but can't edit it, uses the model you picked

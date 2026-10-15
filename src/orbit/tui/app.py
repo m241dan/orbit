@@ -59,6 +59,7 @@ from orbit.tui.agents import AgentsPane
 from orbit.tui.proposals import ProposalScreen
 from orbit.tui.tasks import TaskEditorScreen, TaskList
 from orbit.tui.view import (
+    PLANNER,
     TOOL_ACCESS_DESCRIPTIONS,
     TOOL_ACCESS_OPTIONS,
     EntryKind,
@@ -116,7 +117,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         Binding("ctrl+r", "run_tasks", "Run tasks"),
         Binding("ctrl+g", "super_review", "Super review"),
         Binding("ctrl+e", "configure_checks", "Set up checks"),
-        Binding("ctrl+t", "toggle_planning", "Plan"),
+        Binding("ctrl+t", "toggle_planner", "Planner"),
         Binding("escape", "cancel_turn", "Cancel turn"),
         Binding("ctrl+o", "pick_model", "Model"),
         Binding("ctrl+l", "pick_tool_access", "Tools"),
@@ -129,7 +130,6 @@ class OrbitApp(App[None], inherit_bindings=False):
         self._selected = "prompt"
         # Which lanes have work in progress, as last reported (or just requested).
         self._busy: dict[BusyLane, bool] = {"work": False, "planner": False}
-        self._planning = False  # Whether prompts go to the planner.
         # Last settings reported by the backend; None until the first report.
         self._settings: Settings | None = None
         self._model_choices: tuple[str, ...] = ()
@@ -171,8 +171,9 @@ class OrbitApp(App[None], inherit_bindings=False):
         prompt.action_normal_mode()
         # Busy from now, not from TurnStarted, so ctrl+r can't race the turn.
         self._set_busy(self._lane, True)
-        self._append(text, "user")
-        await self._session.send(SubmitPrompt(text=text, to=self._target))
+        target = self._target
+        self._append(text, "user", PLANNER if target == "planner" else None)
+        await self._session.send(SubmitPrompt(text=text, to=target))
 
     # Window navigation only applies at the top level, when no window is active.
 
@@ -246,16 +247,17 @@ class OrbitApp(App[None], inherit_bindings=False):
         agent = tabs.agent_of(event.tab.id or "")
         tabs.mark_read(agent)
         self.query_one(Transcript).show_only(agent, event.tab.label_text)
+        # The prompt follows the tab: the Planner tab's goes to the planner.
+        self.query_one(PromptInput).show_planning(tabs.on_planner)
+        self._update_prompt()
 
     @on(AgentsPane.Cancel)
     async def _cancel_agent(self, message: AgentsPane.Cancel) -> None:
         await self._session.send(CancelAgent(agent_id=message.agent_id))
 
-    def action_toggle_planning(self) -> None:
-        """Send prompts to the planner, or back to the conversation."""
-        self._planning = not self._planning
-        self.query_one(PromptInput).show_planning(self._planning)
-        self._update_prompt()
+    def action_toggle_planner(self) -> None:
+        """Show the Planner tab, or go back to the tab shown before it."""
+        self.query_one(ConversationTabs).toggle_planner()
 
     @on(TaskList.Accept)
     async def _accept_task(self, message: TaskList.Accept) -> None:
@@ -460,13 +462,18 @@ class OrbitApp(App[None], inherit_bindings=False):
         self.query_one(PromptInput).show_settings(settings)
 
     @property
+    def _on_planner(self) -> bool:
+        """Whether prompts go to the planner: they do on its tab."""
+        return self.query_one(ConversationTabs).on_planner
+
+    @property
     def _target(self) -> PromptTarget:
-        return "planner" if self._planning else "conversation"
+        return "planner" if self._on_planner else "conversation"
 
     @property
     def _lane(self) -> BusyLane:
         """The lane prompts start work in now."""
-        return "planner" if self._planning else "work"
+        return "planner" if self._on_planner else "work"
 
     def _set_busy(self, lane: BusyLane, busy: bool) -> None:
         self._busy[lane] = busy
@@ -492,4 +499,6 @@ class OrbitApp(App[None], inherit_bindings=False):
         return self.query_one(VerificationPanel).steps[step]
 
     def _append(self, text: str, kind: EntryKind, agent: str | None = None) -> None:
-        self.query_one(Transcript).add_entry(text, kind, agent)
+        # Entries are kept by tab: the planner's under its pinned tab.
+        key = self.query_one(ConversationTabs).key_of(agent)
+        self.query_one(Transcript).add_entry(text, kind, key)
