@@ -4,6 +4,8 @@ import asyncio
 import os
 from pathlib import Path
 
+from orbit.agent.external.processes import run_process
+
 WorkspaceState = frozenset[tuple[str, int, int]]
 
 
@@ -15,17 +17,14 @@ async def workspace_state(root: Path | str = ".") -> WorkspaceState | None:
     can't tell whether anything changed.
     """
     try:
-        process = await asyncio.create_subprocess_exec(
-            *("git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"),
-            cwd=root,
-            stdin=asyncio.subprocess.DEVNULL,
-            stdout=asyncio.subprocess.PIPE,
+        returncode, output = await run_process(
+            ("git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"),
+            root,
             stderr=asyncio.subprocess.DEVNULL,
         )
     except FileNotFoundError:
         return None
-    output, _ = await process.communicate()
-    if process.returncode != 0:
+    if returncode != 0:
         return None
     paths = {p for p in output.decode(errors="surrogateescape").split("\0") if p}
     return frozenset(_fingerprint(Path(root), path) for path in paths)

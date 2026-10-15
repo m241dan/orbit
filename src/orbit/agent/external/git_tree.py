@@ -6,7 +6,6 @@ that was checked out when orbit started, fast-forward only. Work is never delete
 left behind are stashed, and commits that can't be merged stay on ``orbit/coder``.
 """
 
-import asyncio
 import datetime
 import hashlib
 import itertools
@@ -16,6 +15,7 @@ from pathlib import Path
 
 from orbit.agent.application.ports import Merge
 from orbit.agent.domain.roles import Setup
+from orbit.agent.external.processes import run_process
 
 BRANCH = "orbit/coder"
 STASH_MESSAGE = "orbit: unverified work"
@@ -54,15 +54,8 @@ def git_top_level(path: str) -> str | None:
 
 async def _run(command: Sequence[str], cwd: Path) -> tuple[bool, str]:
     """Run ``command`` in ``cwd``; returns whether it succeeded and its combined output."""
-    process = await asyncio.create_subprocess_exec(
-        *command,
-        cwd=cwd,
-        stdin=asyncio.subprocess.DEVNULL,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.STDOUT,
-    )
-    output, _ = await process.communicate()
-    return process.returncode == 0, output.decode(errors="replace").strip()
+    returncode, output = await run_process(command, cwd)
+    return returncode == 0, output.decode(errors="replace").strip()
 
 
 def _fingerprint(setup: Setup, path: Path) -> str:
