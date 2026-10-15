@@ -16,6 +16,7 @@ from orbit.protocol import (
     ErrorOccurred,
     Event,
     Settings,
+    ToolAccess,
     ToolCallFinished,
     ToolCallStarted,
     TurnFinished,
@@ -376,7 +377,7 @@ async def test_an_agent_runs_connected_to_orbit(tmp_path: Path) -> None:
         }
     }
     assert "--strict-mcp-config" in argv
-    allowed = "mcp__orbit__get_task,mcp__orbit__complete_task"
+    allowed = "mcp__orbit__get_task,mcp__orbit__complete_task,Read,Glob,Grep"
     assert argv[argv.index("--allowedTools") + 1] == allowed
     assert argv[argv.index("--append-system-prompt") + 1] == f"{AGENT_RULES}\n\nWrite code."
     assert "--resume" not in argv
@@ -397,6 +398,38 @@ async def test_agents_start_without_the_users_auto_memory(tmp_path: Path) -> Non
     await run_agent(runner)
     [call] = calls(scenario)
     assert call["env"]["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] == "1"
+
+
+async def test_restricted_agents_can_read_and_search_but_not_run_or_write(tmp_path: Path) -> None:
+    (tmp_path / "tree").mkdir()
+    runner, scenario = make_runner(tmp_path, stdout=lines(init("connected"), RESULT))
+    await run_agent(runner, Settings(tool_access="restricted"), cwd=str(tmp_path / "tree"))
+    [call] = calls(scenario)
+    argv = call["argv"]
+    assert "--restricted" in argv
+    assert argv[argv.index("--allowedTools") + 1].endswith(",Read,Glob,Grep")
+    assert argv[argv.index("--disallowedTools") + 1] == "Edit,Write,NotebookEdit"
+    # --restricted skips CLAUDE.md discovery; naming the tree brings its CLAUDE.md back.
+    assert argv[argv.index("--add-dir") + 1] == str(tmp_path / "tree")
+    assert call["env"]["CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD"] == "1"
+
+
+async def test_restricted_agents_name_their_tree_by_its_full_path(tmp_path: Path) -> None:
+    runner, scenario = make_runner(tmp_path, stdout=lines(init("connected"), RESULT))
+    await run_agent(runner, cwd=".")
+    argv = calls(scenario)[0]["argv"]
+    assert argv[argv.index("--add-dir") + 1] == os.path.abspath(".")
+
+
+@pytest.mark.parametrize("access", ["off", "full"])
+async def test_only_restricted_agents_get_the_read_only_flags(
+    tmp_path: Path, access: ToolAccess
+) -> None:
+    runner, scenario = make_runner(tmp_path, stdout=lines(init("connected"), RESULT))
+    await run_agent(runner, Settings(tool_access=access))
+    argv = calls(scenario)[0]["argv"]
+    assert not {"--restricted", "--disallowedTools", "--add-dir"} & set(argv)
+    assert "Read" not in argv[argv.index("--allowedTools") + 1]
 
 
 async def test_agents_keep_tool_access_flags_and_orbit_tools(tmp_path: Path) -> None:
@@ -458,5 +491,6 @@ async def test_a_conversation_resumes_its_own_session_turn_after_turn(tmp_path: 
     assert two["argv"][two["argv"].index("--resume") + 1] == SESSION_ID
     assert "--resume" not in three["argv"]  # Another agent's conversation.
     assert two["stdin"] == "Smaller steps, please."
-    assert two["argv"][two["argv"].index("--allowedTools") + 1] == "mcp__orbit__propose_task"
+    allowed = "mcp__orbit__propose_task,Read,Glob,Grep"  # The planner reads, as it's restricted.
+    assert two["argv"][two["argv"].index("--allowedTools") + 1] == allowed
     assert two["env"]["ORBIT_AGENT_TOKEN"] == "s3cret"

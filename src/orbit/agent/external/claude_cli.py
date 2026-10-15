@@ -55,6 +55,10 @@ TOKEN_VARIABLE = "ORBIT_AGENT_TOKEN"
 TOOL_TIMEOUT_MS = 30 * 60 * 1000
 # Statuses the CLI reports for an MCP server that is, or is about to be, usable.
 LIVE_MCP_STATUSES = ("connected", "pending")
+# What a restricted agent may use besides orbit's tools: reading and searching, never running
+# code (--restricted removes Bash and its kin) or writing files.
+READ_ONLY_TOOLS = ("Read", "Glob", "Grep")
+WRITE_TOOLS = ("Edit", "Write", "NotebookEdit")
 AGENT_RULES = (
     "You are an agent working for orbit, which hands out tasks and verifies the work. Talk to"
     " orbit only through its MCP tools (mcp__orbit__*). Fetch your task with get_task, and when"
@@ -65,15 +69,20 @@ AGENT_RULES = (
 
 def agent_args(launch: AgentLaunch) -> list[str]:
     """Flags connecting a CLI to orbit's MCP server, and only to it, allowing the role's tools
-    and telling it the rules and its role."""
+    and telling it the rules and its role. A restricted agent can read and search its tree,
+    and nothing more."""
     headers = {"Authorization": f"Bearer ${{{TOKEN_VARIABLE}}}"}
     config = {"mcpServers": {"orbit": {"type": "http", "url": launch.url, "headers": headers}}}
-    allowed = ",".join(f"mcp__orbit__{tool}" for tool in launch.tools)
+    allowed = [f"mcp__orbit__{tool}" for tool in launch.tools]
     rules = f"{AGENT_RULES}\n\n{launch.instructions}"
-    return [
-        *("--mcp-config", json.dumps(config), "--strict-mcp-config"),
-        *("--allowedTools", allowed, "--append-system-prompt", rules),
-    ]
+    args = [*("--mcp-config", json.dumps(config), "--strict-mcp-config")]
+    if launch.settings.tool_access == "restricted":
+        allowed += READ_ONLY_TOOLS
+        # --restricted skips CLAUDE.md discovery; naming the tree (with the variable agent_env
+        # sets) brings the project's CLAUDE.md back.
+        args += ["--restricted", "--disallowedTools", ",".join(WRITE_TOOLS)]
+        args += ["--add-dir", os.path.abspath(launch.cwd)]
+    return [*args, "--allowedTools", ",".join(allowed), "--append-system-prompt", rules]
 
 
 def agent_env(agent: Agent) -> dict[str, str]:
@@ -83,6 +92,7 @@ def agent_env(agent: Agent) -> dict[str, str]:
         "ENABLE_TOOL_SEARCH": "false",  # Load orbit's tools up front, not on first use.
         # The user's auto-memory is about their own sessions; an agent's context is its task.
         "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1",
+        "CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD": "1",
         "MCP_TOOL_TIMEOUT": str(TOOL_TIMEOUT_MS),
     }
 

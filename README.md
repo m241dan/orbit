@@ -375,9 +375,12 @@ tool access picked with `ctrl+l` is what new tasks start with in the task editor
 
 Tool access levels:
 
-- `off`: no tools (agents still have orbit's tools).
-- `restricted` (default): Claude Code's normal permissions; anything that would need approval
-  is refused, read-only actions still work.
+- `off`: no built-in tools; agents have only orbit's tools.
+- `restricted` (default): read-only. Agents start in Claude Code's `--restricted` mode, which
+  removes Bash and the other tools that run code and ignores your user, project and local
+  settings files; `Read`, `Glob` and `Grep` are allowed, and `Edit`, `Write` and `NotebookEdit` are
+  disallowed. The project's `CLAUDE.md` still loads: `--restricted` skips it, so orbit names the
+  agent's directory with `--add-dir` and sets `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1`.
 - `full`: every tool call is auto-approved (`--permission-mode bypassPermissions`). Claude can
   edit files and run commands without asking.
 
