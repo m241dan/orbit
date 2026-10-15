@@ -63,6 +63,7 @@ from orbit.tui.view import (
     TOOL_ACCESS_OPTIONS,
     EntryKind,
     activity_entry,
+    agent_labelled,
     decision_entry,
     output_entry,
     task_started_entry,
@@ -254,7 +255,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         await self._session.send(CancelAgent(agent_id=message.agent_id))
 
     def action_toggle_planner(self) -> None:
-        """Show the Planner tab, or go back to the tab shown before it."""
+        """Show the planner tab, or go back to the tab shown before it."""
         self.query_one(ConversationTabs).toggle_planner()
 
     @on(TaskList.Accept)
@@ -396,7 +397,7 @@ class OrbitApp(App[None], inherit_bindings=False):
             case TurnFinished():
                 self._turn_finished(event)
             case ErrorOccurred(message=message):
-                self._append(message, "error", event.agent_id)
+                self._append(*agent_labelled((message, "error"), event.agent_id), event.agent_id)
             case AssistantMessage() | ToolCallStarted() | ToolCallFinished():
                 self._append(*output_entry(event), event.agent_id)
             case _:
@@ -473,7 +474,7 @@ class OrbitApp(App[None], inherit_bindings=False):
             self.query_one(TaskList).count(event.usage)
         entry = turn_end_entry(event.reason)
         if entry is not None:
-            self._append(*entry, event.agent_id)
+            self._append(*agent_labelled(entry, event.agent_id), event.agent_id)
 
     def _announce_task(self, task_id: str) -> None:
         task_list = self.query_one(TaskList)
@@ -484,6 +485,6 @@ class OrbitApp(App[None], inherit_bindings=False):
         return self.query_one(VerificationPanel).steps[step]
 
     def _append(self, text: str, kind: EntryKind, agent: str | None = None) -> None:
-        # Entries are kept by tab: the planner's under its pinned tab.
+        # Entries are kept by tab: a pinned role's agents' under its tab.
         key = self.query_one(ConversationTabs).key_of(agent)
         self.query_one(Transcript).add_entry(text, kind, key)

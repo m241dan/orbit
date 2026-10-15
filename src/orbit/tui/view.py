@@ -6,8 +6,9 @@ The widgets decide where things go and when they redraw; this module decides wha
 import json
 import shlex
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
+from types import MappingProxyType
 from typing import Literal, TypeGuard, assert_never, get_args
 
 from rich.cells import cell_len
@@ -240,6 +241,13 @@ def turn_end_entry(reason: TurnEndReason) -> tuple[str, EntryKind] | None:
     return f"[turn ended: {reason}]", "tool"
 
 
+def agent_labelled(entry: tuple[str, EntryKind], agent: str | None) -> tuple[str, EntryKind]:
+    """``entry`` with its text prefixed by ``agent``'s id, so agents sharing a tab can be told
+    apart; unchanged when there's no agent."""
+    text, kind = entry
+    return entry if agent is None else (f"{agent}: {text}", kind)
+
+
 def task_started_entry(number: str, state: TaskState) -> tuple[str, EntryKind]:
     return f"Task {number}: {state.task.prompt}", "user"
 
@@ -420,16 +428,19 @@ ALL_TAB_LABEL = "All"
 """The fixed first tab, showing every conversation; it isn't one of the tracked tabs."""
 
 PLANNER = "planner"
-"""Key of the pinned Planner tab, and of the planner conversation's transcript entries."""
+"""Key of the pinned planner tab, and of the planner conversation's transcript entries."""
 
-PLANNER_TAB_LABEL = "Planner"
+ROLE_TABS: tuple[str, ...] = ("planner", "coder", "reviewer", "super-reviewer", "configurator")
+"""The built-in roles, in strip order, that each have a pinned tab shared by all their
+agents; a pinned tab's key and label are its role's name."""
 
 
 @dataclass(frozen=True)
 class ConversationTab:
-    """A running agent's conversation tab, and whether it has output not yet looked at."""
+    """A conversation tab, by ``key`` (a pinned role's name, or a running agent's id), and
+    whether it has output not yet looked at."""
 
-    agent_id: str
+    key: str
     role: str
     unread: bool = False
 
@@ -452,38 +463,43 @@ _TAB_OUTPUT: tuple[type[_TabOutput], ...] = get_args(_TabOutput)
 """The classes in ``_TabOutput``, for ``isinstance``."""
 
 
-PLANNER_TAB = ConversationTab(PLANNER, PLANNER_TAB_LABEL)
-"""The pinned tab for the planner conversation, there from the start and never removed."""
+PINNED_TABS = tuple(ConversationTab(role, role) for role in ROLE_TABS)
+"""The built-in roles' tabs, there from the start and never removed."""
 
 
-def track_planners(planners: frozenset[str], event: Event) -> frozenset[str]:
-    """The ids of the agents that have run as the planner, after ``event``."""
-    if isinstance(event, AgentStarted) and event.role == PLANNER:
-        return planners | {event.agent_id}
-    return planners
+def track_roles(roles: Mapping[str, str], event: Event) -> Mapping[str, str]:
+    """Which pinned role each agent started in, by agent id, after ``event``."""
+    if isinstance(event, AgentStarted) and event.role in ROLE_TABS:
+        return {**roles, event.agent_id: event.role}
+    return roles
 
 
-def tab_key(agent: str | None, planners: frozenset[str]) -> str | None:
-    """Which tab ``agent``'s entries belong to: the planner's go to the Planner tab."""
-    return PLANNER if agent in planners else agent
+def tab_key(agent: str | None, roles: Mapping[str, str]) -> str | None:
+    """Which tab ``agent``'s entries belong to: its role's, when ``roles`` has it pinned."""
+    return None if agent is None else roles.get(agent, agent)
 
 
 def track_tabs(
     tabs: tuple[ConversationTab, ...],
     event: Event,
     active: str | None = None,
-    planners: frozenset[str] = frozenset(),
+    roles: Mapping[str, str] = MappingProxyType({}),
 ) -> tuple[ConversationTab, ...]:
     """The open conversation tabs after ``event``; output for a tab other than ``active``,
-    the one being shown, marks it unread. The planner has the pinned tab, not one of its own,
-    and ``planners`` are the agents whose output belongs there."""
+    the one being shown, marks it unread. Agents in a pinned role share its tab, and
+    ``roles`` says which role those agents are in."""
     if isinstance(event, AgentStarted):
         return _open_tab(tabs, event)
     if isinstance(event, AgentExited):
-        return tuple(tab for tab in tabs if tab.agent_id != event.agent_id)
+        return _close_tab(tabs, event.agent_id)
     if _is_tab_output(event):
-        return _mark_unread(tabs, tab_key(event.agent_id, planners), active)
+        return _mark_unread(tabs, tab_key(event.agent_id, roles), active)
     return tabs
+
+
+def _close_tab(tabs: tuple[ConversationTab, ...], agent: str) -> tuple[ConversationTab, ...]:
+    """``tabs`` without ``agent``'s own tab; the pinned tabs stay."""
+    return tuple(tab for tab in tabs if tab.key in ROLE_TABS or tab.key != agent)
 
 
 def _is_tab_output(event: Event) -> TypeGuard[_TabOutput]:
@@ -497,8 +513,8 @@ def _is_tab_output(event: Event) -> TypeGuard[_TabOutput]:
 def _open_tab(
     tabs: tuple[ConversationTab, ...], event: AgentStarted
 ) -> tuple[ConversationTab, ...]:
-    """``tabs`` with one for the started agent, unless it's the planner, which has its own."""
-    if event.role == PLANNER:
+    """``tabs`` with one for the started agent, unless its role has a pinned tab."""
+    if event.role in ROLE_TABS:
         return tabs
     return (*tabs, ConversationTab(event.agent_id, event.role))
 
@@ -506,19 +522,19 @@ def _open_tab(
 def _mark_unread(
     tabs: tuple[ConversationTab, ...], agent: str | None, active: str | None
 ) -> tuple[ConversationTab, ...]:
-    """``tabs`` with ``agent``'s tab unread, unless it's the one being shown."""
+    """``tabs`` with the tab keyed ``agent`` unread, unless it's the one being shown."""
     return tabs if agent == active else _set_unread(tabs, agent, True)
 
 
 def mark_tab_read(tabs: tuple[ConversationTab, ...], agent: str) -> tuple[ConversationTab, ...]:
-    """``tabs`` with ``agent``'s tab no longer unread."""
+    """``tabs`` with the tab keyed ``agent`` no longer unread."""
     return _set_unread(tabs, agent, False)
 
 
 def _set_unread(
     tabs: tuple[ConversationTab, ...], agent: str | None, unread: bool
 ) -> tuple[ConversationTab, ...]:
-    return tuple(replace(tab, unread=unread) if tab.agent_id == agent else tab for tab in tabs)
+    return tuple(replace(tab, unread=unread) if tab.key == agent else tab for tab in tabs)
 
 
 def tab_labels(tabs: Sequence[ConversationTab]) -> list[str]:

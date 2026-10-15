@@ -73,7 +73,7 @@ async def test_a_accepts_and_notes_it_in_the_conversation() -> None:
         assert session.commands == [DecideProposal(task_id="7", action="accept")]
         assert not isinstance(app.screen, ProposalScreen)
         assert entries(app)[-1] == "orbit → agent-3: proposal accepted"
-        assert app.query(Entry).last().agent == "agent-3"
+        assert app.query(Entry).last().agent == "configurator"  # its role's tab
 
 
 async def test_x_ends_the_task() -> None:

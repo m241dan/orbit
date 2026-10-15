@@ -49,7 +49,7 @@ In the app:
 | `i` | Jump to the prompt, which talks to the planner, and start typing (vim-style insert mode) |
 | `enter` | On the task list: activate it (`j`/`k` move, `enter` edits a task or adds one on `+ new task`, `a` accepts a draft, `x` removes a task, `esc` leaves) |
 | `enter` | On the agents pane: activate it (`j`/`k` move, `c` cancels the highlighted agent's work, `esc` leaves) |
-| `ctrl+t` | Jump to the **Planner** tab; again, back to the tab you were on |
+| `ctrl+t` | Jump to the **planner** tab; again, back to the tab you were on |
 | `ctrl+r` | Run the tasks that haven't completed yet |
 | `ctrl+g` | Ask for a super review of the whole codebase now (works while tasks run) |
 | `ctrl+e` | Set up (or redo) the verification steps: queue a configurator task first and run it (see [Setting up verification](#setting-up-verification)) |
@@ -95,10 +95,17 @@ planner, just its turn; for the coder, the same as `ctrl+s`.
 The conversation shows everything in one timeline: each agent's own messages and tool calls,
 prefixed with its id, and its exchanges with orbit (`agent-1 → orbit: complete_task …`,
 `orbit → agent-1: …`) in their own colour. The tabs above it narrow it: **All** shows everything,
-the pinned **Planner** tab your conversation with the planner, and then there's one tab per running
-agent. Click one to switch, cycle with `tab`/`shift+tab`, or jump to Planner with `ctrl+t` (again
-goes back); a tab with output you haven't seen ends
-in `*`. Whichever tab is shown, the prompt goes to the planner.
+then come a pinned tab for each built-in role, labelled by its name: **planner**, **coder**,
+**reviewer**, **super-reviewer** and **configurator**. The pinned tabs are there from the start and
+keep the whole session's history; every agent in a role shares its tab (two reviewers running at
+once both show under **reviewer**), each entry prefixed with its agent's id, so you can tell them
+apart. Agents in any other role, such as the startup check (`checker`) or a custom role from
+`.orbit/config.toml`, get a temporary tab of their own after the pinned ones, labelled by role
+(`checker`, `checker 2`, …), which closes when the agent exits; their entries stay under All. Entries
+with no agent, such as task headers and verification notes, show only under All. Click a tab to
+switch, cycle with `tab`/`shift+tab`, or jump to the planner tab with `ctrl+t` (again goes back); a
+tab with output you haven't seen ends in `*`. Whichever tab is shown, the prompt goes to the
+planner.
 
 Each row of the task list shows its status: ⏳ pending, ◜ running (spinning), 🔍 verifying, ✅ done,
 ❗ failed verification, ❌ failed, ⌛ ran out of steps, 🏳 the agent gave up, 🛑 cancelled, 📝 a draft
@@ -260,7 +267,7 @@ your checkout out of its way, it doesn't sandbox it.
 ### Planning with the planner
 
 The prompt talks to the planner (its title reads `Prompt · planner`); orbit is for planning, tasks
-and reviews, with no free-form chat besides. The **Planner** tab, always second in the strip, shows
+and reviews, with no free-form chat besides. The **planner** tab, always second in the strip, shows
 just the planner conversation: your prompts, and the planner's messages, tool calls and exchanges
 with orbit (`ctrl+t` jumps there, and pressed again goes back to the tab you were on). Tell it
 what you want to build; it asks what's unclear and breaks the goal into small tasks, proposing each
@@ -275,7 +282,7 @@ while it answers); the prompt waits only for the planner's own reply. `ctrl+x` s
 planner's turn and leaves the task run going; `ctrl+s` stops the task run, whichever tab is shown. The
 task list beside it fills with
 drafts as the planner proposes them; when it says something while you're on another tab, the
-Planner tab gets a `*`.
+planner tab gets a `*`.
 
 The planner is one agent for the whole session: each prompt resumes its conversation, so it
 remembers what you discussed. It reads your checkout but can't edit it, uses the model you picked

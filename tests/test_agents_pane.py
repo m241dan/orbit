@@ -120,14 +120,14 @@ async def test_a_real_planners_reply_shows_on_the_planner_tab() -> None:
     launcher.planner_replies = ["Here's a plan."]
     app = OrbitApp(session)
     async with app.run_test(size=(120, 30)) as pilot:
-        await pilot.press("tab", "tab")  # Show another tab, so the reply marks the Planner's.
+        await pilot.press("tab", "tab")  # Show another tab, so the reply marks the planner's.
         await pilot.press("i", *"plan it", "enter")
         for _ in range(50):
             await pilot.pause(0.02)
-            if "Planner *" in tab_strip(app):
+            if "planner *" in tab_strip(app):
                 break
-        assert tab_strip(app) == ["All", "Planner *"]
-        await pilot.press("escape", "tab")
-        assert active_tab(app) == "Planner"
+        assert tab_strip(app)[:3] == ["All", "planner *", "coder"]
+        await pilot.press("escape", "ctrl+t")
+        assert active_tab(app) == "planner"
         assert "agent-1: Here's a plan." in shown(app)
         assert "agent-1 planner · planning · working" in rows(app.query_one(AgentsPane))
