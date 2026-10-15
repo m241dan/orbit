@@ -1,5 +1,6 @@
 from textual.pilot import Pilot
 
+from orbit.agent import AgentSession
 from orbit.protocol import (
     AcceptTask,
     AddTask,
@@ -485,4 +486,14 @@ async def test_a_refused_planner_prompt_frees_the_prompt() -> None:
         assert prompt.disabled
         refused = ErrorOccurred(message="Planning needs agents and a planner role.")
         await feed(session, pilot, refused, BusyChanged(busy=False, lane="planner"))
+        assert not prompt.disabled
+
+
+async def test_a_planner_less_session_leaves_the_prompt_usable() -> None:
+    app = OrbitApp(AgentSession())
+    async with app.run_test(size=(120, 30)) as pilot:
+        prompt = app.query_one(PromptInput)
+        await pilot.press("ctrl+t", "i", *"plan", "enter")
+        for _ in range(5):
+            await pilot.pause()
         assert not prompt.disabled
