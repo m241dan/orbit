@@ -122,10 +122,11 @@ class ConversationTabs(Tabs):
         if self.active != self.PLANNER_TAB_ID:
             self._before_planner = self.active
             self.active = self.PLANNER_TAB_ID
-        elif self._before_planner in self._tab_ids.values():
-            self.active = self._before_planner
         else:
-            self.active = self.ALL_TAB_ID
+            # Back to the tab we came from (All included), or All if that tab has since closed.
+            open_tabs = {self.ALL_TAB_ID, *self._tab_ids.values()}
+            back = self._before_planner
+            self.active = back if back in open_tabs else self.ALL_TAB_ID
 
     def track(self, event: Event) -> None:
         """Add a tab for an agent that started, remove an exited agent's tab, and mark a tab
