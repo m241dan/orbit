@@ -2,9 +2,8 @@
 
 import asyncio
 
-from orbit.agent.domain.roles import BUILT_IN_ROLES, Role
 from orbit.protocol import AgentExited, ErrorOccurred, Event, Settings, TaskSpec, TurnEndReason
-from tests.agent_fakes import Call, Steps, board, run, session_for, verified
+from tests.agent_fakes import ROLES, Call, Steps, board, run, session_for, verified
 
 
 def statuses(events: list[Event]) -> list[str]:
@@ -20,8 +19,8 @@ async def test_an_agent_is_launched_with_its_roles_instructions_and_tools() -> N
     session, _, launcher = session_for(done)
     await asyncio.wait_for(run(session), 5)
     [launch] = launcher.launches
-    assert launch.instructions == BUILT_IN_ROLES["coder"].instructions
-    assert launch.tools == BUILT_IN_ROLES["coder"].tools
+    assert launch.instructions == ROLES["coder"].instructions
+    assert launch.tools == ROLES["coder"].tools
 
 
 async def test_tools_outside_the_role_are_refused_and_unverified_roles_finish_on_their_claim() -> (
@@ -56,19 +55,12 @@ async def test_an_agent_that_runs_past_its_roles_time_limit_is_stopped() -> None
         await asyncio.Event().wait()
         raise AssertionError("unreachable")
 
-    roles = {"coder": BUILT_IN_ROLES["coder"].model_copy(update={"timeout_minutes": 0.001})}
+    roles = {"coder": ROLES["coder"].model_copy(update={"timeout_minutes": 0.001})}
     session, _, _ = session_for(works_forever, roles=roles)
     events = await asyncio.wait_for(run(session, TaskSpec(prompt="Go", settings=Settings())), 5)
     assert any(isinstance(e, ErrorOccurred) and "ran out of time" in e.message for e in events)
     assert AgentExited(agent_id="agent-1", reason="killed") in events
     assert statuses(events) == ["error"]
-
-
-def test_roles_default_to_the_built_in_ones() -> None:
-    session, _, _ = session_for()
-    assert session.agents is not None
-    assert session.agents.roles == BUILT_IN_ROLES
-    assert isinstance(next(iter(session.agents.roles.values())), Role)
 
 
 async def test_without_reviews_suggestions_are_refused() -> None:

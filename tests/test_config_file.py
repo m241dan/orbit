@@ -2,9 +2,12 @@ from pathlib import Path
 
 import pytest
 
-from orbit.agent.domain.roles import BUILT_IN_ROLES, ChecksProposal, ConfigError, OrbitConfig, Setup
+from orbit.agent.domain.roles import ChecksProposal, ConfigError, OrbitConfig, Setup
 from orbit.agent.domain.verification import VerificationStep
+from orbit.agent.external.built_in_roles import read_built_in_roles
 from orbit.agent.external.config_file import CONFIG_PATH, read_config, write_checks
+
+BUILT_IN_ROLES = read_built_in_roles()
 
 
 def write(root: Path, text: str) -> Path:
@@ -15,7 +18,7 @@ def write(root: Path, text: str) -> Path:
 
 
 def test_without_a_file_the_defaults_apply(tmp_path: Path) -> None:
-    assert read_config(str(tmp_path)) == OrbitConfig()
+    assert read_config(str(tmp_path)) == OrbitConfig(roles=BUILT_IN_ROLES)
 
 
 def test_the_file_is_read_over_the_defaults(tmp_path: Path) -> None:
@@ -58,7 +61,7 @@ def test_the_file_is_orbit_config_toml(tmp_path: Path) -> None:
 def test_the_old_roles_toml_is_ignored(tmp_path: Path) -> None:
     (tmp_path / ".orbit").mkdir()
     (tmp_path / ".orbit" / "roles.toml").write_text("fix_attempts = 2\n")
-    assert read_config(str(tmp_path)) == OrbitConfig()
+    assert read_config(str(tmp_path)) == OrbitConfig(roles=BUILT_IN_ROLES)
 
 
 def test_the_file_lists_verification_steps(tmp_path: Path) -> None:

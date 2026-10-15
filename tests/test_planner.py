@@ -3,7 +3,6 @@
 import asyncio
 
 from orbit.agent import AgentSession
-from orbit.agent.domain.roles import BUILT_IN_ROLES
 from orbit.protocol import (
     AcceptTask,
     AddTask,
@@ -22,7 +21,7 @@ from orbit.protocol import (
     TurnEndReason,
     TurnStarted,
 )
-from tests.agent_fakes import Call, session_for
+from tests.agent_fakes import ROLES, Call, session_for
 
 
 async def until_idle(session: AgentSession) -> list[Event]:
@@ -69,7 +68,7 @@ async def test_prompts_to_the_planner_go_to_it_and_proposals_become_drafts() -> 
         "I want a --fast flag.",
     )
     assert second.agent.id == "agent-1"  # The same conversation, resumed.
-    assert first.tools == BUILT_IN_ROLES["planner"].tools and first.cwd == "."
+    assert first.tools == ROLES["planner"].tools and first.cwd == "."
     drafts = board(events)
     assert [(t.status, t.origin, t.task.prompt) for t in drafts] == [
         ("draft", "planner", "Add the flag\n\nAdd --fast to the CLI."),
@@ -103,7 +102,7 @@ async def test_planning_needs_agents() -> None:
 
 
 async def test_planning_needs_a_planner_role() -> None:
-    roles = {name: role for name, role in BUILT_IN_ROLES.items() if name != "planner"}
+    roles = {name: role for name, role in ROLES.items() if name != "planner"}
     session, _, _ = session_for(roles=roles)
     events = await refused_planning(session)
     assert any(isinstance(e, ErrorOccurred) and "planner" in e.message for e in events)

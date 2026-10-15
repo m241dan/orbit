@@ -8,7 +8,7 @@ from typing import Any
 from orbit.agent import Agents, AgentSession, Verification, VerificationStep
 from orbit.agent.application.ports import AgentLaunch, CallHandler, Merge, Reply
 from orbit.agent.domain.agent_task import Limits
-from orbit.agent.domain.roles import REVIEW_ROLES, Setup
+from orbit.agent.domain.roles import BUILT_IN_ROLE_NAMES, REVIEW_ROLES, Setup, built_in_roles
 from orbit.protocol import (
     AddTask,
     AgentReply,
@@ -27,6 +27,9 @@ from orbit.protocol import (
     Usage,
     VerificationChanged,
 )
+
+ROLES = built_in_roles({name: f"You are orbit's {name}." for name in BUILT_IN_ROLE_NAMES})
+"""The built-in roles, with stand-in instructions."""
 
 URL = "http://orbit.test/mcp"
 Call = Callable[..., Awaitable[Reply]]
@@ -207,12 +210,13 @@ def session_for(
     """A session whose tasks run through agents playing ``scripts``, one per launch, and
     whose reviews run through agents playing ``reviewers``.
 
-    ``options`` go to :class:`Agents`, such as ``limits``, ``tree`` or ``roles``.
+    ``options`` go to :class:`Agents`, such as ``limits``, ``tree`` or ``roles`` (:data:`ROLES`
+    unless given).
     """
     host = FakeHost()
     launcher = ScriptedLauncher(host, *scripts, reviewers=reviewers)
     tokens = iter(f"token-{n}" for n in range(1, 100))
-    options = {"limits": Limits(), "exit_grace": 0.5, **options}
+    options = {"limits": Limits(), "exit_grace": 0.5, "roles": ROLES, **options}
     agents = Agents(host, launcher, lambda: next(tokens), **options)
     session = AgentSession(
         verification=verification,

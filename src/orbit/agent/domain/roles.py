@@ -1,13 +1,15 @@
 """Roles agents work in, orbit's limits, its verification steps and worktree setup: built-in
 defaults a project file can change.
 
+The built-in roles' instructions aren't kept here: whoever builds the roles passes them in.
+
 A role says what an agent is told about its job, which of orbit's tools it may call, whether its
 claims of being done are verified, and how long it may take. Its model and tool access are the
 defaults for tasks orbit queues in that role; a task the user queues keeps its own settings.
 """
 
 import shlex
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
@@ -84,62 +86,46 @@ def suggested_task(coder: Role, title: str, prompt: str) -> TaskSpec:
     return role_task(CODER, coder, f"{title.strip()}\n\n{prompt.strip()}")
 
 
-BUILT_IN_ROLES: dict[str, Role] = {
-    CODER: Role(
-        instructions=(
-            "You are orbit's coder. Make the change your task asks for in the working directory,"
-            " keeping the project's checks passing. You may run a single check with run_check"
-            " before claiming you're done. Don't commit: orbit commits your work once it's"
-            " verified."
-        ),
-        tool_access="full",
-        tools=("get_task", "complete_task", "run_check", "report_progress", "give_up"),
-    ),
-    REVIEWER: Role(
-        instructions=(
-            "You are orbit's reviewer. Review the change your task names: look for bugs, missing"
-            " tests and unclear code. Don't edit files. Suggest fixes worth making with"
-            " suggest_task, then call complete_task with your findings."
-        ),
-        tools=("get_task", "complete_task", "report_progress", "give_up", "suggest_task"),
-        verify=False,
-    ),
-    SUPER_REVIEWER: Role(
-        instructions=(
-            "You are orbit's super reviewer. Review the whole codebase, not only recent changes:"
-            " look for duplication, structure that no longer fits, and gaps in tests. Don't edit"
-            " files. Suggest improvements worth making with suggest_task, then call complete_task"
-            " with your findings."
-        ),
-        model="opus",
-        tools=("get_task", "complete_task", "report_progress", "give_up", "suggest_task"),
-        verify=False,
-    ),
-    PLANNER: Role(
-        instructions=(
-            "You are orbit's planner, in conversation with the user. Help them break their goal"
-            " into small tasks a coder can do one at a time, in order, each with a clear way to"
-            " tell it's done. Propose each with propose_task (a short title, and a prompt saying"
-            " what to change and how to check it); they appear as drafts the user accepts or"
-            " drops. Ask when something is unclear. Don't edit files."
-        ),
-        tools=("propose_task", "report_progress"),
-        verify=False,
-    ),
-    CONFIGURATOR: Role(
-        instructions=(
-            "You are orbit's configurator. Work out how this project checks its code: inspect"
-            " the repository (CI workflows, .pre-commit-config.yaml, package.json scripts,"
-            " pyproject.toml, the Makefile and so on) to find the checks it already uses."
-            " Propose them with propose_checks, quick ones first, plus a setup command that"
-            " makes a fresh checkout ready and the files whose changes should rerun it. Orbit"
-            " runs your proposal, then shows it to the user. Don't edit files. When orbit"
-            " reports a failure or the user asks for changes, revise and propose again."
-        ),
-        tools=("get_task", "propose_checks", "report_progress", "give_up"),
-        verify=False,
-    ),
+_BUILT_IN_FIELDS: dict[str, dict[str, Any]] = {
+    CODER: {
+        "tool_access": "full",
+        "tools": ("get_task", "complete_task", "run_check", "report_progress", "give_up"),
+    },
+    REVIEWER: {
+        "tools": ("get_task", "complete_task", "report_progress", "give_up", "suggest_task"),
+        "verify": False,
+    },
+    SUPER_REVIEWER: {
+        "model": "opus",
+        "tools": ("get_task", "complete_task", "report_progress", "give_up", "suggest_task"),
+        "verify": False,
+    },
+    PLANNER: {
+        "tools": ("propose_task", "report_progress"),
+        "verify": False,
+    },
+    CONFIGURATOR: {
+        "tools": ("get_task", "propose_checks", "report_progress", "give_up"),
+        "verify": False,
+    },
 }
+"""Each built-in role's fields, all but its instructions."""
+
+BUILT_IN_ROLE_NAMES = tuple(_BUILT_IN_FIELDS)
+
+
+def built_in_roles(instructions: Mapping[str, str]) -> dict[str, Role]:
+    """The built-in roles, each told ``instructions[its name]``.
+
+    Raises :class:`ConfigError`, naming them, if any have no instructions.
+    """
+    missing = [name for name in BUILT_IN_ROLE_NAMES if not instructions.get(name, "").strip()]
+    if missing:
+        raise ConfigError(f"no instructions for the built-in roles {missing}")
+    return {
+        name: Role(instructions=instructions[name], **fields)
+        for name, fields in _BUILT_IN_FIELDS.items()
+    }
 
 
 class VerificationConfig(_Config):
@@ -251,7 +237,7 @@ class OrbitConfig(_Config):
     super_review_every: int = Field(default=_REVIEW_LIMITS.super_every, ge=1)
     review_suggestions: int = Field(default=_REVIEW_LIMITS.suggestions, ge=1)
     super_review_suggestions: int = Field(default=_REVIEW_LIMITS.super_suggestions, ge=1)
-    roles: dict[str, Role] = Field(default_factory=lambda: dict(BUILT_IN_ROLES))
+    roles: dict[str, Role]
     verification: VerificationConfig = VerificationConfig()
     setup: Setup | None = None
 
@@ -269,23 +255,25 @@ class OrbitConfig(_Config):
         )
 
 
-def load_config(data: dict[str, Any]) -> OrbitConfig:
-    """The configuration ``data`` (a project file's contents) describes over the defaults.
+def load_config(data: dict[str, Any], built_in: Mapping[str, Role]) -> OrbitConfig:
+    """The configuration ``data`` (a project file's contents) describes over the defaults, whose
+    roles are ``built_in``.
 
     A role it names that's built in keeps the fields it doesn't set; any other role is new.
     Raises :class:`ConfigError` if it's invalid.
     """
     data = dict(data)
-    if isinstance(data.get("roles"), dict):
-        data["roles"] = _with_built_in_roles(data["roles"])
+    roles = data.get("roles", {})
+    if isinstance(roles, dict):
+        data["roles"] = _with_built_in_roles(roles, built_in)
     try:
         return OrbitConfig.model_validate(data)
     except ValidationError as exc:
         raise ConfigError(_describe(exc)) from None
 
 
-def _with_built_in_roles(roles: dict[str, Any]) -> dict[str, Any]:
-    merged: dict[str, Any] = {name: role.model_dump() for name, role in BUILT_IN_ROLES.items()}
+def _with_built_in_roles(roles: dict[str, Any], built_in: Mapping[str, Role]) -> dict[str, Any]:
+    merged: dict[str, Any] = {name: role.model_dump() for name, role in built_in.items()}
     for name, fields in roles.items():
         base = merged.get(name, {})
         merged[name] = {**base, **fields} if isinstance(fields, dict) else fields

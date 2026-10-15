@@ -7,20 +7,23 @@ import tomlkit
 from tomlkit.items import AoT, Table
 
 from orbit.agent.domain.roles import ChecksProposal, ConfigError, OrbitConfig, load_config
+from orbit.agent.external.built_in_roles import read_built_in_roles
 
 CONFIG_PATH = ".orbit/config.toml"
 
 
 def read_config(root: str = ".") -> OrbitConfig:
-    """The configuration in ``root``'s file over the defaults; just the defaults without one.
+    """The configuration in ``root``'s file over the defaults, whose roles are the built-in
+    ones; just the defaults without a file.
 
     Raises :class:`ConfigError`, naming the file, if it's invalid.
     """
+    built_in = read_built_in_roles()
     path = Path(root) / CONFIG_PATH
     if not path.exists():
-        return load_config({})
+        return load_config({}, built_in)
     try:
-        return load_config(tomllib.loads(path.read_text()))
+        return load_config(tomllib.loads(path.read_text()), built_in)
     except (tomllib.TOMLDecodeError, ConfigError) as exc:
         raise ConfigError(f"{path}: {exc}") from None
 

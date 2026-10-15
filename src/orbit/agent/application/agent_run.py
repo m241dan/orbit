@@ -31,7 +31,6 @@ from orbit.agent.domain.agents import Agent, AgentRegistry, bootstrap_prompt
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.reviews import ReviewLimits
 from orbit.agent.domain.roles import (
-    BUILT_IN_ROLES,
     ORBIT_TOOLS,
     ChecksProposal,
     ConfigError,
@@ -117,10 +116,10 @@ class Agents:
     """How tasks are run through agents.
 
     ``host`` is where agents reach orbit, ``launcher`` starts them, and ``new_token``
-    makes the unguessable tokens they identify themselves with. ``exit_grace`` is how
-    long, in seconds, an agent may take to exit once its task is finished before it's stopped.
-    ``tree`` is where they work and their work is merged from; without one they work in the
-    current directory and nothing is committed. ``roles`` are the roles tasks can name.
+    makes the unguessable tokens they identify themselves with. ``roles`` are the roles tasks
+    can name. ``exit_grace`` is how long, in seconds, an agent may take to exit once its task
+    is finished before it's stopped. ``tree`` is where they work and their work is merged
+    from; without one they work in the current directory and nothing is committed.
     With ``review`` (and a tree), landed work is reviewed, and the whole codebase super
     reviewed, within ``review_limits``. ``proposal_review`` is where the user decides on
     proposed checks; without it, proposals are refused. ``write_config`` saves the checks the
@@ -130,10 +129,10 @@ class Agents:
     host: AgentHost
     launcher: AgentLauncher
     new_token: Callable[[], str]
+    roles: Mapping[str, Role]
     limits: Limits = field(default_factory=Limits)
     exit_grace: float = 10.0
     tree: CoderTree | None = None
-    roles: Mapping[str, Role] = field(default_factory=lambda: dict(BUILT_IN_ROLES))
     review: bool = False
     review_limits: ReviewLimits = field(default_factory=ReviewLimits)
     proposal_review: ProposalReview | None = None

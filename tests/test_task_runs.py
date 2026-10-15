@@ -39,6 +39,7 @@ from orbit.protocol import (
     VerificationStarted,
 )
 from tests.agent_fakes import (
+    ROLES,
     Call,
     FakeHost,
     FakeWorkspace,
@@ -374,7 +375,7 @@ async def test_usage_arriving_after_the_task_was_removed_is_skipped() -> None:
     async def publish(event: Event) -> None:
         events.append(event)
 
-    desk = AgentDesk(Agents(host, launcher, lambda: "token-1", exit_grace=0.5), publish)
+    desk = AgentDesk(Agents(host, launcher, lambda: "token-1", ROLES, exit_grace=0.5), publish)
     outcome = await asyncio.wait_for(AgentRun(task_id, tasks, None, desk).run(None, "."), 5)
     assert outcome.status == "completed"
     assert AgentExited(agent_id="agent-1", reason="finished") in events

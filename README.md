@@ -319,6 +319,11 @@ defaults for tasks orbit queues in that role; a task you queue keeps its own set
 | `planner` | same as `reviewer` | no | default / `restricted` |
 | `configurator` | `get_task`, `propose_checks`, `report_progress`, `give_up` | no | default / `restricted` |
 
+What each built-in role is told, its instructions, is the Markdown file named for it in
+[`src/orbit/agent/external/instructions/`](src/orbit/agent/external/instructions/) (for example
+`coder.md`), shipped with the package and read when orbit starts. A project can still replace a
+role's instructions with `instructions` in `.orbit/config.toml`.
+
 An agent calling a tool its role doesn't have gets an error reply (the CLI only allows its role's
 tools, too); an agent still working when its role's time runs out is stopped and the task fails.
 
@@ -400,7 +405,8 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     `claude -p --output-format stream-json` runs connected to orbit (`run_agent`, and `converse`
     for the planner, which resumes its Claude session turn after turn); `McpHost` is orbit's
     MCP server; `GitCoderTree` is the coder's worktree and its snapshots; `config_file` reads
-    `.orbit/config.toml`; `checks` runs a verification step as a process (`run_step`);
+    `.orbit/config.toml`; `built_in_roles` reads the built-in roles' instructions from
+    `instructions/*.md`; `checks` runs a verification step as a process (`run_step`);
     `workspace` fingerprints the git working tree.
   - `application`: `AgentSession` implements `Session`: it takes commands, asks the domain what
     follows, drives the ports and publishes events. `AgentRun` sees one task through one agent and
@@ -410,10 +416,10 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     `AgentLauncher`, `CoderTree`, `StepRunner`, `Workspace`).
   - `domain`: the rules, with no I/O: the `TaskBoard` (task order, statuses, fix chains),
     `AgentTask` (what orbit replies to an agent, and when its work is verified), the
-    `AgentRegistry` (agent ids and tokens), `roles` (built-in roles, orbit's limits, its
-    verification steps and worktree setup), `ReviewPlanner` (when to review, batches, rounds and
-    caps), commit messages, when a task needs verifying, how many fixes to try per step, and the
-    fix prompt.
+    `AgentRegistry` (agent ids and tokens), `roles` (built-in roles, given their instructions,
+    orbit's limits, its verification steps and worktree setup), `ReviewPlanner` (when to
+    review, batches, rounds and caps), commit messages, when a task needs verifying, how many
+    fixes to try per step, and the fix prompt.
 - `orbit.tui`: frontend. Sends commands and renders events. Imports only `orbit.protocol`.
   `view` turns state and events into text and doesn't import Textual; the widgets (`tasks`,
   `agents`, `widgets`) lay it out.
