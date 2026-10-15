@@ -217,12 +217,11 @@ AgentNote = (
     | AgentRequest
     | AgentReply
     | ProgressNoted
-    | TaskMerged
     | Notice
     | StartupChecked
 )
-"""Events shown as a single transcript entry each: agents' activity, merges, notices and the
-startup check's result."""
+"""Events shown as a single transcript entry each: agents' activity, notices and the startup
+check's result."""
 
 
 def activity_entry(event: AgentNote) -> tuple[str, EntryKind]:

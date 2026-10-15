@@ -167,13 +167,13 @@ def test_merges_and_notices_become_transcript_entries() -> None:
     assert note_entry(Notice(message="2 stashes")) == ("📌 2 stashes", "verify")
 
 
-def test_activity_entries_cover_agents_exchanges_merges_and_notices() -> None:
+def test_activity_entries_cover_agents_exchanges_and_notices() -> None:
     started = AgentStarted(agent_id="a", role="coder", task_id="1")
     assert activity_entry(started) == agent_entry(started)
     note = ProgressNoted(agent_id="a", task_id="1", note="hi")
     assert activity_entry(note) == exchange_entry(note)
-    merged = TaskMerged(task_id="1", result="merged")
-    assert activity_entry(merged) == note_entry(merged)
+    notice = Notice(message="2 stashes")
+    assert activity_entry(notice) == note_entry(notice)
 
 
 def test_agents_are_tracked_from_their_events() -> None:
