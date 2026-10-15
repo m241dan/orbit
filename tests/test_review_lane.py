@@ -475,3 +475,52 @@ async def test_cancelling_a_review_that_is_not_running_does_nothing() -> None:
     lane = session._lane
     assert lane is not None
     lane.cancel("42")
+
+
+async def test_a_review_can_suggest_after_its_first_suggestion_landed() -> None:
+    suggested = asyncio.Event()
+    replies: list[Reply] = []
+    sessions: list[AgentSession] = []
+
+    async def waits_for_suggestion(call: Call) -> TurnEndReason:
+        await suggested.wait()
+        return await claims_done(call)
+
+    async def suggests_after_landing(call: Call) -> TurnEndReason:
+        await call("get_task")
+        replies.append(await call("suggest_task", title="Add tests", prompt="Please."))
+        suggested.set()
+        first = sessions[0]._board.get("4")
+        while first.status != "completed":
+            await asyncio.sleep(0.01)
+            first = sessions[0]._board.get("4")
+        await asyncio.sleep(0.1)  # Let the work lane tell the review lane it landed.
+        replies.append(await call("suggest_task", title="Rename x", prompt="Please."))
+        await call("complete_task", summary="Reviewed")
+        return "completed"
+
+    session, _, _ = session_for(
+        claims_done,
+        waits_for_suggestion,
+        claims_done,
+        claims_done,
+        reviewers=(suggests_after_landing, suggests(), suggests()),
+        tree=FakeTree(),
+        review=True,
+    )
+    sessions.append(session)
+    await start(session, "one", "two")
+    events = await asyncio.wait_for(settle(session), 10)
+    assert [r.is_error for r in replies] == [False, False]
+    shown = [(t.id, t.task.role, t.status, t.batch) for t in board(events)]
+    assert shown == [
+        ("1", "coder", "completed", None),
+        ("2", "coder", "completed", None),
+        ("3", "reviewer", "completed", None),
+        ("4", "coder", "completed", "batch-1"),
+        ("5", "reviewer", "completed", None),  # Of task 2.
+        ("6", "coder", "completed", "batch-1"),
+        ("7", "reviewer", "completed", None),
+    ]
+    batch_review = board(events)[6]
+    assert batch_review.task.prompt.startswith("Review the 2 commits made for review batch-1")

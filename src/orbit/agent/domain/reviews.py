@@ -42,6 +42,7 @@ class _Batch:
     finished: set[str] = field(default_factory=set)
     commits: list[str] = field(default_factory=list)
     missing: list[str] = field(default_factory=list)
+    filling: bool = True  # Its review is still running, and may suggest more.
 
 
 class ReviewPlanner:
@@ -79,13 +80,20 @@ class ReviewPlanner:
         """Task ``task_id`` joined ``batch``: a suggestion, or a fix of one."""
         self._open[batch].tasks.append(task_id)
 
-    def close_if_empty(self, batch: str) -> None:
-        """The review behind ``batch`` is over: if it suggested nothing, stop waiting on it."""
-        if batch in self._open and not self._open[batch].tasks:
-            del self._open[batch]
+    def review_ended(self, batch_id: str) -> ReviewJob | None:
+        """The review behind ``batch_id`` is over; returns the review of the batch, if that's
+        due now. A batch it suggested nothing into is closed."""
+        batch = self._open[batch_id]
+        batch.filling = False
+        if not batch.tasks:
+            del self._open[batch_id]
+            return None
+        return self._due(batch_id)
 
     def refusal(self, batch: str, title: str, queued: Sequence[TaskState]) -> str | None:
         """Why a suggestion titled ``title`` can't join ``batch``; ``None`` if it can."""
+        if batch not in self._open:
+            return "This review's suggestions are closed: its batch is over."
         cap = self._open[batch].cap
         if len(self._open[batch].tasks) >= cap:
             return f"This review has already suggested {cap} tasks, the most allowed."
@@ -136,7 +144,7 @@ class ReviewPlanner:
 
     def _due(self, batch_id: str) -> ReviewJob | None:
         batch = self._open[batch_id]
-        if any(task not in batch.finished for task in batch.tasks):
+        if batch.filling or any(task not in batch.finished for task in batch.tasks):
             return None
         del self._open[batch_id]
         if not batch.commits:

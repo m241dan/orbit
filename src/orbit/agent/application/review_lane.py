@@ -172,11 +172,10 @@ class ReviewLane:
                 await self._tree.drop(root)
 
     async def _after(self, batch: str | None) -> None:
-        """A review ended: wait on its batch's suggestions, and run them, if it made any."""
+        """A review ended: review its batch if that's done, else run the suggestions it made."""
         if batch is None:
             return
-        self.planner.close_if_empty(batch)
-        await self._publish_status()
+        await self._queue(self.planner.review_ended(batch))
         if batch in self.planner.open_batches:
             await self._wake_work()
 

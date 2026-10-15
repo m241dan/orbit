@@ -38,11 +38,18 @@ def test_a_review_opens_a_batch_its_suggestions_join_one_round_on() -> None:
     assert reviews.round_of(batch) == 1
 
 
+def filled(reviews: ReviewPlanner, *tasks: str) -> str:
+    """A batch whose review suggested ``tasks`` and ended."""
+    batch = reviews.open_batch(ReviewJob(commits=("a",), round=0, batch=None))
+    for task in tasks:
+        reviews.added(batch, task)
+    assert reviews.review_ended(batch) is None
+    return batch
+
+
 def test_a_batch_is_reviewed_once_all_its_tasks_have_finished() -> None:
     reviews = planner()
-    batch = reviews.open_batch(ReviewJob(commits=("a",), round=0, batch=None))
-    reviews.added(batch, "2")
-    reviews.added(batch, "3")
+    batch = filled(reviews, "2", "3")
     assert reviews.landed(state("2", origin="review", batch=batch), "c2") is None
     job = reviews.landed(state("3", origin="review", batch=batch), "c3")
     assert job == ReviewJob(commits=("c2", "c3"), round=1, batch=batch)
@@ -50,9 +57,7 @@ def test_a_batch_is_reviewed_once_all_its_tasks_have_finished() -> None:
 
 def test_batch_tasks_that_end_without_a_commit_still_finish_the_batch() -> None:
     reviews = planner()
-    batch = reviews.open_batch(ReviewJob(commits=("a",), round=0, batch=None))
-    reviews.added(batch, "2")
-    reviews.added(batch, "3")
+    batch = filled(reviews, "2", "3")
     assert reviews.ended(state("2", status="gave_up", origin="review", batch=batch)) is None
     job = reviews.landed(state("3", origin="review", batch=batch), "c3")
     assert job == ReviewJob(commits=("c3",), round=1, batch=batch, missing=("2",))
@@ -60,37 +65,34 @@ def test_batch_tasks_that_end_without_a_commit_still_finish_the_batch() -> None:
 
 def test_a_batch_whose_tasks_all_failed_is_not_reviewed() -> None:
     reviews = planner()
-    batch = reviews.open_batch(ReviewJob(commits=("a",), round=0, batch=None))
-    reviews.added(batch, "2")
+    batch = filled(reviews, "2")
     assert reviews.ended(state("2", status="error", origin="review", batch=batch)) is None
     assert not reviews.paused
 
 
 def test_a_batch_with_no_suggestions_is_closed_without_a_review() -> None:
     reviews = planner()
-    batch = reviews.open_batch(ReviewJob(commits=("a",), round=0, batch=None))
-    reviews.close_if_empty(batch)
+    batch = filled(reviews)
     assert reviews.round_of(batch) == 1
     assert batch not in reviews.open_batches
 
 
 def test_review_pauses_once_the_next_round_would_pass_the_limit() -> None:
     reviews = planner(rounds=2)
-    first = reviews.open_batch(ReviewJob(commits=("a",), round=0, batch=None))
-    reviews.added(first, "2")
+    first = filled(reviews, "2")
     job = reviews.landed(state("2", origin="review", batch=first), "c2")
     assert job is not None and job.round == 1
     second = reviews.open_batch(job)
     assert reviews.round_of(second) == 2
     reviews.added(second, "3")
+    reviews.review_ended(second)
     assert reviews.landed(state("3", origin="review", batch=second), "c3") is None
     assert reviews.paused
 
 
 def test_a_commit_from_the_users_task_resumes_review() -> None:
     reviews = planner(rounds=1)
-    batch = reviews.open_batch(ReviewJob(commits=("a",), round=0, batch=None))
-    reviews.added(batch, "2")
+    batch = filled(reviews, "2")
     reviews.landed(state("2", origin="review", batch=batch), "c2")
     assert reviews.paused
     job = reviews.landed(state("9", origin="planner"), "c9")
@@ -127,17 +129,13 @@ def test_tasks_outside_any_batch_from_reviews_are_not_reviewed() -> None:
 
 def test_a_batch_with_suggestions_stays_open_after_its_review() -> None:
     reviews = planner()
-    batch = reviews.open_batch(ReviewJob(commits=("a",), round=0, batch=None))
-    reviews.added(batch, "2")
-    reviews.close_if_empty(batch)
+    batch = filled(reviews, "2")
     assert batch in reviews.open_batches
 
 
 def test_a_task_whose_fix_carries_its_work_on_is_not_missing() -> None:
     reviews = planner()
-    batch = reviews.open_batch(ReviewJob(commits=("a",), round=0, batch=None))
-    reviews.added(batch, "2")
-    reviews.added(batch, "3")  # The fix of task 2.
+    batch = filled(reviews, "2", "3")  # Task 3 fixes task 2.
     assert reviews.ended(state("2", status="unverified", origin="review", batch=batch)) is None
     job = reviews.landed(state("3", origin="review", batch=batch), "c3")
     assert job == ReviewJob(commits=("c3",), round=1, batch=batch)
@@ -145,8 +143,7 @@ def test_a_task_whose_fix_carries_its_work_on_is_not_missing() -> None:
 
 def test_landing_after_its_batch_closed_is_not_reviewed_again() -> None:
     reviews = planner()
-    batch = reviews.open_batch(ReviewJob(commits=("a",), round=0, batch=None))
-    reviews.added(batch, "2")
+    batch = filled(reviews, "2")
     reviews.landed(state("2", origin="review", batch=batch), "c2")
     assert reviews.landed(state("2", origin="review", batch=batch), "c2") is None
 
@@ -179,8 +176,7 @@ def test_a_super_review_is_due_every_so_many_commits() -> None:
 
 def test_a_super_review_due_while_paused_waits_until_review_resumes() -> None:
     reviews = ReviewPlanner(rounds=1, cap=5, super_every=1, super_cap=10)
-    batch = reviews.open_batch(ReviewJob(commits=("a",), round=0, batch=None))
-    reviews.added(batch, "2")
+    batch = filled(reviews, "2")
     reviews.landed(state("2", origin="review", batch=batch), "c2")
     assert reviews.paused
     assert not reviews.count()
@@ -213,3 +209,33 @@ def test_a_super_review_prompt_asks_about_the_whole_codebase() -> None:
     prompt = review_prompt(job, "", 10)
     assert prompt.startswith("Super review of the codebase at abc1234\n")
     assert "whole codebase" in prompt and "at most 10" in prompt and "suggest_task" in prompt
+
+
+def test_a_batch_is_not_reviewed_while_its_review_is_still_suggesting() -> None:
+    reviews = planner()
+    batch = reviews.open_batch(ReviewJob(commits=("a",), round=0, batch=None))
+    reviews.added(batch, "2")
+    assert reviews.landed(state("2", origin="review", batch=batch), "c2") is None
+    assert reviews.refusal(batch, "More", queued=()) is None
+    reviews.added(batch, "3")
+    assert reviews.landed(state("3", origin="review", batch=batch), "c3") is None
+    job = reviews.review_ended(batch)
+    assert job == ReviewJob(commits=("c2", "c3"), round=1, batch=batch)
+    assert batch not in reviews.open_batches
+
+
+def test_a_batch_still_working_when_its_review_ends_is_reviewed_later() -> None:
+    reviews = planner()
+    batch = reviews.open_batch(ReviewJob(commits=("a",), round=0, batch=None))
+    reviews.added(batch, "2")
+    assert reviews.review_ended(batch) is None
+    assert batch in reviews.open_batches
+    job = reviews.landed(state("2", origin="review", batch=batch), "c2")
+    assert job == ReviewJob(commits=("c2",), round=1, batch=batch)
+
+
+def test_suggesting_into_a_closed_batch_is_refused() -> None:
+    reviews = planner()
+    batch = filled(reviews)
+    refusal = reviews.refusal(batch, "Late", queued=())
+    assert refusal is not None and "over" in refusal
