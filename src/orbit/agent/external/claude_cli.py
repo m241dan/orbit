@@ -21,7 +21,6 @@ from orbit.protocol import (
     AssistantMessage,
     ErrorOccurred,
     Event,
-    Settings,
     ToolAccess,
     ToolCallFinished,
     ToolCallStarted,
@@ -189,43 +188,55 @@ class ClaudeCliRunner:
 
     def __init__(self, command: Sequence[str] = ("claude",)) -> None:
         self._command = tuple(command)
-        self._conversations: dict[str, _CliSession] = {}  # Agent id -> its session.
+        self._conversations: dict[str, str] = {}  # Agent id -> its Claude session's id.
 
     async def run_agent(self, launch: AgentLaunch) -> AsyncIterator[Event]:
         """Run the agent as a new Claude session connected to orbit, as ``launch`` says."""
-        async for event in self._session(launch).turn(launch.agent.id, launch):
+        async for event in self._turn(launch, None).run(launch.agent.id, launch.prompt):
             yield event
 
     async def converse(self, turn_id: str, launch: AgentLaunch) -> AsyncIterator[Event]:
         """A turn of the agent's conversation: its first starts a Claude session, later ones
         resume it, each agent's apart from the others'."""
-        session = self._conversations.get(launch.agent.id)
-        if session is None:
-            session = self._conversations[launch.agent.id] = self._session(launch)
-        async for event in session.turn(turn_id, launch):
-            yield event
+        agent_id = launch.agent.id
+        turn = self._turn(launch, self._conversations.get(agent_id))
+        try:
+            async for event in turn.run(turn_id, launch.prompt):
+                yield event
+        finally:
+            if turn.session_id:
+                self._conversations[agent_id] = turn.session_id
 
-    def _session(self, launch: AgentLaunch) -> "_CliSession":
-        return _CliSession(self._command, agent_env(launch.agent), launch.cwd)
+    def _turn(self, launch: AgentLaunch, resume: str | None) -> "_Turn":
+        """A turn of ``launch``'s agent, resuming the Claude session ``resume`` if given."""
+        args = [*self._command, *STREAM_ARGS]
+        if launch.settings.model:
+            args += ["--model", launch.settings.model]
+        args += TOOL_ACCESS_ARGS[launch.settings.tool_access]
+        if resume:
+            args += ["--resume", resume]
+        args += agent_args(launch)
+        return _Turn(args, agent_env(launch.agent), launch.cwd, launch.agent.id)
 
 
-class _CliSession:
-    """One Claude session of an agent: its first turn starts it, later ones resume it."""
+class _Turn:
+    """One run of the CLI: sends a prompt and translates what it says, noting the id of the
+    Claude session it ran in."""
 
-    def __init__(self, command: tuple[str, ...], env: Mapping[str, str], cwd: str) -> None:
-        self._command = command
+    def __init__(self, args: Sequence[str], env: Mapping[str, str], cwd: str, agent_id: str):
+        self._args = args
         self._env = env
         self._cwd = cwd
-        self._session_id: str | None = None
+        self._agent_id = agent_id
+        self.session_id: str | None = None
 
-    async def turn(self, turn_id: str, launch: AgentLaunch) -> AsyncIterator[Event]:
-        args = [*self._args(launch.settings), *agent_args(launch)]
-        async for event in self._run(turn_id, args, launch.prompt):
-            yield event.model_copy(update={"agent_id": launch.agent.id})
+    async def run(self, turn_id: str, prompt: str) -> AsyncIterator[Event]:
+        async for event in self._run(turn_id, prompt):
+            yield event.model_copy(update={"agent_id": self._agent_id})
 
-    async def _run(self, turn_id: str, args: Sequence[str], prompt: str) -> AsyncIterator[Event]:
+    async def _run(self, turn_id: str, prompt: str) -> AsyncIterator[Event]:
         yield TurnStarted(turn_id=turn_id)
-        process = await self._start(args)
+        process = await self._start()
         try:
             async for event in self._converse(turn_id, process, prompt):
                 yield event
@@ -235,19 +246,10 @@ class _CliSession:
                 process.kill()
                 await process.wait()
 
-    def _args(self, settings: Settings) -> list[str]:
-        args = [*self._command, *STREAM_ARGS]
-        if settings.model:
-            args += ["--model", settings.model]
-        args += TOOL_ACCESS_ARGS[settings.tool_access]
-        if self._session_id:
-            args += ["--resume", self._session_id]
-        return args
-
-    async def _start(self, args: Sequence[str]) -> asyncio.subprocess.Process:
+    async def _start(self) -> asyncio.subprocess.Process:
         try:
             return await asyncio.create_subprocess_exec(
-                *args,
+                *self._args,
                 env=self._env,
                 cwd=self._cwd,
                 stdin=asyncio.subprocess.PIPE,
@@ -257,7 +259,7 @@ class _CliSession:
             )
         except FileNotFoundError:
             raise RuntimeError(
-                f"Could not start {self._command[0]!r}; is the Claude CLI installed and on PATH?"
+                f"Could not start {self._args[0]!r}; is the Claude CLI installed and on PATH?"
             ) from None
 
     async def _converse(
@@ -299,7 +301,7 @@ class _CliSession:
         except json.JSONDecodeError:
             raise RuntimeError(f"Unexpected output from claude: {line[:200]}") from None
         if session_id := message.get("session_id"):
-            self._session_id = session_id
+            self.session_id = session_id
         if message.get("subtype") == "init":
             check_orbit_connected(message)
         return message
