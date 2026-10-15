@@ -123,11 +123,15 @@ class VerificationConfig(_Config):
     @field_validator("steps")
     @classmethod
     def _complete_steps(cls, steps: tuple[VerificationStep, ...]) -> tuple[VerificationStep, ...]:
+        numbers: dict[str, int] = {}
         for number, step in enumerate(steps, start=1):
             if not step.name:
                 raise ValueError(f"step {number} has no name")
             if not step.command:
                 raise ValueError(f"step {number} has no command")
+            if step.name in numbers:
+                raise ValueError(f"step {number} has the same name as step {numbers[step.name]}")
+            numbers[step.name] = number
         return steps
 
 

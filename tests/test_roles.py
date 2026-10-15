@@ -171,6 +171,18 @@ def test_setup_lists_the_files_it_watches() -> None:
         ({"verification": {"steps": [{"name": "", "command": ["x"]}]}}, "step 1 has no name"),
         ({"verification": {"steps": [{"name": "a", "command": []}]}}, "step 1 has no command"),
         ({"verification": {"steps": [{"name": "a"}]}}, "verification.steps.0.command"),
+        (
+            {
+                "verification": {
+                    "steps": [
+                        {"name": "a", "command": ["x"]},
+                        {"name": "b", "command": ["y"]},
+                        {"name": "a", "command": ["z"]},
+                    ]
+                }
+            },
+            "step 3 has the same name as step 1",
+        ),
         ({"verification": {"steps": [{"name": "a", "command": "x", "b": 1}]}}, "steps.0.b"),
         ({"verification": {"surprise": 1}}, "verification.surprise"),
         ({"setup": {}}, "setup.command"),
