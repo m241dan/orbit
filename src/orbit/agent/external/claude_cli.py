@@ -27,6 +27,7 @@ from orbit.protocol import (
     ToolCallStarted,
     TurnFinished,
     TurnStarted,
+    Usage,
 )
 
 STREAM_ARGS = ("-p", "--output-format", "stream-json", "--verbose")
@@ -37,6 +38,18 @@ TOOL_ACCESS_ARGS: dict[ToolAccess, tuple[str, ...]] = {
     "restricted": (),
     "full": ("--permission-mode", "bypassPermissions"),
 }
+# What a ``result`` message reports about the turn's cost: token counts under ``usage``, and
+# totals named differently from Usage's fields.
+TOKEN_KINDS = {
+    kind: kind
+    for kind in (
+        "input_tokens",
+        "output_tokens",
+        "cache_creation_input_tokens",
+        "cache_read_input_tokens",
+    )
+}
+USAGE_TOTALS = {"total_cost_usd": "cost_usd", "num_turns": "turns", "duration_ms": "duration_ms"}
 # Tool results (e.g. whole files) arrive as single JSON lines; allow large ones.
 LINE_LIMIT = 64 * 1024 * 1024
 
@@ -136,14 +149,27 @@ def _tool_output(content: str | list[dict[str, Any]]) -> str:
 
 
 def _result_events(turn_id: str, message: dict[str, Any]) -> list[Event]:
+    usage = _usage(message)
     if message.get("subtype") == "error_max_turns":
-        return [TurnFinished(turn_id=turn_id, reason="max_steps")]
+        return [TurnFinished(turn_id=turn_id, reason="max_steps", usage=usage)]
     if message.get("is_error"):
         return [
             ErrorOccurred(turn_id=turn_id, message=message.get("result") or message["subtype"]),
-            TurnFinished(turn_id=turn_id, reason="error"),
+            TurnFinished(turn_id=turn_id, reason="error", usage=usage),
         ]
-    return [TurnFinished(turn_id=turn_id, reason="completed")]
+    return [TurnFinished(turn_id=turn_id, reason="completed", usage=usage)]
+
+
+def _usage(message: dict[str, Any]) -> Usage | None:
+    """What the turn a ``result`` message ends cost, if it says anything about that."""
+    tokens = message.get("usage") or {}
+    fields = {**_known(message, USAGE_TOTALS), **_known(tokens, TOKEN_KINDS)}
+    return Usage(**fields) if fields else None
+
+
+def _known(values: dict[str, Any], names: Mapping[str, str]) -> dict[str, Any]:
+    """The ``values`` given under ``names``' keys, keyed by the Usage fields they name."""
+    return {field: values[key] for key, field in names.items() if values.get(key) is not None}
 
 
 def _pipes(

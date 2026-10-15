@@ -24,6 +24,7 @@ from orbit.protocol import (
     TurnEndReason,
     TurnFinished,
     TurnStarted,
+    Usage,
     VerificationChanged,
 )
 
@@ -60,6 +61,8 @@ class ScriptedLauncher:
         self.reviewers = list(reviewers)
         self.launches: list[AgentLaunch] = []
         self.planner_turns: list[Script] = []  # Played by converse(), one per turn.
+        # The usage of each launch's turns, one launch at a time; one unmetered turn if none.
+        self.usages: list[tuple[Usage, ...]] = []
 
     async def run_agent(self, launch: AgentLaunch) -> AsyncIterator[Event]:
         self.launches.append(launch)
@@ -73,7 +76,8 @@ class ScriptedLauncher:
             return await self.host.call(agent.token, tool, **arguments)
 
         reason = await script(call)
-        yield TurnFinished(turn_id=agent.id, reason=reason, agent_id=agent.id)
+        for usage in self.usages.pop(0) if self.usages else (None,):
+            yield TurnFinished(turn_id=agent.id, reason=reason, agent_id=agent.id, usage=usage)
 
     async def converse(self, turn_id: str, launch: AgentLaunch) -> AsyncIterator[Event]:
         self.launches.append(launch)

@@ -35,6 +35,7 @@ from orbit.protocol import (
     TurnFinished,
     TurnStarted,
     UpdateSettings,
+    Usage,
     VerificationChanged,
     VerificationFinished,
     VerificationSkipped,
@@ -233,3 +234,30 @@ def test_startup_check_messages_round_trip() -> None:
     ):
         assert event_adapter.validate_json(event.model_dump_json()) == event
     assert VerificationChanged(steps=()).title == ""
+
+
+def test_usage_adds_up_and_counts_every_kind_of_token() -> None:
+    first = Usage(input_tokens=1, output_tokens=2, cost_usd=0.5, turns=1, duration_ms=10)
+    second = Usage(cache_creation_input_tokens=3, cache_read_input_tokens=4, cost_usd=0.25)
+    total = first + second
+    assert total == Usage(
+        input_tokens=1,
+        output_tokens=2,
+        cache_creation_input_tokens=3,
+        cache_read_input_tokens=4,
+        cost_usd=0.75,
+        turns=1,
+        duration_ms=10,
+    )
+    assert total.tokens == 10
+    assert Usage().tokens == 0
+
+
+def test_turns_and_tasks_carry_usage_when_known() -> None:
+    assert TurnFinished(turn_id="t", reason="completed").usage is None
+    assert TaskState(id="1", task=TaskSpec(prompt="x")).usage == Usage()
+    usage = Usage(input_tokens=5, cost_usd=0.1)
+    event = TurnFinished(turn_id="t", reason="completed", usage=usage)
+    assert event_adapter.validate_json(event.model_dump_json()) == event
+    with pytest.raises(ValidationError):
+        Usage(input_tokens=-1)

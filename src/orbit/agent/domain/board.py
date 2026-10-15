@@ -3,7 +3,15 @@
 import itertools
 from collections.abc import Collection, Sequence
 
-from orbit.protocol import StepState, StepStatus, TaskOrigin, TaskSpec, TaskState, TaskStatus
+from orbit.protocol import (
+    StepState,
+    StepStatus,
+    TaskOrigin,
+    TaskSpec,
+    TaskState,
+    TaskStatus,
+    Usage,
+)
 
 # Statuses a run leaves alone; any other task is worth (another) run.
 SETTLED: frozenset[TaskStatus] = frozenset(
@@ -88,6 +96,12 @@ class TaskBoard:
         index = self.position(task_id)
         update = {"attempt": attempt, "max_attempts": max_attempts}
         self._tasks[index] = self._tasks[index].model_copy(update=update)
+
+    def add_usage(self, task_id: str, usage: Usage) -> None:
+        """Count ``usage``, what a turn run for task ``task_id`` cost, towards its total."""
+        index = self.position(task_id)
+        total = self._tasks[index].usage + usage
+        self._tasks[index] = self._tasks[index].model_copy(update={"usage": total})
 
     def finish(self, task_id: str, status: TaskStatus) -> None:
         """Record how task ``task_id`` ended; a completed fix also completes what it fixed."""

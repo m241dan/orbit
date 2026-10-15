@@ -17,10 +17,12 @@ from orbit.protocol import (
     TaskStarted,
     TaskState,
     TaskStatus,
+    TurnFinished,
+    Usage,
 )
 from orbit.tui import OrbitApp
 from orbit.tui.tasks import TaskEditorScreen, TaskList
-from orbit.tui.view import task_label, task_numbers
+from orbit.tui.view import task_label, task_numbers, usage_label
 from orbit.tui.widgets import Entry, PickerScreen, PromptInput
 from tests.test_tui import FakeSession, picker, selected, show_settings
 
@@ -94,6 +96,23 @@ def test_running_tasks_show_the_spinner_frame() -> None:
     # Verifying shows the magnifying glass without a spinner; the verification panel spins.
     verifying = running.model_copy(update={"status": "verifying"})
     assert str(task_label(verifying, "1", "◠ ")) == "1. 🔍 go\n      default · restricted"
+
+
+def test_usage_reads_as_tokens_and_cost() -> None:
+    assert usage_label(Usage(input_tokens=512)) == "512 tok · $0.00"
+    assert usage_label(Usage(input_tokens=12_000, output_tokens=345, cost_usd=0.1)) == (
+        "12.3k tok · $0.10"
+    )
+    big = Usage(cache_read_input_tokens=1_200_000, output_tokens=34_567, cost_usd=0.836)
+    assert usage_label(big) == "1.2M tok · $0.84"
+
+
+def test_label_shows_what_a_task_spent_once_it_spent_anything() -> None:
+    usage = Usage(cache_read_input_tokens=1_200_000, cost_usd=0.84)
+    state = TaskState(id="1", task=TaskSpec(prompt="go"), status="completed", usage=usage)
+    assert str(task_label(state, "1", "◠ ")) == (
+        "1. ✅ go\n      default · restricted · 1.2M tok · $0.84"
+    )
 
 
 def test_fix_tasks_are_indented_under_their_task() -> None:
@@ -435,3 +454,29 @@ async def test_ctrl_t_toggles_planning_and_the_prompt_says_so() -> None:
         assert session.commands[-1] == SetPlanning(on=False)
         await feed(session, pilot, PlanningChanged(on=False))
         assert app.query_one(PromptInput).border_title == "Prompt"
+
+
+async def test_list_shows_each_tasks_usage_and_the_sessions_total() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        assert not app.query_one(TaskList).border_subtitle
+        spent = TaskState(
+            id="1", task=TaskSpec(prompt="one"), usage=Usage(input_tokens=1_500, cost_usd=0.2)
+        )
+        await feed(session, pilot, TasksChanged(tasks=(spent,)))
+        assert rows(app)[0].endswith("default · restricted · 1.5k tok · $0.20")
+        # Every metered turn counts towards the session, whether or not a task ran it.
+        await feed(
+            session,
+            pilot,
+            TurnFinished(turn_id="a", reason="completed", usage=Usage(input_tokens=1_000)),
+            TurnFinished(turn_id="b", reason="completed"),
+            TurnFinished(
+                turn_id="c",
+                reason="error",
+                agent_id="agent-1",
+                usage=Usage(output_tokens=500, cost_usd=0.3),
+            ),
+        )
+        assert app.query_one(TaskList).border_subtitle == "session: 1.5k tok · $0.30"

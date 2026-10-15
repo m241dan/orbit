@@ -49,6 +49,7 @@ from orbit.protocol import (
     TasksChanged,
     TaskStatus,
     TurnFinished,
+    Usage,
 )
 
 Publish = Callable[[Event], Awaitable[None]]
@@ -303,7 +304,14 @@ class AgentRun:
             if isinstance(event, TurnFinished) and event.reason == "error":
                 reason = "crashed"
             await self._publish(event)
+            if isinstance(event, TurnFinished) and event.usage is not None:
+                await self._count(event.usage)
         return reason
+
+    async def _count(self, usage: Usage) -> None:
+        """Add what one of the agent's turns cost to its task's total."""
+        self._board.add_usage(self._task_id, usage)
+        await self._publish(TasksChanged(tasks=self._board.tasks))
 
     async def _await_exit(self, stream: "asyncio.Task[None]") -> None:
         """Give a finished agent ``exit_grace`` seconds to exit on its own."""

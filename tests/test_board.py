@@ -1,7 +1,7 @@
 import pytest
 
 from orbit.agent.domain.board import TaskBoard
-from orbit.protocol import Settings, StepState, TaskSpec, TaskState
+from orbit.protocol import Settings, StepState, TaskSpec, TaskState, Usage
 
 ONE = TaskSpec(prompt="one")
 TWO = TaskSpec(prompt="two", settings=Settings(model="opus"))
@@ -216,3 +216,18 @@ def test_steps_can_be_replaced_none_of_them_run() -> None:
     board.set_step(0, "passed")
     board.set_steps(["Lint", "Tests"])
     assert board.steps == (StepState(name="Lint"), StepState(name="Tests"))
+
+
+def test_each_task_adds_up_the_usage_of_its_own_turns() -> None:
+    board = TaskBoard()
+    first, second = board.add(ONE), board.add(TWO)
+    board.add_usage(first, Usage(input_tokens=100, cost_usd=0.5, turns=1))
+    board.add_usage(first, Usage(output_tokens=20, cost_usd=0.25, turns=2))
+    board.add_usage(second, Usage(input_tokens=7, cost_usd=0.01))
+    assert board.get(first).usage == Usage(
+        input_tokens=100, output_tokens=20, cost_usd=0.75, turns=3
+    )
+    assert board.get(second).usage == Usage(input_tokens=7, cost_usd=0.01)
+    # Editing a task makes it pending again, but what it spent stays spent.
+    board.edit(first, TWO)
+    assert board.get(first).usage.tokens == 120

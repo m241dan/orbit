@@ -13,7 +13,7 @@ from textual.message import Message
 from textual.screen import ModalScreen
 from textual.widgets import Input, OptionList, Static
 
-from orbit.protocol import Settings, TaskSpec, TaskState
+from orbit.protocol import Settings, TaskSpec, TaskState, Usage
 from orbit.tui.view import (
     SPINNER_FPS,
     TOOL_ACCESS_DESCRIPTIONS,
@@ -22,6 +22,7 @@ from orbit.tui.view import (
     spinner_frame,
     task_label,
     task_numbers,
+    usage_label,
 )
 from orbit.tui.widgets import PickerScreen, PromptInput
 
@@ -33,7 +34,7 @@ class TaskList(OptionList):
 
     Like the prompt, it only takes focus once activated (``enter_list_mode``);
     then j/k move, enter picks a row, ``a`` accepts a draft, ``x`` removes a task and
-    escape returns to window navigation.
+    escape returns to window navigation. Its border shows what the session's turns cost.
     """
 
     class Accept(Message):
@@ -71,6 +72,7 @@ class TaskList(OptionList):
         self.tasks: tuple[TaskState, ...] = ()
         self.numbers: list[str] = []
         self.clock: Callable[[], float] = time.monotonic
+        self.session_usage = Usage()
 
     def on_mount(self) -> None:
         self.border_title = "Task list"
@@ -122,6 +124,11 @@ class TaskList(OptionList):
         self.tasks = tuple(tasks)
         self.numbers = task_numbers(self.tasks)
         self._show(highlight)
+
+    def count(self, usage: Usage) -> None:
+        """Add what a turn cost to the session's total."""
+        self.session_usage += usage
+        self.border_subtitle = f"session: {usage_label(self.session_usage)}"
 
     def position(self, task_id: str) -> int:
         return next(i for i, t in enumerate(self.tasks) if t.id == task_id)

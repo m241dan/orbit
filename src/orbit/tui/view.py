@@ -41,6 +41,7 @@ from orbit.protocol import (
     ToolCallFinished,
     ToolCallStarted,
     TurnEndReason,
+    Usage,
 )
 
 EntryKind = Literal["user", "assistant", "tool", "verify", "agent", "error"]
@@ -322,8 +323,22 @@ def task_label(state: TaskState, number: str, frame: str) -> Text:
     details = f"{indent}{model_label(settings)} · {settings.tool_access}"
     if state.attempt:
         details += f" · fix {state.attempt}/{state.max_attempts}"
+    if state.usage != Usage():
+        details += f" · {usage_label(state.usage)}"
     label.append(details, style="dim")
     return label
+
+
+def usage_label(usage: Usage) -> str:
+    """Tokens and cost, shortly: ``1.2M tok · $0.84``."""
+    return f"{_count_label(usage.tokens)} tok · ${usage.cost_usd:.2f}"
+
+
+def _count_label(count: int) -> str:
+    for size, suffix in ((1_000_000, "M"), (1_000, "k")):
+        if count >= size:
+            return f"{count / size:.1f}{suffix}"
+    return str(count)
 
 
 # The verification panel

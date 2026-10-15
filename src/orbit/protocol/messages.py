@@ -165,6 +165,35 @@ Command = Annotated[
 ]
 
 
+class Usage(_Message):
+    """What turns cost: tokens of each kind, dollars, model round trips and time taken.
+
+    Usages add up, so a task's total is the sum of its turns'.
+    """
+
+    input_tokens: int = Field(default=0, ge=0)
+    output_tokens: int = Field(default=0, ge=0)
+    cache_creation_input_tokens: int = Field(default=0, ge=0)
+    cache_read_input_tokens: int = Field(default=0, ge=0)
+    cost_usd: float = Field(default=0.0, ge=0)
+    turns: int = Field(default=0, ge=0)
+    duration_ms: int = Field(default=0, ge=0)
+
+    @property
+    def tokens(self) -> int:
+        """Every token, of every kind."""
+        return (
+            self.input_tokens
+            + self.output_tokens
+            + self.cache_creation_input_tokens
+            + self.cache_read_input_tokens
+        )
+
+    def __add__(self, other: "Usage") -> "Usage":
+        mine, theirs = self.model_dump(), other.model_dump()
+        return Usage(**{name: mine[name] + theirs[name] for name in mine})
+
+
 # State the backend owns and reports whole, so the frontend only renders it.
 
 TurnEndReason = Literal["completed", "cancelled", "max_steps", "error"]
@@ -191,6 +220,7 @@ class TaskState(_Message):
     after that task. ``attempt`` counts the fixes asked of the agent working on it, out
     of ``max_attempts``; both are 0 until verification first fails. A task a review
     suggested belongs to that review's ``batch``, at review ``round`` (0 otherwise).
+    ``usage`` adds up what every turn run for the task cost.
     """
 
     id: str
@@ -202,6 +232,7 @@ class TaskState(_Message):
     max_attempts: int = Field(default=0, ge=0)
     batch: str | None = None
     round: int = Field(default=0, ge=0)
+    usage: Usage = Usage()
 
 
 StepStatus = Literal["pending", "running", "passed", "failed", "cancelled", "skipped"]
@@ -260,10 +291,13 @@ class ToolCallFinished(_Message):
 
 
 class TurnFinished(_Message):
+    """The turn ended for ``reason``; ``usage`` says what it cost, when the runner knows."""
+
     type: Literal["turn_finished"] = "turn_finished"
     turn_id: str
     agent_id: str | None = None
     reason: TurnEndReason
+    usage: Usage | None = None
 
 
 class BusyChanged(_Message):

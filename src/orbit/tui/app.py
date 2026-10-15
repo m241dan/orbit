@@ -47,7 +47,6 @@ from orbit.protocol import (
     TaskState,
     ToolCallFinished,
     ToolCallStarted,
-    TurnEndReason,
     TurnFinished,
     TurnStarted,
     UpdateSettings,
@@ -389,8 +388,8 @@ class OrbitApp(App[None], inherit_bindings=False):
         match event:
             case TurnStarted():
                 pass  # The prompt follows BusyChanged, which also covers task runs.
-            case TurnFinished(reason=reason):
-                self._turn_finished(reason)
+            case TurnFinished():
+                self._turn_finished(event)
             case ErrorOccurred(message=message):
                 self._append(message, "error")
             case AssistantMessage() | ToolCallStarted() | ToolCallFinished():
@@ -471,8 +470,10 @@ class OrbitApp(App[None], inherit_bindings=False):
         self._busy = busy
         self.query_one(PromptInput).disabled = busy
 
-    def _turn_finished(self, reason: TurnEndReason) -> None:
-        entry = turn_end_entry(reason)
+    def _turn_finished(self, event: TurnFinished) -> None:
+        if event.usage is not None:
+            self.query_one(TaskList).count(event.usage)
+        entry = turn_end_entry(event.reason)
         if entry is not None:
             self._append(*entry)
 

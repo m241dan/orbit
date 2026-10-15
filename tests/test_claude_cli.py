@@ -24,6 +24,7 @@ from orbit.protocol import (
     ToolCallStarted,
     TurnFinished,
     TurnStarted,
+    Usage,
 )
 
 FAKE_CLAUDE = Path(__file__).parent / "fake_claude.py"
@@ -145,6 +146,40 @@ def test_translate_ignores_plain_user_text() -> None:
 )
 def test_translate_result(result: dict[str, Any], expected: list[Event]) -> None:
     assert translate("t", result) == expected
+
+
+def test_translate_result_carries_the_turns_usage_and_cost() -> None:
+    result = {
+        **RESULT,
+        "usage": {
+            "input_tokens": 10,
+            "output_tokens": 20,
+            "cache_creation_input_tokens": 30,
+            "cache_read_input_tokens": 40,
+            "server_tool_use": {"web_search_requests": 0},
+        },
+        "total_cost_usd": 0.84,
+        "num_turns": 3,
+        "duration_ms": 1500,
+    }
+    usage = Usage(
+        input_tokens=10,
+        output_tokens=20,
+        cache_creation_input_tokens=30,
+        cache_read_input_tokens=40,
+        cost_usd=0.84,
+        turns=3,
+        duration_ms=1500,
+    )
+    assert translate("t", result) == [TurnFinished(turn_id="t", reason="completed", usage=usage)]
+    failed = {"type": "result", "subtype": "error_max_turns", "is_error": True, "num_turns": 9}
+    assert translate("t", failed) == [
+        TurnFinished(turn_id="t", reason="max_steps", usage=Usage(turns=9))
+    ]
+    errored = {"type": "result", "subtype": "x", "is_error": True, "total_cost_usd": 0.5}
+    assert translate("t", errored)[-1] == TurnFinished(
+        turn_id="t", reason="error", usage=Usage(cost_usd=0.5)
+    )
 
 
 @pytest.mark.parametrize("message", [INIT, RATE_LIMIT, {"type": "something_new"}])

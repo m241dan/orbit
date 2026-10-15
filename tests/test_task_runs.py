@@ -32,6 +32,7 @@ from orbit.protocol import (
     TaskState,
     TurnEndReason,
     TurnFinished,
+    Usage,
     VerificationChanged,
     VerificationFinished,
     VerificationSkipped,
@@ -133,6 +134,17 @@ async def test_a_failed_task_does_not_stop_the_next() -> None:
     session, _, _ = session_for(never_starts, claims_done)
     events = await asyncio.wait_for(run(session, TaskSpec(prompt="a"), TaskSpec(prompt="b")), 5)
     assert statuses(events) == ["error", "completed"]
+
+
+async def test_each_task_adds_up_the_usage_of_its_agents_turns() -> None:
+    session, _, launcher = session_for(claims_done, claims_done)
+    one, two, three = Usage(input_tokens=10, cost_usd=0.5), Usage(output_tokens=5), Usage(turns=1)
+    launcher.usages = [(one, two), (three,)]
+    events = await asyncio.wait_for(run(session, TaskSpec(prompt="a"), TaskSpec(prompt="b")), 5)
+    assert [t.usage for t in board(events)] == [one + two, three]
+    # The turns' own usage still reaches the frontend, which keeps the session's total.
+    turns = [e.usage for e in events if isinstance(e, TurnFinished)]
+    assert turns == [one, two, three]
 
 
 class GatedRunner:
