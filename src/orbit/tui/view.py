@@ -8,7 +8,7 @@ import shlex
 from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
-from typing import Literal, assert_never, get_args
+from typing import Literal, TypeGuard, assert_never, get_args
 
 from rich.cells import cell_len
 from rich.text import Text
@@ -23,6 +23,7 @@ from orbit.protocol import (
     AssistantMessage,
     ChecksProposed,
     DecideProposal,
+    ErrorOccurred,
     Event,
     Notice,
     ProgressNoted,
@@ -41,6 +42,7 @@ from orbit.protocol import (
     ToolCallFinished,
     ToolCallStarted,
     TurnEndReason,
+    TurnFinished,
     Usage,
 )
 
@@ -432,8 +434,21 @@ _TAB_OUTPUT = (
     AgentReply,
     ProgressNoted,
     TaskGaveUp,
+    ErrorOccurred,
 )
 """Events that add an entry to their agent's conversation."""
+
+_TabOutput = (
+    AssistantMessage
+    | ToolCallStarted
+    | ToolCallFinished
+    | AgentRequest
+    | AgentReply
+    | ProgressNoted
+    | TaskGaveUp
+    | ErrorOccurred
+    | TurnFinished
+)
 
 
 PLANNER_TAB = ConversationTab(PLANNER, PLANNER_TAB_LABEL)
@@ -465,9 +480,17 @@ def track_tabs(
         return _open_tab(tabs, event)
     if isinstance(event, AgentExited):
         return tuple(tab for tab in tabs if tab.agent_id != event.agent_id)
-    if isinstance(event, _TAB_OUTPUT):
+    if _is_tab_output(event):
         return _mark_unread(tabs, tab_key(event.agent_id, planners), active)
     return tabs
+
+
+def _is_tab_output(event: Event) -> TypeGuard[_TabOutput]:
+    """Whether ``event`` adds an entry to its agent's conversation; a turn's end only does
+    when it gets a note."""
+    if isinstance(event, TurnFinished):
+        return turn_end_entry(event.reason) is not None
+    return isinstance(event, _TAB_OUTPUT)
 
 
 def _open_tab(

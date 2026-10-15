@@ -396,7 +396,7 @@ class OrbitApp(App[None], inherit_bindings=False):
             case TurnFinished():
                 self._turn_finished(event)
             case ErrorOccurred(message=message):
-                self._append(message, "error")
+                self._append(message, "error", event.agent_id)
             case AssistantMessage() | ToolCallStarted() | ToolCallFinished():
                 self._append(*output_entry(event), event.agent_id)
             case _:
@@ -473,7 +473,7 @@ class OrbitApp(App[None], inherit_bindings=False):
             self.query_one(TaskList).count(event.usage)
         entry = turn_end_entry(event.reason)
         if entry is not None:
-            self._append(*entry)
+            self._append(*entry, event.agent_id)
 
     def _announce_task(self, task_id: str) -> None:
         task_list = self.query_one(TaskList)

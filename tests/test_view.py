@@ -7,6 +7,7 @@ from orbit.protocol import (
     AgentRequest,
     AgentStarted,
     AssistantMessage,
+    ErrorOccurred,
     Event,
     Notice,
     ProgressNoted,
@@ -20,6 +21,7 @@ from orbit.protocol import (
     TaskStatus,
     ToolCallFinished,
     ToolCallStarted,
+    TurnFinished,
 )
 from orbit.tui.view import (
     ALL_TAB_LABEL,
@@ -232,6 +234,8 @@ def test_output_from_a_background_agent_marks_its_tab_unread() -> None:
         AgentReply(agent_id="agent-2", request_id="r", text="ok"),
         ProgressNoted(agent_id="agent-2", task_id="1", note="n"),
         TaskGaveUp(agent_id="agent-2", task_id="1", reason="r"),
+        ErrorOccurred(agent_id="agent-2", message="boom"),
+        TurnFinished(turn_id="t", agent_id="agent-2", reason="cancelled"),
     ]
     for event in outputs:
         marked = track_tabs(tabs, event, active="agent-1")
@@ -245,6 +249,13 @@ def test_events_with_no_agent_mark_nothing() -> None:
     tabs = (ConversationTab("agent-1", "coder"),)
     assert track_tabs(tabs, AssistantMessage(turn_id="t", text="hi")) is tabs
     assert track_tabs(tabs, Notice(message="x"), active=None) is tabs
+
+
+def test_a_turn_ending_as_expected_marks_nothing() -> None:
+    tabs = (ConversationTab("agent-1", "coder"),)
+    for reason in ("completed", "error"):
+        event = TurnFinished(turn_id="t", agent_id="agent-1", reason=reason)
+        assert track_tabs(tabs, event) is tabs
 
 
 def test_marking_a_tab_read_clears_only_its_marker() -> None:

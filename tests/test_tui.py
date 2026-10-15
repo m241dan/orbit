@@ -904,6 +904,32 @@ async def test_planner_output_shows_under_planner_and_all_but_not_other_tabs() -
         assert shown(app)[-1] == "■ agent-1 exited"
 
 
+async def test_planner_turn_end_notes_and_errors_show_under_planner_and_all() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test(size=(120, 30)) as pilot:
+        await feed_events(session, pilot, started("agent-1", "planner"), started("agent-2"))
+        # Show the coder's tab, so the planner's entries mark the Planner tab.
+        await pilot.press("tab", "tab")
+        assert active_tab(app) == "coder"
+        await feed_events(
+            session,
+            pilot,
+            TurnFinished(turn_id="t", agent_id="agent-1", reason="cancelled"),
+            ErrorOccurred(agent_id="agent-1", message="boom"),
+        )
+        assert tab_strip(app) == ["All", "Planner *", "coder"]
+        assert shown(app) == ["▶ agent-2 (coder) started"]
+
+        await pilot.press("tab")
+        assert active_tab(app) == "All"
+        assert shown(app)[-2:] == ["[turn ended: cancelled]", "boom"]
+
+        await pilot.press("tab")
+        assert active_tab(app) == "Planner"
+        assert shown(app) == ["▶ agent-1 (planner) started", "[turn ended: cancelled]", "boom"]
+
+
 async def test_the_prompt_talks_to_the_planner_esc_stops_the_run_and_ctrl_x_the_planner() -> None:
     session = FakeSession()
     app = OrbitApp(session)
