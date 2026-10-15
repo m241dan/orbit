@@ -117,7 +117,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         Binding("ctrl+g", "super_review", "Super review"),
         Binding("ctrl+e", "configure_checks", "Set up checks"),
         Binding("ctrl+t", "toggle_planner", "Planner"),
-        Binding("escape", "cancel_turn", "Cancel run"),
+        Binding("ctrl+s", "cancel_turn", "Stop run"),
         Binding("ctrl+x", "stop_planner", "Stop planner"),
         Binding("ctrl+o", "pick_model", "Model"),
         Binding("ctrl+l", "pick_tool_access", "Tools"),
@@ -146,7 +146,7 @@ class OrbitApp(App[None], inherit_bindings=False):
                 yield ConversationTabs(id="conversation-tabs")
                 yield Transcript(id="transcript")
                 yield PromptInput(
-                    placeholder="Press i to talk to the planner, esc to stop", id="prompt"
+                    placeholder="Press i to talk to the planner, esc to stop typing", id="prompt"
                 )
             with Vertical(id="side"):
                 yield TaskList(id="task-list")
@@ -274,7 +274,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         await self._session.send(ConfigureChecks())
 
     async def action_cancel_turn(self) -> None:
-        # The planner has its own lane, stopped with ctrl+x; esc stops the task run.
+        # The planner has its own lane, stopped with ctrl+x; ctrl+s stops the task run.
         await self._session.send(CancelTurn(lane="work"))
 
     async def action_stop_planner(self) -> None:

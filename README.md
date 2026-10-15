@@ -55,7 +55,8 @@ In the app:
 | `ctrl+e` | Set up (or redo) the verification steps: queue a configurator task first and run it (see [Setting up verification](#setting-up-verification)) |
 | `ctrl+o` | Pick the planner's model (default, fable, opus, sonnet, haiku) |
 | `ctrl+l` | Pick the tool access level new tasks start with in the task editor (off, restricted, full) |
-| `esc` | Stop typing; otherwise cancel the task run (on any tab) or close a picker |
+| `esc` | Stop typing or close a picker |
+| `ctrl+s` | Stop the task run (on any tab) |
 | `ctrl+x` | Stop the planner's turn, leaving the task run going |
 | `a` / `r` / `x` | On a proposal of checks: accept it, ask for changes (type them, `enter` sends, `esc` goes back), or end the task (see [Setting up verification](#setting-up-verification)) |
 | `ctrl+c` | Quit |
@@ -88,7 +89,7 @@ The **agents pane** (bottom right) lists the agents running now: each one's role
 whether it's working or waiting on orbit (say, `waiting on complete_task` while its work is
 verified). Its subtitle says whether review is active or paused. Activate it with `enter` and press
 `c` on an agent to cancel its work: for a reviewer, just that review (the next one starts); for the
-planner, just its turn; for the coder, the same as `esc`.
+planner, just its turn; for the coder, the same as `ctrl+s`.
 
 The conversation shows everything in one timeline: each agent's own messages and tool calls,
 prefixed with its id, and its exchanges with orbit (`agent-1 → orbit: complete_task …`,
@@ -100,7 +101,7 @@ in `*`. Whichever tab is shown, the prompt goes to the planner.
 
 Each row of the task list shows its status: ⏳ pending, ◜ running (spinning), 🔍 verifying, ✅ done,
 ❗ failed verification, ❌ failed, ⌛ ran out of steps, 🏳 the agent gave up, 🛑 cancelled, 📝 a draft
-the planner proposed. A failed task doesn't stop the rest; `esc` cancels the running task (stopping
+the planner proposed. A failed task doesn't stop the rest; `ctrl+s` cancels the running task (stopping
 its agent) and skips the remaining ones. Running again skips tasks that completed, failed
 verification or were given up on, and editing a task makes it pending again. Tasks added while a
 run is going join it; the running task can't be edited.
@@ -269,7 +270,7 @@ rest when you press `ctrl+r`.
 
 The planner answers in a lane of its own, so you can plan while tasks run (and press `ctrl+r`
 while it answers); the prompt waits only for the planner's own reply. `ctrl+x` stops only the
-planner's turn and leaves the task run going; `esc` stops the task run, whichever tab is shown. The
+planner's turn and leaves the task run going; `ctrl+s` stops the task run, whichever tab is shown. The
 task list beside it fills with
 drafts as the planner proposes them; when it says something while you're on another tab, the
 Planner tab gets a `*`.
@@ -284,7 +285,7 @@ Every commit from one of your tasks is reviewed in the background while the next
 queues a `reviewer` task (it shows in the task list) carrying the commit's diff, and runs it in a
 read-only snapshot of that commit. The reviewer suggests follow-ups with `suggest_task`: each becomes
 a task at the end of the queue (with the `coder` role's default settings), and once the review ends
-orbit runs them, unless you pressed `esc` since your last `ctrl+r`.
+orbit runs them, unless you pressed `ctrl+s` since your last `ctrl+r`.
 
 Suggestions from one review form a **batch**. When every task in a batch has finished, the batch's
 commits are reviewed together, which may suggest more. To keep this from going on forever, each

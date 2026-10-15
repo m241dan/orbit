@@ -101,11 +101,18 @@ async def test_a_busy_planner_disables_the_prompt() -> None:
         assert app.query_one(PromptInput).disabled
 
 
-async def test_escape_sends_cancel() -> None:
+async def test_ctrl_s_sends_cancel() -> None:
+    session = FakeSession()
+    async with OrbitApp(session).run_test() as pilot:
+        await pilot.press("ctrl+s")
+        assert session.commands == [CancelTurn()]
+
+
+async def test_escape_in_normal_mode_does_not_cancel() -> None:
     session = FakeSession()
     async with OrbitApp(session).run_test() as pilot:
         await pilot.press("escape")
-        assert session.commands == [CancelTurn()]
+        assert session.commands == []
 
 
 async def test_blank_submit_is_ignored() -> None:
@@ -232,8 +239,8 @@ async def test_escape_in_insert_mode_returns_to_normal_mode_without_cancelling()
         assert app.focused is None
         assert session.commands == []
 
-        # Back in normal mode: keys don't type, the draft is kept, escape cancels.
-        await pilot.press("b", "escape")
+        # Back in normal mode: keys don't type, the draft is kept, ctrl+s cancels.
+        await pilot.press("b", "ctrl+s")
         assert prompt.value == "a"
         assert session.commands == [CancelTurn()]
 
@@ -930,19 +937,19 @@ async def test_planner_turn_end_notes_and_errors_show_under_planner_and_all() ->
         assert shown(app) == ["▶ agent-1 (planner) started", "[turn ended: cancelled]", "boom"]
 
 
-async def test_the_prompt_talks_to_the_planner_esc_stops_the_run_and_ctrl_x_the_planner() -> None:
+async def test_prompt_talks_to_the_planner_ctrl_s_stops_the_run_and_ctrl_x_the_planner() -> None:
     session = FakeSession()
     app = OrbitApp(session)
     async with app.run_test(size=(120, 30)) as pilot:
         prompt = app.query_one(PromptInput)
         await pilot.press("tab")
         assert prompt.border_title == "Prompt · planner"
-        # esc stops the task run, even on the Planner tab; ctrl+x stops the planner.
-        await pilot.press("i", *"plan", "enter", "escape", "ctrl+x")
+        # ctrl+s stops the task run, even on the Planner tab; ctrl+x stops the planner.
+        await pilot.press("i", *"plan", "enter", "ctrl+s", "ctrl+x")
         await pilot.press("shift+tab")
         assert prompt.border_title == "Prompt · planner"
         await feed_events(session, pilot, BusyChanged(busy=False, lane="planner"))
-        await pilot.press("i", *"hi", "enter", "escape", "ctrl+x")
+        await pilot.press("i", *"hi", "enter", "ctrl+s", "ctrl+x")
         assert session.commands == [
             SubmitPrompt(text="plan"),
             CancelTurn(lane="work"),

@@ -96,7 +96,7 @@ def chat(
     """Start an interactive agent session.
 
     In the app: h/j/k/l move between windows; i jumps to the prompt, which talks to
-    the planner, whose proposals wait on the task list as drafts, and esc stops;
+    the planner, whose proposals wait on the task list as drafts, and ctrl+s stops the run;
     ctrl+o / ctrl+l open a picker for the planner's model / new tasks' tool access; enter
     on the task list edits queued tasks and ctrl+r runs them, each in a fresh session.
     Each task runs in a fresh agent that fetches it from orbit over MCP; verification

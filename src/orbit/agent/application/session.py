@@ -316,7 +316,7 @@ class AgentSession:
 
     async def _cancel_agent(self, agent_id: str) -> None:
         """Stop the startup check, or a reviewer's review, on its own; any other agent's work,
-        like esc."""
+        like ctrl+s."""
         if self._cancel_startup(agent_id):
             return
         agent = self._desk.find(agent_id) if self._desk else None
