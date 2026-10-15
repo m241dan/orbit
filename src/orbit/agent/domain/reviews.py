@@ -172,35 +172,17 @@ def _normalized(text: str) -> str:
 def review_prompt(job: ReviewJob, diff: str, cap: int) -> str:
     """The task for the reviewer of ``job``, whose commits' messages and diffs are ``diff``.
 
-    Its first line titles it.
+    Its first line titles it. It holds only the facts: how to review is the role's instructions.
     """
+    limit = f"You may make at most {cap} suggestions."
     if job.whole:
-        return _super_review_prompt(job.commits[0], cap)
+        return f"Super review of the codebase at {job.commits[0][:7]}\n\n{limit}"
     if job.batch is None:
         title = f"Review commit {job.commits[0][:7]}"
     else:
         title = f"Review the {len(job.commits)} commits made for review {job.batch}"
-    missing = "".join(
-        f"\ntask {task} of that review ended without a commit." for task in job.missing
-    )
+    parts = [title]
+    parts += [f"Task {task} of that review ended without a commit." for task in job.missing]
     if len(diff) > DIFF_LIMIT:
         diff = diff[:DIFF_LIMIT] + "\n… (diff trimmed)"
-    return (
-        f"{title}\n{missing}\n"
-        "Look for bugs, missing tests and unclear code. For each problem worth fixing, call"
-        f" suggest_task with a short title and a prompt a coder can act on: at most {cap},"
-        " most important first. Suggest nothing if it's fine. Then call complete_task with a"
-        " one-line summary of your review.\n\n"
-        f"{diff}"
-    )
-
-
-def _super_review_prompt(commit: str, cap: int) -> str:
-    return (
-        f"Super review of the codebase at {commit[:7]}\n\n"
-        "Review the whole codebase, not only recent changes: look for duplication, structure"
-        " that no longer fits, missing tests and unclear code. Read the files you need. For each"
-        " improvement worth making, call suggest_task with a short title and a prompt a coder"
-        f" can act on: at most {cap}, most important first. Then call complete_task with a"
-        " one-line summary of your review."
-    )
+    return "\n\n".join([*parts, limit, diff])

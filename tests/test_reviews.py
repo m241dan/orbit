@@ -154,18 +154,20 @@ def test_landing_after_its_batch_closed_is_not_reviewed_again() -> None:
     assert reviews.landed(state("2", origin="review", batch=batch), "c2") is None
 
 
-def test_a_commit_review_prompt_asks_for_suggestions_and_includes_the_diff() -> None:
+def test_a_commit_review_prompt_is_its_title_its_limit_and_the_diff() -> None:
     prompt = review_prompt(ReviewJob(commits=("abc1234def",), round=0, batch=None), "+new", 5)
-    assert prompt.startswith("Review commit abc1234\n")
-    assert "suggest_task" in prompt and "at most 5" in prompt and "complete_task" in prompt
-    assert prompt.endswith("+new")
+    assert prompt == "Review commit abc1234\n\nYou may make at most 5 suggestions.\n\n+new"
 
 
 def test_a_batch_review_prompt_names_its_commits_and_what_did_not_land() -> None:
     job = ReviewJob(commits=("a" * 10, "b" * 10), round=1, batch="batch-1", missing=("7",))
     prompt = review_prompt(job, "diffs", 3)
-    assert prompt.startswith("Review the 2 commits made for review batch-1\n")
-    assert "task 7" in prompt
+    assert prompt == (
+        "Review the 2 commits made for review batch-1\n\n"
+        "Task 7 of that review ended without a commit.\n\n"
+        "You may make at most 3 suggestions.\n\n"
+        "diffs"
+    )
 
 
 def test_long_diffs_are_trimmed_from_the_end() -> None:
@@ -218,11 +220,12 @@ def test_a_super_reviews_batch_has_its_own_cap() -> None:
     assert refusal is not None and "2 tasks" in refusal
 
 
-def test_a_super_review_prompt_asks_about_the_whole_codebase() -> None:
+def test_a_super_review_prompt_is_its_title_and_its_limit() -> None:
     job = ReviewJob(commits=("abc1234def",), round=0, batch=None, whole=True)
     prompt = review_prompt(job, "", 10)
-    assert prompt.startswith("Super review of the codebase at abc1234\n")
-    assert "whole codebase" in prompt and "at most 10" in prompt and "suggest_task" in prompt
+    assert (
+        prompt == "Super review of the codebase at abc1234\n\nYou may make at most 10 suggestions."
+    )
 
 
 def test_a_batch_is_not_reviewed_while_its_review_is_still_suggesting() -> None:
