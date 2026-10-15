@@ -1,3 +1,4 @@
+import pytest
 from textual.widgets import Static
 
 from orbit.protocol import (
@@ -10,7 +11,7 @@ from orbit.protocol import (
     VerificationStarted,
 )
 from orbit.tui import OrbitApp
-from orbit.tui.widgets import Entry, VerificationPanel
+from orbit.tui.widgets import Transcript, VerificationPanel
 from tests.test_task_list import feed
 from tests.test_tui import FakeSession
 
@@ -90,12 +91,12 @@ async def test_verification_progress_is_reported_in_the_transcript() -> None:
             VerificationStarted(task_id="1", step=1),
             VerificationFinished(task_id="1", step=1, passed=False),
         )
-        entries = [(str(e.render()), e.classes) for e in app.query(Entry)]
+        entries = list(app.query_one(Transcript).entries(None))
         assert entries == [
-            ("🔍 Verifying: Unit tests…", frozenset({"verify"})),
-            ("✅ Verification passed: Unit tests", frozenset({"verify"})),
-            ("🔍 Verifying: Lint…", frozenset({"verify"})),
-            ("❌ Verification failed: Lint", frozenset({"error"})),
+            ("🔍 Verifying: Unit tests…", "verify"),
+            ("✅ Verification passed: Unit tests", "verify"),
+            ("🔍 Verifying: Lint…", "verify"),
+            ("❌ Verification failed: Lint", "error"),
         ]
 
 
@@ -109,10 +110,10 @@ async def test_skipped_verification_says_why_in_the_transcript() -> None:
             VerificationSkipped(task_id="1", reason="tools_off"),
             VerificationSkipped(task_id="2", reason="no_changes"),
         )
-        entries = [(str(e.render()), e.classes) for e in app.query(Entry)]
+        entries = list(app.query_one(Transcript).entries(None))
         assert entries == [
-            ("⏩ Verification skipped: tools were off", frozenset({"verify"})),
-            ("⏩ Verification skipped: no files changed", frozenset({"verify"})),
+            ("⏩ Verification skipped: tools were off", "verify"),
+            ("⏩ Verification skipped: no files changed", "verify"),
         ]
 
 
@@ -140,13 +141,35 @@ async def test_the_startup_checks_result_is_noted_in_the_transcript() -> None:
             StartupChecked(passed=True),
             StartupChecked(passed=False, step="Lint", output=output),
         )
-        passed, failed = [(str(e.render()), e.classes) for e in app.query(Entry)]
-        assert passed == ("✅ Startup check passed", frozenset({"verify"}))
+        passed, failed = list(app.query_one(Transcript).entries(None))
+        assert passed == ("✅ Startup check passed", "verify")
         text, kind = failed
-        assert kind == frozenset({"error"})
+        assert kind == "error"
         tail = "\n".join(f"line {n}" for n in range(11, 31))
         assert text == (
             f"❌ Startup check failed: Lint\n\n{tail}\n\n"
             "📝 Added a draft task: Fix failing check: Lint. If the steps themselves are wrong,"
             " press ctrl+e to reconfigure them."
         )
+
+
+async def test_the_panel_is_redrawn_only_when_its_text_changes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        panel = app.query_one(VerificationPanel)
+        now = [100.0]
+        panel.clock = lambda: now[0]
+        await feed(session, pilot, report("passed", "passed"))
+        updates: list[object] = []
+        monkeypatch.setattr(panel.query_one(Static), "update", updates.append)
+        for _ in range(3):
+            now[0] += 1 / 8
+            panel.tick()
+        assert updates == []  # Nothing runs, so the ticks have nothing to redraw.
+        await feed(session, pilot, report("passed", "running"))
+        now[0] += 1 / 8
+        panel.tick()
+        assert len(updates) == 2  # The report, then the spinner's next frame.

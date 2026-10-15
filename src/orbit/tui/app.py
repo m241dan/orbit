@@ -161,6 +161,13 @@ class OrbitApp(App[None], inherit_bindings=False):
         await self._session.close()
 
     def on_mount(self) -> None:
+        # Looked up once: a query walks the DOM, and events arrive many times a second.
+        self._transcript = self.query_one(Transcript)
+        self._tabs = self.query_one(ConversationTabs)
+        self._prompt = self.query_one(PromptInput)
+        self._task_list = self.query_one(TaskList)
+        self._verification = self.query_one(VerificationPanel)
+        self._agents = self.query_one(AgentsPane)
         self.query_one(f"#{self._selected}").add_class("selected")
         self.install_screen(self._model_picker, "pick-model")
         self.install_screen(self._tool_picker, "pick-tool-access")
@@ -172,7 +179,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         if not text:
             return
         message.input.clear()
-        prompt = self.query_one(PromptInput)
+        prompt = self._prompt
         prompt.action_normal_mode()
         # Busy from now, not from TurnStarted, so a second prompt can't race the turn.
         self._set_busy("planner", True)
@@ -196,7 +203,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         return len(self.screen_stack) == 1 and self.focused is None
 
     def action_cycle_tab(self, step: int) -> None:
-        tabs = self.query_one(ConversationTabs)
+        tabs = self._tabs
         if step > 0:
             tabs.action_next_tab()
         else:
@@ -204,19 +211,19 @@ class OrbitApp(App[None], inherit_bindings=False):
 
     def action_activate(self) -> None:
         if self._selected == "task-list":
-            self.query_one(TaskList).enter_list_mode()
+            self._task_list.enter_list_mode()
         elif self._selected == "agents":
-            self.query_one(AgentsPane).enter_list_mode()
+            self._agents.enter_list_mode()
 
     def action_insert_mode(self) -> None:
         """Shortcut from any window: select the prompt and start typing."""
         if self.focused is None:
             self._select("prompt")
-            self.query_one(PromptInput).enter_insert_mode()
+            self._prompt.enter_insert_mode()
 
     @on(OptionList.OptionSelected, "#task-list")
     def _edit_task(self, event: OptionList.OptionSelected) -> None:
-        tasks = self.query_one(TaskList).tasks
+        tasks = self._task_list.tasks
         current = tasks[event.option_index] if event.option_index < len(tasks) else None
 
         # The list changes when the backend reports the new task list.
@@ -247,10 +254,10 @@ class OrbitApp(App[None], inherit_bindings=False):
 
     @on(Tabs.TabActivated, "#conversation-tabs")
     def _show_tab(self, event: Tabs.TabActivated) -> None:
-        tabs = self.query_one(ConversationTabs)
+        tabs = self._tabs
         agent = tabs.agent_of(event.tab.id or "")
         tabs.mark_read(agent)
-        self.query_one(Transcript).show_only(agent, event.tab.label_text)
+        self._transcript.show_only(agent, event.tab.label_text)
 
     @on(AgentsPane.Cancel)
     async def _cancel_agent(self, message: AgentsPane.Cancel) -> None:
@@ -258,7 +265,7 @@ class OrbitApp(App[None], inherit_bindings=False):
 
     def action_toggle_planner(self) -> None:
         """Show the planner tab, or go back to the tab shown before it."""
-        self.query_one(ConversationTabs).toggle_planner()
+        self._tabs.toggle_planner()
 
     @on(TaskList.Accept)
     async def _accept_task(self, message: TaskList.Accept) -> None:
@@ -436,22 +443,22 @@ class OrbitApp(App[None], inherit_bindings=False):
                 assert_never(event)
 
     def _follow_agents(self, event: Event) -> None:
-        self.query_one(AgentsPane).track(event)
-        self.query_one(ConversationTabs).track(event)
+        self._agents.track(event)
+        self._tabs.track(event)
         self._withdraw_proposal(event)
 
     def _show_tasks(self, tasks: tuple[TaskState, ...]) -> None:
-        task_list = self.query_one(TaskList)
+        task_list = self._task_list
         task_list.show(tasks)
         numbers = dict(zip((t.id for t in task_list.tasks), task_list.numbers, strict=True))
-        self.query_one(AgentsPane).number_tasks(numbers)
+        self._agents.number_tasks(numbers)
 
     def _show_progress(self, event: VerificationChanged | ReviewStatus | ChecksProposed) -> None:
         """Show the verification steps' progress, whether review is paused, or proposed steps."""
         if isinstance(event, VerificationChanged):
-            self.query_one(VerificationPanel).show(event.steps, event.title)
+            self._verification.show(event.steps, event.title)
         elif isinstance(event, ReviewStatus):
-            self.query_one(AgentsPane).show_review(event)
+            self._agents.show_review(event)
         else:
             self._show_proposal(event)
 
@@ -477,25 +484,25 @@ class OrbitApp(App[None], inherit_bindings=False):
         if choices != self._model_choices:
             self._model_picker.set_labels(["default", *choices])
         self._settings, self._model_choices = settings, choices
-        self.query_one(PromptInput).show_settings(settings)
+        self._prompt.show_settings(settings)
 
     def _set_busy(self, lane: BusyLane, busy: bool) -> None:
         self._busy[lane] = busy
         if lane == "planner":
             # Take prompts only while the planner is free, and mark its tab while it isn't.
-            self.query_one(PromptInput).disabled = busy
-            self.query_one(ConversationTabs).set_planner_busy(busy)
+            self._prompt.disabled = busy
+            self._tabs.set_planner_busy(busy)
 
     def _turn_finished(self, event: TurnFinished) -> None:
         if event.usage is not None:
-            self.query_one(TaskList).count(event.usage)
+            self._task_list.count(event.usage)
         entry = turn_end_entry(event.reason)
         if entry is not None:
             self._append(*agent_labelled(entry, event.agent_id), event.agent_id)
 
     def _task_header(self, task_id: str) -> tuple[str, EntryKind]:
         """Task ``task_id``'s header, by the number the list shows for it."""
-        task_list = self.query_one(TaskList)
+        task_list = self._task_list
         state = task_list.find(task_id)
         number = task_id if state is None else task_list.numbers[task_list.position(task_id)]
         return task_started_entry(number, state)
@@ -504,14 +511,14 @@ class OrbitApp(App[None], inherit_bindings=False):
         """Add ``entry``, a note on task ``task_id``'s run, under the task's role's tab as
         well as All, marking that tab unread when it isn't being shown. A task that isn't
         on the list (removed meanwhile, or the startup check's) is noted under All only."""
-        key = task_tab_key(self.query_one(TaskList).find(task_id))
-        self.query_one(ConversationTabs).mark_unread(key)
-        self.query_one(Transcript).add_entry(*entry, key)
+        key = task_tab_key(self._task_list.find(task_id))
+        self._tabs.mark_unread(key)
+        self._transcript.add_entry(*entry, key)
 
     def _step(self, step: int) -> StepState:
-        return self.query_one(VerificationPanel).steps[step]
+        return self._verification.steps[step]
 
     def _append(self, text: str, kind: EntryKind, agent: str | None = None) -> None:
         # Entries are kept by tab: a pinned role's agents' under its tab.
-        key = self.query_one(ConversationTabs).key_of(agent)
-        self.query_one(Transcript).add_entry(text, kind, key)
+        key = self._tabs.key_of(agent)
+        self._transcript.add_entry(text, kind, key)

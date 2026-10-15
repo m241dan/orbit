@@ -22,8 +22,8 @@ from orbit.protocol import (
 )
 from orbit.tui import OrbitApp
 from orbit.tui.tasks import TaskEditorScreen, TaskList
-from orbit.tui.view import task_label, task_numbers, usage_label
-from orbit.tui.widgets import Entry, PickerScreen, PromptInput
+from orbit.tui.view import spinner_frame, task_label, task_numbers, usage_label
+from orbit.tui.widgets import PickerScreen, PromptInput, Transcript
 from tests.test_tui import FakeSession, picker, selected, show_settings
 
 
@@ -395,10 +395,10 @@ async def test_started_task_is_announced_in_the_transcript() -> None:
             TaskStarted(task_id="2"),
             TaskStarted(task_id="3"),
         )
-        entries = list(app.query(Entry))
+        entries = app.query_one(Transcript).entries(None)
         # Announced by the number the list shows.
-        assert [str(e.render()) for e in entries] == ["Task 2: two", "Task 1.1: fix one"]
-        assert entries[0].has_class("user")
+        assert [text for text, _ in entries] == ["Task 2: two", "Task 1.1: fix one"]
+        assert entries[0][1] == "user"
 
 
 async def test_side_windows_do_not_take_focus_on_click() -> None:
@@ -496,3 +496,47 @@ async def test_a_planner_less_session_leaves_the_prompt_usable() -> None:
         for _ in range(5):
             await pilot.pause()
         assert not prompt.disabled
+
+
+def options(task_list: TaskList) -> list[object]:
+    return [task_list.get_option_at_index(i) for i in range(task_list.option_count)]
+
+
+async def test_an_unchanged_task_list_is_left_alone() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed(session, pilot, board("one", "two"))
+        task_list = app.query_one(TaskList)
+        before = options(task_list)
+        await feed(session, pilot, board("one", "two"))
+        assert options(task_list) == before
+
+
+async def test_a_changed_task_relabels_its_row_in_place() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        task_list = app.query_one(TaskList)
+        task_list.clock = lambda: 0.0
+        await feed(session, pilot, board("one", "two"))
+        before = options(task_list)
+        one, two = board("one", "two").tasks
+        done = one.model_copy(update={"status": "completed"})
+        await feed(session, pilot, TasksChanged(tasks=(done, two)))
+        assert options(task_list) == before  # The same rows, one with a new label.
+        assert rows(app)[0] == str(task_label(done, "1", spinner_frame(0.0)))
+        assert rows(app)[1] == str(task_label(two, "2", spinner_frame(0.0)))
+
+
+async def test_tasks_coming_or_going_rebuild_the_rows() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed(session, pilot, board("one", "two"))
+        task_list = app.query_one(TaskList)
+        before = options(task_list)
+        await feed(session, pilot, board("one", "two", "three"))
+        assert len(options(task_list)) == 4
+        assert not any(option in before for option in options(task_list))
+        assert [row.split()[0] for row in rows(app)[:3]] == ["1.", "2.", "3."]

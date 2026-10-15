@@ -2,15 +2,16 @@
 
 import time
 from collections.abc import Callable, Mapping, Sequence
-from typing import Any, ClassVar
+from typing import Any, ClassVar, get_args
 
 from rich.text import Text
 from textual import on
 from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
-from textual.containers import VerticalScroll
+from textual.containers import Vertical, VerticalScroll
+from textual.events import Resize
 from textual.screen import ModalScreen
-from textual.widgets import Input, OptionList, Static, Tab, Tabs
+from textual.widgets import Input, OptionList, RichLog, Static, Tab, Tabs
 
 from orbit.protocol import Event, Settings, StepState
 from orbit.tui.view import (
@@ -32,26 +33,19 @@ from orbit.tui.view import (
     track_tabs,
 )
 
+Entry = tuple[str, EntryKind]
+"""A transcript entry: its text and how it's styled."""
 
-class Entry(Static):
-    """One item in the transcript."""
 
-    DEFAULT_CSS = """
-    Entry { margin: 0 0 1 0; }
-    Entry.user { color: $text-accent; text-style: bold; }
-    Entry.tool { color: $text-muted; }
-    Entry.verify { color: $text-warning; }
-    Entry.agent { color: $text-accent; }
-    Entry.error { color: $text-error; }
+class Transcript(Vertical):
+    """Main display: the running conversation, pinned to the latest output.
+
+    Entries are kept per tab (All, and the tab they belong to), each tab in an append-only log
+    of its own that is written as entries arrive and kept at no height until the tab is shown
+    (hidden with ``display``, a log wouldn't know its width, and would render everything at
+    once when shown). Adding an entry then costs the same however long the conversation gets,
+    and switching tabs is instant.
     """
-
-    def __init__(self, text: str, kind: EntryKind, agent: str | None = None) -> None:
-        super().__init__(Text(text), classes=kind)
-        self.agent = agent
-
-
-class Transcript(VerticalScroll):
-    """Main display: the running conversation, pinned to the latest output."""
 
     # Windows are reached with h/j/k/l, not by clicking; the mouse wheel still scrolls.
     can_focus = False
@@ -62,28 +56,93 @@ class Transcript(VerticalScroll):
         border: round $primary;
         padding: 0 1;
     }
+    Transcript > RichLog {
+        height: 0;
+        background: transparent;
+        overflow-y: auto;
+        scrollbar-gutter: stable;
+    }
+    Transcript > RichLog.-shown { height: 1fr; }
+    Transcript .transcript--user { color: $text-accent; text-style: bold; }
+    Transcript .transcript--tool { color: $text-muted; }
+    Transcript .transcript--verify { color: $text-warning; }
+    Transcript .transcript--agent { color: $text-accent; }
+    Transcript .transcript--error { color: $text-error; }
     """
+    COMPONENT_CLASSES: ClassVar[set[str]] = {f"transcript--{kind}" for kind in get_args(EntryKind)}
 
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
-        self.only: str | None = None  # Show only this agent's entries, or all.
+        self.only: str | None = None  # Show only this tab's entries, or all.
+        self._entries: dict[str | None, list[Entry]] = {None: []}
+        self._logs: dict[str | None, RichLog] = {}
+        # Logs whose lines were wrapped for an earlier window size; rewritten when shown.
+        self._stale: set[str | None] = set()
+
+    def compose(self) -> ComposeResult:
+        yield self._new_log(None)
 
     def on_mount(self) -> None:
         self.border_title = "Conversation"
 
-    def add_entry(self, text: str, kind: EntryKind, agent: str | None = None) -> None:
-        entry = Entry(text, kind, agent)
-        entry.display = self.only is None or agent == self.only
-        self.mount(entry)
-        self.scroll_end(animate=False)
+    def entries(self, key: str | None) -> tuple[Entry, ...]:
+        """The entries under the tab keyed ``key``; None is All."""
+        return tuple(self._entries.get(key, ()))
 
-    def show_only(self, agent: str | None, label: str = "") -> None:
-        """Show only ``agent``'s entries, titled by its tab ``label``, or all of them."""
-        self.only = agent
-        self.border_title = "Conversation" if agent is None else f"Conversation · {label}"
-        for entry in self.query(Entry):
-            entry.display = agent is None or entry.agent == agent
-        self.scroll_end(animate=False)
+    def add_entry(self, text: str, kind: EntryKind, key: str | None = None) -> None:
+        """Add an entry under All and, if ``key`` names a tab, under that tab."""
+        for tab in {None, key}:
+            self._entries.setdefault(tab, []).append((text, kind))
+            if tab not in self._logs:
+                self.mount(self._new_log(tab))
+            if tab not in self._stale:
+                self._logs[tab].write(self._styled(text, kind), width=self._width())
+
+    def show_only(self, key: str | None, label: str = "") -> None:
+        """Show only the tab keyed ``key``'s entries, titled by its tab ``label``, or all."""
+        if key not in self._logs:
+            self.mount(self._new_log(key))
+        elif key in self._stale:
+            self._stale.discard(key)
+            self._logs[key].clear()
+            self._fill(key)
+        self._logs[self.only].remove_class("-shown")
+        self.only = key
+        self.border_title = "Conversation" if key is None else f"Conversation · {label}"
+        self._logs[key].add_class("-shown")
+        self._logs[key].scroll_end(animate=False)
+
+    def on_resize(self, event: Resize) -> None:
+        """Wrap the shown log's lines again for the new width, once the logs have it; the
+        others are wrapped again when next shown."""
+        self._stale = set(self._logs) - {self.only}
+        self.call_after_refresh(self._rewrap, self.only)
+
+    def _rewrap(self, key: str | None) -> None:
+        if key == self.only:
+            self._logs[key].clear()
+            self._fill(key)
+
+    def _new_log(self, key: str | None) -> RichLog:
+        log = RichLog(wrap=True, min_width=1, classes="-shown" if key is None else None)
+        log.can_focus = False
+        self._logs[key] = log
+        return log
+
+    def _fill(self, key: str | None) -> None:
+        """Write the tab keyed ``key``'s entries to its log, as wide as the one being shown."""
+        log, width = self._logs[key], self._width()
+        for text, kind in self._entries.get(key, ()):
+            log.write(self._styled(text, kind), width=width)
+
+    def _width(self) -> int | None:
+        """How wide the shown log's lines are; None before the first layout, when a log works
+        out its own width once it has one."""
+        return self._logs[self.only].scrollable_content_region.width or None
+
+    def _styled(self, text: str, kind: EntryKind) -> Text:
+        # Each entry ends in a blank line, so entries read as paragraphs.
+        return Text(text + "\n", style=self.get_component_rich_style(f"transcript--{kind}"))
 
 
 class ConversationTabs(Tabs):
@@ -221,6 +280,7 @@ class VerificationPanel(SidePanel):
         # The running step and when it started, by ``clock``.
         self._running_step: int | None = None
         self._since = 0.0
+        self._text = NO_STEPS_TEXT  # What the panel shows now.
 
     def compose(self) -> ComposeResult:
         yield Static(NO_STEPS_TEXT)
@@ -237,9 +297,13 @@ class VerificationPanel(SidePanel):
         self.tick()
 
     def tick(self) -> None:
+        """Redraw the steps, if they or the spinner's frame changed since the last time."""
         now = self.clock()
         lines = step_lines(self.steps, spinner_frame(now), int(now - self._since), self.title)
-        self.query_one(Static).update(Text("\n".join(lines) or NO_STEPS_TEXT))
+        text = "\n".join(lines) or NO_STEPS_TEXT
+        if text != self._text:
+            self._text = text
+            self.query_one(Static).update(Text(text))
 
 
 class PromptInput(Input):

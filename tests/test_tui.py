@@ -3,7 +3,7 @@ from collections.abc import AsyncIterator
 
 import pytest
 from textual.pilot import Pilot
-from textual.widgets import Footer, Input, OptionList, Tab
+from textual.widgets import Footer, Input, OptionList, RichLog, Tab
 
 from orbit.protocol import (
     STARTUP_TASK,
@@ -38,10 +38,9 @@ from orbit.protocol import (
 )
 from orbit.tui import OrbitApp
 from orbit.tui.tasks import TaskList
-from orbit.tui.view import spinner_frame
+from orbit.tui.view import EntryKind, spinner_frame
 from orbit.tui.widgets import (
     ConversationTabs,
-    Entry,
     PickerScreen,
     PromptInput,
     SidePanel,
@@ -94,8 +93,7 @@ async def test_submit_sends_command_and_renders_events() -> None:
         ):
             await session.queue.put(event)
         await pilot.pause()
-        texts = [str(entry.render()) for entry in app.query(Entry)]
-        assert texts == ["hi", "hello back"]
+        assert shown(app) == ["hi", "hello back"]
         assert prompt.disabled
 
         await session.queue.put(BusyChanged(busy=False, lane="planner"))
@@ -132,7 +130,7 @@ async def test_blank_submit_is_ignored() -> None:
     async with app.run_test() as pilot:
         await pilot.press("i", "space", "enter")
         assert session.commands == []
-        assert len(app.query(Entry)) == 0
+        assert shown(app) == []
 
 
 async def test_renders_tool_calls_errors_and_cancellation() -> None:
@@ -150,13 +148,13 @@ async def test_renders_tool_calls_errors_and_cancellation() -> None:
             await session.queue.put(event)
         await pilot.pause()
 
-        rendered = [(str(e.render()), e.classes) for e in app.query(Entry)]
+        rendered = entries(app)
         assert rendered == [
-            ('→ upper {"text": "hi"}', frozenset({"tool"})),
-            ("HI", frozenset({"tool"})),
-            ("KeyError", frozenset({"error"})),
-            ("boom", frozenset({"error"})),
-            ("[turn ended: cancelled]", frozenset({"tool"})),
+            ('→ upper {"text": "hi"}', "tool"),
+            ("HI", "tool"),
+            ("KeyError", "error"),
+            ("boom", "error"),
+            ("[turn ended: cancelled]", "tool"),
         ]
 
 
@@ -169,11 +167,11 @@ async def test_renders_agent_activity() -> None:
         await session.queue.put(Notice(message="1 stash"))
         await pilot.pause()
 
-        rendered = [(str(e.render()), e.classes) for e in app.query(Entry)]
+        rendered = entries(app)
         assert rendered == [
-            ("▶ agent-1 (coder) started", frozenset({"agent"})),
-            ("orbit → agent-1: Do X.", frozenset({"agent"})),
-            ("📌 1 stash", frozenset({"verify"})),
+            ("▶ agent-1 (coder) started", "agent"),
+            ("orbit → agent-1: Do X.", "agent"),
+            ("📌 1 stash", "verify"),
         ]
 
 
@@ -286,9 +284,9 @@ async def test_display_follows_latest_output() -> None:
             await session.queue.put(AssistantMessage(turn_id="t", text=f"line {i}"))
         await pilot.pause()
 
-        transcript = app.query_one(Transcript)
-        assert transcript.max_scroll_y > 0
-        assert transcript.scroll_y == transcript.max_scroll_y
+        log = app.query_one("Transcript > RichLog.-shown", RichLog)
+        assert log.max_scroll_y > 0
+        assert log.scroll_y == log.max_scroll_y
 
 
 CHOICES = ("opus", "sonnet")
@@ -649,7 +647,14 @@ def tab_strip(app: OrbitApp) -> list[str]:
 
 
 def shown(app: OrbitApp) -> list[str]:
-    return [str(e.render()) for e in app.query(Entry) if e.display]
+    """The texts of the entries on the tab being shown."""
+    transcript = app.query_one(Transcript)
+    return [text for text, _ in transcript.entries(transcript.only)]
+
+
+def entries(app: OrbitApp) -> list[tuple[str, EntryKind]]:
+    """Every entry, with its kind, as the All tab has them."""
+    return list(app.query_one(Transcript).entries(None))
 
 
 def started(agent_id: str, role: str = "coder") -> AgentStarted:

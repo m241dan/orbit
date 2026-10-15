@@ -14,7 +14,7 @@ from orbit.protocol import (
 from orbit.tui import OrbitApp
 from orbit.tui.agents import AgentsPane
 from tests.agent_fakes import Call, session_for
-from tests.test_task_list import feed
+from tests.test_task_list import board, feed
 from tests.test_tui import FakeSession, active_tab, shown, tab_strip
 
 
@@ -131,3 +131,23 @@ async def test_a_real_planners_reply_shows_on_the_planner_tab() -> None:
         assert active_tab(app) == "planner"
         assert "agent-1: Here's a plan." in shown(app)
         assert "agent-1 planner · planning · working" in rows(app.query_one(AgentsPane))
+
+
+async def test_the_pane_is_redrawn_only_when_its_agents_numbers_change() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        one, two = board("one", "two").tasks
+        await feed(session, pilot, AgentStarted(agent_id="agent-1", role="coder", task_id="2"))
+        await feed(session, pilot, TasksChanged(tasks=(one, two)))
+        pane = app.query_one(AgentsPane)
+        assert rows(pane) == ["agent-1 coder · task 2 · working"]
+        before = pane.get_option_at_index(0)
+        # A task added after agent-1's leaves its number alone.
+        three = TaskState(id="3", task=TaskSpec(prompt="three"))
+        await feed(session, pilot, TasksChanged(tasks=(one, two, three)))
+        assert pane.get_option_at_index(0) is before
+        # One added before it renumbers it.
+        await feed(session, pilot, TasksChanged(tasks=(three, one, two)))
+        assert pane.get_option_at_index(0) is not before
+        assert rows(pane) == ["agent-1 coder · task 3 · working"]

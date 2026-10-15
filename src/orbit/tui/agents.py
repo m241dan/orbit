@@ -58,9 +58,15 @@ class AgentsPane(ListPane):
             self._redraw()
 
     def number_tasks(self, numbers: Mapping[str, str]) -> None:
-        """Task ids' numbers in the task list, to show agents' tasks by."""
+        """Task ids' numbers in the task list, to show agents' tasks by; redraws the pane
+        only if one of its agents' numbers changed."""
+        changed = self._shown_numbers(numbers) != self._shown_numbers(self._numbers)
         self._numbers = numbers
-        self._redraw()
+        if changed:
+            self._redraw()
+
+    def _shown_numbers(self, numbers: Mapping[str, str]) -> list[str | None]:
+        return [numbers.get(row.task_id) for row in self.rows]
 
     def show_review(self, status: ReviewStatus) -> None:
         self.border_subtitle = review_line(status)

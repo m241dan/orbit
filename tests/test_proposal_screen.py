@@ -11,7 +11,7 @@ from orbit.protocol import (
 from orbit.tui import OrbitApp
 from orbit.tui.proposals import ProposalScreen
 from orbit.tui.view import proposal_text
-from orbit.tui.widgets import Entry
+from orbit.tui.widgets import Transcript
 from tests.test_task_list import feed
 from tests.test_tui import FakeSession
 
@@ -28,7 +28,7 @@ STARTED = AgentStarted(agent_id="agent-3", role="configurator", task_id="7")
 
 
 def entries(app: OrbitApp) -> list[str]:
-    return [str(entry.render()) for entry in app.query(Entry)]
+    return [text for text, _ in app.query_one(Transcript).entries(None)]
 
 
 def test_the_proposal_reads_setup_then_each_step_and_that_they_passed() -> None:
@@ -73,7 +73,8 @@ async def test_a_accepts_and_notes_it_in_the_conversation() -> None:
         assert session.commands == [DecideProposal(task_id="7", action="accept")]
         assert not isinstance(app.screen, ProposalScreen)
         assert entries(app)[-1] == "orbit → agent-3: proposal accepted"
-        assert app.query(Entry).last().agent == "configurator"  # its role's tab
+        # Under its role's tab, too.
+        assert app.query_one(Transcript).entries("configurator")[-1][0] == entries(app)[-1]
 
 
 async def test_x_ends_the_task() -> None:

@@ -96,18 +96,41 @@ class TaskList(ListPane):
             event.prevent_default()
 
     def show(self, tasks: Sequence[TaskState]) -> None:
-        """Show ``tasks``; the highlight stays on its task, or on the new-task row."""
+        """Show ``tasks``; the highlight stays on its task, or on the new-task row.
+
+        A task that changed has its row relabelled in place; only tasks coming, going or
+        moving rebuild the rows.
+        """
+        tasks = tuple(tasks)
+        if tasks == self.tasks:
+            return
+        highlight = self._moved_highlight(tasks)
+        before = tuple(zip(self.tasks, self.numbers, strict=True))
+        self.tasks, self.numbers = tasks, task_numbers(tasks)
+        if [state.id for state, _ in before] == [state.id for state in tasks]:
+            self._relabel(before)
+        else:
+            self._show(highlight)
+
+    def _moved_highlight(self, tasks: Sequence[TaskState]) -> int | None:
+        """Where the highlight goes once ``tasks`` are shown: with its task, or on the
+        new-task row."""
         highlight = self.highlighted
-        if highlight is not None:
-            positions = {t.id: i for i, t in enumerate(tasks)}
-            highlight = (
-                positions.get(self.tasks[highlight].id, highlight)
-                if highlight < len(self.tasks)
-                else len(tasks)
-            )
-        self.tasks = tuple(tasks)
-        self.numbers = task_numbers(self.tasks)
-        self._show(highlight)
+        if highlight is None:
+            return None
+        if highlight >= len(self.tasks):
+            return len(tasks)
+        positions = {t.id: i for i, t in enumerate(tasks)}
+        return positions.get(self.tasks[highlight].id, highlight)
+
+    def _relabel(self, before: Sequence[tuple[TaskState, str]]) -> None:
+        """Relabel the rows whose task or number differs from ``before``, the same tasks in
+        the same order."""
+        frame = spinner_frame(self.clock())
+        rows = zip(self.tasks, self.numbers, strict=True)
+        for index, (row, old) in enumerate(zip(rows, before, strict=True)):
+            if row != old:
+                self.replace_option_prompt_at_index(index, task_label(*row, frame))
 
     def count(self, usage: Usage) -> None:
         """Add what a turn cost to the session's total."""
