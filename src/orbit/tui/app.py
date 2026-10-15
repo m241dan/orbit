@@ -466,8 +466,10 @@ class OrbitApp(App[None], inherit_bindings=False):
 
     def _set_busy(self, lane: BusyLane, busy: bool) -> None:
         self._busy[lane] = busy
-        # Take prompts only while the planner is free.
-        self.query_one(PromptInput).disabled = self._busy["planner"]
+        if lane == "planner":
+            # Take prompts only while the planner is free, and mark its tab while it isn't.
+            self.query_one(PromptInput).disabled = busy
+            self.query_one(ConversationTabs).set_planner_busy(busy)
 
     def _turn_finished(self, event: TurnFinished) -> None:
         if event.usage is not None:

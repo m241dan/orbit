@@ -103,8 +103,9 @@ apart. Agents in any other role, such as the startup check (`checker`) or a cust
 `.orbit/config.toml`, get a temporary tab of their own after the pinned ones, labelled by role
 (`checker`, `checker 2`, …), which closes when the agent exits; their entries stay under All. Entries
 with no agent, such as task headers and verification notes, show only under All. Click a tab to
-switch, cycle with `tab`/`shift+tab`, or jump to the planner tab with `ctrl+t` (again goes back); a
-tab with output you haven't seen ends in `*`. Whichever tab is shown, the prompt goes to the
+switch, cycle with `tab`/`shift+tab`, or jump to the planner tab with `ctrl+t` (again goes back). A
+role's tab starts with `●` while one of its agents is running (the planner's while it's answering),
+and a tab with output you haven't seen ends in `*`. Whichever tab is shown, the prompt goes to the
 planner.
 
 Each row of the task list shows its status: ⏳ pending, ◜ running (spinning), 🔍 verifying, ✅ done,

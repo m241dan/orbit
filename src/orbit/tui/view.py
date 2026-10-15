@@ -435,14 +435,22 @@ ROLE_TABS: tuple[str, ...] = ("planner", "coder", "reviewer", "super-reviewer", 
 agents; a pinned tab's key and label are its role's name."""
 
 
+RUNNING_MARK = "●"
+"""Leads a tab's label while its role is at work."""
+
+
 @dataclass(frozen=True)
 class ConversationTab:
-    """A conversation tab, by ``key`` (a pinned role's name, or a running agent's id), and
-    whether it has output not yet looked at."""
+    """A conversation tab, by ``key`` (a pinned role's name, or a running agent's id),
+    whether it has output not yet looked at, and how many of its role's agents are at work
+    (``running``). Only a pinned tab counts them: a temporary tab is there only while its
+    agent runs, and the planner's count follows its busy lane, as the planner agent itself
+    runs from the first prompt until the session ends."""
 
     key: str
     role: str
     unread: bool = False
+    running: int = 0
 
 
 _TabOutput = (
@@ -491,15 +499,19 @@ def track_tabs(
     if isinstance(event, AgentStarted):
         return _open_tab(tabs, event)
     if isinstance(event, AgentExited):
-        return _close_tab(tabs, event.agent_id)
+        return _close_tab(tabs, event.agent_id, roles)
     if _is_tab_output(event):
         return _mark_unread(tabs, tab_key(event.agent_id, roles), active)
     return tabs
 
 
-def _close_tab(tabs: tuple[ConversationTab, ...], agent: str) -> tuple[ConversationTab, ...]:
-    """``tabs`` without ``agent``'s own tab; the pinned tabs stay."""
-    return tuple(tab for tab in tabs if tab.key in ROLE_TABS or tab.key != agent)
+def _close_tab(
+    tabs: tuple[ConversationTab, ...], agent: str, roles: Mapping[str, str]
+) -> tuple[ConversationTab, ...]:
+    """``tabs`` without ``agent``'s own tab; the pinned tabs stay, with one agent fewer at
+    work on the tab of ``agent``'s role when ``roles`` has it pinned."""
+    tabs = tuple(tab for tab in tabs if tab.key in ROLE_TABS or tab.key != agent)
+    return _count_running(tabs, roles.get(agent), -1)
 
 
 def _is_tab_output(event: Event) -> TypeGuard[_TabOutput]:
@@ -513,10 +525,28 @@ def _is_tab_output(event: Event) -> TypeGuard[_TabOutput]:
 def _open_tab(
     tabs: tuple[ConversationTab, ...], event: AgentStarted
 ) -> tuple[ConversationTab, ...]:
-    """``tabs`` with one for the started agent, unless its role has a pinned tab."""
+    """``tabs`` with one for the started agent, unless its role has a pinned tab, which
+    counts one more agent at work instead."""
     if event.role in ROLE_TABS:
-        return tabs
+        return _count_running(tabs, event.role, 1)
     return (*tabs, ConversationTab(event.agent_id, event.role))
+
+
+def _count_running(
+    tabs: tuple[ConversationTab, ...], role: str | None, change: int
+) -> tuple[ConversationTab, ...]:
+    """``tabs`` with ``change`` more agents at work on the pinned tab of ``role``, which is
+    None for a role with no pinned tab. The planner's tab is left to ``mark_planner_busy``."""
+    if role is None or role == PLANNER:
+        return tabs
+    return tuple(
+        replace(tab, running=tab.running + change) if tab.key == role else tab for tab in tabs
+    )
+
+
+def mark_planner_busy(tabs: tuple[ConversationTab, ...], busy: bool) -> tuple[ConversationTab, ...]:
+    """``tabs`` with the planner's tab at work while the planner is ``busy`` answering."""
+    return tuple(replace(tab, running=int(busy)) if tab.key == PLANNER else tab for tab in tabs)
 
 
 def _mark_unread(
@@ -539,12 +569,19 @@ def _set_unread(
 
 def tab_labels(tabs: Sequence[ConversationTab]) -> list[str]:
     """Tabs named by role: the first of a role is just the role, later ones "coder 2", …;
-    unread tabs end in " *"."""
+    tabs with agents at work start with "● ", and unread tabs end in " *"."""
     seen: Counter[str] = Counter()
     labels: list[str] = []
     for tab in tabs:
         seen[tab.role] += 1
         count = seen[tab.role]
         label = tab.role if count == 1 else f"{tab.role} {count}"
-        labels.append(f"{label} *" if tab.unread else label)
+        labels.append(_marked(label, tab))
     return labels
+
+
+def _marked(label: str, tab: ConversationTab) -> str:
+    """``label`` with ``tab``'s running and unread markers."""
+    if tab.running:
+        label = f"{RUNNING_MARK} {label}"
+    return f"{label} *" if tab.unread else label

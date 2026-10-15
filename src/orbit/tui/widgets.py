@@ -20,6 +20,7 @@ from orbit.tui.view import (
     SPINNER_FPS,
     ConversationTab,
     EntryKind,
+    mark_planner_busy,
     mark_tab_read,
     settings_summary,
     spinner_frame,
@@ -139,6 +140,10 @@ class ConversationTabs(Tabs):
         """Clear ``agent``'s unread marker; None (All) has none."""
         if agent is not None:
             self._update(mark_tab_read(self.tabs, agent))
+
+    def set_planner_busy(self, busy: bool) -> None:
+        """Show the planner tab's running marker while the planner is ``busy`` answering."""
+        self._update(mark_planner_busy(self.tabs, busy))
 
     def _update(self, tabs: tuple[ConversationTab, ...]) -> None:
         if tabs == self.tabs:

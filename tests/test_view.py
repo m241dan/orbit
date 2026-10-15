@@ -1,4 +1,5 @@
 from collections.abc import Mapping
+from dataclasses import replace
 from typing import get_args
 
 from orbit.protocol import (
@@ -37,6 +38,7 @@ from orbit.tui.view import (
     agent_labelled,
     agent_line,
     exchange_entry,
+    mark_planner_busy,
     mark_tab_read,
     note_entry,
     output_entry,
@@ -289,14 +291,15 @@ def test_the_pinned_tabs_are_the_built_in_roles_in_order() -> None:
 def test_agents_in_a_pinned_role_get_no_tab_of_their_own() -> None:
     for index, role in enumerate(ROLE_TABS):
         started = AgentStarted(agent_id=f"agent-{index}", role=role, task_id="1")
-        assert track_tabs(PINNED_TABS, started) is PINNED_TABS
+        assert [tab.key for tab in track_tabs(PINNED_TABS, started)] == list(ROLE_TABS)
 
 
 def test_a_pinned_roles_agent_exiting_leaves_its_tab() -> None:
-    roles = track_roles({}, AgentStarted(agent_id="agent-1", role="coder", task_id="1"))
+    started = AgentStarted(agent_id="agent-1", role="coder", task_id="1")
+    roles = track_roles({}, started)
     exited = AgentExited(agent_id="agent-1", reason="finished")
     assert track_roles(roles, exited) is roles
-    assert track_tabs(PINNED_TABS, exited, roles=roles) == PINNED_TABS
+    assert track_tabs(track_tabs(PINNED_TABS, started), exited, roles=roles) == PINNED_TABS
 
 
 def test_an_agent_named_like_a_pinned_role_doesnt_close_its_tab() -> None:
@@ -360,3 +363,61 @@ def test_entries_are_labelled_by_their_agent_when_they_have_one() -> None:
     assert end is not None
     assert agent_labelled(end, "agent-2") == ("agent-2: [turn ended: cancelled]", "tool")
     assert agent_labelled(end, None) == end
+
+
+def _pinned(agent: str, role: str) -> tuple[AgentStarted, AgentExited]:
+    return (
+        AgentStarted(agent_id=agent, role=role, task_id="1"),
+        AgentExited(agent_id=agent, reason="finished"),
+    )
+
+
+def test_a_pinned_roles_tab_is_marked_running_from_its_agents_start_to_its_exit() -> None:
+    started, exited = _pinned("agent-1", "coder")
+    roles = track_roles({}, started)
+    tabs = track_tabs(PINNED_TABS, started)
+    assert tabs == tuple(
+        replace(tab, running=1) if tab.key == "coder" else tab for tab in PINNED_TABS
+    )
+    assert tab_labels(tabs) == ["planner", "● coder", "reviewer", "super-reviewer", "configurator"]
+    assert track_tabs(tabs, exited, roles=roles) == PINNED_TABS
+
+
+def test_a_roles_marker_stays_until_its_last_agent_exits() -> None:
+    started_1, exited_1 = _pinned("agent-1", "reviewer")
+    started_2, exited_2 = _pinned("agent-2", "reviewer")
+    roles: Mapping[str, str] = {}
+    tabs = PINNED_TABS
+    for started in (started_1, started_2):
+        roles = track_roles(roles, started)
+        tabs = track_tabs(tabs, started, roles=roles)
+    assert tab_labels(tabs)[2] == "● reviewer"
+    tabs = track_tabs(tabs, exited_1, roles=roles)
+    assert tab_labels(tabs)[2] == "● reviewer"
+    tabs = track_tabs(tabs, exited_2, roles=roles)
+    assert tab_labels(tabs)[2] == "reviewer"
+    assert tabs == PINNED_TABS
+
+
+def test_the_planner_agents_start_and_exit_dont_mark_its_tab() -> None:
+    started, exited = _pinned("planner-agent", "planner")
+    roles = track_roles({}, started)
+    assert track_tabs(PINNED_TABS, started) == PINNED_TABS
+    assert track_tabs(PINNED_TABS, exited, roles=roles) == PINNED_TABS
+
+
+def test_the_planner_tab_is_marked_while_the_planner_is_busy() -> None:
+    busy = mark_planner_busy(PINNED_TABS, True)
+    assert busy == (replace(PINNED_TABS[0], running=1), *PINNED_TABS[1:])
+    assert tab_labels(busy)[0] == "● planner"
+    assert mark_planner_busy(busy, True) == busy
+    assert mark_planner_busy(busy, False) == PINNED_TABS
+
+
+def test_the_running_marker_leads_and_the_unread_marker_trails() -> None:
+    tabs = (ConversationTab("coder", "coder", unread=True, running=1),)
+    assert tab_labels(tabs) == ["● coder *"]
+    assert tab_labels(mark_tab_read(tabs, "coder")) == ["● coder"]
+    assert tab_labels(mark_planner_busy((PINNED_TABS[0],), True)) == ["● planner"]
+    unread = track_tabs(tabs, AgentStarted(agent_id="a", role="coder", task_id="1"))
+    assert tab_labels(unread) == ["● coder *"]
