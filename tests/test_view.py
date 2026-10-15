@@ -82,10 +82,10 @@ def test_task_progress_entries() -> None:
     assert verification_finished_entry(step, False) == ("❌ Verification failed: Lint", "error")
 
 
-def test_settings_summary_names_the_model_and_tool_access() -> None:
-    assert settings_summary(Settings()) == "model: default · tools: restricted"
+def test_settings_summary_names_the_model_and_new_tasks_tool_access() -> None:
+    assert settings_summary(Settings()) == "model: default · new tasks' tools: restricted"
     full = Settings(model="opus", tool_access="full")
-    assert settings_summary(full) == "model: opus · tools: full (auto-approved)"
+    assert settings_summary(full) == "model: opus · new tasks' tools: full (auto-approved)"
 
 
 def test_step_lines_time_only_the_running_step() -> None:

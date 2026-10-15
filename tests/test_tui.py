@@ -289,13 +289,13 @@ async def test_settings_shown_under_prompt() -> None:
         assert not app.query_one(PromptInput).border_subtitle
 
         await show_settings(session, pilot, Settings())
-        assert prompt.border_subtitle == "model: default · tools: restricted"
+        assert prompt.border_subtitle == "model: default · new tasks' tools: restricted"
 
         await show_settings(session, pilot, Settings(model="opus", tool_access="full"))
-        assert prompt.border_subtitle == "model: opus · tools: full (auto-approved)"
+        assert prompt.border_subtitle == "model: opus · new tasks' tools: full (auto-approved)"
 
         await show_settings(session, pilot, Settings(tool_access="off"))
-        assert prompt.border_subtitle == "model: default · tools: off"
+        assert prompt.border_subtitle == "model: default · new tasks' tools: off"
 
 
 async def test_settings_keys_do_nothing_before_backend_reports_settings() -> None:
@@ -315,11 +315,11 @@ async def test_display_waits_for_backend_to_confirm_settings() -> None:
         prompt = app.query_one(PromptInput)
         await pilot.press("ctrl+l", "down", "enter")
         await pilot.pause()
-        assert prompt.border_subtitle == "model: default · tools: restricted"
+        assert prompt.border_subtitle == "model: default · new tasks' tools: restricted"
         assert session.commands == [UpdateSettings(settings=Settings(tool_access="full"))]
 
         await show_settings(session, pilot, Settings(tool_access="full"))
-        assert prompt.border_subtitle == "model: default · tools: full (auto-approved)"
+        assert prompt.border_subtitle == "model: default · new tasks' tools: full (auto-approved)"
 
 
 def picker(app: OrbitApp) -> tuple[str, list[str], int | None]:
