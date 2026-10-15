@@ -72,11 +72,25 @@ def failure_report(step: VerificationStep, output: str) -> str:
     )
 
 
+FIX_INSTRUCTIONS = (
+    "Find and fix the cause so the command passes. Do not weaken the check: don't"
+    " lower thresholds, skip or delete tests, or exclude code from coverage."
+)
+
+
 def fix_prompt(step: VerificationStep, output: str) -> str:
     """A task prompt asking to fix why ``step`` failed. Its first line works as a title."""
     return (
         f"Fix the failed verification step: {step.name}\n\n"
-        f"{failure_report(step, output)}\n\n"
-        "Find and fix the cause so the command passes. Do not weaken the check: don't"
-        " lower thresholds, skip or delete tests, or exclude code from coverage."
+        f"{failure_report(step, output)}\n\n{FIX_INSTRUCTIONS}"
+    )
+
+
+def startup_fix_prompt(step: VerificationStep, output: str) -> str:
+    """A task prompt asking to fix why ``step`` failed on the base commit at startup, before
+    any task ran. Its first line works as a title."""
+    return (
+        f"Fix failing check: {step.name}\n\n"
+        "Orbit ran the verification steps on the base commit at startup, and this one"
+        f" failed. {failure_report(step, output)}\n\n{FIX_INSTRUCTIONS}"
     )

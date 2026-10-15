@@ -14,6 +14,7 @@ from rich.cells import cell_len
 from rich.text import Text
 
 from orbit.protocol import (
+    STARTUP_TASK,
     AgentExited,
     AgentExitReason,
     AgentReply,
@@ -29,6 +30,7 @@ from orbit.protocol import (
     ReviewStatus,
     Settings,
     SkipReason,
+    StartupChecked,
     StepState,
     StepStatus,
     TaskGaveUp,
@@ -167,8 +169,27 @@ def exchange_entry(event: AgentRequest | AgentReply | ProgressNoted) -> tuple[st
             assert_never(event)
 
 
-def note_entry(event: TaskMerged | Notice) -> tuple[str, EntryKind]:
-    """What came of merging a task's work, or a notice, as a transcript entry."""
+# Lines of a failed startup check's output the conversation quotes.
+STARTUP_TAIL_LINES = 20
+
+
+def startup_entry(event: StartupChecked) -> tuple[str, EntryKind]:
+    """How the startup check went: passed, or which step failed, the end of its output, and the
+    draft task added to fix it."""
+    if event.passed:
+        return "✅ Startup check passed", "verify"
+    tail = "\n".join(event.output.splitlines()[-STARTUP_TAIL_LINES:])
+    return (
+        f"❌ Startup check failed: {event.step}\n\n{tail}\n\n"
+        f"📝 Added a draft task: Fix failing check: {event.step}. If the steps themselves are"
+        " wrong, press ctrl+e to reconfigure them.",
+        "error",
+    )
+
+
+def note_entry(event: TaskMerged | Notice | StartupChecked) -> tuple[str, EntryKind]:
+    """What came of merging a task's work, a notice, or the startup check, as a transcript
+    entry."""
     match event:
         case TaskMerged(result="merged"):
             return "⇢ Merged into the base branch.", "verify"
@@ -176,6 +197,8 @@ def note_entry(event: TaskMerged | Notice) -> tuple[str, EntryKind]:
             return f"⚠ Not merged ({result}): {detail}", "verify"
         case Notice(message=message):
             return f"📌 {message}", "verify"
+        case StartupChecked():
+            return startup_entry(event)
         case _:
             assert_never(event)
 
@@ -189,8 +212,10 @@ AgentNote = (
     | ProgressNoted
     | TaskMerged
     | Notice
+    | StartupChecked
 )
-"""Events shown as a single transcript entry each: agents' activity, merges and notices."""
+"""Events shown as a single transcript entry each: agents' activity, merges, notices and the
+startup check's result."""
 
 
 def activity_entry(event: AgentNote) -> tuple[str, EntryKind]:
@@ -304,10 +329,10 @@ def task_label(state: TaskState, number: str, frame: str) -> Text:
 # The verification panel
 
 
-def step_lines(steps: Sequence[StepState], frame: str, elapsed: int) -> list[str]:
-    """One line per step. The running one shows the spinner ``frame`` and the ``elapsed``
-    seconds it has been running."""
-    return [
+def step_lines(steps: Sequence[StepState], frame: str, elapsed: int, title: str = "") -> list[str]:
+    """One line per step, under the ``title`` heading if there is one. The running one shows
+    the spinner ``frame`` and the ``elapsed`` seconds it has been running."""
+    return [title] * bool(title) + [
         f"{frame} {s.name} · {elapsed}s"
         if s.status == "running"
         else f"{STEP_ICONS[s.status]} {s.name}"
@@ -345,7 +370,10 @@ def _waiting(rows: tuple[AgentRow, ...], agent: str, tool: str | None) -> tuple[
 
 def agent_line(row: AgentRow, number: str | None) -> str:
     """``row`` as a line; ``number`` is its task's number in the list, if it has one there."""
-    task = f"task {number}" if number is not None else "planning"
+    if number is not None:
+        task = f"task {number}"
+    else:
+        task = "base commit" if row.task_id == STARTUP_TASK else "planning"
     doing = f"waiting on {row.waiting_on}" if row.waiting_on else "working"
     return f"{row.agent_id} {row.role} · {task} · {doing}"
 

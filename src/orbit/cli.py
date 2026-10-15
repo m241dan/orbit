@@ -72,8 +72,8 @@ def chat(
     verify: Annotated[
         bool,
         typer.Option(
-            help="After each task, run the verification steps in .orbit/config.toml; a failure"
-            " goes back to the agent to fix."
+            help="Run the verification steps in .orbit/config.toml once at startup, and after"
+            " each task; a failure after a task goes back to the agent to fix."
         ),
     ] = True,
     worktree: Annotated[
@@ -134,6 +134,7 @@ def chat(
         verification=verification,
         agents=agents,
         workspace=str(root),
+        check_at_startup=True,
     )
     OrbitApp(session).run()
 

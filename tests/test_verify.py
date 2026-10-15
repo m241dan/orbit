@@ -7,6 +7,7 @@ from orbit.agent.domain.verification import (
     fix_prompt,
     may_change_files,
     skip_reason,
+    startup_fix_prompt,
 )
 from orbit.protocol import Settings, TaskSpec
 
@@ -78,3 +79,16 @@ def test_fix_prompt_keeps_only_the_end_of_long_output() -> None:
     assert "TAIL" in prompt
     assert "x" * OUTPUT_LIMIT not in prompt
     assert "…" + "x" * (OUTPUT_LIMIT - 4) + "TAIL" in prompt
+
+
+def test_startup_fix_prompt_is_titled_by_the_step_and_quotes_its_output() -> None:
+    step = VerificationStep(name="Lint", command=("ruff", "check"))
+    prompt = startup_fix_prompt(step, "E501 line too long\n")
+
+    first, *rest = prompt.splitlines()
+    assert first == "Fix failing check: Lint"
+    body = "\n".join(rest)
+    assert "at startup" in body
+    assert "ruff check" in body
+    assert "E501 line too long" in body
+    assert "Do not weaken the check" in body

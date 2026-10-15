@@ -1,0 +1,160 @@
+"""The startup check: the verification steps, run once on the base commit as orbit starts, so a
+broken setup shows up while the user types their first prompt rather than on the first task.
+
+It runs in the background, in a read-only snapshot of the base commit like a review, so it never
+races with an agent in the coder's tree. It shows in the verification panel until a task's own
+verification takes the panel over, and in the agents pane as an agent that can be cancelled.
+"""
+
+import asyncio
+from collections.abc import Awaitable, Callable
+from contextlib import suppress
+
+from orbit.agent.application.ports import CoderTree
+from orbit.agent.application.verifier import Failure, Verification
+from orbit.agent.domain.verification import VerificationStep, trim_output
+from orbit.protocol import (
+    STARTUP_TASK,
+    AgentExited,
+    AgentExitReason,
+    AgentStarted,
+    ErrorOccurred,
+    Event,
+    Notice,
+    StartupChecked,
+    StepState,
+    StepStatus,
+    VerificationChanged,
+)
+
+AGENT_ID = "startup-check"
+ROLE = "checker"
+TITLE = "Startup check"
+BASE = "HEAD"  # The main checkout's commit: the base, as orbit starts.
+CANCELLED_NOTE = "Startup check cancelled."
+
+Publish = Callable[[Event], Awaitable[None]]
+AddFix = Callable[[VerificationStep, str], Awaitable[None]]
+"""Adds a draft task to fix the step that failed, given its output."""
+
+
+class StartupCheck:
+    """Runs ``verification``'s steps once, in a snapshot of ``tree``'s base set up with its
+    setup (or in place without a tree), publishing progress and the result. A failure goes to
+    ``add_fix``."""
+
+    def __init__(
+        self,
+        verification: Verification,
+        tree: CoderTree | None,
+        publish: Publish,
+        add_fix: AddFix,
+    ) -> None:
+        self._verification = verification
+        self._tree = tree
+        self._publish = publish
+        self._add_fix = add_fix
+        self._steps = tuple(StepState(name=step.name) for step in verification.steps)
+        self._shown = True  # Whether it still has the verification panel.
+        self._task: asyncio.Task[None] | None = None
+
+    def start(self) -> None:
+        self._task = asyncio.create_task(self._run())
+
+    def release_panel(self) -> None:
+        """A task's verification takes the panel over from now on."""
+        self._shown = False
+
+    @property
+    def running(self) -> bool:
+        return self._task is not None and not self._task.done()
+
+    def cancel(self) -> None:
+        if self.running:
+            assert self._task is not None
+            self._task.cancel()
+
+    async def close(self) -> None:
+        self.cancel()
+        if self._task is not None:
+            with suppress(asyncio.CancelledError):
+                await self._task
+
+    async def _run(self) -> None:
+        await self._publish(AgentStarted(agent_id=AGENT_ID, role=ROLE, task_id=STARTUP_TASK))
+        await self._show()
+        reason: AgentExitReason = "killed"
+        try:
+            reason = await self._check()
+        finally:
+            await self._publish(AgentExited(agent_id=AGENT_ID, reason=reason))
+
+    async def _check(self) -> AgentExitReason:
+        try:
+            failure = await self._in_snapshot()
+        except asyncio.CancelledError:
+            await self._set_running("cancelled")
+            await self._publish(Notice(message=CANCELLED_NOTE))
+            raise
+        except RuntimeError as exc:  # Git couldn't make the snapshot.
+            await self._publish(ErrorOccurred(message=f"The startup check couldn't run: {exc}"))
+            return "crashed"
+        await self._report(failure)
+        return "finished"
+
+    async def _in_snapshot(self) -> Failure | None:
+        if self._tree is None:
+            return await self._verify(".")
+        root = await self._tree.snapshot(BASE)
+        try:
+            return await self._verify(root)
+        finally:
+            await self._tree.drop(root)
+
+    async def _verify(self, root: str) -> Failure | None:
+        """Set up ``root``, then run the steps there; returns the first failure."""
+        failure = await self._set_up(root)
+        if failure is not None:
+            return failure
+        for number, step in enumerate(self._verification.steps):
+            await self._set(number, "running")
+            passed, output = await self._verification.run_step(step, root)
+            await self._set(number, "passed" if passed else "failed")
+            if not passed:
+                return step, output
+        return None
+
+    async def _set_up(self, root: str) -> Failure | None:
+        """Run the tree's setup at ``root``, if it has one; returns its failure."""
+        setup = self._tree.setup if self._tree else None
+        if setup is None:
+            return None
+        step = VerificationStep("setup", setup.command)
+        passed, output = await self._verification.run_step(step, root)
+        return None if passed else (step, output)
+
+    async def _report(self, failure: Failure | None) -> None:
+        if failure is None:
+            await self._publish(StartupChecked(passed=True))
+            return
+        step, output = failure
+        await self._add_fix(step, output)
+        await self._publish(
+            StartupChecked(passed=False, step=step.name, output=trim_output(output))
+        )
+
+    async def _set_running(self, status: StepStatus) -> None:
+        """Mark the step running, if any, ``status``."""
+        running = [i for i, s in enumerate(self._steps) if s.status == "running"]
+        for number in running:
+            await self._set(number, status)
+
+    async def _set(self, number: int, status: StepStatus) -> None:
+        steps = list(self._steps)
+        steps[number] = steps[number].model_copy(update={"status": status})
+        self._steps = tuple(steps)
+        await self._show()
+
+    async def _show(self) -> None:
+        if self._shown:
+            await self._publish(VerificationChanged(steps=self._steps, title=TITLE))

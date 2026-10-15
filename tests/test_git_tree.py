@@ -393,6 +393,15 @@ async def test_two_snapshots_of_one_commit_are_separate(repo: Path) -> None:
     assert first != second
 
 
+async def test_a_snapshot_of_head_is_the_base_before_the_coder_tree_exists(repo: Path) -> None:
+    # As the startup check takes it: orbit has only just started.
+    tree = GitCoderTree(str(repo))
+    snapshot = Path(await tree.snapshot("HEAD"))
+    assert git(snapshot, "rev-parse", "HEAD") == git(repo, "rev-parse", "HEAD")
+    await tree.drop(str(snapshot))
+    assert not snapshot.exists()
+
+
 async def test_untracked_lists_new_files_with_new_directories_collapsed(repo: Path) -> None:
     tree = GitCoderTree(str(repo))
     path = Path(await tree.prepare(keep=False))

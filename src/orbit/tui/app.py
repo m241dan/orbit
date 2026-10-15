@@ -36,6 +36,7 @@ from orbit.protocol import (
     SetPlanning,
     Settings,
     SettingsChanged,
+    StartupChecked,
     StepState,
     SubmitPrompt,
     TaskGaveUp,
@@ -347,6 +348,7 @@ class OrbitApp(App[None], inherit_bindings=False):
                 | ProgressNoted()
                 | TaskMerged()
                 | Notice()
+                | StartupChecked()
             ):
                 self._append(*activity_entry(event), getattr(event, "agent_id", None))
             case _:
@@ -427,7 +429,7 @@ class OrbitApp(App[None], inherit_bindings=False):
     def _show_progress(self, event: VerificationChanged | ReviewStatus | ChecksProposed) -> None:
         """Show the verification steps' progress, whether review is paused, or proposed steps."""
         if isinstance(event, VerificationChanged):
-            self.query_one(VerificationPanel).show(event.steps)
+            self.query_one(VerificationPanel).show(event.steps, event.title)
         elif isinstance(event, ReviewStatus):
             self.query_one(AgentsPane).show_review(event)
         else:

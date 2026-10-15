@@ -193,6 +193,7 @@ def session_for(
     verification: Verification | None = None,
     runner: TurnRunner | None = None,
     reviewers: Sequence[Script] = (),
+    check_at_startup: bool = False,
     **options: Any,
 ) -> tuple[AgentSession, FakeHost, ScriptedLauncher]:
     """A session whose tasks run through agents playing ``scripts``, one per launch, and
@@ -206,7 +207,12 @@ def session_for(
     options = {"limits": Limits(), "exit_grace": 0.5, **options}
     agents = Agents(host, launcher, lambda: next(tokens), **options)
     chat = runner or object()  # Tasks never use the conversation's runner.
-    session = AgentSession(chat, verification=verification, agents=agents)  # type: ignore[arg-type]
+    session = AgentSession(
+        chat,  # type: ignore[arg-type]
+        verification=verification,
+        agents=agents,
+        check_at_startup=check_at_startup,
+    )
     return session, host, launcher
 
 

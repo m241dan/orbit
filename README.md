@@ -141,6 +141,20 @@ shows up in seconds:
    parameters.
 6. Unit tests, 100% coverage: `uv run pytest --cov --cov-fail-under=100`
 
+**Startup check.** When orbit starts with verification on and at least one step configured, it
+runs the steps once in the background against the base commit, so a broken setup shows up while
+you type your first prompt rather than on the first task. It runs in a read-only snapshot of the
+base (the same kind reviews use, under `.git/orbit`), set up with the project's setup command
+first, so it never races with an agent in the worktree; outside a git repository it runs in the
+current directory. Nothing waits for it: the prompt, the planner and `ctrl+r` all work meanwhile.
+The verification panel shows its progress under a "Startup check" heading, with the same icons and
+timing as a task's verification, until a task starts and its own verification takes the panel
+over. It's listed in the agents pane as `startup-check`, where `c` cancels it. When it finishes,
+the conversation notes `✅ Startup check passed`, or on a failure the step that failed (`setup`
+if the setup command did) and the end of its output, with a 📝 draft task "Fix failing check:
+<step>" whose prompt holds that output, and a reminder that `ctrl+e` reconfigures the steps if
+they're what's wrong. `--no-verify` skips it, as does having no steps.
+
 With no steps configured, nothing is verified: the conversation says so at startup (`No verification
 steps configured. Press ctrl+e to set them up.`), and each task that would have
 been verified is skipped, with the reason in the conversation. `--no-verify` turns verification off

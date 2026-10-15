@@ -17,12 +17,19 @@ from orbit.agent.application.planner import PlannerChat
 from orbit.agent.application.ports import ProposalReview, TurnRunner
 from orbit.agent.application.proposals import FrontendReview
 from orbit.agent.application.review_lane import REVIEW_ROLES, ReviewLane
+from orbit.agent.application.startup_check import AGENT_ID as STARTUP_AGENT
+from orbit.agent.application.startup_check import StartupCheck
 from orbit.agent.application.verifier import Verification, Verifier
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.commits import commit_message, configure_message
 from orbit.agent.domain.reviews import ReviewPlanner
 from orbit.agent.domain.roles import ChecksProposal, configure_prompt
-from orbit.agent.domain.verification import FixAttempts, VerificationStep, fix_prompt
+from orbit.agent.domain.verification import (
+    FixAttempts,
+    VerificationStep,
+    fix_prompt,
+    startup_fix_prompt,
+)
 from orbit.protocol import (
     AcceptTask,
     AddTask,
@@ -91,6 +98,9 @@ class AgentSession:
     Tasks with tools off aren't verified, and neither are tasks that leave the
     working tree as it was. With a ``verification`` without steps, no task is: a note
     says so at startup, and each task that would have been verified is skipped.
+
+    With ``check_at_startup``, the steps also run once in the background as the events start,
+    on the base commit; a failure adds a draft task to fix it.
     """
 
     def __init__(
@@ -101,6 +111,7 @@ class AgentSession:
         verification: Verification | None = None,
         agents: Agents | None = None,
         workspace: str | None = None,
+        check_at_startup: bool = False,
     ) -> None:
         self._runner = runner
         self._settings = settings or Settings()
@@ -123,6 +134,7 @@ class AgentSession:
         if workspace is not None:
             self._events.put_nowait(Notice(message=f"Workspace: {workspace}"))
         self._announce_steps()
+        self._startup = self._startup_check(verification, check_at_startup)
         self._turn: asyncio.Task[object] | None = None
 
     def _announce_steps(self) -> None:
@@ -131,6 +143,24 @@ class AgentSession:
             self._events.put_nowait(VerificationChanged(steps=self._board.steps))
         elif self._verifier:
             self._events.put_nowait(Notice(message=NO_STEPS_NOTE))
+
+    def _startup_check(
+        self, verification: Verification | None, wanted: bool
+    ) -> StartupCheck | None:
+        """The check to run at startup, if ``wanted``; none without steps to run."""
+        if not wanted or verification is None or not verification.steps:
+            return None
+        tree = self._desk.agents.tree if self._desk else None
+        return StartupCheck(verification, tree, self._events.put, self._add_startup_fix)
+
+    async def _add_startup_fix(self, step: VerificationStep, output: str) -> None:
+        """Add a draft task to fix ``step``, which failed at startup with ``output``."""
+        settings = Settings()
+        if self._desk is not None:
+            coder = self._desk.agents.roles["coder"]
+            settings = Settings(model=coder.model, tool_access=coder.tool_access)
+        self._board.add_draft(TaskSpec(prompt=startup_fix_prompt(step, output), settings=settings))
+        await self._publish_tasks()
 
     @property
     def runner(self) -> TurnRunner:
@@ -273,7 +303,10 @@ class AgentSession:
         return self._desk.working_on(task_id).id
 
     async def _cancel_agent(self, agent_id: str) -> None:
-        """Stop a reviewer's review on its own; any other agent's work, like esc."""
+        """Stop the startup check, or a reviewer's review, on its own; any other agent's work,
+        like esc."""
+        if self._cancel_startup(agent_id):
+            return
         agent = self._desk.find(agent_id) if self._desk else None
         if agent is None:
             await self._events.put(ErrorOccurred(message=f"No running agent {agent_id!r}."))
@@ -282,6 +315,15 @@ class AgentSession:
         else:
             self._held = True
             self._cancel()
+
+    def _cancel_startup(self, agent_id: str) -> bool:
+        """Cancel the startup check if it's agent ``agent_id`` and still running; returns
+        whether it was."""
+        startup = self._startup
+        if agent_id != STARTUP_AGENT or startup is None or not startup.running:
+            return False
+        startup.cancel()
+        return True
 
     async def _super_review(self) -> None:
         if self._lane is None:
@@ -348,17 +390,25 @@ class AgentSession:
             self._turn.cancel()
             with suppress(asyncio.CancelledError):
                 await self._turn
-        if self._lane is not None:
-            await self._lane.close()
+        await self._stop_background()
         if self._planner is not None:
             self._planner.close()
         if self._desk is not None:
             await self._desk.stop()
 
+    async def _stop_background(self) -> None:
+        """Stop the startup check and the review lane."""
+        if self._startup is not None:
+            await self._startup.close()
+        if self._lane is not None:
+            await self._lane.close()
+
     async def events(self) -> AsyncIterator[Event]:
         if not self._announced:
             self._announced = True
             await self._announce_leftovers()
+            if self._startup is not None:
+                self._startup.start()
         while True:
             yield await self._events.get()
 
@@ -395,6 +445,8 @@ class AgentSession:
         """Run one task through a new agent; returns its final status."""
         self._board.set_status(task_id, "running")
         await self._publish_tasks()
+        if self._startup is not None:
+            self._startup.release_panel()
         if self._verifier:
             self._board.reset_steps()
             await self._checks.publish_steps()

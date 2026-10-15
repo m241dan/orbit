@@ -22,6 +22,7 @@ from orbit.protocol import (
     SetPlanning,
     Settings,
     SettingsChanged,
+    StartupChecked,
     StepState,
     SubmitPrompt,
     TaskGaveUp,
@@ -222,3 +223,13 @@ def test_agent_cancelling_and_review_status_round_trip() -> None:
     assert command_adapter.validate_json(command.model_dump_json()) == command
     event = ReviewStatus(paused=True, open_batches=2)
     assert event_adapter.validate_json(event.model_dump_json()) == event
+
+
+def test_startup_check_messages_round_trip() -> None:
+    for event in (
+        StartupChecked(passed=True),
+        StartupChecked(passed=False, step="Lint", output="E501"),
+        VerificationChanged(steps=(StepState(name="Lint"),), title="Startup check"),
+    ):
+        assert event_adapter.validate_json(event.model_dump_json()) == event
+    assert VerificationChanged(steps=()).title == ""

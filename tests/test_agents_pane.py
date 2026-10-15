@@ -1,4 +1,5 @@
 from orbit.protocol import (
+    STARTUP_TASK,
     AgentExited,
     AgentReply,
     AgentRequest,
@@ -92,3 +93,17 @@ async def test_the_highlight_stays_in_range_as_agents_exit() -> None:
         assert pane.highlighted == 1
         await feed(session, pilot, AgentExited(agent_id="agent-2", reason="finished"))
         assert pane.highlighted == 0
+
+
+async def test_the_startup_check_is_listed_against_the_base_commit() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed(
+            session,
+            pilot,
+            AgentStarted(agent_id="startup-check", role="checker", task_id=STARTUP_TASK),
+        )
+        assert rows(app.query_one(AgentsPane)) == ["startup-check checker · base commit · working"]
+        await pilot.press("l", "j", "enter", "c", "escape")
+        assert session.commands == [CancelAgent(agent_id="startup-check")]

@@ -1,6 +1,7 @@
 from textual.widgets import Static
 
 from orbit.protocol import (
+    StartupChecked,
     StepState,
     StepStatus,
     VerificationChanged,
@@ -113,3 +114,39 @@ async def test_skipped_verification_says_why_in_the_transcript() -> None:
             ("⏩ Verification skipped: tools were off", frozenset({"verify"})),
             ("⏩ Verification skipped: no files changed", frozenset({"verify"})),
         ]
+
+
+async def test_the_startup_check_shows_under_its_heading_until_a_task_takes_over() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        app.query_one(VerificationPanel).clock = lambda: 0.0
+        startup = report("passed", "running")
+        await feed(session, pilot, startup.model_copy(update={"title": "Startup check"}))
+        assert steps(app) == "Startup check\n✅ Unit tests\n◜  Lint · 0s"
+        # A task's verification reports without a title, and the heading goes.
+        await feed(session, pilot, report("pending", "pending"))
+        assert steps(app) == "⏳ Unit tests\n⏳ Lint"
+
+
+async def test_the_startup_checks_result_is_noted_in_the_transcript() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    output = "\n".join(f"line {n}" for n in range(1, 31))
+    async with app.run_test() as pilot:
+        await feed(
+            session,
+            pilot,
+            StartupChecked(passed=True),
+            StartupChecked(passed=False, step="Lint", output=output),
+        )
+        passed, failed = [(str(e.render()), e.classes) for e in app.query(Entry)]
+        assert passed == ("✅ Startup check passed", frozenset({"verify"}))
+        text, kind = failed
+        assert kind == frozenset({"error"})
+        tail = "\n".join(f"line {n}" for n in range(11, 31))
+        assert text == (
+            f"❌ Startup check failed: Lint\n\n{tail}\n\n"
+            "📝 Added a draft task: Fix failing check: Lint. If the steps themselves are wrong,"
+            " press ctrl+e to reconfigure them."
+        )

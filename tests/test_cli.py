@@ -328,3 +328,20 @@ def test_chat_can_turn_review_off(launched: list[AgentSession]) -> None:
     runner.invoke(app, ["chat", "--no-review"])
     [session] = launched
     assert session.agents is not None and not session.agents.review
+
+
+def test_chat_checks_the_steps_at_startup(
+    launched: list[AgentSession], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    (tmp_path / ".orbit").mkdir()
+    (tmp_path / ".orbit" / "config.toml").write_text(
+        '[[verification.steps]]\nname = "Lint"\ncommand = ["ruff", "check"]\n'
+    )
+    monkeypatch.chdir(tmp_path)
+    assert runner.invoke(app, ["chat"]).exit_code == 0
+    assert runner.invoke(app, ["chat", "--no-verify"]).exit_code == 0
+
+    checked, unverified = launched
+    assert checked._startup is not None
+    # Without verification, there's nothing to check.
+    assert unverified._startup is None

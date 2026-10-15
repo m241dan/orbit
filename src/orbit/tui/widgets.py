@@ -175,6 +175,7 @@ class VerificationPanel(SidePanel):
     def __init__(self, *, id: str) -> None:
         super().__init__("Verification steps", id=id)
         self.steps: tuple[StepState, ...] = ()
+        self.title = ""  # What the steps check, when it isn't the current task.
         self.clock: Callable[[], float] = time.monotonic
         # The running step and when it started, by ``clock``.
         self._running_step: int | None = None
@@ -186,8 +187,8 @@ class VerificationPanel(SidePanel):
     def on_mount(self) -> None:
         self.set_interval(1 / SPINNER_FPS, self.tick)
 
-    def show(self, steps: Sequence[StepState]) -> None:
-        self.steps = tuple(steps)
+    def show(self, steps: Sequence[StepState], title: str = "") -> None:
+        self.steps, self.title = tuple(steps), title
         running = next((i for i, s in enumerate(self.steps) if s.status == "running"), None)
         if running is not None and running != self._running_step:
             self._since = self.clock()
@@ -196,7 +197,7 @@ class VerificationPanel(SidePanel):
 
     def tick(self) -> None:
         now = self.clock()
-        lines = step_lines(self.steps, spinner_frame(now), int(now - self._since))
+        lines = step_lines(self.steps, spinner_frame(now), int(now - self._since), self.title)
         self.query_one(Static).update(Text("\n".join(lines) or NO_STEPS_TEXT))
 
 

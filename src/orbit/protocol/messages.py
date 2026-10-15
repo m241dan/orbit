@@ -290,11 +290,27 @@ class TaskStarted(_Message):
 class VerificationChanged(_Message):
     """The verification steps and their progress, sent on connect and after every change.
 
-    Not sent when no steps are configured.
+    Not sent when no steps are configured. ``title`` names what the steps are checking when
+    it isn't the current task, such as the startup check; the panel shows it as a heading.
     """
 
     type: Literal["verification_changed"] = "verification_changed"
     steps: tuple[StepState, ...]
+    title: str = ""
+
+
+STARTUP_TASK = "startup"
+"""The task the startup check's ``AgentStarted`` names; no task on the list has this id."""
+
+
+class StartupChecked(_Message):
+    """The verification steps ran once on the base commit at startup. Unless they all
+    ``passed``, ``step`` failed with ``output`` (its end), and a draft task to fix it was added."""
+
+    type: Literal["startup_checked"] = "startup_checked"
+    passed: bool
+    step: str = ""
+    output: str = ""
 
 
 class VerificationStarted(_Message):
@@ -472,6 +488,7 @@ Event = Annotated[
     | TasksChanged
     | TaskStarted
     | VerificationChanged
+    | StartupChecked
     | VerificationStarted
     | VerificationSkipped
     | VerificationFinished
