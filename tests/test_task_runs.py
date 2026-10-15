@@ -2,13 +2,12 @@
 
 import asyncio
 import sys
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 from orbit.agent import (
     NO_STEPS_NOTE,
     AgentSession,
-    ModelLoopRunner,
     Verification,
     VerificationStep,
     run_step,
@@ -16,7 +15,6 @@ from orbit.agent import (
 from orbit.agent.application.agent_run import AgentDesk, AgentRun, Agents
 from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.board import TaskBoard
-from orbit.agent.external.echo import EchoModel
 from orbit.protocol import (
     AddTask,
     AgentExited,
@@ -28,7 +26,6 @@ from orbit.protocol import (
     RunTasks,
     Settings,
     StepState,
-    SubmitPrompt,
     TasksChanged,
     TaskSpec,
     TaskStarted,
@@ -105,15 +102,6 @@ async def test_each_task_gets_its_own_agent_with_its_settings() -> None:
     assert session.settings == Settings()
 
 
-async def test_tasks_leave_the_conversation_alone() -> None:
-    chat = ModelLoopRunner(EchoModel())
-    session, _, _ = session_for(claims_done, runner=chat)
-    await session.send(SubmitPrompt(text="hello"))
-    await idle(session)
-    await asyncio.wait_for(run(session), 5)
-    assert [m.content for m in chat.history] == ["hello", "echo: hello"]
-
-
 async def test_running_again_runs_only_tasks_that_did_not_finish() -> None:
     session, _, launcher = session_for(claims_done, never_starts, claims_done)
     events = await asyncio.wait_for(run(session, TaskSpec(prompt="a"), TaskSpec(prompt="b")), 5)
@@ -135,7 +123,7 @@ async def test_running_does_nothing_when_nothing_is_runnable() -> None:
 
 
 async def test_running_without_agents_is_refused() -> None:
-    session = AgentSession(ModelLoopRunner(EchoModel()))
+    session = AgentSession()
     await session.send(AddTask(task=TaskSpec(prompt="a")))
     await session.send(RunTasks())
     stream = session.events()
@@ -160,22 +148,19 @@ async def test_each_task_adds_up_the_usage_of_its_agents_turns() -> None:
     assert turns == [one, two, three]
 
 
-class GatedRunner:
-    """A conversation whose turns wait for ``gate``."""
+async def test_running_is_refused_while_a_run_runs() -> None:
+    gate = asyncio.Event()
 
-    def __init__(self) -> None:
-        self.gate = asyncio.Event()
+    async def waits(call: Call) -> TurnEndReason:
+        await call("get_task")
+        await gate.wait()
+        await call("complete_task", summary="ok")
+        return "completed"
 
-    async def run_turn(self, turn_id: str, prompt: str, settings: Settings) -> AsyncIterator[Event]:
-        await self.gate.wait()
-        yield TurnFinished(turn_id=turn_id, reason="completed")
-
-
-async def test_running_is_refused_while_a_turn_runs() -> None:
-    chat = GatedRunner()
-    session, _, launcher = session_for(claims_done, runner=chat)
+    session, _, launcher = session_for(waits, claims_done)
     await session.send(AddTask(task=TaskSpec(prompt="a")))
-    await session.send(SubmitPrompt(text="hi"))
+    await session.send(AddTask(task=TaskSpec(prompt="b")))
+    await session.send(RunTasks())
     await session.send(RunTasks())
     events: list[Event] = []
     async for event in session.events():
@@ -183,8 +168,9 @@ async def test_running_is_refused_while_a_turn_runs() -> None:
         if isinstance(event, ErrorOccurred):
             break
     assert events[-1] == ErrorOccurred(message="A turn is already running.")
-    assert launcher.launches == []
-    chat.gate.set()
+    gate.set()
+    assert statuses(await asyncio.wait_for(idle(session), 5)) == ["completed", "completed"]
+    assert len(launcher.launches) == 2
 
 
 async def test_tasks_added_during_a_run_join_it_and_running_ones_cannot_be_edited() -> None:

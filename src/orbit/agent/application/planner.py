@@ -19,7 +19,7 @@ PLAN = "plan"
 
 
 class PlannerChat:
-    """The conversation with the planner, run as turns like the plain conversation's."""
+    """The conversation with the planner, a turn per prompt."""
 
     def __init__(self, desk: AgentDesk, board: TaskBoard) -> None:
         self._desk = desk

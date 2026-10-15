@@ -7,34 +7,9 @@ from dataclasses import dataclass
 from typing import Any, Literal, Protocol
 
 from orbit.agent.domain.agents import Agent
-from orbit.agent.domain.conversation import Message, ModelResponse, ToolSpec
 from orbit.agent.domain.roles import ChecksProposal, Setup
 from orbit.agent.domain.verification import VerificationStep
 from orbit.protocol import Event, MergeResult, Settings
-
-
-class TurnRunner(Protocol):
-    """Executes one turn, yielding ``TurnStarted`` first and ``TurnFinished`` last.
-
-    Raising signals a failed turn; the session reports it. Cancellation arrives
-    as ``asyncio.CancelledError`` and the runner must clean up and re-raise.
-    """
-
-    def run_turn(self, turn_id: str, prompt: str, settings: Settings) -> AsyncIterator[Event]: ...
-
-
-class ModelClient(Protocol):
-    async def complete(
-        self, messages: Sequence[Message], tools: Sequence[ToolSpec]
-    ) -> ModelResponse: ...
-
-
-class Tool(Protocol):
-    @property
-    def spec(self) -> ToolSpec: ...
-
-    async def run(self, arguments: dict[str, Any]) -> str: ...
-
 
 StepRunner = Callable[[VerificationStep, str], Awaitable[tuple[bool, str]]]
 """Runs a verification step in a directory; returns whether it passed and its output."""

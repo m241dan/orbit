@@ -106,7 +106,6 @@ class ConversationTabs(Tabs):
         # Tab key (an agent id, or the planner's) to its tab's id.
         self._tab_ids: dict[str, str] = {PLANNER_TAB.agent_id: self.PLANNER_TAB_ID}
         self._next_id = 1
-        self._before_planner = self.ALL_TAB_ID  # Where ctrl+t goes back to from the planner.
 
     def agent_of(self, tab_id: str) -> str | None:
         """The key of the tab with id ``tab_id``: an agent's id, the planner's, or None for
@@ -120,16 +119,6 @@ class ConversationTabs(Tabs):
     @property
     def on_planner(self) -> bool:
         return self.active == self.PLANNER_TAB_ID
-
-    def toggle_planner(self) -> None:
-        """Show the Planner tab, or from there, the tab shown before it (All if it's gone)."""
-        if not self.on_planner:
-            self._before_planner = self.active
-            self.active = self.PLANNER_TAB_ID
-        elif self._before_planner in self._tab_ids.values():
-            self.active = self._before_planner
-        else:
-            self.active = self.ALL_TAB_ID
 
     def track(self, event: Event) -> None:
         """Add a tab for an agent that started, remove an exited agent's tab, and mark a tab
@@ -257,7 +246,7 @@ class PromptInput(Input):
         self.can_focus = False
 
     def on_mount(self) -> None:
-        self.border_title = "Prompt"
+        self.border_title = "Prompt · planner"
 
     def enter_insert_mode(self) -> None:
         if not self.disabled:
@@ -272,9 +261,6 @@ class PromptInput(Input):
 
     def show_settings(self, settings: Settings) -> None:
         self.border_subtitle = settings_summary(settings)
-
-    def show_planning(self, on: bool) -> None:
-        self.border_title = "Prompt · planner" if on else "Prompt"
 
 
 class PickerScreen(ModalScreen[int | None]):

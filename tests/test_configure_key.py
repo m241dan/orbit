@@ -145,7 +145,7 @@ async def test_while_tasks_run_it_goes_next() -> None:
 
 
 async def test_without_agents_it_is_refused() -> None:
-    session = AgentSession(object())  # type: ignore[arg-type]
+    session = AgentSession()
     await session.send(ConfigureChecks())
     async for event in session.events():
         if isinstance(event, ErrorOccurred):

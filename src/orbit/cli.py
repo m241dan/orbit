@@ -60,13 +60,15 @@ def chat(
     ] = Path("."),
     model: Annotated[
         str | None,
-        typer.Option(help=f"Model alias ({', '.join(MODEL_ALIASES)}) or full model name."),
+        typer.Option(
+            help=f"The planner's model: an alias ({', '.join(MODEL_ALIASES)}) or full model name."
+        ),
     ] = None,
     tools: Annotated[
         ToolAccess,
         typer.Option(
-            help="Tool access: off (none), restricted (read-only; anything needing approval is"
-            " refused), full (auto-approve everything)."
+            help="Default tool access for new tasks: off (none), restricted (read-only; anything"
+            " needing approval is refused), full (auto-approve everything)."
         ),
     ] = "restricted",
     verify: Annotated[
@@ -93,10 +95,10 @@ def chat(
 ) -> None:
     """Start an interactive agent session.
 
-    In the app: h/j/k/l move between windows; i jumps to the prompt to
-    type and esc stops;
-    ctrl+o / ctrl+l open a picker for the model / tool access; enter on the
-    task list edits queued tasks and ctrl+r runs them, each in a fresh session.
+    In the app: h/j/k/l move between windows; i jumps to the prompt, which talks to
+    the planner, whose proposals wait on the task list as drafts, and esc stops;
+    ctrl+o / ctrl+l open a picker for the planner's model / new tasks' tool access; enter
+    on the task list edits queued tasks and ctrl+r runs them, each in a fresh session.
     Each task runs in a fresh agent that fetches it from orbit over MCP; verification
     steps run when it says it's done, and failures go back to it to fix.
     """
@@ -128,7 +130,6 @@ def chat(
         write_config=write_checks,
     )
     session = AgentSession(
-        ClaudeCliRunner(),
         Settings(model=model, tool_access=tools),
         model_choices=MODEL_ALIASES,
         verification=verification,

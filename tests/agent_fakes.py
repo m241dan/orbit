@@ -5,7 +5,7 @@ import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable, Collection, Sequence
 from typing import Any
 
-from orbit.agent import Agents, AgentSession, TurnRunner, Verification, VerificationStep
+from orbit.agent import Agents, AgentSession, Verification, VerificationStep
 from orbit.agent.application.ports import AgentLaunch, CallHandler, Merge, Reply
 from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.roles import Setup
@@ -195,7 +195,6 @@ def verified(
 def session_for(
     *scripts: Script,
     verification: Verification | None = None,
-    runner: TurnRunner | None = None,
     reviewers: Sequence[Script] = (),
     check_at_startup: bool = False,
     **options: Any,
@@ -210,9 +209,7 @@ def session_for(
     tokens = iter(f"token-{n}" for n in range(1, 100))
     options = {"limits": Limits(), "exit_grace": 0.5, **options}
     agents = Agents(host, launcher, lambda: next(tokens), **options)
-    chat = runner or object()  # Tasks never use the conversation's runner.
     session = AgentSession(
-        chat,  # type: ignore[arg-type]
         verification=verification,
         agents=agents,
         check_at_startup=check_at_startup,

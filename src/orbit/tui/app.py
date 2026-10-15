@@ -28,7 +28,6 @@ from orbit.protocol import (
     Event,
     Notice,
     ProgressNoted,
-    PromptTarget,
     RemoveTask,
     RequestSuperReview,
     ReviewStatus,
@@ -117,7 +116,6 @@ class OrbitApp(App[None], inherit_bindings=False):
         Binding("ctrl+r", "run_tasks", "Run tasks"),
         Binding("ctrl+g", "super_review", "Super review"),
         Binding("ctrl+e", "configure_checks", "Set up checks"),
-        Binding("ctrl+t", "toggle_planner", "Planner"),
         Binding("escape", "cancel_turn", "Cancel turn"),
         Binding("ctrl+o", "pick_model", "Model"),
         Binding("ctrl+l", "pick_tool_access", "Tools"),
@@ -145,7 +143,9 @@ class OrbitApp(App[None], inherit_bindings=False):
             with Vertical():
                 yield ConversationTabs(id="conversation-tabs")
                 yield Transcript(id="transcript")
-                yield PromptInput(placeholder="Press i to type, esc to stop", id="prompt")
+                yield PromptInput(
+                    placeholder="Press i to talk to the planner, esc to stop", id="prompt"
+                )
             with Vertical(id="side"):
                 yield TaskList(id="task-list")
                 yield VerificationPanel(id="verification-steps")
@@ -169,11 +169,10 @@ class OrbitApp(App[None], inherit_bindings=False):
         message.input.clear()
         prompt = self.query_one(PromptInput)
         prompt.action_normal_mode()
-        # Busy from now, not from TurnStarted, so ctrl+r can't race the turn.
-        self._set_busy(self._lane, True)
-        target = self._target
-        self._append(text, "user", PLANNER if target == "planner" else None)
-        await self._session.send(SubmitPrompt(text=text, to=target))
+        # Busy from now, not from TurnStarted, so a second prompt can't race the turn.
+        self._set_busy("planner", True)
+        self._append(text, "user", PLANNER)
+        await self._session.send(SubmitPrompt(text=text))
 
     # Window navigation only applies at the top level, when no window is active.
 
@@ -247,17 +246,10 @@ class OrbitApp(App[None], inherit_bindings=False):
         agent = tabs.agent_of(event.tab.id or "")
         tabs.mark_read(agent)
         self.query_one(Transcript).show_only(agent, event.tab.label_text)
-        # The prompt follows the tab: the Planner tab's goes to the planner.
-        self.query_one(PromptInput).show_planning(tabs.on_planner)
-        self._update_prompt()
 
     @on(AgentsPane.Cancel)
     async def _cancel_agent(self, message: AgentsPane.Cancel) -> None:
         await self._session.send(CancelAgent(agent_id=message.agent_id))
-
-    def action_toggle_planner(self) -> None:
-        """Show the Planner tab, or go back to the tab shown before it."""
-        self.query_one(ConversationTabs).toggle_planner()
 
     @on(TaskList.Accept)
     async def _accept_task(self, message: TaskList.Accept) -> None:
@@ -276,7 +268,9 @@ class OrbitApp(App[None], inherit_bindings=False):
         await self._session.send(ConfigureChecks())
 
     async def action_cancel_turn(self) -> None:
-        await self._session.send(CancelTurn(to=self._target))
+        # The Planner tab's esc stops the planner; any other's, the task run.
+        lane: BusyLane = "planner" if self.query_one(ConversationTabs).on_planner else "work"
+        await self._session.send(CancelTurn(lane=lane))
 
     def action_pick_model(self) -> None:
         if self._settings is not None:
@@ -461,27 +455,10 @@ class OrbitApp(App[None], inherit_bindings=False):
         self._settings, self._model_choices = settings, choices
         self.query_one(PromptInput).show_settings(settings)
 
-    @property
-    def _on_planner(self) -> bool:
-        """Whether prompts go to the planner: they do on its tab."""
-        return self.query_one(ConversationTabs).on_planner
-
-    @property
-    def _target(self) -> PromptTarget:
-        return "planner" if self._on_planner else "conversation"
-
-    @property
-    def _lane(self) -> BusyLane:
-        """The lane prompts start work in now."""
-        return "planner" if self._on_planner else "work"
-
     def _set_busy(self, lane: BusyLane, busy: bool) -> None:
         self._busy[lane] = busy
-        self._update_prompt()
-
-    def _update_prompt(self) -> None:
-        """Take prompts only while the lane they'd go to is free."""
-        self.query_one(PromptInput).disabled = self._busy[self._lane]
+        # Take prompts only while the planner is free.
+        self.query_one(PromptInput).disabled = self._busy["planner"]
 
     def _turn_finished(self, event: TurnFinished) -> None:
         if event.usage is not None:

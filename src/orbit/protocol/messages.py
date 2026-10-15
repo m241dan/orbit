@@ -33,27 +33,25 @@ class Settings(_Message):
 # Commands: frontend -> backend
 
 
-PromptTarget = Literal["conversation", "planner"]
-"""Who a prompt goes to: the plain conversation, or the planner."""
+BusyLane = Literal["work", "planner"]
+"""Where work runs: task runs in ``work``; the planner's turns in a lane of their own."""
 
 
 class SubmitPrompt(_Message):
-    """Ask ``to`` to start a turn with the given user input.
+    """Ask the planner to start a turn with the given user input.
 
-    The planner answers in its own lane, so it works while tasks run; the conversation
-    shares the work lane with task runs.
+    The planner answers in its own lane, so it works while tasks run.
     """
 
     type: Literal["submit_prompt"] = "submit_prompt"
     text: str = Field(min_length=1)
-    to: PromptTarget = "conversation"
 
 
 class CancelTurn(_Message):
-    """Ask ``to`` to stop: the planner's turn, or the conversation's turn or task run."""
+    """Stop the work in ``lane``: the planner's turn, or the task run."""
 
     type: Literal["cancel_turn"] = "cancel_turn"
-    to: PromptTarget = "conversation"
+    lane: BusyLane = "work"
 
 
 class UpdateSettings(_Message):
@@ -95,9 +93,8 @@ class EditTask(_Message):
 class RunTasks(_Message):
     """Run the task list: every task that hasn't finished, in order, each in a new context.
 
-    Tasks added while it runs join in. Like a conversation turn, this is rejected while
-    either runs (the planner's turns don't count); ``CancelTurn`` stops the task in progress
-    and the run.
+    Tasks added while it runs join in. Rejected while a run is in progress (the planner's
+    turns don't count); ``CancelTurn`` stops the task in progress and the run.
     """
 
     type: Literal["run_tasks"] = "run_tasks"
@@ -259,7 +256,7 @@ class SettingsChanged(_Message):
     model_choices: tuple[str, ...] = ()
 
 
-# Turn events carry ``agent_id`` when an agent runs the turn, and none for the conversation.
+# Turn events carry ``agent_id`` when an agent runs the turn, and none when orbit ends it itself.
 
 
 class TurnStarted(_Message):
@@ -301,10 +298,6 @@ class TurnFinished(_Message):
     agent_id: str | None = None
     reason: TurnEndReason
     usage: Usage | None = None
-
-
-BusyLane = Literal["work", "planner"]
-"""Where work runs: conversation turns and task runs share ``work``; the planner has its own."""
 
 
 class BusyChanged(_Message):

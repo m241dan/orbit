@@ -7,19 +7,15 @@ from typing import Any
 
 import pytest
 
-from orbit.agent import AgentSession, ClaudeCliRunner
+from orbit.agent import ClaudeCliRunner
 from orbit.agent.application.ports import AgentLaunch
 from orbit.agent.domain.agents import Agent
 from orbit.agent.external.claude_cli import AGENT_RULES, TOOL_TIMEOUT_MS, translate
 from orbit.protocol import (
     AssistantMessage,
-    BusyChanged,
-    CancelTurn,
     ErrorOccurred,
     Event,
     Settings,
-    SettingsChanged,
-    SubmitPrompt,
     ToolCallFinished,
     ToolCallStarted,
     TurnFinished,
@@ -31,7 +27,13 @@ FAKE_CLAUDE = Path(__file__).parent / "fake_claude.py"
 SESSION_ID = "49782958-d074-475d-9aaa-54d462f567dc"
 
 # Shapes captured from a real `claude -p --output-format stream-json --verbose` run.
-INIT = {"type": "system", "subtype": "init", "session_id": SESSION_ID, "model": "x"}
+INIT = {
+    "type": "system",
+    "subtype": "init",
+    "session_id": SESSION_ID,
+    "model": "x",
+    "mcp_servers": [{"name": "orbit", "status": "connected", "source": "dynamic"}],
+}
 TOOL_USE = {
     "type": "assistant",
     "message": {
@@ -206,10 +208,24 @@ def lines(*messages: dict[str, Any]) -> list[str]:
     return [json.dumps(m) for m in messages]
 
 
+# The agent the runner's turns below are a conversation with.
+AGENT = Agent(id="agent-3", role="coder", task_id="7", token="s3cret")
+URL = "http://127.0.0.1:5555/mcp"
+STREAM = ["-p", "--output-format", "stream-json", "--verbose"]
+
+
 async def run(
     runner: ClaudeCliRunner, prompt: str, settings: Settings | None = None
 ) -> list[Event]:
-    return [e async for e in runner.run_turn("t", prompt, settings or Settings())]
+    """One turn, ``t``, of AGENT's conversation through ``runner``."""
+    launch = AgentLaunch(AGENT, URL, prompt, settings or Settings(), ".", "Plan.", ("x",))
+    return [e async for e in runner.converse("t", launch)]
+
+
+def own_args(call: dict[str, Any]) -> list[str]:
+    """The flags a call was given before those connecting it to orbit."""
+    argv: list[str] = call["argv"]
+    return argv[: argv.index("--mcp-config")]
 
 
 async def test_runner_streams_a_turn(tmp_path: Path) -> None:
@@ -217,19 +233,20 @@ async def test_runner_streams_a_turn(tmp_path: Path) -> None:
     events = await run(runner, "--what version?")
 
     assert events == [
-        TurnStarted(turn_id="t"),
+        TurnStarted(turn_id="t", agent_id="agent-3"),
         ToolCallStarted(
             turn_id="t",
+            agent_id="agent-3",
             call_id="toolu_1",
             name="Read",
             arguments={"file_path": "/repo/.python-version"},
         ),
-        ToolCallFinished(turn_id="t", call_id="toolu_1", output="1\t3.13\n"),
-        AssistantMessage(turn_id="t", text="3.13"),
-        TurnFinished(turn_id="t", reason="completed"),
+        ToolCallFinished(turn_id="t", agent_id="agent-3", call_id="toolu_1", output="1\t3.13\n"),
+        AssistantMessage(turn_id="t", agent_id="agent-3", text="3.13"),
+        TurnFinished(turn_id="t", agent_id="agent-3", reason="completed"),
     ]
     [call] = calls(scenario)
-    assert call["argv"] == ["-p", "--output-format", "stream-json", "--verbose"]
+    assert own_args(call) == STREAM
     assert call["stdin"] == "--what version?"
 
 
@@ -252,7 +269,7 @@ async def test_runner_passes_settings_as_flags(
     runner, scenario = make_runner(tmp_path, stdout=lines(RESULT))
     await run(runner, "hi", settings)
     [call] = calls(scenario)
-    assert call["argv"] == ["-p", "--output-format", "stream-json", "--verbose", *extra_args]
+    assert own_args(call) == [*STREAM, *extra_args]
 
 
 async def test_runner_resumes_session_on_next_turn(tmp_path: Path) -> None:
@@ -262,7 +279,7 @@ async def test_runner_resumes_session_on_next_turn(tmp_path: Path) -> None:
 
     first, second = calls(scenario)
     assert "--resume" not in first["argv"]
-    assert second["argv"][-4:] == ["--model", "opus", "--resume", SESSION_ID]
+    assert own_args(second)[-4:] == ["--model", "opus", "--resume", SESSION_ID]
 
 
 async def test_runner_does_not_resume_without_session_id(tmp_path: Path) -> None:
@@ -270,14 +287,13 @@ async def test_runner_does_not_resume_without_session_id(tmp_path: Path) -> None
     await run(runner, "first")
     await run(runner, "second")
 
-    assert runner.session_id is None
     assert all("--resume" not in call["argv"] for call in calls(scenario))
 
 
 async def test_runner_skips_blank_lines(tmp_path: Path) -> None:
     runner, _ = make_runner(tmp_path, stdout=["", *lines(TEXT), "  ", *lines(RESULT)])
     events = await run(runner, "hi")
-    assert events[-1] == TurnFinished(turn_id="t", reason="completed")
+    assert events[-1] == TurnFinished(turn_id="t", agent_id="agent-3", reason="completed")
 
 
 async def test_runner_reports_crash_with_stderr(tmp_path: Path) -> None:
@@ -306,19 +322,12 @@ async def test_runner_reports_missing_cli(tmp_path: Path) -> None:
 
 async def test_cancel_kills_the_cli_process(tmp_path: Path) -> None:
     runner, scenario = make_runner(tmp_path, stdout=lines(INIT), hang=True)
-    session = AgentSession(runner)
-    stream = session.events()
-    assert isinstance(await anext(stream), SettingsChanged)
-
-    await session.send(SubmitPrompt(text="hi"))
-    assert await anext(stream) == BusyChanged(busy=True)
-    assert isinstance(await anext(stream), TurnStarted)
+    turn = asyncio.create_task(run(runner, "hi"))
     while not Path(f"{scenario}.calls").exists():
         await asyncio.sleep(0.01)
-    await session.send(CancelTurn())
-
-    finished = await anext(stream)
-    assert isinstance(finished, TurnFinished) and finished.reason == "cancelled"
+    turn.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await turn
     [call] = calls(scenario)
     with pytest.raises(ProcessLookupError):
         os.kill(call["pid"], 0)
@@ -335,14 +344,12 @@ async def test_new_context_starts_a_fresh_claude_session(tmp_path: Path) -> None
     _, task, second = calls(scenario)
     assert "--resume" not in task["argv"]
     assert task["stdin"] == "task"
-    # The original keeps its own conversation.
-    assert second["argv"][-2:] == ["--resume", SESSION_ID]
+    # The original keeps its own conversations.
+    assert own_args(second)[-2:] == ["--resume", SESSION_ID]
 
 
 # Agents: a CLI connected to orbit's MCP server
 
-AGENT = Agent(id="agent-3", role="coder", task_id="7", token="s3cret")
-URL = "http://127.0.0.1:5555/mcp"
 TOOLS = ("get_task", "complete_task")
 
 

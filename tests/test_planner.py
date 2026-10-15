@@ -18,11 +18,9 @@ from orbit.protocol import (
     TaskSpec,
     TaskState,
     TurnEndReason,
-    TurnFinished,
     TurnStarted,
 )
 from tests.agent_fakes import Call, session_for
-from tests.test_task_runs import GatedRunner
 
 
 async def until_idle(session: AgentSession) -> list[Event]:
@@ -50,7 +48,7 @@ async def chats(call: Call) -> TurnEndReason:
 
 
 async def plan(session: AgentSession, text: str) -> list[Event]:
-    await session.send(SubmitPrompt(text=text, to="planner"))
+    await session.send(SubmitPrompt(text=text))
     return await asyncio.wait_for(until_idle(session), 5)
 
 
@@ -79,25 +77,14 @@ async def test_prompts_to_the_planner_go_to_it_and_proposals_become_drafts() -> 
     assert any(isinstance(e, TurnStarted) and e.agent_id == "agent-1" for e in events)
 
 
-async def test_prompts_go_to_the_conversation_by_default() -> None:
-    chat = GatedRunner()
-    chat.gate.set()
-    session, _, launcher = session_for(runner=chat)
-    await session.send(SubmitPrompt(text="hello"))
-    events = await asyncio.wait_for(until_idle(session), 5)
-    assert events[-1] == BusyChanged(busy=False)
-    assert launcher.launches == []
-    assert any(isinstance(e, TurnFinished) and e.agent_id is None for e in events)
-
-
 async def refused_planning(session: AgentSession) -> list[Event]:
-    await session.send(SubmitPrompt(text="Plan.", to="planner"))
+    await session.send(SubmitPrompt(text="Plan."))
     stream = session.events()
     return [await anext(stream), await anext(stream)]
 
 
 async def test_planning_needs_agents() -> None:
-    events = await refused_planning(AgentSession(GatedRunner()))
+    events = await refused_planning(AgentSession())
     assert any(isinstance(e, ErrorOccurred) and "planner" in e.message for e in events)
 
 

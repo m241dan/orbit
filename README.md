@@ -33,7 +33,7 @@ uv run pre-commit install
 ```sh
 uv run orbit chat                              # interactive agent session
 uv run orbit chat -C ~/code/other              # work on another project
-uv run orbit chat --model opus --tools full    # pick model and tool access up front
+uv run orbit chat --model opus --tools full    # pick the planner's model and new tasks' tool access
 uv run orbit chat --no-verify                  # don't verify tasks
 uv run orbit chat --no-review                  # don't review landed work
 uv run orbit chat --no-worktree                # tasks edit the current checkout; nothing is committed
@@ -46,16 +46,15 @@ In the app:
 | Key | Action |
 |---|---|
 | `h` `j` `k` `l` | Move between windows (the selected one is highlighted) |
-| `i` | Jump to the prompt and start typing (vim-style insert mode) |
+| `i` | Jump to the prompt, which talks to the planner, and start typing (vim-style insert mode) |
 | `enter` | On the task list: activate it (`j`/`k` move, `enter` edits a task or adds one on `+ new task`, `a` accepts a draft, `x` removes a task, `esc` leaves) |
-| `ctrl+t` | Jump to the **Planner** tab (which works while tasks run); again, back to the tab you were on |
 | `enter` | On the agents pane: activate it (`j`/`k` move, `c` cancels the highlighted agent's work, `esc` leaves) |
 | `ctrl+r` | Run the tasks that haven't completed yet |
 | `ctrl+g` | Ask for a super review of the whole codebase now (works while tasks run) |
 | `ctrl+e` | Set up (or redo) the verification steps: queue a configurator task first and run it (see [Setting up verification](#setting-up-verification)) |
-| `ctrl+o` | Pick the model (default, fable, opus, sonnet, haiku) |
-| `ctrl+l` | Pick the tool access level (off, restricted, full) |
-| `esc` | Stop typing; otherwise cancel the running turn (on the Planner tab, only the planner's) or close a picker |
+| `ctrl+o` | Pick the planner's model (default, fable, opus, sonnet, haiku) |
+| `ctrl+l` | Pick the tool access level new tasks start with in the task editor (off, restricted, full) |
+| `esc` | Stop typing; otherwise cancel the task run (on the Planner tab, the planner's turn instead) or close a picker |
 | `a` / `r` / `x` | On a proposal of checks: accept it, ask for changes (type them, `enter` sends, `esc` goes back), or end the task (see [Setting up verification](#setting-up-verification)) |
 | `ctrl+c` | Quit |
 
@@ -69,7 +68,7 @@ set in the task editor: `j`/`k` pick a field, `i` types in the prompt (`esc` or 
 
 `ctrl+r` runs the tasks one after another, each through a fresh **agent**: a new `claude -p`
 session connected to orbit's MCP server, so tasks don't share context with each other or with the
-conversation. The agent is told only who it is (`agent-1`, `agent-2`, …) and to fetch its task:
+planner. The agent is told only who it is (`agent-1`, `agent-2`, …) and to fetch its task:
 
 1. It calls orbit's `get_task` tool and gets the task's prompt.
 2. When it thinks it's done, it calls `complete_task` with a one-line summary. Orbit runs the
@@ -94,8 +93,7 @@ prefixed with its id, and its exchanges with orbit (`agent-1 → orbit: complete
 `orbit → agent-1: …`) in their own colour. The tabs above it narrow it: **All** shows everything,
 the pinned **Planner** tab your conversation with the planner, and then there's one tab per running
 agent. Click one to switch, or cycle with `tab`/`shift+tab`; a tab with output you haven't seen ends
-in `*`. The prompt follows the tab: on **Planner** it goes to the planner, elsewhere to the
-conversation.
+in `*`. Whichever tab is shown, the prompt goes to the planner.
 
 Each row of the task list shows its status: ⏳ pending, ◜ running (spinning), 🔍 verifying, ✅ done,
 ❗ failed verification, ❌ failed, ⌛ ran out of steps, 🏳 the agent gave up, 🛑 cancelled, 📝 a draft
@@ -256,10 +254,10 @@ your checkout out of its way, it doesn't sandbox it.
 
 ### Planning with the planner
 
-The **Planner** tab, always second in the strip, is where you talk to the planner: switch to it
-(`ctrl+t` jumps there, and pressed again goes back to the tab you were on) and the prompt goes to
-the planner (its title reads `Prompt · planner`), while the tab shows just the planner
-conversation: your prompts, and the planner's messages, tool calls and exchanges with orbit. Tell it
+The prompt talks to the planner (its title reads `Prompt · planner`); orbit is for planning, tasks
+and reviews, with no free-form chat besides. The **Planner** tab, always second in the strip, shows
+just the planner conversation: your prompts, and the planner's messages, tool calls and exchanges
+with orbit. Tell it
 what you want to build; it asks what's unclear and breaks the goal into small tasks, proposing each
 with `propose_task`. Proposals appear in the task list as 📝 drafts, with the `coder` role's default
 settings, and never run on their own: on the task list, `a` accepts the highlighted draft (or edit
@@ -267,15 +265,15 @@ it with `enter` and save, which accepts it too), and `x` removes it. Accepted ta
 rest when you press `ctrl+r`.
 
 The planner answers in a lane of its own, so you can plan while tasks run (and press `ctrl+r`
-while it answers); on the Planner tab the prompt waits only for the planner's own reply. `esc` on
-the Planner tab stops only the planner's turn and leaves the task run going; on any other tab, `esc`
-stops the running turn or task run as before. The task list beside it fills with
+while it answers); the prompt waits only for the planner's own reply. `esc` on the Planner tab
+stops only the planner's turn and leaves the task run going; on any other tab, `esc` stops the task
+run. The task list beside it fills with
 drafts as the planner proposes them; when it says something while you're on another tab, the
 Planner tab gets a `*`.
 
 The planner is one agent for the whole session: each prompt resumes its conversation, so it
 remembers what you discussed. It reads your checkout but can't edit it, uses the model you picked
-with `ctrl+o`, and its conversation is separate from the plain one.
+with `ctrl+o`.
 
 ### Reviews
 
@@ -357,7 +355,8 @@ appears in the process list. Agents are started with `--strict-mcp-config` (only
 `--allowedTools 'mcp__orbit__*'` (orbit's tools are allowed at every access level), and
 `ENABLE_TOOL_SEARCH=false` (orbit's tools are loaded up front).
 
-Changes apply from the next prompt and keep the conversation.
+A model picked with `ctrl+o` applies from the planner's next prompt and keeps its conversation; the
+tool access picked with `ctrl+l` is what new tasks start with in the task editor.
 
 Tool access levels:
 
@@ -391,19 +390,18 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
 - `orbit.protocol`: pydantic models (`Command`s in, `Event`s out) and the `Session`
   interface. It imports no other orbit package.
 - `orbit.agent`: backend, with no UI imports. Three layers, each importing only the ones below:
-  - `external`: adapters that reach outside the backend. `ClaudeCliRunner` streams `claude -p
-    --output-format stream-json`, resumes the same Claude session across turns, and launches
-    agents connected to orbit (`run_agent`, and `converse` for the planner); `McpHost` is orbit's
+  - `external`: adapters that reach outside the backend. `ClaudeCliRunner` launches agents as
+    `claude -p --output-format stream-json` runs connected to orbit (`run_agent`, and `converse`
+    for the planner, which resumes its Claude session turn after turn); `McpHost` is orbit's
     MCP server; `GitCoderTree` is the coder's worktree and its snapshots; `config_file` reads
     `.orbit/config.toml`; `checks` runs a verification step as a process (`run_step`);
-    `workspace` fingerprints the git working tree; `EchoModel` is a stand-in model.
+    `workspace` fingerprints the git working tree.
   - `application`: `AgentSession` implements `Session`: it takes commands, asks the domain what
     follows, drives the ports and publishes events. `AgentRun` sees one task through one agent and
     `AgentDesk` routes agents' calls by token; `Verifier` runs the steps; `Lander` commits and
     merges verified work; `ReviewLane` runs reviews beside the work; `PlannerChat` is the
     planner's conversation. `ports` defines what it needs from outside (`AgentHost`,
-    `AgentLauncher`, `CoderTree`, `TurnRunner`, `StepRunner`, `Workspace`, `ModelClient`, `Tool`);
-    `ModelLoopRunner` is an in-house model/tool loop for direct API use.
+    `AgentLauncher`, `CoderTree`, `StepRunner`, `Workspace`).
   - `domain`: the rules, with no I/O: the `TaskBoard` (task order, statuses, fix chains),
     `AgentTask` (what orbit replies to an agent, and when its work is verified), the
     `AgentRegistry` (agent ids and tokens), `roles` (built-in roles, orbit's limits, its

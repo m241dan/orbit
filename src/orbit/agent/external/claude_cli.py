@@ -1,10 +1,10 @@
-"""Turn runner backed by the Claude Code CLI (``claude -p``).
+"""Agent launcher backed by the Claude Code CLI (``claude -p``).
 
 Each turn spawns ``claude -p --output-format stream-json --verbose`` with the
 prompt on stdin and translates its JSON-lines output into protocol events.
-Later turns pass ``--resume <session_id>`` so Claude keeps the conversation.
+Later turns of a conversation pass ``--resume <session_id>`` so Claude keeps it.
 
-Agents are runs of the same CLI connected to orbit's MCP server, told to fetch their task
+Agents are runs of the CLI connected to orbit's MCP server, told to fetch their task
 from it. Their token travels in the environment, so other users can't read it from the
 process list.
 """
@@ -198,10 +198,6 @@ class ClaudeCliRunner:
         """Same CLI, new Claude session (no ``--resume``)."""
         return ClaudeCliRunner(self._command)
 
-    async def run_turn(self, turn_id: str, prompt: str, settings: Settings) -> AsyncIterator[Event]:
-        async for event in self._run(turn_id, self._args(settings), prompt):
-            yield event
-
     async def run_agent(self, launch: AgentLaunch) -> AsyncIterator[Event]:
         """Run the agent as a new Claude session connected to orbit, as ``launch`` says."""
         async for event in self._agent_turn(self.new_context(), launch.agent.id, launch):
@@ -209,7 +205,7 @@ class ClaudeCliRunner:
 
     async def converse(self, turn_id: str, launch: AgentLaunch) -> AsyncIterator[Event]:
         """A turn of the agent's conversation: its first starts a Claude session, later ones
-        resume it, apart from the conversation this runner has itself."""
+        resume it, each agent's apart from the others'."""
         runner = self._conversations.setdefault(launch.agent.id, self.new_context())
         async for event in self._agent_turn(runner, turn_id, launch):
             yield event

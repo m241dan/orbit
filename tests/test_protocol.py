@@ -213,14 +213,16 @@ def test_planning_and_draft_messages_round_trip() -> None:
     for command in (
         AcceptTask(task_id="3"),
         RemoveTask(task_id="3"),
-        SubmitPrompt(text="plan", to="planner"),
-        CancelTurn(to="planner"),
+        SubmitPrompt(text="plan"),
+        CancelTurn(lane="planner"),
     ):
         assert command_adapter.validate_json(command.model_dump_json()) == command
     event = BusyChanged(busy=True, lane="planner")
     assert event_adapter.validate_json(event.model_dump_json()) == event
     assert BusyChanged(busy=True).lane == "work"
-    assert SubmitPrompt(text="hi").to == CancelTurn().to == "conversation"
+    assert CancelTurn().lane == "work"
+    with pytest.raises(ValidationError):
+        SubmitPrompt(text="hi", to="conversation")  # type: ignore[call-arg]
     draft = TaskState(id="1", task=TaskSpec(prompt="x"), status="draft", origin="planner")
     assert TaskState.model_validate(draft.model_dump()) == draft
 

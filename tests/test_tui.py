@@ -76,7 +76,7 @@ async def test_submit_sends_command_and_renders_events() -> None:
         assert prompt.disabled
 
         for event in (
-            BusyChanged(busy=True),
+            BusyChanged(busy=True, lane="planner"),
             TurnStarted(turn_id="t"),
             AssistantMessage(turn_id="t", text="hello back"),
             TurnFinished(turn_id="t", reason="completed"),
@@ -87,16 +87,16 @@ async def test_submit_sends_command_and_renders_events() -> None:
         assert texts == ["hi", "hello back"]
         assert prompt.disabled
 
-        await session.queue.put(BusyChanged(busy=False))
+        await session.queue.put(BusyChanged(busy=False, lane="planner"))
         await pilot.pause()
         assert not prompt.disabled
 
 
-async def test_backend_busy_disables_the_prompt() -> None:
+async def test_a_busy_planner_disables_the_prompt() -> None:
     session = FakeSession()
     app = OrbitApp(session)
     async with app.run_test() as pilot:
-        await session.queue.put(BusyChanged(busy=True))
+        await session.queue.put(BusyChanged(busy=True, lane="planner"))
         await pilot.pause()
         assert app.query_one(PromptInput).disabled
 
@@ -198,7 +198,8 @@ async def test_sections_are_labelled() -> None:
     app = OrbitApp(FakeSession())
     async with app.run_test():
         assert app.query_one(Transcript).border_title == "Conversation"
-        assert app.query_one(PromptInput).border_title == "Prompt"
+        assert app.query_one(PromptInput).border_title == "Prompt · planner"
+        assert "planner" in app.query_one(PromptInput).placeholder
 
 
 async def test_prompt_starts_in_normal_mode_and_ignores_typing_and_clicks() -> None:
@@ -247,12 +248,12 @@ async def test_submit_returns_to_normal_mode_and_finished_turn_stays_there() -> 
         await pilot.press("i", *"hi", "enter")
         assert app.focused is None
 
-        await session.queue.put(BusyChanged(busy=True))
+        await session.queue.put(BusyChanged(busy=True, lane="planner"))
         await pilot.pause()
         await pilot.press("i")
-        assert app.focused is None  # can't edit while a turn runs
+        assert app.focused is None  # can't edit while the planner answers
 
-        await session.queue.put(BusyChanged(busy=False))
+        await session.queue.put(BusyChanged(busy=False, lane="planner"))
         await pilot.pause()
         assert app.focused is None
         await pilot.press("i")
@@ -859,7 +860,7 @@ async def test_planner_output_shows_under_planner_and_all_but_not_other_tabs() -
     app = OrbitApp(session)
     async with app.run_test(size=(120, 30)) as pilot:
         # The user's planner prompt is on the Planner tab before the planner starts.
-        await pilot.press("ctrl+t", "i", *"plan", "enter")
+        await pilot.press("i", *"plan", "enter", "tab")
         await feed_events(
             session,
             pilot,
@@ -903,7 +904,7 @@ async def test_planner_output_shows_under_planner_and_all_but_not_other_tabs() -
         assert shown(app)[-1] == "■ agent-1 exited"
 
 
-async def test_the_prompt_follows_the_selected_tab() -> None:
+async def test_the_prompt_talks_to_the_planner_and_esc_follows_the_tab() -> None:
     session = FakeSession()
     app = OrbitApp(session)
     async with app.run_test(size=(120, 30)) as pilot:
@@ -912,56 +913,36 @@ async def test_the_prompt_follows_the_selected_tab() -> None:
         assert prompt.border_title == "Prompt · planner"
         await pilot.press("i", *"plan", "enter", "escape")
         await pilot.press("shift+tab")
-        assert prompt.border_title == "Prompt"
+        assert prompt.border_title == "Prompt · planner"
         await feed_events(session, pilot, BusyChanged(busy=False, lane="planner"))
         await pilot.press("i", *"hi", "enter", "escape")
         assert session.commands == [
-            SubmitPrompt(text="plan", to="planner"),
-            CancelTurn(to="planner"),
-            SubmitPrompt(text="hi", to="conversation"),
-            CancelTurn(to="conversation"),
+            SubmitPrompt(text="plan"),
+            CancelTurn(lane="planner"),
+            SubmitPrompt(text="hi"),
+            CancelTurn(lane="work"),
         ]
+        await pilot.press("tab")
+        assert shown(app) == ["plan", "hi"]
 
 
-async def test_the_prompt_is_enabled_on_planner_while_a_run_is_busy() -> None:
+async def test_the_prompt_is_enabled_while_a_run_is_busy() -> None:
     session = FakeSession()
     app = OrbitApp(session)
     async with app.run_test(size=(120, 30)) as pilot:
         prompt = app.query_one(PromptInput)
         await feed_events(session, pilot, BusyChanged(busy=True))
-        assert prompt.disabled
-        await pilot.press("tab")
         assert not prompt.disabled
         await pilot.press("i", *"plan", "enter")
         assert prompt.disabled  # Until the planner answers.
         await feed_events(session, pilot, BusyChanged(busy=False, lane="planner"))
         assert not prompt.disabled
-        await feed_events(session, pilot, BusyChanged(busy=True, lane="planner"))
-        await pilot.press("tab")
-        assert prompt.disabled  # On All, whose lane is still busy.
-        await feed_events(session, pilot, BusyChanged(busy=False))
-        assert not prompt.disabled
 
 
-async def test_ctrl_t_jumps_to_the_planner_and_back() -> None:
+async def test_ctrl_t_does_nothing() -> None:
     session = FakeSession()
     app = OrbitApp(session)
     async with app.run_test(size=(120, 30)) as pilot:
-        await feed_events(session, pilot, started("agent-1"), started("agent-2", "reviewer"))
-        await pilot.press("ctrl+t")
-        assert active_tab(app) == "Planner"
         await pilot.press("ctrl+t")
         assert active_tab(app) == "All"
-
-        await pilot.press("tab", "tab", "tab")
-        assert active_tab(app) == "reviewer"
-        await pilot.press("ctrl+t")
-        assert active_tab(app) == "Planner"
-        await pilot.press("ctrl+t")
-        assert active_tab(app) == "reviewer"
-
-        # Back to All when the tab it came from has gone.
-        await pilot.press("ctrl+t")
-        await feed_events(session, pilot, AgentExited(agent_id="agent-2", reason="finished"))
-        await pilot.press("ctrl+t")
-        assert active_tab(app) == "All"
+        assert session.commands == []

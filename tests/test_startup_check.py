@@ -125,7 +125,7 @@ async def test_a_failing_setup_is_the_failing_check() -> None:
 
 async def test_without_a_tree_it_runs_in_the_current_directory() -> None:
     steps = Steps(True, False)
-    session = AgentSession(object(), verification=checked(steps), check_at_startup=True)  # type: ignore[arg-type]
+    session = AgentSession(verification=checked(steps), check_at_startup=True)
 
     events = await until_checked(session)
 
@@ -138,9 +138,9 @@ async def test_without_a_tree_it_runs_in_the_current_directory() -> None:
 
 async def test_it_is_skipped_without_verification_or_steps_or_when_not_asked() -> None:
     sessions = [
-        AgentSession(object(), check_at_startup=True),  # type: ignore[arg-type]
-        AgentSession(object(), verification=Verification((), Steps()), check_at_startup=True),  # type: ignore[arg-type]
-        AgentSession(object(), verification=checked(Steps())),  # type: ignore[arg-type]
+        AgentSession(check_at_startup=True),
+        AgentSession(verification=Verification((), Steps()), check_at_startup=True),
+        AgentSession(verification=checked(Steps())),
     ]
     for session in sessions:
         events = await quiet(session)

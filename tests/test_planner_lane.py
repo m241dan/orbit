@@ -1,4 +1,4 @@
-"""The planner's own lane: its turns run alongside task runs and conversation turns."""
+"""The planner's own lane: its turns run alongside task runs."""
 
 import asyncio
 from collections.abc import Callable
@@ -19,7 +19,7 @@ from orbit.protocol import (
     TurnStarted,
 )
 from tests.agent_fakes import Call, Script, board, session_for
-from tests.test_task_runs import GatedRunner, claims_done
+from tests.test_task_runs import claims_done
 
 PLANNER_IDLE = BusyChanged(busy=False, lane="planner")
 WORK_IDLE = BusyChanged(busy=False)
@@ -71,7 +71,7 @@ async def test_the_planner_answers_while_a_task_runs() -> None:
     launcher.planner_turns = [chats]
     await session.send(AddTask(task=TaskSpec(prompt="one")))
     await session.send(RunTasks())
-    await session.send(SubmitPrompt(text="Plan.", to="planner"))
+    await session.send(SubmitPrompt(text="Plan."))
     events = await until(session, lambda e: e == PLANNER_IDLE)
     assert BusyChanged(busy=True) in events
     assert BusyChanged(busy=True, lane="planner") in events
@@ -83,19 +83,15 @@ async def test_the_planner_answers_while_a_task_runs() -> None:
     assert [t.status for t in board(events)] == ["completed"]
 
 
-async def test_tasks_and_the_conversation_run_while_the_planner_answers() -> None:
+async def test_tasks_run_while_the_planner_answers() -> None:
     gate = asyncio.Event()
-    chat = GatedRunner()
-    chat.gate.set()
-    session, _, launcher = session_for(claims_done, runner=chat)
+    session, _, launcher = session_for(claims_done)
     launcher.planner_turns = [gated_planner(gate)]
-    await session.send(SubmitPrompt(text="Plan.", to="planner"))
+    await session.send(SubmitPrompt(text="Plan."))
     await session.send(AddTask(task=TaskSpec(prompt="one")))
     await session.send(RunTasks())
     events = await until(session, lambda e: e == WORK_IDLE)
     assert [t.status for t in board(events)] == ["completed"]
-    await session.send(SubmitPrompt(text="hi"))
-    events += await until(session, lambda e: e == WORK_IDLE)
     assert PLANNER_IDLE not in events and errors(events) == []
 
     gate.set()
@@ -106,8 +102,8 @@ async def test_the_planner_takes_one_prompt_at_a_time() -> None:
     gate = asyncio.Event()
     session, _, launcher = session_for()
     launcher.planner_turns = [gated_planner(gate)]
-    await session.send(SubmitPrompt(text="Plan.", to="planner"))
-    await session.send(SubmitPrompt(text="More.", to="planner"))
+    await session.send(SubmitPrompt(text="Plan."))
+    await session.send(SubmitPrompt(text="More."))
     events = await until(session, lambda e: isinstance(e, ErrorOccurred))
     assert errors(events) == ["The planner is already answering."]
     gate.set()
@@ -121,9 +117,9 @@ async def test_cancelling_the_planner_leaves_the_task_run_running() -> None:
     launcher.planner_turns = [gated_planner(planner_gate)]
     await session.send(AddTask(task=TaskSpec(prompt="one")))
     await session.send(RunTasks())
-    await session.send(SubmitPrompt(text="Plan.", to="planner"))
+    await session.send(SubmitPrompt(text="Plan."))
     await until(session, lambda e: isinstance(e, TurnStarted) and e.turn_id != e.agent_id)
-    await session.send(CancelTurn(to="planner"))
+    await session.send(CancelTurn(lane="planner"))
     events = await until(session, lambda e: e == PLANNER_IDLE)
     assert any(isinstance(e, TurnFinished) and e.reason == "cancelled" for e in events)
     assert WORK_IDLE not in events
@@ -138,7 +134,7 @@ async def test_cancelling_the_planners_agent_stops_only_its_turn() -> None:
     gate = asyncio.Event()
     session, _, launcher = session_for(gated_task(gate))
     launcher.planner_turns = [gated_planner(asyncio.Event())]
-    await session.send(SubmitPrompt(text="Plan.", to="planner"))
+    await session.send(SubmitPrompt(text="Plan."))
     started = await until(session, lambda e: isinstance(e, TurnStarted))
     planner = next(e.agent_id for e in started if isinstance(e, TurnStarted))
     assert planner is not None
@@ -155,7 +151,7 @@ async def test_cancelling_the_planners_agent_stops_only_its_turn() -> None:
 async def test_closing_stops_the_planners_turn() -> None:
     session, _, launcher = session_for()
     launcher.planner_turns = [gated_planner(asyncio.Event())]
-    await session.send(SubmitPrompt(text="Plan.", to="planner"))
+    await session.send(SubmitPrompt(text="Plan."))
     await until(session, lambda e: isinstance(e, TurnStarted))
     await session.close()
     events = await until(session, lambda e: e == PLANNER_IDLE)

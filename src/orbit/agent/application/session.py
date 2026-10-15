@@ -14,7 +14,7 @@ from typing import Any, assert_never
 from orbit.agent.application.agent_run import AgentDesk, AgentRun, Agents, Outcome
 from orbit.agent.application.landing import Lander
 from orbit.agent.application.planner import PlannerChat
-from orbit.agent.application.ports import ProposalReview, TurnRunner
+from orbit.agent.application.ports import ProposalReview
 from orbit.agent.application.proposals import FrontendReview
 from orbit.agent.application.review_lane import REVIEW_ROLES, ReviewLane
 from orbit.agent.application.startup_check import AGENT_ID as STARTUP_AGENT
@@ -45,7 +45,6 @@ from orbit.protocol import (
     ErrorOccurred,
     Event,
     Notice,
-    PromptTarget,
     RemoveTask,
     RequestSuperReview,
     RunTasks,
@@ -103,8 +102,8 @@ def _cancel(turn: "asyncio.Task[object] | None") -> bool:
 class AgentSession:
     """Runs work in the background and publishes its events.
 
-    Conversation turns and task runs share the work lane, one at a time; the planner's turns
-    run in a lane of their own, alongside them.
+    Prompts go to the planner, whose turns run in a lane of their own, alongside the work
+    lane's task runs.
 
     The session owns the task list and reports it whole on every change. A run
     goes through it in order; after each task that completes, the ``verification``
@@ -121,7 +120,6 @@ class AgentSession:
 
     def __init__(
         self,
-        runner: TurnRunner,
         settings: Settings | None = None,
         model_choices: Sequence[str] = (),
         verification: Verification | None = None,
@@ -129,7 +127,6 @@ class AgentSession:
         workspace: str | None = None,
         check_at_startup: bool = False,
     ) -> None:
-        self._runner = runner
         self._settings = settings or Settings()
         self._model_choices = tuple(model_choices)
         steps = verification.steps if verification else ()
@@ -179,10 +176,6 @@ class AgentSession:
         await self._publish_tasks()
 
     @property
-    def runner(self) -> TurnRunner:
-        return self._runner
-
-    @property
     def settings(self) -> Settings:
         return self._settings
 
@@ -206,7 +199,7 @@ class AgentSession:
     async def send(self, command: Command) -> None:
         match command:
             case SubmitPrompt() | CancelTurn() | UpdateSettings():
-                await self._handle_conversation(command)
+                await self._handle_prompts(command)
             case AddTask() | RunTasks() | ConfigureChecks():
                 await self._handle_tasks(command)
             case EditTask() | AcceptTask() | RemoveTask():
@@ -216,13 +209,11 @@ class AgentSession:
             case _:
                 assert_never(command)
 
-    async def _handle_conversation(
-        self, command: SubmitPrompt | CancelTurn | UpdateSettings
-    ) -> None:
+    async def _handle_prompts(self, command: SubmitPrompt | CancelTurn | UpdateSettings) -> None:
         match command:
-            case SubmitPrompt(text=text, to=to):
-                await self._submit(text, to)
-            case CancelTurn(to="planner"):
+            case SubmitPrompt(text=text):
+                await self._submit(text)
+            case CancelTurn(lane="planner"):
                 _cancel(self._planner_turn)
             case CancelTurn():
                 self._held = True
@@ -233,11 +224,9 @@ class AgentSession:
             case _:
                 assert_never(command)
 
-    async def _submit(self, text: str, to: PromptTarget) -> None:
-        """Start a turn of the conversation, in the work lane, or of the planner's, in its own."""
-        if to == "conversation":
-            await self._start(self._run_turn(self._runner, text, self._settings))
-        elif self._planner is None:
+    async def _submit(self, text: str) -> None:
+        """Start a turn of the planner's conversation, in its own lane."""
+        if self._planner is None:
             message = "Planning needs agents and a planner role."
             await self._events.put(ErrorOccurred(message=message))
         else:
@@ -434,7 +423,7 @@ class AgentSession:
             await self._events.put(Notice(message=note))
 
     async def _start(self, work: Coroutine[Any, Any, object]) -> None:
-        """Run ``work`` in the work lane, shared by conversation turns and task runs."""
+        """Run ``work`` in the work lane, where task runs go."""
         turn = await self._launch(work, self._turn, "work", "A turn is already running.")
         if turn is not None:
             self._turn = turn
@@ -586,12 +575,12 @@ class AgentSession:
     async def _publish_tasks(self) -> None:
         await self._events.put(TasksChanged(tasks=self._board.tasks))
 
-    async def _run_turn(self, runner: TurnRunner, text: str, settings: Settings) -> TurnEndReason:
-        """Run one turn, publishing its events; returns how it ended."""
+    async def _run_turn(self, planner: PlannerChat, text: str, settings: Settings) -> TurnEndReason:
+        """Run one turn of the planner's, publishing its events; returns how it ended."""
         turn_id = uuid.uuid4().hex
         reason: TurnEndReason = "completed"
         try:
-            async for event in runner.run_turn(turn_id, text, settings):
+            async for event in planner.run_turn(turn_id, text, settings):
                 if isinstance(event, TurnFinished):
                     reason = event.reason
                 await self._events.put(event)

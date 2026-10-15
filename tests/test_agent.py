@@ -1,25 +1,20 @@
+"""The session's own business: settings, prompts to the planner, and the task list."""
+
 import asyncio
 import sys
-from collections.abc import AsyncIterator, Sequence
-from typing import Any
+from collections.abc import Sequence
 
 from orbit.agent import (
     NO_STEPS_NOTE,
     AgentSession,
-    EchoModel,
-    ModelLoopRunner,
-    ToolRegistry,
     Verification,
     VerificationStep,
     Workspace,
     run_step,
 )
-from orbit.agent.application.loop import run_turn
-from orbit.agent.domain.conversation import Message, ModelResponse, ToolCall, ToolSpec
 from orbit.agent.domain.verification import MAX_FIX_ATTEMPTS
 from orbit.protocol import (
     AddTask,
-    AssistantMessage,
     BusyChanged,
     CancelTurn,
     EditTask,
@@ -33,9 +28,6 @@ from orbit.protocol import (
     TasksChanged,
     TaskSpec,
     TaskState,
-    ToolAccess,
-    ToolCallFinished,
-    ToolCallStarted,
     TurnEndReason,
     TurnFinished,
     TurnStarted,
@@ -43,236 +35,120 @@ from orbit.protocol import (
     VerificationChanged,
     VerificationFinished,
 )
+from tests.agent_fakes import Call, session_for
+
+PLANNER_IDLE = BusyChanged(busy=False, lane="planner")
 
 
-class ScriptedModel:
-    def __init__(self, *responses: ModelResponse) -> None:
-        self._responses = list(responses)
-
-    async def complete(
-        self, messages: Sequence[Message], tools: Sequence[ToolSpec]
-    ) -> ModelResponse:
-        return self._responses.pop(0)
+async def chats(call: Call) -> TurnEndReason:
+    return "completed"
 
 
-class UpperTool:
-    spec = ToolSpec(name="upper", description="Uppercase text.", parameters={})
-
-    async def run(self, arguments: dict[str, Any]) -> str:
-        return str(arguments["text"]).upper()
+async def fails(call: Call) -> TurnEndReason:
+    raise RuntimeError("boom")
 
 
-class HangingModel:
-    async def complete(
-        self, messages: Sequence[Message], tools: Sequence[ToolSpec]
-    ) -> ModelResponse:
-        await asyncio.Event().wait()
-        raise AssertionError("unreachable")
-
-
-async def collect(session: AgentSession) -> list[Event]:
-    """Events up to the next TurnFinished, ignoring settings and busy announcements."""
+async def collect_run(session: AgentSession) -> list[Event]:
+    """Events until the planner goes idle, ignoring settings announcements."""
     events: list[Event] = []
     async for event in session.events():
-        if isinstance(event, SettingsChanged | BusyChanged):
+        if isinstance(event, SettingsChanged):
             continue
         events.append(event)
-        if isinstance(event, TurnFinished):
+        if event == PLANNER_IDLE:
             return events
     return events
 
 
-async def test_loop_runs_tools_until_model_stops() -> None:
-    model = ScriptedModel(
-        ModelResponse(text="", tool_calls=(ToolCall("c1", "upper", {"text": "hi"}),)),
-        ModelResponse(text="done"),
-    )
-    history = [Message(role="user", content="go")]
-    events = [e async for e in run_turn("t", history, model, ToolRegistry([UpperTool()]))]
-
-    assert [type(e) for e in events] == [
-        TurnStarted,
-        ToolCallStarted,
-        ToolCallFinished,
-        AssistantMessage,
-        TurnFinished,
-    ]
-    assert events[2] == ToolCallFinished(turn_id="t", call_id="c1", output="HI")
-    assert history[-2] == Message(role="tool", content="HI", tool_call_id="c1")
+def turns(events: list[Event]) -> list[Event]:
+    """The turns' starts and ends, and the busy notices around them."""
+    kinds = TurnStarted | TurnFinished | BusyChanged | ErrorOccurred
+    return [e for e in events if isinstance(e, kinds)]
 
 
-async def test_loop_reports_tool_errors_to_model() -> None:
-    model = ScriptedModel(
-        ModelResponse(text="", tool_calls=(ToolCall("c1", "missing", {}),)),
-        ModelResponse(text="ok"),
-    )
-    history = [Message(role="user", content="go")]
-    events = [e async for e in run_turn("t", history, model, ToolRegistry())]
-
-    finished = next(e for e in events if isinstance(e, ToolCallFinished))
-    assert finished.is_error
-    assert events[-1] == TurnFinished(turn_id="t", reason="completed")
-
-
-async def test_loop_stops_at_max_steps() -> None:
-    call = ModelResponse(text="", tool_calls=(ToolCall("c", "upper", {"text": "x"}),))
-    model = ScriptedModel(call, call)
-    history = [Message(role="user", content="go")]
-    events = [
-        e async for e in run_turn("t", history, model, ToolRegistry([UpperTool()]), max_steps=2)
-    ]
-    assert events[-1] == TurnFinished(turn_id="t", reason="max_steps")
-
-
-async def test_session_echo_turn() -> None:
-    runner = ModelLoopRunner(EchoModel())
-    session = AgentSession(runner)
+async def test_a_prompt_starts_a_turn_of_the_planner() -> None:
+    session, _, launcher = session_for()
+    launcher.planner_turns = [chats]
     await session.send(SubmitPrompt(text="hello"))
-    events = await collect(session)
+    events = await asyncio.wait_for(collect_run(session), 5)
 
-    assert any(isinstance(e, AssistantMessage) and e.text == "echo: hello" for e in events)
-    assert isinstance(events[-1], TurnFinished) and events[-1].reason == "completed"
-    assert [m.content for m in runner.history] == ["hello", "echo: hello"]
+    [launch] = launcher.launches  # The planner's launcher was asked to converse.
+    assert (launch.agent.role, launch.prompt) == ("planner", "hello")
+    assert [e.type for e in turns(events)] == [
+        "busy_changed",
+        "turn_started",
+        "turn_finished",
+        "busy_changed",
+    ]
+    assert events[0] == BusyChanged(busy=True, lane="planner")
+    assert any(isinstance(e, TurnFinished) and e.reason == "completed" for e in events)
 
 
-async def test_session_cancel() -> None:
-    runner = ModelLoopRunner(HangingModel())
-    session = AgentSession(runner)
+async def test_a_prompt_without_a_planner_is_refused() -> None:
+    session = AgentSession()
     await session.send(SubmitPrompt(text="hello"))
-    await asyncio.sleep(0)
-    await session.send(CancelTurn())
-    events = await collect(session)
-
-    assert isinstance(events[-1], TurnFinished) and events[-1].reason == "cancelled"
-    assert runner.history == []
-
-
-async def test_session_rejects_concurrent_turn() -> None:
-    session = AgentSession(ModelLoopRunner(HangingModel()))
-    await session.send(SubmitPrompt(text="one"))
-    await session.send(SubmitPrompt(text="two"))
     stream = session.events()
     assert isinstance(await anext(stream), SettingsChanged)
-    assert await anext(stream) == BusyChanged(busy=True)
-    assert isinstance(await anext(stream), ErrorOccurred)
-    await session.send(CancelTurn())
+    assert await anext(stream) == ErrorOccurred(message="Planning needs agents and a planner role.")
+    assert session._events.empty()
 
 
-class FailingModel:
-    async def complete(
-        self, messages: Sequence[Message], tools: Sequence[ToolSpec]
-    ) -> ModelResponse:
-        raise RuntimeError("boom")
-
-
-async def test_session_cancel_without_turn_is_noop() -> None:
-    session = AgentSession(ModelLoopRunner(EchoModel()))
-    await session.send(CancelTurn())
+async def test_session_reports_the_planners_errors() -> None:
+    session, _, launcher = session_for()
+    launcher.planner_turns = [fails]
     await session.send(SubmitPrompt(text="hello"))
-    events = await collect(session)
+    events = turns(await asyncio.wait_for(collect_run(session), 5))
 
-    assert isinstance(events[0], TurnStarted)
-    assert isinstance(events[-1], TurnFinished) and events[-1].reason == "completed"
-
-
-async def test_session_reports_model_errors() -> None:
-    runner = ModelLoopRunner(FailingModel())
-    session = AgentSession(runner)
-    await session.send(SubmitPrompt(text="hello"))
-    events = await collect(session)
-
-    assert isinstance(events[0], TurnStarted)
-    turn_id = events[0].turn_id
-    assert events[1:] == [
+    started = events[1]
+    assert isinstance(started, TurnStarted)
+    turn_id = started.turn_id
+    assert events[2:] == [
         ErrorOccurred(turn_id=turn_id, message="boom"),
         TurnFinished(turn_id=turn_id, reason="error"),
+        PLANNER_IDLE,
     ]
-    assert runner.history == []
 
 
-class RecordingModel:
-    def __init__(self) -> None:
-        self.tools_seen: list[list[str]] = []
-
-    async def complete(
-        self, messages: Sequence[Message], tools: Sequence[ToolSpec]
-    ) -> ModelResponse:
-        self.tools_seen.append([t.name for t in tools])
-        return ModelResponse(text="ok")
-
-
-class RecordingRunner:
-    """Records each turn as (runner, prompt, settings) in a log shared with its new contexts.
-
-    Turns complete, except that a prompt starting with "bad" ends in an error.
-    """
-
-    def __init__(self, log: list[tuple["RecordingRunner", str, Settings]] | None = None) -> None:
-        self.log = [] if log is None else log
-        self.settings_seen: list[Settings] = []
-
-    async def run_turn(self, turn_id: str, prompt: str, settings: Settings) -> AsyncIterator[Event]:
-        self.settings_seen.append(settings)
-        self.log.append((self, prompt, settings))
-        reason: TurnEndReason = "error" if prompt.startswith("bad") else "completed"
-        yield TurnStarted(turn_id=turn_id)
-        yield TurnFinished(turn_id=turn_id, reason=reason)
-
-
-async def test_loop_runner_hides_tools_when_tool_access_is_off() -> None:
-    model = RecordingModel()
-    runner = ModelLoopRunner(model, ToolRegistry([UpperTool()]))
-    accesses: tuple[ToolAccess, ...] = ("off", "restricted", "full")
-    for access in accesses:
-        _ = [e async for e in runner.run_turn("t", "go", Settings(tool_access=access))]
-    assert model.tools_seen == [[], ["upper"], ["upper"]]
+async def test_cancel_without_a_turn_is_a_noop() -> None:
+    session, _, launcher = session_for()
+    launcher.planner_turns = [chats]
+    await session.send(CancelTurn(lane="planner"))
+    await session.send(SubmitPrompt(text="hello"))
+    events = await asyncio.wait_for(collect_run(session), 5)
+    assert any(isinstance(e, TurnFinished) and e.reason == "completed" for e in events)
 
 
 async def test_session_announces_initial_settings() -> None:
     settings = Settings(model="opus", tool_access="off")
-    session = AgentSession(RecordingRunner(), settings, model_choices=("opus", "sonnet"))
+    session = AgentSession(settings, model_choices=("opus", "sonnet"))
     assert session.settings == settings
     assert await anext(session.events()) == SettingsChanged(
         settings=settings, model_choices=("opus", "sonnet")
     )
 
 
-async def test_session_applies_updated_settings_to_next_turn() -> None:
-    runner = RecordingRunner()
-    session = AgentSession(runner, model_choices=("opus",))
+async def test_the_planner_takes_the_model_from_updated_settings() -> None:
+    session, _, launcher = session_for()
+    launcher.planner_turns = [chats, chats]
     stream = session.events()
-    assert await anext(stream) == SettingsChanged(settings=Settings(), model_choices=("opus",))
+    assert await anext(stream) == SettingsChanged(settings=Settings())
 
     await session.send(SubmitPrompt(text="one"))
-    await collect_run(session)
+    await asyncio.wait_for(collect_run(session), 5)
     new = Settings(model="opus", tool_access="full")
     await session.send(UpdateSettings(settings=new))
-    assert await anext(stream) == SettingsChanged(settings=new, model_choices=("opus",))
+    assert await anext(stream) == SettingsChanged(settings=new)
     await session.send(SubmitPrompt(text="two"))
-    await collect_run(session)
+    await asyncio.wait_for(collect_run(session), 5)
 
-    assert runner.settings_seen == [Settings(), new]
+    assert [launch.settings.model for launch in launcher.launches] == [None, "opus"]
+    # Tool access sets new tasks' default; the planner keeps its role's.
+    assert len({launch.settings.tool_access for launch in launcher.launches}) == 1
     assert session.settings == new
 
 
-async def collect_run(session: AgentSession) -> list[Event]:
-    """Events until the session goes idle, ignoring settings announcements."""
-    events: list[Event] = []
-    async for event in session.events():
-        if isinstance(event, SettingsChanged):
-            continue
-        events.append(event)
-        if event == BusyChanged(busy=False):
-            return events
-    return events
-
-
-def kinds(events: list[Event]) -> list[str]:
-    return [e.type for e in events]
-
-
 async def test_add_and_edit_tasks_publish_the_board() -> None:
-    session = AgentSession(RecordingRunner())
+    session = AgentSession()
     stream = session.events()
     assert isinstance(await anext(stream), SettingsChanged)
 
@@ -288,30 +164,23 @@ async def test_add_and_edit_tasks_publish_the_board() -> None:
     assert await anext(stream) == ErrorOccurred(message="No task with id 'nope'.")
 
 
-async def test_prompt_turns_are_wrapped_in_busy_notices() -> None:
-    session = AgentSession(RecordingRunner())
-    await session.send(SubmitPrompt(text="hi"))
-    events = await collect_run(session)
-    assert kinds(events) == ["busy_changed", "turn_started", "turn_finished", "busy_changed"]
-    assert events[0] == BusyChanged(busy=True)
-
-
-async def test_work_started_as_the_last_ends_is_not_reported_idle() -> None:
-    session = AgentSession(RecordingRunner())
+async def test_a_turn_started_as_the_last_ends_is_not_reported_idle() -> None:
+    session, _, launcher = session_for()
+    launcher.planner_turns = [chats, chats]
     await session.send(SubmitPrompt(text="one"))
-    turn = session._turn
+    turn = session._planner_turn
     assert turn is not None
     while not turn.done():
         await asyncio.sleep(0)
     # The first turn is done but hasn't reported idle yet when the second starts.
     await session.send(SubmitPrompt(text="two"))
-    events = await collect_run(session)
+    events = await asyncio.wait_for(collect_run(session), 5)
     assert [e for e in events if isinstance(e, BusyChanged)] == [
-        BusyChanged(busy=True),
-        BusyChanged(busy=True),
-        BusyChanged(busy=False),
+        BusyChanged(busy=True, lane="planner"),
+        BusyChanged(busy=True, lane="planner"),
+        PLANNER_IDLE,
     ]
-    assert kinds(events).count("turn_finished") == 2
+    assert [e.type for e in events].count("turn_finished") == 2
 
 
 def verified(
@@ -329,7 +198,7 @@ FAILING_STEP = VerificationStep(
 
 
 async def test_session_announces_verification_steps() -> None:
-    session = AgentSession(RecordingRunner(), verification=verified((FAILING_STEP,)))
+    session = AgentSession(verification=verified((FAILING_STEP,)))
     assert session.verification == verified((FAILING_STEP,))
     stream = session.events()
     assert isinstance(await anext(stream), SettingsChanged)
@@ -337,7 +206,7 @@ async def test_session_announces_verification_steps() -> None:
 
 
 async def test_verification_without_steps_notes_that_nothing_is_verified() -> None:
-    session = AgentSession(RecordingRunner(), verification=verified(()))
+    session = AgentSession(verification=verified(()))
     assert session.verification == verified(())
     stream = session.events()
     assert isinstance(await anext(stream), SettingsChanged)
@@ -347,26 +216,19 @@ async def test_verification_without_steps_notes_that_nothing_is_verified() -> No
 
 
 async def test_session_notes_its_workspace_at_startup() -> None:
-    session = AgentSession(RecordingRunner(), workspace="/code/project")
+    session = AgentSession(workspace="/code/project")
     stream = session.events()
     assert isinstance(await anext(stream), SettingsChanged)
     assert await anext(stream) == Notice(message="Workspace: /code/project")
     assert session._events.empty()
 
 
-async def test_conversation_turns_are_not_verified() -> None:
-    session = AgentSession(ModelLoopRunner(EchoModel()), verification=verified((FAILING_STEP,)))
+async def test_planner_turns_are_not_verified() -> None:
+    session, _, launcher = session_for(verification=verified((FAILING_STEP,)))
+    launcher.planner_turns = [chats]
     await session.send(SubmitPrompt(text="hello"))
-    events = await collect_run(session)
+    events = await asyncio.wait_for(collect_run(session), 5)
 
     assert not any(isinstance(e, VerificationChanged | VerificationFinished) for e in events[1:])
     await asyncio.sleep(0.01)
     assert session._events.empty()
-
-
-async def test_closing_a_session_cancels_its_turn() -> None:
-    session = AgentSession(ModelLoopRunner(HangingModel()))
-    await session.send(SubmitPrompt(text="hi"))
-    await asyncio.wait_for(session.close(), 5)
-    turn = session._turn
-    assert turn is not None and turn.done()

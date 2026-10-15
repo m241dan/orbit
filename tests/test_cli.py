@@ -163,7 +163,8 @@ def test_chat_runs_tui_against_claude_cli(launched: list[AgentSession]) -> None:
 
     assert result.exit_code == 0
     [session] = launched
-    assert isinstance(session.runner, ClaudeCliRunner)
+    assert session.agents is not None
+    assert isinstance(session.agents.launcher, ClaudeCliRunner)  # The planner's too.
     assert session.settings == Settings()
     assert session.model_choices == MODEL_ALIASES
 
@@ -228,7 +229,6 @@ def test_chat_runs_tasks_through_agents_connected_over_mcp(launched: list[AgentS
     assert agents is not None
     assert isinstance(agents.host, McpHost)
     assert isinstance(agents.launcher, ClaudeCliRunner)
-    assert agents.launcher is not session.runner
     assert agents.limits == Limits(max_attempts=5)
     first, second = agents.new_token(), agents.new_token()
     assert first != second and len(first) >= 32
