@@ -94,7 +94,7 @@ def test_step_lines_time_only_the_running_step() -> None:
 
 
 def test_every_task_status_has_an_icon_except_running_which_spins() -> None:
-    statuses = {status for part in get_args(TaskStatus) for status in get_args(part)}
+    statuses = set(get_args(TaskStatus))
     assert statuses - set(STATUS_ICONS) == {"running"}
     assert STATUS_ICONS["gave_up"] == "🏳"
     assert STATUS_ICONS["draft"] == "📝"

@@ -33,7 +33,7 @@ from tests.agent_fakes import (
     verified,
 )
 
-SETTLED = {"completed", "unverified", "gave_up", "error", "cancelled", "max_steps"}
+SETTLED = {"completed", "unverified", "gave_up", "error", "cancelled"}
 
 
 async def claims_done(call: Call) -> TurnEndReason:

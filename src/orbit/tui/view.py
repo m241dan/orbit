@@ -81,7 +81,6 @@ STATUS_ICONS: dict[TaskStatus, str] = {
     "completed": "✅",
     "unverified": "❗",
     "cancelled": "🛑",
-    "max_steps": "⌛",
     "error": "❌",
     "gave_up": "🏳",
     "draft": "📝",

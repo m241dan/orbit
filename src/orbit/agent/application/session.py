@@ -21,7 +21,7 @@ from orbit.agent.application.startup_check import StartupCheck
 from orbit.agent.application.verifier import Verification, Verifier
 from orbit.agent.application.work_lane import WorkLane
 from orbit.agent.domain.agents import Agent
-from orbit.agent.domain.board import TaskBoard
+from orbit.agent.domain.board import WAITING, TaskBoard
 from orbit.agent.domain.reviews import ReviewPlanner
 from orbit.agent.domain.roles import configure_prompt, role_task
 from orbit.agent.domain.verification import VerificationStep, startup_fix_prompt
@@ -47,7 +47,6 @@ from orbit.protocol import (
     SubmitPrompt,
     TasksChanged,
     TaskSpec,
-    TaskStatus,
     TurnEndReason,
     TurnFinished,
     UpdateSettings,
@@ -57,8 +56,6 @@ from orbit.protocol import (
 NO_STEPS_NOTE = "No verification steps configured. Press ctrl+e to set them up."
 NO_AGENTS_MESSAGE = "Tasks need agents, and none are set up."
 CONFIGURING_NOTE = "A configurator task is already queued or running."
-# Statuses of a task that's yet to finish.
-WAITING: frozenset[TaskStatus] = frozenset({"pending", "running", "verifying"})
 
 
 def _verifier(

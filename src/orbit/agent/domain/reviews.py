@@ -11,10 +11,9 @@ import itertools
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 
+from orbit.agent.domain.board import WAITING
 from orbit.protocol import TaskState
 
-# Statuses of tasks that are still to run or running, so a duplicate of one is refused.
-UNFINISHED = frozenset({"pending", "running", "verifying"})
 # Characters of diff quoted in a review task; a reviewer can read files for more.
 DIFF_LIMIT = 30000
 
@@ -92,7 +91,7 @@ class ReviewPlanner:
             return f"This review has already suggested {cap} tasks, the most allowed."
         wanted = _normalized(title)
         for state in queued:
-            if state.status in UNFINISHED and _normalized(state.task.prompt) == wanted:
+            if state.status in WAITING and _normalized(state.task.prompt) == wanted:
                 return f"Task {state.id} already covers that."
         return None
 

@@ -76,7 +76,6 @@ def test_label_shows_status_title_and_settings() -> None:
         "completed": "✅",
         "unverified": "❗",
         "cancelled": "🛑",
-        "max_steps": "⌛",
         "error": "❌",
     }
     for status, icon in icons.items():

@@ -13,6 +13,8 @@ from orbit.protocol import (
     Usage,
 )
 
+# Statuses of a task that's yet to finish: still to run, or running.
+WAITING: frozenset[TaskStatus] = frozenset({"pending", "running", "verifying"})
 # Statuses a run leaves alone; any other task is worth (another) run.
 SETTLED: frozenset[TaskStatus] = frozenset(
     {"draft", "running", "verifying", "completed", "unverified", "gave_up"}

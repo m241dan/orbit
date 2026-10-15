@@ -60,7 +60,7 @@ def test_edit_rejects_unknown_and_running_tasks() -> None:
 
 def test_next_runnable_skips_done_running_and_already_tried_tasks() -> None:
     board = TaskBoard()
-    ids = [board.add(TaskSpec(prompt=str(i))) for i in range(7)]
+    ids = [board.add(TaskSpec(prompt=str(i))) for i in range(6)]
     statuses = [
         "completed",
         "unverified",
@@ -68,7 +68,6 @@ def test_next_runnable_skips_done_running_and_already_tried_tasks() -> None:
         "verifying",
         "error",
         "cancelled",
-        "max_steps",
     ]
     for task_id, status in zip(ids, statuses, strict=True):
         board.set_status(task_id, status)  # type: ignore[arg-type]

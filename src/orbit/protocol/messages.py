@@ -198,9 +198,17 @@ class Usage(_Message):
 
 TurnEndReason = Literal["completed", "cancelled", "max_steps", "error"]
 
-TaskStatus = (
-    Literal["draft", "pending", "running", "verifying", "unverified", "gave_up"] | TurnEndReason
-)
+TaskStatus = Literal[
+    "draft",
+    "pending",
+    "running",
+    "verifying",
+    "completed",
+    "unverified",
+    "gave_up",
+    "cancelled",
+    "error",
+]
 """Where a task stands.
 
 ``verifying``: its turn completed and the verification steps are checking it.
