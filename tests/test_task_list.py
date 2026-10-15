@@ -5,6 +5,7 @@ from orbit.protocol import (
     AddTask,
     BusyChanged,
     EditTask,
+    ErrorOccurred,
     Event,
     RemoveTask,
     RequestSuperReview,
@@ -473,3 +474,15 @@ async def test_list_shows_each_tasks_usage_and_the_sessions_total() -> None:
             ),
         )
         assert app.query_one(TaskList).border_subtitle == "session: 1.5k tok · $0.30"
+
+
+async def test_a_refused_planner_prompt_frees_the_prompt() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test(size=(120, 30)) as pilot:
+        prompt = app.query_one(PromptInput)
+        await pilot.press("ctrl+t", "i", *"plan", "enter")
+        assert prompt.disabled
+        refused = ErrorOccurred(message="Planning needs agents and a planner role.")
+        await feed(session, pilot, refused, BusyChanged(busy=False, lane="planner"))
+        assert not prompt.disabled

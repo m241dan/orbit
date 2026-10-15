@@ -80,12 +80,13 @@ async def test_prompts_to_the_planner_go_to_it_and_proposals_become_drafts() -> 
 async def refused_planning(session: AgentSession) -> list[Event]:
     await session.send(SubmitPrompt(text="Plan."))
     stream = session.events()
-    return [await anext(stream), await anext(stream)]
+    return [await anext(stream), await anext(stream), await anext(stream)]
 
 
 async def test_planning_needs_agents() -> None:
     events = await refused_planning(AgentSession())
     assert any(isinstance(e, ErrorOccurred) and "planner" in e.message for e in events)
+    assert events[-1] == BusyChanged(busy=False, lane="planner")  # Frees the prompt.
 
 
 async def test_planning_needs_a_planner_role() -> None:
@@ -93,6 +94,7 @@ async def test_planning_needs_a_planner_role() -> None:
     session, _, _ = session_for(roles=roles)
     events = await refused_planning(session)
     assert any(isinstance(e, ErrorOccurred) and "planner" in e.message for e in events)
+    assert events[-1] == BusyChanged(busy=False, lane="planner")
 
 
 async def test_accepted_drafts_run_and_dropped_ones_go() -> None:

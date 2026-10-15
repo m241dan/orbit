@@ -229,6 +229,8 @@ class AgentSession:
         if self._planner is None:
             message = "Planning needs agents and a planner role."
             await self._events.put(ErrorOccurred(message=message))
+            # Frees the prompt of a frontend that marked the lane busy when it sent this.
+            await self._events.put(BusyChanged(busy=False, lane="planner"))
         else:
             await self._start_planner(self._run_turn(self._planner, text, self._settings))
 

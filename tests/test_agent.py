@@ -90,6 +90,7 @@ async def test_a_prompt_without_a_planner_is_refused() -> None:
     stream = session.events()
     assert isinstance(await anext(stream), SettingsChanged)
     assert await anext(stream) == ErrorOccurred(message="Planning needs agents and a planner role.")
+    assert await anext(stream) == PLANNER_IDLE
     assert session._events.empty()
 
 
