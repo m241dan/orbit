@@ -430,18 +430,6 @@ class ConversationTab:
     unread: bool = False
 
 
-_TAB_OUTPUT = (
-    AssistantMessage,
-    ToolCallStarted,
-    ToolCallFinished,
-    AgentRequest,
-    AgentReply,
-    ProgressNoted,
-    TaskGaveUp,
-    ErrorOccurred,
-)
-"""Events that add an entry to their agent's conversation."""
-
 _TabOutput = (
     AssistantMessage
     | ToolCallStarted
@@ -453,6 +441,11 @@ _TabOutput = (
     | ErrorOccurred
     | TurnFinished
 )
+"""Events that can add an entry to their agent's conversation; a turn's end only does when
+it gets a note."""
+
+_TAB_OUTPUT: tuple[type[_TabOutput], ...] = get_args(_TabOutput)
+"""The classes in ``_TabOutput``, for ``isinstance``."""
 
 
 PLANNER_TAB = ConversationTab(PLANNER, PLANNER_TAB_LABEL)
