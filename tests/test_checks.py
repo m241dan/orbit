@@ -30,6 +30,16 @@ async def test_missing_command_fails_the_step() -> None:
     assert output == "Could not run 'orbit-no-such-command': command not found."
 
 
+async def test_non_executable_command_fails_the_step(tmp_path: Path) -> None:
+    script = tmp_path / "check.sh"
+    script.write_text("#!/bin/sh\nexit 0\n")
+    script.chmod(0o644)
+    step = VerificationStep(name="check", command=(str(script),))
+    passed, output = await run_step(step)
+    assert not passed
+    assert output == f"Could not run {str(script)!r}: Permission denied."
+
+
 async def test_cancelling_a_step_kills_its_process() -> None:
     marker = "import time; time.sleep(60)"
     task = asyncio.create_task(run_step(python_step(marker)))

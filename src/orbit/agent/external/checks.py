@@ -17,6 +17,8 @@ async def run_step(step: VerificationStep, root: str = ".") -> tuple[bool, str]:
         )
     except FileNotFoundError:
         return False, f"Could not run {step.command[0]!r}: command not found."
+    except OSError as exc:
+        return False, f"Could not run {step.command[0]!r}: {exc.strerror}."
     try:
         output, _ = await process.communicate()
     finally:
