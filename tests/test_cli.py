@@ -19,6 +19,7 @@ from orbit.agent import (
     run_step,
     workspace_state,
 )
+from orbit.agent.domain.reviews import ReviewLimits
 from orbit.cli import app
 from orbit.protocol import Notice, Settings
 
@@ -79,7 +80,7 @@ def test_chat_works_in_the_workspace_it_is_given(
 ) -> None:
     project = tmp_path / "project"
     (project / ".orbit").mkdir(parents=True)
-    (project / ".orbit" / "config.toml").write_text("fix_attempts = 3\n")
+    (project / ".orbit" / "config.toml").write_text("fix_attempts = 3\nmax_checks = 4\n")
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
     monkeypatch.chdir(elsewhere)
@@ -90,7 +91,7 @@ def test_chat_works_in_the_workspace_it_is_given(
     [session] = launched
     # The project's own configuration is read, from the workspace.
     assert session.agents is not None
-    assert session.agents.limits == Limits(max_attempts=3)
+    assert session.agents.limits == Limits(max_attempts=3, max_checks=4)
     assert f"Workspace: {project.resolve()}" in notices(session)
 
 
@@ -323,8 +324,10 @@ def test_chat_reviews_landed_work_with_the_files_limits(
     [session] = launched
     agents = session.agents
     assert agents is not None
-    assert (agents.review, agents.review_rounds, agents.review_suggestions) == (True, 2, 4)
-    assert (agents.super_review_every, agents.super_review_suggestions) == (7, 6)
+    assert agents.review
+    assert agents.review_limits == ReviewLimits(
+        rounds=2, suggestions=4, super_every=7, super_suggestions=6
+    )
 
 
 def test_chat_can_turn_review_off(launched: list[AgentSession]) -> None:

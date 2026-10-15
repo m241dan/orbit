@@ -1,6 +1,12 @@
 """When reviews happen and what they may suggest: rounds, batches, the breaker and caps."""
 
-from orbit.agent.domain.reviews import DIFF_LIMIT, ReviewJob, ReviewPlanner, review_prompt
+from orbit.agent.domain.reviews import (
+    DIFF_LIMIT,
+    ReviewJob,
+    ReviewLimits,
+    ReviewPlanner,
+    review_prompt,
+)
 from orbit.protocol import TaskSpec, TaskState, TaskStatus
 
 
@@ -21,7 +27,7 @@ def state(
 
 
 def planner(rounds: int = 3, cap: int = 5) -> ReviewPlanner:
-    return ReviewPlanner(rounds=rounds, cap=cap)
+    return ReviewPlanner(ReviewLimits(rounds=rounds, suggestions=cap))
 
 
 def test_a_commit_from_the_users_task_is_reviewed_in_round_zero() -> None:
@@ -170,12 +176,16 @@ def test_long_diffs_are_trimmed_from_the_end() -> None:
 
 
 def test_a_super_review_is_due_every_so_many_commits() -> None:
-    reviews = ReviewPlanner(rounds=3, cap=5, super_every=3, super_cap=10)
+    reviews = ReviewPlanner(
+        ReviewLimits(rounds=3, suggestions=5, super_every=3, super_suggestions=10)
+    )
     assert [reviews.count() for _ in range(7)] == [False, False, True, False, False, True, False]
 
 
 def test_a_super_review_due_while_paused_waits_until_review_resumes() -> None:
-    reviews = ReviewPlanner(rounds=1, cap=5, super_every=1, super_cap=10)
+    reviews = ReviewPlanner(
+        ReviewLimits(rounds=1, suggestions=5, super_every=1, super_suggestions=10)
+    )
     batch = filled(reviews, "2")
     reviews.landed(state("2", origin="review", batch=batch), "c2")
     assert reviews.paused
@@ -185,7 +195,9 @@ def test_a_super_review_due_while_paused_waits_until_review_resumes() -> None:
 
 
 def test_asking_for_a_super_review_restarts_the_count() -> None:
-    reviews = ReviewPlanner(rounds=3, cap=5, super_every=2, super_cap=10)
+    reviews = ReviewPlanner(
+        ReviewLimits(rounds=3, suggestions=5, super_every=2, super_suggestions=10)
+    )
     assert not reviews.count()
     job = reviews.super_review("abc")
     assert job == ReviewJob(commits=("abc",), round=0, batch=None, whole=True)
@@ -194,7 +206,9 @@ def test_asking_for_a_super_review_restarts_the_count() -> None:
 
 
 def test_a_super_reviews_batch_has_its_own_cap() -> None:
-    reviews = ReviewPlanner(rounds=3, cap=1, super_every=10, super_cap=2)
+    reviews = ReviewPlanner(
+        ReviewLimits(rounds=3, suggestions=1, super_every=10, super_suggestions=2)
+    )
     batch = reviews.open_batch(reviews.super_review("abc"))
     assert reviews.round_of(batch) == 1
     for task_id in ("2", "3"):

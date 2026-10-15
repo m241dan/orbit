@@ -330,6 +330,7 @@ name adds a role. Every field is optional:
 
 ```toml
 fix_attempts = 5               # in-session fixes asked of one agent before its task falls back
+max_checks = 20                # checks one agent may run itself before claiming done
 fallback_fixes = 3             # fresh-agent fix tasks a task's chain may queue per failing step
 review_rounds = 3              # rounds of review-suggested work before review pauses
 super_review_every = 10        # commits between super reviews

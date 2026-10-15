@@ -28,6 +28,7 @@ from orbit.agent.application.verifier import Failure, Verifier, first_failure
 from orbit.agent.domain.agent_task import FINISHED, AgentTask, Limits, Phase
 from orbit.agent.domain.agents import Agent, AgentRegistry, bootstrap_prompt
 from orbit.agent.domain.board import TaskBoard
+from orbit.agent.domain.reviews import ReviewLimits
 from orbit.agent.domain.roles import (
     BUILT_IN_ROLES,
     ChecksProposal,
@@ -89,10 +90,8 @@ class Agents:
     long, in seconds, an agent may take to exit once its task is finished before it's stopped.
     ``tree`` is where they work and their work is merged from; without one they work in the
     current directory and nothing is committed. ``roles`` are the roles tasks can name.
-    With ``review`` (and a tree), landed work is reviewed; ``review_rounds`` and
-    ``review_suggestions`` bound what reviews suggest, and the whole codebase is super
-    reviewed every ``super_review_every`` commits, suggesting up to
-    ``super_review_suggestions`` tasks. ``proposal_review`` is where the user decides on
+    With ``review`` (and a tree), landed work is reviewed, and the whole codebase super
+    reviewed, within ``review_limits``. ``proposal_review`` is where the user decides on
     proposed checks; without it, proposals are refused. ``write_config`` saves the checks the
     user accepts into the project's config; without it, they're used but not saved.
     """
@@ -105,10 +104,7 @@ class Agents:
     tree: CoderTree | None = None
     roles: Mapping[str, Role] = field(default_factory=lambda: dict(BUILT_IN_ROLES))
     review: bool = False
-    review_rounds: int = 3
-    review_suggestions: int = 5
-    super_review_every: int = 10
-    super_review_suggestions: int = 10
+    review_limits: ReviewLimits = field(default_factory=ReviewLimits)
     proposal_review: ProposalReview | None = None
     write_config: ConfigWriter | None = None
 

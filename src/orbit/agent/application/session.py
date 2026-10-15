@@ -350,13 +350,7 @@ class AgentSession:
         desk = self._desk
         if desk is None or not desk.agents.review or desk.agents.tree is None:
             return None
-        agents = desk.agents
-        planner = ReviewPlanner(
-            agents.review_rounds,
-            agents.review_suggestions,
-            agents.super_review_every,
-            agents.super_review_suggestions,
-        )
+        planner = ReviewPlanner(desk.agents.review_limits)
         lane = ReviewLane(desk, self._board, planner, self._wake_work)
         desk.suggest = lane.suggest
         return lane

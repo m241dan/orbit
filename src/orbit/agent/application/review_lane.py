@@ -111,8 +111,8 @@ class ReviewLane:
         diff = "" if job.whole else await self._tree.show(job.commits)
         batch = self.planner.open_batch(job)
         role = "super-reviewer" if job.whole else "reviewer"
-        cap = self.planner.super_cap if job.whole else self.planner.cap
-        task = role_task(role, self._desk.agents.roles[role], review_prompt(job, diff, cap))
+        prompt = review_prompt(job, diff, self.planner.cap(job))
+        task = role_task(role, self._desk.agents.roles[role], prompt)
         task_id = self._board.add_review(task)
         self._jobs[task_id], self._batches[task_id] = job, batch
         await self._publish(TasksChanged(tasks=self._board.tasks))
@@ -129,8 +129,9 @@ class ReviewLane:
 
     async def _note_pause(self) -> None:
         if self.planner.paused and not self._paused_noted:
+            rounds = self.planner.limits.rounds
             message = (
-                f"Review paused after {self.planner.rounds} round(s) of review-suggested work;"
+                f"Review paused after {rounds} round(s) of review-suggested work;"
                 " it resumes when one of your tasks lands."
             )
             await self._publish(Notice(message=message))

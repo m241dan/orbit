@@ -1,5 +1,7 @@
 import pytest
 
+from orbit.agent.domain.agent_task import Limits
+from orbit.agent.domain.reviews import ReviewLimits
 from orbit.agent.domain.roles import (
     BUILT_IN_ROLES,
     ORBIT_TOOLS,
@@ -99,6 +101,12 @@ def test_defaults_without_a_file() -> None:
     assert config.verification.steps == ()
 
 
+def test_the_configs_limits_default_to_the_domains() -> None:
+    config = OrbitConfig()
+    assert config.limits == Limits()
+    assert config.review_limits == ReviewLimits()
+
+
 def test_a_file_overrides_settings_and_role_fields() -> None:
     config = load_config(
         {
@@ -168,6 +176,7 @@ def test_setup_lists_the_files_it_watches() -> None:
     ("data", "message"),
     [
         ({"fix_attempts": 0}, "fix_attempts"),
+        ({"max_checks": 0}, "max_checks"),
         ({"fallback_fixes": 0}, "fallback_fixes"),
         ({"surprise": 1}, "surprise"),
         ({"roles": {"coder": {"tools": ["launch_rockets"]}}}, "launch_rockets"),

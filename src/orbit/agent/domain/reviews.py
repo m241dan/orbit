@@ -34,6 +34,18 @@ class ReviewJob:
     whole: bool = False
 
 
+@dataclass(frozen=True)
+class ReviewLimits:
+    """How much reviews may generate: ``rounds`` is the last round reviewed by itself, and
+    ``suggestions`` the tasks one review may suggest. A super review is due every
+    ``super_every`` commits, and may suggest ``super_suggestions`` tasks."""
+
+    rounds: int = 3
+    suggestions: int = 5
+    super_every: int = 10
+    super_suggestions: int = 10
+
+
 @dataclass
 class _Batch:
     round: int
@@ -46,15 +58,10 @@ class _Batch:
 
 
 class ReviewPlanner:
-    """Tracks batches and decides when to review; ``rounds`` is the last round reviewed by
-    itself, and ``cap`` the tasks one review may suggest. A super review is due every
-    ``super_every`` commits, and may suggest ``super_cap`` tasks."""
+    """Tracks batches and decides when to review, within ``limits``."""
 
-    def __init__(self, rounds: int, cap: int, super_every: int = 10, super_cap: int = 10) -> None:
-        self.rounds = rounds
-        self.cap = cap
-        self.super_every = super_every
-        self.super_cap = super_cap
+    def __init__(self, limits: ReviewLimits) -> None:
+        self.limits = limits
         self.paused = False
         self._since_super = 0
         self._ids = itertools.count(1)
@@ -68,11 +75,14 @@ class ReviewPlanner:
     def round_of(self, batch: str) -> int:
         return self._rounds[batch]
 
+    def cap(self, job: ReviewJob) -> int:
+        """The tasks ``job``'s review may suggest."""
+        return self.limits.super_suggestions if job.whole else self.limits.suggestions
+
     def open_batch(self, job: ReviewJob) -> str:
         """Start the batch for ``job``'s suggestions; returns its id."""
         batch = f"batch-{next(self._ids)}"
-        cap = self.super_cap if job.whole else self.cap
-        self._open[batch] = _Batch(round=job.round + 1, cap=cap)
+        self._open[batch] = _Batch(round=job.round + 1, cap=self.cap(job))
         self._rounds[batch] = job.round + 1
         return batch
 
@@ -107,7 +117,7 @@ class ReviewPlanner:
         """A commit landed; returns whether a super review is due now. One that falls due
         while review is paused waits until it resumes."""
         self._since_super += 1
-        if self._since_super < self.super_every or self.paused:
+        if self._since_super < self.limits.super_every or self.paused:
             return False
         self._since_super = 0
         return True
@@ -149,7 +159,7 @@ class ReviewPlanner:
         del self._open[batch_id]
         if not batch.commits:
             return None
-        if batch.round >= self.rounds:
+        if batch.round >= self.limits.rounds:
             self.paused = True
             return None
         return ReviewJob(tuple(batch.commits), batch.round, batch_id, tuple(batch.missing))

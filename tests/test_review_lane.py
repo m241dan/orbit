@@ -7,6 +7,7 @@ from collections.abc import Callable
 from orbit.agent import AgentSession
 from orbit.agent.application.ports import Reply
 from orbit.agent.domain.agent_task import Limits
+from orbit.agent.domain.reviews import ReviewLimits
 from orbit.protocol import (
     AddTask,
     AgentExited,
@@ -147,7 +148,7 @@ async def test_review_pauses_after_the_last_round_and_says_so() -> None:
         reviewers=(suggests("Add tests"),),
         tree=FakeTree(),
         review=True,
-        review_rounds=1,
+        review_limits=ReviewLimits(rounds=1),
     )
     await start(session)
     events = await asyncio.wait_for(settle(session), 10)
@@ -164,8 +165,7 @@ async def test_suggestions_over_the_cap_or_already_queued_are_refused() -> None:
         reviewers=(suggests("Add tests", "add TESTS", "Rename x", "Tidy", replies=replies),),
         tree=FakeTree(),
         review=True,
-        review_rounds=1,
-        review_suggestions=2,
+        review_limits=ReviewLimits(rounds=1, suggestions=2),
     )
     await start(session)
     events = await asyncio.wait_for(settle(session), 10)
@@ -209,7 +209,7 @@ async def test_after_cancelling_suggestions_wait_to_be_run() -> None:
         reviewers=(slow_review,),
         tree=FakeTree(),
         review=True,
-        review_rounds=1,
+        review_limits=ReviewLimits(rounds=1),
     )
     await start(session)
     while not any(la.agent.role == "reviewer" for la in launcher.launches):
@@ -370,7 +370,7 @@ async def test_every_so_many_commits_the_whole_codebase_is_super_reviewed() -> N
         reviewers=(suggests(), suggests(), suggests("Split the parser")),
         tree=tree,
         review=True,
-        super_review_every=2,
+        review_limits=ReviewLimits(super_every=2),
     )
     await start(session, "one", "two")
     events = await asyncio.wait_for(settle(session), 10)
@@ -408,7 +408,7 @@ async def test_review_status_follows_batches_and_the_pause() -> None:
         reviewers=(suggests("Add tests"),),
         tree=FakeTree(),
         review=True,
-        review_rounds=1,
+        review_limits=ReviewLimits(rounds=1),
     )
     await start(session)
     events = await asyncio.wait_for(settle(session), 10)

@@ -12,6 +12,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
+from orbit.agent.domain.agent_task import Limits
+from orbit.agent.domain.reviews import ReviewLimits
 from orbit.agent.domain.verification import MAX_FIX_ATTEMPTS, VerificationStep
 from orbit.protocol import Settings, TaskSpec, ToolAccess
 
@@ -215,10 +217,15 @@ def parse_proposal(data: dict[str, Any]) -> ChecksProposal:
         raise ConfigError(_describe(exc)) from None
 
 
+_LIMITS = Limits()
+_REVIEW_LIMITS = ReviewLimits()
+
+
 class OrbitConfig(_Config):
     """Orbit's limits and roles.
 
     ``fix_attempts``: in-session fixes, asked of the same agent before its task falls back.
+    ``max_checks``: verification steps an agent may run itself before claiming done.
     ``fallback_fixes``: fresh-agent fix tasks one task's chain may queue for each failing step.
     ``review_rounds``: rounds of review-suggested work after which review pauses.
     ``super_review_every``: commits between super reviews.
@@ -227,15 +234,29 @@ class OrbitConfig(_Config):
     ``setup``: how the coder's worktree is set up; ``None`` sets nothing up.
     """
 
-    fix_attempts: int = Field(default=5, ge=1)
+    fix_attempts: int = Field(default=_LIMITS.max_attempts, ge=1)
+    max_checks: int = Field(default=_LIMITS.max_checks, ge=1)
     fallback_fixes: int = Field(default=MAX_FIX_ATTEMPTS, ge=1)
-    review_rounds: int = Field(default=3, ge=1)
-    super_review_every: int = Field(default=10, ge=1)
-    review_suggestions: int = Field(default=5, ge=1)
-    super_review_suggestions: int = Field(default=10, ge=1)
+    review_rounds: int = Field(default=_REVIEW_LIMITS.rounds, ge=1)
+    super_review_every: int = Field(default=_REVIEW_LIMITS.super_every, ge=1)
+    review_suggestions: int = Field(default=_REVIEW_LIMITS.suggestions, ge=1)
+    super_review_suggestions: int = Field(default=_REVIEW_LIMITS.super_suggestions, ge=1)
     roles: dict[str, Role] = Field(default_factory=lambda: dict(BUILT_IN_ROLES))
     verification: VerificationConfig = VerificationConfig()
     setup: Setup | None = None
+
+    @property
+    def limits(self) -> Limits:
+        return Limits(max_attempts=self.fix_attempts, max_checks=self.max_checks)
+
+    @property
+    def review_limits(self) -> ReviewLimits:
+        return ReviewLimits(
+            rounds=self.review_rounds,
+            suggestions=self.review_suggestions,
+            super_every=self.super_review_every,
+            super_suggestions=self.super_review_suggestions,
+        )
 
 
 def load_config(data: dict[str, Any]) -> OrbitConfig:
