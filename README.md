@@ -307,9 +307,11 @@ defaults for tasks orbit queues in that role; a task you queue keeps its own set
 An agent calling a tool its role doesn't have gets an error reply (the CLI only allows its role's
 tools, too); an agent still working when its role's time runs out is stopped and the task fails.
 
-A project can change these, orbit's limits and its verification steps (see
-[Verification steps](#verification-steps)), in `.orbit/config.toml`. A role it names that's built
-in keeps the fields it doesn't set; any other name adds a role. Every field is optional:
+A project can change these, orbit's limits, its verification steps (see
+[Verification steps](#verification-steps)) and its worktree setup (see
+[Where tasks run, and how their work lands](#where-tasks-run-and-how-their-work-lands)), in
+`.orbit/config.toml`. A role it names that's built in keeps the fields it doesn't set; any other
+name adds a role. Every field is optional:
 
 ```toml
 fix_attempts = 5               # fixes asked of one agent before a fresh one takes over
@@ -391,9 +393,10 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     `ModelLoopRunner` is an in-house model/tool loop for direct API use.
   - `domain`: the rules, with no I/O: the `TaskBoard` (task order, statuses, fix chains),
     `AgentTask` (what orbit replies to an agent, and when its work is verified), the
-    `AgentRegistry` (agent ids and tokens), `roles` (built-in roles and orbit's limits),
-    `ReviewPlanner` (when to review, batches, rounds and caps), commit messages, when a task needs
-    verifying, how many fixes to try per step, and the fix prompt.
+    `AgentRegistry` (agent ids and tokens), `roles` (built-in roles, orbit's limits, its
+    verification steps and worktree setup), `ReviewPlanner` (when to review, batches, rounds and
+    caps), commit messages, when a task needs verifying, how many fixes to try per step, and the
+    fix prompt.
 - `orbit.tui`: frontend. Sends commands and renders events. Imports only `orbit.protocol`.
   `view` turns state and events into text and doesn't import Textual; the widgets (`tasks`,
   `agents`, `widgets`) lay it out.
