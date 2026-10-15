@@ -15,13 +15,11 @@ from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 
 from orbit.agent.application.ports import CallHandler
-from orbit.agent.domain.roles import ORBIT_TOOLS
 
 INSTRUCTIONS = (
     "Orbit hands out your task and verifies your work. Call get_task first; when you're done,"
     " call complete_task and wait for its reply, which says whether verification passed."
 )
-TOOL_NAMES = ORBIT_TOOLS
 
 
 class ProposedStep(TypedDict):

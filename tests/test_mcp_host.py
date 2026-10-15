@@ -11,7 +11,8 @@ from mcp.client.streamable_http import streamable_http_client
 from mcp.types import TextContent
 
 from orbit.agent.application.ports import Reply
-from orbit.agent.external.mcp_host import TOOL_NAMES, McpHost, bearer_token
+from orbit.agent.domain.roles import ORBIT_TOOLS
+from orbit.agent.external.mcp_host import McpHost, bearer_token
 
 OK = Reply("ok")
 
@@ -61,7 +62,7 @@ async def test_serves_on_a_random_local_port() -> None:
 async def test_offers_orbit_tools_with_their_arguments() -> None:
     async with serving(RecordingHandler()) as url, connected(url) as client:
         tools = {tool.name: tool for tool in (await client.list_tools()).tools}
-        assert set(tools) == set(TOOL_NAMES)
+        assert set(tools) == set(ORBIT_TOOLS)
         assert tools["complete_task"].input_schema["required"] == ["summary"]
         assert tools["run_check"].input_schema["required"] == ["step"]
         assert tools["suggest_task"].input_schema["required"] == ["title", "prompt"]

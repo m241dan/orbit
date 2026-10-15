@@ -31,18 +31,6 @@ def test_version() -> None:
     assert result.stdout.strip() == __version__
 
 
-def test_hello_default() -> None:
-    result = runner.invoke(app, ["hello"])
-    assert result.exit_code == 0
-    assert "Hello, world!" in result.stdout
-
-
-def test_hello_name() -> None:
-    result = runner.invoke(app, ["hello", "Ada"])
-    assert result.exit_code == 0
-    assert "Hello, Ada!" in result.stdout
-
-
 class FakeApp:
     launched: ClassVar[list[AgentSession]] = []
 

@@ -2,6 +2,7 @@
 
 import itertools
 from collections.abc import Collection, Sequence
+from typing import Any
 
 from orbit.protocol import (
     StepState,
@@ -47,7 +48,7 @@ class TaskBoard:
         A task that ``fixes`` another goes right after it instead, and belongs where that
         one does: the same origin, review batch and round.
         """
-        state = TaskState(id=str(next(self._ids)), task=task, fixes=fixes)
+        state = self._new(task, fixes=fixes)
         if fixes is None:
             self._tasks.append(state)
             return state.id
@@ -58,7 +59,7 @@ class TaskBoard:
 
     def add_first(self, task: TaskSpec) -> str:
         """Add a pending ``task`` at the front, to run next; returns its id."""
-        state = TaskState(id=str(next(self._ids)), task=task)
+        state = self._new(task)
         self._tasks.insert(0, state)
         return state.id
 
@@ -66,9 +67,7 @@ class TaskBoard:
         self, task: TaskSpec, batch: str, round: int, origin: TaskOrigin = "review"
     ) -> str:
         """Add ``task``, suggested by the review behind ``batch``, at the end; returns its id."""
-        state = TaskState(
-            id=str(next(self._ids)), task=task, origin=origin, batch=batch, round=round
-        )
+        state = self._new(task, origin=origin, batch=batch, round=round)
         self._tasks.append(state)
         return state.id
 
@@ -139,7 +138,7 @@ class TaskBoard:
 
     def add_draft(self, task: TaskSpec) -> str:
         """Add ``task``, which the planner proposed, at the end as a draft; returns its id."""
-        state = TaskState(id=str(next(self._ids)), task=task, status="draft", origin="planner")
+        state = self._new(task, status="draft", origin="planner")
         self._tasks.append(state)
         return state.id
 
@@ -157,9 +156,13 @@ class TaskBoard:
 
     def add_review(self, task: TaskSpec) -> str:
         """Add a review orbit queued itself, at the end; returns its id."""
-        state = TaskState(id=str(next(self._ids)), task=task, origin="review")
+        state = self._new(task, origin="review")
         self._tasks.append(state)
         return state.id
+
+    def _new(self, task: TaskSpec, **fields: Any) -> TaskState:
+        """A new task state for ``task``, with the next id."""
+        return TaskState(id=str(next(self._ids)), task=task, **fields)
 
     def set_steps(self, step_names: Sequence[str]) -> None:
         """Track ``step_names`` from now on, none of them run yet."""

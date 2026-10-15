@@ -84,6 +84,7 @@ class GitCoderTree:
     def __init__(self, root: str, setup: Setup | None = None) -> None:
         self._root = Path(root)
         self.setup = setup
+        self.branch = BRANCH
         self._started = False
         self._base: str | None = None
         self._snapshots = itertools.count(1)

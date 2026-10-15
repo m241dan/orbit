@@ -90,10 +90,11 @@ class CoderTree(Protocol):
     """The working tree the coding agent works in, apart from the user's checkout, and the
     branch its commits are merged into from there.
 
-    ``setup`` is what sets it up now.
+    ``setup`` is what sets it up now; ``branch`` is the branch its commits are made on.
     """
 
     setup: Setup | None
+    branch: str
 
     async def prepare(self, keep: bool) -> str:
         """Get the tree ready for a task and return its path. It catches up with the base

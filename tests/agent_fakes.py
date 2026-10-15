@@ -130,6 +130,7 @@ class FakeTree:
     """A coder tree that records what it's asked to do and merges as scripted."""
 
     path = "/work/coder"
+    branch = "orbit/coder"
 
     def __init__(
         self, *merges: Merge, leftovers: tuple[str, ...] = (), broken: str = "", empty: bool = False

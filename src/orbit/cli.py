@@ -146,9 +146,3 @@ def chat(
 def version() -> None:
     """Show the installed version."""
     typer.echo(__version__)
-
-
-@app.command()
-def hello(name: Annotated[str, typer.Argument(help="Who to greet.")] = "world") -> None:
-    """Say hello."""
-    typer.echo(f"Hello, {name}!")

@@ -41,7 +41,7 @@ def test_claiming_done_starts_verification_and_keeps_the_summary() -> None:
     claim = agent_task.claim_done("added the --fast flag")
     assert claim.verify and claim.reply is None
     assert agent_task.phase == "verifying"
-    assert agent_task.summary == "added the --fast flag"
+    assert agent_task.summaries == ["added the --fast flag"]
 
 
 def test_claiming_done_before_getting_the_task_is_refused() -> None:
@@ -57,7 +57,7 @@ def test_a_second_claim_while_verifying_is_refused() -> None:
     claim = agent_task.claim_done("done again")
     assert not claim.verify
     assert claim.reply is not None and "already" in claim.reply
-    assert agent_task.summary == "added it"
+    assert agent_task.summaries == ["added it"]
 
 
 def test_claiming_done_after_finishing_is_refused() -> None:
@@ -97,7 +97,7 @@ def test_exiting_while_working_counts_as_claiming_done() -> None:
     assert agent_task.exited()
     assert agent_task.phase == "verifying"
     assert not agent_task.alive
-    assert agent_task.summary is None
+    assert agent_task.summaries == []
 
 
 def test_exiting_before_getting_the_task_needs_no_verification() -> None:
@@ -129,18 +129,17 @@ def test_a_pass_after_the_agent_exited_still_finishes() -> None:
     assert agent_task.phase == "done"
 
 
-def test_giving_up_ends_the_task_with_its_reason() -> None:
+def test_giving_up_ends_the_task() -> None:
     agent_task = working()
     reply = agent_task.give_up("the spec contradicts itself")
     assert agent_task.phase == "gave_up"
-    assert agent_task.reason == "the spec contradicts itself"
     assert "End your turn" in reply
 
 
 def test_giving_up_while_verifying_is_refused() -> None:
     agent_task = verifying()
     reply = agent_task.give_up("never mind")
-    assert agent_task.phase == "verifying" and agent_task.reason is None
+    assert agent_task.phase == "verifying"
     assert "already" in reply
 
 
@@ -181,9 +180,8 @@ def test_giving_up_or_checking_outside_work_is_refused_by_phase() -> None:
     assert finished.phase == "done"
 
 
-def test_every_accepted_claim_keeps_its_summary_and_the_first_names_the_work() -> None:
+def test_every_accepted_claim_keeps_its_summary() -> None:
     agent_task = verifying()
     agent_task.failed(STEP, "1 failed")
     agent_task.claim_done("fixed the test")
     assert agent_task.summaries == ["added it", "fixed the test"]
-    assert agent_task.summary == "added it"

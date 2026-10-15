@@ -49,7 +49,9 @@ class Lander:
                 return Landing(failure=failure)
             merge = await self._tree.integrate()
         else:
-            merge = Merge("rebased", "The base branch kept moving; the work is on orbit/coder.")
+            merge = Merge(
+                "rebased", f"The base branch kept moving; the work is on {self._tree.branch}."
+            )
         # Read after any rebase, which rewrites the commits.
         head = await self._tree.head()
         commit = head if head != start else None

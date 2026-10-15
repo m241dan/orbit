@@ -83,7 +83,6 @@ class AgentTask:
         self.attempt = 0
         self.checks = 0
         self.summaries: list[str] = []  # One per claim orbit accepted, in order.
-        self.reason: str | None = None
 
     def get_task(self) -> str:
         if self.phase == "assigned":
@@ -96,11 +95,6 @@ class AgentTask:
         self.phase = "verifying"
         self.summaries.append(summary)
         return Claim(verify=True)
-
-    @property
-    def summary(self) -> str | None:
-        """What the agent said it did when it first claimed the task was done."""
-        return self.summaries[0] if self.summaries else None
 
     def passed(self) -> str:
         self.phase = "done"
@@ -131,7 +125,7 @@ class AgentTask:
     def give_up(self, reason: str) -> str:
         if self.phase != "working":
             return REFUSALS[self.phase]
-        self.phase, self.reason = "gave_up", reason
+        self.phase = "gave_up"
         return f"Understood; the task is marked as given up. {STOP}"
 
     def propose(self) -> str | None:
