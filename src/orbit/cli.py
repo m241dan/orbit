@@ -113,7 +113,9 @@ def chat(
         typer.echo(f"Invalid orbit configuration: {exc}", err=True)
         raise typer.Exit(2) from None
     steps = config.verification.steps
-    verification = Verification(steps, run_step, workspace_state) if verify else None
+    verification = (
+        Verification(steps, run_step, workspace_state, config.fallback_fixes) if verify else None
+    )
     tree = GitCoderTree(".", config.setup) if worktree and in_git_work_tree(".") else None
     agents = Agents(
         McpHost(),

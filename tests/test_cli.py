@@ -278,6 +278,21 @@ def test_chat_reads_roles_and_limits_from_the_project_file(
     assert session.agents.roles["coder"].model == "sonnet"
 
 
+def test_chat_gives_verification_the_project_files_fallback_fixes(
+    launched: list[AgentSession], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    (tmp_path / ".orbit").mkdir()
+    (tmp_path / ".orbit" / "config.toml").write_text("fix_attempts = 2\nfallback_fixes = 7\n")
+    monkeypatch.chdir(tmp_path)
+    result = runner.invoke(app, ["chat"])
+    assert result.exit_code == 0
+    [session] = launched
+    assert session.verification is not None
+    assert session.verification.max_fix_attempts == 7
+    assert session.agents is not None
+    assert session.agents.limits == Limits(max_attempts=2)
+
+
 def test_chat_sets_up_the_coder_tree_as_the_project_file_says(
     launched: list[AgentSession], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

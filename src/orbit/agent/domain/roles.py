@@ -12,7 +12,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
-from orbit.agent.domain.verification import VerificationStep
+from orbit.agent.domain.verification import MAX_FIX_ATTEMPTS, VerificationStep
 from orbit.protocol import Settings, TaskSpec, ToolAccess
 
 ORBIT_TOOLS = (
@@ -218,7 +218,8 @@ def parse_proposal(data: dict[str, Any]) -> ChecksProposal:
 class OrbitConfig(_Config):
     """Orbit's limits and roles.
 
-    ``fix_attempts``: fixes asked of one agent before a fresh one takes over.
+    ``fix_attempts``: in-session fixes, asked of the same agent before its task falls back.
+    ``fallback_fixes``: fresh-agent fix tasks one task's chain may queue for each failing step.
     ``review_rounds``: rounds of review-suggested work after which review pauses.
     ``super_review_every``: commits between super reviews.
     ``review_suggestions`` / ``super_review_suggestions``: tasks one review may suggest.
@@ -227,6 +228,7 @@ class OrbitConfig(_Config):
     """
 
     fix_attempts: int = Field(default=5, ge=1)
+    fallback_fixes: int = Field(default=MAX_FIX_ATTEMPTS, ge=1)
     review_rounds: int = Field(default=3, ge=1)
     super_review_every: int = Field(default=10, ge=1)
     review_suggestions: int = Field(default=5, ge=1)

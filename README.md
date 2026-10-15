@@ -166,11 +166,11 @@ been verified is skipped, with the reason in the conversation. `--no-verify` tur
 whatever the file says.
 
 Failures go back to the same agent, which keeps the context of what it just did. After
-`fix_attempts` fixes (default 5, set in `.orbit/config.toml`), or if the agent has exited, the task
+`fix_attempts` in-session fixes (default 5, set in `.orbit/config.toml`), or if the agent has exited, the task
 **falls back**: it is marked ❗ and a fix task is inserted right after it, indented and numbered under
 it (`1.1`, `1.2`, …), with the same model and tool access, for a fresh agent. A task's chain of
-fallbacks gets up to 3 per step; once a step has used its 3, orbit reports the failure and moves on
-to the next task. Once a fix passes, the task it fixed turns ✅, along with any earlier fixes in the
+fallbacks gets up to `fallback_fixes` per step (default 3, also set in `.orbit/config.toml`); once a
+step has used them, orbit reports the failure and moves on to the next task. Once a fix passes, the task it fixed turns ✅, along with any earlier fixes in the
 chain.
 
 Verification is skipped for tasks run with tools `off`, for tasks that changed no files, and for an
@@ -329,7 +329,8 @@ A project can change these, orbit's limits, its verification steps (see
 name adds a role. Every field is optional:
 
 ```toml
-fix_attempts = 5               # fixes asked of one agent before a fresh one takes over
+fix_attempts = 5               # in-session fixes asked of one agent before its task falls back
+fallback_fixes = 3             # fresh-agent fix tasks a task's chain may queue per failing step
 review_rounds = 3              # rounds of review-suggested work before review pauses
 super_review_every = 10        # commits between super reviews
 review_suggestions = 5         # tasks one review may suggest

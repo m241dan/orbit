@@ -95,6 +95,7 @@ def test_defaults_without_a_file() -> None:
     assert config.roles == BUILT_IN_ROLES
     assert (config.fix_attempts, config.review_rounds, config.super_review_every) == (5, 3, 10)
     assert (config.review_suggestions, config.super_review_suggestions) == (5, 10)
+    assert config.fallback_fixes == 3
     assert config.verification.steps == ()
 
 
@@ -102,10 +103,11 @@ def test_a_file_overrides_settings_and_role_fields() -> None:
     config = load_config(
         {
             "fix_attempts": 2,
+            "fallback_fixes": 4,
             "roles": {"coder": {"model": "sonnet", "timeout_minutes": 30}},
         }
     )
-    assert config.fix_attempts == 2
+    assert (config.fix_attempts, config.fallback_fixes) == (2, 4)
     coder = config.roles["coder"]
     assert (coder.model, coder.timeout_minutes) == ("sonnet", 30)
     assert coder.instructions == BUILT_IN_ROLES["coder"].instructions  # Untouched fields kept.
@@ -166,6 +168,7 @@ def test_setup_lists_the_files_it_watches() -> None:
     ("data", "message"),
     [
         ({"fix_attempts": 0}, "fix_attempts"),
+        ({"fallback_fixes": 0}, "fallback_fixes"),
         ({"surprise": 1}, "surprise"),
         ({"roles": {"coder": {"tools": ["launch_rockets"]}}}, "launch_rockets"),
         ({"roles": {"coder": {"tool_access": "sometimes"}}}, "roles.coder.tool_access"),
