@@ -169,6 +169,19 @@ async def test_the_planner_may_only_use_its_roles_tools_and_can_note_progress() 
     assert ProgressNoted(agent_id="agent-1", task_id="plan", note="reading the CLI") in events
 
 
+async def test_the_planners_long_notes_are_cut_short_like_any_agents() -> None:
+    async def chatty(call: Call) -> TurnEndReason:
+        await call("report_progress", note="  " + "x" * 300 + "  ")
+        return "completed"
+
+    session, _, launcher = session_for()
+    launcher.planner_turns = [chatty]
+    events = await plan(session, "Plan.")
+    notes = [e.note for e in events if isinstance(e, ProgressNoted)]
+    assert notes == ["x" * 199 + "…"]
+    await session.close()
+
+
 async def test_closing_ends_the_planners_access() -> None:
     session, host, launcher = session_for()
     launcher.planner_turns = [chats]

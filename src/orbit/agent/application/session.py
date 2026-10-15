@@ -24,7 +24,7 @@ from orbit.agent.domain.agents import Agent
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.commits import commit_message, configure_message
 from orbit.agent.domain.reviews import ReviewPlanner
-from orbit.agent.domain.roles import ChecksProposal, configure_prompt
+from orbit.agent.domain.roles import ChecksProposal, configure_prompt, role_task
 from orbit.agent.domain.verification import (
     FixAttempts,
     VerificationStep,
@@ -170,8 +170,7 @@ class AgentSession:
         """Add a draft task to fix ``step``, which failed at startup with ``output``."""
         settings = Settings()
         if self._desk is not None:
-            coder = self._desk.agents.roles["coder"]
-            settings = Settings(model=coder.model, tool_access=coder.tool_access)
+            settings = self._desk.agents.roles["coder"].settings
         self._board.add_draft(TaskSpec(prompt=startup_fix_prompt(step, output), settings=settings))
         await self._publish_tasks()
 
@@ -269,9 +268,7 @@ class AgentSession:
         """A configurator's task, told the steps and setup configured now."""
         steps = self.verification.steps if self.verification else ()
         prompt = configure_prompt(steps, agents.tree.setup if agents.tree else None)
-        role = agents.roles["configurator"]
-        settings = Settings(model=role.model, tool_access=role.tool_access)
-        return TaskSpec(prompt=prompt, settings=settings, role="configurator")
+        return role_task("configurator", agents.roles["configurator"], prompt)
 
     async def _handle_board(self, command: EditTask | AcceptTask | RemoveTask) -> None:
         match command:

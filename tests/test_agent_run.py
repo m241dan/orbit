@@ -2,6 +2,7 @@
 
 import asyncio
 
+from orbit.agent.application.agent_run import NOTE_LIMIT, progress_note
 from orbit.agent.domain.agent_task import Limits
 from orbit.protocol import (
     AddTask,
@@ -421,3 +422,9 @@ async def test_closing_a_session_that_never_ran_a_task_starts_nothing() -> None:
     session, host, _ = session_for()
     await session.close()
     assert (host.starts, host.stops) == (0, 0)
+
+
+def test_a_progress_note_is_stripped_and_cut_short_at_the_limit() -> None:
+    assert progress_note("  reading the CLI\n") == "reading the CLI"
+    assert progress_note("x" * NOTE_LIMIT) == "x" * NOTE_LIMIT
+    assert progress_note("x" * (NOTE_LIMIT + 1)) == "x" * (NOTE_LIMIT - 1) + "…"

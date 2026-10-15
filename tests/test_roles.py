@@ -10,8 +10,11 @@ from orbit.agent.domain.roles import (
     Setup,
     load_config,
     parse_proposal,
+    role_task,
+    suggested_task,
 )
 from orbit.agent.domain.verification import VerificationStep
+from orbit.protocol import Settings, TaskSpec
 
 
 def test_built_in_roles_cover_coding_reviewing_and_planning() -> None:
@@ -214,3 +217,23 @@ def test_a_new_role_must_be_able_to_fetch_its_task() -> None:
 def test_a_conversational_role_plans_instead_of_fetching_a_task() -> None:
     config = load_config({"roles": {"architect": {"instructions": "x", "tools": ["propose_task"]}}})
     assert config.roles["architect"].tools == ("propose_task",)
+
+
+def test_a_roles_settings_are_its_model_and_tool_access() -> None:
+    role = Role(instructions="Do it.", model="opus", tool_access="full")
+    assert role.settings == Settings(model="opus", tool_access="full")
+    assert BUILT_IN_ROLES["reviewer"].settings == Settings()
+
+
+def test_a_role_task_runs_in_the_role_with_its_settings() -> None:
+    reviewer = BUILT_IN_ROLES["super-reviewer"]
+    assert role_task("super-reviewer", reviewer, "Review.") == TaskSpec(
+        prompt="Review.", settings=Settings(model="opus"), role="super-reviewer"
+    )
+
+
+def test_a_suggested_task_is_a_coders_titled_prompt() -> None:
+    coder = BUILT_IN_ROLES["coder"]
+    assert suggested_task(coder, " Add the flag \n", "\nAdd --fast. ") == TaskSpec(
+        prompt="Add the flag\n\nAdd --fast.", settings=Settings(tool_access="full")
+    )

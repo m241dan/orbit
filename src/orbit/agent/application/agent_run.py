@@ -56,6 +56,15 @@ Publish = Callable[[Event], Awaitable[None]]
 # Longest progress note shown; agents can be chatty.
 NOTE_LIMIT = 200
 
+
+def progress_note(text: str) -> str:
+    """``text`` as a progress note: stripped, and cut short at :data:`NOTE_LIMIT`."""
+    note = text.strip()
+    if len(note) > NOTE_LIMIT:
+        note = note[: NOTE_LIMIT - 1] + "…"
+    return note
+
+
 Wake = Literal["exited", "gave_up"]
 """Why the run loop wakes up, other than a claim that the task is done."""
 
@@ -467,9 +476,7 @@ class AgentRun:
         return Reply(f"{step.name}: {'passed' if passed else 'failed'}\n\n{trim_output(output)}")
 
     async def _report_progress(self, arguments: dict[str, Any]) -> Reply:
-        note = str(arguments.get("note", "")).strip()
-        if len(note) > NOTE_LIMIT:
-            note = note[: NOTE_LIMIT - 1] + "…"
+        note = progress_note(str(arguments.get("note", "")))
         await self._publish(ProgressNoted(agent_id=self.agent.id, task_id=self._task_id, note=note))
         return Reply("Noted.")
 

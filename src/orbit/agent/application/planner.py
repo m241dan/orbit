@@ -8,10 +8,11 @@ and they wait on the board as drafts until the user accepts them.
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
 
-from orbit.agent.application.agent_run import AgentDesk
+from orbit.agent.application.agent_run import AgentDesk, progress_note
 from orbit.agent.application.ports import AgentLaunch, Reply
 from orbit.agent.domain.agents import Agent
 from orbit.agent.domain.board import TaskBoard
+from orbit.agent.domain.roles import suggested_task
 from orbit.protocol import (
     PLAN_TASK,
     AgentExited,
@@ -20,7 +21,6 @@ from orbit.protocol import (
     ProgressNoted,
     Settings,
     TasksChanged,
-    TaskSpec,
 )
 
 
@@ -71,18 +71,13 @@ class PlannerChat:
             await self._desk.publish(AgentExited(agent_id=self._agent.id, reason="finished"))
 
     async def _propose_task(self, agent: Agent, arguments: dict[str, Any]) -> Reply:
-        title = str(arguments.get("title", "")).strip()
-        prompt = str(arguments.get("prompt", "")).strip()
-        coder = self._desk.agents.roles["coder"]
-        task = TaskSpec(
-            prompt=f"{title}\n\n{prompt}",
-            settings=Settings(model=coder.model, tool_access=coder.tool_access),
-        )
+        title, prompt = str(arguments.get("title", "")), str(arguments.get("prompt", ""))
+        task = suggested_task(self._desk.agents.roles["coder"], title, prompt)
         task_id = self._board.add_draft(task)
         await self._desk.publish(TasksChanged(tasks=self._board.tasks))
         return Reply(f"Added draft task {task_id}; the user will accept or drop it.")
 
     async def _report_progress(self, agent: Agent, arguments: dict[str, Any]) -> Reply:
-        note = str(arguments.get("note", "")).strip()
+        note = progress_note(str(arguments.get("note", "")))
         await self._desk.publish(ProgressNoted(agent_id=agent.id, task_id=PLAN_TASK, note=note))
         return Reply("Noted.")

@@ -13,7 +13,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from orbit.agent.domain.verification import VerificationStep
-from orbit.protocol import ToolAccess
+from orbit.protocol import Settings, TaskSpec, ToolAccess
 
 ORBIT_TOOLS = (
     "get_task",
@@ -55,6 +55,21 @@ class Role(_Config):
                 "an agent needs get_task to fetch its task, or propose_task to plan in conversation"
             )
         return tools
+
+    @property
+    def settings(self) -> Settings:
+        """The settings of a task orbit queues in this role."""
+        return Settings(model=self.model, tool_access=self.tool_access)
+
+
+def role_task(role_name: str, role: Role, prompt: str) -> TaskSpec:
+    """A task orbit queues for ``role`` (named ``role_name``), with its settings."""
+    return TaskSpec(prompt=prompt, settings=role.settings, role=role_name)
+
+
+def suggested_task(coder: Role, title: str, prompt: str) -> TaskSpec:
+    """A coder's task an agent suggested or proposed, as ``title`` and ``prompt``."""
+    return role_task("coder", coder, f"{title.strip()}\n\n{prompt.strip()}")
 
 
 BUILT_IN_ROLES: dict[str, Role] = {

@@ -13,13 +13,12 @@ from orbit.agent.application.agent_run import AgentDesk, AgentRun
 from orbit.agent.application.ports import CoderTree, Reply
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.reviews import ReviewJob, ReviewPlanner, review_prompt
+from orbit.agent.domain.roles import role_task, suggested_task
 from orbit.protocol import (
     Notice,
     ReviewStatus,
-    Settings,
     TaskOrigin,
     TasksChanged,
-    TaskSpec,
     TaskStatus,
 )
 
@@ -81,11 +80,7 @@ class ReviewLane:
         refusal = self.planner.refusal(batch, title, self._board.tasks)
         if refusal is not None:
             return Reply(refusal, is_error=True)
-        coder = self._desk.agents.roles["coder"]
-        task = TaskSpec(
-            prompt=f"{title.strip()}\n\n{prompt.strip()}",
-            settings=Settings(model=coder.model, tool_access=coder.tool_access),
-        )
+        task = suggested_task(self._desk.agents.roles["coder"], title, prompt)
         origin: TaskOrigin = "super_review" if self._jobs[task_id].whole else "review"
         new_id = self._board.add_suggestion(task, batch, self.planner.round_of(batch), origin)
         self.planner.added(batch, new_id)
@@ -116,13 +111,8 @@ class ReviewLane:
         diff = "" if job.whole else await self._tree.show(job.commits)
         batch = self.planner.open_batch(job)
         role = "super-reviewer" if job.whole else "reviewer"
-        reviewer = self._desk.agents.roles[role]
         cap = self.planner.super_cap if job.whole else self.planner.cap
-        task = TaskSpec(
-            prompt=review_prompt(job, diff, cap),
-            role=role,
-            settings=Settings(model=reviewer.model, tool_access=reviewer.tool_access),
-        )
+        task = role_task(role, self._desk.agents.roles[role], review_prompt(job, diff, cap))
         task_id = self._board.add_review(task)
         self._jobs[task_id], self._batches[task_id] = job, batch
         await self._publish(TasksChanged(tasks=self._board.tasks))
