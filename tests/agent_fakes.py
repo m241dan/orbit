@@ -8,7 +8,7 @@ from typing import Any
 from orbit.agent import Agents, AgentSession, Verification, VerificationStep
 from orbit.agent.application.ports import AgentLaunch, CallHandler, Merge, Reply
 from orbit.agent.domain.agent_task import Limits
-from orbit.agent.domain.roles import Setup
+from orbit.agent.domain.roles import REVIEW_ROLES, Setup
 from orbit.protocol import (
     AddTask,
     AgentReply,
@@ -68,7 +68,7 @@ class ScriptedLauncher:
     async def run_agent(self, launch: AgentLaunch) -> AsyncIterator[Event]:
         self.launches.append(launch)
         agent = launch.agent
-        reviewing = agent.role in ("reviewer", "super-reviewer")
+        reviewing = agent.role in REVIEW_ROLES
         script = (self.reviewers if reviewing else self.scripts).pop(0)
         yield TurnStarted(turn_id=agent.id, agent_id=agent.id)
         yield AssistantMessage(turn_id=agent.id, text="on it", agent_id=agent.id)

@@ -15,7 +15,7 @@ from orbit.agent.application.agent_run import AgentDesk, Agents
 from orbit.agent.application.planner import PlannerChat
 from orbit.agent.application.ports import ProposalReview
 from orbit.agent.application.proposals import FrontendReview
-from orbit.agent.application.review_lane import REVIEW_ROLES, ReviewLane
+from orbit.agent.application.review_lane import ReviewLane
 from orbit.agent.application.startup_check import AGENT_ID as STARTUP_AGENT
 from orbit.agent.application.startup_check import StartupCheck
 from orbit.agent.application.verifier import Verification, Verifier
@@ -23,7 +23,14 @@ from orbit.agent.application.work_lane import WorkLane
 from orbit.agent.domain.agents import Agent
 from orbit.agent.domain.board import WAITING, TaskBoard
 from orbit.agent.domain.reviews import ReviewPlanner
-from orbit.agent.domain.roles import configure_prompt, role_task
+from orbit.agent.domain.roles import (
+    CODER,
+    CONFIGURATOR,
+    PLANNER,
+    REVIEW_ROLES,
+    configure_prompt,
+    role_task,
+)
 from orbit.agent.domain.verification import VerificationStep, startup_fix_prompt
 from orbit.protocol import (
     AcceptTask,
@@ -167,7 +174,7 @@ class AgentSession:
         """Add a draft task to fix ``step``, which failed at startup with ``output``."""
         settings = Settings()
         if self._desk is not None:
-            settings = self._desk.agents.roles["coder"].settings
+            settings = self._desk.agents.roles[CODER].settings
         self._board.add_draft(TaskSpec(prompt=startup_fix_prompt(step, output), settings=settings))
         await self._publish_tasks()
 
@@ -254,13 +261,13 @@ class AgentSession:
 
     def _configuring(self) -> bool:
         """Whether a configurator task is queued or running."""
-        return any(t.task.role == "configurator" and t.status in WAITING for t in self._board.tasks)
+        return any(t.task.role == CONFIGURATOR and t.status in WAITING for t in self._board.tasks)
 
     def _configurator_task(self, agents: Agents) -> TaskSpec:
         """A configurator's task, told the steps and setup configured now."""
         steps = self.verification.steps if self.verification else ()
         prompt = configure_prompt(steps, agents.tree.setup if agents.tree else None)
-        return role_task("configurator", agents.roles["configurator"], prompt)
+        return role_task(CONFIGURATOR, agents.roles[CONFIGURATOR], prompt)
 
     async def _handle_board(self, command: EditTask | AcceptTask | RemoveTask) -> None:
         match command:
@@ -318,7 +325,7 @@ class AgentSession:
         """Stop a reviewer's review, or the planner's turn, on its own; else the work lane's."""
         if agent.role in REVIEW_ROLES and self._lane is not None:
             self._lane.cancel(agent.task_id)
-        elif agent.role == "planner":
+        elif agent.role == PLANNER:
             _cancel(self._planner_turn)
         else:
             self._held = True
@@ -365,7 +372,7 @@ class AgentSession:
             await self._publish_tasks()
 
     def _planner_chat(self) -> PlannerChat | None:
-        if self._desk is None or "planner" not in self._desk.agents.roles:
+        if self._desk is None or PLANNER not in self._desk.agents.roles:
             return None
         return PlannerChat(self._desk, self._board)
 

@@ -29,6 +29,16 @@ ORBIT_TOOLS = (
 )
 """Every tool orbit's MCP server offers agents."""
 
+CODER = "coder"
+REVIEWER = "reviewer"
+SUPER_REVIEWER = "super-reviewer"
+PLANNER = "planner"
+CONFIGURATOR = "configurator"
+"""The built-in roles' names."""
+
+REVIEW_ROLES = frozenset({REVIEWER, SUPER_REVIEWER})
+"""The roles that review work rather than do it."""
+
 
 class ConfigError(ValueError):
     """The configuration is invalid; the message says where and why, on one line per problem."""
@@ -71,11 +81,11 @@ def role_task(role_name: str, role: Role, prompt: str) -> TaskSpec:
 
 def suggested_task(coder: Role, title: str, prompt: str) -> TaskSpec:
     """A coder's task an agent suggested or proposed, as ``title`` and ``prompt``."""
-    return role_task("coder", coder, f"{title.strip()}\n\n{prompt.strip()}")
+    return role_task(CODER, coder, f"{title.strip()}\n\n{prompt.strip()}")
 
 
 BUILT_IN_ROLES: dict[str, Role] = {
-    "coder": Role(
+    CODER: Role(
         instructions=(
             "You are orbit's coder. Make the change your task asks for in the working directory,"
             " keeping the project's checks passing. You may run a single check with run_check"
@@ -85,7 +95,7 @@ BUILT_IN_ROLES: dict[str, Role] = {
         tool_access="full",
         tools=("get_task", "complete_task", "run_check", "report_progress", "give_up"),
     ),
-    "reviewer": Role(
+    REVIEWER: Role(
         instructions=(
             "You are orbit's reviewer. Review the change your task names: look for bugs, missing"
             " tests and unclear code. Don't edit files. Suggest fixes worth making with"
@@ -94,7 +104,7 @@ BUILT_IN_ROLES: dict[str, Role] = {
         tools=("get_task", "complete_task", "report_progress", "give_up", "suggest_task"),
         verify=False,
     ),
-    "super-reviewer": Role(
+    SUPER_REVIEWER: Role(
         instructions=(
             "You are orbit's super reviewer. Review the whole codebase, not only recent changes:"
             " look for duplication, structure that no longer fits, and gaps in tests. Don't edit"
@@ -105,7 +115,7 @@ BUILT_IN_ROLES: dict[str, Role] = {
         tools=("get_task", "complete_task", "report_progress", "give_up", "suggest_task"),
         verify=False,
     ),
-    "planner": Role(
+    PLANNER: Role(
         instructions=(
             "You are orbit's planner, in conversation with the user. Help them break their goal"
             " into small tasks a coder can do one at a time, in order, each with a clear way to"
@@ -116,7 +126,7 @@ BUILT_IN_ROLES: dict[str, Role] = {
         tools=("propose_task", "report_progress"),
         verify=False,
     ),
-    "configurator": Role(
+    CONFIGURATOR: Role(
         instructions=(
             "You are orbit's configurator. Work out how this project checks its code: inspect"
             " the repository (CI workflows, .pre-commit-config.yaml, package.json scripts,"

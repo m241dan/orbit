@@ -11,12 +11,12 @@ from dataclasses import replace
 
 from orbit.agent.application.agent_run import AgentDesk, AgentRun, Outcome
 from orbit.agent.application.landing import Lander
-from orbit.agent.application.review_lane import REVIEW_ROLES, ReviewLane
+from orbit.agent.application.review_lane import ReviewLane
 from orbit.agent.application.startup_check import StartupCheck
 from orbit.agent.application.verifier import Verifier
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.commits import commit_message, configure_message
-from orbit.agent.domain.roles import ChecksProposal
+from orbit.agent.domain.roles import REVIEW_ROLES, ChecksProposal
 from orbit.agent.domain.verification import FixAttempts, VerificationStep, fix_prompt
 from orbit.protocol import (
     ErrorOccurred,

@@ -12,7 +12,7 @@ from orbit.agent.application.agent_run import AgentDesk, Tool, dispatch, report_
 from orbit.agent.application.ports import Reply
 from orbit.agent.domain.agents import Agent
 from orbit.agent.domain.board import TaskBoard
-from orbit.agent.domain.roles import suggested_task
+from orbit.agent.domain.roles import CODER, PLANNER, suggested_task
 from orbit.protocol import (
     PLAN_TASK,
     AgentExited,
@@ -38,20 +38,20 @@ class PlannerChat:
     async def run_turn(self, turn_id: str, prompt: str, settings: Settings) -> AsyncIterator[Event]:
         """Tell the planner ``prompt``, with the session's model, and yield what it does."""
         if self._agent is None:
-            self._agent = self._desk.open(self, "planner", PLAN_TASK)
+            self._agent = self._desk.open(self, PLANNER, PLAN_TASK)
             # The frontend learns from this which agent's output is the planner's.
             await self._desk.publish(
-                AgentStarted(agent_id=self._agent.id, role="planner", task_id=PLAN_TASK)
+                AgentStarted(agent_id=self._agent.id, role=PLANNER, task_id=PLAN_TASK)
             )
-        role = self._desk.agents.roles["planner"]
+        role = self._desk.agents.roles[PLANNER]
         own = Settings(model=settings.model, tool_access=role.tool_access)
         launch = await self._desk.launch(self._agent, prompt, own, ".")
         async for event in self._desk.agents.launcher.converse(turn_id, launch):
             yield event
 
     async def handle(self, tool: str, arguments: dict[str, Any]) -> Reply:
-        role = self._desk.agents.roles["planner"]
-        return await dispatch("planner", role, self._tools, tool, arguments)
+        role = self._desk.agents.roles[PLANNER]
+        return await dispatch(PLANNER, role, self._tools, tool, arguments)
 
     async def close(self) -> None:
         """End the planner's conversation, at the session's end."""
@@ -61,7 +61,7 @@ class PlannerChat:
 
     async def _propose_task(self, arguments: dict[str, Any]) -> Reply:
         title, prompt = str(arguments.get("title", "")), str(arguments.get("prompt", ""))
-        task = suggested_task(self._desk.agents.roles["coder"], title, prompt)
+        task = suggested_task(self._desk.agents.roles[CODER], title, prompt)
         task_id = self._board.add_draft(task)
         await self._desk.publish(TasksChanged(tasks=self._board.tasks))
         return Reply(f"Added draft task {task_id}; the user will accept or drop it.")

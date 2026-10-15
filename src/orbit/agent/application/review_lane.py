@@ -13,7 +13,14 @@ from orbit.agent.application.agent_run import AgentDesk, AgentRun
 from orbit.agent.application.ports import CoderTree, Reply
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.reviews import ReviewJob, ReviewPlanner, review_prompt
-from orbit.agent.domain.roles import role_task, suggested_task
+from orbit.agent.domain.roles import (
+    CODER,
+    REVIEW_ROLES,
+    REVIEWER,
+    SUPER_REVIEWER,
+    role_task,
+    suggested_task,
+)
 from orbit.protocol import (
     Notice,
     ReviewStatus,
@@ -21,8 +28,6 @@ from orbit.protocol import (
     TasksChanged,
     TaskStatus,
 )
-
-REVIEW_ROLES = frozenset({"reviewer", "super-reviewer"})
 
 
 class ReviewLane:
@@ -80,7 +85,7 @@ class ReviewLane:
         refusal = self.planner.refusal(batch, title, self._board.tasks)
         if refusal is not None:
             return Reply(refusal, is_error=True)
-        task = suggested_task(self._desk.agents.roles["coder"], title, prompt)
+        task = suggested_task(self._desk.agents.roles[CODER], title, prompt)
         origin: TaskOrigin = "super_review" if self._jobs[task_id].whole else "review"
         new_id = self._board.add_suggestion(task, batch, self.planner.round_of(batch), origin)
         self.planner.added(batch, new_id)
@@ -110,7 +115,7 @@ class ReviewLane:
             return
         diff = "" if job.whole else await self._tree.show(job.commits)
         batch = self.planner.open_batch(job)
-        role = "super-reviewer" if job.whole else "reviewer"
+        role = SUPER_REVIEWER if job.whole else REVIEWER
         prompt = review_prompt(job, diff, self.planner.cap(job))
         task = role_task(role, self._desk.agents.roles[role], prompt)
         task_id = self._board.add_review(task)

@@ -4,12 +4,12 @@
 
 from collections.abc import AsyncIterator, Awaitable, Callable, Collection, Sequence
 from dataclasses import dataclass
-from typing import Any, Literal, Protocol
+from typing import Any, Protocol
 
 from orbit.agent.domain.agents import Agent
 from orbit.agent.domain.roles import ChecksProposal, Setup
 from orbit.agent.domain.verification import VerificationStep
-from orbit.protocol import Event, MergeResult, Settings
+from orbit.protocol import Event, MergeResult, ProposalAction, Settings
 
 Publish = Callable[[Event], Awaitable[None]]
 """Publishes an event to the frontend."""
@@ -150,7 +150,7 @@ class ProposalDecision:
     """What the user made of a proposal: ``accept`` it, have the agent ``revise`` it as
     ``feedback`` says, or ``end`` the task."""
 
-    action: Literal["accept", "revise", "end"]
+    action: ProposalAction
     feedback: str = ""
 
 
