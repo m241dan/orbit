@@ -50,9 +50,15 @@ def test_invalid_settings_name_the_file_and_the_problem(tmp_path: Path) -> None:
 
 
 def test_the_file_is_orbit_config_toml(tmp_path: Path) -> None:
-    (tmp_path / ".orbit").mkdir()
-    (tmp_path / ".orbit" / "config.toml").write_text("fix_attempts = 2\n")
+    assert CONFIG_PATH == ".orbit/config.toml"
+    write(tmp_path, "fix_attempts = 2\n")
     assert read_config(str(tmp_path)).fix_attempts == 2
+
+
+def test_the_old_roles_toml_is_ignored(tmp_path: Path) -> None:
+    (tmp_path / ".orbit").mkdir()
+    (tmp_path / ".orbit" / "roles.toml").write_text("fix_attempts = 2\n")
+    assert read_config(str(tmp_path)) == OrbitConfig()
 
 
 def test_the_file_lists_verification_steps(tmp_path: Path) -> None:
