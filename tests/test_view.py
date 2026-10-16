@@ -28,6 +28,8 @@ from orbit.protocol import (
 )
 from orbit.tui.view import (
     ALL_TAB_LABEL,
+    GUTTER_BAR,
+    GUTTER_MARKER,
     PINNED_TABS,
     PLANNER,
     ROLE_TABS,
@@ -41,6 +43,7 @@ from orbit.tui.view import (
     collapsible,
     entry_label,
     exchange_entry,
+    gutter_lines,
     join_prompt,
     mark_planner_busy,
     mark_tab_read,
@@ -480,6 +483,58 @@ def test_entry_labels_mark_collapsible_entries_and_count_collapsed_lines() -> No
     assert entry_label("one\ntwo", collapsed=False) == "▾ one\ntwo"
     assert entry_label("one\ntwo", collapsed=True) == "▸ one (+1 line)"
     assert entry_label("one\ntwo\nthree", collapsed=True) == "▸ one (+2 lines)"
+
+
+def test_gutter_symbols_differ_and_fill_one_column() -> None:
+    assert GUTTER_BAR != GUTTER_MARKER
+    assert len(GUTTER_BAR) == len(GUTTER_MARKER) == 1
+
+
+def test_gutter_puts_a_bar_before_an_unmarked_single_line() -> None:
+    assert gutter_lines("one", marked=False) == [(f"{GUTTER_BAR} ", "one")]
+
+
+def test_gutter_puts_the_marker_before_a_marked_single_line() -> None:
+    assert gutter_lines("one", marked=True) == [(f"{GUTTER_MARKER} ", "one")]
+
+
+def test_gutter_marks_every_line_of_an_expanded_entry() -> None:
+    label = entry_label("one\ntwo\nthree", collapsed=False)
+    assert gutter_lines(label, marked=True) == [
+        (f"{GUTTER_MARKER} ", "▾ one"),
+        (f"{GUTTER_MARKER} ", "two"),
+        (f"{GUTTER_MARKER} ", "three"),
+    ]
+
+
+def test_gutter_bars_every_line_of_an_unmarked_multi_line_entry() -> None:
+    assert gutter_lines("one\ntwo", marked=False) == [
+        (f"{GUTTER_BAR} ", "one"),
+        (f"{GUTTER_BAR} ", "two"),
+    ]
+
+
+def test_gutter_comes_before_the_collapsed_marker() -> None:
+    label = entry_label("one\ntwo\nthree\nfour", collapsed=True)
+    assert gutter_lines(label, marked=True) == [(f"{GUTTER_MARKER} ", "▸ one (+3 lines)")]
+    assert gutter_lines(label, marked=False) == [(f"{GUTTER_BAR} ", "▸ one (+3 lines)")]
+
+
+def test_gutter_of_an_empty_label_is_a_single_gutter_only_line() -> None:
+    assert gutter_lines("", marked=False) == [(f"{GUTTER_BAR} ", "")]
+    assert gutter_lines("", marked=True) == [(f"{GUTTER_MARKER} ", "")]
+
+
+def test_gutter_keeps_the_empty_last_line_a_trailing_newline_shows() -> None:
+    assert gutter_lines("one\n", marked=False) == [
+        (f"{GUTTER_BAR} ", "one"),
+        (f"{GUTTER_BAR} ", ""),
+    ]
+
+
+def test_gutter_is_two_columns_whether_marked_or_not() -> None:
+    for marked in (False, True):
+        assert all(len(gutter) == 2 for gutter, _ in gutter_lines("a\nb", marked))
 
 
 def test_planner_prompt_splits_into_title_and_body_and_joins_back() -> None:

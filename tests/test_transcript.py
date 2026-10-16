@@ -160,6 +160,10 @@ async def test_switching_tabs_leaves_list_mode_and_shows_the_tabs_end() -> None:
         assert app.focused is None
         await pilot.press("ctrl+t")  # Back to All, whose log is laid out again at its end.
         log = visible_log(app)
+        for _ in range(100):  # The scroll waits for a refresh, which may lag under load.
+            if log.scroll_y == log.max_scroll_y:
+                break
+            await pilot.pause()
         assert log.scroll_y == log.max_scroll_y > 0
 
 
