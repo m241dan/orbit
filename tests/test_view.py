@@ -41,6 +41,7 @@ from orbit.tui.view import (
     collapsible,
     entry_label,
     exchange_entry,
+    join_prompt,
     mark_planner_busy,
     mark_tab_read,
     mark_tab_unread,
@@ -48,6 +49,7 @@ from orbit.tui.view import (
     output_entry,
     review_line,
     settings_summary,
+    split_prompt,
     starts_collapsed,
     step_lines,
     tab_key,
@@ -476,3 +478,41 @@ def test_entry_labels_mark_collapsible_entries_and_count_collapsed_lines() -> No
     assert entry_label("one\ntwo", collapsed=False) == "▾ one\ntwo"
     assert entry_label("one\ntwo", collapsed=True) == "▸ one (+1 line)"
     assert entry_label("one\ntwo\nthree", collapsed=True) == "▸ one (+2 lines)"
+
+
+def test_planner_prompt_splits_into_title_and_body_and_joins_back() -> None:
+    prompt = "Title\n\nBody line 1\nBody line 2"
+    assert split_prompt(prompt) == ("Title", "Body line 1\nBody line 2")
+    assert join_prompt(*split_prompt(prompt)) == prompt
+
+
+def test_fix_prompt_round_trips_through_split_and_join() -> None:
+    prompt = "Fix the failed verification step: pytest\n\n$ uv run pytest\n...\nMore"
+    assert join_prompt(*split_prompt(prompt)) == prompt
+
+
+def test_single_line_prompt_has_no_body() -> None:
+    assert split_prompt("Do the thing") == ("Do the thing", "")
+    assert join_prompt(*split_prompt("Do the thing")) == "Do the thing"
+
+
+def test_empty_prompt_splits_to_nothing() -> None:
+    assert split_prompt("") == ("", "")
+
+
+def test_body_on_the_second_line_joins_back_after_a_blank_line() -> None:
+    assert split_prompt("a\nb") == ("a", "b")
+    assert join_prompt("a", "b") == "a\n\nb"
+
+
+def test_blank_lines_and_trailing_whitespace_around_the_body_are_dropped() -> None:
+    assert split_prompt("Title\n\n\n  body\n\n  ") == ("Title", "body")
+
+
+def test_joining_a_blank_body_gives_just_the_title() -> None:
+    assert join_prompt("Title", "") == "Title"
+    assert join_prompt("Title", "  \n ") == "Title"
+
+
+def test_joining_strips_the_title() -> None:
+    assert join_prompt("  Title \n", "body") == "Title\n\nbody"

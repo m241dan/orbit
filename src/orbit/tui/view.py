@@ -369,6 +369,26 @@ def task_label(state: TaskState, number: str, frame: str) -> Text:
     return label
 
 
+def split_prompt(prompt: str) -> tuple[str, str]:
+    """The first line of ``prompt`` as the title, and the rest as the body.
+
+    The body loses the blank lines around it and its trailing whitespace; a single line has an
+    empty body, and an empty prompt gives ("", "").
+    """
+    title, _, body = prompt.partition("\n")
+    return title, body.strip()
+
+
+def join_prompt(title: str, body: str) -> str:
+    """The prompt the editor saves: ``title`` stripped, a blank line, then ``body`` stripped.
+
+    A blank body gives just the stripped title.
+    """
+    if not body.strip():
+        return title.strip()
+    return f"{title.strip()}\n\n{body.strip()}"
+
+
 def usage_label(usage: Usage) -> str:
     """Tokens and cost, shortly: ``1.2M tok · $0.84``."""
     return f"{_count_label(usage.tokens)} tok · ${usage.cost_usd:.2f}"
