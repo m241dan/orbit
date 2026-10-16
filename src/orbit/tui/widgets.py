@@ -71,7 +71,9 @@ class ListPane(ModalFocus, OptionList):
     def show_rows(self, rows: Sequence[Row], trailing: Option | None = None) -> None:
         """Show ``rows``, then ``trailing`` if given. The same keys in the same order have the
         rows whose label changed relabelled in place; otherwise the rows are rebuilt, the
-        highlight staying on its key's row, or on the nearest one when that row has gone."""
+        highlight staying on its key's row, or on the nearest one when that row has gone. A
+        highlighted trailing row that's gone leaves nothing highlighted, so the highlight
+        never lands on a row the user didn't choose."""
         rows = tuple(rows)
         keys = tuple(key for key, _ in rows) + (() if trailing is None else (None,))
         if keys == self._shown_keys:
@@ -92,12 +94,14 @@ class ListPane(ModalFocus, OptionList):
 
     def _kept_highlight(self, keys: tuple[str | None, ...]) -> int | None:
         """Where the highlight goes once rows with ``keys`` are shown: on the row with its
-        key, or the nearest one when that's gone."""
+        key, or the nearest one when that's gone, or nowhere when the trailing row has gone."""
         index = self.highlighted
         if index is None:
             return None
         key = self._shown_keys[index]
-        return keys.index(key) if key in keys else min(index, len(keys) - 1)
+        if key in keys:
+            return keys.index(key)
+        return None if key is None else min(index, len(keys) - 1)
 
     def replace_prompt(self, index: int, prompt: VisualType) -> None:
         """Replace the prompt of the option at ``index``, redrawing only that option and, if

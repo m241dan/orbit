@@ -333,3 +333,27 @@ async def test_the_highlight_stays_on_its_row_as_labels_change() -> None:
             AgentRequest(agent_id="agent-1", request_id="r", tool="complete_task", arguments={}),
         )
         assert pane.highlighted == 1
+
+
+async def test_a_new_agent_isnt_highlighted_from_the_empty_row() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed(
+            session,
+            pilot,
+            AgentStarted(agent_id="agent-1", role="coder", task_id="7"),
+            AgentStarted(agent_id="agent-2", role="reviewer", task_id="8"),
+        )
+        await pilot.press("l", "j", "enter", "j")
+        await feed(
+            session,
+            pilot,
+            AgentExited(agent_id="agent-1", reason="finished"),
+            AgentExited(agent_id="agent-2", reason="finished"),
+            AgentStarted(agent_id="agent-3", role="coder", task_id="9"),
+        )
+        pane = app.query_one(AgentsPane)
+        assert pane.highlighted is None
+        await pilot.press("c", "escape")
+        assert session.commands == []
