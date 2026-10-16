@@ -304,6 +304,38 @@ async def test_verification_stops_at_the_first_failing_step(tmp_path: Path) -> N
     assert {e.step for e in events if isinstance(e, VerificationFinished)} == {0}
 
 
+async def test_the_fix_cap_survives_a_cancelled_and_restarted_run() -> None:
+    fetched = asyncio.Event()
+
+    async def waits_forever(call: Call) -> TurnEndReason:
+        await call("get_task")
+        fetched.set()
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+    session, _, launcher = session_for(
+        keeps_claiming,
+        waits_forever,
+        keeps_claiming,
+        verification=verified(Steps(False, False, False, False), max_fix_attempts=1),
+        limits=Limits(max_attempts=1),
+    )
+    await session.send(AddTask(task=TaskSpec(prompt="a")))
+    await session.send(RunTasks())
+    await asyncio.wait_for(fetched.wait(), 5)  # The fix is running.
+    await session.send(CancelTurn())
+    first = await asyncio.wait_for(idle(session), 5)
+    assert statuses(first) == ["unverified", "cancelled"]
+
+    await session.send(RunTasks())
+    second = await asyncio.wait_for(idle(session), 5)
+
+    assert len(launcher.launches) == 3
+    assert statuses(second) == ["unverified", "unverified"]
+    errors = [e.message for e in second if isinstance(e, ErrorOccurred)]
+    assert errors == ["Verification step 'Unit tests' still fails after 1 fix attempts."]
+
+
 async def test_tasks_with_tools_off_skip_verification() -> None:
     workspace = FakeWorkspace()
     steps = Steps()

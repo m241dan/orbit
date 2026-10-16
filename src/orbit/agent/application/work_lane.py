@@ -49,6 +49,9 @@ class WorkLane:
         self.startup: StartupCheck | None = None  # Whose panel each task takes over.
         self._landed: dict[str, str] = {}  # Task id -> the commit it landed, until reported.
         self._starts: dict[str, str] = {}  # Task id -> the tree's head when it started.
+        # Fixes queued per step along each chain, kept across runs so a restart can't reset
+        # the cap.
+        self._attempts = FixAttempts()
 
     def next_work(self, tried: Collection[str] = ()) -> str | None:
         """The next task for the work lane; reviews have their own lane, if there is one."""
@@ -58,13 +61,12 @@ class WorkLane:
     async def run(self) -> None:
         """Run the tasks waiting, in order, until none are left or one is cancelled."""
         tried: set[str] = set()
-        attempts = FixAttempts()
         while (task_id := self.next_work(tried)) is not None:
             tried.add(task_id)
-            if await self._run_task(task_id, attempts) == "cancelled":
+            if await self._run_task(task_id) == "cancelled":
                 return
 
-    async def _run_task(self, task_id: str, attempts: FixAttempts) -> TaskStatus:
+    async def _run_task(self, task_id: str) -> TaskStatus:
         """Run one task through a new agent; returns its final status."""
         self._board.set_status(task_id, "running")
         await self._publish_tasks()
@@ -75,7 +77,7 @@ class WorkLane:
             await self._verifier.publish_steps()
         await self._publish(TaskStarted(task_id=task_id))
         try:
-            status = await self._run_agent(task_id, attempts)
+            status = await self._run_agent(task_id)
         except asyncio.CancelledError:
             if self._verifier is not None:
                 await self._verifier.cancel()
@@ -98,7 +100,7 @@ class WorkLane:
         else:
             await self._review.ended(task_id)
 
-    async def _run_agent(self, task_id: str, attempts: FixAttempts) -> TaskStatus:
+    async def _run_agent(self, task_id: str) -> TaskStatus:
         """Run task ``task_id`` through a new agent and land its work; a fallback queues a fix
         for a fresh one."""
         root = await self._prepare(task_id)
@@ -113,7 +115,7 @@ class WorkLane:
             outcome = await self._land(task_id, outcome, root)
         if outcome.failure is not None and outcome.status == "unverified":
             assert verifier is not None  # Only verification fails.
-            await self._queue_fix(verifier, task_id, attempts, outcome.failure)
+            await self._queue_fix(verifier, task_id, outcome.failure)
         return outcome.status
 
     async def _configure(self, verifier: Verifier, checks: ChecksProposal, root: str) -> None:
@@ -155,21 +157,19 @@ class WorkLane:
         self._starts[task_id] = await tree.head()
         return root
 
-    async def _queue_fix(
-        self, verifier: Verifier, task_id: str, attempts: FixAttempts, failure: Failure
-    ) -> None:
+    async def _queue_fix(self, verifier: Verifier, task_id: str, failure: Failure) -> None:
         """Add a task fixing ``failure``'s step right after ``task_id``, unless its attempts
         ran out."""
         step, output = failure
         limit = verifier.verification.max_fix_attempts
-        if attempts.exhausted(task_id, step.name, limit):
+        if self._attempts.exhausted(task_id, step.name, limit):
             message = f"Verification step {step.name!r} still fails after {limit} fix attempts."
             await self._publish(ErrorOccurred(message=message))
             return
         settings = self._board.get(task_id).task.settings
         fix = TaskSpec(prompt=fix_prompt(step, output), settings=settings)
         fix_id = self._board.add(fix, fixes=task_id)
-        attempts.record(fix_id, task_id, step.name)
+        self._attempts.record(fix_id, task_id, step.name)
         if self._review is not None:
             self._review.joined(fix_id)
 
