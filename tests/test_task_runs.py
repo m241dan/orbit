@@ -427,6 +427,16 @@ async def test_an_unexpected_error_in_the_work_lane_is_reported() -> None:
     assert len(launcher.launches) == 1
 
 
+async def test_a_task_whose_lane_crashes_ends_in_error() -> None:
+    tree = FakeTree()
+    tree.failures["prepare"] = ValueError("boom")
+    session, _, launcher = session_for(claims_done, tree=tree)
+    events = await asyncio.wait_for(run(session, TaskSpec(prompt="a")), 5)
+    message = "The work lane stopped on an unexpected error: ValueError('boom')"
+    assert ErrorOccurred(message=message) in events
+    assert statuses(events) == ["error"] and launcher.launches == []
+
+
 async def test_cancelling_a_run_before_it_starts_is_no_error() -> None:
     session, _, launcher = session_for(claims_done)
     await session.send(AddTask(task=TaskSpec(prompt="a")))

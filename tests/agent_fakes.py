@@ -156,6 +156,7 @@ class FakeTree:
 
     async def prepare(self, keep: bool) -> str:
         self.prepared.append(keep)
+        self._fail("prepare")
         if self.broken:
             raise RuntimeError(self.broken)
         return self.path

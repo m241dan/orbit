@@ -592,3 +592,5 @@ async def test_an_unexpected_error_in_the_review_lane_is_reported() -> None:
     events = await asyncio.wait_for(settle(session), 10)
     message = "The review lane stopped on an unexpected error: ValueError('the lane tripped')"
     assert ErrorOccurred(message=message) in events
+    assert statuses_of(events, "reviewer") == ["error"]
+    assert [e for e in events if isinstance(e, ReviewStatus)][-1].open_batches == 0

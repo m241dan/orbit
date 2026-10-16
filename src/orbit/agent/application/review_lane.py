@@ -186,24 +186,34 @@ class ReviewLane:
         job = self._jobs.get(task_id)
         self._board.set_status(task_id, "running")
         await self._publish(TasksChanged(tasks=self._board.tasks))
-        status: TaskStatus = "cancelled"
+        status: TaskStatus = "cancelled"  # What the lane stopping leaves the review as.
         reviewer = asyncio.create_task(
             self._run_reviewer(task_id, job.commits[-1] if job else None)
         )
         self._current = (task_id, reviewer)
         try:
-            status = await reviewer
-        except asyncio.CancelledError:
-            if _being_cancelled():  # The lane itself is stopping, not just this review.
-                raise
-        except RuntimeError as exc:  # Git couldn't make or drop the snapshot.
-            await self._publish(ErrorOccurred(message=str(exc)))
+            status = await self._outcome(reviewer)
+        except Exception:  # A bug; the review still ends, or its batch would stay open.
             status = "error"
+            raise
         finally:
             self._current = None
             self._board.finish(task_id, status)
             await self._publish(TasksChanged(tasks=self._board.tasks))
-        await self._after(self._batches.get(task_id))
+            if not _being_cancelled():  # The lane stopping leaves its batches as they are.
+                await self._after(self._batches.get(task_id))
+
+    async def _outcome(self, reviewer: asyncio.Task[TaskStatus]) -> TaskStatus:
+        """How the review ``reviewer`` ended; anything unexpected escapes."""
+        try:
+            return await reviewer
+        except asyncio.CancelledError:
+            if _being_cancelled():  # The lane itself is stopping, not just this review.
+                raise
+            return "cancelled"
+        except RuntimeError as exc:  # Git couldn't make or drop the snapshot.
+            await self._publish(ErrorOccurred(message=str(exc)))
+            return "error"
 
     async def _run_reviewer(self, task_id: str, commit: str | None) -> TaskStatus:
         """Run the reviewer in a snapshot of ``commit``; a review the user queued works in place."""

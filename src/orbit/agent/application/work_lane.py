@@ -77,19 +77,26 @@ class WorkLane:
             self._board.reset_steps()
             await self._verifier.publish_steps()
         await self._publish(TaskStarted(task_id=task_id))
+        status: TaskStatus = "error"  # What a bug in the run leaves the task as.
         try:
-            status = await self._run_agent(task_id)
+            status = await self._outcome(task_id)
+        finally:  # Even a bug ends the task, or the board could never run or drop it.
+            self._board.finish(task_id, status)
+            await self._publish_tasks()
+        await self._report_to_review(task_id)
+        return status
+
+    async def _outcome(self, task_id: str) -> TaskStatus:
+        """How task ``task_id``'s run through an agent ended; anything unexpected escapes."""
+        try:
+            return await self._run_agent(task_id)
         except asyncio.CancelledError:
             if self._verifier is not None:
                 await self._verifier.cancel()
-            status = "cancelled"
+            return "cancelled"
         except RuntimeError as exc:  # Git or the tree's setup failed.
             await self._publish(ErrorOccurred(message=str(exc)))
-            status = "error"
-        self._board.finish(task_id, status)
-        await self._publish_tasks()
-        await self._report_to_review(task_id)
-        return status
+            return "error"
 
     async def _report_to_review(self, task_id: str) -> None:
         """Tell the review lane how task ``task_id`` ended."""
