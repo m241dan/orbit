@@ -59,6 +59,34 @@ class FakeHost:
         return await self.handler(token, tool, arguments)
 
 
+class GatedHost(FakeHost):
+    """A host whose start waits for ``gate`` to be set; ``entered`` is set once it's waiting."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.gate = asyncio.Event()
+        self.entered = asyncio.Event()
+
+    async def start(self, handler: CallHandler) -> str:
+        self.entered.set()
+        await self.gate.wait()
+        return await super().start(handler)
+
+
+class FailingHost(FakeHost):
+    """A host whose first ``failures`` starts fail, as uvicorn's might."""
+
+    def __init__(self, failures: int = 1) -> None:
+        super().__init__()
+        self.failures = failures
+
+    async def start(self, handler: CallHandler) -> str:
+        if self.failures:
+            self.failures -= 1
+            raise RuntimeError("Orbit's MCP server failed to start.")
+        return await super().start(handler)
+
+
 class ScriptedLauncher:
     """Each launch plays the next script as the agent, calling orbit through the host."""
 

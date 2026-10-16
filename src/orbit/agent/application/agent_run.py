@@ -133,6 +133,16 @@ class AgentRun:
             return Outcome("error")
         self._root = root
         self._agent = self._desk.open(self, task.role, self._task_id)
+        try:
+            await self._see_through(before)
+        finally:
+            self._desk.close(self.agent)  # Even if the agent never got as far as starting.
+            self._drain()
+        status = STATUSES[self._work.phase]
+        return Outcome(status, self._failure, tuple(self._work.summaries), self._accepted)
+
+    async def _see_through(self, before: object) -> None:
+        """Launch the agent and serve it until the task is finished, then stop it."""
         stream = self._stream_task = await self._launch()
         try:
             await self._serve_in_time(before)
@@ -140,10 +150,6 @@ class AgentRun:
                 await self._await_exit(stream)
         finally:
             await self._stop(stream)
-            self._desk.close(self.agent)
-            self._drain()
-        status = STATUSES[self._work.phase]
-        return Outcome(status, self._failure, tuple(self._work.summaries), self._accepted)
 
     async def _launch(self) -> "asyncio.Task[None]":
         await self._desk.url()  # Started before the agent is announced.

@@ -6,6 +6,7 @@ a :class:`CallTarget` opened on the desk; :func:`dispatch` answers a call with t
 agent's role allows.
 """
 
+import asyncio
 import uuid
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
@@ -116,19 +117,30 @@ class AgentDesk:
         # Takes a review task's suggestions: its id, then the suggestion's title and prompt.
         self.suggest: Callable[[str, str, str], Awaitable[Reply]] | None = None
         self._runs: dict[str, CallTarget] = {}
-        self._url: str | None = None
+        self._starting: asyncio.Task[str] | None = None  # The host's start, shared by callers.
 
     async def url(self) -> str:
-        """Where agents reach orbit; starts the host the first time."""
-        if self._url is None:
-            self._url = await self.agents.host.start(self.handle)
-        return self._url
+        """Where agents reach orbit; starts the host the first time, or after a failed start."""
+        if self._starting is None:
+            self._starting = asyncio.ensure_future(self.agents.host.start(self.handle))
+            self._starting.add_done_callback(self._started)
+        # Shielded: one caller giving up doesn't cancel the start the others wait on.
+        return await asyncio.shield(self._starting)
+
+    def _started(self, starting: "asyncio.Task[str]") -> None:
+        """Forget ``starting`` if it failed, so the next call starts the host again."""
+        failed = starting.cancelled() or starting.exception() is not None
+        if failed and self._starting is starting:
+            self._starting = None
 
     async def stop(self) -> None:
-        """Stop the host, if it was started."""
-        if self._url is not None:
-            self._url = None
-            await self.agents.host.stop()
+        """Stop the host, if it was started, cancelling a start that's under way."""
+        starting, self._starting = self._starting, None
+        if starting is None:
+            return
+        starting.cancel()
+        await asyncio.wait({starting})
+        await self.agents.host.stop()  # Also cleans up after a start cut short.
 
     async def launch(self, agent: Agent, prompt: str, settings: Settings, cwd: str) -> AgentLaunch:
         """How to start ``agent`` in its role: told ``prompt``, with ``settings``, in ``cwd``."""
