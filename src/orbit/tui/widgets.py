@@ -142,7 +142,7 @@ class TranscriptLog(ListPane):
         return tuple(self._entries)
 
     def enter_list_mode(self) -> None:
-        """Activate the list, starting at the latest entry the first time."""
+        """Activate the list, starting at the latest entry when it holds no cursor."""
         if self.highlighted is None and self.option_count:
             self.highlighted = self.option_count - 1
         super().enter_list_mode()

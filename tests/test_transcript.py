@@ -400,6 +400,46 @@ async def test_each_tab_holds_its_own_cursor() -> None:
         assert coder.highlighted == 1
 
 
+async def scrolled_to_top(pilot: Pilot[None], log: TranscriptLog) -> bool:
+    """Whether ``log`` reaches its top, waiting out a scroll that lags a refresh."""
+    for _ in range(100):
+        if log.scroll_y == 0:
+            return True
+        await pilot.pause()
+    return False
+
+
+async def held_out_of_view(
+    session: FakeSession, pilot: Pilot[None], app: OrbitApp
+) -> TranscriptLog:
+    """The shown log, holding its first entry with the view scrolled away to the end."""
+    await fed(session, pilot, app, 40)
+    await pilot.press("k", "enter", "home", "escape")
+    log = visible_log(app)
+    log.scroll_end(animate=False)
+    await pilot.pause()
+    assert log.scroll_y > 0
+    return log
+
+
+async def test_switching_back_scrolls_to_a_held_entry_out_of_view() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test(size=(80, 24)) as pilot:
+        log = await held_out_of_view(session, pilot, app)
+        await pilot.press("ctrl+t", "ctrl+t")
+        assert await scrolled_to_top(pilot, log) and log.highlighted == 0
+
+
+async def test_show_place_scrolls_back_to_a_held_entry() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test(size=(80, 24)) as pilot:
+        log = await held_out_of_view(session, pilot, app)
+        log.show_place()
+        assert await scrolled_to_top(pilot, log) and log.highlighted == 0
+
+
 async def test_switching_tabs_keeps_a_held_place() -> None:
     session = FakeSession()
     app = OrbitApp(session)
