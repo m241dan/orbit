@@ -286,3 +286,19 @@ def test_usage_changed_round_trips_with_its_times() -> None:
     assert UsageChanged() == UsageChanged(limits=(), status="ok", detail="", retry_at=None)
     with pytest.raises(ValidationError):
         UsageLimit(label="Week", percent=101)
+
+
+def test_usage_limit_rejects_a_naive_reset_time() -> None:
+    with pytest.raises(ValidationError):
+        UsageLimit(label="Week", percent=1, resets_at=datetime(2026, 10, 16))
+
+
+def test_usage_changed_rejects_a_naive_retry_time() -> None:
+    with pytest.raises(ValidationError):
+        UsageChanged(status="rate_limited", retry_at=datetime(2026, 10, 16))
+
+
+def test_usage_changed_json_rejects_a_zoneless_time() -> None:
+    payload = '{"type": "usage_changed", "retry_at": "2026-10-16T15:40:00"}'
+    with pytest.raises(ValidationError):
+        event_adapter.validate_json(payload)

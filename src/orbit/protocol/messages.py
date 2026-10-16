@@ -5,10 +5,9 @@ discriminated unions on ``type`` so they can be serialized to JSON and sent
 across a process boundary without changes.
 """
 
-from datetime import datetime
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, TypeAdapter
 
 
 class _Message(BaseModel):
@@ -523,7 +522,7 @@ class UsageLimit(_Message):
 
     label: str
     percent: float = Field(ge=0, le=100)
-    resets_at: datetime | None = None
+    resets_at: AwareDatetime | None = None
 
 
 UsageStatus = Literal["ok", "rate_limited", "unavailable"]
@@ -541,7 +540,7 @@ class UsageChanged(_Message):
     limits: tuple[UsageLimit, ...] = ()
     status: UsageStatus = "ok"
     detail: str = ""
-    retry_at: datetime | None = None
+    retry_at: AwareDatetime | None = None
 
 
 Event = Annotated[
