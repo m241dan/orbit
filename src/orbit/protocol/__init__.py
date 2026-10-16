@@ -66,6 +66,7 @@ from orbit.protocol.messages import (
     event_adapter,
 )
 from orbit.protocol.session import Session
+from orbit.protocol.threaded import ThreadedSession
 
 __all__ = [
     "PLAN_TASK",
@@ -115,6 +116,7 @@ __all__ = [
     "TaskState",
     "TaskStatus",
     "TasksChanged",
+    "ThreadedSession",
     "ToolAccess",
     "ToolCallFinished",
     "ToolCallStarted",

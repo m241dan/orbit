@@ -116,6 +116,8 @@ name = "Domain does no I/O"
 type = "forbidden"
 source_modules = ["orbit.agent.domain"]
 forbidden_modules = ["asyncio", "subprocess", "os", "pathlib", "json", "uuid", "time"]
+# The domain uses the protocol's messages; the threaded session it also exports is the CLI's.
+ignore_imports = ["orbit.protocol -> orbit.protocol.threaded"]
 
 # MCP, the web server it runs on and the HTTP client are details of the external adapters.
 # The CLI wires the adapters up, so it reaches them indirectly.

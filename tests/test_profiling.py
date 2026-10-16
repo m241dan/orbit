@@ -59,3 +59,30 @@ async def test_profiled_writes_a_profile_and_a_blocked_log(tmp_path: Path) -> No
     stats = pstats.Stats(str(directory / "backend.prof"))
     assert stats.total_calls > 0  # type: ignore[attr-defined]
     assert (directory / "backend-blocked.log").read_text() == ""
+
+
+def backend_work() -> None:
+    """A function only the backend thread runs."""
+
+
+async def run_profiled_backend(directory: Path) -> None:
+    with profiled(directory, "backend"):
+        backend_work()
+
+
+async def test_profiled_on_a_second_thread_leaves_the_profile_to_the_first(
+    tmp_path: Path,
+) -> None:
+    with profiled(tmp_path, "ui"):
+        backend = threading.Thread(target=asyncio.run, args=(run_profiled_backend(tmp_path),))
+        backend.start()
+        backend.join()
+
+    # The UI's profile already sees every thread, so the backend writes only its log.
+    assert sorted(p.name for p in tmp_path.iterdir()) == [
+        "backend-blocked.log",
+        "ui-blocked.log",
+        "ui.prof",
+    ]
+    stats = pstats.Stats(str(tmp_path / "ui.prof"))
+    assert any(name == "backend_work" for _, _, name in stats.stats)  # type: ignore[attr-defined]

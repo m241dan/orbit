@@ -1,5 +1,7 @@
+import asyncio
 import pstats
 import subprocess
+import threading
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -24,7 +26,7 @@ from orbit.agent import (
 from orbit.agent.application.ports import UsageSource
 from orbit.agent.domain.reviews import ReviewLimits
 from orbit.cli import app
-from orbit.protocol import Notice, Settings
+from orbit.protocol import Notice, Settings, ThreadedSession
 
 runner = CliRunner()
 
@@ -36,26 +38,47 @@ def test_version() -> None:
 
 
 class FakeApp:
+    """Starts its session, which builds the backend on its thread, and closes it."""
+
+    # The backend sessions built, the threads they were built on and their usage sources.
     launched: ClassVar[list[AgentSession]] = []
+    threads: ClassVar[list[str]] = []
+    usage_sources: ClassVar[list[UsageSource | None]] = []
     # The files in profile_dir while each app ran async.
     profile_dir: ClassVar[Path] = Path()
     profiling: ClassVar[list[list[str]]] = []
 
-    def __init__(self, session: AgentSession) -> None:
+    def __init__(self, session: ThreadedSession) -> None:
         self.session = session
 
     def run(self) -> None:
-        FakeApp.launched.append(self.session)
+        asyncio.run(self._open_and_close())
 
     async def run_async(self) -> None:
-        FakeApp.launched.append(self.session)
-        FakeApp.profiling.append(sorted(p.name for p in FakeApp.profile_dir.iterdir()))
+        await self._open_and_close()
+
+    async def _open_and_close(self) -> None:
+        self.session.start()
+        if FakeApp.profile_dir.exists():
+            FakeApp.profiling.append(sorted(p.name for p in FakeApp.profile_dir.iterdir()))
+        await self.session.close()
 
 
 @pytest.fixture
-def launched(monkeypatch: pytest.MonkeyPatch) -> list[AgentSession]:
+def launched(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> list[AgentSession]:
+    def session(*args: Any, usage: UsageSource | None = None, **kwargs: Any) -> AgentSession:
+        built = AgentSession(*args, usage=usage, **kwargs)
+        FakeApp.launched.append(built)
+        FakeApp.threads.append(threading.current_thread().name)
+        FakeApp.usage_sources.append(usage)
+        return built
+
     monkeypatch.setattr("orbit.cli.OrbitApp", FakeApp)
+    monkeypatch.setattr("orbit.cli.AgentSession", session)
     FakeApp.launched = []
+    FakeApp.threads = []
+    FakeApp.usage_sources = []
+    FakeApp.profile_dir = tmp_path / "profile"
     FakeApp.profiling = []
     return FakeApp.launched
 
@@ -156,6 +179,13 @@ def test_a_workspace_that_is_a_file_stops_chat(
     assert result.exit_code == 2
     assert "isn't a directory" in result.output
     assert launched == []
+
+
+def test_chat_builds_the_backend_on_its_own_thread(launched: list[AgentSession]) -> None:
+    assert runner.invoke(app, ["chat"]).exit_code == 0
+
+    assert len(launched) == 1
+    assert FakeApp.threads == ["orbit-backend"]
 
 
 def test_chat_runs_tui_against_claude_cli(launched: list[AgentSession]) -> None:
@@ -365,16 +395,9 @@ def test_chat_checks_the_steps_at_startup(
 
 
 @pytest.fixture
-def usage_sources(monkeypatch: pytest.MonkeyPatch) -> list[UsageSource | None]:
+def usage_sources(launched: list[AgentSession]) -> list[UsageSource | None]:
     """The usage sources chat gives its sessions."""
-    sources: list[UsageSource | None] = []
-
-    def session(*args: Any, usage: UsageSource | None = None, **kwargs: Any) -> AgentSession:
-        sources.append(usage)
-        return AgentSession(*args, usage=usage, **kwargs)
-
-    monkeypatch.setattr("orbit.cli.AgentSession", session)
-    return sources
+    return FakeApp.usage_sources
 
 
 def test_chat_shows_usage_limits_from_the_claude_login(
@@ -400,14 +423,19 @@ def test_chat_can_profile_the_app(
     project = tmp_path / "project"
     project.mkdir()
     monkeypatch.chdir(tmp_path)
-    FakeApp.profile_dir = tmp_path / "profile"
     result = runner.invoke(app, ["chat", "-C", str(project), "--profile", "profile"])
 
     assert result.exit_code == 0
     assert len(launched) == 1
-    # The directory is relative to where chat started, not the workspace. The app ran while
-    # its loop was watched, and the profile was written when it ended.
-    assert FakeApp.profiling == [["ui-blocked.log"]]
+    # The directory is relative to where chat started, not the workspace. The app and the
+    # backend ran while their loops were watched, and the profile, which sees both threads,
+    # was written when the app ended.
+    assert FakeApp.profiling == [["backend-blocked.log", "ui-blocked.log"]]
+    assert sorted(p.name for p in FakeApp.profile_dir.iterdir()) == [
+        "backend-blocked.log",
+        "ui-blocked.log",
+        "ui.prof",
+    ]
     stats = pstats.Stats(str(tmp_path / "profile" / "ui.prof"))
     assert stats.total_calls > 0  # type: ignore[attr-defined]
 
@@ -420,4 +448,4 @@ def test_chat_runs_the_app_unprofiled_by_default(
 
     assert len(launched) == 1
     assert FakeApp.profiling == []
-    assert not (tmp_path / "profile").exists()
+    assert not FakeApp.profile_dir.exists()

@@ -87,16 +87,33 @@ def _ms(seconds: float) -> str:
 @contextmanager
 def profiled(directory: Path, name: str) -> Iterator[None]:
     """Profile the current thread, and log each time its running loop is blocked, while
-    the block runs; writes ``name``.prof and ``name``-blocked.log to ``directory``."""
+    the block runs; writes ``name``.prof and ``name``-blocked.log to ``directory``.
+
+    Only one profile can be on at a time, and it sees every thread, so if another thread's
+    is already on, this writes only the log."""
     directory.mkdir(parents=True, exist_ok=True)
     with (directory / f"{name}-blocked.log").open("w") as log:
         watchdog = LoopWatchdog(asyncio.get_running_loop(), threading.get_ident(), name, log)
-        profile = cProfile.Profile()
         watchdog.start()
-        profile.enable()
         try:
-            yield
+            with _profile(directory / f"{name}.prof"):
+                yield
         finally:
-            profile.disable()
             watchdog.stop()
-            profile.dump_stats(directory / f"{name}.prof")
+
+
+@contextmanager
+def _profile(path: Path) -> Iterator[None]:
+    """Profile while the block runs and write the profile to ``path``, unless a profile is
+    already on."""
+    profile = cProfile.Profile()
+    try:
+        profile.enable()
+    except ValueError:  # Another profile is on.
+        yield
+        return
+    try:
+        yield
+    finally:
+        profile.disable()
+        profile.dump_stats(path)

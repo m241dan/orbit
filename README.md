@@ -43,11 +43,12 @@ uv run orbit chat --profile /tmp/orbit-prof    # record what slows orbit down
 
 With orbit installed as a tool, drop the `uv run`.
 
-`--profile <dir>` records where time goes, for when orbit bogs down. It writes `ui.prof` (and,
-once the backend has its own thread, `backend.prof`), a profile of that thread that `python -m
-pstats` or `snakeviz` opens, and `ui-blocked.log` (and `backend-blocked.log`), with an entry for
-every time that thread's event loop was blocked for over 50 ms showing what was running while it
-was stuck, and how long it lasted.
+`--profile <dir>` records where time goes, for when orbit bogs down. It writes `ui.prof`, a
+profile that `python -m pstats` or `snakeviz` opens, and `ui-blocked.log` and
+`backend-blocked.log`, with an entry for every time the UI's or the backend's event loop was
+blocked for over 50 ms showing what its thread was running while it was stuck, and how long it
+lasted. Python allows only one profile at a time, and it sees every thread, so `ui.prof` covers
+the backend too and there's no `backend.prof`.
 
 In the app:
 
@@ -461,8 +462,9 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
 (Textual)  ◀──Event────                          ◀──  (agentic loop)
 ```
 
-- `orbit.protocol`: pydantic models (`Command`s in, `Event`s out) and the `Session`
-  interface. It imports no other orbit package.
+- `orbit.protocol`: pydantic models (`Command`s in, `Event`s out), the `Session`
+  interface, and `ThreadedSession`, which runs a session on a thread of its own. It imports no
+  other orbit package.
 - `orbit.agent`: backend, with no UI imports. Three layers, each importing only the ones below:
   - `external`: adapters that reach outside the backend. `ClaudeCliRunner` launches agents as
     `claude -p --output-format stream-json` runs connected to orbit (`run_agent`, and `converse`
@@ -493,6 +495,8 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
   `view` turns state and events into text and doesn't import Textual; the widgets (`tasks`,
   `agents`, `widgets`) lay it out.
 - `orbit.cli`: the composition root, and the only place the two sides are wired together: it
-  plugs the external adapters into `AgentSession` and hands that to the TUI.
+  plugs the external adapters into `AgentSession` and hands that to the TUI. It runs the
+  backend on its own thread and event loop through `orbit.protocol.ThreadedSession`, so neither
+  side's work stalls the other.
 
 These rules are enforced by `lint-imports` (see `[tool.importlinter]` in `pyproject.toml`).

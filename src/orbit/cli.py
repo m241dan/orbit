@@ -3,6 +3,8 @@
 import asyncio
 import os
 import secrets
+from collections.abc import Callable
+from contextlib import AbstractContextManager
 from pathlib import Path
 from typing import Annotated
 
@@ -28,7 +30,7 @@ from orbit.agent import (
     write_checks,
 )
 from orbit.profiling import profiled
-from orbit.protocol import Settings, ToolAccess
+from orbit.protocol import Settings, ThreadedSession, ToolAccess
 from orbit.tui import OrbitApp
 
 app = typer.Typer(help="Orbit command-line tool.", no_args_is_help=True)
@@ -135,16 +137,28 @@ def chat(
         Verification(steps, run_step, workspace_state, config.fallback_fixes) if verify else None
     )
     agents = _agents(config, worktree=worktree, review=review)
-    session = AgentSession(
-        Settings(model=model, tool_access=tools),
-        model_choices=MODEL_ALIASES,
-        verification=verification,
-        agents=agents,
-        workspace=str(root),
-        check_at_startup=True,
-        usage=UsageApi() if usage else None,
+    settings = Settings(model=model, tool_access=tools)
+    usage_source = UsageApi() if usage else None
+    session = ThreadedSession(
+        lambda: AgentSession(
+            settings,
+            model_choices=MODEL_ALIASES,
+            verification=verification,
+            agents=agents,
+            workspace=str(root),
+            check_at_startup=True,
+            usage=usage_source,
+        ),
+        _thread_context(profile),
     )
     _launch(OrbitApp(session), profile)
+
+
+def _thread_context(profile: Path | None) -> Callable[[], AbstractContextManager[None]] | None:
+    """What the backend's thread runs inside: profiled into ``profile``, if there is one."""
+    if profile is None:
+        return None
+    return lambda: profiled(profile, "backend")
 
 
 def _agents(config: OrbitConfig, *, worktree: bool, review: bool) -> Agents:
