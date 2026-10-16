@@ -2,8 +2,8 @@
 
 import asyncio
 import threading
-from collections.abc import AsyncIterator, Callable, Coroutine
-from contextlib import AbstractContextManager, nullcontext
+from collections.abc import AsyncGenerator, Callable, Coroutine
+from contextlib import AbstractContextManager, nullcontext, suppress
 from dataclasses import dataclass
 from typing import Any
 
@@ -53,17 +53,23 @@ class ThreadedSession:
         backend = self._running()
         await self._on_backend(backend, backend.session.send(command))
 
-    async def events(self) -> AsyncIterator[Event]:
+    async def events(self) -> AsyncGenerator[Event]:
         backend = self._running()
         loop = asyncio.get_running_loop()
         queue: asyncio.Queue[Event | None] = asyncio.Queue()
 
-        def deliver(event: Event | None) -> None:
-            loop.call_soon_threadsafe(queue.put_nowait, event)
+        pump: list[asyncio.Task[None]] = []  # Touched only on the backend's loop.
 
-        backend.loop.call_soon_threadsafe(self._start_pump, backend.session, deliver)
-        while (event := await queue.get()) is not None:
-            yield event
+        def deliver(event: Event | None) -> None:
+            with suppress(RuntimeError):  # The caller's loop has closed: nobody is listening.
+                loop.call_soon_threadsafe(queue.put_nowait, event)
+
+        backend.loop.call_soon_threadsafe(self._start_pump, backend.session, deliver, pump)
+        try:
+            while (event := await queue.get()) is not None:
+                yield event
+        finally:
+            _cancel_on(backend.loop, pump)
 
     async def close(self) -> None:
         """Close the inner session on its loop, then stop the backend thread and wait for it."""
@@ -120,9 +126,28 @@ class ThreadedSession:
                 pump.cancel()
             await asyncio.gather(*self._pumps, return_exceptions=True)
 
-    def _start_pump(self, session: Session, deliver: _Deliver) -> None:
-        """Start passing ``session``'s events to ``deliver``."""
-        self._pumps.add(asyncio.create_task(_pump(session, deliver)))
+    def _start_pump(
+        self, session: Session, deliver: _Deliver, pump: list[asyncio.Task[None]]
+    ) -> None:
+        """Start passing ``session``'s events to ``deliver``, adding the task doing so to
+        ``pump``."""
+        task = asyncio.create_task(_pump(session, deliver))
+        task.add_done_callback(self._pumps.discard)
+        self._pumps.add(task)
+        pump.append(task)
+
+
+def _cancel_on(loop: asyncio.AbstractEventLoop, tasks: list[asyncio.Task[None]]) -> None:
+    """Have ``loop`` cancel ``tasks``, once it has run what was scheduled on it before; if
+    ``loop`` has closed, its tasks have already ended."""
+    with suppress(RuntimeError):
+        loop.call_soon_threadsafe(_cancel_all, tasks)
+
+
+def _cancel_all(tasks: list[asyncio.Task[None]]) -> None:
+    """Cancel each of ``tasks``."""
+    for task in tasks:
+        task.cancel()
 
 
 async def _pump(session: Session, deliver: _Deliver) -> None:
