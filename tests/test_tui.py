@@ -1,5 +1,6 @@
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
+from contextlib import contextmanager
 
 import pytest
 from textual.pilot import Pilot
@@ -38,8 +39,10 @@ from orbit.protocol import (
     VerificationStarted,
 )
 from orbit.tui import OrbitApp
+from orbit.tui.agents import AgentsPane
+from orbit.tui.app import event_batches
 from orbit.tui.tasks import TaskList
-from orbit.tui.view import EntryKind, spinner_frame
+from orbit.tui.view import EntryKind, coalesce, spinner_frame
 from orbit.tui.widgets import (
     ConversationTabs,
     PickerScreen,
@@ -47,6 +50,7 @@ from orbit.tui.widgets import (
     SidePanel,
     Transcript,
     TranscriptLog,
+    VerificationPanel,
 )
 
 
@@ -1337,3 +1341,121 @@ async def test_notes_on_no_listed_pinned_task_stay_under_all() -> None:
             "Task 1: do 1",
             *NOTES_AFTER_HEADER,
         ]
+
+
+async def finite(*events: Event) -> AsyncIterator[Event]:
+    for event in events:
+        yield event
+
+
+async def collect_batches(events: AsyncIterator[Event], limit: int) -> list[list[Event]]:
+    return [batch async for batch in event_batches(events, limit)]
+
+
+async def test_event_batches_takes_every_event_waiting_up_to_the_limit() -> None:
+    events = [Notice(message=str(n)) for n in range(5)]
+    batches = await collect_batches(finite(*events), limit=2)
+    assert batches == [events[:2], events[2:4], events[4:]]
+
+
+async def test_event_batches_ends_with_the_events() -> None:
+    assert await collect_batches(finite(), limit=2) == []
+
+
+async def test_event_batches_raises_what_reading_the_events_raises() -> None:
+    async def failing() -> AsyncIterator[Event]:
+        yield Notice(message="before")
+        raise RuntimeError("lost")
+
+    with pytest.raises(RuntimeError, match="lost"):
+        await collect_batches(failing(), limit=10)
+
+
+async def test_event_batches_cancels_its_reader_when_closed() -> None:
+    session = FakeSession()
+    await session.queue.put(Notice(message="1"))
+    batches = event_batches(session.events(), limit=10)
+    assert await anext(batches) == [Notice(message="1")]
+    await batches.aclose()
+    await session.queue.put(Notice(message="2"))
+    await asyncio.sleep(0)
+    # The reader is gone, so nothing takes the event.
+    assert session.queue.qsize() == 1
+
+
+class BatchRecordingApp(OrbitApp):
+    """Records the events rendered inside each outermost batch update."""
+
+    def __init__(self, session: FakeSession) -> None:
+        super().__init__(session)
+        self.batches: list[list[Event]] = []
+        self._depth = 0
+
+    @contextmanager
+    def batch_update(self) -> Iterator[None]:
+        if not self._depth:
+            self.batches.append([])
+        self._depth += 1
+        try:
+            with super().batch_update():
+                yield
+        finally:
+            self._depth -= 1
+
+    def _render_event(self, event: Event) -> None:
+        self.batches[-1].append(event)
+        super()._render_event(event)
+
+
+BURST: list[Event] = [
+    TasksChanged(tasks=(task("1"),)),
+    TasksChanged(tasks=(task("1"), task("2", "reviewer"))),
+    LINT_STEP,
+    TaskStarted(task_id="2"),
+    started("agent-1", "reviewer"),
+    said("agent-1", "looking"),
+    TasksChanged(tasks=(task("2", "reviewer"),)),
+    TasksChanged(tasks=(task("2", "reviewer"), task("3"))),
+    *task_notes("2"),
+]
+
+
+def visible_state(app: OrbitApp) -> object:
+    agents = app.query_one(AgentsPane)
+    task_list = app.query_one(TaskList)
+    return (
+        entries(app),
+        tab_strip(app),
+        task_list.tasks,
+        task_list.numbers,
+        [str(agents.get_option_at_index(i).prompt) for i in range(agents.option_count)],
+        app.query_one(VerificationPanel).steps,
+    )
+
+
+async def test_a_burst_renders_in_one_batch_without_superseded_snapshots() -> None:
+    session = FakeSession()
+    for event in BURST:
+        session.queue.put_nowait(event)
+    app = BatchRecordingApp(session)
+    async with app.run_test(size=(120, 30)) as pilot:
+        await pilot.pause()
+        assert [batch for batch in app.batches if batch] == [coalesce(BURST)]
+        assert len(coalesce(BURST)) == len(BURST) - 2
+
+
+async def test_a_burst_ends_where_rendering_each_event_alone_would() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test(size=(120, 30)) as pilot:
+        for event in BURST:
+            await feed_events(session, pilot, event)
+        one_by_one = visible_state(app)
+
+    session = FakeSession()
+    for event in BURST:
+        session.queue.put_nowait(event)
+    app = OrbitApp(session)
+    async with app.run_test(size=(120, 30)) as pilot:
+        await pilot.pause()
+        assert visible_state(app) == one_by_one
