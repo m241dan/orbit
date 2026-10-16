@@ -156,7 +156,7 @@ async def test_renders_tool_calls_errors_and_cancellation() -> None:
 
         rendered = entries(app)
         assert rendered == [
-            ('→ upper {"text": "hi"}', "tool"),
+            ('→ upper {"text": "hi"}\n{\n  "text": "hi"\n}', "tool"),
             ("HI", "tool"),
             ("KeyError", "error"),
             ("boom", "error"),

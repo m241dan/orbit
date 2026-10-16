@@ -1,7 +1,10 @@
+import json
 from collections.abc import Mapping
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta, timezone
-from typing import get_args
+from typing import Any, get_args
+
+import pytest
 
 from orbit.agent.domain.roles import BUILT_IN_ROLE_NAMES
 from orbit.protocol import (
@@ -70,6 +73,7 @@ from orbit.tui.view import (
     tab_labels,
     task_started_entry,
     task_tab_key,
+    tool_call_summary,
     track_agents,
     track_roles,
     track_tabs,
@@ -83,8 +87,8 @@ from orbit.tui.view import (
 
 def test_turn_output_becomes_transcript_entries() -> None:
     assert output_entry(AssistantMessage(turn_id="t", text="hi")) == ("hi", "assistant")
-    started = ToolCallStarted(turn_id="t", call_id="c", name="Read", arguments={"path": "a"})
-    assert output_entry(started) == ('→ Read {"path": "a"}', "tool")
+    started = ToolCallStarted(turn_id="t", call_id="c", name="Read", arguments={"file_path": "a"})
+    assert output_entry(started) == ('→ Read a\n{\n  "file_path": "a"\n}', "tool")
     assert output_entry(ToolCallFinished(turn_id="t", call_id="c", output="ok")) == ("ok", "tool")
     failed = ToolCallFinished(turn_id="t", call_id="c", output="no", is_error=True)
     assert output_entry(failed) == ("no", "error")
@@ -176,7 +180,7 @@ def test_agent_output_is_labelled_with_its_agent() -> None:
     started = ToolCallStarted(
         turn_id="t", call_id="c", name="Read", arguments={}, agent_id="agent-2"
     )
-    assert output_entry(started) == ("agent-2: → Read {}", "tool")
+    assert output_entry(started) == ("agent-2: → Read", "tool")
     failed = ToolCallFinished(turn_id="t", call_id="c", output="no", is_error=True, agent_id="a")
     assert output_entry(failed) == ("a: no", "error")
 
@@ -752,3 +756,102 @@ def test_coalesce_keeps_other_events_in_order() -> None:
 def test_coalesce_passes_empty_and_single_batches_through() -> None:
     assert coalesce([]) == []
     assert coalesce([tasks_changed("1")]) == [tasks_changed("1")]
+
+
+@pytest.mark.parametrize(
+    ("name", "arguments", "summary"),
+    [
+        ("Read", {"file_path": "src/a.py"}, "Read src/a.py"),
+        ("Write", {"file_path": "src/a.py", "content": "x"}, "Write src/a.py"),
+        ("Edit", {"file_path": "src/a.py", "old_string": "x"}, "Edit src/a.py"),
+        ("MultiEdit", {"file_path": "src/a.py", "edits": []}, "MultiEdit src/a.py"),
+        ("NotebookEdit", {"notebook_path": "n.ipynb"}, "NotebookEdit n.ipynb"),
+        ("Bash", {"command": "uv run pytest"}, "Bash uv run pytest"),
+        ("Grep", {"pattern": "def x"}, "Grep def x"),
+        ("Grep", {"pattern": "def x", "path": "src"}, "Grep def x in src"),
+        ("Glob", {"pattern": "*.py"}, "Glob *.py"),
+        ("Glob", {"pattern": "*.py", "path": "tests"}, "Glob *.py in tests"),
+        ("WebSearch", {"query": "textual"}, "WebSearch textual"),
+        ("WebFetch", {"url": "https://x.org"}, "WebFetch https://x.org"),
+        ("Task", {"description": "Find it", "prompt": "…"}, "Task Find it"),
+        ("Agent", {"description": "Find it"}, "Agent Find it"),
+        ("TodoWrite", {"todos": [{}, {}, {}]}, "TodoWrite 3 todos"),
+    ],
+)
+def test_tool_call_summary_names_a_built_in_tools_key_argument(
+    name: str, arguments: dict[str, Any], summary: str
+) -> None:
+    assert tool_call_summary(name, arguments) == summary
+
+
+@pytest.mark.parametrize("field", ["summary", "title", "note", "reason", "name"])
+def test_tool_call_summary_shows_an_orbit_tools_first_text_field(field: str) -> None:
+    arguments = {field: "Fix it", "zzz": "other"}
+    assert tool_call_summary("mcp__orbit__complete_task", arguments) == "complete_task Fix it"
+
+
+def test_tool_call_summary_prefers_an_orbit_tools_earlier_field() -> None:
+    arguments = {"name": "later", "summary": "first"}
+    assert tool_call_summary("mcp__orbit__x", arguments) == "x first"
+
+
+def test_tool_call_summary_shows_an_orbit_tool_without_a_text_field_by_name() -> None:
+    assert tool_call_summary("mcp__orbit__get_task", {}) == "get_task"
+    assert tool_call_summary("mcp__orbit__run_check", {"step": "lint"}) == "run_check"
+
+
+def test_tool_call_summary_shows_an_unknown_tools_arguments_as_json() -> None:
+    summary = tool_call_summary("upper", {"text": "hé"})
+    assert summary == 'upper {"text": "hé"}'
+
+
+def test_tool_call_summary_falls_back_to_json_without_its_key_argument() -> None:
+    assert tool_call_summary("Read", {}) == "Read {}"
+    assert tool_call_summary("Bash", {"command": 3}) == 'Bash {"command": 3}'
+    assert tool_call_summary("TodoWrite", {"todos": "x"}) == 'TodoWrite {"todos": "x"}'
+    assert tool_call_summary("Grep", {"pattern": "x", "path": 1}) == "Grep x"
+
+
+def test_tool_call_summary_shows_a_commands_first_line() -> None:
+    arguments = {"command": "cd  src;\techo hi\nls -la\npwd"}
+    assert tool_call_summary("Bash", arguments) == "Bash cd src; echo hi"
+
+
+def test_tool_call_summary_collapses_whitespace_in_its_key_argument() -> None:
+    arguments = {"summary": "Add  a\nthing"}
+    assert tool_call_summary("mcp__orbit__complete_task", arguments) == "complete_task Add a thing"
+
+
+def test_tool_call_summary_keeps_120_characters() -> None:
+    path = "a" * (120 - len("Read "))
+    assert tool_call_summary("Read", {"file_path": path}) == f"Read {path}"
+
+
+def test_tool_call_summary_cuts_121_characters_with_an_ellipsis() -> None:
+    path = "a" * (121 - len("Read "))
+    summary = tool_call_summary("Read", {"file_path": path})
+    assert len(summary) == 120
+    assert summary == f"Read {path[:114]}…"
+
+
+def test_a_tool_call_entry_collapses_its_full_arguments_beneath_a_summary() -> None:
+    arguments = {"file_path": "src/foo.py", "content": "a\nb"}
+    started = ToolCallStarted(turn_id="t", call_id="c", name="Write", arguments=arguments)
+    text, kind = output_entry(started)
+    first, _, rest = text.partition("\n")
+    assert first == "→ Write src/foo.py"
+    assert json.loads(rest) == arguments
+    assert starts_collapsed(kind)
+    assert entry_label(text, collapsed=True) == "▸ → Write src/foo.py (+4 lines)"
+
+
+def test_a_tool_call_entry_without_arguments_is_one_line() -> None:
+    started = ToolCallStarted(turn_id="t", call_id="c", name="mcp__orbit__get_task", arguments={})
+    text, _ = output_entry(started)
+    assert text == "→ mcp__orbit__get_task"
+    assert not collapsible(text)
+
+
+def test_a_tool_call_entrys_arguments_keep_non_ascii_text() -> None:
+    started = ToolCallStarted(turn_id="t", call_id="c", name="x", arguments={"a": "é"})
+    assert output_entry(started)[0] == '→ x {"a": "é"}\n{\n  "a": "é"\n}'
