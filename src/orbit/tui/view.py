@@ -117,8 +117,6 @@ def settings_summary(settings: Settings) -> str:
 # Transcript entries
 
 COLLAPSED_KINDS: frozenset[EntryKind] = frozenset({"tool"})
-GUTTER_BAR = "│"
-GUTTER_MARKER = "▌"
 """Kinds whose entries start collapsed: tool output is long and rarely read."""
 
 
@@ -141,6 +139,12 @@ def entry_label(text: str, collapsed: bool) -> str:
         return f"▾ {text}"
     more = rest.count("\n") + 1
     return f"▸ {first} (+{more} line{'s' if more != 1 else ''})"
+
+
+GUTTER_BAR = "│"
+"""The dim bar in front of each line of an entry the cursor isn't on."""
+GUTTER_MARKER = "▌"
+"""The marker that replaces the bar on every line of the cursor's entry."""
 
 
 def gutter_lines(label: str, marked: bool) -> list[tuple[str, str]]:
