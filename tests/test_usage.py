@@ -94,6 +94,7 @@ def test_reports_and_unavailable_outcomes_wait_the_refresh_period() -> None:
         (10.0, MIN_REFRESH_SECONDS),
         (900.0, 900.0),
         (MAX_RETRY_SECONDS + 1.0, MAX_RETRY_SECONDS),
+        (1e300, MAX_RETRY_SECONDS),
         (float("inf"), MAX_RETRY_SECONDS),
         (float("nan"), REFRESH_SECONDS),
     ],
@@ -125,6 +126,11 @@ def test_a_huge_rate_limit_retries_after_the_maximum() -> None:
     assert event == UsageChanged(
         limits=LIMITS, status="rate_limited", retry_at=NOW + timedelta(seconds=MAX_RETRY_SECONDS)
     )
+
+
+def test_an_enormous_rate_limit_retries_after_the_maximum() -> None:
+    event = usage_event(UsageRateLimited(1e300), (), NOW)
+    assert event.retry_at == NOW + timedelta(seconds=MAX_RETRY_SECONDS)
 
 
 def test_unavailable_keeps_the_last_limits_and_says_why() -> None:

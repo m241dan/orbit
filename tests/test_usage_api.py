@@ -158,7 +158,15 @@ async def test_a_refused_token_is_an_expired_login(tmp_path: Path, status: int) 
 
 @pytest.mark.parametrize(
     ("retry_after", "seconds"),
-    [("120", 120.0), ("2.5", 2.5), ("Wed, 21 Oct 2026 07:28:00 GMT", None)],
+    [
+        ("120", 120.0),
+        ("2.5", 2.5),
+        ("0", 0.0),
+        ("Wed, 21 Oct 2026 07:28:00 GMT", None),
+        ("inf", None),
+        ("nan", None),
+        ("-5", None),
+    ],
 )
 async def test_a_rate_limit_waits_as_long_as_it_asks(
     tmp_path: Path, retry_after: str, seconds: float | None

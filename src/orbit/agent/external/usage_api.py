@@ -1,6 +1,7 @@
 """The Claude subscription's usage limits, fetched from Anthropic's OAuth usage endpoint."""
 
 import json
+import math
 from pathlib import Path
 
 import httpx
@@ -86,10 +87,11 @@ def _report(response: httpx.Response) -> UsageFetch:
 
 def _retry_after(value: str | None) -> float | None:
     """The seconds a ``Retry-After`` header ``value`` asks for, or ``None`` if it isn't a
-    number (an HTTP date counts as not a number)."""
+    finite, non-negative number (an HTTP date counts as not a number)."""
     if value is None:
         return None
     try:
-        return float(value)
+        seconds = float(value)
     except ValueError:
         return None
+    return seconds if math.isfinite(seconds) and seconds >= 0 else None
