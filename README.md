@@ -456,7 +456,8 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     `AgentRun` sees one task through one agent; `AgentDesk` (in `desk`) launches agents and
     routes their calls by token; `Verifier` runs the steps; `Lander` commits and merges verified
     work; `ReviewLane` runs reviews beside the work; `StartupCheck` runs the steps once on the
-    base commit as orbit starts; `FrontendReview` is where the user decides on proposed checks;
+    base commit as orbit starts; `UsageMonitor` fetches the usage limits on a schedule and
+    after an agent's turn; `FrontendReview` is where the user decides on proposed checks;
     `PlannerChat` is the planner's conversation. `ports` defines what it needs from outside
     (`AgentHost`, `AgentLauncher`, `CoderTree`, `StepRunner`, `Workspace`).
   - `domain`: the rules, with no I/O: the `TaskBoard` (task order, statuses, fix chains),

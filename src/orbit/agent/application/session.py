@@ -14,11 +14,12 @@ from typing import Any, assert_never
 from orbit.agent.application.desk import AgentDesk, Agents
 from orbit.agent.application.lanes import crash_of, crash_report
 from orbit.agent.application.planner import PlannerChat
-from orbit.agent.application.ports import ProposalReview
+from orbit.agent.application.ports import ProposalReview, UsageSource
 from orbit.agent.application.proposals import FrontendReview
 from orbit.agent.application.review_lane import ReviewLane
 from orbit.agent.application.startup_check import AGENT_ID as STARTUP_AGENT
 from orbit.agent.application.startup_check import StartupCheck
+from orbit.agent.application.usage_monitor import UsageMonitor
 from orbit.agent.application.verifier import Verification, Verifier
 from orbit.agent.application.work_lane import WorkLane
 from orbit.agent.domain.agents import Agent
@@ -79,6 +80,13 @@ def _verifier(
     return Verifier(verification, board, events.put, agents.tree if agents else None)
 
 
+def _usage_monitor(
+    usage: UsageSource | None, events: "asyncio.Queue[Event]"
+) -> UsageMonitor | None:
+    """What fetches the usage limits from ``usage`` into ``events``; none without a source."""
+    return UsageMonitor(usage, events.put) if usage else None
+
+
 def _reviewed(agents: Agents | None, review: ProposalReview) -> Agents | None:
     """``agents``, with proposals going to ``review`` unless they already go somewhere."""
     if agents is None or agents.proposal_review is not None:
@@ -106,7 +114,8 @@ class AgentSession:
     tasks. ``WorkLane`` holds the rules of a task run: verification, fixes and reviews.
 
     With ``check_at_startup``, the ``verification`` steps also run once in the background as
-    the events start, on the base commit; a failure adds a draft task to fix it.
+    the events start, on the base commit; a failure adds a draft task to fix it. With a
+    ``usage`` source, the subscription's usage limits are fetched in the background too.
     """
 
     def __init__(
@@ -117,6 +126,8 @@ class AgentSession:
         agents: Agents | None = None,
         workspace: str | None = None,
         check_at_startup: bool = False,
+        *,
+        usage: UsageSource | None = None,
     ) -> None:
         self._settings = settings or Settings()
         self._model_choices = tuple(model_choices)
@@ -139,6 +150,7 @@ class AgentSession:
         self._work = self._work_lane()
         self._turn: asyncio.Task[object] | None = None  # The work lane's.
         self._planner_turn: asyncio.Task[object] | None = None
+        self._usage = _usage_monitor(usage, self._events)
 
     def _work_lane(self) -> WorkLane | None:
         if self._desk is None:
@@ -385,9 +397,11 @@ class AgentSession:
             await self._desk.stop()
 
     async def _stop_background(self) -> None:
-        """Stop the startup check and the review lane."""
+        """Stop the startup check, the usage monitor and the review lane."""
         if self._startup is not None:
             await self._startup.close()
+        if self._usage is not None:
+            await self._usage.close()
         if self._lane is not None:
             await self._lane.close()
 
@@ -395,10 +409,23 @@ class AgentSession:
         if not self._announced:
             self._announced = True
             await self._announce_leftovers()
-            if self._startup is not None:
-                self._startup.start()
+            self._start_background()
         while True:
-            yield await self._events.get()
+            event = await self._events.get()
+            self._nudge_usage(event)
+            yield event
+
+    def _start_background(self) -> None:
+        """Start the startup check and the usage monitor, if there are any."""
+        if self._startup is not None:
+            self._startup.start()
+        if self._usage is not None:
+            self._usage.start()
+
+    def _nudge_usage(self, event: Event) -> None:
+        """Have the usage monitor fetch again, if due, once ``event`` ends an agent's turn."""
+        if self._usage is not None and isinstance(event, TurnFinished) and event.agent_id:
+            self._usage.nudge()
 
     async def _announce_leftovers(self) -> None:
         """Tell the user about work earlier runs left in the coder's tree."""

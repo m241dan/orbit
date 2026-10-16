@@ -8,6 +8,7 @@ from typing import Any, Protocol
 
 from orbit.agent.domain.agents import Agent
 from orbit.agent.domain.roles import ChecksProposal, Setup
+from orbit.agent.domain.usage import UsageFetch
 from orbit.agent.domain.verification import VerificationStep
 from orbit.protocol import Event, MergeResult, ProposalAction, Settings
 
@@ -19,6 +20,9 @@ StepRunner = Callable[[VerificationStep, str], Awaitable[tuple[bool, str]]]
 
 ConfigWriter = Callable[[str, ChecksProposal], None]
 """Makes accepted checks the verification steps and setup in the project config in a directory."""
+
+UsageSource = Callable[[], Awaitable[UsageFetch]]
+"""Fetches the subscription's usage limits once."""
 
 Workspace = Callable[[str], Awaitable[object]]
 """A fingerprint of the working tree in a directory, equal before and after a task that
