@@ -378,7 +378,7 @@ async def test_an_agent_runs_connected_to_orbit(tmp_path: Path) -> None:
         }
     }
     assert "--strict-mcp-config" in argv
-    allowed = "mcp__orbit__get_task,mcp__orbit__complete_task,Read,Glob,Grep"
+    allowed = "mcp__orbit__get_task,mcp__orbit__complete_task,Read,Glob,Grep,WebSearch"
     assert argv[argv.index("--allowedTools") + 1] == allowed
     assert argv[argv.index("--append-system-prompt") + 1] == f"{AGENT_RULES}\n\nWrite code."
     assert "--resume" not in argv
@@ -408,7 +408,7 @@ async def test_restricted_agents_can_read_and_search_but_not_run_or_write(tmp_pa
     [call] = calls(scenario)
     argv = call["argv"]
     assert "--restricted" in argv
-    assert argv[argv.index("--allowedTools") + 1].endswith(",Read,Glob,Grep")
+    assert argv[argv.index("--allowedTools") + 1].endswith(",Read,Glob,Grep,WebSearch")
     assert argv[argv.index("--disallowedTools") + 1].endswith(",Edit,Write,NotebookEdit")
     # --restricted skips CLAUDE.md discovery; naming the tree brings its CLAUDE.md back.
     assert argv[argv.index("--add-dir") + 1] == str(tmp_path / "tree")
@@ -431,6 +431,7 @@ async def test_only_restricted_agents_get_the_read_only_flags(
     argv = calls(scenario)[0]["argv"]
     assert not {"--restricted", "--add-dir"} & set(argv)
     assert "Read" not in argv[argv.index("--allowedTools") + 1]
+    assert "WebSearch" not in argv[argv.index("--allowedTools") + 1]
     assert "Edit" not in argv[argv.index("--disallowedTools") + 1]
 
 
@@ -510,6 +511,6 @@ async def test_a_conversation_resumes_its_own_session_turn_after_turn(tmp_path: 
     assert two["argv"][two["argv"].index("--resume") + 1] == SESSION_ID
     assert "--resume" not in three["argv"]  # Another agent's conversation.
     assert two["stdin"] == "Smaller steps, please."
-    allowed = "mcp__orbit__propose_task,Read,Glob,Grep"  # The planner reads, as it's restricted.
+    allowed = "mcp__orbit__propose_task,Read,Glob,Grep,WebSearch"  # The planner is restricted.
     assert two["argv"][two["argv"].index("--allowedTools") + 1] == allowed
     assert two["env"]["ORBIT_AGENT_TOKEN"] == "s3cret"

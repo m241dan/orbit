@@ -56,9 +56,11 @@ TOKEN_VARIABLE = "ORBIT_AGENT_TOKEN"
 TOOL_TIMEOUT_MS = 30 * 60 * 1000
 # Statuses the CLI reports for an MCP server that is, or is about to be, usable.
 LIVE_MCP_STATUSES = ("connected", "pending")
-# What a restricted agent may use besides orbit's tools: reading and searching, never running
-# code (--restricted removes Bash and its kin) or writing files.
-READ_ONLY_TOOLS = ("Read", "Glob", "Grep")
+# What a restricted agent may use besides orbit's tools: reading and searching its tree and
+# the web, never running code (--restricted removes Bash and its kin) or writing files.
+# WebFetch is read-only too, but --restricted disables it unless --tools names it, and --tools
+# would replace the built-in set.
+READ_ONLY_TOOLS = ("Read", "Glob", "Grep", "WebSearch")
 WRITE_TOOLS = ("Edit", "Write", "NotebookEdit")
 # How agents are told to work is in the replies to their calls, which know their role.
 AGENT_RULES = (
@@ -70,7 +72,7 @@ AGENT_RULES = (
 def agent_args(launch: AgentLaunch) -> list[str]:
     """Flags connecting a CLI to orbit's MCP server, and only to it, allowing the role's tools
     (and hiding orbit's others) and telling it the rules and its role. A restricted agent can
-    read and search its tree, and nothing more."""
+    read and search its tree and the web, and nothing more."""
     headers = {"Authorization": f"Bearer ${{{TOKEN_VARIABLE}}}"}
     config = {"mcpServers": {"orbit": {"type": "http", "url": launch.url, "headers": headers}}}
     allowed = [f"mcp__orbit__{tool}" for tool in launch.tools]

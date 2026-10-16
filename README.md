@@ -300,8 +300,8 @@ drafts as the planner proposes them; when it says something while you're on anot
 planner tab gets a `*`.
 
 The planner is one agent for the whole session: each prompt resumes its conversation, so it
-remembers what you discussed. It reads your checkout but can't edit it, uses the model you picked
-with `ctrl+o`.
+remembers what you discussed. It reads your checkout and can search the web but can't edit your
+checkout, and uses the model you picked with `ctrl+o`.
 
 ### Reviews
 
@@ -402,9 +402,11 @@ Tool access levels:
 - `off`: no built-in tools; agents have only orbit's tools.
 - `restricted` (default): read-only. Agents start in Claude Code's `--restricted` mode, which
   removes Bash and the other tools that run code and ignores your user, project and local
-  settings files; `Read`, `Glob` and `Grep` are allowed, and `Edit`, `Write` and `NotebookEdit` are
-  disallowed. The project's `CLAUDE.md` still loads: `--restricted` skips it, so orbit names the
-  agent's directory with `--add-dir` and sets `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1`.
+  settings files; `Read`, `Glob`, `Grep` and `WebSearch` are allowed (read-only, including looking
+  things up on the web), and `Edit`, `Write` and `NotebookEdit` are disallowed. `WebFetch` isn't
+  allowed, as `--restricted` disables it. The project's `CLAUDE.md` still loads: `--restricted`
+  skips it, so orbit names the agent's directory with `--add-dir` and sets
+  `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1`.
 - `full`: every tool call is auto-approved (`--permission-mode bypassPermissions`). Claude can
   edit files and run commands without asking.
 
