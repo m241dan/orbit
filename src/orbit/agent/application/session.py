@@ -284,12 +284,13 @@ class AgentSession:
 
     async def _edit(self, task_id: str, task: TaskSpec) -> None:
         """Edit a task, unless it's a review orbit queued: its batch is spent, so it couldn't
-        run again."""
+        run again. An edited task in a review batch has to finish again before the batch does."""
         if self._lane is not None and self._lane.queued_by_orbit(task_id):
             message = "Reviews can't be edited; remove it instead."
             await self._events.put(ErrorOccurred(message=message))
             return
-        await self._change(self._board.edit, task_id, task)
+        if await self._change(self._board.edit, task_id, task) and self._lane is not None:
+            self._lane.edited(task_id)
 
     async def _remove(self, task_id: str) -> None:
         """Remove a task, and take it out of its review batch, if any."""

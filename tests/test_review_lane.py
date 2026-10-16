@@ -689,3 +689,45 @@ async def test_a_review_the_user_queued_can_be_edited_with_the_review_lane() -> 
     events = await edit_a_user_review(session)
     assert not _error_messages(events)
     assert [t.task.prompt for t in board(events)] == ["Again"]
+
+
+async def test_a_task_edited_back_to_pending_is_reviewed_with_its_batch() -> None:
+    sessions: list[AgentSession] = []
+
+    async def gives_up(call: Call) -> TurnEndReason:
+        await call("get_task")
+        await call("give_up", reason="blocked")
+        return "completed"
+
+    async def reopens_task_3(call: Call) -> TurnEndReason:
+        await call("get_task")
+        await sessions[0].send(EditTask(task_id="3", task=TaskSpec(prompt="Add tests, again.")))
+        await call("complete_task", summary="Did it")
+        return "completed"
+
+    session, _, _ = session_for(
+        claims_done,
+        gives_up,
+        reopens_task_3,
+        claims_done,
+        reviewers=(suggests("Add tests", "Rename x"), suggests()),
+        tree=FakeTree(),
+        review=True,
+    )
+    sessions.append(session)
+    await start(session)
+    events = await asyncio.wait_for(settle(session, until=lambda e: len(board(e)) == 4), 10)
+    assert [t.status for t in board(events)][2:] == ["pending", "completed"]
+    await session.send(RunTasks())
+    events = await asyncio.wait_for(settle(session, events), 10)
+    assert [(t.id, t.task.role, t.status) for t in board(events)] == [
+        ("1", "coder", "completed"),
+        ("2", "reviewer", "completed"),
+        ("3", "coder", "completed"),
+        ("4", "coder", "completed"),
+        ("5", "reviewer", "completed"),
+    ]
+    prompt = board(events)[4].task.prompt
+    assert prompt.startswith("Review the 2 commits made for review batch-1")
+    assert "ended without a commit" not in prompt
+    assert [e for e in events if isinstance(e, ReviewStatus)][-1].open_batches == 0

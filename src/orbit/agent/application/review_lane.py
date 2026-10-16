@@ -91,6 +91,10 @@ class ReviewLane:
         open_batch = batch in self.planner.open_batches
         await self._queue(self.planner.review_ended(batch) if open_batch else None)
 
+    def edited(self, task_id: str) -> None:
+        """Task ``task_id`` was edited back to pending, so its batch waits for it again."""
+        self.planner.reopened(self._board.get(task_id))
+
     def joined(self, task_id: str) -> None:
         """Task ``task_id`` was added to fix another; if that one is in a batch, so is it."""
         batch = self._board.get(task_id).batch

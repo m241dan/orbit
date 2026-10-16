@@ -162,6 +162,15 @@ class ReviewPlanner:
         batch.finished.discard(state.id)
         return self._due(batch_id)
 
+    def reopened(self, state: TaskState) -> None:
+        """Task ``state`` was edited back to pending: if its batch is open, it hasn't finished."""
+        batch = self._open.get(state.batch) if state.batch is not None else None
+        if batch is None:
+            return
+        batch.finished.discard(state.id)
+        if state.id in batch.missing:
+            batch.missing.remove(state.id)
+
     def _due(self, batch_id: str) -> ReviewJob | None:
         batch = self._open[batch_id]
         if batch.filling or any(task not in batch.finished for task in batch.tasks):

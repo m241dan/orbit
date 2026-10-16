@@ -299,3 +299,31 @@ def test_removing_a_task_outside_any_open_batch_changes_nothing() -> None:
     assert reviews.removed(state("1")) is None
     assert reviews.removed(state("9", origin="review", batch="batch-7")) is None
     assert reviews.open_batches == (batch,)
+
+
+def test_a_reopened_task_holds_its_batch_open_until_it_finishes_again() -> None:
+    reviews = planner()
+    batch = filled(reviews, "2", "3")
+    assert reviews.ended(state("2", status="error", origin="review", batch=batch)) is None
+    reviews.reopened(state("2", status="pending", origin="review", batch=batch))
+    assert reviews.landed(state("3", origin="review", batch=batch), "c3") is None
+    job = reviews.landed(state("2", origin="review", batch=batch), "c2")
+    assert job == ReviewJob(commits=("c3", "c2"), round=1, batch=batch)
+
+
+def test_a_reopened_task_that_had_landed_is_waited_for_again() -> None:
+    reviews = planner()
+    batch = filled(reviews, "2", "3")
+    assert reviews.landed(state("2", origin="review", batch=batch), "c2") is None
+    reviews.reopened(state("2", status="pending", origin="review", batch=batch))
+    assert reviews.landed(state("3", origin="review", batch=batch), "c3") is None
+    assert reviews.open_batches == (batch,)
+
+
+def test_reopening_a_task_outside_any_open_batch_changes_nothing() -> None:
+    reviews = planner()
+    batch = filled(reviews, "2")
+    reviews.reopened(state("1", status="pending"))
+    reviews.reopened(state("9", status="pending", origin="review", batch="batch-7"))
+    job = reviews.landed(state("2", origin="review", batch=batch), "c2")
+    assert job == ReviewJob(commits=("c2",), round=1, batch=batch)
