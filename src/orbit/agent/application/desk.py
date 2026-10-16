@@ -134,13 +134,16 @@ class AgentDesk:
             self._starting = None
 
     async def stop(self) -> None:
-        """Stop the host, if it was started, cancelling a start that's under way."""
+        """Stop the host, if it was started, cancelling a start that's under way; a host whose
+        start failed is left alone."""
         starting, self._starting = self._starting, None
         if starting is None:
             return
         starting.cancel()
         await asyncio.wait({starting})
-        await self.agents.host.stop()  # Also cleans up after a start cut short.
+        # A start that failed left nothing to stop, though the desk may not have forgotten it yet.
+        if starting.cancelled() or starting.exception() is None:
+            await self.agents.host.stop()  # Also cleans up after a start cut short.
 
     async def launch(self, agent: Agent, prompt: str, settings: Settings, cwd: str) -> AgentLaunch:
         """How to start ``agent`` in its role: told ``prompt``, with ``settings``, in ``cwd``."""

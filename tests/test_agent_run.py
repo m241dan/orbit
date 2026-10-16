@@ -8,7 +8,7 @@ import pytest
 
 from orbit.agent.application.agent_run import AgentRun, Outcome
 from orbit.agent.application.desk import NOTE_LIMIT, AgentDesk, Agents, progress_note
-from orbit.agent.application.ports import ProposalDecision, Reply
+from orbit.agent.application.ports import CallHandler, ProposalDecision, Reply
 from orbit.agent.application.verifier import Verifier
 from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.board import TaskBoard
@@ -579,8 +579,31 @@ async def test_stopping_after_a_failed_start_stops_nothing() -> None:
     desk = desk_on(host)
     with pytest.raises(RuntimeError):
         await desk.url()
-    await asyncio.sleep(0)
     await desk.stop()
+    assert host.stops == 0
+
+
+class StoppedAsItFailsHost(FailingHost):
+    """A host whose failing start has ``desk`` stopped before the desk forgets the start."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.desk: AgentDesk | None = None
+        self.stopping: list[asyncio.Task[None]] = []
+
+    async def start(self, handler: CallHandler) -> str:
+        assert self.desk is not None
+        self.stopping.append(asyncio.ensure_future(self.desk.stop()))
+        return await super().start(handler)
+
+
+async def test_stopping_as_a_start_fails_stops_nothing() -> None:
+    host = StoppedAsItFailsHost()
+    desk = host.desk = desk_on(host)
+    with pytest.raises(RuntimeError, match="failed to start"):
+        await desk.url()
+    [stopping] = host.stopping
+    await asyncio.wait_for(stopping, 5)
     assert host.stops == 0
 
 
