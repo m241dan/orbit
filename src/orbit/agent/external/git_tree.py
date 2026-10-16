@@ -53,8 +53,14 @@ def git_top_level(path: str) -> str | None:
 
 
 async def _run(command: Sequence[str], cwd: Path) -> tuple[bool, str]:
-    """Run ``command`` in ``cwd``; returns whether it succeeded and its combined output."""
-    returncode, output = await run_process(command, cwd)
+    """Run ``command`` in ``cwd``; returns whether it succeeded and its combined output.
+
+    Raises ``RuntimeError`` when it can't be started, such as in a directory that isn't there.
+    """
+    try:
+        returncode, output = await run_process(command, cwd)
+    except OSError as error:
+        raise RuntimeError(f"{' '.join(command[:2])} failed to start in {cwd}: {error}") from error
     return returncode == 0, output.decode(errors="replace").strip()
 
 
@@ -116,6 +122,10 @@ class GitCoderTree:
     async def head(self) -> str:
         return await self._git(await self._path(), "rev-parse", "HEAD")
 
+    async def base_commit(self) -> str:
+        base = await self._base_branch()
+        return await self._git(self._root, "rev-parse", f"refs/heads/{base}" if base else "HEAD")
+
     async def show(self, commits: Sequence[str]) -> str:
         return await self._git(self._root, "show", "--stat", "--patch", "--format=medium", *commits)
 
@@ -150,7 +160,7 @@ class GitCoderTree:
         return [note for note in notes if note]
 
     async def _unmerged(self) -> str | None:
-        base = self._base if self._started else await self._checked_out()
+        base = await self._base_branch()
         if base is None or not await self._exists(BRANCH):
             return None
         count = int(await self._git(self._root, "rev-list", "--count", f"{base}..{BRANCH}"))
@@ -239,6 +249,10 @@ class GitCoderTree:
             self._root, "rev-parse", "--path-format=absolute", "--git-common-dir"
         )
         return Path(common) / "orbit" / "coder"
+
+    async def _base_branch(self) -> str | None:
+        """The base branch: the one checked out when the tree started, or now, before it has."""
+        return self._base if self._started else await self._checked_out()
 
     async def _checked_out(self) -> str | None:
         """The branch the main checkout is on; ``None`` on a detached HEAD."""

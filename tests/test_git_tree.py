@@ -353,6 +353,34 @@ async def test_head_is_the_trees_latest_commit(repo: Path) -> None:
     assert await tree.head() == git(path, "rev-parse", "HEAD")
 
 
+async def test_head_before_the_coder_tree_exists_raises_a_runtime_error(repo: Path) -> None:
+    # git can't run in a directory that isn't there; callers expect a RuntimeError, not an OSError.
+    tree = GitCoderTree(str(repo))
+    with pytest.raises(RuntimeError, match="git rev-parse"):
+        await tree.head()
+
+
+async def test_base_commit_is_the_checkouts_head_before_the_tree_is_prepared(repo: Path) -> None:
+    tree = GitCoderTree(str(repo))
+    assert await tree.base_commit() == git(repo, "rev-parse", "HEAD")
+    assert not (repo / ".git" / "orbit" / "coder").exists()
+
+
+async def test_base_commit_follows_the_base_branch(repo: Path) -> None:
+    tree = GitCoderTree(str(repo))
+    path = Path(await tree.prepare(keep=False))
+    commit_file(repo, "c.txt", "three\n", "user's commit")
+    assert await tree.base_commit() == git(repo, "rev-parse", "main")
+    assert await tree.base_commit() != git(path, "rev-parse", "HEAD")  # The tree lags behind.
+
+
+async def test_base_commit_on_a_detached_checkout_is_its_head(repo: Path) -> None:
+    git(repo, "checkout", "-q", "--detach")
+    tree = GitCoderTree(str(repo))
+    await tree.prepare(keep=False)
+    assert await tree.base_commit() == git(repo, "rev-parse", "HEAD")
+
+
 async def test_show_gives_each_commits_message_and_diff(repo: Path) -> None:
     tree = GitCoderTree(str(repo))
     path = Path(await tree.prepare(keep=False))

@@ -64,8 +64,9 @@ class ReviewLane:
             await self._queue(self.planner.super_review(commit))
 
     async def super_review(self) -> None:
-        """Queue a super review of the codebase as it is now."""
-        await self._queue(self.planner.super_review(await self._tree.head()))
+        """Queue a super review of the codebase as the user has it: the base's latest commit.
+        (The coder's tree may lag behind it, or not exist yet.)"""
+        await self._queue(self.planner.super_review(await self._tree.base_commit()))
 
     async def ended(self, task_id: str) -> None:
         """Task ``task_id`` finished without landing anything."""

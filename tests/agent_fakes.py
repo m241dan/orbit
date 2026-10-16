@@ -134,6 +134,7 @@ class FakeTree:
 
     path = "/work/coder"
     branch = "orbit/coder"
+    base = "base"  # The base branch's commit, apart from the tree's own heads.
 
     def __init__(
         self, *merges: Merge, leftovers: tuple[str, ...] = (), broken: str = "", empty: bool = False
@@ -168,7 +169,12 @@ class FakeTree:
         return self.merges.pop(0) if self.merges else Merge("merged")
 
     async def head(self) -> str:
+        if not self.prepared:  # Like git in a worktree that doesn't exist yet.
+            raise RuntimeError("git rev-parse failed: the coder's tree doesn't exist")
         return f"c{len(self.commits) + self.agent_commits}"
+
+    async def base_commit(self) -> str:
+        return self.base
 
     async def show(self, commits: Sequence[str]) -> str:
         return "\n".join(f"diff of {commit}" for commit in commits)

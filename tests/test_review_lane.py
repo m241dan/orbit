@@ -384,13 +384,15 @@ async def test_every_so_many_commits_the_whole_codebase_is_super_reviewed() -> N
     assert "c2" in tree.snapshots
 
 
-async def test_a_super_review_can_be_asked_for() -> None:
+async def test_a_super_review_can_be_asked_for_before_any_task_ran() -> None:
+    # The coder's tree doesn't exist yet, so its head can't be read; the base's commit can.
     tree = FakeTree()
     session, _, _ = session_for(reviewers=(suggests(),), tree=tree, review=True)
     await session.send(RequestSuperReview())
     events = await asyncio.wait_for(settle(session), 10)
     assert [t.task.role for t in board(events)] == ["super-reviewer"]
-    assert tree.snapshots == ["c0"]
+    assert tree.snapshots == [tree.base] and tree.prepared == []
+    assert not any(isinstance(e, ErrorOccurred) for e in events)
 
 
 async def test_without_reviews_a_super_review_is_refused() -> None:

@@ -116,6 +116,11 @@ class CoderTree(Protocol):
         """The tree's latest commit."""
         ...
 
+    async def base_commit(self) -> str:
+        """The base's latest commit: the base branch's, or the main checkout's ``HEAD`` while
+        there's no base branch. Works before the tree exists."""
+        ...
+
     async def show(self, commits: Sequence[str]) -> str:
         """Each of ``commits``' message and diff."""
         ...
