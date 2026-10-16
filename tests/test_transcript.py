@@ -11,7 +11,9 @@ from orbit.tui.view import GUTTER_BAR, GUTTER_MARKER
 from orbit.tui.widgets import GutteredEntry, Transcript, TranscriptLog
 from tests.test_tui import FakeSession, feed_events, said, started
 
-LONG = " ".join(["word"] * 30)  # Wraps in any window a test opens.
+# Wraps in any window a test opens. At 40 columns a row beside the gutter holds two words but
+# would hold three if wrapped at the full width, so cropping a row would lose text.
+LONG = " ".join(["gutter"] * 20)
 
 
 def visible_log(app: OrbitApp) -> TranscriptLog:
@@ -123,6 +125,14 @@ async def test_every_entry_has_a_dim_bar_in_its_gutter_without_a_cursor() -> Non
         )
 
 
+def assert_rows_hold_label(log: TranscriptLog, rows: int, label: str) -> None:
+    """Assert the log's first ``rows`` rows fit its content width and, past their gutter, hold
+    all of ``label``, so wrapping beside the gutter crops nothing."""
+    lines = rendered(log, rows)
+    assert all(len(line) <= log.scrollable_content_region.width for line in lines)
+    assert " ".join(line[2:].rstrip() for line in lines) == label
+
+
 async def test_every_wrapped_row_of_an_entry_keeps_its_gutter() -> None:
     session = FakeSession()
     app = OrbitApp(session)
@@ -133,9 +143,11 @@ async def test_every_wrapped_row_of_an_entry_keeps_its_gutter() -> None:
         assert rows > 3  # The entry wraps onto several rows, then a blank one.
         assert all(row.startswith(f"{GUTTER_BAR} ") for row in rendered(log, rows - 1))
         assert rendered(log, rows)[-1] == ""
+        assert_rows_hold_label(log, rows - 1, labels(app)[0])
         await pilot.press("k", "enter")
         assert all(row.startswith(f"{GUTTER_MARKER} ") for row in rendered(log, rows - 1))
         assert rendered(log, rows)[-1] == ""
+        assert_rows_hold_label(log, rows - 1, labels(app)[0])
 
 
 async def test_the_cursors_entry_is_marked_and_the_marker_moves_with_it() -> None:
