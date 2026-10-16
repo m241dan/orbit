@@ -54,7 +54,7 @@ In the app:
 | `ctrl+r` | Run the tasks that haven't completed yet |
 | `ctrl+g` | Ask for a super review of the whole codebase now (works while tasks run) |
 | `ctrl+e` | Set up (or redo) the verification steps: queue a configurator task first and run it (see [Setting up verification](#setting-up-verification)) |
-| `ctrl+o` | Pick the planner's model (default, fable, opus, sonnet, haiku) |
+| `ctrl+o` | Pick the planner's model (default, fable, opus, sonnet, haiku; new tasks default to it too) |
 | `ctrl+l` | Pick the tool access level new tasks start with in the task editor (off, restricted, full) |
 | `esc` | Stop typing or close a picker |
 | `ctrl+s` | Stop the task run (on any tab) |
@@ -395,7 +395,9 @@ appears in the process list. Agents are started with `--strict-mcp-config` (only
 repository, stays out of agents' context).
 
 A model picked with `ctrl+o` applies from the planner's next prompt and keeps its conversation; the
-tool access picked with `ctrl+l` is what new tasks start with in the task editor.
+tool access picked with `ctrl+l` is what new tasks start with in the task editor. `ctrl+l` does not
+change the planner's own tool access, which is the planner role's (`[roles.planner] tool_access` in
+`.orbit/config.toml`, `restricted` by default).
 
 Tool access levels:
 

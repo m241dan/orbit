@@ -107,10 +107,11 @@ def model_label(settings: Settings) -> str:
 def settings_summary(settings: Settings) -> str:
     """The settings as the prompt shows them.
 
-    The planner uses only the model; tool access is the default for new tasks.
+    The model is the planner's, and the default for new tasks; the tool access is
+    only the default for new tasks.
     """
     tools = TOOL_ACCESS_LABELS[settings.tool_access]
-    return f"model: {model_label(settings)} · new tasks' tools: {tools}"
+    return f"planner's model: {model_label(settings)} · new tasks' tools: {tools}"
 
 
 # Transcript entries
