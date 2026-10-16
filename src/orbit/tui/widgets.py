@@ -169,6 +169,7 @@ class TranscriptLog(ListPane):
     TranscriptLog .transcript--tool { color: $text-muted; }
     TranscriptLog .transcript--verify { color: $text-warning; }
     TranscriptLog .transcript--agent { color: $text-accent; }
+    TranscriptLog .transcript--request { color: $text-accent; }
     TranscriptLog .transcript--error { color: $text-error; }
     TranscriptLog .transcript--gutter { color: $text-muted; }
     TranscriptLog .transcript--marker { color: $accent; }

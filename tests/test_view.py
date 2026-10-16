@@ -173,16 +173,49 @@ def test_agent_lifecycle_becomes_transcript_entries() -> None:
 
 
 def test_agent_exchanges_become_transcript_entries() -> None:
-    request = AgentRequest(
-        agent_id="agent-1", request_id="r", tool="complete_task", arguments={"summary": "ok"}
-    )
-    assert exchange_entry(request) == ('agent-1 → orbit: complete_task {"summary": "ok"}', "agent")
     reply = AgentReply(agent_id="agent-1", request_id="r", text="Checks passed.")
     assert exchange_entry(reply) == ("orbit → agent-1: Checks passed.", "agent")
     refused = AgentReply(agent_id="agent-1", request_id="r", text="No task.", is_error=True)
     assert exchange_entry(refused) == ("orbit → agent-1: No task.", "error")
     note = ProgressNoted(agent_id="agent-1", task_id="1", note="tests written")
     assert exchange_entry(note) == ("agent-1: tests written", "agent")
+
+
+def test_an_orbit_request_collapses_its_full_arguments_beneath_a_summary() -> None:
+    arguments = {"title": "Add a flag", "prompt": "First paragraph.\n\nSecond paragraph."}
+    request = AgentRequest(
+        agent_id="agent-1", request_id="r", tool="suggest_task", arguments=arguments
+    )
+    text, kind = exchange_entry(request)
+    first, _, rest = text.partition("\n")
+    assert first == "agent-1 → orbit: suggest_task Add a flag"
+    assert json.loads(rest) == arguments
+    assert starts_collapsed(kind)
+
+
+def test_an_orbit_request_summary_is_clipped_to_the_tool_call_limit() -> None:
+    title = "a" * 200
+    request = AgentRequest(
+        agent_id="agent-1", request_id="r", tool="suggest_task", arguments={"title": title}
+    )
+    first = exchange_entry(request)[0].partition("\n")[0]
+    assert first == f"agent-1 → orbit: suggest_task {title[:106]}…"
+
+
+def test_an_orbit_request_without_arguments_is_one_line() -> None:
+    request = AgentRequest(agent_id="agent-1", request_id="r", tool="get_task", arguments={})
+    text, _ = exchange_entry(request)
+    assert text == "agent-1 → orbit: get_task"
+    assert not collapsible(text)
+
+
+def test_an_orbit_request_keeps_non_ascii_arguments() -> None:
+    request = AgentRequest(
+        agent_id="agent-1", request_id="r", tool="complete_task", arguments={"summary": "café ✓"}
+    )
+    text, _ = exchange_entry(request)
+    assert text.partition("\n")[0] == "agent-1 → orbit: complete_task café ✓"
+    assert '"café ✓"' in text
 
 
 def test_no_steps_skip_reason_reads_naturally() -> None:
@@ -503,8 +536,8 @@ def test_marking_a_tab_unread_skips_the_shown_tab_and_all() -> None:
     assert mark_tab_unread(PINNED_TABS, None, active=None) == PINNED_TABS
 
 
-def test_only_tool_entries_start_collapsed() -> None:
-    assert starts_collapsed("tool")
+def test_only_tool_and_request_entries_start_collapsed() -> None:
+    assert starts_collapsed("tool") and starts_collapsed("request")
     assert not any(
         starts_collapsed(kind) for kind in ("user", "assistant", "verify", "agent", "error")
     )

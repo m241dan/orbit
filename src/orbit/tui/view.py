@@ -58,7 +58,7 @@ from orbit.protocol import (
     VerificationStarted,
 )
 
-EntryKind = Literal["user", "assistant", "tool", "verify", "agent", "error"]
+EntryKind = Literal["user", "assistant", "tool", "verify", "agent", "request", "error"]
 """How a transcript entry is styled."""
 
 TOOL_ACCESS_OPTIONS: tuple[ToolAccess, ...] = get_args(ToolAccess)
@@ -170,8 +170,9 @@ def settings_summary(settings: Settings) -> str:
 
 # Transcript entries
 
-COLLAPSED_KINDS: frozenset[EntryKind] = frozenset({"tool"})
-"""Kinds whose entries start collapsed: tool output is long and rarely read."""
+COLLAPSED_KINDS: frozenset[EntryKind] = frozenset({"tool", "request"})
+"""Kinds whose entries start collapsed: tool output and the arguments of agents' requests to
+orbit are long and rarely read."""
 
 
 def starts_collapsed(kind: EntryKind) -> bool:
@@ -239,6 +240,15 @@ def _tool_call(name: str, arguments: Mapping[str, Any]) -> str:
         return f"→ {name}"
     full = json.dumps(arguments, indent=2, ensure_ascii=False)
     return f"→ {tool_call_summary(name, arguments)}\n{full}"
+
+
+def _orbit_request(tool: str, arguments: Mapping[str, Any]) -> str:
+    """A request to orbit's ``tool`` as one line summing it up, with its full ``arguments`` on
+    the lines after."""
+    if not arguments:
+        return tool
+    summary = _clip(_orbit_tool_summary(tool, arguments), TOOL_CALL_SUMMARY_LIMIT)
+    return f"{summary}\n{json.dumps(arguments, indent=2, ensure_ascii=False)}"
 
 
 TOOL_CALL_SUMMARY_LIMIT = 120
@@ -356,7 +366,7 @@ def exchange_entry(event: AgentRequest | AgentReply | ProgressNoted) -> tuple[st
     """A message between an agent and orbit, as a transcript entry."""
     match event:
         case AgentRequest(agent_id=agent, tool=tool, arguments=arguments):
-            return f"{agent} → orbit: {tool} {json.dumps(arguments)}", "agent"
+            return f"{agent} → orbit: {_orbit_request(tool, arguments)}", "request"
         case AgentReply(agent_id=agent, text=text, is_error=is_error):
             return f"orbit → {agent}: {text}", "error" if is_error else "agent"
         case ProgressNoted(agent_id=agent, note=note):

@@ -136,10 +136,10 @@ to the planner.
 
 Each entry is coloured by what it is: your prompts, agents' messages, tool calls and their output,
 verification and notices, and errors. A tool call shows as one line naming the tool and its main
-argument, such as the file or command, with its full arguments collapsed beneath it. An entry
-of more than one line can be collapsed to its first line and a count of the rest, marked `▸`
-(`▾` when expanded); tool calls and output start collapsed. Press
-`enter` on the conversation to move between entries with `j`/`k`, `enter` again to collapse or
+argument, such as the file or command, with its full arguments collapsed beneath it; an agent's
+request to orbit shows the same way. An entry of more than one line can be collapsed to its first
+line and a count of the rest, marked `▸` (`▾` when expanded); tool calls, their output and requests
+to orbit start collapsed. Press `enter` on the conversation to move between entries with `j`/`k`, `enter` again to collapse or
 expand the one marked `▌` in the left gutter, and `esc` to leave. Leaving holds the marked entry:
 the mark stays, the conversation stops following new output, and `enter` picks up there again.
 `esc` again with the Conversation window selected lets go, and the conversation follows the latest
