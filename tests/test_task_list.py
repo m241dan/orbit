@@ -664,3 +664,17 @@ async def test_editor_scrolls_every_field_into_view_in_a_small_terminal() -> Non
         await pilot.press("k", "k", "k")
         assert box.scroll_y == 0
         assert box.content_region.contains_region(screen.query_one("#task-title").region)
+
+
+async def test_tab_does_not_focus_the_editor_scroll_container() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await show_settings(session, pilot, Settings())
+        await feed(session, pilot, board("Add a widget"))
+        await open_task_list(pilot)
+        await pilot.press("enter")
+
+        await pilot.press("tab")
+        assert app.focused is None
+        assert isinstance(app.screen, TaskEditorScreen)

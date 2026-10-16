@@ -224,7 +224,8 @@ class TaskEditorScreen(ModalScreen[TaskSpec | None]):
 
     def compose(self) -> ComposeResult:
         title, body = split_prompt(self._prompt)
-        with VerticalScroll() as box:
+        # Fields are reached with j/k, not by tabbing or clicking; the wheel still scrolls.
+        with VerticalScroll(can_focus=False) as box:
             box.border_title = self.title_text
             box.border_subtitle = "j/k move · i type · enter choose · ctrl+s save · esc cancel"
             yield PromptInput(value=title, placeholder="Press i to type", id="task-title")
