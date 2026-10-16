@@ -169,11 +169,6 @@ class AgentSession:
         await self._publish_tasks()
 
     @property
-    def _planner_turn(self) -> "asyncio.Task[object] | None":
-        """The planner's current or last turn."""
-        return self._planner_turns.turn
-
-    @property
     def settings(self) -> Settings:
         return self._settings
 
@@ -209,8 +204,7 @@ class AgentSession:
             case CancelTurn(lane="planner"):
                 self._planner_turns.cancel()
             case CancelTurn():
-                self._held = True
-                self._work_turns.cancel()
+                self._hold_work()
             case UpdateSettings(settings=settings):
                 self._settings = settings
                 await self._events.put(self._settings_changed())
@@ -254,8 +248,7 @@ class AgentSession:
         self._board.add_first(self._configurator_task(self._desk.agents))
         await self._publish_tasks()
         if not self._work_turns.running:
-            self._held = False
-            await self._work_turns.start(self._work.run())
+            await self._start_work(asked=True)
 
     def _configuring(self) -> bool:
         """Whether a configurator task is queued or running."""
@@ -302,11 +295,25 @@ class AgentSession:
         if self._work is None:
             await self._events.put(ErrorOccurred(message=NO_AGENTS_MESSAGE))
             return
-        self._held = False
         if self._lane is not None:
             self._lane.kick()
+        await self._start_work(asked=True)
+
+    async def _start_work(self, *, asked: bool) -> None:
+        """Start the work lane's turn if there is work. The user ``asked`` lifts a hold, and a
+        run already running refuses them; otherwise a hold or a running run keeps it waiting."""
+        assert self._work is not None  # Work needs agents.
+        if asked:
+            self._held = False
+        elif self._held or self._work_turns.running:
+            return
         if self._work.next_work() is not None:
             await self._work_turns.start(self._work.run())
+
+    def _hold_work(self) -> None:
+        """Cancel the work lane's run, and hold it until the user asks for work again."""
+        self._held = True
+        self._work_turns.cancel()
 
     async def _handle_agents(
         self, command: RequestSuperReview | CancelAgent | DecideProposal
@@ -349,8 +356,7 @@ class AgentSession:
         elif agent.role == PLANNER:
             self._planner_turns.cancel()
         else:
-            self._held = True
-            self._work_turns.cancel()
+            self._hold_work()
 
     def _cancel_startup(self, agent_id: str) -> bool:
         """Cancel the startup check if it's agent ``agent_id`` and still running; returns
@@ -370,9 +376,7 @@ class AgentSession:
 
     async def _wake_work(self) -> None:
         """Run the work a review queued, unless something runs or the user cancelled."""
-        assert self._work is not None  # Only reviews wake it, and they need agents.
-        if not (self._work_turns.running or self._held) and self._work.next_work() is not None:
-            await self._work_turns.start(self._work.run())
+        await self._start_work(asked=False)
 
     def _review_lane(self) -> ReviewLane | None:
         desk = self._desk

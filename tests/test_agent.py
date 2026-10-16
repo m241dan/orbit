@@ -170,7 +170,9 @@ async def test_a_turn_started_as_the_last_ends_is_not_reported_idle() -> None:
     session, _, launcher = session_for()
     launcher.planner_turns = [chats, chats]
     await session.send(SubmitPrompt(text="one"))
-    turn = session._planner_turn
+    # The race sits between the task ending and its done-callback reporting idle, which no
+    # event marks: TurnFinished comes before the end, BusyChanged after the callback.
+    turn = session._planner_turns.turn
     assert turn is not None
     while not turn.done():
         await asyncio.sleep(0)
