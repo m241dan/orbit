@@ -506,6 +506,21 @@ async def test_two_sessions_can_snapshot_one_commit_at_once(repo: Path) -> None:
     assert all((Path(path) / "a.txt").exists() for path in paths)
 
 
+async def test_snapshots_left_by_an_earlier_run_dont_block_a_later_one(repo: Path) -> None:
+    earlier = GitCoderTree(str(repo))
+    await earlier.prepare(keep=False)
+    commit = await earlier.head()
+    left = {await earlier.snapshot(commit), await earlier.snapshot("HEAD")}  # Never dropped.
+
+    later = GitCoderTree(str(repo))
+    taken = [await later.snapshot(commit), await later.snapshot("HEAD")]
+    assert len(set(taken)) == 2 and not left & set(taken)
+    for path in taken:
+        await later.drop(path)
+        assert not Path(path).exists()
+    assert all(Path(path).exists() for path in left)
+
+
 async def test_leftovers_report_snapshots_left_by_other_sessions_only(repo: Path) -> None:
     earlier, tree = GitCoderTree(str(repo)), GitCoderTree(str(repo))
     await earlier.snapshot("HEAD")
