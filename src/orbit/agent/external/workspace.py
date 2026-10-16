@@ -27,7 +27,12 @@ async def workspace_state(root: Path | str = ".") -> WorkspaceState | None:
     if returncode != 0:
         return None
     paths = {p for p in output.decode(errors="surrogateescape").split("\0") if p}
-    return frozenset(_fingerprint(Path(root), path) for path in paths)
+    return await asyncio.to_thread(_fingerprints, Path(root), paths)
+
+
+def _fingerprints(root: Path, paths: set[str]) -> WorkspaceState:
+    """Each of ``paths`` under ``root`` with its size and modification time."""
+    return frozenset(_fingerprint(root, path) for path in paths)
 
 
 def _fingerprint(root: Path, path: str) -> tuple[str, int, int]:

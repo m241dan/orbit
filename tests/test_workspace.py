@@ -1,6 +1,8 @@
 import os
 import subprocess
+import threading
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -59,3 +61,28 @@ async def test_without_git_the_state_is_unknown(
 ) -> None:
     monkeypatch.setenv("PATH", "")
     assert await workspace_state(repo) is None
+
+
+async def test_a_missing_tracked_file_has_no_size_or_time(repo: Path) -> None:
+    (repo / "tracked.py").unlink()
+    state = await workspace_state(repo)
+    assert state is not None
+    assert ("tracked.py", -1, -1) in state
+
+
+async def test_files_are_checked_off_the_event_loops_thread(
+    repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    threads: set[threading.Thread] = set()
+    real_stat = os.stat
+
+    def recording_stat(path: Path, *args: Any, **kwargs: Any) -> os.stat_result:
+        threads.add(threading.current_thread())
+        return real_stat(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "stat", recording_stat)
+    state = await workspace_state(repo)
+    assert state is not None
+    assert {path for path, _, _ in state} == {".gitignore", "tracked.py"}
+    assert threads
+    assert threading.current_thread() not in threads

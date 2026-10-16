@@ -3,11 +3,14 @@
 import asyncio
 import subprocess
 import sys
+import threading
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from orbit.agent.domain.roles import Setup
+from orbit.agent.external import git_tree
 from orbit.agent.external.git_tree import GitCoderTree, git_top_level, in_git_work_tree
 
 
@@ -280,6 +283,44 @@ async def test_a_failing_setup_raises_and_runs_again_next_time(repo: Path) -> No
         await tree.prepare(keep=False)
     with pytest.raises(RuntimeError, match="no network"):
         await tree.prepare(keep=False)
+
+
+async def test_setup_checks_its_files_off_the_event_loops_thread(
+    repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    commit_file(repo, "uv.lock", "v1\n", "lock")
+    setup, runs = counting_setup(repo, watch=("uv.lock",))
+    threads: list[threading.Thread] = []
+    real_fingerprint, real_read, real_write = (
+        git_tree._fingerprint,
+        Path.read_text,
+        Path.write_text,
+    )
+
+    def fingerprint(setup: Setup, path: Path) -> str:
+        threads.append(threading.current_thread())
+        return real_fingerprint(setup, path)
+
+    def read_text(self: Path, *args: Any, **kwargs: Any) -> str:
+        if self.name == "coder.synced":
+            threads.append(threading.current_thread())
+        return real_read(self, *args, **kwargs)
+
+    def write_text(self: Path, *args: Any, **kwargs: Any) -> int:
+        if self.name == "coder.synced":
+            threads.append(threading.current_thread())
+        return real_write(self, *args, **kwargs)
+
+    monkeypatch.setattr(git_tree, "_fingerprint", fingerprint)
+    monkeypatch.setattr(Path, "read_text", read_text)
+    monkeypatch.setattr(Path, "write_text", write_text)
+    tree = GitCoderTree(str(repo), setup=setup)
+    await tree.prepare(keep=False)
+    await tree.prepare(keep=False)
+
+    assert runs.read_text() == "x"
+    assert len(threads) == 4  # Two fingerprints, one stamp written, then read.
+    assert threading.current_thread() not in threads
 
 
 async def test_without_setup_nothing_runs(repo: Path) -> None:

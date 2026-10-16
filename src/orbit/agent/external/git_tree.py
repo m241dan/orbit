@@ -6,6 +6,7 @@ that was checked out when orbit started, fast-forward only. Work is never delete
 left behind are stashed, and commits that can't be merged stay on ``orbit/coder``.
 """
 
+import asyncio
 import datetime
 import hashlib
 import itertools
@@ -72,6 +73,11 @@ def _fingerprint(setup: Setup, path: Path) -> str:
         content = file.read_bytes() if file.is_file() else None
         digest.update(repr((name, content)).encode())
     return digest.hexdigest()
+
+
+def _read_stamp(stamp: Path) -> str | None:
+    """The digest ``stamp`` records; ``None`` when there isn't one."""
+    return stamp.read_text() if stamp.exists() else None
 
 
 class GitCoderTree:
@@ -207,14 +213,14 @@ class GitCoderTree:
     async def _set_up(self, path: Path) -> None:
         if self.setup is None:
             return
-        digest = _fingerprint(self.setup, path)
+        digest = await asyncio.to_thread(_fingerprint, self.setup, path)
         stamp = path.parent / "coder.synced"
-        if stamp.exists() and stamp.read_text() == digest:
+        if await asyncio.to_thread(_read_stamp, stamp) == digest:
             return
         ok, output = await _run(self.setup.command, path)
         if not ok:
             raise RuntimeError(f"Setting up the coder's tree failed: {output}")
-        stamp.write_text(digest)
+        await asyncio.to_thread(stamp.write_text, digest)
 
     # Merging
 
