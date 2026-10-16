@@ -433,8 +433,10 @@ class AgentSession:
     async def events(self) -> AsyncIterator[Event]:
         if not self._announced:
             self._announced = True
-            await self._announce_leftovers()
-            self._start_background()
+            try:
+                await self._announce_leftovers()
+            finally:  # A listener cancelled meanwhile mustn't keep the background from starting.
+                self._start_background()
         while True:
             event = await self._events.get()
             self._nudge_usage(event)

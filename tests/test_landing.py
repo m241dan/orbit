@@ -1,9 +1,16 @@
 """Landing finished work: committing it in the coder's tree and merging it into the base."""
 
 import asyncio
+from collections.abc import AsyncIterator, Callable
+from typing import Any
+
+import pytest
 
 from orbit.agent.application.ports import Merge
+from orbit.agent.application.startup_check import StartupCheck
+from orbit.agent.application.usage_monitor import UsageMonitor
 from orbit.agent.domain.agent_task import Limits
+from orbit.agent.domain.usage import UsageFetch, UsageUnavailable
 from orbit.protocol import (
     ErrorOccurred,
     Event,
@@ -158,6 +165,65 @@ async def test_leftovers_from_earlier_runs_are_announced_once_at_the_start() -> 
     await asyncio.sleep(0.01)
     assert not waiting.done()
     waiting.cancel()
+
+
+class SlowTree(FakeTree):
+    """A tree whose leftovers are only found once ``found`` is set."""
+
+    def __init__(self, *leftovers: str) -> None:
+        super().__init__(leftovers=leftovers)
+        self.asked = asyncio.Event()
+        self.found = asyncio.Event()
+
+    async def leftovers(self) -> list[str]:
+        self.asked.set()
+        await self.found.wait()
+        return await super().leftovers()
+
+
+def recorded(start: Callable[[Any], None], name: str, started: list[str]) -> Callable[[Any], None]:
+    """``start``, noting ``name`` in ``started`` on each call."""
+
+    def wrapper(self: Any) -> None:
+        started.append(name)
+        start(self)
+
+    return wrapper
+
+
+async def listen(stream: AsyncIterator[Event], seen: list[Event]) -> None:
+    async for event in stream:
+        seen.append(event)
+
+
+async def no_usage() -> UsageFetch:
+    return UsageUnavailable("no usage here")
+
+
+async def test_a_listener_cancelled_while_leftovers_are_found_still_starts_the_background(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    started: list[str] = []
+    for part, name in ((StartupCheck, "startup"), (UsageMonitor, "usage")):
+        monkeypatch.setattr(part, "start", recorded(part.start, name, started))
+    tree = SlowTree("2 commits on orbit/coder not yet merged into main.")
+    steps = Steps(True)
+    session, _, _ = session_for(
+        verification=verified(steps), tree=tree, check_at_startup=True, usage=no_usage
+    )
+    first = asyncio.ensure_future(anext(session.events()))
+    await tree.asked.wait()
+    first.cancel()
+    await asyncio.gather(first, return_exceptions=True)
+    tree.found.set()
+    seen: list[Event] = []
+    listening = asyncio.ensure_future(listen(session.events(), seen))
+    await asyncio.sleep(0.01)
+    listening.cancel()
+    await asyncio.gather(listening, return_exceptions=True)
+    assert started == ["startup", "usage"]
+    assert not any(isinstance(e, Notice) and "orbit/coder" in e.message for e in seen)
+    await session.close()
 
 
 async def test_without_a_tree_tasks_work_in_the_current_directory() -> None:
