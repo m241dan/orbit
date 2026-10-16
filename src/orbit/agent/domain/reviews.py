@@ -152,6 +152,16 @@ class ReviewPlanner:
             batch.missing.append(state.id)
         return self._due(batch_id)
 
+    def removed(self, state: TaskState) -> ReviewJob | None:
+        """Task ``state`` was taken off the board; returns the review that's due without it."""
+        batch_id = state.batch
+        if batch_id is None or batch_id not in self._open:
+            return None
+        batch = self._open[batch_id]
+        batch.tasks.remove(state.id)
+        batch.finished.discard(state.id)
+        return self._due(batch_id)
+
     def _due(self, batch_id: str) -> ReviewJob | None:
         batch = self._open[batch_id]
         if batch.filling or any(task not in batch.finished for task in batch.tasks):

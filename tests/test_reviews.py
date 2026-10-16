@@ -256,3 +256,46 @@ def test_suggesting_into_a_closed_batch_is_refused() -> None:
     batch = filled(reviews)
     refusal = reviews.refusal(batch, "Late", queued=())
     assert refusal is not None and "over" in refusal
+
+
+def test_removing_a_batchs_last_unfinished_task_has_the_batch_reviewed_without_it() -> None:
+    reviews = planner()
+    batch = filled(reviews, "2", "3")
+    assert reviews.landed(state("2", origin="review", batch=batch), "c2") is None
+    job = reviews.removed(state("3", status="pending", origin="review", batch=batch))
+    assert job == ReviewJob(commits=("c2",), round=1, batch=batch)
+    assert reviews.open_batches == ()
+
+
+def test_after_a_removal_the_batch_is_reviewed_once_the_rest_finish() -> None:
+    reviews = planner()
+    batch = filled(reviews, "2", "3")
+    assert reviews.removed(state("2", status="pending", origin="review", batch=batch)) is None
+    job = reviews.landed(state("3", origin="review", batch=batch), "c3")
+    assert job == ReviewJob(commits=("c3",), round=1, batch=batch)
+
+
+def test_removing_a_batchs_only_task_closes_it_with_nothing_to_review() -> None:
+    reviews = planner()
+    batch = filled(reviews, "2")
+    assert reviews.removed(state("2", status="pending", origin="review", batch=batch)) is None
+    assert reviews.open_batches == ()
+    assert not reviews.paused
+
+
+def test_removing_a_task_of_a_batch_still_filling_leaves_it_open() -> None:
+    reviews = planner()
+    batch = reviews.open_batch(ReviewJob(commits=("a",), round=0, batch=None))
+    reviews.added(batch, "2")
+    assert reviews.removed(state("2", status="pending", origin="review", batch=batch)) is None
+    assert reviews.open_batches == (batch,)
+    assert reviews.review_ended(batch) is None
+    assert not reviews.open_batches
+
+
+def test_removing_a_task_outside_any_open_batch_changes_nothing() -> None:
+    reviews = planner()
+    batch = filled(reviews, "2")
+    assert reviews.removed(state("1")) is None
+    assert reviews.removed(state("9", origin="review", batch="batch-7")) is None
+    assert reviews.open_batches == (batch,)

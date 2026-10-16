@@ -342,7 +342,9 @@ batch is a round further from your own work, and once the batches reach `review_
 review pauses, with a note in the conversation; it resumes with the next commit from one of your
 tasks. A review may suggest at most `review_suggestions` tasks (default 5), and a suggestion that
 an unfinished task already covers is refused. With the defaults, one of your commits can lead to at
-most 15 suggested tasks.
+most 15 suggested tasks. Removing a suggested task drops it from its batch, which is then reviewed
+without it (or closed, if nothing in it landed); removing a queued review closes the batch it would
+have suggested into.
 
 Every `super_review_every` commits (default 10, counting every commit orbit lands), a
 `super-reviewer` (Opus by default) reviews the **whole codebase** at the latest commit, looking for
@@ -351,7 +353,8 @@ duplication, structure that no longer fits and gaps in tests, and may suggest up
 other review's. `ctrl+g` asks for one straight away and restarts the count. A super review that
 falls due while review is paused waits until it resumes.
 
-Reviews need the worktree; `--no-review` turns them off.
+Reviews can't be edited: remove one instead. Reviews need the worktree; `--no-review` turns them
+off.
 
 ### Roles and `.orbit/config.toml`
 

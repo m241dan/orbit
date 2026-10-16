@@ -13,9 +13,11 @@ from orbit.protocol import (
     AgentExited,
     CancelAgent,
     CancelTurn,
+    EditTask,
     ErrorOccurred,
     Event,
     Notice,
+    RemoveTask,
     RequestSuperReview,
     ReviewStatus,
     RunTasks,
@@ -593,4 +595,76 @@ async def test_an_unexpected_error_in_the_review_lane_is_reported() -> None:
     message = "The review lane stopped on an unexpected error: ValueError('the lane tripped')"
     assert ErrorOccurred(message=message) in events
     assert statuses_of(events, "reviewer") == ["error"]
+    assert [e for e in events if isinstance(e, ReviewStatus)][-1].open_batches == 0
+
+
+async def test_a_suggestion_removed_from_its_batch_leaves_the_rest_reviewed() -> None:
+    sessions: list[AgentSession] = []
+
+    async def suggests_then_one_is_removed(call: Call) -> TurnEndReason:
+        await call("get_task")
+        await call("suggest_task", title="Add tests", prompt="Please.")
+        await call("suggest_task", title="Rename x", prompt="Please.")
+        await sessions[0].send(RemoveTask(task_id="4"))
+        await call("complete_task", summary="Reviewed")
+        return "completed"
+
+    session, _, _ = session_for(
+        claims_done,
+        claims_done,
+        reviewers=(suggests_then_one_is_removed, suggests()),
+        tree=FakeTree(),
+        review=True,
+    )
+    sessions.append(session)
+    await start(session)
+    events = await asyncio.wait_for(settle(session), 10)
+    assert [(t.id, t.task.role, t.status) for t in board(events)] == [
+        ("1", "coder", "completed"),
+        ("2", "reviewer", "completed"),
+        ("3", "coder", "completed"),
+        ("5", "reviewer", "completed"),
+    ]
+    assert board(events)[3].task.prompt.startswith("Review the 1 commits made for review batch-1")
+    assert [e for e in events if isinstance(e, ReviewStatus)][-1].open_batches == 0
+
+
+async def test_a_queued_review_that_is_removed_leaves_no_batch_open() -> None:
+    gate = asyncio.Event()
+
+    async def slow(call: Call) -> TurnEndReason:
+        await call("get_task")
+        await gate.wait()
+        await call("complete_task", summary="Reviewed")
+        return "completed"
+
+    session, _, launcher = session_for(
+        claims_done, claims_done, reviewers=(slow,), tree=FakeTree(), review=True
+    )
+    await start(session, "one", "two")
+    events: list[Event] = []
+    collecting = asyncio.ensure_future(settle(session, events))
+    while [t.task.role for t in session._board.tasks].count("reviewer") < 2:
+        await asyncio.sleep(0.01)
+    await session.send(RemoveTask(task_id="4"))
+    gate.set()
+    await asyncio.wait_for(collecting, 10)
+    assert [(t.id, t.task.role) for t in board(events)] == [
+        ("1", "coder"),
+        ("2", "coder"),
+        ("3", "reviewer"),
+    ]
+    assert len(reviewers_of(launcher)) == 1
+    assert [e for e in events if isinstance(e, ReviewStatus)][-1].open_batches == 0
+
+
+async def test_a_finished_review_can_be_removed_but_not_edited() -> None:
+    session, _, _ = session_for(claims_done, reviewers=(suggests(),), tree=FakeTree(), review=True)
+    await start(session)
+    events = await asyncio.wait_for(settle(session), 10)
+    await session.send(EditTask(task_id="2", task=TaskSpec(prompt="Again", role="reviewer")))
+    await session.send(RemoveTask(task_id="2"))
+    events = await asyncio.wait_for(settle(session, events), 10)
+    assert ErrorOccurred(message="Reviews can't be edited; remove it instead.") in events
+    assert [(t.id, t.status) for t in board(events)] == [("1", "completed")]
     assert [e for e in events if isinstance(e, ReviewStatus)][-1].open_batches == 0

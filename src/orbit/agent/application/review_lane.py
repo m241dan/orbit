@@ -29,6 +29,7 @@ from orbit.protocol import (
     ReviewStatus,
     TaskOrigin,
     TasksChanged,
+    TaskState,
     TaskStatus,
 )
 
@@ -79,6 +80,17 @@ class ReviewLane:
     async def ended(self, task_id: str) -> None:
         """Task ``task_id`` finished without landing anything."""
         await self._queue(self.planner.ended(self._board.get(task_id)))
+
+    async def removed(self, task_id: str, state: TaskState) -> None:
+        """Task ``task_id``, which was ``state``, was taken off the board. A review's batch
+        ends as if it suggested nothing; any other task leaves its batch."""
+        batch = self._batches.pop(task_id, None)
+        if batch is None:
+            await self._queue(self.planner.removed(state))
+            return
+        del self._jobs[task_id]
+        open_batch = batch in self.planner.open_batches
+        await self._queue(self.planner.review_ended(batch) if open_batch else None)
 
     def joined(self, task_id: str) -> None:
         """Task ``task_id`` was added to fix another; if that one is in a batch, so is it."""

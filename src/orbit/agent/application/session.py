@@ -56,6 +56,7 @@ from orbit.protocol import (
     SubmitPrompt,
     TasksChanged,
     TaskSpec,
+    TaskState,
     TurnEndReason,
     TurnFinished,
     UpdateSettings,
@@ -277,13 +278,32 @@ class AgentSession:
     async def _handle_board(self, command: EditTask | AcceptTask | RemoveTask) -> None:
         match command:
             case EditTask(task_id=task_id, task=task):
-                await self._change(self._board.edit, task_id, task)
+                await self._edit(task_id, task)
             case AcceptTask(task_id=task_id):
                 await self._change(self._board.accept, task_id)
             case RemoveTask(task_id=task_id):
-                await self._change(self._board.remove, task_id)
+                await self._remove(task_id)
             case _:
                 assert_never(command)
+
+    async def _edit(self, task_id: str, task: TaskSpec) -> None:
+        """Edit a task, unless it's a review: its batch is spent, so it couldn't run again."""
+        state = self._state_of(task_id)
+        if state is not None and state.task.role in REVIEW_ROLES:
+            message = "Reviews can't be edited; remove it instead."
+            await self._events.put(ErrorOccurred(message=message))
+            return
+        await self._change(self._board.edit, task_id, task)
+
+    async def _remove(self, task_id: str) -> None:
+        """Remove a task, and take it out of its review batch, if any."""
+        state = self._state_of(task_id)
+        if await self._change(self._board.remove, task_id) and self._lane is not None:
+            assert state is not None  # The board removed it, so it was there.
+            await self._lane.removed(task_id, state)
+
+    def _state_of(self, task_id: str) -> TaskState | None:
+        return next((t for t in self._board.tasks if t.id == task_id), None)
 
     async def _run_tasks_if_possible(self) -> None:
         if self._work is None:
@@ -370,14 +390,16 @@ class AgentSession:
         desk.suggest = lane.suggest
         return lane
 
-    async def _change(self, change: Callable[..., None], *arguments: Any) -> None:
-        """Change the board, publishing it, or report why the change was refused."""
+    async def _change(self, change: Callable[..., None], *arguments: Any) -> bool:
+        """Change the board, publishing it, or report why the change was refused; returns
+        whether it was changed."""
         try:
             change(*arguments)
         except ValueError as exc:
             await self._events.put(ErrorOccurred(message=str(exc)))
-        else:
-            await self._publish_tasks()
+            return False
+        await self._publish_tasks()
+        return True
 
     def _planner_chat(self) -> PlannerChat | None:
         if self._desk is None or PLANNER not in self._desk.agents.roles:
