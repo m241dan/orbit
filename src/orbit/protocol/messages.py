@@ -5,6 +5,7 @@ discriminated unions on ``type`` so they can be serialized to JSON and sent
 across a process boundary without changes.
 """
 
+from datetime import datetime
 from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
@@ -516,6 +517,33 @@ class ChecksProposed(_Message):
     setup: ProposedSetup | None = None
 
 
+class UsageLimit(_Message):
+    """How much of a subscription usage window, such as ``Session`` or ``Week``, is used, and
+    when it resets (timezone-aware), if known."""
+
+    label: str
+    percent: float = Field(ge=0, le=100)
+    resets_at: datetime | None = None
+
+
+UsageStatus = Literal["ok", "rate_limited", "unavailable"]
+"""Whether the latest usage fetch worked, was rate limited, or couldn't be made."""
+
+
+class UsageChanged(_Message):
+    """The subscription's usage limits, sent after every fetch.
+
+    Unless the ``status`` is ``ok``, ``limits`` are the last good ones; ``detail`` says why
+    usage is unavailable, and ``retry_at`` when a rate-limited fetch is tried again.
+    """
+
+    type: Literal["usage_changed"] = "usage_changed"
+    limits: tuple[UsageLimit, ...] = ()
+    status: UsageStatus = "ok"
+    detail: str = ""
+    retry_at: datetime | None = None
+
+
 Event = Annotated[
     SettingsChanged
     | TurnStarted
@@ -541,7 +569,8 @@ Event = Annotated[
     | TaskMerged
     | Notice
     | ReviewStatus
-    | ChecksProposed,
+    | ChecksProposed
+    | UsageChanged,
     Field(discriminator="type"),
 ]
 

@@ -31,6 +31,7 @@ from orbit.protocol import (
     TurnFinished,
     TurnStarted,
     UpdateSettings,
+    UsageChanged,
     VerificationChanged,
     VerificationFinished,
     VerificationSkipped,
@@ -174,6 +175,17 @@ async def test_renders_agent_activity() -> None:
             ("orbit → agent-1: Do X.", "agent"),
             ("📌 1 stash", "verify"),
         ]
+
+
+async def test_usage_changes_add_nothing_to_the_transcript() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await session.queue.put(UsageChanged(status="unavailable", detail="not logged in"))
+        await session.queue.put(Notice(message="1 stash"))
+        await pilot.pause()
+
+        assert entries(app) == [("📌 1 stash", "verify")]
 
 
 async def test_layout_stacks_display_over_prompt_over_footer() -> None:

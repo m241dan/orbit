@@ -49,6 +49,7 @@ from orbit.protocol import (
     TurnFinished,
     TurnStarted,
     UpdateSettings,
+    UsageChanged,
     VerificationChanged,
     VerificationFinished,
     VerificationSkipped,
@@ -360,6 +361,7 @@ class OrbitApp(App[None], inherit_bindings=False):
                 | VerificationChanged()
                 | ReviewStatus()
                 | ChecksProposed()
+                | UsageChanged()
             ):
                 self._render_state(event)
             case (
@@ -400,7 +402,8 @@ class OrbitApp(App[None], inherit_bindings=False):
         | TasksChanged
         | VerificationChanged
         | ReviewStatus
-        | ChecksProposed,
+        | ChecksProposed
+        | UsageChanged,
     ) -> None:
         """Show a snapshot of backend state, or a decision it waits for."""
         match event:
@@ -410,7 +413,7 @@ class OrbitApp(App[None], inherit_bindings=False):
                 self._set_busy(lane, busy)
             case TasksChanged(tasks=tasks):
                 self._show_tasks(tasks)
-            case VerificationChanged() | ReviewStatus() | ChecksProposed():
+            case VerificationChanged() | ReviewStatus() | ChecksProposed() | UsageChanged():
                 self._show_progress(event)
             case _:
                 assert_never(event)
@@ -477,13 +480,18 @@ class OrbitApp(App[None], inherit_bindings=False):
         numbers = dict(zip((t.id for t in task_list.tasks), task_list.numbers, strict=True))
         self._agents.number_tasks(numbers)
 
-    def _show_progress(self, event: VerificationChanged | ReviewStatus | ChecksProposed) -> None:
-        """Show the verification steps' progress, whether review is paused, or proposed steps."""
+    def _show_progress(
+        self, event: VerificationChanged | ReviewStatus | ChecksProposed | UsageChanged
+    ) -> None:
+        """Show the verification steps' progress, whether review is paused, or proposed steps.
+
+        Nothing shows usage limits yet.
+        """
         if isinstance(event, VerificationChanged):
             self._verification.show(event.steps, event.title)
         elif isinstance(event, ReviewStatus):
             self._agents.show_review(event)
-        else:
+        elif isinstance(event, ChecksProposed):
             self._show_proposal(event)
 
     def _show_proposal(self, event: ChecksProposed) -> None:

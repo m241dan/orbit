@@ -1,3 +1,5 @@
+from datetime import UTC, datetime
+
 import pytest
 from pydantic import ValidationError
 
@@ -35,6 +37,8 @@ from orbit.protocol import (
     TurnStarted,
     UpdateSettings,
     Usage,
+    UsageChanged,
+    UsageLimit,
     VerificationChanged,
     VerificationFinished,
     VerificationSkipped,
@@ -269,3 +273,16 @@ def test_turns_and_tasks_carry_usage_when_known() -> None:
     assert event_adapter.validate_json(event.model_dump_json()) == event
     with pytest.raises(ValidationError):
         Usage(input_tokens=-1)
+
+
+def test_usage_changed_round_trips_with_its_times() -> None:
+    resets = datetime(2026, 10, 16, 15, 40, tzinfo=UTC)
+    event = UsageChanged(
+        limits=(UsageLimit(label="Session", percent=52.0, resets_at=resets),),
+        status="rate_limited",
+        retry_at=datetime(2026, 10, 16, 12, 5, tzinfo=UTC),
+    )
+    assert event_adapter.validate_json(event.model_dump_json()) == event
+    assert UsageChanged() == UsageChanged(limits=(), status="ok", detail="", retry_at=None)
+    with pytest.raises(ValidationError):
+        UsageLimit(label="Week", percent=101)
