@@ -148,6 +148,16 @@ def model_label(settings: Settings) -> str:
     return settings.model or "default"
 
 
+def model_options(choices: Sequence[str]) -> tuple[tuple[str | None, ...], list[str]]:
+    """The models a picker offers, the default (None) first, and their labels."""
+    return (None, *choices), ["default", *choices]
+
+
+def tool_access_labels() -> list[str]:
+    """The labels a picker shows for ``TOOL_ACCESS_OPTIONS``, in the same order."""
+    return [TOOL_ACCESS_DESCRIPTIONS[a] for a in TOOL_ACCESS_OPTIONS]
+
+
 def settings_summary(settings: Settings) -> str:
     """The settings as the prompt shows them.
 

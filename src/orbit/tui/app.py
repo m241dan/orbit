@@ -63,17 +63,18 @@ from orbit.tui.proposals import ProposalScreen
 from orbit.tui.tasks import TaskEditorScreen, TaskList
 from orbit.tui.view import (
     PLANNER,
-    TOOL_ACCESS_DESCRIPTIONS,
     TOOL_ACCESS_OPTIONS,
     EntryKind,
     activity_entry,
     agent_labelled,
     coalesce,
     decision_entry,
+    model_options,
     note_entry,
     output_entry,
     task_started_entry,
     task_tab_key,
+    tool_access_labels,
     turn_end_entry,
     verification_finished_entry,
     verification_skipped_entry,
@@ -194,10 +195,8 @@ class OrbitApp(App[None], inherit_bindings=False):
         self._model_choices: tuple[str, ...] = ()
         self._proposal: ProposalScreen | None = None  # The proposal being shown, if any.
         # Pickers are built once and installed so they open instantly.
-        self._model_picker = PickerScreen("Model", ["default"])
-        self._tool_picker = PickerScreen(
-            "Tool access", [TOOL_ACCESS_DESCRIPTIONS[a] for a in TOOL_ACCESS_OPTIONS]
-        )
+        self._model_picker = PickerScreen("Model", model_options(())[1])
+        self._tool_picker = PickerScreen("Tool access", tool_access_labels())
 
     def compose(self) -> ComposeResult:
         with Horizontal():
@@ -365,7 +364,7 @@ class OrbitApp(App[None], inherit_bindings=False):
 
     def action_pick_model(self) -> None:
         if self._settings is not None:
-            models = (None, *self._model_choices)
+            models, _ = model_options(self._model_choices)
             candidates = [self._settings.model_copy(update={"model": m}) for m in models]
             self._open_picker(self._model_picker, candidates)
 
@@ -565,7 +564,7 @@ class OrbitApp(App[None], inherit_bindings=False):
 
     def _show_settings(self, settings: Settings, choices: tuple[str, ...]) -> None:
         if choices != self._model_choices:
-            self._model_picker.set_labels(["default", *choices])
+            self._model_picker.set_labels(model_options(choices)[1])
         self._settings, self._model_choices = settings, choices
         self._prompt.show_settings(settings)
 

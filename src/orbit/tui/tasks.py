@@ -16,14 +16,15 @@ from textual.widgets import Input, Static
 from orbit.protocol import Settings, TaskSpec, TaskState, Usage
 from orbit.tui.view import (
     SPINNER_FPS,
-    TOOL_ACCESS_DESCRIPTIONS,
     TOOL_ACCESS_OPTIONS,
     join_prompt,
     model_label,
+    model_options,
     spinner_frame,
     split_prompt,
     task_label,
     task_numbers,
+    tool_access_labels,
     usage_label,
 )
 from orbit.tui.widgets import ListPane, PickerScreen, PromptBox, PromptInput
@@ -266,17 +267,16 @@ class TaskEditorScreen(ModalScreen[TaskSpec | None]):
             self._choose_tools()
 
     def _choose_model(self) -> None:
-        models = [None, *self._models]
-        picker = PickerScreen("Model", ["default", *self._models])
+        models, labels = model_options(self._models)
+        picker = PickerScreen("Model", labels)
         current = self._settings.model
         index = models.index(current) if current in models else None
         self._pick(picker, index, lambda i: self._update(model=models[i]))
 
     def _choose_tools(self) -> None:
-        labels = [TOOL_ACCESS_DESCRIPTIONS[a] for a in TOOL_ACCESS_OPTIONS]
         index = TOOL_ACCESS_OPTIONS.index(self._settings.tool_access)
         self._pick(
-            PickerScreen("Tool access", labels),
+            PickerScreen("Tool access", tool_access_labels()),
             index,
             lambda i: self._update(tool_access=TOOL_ACCESS_OPTIONS[i]),
         )

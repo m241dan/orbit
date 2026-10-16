@@ -61,6 +61,7 @@ from orbit.tui.view import (
     mark_planner_busy,
     mark_tab_read,
     mark_tab_unread,
+    model_options,
     note_entry,
     output_entry,
     reset_label,
@@ -73,6 +74,7 @@ from orbit.tui.view import (
     tab_labels,
     task_started_entry,
     task_tab_key,
+    tool_access_labels,
     tool_call_summary,
     track_agents,
     track_roles,
@@ -122,6 +124,25 @@ def test_settings_summary_names_the_model_and_new_tasks_tool_access() -> None:
     assert (
         settings_summary(full) == "planner's model: opus · new tasks' tools: full (auto-approved)"
     )
+
+
+def test_model_options_offer_only_the_default_without_choices() -> None:
+    assert model_options(()) == ((None,), ["default"])
+
+
+def test_model_options_put_the_default_before_the_choices() -> None:
+    assert model_options(("opus", "sonnet")) == (
+        (None, "opus", "sonnet"),
+        ["default", "opus", "sonnet"],
+    )
+
+
+def test_tool_access_labels_describe_each_option_in_order() -> None:
+    assert tool_access_labels() == [
+        "off: no tools",
+        "restricted: read-only; anything needing approval is refused",
+        "full: auto-approve everything",
+    ]
 
 
 def test_step_lines_time_only_the_running_step() -> None:

@@ -4,7 +4,7 @@ import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, ClassVar, cast, get_args
+from typing import TYPE_CHECKING, Any, ClassVar, cast, get_args
 
 from rich.console import Console, ConsoleOptions, RenderResult
 from rich.segment import Segment
@@ -17,6 +17,7 @@ from textual.containers import Vertical, VerticalScroll
 from textual.css.styles import RulesMap
 from textual.screen import ModalScreen
 from textual.visual import VisualType
+from textual.widget import Widget
 from textual.widgets import Input, OptionList, Static, Tab, Tabs, TextArea
 
 from orbit.protocol import Event, Settings, StepState, UsageChanged
@@ -44,8 +45,36 @@ from orbit.tui.view import (
     usage_lines,
 )
 
+if TYPE_CHECKING:
+    _WidgetMixin = Widget
+else:
+    # Not a Widget at runtime, so Textual still inherits the base's CSS and component classes.
+    _WidgetMixin = object
 
-class ListPane(OptionList):
+
+class ModalFocus(_WidgetMixin):
+    """Vim-style focus, mixed into a widget before its Textual base: the widget only takes
+    focus once activated, and escape (bound by the widget to ``normal_mode``) or losing
+    focus makes it unfocusable again, returning keys to the app."""
+
+    can_focus = False
+
+    def _activate(self) -> bool:
+        """Whether the widget took focus; a disabled one doesn't."""
+        if self.disabled:
+            return False
+        self.can_focus = True
+        self.focus()
+        return True
+
+    def action_normal_mode(self) -> None:
+        self.screen.set_focus(None)
+
+    def on_blur(self) -> None:
+        self.can_focus = False
+
+
+class ListPane(ModalFocus, OptionList):
     """A window's list that only takes focus once activated (``enter_list_mode``);
     then j/k move and escape returns to window navigation."""
 
@@ -55,21 +84,9 @@ class ListPane(OptionList):
         Binding("escape", "normal_mode", show=False),
     ]
 
-    def __init__(self, *, id: str | None = None) -> None:
-        super().__init__(id=id)
-        self.can_focus = False
-
     def enter_list_mode(self) -> None:
-        self.can_focus = True
-        self.focus()
-        if self.highlighted is None and self.option_count:
+        if self._activate() and self.highlighted is None and self.option_count:
             self.highlighted = 0
-
-    def action_normal_mode(self) -> None:
-        self.screen.set_focus(None)
-
-    def on_blur(self) -> None:
-        self.can_focus = False
 
     def replace_prompt(self, index: int, prompt: VisualType) -> None:
         """Replace the prompt of the option at ``index``, redrawing only that option and, if
@@ -528,7 +545,7 @@ class UsagePanel(SidePanel):
         self.query_one(Static).update(Text("\n").join(lines))
 
 
-class PromptInput(Input):
+class PromptInput(ModalFocus, Input):
     """Single-line prompt box at the bottom of the screen.
 
     Vim-style: it only takes focus in insert mode (``enter_insert_mode``), and
@@ -549,27 +566,18 @@ class PromptInput(Input):
     def __init__(self, **kwargs: Any) -> None:
         # Keep the draft unselected so re-entering insert mode appends to it.
         super().__init__(select_on_focus=False, **kwargs)
-        self.can_focus = False
 
     def on_mount(self) -> None:
         self.border_title = "Prompt · planner"
 
     def enter_insert_mode(self) -> None:
-        if not self.disabled:
-            self.can_focus = True
-            self.focus()
-
-    def action_normal_mode(self) -> None:
-        self.screen.set_focus(None)
-
-    def on_blur(self) -> None:
-        self.can_focus = False
+        self._activate()
 
     def show_settings(self, settings: Settings) -> None:
         self.border_subtitle = settings_summary(settings)
 
 
-class PromptBox(TextArea):
+class PromptBox(ModalFocus, TextArea):
     """Multi-line prompt box, for a task's whole prompt.
 
     Vim-style like ``PromptInput``: it only takes focus in insert mode
@@ -590,19 +598,10 @@ class PromptBox(TextArea):
 
     def __init__(self, text: str = "", **kwargs: Any) -> None:
         super().__init__(text, soft_wrap=True, show_line_numbers=False, **kwargs)
-        self.can_focus = False
 
     def enter_insert_mode(self) -> None:
-        if not self.disabled:
-            self.can_focus = True
-            self.focus()
+        if self._activate():
             self.move_cursor(self.document.end)
-
-    def action_normal_mode(self) -> None:
-        self.screen.set_focus(None)
-
-    def on_blur(self) -> None:
-        self.can_focus = False
 
 
 class PickerScreen(ModalScreen[int | None]):
