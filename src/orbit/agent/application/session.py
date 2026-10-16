@@ -6,7 +6,7 @@ ports to do it, and reports what happened as events.
 
 import asyncio
 import uuid
-from collections.abc import AsyncIterator, Callable, Coroutine, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine, Sequence
 from contextlib import suppress
 from dataclasses import replace
 from typing import Any, assert_never
@@ -411,25 +411,33 @@ class AgentSession:
         return PlannerChat(self._desk, self._board)
 
     async def close(self) -> None:
-        """Cancel the work in progress, which stops its agent, and stop the agents' host."""
+        """Cancel the work in progress, which stops its agent, then stop the startup check, the
+        usage monitor, the review lane, the planner and the agents' host, in that order. Each is
+        stopped even if one before it fails; the first failure is raised after."""
+        failure: Exception | None = None
+        for stop in self._stops():
+            try:
+                await stop()
+            except Exception as exc:  # A bug; the rest must still stop.
+                failure = failure or exc
+        if failure is not None:
+            raise failure
+
+    def _stops(self) -> list[Callable[[], Awaitable[None]]]:
+        """What :meth:`close` awaits, in order."""
+        parts = (self._startup, self._usage, self._lane, self._planner)
+        stops: list[Callable[[], Awaitable[None]]] = [self._stop_turns]
+        stops += [part.close for part in parts if part is not None]
+        if self._desk is not None:
+            stops.append(self._desk.stop)
+        return stops
+
+    async def _stop_turns(self) -> None:
+        """Cancel the work lane's and the planner's turns, and wait for them to end."""
         for turn in (self._turn, self._planner_turn):
             if turn is not None and _cancel(turn):
                 with suppress(asyncio.CancelledError):
                     await turn
-        await self._stop_background()
-        if self._planner is not None:
-            await self._planner.close()
-        if self._desk is not None:
-            await self._desk.stop()
-
-    async def _stop_background(self) -> None:
-        """Stop the startup check, the usage monitor and the review lane."""
-        if self._startup is not None:
-            await self._startup.close()
-        if self._usage is not None:
-            await self._usage.close()
-        if self._lane is not None:
-            await self._lane.close()
 
     async def events(self) -> AsyncIterator[Event]:
         if not self._announced:

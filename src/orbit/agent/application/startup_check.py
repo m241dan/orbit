@@ -8,8 +8,8 @@ verification takes the panel over, and in the agents pane as an agent that can b
 
 import asyncio
 from collections.abc import Awaitable, Callable
-from contextlib import suppress
 
+from orbit.agent.application.lanes import Background
 from orbit.agent.application.ports import CoderTree, Publish
 from orbit.agent.application.verifier import Failure, Verification, first_failure
 from orbit.agent.domain.roles import setup_step
@@ -55,10 +55,10 @@ class StartupCheck:
         self._add_fix = add_fix
         self._steps = tuple(StepState(name=step.name) for step in verification.steps)
         self._shown = True  # Whether it still has the verification panel.
-        self._task: asyncio.Task[None] | None = None
+        self._background = Background("startup check", publish)
 
     def start(self) -> None:
-        self._task = asyncio.create_task(self._run())
+        self._background.start(self._run())
 
     def release_panel(self) -> None:
         """A task's verification takes the panel over from now on."""
@@ -66,18 +66,13 @@ class StartupCheck:
 
     @property
     def running(self) -> bool:
-        return self._task is not None and not self._task.done()
+        return self._background.running
 
     def cancel(self) -> None:
-        if self.running:
-            assert self._task is not None
-            self._task.cancel()
+        self._background.cancel()
 
     async def close(self) -> None:
-        self.cancel()
-        if self._task is not None:
-            with suppress(asyncio.CancelledError):
-                await self._task
+        await self._background.close()
 
     async def _run(self) -> None:
         await self._publish(AgentStarted(agent_id=AGENT_ID, role=ROLE, task_id=STARTUP_TASK))

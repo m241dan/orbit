@@ -6,7 +6,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Collection, Sequ
 from typing import Any
 
 from orbit.agent import Agents, AgentSession, Verification, VerificationStep
-from orbit.agent.application.ports import AgentLaunch, CallHandler, Merge, Reply
+from orbit.agent.application.ports import AgentLaunch, CallHandler, Merge, Reply, UsageSource
 from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.roles import BUILT_IN_ROLE_NAMES, REVIEW_ROLES, Setup, built_in_roles
 from orbit.protocol import (
@@ -222,10 +222,11 @@ def session_for(
     verification: Verification | None = None,
     reviewers: Sequence[Script] = (),
     check_at_startup: bool = False,
+    usage: UsageSource | None = None,
     **options: Any,
 ) -> tuple[AgentSession, FakeHost, ScriptedLauncher]:
     """A session whose tasks run through agents playing ``scripts``, one per launch, and
-    whose reviews run through agents playing ``reviewers``.
+    whose reviews run through agents playing ``reviewers``, with usage from ``usage``.
 
     ``options`` go to :class:`Agents`, such as ``limits``, ``tree`` or ``roles`` (:data:`ROLES`
     unless given).
@@ -239,6 +240,7 @@ def session_for(
         verification=verification,
         agents=agents,
         check_at_startup=check_at_startup,
+        usage=usage,
     )
     return session, host, launcher
 

@@ -4,6 +4,8 @@ import asyncio
 import sys
 from collections.abc import Sequence
 
+import pytest
+
 from orbit.agent import (
     NO_STEPS_NOTE,
     AgentSession,
@@ -12,6 +14,12 @@ from orbit.agent import (
     Workspace,
     run_step,
 )
+from orbit.agent.application.desk import AgentDesk
+from orbit.agent.application.planner import PlannerChat
+from orbit.agent.application.review_lane import ReviewLane
+from orbit.agent.application.startup_check import StartupCheck
+from orbit.agent.application.usage_monitor import UsageMonitor
+from orbit.agent.domain.usage import UsageFetch, UsageUnavailable
 from orbit.agent.domain.verification import MAX_FALLBACK_FIXES
 from orbit.protocol import (
     AddTask,
@@ -35,7 +43,7 @@ from orbit.protocol import (
     VerificationChanged,
     VerificationFinished,
 )
-from tests.agent_fakes import Call, session_for
+from tests.agent_fakes import STEP, Call, FakeTree, Steps, session_for
 
 PLANNER_IDLE = BusyChanged(busy=False, lane="planner")
 
@@ -233,3 +241,62 @@ async def test_planner_turns_are_not_verified() -> None:
     assert not any(isinstance(e, VerificationChanged | VerificationFinished) for e in events[1:])
     await asyncio.sleep(0.01)
     assert session._events.empty()
+
+
+async def no_usage() -> UsageFetch:
+    return UsageUnavailable("offline")
+
+
+def record_stops(monkeypatch: pytest.MonkeyPatch, failing: str = "") -> list[str]:
+    """The parts of a session in the order closing stops them; ``failing`` raises as it stops."""
+    stopped: list[str] = []
+    parts: dict[str, type] = {
+        "startup": StartupCheck,
+        "usage": UsageMonitor,
+        "review": ReviewLane,
+        "planner": PlannerChat,
+        "host": AgentDesk,
+    }
+    for name, part in parts.items():
+        method = "stop" if part is AgentDesk else "close"
+
+        async def stop(self: object, name: str = name) -> None:
+            stopped.append(name)
+            if name == failing:
+                raise ValueError(f"{name} broke")
+
+        monkeypatch.setattr(part, method, stop)
+    return stopped
+
+
+def full_session() -> AgentSession:
+    """A session with every part closing stops: a startup check, usage, reviews and a planner."""
+    session, _, _ = session_for(
+        verification=Verification((STEP,), Steps()),
+        tree=FakeTree(),
+        check_at_startup=True,
+        usage=no_usage,
+        review=True,
+    )
+    return session
+
+
+async def test_closing_stops_the_background_then_the_planner_then_the_host(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stopped = record_stops(monkeypatch)
+
+    await full_session().close()
+
+    assert stopped == ["startup", "usage", "review", "planner", "host"]
+
+
+async def test_closing_stops_every_part_even_if_one_fails_then_raises_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stopped = record_stops(monkeypatch, failing="startup")
+
+    with pytest.raises(ValueError, match="startup broke"):
+        await full_session().close()
+
+    assert stopped == ["startup", "usage", "review", "planner", "host"]

@@ -7,11 +7,10 @@ review is due and stops reviews generating work forever.
 
 import asyncio
 from collections.abc import Awaitable, Callable
-from contextlib import suppress
 
 from orbit.agent.application.agent_run import AgentRun
 from orbit.agent.application.desk import AgentDesk
-from orbit.agent.application.lanes import crash_report
+from orbit.agent.application.lanes import Background
 from orbit.agent.application.ports import CoderTree, Reply
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.reviews import ReviewJob, ReviewPlanner, review_prompt
@@ -56,7 +55,7 @@ class ReviewLane:
         self._publish = desk.publish
         self._jobs: dict[str, ReviewJob] = {}  # Review task id -> what it reviews.
         self._batches: dict[str, str] = {}  # Review task id -> the batch it suggests into.
-        self._running: asyncio.Task[None] | None = None
+        self._background = Background("review", desk.publish)
         self._current: tuple[str, asyncio.Task[TaskStatus]] | None = None  # The review running.
         self._paused_noted = False
         self._status: ReviewStatus | None = None
@@ -120,14 +119,11 @@ class ReviewLane:
 
     def kick(self) -> None:
         """Run the reviews waiting, if they aren't being run already."""
-        if self._running is None or self._running.done():
-            self._running = asyncio.create_task(self._run())
+        if not self._background.running:
+            self._background.start(self._run_reviews())
 
     async def close(self) -> None:
-        if self._running is not None and not self._running.done():
-            self._running.cancel()
-            with suppress(asyncio.CancelledError):
-                await self._running
+        await self._background.close()
 
     async def _queue(self, job: ReviewJob | None) -> None:
         await self._note_pause()
@@ -176,12 +172,6 @@ class ReviewLane:
             )
             await self._publish(Notice(message=message))
         self._paused_noted = self.planner.paused
-
-    async def _run(self) -> None:
-        try:
-            await self._run_reviews()
-        except Exception as exc:  # A bug; nothing awaits this task, so say so here.
-            await self._publish(crash_report("review", exc))
 
     async def _run_reviews(self) -> None:
         tried = self._spent()

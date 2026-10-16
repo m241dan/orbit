@@ -3,7 +3,10 @@
 import asyncio
 from collections.abc import AsyncIterator
 
+import pytest
+
 from orbit.agent import AgentSession, Setup, Verification, VerificationStep
+from orbit.agent.application import session as session_module
 from orbit.agent.application.startup_check import CANCELLED_NOTE, StartupCheck
 from orbit.protocol import (
     AgentExited,
@@ -14,6 +17,7 @@ from orbit.protocol import (
     Notice,
     StartupChecked,
     StepState,
+    SubmitPrompt,
     TaskStarted,
     TurnEndReason,
     VerificationChanged,
@@ -238,3 +242,31 @@ async def test_tasks_run_while_it_does_and_take_the_panel_over() -> None:
     # The task's verification has the panel now; the startup check no longer reports to it.
     assert not [e for e in rest if isinstance(e, VerificationChanged) and e.title]
     await session.close()
+
+
+async def says_nothing(call: Call) -> TurnEndReason:
+    return "completed"
+
+
+async def test_a_crash_is_reported_and_closing_still_stops_the_host(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def broken(step: VerificationStep, output: str) -> str:
+        raise ValueError("bug")
+
+    monkeypatch.setattr(session_module, "startup_fix_prompt", broken)
+    session, host, launcher = session_for(verification=checked(Steps(False)), check_at_startup=True)
+    launcher.planner_turns.append(says_nothing)
+    await session.send(SubmitPrompt(text="Hello."))  # Starts the host.
+    events: list[Event] = []
+    async for event in session.events():
+        events.append(event)
+        if isinstance(event, ErrorOccurred):
+            break
+
+    assert events[-1] == ErrorOccurred(
+        message="The startup check lane stopped on an unexpected error: ValueError('bug')"
+    )
+    assert AgentExited(agent_id="startup-check", reason="killed") in events
+    await session.close()
+    assert host.stops == 1

@@ -7,6 +7,7 @@ from collections.abc import Callable
 from contextlib import suppress
 from datetime import UTC, datetime
 
+from orbit.agent.application.lanes import Background
 from orbit.agent.application.ports import Publish, UsageSource
 from orbit.agent.domain.usage import (
     UsageFetch,
@@ -49,10 +50,10 @@ class UsageMonitor:
         # When the last fetch started, and its outcome.
         self._last: tuple[float, UsageFetch] | None = None
         self._wake = asyncio.Event()
-        self._task: asyncio.Task[None] | None = None
+        self._background = Background("usage", publish)
 
     def start(self) -> None:
-        self._task = asyncio.create_task(self._run())
+        self._background.start(self._run())
 
     def nudge(self) -> None:
         """Fetch again now, if no fetch is in progress and a refresh is due: a minute after the
@@ -64,10 +65,7 @@ class UsageMonitor:
             self._wake.set()
 
     async def close(self) -> None:
-        if self._task is not None:
-            self._task.cancel()
-            with suppress(asyncio.CancelledError):
-                await self._task
+        await self._background.close()
 
     async def _run(self) -> None:
         while True:
