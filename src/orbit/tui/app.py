@@ -2,7 +2,7 @@
 
 import asyncio
 from collections.abc import AsyncGenerator, AsyncIterator
-from contextlib import suppress
+from contextlib import aclosing, suppress
 from typing import ClassVar, assert_never
 
 from textual import on, work
@@ -395,11 +395,13 @@ class OrbitApp(App[None], inherit_bindings=False):
 
     @work(exclusive=True, group="events")
     async def _consume_events(self) -> None:
-        async for batch in event_batches(self._session.events()):
-            # One repaint for the whole batch.
-            with self.batch_update():
-                for event in coalesce(batch):
-                    self._render_event(event)
+        # Closing the batches here, not on garbage collection, stops their reader however this ends.
+        async with aclosing(event_batches(self._session.events())) as batches:
+            async for batch in batches:
+                # One repaint for the whole batch.
+                with self.batch_update():
+                    for event in coalesce(batch):
+                        self._render_event(event)
 
     def _render_event(self, event: Event) -> None:
         self._follow_agents(event)

@@ -1,10 +1,11 @@
 import asyncio
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncGenerator, AsyncIterator, Iterator
 from contextlib import contextmanager
 
 import pytest
 from textual.pilot import Pilot
 from textual.widgets import Footer, Input, OptionList, Tab
+from textual.worker import WorkerFailed
 
 from orbit.protocol import (
     STARTUP_TASK,
@@ -1381,6 +1382,36 @@ async def test_event_batches_cancels_its_reader_when_closed() -> None:
     await asyncio.sleep(0)
     # The reader is gone, so nothing takes the event.
     assert session.queue.qsize() == 1
+
+
+class FailingRenderApp(OrbitApp):
+    """Fails to render any event."""
+
+    def _render_event(self, event: Event) -> None:
+        raise RuntimeError("render failed")
+
+
+async def test_a_failed_render_cancels_the_event_reader(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Holding the batches keeps garbage collection from closing them, as it would by chance.
+    held: list[AsyncGenerator[list[Event]]] = []
+
+    def holding(events: AsyncIterator[Event]) -> AsyncGenerator[list[Event]]:
+        held.append(event_batches(events))
+        return held[-1]
+
+    monkeypatch.setattr("orbit.tui.app.event_batches", holding)
+    session = FakeSession()
+    await session.queue.put(Notice(message="1"))
+    with pytest.raises(WorkerFailed, match="render failed"):
+        async with FailingRenderApp(session).run_test() as pilot:
+            await pilot.pause()
+    await session.queue.put(Notice(message="2"))
+    await asyncio.sleep(0)
+    # The reader is gone, so nothing takes the event.
+    assert session.queue.qsize() == 1
+    assert len(held) == 1
 
 
 class BatchRecordingApp(OrbitApp):
