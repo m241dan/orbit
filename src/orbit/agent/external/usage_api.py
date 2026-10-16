@@ -3,6 +3,7 @@
 import json
 import math
 from pathlib import Path
+from typing import TypeGuard
 
 import httpx
 
@@ -56,14 +57,20 @@ class UsageApi:
 
 
 def _read_token(path: Path) -> str | None:
-    """The OAuth access token in the credentials file at ``path``, or ``None`` without one."""
+    """The OAuth access token in the credentials file at ``path``, or ``None`` without one or
+    when it isn't ASCII, which an HTTP header can't carry."""
     try:
         content = json.loads(path.read_text())
     except (OSError, ValueError):
         return None
     oauth = content.get("claudeAiOauth") if isinstance(content, dict) else None
     token = oauth.get("accessToken") if isinstance(oauth, dict) else None
-    return token if isinstance(token, str) and token else None
+    return token if _usable(token) else None
+
+
+def _usable(token: object) -> TypeGuard[str]:
+    """Whether ``token`` can go in an HTTP header: a non-empty ASCII string."""
+    return isinstance(token, str) and bool(token) and token.isascii()
 
 
 def _outcome(response: httpx.Response) -> UsageFetch:

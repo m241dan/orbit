@@ -132,6 +132,7 @@ async def test_credentials_that_arent_utf8_are_no_login(tmp_path: Path) -> None:
         {"claudeAiOauth": {}},
         {"claudeAiOauth": {"accessToken": ""}},
         {"claudeAiOauth": {"accessToken": 42}},
+        {"claudeAiOauth": {"accessToken": "tökén"}},
         {"apiKey": "sk-ant-api"},
     ],
 )
