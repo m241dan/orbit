@@ -45,6 +45,20 @@ def test_invalid_toml_names_the_file(tmp_path: Path) -> None:
         read_config(str(tmp_path))
 
 
+def test_a_non_utf8_file_raises_config_error_naming_the_file(tmp_path: Path) -> None:
+    path = write(tmp_path, "")
+    path.write_bytes(b"fix_attempts = 3 # \xff\n")
+    with pytest.raises(ConfigError, match=re.escape(str(path))):
+        read_config(str(tmp_path))
+
+
+def test_a_config_path_that_is_a_directory_raises_config_error_naming_it(tmp_path: Path) -> None:
+    path = tmp_path / CONFIG_PATH
+    path.mkdir(parents=True)
+    with pytest.raises(ConfigError, match=re.escape(str(path))):
+        read_config(str(tmp_path))
+
+
 def test_invalid_settings_name_the_file_and_the_problem(tmp_path: Path) -> None:
     path = write(tmp_path, "[roles.coder]\ntools = ['launch_rockets']\n")
     with pytest.raises(ConfigError) as raised:

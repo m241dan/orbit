@@ -17,7 +17,7 @@ def read_config(root: str = ".") -> OrbitConfig:
     """The configuration in ``root``'s file over the defaults, whose roles are the built-in
     ones; just the defaults without a file.
 
-    Raises :class:`ConfigError`, naming the file, if it's invalid.
+    Raises :class:`ConfigError`, naming the file, if it can't be read or is invalid.
     """
     built_in = read_built_in_roles()
     path = Path(root) / CONFIG_PATH
@@ -25,7 +25,7 @@ def read_config(root: str = ".") -> OrbitConfig:
         return load_config({}, built_in)
     try:
         return load_config(tomllib.loads(path.read_text()), built_in)
-    except (tomllib.TOMLDecodeError, ConfigError) as exc:
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError, ConfigError) as exc:
         raise ConfigError(f"{path}: {exc}") from None
 
 
