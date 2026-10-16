@@ -10,7 +10,7 @@ from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
 from textual.containers import Vertical, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Input, OptionList, Static, Tab, Tabs
+from textual.widgets import Input, OptionList, Static, Tab, Tabs, TextArea
 
 from orbit.protocol import Event, Settings, StepState
 from orbit.tui.view import (
@@ -413,6 +413,42 @@ class PromptInput(Input):
 
     def show_settings(self, settings: Settings) -> None:
         self.border_subtitle = settings_summary(settings)
+
+
+class PromptBox(TextArea):
+    """Multi-line prompt box, for a task's whole prompt.
+
+    Vim-style like ``PromptInput``: it only takes focus in insert mode
+    (``enter_insert_mode``), which puts the cursor at the end so typing appends, and
+    escape or losing focus returns to normal mode, where keys go to the app.
+    """
+
+    DEFAULT_CSS = """
+    PromptBox {
+        height: 12;
+        border: round $secondary;
+    }
+    """
+
+    BINDINGS: ClassVar[list[BindingType]] = [
+        Binding("escape", "normal_mode", "Normal mode", show=False)
+    ]
+
+    def __init__(self, text: str = "", **kwargs: Any) -> None:
+        super().__init__(text, soft_wrap=True, show_line_numbers=False, **kwargs)
+        self.can_focus = False
+
+    def enter_insert_mode(self) -> None:
+        if not self.disabled:
+            self.can_focus = True
+            self.focus()
+            self.move_cursor(self.document.end)
+
+    def action_normal_mode(self) -> None:
+        self.screen.set_focus(None)
+
+    def on_blur(self) -> None:
+        self.can_focus = False
 
 
 class PickerScreen(ModalScreen[int | None]):
