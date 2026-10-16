@@ -139,4 +139,11 @@ allow_indirect_imports = true
 name = "TUI view is independent of Textual"
 type = "forbidden"
 source_modules = ["orbit.tui.view"]
-forbidden_modules = ["textual", "orbit.tui.app", "orbit.tui.tasks", "orbit.tui.widgets"]
+forbidden_modules = [
+    "textual",
+    "orbit.tui.agents",
+    "orbit.tui.app",
+    "orbit.tui.proposals",
+    "orbit.tui.tasks",
+    "orbit.tui.widgets",
+]

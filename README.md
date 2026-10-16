@@ -512,7 +512,9 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     review, batches, rounds and caps), commit messages, when a task needs verifying, how many
     fixes to try per step, and the fix prompt.
 - `orbit.tui`: frontend. Sends commands and renders events. Imports only `orbit.protocol`.
-  `view` turns state and events into text and doesn't import Textual; the widgets (`tasks`,
+  `view` turns state and events into text and doesn't import Textual, with a module per area
+  of the screen (`events`, `transcript`, `tool_calls`, `proposals`, `tasks`, `panels`, `agents`,
+  `tabs`, and `settings` and `common` for what they share); the widgets (`tasks`,
   `agents`, `widgets`, and `proposals`, the proposal modal) lay it out, and `app` is the Textual
   app that holds them.
 - `orbit.cli`: the composition root, and the only place the two sides are wired together: it
