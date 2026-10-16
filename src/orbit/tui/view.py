@@ -357,7 +357,7 @@ def task_label(state: TaskState, number: str, frame: str) -> Text:
     head = f"{number}. " if state.fixes is None else f"   {number} "
     icon = frame if state.status == "running" else STATUS_ICONS[state.status]
     # Long prompts (like fix tasks) are titled by their first line.
-    title = state.task.prompt.split("\n", 1)[0]
+    title = split_prompt(state.task.prompt)[0]
     label = Text(f"{head}{icon} {title}\n")
     indent = " " * (len(head) + cell_len(icon) + 1)
     details = f"{indent}{model_label(settings)} · {settings.tool_access}"
@@ -372,21 +372,31 @@ def task_label(state: TaskState, number: str, frame: str) -> Text:
 def split_prompt(prompt: str) -> tuple[str, str]:
     """The first line of ``prompt`` as the title, and the rest as the body.
 
-    The body loses the blank lines around it and its trailing whitespace; a single line has an
-    empty body, and an empty prompt gives ("", "").
+    The body loses the blank lines around it and the trailing whitespace of its last line, but
+    keeps its indentation; a single line has an empty body, and an empty prompt gives ("", "").
     """
     title, _, body = prompt.partition("\n")
-    return title, body.strip()
+    return title, _trim_body(body)
 
 
 def join_prompt(title: str, body: str) -> str:
-    """The prompt the editor saves: ``title`` stripped, a blank line, then ``body`` stripped.
+    """The prompt the editor saves: ``title`` stripped, a blank line, then ``body`` trimmed.
 
-    A blank body gives just the stripped title.
+    The body loses only the blank lines around it and the trailing whitespace of its last
+    line; a blank body gives just the stripped title.
     """
-    if not body.strip():
+    body = _trim_body(body)
+    if not body:
         return title.strip()
-    return f"{title.strip()}\n\n{body.strip()}"
+    return f"{title.strip()}\n\n{body}"
+
+
+def _trim_body(body: str) -> str:
+    """``body`` without the blank lines around it or its last line's trailing whitespace."""
+    lines = body.splitlines()
+    while lines and not lines[0].strip():
+        del lines[0]
+    return "\n".join(lines).rstrip()
 
 
 def usage_label(usage: Usage) -> str:

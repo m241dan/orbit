@@ -506,7 +506,14 @@ def test_body_on_the_second_line_joins_back_after_a_blank_line() -> None:
 
 
 def test_blank_lines_and_trailing_whitespace_around_the_body_are_dropped() -> None:
-    assert split_prompt("Title\n\n\n  body\n\n  ") == ("Title", "body")
+    assert split_prompt("Title\n  \n\n  body\n\n  ") == ("Title", "  body")
+    assert join_prompt("Title", "\n  body  \n\n") == "Title\n\n  body"
+
+
+def test_body_keeps_its_leading_indentation_through_split_and_join() -> None:
+    prompt = "Title\n\n    code = 1\nmore\n"
+    assert split_prompt(prompt) == ("Title", "    code = 1\nmore")
+    assert join_prompt(*split_prompt(prompt)) == "Title\n\n    code = 1\nmore"
 
 
 def test_joining_a_blank_body_gives_just_the_title() -> None:
