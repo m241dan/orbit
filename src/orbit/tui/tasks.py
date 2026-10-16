@@ -8,7 +8,7 @@ from rich.text import Text
 from textual import events, on
 from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
-from textual.containers import Vertical
+from textual.containers import VerticalScroll
 from textual.message import Message
 from textual.screen import ModalScreen
 from textual.widgets import Input, Static
@@ -195,7 +195,7 @@ class TaskEditorScreen(ModalScreen[TaskSpec | None]):
     AUTO_FOCUS = None
     DEFAULT_CSS = """
     TaskEditorScreen { align: center middle; }
-    TaskEditorScreen > Vertical {
+    TaskEditorScreen > VerticalScroll {
         width: 80;
         max-width: 90%;
         height: auto;
@@ -224,7 +224,7 @@ class TaskEditorScreen(ModalScreen[TaskSpec | None]):
 
     def compose(self) -> ComposeResult:
         title, body = split_prompt(self._prompt)
-        with Vertical() as box:
+        with VerticalScroll() as box:
             box.border_title = self.title_text
             box.border_subtitle = "j/k move · i type · enter choose · ctrl+s save · esc cancel"
             yield PromptInput(value=title, placeholder="Press i to type", id="task-title")
@@ -287,8 +287,11 @@ class TaskEditorScreen(ModalScreen[TaskSpec | None]):
         self.query_one(PromptInput).action_normal_mode()
 
     def _select(self, field: int) -> None:
+        """Select field ``field``, scrolling it into view when the editor doesn't all fit."""
         self.query_one(f"#{FIELDS[self._field]}").remove_class("selected")
-        self.query_one(f"#{FIELDS[field]}").add_class("selected")
+        selected = self.query_one(f"#{FIELDS[field]}")
+        selected.add_class("selected")
+        selected.scroll_visible()
         self._field = field
 
     def _pick(

@@ -1,3 +1,4 @@
+from textual.containers import VerticalScroll
 from textual.pilot import Pilot
 
 from orbit.agent import AgentSession
@@ -619,3 +620,24 @@ async def test_tasks_coming_or_going_rebuild_the_rows() -> None:
         assert len(options(task_list)) == 4
         assert not any(option in before for option in options(task_list))
         assert [row.split()[0] for row in rows(app)[:3]] == ["1.", "2.", "3."]
+
+
+async def test_editor_scrolls_every_field_into_view_in_a_small_terminal() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test(size=(80, 24)) as pilot:
+        await show_settings(session, pilot, Settings())
+        await feed(session, pilot, board("Add a widget\n\n" + "\n".join(["line"] * 20)))
+        await open_task_list(pilot)
+        await pilot.press("enter")
+        screen = editor(app)
+        box = screen.query_one(VerticalScroll)
+        assert box.scroll_y == 0
+
+        await pilot.press("j", "j", "j")
+        assert box.scroll_y > 0
+        assert box.content_region.contains_region(screen.query_one("#task-tools").region)
+
+        await pilot.press("k", "k", "k")
+        assert box.scroll_y == 0
+        assert box.content_region.contains_region(screen.query_one("#task-title").region)
