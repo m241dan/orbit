@@ -7,8 +7,10 @@ left behind are stashed, and commits that can't be merged stay on ``orbit/coder`
 """
 
 import asyncio
+import contextlib
 import datetime
 import hashlib
+import shutil
 import subprocess
 import tempfile
 from collections.abc import Collection, Sequence
@@ -187,12 +189,26 @@ class GitCoderTree:
         parent = (await self._path()).parent
         path = await asyncio.to_thread(_make_snapshot_dir, parent, sha)
         self._snapshots.add(path)
-        await self._git(self._root, "worktree", "add", "-q", "--detach", str(path), sha)
+        try:
+            await self._git(self._root, "worktree", "add", "-q", "--detach", str(path), sha)
+        except BaseException:  # Cancellation too: the caller never gets the path to drop.
+            await self._discard_snapshot(path)
+            raise
         return str(path)
 
     async def drop(self, path: str) -> None:
         await self._git(self._root, "worktree", "remove", "--force", path)
         self._snapshots.discard(Path(path))
+
+    async def _discard_snapshot(self, path: Path) -> None:
+        """Remove the half-made snapshot at ``path``, whether or not git registered it,
+        ignoring failures so the error that stopped it is the one raised."""
+        try:
+            with contextlib.suppress(RuntimeError):
+                await _run(("git", "worktree", "remove", "--force", str(path)), self._root)
+            await asyncio.to_thread(shutil.rmtree, path, ignore_errors=True)
+        finally:
+            self._snapshots.discard(path)
 
     async def untracked(self) -> frozenset[str]:
         listed = await self._git(
