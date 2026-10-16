@@ -210,9 +210,9 @@ class FakeTree:
 
 
 def verified(
-    steps: Steps, workspace: FakeWorkspace | None = None, max_fix_attempts: int = 3
+    steps: Steps, workspace: FakeWorkspace | None = None, fallback_fixes: int = 3
 ) -> Verification:
-    return Verification((STEP,), steps, workspace, max_fix_attempts)
+    return Verification((STEP,), steps, workspace, fallback_fixes)
 
 
 def session_for(

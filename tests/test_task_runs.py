@@ -298,7 +298,7 @@ async def test_verification_stops_at_the_first_failing_step(tmp_path: Path) -> N
     steps = (file_step(tmp_path / "missing", "first"), file_step(tmp_path, "second"))
     session, _, _ = session_for(
         keeps_claiming,
-        verification=Verification(steps, run_step, max_fix_attempts=0),
+        verification=Verification(steps, run_step, fallback_fixes=0),
         limits=Limits(max_attempts=1),
     )
     events = await asyncio.wait_for(run(session), 10)
@@ -318,7 +318,7 @@ async def test_the_fix_cap_survives_a_cancelled_and_restarted_run() -> None:
         keeps_claiming,
         waits_forever,
         keeps_claiming,
-        verification=verified(Steps(False, False, False, False), max_fix_attempts=1),
+        verification=verified(Steps(False, False, False, False), fallback_fixes=1),
         limits=Limits(max_attempts=1),
     )
     await session.send(AddTask(task=TaskSpec(prompt="a")))

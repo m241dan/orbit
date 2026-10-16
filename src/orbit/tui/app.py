@@ -115,7 +115,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         Binding("enter", "activate", show=False),
         # Priority, to beat the screen's focus_next; check_action lets it through
         # to that everywhere but normal mode.
-        Binding("tab", "cycle_tab(1)", "Next agent", key_display="Tab", priority=True),
+        Binding("tab", "cycle_tab(1)", "Next tab", key_display="Tab", priority=True),
         Binding("shift+tab", "cycle_tab(-1)", show=False, priority=True),
         Binding("i", "insert_mode", "Type"),
         Binding("ctrl+r", "run_tasks", "Run tasks"),

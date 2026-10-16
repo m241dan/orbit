@@ -12,7 +12,7 @@ from orbit.agent import (
     Workspace,
     run_step,
 )
-from orbit.agent.domain.verification import MAX_FIX_ATTEMPTS
+from orbit.agent.domain.verification import MAX_FALLBACK_FIXES
 from orbit.protocol import (
     AddTask,
     BusyChanged,
@@ -186,11 +186,11 @@ async def test_a_turn_started_as_the_last_ends_is_not_reported_idle() -> None:
 
 def verified(
     steps: Sequence[VerificationStep],
-    max_fix_attempts: int = MAX_FIX_ATTEMPTS,
+    fallback_fixes: int = MAX_FALLBACK_FIXES,
     workspace: Workspace | None = None,
 ) -> Verification:
     """Verification that runs ``steps`` as real processes."""
-    return Verification(tuple(steps), run_step, workspace, max_fix_attempts)
+    return Verification(tuple(steps), run_step, workspace, fallback_fixes)
 
 
 FAILING_STEP = VerificationStep(

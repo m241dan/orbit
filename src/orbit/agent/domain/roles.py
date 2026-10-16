@@ -16,7 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 
 from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.reviews import ReviewLimits
-from orbit.agent.domain.verification import MAX_FIX_ATTEMPTS, VerificationStep
+from orbit.agent.domain.verification import MAX_FALLBACK_FIXES, VerificationStep
 from orbit.protocol import Settings, TaskSpec, ToolAccess
 
 ORBIT_TOOLS = (
@@ -232,7 +232,7 @@ class OrbitConfig(_Config):
 
     fix_attempts: int = Field(default=_LIMITS.max_attempts, ge=1)
     max_checks: int = Field(default=_LIMITS.max_checks, ge=1)
-    fallback_fixes: int = Field(default=MAX_FIX_ATTEMPTS, ge=1)
+    fallback_fixes: int = Field(default=MAX_FALLBACK_FIXES, ge=1)
     review_rounds: int = Field(default=_REVIEW_LIMITS.rounds, ge=1)
     super_review_every: int = Field(default=_REVIEW_LIMITS.super_every, ge=1)
     review_suggestions: int = Field(default=_REVIEW_LIMITS.suggestions, ge=1)

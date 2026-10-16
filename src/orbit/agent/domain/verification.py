@@ -16,7 +16,7 @@ class VerificationStep:
 
 
 # Fix tasks one task's chain of fixes may queue for each step before giving up on it.
-MAX_FIX_ATTEMPTS = 3
+MAX_FALLBACK_FIXES = 3
 # Characters of step output quoted in a fix prompt, and how many of them come from its start:
 # the first failure is usually there, and the summary at the end.
 OUTPUT_LIMIT = 8000
@@ -42,7 +42,7 @@ def skip_reason(task: TaskSpec, before: object, after: object) -> SkipReason | N
     return None
 
 
-class FixAttempts:
+class FallbackFixes:
     """The fixes queued for each step, per task, counted along each chain of fixes.
 
     Tasks the user queued have none. A fix inherits the counts of the task it fixes, plus

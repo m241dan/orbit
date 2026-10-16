@@ -277,7 +277,7 @@ def test_chat_gives_verification_the_project_files_fallback_fixes(
     assert result.exit_code == 0
     [session] = launched
     assert session.verification is not None
-    assert session.verification.max_fix_attempts == 7
+    assert session.verification.fallback_fixes == 7
     assert session.agents is not None
     assert session.agents.limits == Limits(max_attempts=2)
 

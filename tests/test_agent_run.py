@@ -124,7 +124,7 @@ async def test_fallbacks_stop_after_the_chain_runs_out_of_fixes() -> None:
     session, _, launcher = session_for(
         keeps_claiming,
         keeps_claiming,
-        verification=verified(Steps(False, False, False, False), max_fix_attempts=1),
+        verification=verified(Steps(False, False, False, False), fallback_fixes=1),
         limits=Limits(max_attempts=1),
     )
     events = await asyncio.wait_for(run(session), 5)

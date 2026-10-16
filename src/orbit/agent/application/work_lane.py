@@ -18,7 +18,7 @@ from orbit.agent.application.verifier import Failure, Verifier
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.commits import commit_message, configure_message
 from orbit.agent.domain.roles import REVIEW_ROLES, ChecksProposal
-from orbit.agent.domain.verification import FixAttempts, fix_prompt
+from orbit.agent.domain.verification import FallbackFixes, fix_prompt
 from orbit.protocol import (
     ErrorOccurred,
     TasksChanged,
@@ -52,7 +52,7 @@ class WorkLane:
         self._starts: dict[str, str] = {}  # Task id -> the tree's head when it started.
         # Fixes queued per step along each chain, kept across runs so a restart can't reset
         # the cap.
-        self._attempts = FixAttempts()
+        self._fallbacks = FallbackFixes()
 
     def next_work(self, tried: Collection[str] = ()) -> str | None:
         """The next task for the work lane; reviews have their own lane, if there is one."""
@@ -162,15 +162,15 @@ class WorkLane:
         """Add a task fixing ``failure``'s step right after ``task_id``, unless its attempts
         ran out."""
         step, output = failure
-        limit = verifier.verification.max_fix_attempts
-        if self._attempts.exhausted(task_id, step.name, limit):
+        limit = verifier.verification.fallback_fixes
+        if self._fallbacks.exhausted(task_id, step.name, limit):
             message = f"Verification step {step.name!r} still fails after {limit} fix attempts."
             await self._publish(ErrorOccurred(message=message))
             return
         settings = self._board.get(task_id).task.settings
         fix = TaskSpec(prompt=fix_prompt(step, output), settings=settings)
         fix_id = self._board.add(fix, fixes=task_id)
-        self._attempts.record(fix_id, task_id, step.name)
+        self._fallbacks.record(fix_id, task_id, step.name)
         if self._review is not None:
             self._review.joined(fix_id)
 

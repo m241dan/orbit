@@ -99,22 +99,14 @@ def _cancel(turn: "asyncio.Task[object] | None") -> bool:
 
 
 class AgentSession:
-    """Runs work in the background and publishes its events.
+    """Takes commands, runs work in the background and publishes its events.
 
-    Prompts go to the planner, whose turns run in a lane of their own, alongside the work
-    lane's task runs.
+    The session owns the task board and reports it whole on every change. It starts two
+    lanes: the planner's, whose turns answer prompts, and the work lane's, which runs the
+    tasks. ``WorkLane`` holds the rules of a task run: verification, fixes and reviews.
 
-    The session owns the task list and reports it whole on every change. A run
-    goes through it in order; after each task that completes, the ``verification``
-    steps run until one fails. A failure adds a task to fix it right after the
-    failed one. Once a fix passes, the tasks it fixed count as completed.
-
-    Tasks with tools off aren't verified, and neither are tasks that leave the
-    working tree as it was. With a ``verification`` without steps, no task is: a note
-    says so at startup, and each task that would have been verified is skipped.
-
-    With ``check_at_startup``, the steps also run once in the background as the events start,
-    on the base commit; a failure adds a draft task to fix it.
+    With ``check_at_startup``, the ``verification`` steps also run once in the background as
+    the events start, on the base commit; a failure adds a draft task to fix it.
     """
 
     def __init__(

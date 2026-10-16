@@ -6,7 +6,7 @@ from orbit.agent.domain.verification import (
     CUT,
     HEAD_LIMIT,
     OUTPUT_LIMIT,
-    FixAttempts,
+    FallbackFixes,
     VerificationStep,
     check_reply,
     fix_prompt,
@@ -49,8 +49,8 @@ def test_tasks_are_verified_when_the_tree_cannot_be_read() -> None:
     assert skip_reason(task(), None, None) is None
 
 
-def test_fix_attempts_follow_the_chain_per_step() -> None:
-    attempts = FixAttempts()
+def test_fallback_fixes_follow_the_chain_per_step() -> None:
+    attempts = FallbackFixes()
     assert not attempts.exhausted("1", "lint", 1)
     attempts.record("2", "1", "lint")
     # The fix carries its chain's count; the task the user queued keeps none.
@@ -65,7 +65,7 @@ def test_fix_attempts_follow_the_chain_per_step() -> None:
 
 
 def test_no_fixes_are_allowed_with_a_limit_of_zero() -> None:
-    assert FixAttempts().exhausted("1", "lint", 0)
+    assert FallbackFixes().exhausted("1", "lint", 0)
 
 
 def test_fix_prompt_names_the_step_command_and_output() -> None:

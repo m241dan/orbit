@@ -954,7 +954,7 @@ async def test_tab_shows_in_the_footer() -> None:
     app = OrbitApp(FakeSession())
     async with app.run_test(size=(200, 30)):
         keys = {b.binding.description for b in app.active_bindings.values() if b.binding.show}
-        assert "Next agent" in keys
+        assert "Next tab" in keys
 
 
 async def test_tab_keeps_its_normal_behaviour_outside_normal_mode() -> None:

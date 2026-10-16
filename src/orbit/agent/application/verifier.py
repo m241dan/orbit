@@ -7,7 +7,7 @@ from typing import TypeVar
 from orbit.agent.application.ports import CoderTree, Publish, StepRunner, Workspace
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.verification import (
-    MAX_FIX_ATTEMPTS,
+    MAX_FALLBACK_FIXES,
     VerificationStep,
     may_change_files,
     skip_reason,
@@ -57,13 +57,13 @@ class Verification:
 
     ``steps`` run in order through ``run_step`` until one fails. ``workspace`` tells
     whether a task changed any files; without it, every task counts as changing them.
-    A task's chain of fixes gets ``max_fix_attempts`` for each step.
+    A task's chain of fixes may queue ``fallback_fixes`` fix tasks for each step.
     """
 
     steps: tuple[VerificationStep, ...]
     run_step: StepRunner
     workspace: Workspace | None = None
-    max_fix_attempts: int = MAX_FIX_ATTEMPTS
+    fallback_fixes: int = MAX_FALLBACK_FIXES
 
 
 class Verifier:
