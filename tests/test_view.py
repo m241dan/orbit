@@ -858,6 +858,40 @@ def test_tool_call_summary_shows_a_commands_first_line() -> None:
     assert tool_call_summary("Bash", arguments) == "Bash cd src; echo hi"
 
 
+@pytest.mark.parametrize("command", ["\nls -la\npwd", "  \n  ls -la", "\n\n ls  -la"])
+def test_tool_call_summary_shows_a_commands_first_line_that_is_not_blank(command: str) -> None:
+    assert tool_call_summary("Bash", {"command": command}) == "Bash ls -la"
+
+
+@pytest.mark.parametrize(
+    ("name", "arguments", "summary"),
+    [
+        ("Read", {"file_path": ""}, 'Read {"file_path": ""}'),
+        ("Read", {"file_path": " \n "}, 'Read {"file_path": " \\n "}'),
+        ("Bash", {"command": "\n  \n"}, 'Bash {"command": "\\n  \\n"}'),
+        ("Grep", {"pattern": " ", "path": "src"}, 'Grep {"pattern": " ", "path": "src"}'),
+    ],
+)
+def test_tool_call_summary_falls_back_to_json_with_a_blank_key_argument(
+    name: str, arguments: dict[str, Any], summary: str
+) -> None:
+    assert tool_call_summary(name, arguments) == summary
+
+
+def test_tool_call_summary_leaves_out_a_blank_search_path() -> None:
+    assert tool_call_summary("Grep", {"pattern": "def x", "path": "  "}) == "Grep def x"
+
+
+def test_tool_call_summary_skips_an_orbit_tools_blank_field() -> None:
+    arguments = {"summary": "   ", "title": "Fix"}
+    assert tool_call_summary("mcp__orbit__complete_task", arguments) == "complete_task Fix"
+
+
+def test_tool_call_summary_shows_an_orbit_tool_with_only_blank_fields_by_name() -> None:
+    arguments = {"summary": "", "note": "\n"}
+    assert tool_call_summary("mcp__orbit__complete_task", arguments) == "complete_task"
+
+
 def test_tool_call_summary_collapses_whitespace_in_its_key_argument() -> None:
     arguments = {"summary": "Add  a\nthing"}
     assert tool_call_summary("mcp__orbit__complete_task", arguments) == "complete_task Add a thing"

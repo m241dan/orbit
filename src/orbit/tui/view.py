@@ -251,8 +251,9 @@ type ArgumentExtractor = Callable[[Mapping[str, Any]], str | None]
 
 
 def _text(arguments: Mapping[str, Any], key: str) -> str | None:
+    """The string at ``key`` in ``arguments``, or None when it's missing, not text or blank."""
     value = arguments.get(key)
-    return value if isinstance(value, str) else None
+    return value if isinstance(value, str) and value.strip() else None
 
 
 def _field(key: str) -> ArgumentExtractor:
@@ -261,7 +262,7 @@ def _field(key: str) -> ArgumentExtractor:
 
 def _first_line(arguments: Mapping[str, Any]) -> str | None:
     command = _text(arguments, "command")
-    return None if command is None else command.partition("\n")[0]
+    return None if command is None else command.lstrip().partition("\n")[0]
 
 
 def _searched(arguments: Mapping[str, Any]) -> str | None:
