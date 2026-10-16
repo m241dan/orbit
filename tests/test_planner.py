@@ -20,26 +20,24 @@ from orbit.protocol import (
     RunTasks,
     Settings,
     SubmitPrompt,
-    TasksChanged,
     TaskSpec,
-    TaskState,
     TurnEndReason,
     TurnStarted,
 )
-from tests.agent_fakes import ROLES, Call, FakeHost, ScriptedLauncher, session_for
+from tests.agent_fakes import (
+    ROLES,
+    Call,
+    FakeHost,
+    ScriptedLauncher,
+    board,
+    events_until,
+    idle,
+    session_for,
+)
 
 
 async def until_idle(session: AgentSession) -> list[Event]:
-    events: list[Event] = []
-    async for event in session.events():
-        events.append(event)
-        if isinstance(event, BusyChanged) and not event.busy:
-            return events
-    raise AssertionError("unreachable")
-
-
-def board(events: list[Event]) -> tuple[TaskState, ...]:
-    return [e for e in events if isinstance(e, TasksChanged)][-1].tasks
+    return await events_until(session, idle(lane=None))
 
 
 async def proposes_two(call: Call) -> TurnEndReason:
@@ -55,7 +53,7 @@ async def chats(call: Call) -> TurnEndReason:
 
 async def plan(session: AgentSession, text: str) -> list[Event]:
     await session.send(SubmitPrompt(text=text))
-    return await asyncio.wait_for(until_idle(session), 5)
+    return await until_idle(session)
 
 
 async def test_prompts_to_the_planner_go_to_it_and_proposals_become_drafts() -> None:
@@ -124,7 +122,7 @@ async def test_accepted_drafts_run_and_dropped_ones_go() -> None:
     await session.send(AcceptTask(task_id="1"))
     await session.send(RemoveTask(task_id="2"))
     await session.send(RunTasks())
-    events = await asyncio.wait_for(until_idle(session), 5)
+    events = await until_idle(session)
     assert [(t.id, t.status) for t in board(events)] == [("1", "completed")]
 
 

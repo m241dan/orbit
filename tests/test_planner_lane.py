@@ -1,9 +1,7 @@
 """The planner's own lane: its turns run alongside task runs."""
 
 import asyncio
-from collections.abc import Callable
 
-from orbit.agent import AgentSession
 from orbit.agent.application.ports import Reply
 from orbit.protocol import (
     AddTask,
@@ -19,25 +17,11 @@ from orbit.protocol import (
     TurnFinished,
     TurnStarted,
 )
-from tests.agent_fakes import Call, Script, board, session_for
+from tests.agent_fakes import Call, Script, board, events_until, session_for
 from tests.test_task_runs import claims_done
 
 PLANNER_IDLE = BusyChanged(busy=False, lane="planner")
 WORK_IDLE = BusyChanged(busy=False)
-
-
-async def until(session: AgentSession, done: Callable[[Event], bool]) -> list[Event]:
-    """The session's events up to the first that's ``done``."""
-
-    async def collect() -> list[Event]:
-        events: list[Event] = []
-        async for event in session.events():
-            events.append(event)
-            if done(event):
-                return events
-        raise AssertionError("unreachable")
-
-    return await asyncio.wait_for(collect(), 5)
 
 
 def gated_task(gate: asyncio.Event) -> Script:
@@ -73,14 +57,14 @@ async def test_the_planner_answers_while_a_task_runs() -> None:
     await session.send(AddTask(task=TaskSpec(prompt="one")))
     await session.send(RunTasks())
     await session.send(SubmitPrompt(text="Plan."))
-    events = await until(session, lambda e: e == PLANNER_IDLE)
+    events = await events_until(session, lambda e: e == PLANNER_IDLE)
     assert BusyChanged(busy=True) in events
     assert BusyChanged(busy=True, lane="planner") in events
     assert any(isinstance(e, TurnFinished) and e.reason == "completed" for e in events)
     assert WORK_IDLE not in events and errors(events) == []
 
     gate.set()
-    events = await until(session, lambda e: e == WORK_IDLE)
+    events = await events_until(session, lambda e: e == WORK_IDLE)
     assert [t.status for t in board(events)] == ["completed"]
 
 
@@ -91,12 +75,12 @@ async def test_tasks_run_while_the_planner_answers() -> None:
     await session.send(SubmitPrompt(text="Plan."))
     await session.send(AddTask(task=TaskSpec(prompt="one")))
     await session.send(RunTasks())
-    events = await until(session, lambda e: e == WORK_IDLE)
+    events = await events_until(session, lambda e: e == WORK_IDLE)
     assert [t.status for t in board(events)] == ["completed"]
     assert PLANNER_IDLE not in events and errors(events) == []
 
     gate.set()
-    await until(session, lambda e: e == PLANNER_IDLE)
+    await events_until(session, lambda e: e == PLANNER_IDLE)
 
 
 async def test_the_planner_takes_one_prompt_at_a_time() -> None:
@@ -105,10 +89,10 @@ async def test_the_planner_takes_one_prompt_at_a_time() -> None:
     launcher.planner_turns = [gated_planner(gate)]
     await session.send(SubmitPrompt(text="Plan."))
     await session.send(SubmitPrompt(text="More."))
-    events = await until(session, lambda e: isinstance(e, ErrorOccurred))
+    events = await events_until(session, lambda e: isinstance(e, ErrorOccurred))
     assert errors(events) == ["The planner is already answering."]
     gate.set()
-    await until(session, lambda e: e == PLANNER_IDLE)
+    await events_until(session, lambda e: e == PLANNER_IDLE)
     assert len(launcher.launches) == 1
 
 
@@ -119,15 +103,15 @@ async def test_cancelling_the_planner_leaves_the_task_run_running() -> None:
     await session.send(AddTask(task=TaskSpec(prompt="one")))
     await session.send(RunTasks())
     await session.send(SubmitPrompt(text="Plan."))
-    await until(session, lambda e: isinstance(e, TurnStarted) and e.turn_id != e.agent_id)
+    await events_until(session, lambda e: isinstance(e, TurnStarted) and e.turn_id != e.agent_id)
     await session.send(CancelTurn(lane="planner"))
-    events = await until(session, lambda e: e == PLANNER_IDLE)
+    events = await events_until(session, lambda e: e == PLANNER_IDLE)
     assert any(isinstance(e, TurnFinished) and e.reason == "cancelled" for e in events)
     assert WORK_IDLE not in events
 
     # Not held: the run goes on, and work a review queues would still start.
     task_gate.set()
-    events = await until(session, lambda e: e == WORK_IDLE)
+    events = await events_until(session, lambda e: e == WORK_IDLE)
     assert [t.status for t in board(events)] == ["completed"]
 
 
@@ -136,16 +120,16 @@ async def test_cancelling_the_planners_agent_stops_only_its_turn() -> None:
     session, _, launcher = session_for(gated_task(gate))
     launcher.planner_turns = [gated_planner(asyncio.Event())]
     await session.send(SubmitPrompt(text="Plan."))
-    started = await until(session, lambda e: isinstance(e, TurnStarted))
+    started = await events_until(session, lambda e: isinstance(e, TurnStarted))
     planner = next(e.agent_id for e in started if isinstance(e, TurnStarted))
     assert planner is not None
     await session.send(AddTask(task=TaskSpec(prompt="one")))
     await session.send(RunTasks())
     await session.send(CancelAgent(agent_id=planner))
-    events = await until(session, lambda e: e == PLANNER_IDLE)
+    events = await events_until(session, lambda e: e == PLANNER_IDLE)
     assert WORK_IDLE not in events
     gate.set()
-    events = await until(session, lambda e: e == WORK_IDLE)
+    events = await events_until(session, lambda e: e == WORK_IDLE)
     assert [t.status for t in board(events)] == ["completed"]
 
 
@@ -153,9 +137,9 @@ async def test_closing_stops_the_planners_turn() -> None:
     session, _, launcher = session_for()
     launcher.planner_turns = [gated_planner(asyncio.Event())]
     await session.send(SubmitPrompt(text="Plan."))
-    await until(session, lambda e: isinstance(e, TurnStarted))
+    await events_until(session, lambda e: isinstance(e, TurnStarted))
     await session.close()
-    events = await until(session, lambda e: e == PLANNER_IDLE)
+    events = await events_until(session, lambda e: e == PLANNER_IDLE)
     assert any(isinstance(e, TurnFinished) and e.reason == "cancelled" for e in events)
 
 
@@ -169,5 +153,5 @@ async def test_the_planner_calling_an_unknown_tool_is_refused() -> None:
     session, _, launcher = session_for()
     launcher.planner_turns = [calls_unknown]
     await session.send(SubmitPrompt(text="Plan."))
-    await until(session, lambda e: e == PLANNER_IDLE)
+    await events_until(session, lambda e: e == PLANNER_IDLE)
     assert replies == [Reply("Orbit has no tool 'no_such_tool'.", is_error=True)]

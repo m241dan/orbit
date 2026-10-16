@@ -22,7 +22,17 @@ from orbit.protocol import (
     TurnEndReason,
     VerificationChanged,
 )
-from tests.agent_fakes import STEP, Call, FakeTree, Steps, board, run, session_for
+from tests.agent_fakes import (
+    STEP,
+    Call,
+    FakeTree,
+    Steps,
+    agent_exited,
+    board,
+    events_until,
+    run,
+    session_for,
+)
 
 LINT = VerificationStep(name="Lint", command=("ruff", "check"))
 SNAPSHOT = "/work/review-HEAD"
@@ -42,12 +52,7 @@ def titled(*statuses: str) -> VerificationChanged:
 
 async def until_checked(session: AgentSession) -> list[Event]:
     """The events until the startup check's agent exits."""
-    events: list[Event] = []
-    async for event in session.events():
-        events.append(event)
-        if isinstance(event, AgentExited) and event.agent_id == "startup-check":
-            return events
-    raise AssertionError("unreachable")
+    return await events_until(session, agent_exited("startup-check"))
 
 
 async def quiet(session: AgentSession) -> list[Event]:

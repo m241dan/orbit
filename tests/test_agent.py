@@ -43,7 +43,7 @@ from orbit.protocol import (
     VerificationChanged,
     VerificationFinished,
 )
-from tests.agent_fakes import STEP, Call, FakeTree, Steps, session_for
+from tests.agent_fakes import STEP, Call, FakeTree, Steps, events_until, idle, session_for
 
 PLANNER_IDLE = BusyChanged(busy=False, lane="planner")
 
@@ -58,14 +58,7 @@ async def fails(call: Call) -> TurnEndReason:
 
 async def collect_run(session: AgentSession) -> list[Event]:
     """Events until the planner goes idle, ignoring settings announcements."""
-    events: list[Event] = []
-    async for event in session.events():
-        if isinstance(event, SettingsChanged):
-            continue
-        events.append(event)
-        if event == PLANNER_IDLE:
-            return events
-    return events
+    return await events_until(session, idle("planner"), skip=(SettingsChanged,))
 
 
 def turns(events: list[Event]) -> list[Event]:
@@ -78,7 +71,7 @@ async def test_a_prompt_starts_a_turn_of_the_planner() -> None:
     session, _, launcher = session_for()
     launcher.planner_turns = [chats]
     await session.send(SubmitPrompt(text="hello"))
-    events = await asyncio.wait_for(collect_run(session), 5)
+    events = await collect_run(session)
 
     [launch] = launcher.launches  # The planner's launcher was asked to converse.
     assert launch.agent.role == "planner" and launch.prompt.endswith("\n\nhello")
@@ -106,7 +99,7 @@ async def test_session_reports_the_planners_errors() -> None:
     session, _, launcher = session_for()
     launcher.planner_turns = [fails]
     await session.send(SubmitPrompt(text="hello"))
-    events = turns(await asyncio.wait_for(collect_run(session), 5))
+    events = turns(await collect_run(session))
 
     started = events[1]
     assert isinstance(started, TurnStarted)
@@ -123,7 +116,7 @@ async def test_cancel_without_a_turn_is_a_noop() -> None:
     launcher.planner_turns = [chats]
     await session.send(CancelTurn(lane="planner"))
     await session.send(SubmitPrompt(text="hello"))
-    events = await asyncio.wait_for(collect_run(session), 5)
+    events = await collect_run(session)
     assert any(isinstance(e, TurnFinished) and e.reason == "completed" for e in events)
 
 
@@ -143,12 +136,12 @@ async def test_the_planner_takes_the_model_from_updated_settings() -> None:
     assert await anext(stream) == SettingsChanged(settings=Settings())
 
     await session.send(SubmitPrompt(text="one"))
-    await asyncio.wait_for(collect_run(session), 5)
+    await collect_run(session)
     new = Settings(model="opus", tool_access="full")
     await session.send(UpdateSettings(settings=new))
     assert await anext(stream) == SettingsChanged(settings=new)
     await session.send(SubmitPrompt(text="two"))
-    await asyncio.wait_for(collect_run(session), 5)
+    await collect_run(session)
 
     assert [launch.settings.model for launch in launcher.launches] == [None, "opus"]
     # Tool access sets new tasks' default; the planner keeps its role's.
@@ -183,7 +176,7 @@ async def test_a_turn_started_as_the_last_ends_is_not_reported_idle() -> None:
         await asyncio.sleep(0)
     # The first turn is done but hasn't reported idle yet when the second starts.
     await session.send(SubmitPrompt(text="two"))
-    events = await asyncio.wait_for(collect_run(session), 5)
+    events = await collect_run(session)
     assert [e for e in events if isinstance(e, BusyChanged)] == [
         BusyChanged(busy=True, lane="planner"),
         BusyChanged(busy=True, lane="planner"),
@@ -236,7 +229,7 @@ async def test_planner_turns_are_not_verified() -> None:
     session, _, launcher = session_for(verification=verified((FAILING_STEP,)))
     launcher.planner_turns = [chats]
     await session.send(SubmitPrompt(text="hello"))
-    events = await asyncio.wait_for(collect_run(session), 5)
+    events = await collect_run(session)
 
     assert not any(isinstance(e, VerificationChanged | VerificationFinished) for e in events[1:])
     await asyncio.sleep(0.01)

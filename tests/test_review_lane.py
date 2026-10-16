@@ -23,7 +23,6 @@ from orbit.protocol import (
     RunTasks,
     TasksChanged,
     TaskSpec,
-    TaskState,
     TurnEndReason,
 )
 from tests.agent_fakes import (
@@ -32,6 +31,7 @@ from tests.agent_fakes import (
     Script,
     ScriptedLauncher,
     Steps,
+    board,
     session_for,
     verified,
 )
@@ -111,10 +111,6 @@ def reviewers_of(launcher: ScriptedLauncher) -> list[str]:
 
 def statuses_of(events: list[Event], role: str) -> list[str]:
     return [t.status for t in board(events) if t.task.role == role]
-
-
-def board(events: list[Event]) -> tuple[TaskState, ...]:
-    return [e for e in events if isinstance(e, TasksChanged)][-1].tasks
 
 
 async def start(session: AgentSession, *prompts: str) -> None:

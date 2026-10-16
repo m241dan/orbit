@@ -3,6 +3,7 @@ CLI, and a step runner and workspace for verification."""
 
 import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable, Collection, Sequence
+from dataclasses import dataclass
 from typing import Any
 
 from orbit.agent import Agents, AgentSession, Verification, VerificationStep
@@ -11,9 +12,11 @@ from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.roles import BUILT_IN_ROLE_NAMES, REVIEW_ROLES, Setup, built_in_roles
 from orbit.protocol import (
     AddTask,
+    AgentExited,
     AgentReply,
     AssistantMessage,
     BusyChanged,
+    BusyLane,
     Event,
     RunTasks,
     Settings,
@@ -250,14 +253,68 @@ async def run(session: AgentSession, *tasks: TaskSpec) -> list[Event]:
     for task in tasks or (TaskSpec(prompt="Add a flag.", settings=Settings(model="opus")),):
         await session.send(AddTask(task=task))
     await session.send(RunTasks())
+    return await events_until(session, idle(), skip=(SettingsChanged, VerificationChanged))
+
+
+@dataclass(frozen=True)
+class Stop:
+    """A test of the event to stop at, named by ``description``."""
+
+    description: str
+    matches: Callable[[Event], bool]
+
+    def __call__(self, event: Event) -> bool:
+        return self.matches(event)
+
+    def __repr__(self) -> str:
+        return self.description
+
+
+def idle(lane: BusyLane | None = "work") -> Stop:
+    """Stops when ``lane`` goes idle, or any lane if ``lane`` is None."""
+    return Stop(
+        f"idle(lane={lane!r})",
+        lambda e: isinstance(e, BusyChanged) and not e.busy and lane in (None, e.lane),
+    )
+
+
+def agent_exited(agent_id: str) -> Stop:
+    """Stops when agent ``agent_id`` exits."""
+    return Stop(
+        f"agent_exited({agent_id!r})",
+        lambda e: isinstance(e, AgentExited) and e.agent_id == agent_id,
+    )
+
+
+def of_type(kind: type) -> Stop:
+    """Stops at the first event of type ``kind``."""
+    return Stop(f"of_type({kind.__name__})", lambda e: isinstance(e, kind))
+
+
+async def events_until(
+    session: AgentSession,
+    done: Callable[[Event], bool],
+    *,
+    skip: tuple[type, ...] = (),
+    timeout: float = 5,
+) -> list[Event]:
+    """The session's events up to and including the first that's ``done``, leaving out those
+    of the ``skip`` types; fails if none comes within ``timeout`` seconds."""
     events: list[Event] = []
-    async for event in session.events():
-        if isinstance(event, SettingsChanged | VerificationChanged):
-            continue
-        events.append(event)
-        if event == BusyChanged(busy=False):
-            return events
-    raise AssertionError("unreachable")
+
+    async def collect() -> None:
+        async for event in session.events():
+            if isinstance(event, skip):
+                continue
+            events.append(event)
+            if done(event):
+                return
+
+    try:
+        await asyncio.wait_for(collect(), timeout)
+    except TimeoutError:
+        raise AssertionError(f"no event matched {done!r} within {timeout}s") from None
+    return events
 
 
 def board(events: list[Event]) -> tuple[TaskState, ...]:

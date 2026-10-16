@@ -11,7 +11,6 @@ from orbit.agent.domain.roles import Setup, configure_prompt
 from orbit.agent.domain.verification import VerificationStep
 from orbit.protocol import (
     AddTask,
-    BusyChanged,
     ConfigureChecks,
     ErrorOccurred,
     Event,
@@ -25,7 +24,17 @@ from orbit.protocol import (
 from orbit.tui import OrbitApp
 from orbit.tui.tasks import TaskList
 from orbit.tui.widgets import CONFIGURE_MESSAGE, CONFIGURE_TITLE, ConfirmScreen, PickerScreen
-from tests.agent_fakes import STEP, Call, FakeTree, Steps, board, session_for, verified
+from tests.agent_fakes import (
+    STEP,
+    Call,
+    FakeTree,
+    Steps,
+    board,
+    events_until,
+    idle,
+    session_for,
+    verified,
+)
 from tests.test_tui import FakeSession, shown
 
 CODE = TaskSpec(prompt="Add a flag.")
@@ -55,12 +64,7 @@ async def claims_done(call: Call) -> TurnEndReason:
 
 
 async def until_idle(session: AgentSession) -> list[Event]:
-    events: list[Event] = []
-    async for event in session.events():
-        events.append(event)
-        if event == BusyChanged(busy=False):
-            return events
-    raise AssertionError("unreachable")
+    return await events_until(session, idle())
 
 
 def test_the_startup_note_says_how_to_set_steps_up() -> None:
@@ -95,7 +99,7 @@ async def test_it_queues_a_configurator_first_and_runs_it_straight_away() -> Non
     )
     await session.send(AddTask(task=CODE))
     await session.send(ConfigureChecks())
-    events = await asyncio.wait_for(until_idle(session), 5)
+    events = await until_idle(session)
     tasks = board(events)
     assert [t.task.role for t in tasks] == ["configurator", "coder"]
     assert [t.status for t in tasks] == ["unverified", "completed"]
@@ -110,7 +114,7 @@ async def test_with_nothing_configured_the_prompt_says_so() -> None:
     configurator = Configurator()
     session, _, _ = session_for(configurator, verification=no_steps())
     await session.send(ConfigureChecks())
-    events = await asyncio.wait_for(until_idle(session), 5)
+    events = await until_idle(session)
     assert board(events)[0].task.prompt == configure_prompt((), None)
     assert "Nothing is configured yet." in configurator.tasks[0]
 
@@ -119,7 +123,7 @@ async def test_a_second_request_is_refused_while_one_is_queued_or_running() -> N
     session, _, _ = session_for(Configurator(), verification=no_steps())
     await session.send(ConfigureChecks())
     await session.send(ConfigureChecks())
-    events = await asyncio.wait_for(until_idle(session), 5)
+    events = await until_idle(session)
     assert Notice(message=CONFIGURING_NOTE) in events
     assert CONFIGURING_NOTE == "A configurator task is already queued or running."
     assert [t.task.role for t in board(events)] == ["configurator"]
@@ -128,9 +132,9 @@ async def test_a_second_request_is_refused_while_one_is_queued_or_running() -> N
 async def test_it_can_be_asked_for_again_to_reconfigure() -> None:
     session, _, launcher = session_for(Configurator(), Configurator(), verification=no_steps())
     await session.send(ConfigureChecks())
-    await asyncio.wait_for(until_idle(session), 5)
+    await until_idle(session)
     await session.send(ConfigureChecks())
-    events = await asyncio.wait_for(until_idle(session), 5)
+    events = await until_idle(session)
     assert [t.task.role for t in board(events)] == ["configurator", "configurator"]
     assert len(launcher.launches) == 2
 
@@ -150,7 +154,7 @@ async def test_while_tasks_run_it_goes_next() -> None:
     await session.send(AddTask(task=CODE))
     await session.send(AddTask(task=CODE))
     await session.send(RunTasks())
-    events = await asyncio.wait_for(until_idle(session), 5)
+    events = await until_idle(session)
     assert [launch.agent.role for launch in launcher.launches] == ["coder", "configurator", "coder"]
     assert [t.task.role for t in board(events)] == ["configurator", "coder", "coder"]
     assert not any(isinstance(e, ErrorOccurred) for e in events)
