@@ -105,9 +105,20 @@ def test_a_rate_limit_waits_as_asked_within_the_minimum_and_maximum(
     assert next_delay(UsageRateLimited(retry_after)) == delay
 
 
-def test_refresh_is_due_after_the_minimum_period() -> None:
-    assert not refresh_due(MIN_REFRESH_SECONDS - 1)
-    assert refresh_due(MIN_REFRESH_SECONDS)
+@pytest.mark.parametrize("outcome", [UsageReport(LIMITS), UsageUnavailable("offline")])
+def test_refresh_is_due_after_the_minimum_period(outcome: UsageReport | UsageUnavailable) -> None:
+    assert not refresh_due(MIN_REFRESH_SECONDS - 1, outcome)
+    assert refresh_due(MIN_REFRESH_SECONDS, outcome)
+
+
+@pytest.mark.parametrize("retry_after", [600.0, None])
+def test_refresh_after_a_rate_limit_is_due_once_its_delay_has_passed(
+    retry_after: float | None,
+) -> None:
+    outcome = UsageRateLimited(retry_after)
+    assert not refresh_due(MIN_REFRESH_SECONDS, outcome)
+    assert not refresh_due(next_delay(outcome) - 1, outcome)
+    assert refresh_due(next_delay(outcome), outcome)
 
 
 def test_a_report_is_ok_with_its_limits() -> None:

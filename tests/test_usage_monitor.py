@@ -128,6 +128,43 @@ async def test_a_nudge_under_a_minute_after_the_last_fetch_does_nothing() -> Non
     await watched.monitor.close()
 
 
+async def test_a_nudge_before_a_rate_limits_retry_time_does_nothing() -> None:
+    source = Source(UsageRateLimited(600), UsageReport(LATER))
+    watched = Monitored(source)
+    watched.monitor.start()
+    await watched.next()
+    watched.clock.time = 60
+    watched.monitor.nudge()
+    assert await watched.none()
+    assert source.calls == 1
+    watched.clock.time = 600
+    watched.monitor.nudge()
+    assert await watched.next() == UsageChanged(limits=LATER)
+    await watched.monitor.close()
+
+
+async def test_a_nudge_before_an_unspecified_rate_limits_retry_time_does_nothing() -> None:
+    source = Source(UsageRateLimited(None), UsageReport(LATER))
+    watched = Monitored(source)
+    watched.monitor.start()
+    await watched.next()
+    watched.clock.time = 60
+    watched.monitor.nudge()
+    assert await watched.none()
+    assert source.calls == 1
+    await watched.monitor.close()
+
+
+async def test_a_nudge_a_minute_after_unavailable_usage_fetches_again() -> None:
+    watched = Monitored(Source(UsageUnavailable("offline"), UsageReport(LATER)))
+    watched.monitor.start()
+    await watched.next()
+    watched.clock.time = 60
+    watched.monitor.nudge()
+    assert await watched.next() == UsageChanged(limits=LATER)
+    await watched.monitor.close()
+
+
 async def test_a_nudge_during_a_fetch_does_nothing() -> None:
     source = Source(UsageReport(LIMITS), UsageReport(LATER))
     source.gate = asyncio.Event()
@@ -192,7 +229,7 @@ async def quiet_of_usage(stream: AsyncIterator[Event]) -> bool:
 
 @pytest.fixture
 def always_due(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(usage_monitor, "refresh_due", lambda seconds: True)
+    monkeypatch.setattr(usage_monitor, "refresh_due", lambda seconds, outcome: True)
 
 
 async def test_a_session_without_a_usage_source_sends_no_usage() -> None:

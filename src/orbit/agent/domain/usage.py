@@ -92,8 +92,11 @@ def next_delay(outcome: UsageFetch) -> float:
             return REFRESH_SECONDS
 
 
-def refresh_due(seconds_since_last_fetch: float) -> bool:
-    """Whether enough time has passed since the last fetch to fetch again."""
+def refresh_due(seconds_since_last_fetch: float, last_outcome: UsageFetch) -> bool:
+    """Whether enough time has passed since the last fetch, which came to ``last_outcome``, to
+    fetch again: the minimum period, or as long as a rate limit asked."""
+    if isinstance(last_outcome, UsageRateLimited):
+        return seconds_since_last_fetch >= next_delay(last_outcome)
     return seconds_since_last_fetch >= MIN_REFRESH_SECONDS
 
 

@@ -46,7 +46,8 @@ class UsageMonitor:
         self._now = now
         self._limits: tuple[UsageLimit, ...] = ()
         self._fetching = False
-        self._fetched_at: float | None = None  # When the last fetch started.
+        # When the last fetch started, and its outcome.
+        self._last: tuple[float, UsageFetch] | None = None
         self._wake = asyncio.Event()
         self._task: asyncio.Task[None] | None = None
 
@@ -54,10 +55,12 @@ class UsageMonitor:
         self._task = asyncio.create_task(self._run())
 
     def nudge(self) -> None:
-        """Fetch again now, if a refresh is due and no fetch is in progress."""
-        if self._fetching or self._fetched_at is None:
+        """Fetch again now, if no fetch is in progress and a refresh is due: a minute after the
+        last fetch started, or once a rate limit's retry time has passed."""
+        if self._fetching or self._last is None:
             return
-        if refresh_due(self._clock() - self._fetched_at):
+        fetched_at, outcome = self._last
+        if refresh_due(self._clock() - fetched_at, outcome):
             self._wake.set()
 
     async def close(self) -> None:
@@ -77,14 +80,16 @@ class UsageMonitor:
     async def _fetch(self) -> UsageFetch:
         """The source's outcome, a failure in it being one where usage is unavailable."""
         self._fetching = True
-        self._fetched_at = self._clock()
+        fetched_at = self._clock()
         self._wake.clear()  # A nudge from before this fetch is answered by it.
         try:
-            return await self._source()
+            outcome = await self._source()
         except Exception as exc:  # A bug in the source mustn't stop the monitor.
-            return UsageUnavailable(str(exc) or "error")
+            outcome = UsageUnavailable(str(exc) or "error")
         finally:
             self._fetching = False
+        self._last = (fetched_at, outcome)
+        return outcome
 
     async def _wait(self, delay: float) -> None:
         """Wait ``delay`` seconds, or until nudged."""
