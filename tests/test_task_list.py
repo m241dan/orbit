@@ -678,3 +678,103 @@ async def test_tab_does_not_focus_the_editor_scroll_container() -> None:
         await pilot.press("tab")
         assert app.focused is None
         assert isinstance(app.screen, TaskEditorScreen)
+
+
+LONG_PROMPT = "Add a widget\n\n" + "\n".join(f"line {n}" for n in range(40))
+
+
+async def open_editor_on(session: FakeSession, pilot: Pilot[None], prompt: str) -> PromptBox:
+    """Open the editor on a task with ``prompt``, and return its prompt box."""
+    await show_settings(session, pilot, Settings())
+    await feed(session, pilot, board(prompt))
+    await open_task_list(pilot)
+    await pilot.press("enter")
+    assert isinstance(pilot.app.screen, TaskEditorScreen)
+    return pilot.app.screen.query_one(PromptBox)
+
+
+def selected_fields(app: OrbitApp) -> list[str | None]:
+    return [w.id for w in editor(app).query(".selected")]
+
+
+async def test_shift_j_and_k_scroll_the_prompt_box_one_line_at_a_time() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        box = await open_editor_on(session, pilot, LONG_PROMPT)
+        cursor = box.cursor_location
+
+        await pilot.press("J", "J", "J")
+        assert box.scroll_y == 3
+        await pilot.press("K")
+        assert box.scroll_y == 2
+        assert box.cursor_location == cursor
+        assert selected_fields(app) == ["task-title"]
+
+
+async def test_shift_j_scrolls_the_prompt_box_from_every_field() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        box = await open_editor_on(session, pilot, LONG_PROMPT)
+        for field, expected in enumerate(["task-title", "task-prompt", "task-model", "task-tools"]):
+            if field:
+                await pilot.press("j")
+            await pilot.press("J")
+            assert box.scroll_y == field + 1
+            assert selected_fields(app) == [expected]
+
+
+async def test_shift_j_and_k_stop_at_the_ends_of_the_prompt_box() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        box = await open_editor_on(session, pilot, LONG_PROMPT)
+        await pilot.press("K")
+        assert box.scroll_y == 0
+
+        box.scroll_to(y=box.max_scroll_y, animate=False)
+        await pilot.pause()
+        assert box.scroll_y == box.max_scroll_y > 0
+        await pilot.press("J")
+        assert box.scroll_y == box.max_scroll_y
+
+
+async def test_shift_j_and_k_do_nothing_when_the_prompt_fits() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        box = await open_editor_on(session, pilot, "Add a widget\n\nShort.")
+        await pilot.press("J", "K", "J")
+        assert box.scroll_y == 0
+
+
+async def test_shift_j_and_k_type_in_the_prompt_while_inserting() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        box = await open_editor_on(session, pilot, LONG_PROMPT)
+        await pilot.press("j", "i")
+        scroll_y = box.scroll_y
+        await pilot.press("J", "K", "escape")
+        assert box.text.endswith("line 39JK")
+        assert box.scroll_y == scroll_y
+
+
+async def test_shift_j_and_k_type_in_the_title_while_inserting() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        box = await open_editor_on(session, pilot, LONG_PROMPT)
+        await pilot.press("i", "J", "K", "escape")
+        assert editor_fields(app)[0] == "Add a widgetJK"
+        assert box.scroll_y == 0
+
+
+async def test_editor_hint_mentions_shift_j_and_k_scrolling() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await open_editor_on(session, pilot, LONG_PROMPT)
+        hint = editor(app).query_one(VerticalScroll).border_subtitle
+        assert hint == "j/k move · J/K scroll · i type · enter choose · ctrl+s save · esc cancel"

@@ -187,9 +187,10 @@ class TaskEditorScreen(ModalScreen[TaskSpec | None]):
     """Edit one task's title, prompt, model and tool access. Dismisses with the task, or None.
 
     The title is the prompt's first line and the prompt box its body, joined on save by
-    ``join_prompt``. Works like the main screen: j/k select a field, i types in the title or
-    prompt (escape stops; enter stops in the title and adds a line in the prompt), enter on
-    model or tools opens a picker, ctrl+s saves and escape discards.
+    ``join_prompt``. Works like the main screen: j/k select a field, J/K scroll the prompt box
+    from any field, i types in the title or prompt (escape stops; enter stops in the title and
+    adds a line in the prompt), enter on model or tools opens a picker, ctrl+s saves and escape
+    discards.
     """
 
     AUTO_FOCUS = None
@@ -207,6 +208,8 @@ class TaskEditorScreen(ModalScreen[TaskSpec | None]):
     BINDINGS: ClassVar[list[BindingType]] = [
         Binding("j", "move(1)", show=False),
         Binding("k", "move(-1)", show=False),
+        Binding("J", "scroll_prompt(1)", show=False),
+        Binding("K", "scroll_prompt(-1)", show=False),
         Binding("i", "insert_mode", show=False),
         Binding("enter", "choose", show=False),
         Binding("ctrl+s", "save", "Save"),
@@ -227,7 +230,9 @@ class TaskEditorScreen(ModalScreen[TaskSpec | None]):
         # Fields are reached with j/k, not by tabbing or clicking; the wheel still scrolls.
         with VerticalScroll(can_focus=False) as box:
             box.border_title = self.title_text
-            box.border_subtitle = "j/k move · i type · enter choose · ctrl+s save · esc cancel"
+            box.border_subtitle = (
+                "j/k move · J/K scroll · i type · enter choose · ctrl+s save · esc cancel"
+            )
             yield PromptInput(value=title, placeholder="Press i to type", id="task-title")
             yield PromptBox(body, id="task-prompt")
             yield FieldBox("Model", model_label(self._settings), id="task-model")
@@ -240,6 +245,10 @@ class TaskEditorScreen(ModalScreen[TaskSpec | None]):
 
     def action_move(self, step: int) -> None:
         self._select(min(max(self._field + step, 0), len(FIELDS) - 1))
+
+    def action_scroll_prompt(self, step: int) -> None:
+        """Scroll the prompt box ``step`` lines, leaving its cursor and the selection alone."""
+        self.query_one(PromptBox).scroll_relative(y=step, animate=False)
 
     def action_insert_mode(self) -> None:
         """Type in the selected text field, or in the title when another is selected."""
