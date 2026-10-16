@@ -351,6 +351,29 @@ def test_an_invalid_project_file_stops_chat_with_its_problems(
     assert launched == []
 
 
+def test_a_non_utf8_project_file_stops_chat_as_invalid(
+    launched: list[AgentSession], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    (tmp_path / ".orbit").mkdir()
+    (tmp_path / ".orbit" / "config.toml").write_bytes(b"fix_attempts = '\xff'\n")
+    monkeypatch.chdir(tmp_path)
+    result = runner.invoke(app, ["chat"])
+    assert result.exit_code == 2
+    assert "Invalid orbit configuration:" in result.output
+    assert launched == []
+
+
+def test_a_project_file_that_is_a_directory_stops_chat_as_invalid(
+    launched: list[AgentSession], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    (tmp_path / ".orbit" / "config.toml").mkdir(parents=True)
+    monkeypatch.chdir(tmp_path)
+    result = runner.invoke(app, ["chat"])
+    assert result.exit_code == 2
+    assert "Invalid orbit configuration:" in result.output
+    assert launched == []
+
+
 def test_chat_reviews_landed_work_with_the_files_limits(
     launched: list[AgentSession], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
