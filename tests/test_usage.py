@@ -3,6 +3,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from orbit.agent.domain.usage import (
+    MAX_RETRY_SECONDS,
     MIN_REFRESH_SECONDS,
     REFRESH_SECONDS,
     UsageRateLimited,
@@ -68,6 +69,8 @@ def test_clamps_utilization_into_range() -> None:
         {"five_hour": [52.0]},
         {"five_hour": {"utilization": "52"}},
         {"five_hour": {"utilization": True}},
+        {"five_hour": {"utilization": float("nan")}},
+        {"five_hour": {"utilization": float("inf")}},
         {"seven_day": {"utilization": 1.0, "resets_at": "soon"}},
         {"seven_day": {"utilization": 1.0, "resets_at": 1760000000}},
     ],
@@ -90,9 +93,12 @@ def test_reports_and_unavailable_outcomes_wait_the_refresh_period() -> None:
         (-3.0, REFRESH_SECONDS),
         (10.0, MIN_REFRESH_SECONDS),
         (900.0, 900.0),
+        (MAX_RETRY_SECONDS + 1.0, MAX_RETRY_SECONDS),
+        (float("inf"), MAX_RETRY_SECONDS),
+        (float("nan"), REFRESH_SECONDS),
     ],
 )
-def test_a_rate_limit_waits_as_asked_but_at_least_the_minimum(
+def test_a_rate_limit_waits_as_asked_within_the_minimum_and_maximum(
     retry_after: float | None, delay: float
 ) -> None:
     assert next_delay(UsageRateLimited(retry_after)) == delay
@@ -111,6 +117,13 @@ def test_a_rate_limit_keeps_the_last_limits_and_says_when_it_retries() -> None:
     event = usage_event(UsageRateLimited(120.0), LIMITS, NOW)
     assert event == UsageChanged(
         limits=LIMITS, status="rate_limited", retry_at=NOW + timedelta(seconds=120)
+    )
+
+
+def test_a_huge_rate_limit_retries_after_the_maximum() -> None:
+    event = usage_event(UsageRateLimited(1e12), LIMITS, NOW)
+    assert event == UsageChanged(
+        limits=LIMITS, status="rate_limited", retry_at=NOW + timedelta(seconds=MAX_RETRY_SECONDS)
     )
 
 

@@ -1,5 +1,6 @@
 """The rules for fetching and reporting the subscription's usage limits."""
 
+import math
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
@@ -7,6 +8,9 @@ from orbit.protocol import UsageChanged, UsageLimit
 
 REFRESH_SECONDS = 300
 MIN_REFRESH_SECONDS = 60
+# The longest a rate limit can hold off the next fetch, an hour, so that a bogus Retry-After
+# can't stall the limits for good or overflow the time it's added to.
+MAX_RETRY_SECONDS = 3600
 
 # The usage endpoint's windows we show, by key, and the labels they're shown with.
 _WINDOWS = (("five_hour", "Session"), ("seven_day", "Week"))
@@ -53,10 +57,18 @@ def _parse_window(window: object, label: str) -> UsageLimit | None:
     utilization = window.get("utilization")
     if utilization is None:
         return None
+    percent = _parse_percent(utilization, label)
+    return UsageLimit(label=label, percent=percent, resets_at=_parse_time(window.get("resets_at")))
+
+
+def _parse_percent(utilization: object, label: str) -> float:
+    """``utilization`` clamped into a percentage, raising ``ValueError`` unless it's a finite
+    number."""
     if isinstance(utilization, bool) or not isinstance(utilization, int | float):
         raise ValueError(f"{label} utilization isn't a number: {utilization!r}")
-    percent = min(max(float(utilization), 0.0), 100.0)
-    return UsageLimit(label=label, percent=percent, resets_at=_parse_time(window.get("resets_at")))
+    if not math.isfinite(utilization):
+        raise ValueError(f"{label} utilization isn't finite: {utilization!r}")
+    return min(max(float(utilization), 0.0), 100.0)
 
 
 def _parse_time(value: object) -> datetime | None:
@@ -71,10 +83,11 @@ def _parse_time(value: object) -> datetime | None:
 
 def next_delay(outcome: UsageFetch) -> float:
     """Seconds to wait after ``outcome`` before fetching again: as long as a rate limit asks,
-    but at least the minimum, and the refresh period otherwise."""
+    between the minimum and the maximum, and the refresh period otherwise, including when the
+    rate limit asks for no time or a NaN."""
     match outcome:
         case UsageRateLimited(retry_after) if retry_after is not None and retry_after > 0:
-            return max(retry_after, MIN_REFRESH_SECONDS)
+            return min(max(retry_after, MIN_REFRESH_SECONDS), MAX_RETRY_SECONDS)
         case _:
             return REFRESH_SECONDS
 
