@@ -81,12 +81,14 @@ def _fingerprint(setup: Setup, path: Path) -> str:
 
 
 def _read_stamp(stamp: Path) -> str | None:
-    """The digest ``stamp`` records; ``None`` when there isn't one.
+    """The digest ``stamp`` records; ``None`` when there isn't one, so the setup runs.
 
-    Raises ``RuntimeError`` when it can't be read.
+    Raises ``RuntimeError`` when it's there but can't be read.
     """
     try:
-        return stamp.read_text() if stamp.exists() else None
+        return stamp.read_text()
+    except FileNotFoundError:
+        return None
     except (OSError, UnicodeDecodeError) as error:
         raise RuntimeError(f"Couldn't read the setup record in {stamp}: {error}") from error
 

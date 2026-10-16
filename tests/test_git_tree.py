@@ -319,7 +319,7 @@ async def test_setup_checks_its_files_off_the_event_loops_thread(
     await tree.prepare(keep=False)
 
     assert runs.read_text() == "x"
-    assert len(threads) == 4  # Two fingerprints, one stamp written, then read.
+    assert len(threads) == 5  # Two fingerprints, two stamp reads (the first finds none), one write.
     assert threading.current_thread() not in threads
 
 
@@ -593,6 +593,25 @@ async def test_a_setup_stamp_that_cant_be_read_raises_runtime_error(repo: Path) 
     with pytest.raises(RuntimeError, match=r"Couldn't read the setup record in .*coder\.synced"):
         await GitCoderTree(str(repo), setup=setup).prepare(keep=False)
     assert not runs.exists()
+
+
+async def test_a_setup_stamp_that_vanishes_while_read_runs_the_setup(
+    repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = Path(await GitCoderTree(str(repo)).prepare(keep=False))
+    stamp = path.parent / "coder.synced"
+    stamp.write_text("stale")
+    real_read = Path.read_text
+
+    def read_text(self: Path, *args: Any, **kwargs: Any) -> str:
+        if self == stamp:
+            self.unlink(missing_ok=True)  # Gone after any check that it was there.
+        return real_read(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", read_text)
+    setup, runs = counting_setup(repo)
+    await GitCoderTree(str(repo), setup=setup).prepare(keep=False)
+    assert runs.read_text() == "x"
 
 
 async def test_a_non_utf8_setup_stamp_raises_runtime_error(repo: Path) -> None:
