@@ -16,6 +16,7 @@ from orbit.tui.view.common import (
 )
 from orbit.tui.view.events import SUPERSEDED_UNLESS, coalesce
 from orbit.tui.view.panels import STALE_STYLE, USAGE_COLOURS, reset_label, step_lines, usage_lines
+from orbit.tui.view.progress import TaskProgress, progress_entry, task_note
 from orbit.tui.view.proposals import DECISION_NOTES, decision_entry, proposal_text
 from orbit.tui.view.settings import (
     TOOL_ACCESS_DESCRIPTIONS,
@@ -64,6 +65,7 @@ from orbit.tui.view.transcript import (
     agent_labelled,
     collapsible,
     entry_label,
+    error_entry,
     exchange_entry,
     gutter,
     note_entry,
@@ -72,6 +74,7 @@ from orbit.tui.view.transcript import (
     startup_entry,
     task_started_entry,
     turn_end_entry,
+    turn_finished_entry,
     verification_finished_entry,
     verification_skipped_entry,
     verification_started_entry,
@@ -108,6 +111,7 @@ __all__ = [
     "ArgumentExtractor",
     "ConversationTab",
     "EntryKind",
+    "TaskProgress",
     "activity_entry",
     "agent_entry",
     "agent_labelled",
@@ -116,6 +120,7 @@ __all__ = [
     "collapsible",
     "decision_entry",
     "entry_label",
+    "error_entry",
     "exchange_entry",
     "gutter",
     "join_prompt",
@@ -127,6 +132,7 @@ __all__ = [
     "note_entry",
     "orbit_request_text",
     "output_entry",
+    "progress_entry",
     "proposal_text",
     "reset_label",
     "review_line",
@@ -139,6 +145,7 @@ __all__ = [
     "tab_key",
     "tab_labels",
     "task_label",
+    "task_note",
     "task_numbers",
     "task_started_entry",
     "task_tab_key",
@@ -149,6 +156,7 @@ __all__ = [
     "track_roles",
     "track_tabs",
     "turn_end_entry",
+    "turn_finished_entry",
     "usage_label",
     "usage_lines",
     "verification_finished_entry",

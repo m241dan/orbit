@@ -40,7 +40,6 @@ from orbit.protocol import (
     Settings,
     SettingsChanged,
     StartupChecked,
-    StepState,
     SubmitPrompt,
     TaskGaveUp,
     TaskMerged,
@@ -68,20 +67,16 @@ from orbit.tui.transcript import Transcript
 from orbit.tui.view import (
     TOOL_ACCESS_OPTIONS,
     EntryKind,
+    TaskProgress,
     activity_entry,
-    agent_labelled,
     coalesce,
     decision_entry,
+    error_entry,
     model_options,
-    note_entry,
     output_entry,
-    task_started_entry,
-    task_tab_key,
+    task_note,
     tool_access_labels,
-    turn_end_entry,
-    verification_finished_entry,
-    verification_skipped_entry,
-    verification_started_entry,
+    turn_finished_entry,
 )
 from orbit.tui.widgets import (
     CONFIGURE_MESSAGE,
@@ -483,42 +478,22 @@ class OrbitApp(App[None], inherit_bindings=False):
                 pass  # The prompt follows BusyChanged, which also covers task runs.
             case TurnFinished():
                 self._turn_finished(event)
-            case ErrorOccurred(message=message):
-                self._append(*agent_labelled((message, "error"), event.agent_id), event.agent_id)
+            case ErrorOccurred():
+                self._append(*error_entry(event), event.agent_id)
             case AssistantMessage() | ToolCallStarted() | ToolCallFinished():
                 self._append(*output_entry(event), event.agent_id)
             case _:
                 assert_never(event)
 
-    def _render_progress(
-        self,
-        event: TaskStarted
-        | VerificationStarted
-        | VerificationSkipped
-        | VerificationFinished
-        | TaskMerged,
-    ) -> None:
-        """Note a task run's progress in the transcript: under its role's tab, and All."""
-        if isinstance(event, TaskStarted):
-            entry = self._task_header(event.task_id)
-        elif isinstance(event, TaskMerged):
-            entry = note_entry(event)
-        else:
-            entry = self._verification_entry(event)
-        self._note_task(event.task_id, entry)
-
-    def _verification_entry(
-        self, event: VerificationStarted | VerificationSkipped | VerificationFinished
-    ) -> tuple[str, EntryKind]:
-        match event:
-            case VerificationStarted(step=step):
-                return verification_started_entry(self._step(step))
-            case VerificationSkipped(reason=reason):
-                return verification_skipped_entry(reason)
-            case VerificationFinished(step=step, passed=passed):
-                return verification_finished_entry(self._step(step), passed)
-            case _:
-                assert_never(event)
+    def _render_progress(self, event: TaskProgress) -> None:
+        """Note a task run's progress in the transcript: under its role's tab, and All,
+        marking that tab unread when it isn't being shown."""
+        task_list = self._task_list
+        state = task_list.find(event.task_id)
+        number = None if state is None else task_list.numbers[task_list.position(event.task_id)]
+        (text, kind), key = task_note(event, state, number, self._verification.steps)
+        self._tabs.mark_unread(key)
+        self._transcript.add_entry(text, kind, key)
 
     def _follow_agents(self, event: Event) -> None:
         self._agents.track(event)
@@ -579,27 +554,9 @@ class OrbitApp(App[None], inherit_bindings=False):
     def _turn_finished(self, event: TurnFinished) -> None:
         if event.usage is not None:
             self._task_list.count(event.usage)
-        entry = turn_end_entry(event.reason)
+        entry = turn_finished_entry(event)
         if entry is not None:
-            self._append(*agent_labelled(entry, event.agent_id), event.agent_id)
-
-    def _task_header(self, task_id: str) -> tuple[str, EntryKind]:
-        """Task ``task_id``'s header, by the number the list shows for it."""
-        task_list = self._task_list
-        state = task_list.find(task_id)
-        number = task_id if state is None else task_list.numbers[task_list.position(task_id)]
-        return task_started_entry(number, state)
-
-    def _note_task(self, task_id: str, entry: tuple[str, EntryKind]) -> None:
-        """Add ``entry``, a note on task ``task_id``'s run, under the task's role's tab as
-        well as All, marking that tab unread when it isn't being shown. A task that isn't
-        on the list (removed meanwhile, or the startup check's) is noted under All only."""
-        key = task_tab_key(self._task_list.find(task_id))
-        self._tabs.mark_unread(key)
-        self._transcript.add_entry(*entry, key)
-
-    def _step(self, step: int) -> StepState:
-        return self._verification.steps[step]
+            self._append(*entry, event.agent_id)
 
     def _append(self, text: str, kind: EntryKind, agent: str | None = None) -> None:
         # Entries are kept by tab: a pinned role's agents' under its tab.

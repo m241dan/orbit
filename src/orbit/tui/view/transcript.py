@@ -9,6 +9,7 @@ from orbit.protocol import (
     AgentRequest,
     AgentStarted,
     AssistantMessage,
+    ErrorOccurred,
     Notice,
     ProgressNoted,
     SkipReason,
@@ -20,6 +21,7 @@ from orbit.protocol import (
     ToolCallFinished,
     ToolCallStarted,
     TurnEndReason,
+    TurnFinished,
 )
 from orbit.tui.view.common import EntryKind
 from orbit.tui.view.tool_calls import orbit_request_text, tool_call_text
@@ -191,6 +193,18 @@ def turn_end_entry(reason: TurnEndReason) -> tuple[str, EntryKind] | None:
     if reason in ("completed", "error"):
         return None
     return f"[turn ended: {reason}]", "tool"
+
+
+def turn_finished_entry(event: TurnFinished) -> tuple[str, EntryKind] | None:
+    """A note on how ``event``'s turn ended, labelled with its agent; None when the turn ended
+    as expected or its error was shown."""
+    entry = turn_end_entry(event.reason)
+    return None if entry is None else agent_labelled(entry, event.agent_id)
+
+
+def error_entry(event: ErrorOccurred) -> tuple[str, EntryKind]:
+    """``event``'s error message, labelled with its agent."""
+    return agent_labelled((event.message, "error"), event.agent_id)
 
 
 def agent_labelled(entry: tuple[str, EntryKind], agent: str | None) -> tuple[str, EntryKind]:

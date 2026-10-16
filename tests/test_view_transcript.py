@@ -7,6 +7,7 @@ from orbit.protocol import (
     AgentRequest,
     AgentStarted,
     AssistantMessage,
+    ErrorOccurred,
     Notice,
     ProgressNoted,
     StepState,
@@ -16,6 +17,7 @@ from orbit.protocol import (
     TaskState,
     ToolCallFinished,
     ToolCallStarted,
+    TurnFinished,
 )
 from orbit.tui.view import (
     GUTTER_BAR,
@@ -25,6 +27,7 @@ from orbit.tui.view import (
     agent_labelled,
     collapsible,
     entry_label,
+    error_entry,
     exchange_entry,
     gutter,
     note_entry,
@@ -32,6 +35,7 @@ from orbit.tui.view import (
     starts_collapsed,
     task_started_entry,
     turn_end_entry,
+    turn_finished_entry,
     verification_finished_entry,
     verification_skipped_entry,
     verification_started_entry,
@@ -235,3 +239,21 @@ def test_a_tool_call_entry_without_arguments_is_one_line() -> None:
 def test_a_tool_call_entrys_arguments_keep_non_ascii_text() -> None:
     started = ToolCallStarted(turn_id="t", call_id="c", name="x", arguments={"a": "é"})
     assert output_entry(started)[0] == '→ x {"a": "é"}\n{\n  "a": "é"\n}'
+
+
+def test_an_unexpected_turn_ending_is_labelled_with_its_agent() -> None:
+    cancelled = TurnFinished(turn_id="t", agent_id="agent-1", reason="cancelled")
+    assert turn_finished_entry(cancelled) == ("agent-1: [turn ended: cancelled]", "tool")
+    assert turn_finished_entry(TurnFinished(turn_id="t", reason="max_steps")) == (
+        "[turn ended: max_steps]",
+        "tool",
+    )
+    assert turn_finished_entry(TurnFinished(turn_id="t", agent_id="a", reason="completed")) is None
+
+
+def test_an_error_is_labelled_with_its_agent() -> None:
+    assert error_entry(ErrorOccurred(agent_id="agent-1", message="boom")) == (
+        "agent-1: boom",
+        "error",
+    )
+    assert error_entry(ErrorOccurred(message="boom")) == ("boom", "error")
