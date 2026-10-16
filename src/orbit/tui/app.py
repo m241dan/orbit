@@ -101,7 +101,9 @@ class OrbitApp(App[None], inherit_bindings=False):
     CSS = """
     #side { width: 33%; }
     .selected { border: round $accent; }
-    PromptInput:focus, TaskList:focus, Transcript:focus-within { border: heavy $accent; }
+    PromptInput:focus, PromptBox:focus, TaskList:focus, Transcript:focus-within {
+        border: heavy $accent;
+    }
     """
     BINDINGS: ClassVar[list[BindingType]] = [
         # Priority, so it beats the prompt's own ctrl+c (copy).

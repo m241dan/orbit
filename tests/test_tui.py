@@ -974,7 +974,7 @@ async def test_tab_keeps_its_normal_behaviour_outside_normal_mode() -> None:
         assert len(app.screen_stack) == 2
         await pilot.press("tab", "shift+tab", "j")
         assert active_tab(app) == "All"
-        assert app.screen.query_one("#task-model").has_class("selected")
+        assert app.screen.query_one("#task-prompt").has_class("selected")
         await pilot.press("i", "tab")
         assert active_tab(app) == "All"
 

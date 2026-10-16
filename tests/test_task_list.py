@@ -23,7 +23,7 @@ from orbit.protocol import (
 from orbit.tui import OrbitApp
 from orbit.tui.tasks import TaskEditorScreen, TaskList
 from orbit.tui.view import spinner_frame, task_label, task_numbers, usage_label
-from orbit.tui.widgets import PickerScreen, PromptInput, Transcript
+from orbit.tui.widgets import PickerScreen, PromptBox, PromptInput, Transcript
 from tests.test_tui import FakeSession, picker, selected, show_settings
 
 
@@ -38,11 +38,12 @@ def editor(app: OrbitApp) -> TaskEditorScreen:
     return screen
 
 
-def editor_fields(app: OrbitApp) -> tuple[str, str, str]:
-    """The open editor's prompt text, model and tools values."""
+def editor_fields(app: OrbitApp) -> tuple[str, str, str, str]:
+    """The open editor's title, prompt body, model and tools values."""
     screen = editor(app)
     return (
         screen.query_one(PromptInput).value,
+        screen.query_one(PromptBox).text,
         str(screen.query_one("#task-model").render()),
         str(screen.query_one("#task-tools").render()),
     )
@@ -257,8 +258,10 @@ async def test_new_task_editor_defaults_to_session_settings() -> None:
         await open_task_list(pilot)
         await pilot.press("enter")
         assert editor(app).title_text == "New task"
-        assert editor_fields(app) == ("", "opus", "off")
+        assert editor_fields(app) == ("", "", "opus", "off")
         assert app.focused is None
+        assert editor(app).query_one(PromptInput).border_title == "Title"
+        assert editor(app).query_one(PromptBox).border_title == "Prompt"
 
 
 async def test_editor_builds_a_task_with_vim_keys() -> None:
@@ -270,15 +273,15 @@ async def test_editor_builds_a_task_with_vim_keys() -> None:
         await pilot.press("enter")
         screen = editor(app)
 
-        # The prompt field needs `i` before typing; letters do nothing otherwise.
+        # The title field needs `i` before typing; letters do nothing otherwise.
         await pilot.press("x")
         assert editor_fields(app)[0] == ""
         await pilot.press("i", *"fix it", "escape")
         assert editor_fields(app)[0] == "fix it"
         assert app.focused is None
 
-        # j moves to the model field; enter opens a picker that j/k drive.
-        await pilot.press("j")
+        # j moves past the prompt to the model field; enter opens a picker that j/k drive.
+        await pilot.press("j", "j")
         assert [w.id for w in screen.query(".selected")] == ["task-model"]
         await pilot.press("enter")
         assert picker(app)[1] == ["default", "opus", "sonnet"]
@@ -289,15 +292,20 @@ async def test_editor_builds_a_task_with_vim_keys() -> None:
         assert picker(app)[0] == "Tool access"
         assert picker(app)[2] == 1  # restricted
         await pilot.press("j", "enter")
-        assert editor_fields(app) == ("fix it", "opus", "full")
+        assert editor_fields(app) == ("fix it", "", "opus", "full")
 
-        # i jumps back to the prompt field from anywhere.
+        # i jumps back to the title field from the model or tools field.
         await pilot.press("i", "!", "enter")
         assert editor_fields(app)[0] == "fix it!"
-        assert [w.id for w in screen.query(".selected")] == ["task-prompt"]
+        assert [w.id for w in screen.query(".selected")] == ["task-title"]
         assert app.focused is None  # enter stops typing rather than submitting
         assert session.commands == []
+        await pilot.press("j", "j", "i")
+        assert [w.id for w in screen.query(".selected")] == ["task-title"]
+        assert app.focused is screen.query_one(PromptInput)
+        await pilot.press("escape")
 
+        # A title alone saves a single-line prompt, from whichever field is selected.
         await pilot.press("k", "k", "j", "j", "ctrl+s")
         assert not isinstance(app.screen, TaskEditorScreen)
         task = TaskSpec(prompt="fix it!", settings=Settings(model="opus", tool_access="full"))
@@ -308,7 +316,7 @@ async def test_editor_builds_a_task_with_vim_keys() -> None:
         assert app.focused is app.query_one(TaskList)
 
 
-async def test_editor_escape_discards_and_empty_prompt_is_not_saved() -> None:
+async def test_editor_escape_discards_and_blank_title_is_not_saved() -> None:
     session = FakeSession()
     app = OrbitApp(session)
     async with app.run_test() as pilot:
@@ -320,7 +328,64 @@ async def test_editor_escape_discards_and_empty_prompt_is_not_saved() -> None:
         assert isinstance(app.screen, TaskEditorScreen)
         await pilot.press("i", " ", "escape", "ctrl+s")
         assert isinstance(app.screen, TaskEditorScreen)
+        # A body is no title.
+        await pilot.press("j", "i", *"body", "escape", "ctrl+s")
+        assert isinstance(app.screen, TaskEditorScreen)
+        assert editor_fields(app)[:2] == (" ", "body")
         assert session.commands == []
+
+
+async def test_editor_shows_a_prompts_title_and_body_and_edits_the_body() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await show_settings(session, pilot, Settings())
+        await feed(session, pilot, board("Add a widget\n\nPut it in widgets.py.\nTest it."))
+        await open_task_list(pilot)
+        await pilot.press("enter")
+        screen = editor(app)
+        body = "Put it in widgets.py.\nTest it."
+        assert editor_fields(app) == ("Add a widget", body, "default", "restricted")
+
+        # j selects the prompt box; i types there, where enter adds a line.
+        await pilot.press("j")
+        assert [w.id for w in screen.query(".selected")] == ["task-prompt"]
+        await pilot.press("enter")  # Nothing to choose on the prompt.
+        assert editor(app) is screen
+        await pilot.press("i")
+        assert app.focused is screen.query_one(PromptBox)
+        await pilot.press("enter", *"more", "escape")
+        assert app.focused is None
+        assert editor_fields(app)[1] == f"{body}\nmore"
+        await pilot.press("ctrl+s")
+        edited = TaskSpec(prompt=f"Add a widget\n\n{body}\nmore")
+        assert session.commands == [EditTask(task_id="1", task=edited)]
+
+
+async def test_ctrl_s_saves_while_typing_in_the_prompt_box() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await show_settings(session, pilot, Settings())
+        await open_task_list(pilot)
+        await pilot.press("enter", "i", *"Title", "escape", "j", "i", *"body", "ctrl+s")
+        assert not isinstance(app.screen, TaskEditorScreen)
+        assert session.commands == [AddTask(task=TaskSpec(prompt="Title\n\nbody"))]
+
+
+async def test_a_fix_task_round_trips_through_the_editor_unchanged() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    prompt = (
+        "Fix the failed verification step: x\n\n"
+        "The step `x` ran `false` and failed.\n\nFind and fix the cause so the command passes."
+    )
+    async with app.run_test() as pilot:
+        await show_settings(session, pilot, Settings())
+        await feed(session, pilot, board(prompt))
+        await open_task_list(pilot)
+        await pilot.press("enter", "ctrl+s")
+        assert session.commands == [EditTask(task_id="1", task=TaskSpec(prompt=prompt))]
 
 
 async def test_editor_picker_escape_keeps_value() -> None:
@@ -329,10 +394,10 @@ async def test_editor_picker_escape_keeps_value() -> None:
     async with app.run_test() as pilot:
         await show_settings(session, pilot, Settings(model="sonnet"))
         await open_task_list(pilot)
-        await pilot.press("enter", "j", "enter", "k", "escape")
-        assert editor_fields(app)[1] == "sonnet"
-        await pilot.press("k", "enter")
-        assert not isinstance(app.screen, PickerScreen)  # enter on the prompt does nothing
+        await pilot.press("enter", "j", "j", "enter", "k", "escape")
+        assert editor_fields(app)[2] == "sonnet"
+        await pilot.press("k", "k", "enter")
+        assert not isinstance(app.screen, PickerScreen)  # enter on the title does nothing
 
 
 async def test_editor_model_picker_highlights_nothing_for_custom_model() -> None:
@@ -341,10 +406,10 @@ async def test_editor_model_picker_highlights_nothing_for_custom_model() -> None
     async with app.run_test() as pilot:
         await show_settings(session, pilot, Settings(model="claude-custom-1"))
         await open_task_list(pilot)
-        await pilot.press("enter", "j", "enter")
+        await pilot.press("enter", "j", "j", "enter")
         assert picker(app)[2] is None
         await pilot.press("escape")
-        assert editor_fields(app)[1] == "claude-custom-1"
+        assert editor_fields(app)[2] == "claude-custom-1"
 
 
 async def test_enter_on_existing_task_edits_it() -> None:
@@ -357,7 +422,7 @@ async def test_enter_on_existing_task_edits_it() -> None:
         await pilot.press("j", "enter")
         assert editor(app).title_text == "Edit task"
         assert editor_fields(app)[0] == "two"
-        await pilot.press("i", "!", "escape", "j", "j", "enter", "k", "enter", "ctrl+s")
+        await pilot.press("i", "!", "escape", "j", "j", "j", "enter", "k", "enter", "ctrl+s")
         edited = TaskSpec(prompt="two!", settings=Settings(tool_access="off"))
         assert session.commands == [EditTask(task_id="2", task=edited)]
 

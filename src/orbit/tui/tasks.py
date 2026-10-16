@@ -18,13 +18,15 @@ from orbit.tui.view import (
     SPINNER_FPS,
     TOOL_ACCESS_DESCRIPTIONS,
     TOOL_ACCESS_OPTIONS,
+    join_prompt,
     model_label,
     spinner_frame,
+    split_prompt,
     task_label,
     task_numbers,
     usage_label,
 )
-from orbit.tui.widgets import ListPane, PickerScreen, PromptInput
+from orbit.tui.widgets import ListPane, PickerScreen, PromptBox, PromptInput
 
 NEW_TASK_LABEL = "+ new task"
 
@@ -177,15 +179,17 @@ class FieldBox(Static):
         self.border_title = title
 
 
-FIELDS = ("task-prompt", "task-model", "task-tools")
+FIELDS = ("task-title", "task-prompt", "task-model", "task-tools")
+TEXT_FIELDS = FIELDS[:2]
 
 
 class TaskEditorScreen(ModalScreen[TaskSpec | None]):
-    """Edit one task's prompt, model and tool access. Dismisses with the task, or None.
+    """Edit one task's title, prompt, model and tool access. Dismisses with the task, or None.
 
-    Works like the main screen: j/k select a field, i types in the prompt (escape
-    or enter stops), enter on model or tools opens a picker, ctrl+s saves and
-    escape discards.
+    The title is the prompt's first line and the prompt box its body, joined on save by
+    ``join_prompt``. Works like the main screen: j/k select a field, i types in the title or
+    prompt (escape stops; enter stops in the title and adds a line in the prompt), enter on
+    model or tools opens a picker, ctrl+s saves and escape discards.
     """
 
     AUTO_FOCUS = None
@@ -195,6 +199,7 @@ class TaskEditorScreen(ModalScreen[TaskSpec | None]):
         width: 80;
         max-width: 90%;
         height: auto;
+        max-height: 90%;
         border: round $accent;
         padding: 0 1;
     }
@@ -218,48 +223,65 @@ class TaskEditorScreen(ModalScreen[TaskSpec | None]):
         self._field = 0
 
     def compose(self) -> ComposeResult:
+        title, body = split_prompt(self._prompt)
         with Vertical() as box:
             box.border_title = self.title_text
             box.border_subtitle = "j/k move · i type · enter choose · ctrl+s save · esc cancel"
-            yield PromptInput(value=self._prompt, placeholder="Press i to type", id="task-prompt")
+            yield PromptInput(value=title, placeholder="Press i to type", id="task-title")
+            yield PromptBox(body, id="task-prompt")
             yield FieldBox("Model", model_label(self._settings), id="task-model")
             yield FieldBox("Tools", self._settings.tool_access, id="task-tools")
 
     def on_mount(self) -> None:
+        self.query_one(PromptInput).border_title = "Title"
+        self.query_one(PromptBox).border_title = "Prompt"
         self.query_one(f"#{FIELDS[0]}").add_class("selected")
 
     def action_move(self, step: int) -> None:
         self._select(min(max(self._field + step, 0), len(FIELDS) - 1))
 
     def action_insert_mode(self) -> None:
-        self._select(0)
-        self.query_one(PromptInput).enter_insert_mode()
+        """Type in the selected text field, or in the title when another is selected."""
+        if FIELDS[self._field] not in TEXT_FIELDS:
+            self._select(0)
+        if FIELDS[self._field] == "task-title":
+            self.query_one(PromptInput).enter_insert_mode()
+        else:
+            self.query_one(PromptBox).enter_insert_mode()
 
     def action_choose(self) -> None:
         if FIELDS[self._field] == "task-model":
-            models = [None, *self._models]
-            picker = PickerScreen("Model", ["default", *self._models])
-            current = self._settings.model
-            index = models.index(current) if current in models else None
-            self._pick(picker, index, lambda i: self._update(model=models[i]))
+            self._choose_model()
         elif FIELDS[self._field] == "task-tools":
-            labels = [TOOL_ACCESS_DESCRIPTIONS[a] for a in TOOL_ACCESS_OPTIONS]
-            index = TOOL_ACCESS_OPTIONS.index(self._settings.tool_access)
-            self._pick(
-                PickerScreen("Tool access", labels),
-                index,
-                lambda i: self._update(tool_access=TOOL_ACCESS_OPTIONS[i]),
-            )
+            self._choose_tools()
+
+    def _choose_model(self) -> None:
+        models = [None, *self._models]
+        picker = PickerScreen("Model", ["default", *self._models])
+        current = self._settings.model
+        index = models.index(current) if current in models else None
+        self._pick(picker, index, lambda i: self._update(model=models[i]))
+
+    def _choose_tools(self) -> None:
+        labels = [TOOL_ACCESS_DESCRIPTIONS[a] for a in TOOL_ACCESS_OPTIONS]
+        index = TOOL_ACCESS_OPTIONS.index(self._settings.tool_access)
+        self._pick(
+            PickerScreen("Tool access", labels),
+            index,
+            lambda i: self._update(tool_access=TOOL_ACCESS_OPTIONS[i]),
+        )
 
     def action_save(self) -> None:
-        prompt = self.query_one(PromptInput).value.strip()
-        if prompt:
+        """Save the task, if it has a title; its body may be empty."""
+        title = self.query_one(PromptInput).value
+        if title.strip():
+            prompt = join_prompt(title, self.query_one(PromptBox).text)
             self.dismiss(TaskSpec(prompt=prompt, settings=self._settings, role=self._role))
 
     def action_cancel(self) -> None:
         self.dismiss(None)
 
-    @on(Input.Submitted, "#task-prompt")
+    @on(Input.Submitted, "#task-title")
     def _stop_typing(self, event: Input.Submitted) -> None:
         event.stop()
         self.query_one(PromptInput).action_normal_mode()

@@ -67,8 +67,11 @@ In a picker, `j`/`k` (or the arrow keys) move and `enter` chooses.
 ### Tasks
 
 The task list queues prompts to run later. Each task has its own prompt, model and tool access,
-set in the task editor: `j`/`k` pick a field, `i` types in the prompt (`esc` or `enter` stops),
-`enter` on model or tools opens a picker, `ctrl+s` saves and `esc` discards.
+set in the task editor's four fields: **Title**, the prompt's first line, which is what the task
+list shows; **Prompt**, the rest of it, in a box that scrolls; **Model** and **Tools**. `j`/`k`
+pick a field, `i` types in the title or prompt (`esc` stops; `enter` stops in the title and adds a
+line in the prompt), `enter` on model or tools opens a picker, `ctrl+s` saves (from anywhere, even
+while typing) and `esc` discards. A task needs a title; the prompt may be empty.
 
 `ctrl+r` runs the tasks one after another, each through a fresh **agent**: a new `claude -p`
 session connected to orbit's MCP server, so tasks don't share context with each other or with the
