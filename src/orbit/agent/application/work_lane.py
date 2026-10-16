@@ -131,7 +131,7 @@ class WorkLane:
         the next task on. This, or a restart, is the only way the checks change. A failed save
         raises ``RuntimeError`` before anything changes, ending the task in error."""
         if self._desk.agents.write_config is not None:
-            self._desk.agents.write_config(root, checks)
+            await asyncio.to_thread(self._desk.agents.write_config, root, checks)
         if self._desk.agents.tree is not None:
             self._desk.agents.tree.use_setup(checks.setup)
         verifier.verification = replace(verifier.verification, steps=checks.steps)

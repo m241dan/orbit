@@ -1,5 +1,6 @@
 """The Claude subscription's usage limits, fetched from Anthropic's OAuth usage endpoint."""
 
+import asyncio
 import json
 import math
 from pathlib import Path
@@ -37,7 +38,7 @@ class UsageApi:
     async def __call__(self) -> UsageFetch:
         """One fetch's outcome; it never raises for a failed fetch."""
         # Claude Code refreshes the token itself, so it's read afresh every time.
-        token = _read_token(self.credentials)
+        token = await asyncio.to_thread(_read_token, self.credentials)
         if token is None:
             return UsageUnavailable("no Claude login")
         try:

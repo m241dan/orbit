@@ -83,6 +83,22 @@ def _read_stamp(stamp: Path) -> str | None:
     return stamp.read_text() if stamp.exists() else None
 
 
+def _add_ignores(exclude: Path, paths: Collection[str]) -> None:
+    """Add ``paths`` to the git exclude file ``exclude`` under orbit's header, once each.
+
+    Raises ``RuntimeError`` when the file can't be read or written.
+    """
+    try:
+        exclude.parent.mkdir(exist_ok=True)
+        lines = exclude.read_text().splitlines() if exclude.exists() else []
+        new = sorted(set(paths) - set(lines))
+        if IGNORE_HEADER not in lines:
+            new.insert(0, IGNORE_HEADER)
+        exclude.write_text("\n".join([*lines, *new]) + "\n")
+    except OSError as error:
+        raise RuntimeError(f"Couldn't ignore files in {exclude}: {error}") from error
+
+
 class GitCoderTree:
     """The coder's worktree of the repository at ``root``.
 
@@ -154,15 +170,7 @@ class GitCoderTree:
 
     async def ignore(self, paths: Collection[str]) -> None:
         exclude = (await self._path()).parent.parent / "info" / "exclude"
-        try:
-            exclude.parent.mkdir(exist_ok=True)
-            lines = exclude.read_text().splitlines() if exclude.exists() else []
-            new = sorted(set(paths) - set(lines))
-            if IGNORE_HEADER not in lines:
-                new.insert(0, IGNORE_HEADER)
-            exclude.write_text("\n".join([*lines, *new]) + "\n")
-        except OSError as error:
-            raise RuntimeError(f"Couldn't ignore files in {exclude}: {error}") from error
+        await asyncio.to_thread(_add_ignores, exclude, paths)
 
     def use_setup(self, setup: Setup | None) -> None:
         self.setup = setup
@@ -189,7 +197,7 @@ class GitCoderTree:
 
     async def _ensure(self) -> Path:
         path = await self._path()
-        if (path / ".git").exists():
+        if await asyncio.to_thread((path / ".git").exists):
             return path
         await self._git(self._root, "worktree", "prune")
         if await self._exists(BRANCH):
