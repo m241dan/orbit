@@ -113,14 +113,18 @@ class TaskBoard:
     def mark_fixed(self, task_id: str) -> None:
         """Task ``task_id`` passed verification, so the tasks it was fixing are completed too.
 
-        Walks up the chain of fixes. Tasks that aren't unverified any more (say, edited
-        since) stay as they are.
+        Walks up the chain of fixes, stopping at a task that's no longer on the board. Tasks
+        that aren't unverified any more (say, edited since) stay as they are.
         """
-        fixed = self.get(task_id).fixes
+        fixed = self._find(self.get(task_id).fixes)
         while fixed is not None:
-            if self.get(fixed).status == "unverified":
-                self.set_status(fixed, "completed")
-            fixed = self.get(fixed).fixes
+            if fixed.status == "unverified":
+                self.set_status(fixed.id, "completed")
+            fixed = self._find(fixed.fixes)
+
+    def _find(self, task_id: str | None) -> TaskState | None:
+        """Task ``task_id``, or None if there's no such task on the board."""
+        return next((state for state in self._tasks if state.id == task_id), None)
 
     def next_runnable(
         self,

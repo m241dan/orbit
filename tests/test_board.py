@@ -233,6 +233,16 @@ def test_removing_the_middle_of_a_chain_keeps_the_chain() -> None:
     assert [t.status for t in board.tasks] == ["completed", "completed"]
 
 
+def test_a_fix_whose_fixed_task_was_removed_still_completes() -> None:
+    board = TaskBoard()
+    first = board.add(ONE)
+    board.finish(first, "unverified")
+    fix = board.add(FIX, fixes=first)
+    board.remove(first)
+    board.finish(fix, "completed")
+    assert [(t.id, t.status) for t in board.tasks] == [(fix, "completed")]
+
+
 def test_steps_can_be_replaced_none_of_them_run() -> None:
     board = TaskBoard(["Old"])
     board.set_step(0, "passed")

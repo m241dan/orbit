@@ -25,6 +25,7 @@ from orbit.protocol import (
     ErrorOccurred,
     Event,
     Notice,
+    RemoveTask,
     RunTasks,
     Settings,
     StepState,
@@ -258,6 +259,29 @@ async def test_a_fallback_fix_runs_next_with_the_failed_tasks_settings() -> None
     assert (fix.fixes, fix.task.settings) == (one.id, settings)
     assert [launch.agent.task_id for launch in launcher.launches] == [one.id, fix.id, two.id]
     assert statuses(events) == ["completed", "completed", "completed"]
+
+
+async def test_a_fix_completes_after_the_task_it_fixed_is_removed() -> None:
+    sessions: list[AgentSession] = []
+
+    async def removes_what_it_fixes(call: Call) -> TurnEndReason:
+        await call("get_task")
+        await sessions[0].send(RemoveTask(task_id="1"))
+        await call("complete_task", summary="fixed")
+        return "completed"
+
+    session, _, launcher = session_for(
+        keeps_claiming,
+        removes_what_it_fixes,
+        claims_done,
+        verification=verified(Steps(False, False, True, True)),
+        limits=Limits(max_attempts=1),
+    )
+    sessions.append(session)
+    events = await asyncio.wait_for(run(session, TaskSpec(prompt="one"), TaskSpec(prompt="two")), 5)
+    assert not [e for e in events if isinstance(e, ErrorOccurred)]
+    assert [launch.agent.task_id for launch in launcher.launches] == ["1", "3", "2"]
+    assert [(t.id, t.status) for t in board(events)] == [("3", "completed"), ("2", "completed")]
 
 
 def file_step(path: Path, name: str) -> VerificationStep:
