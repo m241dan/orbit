@@ -535,6 +535,27 @@ async def test_a_failing_cleanup_doesnt_hide_why_the_snapshot_failed(
     assert snapshot_dirs(repo) == [] and tree._snapshots == set()
 
 
+async def test_an_unremovable_snapshot_directory_doesnt_hide_why_the_snapshot_failed(
+    monkeypatch: pytest.MonkeyPatch, repo: Path
+) -> None:
+    real = GitCoderTree._git
+
+    async def locking_add(self: GitCoderTree, cwd: Path, *args: str) -> str:
+        if args[:2] == ("worktree", "add"):
+            Path(args[-2]).parent.chmod(0o555)
+            raise RuntimeError("git worktree failed: index.lock exists")
+        return await real(self, cwd, *args)
+
+    monkeypatch.setattr(GitCoderTree, "_git", locking_add)
+    tree = GitCoderTree(str(repo))
+    try:
+        with pytest.raises(RuntimeError, match=r"index\.lock"):
+            await tree.snapshot("HEAD")
+    finally:
+        (repo / ".git" / "orbit").chmod(0o755)
+    assert len(snapshot_dirs(repo)) == 1 and tree._snapshots == set()
+
+
 async def test_a_snapshot_cancelled_while_being_added_leaves_nothing(
     monkeypatch: pytest.MonkeyPatch, repo: Path
 ) -> None:
