@@ -1,3 +1,6 @@
+import pytest
+from textual.visual import VisualType
+
 from orbit.protocol import (
     STARTUP_TASK,
     AgentExited,
@@ -149,5 +152,123 @@ async def test_the_pane_is_redrawn_only_when_its_agents_numbers_change() -> None
         assert pane.get_option_at_index(0) is before
         # One added before it renumbers it.
         await feed(session, pilot, TasksChanged(tasks=(three, one, two)))
-        assert pane.get_option_at_index(0) is not before
         assert rows(pane) == ["agent-1 coder · task 3 · working"]
+
+
+def spy_rebuilds(pane: AgentsPane, monkeypatch: pytest.MonkeyPatch) -> list[None]:
+    """A list that grows by one each time ``pane`` clears its rows."""
+    clears: list[None] = []
+    clear = pane.clear_options
+
+    def spy() -> AgentsPane:
+        clears.append(None)
+        return clear()
+
+    monkeypatch.setattr(pane, "clear_options", spy)
+    return clears
+
+
+def spy_relabels(pane: AgentsPane, monkeypatch: pytest.MonkeyPatch) -> list[int]:
+    """The indexes of the rows ``pane`` relabels in place, as it relabels them."""
+    relabelled: list[int] = []
+    replace = pane.replace_prompt
+
+    def spy(index: int, prompt: VisualType) -> None:
+        relabelled.append(index)
+        replace(index, prompt)
+
+    monkeypatch.setattr(pane, "replace_prompt", spy)
+    return relabelled
+
+
+async def test_an_agent_starting_to_wait_relabels_only_its_row(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed(
+            session,
+            pilot,
+            AgentStarted(agent_id="agent-1", role="coder", task_id="7"),
+            AgentStarted(agent_id="agent-2", role="reviewer", task_id="8"),
+        )
+        pane = app.query_one(AgentsPane)
+        clears, relabelled = spy_rebuilds(pane, monkeypatch), spy_relabels(pane, monkeypatch)
+        await feed(
+            session,
+            pilot,
+            AgentRequest(agent_id="agent-2", request_id="r", tool="complete_task", arguments={}),
+        )
+        assert rows(pane) == [
+            "agent-1 coder · task 7 · working",
+            "agent-2 reviewer · task 8 · waiting on complete_task",
+        ]
+        await feed(session, pilot, AgentReply(agent_id="agent-2", request_id="r", text="ok"))
+        assert rows(pane) == [
+            "agent-1 coder · task 7 · working",
+            "agent-2 reviewer · task 8 · working",
+        ]
+        assert (clears, relabelled) == ([], [1, 1])
+
+
+async def test_renumbering_an_agents_task_relabels_its_row(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        one, two = board("one", "two").tasks
+        await feed(
+            session,
+            pilot,
+            AgentStarted(agent_id="agent-1", role="coder", task_id="1"),
+            AgentStarted(agent_id="agent-2", role="coder", task_id="2"),
+            TasksChanged(tasks=(one, two)),
+        )
+        pane = app.query_one(AgentsPane)
+        clears, relabelled = spy_rebuilds(pane, monkeypatch), spy_relabels(pane, monkeypatch)
+        three = TaskState(id="3", task=TaskSpec(prompt="three"))
+        await feed(session, pilot, TasksChanged(tasks=(one, three, two)))
+        assert rows(pane) == [
+            "agent-1 coder · task 1 · working",
+            "agent-2 coder · task 3 · working",
+        ]
+        assert (clears, relabelled) == ([], [1])
+
+
+async def test_agents_coming_and_going_rebuild_the_rows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        pane = app.query_one(AgentsPane)
+        clears, relabelled = spy_rebuilds(pane, monkeypatch), spy_relabels(pane, monkeypatch)
+        await feed(session, pilot, AgentStarted(agent_id="agent-1", role="coder", task_id="7"))
+        await feed(session, pilot, AgentStarted(agent_id="agent-2", role="coder", task_id="8"))
+        await feed(session, pilot, AgentExited(agent_id="agent-1", reason="finished"))
+        assert rows(pane) == ["agent-2 coder · task 8 · working"]
+        await feed(session, pilot, AgentExited(agent_id="agent-2", reason="finished"))
+        assert rows(pane) == ["No agents running"]
+        assert (len(clears), relabelled) == (4, [])
+
+
+async def test_the_highlight_stays_on_its_row_as_labels_change() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed(
+            session,
+            pilot,
+            AgentStarted(agent_id="agent-1", role="coder", task_id="7"),
+            AgentStarted(agent_id="agent-2", role="reviewer", task_id="8"),
+        )
+        await pilot.press("l", "j", "enter", "j")
+        pane = app.query_one(AgentsPane)
+        await feed(
+            session,
+            pilot,
+            AgentRequest(agent_id="agent-1", request_id="r", tool="complete_task", arguments={}),
+        )
+        assert pane.highlighted == 1

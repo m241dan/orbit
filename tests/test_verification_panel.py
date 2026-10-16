@@ -164,7 +164,11 @@ async def test_the_panel_is_redrawn_only_when_its_text_changes(
         panel.clock = lambda: now[0]
         await feed(session, pilot, report("passed", "passed"))
         updates: list[object] = []
-        monkeypatch.setattr(panel.query_one(Static), "update", updates.append)
+
+        def update(content: object, *, layout: bool = True) -> None:
+            updates.append(content)
+
+        monkeypatch.setattr(panel.query_one(Static), "update", update)
         for _ in range(3):
             now[0] += 1 / 8
             panel.tick()
@@ -173,3 +177,44 @@ async def test_the_panel_is_redrawn_only_when_its_text_changes(
         now[0] += 1 / 8
         panel.tick()
         assert len(updates) == 2  # The report, then the spinner's next frame.
+
+
+async def test_a_spinner_frame_redraws_the_panel_without_a_layout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        panel = app.query_one(VerificationPanel)
+        now = [100.0]
+        panel.clock = lambda: now[0]
+        await feed(session, pilot, report("running", "pending"))
+        layouts: list[bool] = []
+
+        def update(content: object, *, layout: bool = True) -> None:
+            layouts.append(layout)
+
+        monkeypatch.setattr(panel.query_one(Static), "update", update)
+        now[0] += 1 / 8
+        panel.tick()
+        assert layouts == [False]
+
+
+async def test_a_change_in_the_number_of_lines_lays_the_panel_out(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        panel = app.query_one(VerificationPanel)
+        panel.clock = lambda: 0.0
+        layouts: list[bool] = []
+
+        def update(content: object, *, layout: bool = True) -> None:
+            layouts.append(layout)
+
+        monkeypatch.setattr(panel.query_one(Static), "update", update)
+        await feed(session, pilot, report("running", "pending"))
+        startup = report("running", "pending").model_copy(update={"title": "Startup check"})
+        await feed(session, pilot, startup)
+        assert layouts == [True, True]

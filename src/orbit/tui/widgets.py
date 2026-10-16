@@ -481,8 +481,10 @@ class VerificationPanel(SidePanel):
         lines = step_lines(self.steps, spinner_frame(now), int(now - self._since), self.title)
         text = "\n".join(lines) or NO_STEPS_TEXT
         if text != self._text:
+            # Spinner frames keep the line count, so only a change in it needs a layout.
+            layout = text.count("\n") != self._text.count("\n")
             self._text = text
-            self.query_one(Static).update(Text(text))
+            self.query_one(Static).update(Text(text), layout=layout)
 
 
 def _local_now() -> datetime:
