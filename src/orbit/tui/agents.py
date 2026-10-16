@@ -41,7 +41,6 @@ class AgentsPane(ListPane):
         super().__init__(id=id)
         self.rows: tuple[AgentRow, ...] = ()
         self._numbers: Mapping[str, str] = {}
-        self._shown: tuple[tuple[str, str], ...] = ()  # Each row's agent id and label.
 
     def on_mount(self) -> None:
         self.border_title = "Agents"
@@ -73,29 +72,8 @@ class AgentsPane(ListPane):
         self.border_subtitle = review_line(status)
 
     def _redraw(self) -> None:
-        """Show the rows: the same agents in the same order have the rows whose label changed
-        relabelled in place; agents coming, going or moving rebuild the rows."""
-        shown = tuple(
+        """Show the rows, the empty row when no agents are running."""
+        rows = [
             (row.agent_id, agent_line(row, self._numbers.get(row.task_id))) for row in self.rows
-        )
-        before, self._shown = self._shown, shown
-        if shown and [agent for agent, _ in before] == [agent for agent, _ in shown]:
-            self._relabel(before)
-        else:
-            self._rebuild()
-
-    def _relabel(self, before: tuple[tuple[str, str], ...]) -> None:
-        """Relabel the rows whose label differs from ``before``'s."""
-        for index, ((_, label), (_, old)) in enumerate(zip(self._shown, before, strict=True)):
-            if label != old:
-                self.replace_prompt(index, label)
-
-    def _rebuild(self) -> None:
-        highlight = self.highlighted
-        self.clear_options()
-        if not self._shown:
-            self.add_option(Option(EMPTY_LABEL, disabled=True))
-            return
-        self.add_options([label for _, label in self._shown])
-        if highlight is not None:
-            self.highlighted = min(highlight, len(self._shown) - 1)
+        ]
+        self.show_rows(rows, None if rows else Option(EMPTY_LABEL, disabled=True))

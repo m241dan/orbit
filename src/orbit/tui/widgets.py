@@ -19,6 +19,7 @@ from textual.screen import ModalScreen
 from textual.visual import VisualType
 from textual.widget import Widget
 from textual.widgets import Input, OptionList, Static, Tab, Tabs, TextArea
+from textual.widgets.option_list import Option
 
 from orbit.protocol import Event, Settings, StepState, UsageChanged
 from orbit.tui.view import (
@@ -74,9 +75,16 @@ class ModalFocus(_WidgetMixin):
         self.can_focus = False
 
 
+Row = tuple[str, VisualType]
+"""A list row: the key it's tracked by and its label."""
+
+
 class ListPane(ModalFocus, OptionList):
     """A window's list that only takes focus once activated (``enter_list_mode``);
     then j/k move and escape returns to window navigation."""
+
+    _shown_rows: tuple[Row, ...] = ()
+    _shown_keys: tuple[str | None, ...] = ()  # The rows' keys, then None for a trailing row.
 
     BINDINGS: ClassVar[list[BindingType]] = [
         Binding("j", "cursor_down", show=False),
@@ -87,6 +95,37 @@ class ListPane(ModalFocus, OptionList):
     def enter_list_mode(self) -> None:
         if self._activate() and self.highlighted is None and self.option_count:
             self.highlighted = 0
+
+    def show_rows(self, rows: Sequence[Row], trailing: Option | None = None) -> None:
+        """Show ``rows``, then ``trailing`` if given. The same keys in the same order have the
+        rows whose label changed relabelled in place; otherwise the rows are rebuilt, the
+        highlight staying on its key's row, or on the nearest one when that row has gone."""
+        rows = tuple(rows)
+        keys = tuple(key for key, _ in rows) + (() if trailing is None else (None,))
+        if keys == self._shown_keys:
+            self._relabel_rows(rows)
+            return
+        highlight = self._kept_highlight(keys)
+        self._shown_rows, self._shown_keys = rows, keys
+        self.clear_options()
+        self.add_options([label for _, label in rows] + ([] if trailing is None else [trailing]))
+        self.highlighted = highlight
+
+    def _relabel_rows(self, rows: tuple[Row, ...]) -> None:
+        """Relabel the shown rows whose label differs in ``rows``, which have the same keys."""
+        before, self._shown_rows = self._shown_rows, rows
+        for index, ((_, label), (_, old)) in enumerate(zip(rows, before, strict=True)):
+            if label != old:
+                self.replace_prompt(index, label)
+
+    def _kept_highlight(self, keys: tuple[str | None, ...]) -> int | None:
+        """Where the highlight goes once rows with ``keys`` are shown: on the row with its
+        key, or the nearest one when that's gone."""
+        index = self.highlighted
+        if index is None:
+            return None
+        key = self._shown_keys[index]
+        return keys.index(key) if key in keys else min(index, len(keys) - 1)
 
     def replace_prompt(self, index: int, prompt: VisualType) -> None:
         """Replace the prompt of the option at ``index``, redrawing only that option and, if

@@ -12,6 +12,7 @@ from textual.containers import VerticalScroll
 from textual.message import Message
 from textual.screen import ModalScreen
 from textual.widgets import Input, Static
+from textual.widgets.option_list import Option
 
 from orbit.protocol import Settings, TaskSpec, TaskState, Usage
 from orbit.tui.view import (
@@ -75,7 +76,7 @@ class TaskList(ListPane):
 
     def on_mount(self) -> None:
         self.border_title = "Task list"
-        self._show(None)
+        self._redraw()
         self.set_interval(1 / SPINNER_FPS, self.tick)
 
     def action_accept(self) -> None:
@@ -107,33 +108,8 @@ class TaskList(ListPane):
         tasks = tuple(tasks)
         if tasks == self.tasks:
             return
-        highlight = self._moved_highlight(tasks)
-        before = tuple(zip(self.tasks, self.numbers, strict=True))
         self.tasks, self.numbers = tasks, task_numbers(tasks)
-        if [state.id for state, _ in before] == [state.id for state in tasks]:
-            self._relabel(before)
-        else:
-            self._show(highlight)
-
-    def _moved_highlight(self, tasks: Sequence[TaskState]) -> int | None:
-        """Where the highlight goes once ``tasks`` are shown: with its task, or on the
-        new-task row."""
-        highlight = self.highlighted
-        if highlight is None:
-            return None
-        if highlight >= len(self.tasks):
-            return len(tasks)
-        positions = {t.id: i for i, t in enumerate(tasks)}
-        return positions.get(self.tasks[highlight].id, highlight)
-
-    def _relabel(self, before: Sequence[tuple[TaskState, str]]) -> None:
-        """Relabel the rows whose task or number differs from ``before``, the same tasks in
-        the same order."""
-        frame = spinner_frame(self.clock())
-        rows = zip(self.tasks, self.numbers, strict=True)
-        for index, (row, old) in enumerate(zip(rows, before, strict=True)):
-            if row != old:
-                self.replace_prompt(index, task_label(*row, frame))
+        self._redraw()
 
     def count(self, usage: Usage) -> None:
         """Add what a turn cost to the session's total."""
@@ -149,19 +125,15 @@ class TaskList(ListPane):
 
     def tick(self) -> None:
         """Turn the spinners: redraw just the rows of running tasks."""
-        frame = spinner_frame(self.clock())
-        for index, (state, number) in enumerate(zip(self.tasks, self.numbers, strict=True)):
-            if state.status == "running":
-                self.replace_prompt(index, task_label(state, number, frame))
+        self._redraw()
 
-    def _show(self, highlight: int | None) -> None:
+    def _redraw(self) -> None:
+        """Show the tasks, relabelling in place the rows whose label changed."""
         frame = spinner_frame(self.clock())
-        self.clear_options()
-        self.add_options(
-            [task_label(t, n, frame) for t, n in zip(self.tasks, self.numbers, strict=True)]
-            + [Text(NEW_TASK_LABEL, style="dim italic")]
-        )
-        self.highlighted = highlight
+        rows = [
+            (t.id, task_label(t, n, frame)) for t, n in zip(self.tasks, self.numbers, strict=True)
+        ]
+        self.show_rows(rows, Option(Text(NEW_TASK_LABEL, style="dim italic")))
 
 
 class FieldBox(Static):
