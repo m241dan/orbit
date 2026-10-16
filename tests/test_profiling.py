@@ -86,3 +86,32 @@ async def test_profiled_on_a_second_thread_leaves_the_profile_to_the_first(
     ]
     stats = pstats.Stats(str(tmp_path / "ui.prof"))
     assert any(name == "backend_work" for _, _, name in stats.stats)  # type: ignore[attr-defined]
+
+
+async def test_stopping_from_the_loops_thread_mid_block_returns() -> None:
+    log = io.StringIO()
+    dog = watchdog(log)
+    dog.start()
+    await asyncio.sleep(0.05)
+    rescued = threading.Event()
+
+    def rescue() -> None:
+        # Without stop() releasing the pending check, the watchdog waits forever on a no-op
+        # the loop can't run while its thread joins; releasing it here turns that hang into
+        # a failure.
+        rescued.set()
+        dog._pending.set()
+
+    guard = threading.Timer(5, rescue)
+    guard.start()
+    try:
+        hogs_the_loop()
+        dog.stop()
+    finally:
+        guard.cancel()
+
+    assert not rescued.is_set()
+    text = log.getvalue()
+    assert text.count("blocked for") == 1
+    assert text.count("unblocked after") == 1
+    assert "ui unblocked after" in text.splitlines()[-1]
