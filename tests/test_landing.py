@@ -12,8 +12,18 @@ from orbit.protocol import (
     TaskMerged,
     TaskSpec,
     TurnEndReason,
+    VerificationStarted,
 )
-from tests.agent_fakes import Call, FakeTree, Steps, board, run, session_for, verified
+from tests.agent_fakes import (
+    ROLES,
+    Call,
+    FakeTree,
+    Steps,
+    board,
+    run,
+    session_for,
+    verified,
+)
 
 
 async def claims_done(call: Call) -> TurnEndReason:
@@ -88,6 +98,18 @@ async def test_work_rebased_onto_a_moved_base_is_verified_again_before_merging()
     session, _, _ = session_for(claims_done, verification=verified(steps), tree=tree)
     events = await asyncio.wait_for(run(session), 5)
     assert steps.runs == ["Unit tests", "Unit tests"]
+    assert TaskMerged(task_id="1", result="merged", commit="c1") in events
+    assert statuses(events) == ["completed"]
+
+
+async def test_rebased_work_in_a_role_that_is_not_verified_lands_without_checks() -> None:
+    tree = FakeTree(Merge("rebased"), Merge("merged"))
+    steps = Steps()
+    roles = {**ROLES, "docs-writer": ROLES["coder"].model_copy(update={"verify": False})}
+    session, _, _ = session_for(claims_done, verification=verified(steps), tree=tree, roles=roles)
+    events = await asyncio.wait_for(run(session, TaskSpec(prompt="Docs.", role="docs-writer")), 5)
+    assert steps.runs == []
+    assert not any(isinstance(e, VerificationStarted) for e in events)
     assert TaskMerged(task_id="1", result="merged", commit="c1") in events
     assert statuses(events) == ["completed"]
 

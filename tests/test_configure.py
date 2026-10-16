@@ -113,12 +113,12 @@ async def test_accepted_checks_land_like_task_work(result: MergeResult) -> None:
     assert (merged.result, merged.detail) == (result, "in the way")
 
 
-async def test_a_rebase_is_checked_with_the_accepted_steps() -> None:
+async def test_a_rebased_config_commit_is_not_checked_again() -> None:
     tree = FakeTree(Merge("rebased"))
-    steps = Steps(True, True, True, True, True)
+    steps = Steps(True, True, True)
     session = accepting(steps=steps, tree=tree, write_config=Writer())
     events = await asyncio.wait_for(everything(session, CONFIGURE), 5)
-    assert steps.runs == ["setup", "Lint", "Tests", "Lint", "Tests"]
+    assert steps.runs == ["setup", "Lint", "Tests"]  # Only the proposal's trial run.
     assert TaskMerged(task_id="1", result="merged", commit="c1") in events
 
 

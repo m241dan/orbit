@@ -289,8 +289,8 @@ watch = ["uv.lock"]   # rerun when any of these files change
 When a task passes verification, orbit commits its work there (the agent's summary as the subject,
 the task as the body) and fast-forwards the base to it, so the commit appears on your branch and in
 your checkout (`⇢ Merged into the base branch.`). If you committed to the base in the meantime, the
-work is rebased onto your commits and verified again before merging; if that fails, a fresh agent
-fixes it. When it can't be merged, it stays committed on `orbit/coder` and the conversation says why
+work is rebased onto your commits and, if its role is verified, verified again before merging; if
+that fails, a fresh agent fixes it. When it can't be merged, it stays committed on `orbit/coder` and the conversation says why
 (`⚠ Not merged …`); orbit tries again after the next task:
 
 - `conflict`: it conflicts with your commits. Merge `orbit/coder` yourself.

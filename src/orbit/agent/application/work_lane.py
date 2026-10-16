@@ -140,15 +140,17 @@ class WorkLane:
 
     async def _land(self, task_id: str, outcome: Outcome, root: str) -> Outcome:
         """Commit and merge a completed task's work, when there's a tree to do it from: the
-        checks the user accepted from it, or else the work itself."""
+        checks the user accepted from it, or else the work itself. A rebase is rechecked only
+        if the task's role is verified."""
         if self._desk.agents.tree is None:
             return outcome
+        state = self._board.get(task_id)
         if outcome.checks is not None:
             message = configure_message(outcome.checks)
         else:
-            state = self._board.get(task_id)
             message = commit_message(state.task, outcome.summaries, fix=state.fixes is not None)
-        lander = Lander(self._desk.agents.tree, self._board, self._verifier, self._publish)
+        verifier = self._verifier if self._desk.agents.roles[state.task.role].verify else None
+        lander = Lander(self._desk.agents.tree, self._board, verifier, self._publish)
         landing = await lander.land(task_id, message, root, self._starts.pop(task_id))
         if landing.failure is not None:
             return Outcome("unverified", landing.failure)
