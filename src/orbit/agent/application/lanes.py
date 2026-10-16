@@ -1,13 +1,13 @@
 """What the lanes share: a failure that escapes one is reported to the user, not lost with the
-background task that ran it."""
+background task that ran it, and a busy lane's turns are run one at a time."""
 
 import asyncio
-from collections.abc import Coroutine
+from collections.abc import Callable, Coroutine
 from contextlib import suppress
 from typing import Any
 
 from orbit.agent.application.ports import Publish
-from orbit.protocol import ErrorOccurred
+from orbit.protocol import BusyChanged, BusyLane, ErrorOccurred, Event
 
 
 def crash_of(task: "asyncio.Task[object]") -> BaseException | None:
@@ -60,3 +60,59 @@ class Background:
             await work
         except Exception as exc:  # A bug; nothing else awaits the work, so say so here.
             await self._publish(crash_report(self._name, exc))
+
+
+class TurnSlot:
+    """Runs one turn at a time in busy lane ``lane``, which the frontend shows as busy while a
+    turn runs. A second turn is refused with ``refusal``. Events go out through ``post``, which
+    must not block: a turn's end is reported from its done-callback."""
+
+    def __init__(self, lane: BusyLane, refusal: str, post: Callable[[Event], None]) -> None:
+        self._lane: BusyLane = lane
+        self._refusal = refusal
+        self._post = post
+        self._turn: asyncio.Task[object] | None = None
+
+    @property
+    def running(self) -> bool:
+        return self._turn is not None and not self._turn.done()
+
+    @property
+    def turn(self) -> "asyncio.Task[object] | None":
+        """The current or last turn; none before the first."""
+        return self._turn
+
+    async def start(self, work: Coroutine[Any, Any, object]) -> bool:
+        """Run ``work`` as the lane's turn, unless a turn still runs: then close ``work`` and
+        say why; returns whether it started."""
+        if self.running:
+            work.close()
+            self._post(ErrorOccurred(message=self._refusal))
+            return False
+        self._post(BusyChanged(busy=True, lane=self._lane))
+        self._turn = asyncio.create_task(work)
+        # A callback, so it also runs if the work is cancelled before it starts.
+        self._turn.add_done_callback(self._ended)
+        return True
+
+    def cancel(self) -> bool:
+        """Cancel the turn if it still runs; returns whether it did."""
+        if self._turn is None or self._turn.done():
+            return False
+        self._turn.cancel()
+        return True
+
+    async def close(self) -> None:
+        """Cancel the turn, if it runs, and wait for it to end."""
+        turn = self._turn
+        if turn is not None and self.cancel():
+            with suppress(asyncio.CancelledError):
+                await turn
+
+    def _ended(self, turn: "asyncio.Task[object]") -> None:
+        crash = crash_of(turn)
+        if crash is not None:  # A bug; nothing awaits the turn, so it's reported here.
+            self._post(crash_report(self._lane, crash))
+        # A turn started since then reports its own end; staying quiet keeps it shown busy.
+        if turn is self._turn:
+            self._post(BusyChanged(busy=False, lane=self._lane))
