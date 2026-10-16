@@ -448,7 +448,8 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     `.orbit/config.toml`; `built_in_roles` reads the built-in roles' instructions from
     `instructions/*.md`; `checks` runs a verification step as a process (`run_step`);
     `processes` runs a program to completion without leaving it behind; `workspace`
-    fingerprints the git working tree.
+    fingerprints the git working tree; `usage_api` fetches the Claude subscription's usage
+    limits (`UsageApi`) with the token in `~/.claude/.credentials.json`.
   - `application`: `AgentSession` implements `Session`: it takes commands, asks the domain what
     follows, drives the ports and publishes events. `WorkLane` is the work lane: it runs the
     board's tasks one at a time, queues a fix after each failed step and lands work that passes.
