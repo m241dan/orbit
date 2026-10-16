@@ -516,8 +516,9 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
 - `orbit.tui`: frontend. Sends commands and renders events. Imports only `orbit.protocol`.
   `view` turns state and events into text and doesn't import Textual, with a module per area
   of the screen (`events`, `transcript`, `tool_calls`, `proposals`, `tasks`, `panels`, `agents`,
-  `tabs`, and `settings` and `common` for what they share); the widgets (`tasks`,
-  `agents`, `widgets`, and `proposals`, the proposal modal) lay it out, and `app` is the Textual
+  `tabs`, and `settings` and `common` for what they share); the widgets (`transcript`,
+  `tabs`, `tasks`, `agents`, `panels`, `proposals`, the proposal modal, and `widgets` for the
+  building blocks they share) lay it out, and `app` is the Textual
   app that holds them.
 - `orbit.cli`: the composition root, and the only place the two sides are wired together: it
   plugs the external adapters into `AgentSession` and hands that to the TUI. It runs the

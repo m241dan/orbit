@@ -9,8 +9,8 @@ from textual.pilot import Pilot
 
 from orbit.protocol import AssistantMessage, Notice, ToolCallFinished
 from orbit.tui import OrbitApp
+from orbit.tui.transcript import GutteredEntry, Transcript, TranscriptLog
 from orbit.tui.view import GUTTER_BAR, GUTTER_MARKER
-from orbit.tui.widgets import GutteredEntry, Transcript, TranscriptLog
 from tests.test_tui import FakeSession, feed_events, said, started
 
 # Wraps in any window a test opens. At 40 columns a row beside the gutter holds two words but

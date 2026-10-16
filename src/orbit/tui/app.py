@@ -59,8 +59,11 @@ from orbit.protocol import (
     VerificationStarted,
 )
 from orbit.tui.agents import AgentsPane
+from orbit.tui.panels import UsagePanel, VerificationPanel
 from orbit.tui.proposals import ProposalScreen
+from orbit.tui.tabs import ConversationTabs
 from orbit.tui.tasks import TaskEditorScreen, TaskList
+from orbit.tui.transcript import Transcript
 from orbit.tui.view import (
     PLANNER,
     TOOL_ACCESS_OPTIONS,
@@ -85,12 +88,8 @@ from orbit.tui.widgets import (
     CONFIGURE_TITLE,
     CONFIGURE_YES,
     ConfirmScreen,
-    ConversationTabs,
     PickerScreen,
     PromptInput,
-    Transcript,
-    UsagePanel,
-    VerificationPanel,
 )
 
 # Window reached from each window by h/j/k/l; missing means an edge.

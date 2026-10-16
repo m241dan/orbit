@@ -23,8 +23,9 @@ from orbit.protocol import (
 )
 from orbit.tui import OrbitApp
 from orbit.tui.tasks import TaskEditorScreen, TaskList
+from orbit.tui.transcript import Transcript
 from orbit.tui.view import spinner_frame, task_label, task_numbers, usage_label
-from orbit.tui.widgets import PickerScreen, PromptBox, PromptInput, Transcript
+from orbit.tui.widgets import PickerScreen, PromptBox, PromptInput
 from tests.test_tui import FakeSession, picker, selected, show_settings
 
 

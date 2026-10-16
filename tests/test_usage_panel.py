@@ -4,7 +4,7 @@ from textual.widgets import Static
 
 from orbit.protocol import UsageChanged, UsageLimit
 from orbit.tui import OrbitApp
-from orbit.tui.widgets import UsagePanel
+from orbit.tui.panels import UsagePanel
 from tests.test_task_list import feed
 from tests.test_tui import FakeSession
 

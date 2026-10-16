@@ -42,17 +42,12 @@ from orbit.protocol import (
 from orbit.tui import OrbitApp
 from orbit.tui.agents import AgentsPane
 from orbit.tui.app import event_batches
+from orbit.tui.panels import VerificationPanel
+from orbit.tui.tabs import ConversationTabs
 from orbit.tui.tasks import TaskList
+from orbit.tui.transcript import Transcript, TranscriptLog
 from orbit.tui.view import EntryKind, coalesce, spinner_frame
-from orbit.tui.widgets import (
-    ConversationTabs,
-    PickerScreen,
-    PromptInput,
-    SidePanel,
-    Transcript,
-    TranscriptLog,
-    VerificationPanel,
-)
+from orbit.tui.widgets import PickerScreen, PromptInput, SidePanel
 
 
 class FakeSession:

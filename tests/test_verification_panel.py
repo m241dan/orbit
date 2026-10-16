@@ -11,8 +11,9 @@ from orbit.protocol import (
     VerificationStarted,
 )
 from orbit.tui import OrbitApp
+from orbit.tui.panels import VerificationPanel
+from orbit.tui.transcript import Transcript
 from orbit.tui.view import spinner_frame, step_lines
-from orbit.tui.widgets import Transcript, VerificationPanel
 from tests.test_task_list import feed
 from tests.test_tui import FakeSession
 

@@ -10,8 +10,8 @@ from orbit.protocol import (
 )
 from orbit.tui import OrbitApp
 from orbit.tui.proposals import ProposalScreen
+from orbit.tui.transcript import Transcript
 from orbit.tui.view import proposal_text
-from orbit.tui.widgets import Transcript
 from tests.test_task_list import feed
 from tests.test_tui import FakeSession
 
