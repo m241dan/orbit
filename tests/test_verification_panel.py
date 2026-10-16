@@ -218,3 +218,75 @@ async def test_a_change_in_the_number_of_lines_lays_the_panel_out(
         startup = report("running", "pending").model_copy(update={"title": "Startup check"})
         await feed(session, pilot, startup)
         assert layouts == [True, True]
+
+
+def spy_layouts(panel: VerificationPanel, monkeypatch: pytest.MonkeyPatch) -> list[bool]:
+    layouts: list[bool] = []
+
+    def update(content: object, *, layout: bool = True) -> None:
+        layouts.append(layout)
+
+    monkeypatch.setattr(panel.query_one(Static), "update", update)
+    return layouts
+
+
+def running(name: str) -> VerificationChanged:
+    return VerificationChanged(steps=(StepState(name=name, status="running"),))
+
+
+async def test_a_line_that_wraps_as_its_time_grows_lays_the_panel_out(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test(size=(60, 24)) as pilot:
+        panel = app.query_one(VerificationPanel)
+        width = panel.query_one(Static).content_region.width
+        # "◜  " + name + " · 9s" fills the width exactly; at 10s it wraps.
+        name = "x" * (width - len("◜  · 9s") - 1)
+        now = [0.0]
+        panel.clock = lambda: now[0]
+        await feed(session, pilot, running(name))
+        now[0] = 9.0  # frame 72, the same as at 10s
+        panel.tick()
+        layouts = spy_layouts(panel, monkeypatch)
+        now[0] = 10.0
+        panel.tick()
+        assert layouts == [True]
+
+
+async def test_a_report_with_longer_names_that_wrap_lays_the_panel_out(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test(size=(60, 24)) as pilot:
+        panel = app.query_one(VerificationPanel)
+        await feed(session, pilot, report("passed", "pending"))
+        layouts = spy_layouts(panel, monkeypatch)
+        long = VerificationChanged(
+            steps=(
+                StepState(name="Unit tests", status="passed"),
+                StepState(name="A step whose name is far too long to fit", status="pending"),
+            )
+        )
+        await feed(session, pilot, long)
+        assert layouts == [True]
+
+
+async def test_a_panel_without_a_width_yet_lays_out_every_change(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        panel = app.query_one(VerificationPanel)
+        now = [100.0]
+        panel.clock = lambda: now[0]
+        panel.query_one(Static).styles.width = 0
+        await pilot.pause()
+        layouts = spy_layouts(panel, monkeypatch)
+        await feed(session, pilot, report("running", "pending"))
+        now[0] += 1 / 8
+        panel.tick()
+        assert layouts == [True, True]  # The spinner's frame too, as its wrapping is unknown.

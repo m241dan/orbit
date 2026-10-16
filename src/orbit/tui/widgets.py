@@ -477,6 +477,7 @@ class VerificationPanel(SidePanel):
         self._running_step: int | None = None
         self._since = 0.0
         self._text = NO_STEPS_TEXT  # What the panel shows now.
+        self._height: int | None = None  # Its rows when last drawn, if its width was known.
 
     def compose(self) -> ComposeResult:
         yield Static(NO_STEPS_TEXT)
@@ -498,10 +499,19 @@ class VerificationPanel(SidePanel):
         lines = step_lines(self.steps, spinner_frame(now), int(now - self._since), self.title)
         text = "\n".join(lines) or NO_STEPS_TEXT
         if text != self._text:
-            # Spinner frames keep the line count, so only a change in it needs a layout.
-            layout = text.count("\n") != self._text.count("\n")
-            self._text = text
+            # Spinner frames keep every line's length, so only a change in the wrapped
+            # height needs a layout.
+            height = self._wrapped_height(text)
+            layout = height is None or height != self._height
+            self._text, self._height = text, height
             self.query_one(Static).update(Text(text), layout=layout)
+
+    def _wrapped_height(self, text: str) -> int | None:
+        """The rows ``text`` takes wrapped to the panel's width, or None before it has one."""
+        width = self.query_one(Static).content_region.width
+        if not width:
+            return None
+        return len(Text(text).wrap(self.app.console, width))
 
 
 def _local_now() -> datetime:
