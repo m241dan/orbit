@@ -75,6 +75,10 @@ from orbit.tui.view import (
     verification_started_entry,
 )
 from orbit.tui.widgets import (
+    CONFIGURE_MESSAGE,
+    CONFIGURE_TITLE,
+    CONFIGURE_YES,
+    ConfirmScreen,
     ConversationTabs,
     PickerScreen,
     PromptInput,
@@ -201,6 +205,8 @@ class OrbitApp(App[None], inherit_bindings=False):
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
         if action in ("cycle_tab", "release_cursor"):
             return self._normal_mode()
+        if action == "configure_checks":
+            return len(self.screen_stack) == 1
         return True
 
     def _normal_mode(self) -> bool:
@@ -291,9 +297,15 @@ class OrbitApp(App[None], inherit_bindings=False):
         # Reviews have their own lane, so this works while tasks run.
         await self._session.send(RequestSuperReview())
 
-    async def action_configure_checks(self) -> None:
-        # The backend queues it first and runs it, or says one is already on its way.
-        await self._session.send(ConfigureChecks())
+    def action_configure_checks(self) -> None:
+        """Ask first, so a stray ctrl+e doesn't queue a configurator."""
+
+        async def answered(confirmed: bool | None) -> None:
+            # The backend queues it first and runs it, or says one is already on its way.
+            if confirmed:
+                await self._session.send(ConfigureChecks())
+
+        self.push_screen(ConfirmScreen(CONFIGURE_TITLE, CONFIGURE_MESSAGE, CONFIGURE_YES), answered)
 
     async def action_cancel_turn(self) -> None:
         # The planner has its own lane, stopped with ctrl+x; ctrl+s stops the task run.

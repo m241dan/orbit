@@ -583,3 +583,48 @@ class PickerScreen(ModalScreen[int | None]):
 
     def action_close(self) -> None:
         self.dismiss(None)
+
+
+CONFIGURE_TITLE = "Set up checks?"
+CONFIGURE_MESSAGE = "A configurator task will go to the front of the task list and run now."
+CONFIGURE_YES = "set up"
+
+
+class ConfirmScreen(ModalScreen[bool]):
+    """Asks ``title`` with ``message``; dismisses with True on ``y``, False on ``n`` or escape.
+
+    ``yes`` names what ``y`` does in the keys shown. Enter doesn't answer, so a stray
+    keypress can't confirm.
+    """
+
+    AUTO_FOCUS = None
+    DEFAULT_CSS = """
+    ConfirmScreen { align: center middle; }
+    ConfirmScreen > Static {
+        width: 60;
+        max-width: 90%;
+        height: auto;
+        border: round $accent;
+        padding: 0 1;
+    }
+    """
+    BINDINGS: ClassVar[list[BindingType]] = [
+        Binding("y", "answer(True)", show=False),
+        Binding("n", "answer(False)", show=False),
+        Binding("escape", "answer(False)", show=False),
+    ]
+
+    def __init__(self, title: str, message: str, yes: str = "confirm") -> None:
+        super().__init__()
+        self.title_text = title
+        self.message = message
+        self.yes = yes
+
+    def compose(self) -> ComposeResult:
+        body = Static(Text(self.message), id="confirm-message")
+        body.border_title = self.title_text
+        body.border_subtitle = f"y {self.yes} · n/esc cancel"
+        yield body
+
+    def action_answer(self, confirmed: bool) -> None:
+        self.dismiss(confirmed)

@@ -53,7 +53,7 @@ In the app:
 | `ctrl+t` | Jump to the **planner** tab; again, back to the tab you were on |
 | `ctrl+r` | Run the tasks that haven't completed yet |
 | `ctrl+g` | Ask for a super review of the whole codebase now (works while tasks run) |
-| `ctrl+e` | Set up (or redo) the verification steps: queue a configurator task first and run it (see [Setting up verification](#setting-up-verification)) |
+| `ctrl+e` | Set up (or redo) the verification steps: after you confirm (`y` to go ahead, `n`/`esc` to cancel), queue a configurator task first and run it (see [Setting up verification](#setting-up-verification)) |
 | `ctrl+o` | Pick the planner's model (default, fable, opus, sonnet, haiku; new tasks default to it too) |
 | `ctrl+l` | Pick the tool access level new tasks start with in the task editor (off, restricted, full) |
 | `esc` | Stop typing, leave a list or close a picker; with the conversation selected and nothing active, let go of its held entry and follow the latest output again |
@@ -215,11 +215,13 @@ inspects the repository (CI workflows, `.pre-commit-config.yaml`, `package.json`
 ones first, plus a setup command and the files whose changes should rerun it. It doesn't edit
 files.
 
-Press `ctrl+e` to start one. It goes to the front of the task list and runs straight away (if
-tasks are already running, it runs next). It works whether or not steps are configured: its prompt
+Press `ctrl+e` to start one. It asks for confirmation first, so a stray keypress does nothing:
+`y` goes ahead, `n` or `esc` cancels (`enter` doesn't answer). Once confirmed, the task goes to
+the front of the task list and runs straight away (if tasks are already running, it runs
+next). It works whether or not steps are configured: its prompt
 lists the steps and setup configured now, if any, so the agent builds on them, which makes `ctrl+e`
-the way to reconfigure too. While a configurator task is queued or running, `ctrl+e` doesn't add
-another; the conversation says `A configurator task is already queued or running.`
+the way to reconfigure too. While a configurator task is queued or running, a confirmed `ctrl+e`
+doesn't add another; the conversation says `A configurator task is already queued or running.`
 
 Orbit tries each proposal in the agent's working directory first: the setup, then each step in
 order. If one fails, the agent gets the step's name and its output and is asked to revise,

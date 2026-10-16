@@ -2,6 +2,9 @@
 
 import asyncio
 
+import pytest
+from textual.widgets import Static
+
 from orbit.agent import NO_STEPS_NOTE, AgentSession
 from orbit.agent.application.session import CONFIGURING_NOTE
 from orbit.agent.domain.roles import Setup, configure_prompt
@@ -20,6 +23,7 @@ from orbit.protocol import (
 )
 from orbit.tui import OrbitApp
 from orbit.tui.tasks import TaskList
+from orbit.tui.widgets import CONFIGURE_MESSAGE, CONFIGURE_TITLE, ConfirmScreen, PickerScreen
 from tests.agent_fakes import STEP, Call, FakeTree, Steps, board, session_for, verified
 from tests.test_tui import FakeSession, shown
 
@@ -158,7 +162,69 @@ async def test_ctrl_e_asks_for_a_configurator() -> None:
     app = OrbitApp(session)
     async with app.run_test() as pilot:
         await pilot.press("ctrl+e")
+        assert session.commands == []
+        assert isinstance(app.screen, ConfirmScreen)
+        await pilot.press("y")
         assert session.commands == [ConfigureChecks()]
+        assert not isinstance(app.screen, ConfirmScreen)
+
+
+@pytest.mark.parametrize("key", ["n", "escape"])
+async def test_declining_the_confirmation_sends_nothing(key: str) -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await pilot.press("ctrl+e", key)
+        assert not isinstance(app.screen, ConfirmScreen)
+        assert session.commands == []
+
+
+@pytest.mark.parametrize("key", ["enter", "x"])
+async def test_other_keys_leave_the_confirmation_open(key: str) -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await pilot.press("ctrl+e", key)
+        assert isinstance(app.screen, ConfirmScreen)
+        assert session.commands == []
+
+
+async def test_ctrl_e_in_the_confirmation_does_not_stack_another() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await pilot.press("ctrl+e", "ctrl+e")
+        assert len(app.screen_stack) == 2
+        await pilot.press("y")
+        assert len(app.screen_stack) == 1
+        assert session.commands == [ConfigureChecks()]
+
+
+async def test_ctrl_e_over_another_modal_does_not_ask() -> None:
+    app = OrbitApp(FakeSession())
+    async with app.run_test() as pilot:
+        await app.push_screen(PickerScreen("Model", ["default"]))
+        await pilot.press("ctrl+e")
+        assert isinstance(app.screen, PickerScreen)
+        assert not app.check_action("configure_checks", ())
+
+
+async def test_the_confirmation_shows_its_question_and_keys() -> None:
+    app = OrbitApp(FakeSession())
+    async with app.run_test() as pilot:
+        await pilot.press("ctrl+e")
+        body = app.screen.query_one("#confirm-message", Static)
+        assert body.border_title == CONFIGURE_TITLE
+        assert body.border_subtitle == "y set up · n/esc cancel"
+        assert str(body.render()) == CONFIGURE_MESSAGE
+
+
+def test_the_confirmation_wording() -> None:
+    assert CONFIGURE_TITLE == "Set up checks?"
+    assert CONFIGURE_MESSAGE == (
+        "A configurator task will go to the front of the task list and run now."
+    )
+    assert ConfirmScreen("Sure?", "Really.").yes == "confirm"
 
 
 def test_configure_checks_round_trips() -> None:
@@ -176,10 +242,10 @@ async def test_in_the_app_ctrl_e_runs_a_configurator_and_refuses_a_second() -> N
     session, _, launcher = session_for(waits)
     app = OrbitApp(session)
     async with app.run_test() as pilot:
-        await pilot.press("ctrl+e")
+        await pilot.press("ctrl+e", "y")
         while not launcher.launches:
             await pilot.pause()
-        await pilot.press("ctrl+e")
+        await pilot.press("ctrl+e", "y")
         while CONFIGURING_NOTE not in "\n".join(shown(app)):
             await pilot.pause()
         gate.set()
