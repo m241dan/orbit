@@ -1,10 +1,10 @@
 """Verification rules: when a task needs checking, how many fixes to try, and what to ask for."""
 
 import shlex
-from collections.abc import Sequence
-from dataclasses import dataclass
+from collections.abc import Iterable, Sequence
+from dataclasses import dataclass, replace
 
-from orbit.protocol import SkipReason, TaskSpec
+from orbit.protocol import SkipReason, StepState, StepStatus, TaskSpec
 
 
 @dataclass(frozen=True)
@@ -13,6 +13,48 @@ class VerificationStep:
 
     name: str
     command: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class StepProgress:
+    """How far a run of the verification steps has got: each step's status, in order."""
+
+    steps: tuple[StepState, ...] = ()
+
+    @classmethod
+    def of(cls, names: Iterable[str]) -> "StepProgress":
+        """Progress over the steps ``names``, none of them run yet."""
+        return cls(tuple(StepState(name=name) for name in names))
+
+    @property
+    def names(self) -> tuple[str, ...]:
+        return tuple(step.name for step in self.steps)
+
+    def set(self, step: int, status: StepStatus) -> "StepProgress":
+        """This progress with step number ``step`` at ``status``."""
+        steps = list(self.steps)
+        steps[step] = steps[step].model_copy(update={"status": status})
+        return replace(self, steps=tuple(steps))
+
+    def reset(self) -> "StepProgress":
+        """This progress with every step pending again."""
+        return StepProgress.of(self.names)
+
+    def skip(self) -> "StepProgress":
+        """This progress with every step skipped."""
+        return replace(
+            self, steps=tuple(s.model_copy(update={"status": "skipped"}) for s in self.steps)
+        )
+
+    def cancel_running(self) -> "StepProgress":
+        """This progress with the step running, if any, cancelled."""
+        return replace(
+            self,
+            steps=tuple(
+                s.model_copy(update={"status": "cancelled"}) if s.status == "running" else s
+                for s in self.steps
+            ),
+        )
 
 
 # Fix tasks one task's chain of fixes may queue for each step before giving up on it.

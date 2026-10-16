@@ -1,13 +1,14 @@
 """Verifying a task once its agent is done: which steps run, and reporting their progress."""
 
 from collections.abc import Awaitable, Callable, Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TypeVar
 
 from orbit.agent.application.ports import CoderTree, Publish, StepRunner, Workspace
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.verification import (
     MAX_FALLBACK_FIXES,
+    StepProgress,
     VerificationStep,
     may_change_files,
     skip_reason,
@@ -67,7 +68,8 @@ class Verification:
 
 
 class Verifier:
-    """Runs ``verification``'s steps on tasks of ``board``, publishing progress as it goes."""
+    """Runs ``verification``'s steps on tasks of ``board``, publishing their progress as it
+    goes."""
 
     def __init__(
         self,
@@ -77,9 +79,29 @@ class Verifier:
         tree: CoderTree | None = None,
     ) -> None:
         self.verification = verification
+        self._progress = StepProgress.of(step.name for step in verification.steps)
         self._board = board
         self._publish = publish
         self._tree = tree
+
+    @property
+    def step_names(self) -> tuple[str, ...]:
+        return self._progress.names
+
+    @property
+    def progress(self) -> StepProgress:
+        return self._progress
+
+    async def use_steps(self, steps: tuple[VerificationStep, ...]) -> None:
+        """Verify with ``steps`` from now on, none of them run yet, and report them."""
+        self.verification = replace(self.verification, steps=steps)
+        self._progress = StepProgress.of(step.name for step in steps)
+        await self.publish_steps()
+
+    async def reset(self) -> None:
+        """A task starts: report every step pending again."""
+        self._progress = self._progress.reset()
+        await self.publish_steps()
 
     async def state_before(self, task: TaskSpec, root: str) -> object:
         """The tree's state at ``root``, when it will tell whether ``task`` changed files."""
@@ -99,7 +121,7 @@ class Verifier:
         if reason is None and not self.verification.steps:
             reason = "no_steps"
         if reason is not None:
-            self._board.skip_steps()
+            self._progress = self._progress.skip()
             await self.publish_steps()
             await self._publish(VerificationSkipped(task_id=task_id, reason=reason))
             return None
@@ -135,25 +157,25 @@ class Verifier:
 
     async def skip_unchanged(self, task_id: str) -> None:
         """Report that task ``task_id`` isn't verified again: nothing changed since it failed."""
-        self._board.skip_steps()
+        self._progress = self._progress.skip()
         await self.publish_steps()
         await self._publish(VerificationSkipped(task_id=task_id, reason="unchanged"))
 
     async def cancel(self) -> None:
         """The task was cancelled while verifying: mark the step in progress cancelled."""
-        self._board.cancel_running_steps()
+        self._progress = self._progress.cancel_running()
         await self.publish_steps()
 
     async def publish_steps(self) -> None:
         """Report the steps' progress; there's none to report without steps."""
         if self.verification.steps:
-            await self._publish(VerificationChanged(steps=self._board.steps))
+            await self._publish(VerificationChanged(steps=self._progress.steps))
 
     async def _verify(self, task_id: str, root: str) -> Failure | None:
         """Run the steps at ``root`` after task ``task_id``; returns the first failure."""
 
         async def on_step(number: int, status: StepStatus) -> None:
-            self._board.set_step(number, status)
+            self._progress = self._progress.set(number, status)
             await self.publish_steps()
             if status == "running":
                 await self._publish(VerificationStarted(task_id=task_id, step=number))

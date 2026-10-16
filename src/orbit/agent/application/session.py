@@ -115,8 +115,7 @@ class AgentSession:
     ) -> None:
         self._settings = settings or Settings()
         self._model_choices = tuple(model_choices)
-        steps = verification.steps if verification else ()
-        self._board = TaskBoard([s.name for s in steps])
+        self._board = TaskBoard()
         self._events: asyncio.Queue[Event] = asyncio.Queue()
         self._proposals = FrontendReview(self._events.put, self._agent_on)
         agents = _reviewed(agents, self._proposals)
@@ -146,8 +145,9 @@ class AgentSession:
 
     def _announce_steps(self) -> None:
         """Show the steps that will verify tasks, or note that none will."""
-        if self._board.steps:
-            self._events.put_nowait(VerificationChanged(steps=self._board.steps))
+        if self._verifier and self._verifier.step_names:
+            steps = self._verifier.progress.steps
+            self._events.put_nowait(VerificationChanged(steps=steps))
         elif self._verifier:
             self._events.put_nowait(Notice(message=NO_STEPS_NOTE))
 
@@ -397,7 +397,11 @@ class AgentSession:
     def _planner_chat(self) -> PlannerChat | None:
         if self._desk is None or PLANNER not in self._desk.agents.roles:
             return None
-        return PlannerChat(self._desk, self._board)
+        return PlannerChat(self._desk, self._board, self._step_names)
+
+    def _step_names(self) -> tuple[str, ...]:
+        """The names of the steps verifying tasks now; none without verification."""
+        return self._verifier.step_names if self._verifier else ()
 
     async def close(self) -> None:
         """Cancel the work in progress, which stops its agent, then stop the startup check, the

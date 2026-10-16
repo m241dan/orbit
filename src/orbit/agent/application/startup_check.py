@@ -13,7 +13,7 @@ from orbit.agent.application.lanes import Background
 from orbit.agent.application.ports import CoderTree, Publish
 from orbit.agent.application.verifier import Failure, Verification, first_failure
 from orbit.agent.domain.roles import setup_step
-from orbit.agent.domain.verification import VerificationStep, trim_output
+from orbit.agent.domain.verification import StepProgress, VerificationStep, trim_output
 from orbit.protocol import (
     STARTUP_TASK,
     AgentExited,
@@ -22,7 +22,6 @@ from orbit.protocol import (
     ErrorOccurred,
     Notice,
     StartupChecked,
-    StepState,
     StepStatus,
     VerificationChanged,
 )
@@ -53,7 +52,7 @@ class StartupCheck:
         self._tree = tree
         self._publish = publish
         self._add_fix = add_fix
-        self._steps = tuple(StepState(name=step.name) for step in verification.steps)
+        self._progress = StepProgress.of(step.name for step in verification.steps)
         self._shown = True  # Whether it still has the verification panel.
         self._background = Background("startup check", publish)
 
@@ -87,7 +86,7 @@ class StartupCheck:
         try:
             failure = await self._in_snapshot()
         except asyncio.CancelledError:
-            await self._set_running("cancelled")
+            await self._cancel_running()
             await self._publish(Notice(message=CANCELLED_NOTE))
             raise
         except RuntimeError as exc:  # Git couldn't make the snapshot.
@@ -130,18 +129,17 @@ class StartupCheck:
             StartupChecked(passed=False, step=step.name, output=trim_output(output))
         )
 
-    async def _set_running(self, status: StepStatus) -> None:
-        """Mark the step running, if any, ``status``."""
-        running = [i for i, s in enumerate(self._steps) if s.status == "running"]
-        for number in running:
-            await self._set(number, status)
+    async def _cancel_running(self) -> None:
+        """Mark the step running, if any, cancelled."""
+        cancelled = self._progress.cancel_running()
+        if cancelled != self._progress:
+            self._progress = cancelled
+            await self._show()
 
     async def _set(self, number: int, status: StepStatus) -> None:
-        steps = list(self._steps)
-        steps[number] = steps[number].model_copy(update={"status": status})
-        self._steps = tuple(steps)
+        self._progress = self._progress.set(number, status)
         await self._show()
 
     async def _show(self) -> None:
         if self._shown:
-            await self._publish(VerificationChanged(steps=self._steps, title=TITLE))
+            await self._publish(VerificationChanged(steps=self._progress.steps, title=TITLE))

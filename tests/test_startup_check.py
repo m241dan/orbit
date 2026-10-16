@@ -185,6 +185,28 @@ async def test_cancelling_its_agent_stops_it() -> None:
     await session.close()
 
 
+async def test_cancelling_it_while_setting_up_leaves_the_steps_pending() -> None:
+    steps = Steps(True)
+    steps.gate = asyncio.Event()
+    tree = FakeTree()
+    tree.setup = Setup(command=("uv", "sync"))
+    session, _, _ = session_for(verification=checked(steps), tree=tree, check_at_startup=True)
+    events: list[Event] = []
+    async for event in session.events():
+        events.append(event)
+        if event == titled("pending", "pending"):
+            await session.send(CancelAgent(agent_id="startup-check"))
+        if isinstance(event, AgentExited):
+            break
+
+    assert events[-3:] == [
+        titled("pending", "pending"),
+        Notice(message=CANCELLED_NOTE),
+        AgentExited(agent_id="startup-check", reason="killed"),
+    ]
+    await session.close()
+
+
 async def test_closing_the_session_stops_it() -> None:
     steps = Steps(True)
     steps.gate = asyncio.Event()

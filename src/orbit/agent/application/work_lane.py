@@ -7,7 +7,6 @@ hears how each task ended.
 
 import asyncio
 from collections.abc import Collection
-from dataclasses import replace
 
 from orbit.agent.application.agent_run import AgentRun, Outcome
 from orbit.agent.application.desk import AgentDesk
@@ -74,8 +73,7 @@ class WorkLane:
         if self.startup is not None:
             self.startup.release_panel()
         if self._verifier is not None:
-            self._board.reset_steps()
-            await self._verifier.publish_steps()
+            await self._verifier.reset()
         await self._publish(TaskStarted(task_id=task_id))
         status: TaskStatus = "error"  # What a bug in the run leaves the task as.
         try:
@@ -134,9 +132,7 @@ class WorkLane:
             await asyncio.to_thread(self._desk.agents.write_config, root, checks)
         if self._desk.agents.tree is not None:
             self._desk.agents.tree.use_setup(checks.setup)
-        verifier.verification = replace(verifier.verification, steps=checks.steps)
-        self._board.set_steps([step.name for step in checks.steps])
-        await verifier.publish_steps()
+        await verifier.use_steps(checks.steps)
 
     async def _land(self, task_id: str, outcome: Outcome, root: str) -> Outcome:
         """Commit and merge a completed task's work, when there's a tree to do it from: the

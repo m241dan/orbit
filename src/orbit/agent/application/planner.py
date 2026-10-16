@@ -6,7 +6,7 @@ and they wait on the board as drafts until the user accepts them. Its first prom
 after the verification steps change, tells it the steps each task must pass.
 """
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from typing import Any
 
 from orbit.agent.application.desk import AgentDesk, Tool, dispatch, report_progress
@@ -28,11 +28,15 @@ from orbit.protocol import (
 
 
 class PlannerChat:
-    """The conversation with the planner, a turn per prompt."""
+    """The conversation with the planner, a turn per prompt; ``step_names`` tells the names of
+    the verification steps tasks must pass now."""
 
-    def __init__(self, desk: AgentDesk, board: TaskBoard) -> None:
+    def __init__(
+        self, desk: AgentDesk, board: TaskBoard, step_names: Callable[[], tuple[str, ...]]
+    ) -> None:
         self._desk = desk
         self._board = board
+        self._step_names = step_names
         self._agent: Agent | None = None
         self._told: tuple[str, ...] | None = None  # The steps the planner last heard about.
         self._tools: dict[str, Tool] = {
@@ -56,7 +60,7 @@ class PlannerChat:
 
     def _with_steps(self, prompt: str) -> str:
         """``prompt``, after a note of the verification steps if the planner hasn't heard them."""
-        steps = tuple(step.name for step in self._board.steps)
+        steps = self._step_names()
         if steps == self._told:
             return prompt
         self._told = steps

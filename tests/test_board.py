@@ -1,7 +1,7 @@
 import pytest
 
 from orbit.agent.domain.board import TaskBoard
-from orbit.protocol import Settings, StepState, TaskSpec, TaskState, Usage
+from orbit.protocol import Settings, TaskSpec, TaskState, Usage
 
 ONE = TaskSpec(prompt="one")
 TWO = TaskSpec(prompt="two", settings=Settings(model="opus"))
@@ -12,11 +12,8 @@ def prompts(board: TaskBoard) -> list[str]:
     return [t.task.prompt for t in board.tasks]
 
 
-def test_starts_empty_with_pending_steps() -> None:
-    board = TaskBoard(("Unit tests", "Lint"))
-    assert board.tasks == ()
-    assert board.steps == (StepState(name="Unit tests"), StepState(name="Lint"))
-    assert TaskBoard().steps == ()
+def test_starts_empty() -> None:
+    assert TaskBoard().tasks == ()
 
 
 def test_add_appends_pending_tasks_with_distinct_ids() -> None:
@@ -119,18 +116,6 @@ def test_finishing_a_fix_completes_what_it_fixed_but_other_endings_do_not() -> N
     assert [t.status for t in board.tasks] == ["unverified", "error"]
     board.finish(fix, "completed")
     assert [t.status for t in board.tasks] == ["completed", "completed"]
-
-
-def test_step_statuses_follow_a_verification_and_reset() -> None:
-    board = TaskBoard(("Unit tests", "Lint"))
-    board.set_step(0, "passed")
-    board.set_step(1, "running")
-    board.cancel_running_steps()
-    assert [s.status for s in board.steps] == ["passed", "cancelled"]
-    board.reset_steps()
-    assert [s.status for s in board.steps] == ["pending", "pending"]
-    board.skip_steps()
-    assert [s.status for s in board.steps] == ["skipped", "skipped"]
 
 
 def test_next_runnable_can_be_limited_to_roles_or_exclude_them() -> None:
@@ -241,13 +226,6 @@ def test_a_fix_whose_fixed_task_was_removed_still_completes() -> None:
     board.remove(first)
     board.finish(fix, "completed")
     assert [(t.id, t.status) for t in board.tasks] == [(fix, "completed")]
-
-
-def test_steps_can_be_replaced_none_of_them_run() -> None:
-    board = TaskBoard(["Old"])
-    board.set_step(0, "passed")
-    board.set_steps(["Lint", "Tests"])
-    assert board.steps == (StepState(name="Lint"), StepState(name="Tests"))
 
 
 def test_each_task_adds_up_the_usage_of_its_own_turns() -> None:

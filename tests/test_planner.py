@@ -203,8 +203,8 @@ async def test_the_planner_hears_the_steps_on_its_first_turn_and_when_they_chang
         events.append(event)
 
     desk = AgentDesk(Agents(host, launcher, lambda: "token-1", ROLES), publish)
-    board = TaskBoard(["Ruff lint"])
-    chat = PlannerChat(desk, board)
+    steps: tuple[str, ...] = ("Ruff lint",)
+    chat = PlannerChat(desk, TaskBoard(), lambda: steps)
 
     async def turn(text: str) -> str:
         async for _ in chat.run_turn("turn", text, Settings()):
@@ -214,5 +214,5 @@ async def test_the_planner_hears_the_steps_on_its_first_turn_and_when_they_chang
     first = await turn("Plan a flag.")
     assert first.startswith(steps_note(("Ruff lint",))) and first.endswith("\n\nPlan a flag.")
     assert await turn("And docs.") == "And docs."
-    board.set_steps(["Ruff lint", "Unit tests"])
+    steps = ("Ruff lint", "Unit tests")
     assert await turn("More.") == f"{steps_note(('Ruff lint', 'Unit tests'))}\n\nMore."
