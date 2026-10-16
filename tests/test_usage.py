@@ -61,6 +61,18 @@ def test_clamps_utilization_into_range() -> None:
     assert [limit.percent for limit in parse_usage(payload)] == [0.0, 100.0]
 
 
+def test_clamps_a_huge_utilization_to_full() -> None:
+    assert parse_usage({"five_hour": {"utilization": 10**400}}) == (
+        UsageLimit(label="Session", percent=100.0, resets_at=None),
+    )
+
+
+def test_clamps_a_hugely_negative_utilization_to_empty() -> None:
+    assert parse_usage({"five_hour": {"utilization": -(10**400)}}) == (
+        UsageLimit(label="Session", percent=0.0, resets_at=None),
+    )
+
+
 @pytest.mark.parametrize(
     "payload",
     [

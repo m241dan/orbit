@@ -146,6 +146,14 @@ async def test_a_response_that_isnt_json_is_unexpected(tmp_path: Path) -> None:
     assert await fetch() == UsageUnavailable("unexpected response")
 
 
+async def test_a_huge_utilization_is_reported_as_full(tmp_path: Path) -> None:
+    body = '{"five_hour": {"utilization": 1' + "0" * 400 + "}}"
+    fetch = api(logged_in(tmp_path), responding(httpx.Response(200, text=body)))
+    assert await fetch() == UsageReport(
+        (UsageLimit(label="Session", percent=100.0, resets_at=None),)
+    )
+
+
 async def test_a_malformed_usage_payload_is_unexpected(tmp_path: Path) -> None:
     fetch = api(logged_in(tmp_path), responding(httpx.Response(200, json=[1])))
     assert await fetch() == UsageUnavailable("unexpected response")

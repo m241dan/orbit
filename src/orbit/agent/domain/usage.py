@@ -63,12 +63,13 @@ def _parse_window(window: object, label: str) -> UsageLimit | None:
 
 def _parse_percent(utilization: object, label: str) -> float:
     """``utilization`` clamped into a percentage, raising ``ValueError`` unless it's a finite
-    number."""
+    number. Clamping comes before the conversion to float, so an int too big for a float
+    clamps like any other."""
     if isinstance(utilization, bool) or not isinstance(utilization, int | float):
         raise ValueError(f"{label} utilization isn't a number: {utilization!r}")
-    if not math.isfinite(utilization):
+    if isinstance(utilization, float) and not math.isfinite(utilization):
         raise ValueError(f"{label} utilization isn't finite: {utilization!r}")
-    return min(max(float(utilization), 0.0), 100.0)
+    return float(min(max(utilization, 0), 100))
 
 
 def _parse_time(value: object) -> datetime | None:
