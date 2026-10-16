@@ -39,18 +39,9 @@ class Lander:
         """Commit task ``task_id``'s work with ``message`` and merge it; ``start`` is the tree's
         head before the task, so commits the agent made itself count too."""
         await self._tree.commit(message)
-        merge = await self._tree.integrate()
-        for _ in range(MAX_REBASES):
-            if merge.result != "rebased":
-                break
-            failure = await self._recheck(task_id, root)
-            if failure is not None:
-                return Landing(failure=failure)
-            merge = await self._tree.integrate()
-        else:
-            merge = Merge(
-                "rebased", f"The base branch kept moving; the work is on {self._tree.branch}."
-            )
+        merge = await self._integrate(task_id, root)
+        if not isinstance(merge, Merge):
+            return Landing(failure=merge)
         # Read after any rebase, which rewrites the commits.
         head = await self._tree.head()
         commit = head if head != start else None
@@ -60,6 +51,23 @@ class Lander:
             )
         )
         return Landing(commit=commit)
+
+    async def _integrate(self, task_id: str, root: str) -> Merge | Failure:
+        """Merge the tree's work, rechecking it after each of at most MAX_REBASES rebases;
+        the first recheck that fails is returned instead."""
+        merge = await self._tree.integrate()
+        for _ in range(MAX_REBASES):
+            if merge.result != "rebased":
+                return merge
+            failure = await self._recheck(task_id, root)
+            if failure is not None:
+                return failure
+            merge = await self._tree.integrate()
+        if merge.result == "rebased":
+            return Merge(
+                "rebased", f"The base branch kept moving; the work is on {self._tree.branch}."
+            )
+        return merge
 
     async def _recheck(self, task_id: str, root: str) -> Failure | None:
         if self._verifier is None:

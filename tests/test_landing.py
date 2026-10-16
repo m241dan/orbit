@@ -157,6 +157,16 @@ async def test_a_base_that_keeps_moving_leaves_the_work_unmerged() -> None:
     assert statuses(events) == ["completed"]
 
 
+async def test_work_merged_on_the_last_allowed_rebase_is_reported_merged() -> None:
+    tree = FakeTree(*[Merge("rebased")] * 3, Merge("merged"))
+    steps = Steps(True, True, True, True)
+    session, _, _ = session_for(claims_done, verification=verified(steps), tree=tree)
+    events = await asyncio.wait_for(run(session), 5)
+    [merged] = [e for e in events if isinstance(e, TaskMerged)]
+    assert merged.result == "merged" and merged.detail == ""
+    assert len(steps.runs) == 4  # The claim, then once after each rebase.
+
+
 async def test_without_verification_rebased_work_is_merged_straight_away() -> None:
     tree = FakeTree(Merge("rebased"), Merge("merged"))
     session, _, _ = session_for(claims_done, tree=tree)
