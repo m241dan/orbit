@@ -4,7 +4,7 @@ import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, ClassVar, get_args
+from typing import Any, ClassVar, cast, get_args
 
 from rich.console import Console, ConsoleOptions, RenderResult
 from rich.segment import Segment
@@ -14,7 +14,9 @@ from textual import on
 from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
 from textual.containers import Vertical, VerticalScroll
+from textual.css.styles import RulesMap
 from textual.screen import ModalScreen
+from textual.visual import VisualType
 from textual.widgets import Input, OptionList, Static, Tab, Tabs, TextArea
 
 from orbit.protocol import Event, Settings, StepState, UsageChanged
@@ -68,6 +70,41 @@ class ListPane(OptionList):
 
     def on_blur(self) -> None:
         self.can_focus = False
+
+    def replace_prompt(self, index: int, prompt: VisualType) -> None:
+        """Replace the prompt of the option at ``index``, redrawing only that option and, if
+        its height changed, re-measuring only it and the options after it."""
+        # OptionList.replace_option_prompt_at_index clears every option's render and line
+        # caches, so the next draw wraps the whole list again. Textual has no public way to
+        # invalidate one option, so this reaches into its private caches; the tests in
+        # tests/test_list_pane.py guard them.
+        option = self.get_option_at_index(index)
+        render_cache = self._option_render_cache
+        cached = render_cache.keys()  # LRUCache isn't iterable itself.
+        for key in [key for key in cached if key[0] is option]:
+            render_cache.discard(key)
+        option._set_prompt(prompt)
+        line_cache = self._line_cache
+        height = line_cache.heights.get(index)
+        if height is None:  # Not measured yet, so measured as the list is laid out.
+            self.refresh()
+            return
+        width = self.scrollable_content_region.width - self._get_left_gutter_width()
+        width -= self.get_component_styles("option-list--option").padding.width
+        rules = cast(RulesMap, self.styles)  # As OptionList measures its options.
+        if self._get_visual(option).get_height(rules, width) + option._divider != height:
+            self._remeasure_from(index)
+        self.refresh()
+
+    def _remeasure_from(self, index: int) -> None:
+        """Forget the lines of the options from ``index`` on and measure them again, keeping
+        those before it; part of ``replace_prompt``, on the same private caches."""
+        line_cache = self._line_cache
+        del line_cache.lines[line_cache.index_to_line[index] :]
+        for later in range(index, self.option_count):
+            line_cache.heights.pop(later, None)
+            line_cache.index_to_line.pop(later, None)
+        self._update_lines()
 
 
 Entry = tuple[str, EntryKind]
@@ -197,7 +234,7 @@ class TranscriptLog(ListPane):
         self.toggle(event.option_index)
 
     def _redraw(self, index: int) -> None:
-        self.replace_option_prompt_at_index(index, self._prompt(index))
+        self.replace_prompt(index, self._prompt(index))
 
     def _prompt(self, index: int) -> GutteredEntry:
         # Partial styles, so no background of their own paints a band across the entry.

@@ -1,8 +1,10 @@
 """The transcript keeps entries per tab, each tab a list of entries that can be moved between
 and collapsed."""
 
-from rich.console import Console
+import pytest
+from rich.console import Console, ConsoleOptions, RenderResult
 from rich.style import Style
+from textual.app import App, ComposeResult
 from textual.pilot import Pilot
 
 from orbit.protocol import AssistantMessage, Notice, ToolCallFinished
@@ -464,3 +466,96 @@ async def test_switching_tabs_keeps_a_held_place() -> None:
         for _ in range(5):
             await pilot.pause()
         assert log.scroll_y == 0 and log.max_scroll_y > 0
+
+
+class LongLogApp(App[None]):
+    """A shown log of 1,000 entries of two lines each, the ``tool`` ones collapsed."""
+
+    def compose(self) -> ComposeResult:
+        log = TranscriptLog(shown=True)
+        for i in range(1000):
+            log.append(f"entry {i}\nmore", "tool" if i % 2 else "assistant")
+        yield log
+
+
+def count_renders(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """The labels of the entries rendered or measured from now on, one per time."""
+    renders: list[str] = []
+    render = GutteredEntry.__rich_console__
+
+    def counted(self: GutteredEntry, console: Console, options: ConsoleOptions) -> RenderResult:
+        renders.append(self.label.plain)
+        return render(self, console, options)
+
+    monkeypatch.setattr(GutteredEntry, "__rich_console__", counted)
+    return renders
+
+
+def entry_number(label: str) -> int:
+    return int(label.split()[2])
+
+
+async def test_moving_the_cursor_in_a_long_log_draws_only_the_entries_it_changes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = LongLogApp()
+    async with app.run_test(size=(80, 24)) as pilot:
+        log = app.query_one(TranscriptLog)
+        log.enter_list_mode()
+        await pilot.pause()
+        renders = count_renders(monkeypatch)
+        await pilot.press(*["k"] * 20)
+        await pilot.pause()
+        assert log.highlighted == 979
+        assert gutters_of(log)[978:981] == [GUTTER_BAR, GUTTER_MARKER, GUTTER_BAR]
+        assert 0 < len(renders) <= 20 * 10
+        assert min(entry_number(label) for label in renders) >= 970
+
+
+async def test_toggling_an_entry_measures_only_it_and_the_entries_after_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = LongLogApp()
+    async with app.run_test(size=(80, 24)) as pilot:
+        log = app.query_one(TranscriptLog)
+        log.enter_list_mode()
+        await pilot.pause()
+        height = log.virtual_size.height
+        renders = count_renders(monkeypatch)
+        log.toggle(995)
+        await pilot.pause()
+        assert log.virtual_size.height == height + 1
+        assert min(entry_number(label) for label in renders) == 995
+        assert len(renders) <= 50
+        log.scroll_end(animate=False)
+        assert await scrolled_to_end(pilot, log)
+        assert [row[2:] for row in rendered_tail(log, 13)] == [
+            "▾ entry 995",
+            "more",
+            "",
+            "▾ entry 996",
+            "more",
+            "",
+            "▸ entry 997 (+1 line)",
+            "",
+            "▾ entry 998",
+            "more",
+            "",
+            "▸ entry 999 (+1 line)",
+            "",
+        ]
+
+
+def gutters_of(log: TranscriptLog) -> list[str]:
+    entries = []
+    for index in range(log.option_count):
+        prompt = log.get_option_at_index(index).prompt
+        assert isinstance(prompt, GutteredEntry)
+        entries.append(prompt.gutter.strip())
+    return entries
+
+
+def rendered_tail(log: TranscriptLog, rows: int) -> list[str]:
+    """The text of the last ``rows`` rows on screen as drawn."""
+    height = log.scrollable_content_region.height
+    return [log.render_line(y).text.rstrip() for y in range(height - rows, height)]

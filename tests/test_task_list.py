@@ -778,3 +778,32 @@ async def test_editor_hint_mentions_shift_j_and_k_scrolling() -> None:
         await open_editor_on(session, pilot, LONG_PROMPT)
         hint = editor(app).query_one(VerticalScroll).border_subtitle
         assert hint == "j/k move · J/K scroll · i type · enter choose · ctrl+s save · esc cancel"
+
+
+def cached_rows(task_list: TaskList) -> set[int]:
+    """The rows whose drawing the list has cached, and so won't draw again."""
+    keys = task_list._option_render_cache.keys()  # LRUCache isn't iterable itself.
+    cached = {key[0] for key in keys}
+    return {i for i, option in enumerate(options(task_list)) if option in cached}
+
+
+async def test_spinning_and_relabelling_redraw_only_their_rows() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        task_list = app.query_one(TaskList)
+        task_list.clock = lambda: 0.0
+        one, two, three = board("one", "two", "three").tasks
+        running = two.model_copy(update={"status": "running"})
+        await feed(session, pilot, TasksChanged(tasks=(one, running, three)))
+        await pilot.pause()
+        before = cached_rows(task_list)
+        assert {0, 1, 2} <= before
+        task_list.clock = lambda: 0.25
+        task_list.tick()
+        assert cached_rows(task_list) == before - {1}
+        await pilot.pause()
+        done = three.model_copy(update={"status": "completed"})
+        task_list.show((one, running, done))
+        assert cached_rows(task_list) == before - {2}
+        assert rows(app)[2] == str(task_label(done, "3", spinner_frame(0.25)))

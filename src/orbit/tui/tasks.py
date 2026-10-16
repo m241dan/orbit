@@ -132,7 +132,7 @@ class TaskList(ListPane):
         rows = zip(self.tasks, self.numbers, strict=True)
         for index, (row, old) in enumerate(zip(rows, before, strict=True)):
             if row != old:
-                self.replace_option_prompt_at_index(index, task_label(*row, frame))
+                self.replace_prompt(index, task_label(*row, frame))
 
     def count(self, usage: Usage) -> None:
         """Add what a turn cost to the session's total."""
@@ -151,7 +151,7 @@ class TaskList(ListPane):
         frame = spinner_frame(self.clock())
         for index, (state, number) in enumerate(zip(self.tasks, self.numbers, strict=True)):
             if state.status == "running":
-                self.replace_option_prompt_at_index(index, task_label(state, number, frame))
+                self.replace_prompt(index, task_label(state, number, frame))
 
     def _show(self, highlight: int | None) -> None:
         frame = spinner_frame(self.clock())
