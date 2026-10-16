@@ -302,6 +302,7 @@ async def test_editor_builds_a_task_with_vim_keys() -> None:
         assert not isinstance(app.screen, TaskEditorScreen)
         task = TaskSpec(prompt="fix it!", settings=Settings(model="opus", tool_access="full"))
         assert session.commands == [AddTask(task=task)]
+        assert task.role == "coder"
         # The row appears once the backend reports it.
         assert rows(app) == ["+ new task"]
         assert app.focused is app.query_one(TaskList)
@@ -359,6 +360,19 @@ async def test_enter_on_existing_task_edits_it() -> None:
         await pilot.press("i", "!", "escape", "j", "j", "enter", "k", "enter", "ctrl+s")
         edited = TaskSpec(prompt="two!", settings=Settings(tool_access="off"))
         assert session.commands == [EditTask(task_id="2", task=edited)]
+
+
+async def test_editing_a_task_keeps_its_role() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    reviewer = TaskSpec(prompt="check it", role="reviewer")
+    async with app.run_test() as pilot:
+        await show_settings(session, pilot, Settings())
+        await feed(session, pilot, TasksChanged(tasks=(TaskState(id="1", task=reviewer),)))
+        await open_task_list(pilot)
+        await pilot.press("enter", "i", "!", "escape", "ctrl+s")
+        edited = TaskSpec(prompt="check it!", role="reviewer")
+        assert session.commands == [EditTask(task_id="1", task=edited)]
 
 
 async def test_ctrl_r_asks_the_backend_to_run_unless_busy() -> None:

@@ -213,6 +213,7 @@ class TaskEditorScreen(ModalScreen[TaskSpec | None]):
         self.title_text = "New task" if task is None else "Edit task"
         self._prompt = "" if task is None else task.prompt
         self._settings = settings if task is None else task.settings
+        self._role = TaskSpec.model_fields["role"].default if task is None else task.role
         self._models = list(models)
         self._field = 0
 
@@ -253,7 +254,7 @@ class TaskEditorScreen(ModalScreen[TaskSpec | None]):
     def action_save(self) -> None:
         prompt = self.query_one(PromptInput).value.strip()
         if prompt:
-            self.dismiss(TaskSpec(prompt=prompt, settings=self._settings))
+            self.dismiss(TaskSpec(prompt=prompt, settings=self._settings, role=self._role))
 
     def action_cancel(self) -> None:
         self.dismiss(None)
