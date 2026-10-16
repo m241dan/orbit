@@ -38,9 +38,16 @@ uv run orbit chat --no-verify                  # don't verify tasks
 uv run orbit chat --no-review                  # don't review landed work
 uv run orbit chat --no-worktree                # tasks edit the current checkout; nothing is committed
 uv run orbit chat --no-usage                   # don't show usage limits
+uv run orbit chat --profile /tmp/orbit-prof    # record what slows orbit down
 ```
 
 With orbit installed as a tool, drop the `uv run`.
+
+`--profile <dir>` records where time goes, for when orbit bogs down. It writes `ui.prof` (and,
+once the backend has its own thread, `backend.prof`), a profile of that thread that `python -m
+pstats` or `snakeviz` opens, and `ui-blocked.log` (and `backend-blocked.log`), with an entry for
+every time that thread's event loop was blocked for over 50 ms showing what was running while it
+was stuck, and how long it lasted.
 
 In the app:
 

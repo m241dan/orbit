@@ -90,6 +90,19 @@ type = "forbidden"
 source_modules = ["orbit.agent"]
 forbidden_modules = ["textual", "rich", "typer"]
 
+# Profiling is wired in by the CLI alone, and knows nothing of what it profiles.
+[[tool.importlinter.contracts]]
+name = "Profiling stands apart from the backend and frontend"
+type = "forbidden"
+source_modules = ["orbit.profiling"]
+forbidden_modules = ["orbit.agent", "orbit.tui", "orbit.protocol", "orbit.cli"]
+
+[[tool.importlinter.contracts]]
+name = "Only the CLI uses profiling"
+type = "forbidden"
+source_modules = ["orbit.agent", "orbit.tui", "orbit.protocol"]
+forbidden_modules = ["orbit.profiling"]
+
 # Inside the backend: external adapters over the application over the domain. A layer may
 # import the ones below it, never above.
 [[tool.importlinter.contracts]]

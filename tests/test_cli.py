@@ -1,3 +1,4 @@
+import pstats
 import subprocess
 from pathlib import Path
 from typing import Any, ClassVar
@@ -36,6 +37,9 @@ def test_version() -> None:
 
 class FakeApp:
     launched: ClassVar[list[AgentSession]] = []
+    # The files in profile_dir while each app ran async.
+    profile_dir: ClassVar[Path] = Path()
+    profiling: ClassVar[list[list[str]]] = []
 
     def __init__(self, session: AgentSession) -> None:
         self.session = session
@@ -43,11 +47,16 @@ class FakeApp:
     def run(self) -> None:
         FakeApp.launched.append(self.session)
 
+    async def run_async(self) -> None:
+        FakeApp.launched.append(self.session)
+        FakeApp.profiling.append(sorted(p.name for p in FakeApp.profile_dir.iterdir()))
+
 
 @pytest.fixture
 def launched(monkeypatch: pytest.MonkeyPatch) -> list[AgentSession]:
     monkeypatch.setattr("orbit.cli.OrbitApp", FakeApp)
     FakeApp.launched = []
+    FakeApp.profiling = []
     return FakeApp.launched
 
 
@@ -383,3 +392,32 @@ def test_chat_can_turn_usage_limits_off(
     assert runner.invoke(app, ["chat", "--no-usage"]).exit_code == 0
     assert usage_sources == [None]
     assert len(launched) == 1
+
+
+def test_chat_can_profile_the_app(
+    launched: list[AgentSession], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    monkeypatch.chdir(tmp_path)
+    FakeApp.profile_dir = tmp_path / "profile"
+    result = runner.invoke(app, ["chat", "-C", str(project), "--profile", "profile"])
+
+    assert result.exit_code == 0
+    assert len(launched) == 1
+    # The directory is relative to where chat started, not the workspace. The app ran while
+    # its loop was watched, and the profile was written when it ended.
+    assert FakeApp.profiling == [["ui-blocked.log"]]
+    stats = pstats.Stats(str(tmp_path / "profile" / "ui.prof"))
+    assert stats.total_calls > 0  # type: ignore[attr-defined]
+
+
+def test_chat_runs_the_app_unprofiled_by_default(
+    launched: list[AgentSession], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    assert runner.invoke(app, ["chat"]).exit_code == 0
+
+    assert len(launched) == 1
+    assert FakeApp.profiling == []
+    assert not (tmp_path / "profile").exists()

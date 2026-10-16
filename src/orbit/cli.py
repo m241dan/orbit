@@ -1,5 +1,6 @@
 """Command-line interface for orbit."""
 
+import asyncio
 import os
 import secrets
 from pathlib import Path
@@ -16,6 +17,7 @@ from orbit.agent import (
     ConfigError,
     GitCoderTree,
     McpHost,
+    OrbitConfig,
     UsageApi,
     Verification,
     git_top_level,
@@ -25,6 +27,7 @@ from orbit.agent import (
     workspace_state,
     write_checks,
 )
+from orbit.profiling import profiled
 from orbit.protocol import Settings, ToolAccess
 from orbit.tui import OrbitApp
 
@@ -99,6 +102,13 @@ def chat(
             " your Claude login's token from ~/.claude/.credentials.json.",
         ),
     ] = True,
+    profile: Annotated[
+        Path | None,
+        typer.Option(
+            help="Write a profile of each thread, and a log of every time the UI or backend was"
+            " blocked for over 50 ms, to this directory.",
+        ),
+    ] = None,
 ) -> None:
     """Start an interactive agent session.
 
@@ -112,6 +122,7 @@ def chat(
     # The only place the backend and frontend meet, and where the backend's external
     # adapters are plugged into its ports. Every adapter works relative to the current
     # directory, so move into the workspace before anything reads the filesystem.
+    profile = profile.expanduser().resolve() if profile else None
     root = _workspace(workspace)
     os.chdir(root)
     try:
@@ -123,8 +134,24 @@ def chat(
     verification = (
         Verification(steps, run_step, workspace_state, config.fallback_fixes) if verify else None
     )
+    agents = _agents(config, worktree=worktree, review=review)
+    session = AgentSession(
+        Settings(model=model, tool_access=tools),
+        model_choices=MODEL_ALIASES,
+        verification=verification,
+        agents=agents,
+        workspace=str(root),
+        check_at_startup=True,
+        usage=UsageApi() if usage else None,
+    )
+    _launch(OrbitApp(session), profile)
+
+
+def _agents(config: OrbitConfig, *, worktree: bool, review: bool) -> Agents:
+    """The agents that run tasks as ``config`` says, in the coder tree if ``worktree`` and
+    the workspace is a git work tree, reviewing landed work if ``review``."""
     tree = GitCoderTree(".", config.setup) if worktree and in_git_work_tree(".") else None
-    agents = Agents(
+    return Agents(
         McpHost(),
         ClaudeCliRunner(),
         secrets.token_urlsafe,
@@ -135,16 +162,20 @@ def chat(
         review_limits=config.review_limits,
         write_config=write_checks,
     )
-    session = AgentSession(
-        Settings(model=model, tool_access=tools),
-        model_choices=MODEL_ALIASES,
-        verification=verification,
-        agents=agents,
-        workspace=str(root),
-        check_at_startup=True,
-        usage=UsageApi() if usage else None,
-    )
-    OrbitApp(session).run()
+
+
+def _launch(tui: OrbitApp, profile: Path | None) -> None:
+    """Run ``tui``, profiled into the ``profile`` directory if there is one."""
+    if profile is None:
+        tui.run()
+    else:
+        asyncio.run(_run_profiled(tui, profile))
+
+
+async def _run_profiled(tui: OrbitApp, directory: Path) -> None:
+    """Run ``tui``, profiling its thread into ``directory``."""
+    with profiled(directory, "ui"):
+        await tui.run_async()
 
 
 @app.command()
