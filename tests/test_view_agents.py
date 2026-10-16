@@ -1,0 +1,51 @@
+from orbit.protocol import (
+    AgentExited,
+    AgentReply,
+    AgentRequest,
+    AgentStarted,
+    Notice,
+    ReviewStatus,
+)
+from orbit.tui.view import (
+    AgentRow,
+    agent_line,
+    review_line,
+    track_agents,
+)
+
+
+def test_agents_are_tracked_from_their_events() -> None:
+    rows: tuple[AgentRow, ...] = ()
+    for event in (
+        AgentStarted(agent_id="agent-1", role="coder", task_id="1"),
+        AgentStarted(agent_id="agent-2", role="reviewer", task_id="2"),
+        AgentRequest(agent_id="agent-1", request_id="r", tool="complete_task", arguments={}),
+    ):
+        rows = track_agents(rows, event)
+    assert rows == (
+        AgentRow("agent-1", "coder", "1", waiting_on="complete_task"),
+        AgentRow("agent-2", "reviewer", "2"),
+    )
+    rows = track_agents(rows, AgentReply(agent_id="agent-1", request_id="r", text="ok"))
+    assert rows[0].waiting_on is None
+    rows = track_agents(rows, AgentExited(agent_id="agent-2", reason="finished"))
+    assert [r.agent_id for r in rows] == ["agent-1"]
+    assert track_agents(rows, Notice(message="x")) == rows
+
+
+def test_agent_lines_say_what_each_is_doing() -> None:
+    assert agent_line(AgentRow("agent-1", "coder", "4"), "2") == "agent-1 coder · task 2 · working"
+    waiting = AgentRow("agent-3", "reviewer", "5", waiting_on="complete_task")
+    assert agent_line(waiting, "3") == "agent-3 reviewer · task 3 · waiting on complete_task"
+    planner = AgentRow("agent-4", "planner", "plan")
+    assert agent_line(planner, None) == "agent-4 planner · planning · working"
+    # A task that has left the list is named by its id, not taken for planning.
+    gone = AgentRow("agent-5", "coder", "7")
+    assert agent_line(gone, None) == "agent-5 coder · task 7 · working"
+
+
+def test_the_review_line_says_whether_review_is_paused() -> None:
+    assert review_line(None) == ""
+    assert review_line(ReviewStatus(paused=False, open_batches=0)) == "review: active"
+    assert review_line(ReviewStatus(paused=False, open_batches=2)) == "review: active · 2 open"
+    assert review_line(ReviewStatus(paused=True, open_batches=0)) == "review: paused"
