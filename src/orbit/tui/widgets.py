@@ -3,6 +3,7 @@
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, ClassVar, get_args
 
 from rich.console import Console, ConsoleOptions, RenderResult
@@ -16,7 +17,7 @@ from textual.containers import Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import Input, OptionList, Static, Tab, Tabs, TextArea
 
-from orbit.protocol import Event, Settings, StepState
+from orbit.protocol import Event, Settings, StepState, UsageChanged
 from orbit.tui.view import (
     ALL_TAB_LABEL,
     PINNED_TABS,
@@ -38,6 +39,7 @@ from orbit.tui.view import (
     tab_labels,
     track_roles,
     track_tabs,
+    usage_lines,
 )
 
 
@@ -444,6 +446,47 @@ class VerificationPanel(SidePanel):
         if text != self._text:
             self._text = text
             self.query_one(Static).update(Text(text))
+
+
+def _local_now() -> datetime:
+    return datetime.now().astimezone()
+
+
+class UsagePanel(SidePanel):
+    """How much of each subscription usage limit is used, as reported; hidden until a report
+    arrives, so the layout is unchanged when nothing reports usage."""
+
+    DEFAULT_CSS = """
+    UsagePanel { height: auto; }
+    """
+
+    def __init__(self, *, id: str) -> None:
+        super().__init__("Usage", id=id)
+        self.display = False
+        self.event: UsageChanged | None = None
+        self.now: Callable[[], datetime] = _local_now
+
+    def compose(self) -> ComposeResult:
+        yield Static()
+
+    def on_mount(self) -> None:
+        # Keeps the reset times right as the day changes.
+        self.set_interval(60, self.tick)
+
+    def on_resize(self) -> None:
+        self.tick()
+
+    def show(self, event: UsageChanged) -> None:
+        self.event = event
+        self.display = True
+        self.tick()
+
+    def tick(self) -> None:
+        """Redraw the usage reported, if any, to fit the panel's width."""
+        if self.event is None:
+            return
+        lines = usage_lines(self.event, self.content_region.width, self.now())
+        self.query_one(Static).update(Text("\n").join(lines))
 
 
 class PromptInput(Input):

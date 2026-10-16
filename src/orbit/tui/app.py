@@ -84,6 +84,7 @@ from orbit.tui.widgets import (
     PickerScreen,
     PromptInput,
     Transcript,
+    UsagePanel,
     VerificationPanel,
 )
 
@@ -164,6 +165,7 @@ class OrbitApp(App[None], inherit_bindings=False):
             with Vertical(id="side"):
                 yield TaskList(id="task-list")
                 yield VerificationPanel(id="verification-steps")
+                yield UsagePanel(id="usage")
                 yield AgentsPane(id="agents")
         yield Footer()
 
@@ -177,6 +179,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         self._prompt = self.query_one(PromptInput)
         self._task_list = self.query_one(TaskList)
         self._verification = self.query_one(VerificationPanel)
+        self._usage = self.query_one(UsagePanel)
         self._agents = self.query_one(AgentsPane)
         self.query_one(f"#{self._selected}").add_class("selected")
         self.install_screen(self._model_picker, "pick-model")
@@ -483,16 +486,16 @@ class OrbitApp(App[None], inherit_bindings=False):
     def _show_progress(
         self, event: VerificationChanged | ReviewStatus | ChecksProposed | UsageChanged
     ) -> None:
-        """Show the verification steps' progress, whether review is paused, or proposed steps.
-
-        Nothing shows usage limits yet.
-        """
+        """Show the verification steps' progress, whether review is paused, proposed steps, or
+        usage limits."""
         if isinstance(event, VerificationChanged):
             self._verification.show(event.steps, event.title)
         elif isinstance(event, ReviewStatus):
             self._agents.show_review(event)
         elif isinstance(event, ChecksProposed):
             self._show_proposal(event)
+        else:
+            self._usage.show(event)
 
     def _show_proposal(self, event: ChecksProposed) -> None:
         """Ask the user about ``event``'s proposal; their decision goes to the backend."""
