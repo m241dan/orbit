@@ -985,6 +985,37 @@ async def test_tab_keeps_its_normal_behaviour_outside_normal_mode() -> None:
         assert active_tab(app) == "All"
 
 
+def held(app: OrbitApp) -> int | None:
+    """The cursor the shown conversation log holds."""
+    return app.query_one(Transcript).shown.highlighted
+
+
+async def test_escape_keeps_its_behaviour_while_the_conversation_holds_a_cursor() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test(size=(120, 30)) as pilot:
+        await show_settings(session, pilot, Settings())
+        await feed_events(session, pilot, started("agent-1"), said("agent-1", "hi"))
+        await pilot.press("k", "enter", "escape")
+        assert held(app) == 1
+
+        await pilot.press("ctrl+o")
+        assert isinstance(app.screen, PickerScreen)
+        await pilot.press("escape")  # The picker closes.
+        assert len(app.screen_stack) == 1 and held(app) == 1
+        await pilot.press("l", "k", "enter", "escape")  # The task list leaves list mode.
+        assert app.focused is None and held(app) == 1
+        await pilot.press("enter", "enter")
+        assert len(app.screen_stack) == 2
+        await pilot.press("escape")  # The task editor closes, back to the task list.
+        assert len(app.screen_stack) == 1 and held(app) == 1
+        await pilot.press("escape", "i", "escape")  # The prompt stops typing.
+        assert app.focused is None and held(app) == 1
+
+        await pilot.press("k", "escape")  # Back on the conversation, escape lets go.
+        assert held(app) is None
+
+
 async def test_planner_output_shows_under_planner_and_all_but_not_other_tabs() -> None:
     session = FakeSession()
     app = OrbitApp(session)

@@ -113,6 +113,9 @@ class OrbitApp(App[None], inherit_bindings=False):
         Binding("k", "move('k')", show=False),
         Binding("l", "move('l')", show=False),
         Binding("enter", "activate", show=False),
+        # Below any focused widget's or modal screen's escape; check_action keeps it to
+        # normal mode.
+        Binding("escape", "release_cursor", show=False),
         # Priority, to beat the screen's focus_next; check_action lets it through
         # to that everywhere but normal mode.
         Binding("tab", "cycle_tab(1)", "Next tab", key_display="Tab", priority=True),
@@ -196,7 +199,7 @@ class OrbitApp(App[None], inherit_bindings=False):
             self._select(target)
 
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
-        if action == "cycle_tab":
+        if action in ("cycle_tab", "release_cursor"):
             return self._normal_mode()
         return True
 
@@ -218,6 +221,11 @@ class OrbitApp(App[None], inherit_bindings=False):
             self._agents.enter_list_mode()
         elif self._selected == "transcript":
             self._transcript.enter_list_mode()
+
+    def action_release_cursor(self) -> None:
+        """With the conversation selected, let go of its held cursor."""
+        if self._selected == "transcript":
+            self._transcript.release_cursor()
 
     def action_insert_mode(self) -> None:
         """Shortcut from any window: select the prompt and start typing."""

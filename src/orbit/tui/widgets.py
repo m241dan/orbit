@@ -126,13 +126,25 @@ class TranscriptLog(ListPane):
 
     def append(self, text: str, kind: EntryKind) -> None:
         """Add an entry, collapsed if its kind starts so; the view stays pinned to the latest
-        entry unless the list is active."""
+        entry unless the list is active or holds a cursor."""
         collapsed = starts_collapsed(kind) and collapsible(text)
         self._entries.append((text, kind))
         self._collapsed.append(collapsed)
         self.add_option(self._prompt(len(self._entries) - 1))
-        if not self.has_focus:
+        if not self.has_focus and self.highlighted is None:
             self.scroll_end(animate=False)
+
+    def release_cursor(self) -> None:
+        """Let go of the held cursor, so the view follows the latest entry again."""
+        self.highlighted = None
+        self.scroll_end(animate=False)
+
+    def show_place(self) -> None:
+        """Scroll to the held cursor's entry, or to the latest entry if there's none."""
+        if self.highlighted is None:
+            self.scroll_end(animate=False)
+        else:
+            self.scroll_to_highlight()
 
     def collapsed(self, index: int) -> bool:
         return self._collapsed[index]
@@ -178,7 +190,8 @@ class TranscriptLog(ListPane):
 
 
 class Transcript(Vertical):
-    """Main display: the running conversation, pinned to the latest output.
+    """Main display: the running conversation, pinned to the latest output unless the shown
+    tab's log holds a cursor.
 
     Entries are kept per tab (All, and the tab they belong to), each tab in a
     :class:`TranscriptLog` of its own, one of which is shown.
@@ -225,6 +238,10 @@ class Transcript(Vertical):
         one, and escape leaves."""
         self.shown.enter_list_mode()
 
+    def release_cursor(self) -> None:
+        """Let go of the shown log's cursor, so it follows the latest entry again."""
+        self.shown.release_cursor()
+
     def show_only(self, key: str | None, label: str = "") -> None:
         """Show only the tab keyed ``key``'s entries, titled by its tab ``label``, or all."""
         if self.shown.has_focus:
@@ -235,7 +252,7 @@ class Transcript(Vertical):
         log = self._log(key)
         log.add_class("-shown")
         # Laid out once shown, which is when its end is known.
-        self.call_after_refresh(log.scroll_end, animate=False)
+        self.call_after_refresh(log.show_place)
 
     def _log(self, key: str | None) -> TranscriptLog:
         if key not in self._logs:

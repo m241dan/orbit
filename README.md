@@ -47,7 +47,7 @@ In the app:
 |---|---|
 | `h` `j` `k` `l` | Move between windows (the selected one is highlighted) |
 | `i` | Jump to the prompt, which talks to the planner, and start typing (vim-style insert mode) |
-| `enter` | On the conversation: activate it (`j`/`k` move between entries, `enter` collapses or expands the one marked `▌` in the left gutter, `esc` leaves) |
+| `enter` | On the conversation: activate it (`j`/`k` move between entries, `enter` collapses or expands the one marked `▌` in the left gutter, `esc` leaves and holds the marked entry); again, resume at the held entry |
 | `enter` | On the task list: activate it (`j`/`k` move, `enter` edits a task or adds one on `+ new task`, `a` accepts a draft, `x` removes a task, `esc` leaves) |
 | `enter` | On the agents pane: activate it (`j`/`k` move, `c` cancels the highlighted agent's work, `esc` leaves) |
 | `ctrl+t` | Jump to the **planner** tab; again, back to the tab you were on |
@@ -56,7 +56,7 @@ In the app:
 | `ctrl+e` | Set up (or redo) the verification steps: queue a configurator task first and run it (see [Setting up verification](#setting-up-verification)) |
 | `ctrl+o` | Pick the planner's model (default, fable, opus, sonnet, haiku; new tasks default to it too) |
 | `ctrl+l` | Pick the tool access level new tasks start with in the task editor (off, restricted, full) |
-| `esc` | Stop typing or close a picker |
+| `esc` | Stop typing, leave a list or close a picker; with the conversation selected and nothing active, let go of its held entry and follow the latest output again |
 | `ctrl+s` | Stop the task run (on any tab) |
 | `ctrl+x` | Stop the planner's turn, leaving the task run going |
 | `a` / `r` / `x` | On a proposal of checks: accept it, ask for changes (type them, `enter` sends, `esc` goes back), or end the task (see [Setting up verification](#setting-up-verification)) |
@@ -119,8 +119,10 @@ Each entry is coloured by what it is: your prompts, agents' messages, tool calls
 verification and notices, and errors. An entry of more than one line can be collapsed to its first
 line and a count of the rest, marked `▸` (`▾` when expanded); tool output starts collapsed. Press
 `enter` on the conversation to move between entries with `j`/`k`, `enter` again to collapse or
-expand the one marked `▌` in the left gutter, and `esc` to leave; the mark stays where you left
-it. The conversation stays pinned to the latest entry unless you're moving about in it.
+expand the one marked `▌` in the left gutter, and `esc` to leave. Leaving holds the marked entry:
+the mark stays, the conversation stops following new output, and `enter` picks up there again.
+`esc` again with the Conversation window selected lets go, and the conversation follows the latest
+output again. Each tab holds its own spot, kept while you switch tabs.
 
 Each row of the task list shows its status: ⏳ pending, ◜ running (spinning), 🔍 verifying, ✅ done,
 ❗ failed verification, ❌ failed, ⌛ ran out of steps, 🏳 the agent gave up, 🛑 cancelled, 📝 a draft

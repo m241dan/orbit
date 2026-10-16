@@ -229,7 +229,7 @@ async def test_the_conversation_can_be_activated_to_move_between_entries_and_tog
         assert app.focused is log and log.highlighted == 0
 
 
-async def test_the_shown_log_stays_pinned_to_the_latest_entry_unless_active() -> None:
+async def test_the_shown_log_stays_pinned_to_the_latest_entry_unless_it_has_a_cursor() -> None:
     session = FakeSession()
     app = OrbitApp(session)
     async with app.run_test(size=(80, 24)) as pilot:
@@ -242,26 +242,21 @@ async def test_the_shown_log_stays_pinned_to_the_latest_entry_unless_active() ->
         assert log.highlighted == 0 and log.scroll_y == 0
         await feed_events(session, pilot, said("agent-1", "later"))
         assert log.scroll_y == 0 and log.highlighted == 0
-        await pilot.press("escape")
+        await pilot.press("escape", "escape")  # Leave, then let go of the cursor.
         await feed_events(session, pilot, said("agent-1", "latest"))
         assert log.scroll_y == log.max_scroll_y
 
 
-async def test_switching_tabs_leaves_list_mode_and_shows_the_tabs_end() -> None:
+async def test_switching_tabs_shows_the_end_of_a_tab_with_no_cursor() -> None:
     session = FakeSession()
     app = OrbitApp(session)
     async with app.run_test(size=(80, 24)) as pilot:
         await fed(session, pilot, app, 40)
-        await pilot.press("k", "enter", "home")
         await pilot.press("ctrl+t")  # The planner tab.
-        assert app.focused is None
         await pilot.press("ctrl+t")  # Back to All, whose log is laid out again at its end.
         log = visible_log(app)
-        for _ in range(100):  # The scroll waits for a refresh, which may lag under load.
-            if log.scroll_y == log.max_scroll_y:
-                break
-            await pilot.pause()
-        assert log.scroll_y == log.max_scroll_y > 0
+        assert await scrolled_to_end(pilot, log)
+        assert log.max_scroll_y > 0
 
 
 async def test_a_tab_shows_only_its_entries_and_all_shows_every_one() -> None:
@@ -308,3 +303,104 @@ async def test_lines_are_wrapped_again_for_a_new_window_size() -> None:
         await pilot.resize_terminal(160, 24)
         await pilot.pause()
         assert visible_log(app).max_scroll_y < narrow
+
+
+async def scrolled_to_end(pilot: Pilot[None], log: TranscriptLog) -> bool:
+    """Whether ``log`` reaches its end, waiting out a scroll that lags a refresh."""
+    for _ in range(100):
+        if log.scroll_y == log.max_scroll_y:
+            return True
+        await pilot.pause()
+    return False
+
+
+async def test_escape_holds_the_cursor_and_the_conversation_stops_following() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test(size=(80, 24)) as pilot:
+        await fed(session, pilot, app, 40)
+        await pilot.press("k", "enter", "home", "j", "escape")
+        log = visible_log(app)
+        assert app.focused is None and log.highlighted == 1
+        await feed_events(session, pilot, said("agent-1", "later"))
+        assert log.scroll_y == 0 and log.highlighted == 1
+        assert gutters(app)[1] == GUTTER_MARKER
+
+
+async def test_enter_resumes_at_the_held_entry() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test(size=(80, 24)) as pilot:
+        await fed(session, pilot, app, 40)
+        await pilot.press("k", "enter", "home", "j", "escape")
+        await feed_events(session, pilot, said("agent-1", "later"))
+        await pilot.press("enter")
+        log = visible_log(app)
+        assert app.focused is log and log.highlighted == 1
+
+
+async def test_a_second_escape_lets_go_and_follows_the_latest_output_again() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test(size=(80, 24)) as pilot:
+        await fed(session, pilot, app, 40)
+        await pilot.press("k", "enter", "home", "escape", "escape")
+        log = visible_log(app)
+        assert log.highlighted is None
+        assert GUTTER_MARKER not in gutters(app)
+        assert await scrolled_to_end(pilot, log)
+        await feed_events(session, pilot, *(said("agent-1", LONG) for _ in range(3)))
+        assert log.scroll_y == log.max_scroll_y
+        await pilot.press("enter")
+        assert log.highlighted == log.option_count - 1
+
+
+async def test_escape_with_another_window_selected_keeps_the_held_cursor() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test(size=(80, 24)) as pilot:
+        await fed(session, pilot, app, 3)
+        await pilot.press("k", "enter", "k", "escape", "l", "escape", "j", "escape")
+        assert visible_log(app).highlighted == 1
+
+
+async def test_a_second_escape_with_no_entries_does_nothing_harmful() -> None:
+    app = OrbitApp(FakeSession())
+    async with app.run_test() as pilot:
+        await pilot.press("k", "enter", "escape", "escape")
+        log = visible_log(app)
+        assert app.focused is None and log.highlighted is None and log.option_count == 0
+
+
+async def test_each_tab_holds_its_own_cursor() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test(size=(120, 30)) as pilot:
+        await feed_events(session, pilot, started("agent-1"), said("agent-1", "a"))
+        await pilot.press("k", "enter", "k", "escape")  # All holds its first entry.
+        await pilot.press("tab", "tab")  # coder
+        coder = visible_log(app)
+        assert coder.highlighted is None
+        await pilot.press("enter", "escape", "escape")  # Held, then let go, in coder only.
+        assert coder.highlighted is None
+        await pilot.press("enter", "escape")  # Held again in coder.
+        await pilot.press("shift+tab", "shift+tab")  # All, which kept its cursor.
+        assert app.query_one(Transcript).only is None
+        assert visible_log(app).highlighted == 0
+        await pilot.press("escape")  # Lets go of All's only.
+        assert visible_log(app).highlighted is None
+        assert coder.highlighted == 1
+
+
+async def test_switching_tabs_keeps_a_held_place() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test(size=(80, 24)) as pilot:
+        await fed(session, pilot, app, 40)
+        await pilot.press("k", "enter", "home", "ctrl+t")  # Away while in list mode.
+        await pilot.press("ctrl+t")
+        log = visible_log(app)
+        assert app.focused is None and log.highlighted == 0
+        for _ in range(5):
+            await pilot.pause()
+        assert log.scroll_y == 0 and log.max_scroll_y > 0
