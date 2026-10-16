@@ -471,6 +471,74 @@ async def test_a_snapshot_of_head_is_the_base_before_the_coder_tree_exists(repo:
     assert not snapshot.exists()
 
 
+async def test_a_snapshot_is_named_for_its_commit_not_the_ref(repo: Path) -> None:
+    tree = GitCoderTree(str(repo))
+    snapshot = Path(await tree.snapshot("HEAD"))
+    assert snapshot.name.startswith(f"snapshot-{git(repo, 'rev-parse', 'HEAD')[:12]}-")
+    await tree.drop(str(snapshot))
+
+
+async def test_a_snapshot_of_a_missing_commit_fails_and_leaves_nothing(repo: Path) -> None:
+    tree = GitCoderTree(str(repo))
+    with pytest.raises(RuntimeError, match="git rev-parse"):
+        await tree.snapshot("no-such-commit")
+    assert await tree.leftovers() == []
+
+
+@pytest.mark.parametrize("worktree", [True, False])
+async def test_a_leftover_from_the_old_naming_doesnt_block_a_snapshot(
+    repo: Path, worktree: bool
+) -> None:
+    old = repo / ".git" / "orbit" / "review-HEAD-1"
+    if worktree:
+        git(repo, "worktree", "add", "-q", "--detach", str(old), "HEAD")
+    else:
+        old.mkdir(parents=True)
+    tree = GitCoderTree(str(repo))
+    snapshot = Path(await tree.snapshot("HEAD"))
+    assert snapshot != old and (snapshot / "a.txt").exists()
+
+
+async def test_two_sessions_can_snapshot_one_commit_at_once(repo: Path) -> None:
+    first, second = GitCoderTree(str(repo)), GitCoderTree(str(repo))
+    paths = await asyncio.gather(first.snapshot("HEAD"), second.snapshot("HEAD"))
+    assert paths[0] != paths[1]
+    assert all((Path(path) / "a.txt").exists() for path in paths)
+
+
+async def test_leftovers_report_snapshots_left_by_other_sessions_only(repo: Path) -> None:
+    earlier, tree = GitCoderTree(str(repo)), GitCoderTree(str(repo))
+    await earlier.snapshot("HEAD")
+    await earlier.snapshot("HEAD")
+    own = await tree.snapshot("HEAD")
+
+    assert await tree.leftovers() == [
+        "2 snapshot worktree(s) left in .git/orbit by earlier runs; "
+        "remove them with git worktree remove."
+    ]
+    assert await earlier.leftovers() == [
+        "1 snapshot worktree(s) left in .git/orbit by earlier runs; "
+        "remove them with git worktree remove."
+    ]
+    await tree.drop(own)
+    assert await earlier.leftovers() == []  # Dropped, so no longer there.
+
+
+async def test_leftovers_report_snapshots_of_the_old_naming(repo: Path) -> None:
+    git(repo, "worktree", "add", "-q", "--detach", str(repo / ".git" / "orbit" / "review-HEAD-1"))
+    notes = await GitCoderTree(str(repo)).leftovers()
+    assert notes == [
+        "1 snapshot worktree(s) left in .git/orbit by earlier runs; "
+        "remove them with git worktree remove."
+    ]
+
+
+async def test_the_coder_tree_is_not_a_leftover_snapshot(repo: Path) -> None:
+    tree = GitCoderTree(str(repo))
+    await tree.prepare(keep=False)
+    assert await GitCoderTree(str(repo)).leftovers() == []
+
+
 async def test_untracked_lists_new_files_with_new_directories_collapsed(repo: Path) -> None:
     tree = GitCoderTree(str(repo))
     path = Path(await tree.prepare(keep=False))

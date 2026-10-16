@@ -300,7 +300,9 @@ that fails, a fresh agent fixes it. When it can't be merged, it stays committed 
 Work is never thrown away. When a new task starts, changes a failed task left in the worktree are
 stashed (`git stash list` shows them as `orbit: unverified work …`); a fallback fix carries on from
 the work it fixes instead. At startup orbit mentions unmerged commits on `orbit/coder` and stashes
-it left behind. Outside a git repository, or with `--no-worktree`, agents work in the current
+it left behind, and snapshot worktrees in `.git/orbit` that an earlier run didn't remove (killed
+mid-review, say). It leaves those for you to remove with `git worktree remove`, since another orbit
+session on the repository may still be reading them. Outside a git repository, or with `--no-worktree`, agents work in the current
 directory and nothing is committed.
 
 With `full` tool access an agent can still run commands outside its worktree; the worktree keeps

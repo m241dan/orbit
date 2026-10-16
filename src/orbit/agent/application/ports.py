@@ -131,7 +131,8 @@ class CoderTree(Protocol):
         ...
 
     async def snapshot(self, commit: str) -> str:
-        """A separate, detached tree at ``commit`` to read; returns its path."""
+        """A separate, detached tree at ``commit`` to read, under a name of its own that no
+        other snapshot, earlier or in another session, shares; returns its path."""
         ...
 
     async def drop(self, path: str) -> None:
@@ -147,7 +148,8 @@ class CoderTree(Protocol):
         ...
 
     async def leftovers(self) -> list[str]:
-        """Notes on work left behind by earlier runs: unmerged commits, put-aside changes."""
+        """Notes on work left behind by earlier runs: unmerged commits, put-aside changes, and
+        snapshots this tree didn't make (left in place, as another session may be using them)."""
         ...
 
     def use_setup(self, setup: Setup | None) -> None:

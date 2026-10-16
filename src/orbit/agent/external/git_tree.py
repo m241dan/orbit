@@ -9,8 +9,8 @@ left behind are stashed, and commits that can't be merged stay on ``orbit/coder`
 import asyncio
 import datetime
 import hashlib
-import itertools
 import subprocess
+import tempfile
 from collections.abc import Collection, Sequence
 from pathlib import Path
 
@@ -21,6 +21,8 @@ from orbit.agent.external.processes import run_process
 BRANCH = "orbit/coder"
 STASH_MESSAGE = "orbit: unverified work"
 IGNORE_HEADER = "# Created by orbit's verification checks:"
+# Snapshot directories in ``.git/orbit``: ``snapshot-…`` now, ``review-…`` from older versions.
+SNAPSHOT_PREFIXES = ("snapshot-", "review-")
 
 
 def in_git_work_tree(path: str) -> bool:
@@ -105,6 +107,24 @@ def _add_ignores(exclude: Path, paths: Collection[str]) -> None:
         raise RuntimeError(f"Couldn't ignore files in {exclude}: {error}") from error
 
 
+def _make_snapshot_dir(parent: Path, commit: str) -> Path:
+    """A new, empty directory in ``parent`` for a snapshot of ``commit``, named so it can't
+    collide with any other, from this process or another."""
+    parent.mkdir(parents=True, exist_ok=True)
+    return Path(tempfile.mkdtemp(prefix=f"snapshot-{commit[:12]}-", dir=parent))
+
+
+def _snapshot_dirs(parent: Path) -> set[Path]:
+    """The snapshot directories in ``parent``, by whoever made them; none when it's missing."""
+    if not parent.is_dir():
+        return set()
+    return {
+        path
+        for path in parent.iterdir()
+        if path.is_dir() and path.name.startswith(SNAPSHOT_PREFIXES)
+    }
+
+
 class GitCoderTree:
     """The coder's worktree of the repository at ``root``.
 
@@ -117,7 +137,7 @@ class GitCoderTree:
         self.branch = BRANCH
         self._started = False
         self._base: str | None = None
-        self._snapshots = itertools.count(1)
+        self._snapshots: set[Path] = set()
 
     async def prepare(self, keep: bool) -> str:
         if not self._started:
@@ -161,12 +181,16 @@ class GitCoderTree:
         return await self._git(self._root, "show", "--stat", "--patch", "--format=medium", *commits)
 
     async def snapshot(self, commit: str) -> str:
-        path = (await self._path()).parent / f"review-{commit[:12]}-{next(self._snapshots)}"
-        await self._git(self._root, "worktree", "add", "-q", "--detach", str(path), commit)
+        sha = await self._git(self._root, "rev-parse", "--verify", "-q", f"{commit}^{{commit}}")
+        parent = (await self._path()).parent
+        path = await asyncio.to_thread(_make_snapshot_dir, parent, sha)
+        self._snapshots.add(path)
+        await self._git(self._root, "worktree", "add", "-q", "--detach", str(path), sha)
         return str(path)
 
     async def drop(self, path: str) -> None:
         await self._git(self._root, "worktree", "remove", "--force", path)
+        self._snapshots.discard(Path(path))
 
     async def untracked(self) -> frozenset[str]:
         listed = await self._git(
@@ -182,7 +206,7 @@ class GitCoderTree:
         self.setup = setup
 
     async def leftovers(self) -> list[str]:
-        notes = [await self._unmerged(), await self._stashed()]
+        notes = [await self._unmerged(), await self._stashed(), await self._stale_snapshots()]
         return [note for note in notes if note]
 
     async def _unmerged(self) -> str | None:
@@ -198,6 +222,16 @@ class GitCoderTree:
         stashes = await self._git(self._root, "stash", "list", "--format=%s")
         count = sum(STASH_MESSAGE in line for line in stashes.splitlines())
         return f"{count} stash(es) of unverified orbit work; see git stash list." if count else None
+
+    async def _stale_snapshots(self) -> str | None:
+        parent = (await self._path()).parent
+        count = len(await asyncio.to_thread(_snapshot_dirs, parent) - self._snapshots)
+        if not count:
+            return None
+        return (
+            f"{count} snapshot worktree(s) left in .git/orbit by earlier runs; "
+            "remove them with git worktree remove."
+        )
 
     # Steps of prepare
 
