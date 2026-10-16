@@ -149,10 +149,19 @@ class TaskBoard:
         self.set_status(task_id, "pending")
 
     def remove(self, task_id: str) -> None:
-        """Take ``task_id`` off the list. Raises ``ValueError`` if it can't be."""
-        if self.get(task_id).status in ("running", "verifying"):
+        """Take ``task_id`` off the list. Raises ``ValueError`` if it can't be.
+
+        Its fixes take its place in the chain: they fix what it fixed, or become top-level
+        tasks if it was one.
+        """
+        removed = self.get(task_id)
+        if removed.status in ("running", "verifying"):
             raise ValueError(f"Task {task_id!r} can't be removed while it runs.")
         del self._tasks[self.position(task_id)]
+        self._tasks = [
+            state.model_copy(update={"fixes": removed.fixes}) if state.fixes == task_id else state
+            for state in self._tasks
+        ]
 
     def add_review(self, task: TaskSpec) -> str:
         """Add a review orbit queued itself, at the end; returns its id."""

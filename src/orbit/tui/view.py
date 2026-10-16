@@ -502,19 +502,20 @@ def decision_entry(agent: str, decision: DecideProposal) -> tuple[str, EntryKind
 def task_numbers(tasks: Sequence[TaskState]) -> list[str]:
     """Outline numbers: "1", "2", … for tasks, and "2.1", "2.2", … for the fixes under task 2.
 
-    Every fix in a chain (a fix of a fix, too) is numbered under the task that started it.
+    Every fix in a chain (a fix of a fix, too) is numbered under the task that started it. A
+    fix whose task isn't on the list is numbered as a task.
     """
     numbers: list[str] = []
     top_number: dict[str, str] = {}  # top-level task id -> its number
     top_of: dict[str, str] = {}  # task id -> id of the top-level task it belongs to
     fixes_so_far: Counter[str] = Counter()
     for state in tasks:
-        if state.fixes is None:
+        # A fix comes after the task it fixes, so that one is already placed if present.
+        if state.fixes is None or state.fixes not in top_of:
             top = state.id
             top_number[top] = str(len(top_number) + 1)
             numbers.append(top_number[top])
         else:
-            # A fix comes after the task it fixes, so that one is already placed.
             top = top_of[state.fixes]
             fixes_so_far[top] += 1
             numbers.append(f"{top_number[top]}.{fixes_so_far[top]}")

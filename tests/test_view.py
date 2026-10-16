@@ -73,6 +73,7 @@ from orbit.tui.view import (
     step_lines,
     tab_key,
     tab_labels,
+    task_numbers,
     task_started_entry,
     task_tab_key,
     tool_access_labels,
@@ -963,3 +964,9 @@ def test_a_tool_call_entry_without_arguments_is_one_line() -> None:
 def test_a_tool_call_entrys_arguments_keep_non_ascii_text() -> None:
     started = ToolCallStarted(turn_id="t", call_id="c", name="x", arguments={"a": "é"})
     assert output_entry(started)[0] == '→ x {"a": "é"}\n{\n  "a": "é"\n}'
+
+
+def test_task_numbers_number_a_fix_whose_task_is_missing_as_a_top_level_task() -> None:
+    orphan = TaskState(id="2", task=TaskSpec(prompt="fix"), fixes="gone")
+    fix = TaskState(id="3", task=TaskSpec(prompt="fix"), fixes="2")
+    assert task_numbers([orphan, fix]) == ["1", "1.1"]

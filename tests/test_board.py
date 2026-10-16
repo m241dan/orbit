@@ -210,6 +210,29 @@ def test_tasks_can_be_removed_unless_they_run() -> None:
         board.remove(second)
 
 
+def test_removing_a_task_makes_its_fixes_top_level_where_they_were() -> None:
+    board = TaskBoard()
+    suggestion = board.add_suggestion(TaskSpec(prompt="tidy"), batch="batch-1", round=2)
+    fix = board.add(FIX, fixes=suggestion)
+    board.remove(suggestion)
+    state = board.get(fix)
+    assert state.fixes is None
+    assert (state.origin, state.batch, state.round) == ("review", "batch-1", 2)
+
+
+def test_removing_the_middle_of_a_chain_keeps_the_chain() -> None:
+    board = TaskBoard()
+    first = board.add(ONE)
+    board.finish(first, "unverified")
+    fix = board.add(FIX, fixes=first)
+    board.finish(fix, "unverified")
+    fix_of_fix = board.add(FIX, fixes=fix)
+    board.remove(fix)
+    assert board.get(fix_of_fix).fixes == first
+    board.finish(fix_of_fix, "completed")
+    assert [t.status for t in board.tasks] == ["completed", "completed"]
+
+
 def test_steps_can_be_replaced_none_of_them_run() -> None:
     board = TaskBoard(["Old"])
     board.set_step(0, "passed")
