@@ -24,6 +24,7 @@ from orbit.protocol import (
     Event,
     Settings,
     TasksChanged,
+    TurnFinished,
 )
 
 
@@ -54,16 +55,18 @@ class PlannerChat:
             )
         role = self._desk.agents.roles[PLANNER]
         own = Settings(model=settings.model, tool_access=role.tool_access)
-        launch = await self._desk.launch(self._agent, self._with_steps(prompt), own, ".")
+        steps = self._step_names()
+        launch = await self._desk.launch(self._agent, self._with_steps(prompt, steps), own, ".")
         async for event in self._desk.agents.launcher.converse(turn_id, launch):
+            # Only a completed turn surely delivered the note; otherwise the next prompt repeats it.
+            if isinstance(event, TurnFinished) and event.reason == "completed":
+                self._told = steps
             yield event
 
-    def _with_steps(self, prompt: str) -> str:
-        """``prompt``, after a note of the verification steps if the planner hasn't heard them."""
-        steps = self._step_names()
+    def _with_steps(self, prompt: str, steps: tuple[str, ...]) -> str:
+        """``prompt``, after a note of ``steps`` if the planner hasn't heard them."""
         if steps == self._told:
             return prompt
-        self._told = steps
         return f"{steps_note(steps)}\n\n{prompt}"
 
     async def handle(self, tool: str, arguments: dict[str, Any]) -> Reply:

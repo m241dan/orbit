@@ -2,6 +2,8 @@
 
 import asyncio
 
+import pytest
+
 from orbit.agent import Agents, AgentSession
 from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.planner import PlannerChat
@@ -28,6 +30,7 @@ from tests.agent_fakes import (
     ROLES,
     Call,
     FakeHost,
+    Script,
     ScriptedLauncher,
     board,
     events_until,
@@ -193,26 +196,71 @@ async def test_closing_ends_the_planners_access() -> None:
     assert await asyncio.wait_for(anext(session.events()), 5) == exited
 
 
-async def test_the_planner_hears_the_steps_on_its_first_turn_and_when_they_change() -> None:
+def steps_chat(*turns: Script) -> tuple[PlannerChat, ScriptedLauncher, list[tuple[str, ...]]]:
+    """A planner chat playing ``turns``, whose steps are the last in the list it returns."""
     host = FakeHost()
     launcher = ScriptedLauncher(host)
-    launcher.planner_turns = [chats, chats, chats]
-    events: list[Event] = []
+    launcher.planner_turns = list(turns)
 
     async def publish(event: Event) -> None:
-        events.append(event)
+        pass
 
     desk = AgentDesk(Agents(host, launcher, lambda: "token-1", ROLES), publish)
-    steps: tuple[str, ...] = ("Ruff lint",)
-    chat = PlannerChat(desk, TaskBoard(), lambda: steps)
+    steps: list[tuple[str, ...]] = [("Ruff lint",)]
+    return PlannerChat(desk, TaskBoard(), lambda: steps[-1]), launcher, steps
 
-    async def turn(text: str) -> str:
-        async for _ in chat.run_turn("turn", text, Settings()):
-            pass
-        return launcher.launches[-1].prompt
 
-    first = await turn("Plan a flag.")
+async def turn(chat: PlannerChat, launcher: ScriptedLauncher, text: str) -> str:
+    async for _ in chat.run_turn("turn", text, Settings()):
+        pass
+    return launcher.launches[-1].prompt
+
+
+async def fails(call: Call) -> TurnEndReason:
+    raise RuntimeError("Could not start 'claude'.")
+
+
+async def errs(call: Call) -> TurnEndReason:
+    return "error"
+
+
+async def hangs(call: Call) -> TurnEndReason:
+    await asyncio.Event().wait()
+    raise AssertionError("unreachable")
+
+
+async def test_the_planner_hears_the_steps_on_its_first_turn_and_when_they_change() -> None:
+    chat, launcher, steps = steps_chat(chats, chats, chats)
+    first = await turn(chat, launcher, "Plan a flag.")
     assert first.startswith(steps_note(("Ruff lint",))) and first.endswith("\n\nPlan a flag.")
-    assert await turn("And docs.") == "And docs."
-    steps = ("Ruff lint", "Unit tests")
-    assert await turn("More.") == f"{steps_note(('Ruff lint', 'Unit tests'))}\n\nMore."
+    assert await turn(chat, launcher, "And docs.") == "And docs."
+    steps.append(("Ruff lint", "Unit tests"))
+    more = await turn(chat, launcher, "More.")
+    assert more == f"{steps_note(('Ruff lint', 'Unit tests'))}\n\nMore."
+
+
+async def test_the_planner_hears_the_steps_again_after_a_turn_that_raised() -> None:
+    chat, launcher, _ = steps_chat(fails, chats)
+    with pytest.raises(RuntimeError):
+        await turn(chat, launcher, "Plan a flag.")
+    again = await turn(chat, launcher, "Again.")
+    assert again == f"{steps_note(('Ruff lint',))}\n\nAgain."
+
+
+async def test_the_planner_hears_the_steps_again_after_a_turn_that_ended_in_error() -> None:
+    chat, launcher, _ = steps_chat(errs, chats)
+    await turn(chat, launcher, "Plan a flag.")
+    again = await turn(chat, launcher, "Again.")
+    assert again == f"{steps_note(('Ruff lint',))}\n\nAgain."
+
+
+async def test_the_planner_hears_the_steps_again_after_a_cancelled_turn() -> None:
+    chat, launcher, _ = steps_chat(hangs, chats)
+    first = asyncio.create_task(turn(chat, launcher, "Plan a flag."))
+    while not launcher.launches:
+        await asyncio.sleep(0)
+    first.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await first
+    again = await turn(chat, launcher, "Again.")
+    assert again == f"{steps_note(('Ruff lint',))}\n\nAgain."
