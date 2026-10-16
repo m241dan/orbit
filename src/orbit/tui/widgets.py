@@ -2,8 +2,12 @@
 
 import time
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 from typing import Any, ClassVar, get_args
 
+from rich.console import Console, ConsoleOptions, RenderResult
+from rich.segment import Segment
+from rich.style import Style
 from rich.text import Text
 from textual import on
 from textual.app import ComposeResult
@@ -22,7 +26,7 @@ from orbit.tui.view import (
     EntryKind,
     collapsible,
     entry_label,
-    gutter_lines,
+    gutter,
     mark_planner_busy,
     mark_tab_read,
     mark_tab_unread,
@@ -66,6 +70,25 @@ class ListPane(OptionList):
 
 Entry = tuple[str, EntryKind]
 """A transcript entry: its text and how it's styled."""
+
+
+@dataclass(frozen=True)
+class GutteredEntry:
+    """A transcript entry as drawn: its ``label`` wrapped to the width left beside the
+    ``gutter``, which goes in front of every row in ``gutter_style``, then a blank row so the
+    entry reads as a paragraph."""
+
+    label: Text
+    gutter: str
+    gutter_style: Style
+
+    def __rich_console__(self, console: Console, options: ConsoleOptions) -> RenderResult:
+        width = options.max_width - len(self.gutter)
+        for row in console.render_lines(self.label, options.update_width(width), pad=False):
+            yield Segment(self.gutter, self.gutter_style)
+            yield from row
+            yield Segment.line()
+        yield Segment.line()
 
 
 class TranscriptLog(ListPane):
@@ -174,19 +197,16 @@ class TranscriptLog(ListPane):
     def _redraw(self, index: int) -> None:
         self.replace_option_prompt_at_index(index, self._prompt(index))
 
-    def _prompt(self, index: int) -> Text:
+    def _prompt(self, index: int) -> GutteredEntry:
         # Partial styles, so no background of their own paints a band across the entry.
         text, kind = self._entries[index]
         marked = index == self._marked
         style = self.get_component_rich_style(f"transcript--{kind}", partial=True)
-        gutter = self.get_component_rich_style(
+        gutter_style = self.get_component_rich_style(
             "transcript--marker" if marked else "transcript--gutter", partial=True
         )
-        prompt = Text()
-        # Each line ends in a newline, so the entry ends in a blank line and reads as a paragraph.
-        for bar, line in gutter_lines(entry_label(text, self._collapsed[index]), marked):
-            prompt.append(bar, gutter).append(line, style).append("\n")
-        return prompt
+        label = Text(entry_label(text, self._collapsed[index]), style=style)
+        return GutteredEntry(label, gutter(marked), gutter_style)
 
 
 class Transcript(Vertical):

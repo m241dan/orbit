@@ -1,14 +1,14 @@
 """The transcript keeps entries per tab, each tab a list of entries that can be moved between
 and collapsed."""
 
+from rich.console import Console
 from rich.style import Style
-from rich.text import Text
 from textual.pilot import Pilot
 
 from orbit.protocol import AssistantMessage, Notice, ToolCallFinished
 from orbit.tui import OrbitApp
 from orbit.tui.view import GUTTER_BAR, GUTTER_MARKER
-from orbit.tui.widgets import Transcript, TranscriptLog
+from orbit.tui.widgets import GutteredEntry, Transcript, TranscriptLog
 from tests.test_tui import FakeSession, feed_events, said, started
 
 LONG = " ".join(["word"] * 30)  # Wraps in any window a test opens.
@@ -18,41 +18,34 @@ def visible_log(app: OrbitApp) -> TranscriptLog:
     return app.query_one("Transcript > TranscriptLog.-shown", TranscriptLog)
 
 
-def prompts(app: OrbitApp) -> list[Text]:
+def prompts(app: OrbitApp) -> list[GutteredEntry]:
     log = visible_log(app)
-    texts = []
+    entries = []
     for index in range(log.option_count):
         prompt = log.get_option_at_index(index).prompt
-        assert isinstance(prompt, Text)
-        texts.append(prompt)
-    return texts
-
-
-def entry_lines(prompt: Text) -> list[str]:
-    """The lines of an entry, without the blank line after it."""
-    return prompt.plain.removesuffix("\n").split("\n")
+        assert isinstance(prompt, GutteredEntry)
+        entries.append(prompt)
+    return entries
 
 
 def labels(app: OrbitApp) -> list[str]:
     """The shown log's entries as they're labelled, without their gutter."""
-    return ["\n".join(line[2:] for line in entry_lines(prompt)) for prompt in prompts(app)]
+    return [prompt.label.plain for prompt in prompts(app)]
 
 
 def gutters(app: OrbitApp) -> list[str]:
-    """The gutter symbol of each of the shown log's entries, checked to be on all its lines."""
-    symbols = []
-    for prompt in prompts(app):
-        (symbol,) = {line[:2] for line in entry_lines(prompt)}
-        symbols.append(symbol.strip())
-    return symbols
+    """The gutter symbol of each of the shown log's entries."""
+    return [prompt.gutter.strip() for prompt in prompts(app)]
 
 
-def label_style(prompt: Text) -> Style:
-    """The style of the first character after an entry's gutter."""
-    styles = [span.style for span in prompt.spans if span.start <= 2 < span.end]
-    return Style.combine(
-        [Style.null(), *(Style.parse(s) if isinstance(s, str) else s for s in styles)]
-    )
+def label_style(prompt: GutteredEntry) -> Style:
+    """The style of an entry's label."""
+    return prompt.label.get_style_at_offset(Console(), 0)
+
+
+def rendered(log: TranscriptLog, rows: int) -> list[str]:
+    """The text of the log's first ``rows`` rows as drawn."""
+    return [log.render_line(y).text.rstrip() for y in range(rows)]
 
 
 async def fed(session: FakeSession, pilot: Pilot[None], app: OrbitApp, count: int) -> None:
@@ -94,10 +87,13 @@ async def test_entries_are_shown_as_paragraphs_separated_by_blank_lines() -> Non
     async with app.run_test() as pilot:
         await feed_events(session, pilot, started("agent-1"), said("agent-1", "hi\nthere"))
         assert labels(app) == ["▶ agent-1 (coder) started", "▾ agent-1: hi\nthere"]
-        assert all(prompt.plain.endswith("\n") for prompt in prompts(app))
-        log = visible_log(app)
-        rendered = [log.render_line(y).text.rstrip() for y in range(5)]
-        assert rendered == ["│ ▶ agent-1 (coder) started", "", "│ ▾ agent-1: hi", "│ there", ""]
+        assert rendered(visible_log(app), 5) == [
+            "│ ▶ agent-1 (coder) started",
+            "",
+            "│ ▾ agent-1: hi",
+            "│ there",
+            "",
+        ]
 
 
 async def test_entry_kinds_style_the_entries() -> None:
@@ -122,11 +118,24 @@ async def test_every_entry_has_a_dim_bar_in_its_gutter_without_a_cursor() -> Non
         await feed_events(session, pilot, started("agent-1"), said("agent-1", "hi\nthere"))
         assert visible_log(app).highlighted is None
         assert gutters(app) == [GUTTER_BAR, GUTTER_BAR]
-        bar = prompts(app)[1].spans[0]
-        assert prompts(app)[1].plain[bar.start : bar.end] == f"{GUTTER_BAR} "
-        assert bar.style == visible_log(app).get_component_rich_style(
+        assert prompts(app)[1].gutter_style == visible_log(app).get_component_rich_style(
             "transcript--gutter", partial=True
         )
+
+
+async def test_every_wrapped_row_of_an_entry_keeps_its_gutter() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test(size=(40, 24)) as pilot:
+        await feed_events(session, pilot, said("agent-1", LONG))
+        log = visible_log(app)
+        rows = log.virtual_size.height
+        assert rows > 3  # The entry wraps onto several rows, then a blank one.
+        assert all(row.startswith(f"{GUTTER_BAR} ") for row in rendered(log, rows - 1))
+        assert rendered(log, rows)[-1] == ""
+        await pilot.press("k", "enter")
+        assert all(row.startswith(f"{GUTTER_MARKER} ") for row in rendered(log, rows - 1))
+        assert rendered(log, rows)[-1] == ""
 
 
 async def test_the_cursors_entry_is_marked_and_the_marker_moves_with_it() -> None:
@@ -136,8 +145,7 @@ async def test_the_cursors_entry_is_marked_and_the_marker_moves_with_it() -> Non
         await feed_events(session, pilot, started("agent-1"), said("agent-1", "hi\nthere"))
         await pilot.press("k", "enter")
         assert gutters(app) == [GUTTER_BAR, GUTTER_MARKER]
-        marker = prompts(app)[1].spans[0]
-        assert marker.style == visible_log(app).get_component_rich_style(
+        assert prompts(app)[1].gutter_style == visible_log(app).get_component_rich_style(
             "transcript--marker", partial=True
         )
         await pilot.press("k")

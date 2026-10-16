@@ -147,12 +147,10 @@ GUTTER_MARKER = "▌"
 """The marker that replaces the bar on every line of the cursor's entry."""
 
 
-def gutter_lines(label: str, marked: bool) -> list[tuple[str, str]]:
-    """The lines of ``label``, each paired with the 2-column gutter in front of it: the marker
-    on every line when the entry is ``marked`` as the cursor's, else a bar. Every line the label
-    shows gets one, so an empty label is one line and a trailing newline ends in an empty one."""
-    gutter = f"{GUTTER_MARKER if marked else GUTTER_BAR} "
-    return [(gutter, line) for line in label.split("\n")]
+def gutter(marked: bool) -> str:
+    """The 2 columns in front of every row of an entry: the marker when it's ``marked`` as the
+    cursor's, else a bar."""
+    return f"{GUTTER_MARKER if marked else GUTTER_BAR} "
 
 
 def output_entry(
