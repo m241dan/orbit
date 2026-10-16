@@ -34,7 +34,7 @@ uv run pre-commit install
 uv run orbit chat                              # interactive agent session
 uv run orbit chat -C ~/code/other              # work on another project
 uv run orbit chat --model opus --tools full    # pick the planner's model and new tasks' tool access
-uv run orbit chat --no-verify                  # don't verify tasks
+uv run orbit chat --no-verify                  # don't verify tasks (ctrl+e is refused)
 uv run orbit chat --no-review                  # don't review landed work
 uv run orbit chat --no-worktree                # tasks edit the current checkout; nothing is committed
 uv run orbit chat --no-usage                   # don't show usage limits
@@ -243,6 +243,8 @@ next). It works whether or not steps are configured: its prompt
 lists the steps and setup configured now, if any, so the agent builds on them, which makes `ctrl+e`
 the way to reconfigure too. While a configurator task is queued or running, a confirmed `ctrl+e`
 doesn't add another; the conversation says `A configurator task is already queued or running.`
+With `--no-verify` there's nothing to set up checks for, so a confirmed `ctrl+e` adds no task and
+the conversation says `Setting up checks needs verification on; orbit was started with --no-verify.`
 
 Orbit tries each proposal in the agent's working directory first: the setup, then each step in
 order. If one fails, the agent gets the step's name and its output and is asked to revise,

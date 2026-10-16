@@ -5,8 +5,8 @@ import asyncio
 import pytest
 from textual.widgets import Static
 
-from orbit.agent import NO_STEPS_NOTE, AgentSession
-from orbit.agent.application.session import CONFIGURING_NOTE
+from orbit.agent import NO_STEPS_NOTE, AgentSession, Verification
+from orbit.agent.application.session import CONFIGURING_NOTE, NO_VERIFY_MESSAGE
 from orbit.agent.domain.roles import Setup, configure_prompt
 from orbit.agent.domain.verification import VerificationStep
 from orbit.protocol import (
@@ -17,6 +17,7 @@ from orbit.protocol import (
     Event,
     Notice,
     RunTasks,
+    TasksChanged,
     TaskSpec,
     TurnEndReason,
     command_adapter,
@@ -29,6 +30,11 @@ from tests.test_tui import FakeSession, shown
 
 CODE = TaskSpec(prompt="Add a flag.")
 SETUP = Setup(command=("uv", "sync"), watch=("uv.lock",))
+
+
+def no_steps() -> Verification:
+    """Verification turned on with no steps configured."""
+    return Verification((), Steps())
 
 
 class Configurator:
@@ -102,7 +108,7 @@ async def test_it_queues_a_configurator_first_and_runs_it_straight_away() -> Non
 
 async def test_with_nothing_configured_the_prompt_says_so() -> None:
     configurator = Configurator()
-    session, _, _ = session_for(configurator)
+    session, _, _ = session_for(configurator, verification=no_steps())
     await session.send(ConfigureChecks())
     events = await asyncio.wait_for(until_idle(session), 5)
     assert board(events)[0].task.prompt == configure_prompt((), None)
@@ -110,7 +116,7 @@ async def test_with_nothing_configured_the_prompt_says_so() -> None:
 
 
 async def test_a_second_request_is_refused_while_one_is_queued_or_running() -> None:
-    session, _, _ = session_for(Configurator())
+    session, _, _ = session_for(Configurator(), verification=no_steps())
     await session.send(ConfigureChecks())
     await session.send(ConfigureChecks())
     events = await asyncio.wait_for(until_idle(session), 5)
@@ -120,7 +126,7 @@ async def test_a_second_request_is_refused_while_one_is_queued_or_running() -> N
 
 
 async def test_it_can_be_asked_for_again_to_reconfigure() -> None:
-    session, _, launcher = session_for(Configurator(), Configurator())
+    session, _, launcher = session_for(Configurator(), Configurator(), verification=no_steps())
     await session.send(ConfigureChecks())
     await asyncio.wait_for(until_idle(session), 5)
     await session.send(ConfigureChecks())
@@ -138,7 +144,9 @@ async def test_while_tasks_run_it_goes_next() -> None:
         return await claims_done(call)
 
     configurator = Configurator()
-    session, _, launcher = session_for(asks_to_configure, configurator, claims_done)
+    session, _, launcher = session_for(
+        asks_to_configure, configurator, claims_done, verification=no_steps()
+    )
     await session.send(AddTask(task=CODE))
     await session.send(AddTask(task=CODE))
     await session.send(RunTasks())
@@ -155,6 +163,22 @@ async def test_without_agents_it_is_refused() -> None:
         if isinstance(event, ErrorOccurred):
             assert event.message == "Tasks need agents, and none are set up."
             return
+
+
+async def test_without_verification_it_is_refused_and_nothing_starts() -> None:
+    session, _, launcher = session_for(Configurator())
+    await session.send(ConfigureChecks())
+    events: list[Event] = []
+    async for event in session.events():
+        events.append(event)
+        if isinstance(event, ErrorOccurred):
+            break
+    assert events[-1] == ErrorOccurred(message=NO_VERIFY_MESSAGE)
+    assert NO_VERIFY_MESSAGE == (
+        "Setting up checks needs verification on; orbit was started with --no-verify."
+    )
+    assert not any(isinstance(e, TasksChanged) and e.tasks for e in events)
+    assert launcher.launches == []
 
 
 async def test_ctrl_e_asks_for_a_configurator() -> None:
@@ -239,7 +263,7 @@ async def test_in_the_app_ctrl_e_runs_a_configurator_and_refuses_a_second() -> N
         await gate.wait()
         return await configurator(call)
 
-    session, _, launcher = session_for(waits)
+    session, _, launcher = session_for(waits, verification=no_steps())
     app = OrbitApp(session)
     async with app.run_test() as pilot:
         await pilot.press("ctrl+e", "y")

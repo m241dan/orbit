@@ -65,6 +65,7 @@ from orbit.protocol import (
 
 NO_STEPS_NOTE = "No verification steps configured. Press ctrl+e to set them up."
 NO_AGENTS_MESSAGE = "Tasks need agents, and none are set up."
+NO_VERIFY_MESSAGE = "Setting up checks needs verification on; orbit was started with --no-verify."
 CONFIGURING_NOTE = "A configurator task is already queued or running."
 
 
@@ -252,9 +253,12 @@ class AgentSession:
 
     async def _configure_checks(self) -> None:
         """Queue a configurator first and run it, unless work is running already (then it goes
-        next); refused while one is queued or running."""
+        next); refused without verification or while one is queued or running."""
         if self._desk is None or self._work is None:
             await self._events.put(ErrorOccurred(message=NO_AGENTS_MESSAGE))
+            return
+        if self._verifier is None:
+            await self._events.put(ErrorOccurred(message=NO_VERIFY_MESSAGE))
             return
         if self._configuring():
             await self._events.put(Notice(message=CONFIGURING_NOTE))
