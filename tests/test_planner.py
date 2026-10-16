@@ -3,7 +3,7 @@
 import asyncio
 
 from orbit.agent import Agents, AgentSession
-from orbit.agent.application.agent_run import AgentDesk
+from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.planner import PlannerChat
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.verification import steps_note

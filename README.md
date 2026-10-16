@@ -442,13 +442,17 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     MCP server; `GitCoderTree` is the coder's worktree and its snapshots; `config_file` reads
     `.orbit/config.toml`; `built_in_roles` reads the built-in roles' instructions from
     `instructions/*.md`; `checks` runs a verification step as a process (`run_step`);
-    `workspace` fingerprints the git working tree.
+    `processes` runs a program to completion without leaving it behind; `workspace`
+    fingerprints the git working tree.
   - `application`: `AgentSession` implements `Session`: it takes commands, asks the domain what
-    follows, drives the ports and publishes events. `AgentRun` sees one task through one agent and
-    `AgentDesk` routes agents' calls by token; `Verifier` runs the steps; `Lander` commits and
-    merges verified work; `ReviewLane` runs reviews beside the work; `PlannerChat` is the
-    planner's conversation. `ports` defines what it needs from outside (`AgentHost`,
-    `AgentLauncher`, `CoderTree`, `StepRunner`, `Workspace`).
+    follows, drives the ports and publishes events. `WorkLane` is the work lane: it runs the
+    board's tasks one at a time, queues a fix after each failed step and lands work that passes.
+    `AgentRun` sees one task through one agent; `AgentDesk` (in `desk`) launches agents and
+    routes their calls by token; `Verifier` runs the steps; `Lander` commits and merges verified
+    work; `ReviewLane` runs reviews beside the work; `StartupCheck` runs the steps once on the
+    base commit as orbit starts; `FrontendReview` is where the user decides on proposed checks;
+    `PlannerChat` is the planner's conversation. `ports` defines what it needs from outside
+    (`AgentHost`, `AgentLauncher`, `CoderTree`, `StepRunner`, `Workspace`).
   - `domain`: the rules, with no I/O: the `TaskBoard` (task order, statuses, fix chains),
     `AgentTask` (what orbit replies to an agent, and when its work is verified), the
     `AgentRegistry` (agent ids and tokens), `roles` (built-in roles, given their instructions,

@@ -1,37 +1,25 @@
 """Running a task through an agent: start it, answer its calls, verify its work, stop it.
 
 The agent is a separate process that reaches orbit through the :class:`AgentHost`. Its calls
-arrive at the :class:`AgentDesk`, which passes each to the :class:`AgentRun` for that agent.
+arrive at the :class:`~orbit.agent.application.desk.AgentDesk`, which passes each to the
+:class:`AgentRun` for that agent.
 Verification runs in the run's own task, not in a call's, so it carries on if the agent
 disconnects while waiting for the result. So does trying a proposal of checks, and asking the
 user what they make of it.
 """
 
 import asyncio
-import uuid
-from collections.abc import Awaitable, Callable, Mapping
 from contextlib import suppress
-from dataclasses import dataclass, field
-from typing import Any, Literal, Protocol
+from dataclasses import dataclass
+from typing import Any, Literal
 
-from orbit.agent.application.ports import (
-    AgentHost,
-    AgentLaunch,
-    AgentLauncher,
-    CoderTree,
-    ConfigWriter,
-    ProposalDecision,
-    ProposalReview,
-    Publish,
-    Reply,
-)
+from orbit.agent.application.desk import AgentDesk, Tool, dispatch, report_progress
+from orbit.agent.application.ports import ProposalDecision, Reply
 from orbit.agent.application.verifier import Failure, Verifier, first_failure
-from orbit.agent.domain.agent_task import FINISHED, AgentTask, Limits, Phase
-from orbit.agent.domain.agents import Agent, AgentRegistry, bootstrap_prompt
+from orbit.agent.domain.agent_task import FINISHED, AgentTask, Phase
+from orbit.agent.domain.agents import Agent, bootstrap_prompt
 from orbit.agent.domain.board import TaskBoard
-from orbit.agent.domain.reviews import ReviewLimits
 from orbit.agent.domain.roles import (
-    ORBIT_TOOLS,
     ChecksProposal,
     ConfigError,
     Role,
@@ -42,60 +30,14 @@ from orbit.agent.domain.verification import check_reply
 from orbit.protocol import (
     AgentExited,
     AgentExitReason,
-    AgentReply,
-    AgentRequest,
     AgentStarted,
     ErrorOccurred,
-    ProgressNoted,
-    Settings,
     TaskGaveUp,
     TasksChanged,
     TaskStatus,
     TurnFinished,
     Usage,
 )
-
-# Longest progress note shown; agents can be chatty.
-NOTE_LIMIT = 200
-
-
-def progress_note(text: str) -> str:
-    """``text`` as a progress note: stripped, and cut short at :data:`NOTE_LIMIT`."""
-    note = text.strip()
-    if len(note) > NOTE_LIMIT:
-        note = note[: NOTE_LIMIT - 1] + "…"
-    return note
-
-
-Tool = Callable[[dict[str, Any]], Awaitable[Reply]]
-"""Answers a call to one of orbit's tools, given its arguments."""
-
-
-async def dispatch(
-    role_name: str,
-    role: Role,
-    tools: Mapping[str, Tool],
-    tool: str,
-    arguments: dict[str, Any],
-) -> Reply:
-    """Answer a call to ``tool`` from ``tools``, refusing a tool orbit lacks, or one ``role``
-    (named ``role_name``) may not use or ``tools`` doesn't answer."""
-    if tool not in ORBIT_TOOLS:
-        return Reply(f"Orbit has no tool {tool!r}.", is_error=True)
-    answer = tools.get(tool)
-    if answer is None or tool not in role.tools:
-        return Reply(f"Your role ({role_name}) can't use {tool}.", is_error=True)
-    return await answer(arguments)
-
-
-async def report_progress(
-    publish: Publish, agent_id: str, task_id: str, arguments: dict[str, Any]
-) -> Reply:
-    """Publish agent ``agent_id``'s progress note on task ``task_id`` from ``arguments``."""
-    note = progress_note(str(arguments.get("note", "")))
-    await publish(ProgressNoted(agent_id=agent_id, task_id=task_id, note=note))
-    return Reply("Noted.")
-
 
 Wake = Literal["exited", "gave_up"]
 """Why the run loop wakes up, other than a claim that the task is done."""
@@ -109,34 +51,6 @@ STATUSES: dict[Phase, TaskStatus] = {
     "gave_up": "gave_up",
     "ended": "cancelled",
 }
-
-
-@dataclass(frozen=True)
-class Agents:
-    """How tasks are run through agents.
-
-    ``host`` is where agents reach orbit, ``launcher`` starts them, and ``new_token``
-    makes the unguessable tokens they identify themselves with. ``roles`` are the roles tasks
-    can name. ``exit_grace`` is how long, in seconds, an agent may take to exit once its task
-    is finished before it's stopped. ``tree`` is where they work and their work is merged
-    from; without one they work in the current directory and nothing is committed.
-    With ``review`` (and a tree), landed work is reviewed, and the whole codebase super
-    reviewed, within ``review_limits``. ``proposal_review`` is where the user decides on
-    proposed checks; without it, proposals are refused. ``write_config`` saves the checks the
-    user accepts into the project's config; without it, they're used but not saved.
-    """
-
-    host: AgentHost
-    launcher: AgentLauncher
-    new_token: Callable[[], str]
-    roles: Mapping[str, Role]
-    limits: Limits = field(default_factory=Limits)
-    exit_grace: float = 10.0
-    tree: CoderTree | None = None
-    review: bool = False
-    review_limits: ReviewLimits = field(default_factory=ReviewLimits)
-    proposal_review: ProposalReview | None = None
-    write_config: ConfigWriter | None = None
 
 
 @dataclass(frozen=True)
@@ -162,76 +76,6 @@ def _answer(claim: "asyncio.Future[Reply] | None", reply: Reply) -> None:
     """Answer ``claim`` with ``reply``, unless there's no claim or it was answered already."""
     if claim is not None and not claim.done():
         claim.set_result(reply)
-
-
-class CallTarget(Protocol):
-    """Whatever answers an agent's calls: its run, or the planner's conversation."""
-
-    async def handle(self, tool: str, arguments: dict[str, Any]) -> Reply: ...
-
-
-class AgentDesk:
-    """Answers agents' calls by passing them to their runs, publishing each call and reply."""
-
-    def __init__(self, agents: Agents, publish: Publish) -> None:
-        self.agents = agents
-        self.registry = AgentRegistry(agents.new_token)
-        self.publish = publish
-        # Takes a review task's suggestions: its id, then the suggestion's title and prompt.
-        self.suggest: Callable[[str, str, str], Awaitable[Reply]] | None = None
-        self._runs: dict[str, CallTarget] = {}
-        self._url: str | None = None
-
-    async def url(self) -> str:
-        """Where agents reach orbit; starts the host the first time."""
-        if self._url is None:
-            self._url = await self.agents.host.start(self.handle)
-        return self._url
-
-    async def stop(self) -> None:
-        """Stop the host, if it was started."""
-        if self._url is not None:
-            self._url = None
-            await self.agents.host.stop()
-
-    async def launch(self, agent: Agent, prompt: str, settings: Settings, cwd: str) -> AgentLaunch:
-        """How to start ``agent`` in its role: told ``prompt``, with ``settings``, in ``cwd``."""
-        role = self.agents.roles[agent.role]
-        url = await self.url()
-        return AgentLaunch(agent, url, prompt, settings, cwd, role.instructions, role.tools)
-
-    def open(self, run: CallTarget, role: str, task_id: str) -> Agent:
-        agent = self.registry.register(role, task_id)
-        self._runs[agent.id] = run
-        return agent
-
-    def find(self, agent_id: str) -> Agent | None:
-        """Running agent ``agent_id``, if there is one."""
-        return next((agent for agent in self.registry.live if agent.id == agent_id), None)
-
-    def working_on(self, task_id: str) -> Agent:
-        """The running agent working on task ``task_id``; there must be one."""
-        return next(agent for agent in self.registry.live if agent.task_id == task_id)
-
-    def close(self, agent: Agent) -> None:
-        self.registry.revoke(agent.id)
-        self._runs.pop(agent.id, None)
-
-    async def handle(self, token: str, tool: str, arguments: dict[str, Any]) -> Reply:
-        agent = self.registry.by_token(token)
-        if agent is None:
-            return Reply("Unknown or expired agent token.", is_error=True)
-        request_id = uuid.uuid4().hex
-        await self.publish(
-            AgentRequest(agent_id=agent.id, request_id=request_id, tool=tool, arguments=arguments)
-        )
-        reply = await self._runs[agent.id].handle(tool, arguments)
-        await self.publish(
-            AgentReply(
-                agent_id=agent.id, request_id=request_id, text=reply.text, is_error=reply.is_error
-            )
-        )
-        return reply
 
 
 class AgentRun:

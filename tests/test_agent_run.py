@@ -2,7 +2,7 @@
 
 import asyncio
 
-from orbit.agent.application.agent_run import NOTE_LIMIT, progress_note
+from orbit.agent.application.desk import NOTE_LIMIT, progress_note
 from orbit.agent.domain.agent_task import Limits
 from orbit.protocol import (
     AddTask,

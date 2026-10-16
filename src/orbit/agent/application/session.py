@@ -11,7 +11,7 @@ from contextlib import suppress
 from dataclasses import replace
 from typing import Any, assert_never
 
-from orbit.agent.application.agent_run import AgentDesk, Agents
+from orbit.agent.application.desk import AgentDesk, Agents
 from orbit.agent.application.lanes import crash_of, crash_report
 from orbit.agent.application.planner import PlannerChat
 from orbit.agent.application.ports import ProposalReview

@@ -7,7 +7,7 @@ Layered, outermost first; each layer may import only the ones below it:
 - ``domain``: the rules the application decides by. Pure.
 """
 
-from orbit.agent.application.agent_run import Agents
+from orbit.agent.application.desk import Agents
 from orbit.agent.application.ports import (
     ConfigWriter,
     ProposalDecision,

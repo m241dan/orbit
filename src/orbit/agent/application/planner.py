@@ -9,7 +9,7 @@ after the verification steps change, tells it the steps each task must pass.
 from collections.abc import AsyncIterator
 from typing import Any
 
-from orbit.agent.application.agent_run import AgentDesk, Tool, dispatch, report_progress
+from orbit.agent.application.desk import AgentDesk, Tool, dispatch, report_progress
 from orbit.agent.application.ports import Reply
 from orbit.agent.domain.agents import Agent
 from orbit.agent.domain.board import TaskBoard

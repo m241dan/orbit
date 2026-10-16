@@ -9,7 +9,8 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
 
-from orbit.agent.application.agent_run import AgentDesk, AgentRun
+from orbit.agent.application.agent_run import AgentRun
+from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.lanes import crash_report
 from orbit.agent.application.ports import CoderTree, Reply
 from orbit.agent.domain.board import TaskBoard

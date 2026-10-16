@@ -12,7 +12,8 @@ from orbit.agent import (
     VerificationStep,
     run_step,
 )
-from orbit.agent.application.agent_run import AgentDesk, AgentRun, Agents
+from orbit.agent.application.agent_run import AgentRun
+from orbit.agent.application.desk import AgentDesk, Agents
 from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.board import TaskBoard
 from orbit.protocol import (

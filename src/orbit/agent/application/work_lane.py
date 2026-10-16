@@ -9,7 +9,8 @@ import asyncio
 from collections.abc import Collection
 from dataclasses import replace
 
-from orbit.agent.application.agent_run import AgentDesk, AgentRun, Outcome
+from orbit.agent.application.agent_run import AgentRun, Outcome
+from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.landing import Lander
 from orbit.agent.application.review_lane import ReviewLane
 from orbit.agent.application.startup_check import StartupCheck
