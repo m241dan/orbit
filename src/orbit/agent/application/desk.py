@@ -27,6 +27,9 @@ from orbit.agent.domain.reviews import ReviewLimits
 from orbit.agent.domain.roles import ORBIT_TOOLS, Role
 from orbit.protocol import AgentReply, AgentRequest, ProgressNoted, Settings
 
+# The refusal of a call from an agent that isn't running.
+UNKNOWN_AGENT = Reply("Unknown or expired agent token.", is_error=True)
+
 # Longest progress note shown; agents can be chatty.
 NOTE_LIMIT = 200
 
@@ -153,12 +156,13 @@ class AgentDesk:
     async def handle(self, token: str, tool: str, arguments: dict[str, Any]) -> Reply:
         agent = self.registry.by_token(token)
         if agent is None:
-            return Reply("Unknown or expired agent token.", is_error=True)
+            return UNKNOWN_AGENT
         request_id = uuid.uuid4().hex
         await self.publish(
             AgentRequest(agent_id=agent.id, request_id=request_id, tool=tool, arguments=arguments)
         )
-        reply = await self._runs[agent.id].handle(tool, arguments)
+        run = self._runs.get(agent.id)  # Its run may have closed it during the publish.
+        reply = UNKNOWN_AGENT if run is None else await run.handle(tool, arguments)
         await self.publish(
             AgentReply(
                 agent_id=agent.id, request_id=request_id, text=reply.text, is_error=reply.is_error

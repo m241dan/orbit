@@ -1,12 +1,20 @@
 """Running tasks through agents: a fake host and scripted agents stand in for MCP and the CLI."""
 
 import asyncio
+from collections.abc import Awaitable, Callable
+from typing import Any
 
-from orbit.agent.application.desk import NOTE_LIMIT, progress_note
+from orbit.agent.application.agent_run import AgentRun, Outcome
+from orbit.agent.application.desk import NOTE_LIMIT, AgentDesk, Agents, progress_note
+from orbit.agent.application.ports import ProposalDecision, Reply
+from orbit.agent.application.verifier import Verifier
 from orbit.agent.domain.agent_task import Limits
+from orbit.agent.domain.board import TaskBoard
+from orbit.agent.domain.roles import ChecksProposal
 from orbit.protocol import (
     AddTask,
     AgentExited,
+    AgentReply,
     AgentRequest,
     AgentStarted,
     AssistantMessage,
@@ -24,9 +32,12 @@ from orbit.protocol import (
     VerificationSkipped,
 )
 from tests.agent_fakes import (
+    ROLES,
     URL,
     Call,
+    FakeHost,
     FakeWorkspace,
+    ScriptedLauncher,
     Steps,
     board,
     replies,
@@ -428,3 +439,103 @@ def test_a_progress_note_is_stripped_and_cut_short_at_the_limit() -> None:
     assert progress_note("  reading the CLI\n") == "reading the CLI"
     assert progress_note("x" * NOTE_LIMIT) == "x" * NOTE_LIMIT
     assert progress_note("x" * (NOTE_LIMIT + 1)) == "x" * (NOTE_LIMIT - 1) + "…"
+
+
+CANCELLED = Reply("The task was cancelled.", is_error=True)
+LINT = {"name": "Lint", "command": ["ruff", "check"]}
+Publish = Callable[[Event], Awaitable[None]]
+
+
+async def ignore(event: Event) -> None:
+    return None
+
+
+class Undecided:
+    """A proposal review that's never reached."""
+
+    async def review(self, task_id: str, proposal: ChecksProposal) -> ProposalDecision:
+        raise AssertionError("unreachable")
+
+
+async def started(
+    role: str, publish: Publish = ignore, timeout_minutes: float | None = None
+) -> tuple[AgentRun, "asyncio.Task[Outcome]"]:
+    """A run of a task in ``role``, timing out after ``timeout_minutes``, whose agent has
+    fetched its task and is working on it; the run publishes to ``publish``."""
+    fetched = asyncio.Event()
+
+    async def works(call: Call) -> TurnEndReason:
+        await call("get_task")
+        fetched.set()
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+    host = FakeHost()
+    roles = {**ROLES, role: ROLES[role].model_copy(update={"timeout_minutes": timeout_minutes})}
+    agents = Agents(
+        host, ScriptedLauncher(host, works), lambda: "token-1", roles, proposal_review=Undecided()
+    )
+    tasks = TaskBoard()
+    task_id = tasks.add(TaskSpec(prompt="a", role=role))
+    verifier = Verifier(verified(Steps()), tasks, publish)
+    agent_run = AgentRun(task_id, tasks, verifier, AgentDesk(agents, publish))
+    running = asyncio.create_task(agent_run.run(None, "."))
+    await asyncio.wait_for(fetched.wait(), 5)
+    return agent_run, running
+
+
+async def cancelled_while_queued(role: str, tool: str, **arguments: Any) -> Reply:
+    """The reply to a call to ``tool`` that's queued for the run loop of a run in ``role``,
+    which is cancelled before the loop takes it."""
+    agent_run, running = await started(role)
+    call = asyncio.ensure_future(agent_run.handle(tool, arguments))
+    await asyncio.sleep(0)  # The call is queued; the run loop hasn't woken to take it.
+    running.cancel()
+    return await asyncio.wait_for(call, 5)
+
+
+async def test_a_claim_left_queued_when_the_run_is_cancelled_is_answered() -> None:
+    assert await cancelled_while_queued("coder", "complete_task", summary="done") == CANCELLED
+
+
+async def test_a_proposal_left_queued_when_the_run_is_cancelled_is_answered() -> None:
+    assert await cancelled_while_queued("configurator", "propose_checks", steps=[LINT]) == CANCELLED
+
+
+async def test_a_claim_left_queued_when_the_run_times_out_is_answered() -> None:
+    runs: list[AgentRun] = []
+    calls: list[asyncio.Future[Reply]] = []
+
+    async def claims_at_the_timeout(event: Event) -> None:
+        if isinstance(event, ErrorOccurred) and "ran out of time" in event.message:
+            calls.append(asyncio.ensure_future(runs[0].handle("complete_task", {"summary": "x"})))
+            await asyncio.sleep(0)  # The claim is queued, with the run loop stopped.
+
+    agent_run, running = await started("coder", claims_at_the_timeout, timeout_minutes=0.005)
+    runs.append(agent_run)
+    outcome = await asyncio.wait_for(running, 5)
+    assert outcome.status == "error"
+    assert await asyncio.wait_for(calls[0], 5) == CANCELLED
+
+
+class Target:
+    async def handle(self, tool: str, arguments: dict[str, Any]) -> Reply:
+        raise AssertionError("unreachable")
+
+
+async def test_a_call_whose_run_closes_while_it_is_published_is_refused() -> None:
+    host = FakeHost()
+    events: list[Event] = []
+
+    async def publish(event: Event) -> None:
+        events.append(event)
+        if isinstance(event, AgentRequest):
+            desk.close(agent)  # The run ends while the request is published.
+
+    agents = Agents(host, ScriptedLauncher(host), lambda: "token-1", ROLES)
+    desk = AgentDesk(agents, publish)
+    agent = desk.open(Target(), "coder", "1")
+    reply = await desk.handle("token-1", "get_task", {})
+    assert reply == Reply("Unknown or expired agent token.", is_error=True)
+    [answer] = [e for e in events if isinstance(e, AgentReply)]
+    assert (answer.text, answer.is_error) == (reply.text, True)

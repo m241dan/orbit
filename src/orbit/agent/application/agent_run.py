@@ -78,6 +78,11 @@ def _answer(claim: "asyncio.Future[Reply] | None", reply: Reply) -> None:
         claim.set_result(reply)
 
 
+def _cancel(claim: "asyncio.Future[Reply] | None") -> None:
+    """Answer ``claim``, if it's still waiting, with the reply that the task was cancelled."""
+    _answer(claim, Reply("The task was cancelled.", is_error=True))
+
+
 class AgentRun:
     """One agent working on task ``task_id`` of ``board``, from launch until it exits."""
 
@@ -136,6 +141,7 @@ class AgentRun:
         finally:
             await self._stop(stream)
             self._desk.close(self.agent)
+            self._drain()
         status = STATUSES[self._work.phase]
         return Outcome(status, self._failure, tuple(self._work.summaries), self._accepted)
 
@@ -221,6 +227,15 @@ class AgentRun:
             elif isinstance(item, _Proposal):
                 await self._consider(item)
 
+    def _drain(self) -> None:
+        """Answer the calls left in the inbox once the run loop has stopped taking them."""
+        while not self._inbox.empty():
+            item = self._inbox.get_nowait()
+            if isinstance(item, asyncio.Future):
+                _cancel(item)
+            elif isinstance(item, _Proposal):
+                _cancel(item.answer)
+
     async def _exited(self, before: object) -> None:
         if not self._work.exited():
             message = f"{self.agent.id} exited without calling get_task."
@@ -246,7 +261,7 @@ class AgentRun:
         try:
             failure = await self._check(before)
         except asyncio.CancelledError:
-            _answer(claim, Reply("The task was cancelled.", is_error=True))
+            _cancel(claim)
             raise
         reply = self._work.passed() if failure is None else await self._failed(failure)
         _answer(claim, Reply(reply))
@@ -275,7 +290,7 @@ class AgentRun:
         try:
             reply = await self._decide(proposal.checks)
         except asyncio.CancelledError:
-            _answer(proposal.answer, Reply("The task was cancelled.", is_error=True))
+            _cancel(proposal.answer)
             raise
         _answer(proposal.answer, Reply(reply))
 
