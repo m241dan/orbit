@@ -79,8 +79,14 @@ def _fingerprint(setup: Setup, path: Path) -> str:
 
 
 def _read_stamp(stamp: Path) -> str | None:
-    """The digest ``stamp`` records; ``None`` when there isn't one."""
-    return stamp.read_text() if stamp.exists() else None
+    """The digest ``stamp`` records; ``None`` when there isn't one.
+
+    Raises ``RuntimeError`` when it can't be read.
+    """
+    try:
+        return stamp.read_text() if stamp.exists() else None
+    except (OSError, UnicodeDecodeError) as error:
+        raise RuntimeError(f"Couldn't read the setup record in {stamp}: {error}") from error
 
 
 def _add_ignores(exclude: Path, paths: Collection[str]) -> None:
@@ -95,7 +101,7 @@ def _add_ignores(exclude: Path, paths: Collection[str]) -> None:
         if IGNORE_HEADER not in lines:
             new.insert(0, IGNORE_HEADER)
         exclude.write_text("\n".join([*lines, *new]) + "\n")
-    except OSError as error:
+    except (OSError, UnicodeDecodeError) as error:
         raise RuntimeError(f"Couldn't ignore files in {exclude}: {error}") from error
 
 

@@ -507,6 +507,34 @@ async def test_ignoring_paths_that_cant_be_written_raises_runtime_error(repo: Pa
         await tree.ignore({"__pycache__/"})
 
 
+async def test_ignoring_paths_with_a_non_utf8_exclude_file_raises_runtime_error(
+    repo: Path,
+) -> None:
+    tree = GitCoderTree(str(repo))
+    await tree.prepare(keep=False)
+    exclude = repo / ".git" / "info" / "exclude"
+    exclude.write_bytes(b"# \xff\n")
+    with pytest.raises(RuntimeError, match=r"Couldn't ignore files in .*exclude"):
+        await tree.ignore({"__pycache__/"})
+
+
+async def test_a_setup_stamp_that_cant_be_read_raises_runtime_error(repo: Path) -> None:
+    path = Path(await GitCoderTree(str(repo)).prepare(keep=False))
+    (path.parent / "coder.synced").mkdir()  # A directory in the stamp's place.
+    setup, runs = counting_setup(repo)
+    with pytest.raises(RuntimeError, match=r"Couldn't read the setup record in .*coder\.synced"):
+        await GitCoderTree(str(repo), setup=setup).prepare(keep=False)
+    assert not runs.exists()
+
+
+async def test_a_non_utf8_setup_stamp_raises_runtime_error(repo: Path) -> None:
+    path = Path(await GitCoderTree(str(repo)).prepare(keep=False))
+    (path.parent / "coder.synced").write_bytes(b"\xff")
+    setup, _ = counting_setup(repo)
+    with pytest.raises(RuntimeError, match=r"Couldn't read the setup record in .*coder\.synced"):
+        await GitCoderTree(str(repo), setup=setup).prepare(keep=False)
+
+
 async def test_a_watched_file_that_cant_be_read_raises_runtime_error(
     repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

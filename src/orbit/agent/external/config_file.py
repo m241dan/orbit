@@ -4,7 +4,7 @@ import tomllib
 from pathlib import Path
 
 import tomlkit
-from tomlkit.exceptions import ParseError
+from tomlkit.exceptions import TOMLKitError
 from tomlkit.items import AoT, Table
 
 from orbit.agent.domain.roles import ChecksProposal, ConfigError, OrbitConfig, load_config
@@ -38,7 +38,7 @@ def write_checks(root: str, checks: ChecksProposal) -> None:
     path = Path(root) / CONFIG_PATH
     try:
         _write_checks(path, checks)
-    except (OSError, ParseError) as exc:
+    except (OSError, UnicodeDecodeError, TOMLKitError) as exc:
         raise RuntimeError(f"Couldn't save the checks to {path}: {exc}") from exc
 
 
