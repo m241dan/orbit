@@ -112,6 +112,10 @@ class ReviewLane:
         await self._publish(TasksChanged(tasks=self._board.tasks))
         return Reply(f"Queued as task {new_id}.")
 
+    def queued_by_orbit(self, task_id: str) -> bool:
+        """Whether task ``task_id`` is a review this lane queued, rather than one the user added."""
+        return task_id in self._batches
+
     def cancel(self, task_id: str) -> None:
         """Stop review task ``task_id`` if it's the one running; the lane carries on."""
         if self._current is not None and self._current[0] == task_id:

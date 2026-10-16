@@ -355,8 +355,8 @@ duplication, structure that no longer fits and gaps in tests, and may suggest up
 other review's. `ctrl+g` asks for one straight away and restarts the count. A super review that
 falls due while review is paused waits until it resumes.
 
-Reviews can't be edited: remove one instead. Reviews need the worktree; `--no-review` turns them
-off.
+The reviews orbit queued can't be edited: remove one instead. Reviews need the worktree;
+`--no-review` turns them off.
 
 ### Roles and `.orbit/config.toml`
 

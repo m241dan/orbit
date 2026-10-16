@@ -664,3 +664,28 @@ async def test_a_finished_review_can_be_removed_but_not_edited() -> None:
     assert ErrorOccurred(message="Reviews can't be edited; remove it instead.") in events
     assert [(t.id, t.status) for t in board(events)] == [("1", "completed")]
     assert [e for e in events if isinstance(e, ReviewStatus)][-1].open_batches == 0
+
+
+async def edit_a_user_review(session: AgentSession) -> list[Event]:
+    """The events after adding a reviewer task to ``session`` and editing its prompt."""
+    await session.send(AddTask(task=TaskSpec(prompt="Review the parser", role="reviewer")))
+    await session.send(EditTask(task_id="1", task=TaskSpec(prompt="Again", role="reviewer")))
+    events: list[Event] = []
+    while not session._events.empty():
+        events.append(session._events.get_nowait())
+    await session.close()
+    return events
+
+
+async def test_a_review_the_user_queued_can_be_edited_without_the_review_lane() -> None:
+    session, _, _ = session_for()
+    events = await edit_a_user_review(session)
+    assert not _error_messages(events)
+    assert [t.task.prompt for t in board(events)] == ["Again"]
+
+
+async def test_a_review_the_user_queued_can_be_edited_with_the_review_lane() -> None:
+    session, _, _ = session_for(tree=FakeTree(), review=True)
+    events = await edit_a_user_review(session)
+    assert not _error_messages(events)
+    assert [t.task.prompt for t in board(events)] == ["Again"]

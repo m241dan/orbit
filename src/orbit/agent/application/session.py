@@ -283,9 +283,9 @@ class AgentSession:
                 assert_never(command)
 
     async def _edit(self, task_id: str, task: TaskSpec) -> None:
-        """Edit a task, unless it's a review: its batch is spent, so it couldn't run again."""
-        state = self._state_of(task_id)
-        if state is not None and state.task.role in REVIEW_ROLES:
+        """Edit a task, unless it's a review orbit queued: its batch is spent, so it couldn't
+        run again."""
+        if self._lane is not None and self._lane.queued_by_orbit(task_id):
             message = "Reviews can't be edited; remove it instead."
             await self._events.put(ErrorOccurred(message=message))
             return
