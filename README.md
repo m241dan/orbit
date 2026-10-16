@@ -157,8 +157,8 @@ Edge cases:
 - An agent that ends its turn without calling `complete_task` is taken to have finished, and its
   work is verified. If it stops after being asked for a fix without changing anything, it isn't
   verified again; the task falls back straight away (see below).
-- An agent that exits without ever calling `get_task`, or can't reach orbit's MCP server, fails the
-  task with an error.
+- A task's agent that exits without ever calling `get_task`, or can't reach orbit's MCP server,
+  fails the task with an error. (The planner runs no task, so it has no `get_task`.)
 - Calls out of order (claiming done before fetching the task, or twice while verification runs) get
   an error reply and change nothing.
 
@@ -370,9 +370,9 @@ defaults for tasks orbit queues in that role; a task you queue keeps its own set
 | Role | Tools | Verified | Default model / access |
 |---|---|---|---|
 | `coder` | `get_task`, `complete_task`, `run_check`, `report_progress`, `give_up` | yes | default / `full` |
-| `reviewer` | `get_task`, `complete_task`, `report_progress`, `give_up` | no | default / `restricted` |
-| `super-reviewer` | same as `reviewer` | no | `opus` / `restricted` |
-| `planner` | same as `reviewer` | no | default / `restricted` |
+| `reviewer` | `get_task`, `complete_task`, `report_progress`, `give_up`, `suggest_task` | no | default / `restricted` |
+| `super-reviewer` | `get_task`, `complete_task`, `report_progress`, `give_up`, `suggest_task` | no | `opus` / `restricted` |
+| `planner` | `propose_task`, `report_progress` | no | default / `restricted` |
 | `configurator` | `get_task`, `propose_checks`, `report_progress`, `give_up` | no | default / `restricted` |
 
 What each built-in role is told, its instructions, is the Markdown file named for it in
