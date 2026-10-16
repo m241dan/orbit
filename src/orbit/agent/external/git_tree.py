@@ -70,7 +70,10 @@ def _fingerprint(setup: Setup, path: Path) -> str:
     digest = hashlib.sha256(repr(setup.command).encode())
     for name in setup.watch:
         file = path / name
-        content = file.read_bytes() if file.is_file() else None
+        try:
+            content = file.read_bytes() if file.is_file() else None
+        except OSError as error:
+            raise RuntimeError(f"Couldn't read {file} to check the setup: {error}") from error
         digest.update(repr((name, content)).encode())
     return digest.hexdigest()
 
@@ -151,12 +154,15 @@ class GitCoderTree:
 
     async def ignore(self, paths: Collection[str]) -> None:
         exclude = (await self._path()).parent.parent / "info" / "exclude"
-        exclude.parent.mkdir(exist_ok=True)
-        lines = exclude.read_text().splitlines() if exclude.exists() else []
-        new = sorted(set(paths) - set(lines))
-        if IGNORE_HEADER not in lines:
-            new.insert(0, IGNORE_HEADER)
-        exclude.write_text("\n".join([*lines, *new]) + "\n")
+        try:
+            exclude.parent.mkdir(exist_ok=True)
+            lines = exclude.read_text().splitlines() if exclude.exists() else []
+            new = sorted(set(paths) - set(lines))
+            if IGNORE_HEADER not in lines:
+                new.insert(0, IGNORE_HEADER)
+            exclude.write_text("\n".join([*lines, *new]) + "\n")
+        except OSError as error:
+            raise RuntimeError(f"Couldn't ignore files in {exclude}: {error}") from error
 
     def use_setup(self, setup: Setup | None) -> None:
         self.setup = setup
@@ -220,7 +226,10 @@ class GitCoderTree:
         ok, output = await _run(self.setup.command, path)
         if not ok:
             raise RuntimeError(f"Setting up the coder's tree failed: {output}")
-        await asyncio.to_thread(stamp.write_text, digest)
+        try:
+            await asyncio.to_thread(stamp.write_text, digest)
+        except OSError as error:
+            raise RuntimeError(f"Couldn't record the setup in {stamp}: {error}") from error
 
     # Merging
 

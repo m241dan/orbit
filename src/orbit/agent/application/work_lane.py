@@ -128,7 +128,8 @@ class WorkLane:
 
     async def _configure(self, verifier: Verifier, checks: ChecksProposal, root: str) -> None:
         """Save the ``checks`` the user accepted into the config at ``root``, and use them from
-        the next task on. This, or a restart, is the only way the checks change."""
+        the next task on. This, or a restart, is the only way the checks change. A failed save
+        raises ``RuntimeError`` before anything changes, ending the task in error."""
         if self._desk.agents.write_config is not None:
             self._desk.agents.write_config(root, checks)
         if self._desk.agents.tree is not None:

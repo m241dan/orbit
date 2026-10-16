@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 import pytest
@@ -208,3 +209,18 @@ def test_writing_checks_twice_gives_the_same_file(tmp_path: Path) -> None:
     first = (tmp_path / CONFIG_PATH).read_text()
     write_checks(str(tmp_path), checks)
     assert (tmp_path / CONFIG_PATH).read_text() == first
+
+
+def test_writing_checks_where_orbits_directory_is_a_file_raises_runtime_error(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / ".orbit").write_text("")
+    with pytest.raises(RuntimeError, match=re.escape(f"Couldn't save the checks to {tmp_path}")):
+        write_checks(str(tmp_path), ChecksProposal(steps=(LINT,)))
+
+
+def test_writing_checks_into_an_unparsable_file_raises_runtime_error(tmp_path: Path) -> None:
+    path = write(tmp_path, "fix_attempts = = 3\n")
+    with pytest.raises(RuntimeError, match=re.escape(f"Couldn't save the checks to {path}")):
+        write_checks(str(tmp_path), ChecksProposal(steps=(LINT,)))
+    assert path.read_text() == "fix_attempts = = 3\n"

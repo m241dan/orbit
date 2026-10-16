@@ -496,6 +496,48 @@ async def test_ignored_paths_are_no_longer_committed_stashed_or_listed(repo: Pat
     assert "orbit" in exclude
 
 
+async def test_ignoring_paths_that_cant_be_written_raises_runtime_error(repo: Path) -> None:
+    tree = GitCoderTree(str(repo))
+    await tree.prepare(keep=False)
+    info = repo / ".git" / "info"
+    (info / "exclude").unlink()
+    info.rmdir()
+    info.write_text("")  # Not a directory any more.
+    with pytest.raises(RuntimeError, match="Couldn't ignore files in"):
+        await tree.ignore({"__pycache__/"})
+
+
+async def test_a_watched_file_that_cant_be_read_raises_runtime_error(
+    repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    commit_file(repo, "uv.lock", "v1\n", "lock")
+    setup, runs = counting_setup(repo, watch=("uv.lock",))
+
+    def read_bytes(self: Path) -> bytes:
+        raise PermissionError("denied")
+
+    monkeypatch.setattr(Path, "read_bytes", read_bytes)
+    with pytest.raises(RuntimeError, match=r"Couldn't read .*uv\.lock to check the setup: denied"):
+        await GitCoderTree(str(repo), setup=setup).prepare(keep=False)
+    assert not runs.exists()
+
+
+async def test_a_setup_that_cant_be_recorded_raises_runtime_error(
+    repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    setup, _ = counting_setup(repo)
+    real_write = Path.write_text
+
+    def write_text(self: Path, *args: Any, **kwargs: Any) -> int:
+        if self.name == "coder.synced":
+            raise PermissionError("denied")
+        return real_write(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", write_text)
+    with pytest.raises(RuntimeError, match=r"Couldn't record the setup in .*coder\.synced: denied"):
+        await GitCoderTree(str(repo), setup=setup).prepare(keep=False)
+
+
 async def test_a_setup_swapped_in_runs_at_the_next_prepare(repo: Path) -> None:
     tree = GitCoderTree(str(repo))
     await tree.prepare(keep=False)

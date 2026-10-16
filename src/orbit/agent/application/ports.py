@@ -19,7 +19,8 @@ StepRunner = Callable[[VerificationStep, str], Awaitable[tuple[bool, str]]]
 """Runs a verification step in a directory; returns whether it passed and its output."""
 
 ConfigWriter = Callable[[str, ChecksProposal], None]
-"""Makes accepted checks the verification steps and setup in the project config in a directory."""
+"""Makes accepted checks the verification steps and setup in the project config in a directory;
+raises ``RuntimeError`` when it can't."""
 
 UsageSource = Callable[[], Awaitable[UsageFetch]]
 """Fetches the subscription's usage limits once."""

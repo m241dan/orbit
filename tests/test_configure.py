@@ -23,6 +23,7 @@ from orbit.agent.external.config_file import CONFIG_PATH
 from orbit.protocol import (
     AddTask,
     BusyChanged,
+    ErrorOccurred,
     Event,
     MergeResult,
     Notice,
@@ -52,6 +53,10 @@ class Writer:
 
     def __call__(self, root: str, checks: ChecksProposal) -> None:
         self.writes.append((root, checks))
+
+
+def unsaveable(root: str, checks: ChecksProposal) -> None:
+    raise RuntimeError("Couldn't save the checks to .orbit/config.toml: read-only")
 
 
 async def claims_done(call: Call) -> TurnEndReason:
@@ -133,6 +138,20 @@ async def test_the_next_task_is_verified_by_the_accepted_steps_and_setup() -> No
     assert tree.setups == [CHECKS.setup]
     assert VerificationChanged(steps=(StepState(name="Lint"), StepState(name="Tests"))) in events
     assert [t.status for t in board(events)] == ["completed", "completed"]
+
+
+async def test_checks_that_cant_be_saved_end_the_task_in_error_and_change_nothing() -> None:
+    tree, steps = FakeTree(), Steps(True, True, True, True)
+    session = accepting(claims_done, steps=steps, tree=tree, write_config=unsaveable)
+    events = await asyncio.wait_for(everything(session, CONFIGURE, CODE), 5)
+    message = "Couldn't save the checks to .orbit/config.toml: read-only"
+    assert ErrorOccurred(message=message) in events
+    assert [t.status for t in board(events)] == ["error", "completed"]
+    assert steps.runs == ["setup", "Lint", "Tests", STEP.name]
+    assert tree.setups == []
+    assert len(tree.commits) == 1  # Only the next task's work landed.
+    shown = [e.steps for e in events if isinstance(e, VerificationChanged)]
+    assert {tuple(step.name for step in steps) for steps in shown} == {(STEP.name,)}
 
 
 async def test_accepted_checks_end_the_no_steps_state() -> None:
