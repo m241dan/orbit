@@ -9,9 +9,8 @@ from textual import on
 from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
 from textual.containers import Vertical, VerticalScroll
-from textual.events import Resize
 from textual.screen import ModalScreen
-from textual.widgets import Input, OptionList, RichLog, Static, Tab, Tabs
+from textual.widgets import Input, OptionList, Static, Tab, Tabs
 
 from orbit.protocol import Event, Settings, StepState
 from orbit.tui.view import (
@@ -21,11 +20,14 @@ from orbit.tui.view import (
     SPINNER_FPS,
     ConversationTab,
     EntryKind,
+    collapsible,
+    entry_label,
     mark_planner_busy,
     mark_tab_read,
     mark_tab_unread,
     settings_summary,
     spinner_frame,
+    starts_collapsed,
     step_lines,
     tab_key,
     tab_labels,
@@ -33,18 +35,118 @@ from orbit.tui.view import (
     track_tabs,
 )
 
+
+class ListPane(OptionList):
+    """A window's list that only takes focus once activated (``enter_list_mode``);
+    then j/k move and escape returns to window navigation."""
+
+    BINDINGS: ClassVar[list[BindingType]] = [
+        Binding("j", "cursor_down", show=False),
+        Binding("k", "cursor_up", show=False),
+        Binding("escape", "normal_mode", show=False),
+    ]
+
+    def __init__(self, *, id: str | None = None) -> None:
+        super().__init__(id=id)
+        self.can_focus = False
+
+    def enter_list_mode(self) -> None:
+        self.can_focus = True
+        self.focus()
+        if self.highlighted is None and self.option_count:
+            self.highlighted = 0
+
+    def action_normal_mode(self) -> None:
+        self.screen.set_focus(None)
+
+    def on_blur(self) -> None:
+        self.can_focus = False
+
+
 Entry = tuple[str, EntryKind]
 """A transcript entry: its text and how it's styled."""
+
+
+class TranscriptLog(ListPane):
+    """One tab's entries, each an option: activated, j/k move between them and enter collapses
+    or expands one. Kept at no display until shown, since the list lays out only what's on
+    screen, so switching tabs is instant and adding an entry costs the same however long the
+    conversation gets."""
+
+    DEFAULT_CSS = """
+    TranscriptLog {
+        display: none;
+        height: 1fr;
+        max-height: 100%;
+        border: none;
+        padding: 0;
+        background: transparent;
+        scrollbar-gutter: stable;
+    }
+    TranscriptLog:focus { border: none; background-tint: $foreground 0%; }
+    TranscriptLog.-shown { display: block; }
+    TranscriptLog .transcript--user { color: $text-accent; text-style: bold; }
+    TranscriptLog .transcript--tool { color: $text-muted; }
+    TranscriptLog .transcript--verify { color: $text-warning; }
+    TranscriptLog .transcript--agent { color: $text-accent; }
+    TranscriptLog .transcript--error { color: $text-error; }
+    """
+    COMPONENT_CLASSES: ClassVar[set[str]] = {f"transcript--{kind}" for kind in get_args(EntryKind)}
+
+    def __init__(self, shown: bool = False) -> None:
+        super().__init__()
+        self._entries: list[Entry] = []
+        self._collapsed: list[bool] = []
+        self.set_class(shown, "-shown")
+
+    @property
+    def entries(self) -> tuple[Entry, ...]:
+        return tuple(self._entries)
+
+    def enter_list_mode(self) -> None:
+        """Activate the list, starting at the latest entry the first time."""
+        if self.highlighted is None and self.option_count:
+            self.highlighted = self.option_count - 1
+        super().enter_list_mode()
+
+    def append(self, text: str, kind: EntryKind) -> None:
+        """Add an entry, collapsed if its kind starts so; the view stays pinned to the latest
+        entry unless the list is active."""
+        collapsed = starts_collapsed(kind) and collapsible(text)
+        self._entries.append((text, kind))
+        self._collapsed.append(collapsed)
+        self.add_option(self._prompt(text, kind, collapsed))
+        if not self.has_focus:
+            self.scroll_end(animate=False)
+
+    def collapsed(self, index: int) -> bool:
+        return self._collapsed[index]
+
+    def toggle(self, index: int) -> None:
+        """Collapse the entry at ``index`` if it's expanded, and the other way round; an entry
+        of one line stays as it is."""
+        text, kind = self._entries[index]
+        if not collapsible(text):
+            return
+        self._collapsed[index] = not self._collapsed[index]
+        self.replace_option_prompt_at_index(index, self._prompt(text, kind, self._collapsed[index]))
+
+    @on(OptionList.OptionSelected)
+    def _toggle(self, event: OptionList.OptionSelected) -> None:
+        event.stop()
+        self.toggle(event.option_index)
+
+    def _prompt(self, text: str, kind: EntryKind, collapsed: bool) -> Text:
+        # Each entry ends in a blank line, so entries read as paragraphs.
+        style = self.get_component_rich_style(f"transcript--{kind}")
+        return Text(entry_label(text, collapsed) + "\n", style=style)
 
 
 class Transcript(Vertical):
     """Main display: the running conversation, pinned to the latest output.
 
-    Entries are kept per tab (All, and the tab they belong to), each tab in an append-only log
-    of its own that is written as entries arrive and kept at no height until the tab is shown
-    (hidden with ``display``, a log wouldn't know its width, and would render everything at
-    once when shown). Adding an entry then costs the same however long the conversation gets,
-    and switching tabs is instant.
+    Entries are kept per tab (All, and the tab they belong to), each tab in a
+    :class:`TranscriptLog` of its own, one of which is shown.
     """
 
     # Windows are reached with h/j/k/l, not by clicking; the mouse wheel still scrolls.
@@ -56,93 +158,59 @@ class Transcript(Vertical):
         border: round $primary;
         padding: 0 1;
     }
-    Transcript > RichLog {
-        height: 0;
-        background: transparent;
-        overflow-y: auto;
-        scrollbar-gutter: stable;
-    }
-    Transcript > RichLog.-shown { height: 1fr; }
-    Transcript .transcript--user { color: $text-accent; text-style: bold; }
-    Transcript .transcript--tool { color: $text-muted; }
-    Transcript .transcript--verify { color: $text-warning; }
-    Transcript .transcript--agent { color: $text-accent; }
-    Transcript .transcript--error { color: $text-error; }
     """
-    COMPONENT_CLASSES: ClassVar[set[str]] = {f"transcript--{kind}" for kind in get_args(EntryKind)}
 
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.only: str | None = None  # Show only this tab's entries, or all.
-        self._entries: dict[str | None, list[Entry]] = {None: []}
-        self._logs: dict[str | None, RichLog] = {}
-        # Logs whose lines were wrapped for an earlier window size; rewritten when shown.
-        self._stale: set[str | None] = set()
+        self._logs: dict[str | None, TranscriptLog] = {}
 
     def compose(self) -> ComposeResult:
-        yield self._new_log(None)
+        yield self._new_log(None, shown=True)
 
     def on_mount(self) -> None:
         self.border_title = "Conversation"
 
+    @property
+    def shown(self) -> TranscriptLog:
+        """The log of the tab being shown."""
+        return self._logs[self.only]
+
     def entries(self, key: str | None) -> tuple[Entry, ...]:
         """The entries under the tab keyed ``key``; None is All."""
-        return tuple(self._entries.get(key, ()))
+        return self._logs[key].entries if key in self._logs else ()
 
     def add_entry(self, text: str, kind: EntryKind, key: str | None = None) -> None:
         """Add an entry under All and, if ``key`` names a tab, under that tab."""
         for tab in {None, key}:
-            self._entries.setdefault(tab, []).append((text, kind))
-            if tab not in self._logs:
-                self.mount(self._new_log(tab))
-            if tab not in self._stale:
-                self._logs[tab].write(self._styled(text, kind), width=self._width())
+            self._log(tab).append(text, kind)
+
+    def enter_list_mode(self) -> None:
+        """Activate the shown log: j/k move between its entries, enter collapses or expands
+        one, and escape leaves."""
+        self.shown.enter_list_mode()
 
     def show_only(self, key: str | None, label: str = "") -> None:
         """Show only the tab keyed ``key``'s entries, titled by its tab ``label``, or all."""
-        if key not in self._logs:
-            self.mount(self._new_log(key))
-        elif key in self._stale:
-            self._stale.discard(key)
-            self._logs[key].clear()
-            self._fill(key)
-        self._logs[self.only].remove_class("-shown")
+        if self.shown.has_focus:
+            self.screen.set_focus(None)
+        self.shown.remove_class("-shown")
         self.only = key
         self.border_title = "Conversation" if key is None else f"Conversation · {label}"
-        self._logs[key].add_class("-shown")
-        self._logs[key].scroll_end(animate=False)
+        log = self._log(key)
+        log.add_class("-shown")
+        # Laid out once shown, which is when its end is known.
+        self.call_after_refresh(log.scroll_end, animate=False)
 
-    def on_resize(self, event: Resize) -> None:
-        """Wrap the shown log's lines again for the new width, once the logs have it; the
-        others are wrapped again when next shown."""
-        self._stale = set(self._logs) - {self.only}
-        self.call_after_refresh(self._rewrap, self.only)
+    def _log(self, key: str | None) -> TranscriptLog:
+        if key not in self._logs:
+            self.mount(self._new_log(key))
+        return self._logs[key]
 
-    def _rewrap(self, key: str | None) -> None:
-        if key == self.only:
-            self._logs[key].clear()
-            self._fill(key)
-
-    def _new_log(self, key: str | None) -> RichLog:
-        log = RichLog(wrap=True, min_width=1, classes="-shown" if key is None else None)
-        log.can_focus = False
+    def _new_log(self, key: str | None, shown: bool = False) -> TranscriptLog:
+        log = TranscriptLog(shown=shown)
         self._logs[key] = log
         return log
-
-    def _fill(self, key: str | None) -> None:
-        """Write the tab keyed ``key``'s entries to its log, as wide as the one being shown."""
-        log, width = self._logs[key], self._width()
-        for text, kind in self._entries.get(key, ()):
-            log.write(self._styled(text, kind), width=width)
-
-    def _width(self) -> int | None:
-        """How wide the shown log's lines are; None before the first layout, when a log works
-        out its own width once it has one."""
-        return self._logs[self.only].scrollable_content_region.width or None
-
-    def _styled(self, text: str, kind: EntryKind) -> Text:
-        # Each entry ends in a blank line, so entries read as paragraphs.
-        return Text(text + "\n", style=self.get_component_rich_style(f"transcript--{kind}"))
 
 
 class ConversationTabs(Tabs):
@@ -345,33 +413,6 @@ class PromptInput(Input):
 
     def show_settings(self, settings: Settings) -> None:
         self.border_subtitle = settings_summary(settings)
-
-
-class ListPane(OptionList):
-    """A window's list that only takes focus once activated (``enter_list_mode``);
-    then j/k move and escape returns to window navigation."""
-
-    BINDINGS: ClassVar[list[BindingType]] = [
-        Binding("j", "cursor_down", show=False),
-        Binding("k", "cursor_up", show=False),
-        Binding("escape", "normal_mode", show=False),
-    ]
-
-    def __init__(self, *, id: str | None = None) -> None:
-        super().__init__(id=id)
-        self.can_focus = False
-
-    def enter_list_mode(self) -> None:
-        self.can_focus = True
-        self.focus()
-        if self.highlighted is None and self.option_count:
-            self.highlighted = 0
-
-    def action_normal_mode(self) -> None:
-        self.screen.set_focus(None)
-
-    def on_blur(self) -> None:
-        self.can_focus = False
 
 
 class PickerScreen(ModalScreen[int | None]):

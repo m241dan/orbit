@@ -115,6 +115,30 @@ def settings_summary(settings: Settings) -> str:
 
 # Transcript entries
 
+COLLAPSED_KINDS: frozenset[EntryKind] = frozenset({"tool"})
+"""Kinds whose entries start collapsed: tool output is long and rarely read."""
+
+
+def starts_collapsed(kind: EntryKind) -> bool:
+    return kind in COLLAPSED_KINDS
+
+
+def collapsible(text: str) -> bool:
+    """Whether an entry has lines after its first to collapse away."""
+    return "\n" in text
+
+
+def entry_label(text: str, collapsed: bool) -> str:
+    """``text`` as its entry shows it. A collapsible entry starts with a marker; ``collapsed``,
+    it shows only its first line and how many more there are."""
+    if not collapsible(text):
+        return text
+    first, _, rest = text.partition("\n")
+    if not collapsed:
+        return f"▾ {text}"
+    more = rest.count("\n") + 1
+    return f"▸ {first} (+{more} line{'s' if more != 1 else ''})"
+
 
 def output_entry(
     event: AssistantMessage | ToolCallStarted | ToolCallFinished,

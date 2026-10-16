@@ -101,7 +101,7 @@ class OrbitApp(App[None], inherit_bindings=False):
     CSS = """
     #side { width: 33%; }
     .selected { border: round $accent; }
-    PromptInput:focus, TaskList:focus { border: heavy $accent; }
+    PromptInput:focus, TaskList:focus, Transcript:focus-within { border: heavy $accent; }
     """
     BINDINGS: ClassVar[list[BindingType]] = [
         # Priority, so it beats the prompt's own ctrl+c (copy).
@@ -214,6 +214,8 @@ class OrbitApp(App[None], inherit_bindings=False):
             self._task_list.enter_list_mode()
         elif self._selected == "agents":
             self._agents.enter_list_mode()
+        elif self._selected == "transcript":
+            self._transcript.enter_list_mode()
 
     def action_insert_mode(self) -> None:
         """Shortcut from any window: select the prompt and start typing."""

@@ -38,6 +38,8 @@ from orbit.tui.view import (
     agent_entry,
     agent_labelled,
     agent_line,
+    collapsible,
+    entry_label,
     exchange_entry,
     mark_planner_busy,
     mark_tab_read,
@@ -46,6 +48,7 @@ from orbit.tui.view import (
     output_entry,
     review_line,
     settings_summary,
+    starts_collapsed,
     step_lines,
     tab_key,
     tab_labels,
@@ -453,3 +456,23 @@ def test_marking_a_tab_unread_skips_the_shown_tab_and_all() -> None:
     )
     assert mark_tab_unread(PINNED_TABS, "coder", active="coder") == PINNED_TABS
     assert mark_tab_unread(PINNED_TABS, None, active=None) == PINNED_TABS
+
+
+def test_only_tool_entries_start_collapsed() -> None:
+    assert starts_collapsed("tool")
+    assert not any(
+        starts_collapsed(kind) for kind in ("user", "assistant", "verify", "agent", "error")
+    )
+
+
+def test_an_entry_is_collapsible_when_it_has_more_than_one_line() -> None:
+    assert collapsible("one\ntwo") and collapsible("one\n")
+    assert not collapsible("one")
+
+
+def test_entry_labels_mark_collapsible_entries_and_count_collapsed_lines() -> None:
+    assert entry_label("one", collapsed=False) == "one"
+    assert entry_label("one", collapsed=True) == "one"
+    assert entry_label("one\ntwo", collapsed=False) == "▾ one\ntwo"
+    assert entry_label("one\ntwo", collapsed=True) == "▸ one (+1 line)"
+    assert entry_label("one\ntwo\nthree", collapsed=True) == "▸ one (+2 lines)"

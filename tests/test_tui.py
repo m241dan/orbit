@@ -3,7 +3,7 @@ from collections.abc import AsyncIterator
 
 import pytest
 from textual.pilot import Pilot
-from textual.widgets import Footer, Input, OptionList, RichLog, Tab
+from textual.widgets import Footer, Input, OptionList, Tab
 
 from orbit.protocol import (
     STARTUP_TASK,
@@ -45,6 +45,7 @@ from orbit.tui.widgets import (
     PromptInput,
     SidePanel,
     Transcript,
+    TranscriptLog,
 )
 
 
@@ -284,7 +285,7 @@ async def test_display_follows_latest_output() -> None:
             await session.queue.put(AssistantMessage(turn_id="t", text=f"line {i}"))
         await pilot.pause()
 
-        log = app.query_one("Transcript > RichLog.-shown", RichLog)
+        log = app.query_one("Transcript > TranscriptLog.-shown", TranscriptLog)
         assert log.max_scroll_y > 0
         assert log.scroll_y == log.max_scroll_y
 
@@ -560,12 +561,12 @@ async def test_border_highlight_follows_selection() -> None:
         assert tasks.styles.border_top == before
 
 
-async def test_enter_does_nothing_off_the_prompt() -> None:
+async def test_enter_does_nothing_on_a_window_without_a_list() -> None:
     app = OrbitApp(FakeSession())
     async with app.run_test() as pilot:
-        await pilot.press("k", "enter")
+        await pilot.press("l", "enter")
         assert app.focused is None
-        assert selected(app) == ["transcript"]
+        assert selected(app) == ["verification-steps"]
 
 
 @pytest.mark.parametrize("keys", ["k", "kl", "l", "lk"])
