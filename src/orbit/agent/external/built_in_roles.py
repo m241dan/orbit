@@ -2,7 +2,8 @@
 
 from importlib.resources import files
 
-from orbit.agent.domain.roles import BUILT_IN_ROLE_NAMES, Role, built_in_roles
+from orbit.agent.domain.roles import Role, built_in_roles
+from orbit.protocol import BUILT_IN_ROLE_NAMES
 
 
 def read_built_in_roles() -> dict[str, Role]:

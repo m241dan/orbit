@@ -1,8 +1,14 @@
 """Shared contract between the frontend and the backend."""
 
 from orbit.protocol.messages import (
+    BUILT_IN_ROLE_NAMES,
+    CODER,
+    CONFIGURATOR,
     PLAN_TASK,
+    PLANNER,
+    REVIEWER,
     STARTUP_TASK,
+    SUPER_REVIEWER,
     AcceptTask,
     AddTask,
     AgentExited,
@@ -69,8 +75,14 @@ from orbit.protocol.session import Session
 from orbit.protocol.threaded import ThreadedSession
 
 __all__ = [
+    "BUILT_IN_ROLE_NAMES",
+    "CODER",
+    "CONFIGURATOR",
+    "PLANNER",
     "PLAN_TASK",
+    "REVIEWER",
     "STARTUP_TASK",
+    "SUPER_REVIEWER",
     "AcceptTask",
     "AddTask",
     "AgentExitReason",

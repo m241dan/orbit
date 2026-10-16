@@ -5,11 +5,10 @@ from typing import Any
 
 from textual.widgets import Tab, Tabs
 
-from orbit.protocol import Event
+from orbit.protocol import PLANNER, Event
 from orbit.tui.view import (
     ALL_TAB_LABEL,
     PINNED_TABS,
-    PLANNER,
     ConversationTab,
     mark_planner_busy,
     mark_tab_read,

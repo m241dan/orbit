@@ -7,6 +7,8 @@ from types import MappingProxyType
 from typing import TypeGuard, get_args
 
 from orbit.protocol import (
+    BUILT_IN_ROLE_NAMES,
+    PLANNER,
     AgentExited,
     AgentReply,
     AgentRequest,
@@ -26,14 +28,10 @@ from orbit.tui.view.transcript import turn_end_entry
 ALL_TAB_LABEL = "All"
 """The fixed first tab, showing every conversation; it isn't one of the tracked tabs."""
 
-PLANNER = "planner"
-"""Key of the pinned planner tab, and of the planner conversation's transcript entries."""
-
-ROLE_TABS: tuple[str, ...] = ("planner", "coder", "reviewer", "super-reviewer", "configurator")
+ROLE_TABS: tuple[str, ...] = BUILT_IN_ROLE_NAMES
 """The built-in roles, in strip order, that each have a pinned tab shared by all their
-agents; a pinned tab's key and label are its role's name. Mirrors the backend's
-``BUILT_IN_ROLE_NAMES``, which the TUI can't import; ``tests/test_view.py`` keeps them in
-step."""
+agents; a pinned tab's key and label are its role's name. The planner's (``PLANNER``) also
+keys the planner conversation's transcript entries."""
 
 
 RUNNING_MARK = "●"

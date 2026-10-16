@@ -14,15 +14,11 @@ from orbit.agent.application.lanes import Background
 from orbit.agent.application.ports import CoderTree, Reply
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.reviews import ReviewJob, ReviewPlanner, review_prompt
-from orbit.agent.domain.roles import (
+from orbit.agent.domain.roles import REVIEW_ROLES, role_task, suggested_task
+from orbit.protocol import (
     CODER,
-    REVIEW_ROLES,
     REVIEWER,
     SUPER_REVIEWER,
-    role_task,
-    suggested_task,
-)
-from orbit.protocol import (
     ErrorOccurred,
     Notice,
     ReviewStatus,

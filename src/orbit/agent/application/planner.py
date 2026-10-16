@@ -13,10 +13,12 @@ from orbit.agent.application.desk import AgentDesk, Tool, dispatch, report_progr
 from orbit.agent.application.ports import Reply
 from orbit.agent.domain.agents import Agent
 from orbit.agent.domain.board import TaskBoard
-from orbit.agent.domain.roles import CODER, PLANNER, suggested_task
+from orbit.agent.domain.roles import suggested_task
 from orbit.agent.domain.verification import steps_note
 from orbit.protocol import (
+    CODER,
     PLAN_TASK,
+    PLANNER,
     AgentExited,
     AgentStarted,
     Event,

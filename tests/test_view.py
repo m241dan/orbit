@@ -6,8 +6,8 @@ from typing import Any, get_args
 
 import pytest
 
-from orbit.agent.domain.roles import BUILT_IN_ROLE_NAMES
 from orbit.protocol import (
+    PLANNER,
     AgentExited,
     AgentExitReason,
     AgentReply,
@@ -44,7 +44,6 @@ from orbit.tui.view import (
     GUTTER_BAR,
     GUTTER_MARKER,
     PINNED_TABS,
-    PLANNER,
     ROLE_TABS,
     STATUS_ICONS,
     AgentRow,
@@ -360,11 +359,6 @@ def test_marking_a_tab_read_clears_only_its_marker() -> None:
         ConversationTab("agent-2", "coder", True),
     )
     assert tab_labels(mark_tab_read(tabs, "agent-1")) == ["coder", "coder 2 *"]
-
-
-def test_the_pinned_tabs_are_exactly_the_backends_built_in_roles() -> None:
-    assert set(ROLE_TABS) == set(BUILT_IN_ROLE_NAMES)
-    assert len(ROLE_TABS) == len(BUILT_IN_ROLE_NAMES)
 
 
 def test_the_pinned_tabs_are_the_built_in_roles_in_order() -> None:

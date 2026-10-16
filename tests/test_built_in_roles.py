@@ -2,8 +2,8 @@
 
 from importlib.resources import files
 
-from orbit.agent.domain.roles import BUILT_IN_ROLE_NAMES
 from orbit.agent.external.built_in_roles import read_built_in_roles
+from orbit.protocol import BUILT_IN_ROLE_NAMES
 
 FOLDER = files("orbit.agent.external") / "instructions"
 

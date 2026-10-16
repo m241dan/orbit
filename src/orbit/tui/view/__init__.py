@@ -28,7 +28,6 @@ from orbit.tui.view.settings import (
 from orbit.tui.view.tabs import (
     ALL_TAB_LABEL,
     PINNED_TABS,
-    PLANNER,
     ROLE_TABS,
     RUNNING_MARK,
     ConversationTab,
@@ -89,7 +88,6 @@ __all__ = [
     "ORBIT_TOOL_FIELDS",
     "ORBIT_TOOL_PREFIX",
     "PINNED_TABS",
-    "PLANNER",
     "ROLE_TABS",
     "RUNNING_MARK",
     "SKIP_REASONS",

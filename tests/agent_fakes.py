@@ -9,8 +9,9 @@ from typing import Any
 from orbit.agent import Agents, AgentSession, Verification, VerificationStep
 from orbit.agent.application.ports import AgentLaunch, CallHandler, Merge, Reply, UsageSource
 from orbit.agent.domain.agent_task import Limits
-from orbit.agent.domain.roles import BUILT_IN_ROLE_NAMES, REVIEW_ROLES, Setup, built_in_roles
+from orbit.agent.domain.roles import REVIEW_ROLES, Setup, built_in_roles
 from orbit.protocol import (
+    BUILT_IN_ROLE_NAMES,
     AddTask,
     AgentExited,
     AgentReply,

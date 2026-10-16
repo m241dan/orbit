@@ -17,7 +17,17 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.reviews import ReviewLimits
 from orbit.agent.domain.verification import MAX_FALLBACK_FIXES, VerificationStep
-from orbit.protocol import Settings, TaskSpec, ToolAccess
+from orbit.protocol import (
+    BUILT_IN_ROLE_NAMES,
+    CODER,
+    CONFIGURATOR,
+    PLANNER,
+    REVIEWER,
+    SUPER_REVIEWER,
+    Settings,
+    TaskSpec,
+    ToolAccess,
+)
 
 ORBIT_TOOLS = (
     "get_task",
@@ -30,13 +40,6 @@ ORBIT_TOOLS = (
     "propose_checks",
 )
 """Every tool orbit's MCP server offers agents."""
-
-CODER = "coder"
-REVIEWER = "reviewer"
-SUPER_REVIEWER = "super-reviewer"
-PLANNER = "planner"
-CONFIGURATOR = "configurator"
-"""The built-in roles' names."""
 
 REVIEW_ROLES = frozenset({REVIEWER, SUPER_REVIEWER})
 """The roles that review work rather than do it."""
@@ -111,8 +114,6 @@ _BUILT_IN_FIELDS: dict[str, dict[str, Any]] = {
 }
 """Each built-in role's fields, all but its instructions."""
 
-BUILT_IN_ROLE_NAMES = tuple(_BUILT_IN_FIELDS)
-
 
 def built_in_roles(instructions: Mapping[str, str]) -> dict[str, Role]:
     """The built-in roles, each told ``instructions[its name]``.
@@ -123,8 +124,8 @@ def built_in_roles(instructions: Mapping[str, str]) -> dict[str, Role]:
     if missing:
         raise ConfigError(f"no instructions for the built-in roles {missing}")
     return {
-        name: Role(instructions=instructions[name], **fields)
-        for name, fields in _BUILT_IN_FIELDS.items()
+        name: Role(instructions=instructions[name], **_BUILT_IN_FIELDS[name])
+        for name in BUILT_IN_ROLE_NAMES
     }
 
 

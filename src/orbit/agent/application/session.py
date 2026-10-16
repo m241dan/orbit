@@ -24,16 +24,12 @@ from orbit.agent.application.work_lane import WorkLane
 from orbit.agent.domain.agents import Agent
 from orbit.agent.domain.board import WAITING, TaskBoard
 from orbit.agent.domain.reviews import ReviewPlanner
-from orbit.agent.domain.roles import (
+from orbit.agent.domain.roles import REVIEW_ROLES, configure_prompt, role_task
+from orbit.agent.domain.verification import VerificationStep, startup_fix_prompt
+from orbit.protocol import (
     CODER,
     CONFIGURATOR,
     PLANNER,
-    REVIEW_ROLES,
-    configure_prompt,
-    role_task,
-)
-from orbit.agent.domain.verification import VerificationStep, startup_fix_prompt
-from orbit.protocol import (
     AcceptTask,
     AddTask,
     BusyChanged,

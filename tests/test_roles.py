@@ -3,7 +3,6 @@ import pytest
 from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.reviews import ReviewLimits
 from orbit.agent.domain.roles import (
-    BUILT_IN_ROLE_NAMES,
     ORBIT_TOOLS,
     ChecksProposal,
     ConfigError,
@@ -17,7 +16,7 @@ from orbit.agent.domain.roles import (
     suggested_task,
 )
 from orbit.agent.domain.verification import VerificationStep
-from orbit.protocol import Settings, TaskSpec
+from orbit.protocol import BUILT_IN_ROLE_NAMES, Settings, TaskSpec
 
 INSTRUCTIONS = {name: f"You are orbit's {name}." for name in BUILT_IN_ROLE_NAMES}
 BUILT_IN_ROLES = built_in_roles(INSTRUCTIONS)

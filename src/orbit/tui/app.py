@@ -12,6 +12,7 @@ from textual.containers import Horizontal, Vertical
 from textual.widgets import Footer, Input, OptionList, Tabs
 
 from orbit.protocol import (
+    PLANNER,
     AcceptTask,
     AddTask,
     AgentExited,
@@ -65,7 +66,6 @@ from orbit.tui.tabs import ConversationTabs
 from orbit.tui.tasks import TaskEditorScreen, TaskList
 from orbit.tui.transcript import Transcript
 from orbit.tui.view import (
-    PLANNER,
     TOOL_ACCESS_OPTIONS,
     EntryKind,
     activity_entry,
