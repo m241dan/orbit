@@ -124,6 +124,26 @@ async def test_c_after_an_agent_above_exits_cancels_the_highlighted_agent() -> N
         assert session.commands == [CancelAgent(agent_id="agent-2")]
 
 
+async def test_c_after_a_reviewer_above_exits_cancels_the_reviewer_not_the_coder() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed(
+            session,
+            pilot,
+            AgentStarted(agent_id="agent-1", role="reviewer", task_id="7"),
+            AgentStarted(agent_id="agent-2", role="reviewer", task_id="8"),
+            AgentStarted(agent_id="agent-3", role="coder", task_id="9"),
+        )
+        await pilot.press("l", "j", "enter", "j")
+        await feed(session, pilot, AgentExited(agent_id="agent-1", reason="finished"))
+        pane = app.query_one(AgentsPane)
+        assert pane.highlighted == 0
+        assert pane.rows[0].agent_id == "agent-2"
+        await pilot.press("c", "escape")
+        assert session.commands == [CancelAgent(agent_id="agent-2")]
+
+
 async def test_the_highlight_moves_to_the_nearest_row_when_its_agent_exits() -> None:
     session = FakeSession()
     app = OrbitApp(session)

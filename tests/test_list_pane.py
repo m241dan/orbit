@@ -1,4 +1,7 @@
+import pytest
 from textual.app import App, ComposeResult
+from textual.visual import VisualType
+from textual.widgets.option_list import Option
 
 from orbit.tui.widgets import ListPane
 
@@ -133,3 +136,86 @@ async def test_a_prompt_replaced_before_the_pane_is_laid_out_is_measured_when_it
         await app.mount(pane)
         await pilot.pause()
         assert line_map(pane) == [0, 0, 1]
+
+
+def prompts(pane: ListPane) -> list[str]:
+    return [str(pane.get_option_at_index(i).prompt) for i in range(pane.option_count)]
+
+
+async def test_shown_rows_end_with_the_trailing_row() -> None:
+    app = ListApp()
+    async with app.run_test() as pilot:
+        pane = app.query_one(ListPane)
+        pane.show_rows([("a", "one"), ("b", "two")], Option("more"))
+        await pilot.pause()
+        assert prompts(pane) == ["one", "two", "more"]
+        pane.show_rows([])
+        await pilot.pause()
+        assert prompts(pane) == []
+
+
+async def test_rows_with_the_same_keys_relabel_only_the_changed_ones(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = ListApp()
+    async with app.run_test() as pilot:
+        pane = app.query_one(ListPane)
+        pane.show_rows([("a", "one"), ("b", "two")])
+        await pilot.pause()
+        kept = pane.get_option_at_index(0)
+        relabelled: list[int] = []
+        replace = pane.replace_prompt
+
+        def spy(index: int, prompt: VisualType) -> None:
+            relabelled.append(index)
+            replace(index, prompt)
+
+        monkeypatch.setattr(pane, "replace_prompt", spy)
+        pane.show_rows([("a", "one"), ("b", "deux")])
+        await pilot.pause()
+        assert prompts(pane) == ["one", "deux"]
+        assert relabelled == [1]
+        assert pane.get_option_at_index(0) is kept
+
+
+@pytest.mark.parametrize(
+    ("keys", "highlight"),
+    [
+        (["b", "c"], 0),  # A row above it went: the highlight follows its key up.
+        (["x", "a", "b", "c"], 2),  # One appeared above it: it follows its key down.
+        (["a", "c"], 1),  # Its own row went: the nearest row in range.
+        (["a"], 0),
+    ],
+)
+async def test_the_highlight_follows_its_key_when_the_rows_change(
+    keys: list[str], highlight: int
+) -> None:
+    app = ListApp()
+    async with app.run_test() as pilot:
+        pane = app.query_one(ListPane)
+        pane.show_rows([("a", "a"), ("b", "b"), ("c", "c")])
+        pane.highlighted = 1
+        pane.show_rows([(key, key) for key in keys])
+        await pilot.pause()
+        assert pane.highlighted == highlight
+
+
+async def test_the_highlight_stays_on_the_trailing_row() -> None:
+    app = ListApp()
+    async with app.run_test() as pilot:
+        pane = app.query_one(ListPane)
+        pane.show_rows([("a", "a")], Option("more"))
+        pane.highlighted = 1
+        pane.show_rows([("b", "b"), ("a", "a")], Option("more"))
+        await pilot.pause()
+        assert pane.highlighted == 2
+
+
+async def test_rows_shown_without_a_highlight_highlight_nothing() -> None:
+    app = ListApp()
+    async with app.run_test() as pilot:
+        pane = app.query_one(ListPane)
+        pane.show_rows([("a", "a")])
+        pane.show_rows([("b", "b"), ("a", "a")])
+        await pilot.pause()
+        assert pane.highlighted is None
