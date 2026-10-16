@@ -37,6 +37,7 @@ uv run orbit chat --model opus --tools full    # pick the planner's model and ne
 uv run orbit chat --no-verify                  # don't verify tasks
 uv run orbit chat --no-review                  # don't review landed work
 uv run orbit chat --no-worktree                # tasks edit the current checkout; nothing is committed
+uv run orbit chat --no-usage                   # don't show usage limits
 ```
 
 With orbit installed as a tool, drop the `uv run`.
@@ -416,6 +417,21 @@ Tool access levels:
   `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1`.
 - `full`: every tool call is auto-approved (`--permission-mode bypassPermissions`). Claude can
   edit files and run commands without asking.
+
+### Usage limits
+
+The Usage panel in the right column shows **Session** (the 5-hour window) and **Week** (all
+models): the percent used, a bar that turns yellow at 75% and red at 90%, and when each resets, in
+local time.
+
+Orbit fetches them from the same undocumented endpoint Claude Code's `/usage` uses, with your
+Claude login's OAuth token from `~/.claude/.credentials.json` (Linux), sent only to
+`api.anthropic.com`. It fetches at startup, every 5 minutes, and after an agent's turn ends (at most
+once a minute). When it can't get them (no Claude login or an API-key login, an expired login, rate
+limiting, network errors), the panel says why and greys out the last numbers; nothing else is
+affected. The panel is display only.
+
+`--no-usage` turns it off, and orbit then never reads the token.
 
 ## Development
 

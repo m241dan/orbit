@@ -16,6 +16,7 @@ from orbit.agent import (
     ConfigError,
     GitCoderTree,
     McpHost,
+    UsageApi,
     Verification,
     git_top_level,
     in_git_work_tree,
@@ -91,6 +92,13 @@ def chat(
             " suggestions as tasks (needs the worktree).",
         ),
     ] = True,
+    usage: Annotated[
+        bool,
+        typer.Option(
+            help="Show your Claude subscription's session and weekly usage limits, read with"
+            " your Claude login's token from ~/.claude/.credentials.json.",
+        ),
+    ] = True,
 ) -> None:
     """Start an interactive agent session.
 
@@ -134,6 +142,7 @@ def chat(
         agents=agents,
         workspace=str(root),
         check_at_startup=True,
+        usage=UsageApi() if usage else None,
     )
     OrbitApp(session).run()
 

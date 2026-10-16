@@ -1,6 +1,6 @@
 import subprocess
 from pathlib import Path
-from typing import ClassVar
+from typing import Any, ClassVar
 
 import pytest
 from typer.testing import CliRunner
@@ -14,11 +14,13 @@ from orbit.agent import (
     Limits,
     McpHost,
     Setup,
+    UsageApi,
     Verification,
     VerificationStep,
     run_step,
     workspace_state,
 )
+from orbit.agent.application.ports import UsageSource
 from orbit.agent.domain.reviews import ReviewLimits
 from orbit.cli import app
 from orbit.protocol import Notice, Settings
@@ -351,3 +353,33 @@ def test_chat_checks_the_steps_at_startup(
     assert checked._startup is not None
     # Without verification, there's nothing to check.
     assert unverified._startup is None
+
+
+@pytest.fixture
+def usage_sources(monkeypatch: pytest.MonkeyPatch) -> list[UsageSource | None]:
+    """The usage sources chat gives its sessions."""
+    sources: list[UsageSource | None] = []
+
+    def session(*args: Any, usage: UsageSource | None = None, **kwargs: Any) -> AgentSession:
+        sources.append(usage)
+        return AgentSession(*args, usage=usage, **kwargs)
+
+    monkeypatch.setattr("orbit.cli.AgentSession", session)
+    return sources
+
+
+def test_chat_shows_usage_limits_from_the_claude_login(
+    launched: list[AgentSession], usage_sources: list[UsageSource | None]
+) -> None:
+    assert runner.invoke(app, ["chat"]).exit_code == 0
+    [source] = usage_sources
+    assert isinstance(source, UsageApi)
+    assert source.credentials == Path("~/.claude/.credentials.json").expanduser()
+
+
+def test_chat_can_turn_usage_limits_off(
+    launched: list[AgentSession], usage_sources: list[UsageSource | None]
+) -> None:
+    assert runner.invoke(app, ["chat", "--no-usage"]).exit_code == 0
+    assert usage_sources == [None]
+    assert len(launched) == 1
