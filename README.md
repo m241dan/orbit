@@ -107,6 +107,15 @@ verified). Its subtitle says whether review is active or paused. Activate it wit
 `c` on an agent to cancel its work: for a reviewer, just that review (the next one starts); for the
 planner, just its turn; for the coder, the same as `ctrl+s`.
 
+The **Usage panel** sits in the right column, between the verification panel and the agents pane.
+It stays hidden until a usage report arrives (orbit fetches it with the token in
+`~/.claude/.credentials.json`; see [Usage limits](#usage-limits)). For each limit, such as Session
+and Week, it shows a header with the percent used and the local reset time (`3:40pm` for today,
+`Mon 9:00am` for another day), and a bar that is green below 75%, yellow from 75% and red from 90%.
+When usage is rate limited or unavailable, it dims the last good numbers and adds a status line
+(`usage: rate limited, retrying …` or `usage unavailable: …`); when there are no limits, it says
+`no usage limits reported`. It's display only: it can't be focused, and `h`/`j`/`k`/`l` skip it.
+
 The conversation shows everything in one timeline: each agent's own messages and tool calls,
 prefixed with its id, and its exchanges with orbit (`agent-1 → orbit: complete_task …`,
 `orbit → agent-1: …`) in their own colour. The tabs above it narrow it: **All** shows everything,
