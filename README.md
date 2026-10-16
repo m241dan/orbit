@@ -508,7 +508,8 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     from outside (`AgentHost`, `AgentLauncher`, `CoderTree`, `StepRunner`, `Workspace`,
     `ProposalReview`, `UsageSource`, `ConfigWriter`).
   - `domain`: the rules, with no I/O: the `TaskBoard` (task order, statuses, fix chains),
-    `AgentTask` (what orbit replies to an agent, and when its work is verified), the
+    `StepProgress` (each verification step's status, kept by the `Verifier` and the startup
+    check), `AgentTask` (what orbit replies to an agent, and when its work is verified), the
     `AgentRegistry` (agent ids and tokens), `roles` (built-in roles, given their instructions,
     orbit's limits, its verification steps and worktree setup), `ReviewPlanner` (when to
     review, batches, rounds and caps), commit messages, when a task needs verifying, how many

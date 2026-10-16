@@ -1,6 +1,7 @@
 import sys
 
-from orbit.agent.application.verifier import first_failure
+from orbit.agent.application.verifier import Verification, Verifier, first_failure
+from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.roles import Setup, setup_step
 from orbit.agent.domain.verification import (
     CUT,
@@ -17,7 +18,14 @@ from orbit.agent.domain.verification import (
     steps_note,
     trim_output,
 )
-from orbit.protocol import Settings, StepState, StepStatus, TaskSpec
+from orbit.protocol import (
+    Event,
+    Settings,
+    StepState,
+    StepStatus,
+    TaskSpec,
+    VerificationChanged,
+)
 
 
 def python_step(code: str, name: str = "check") -> VerificationStep:
@@ -193,3 +201,22 @@ def test_resetting_makes_every_step_pending_again() -> None:
 def test_skipping_marks_every_step_skipped() -> None:
     progress = StepProgress.of(["Unit tests", "Lint"]).set(0, "passed")
     assert statuses(progress.skip()) == ["skipped", "skipped"]
+
+
+async def test_using_new_steps_replaces_the_steps_and_their_progress_together() -> None:
+    async def run_step(step: VerificationStep, root: str) -> tuple[bool, str]:
+        return True, ""
+
+    published: list[Event] = []
+
+    async def publish(event: Event) -> None:
+        published.append(event)
+
+    verifier = Verifier(Verification((python_step("", "old"),), run_step), TaskBoard(), publish)
+    await verifier.reset()
+    steps = (python_step("", "Lint"), python_step("", "Unit tests"))
+    await verifier.use_steps(steps)
+    assert verifier.verification.steps == steps
+    assert verifier.step_names == ("Lint", "Unit tests")
+    assert published[-1] == VerificationChanged(steps=verifier.progress.steps)
+    assert verifier.progress == StepProgress.of(["Lint", "Unit tests"])
