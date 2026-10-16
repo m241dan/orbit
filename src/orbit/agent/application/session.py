@@ -122,6 +122,7 @@ class AgentSession:
         self._verifier = _verifier(verification, self._board, self._events, agents)
         self._desk = AgentDesk(agents, self._events.put) if agents else None
         self._announced = False
+        self._closing = False
         self._lane = self._review_lane()
         self._held = False  # The user cancelled: don't start work by itself.
         self._planner = self._planner_chat()
@@ -411,6 +412,7 @@ class AgentSession:
         """Cancel the work in progress, which stops its agent, then stop the startup check, the
         usage monitor, the review lane, the planner and the agents' host, in that order. Each is
         stopped even if one before it fails; the first failure is raised after."""
+        self._closing = True
         failure: Exception | None = None
         for stop in self._stops():
             try:
@@ -447,7 +449,10 @@ class AgentSession:
             yield event
 
     def _start_background(self) -> None:
-        """Start the startup check and the usage monitor, if there are any."""
+        """Start the startup check and the usage monitor, if there are any and the session isn't
+        closing."""
+        if self._closing:
+            return
         if self._startup is not None:
             self._startup.start()
         if self._usage is not None:

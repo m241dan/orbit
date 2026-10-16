@@ -226,6 +226,41 @@ async def test_a_listener_cancelled_while_leftovers_are_found_still_starts_the_b
     await session.close()
 
 
+async def test_a_listener_cancelled_after_close_doesnt_start_the_background(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    started: list[str] = []
+    for part, name in ((StartupCheck, "startup"), (UsageMonitor, "usage")):
+        monkeypatch.setattr(part, "start", recorded(part.start, name, started))
+    tree = SlowTree("2 commits on orbit/coder not yet merged into main.")
+    session, _, _ = session_for(
+        verification=verified(Steps(True)), tree=tree, check_at_startup=True, usage=no_usage
+    )
+    first = asyncio.ensure_future(anext(session.events()))
+    await tree.asked.wait()
+    await session.close()
+    first.cancel()
+    await asyncio.gather(first, return_exceptions=True)
+    assert started == []
+
+
+async def test_listening_first_after_close_doesnt_start_the_background(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    started: list[str] = []
+    for part, name in ((StartupCheck, "startup"), (UsageMonitor, "usage")):
+        monkeypatch.setattr(part, "start", recorded(part.start, name, started))
+    session, _, _ = session_for(
+        verification=verified(Steps(True)), check_at_startup=True, usage=no_usage
+    )
+    await session.close()
+    listening = asyncio.ensure_future(listen(session.events(), []))
+    await asyncio.sleep(0.01)
+    listening.cancel()
+    await asyncio.gather(listening, return_exceptions=True)
+    assert started == []
+
+
 async def test_without_a_tree_tasks_work_in_the_current_directory() -> None:
     steps = Steps(True)
     session, _, launcher = session_for(claims_done, verification=verified(steps))
