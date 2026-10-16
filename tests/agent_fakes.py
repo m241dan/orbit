@@ -152,6 +152,7 @@ class FakeTree:
         self.dropped: list[str] = []
         self.setups: list[Setup | None] = []  # Each setup it was told to use, in order.
         self.setup: Setup | None = None
+        self.failures: dict[str, Exception] = {}  # Method name -> what its next call raises.
 
     async def prepare(self, keep: bool) -> str:
         self.prepared.append(keep)
@@ -177,9 +178,11 @@ class FakeTree:
         return self.base
 
     async def show(self, commits: Sequence[str]) -> str:
+        self._fail("show")
         return "\n".join(f"diff of {commit}" for commit in commits)
 
     async def snapshot(self, commit: str) -> str:
+        self._fail("snapshot")
         self.snapshots.append(commit)
         return f"/work/review-{commit}"
 
@@ -198,6 +201,12 @@ class FakeTree:
     def use_setup(self, setup: Setup | None) -> None:
         self.setups.append(setup)
         self.setup = setup
+
+    def _fail(self, method: str) -> None:
+        """Raise the failure scripted for ``method``, if any; it fails once."""
+        failure = self.failures.pop(method, None)
+        if failure is not None:
+            raise failure
 
 
 def verified(

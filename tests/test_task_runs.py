@@ -19,6 +19,7 @@ from orbit.protocol import (
     AddTask,
     AgentExited,
     BusyChanged,
+    CancelTurn,
     EditTask,
     ErrorOccurred,
     Event,
@@ -42,6 +43,7 @@ from tests.agent_fakes import (
     ROLES,
     Call,
     FakeHost,
+    FakeTree,
     FakeWorkspace,
     ScriptedLauncher,
     Steps,
@@ -380,3 +382,23 @@ async def test_usage_arriving_after_the_task_was_removed_is_skipped() -> None:
     assert outcome.status == "completed"
     assert AgentExited(agent_id="agent-1", reason="finished") in events
     assert not [e for e in events if isinstance(e, ErrorOccurred | TasksChanged)]
+
+
+async def test_an_unexpected_error_in_the_work_lane_is_reported() -> None:
+    tree = FakeTree()
+    tree.failures["show"] = ValueError("the lane tripped")
+    session, _, launcher = session_for(claims_done, claims_done, tree=tree, review=True)
+    events = await asyncio.wait_for(run(session, TaskSpec(prompt="a"), TaskSpec(prompt="b")), 5)
+    message = "The work lane stopped on an unexpected error: ValueError('the lane tripped')"
+    assert ErrorOccurred(message=message) in events
+    assert len(launcher.launches) == 1
+
+
+async def test_cancelling_a_run_before_it_starts_is_no_error() -> None:
+    session, _, launcher = session_for(claims_done)
+    await session.send(AddTask(task=TaskSpec(prompt="a")))
+    await session.send(RunTasks())
+    await session.send(CancelTurn())  # The run's task hasn't had a chance to start yet.
+    events = await asyncio.wait_for(idle(session), 5)
+    assert not any(isinstance(e, ErrorOccurred) for e in events)
+    assert statuses(events) == ["pending"] and launcher.launches == []

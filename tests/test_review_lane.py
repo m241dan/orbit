@@ -526,3 +526,45 @@ async def test_a_review_can_suggest_after_its_first_suggestion_landed() -> None:
     ]
     batch_review = board(events)[6]
     assert batch_review.task.prompt.startswith("Review the 2 commits made for review batch-1")
+
+
+async def test_a_snapshot_that_fails_errors_the_review_and_the_next_review_still_runs() -> None:
+    tree = FakeTree()
+    tree.failures["snapshot"] = RuntimeError("git worktree add failed: no space left")
+    session, _, _ = session_for(
+        claims_done, claims_done, reviewers=(suggests(),), tree=tree, review=True
+    )
+    await start(session, "one", "two")
+    events = await asyncio.wait_for(settle(session), 10)
+    assert statuses_of(events, "reviewer") == ["error", "completed"]
+    assert statuses_of(events, "coder") == ["completed", "completed"]
+    assert ErrorOccurred(message="git worktree add failed: no space left") in events
+    assert [e for e in events if isinstance(e, ReviewStatus)][-1].open_batches == 0
+    assert tree.snapshots == ["c2"] and tree.dropped == ["/work/review-c2"]
+
+
+async def test_a_diff_that_cannot_be_shown_skips_the_review_and_the_run_goes_on() -> None:
+    tree = FakeTree()
+    tree.failures["show"] = RuntimeError("git show failed: bad object c1")
+    session, _, _ = session_for(
+        claims_done, claims_done, reviewers=(suggests(),), tree=tree, review=True
+    )
+    await start(session, "one", "two")
+    events = await asyncio.wait_for(settle(session), 10)
+    assert [(t.task.role, t.status) for t in board(events)] == [
+        ("coder", "completed"),
+        ("coder", "completed"),
+        ("reviewer", "completed"),
+    ]
+    assert ErrorOccurred(message="Review skipped: git show failed: bad object c1") in events
+    assert "diff of c2" in board(events)[2].task.prompt
+
+
+async def test_an_unexpected_error_in_the_review_lane_is_reported() -> None:
+    tree = FakeTree()
+    tree.failures["snapshot"] = ValueError("the lane tripped")
+    session, _, _ = session_for(claims_done, tree=tree, review=True)
+    await start(session)
+    events = await asyncio.wait_for(settle(session), 10)
+    message = "The review lane stopped on an unexpected error: ValueError('the lane tripped')"
+    assert ErrorOccurred(message=message) in events

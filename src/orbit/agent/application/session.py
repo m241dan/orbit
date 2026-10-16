@@ -12,6 +12,7 @@ from dataclasses import replace
 from typing import Any, assert_never
 
 from orbit.agent.application.agent_run import AgentDesk, Agents
+from orbit.agent.application.lanes import crash_of, crash_report
 from orbit.agent.application.planner import PlannerChat
 from orbit.agent.application.ports import ProposalReview
 from orbit.agent.application.proposals import FrontendReview
@@ -447,6 +448,9 @@ class AgentSession:
         return turn
 
     def _idle(self, turn: "asyncio.Task[object]", lane: BusyLane) -> None:
+        crash = crash_of(turn)
+        if crash is not None:  # A bug; nothing awaits the turn, so it's reported here.
+            self._events.put_nowait(crash_report(lane, crash))
         # Work started since then reports its own end; staying quiet keeps it shown busy.
         if turn is (self._planner_turn if lane == "planner" else self._turn):
             self._events.put_nowait(BusyChanged(busy=False, lane=lane))

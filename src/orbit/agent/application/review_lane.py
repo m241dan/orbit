@@ -10,6 +10,7 @@ from collections.abc import Awaitable, Callable
 from contextlib import suppress
 
 from orbit.agent.application.agent_run import AgentDesk, AgentRun
+from orbit.agent.application.lanes import crash_report
 from orbit.agent.application.ports import CoderTree, Reply
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.reviews import ReviewJob, ReviewPlanner, review_prompt
@@ -22,6 +23,7 @@ from orbit.agent.domain.roles import (
     suggested_task,
 )
 from orbit.protocol import (
+    ErrorOccurred,
     Notice,
     ReviewStatus,
     TaskOrigin,
@@ -111,10 +113,26 @@ class ReviewLane:
 
     async def _queue(self, job: ReviewJob | None) -> None:
         await self._note_pause()
-        if job is None:
+        diff = None if job is None else await self._diff(job)
+        if job is None or diff is None:  # No review is due, or its diff can't be read.
             await self._publish_status()
             return
-        diff = "" if job.whole else await self._tree.show(job.commits)
+        await self._add(job, diff)
+        await self._publish_status()
+        self.kick()
+
+    async def _diff(self, job: ReviewJob) -> str | None:
+        """The diff ``job``'s reviewer is shown; none, reported, if git can't show it."""
+        if job.whole:
+            return ""
+        try:
+            return await self._tree.show(job.commits)
+        except RuntimeError as exc:  # Git failed; the review is skipped rather than the run.
+            await self._publish(ErrorOccurred(message=f"Review skipped: {exc}"))
+            return None
+
+    async def _add(self, job: ReviewJob, diff: str) -> None:
+        """Queue ``job``'s review task, told ``diff``."""
         batch = self.planner.open_batch(job)
         role = SUPER_REVIEWER if job.whole else REVIEWER
         prompt = review_prompt(job, diff, self.planner.cap(job))
@@ -122,8 +140,6 @@ class ReviewLane:
         task_id = self._board.add_review(task)
         self._jobs[task_id], self._batches[task_id] = job, batch
         await self._publish(TasksChanged(tasks=self._board.tasks))
-        await self._publish_status()
-        self.kick()
 
     async def _publish_status(self) -> None:
         status = ReviewStatus(
@@ -144,10 +160,21 @@ class ReviewLane:
         self._paused_noted = self.planner.paused
 
     async def _run(self) -> None:
-        tried: set[str] = set()
+        try:
+            await self._run_reviews()
+        except Exception as exc:  # A bug; nothing awaits this task, so say so here.
+            await self._publish(crash_report("review", exc))
+
+    async def _run_reviews(self) -> None:
+        tried = self._spent()
         while (task_id := self._board.next_runnable(skip=tried, roles=REVIEW_ROLES)) is not None:
             tried.add(task_id)
             await self._review(task_id)
+
+    def _spent(self) -> set[str]:
+        """Reviews that ended, however they did: their batch is over, so running them again
+        could suggest nothing."""
+        return {t for t, b in self._batches.items() if b not in self.planner.open_batches}
 
     async def _review(self, task_id: str) -> None:
         job = self._jobs.get(task_id)
@@ -163,6 +190,9 @@ class ReviewLane:
         except asyncio.CancelledError:
             if _being_cancelled():  # The lane itself is stopping, not just this review.
                 raise
+        except RuntimeError as exc:  # Git couldn't make or drop the snapshot.
+            await self._publish(ErrorOccurred(message=str(exc)))
+            status = "error"
         finally:
             self._current = None
             self._board.finish(task_id, status)
