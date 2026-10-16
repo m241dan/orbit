@@ -490,8 +490,9 @@ def snapshot_dirs(repo: Path) -> list[Path]:
     return list((repo / ".git" / "orbit").glob("snapshot-*"))
 
 
-def failing_add(monkeypatch: pytest.MonkeyPatch, *, after: bool) -> None:
-    """Make ``git worktree add`` raise, before running or ``after`` it has made the tree."""
+def failing_add(monkeypatch: pytest.MonkeyPatch, *, after: bool, lock: bool = False) -> None:
+    """Make ``git worktree add`` raise, before running or ``after`` it has made the tree,
+    which it can ``lock`` first, as git leaves a half-made one."""
     real = GitCoderTree._git
 
     async def fake(self: GitCoderTree, cwd: Path, *args: str) -> str:
@@ -499,6 +500,8 @@ def failing_add(monkeypatch: pytest.MonkeyPatch, *, after: bool) -> None:
             return await real(self, cwd, *args)
         if after:
             await real(self, cwd, *args)
+        if lock:
+            await real(self, cwd, "worktree", "lock", args[-2])
         raise RuntimeError("git worktree failed: index.lock exists")
 
     monkeypatch.setattr(GitCoderTree, "_git", fake)
@@ -514,6 +517,19 @@ async def test_a_failed_snapshot_leaves_no_directory_or_worktree(
         await tree.snapshot("HEAD")
     assert snapshot_dirs(repo) == []
     assert "snapshot-" not in git(repo, "worktree", "list")
+    assert await GitCoderTree(str(repo)).leftovers() == []
+
+
+async def test_a_failed_snapshot_left_locked_is_unregistered(
+    monkeypatch: pytest.MonkeyPatch, repo: Path
+) -> None:
+    failing_add(monkeypatch, after=True, lock=True)
+    tree = GitCoderTree(str(repo))
+    with pytest.raises(RuntimeError, match=r"index\.lock"):
+        await tree.snapshot("HEAD")
+    assert snapshot_dirs(repo) == []
+    assert "snapshot-" not in git(repo, "worktree", "list", "--porcelain")
+    assert list((repo / ".git" / "worktrees").glob("snapshot-*")) == []
     assert await GitCoderTree(str(repo)).leftovers() == []
 
 
@@ -576,6 +592,32 @@ async def test_a_snapshot_cancelled_while_being_added_leaves_nothing(
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
+    assert snapshot_dirs(repo) == [] and tree._snapshots == set()
+
+
+async def test_a_snapshot_cancelled_while_making_its_directory_leaves_nothing(
+    monkeypatch: pytest.MonkeyPatch, repo: Path
+) -> None:
+    real = git_tree._make_snapshot_dir
+    making, release, made = threading.Event(), threading.Event(), threading.Event()
+
+    def blocking(parent: Path, commit: str) -> Path:
+        making.set()
+        release.wait()
+        path = real(parent, commit)
+        made.set()
+        return path
+
+    monkeypatch.setattr(git_tree, "_make_snapshot_dir", blocking)
+    tree = GitCoderTree(str(repo))
+    task = asyncio.create_task(tree.snapshot("HEAD"))
+    await asyncio.to_thread(making.wait)
+    task.cancel()
+    await asyncio.sleep(0)
+    release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    await asyncio.to_thread(made.wait)
     assert snapshot_dirs(repo) == [] and tree._snapshots == set()
 
 

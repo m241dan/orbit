@@ -187,7 +187,7 @@ class GitCoderTree:
     async def snapshot(self, commit: str) -> str:
         sha = await self._git(self._root, "rev-parse", "--verify", "-q", f"{commit}^{{commit}}")
         parent = (await self._path()).parent
-        path = await asyncio.to_thread(_make_snapshot_dir, parent, sha)
+        path = await self._new_snapshot_dir(parent, sha)
         self._snapshots.add(path)
         try:
             await self._git(self._root, "worktree", "add", "-q", "--detach", str(path), sha)
@@ -200,12 +200,26 @@ class GitCoderTree:
         await self._git(self._root, "worktree", "remove", "--force", path)
         self._snapshots.discard(Path(path))
 
+    async def _new_snapshot_dir(self, parent: Path, sha: str) -> Path:
+        """A new directory in ``parent`` for a snapshot of ``sha``; when cancelled, the one
+        the thread goes on to make is removed before the cancellation is raised."""
+        making = asyncio.ensure_future(asyncio.to_thread(_make_snapshot_dir, parent, sha))
+        try:
+            return await asyncio.shield(making)
+        except asyncio.CancelledError:
+            await asyncio.wait([making])
+            with contextlib.suppress(OSError):  # It failed to make one: nothing to remove.
+                await asyncio.to_thread(shutil.rmtree, making.result(), ignore_errors=True)
+            raise
+
     async def _discard_snapshot(self, path: Path) -> None:
-        """Remove the half-made snapshot at ``path``, whether or not git registered it,
-        ignoring failures so the error that stopped it is the one raised."""
+        """Remove the half-made snapshot at ``path``, whether or not git registered it, even
+        locked as a killed ``git worktree add`` leaves it, ignoring failures so the error that
+        stopped it is the one raised."""
         try:
             with contextlib.suppress(RuntimeError):
-                await _run(("git", "worktree", "remove", "--force", str(path)), self._root)
+                remove = ("git", "worktree", "remove", "--force", "--force", str(path))
+                await _run(remove, self._root)
             await asyncio.to_thread(shutil.rmtree, path, ignore_errors=True)
         finally:
             self._snapshots.discard(path)
