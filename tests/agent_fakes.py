@@ -175,6 +175,7 @@ class FakeTree:
         return f"c{len(self.commits) + self.agent_commits}"
 
     async def base_commit(self) -> str:
+        self._fail("base_commit")
         return self.base
 
     async def show(self, commits: Sequence[str]) -> str:

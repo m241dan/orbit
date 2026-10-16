@@ -90,6 +90,19 @@ def _finished(events: list[Event]) -> bool:
     return bool(tasks) and all(t.status in SETTLED for t in tasks[-1].tasks)
 
 
+def _errored(events: list[Event]) -> bool:
+    return bool(_error_messages(events))
+
+
+def _error_messages(events: list[Event]) -> list[str]:
+    return [e.message for e in events if isinstance(e, ErrorOccurred)]
+
+
+def _roles_seen(events: list[Event]) -> set[str]:
+    """Every role a task on the board had, over all the board's changes."""
+    return {t.task.role for e in events if isinstance(e, TasksChanged) for t in e.tasks}
+
+
 def reviewers_of(launcher: ScriptedLauncher) -> list[str]:
     return [la.agent.id for la in launcher.launches if la.agent.role == "reviewer"]
 
@@ -393,6 +406,17 @@ async def test_a_super_review_can_be_asked_for_before_any_task_ran() -> None:
     assert [t.task.role for t in board(events)] == ["super-reviewer"]
     assert tree.snapshots == [tree.base] and tree.prepared == []
     assert not any(isinstance(e, ErrorOccurred) for e in events)
+
+
+async def test_a_super_review_is_skipped_when_the_base_commit_cannot_be_read() -> None:
+    tree = FakeTree()
+    tree.failures["base_commit"] = RuntimeError("git rev-parse failed: unknown revision")
+    session, _, _ = session_for(reviewers=(suggests(),), tree=tree, review=True)
+    await session.send(RequestSuperReview())
+    events = await asyncio.wait_for(settle(session, until=_errored), 10)
+    assert "unknown revision" in " ".join(_error_messages(events))
+    assert "super-reviewer" not in _roles_seen(events)
+    assert tree.snapshots == []
 
 
 async def test_without_reviews_a_super_review_is_refused() -> None:

@@ -69,7 +69,12 @@ class ReviewLane:
     async def super_review(self) -> None:
         """Queue a super review of the codebase as the user has it: the base's latest commit.
         (The coder's tree may lag behind it, or not exist yet.)"""
-        await self._queue(self.planner.super_review(await self._tree.base_commit()))
+        try:
+            commit = await self._tree.base_commit()
+        except RuntimeError as exc:  # Git failed; the review is skipped rather than the run.
+            await self._publish(ErrorOccurred(message=f"Super review skipped: {exc}"))
+            return
+        await self._queue(self.planner.super_review(commit))
 
     async def ended(self, task_id: str) -> None:
         """Task ``task_id`` finished without landing anything."""
