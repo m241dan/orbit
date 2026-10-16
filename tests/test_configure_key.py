@@ -11,6 +11,7 @@ from orbit.agent.domain.roles import Setup, configure_prompt
 from orbit.agent.domain.verification import VerificationStep
 from orbit.protocol import (
     AddTask,
+    CancelTurn,
     ConfigureChecks,
     ErrorOccurred,
     Event,
@@ -158,6 +159,31 @@ async def test_while_tasks_run_it_goes_next() -> None:
     assert [launch.agent.role for launch in launcher.launches] == ["coder", "configurator", "coder"]
     assert [t.task.role for t in board(events)] == ["configurator", "coder", "coder"]
     assert not any(isinstance(e, ErrorOccurred) for e in events)
+
+
+async def test_after_ctrl_s_holds_the_work_it_still_runs_straight_away() -> None:
+    fetched = asyncio.Event()
+
+    async def waits_forever(call: Call) -> TurnEndReason:
+        await call("get_task")
+        fetched.set()
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+    configurator = Configurator()
+    session, _, launcher = session_for(
+        waits_forever, configurator, claims_done, verification=no_steps()
+    )
+    await session.send(AddTask(task=CODE))
+    await session.send(RunTasks())
+    await asyncio.wait_for(fetched.wait(), 5)
+    await session.send(CancelTurn())
+    await until_idle(session)
+    await session.send(ConfigureChecks())
+    events = await until_idle(session)
+    assert [launch.agent.role for launch in launcher.launches] == ["coder", "configurator", "coder"]
+    assert len(configurator.tasks) == 1
+    assert [t.task.role for t in board(events)] == ["configurator", "coder"]
 
 
 async def test_without_agents_it_is_refused() -> None:
