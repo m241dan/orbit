@@ -393,7 +393,7 @@ def join_prompt(title: str, body: str) -> str:
 
 def _trim_body(body: str) -> str:
     """``body`` without the blank lines around it or its last line's trailing whitespace."""
-    lines = body.splitlines()
+    lines = body.split("\n")
     while lines and not lines[0].strip():
         del lines[0]
     return "\n".join(lines).rstrip()

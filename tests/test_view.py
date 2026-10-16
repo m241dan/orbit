@@ -523,3 +523,19 @@ def test_joining_a_blank_body_gives_just_the_title() -> None:
 
 def test_joining_strips_the_title() -> None:
     assert join_prompt("  Title \n", "body") == "Title\n\nbody"
+
+
+def test_interior_blank_lines_of_the_body_survive_split_and_join() -> None:
+    prompt = "Title\n\na\n\n  \nb"
+    assert split_prompt(prompt) == ("Title", "a\n\n  \nb")
+    assert join_prompt(*split_prompt(prompt)) == prompt
+
+
+def test_trailing_whitespace_on_an_interior_body_line_survives() -> None:
+    assert split_prompt("Title\n\na  \nb") == ("Title", "a  \nb")
+
+
+def test_only_newlines_delimit_body_lines() -> None:
+    # str.splitlines would also split on these; the editor must hand the body back unchanged.
+    for prompt in ("Title\n\na\u2028b", "Title\n\na\x0cb", "Title\n\na\r\nb"):
+        assert join_prompt(*split_prompt(prompt)) == prompt
