@@ -374,6 +374,29 @@ async def test_ctrl_s_saves_while_typing_in_the_prompt_box() -> None:
         assert session.commands == [AddTask(task=TaskSpec(prompt="Title\n\nbody"))]
 
 
+async def test_ctrl_s_saves_while_typing_in_the_title() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await show_settings(session, pilot, Settings())
+        await open_task_list(pilot)
+        await pilot.press("enter", "i", *"Title", "ctrl+s")
+        assert not isinstance(app.screen, TaskEditorScreen)
+        assert session.commands == [AddTask(task=TaskSpec(prompt="Title"))]
+
+
+async def test_ctrl_s_saves_an_edited_task_while_typing_in_the_title() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await show_settings(session, pilot, Settings())
+        await feed(session, pilot, board("one"))
+        await open_task_list(pilot)
+        await pilot.press("enter", "i", "!", "ctrl+s")
+        assert not isinstance(app.screen, TaskEditorScreen)
+        assert session.commands == [EditTask(task_id="1", task=TaskSpec(prompt="one!"))]
+
+
 async def test_a_fix_task_round_trips_through_the_editor_unchanged() -> None:
     session = FakeSession()
     app = OrbitApp(session)
