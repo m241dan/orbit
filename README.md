@@ -47,7 +47,7 @@ In the app:
 |---|---|
 | `h` `j` `k` `l` | Move between windows (the selected one is highlighted) |
 | `i` | Jump to the prompt, which talks to the planner, and start typing (vim-style insert mode) |
-| `enter` | On the conversation: activate it (`j`/`k` move between entries, `enter` collapses or expands the highlighted one, `esc` leaves) |
+| `enter` | On the conversation: activate it (`j`/`k` move between entries, `enter` collapses or expands the one marked `▌` in the left gutter, `esc` leaves) |
 | `enter` | On the task list: activate it (`j`/`k` move, `enter` edits a task or adds one on `+ new task`, `a` accepts a draft, `x` removes a task, `esc` leaves) |
 | `enter` | On the agents pane: activate it (`j`/`k` move, `c` cancels the highlighted agent's work, `esc` leaves) |
 | `ctrl+t` | Jump to the **planner** tab; again, back to the tab you were on |
@@ -119,8 +119,8 @@ Each entry is coloured by what it is: your prompts, agents' messages, tool calls
 verification and notices, and errors. An entry of more than one line can be collapsed to its first
 line and a count of the rest, marked `▸` (`▾` when expanded); tool output starts collapsed. Press
 `enter` on the conversation to move between entries with `j`/`k`, `enter` again to collapse or
-expand the highlighted one, and `esc` to leave. The conversation stays pinned to the latest entry
-unless you're moving about in it.
+expand the one marked `▌` in the left gutter, and `esc` to leave; the mark stays where you left
+it. The conversation stays pinned to the latest entry unless you're moving about in it.
 
 Each row of the task list shows its status: ⏳ pending, ◜ running (spinning), 🔍 verifying, ✅ done,
 ❗ failed verification, ❌ failed, ⌛ ran out of steps, 🏳 the agent gave up, 🛑 cancelled, 📝 a draft

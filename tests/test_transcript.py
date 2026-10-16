@@ -1,11 +1,13 @@
 """The transcript keeps entries per tab, each tab a list of entries that can be moved between
 and collapsed."""
 
+from rich.style import Style
 from rich.text import Text
 from textual.pilot import Pilot
 
 from orbit.protocol import AssistantMessage, Notice, ToolCallFinished
 from orbit.tui import OrbitApp
+from orbit.tui.view import GUTTER_BAR, GUTTER_MARKER
 from orbit.tui.widgets import Transcript, TranscriptLog
 from tests.test_tui import FakeSession, feed_events, said, started
 
@@ -26,9 +28,31 @@ def prompts(app: OrbitApp) -> list[Text]:
     return texts
 
 
+def entry_lines(prompt: Text) -> list[str]:
+    """The lines of an entry, without the blank line after it."""
+    return prompt.plain.removesuffix("\n").split("\n")
+
+
 def labels(app: OrbitApp) -> list[str]:
-    """The shown log's entries as they're labelled."""
-    return [prompt.plain.removesuffix("\n") for prompt in prompts(app)]
+    """The shown log's entries as they're labelled, without their gutter."""
+    return ["\n".join(line[2:] for line in entry_lines(prompt)) for prompt in prompts(app)]
+
+
+def gutters(app: OrbitApp) -> list[str]:
+    """The gutter symbol of each of the shown log's entries, checked to be on all its lines."""
+    symbols = []
+    for prompt in prompts(app):
+        (symbol,) = {line[:2] for line in entry_lines(prompt)}
+        symbols.append(symbol.strip())
+    return symbols
+
+
+def label_style(prompt: Text) -> Style:
+    """The style of the first character after an entry's gutter."""
+    styles = [span.style for span in prompt.spans if span.start <= 2 < span.end]
+    return Style.combine(
+        [Style.null(), *(Style.parse(s) if isinstance(s, str) else s for s in styles)]
+    )
 
 
 async def fed(session: FakeSession, pilot: Pilot[None], app: OrbitApp, count: int) -> None:
@@ -72,8 +96,8 @@ async def test_entries_are_shown_as_paragraphs_separated_by_blank_lines() -> Non
         assert labels(app) == ["▶ agent-1 (coder) started", "▾ agent-1: hi\nthere"]
         assert all(prompt.plain.endswith("\n") for prompt in prompts(app))
         log = visible_log(app)
-        rendered = [log.render_line(y).text.strip() for y in range(5)]
-        assert rendered == ["▶ agent-1 (coder) started", "", "▾ agent-1: hi", "there", ""]
+        rendered = [log.render_line(y).text.rstrip() for y in range(5)]
+        assert rendered == ["│ ▶ agent-1 (coder) started", "", "│ ▾ agent-1: hi", "│ there", ""]
 
 
 async def test_entry_kinds_style_the_entries() -> None:
@@ -82,10 +106,83 @@ async def test_entry_kinds_style_the_entries() -> None:
     async with app.run_test() as pilot:
         await pilot.press("i", *"hi", "enter")
         await feed_events(session, pilot, AssistantMessage(turn_id="t", text="plain"))
+        log = visible_log(app)
         user, plain = prompts(app)
-        assert user.style == visible_log(app).get_component_rich_style("transcript--user")
-        assert isinstance(user.style, str) or user.style.bold
-        assert plain.style == visible_log(app).get_component_rich_style("transcript--assistant")
+        user_style, plain_style = (label_style(prompt) for prompt in (user, plain))
+        assert user_style == log.get_component_rich_style("transcript--user", partial=True)
+        assert isinstance(user_style, Style) and user_style.bold
+        assert plain_style == log.get_component_rich_style("transcript--assistant", partial=True)
+        assert user_style.bgcolor is None
+
+
+async def test_every_entry_has_a_dim_bar_in_its_gutter_without_a_cursor() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, started("agent-1"), said("agent-1", "hi\nthere"))
+        assert visible_log(app).highlighted is None
+        assert gutters(app) == [GUTTER_BAR, GUTTER_BAR]
+        bar = prompts(app)[1].spans[0]
+        assert prompts(app)[1].plain[bar.start : bar.end] == f"{GUTTER_BAR} "
+        assert bar.style == visible_log(app).get_component_rich_style(
+            "transcript--gutter", partial=True
+        )
+
+
+async def test_the_cursors_entry_is_marked_and_the_marker_moves_with_it() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, started("agent-1"), said("agent-1", "hi\nthere"))
+        await pilot.press("k", "enter")
+        assert gutters(app) == [GUTTER_BAR, GUTTER_MARKER]
+        marker = prompts(app)[1].spans[0]
+        assert marker.style == visible_log(app).get_component_rich_style(
+            "transcript--marker", partial=True
+        )
+        await pilot.press("k")
+        assert gutters(app) == [GUTTER_MARKER, GUTTER_BAR]
+        await pilot.press("j")
+        assert gutters(app) == [GUTTER_BAR, GUTTER_MARKER]
+
+
+async def test_a_toggled_entry_keeps_its_marker() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, started("agent-1"), tool_output("agent-1", "a\nb"))
+        await pilot.press("k", "enter", "enter")
+        assert labels(app)[1] == "▾ agent-1: a\nb"
+        assert gutters(app) == [GUTTER_BAR, GUTTER_MARKER]
+
+
+async def test_the_marker_stays_after_leaving_and_goes_with_the_cursor() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, started("agent-1"), said("agent-1", "hi"))
+        await pilot.press("k", "enter", "escape")
+        log = visible_log(app)
+        assert app.focused is None and log.highlighted == 1
+        assert gutters(app) == [GUTTER_BAR, GUTTER_MARKER]
+        log.highlighted = None
+        await pilot.pause()
+        assert gutters(app) == [GUTTER_BAR, GUTTER_BAR]
+
+
+async def test_the_cursors_entry_has_no_highlight_background() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, started("agent-1"), said("agent-1", "hi"))
+        await pilot.press("k", "enter")
+        log = visible_log(app)
+        plain = log.get_visual_style("option-list--option")
+        for focused in (True, False):
+            assert (app.focused is log) == focused
+            for state in ("option-list--option-highlighted", "option-list--option-hover"):
+                assert log.get_visual_style("option-list--option", state) == plain
+            await pilot.press("escape")
 
 
 async def test_tool_output_of_several_lines_starts_collapsed() -> None:

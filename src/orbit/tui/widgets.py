@@ -22,6 +22,7 @@ from orbit.tui.view import (
     EntryKind,
     collapsible,
     entry_label,
+    gutter_lines,
     mark_planner_busy,
     mark_tab_read,
     mark_tab_unread,
@@ -71,7 +72,7 @@ class TranscriptLog(ListPane):
     """One tab's entries, each an option: activated, j/k move between them and enter collapses
     or expands one. Kept at no display until shown, since the list lays out only what's on
     screen, so switching tabs is instant and adding an entry costs the same however long the
-    conversation gets."""
+    conversation gets. The cursor's entry is marked in the left gutter rather than highlighted."""
 
     DEFAULT_CSS = """
     TranscriptLog {
@@ -90,13 +91,27 @@ class TranscriptLog(ListPane):
     TranscriptLog .transcript--verify { color: $text-warning; }
     TranscriptLog .transcript--agent { color: $text-accent; }
     TranscriptLog .transcript--error { color: $text-error; }
+    TranscriptLog .transcript--gutter { color: $text-muted; }
+    TranscriptLog .transcript--marker { color: $accent; }
+    TranscriptLog > .option-list--option-highlighted,
+    TranscriptLog:focus > .option-list--option-highlighted,
+    TranscriptLog > .option-list--option-hover {
+        color: $foreground;
+        background: transparent;
+        text-style: none;
+    }
     """
-    COMPONENT_CLASSES: ClassVar[set[str]] = {f"transcript--{kind}" for kind in get_args(EntryKind)}
+    COMPONENT_CLASSES: ClassVar[set[str]] = {
+        "transcript--gutter",
+        "transcript--marker",
+        *(f"transcript--{kind}" for kind in get_args(EntryKind)),
+    }
 
     def __init__(self, shown: bool = False) -> None:
         super().__init__()
         self._entries: list[Entry] = []
         self._collapsed: list[bool] = []
+        self._marked: int | None = None  # The entry drawn with the marker.
         self.set_class(shown, "-shown")
 
     @property
@@ -115,7 +130,7 @@ class TranscriptLog(ListPane):
         collapsed = starts_collapsed(kind) and collapsible(text)
         self._entries.append((text, kind))
         self._collapsed.append(collapsed)
-        self.add_option(self._prompt(text, kind, collapsed))
+        self.add_option(self._prompt(len(self._entries) - 1))
         if not self.has_focus:
             self.scroll_end(animate=False)
 
@@ -125,21 +140,41 @@ class TranscriptLog(ListPane):
     def toggle(self, index: int) -> None:
         """Collapse the entry at ``index`` if it's expanded, and the other way round; an entry
         of one line stays as it is."""
-        text, kind = self._entries[index]
+        text, _ = self._entries[index]
         if not collapsible(text):
             return
         self._collapsed[index] = not self._collapsed[index]
-        self.replace_option_prompt_at_index(index, self._prompt(text, kind, self._collapsed[index]))
+        self._redraw(index)
+
+    def watch_highlighted(self, highlighted: int | None) -> None:
+        """Move the marker from the entry it was on to the cursor's, if there is one."""
+        super().watch_highlighted(highlighted)
+        previous, self._marked = self._marked, highlighted
+        for index in (previous, highlighted):
+            if index is not None:
+                self._redraw(index)
 
     @on(OptionList.OptionSelected)
     def _toggle(self, event: OptionList.OptionSelected) -> None:
         event.stop()
         self.toggle(event.option_index)
 
-    def _prompt(self, text: str, kind: EntryKind, collapsed: bool) -> Text:
-        # Each entry ends in a blank line, so entries read as paragraphs.
-        style = self.get_component_rich_style(f"transcript--{kind}")
-        return Text(entry_label(text, collapsed) + "\n", style=style)
+    def _redraw(self, index: int) -> None:
+        self.replace_option_prompt_at_index(index, self._prompt(index))
+
+    def _prompt(self, index: int) -> Text:
+        # Partial styles, so no background of their own paints a band across the entry.
+        text, kind = self._entries[index]
+        marked = index == self._marked
+        style = self.get_component_rich_style(f"transcript--{kind}", partial=True)
+        gutter = self.get_component_rich_style(
+            "transcript--marker" if marked else "transcript--gutter", partial=True
+        )
+        prompt = Text()
+        # Each line ends in a newline, so the entry ends in a blank line and reads as a paragraph.
+        for bar, line in gutter_lines(entry_label(text, self._collapsed[index]), marked):
+            prompt.append(bar, gutter).append(line, style).append("\n")
+        return prompt
 
 
 class Transcript(Vertical):
