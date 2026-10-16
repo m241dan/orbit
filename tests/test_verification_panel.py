@@ -11,6 +11,7 @@ from orbit.protocol import (
     VerificationStarted,
 )
 from orbit.tui import OrbitApp
+from orbit.tui.view import spinner_frame, step_lines
 from orbit.tui.widgets import Transcript, VerificationPanel
 from tests.test_task_list import feed
 from tests.test_tui import FakeSession
@@ -242,12 +243,15 @@ async def test_a_line_that_wraps_as_its_time_grows_lays_the_panel_out(
     async with app.run_test(size=(60, 24)) as pilot:
         panel = app.query_one(VerificationPanel)
         width = panel.query_one(Static).content_region.width
-        # "◜  " + name + " · 9s" fills the width exactly; at 10s it wraps.
-        name = "x" * (width - len("◜  · 9s") - 1)
+        # The running line around an empty name, so with this name it fills the width
+        # exactly at 9s and wraps at 10s, when the time gains a digit.
+        fixed = len(step_lines((StepState(name="", status="running"),), spinner_frame(9.0), 9)[0])
+        name = "x" * (width - fixed)
         now = [0.0]
         panel.clock = lambda: now[0]
         await feed(session, pilot, running(name))
-        now[0] = 9.0  # frame 72, the same as at 10s
+        # Records the panel's height for the line at 9s before the spy goes in.
+        now[0] = 9.0
         panel.tick()
         layouts = spy_layouts(panel, monkeypatch)
         now[0] = 10.0
