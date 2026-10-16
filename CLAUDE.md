@@ -26,7 +26,7 @@ The import contracts in `pyproject.toml` keep this shape:
 - The backend is layered `external` > `application` > `domain`: a layer imports only the ones
   below it. The domain is pure rules, with I/O left to the layers above; when a rule needs data
   from outside, such as a file's contents, the caller reads it and passes it in.
-- `orbit.agent.external` is the only place that uses mcp, uvicorn or starlette.
+- `orbit.agent.external` is the only place that uses mcp, uvicorn, starlette or httpx.
 - `orbit.tui.view` holds the presentation rules as plain functions; the Textual widgets lay out
   what it returns.
 

@@ -104,10 +104,10 @@ type = "forbidden"
 source_modules = ["orbit.agent.domain"]
 forbidden_modules = ["asyncio", "subprocess", "os", "pathlib", "json", "uuid", "time"]
 
-# MCP and the web server it runs on are details of the external adapters. The CLI wires
-# the adapters up, so it reaches them indirectly.
+# MCP, the web server it runs on and the HTTP client are details of the external adapters.
+# The CLI wires the adapters up, so it reaches them indirectly.
 [[tool.importlinter.contracts]]
-name = "Only external adapters use MCP"
+name = "Only external adapters use MCP or HTTP"
 type = "forbidden"
 source_modules = [
     "orbit.agent.application",
@@ -116,7 +116,7 @@ source_modules = [
     "orbit.tui",
     "orbit.cli",
 ]
-forbidden_modules = ["mcp", "uvicorn", "starlette"]
+forbidden_modules = ["mcp", "uvicorn", "starlette", "httpx"]
 allow_indirect_imports = true
 
 # The frontend's presentation rules are plain functions; the widgets are what touch Textual.
