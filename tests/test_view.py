@@ -36,6 +36,7 @@ from orbit.protocol import (
     UsageLimit,
     VerificationChanged,
     VerificationFinished,
+    VerificationSkipped,
     VerificationStarted,
 )
 from orbit.tui.view import (
@@ -718,9 +719,28 @@ def test_coalesce_collapses_consecutive_task_lists_to_the_last() -> None:
     assert coalesce([tasks_changed("1"), tasks_changed("1", "2"), last]) == [last]
 
 
-def test_coalesce_keeps_a_task_list_a_task_start_reads() -> None:
-    events: list[Event] = [tasks_changed("1"), TaskStarted(task_id="1"), tasks_changed("1", "2")]
+@pytest.mark.parametrize(
+    "blocker",
+    [
+        TaskStarted(task_id="1"),
+        VerificationStarted(task_id="1", step=0),
+        VerificationSkipped(task_id="1", reason="no_changes"),
+        VerificationFinished(task_id="1", step=0, passed=True),
+        TaskMerged(task_id="1", result="merged"),
+    ],
+)
+def test_coalesce_keeps_a_task_list_an_event_reads(blocker: Event) -> None:
+    events: list[Event] = [tasks_changed("1"), blocker, tasks_changed("1", "2")]
     assert coalesce(events) == events
+
+
+@pytest.mark.parametrize(
+    "between",
+    [Notice(message="n"), AgentStarted(agent_id="agent-1", role="coder", task_id="1")],
+)
+def test_coalesce_drops_a_task_list_past_events_that_dont_read_it(between: Event) -> None:
+    last = tasks_changed("1", "2")
+    assert coalesce([tasks_changed("1"), between, last]) == [between, last]
 
 
 def test_coalesce_drops_only_the_task_lists_nothing_reads() -> None:
