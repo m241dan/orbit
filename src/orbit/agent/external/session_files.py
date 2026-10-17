@@ -4,13 +4,19 @@ Inside a git repository they live in ``.git/orbit/sessions``, beside the coder's
 when orbit works in the user's checkout; outside one, in ``.orbit/sessions`` in the workspace.
 Files are replaced atomically, so a crash leaves the old version or the new one, and orbit never
 overwrites or deletes a file it can't read unless asked to delete that session. Nothing is pruned.
+
+A session's lock is an exclusive ``flock`` on its ``.lock`` file, held open until the orbit lets
+go of it; the kernel drops it when the orbit's process ends, so a lock file nobody holds is free to
+take. The file names the holder's process only for whoever reads it. Taking, letting go of and
+checking locks happen under a lock on the sessions directory, so a lock file is never removed
+between another orbit opening it and locking it.
 """
 
 import asyncio
 import fcntl
 import os
 import tempfile
-from collections.abc import Callable, Iterator
+from collections.abc import Iterator
 from contextlib import contextmanager
 from enum import Enum, auto
 from pathlib import Path
@@ -19,8 +25,6 @@ from orbit.agent.application.ports import StoredSession
 from orbit.agent.domain.sessions import (
     SessionRecord,
     Unreadable,
-    lock_is_stale,
-    lock_owner,
     parse_record,
     parse_review_count,
     record_json,
@@ -38,17 +42,6 @@ def state_dir(workspace: str) -> Path:
     without git)."""
     common = git_common_dir(workspace)
     return Path(common) / ORBIT_DIR if common else Path(workspace) / ".orbit"
-
-
-def pid_alive(pid: int) -> bool:
-    """Whether the process ``pid`` is running."""
-    try:
-        os.kill(pid, 0)
-    except (ProcessLookupError, OverflowError):
-        return False
-    except PermissionError:  # It's running, as another user.
-        return True
-    return True
 
 
 def _write_atomic(path: Path, text: str) -> None:
@@ -94,24 +87,48 @@ def _read_record(path: Path) -> SessionRecord | Unreadable:
     return parse_record(text)
 
 
-def _read_lock(path: Path) -> str:
-    """The lock file ``path``'s content; empty when there's none or it can't be read."""
-    try:
-        return path.read_text(errors="replace")
-    except OSError:
-        return ""
-
-
 @contextmanager
-def _exclusive(directory: Path) -> Iterator[None]:
-    """Hold an exclusive lock on ``directory`` itself, so that orbits taking locks in it take
-    them one at a time."""
+def _locked_dir(directory: Path, operation: int) -> Iterator[None]:
+    """Hold a lock of ``operation`` (``LOCK_EX`` or ``LOCK_SH``) on ``directory`` itself, so that
+    orbits take, let go of and check the session locks in it one at a time."""
     fd = os.open(directory, os.O_RDONLY)
     try:
-        fcntl.flock(fd, fcntl.LOCK_EX)
+        fcntl.flock(fd, operation)
         yield
     finally:
         os.close(fd)
+
+
+def _lock_file(lock: Path) -> int | None:
+    """A descriptor holding an exclusive lock on the file ``lock``, created if need be, with this
+    process's id written in it; none when another open file holds the lock."""
+    fd = os.open(lock, os.O_RDWR | os.O_CREAT, 0o644)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        os.ftruncate(fd, 0)
+        os.write(fd, str(os.getpid()).encode())
+    except BlockingIOError:
+        os.close(fd)
+        return None
+    except BaseException:
+        os.close(fd)
+        raise
+    return fd
+
+
+def _lock_held(lock: Path) -> bool:
+    """Whether an open file holds the lock on the file ``lock``."""
+    try:
+        fd = os.open(lock, os.O_RDONLY)
+    except OSError:
+        return False
+    try:
+        fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
+    except BlockingIOError:
+        return True
+    finally:
+        os.close(fd)
+    return False
 
 
 class _Taken(Enum):
@@ -125,20 +142,14 @@ class _Taken(Enum):
 class SessionFiles:
     """Saved sessions in ``directory``'s ``sessions`` directory, with the review count beside it.
 
-    Locks name the process ``pid`` (this one by default); ``alive`` tells whether another
-    lock's process is still running.
+    Each stands for one orbit: the session locks it holds are its own, even against another
+    ``SessionFiles`` in the same process.
     """
 
-    def __init__(
-        self,
-        directory: Path | str,
-        pid: int | None = None,
-        alive: Callable[[int], bool] = pid_alive,
-    ) -> None:
+    def __init__(self, directory: Path | str) -> None:
         self._sessions = Path(directory) / SESSIONS
         self._reviews = Path(directory) / REVIEWS
-        self._pid = os.getpid() if pid is None else pid
-        self._alive = alive
+        self._held: dict[str, int] = {}
 
     async def save(self, record: SessionRecord) -> None:
         path = self._file(record.id, ".json")
@@ -154,11 +165,12 @@ class SessionFiles:
         return await asyncio.to_thread(self._list)
 
     async def delete(self, session_id: str) -> None:
-        for path in (self._file(session_id, ".json"), self._file(session_id, ".lock")):
-            try:
-                await asyncio.to_thread(path.unlink, missing_ok=True)
-            except OSError as error:
-                raise RuntimeError(f"Couldn't delete the session {path}: {error}") from error
+        path = self._file(session_id, ".json")
+        try:
+            await asyncio.to_thread(path.unlink, missing_ok=True)
+        except OSError as error:
+            raise RuntimeError(f"Couldn't delete the session {path}: {error}") from error
+        await asyncio.to_thread(self._remove_lock, session_id, "delete")
 
     async def acquire(self, session_id: str) -> bool:
         taking = asyncio.ensure_future(asyncio.to_thread(self._acquire, session_id))
@@ -173,7 +185,8 @@ class SessionFiles:
             raise
 
     async def release(self, session_id: str) -> None:
-        await asyncio.to_thread(self._release, self._file(session_id, ".lock"))
+        if session_id in self._held:
+            await asyncio.to_thread(self._remove_lock, session_id, "unlock")
 
     async def review_count(self) -> int:
         return await asyncio.to_thread(self._read_review_count)
@@ -197,62 +210,49 @@ class SessionFiles:
     def _list(self) -> list[StoredSession]:
         if not self._sessions.is_dir():
             return []
-        return [
-            StoredSession(
-                path.stem, _read_record(path), self._held_elsewhere(path.with_suffix(".lock"))
-            )
-            for path in sorted(self._sessions.glob("*.json"))
-        ]
+        with _locked_dir(self._sessions, fcntl.LOCK_SH):
+            return [
+                StoredSession(path.stem, _read_record(path), self._held_elsewhere(path.stem))
+                for path in sorted(self._sessions.glob("*.json"))
+            ]
 
-    def _held_elsewhere(self, lock: Path) -> bool:
-        """Whether another running orbit holds ``lock``."""
-        text = _read_lock(lock)
-        return lock_owner(text) != self._pid and not lock_is_stale(text, self._alive)
+    def _held_elsewhere(self, session_id: str) -> bool:
+        """Whether another orbit holds the session ``session_id``'s lock."""
+        return session_id not in self._held and _lock_held(self._file(session_id, ".lock"))
 
     def _acquire(self, session_id: str) -> _Taken:
         lock = self._file(session_id, ".lock")
         try:
             lock.parent.mkdir(parents=True, exist_ok=True)
-            with _exclusive(lock.parent):
-                return self._take(lock)
+            with _locked_dir(lock.parent, fcntl.LOCK_EX):
+                return self._take(session_id, lock)
         except OSError as error:
             raise RuntimeError(f"Couldn't lock the session {lock}: {error}") from error
 
-    def _take(self, lock: Path) -> _Taken:
-        """Take ``lock`` unless another running orbit holds it; returns whether this created it,
-        found it already ours, or was refused.
-
-        Callers hold the sessions directory's exclusive lock, so no other orbit takes over a
-        stale lock between this deciding it's stale and replacing it.
-        """
-        if self._create_lock(lock):
-            return _Taken.CREATED
-        if self._held_elsewhere(lock):
-            return _Taken.REFUSED
-        if lock_owner(_read_lock(lock)) == self._pid:
+    def _take(self, session_id: str, lock: Path) -> _Taken:
+        """Take the session ``session_id``'s ``lock`` unless another orbit holds it; returns
+        whether this took it, already held it, or was refused."""
+        if session_id in self._held:
             return _Taken.OURS
-        lock.unlink(missing_ok=True)  # Stale: its orbit has ended.
-        return _Taken.CREATED if self._create_lock(lock) else _Taken.REFUSED
+        fd = _lock_file(lock)
+        if fd is None:
+            return _Taken.REFUSED
+        self._held[session_id] = fd
+        return _Taken.CREATED
 
-    def _create_lock(self, lock: Path) -> bool:
-        """Create ``lock`` naming this process, complete, unless it exists; returns whether it
-        was created."""
-        temp = _write_temp(lock, str(self._pid))
+    def _remove_lock(self, session_id: str, action: str) -> None:
+        """Let go of the session ``session_id``'s lock if this holds it, and remove its file;
+        errors say what failed to ``action`` it."""
+        lock = self._file(session_id, ".lock")
         try:
-            os.link(temp, lock)
-        except FileExistsError:
-            return False
-        finally:
-            os.unlink(temp)
-        return True
-
-    def _release(self, lock: Path) -> None:
-        if lock_owner(_read_lock(lock)) != self._pid:
-            return
-        try:
-            lock.unlink(missing_ok=True)
+            lock.parent.mkdir(parents=True, exist_ok=True)
+            with _locked_dir(lock.parent, fcntl.LOCK_EX):
+                fd = self._held.pop(session_id, None)
+                if fd is not None:
+                    os.close(fd)
+                lock.unlink(missing_ok=True)
         except OSError as error:
-            raise RuntimeError(f"Couldn't unlock the session {lock}: {error}") from error
+            raise RuntimeError(f"Couldn't {action} the session {lock}: {error}") from error
 
     def _read_review_count(self) -> int:
         try:

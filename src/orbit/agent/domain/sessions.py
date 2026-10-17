@@ -2,8 +2,7 @@
 
 A saved session keeps its task list, its review state, the planner's conversation and the
 settings it ran with. It is unrelated to the backend's connection, :class:`AgentSession`. The
-caller reads and writes the files and the clock; these rules only shape what's in them, and
-decide when a session's lock, held by the orbit that has it open, may be taken over.
+caller reads and writes the files and the clock; these rules only shape what's in them.
 """
 
 from collections import Counter
@@ -244,22 +243,6 @@ def resumed_settings(saved: Settings, given: Settings, pinned: Collection[str]) 
     """The settings to resume a session ``saved`` with: those settings, except the ones
     ``pinned``, by field name, which are as ``given``."""
     return saved.model_copy(update={name: getattr(given, name) for name in pinned})
-
-
-def lock_owner(text: str) -> int | None:
-    """The process id a session lock's ``text`` names; ``None`` when it isn't one."""
-    stripped = text.strip()
-    if not (stripped.isascii() and stripped.isdecimal()):
-        return None
-    pid = int(stripped)
-    return pid if pid > 0 else None
-
-
-def lock_is_stale(text: str, alive: Callable[[int], bool]) -> bool:
-    """Whether a session lock reading ``text`` may be taken over: it names no process, or one
-    that ``alive`` says has ended."""
-    owner = lock_owner(text)
-    return owner is None or not alive(owner)
 
 
 def review_count_json(count: int) -> str:

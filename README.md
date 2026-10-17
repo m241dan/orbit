@@ -117,9 +117,9 @@ review, one is queued for the next run. The planner carries on its saved convers
 access come back, unless `--model` or `--tools` was given, which hold for this run.
 
 Each session is locked while an orbit has it open: in another orbit's list it shows `open in
-another orbit`, dimmed, and can't be opened. The lock is a `.lock` file beside the session's,
-naming the orbit's process; a lock whose process has ended (orbit crashed, say) is stale, and the
-next orbit to open the session takes it over. A session file that can't be read shows `unreadable:`
+another orbit`, dimmed, and can't be opened. The lock is an OS lock on a `.lock` file beside the
+session's, held while the orbit runs; when its process ends (orbit crashed, say) the lock goes with
+it, and the next orbit to open the session takes it. A session file that can't be read shows `unreadable:`
 and the reason, and can't be opened either.
 
 In the list, `r` renames the highlighted session, the open one included: it asks for the new name,
@@ -726,8 +726,7 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     fixes to try per step, and the fix prompt. `sessions` holds the rules of saved sessions:
     the `SessionRecord` and its format (versioned, with upgrades from older ones, or why a file
     is unreadable), how the list of sessions summarizes and orders them, when one may be
-    opened, renamed or deleted, the notes and settings a resumed session starts with, and when a
-    lock is stale.
+    opened, renamed or deleted, and the notes and settings a resumed session starts with.
 - `orbit.tui`: frontend. Sends commands and renders events. Imports only `orbit.protocol`.
   `view` turns state and events into text and doesn't import Textual, with a module per area
   of the screen (`events`, `transcript`, `tool_calls`, `proposals`, `tasks`, `panels`, `agents`,

@@ -5,7 +5,8 @@ import fcntl
 import os
 import subprocess
 import sys
-import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -14,10 +15,8 @@ import pytest
 from orbit.agent.application.ports import SessionStore, StoredSession
 from orbit.agent.domain.sessions import SessionRecord, Unreadable, record_json
 from orbit.agent.external.git_tree import GitCoderTree
-from orbit.agent.external.session_files import SessionFiles, pid_alive, state_dir
+from orbit.agent.external.session_files import SessionFiles, state_dir
 
-ME = 1000
-OTHER = 2000
 WHEN = datetime(2026, 10, 17, 14, 30, tzinfo=UTC)
 
 
@@ -38,8 +37,8 @@ def record(session_id: str = "abc", name: str = "Oct 17 14:30") -> SessionRecord
     return SessionRecord(id=session_id, name=name, created=WHEN, last_active=WHEN)
 
 
-def store(directory: Path, alive: frozenset[int] = frozenset({ME})) -> SessionFiles:
-    return SessionFiles(directory, pid=ME, alive=lambda pid: pid in alive)
+def store(directory: Path) -> SessionFiles:
+    return SessionFiles(directory)
 
 
 def sessions(directory: Path) -> Path:
@@ -148,15 +147,16 @@ async def test_listing_gives_readable_and_unreadable_sessions_by_id(tmp_path: Pa
     assert (sessions(tmp_path) / "a.json").read_text() == "{oops"
 
 
-async def test_listing_marks_sessions_another_live_orbit_has_locked(tmp_path: Path) -> None:
-    files = store(tmp_path, alive=frozenset({ME, OTHER}))
+async def test_listing_marks_sessions_another_orbit_holds_as_locked(tmp_path: Path) -> None:
+    files, other = store(tmp_path), store(tmp_path)
     for session_id in ("mine", "theirs", "stale"):
         await files.save(record(session_id))
     await files.acquire("mine")
-    (sessions(tmp_path) / "theirs.lock").write_text(str(OTHER))
+    await other.acquire("theirs")
     (sessions(tmp_path) / "stale.lock").write_text("3000")
     listed = {entry.id: entry.locked for entry in await files.sessions()}
     assert listed == {"mine": False, "stale": False, "theirs": True}
+    assert {entry.id: entry.locked for entry in await other.sessions()}["mine"]
 
 
 async def test_deleting_removes_the_session_and_its_lock(tmp_path: Path) -> None:
@@ -165,6 +165,13 @@ async def test_deleting_removes_the_session_and_its_lock(tmp_path: Path) -> None
     await files.acquire("abc")
     await files.delete("abc")
     assert list(sessions(tmp_path).iterdir()) == []
+
+
+async def test_deleting_a_session_lets_go_of_its_lock(tmp_path: Path) -> None:
+    files = store(tmp_path)
+    await files.acquire("abc")
+    await files.delete("abc")
+    assert await store(tmp_path).acquire("abc")
 
 
 async def test_deleting_works_on_unreadable_and_missing_sessions(tmp_path: Path) -> None:
@@ -182,12 +189,38 @@ async def test_a_failed_delete_raises(tmp_path: Path) -> None:
         await store(tmp_path).delete("abc")
 
 
+async def test_a_failed_lock_delete_raises(tmp_path: Path) -> None:
+    (sessions(tmp_path) / "abc.lock" / "inside").mkdir(parents=True)
+    with pytest.raises(RuntimeError, match=r"Couldn't delete the session .*abc\.lock"):
+        await store(tmp_path).delete("abc")
+
+
 # Locks
+
+
+def hold_and_exit(lock: Path) -> None:
+    """Run a process that takes ``lock`` as an orbit does, then ends without letting go."""
+    code = (
+        "import fcntl, os, sys; fd = os.open(sys.argv[1], os.O_RDWR | os.O_CREAT); "
+        "fcntl.flock(fd, fcntl.LOCK_EX); os.write(fd, str(os.getpid()).encode())"
+    )
+    subprocess.run([sys.executable, "-c", code, str(lock)], check=True)
+
+
+@contextmanager
+def directory_held(directory: Path) -> Iterator[None]:
+    """Hold the lock on ``directory`` that orbits take before touching its locks."""
+    guard = os.open(directory, os.O_RDONLY)
+    try:
+        fcntl.flock(guard, fcntl.LOCK_EX)
+        yield
+    finally:
+        os.close(guard)
 
 
 async def test_acquiring_writes_a_lock_with_our_process_id(tmp_path: Path) -> None:
     assert await store(tmp_path).acquire("abc")
-    assert (sessions(tmp_path) / "abc.lock").read_text() == str(ME)
+    assert (sessions(tmp_path) / "abc.lock").read_text() == str(os.getpid())
     assert [path.name for path in sessions(tmp_path).iterdir()] == ["abc.lock"]
 
 
@@ -197,19 +230,34 @@ async def test_acquiring_a_lock_we_hold_succeeds(tmp_path: Path) -> None:
     assert await files.acquire("abc")
 
 
-async def test_acquiring_a_lock_another_live_orbit_holds_is_refused(tmp_path: Path) -> None:
-    sessions(tmp_path).mkdir(parents=True)
-    (sessions(tmp_path) / "abc.lock").write_text(str(OTHER))
-    assert not await store(tmp_path, alive=frozenset({ME, OTHER})).acquire("abc")
-    assert (sessions(tmp_path) / "abc.lock").read_text() == str(OTHER)
+async def test_acquiring_a_lock_another_orbit_holds_is_refused(tmp_path: Path) -> None:
+    other = store(tmp_path)
+    await other.acquire("abc")
+    assert not await store(tmp_path).acquire("abc")
+    assert (sessions(tmp_path) / "abc.lock").exists()
 
 
-@pytest.mark.parametrize("content", [str(OTHER), "garbage", ""])
-async def test_a_stale_lock_is_taken_over(tmp_path: Path, content: str) -> None:
+async def test_two_orbits_acquiring_at_once_cant_both_win(tmp_path: Path) -> None:
+    orbits = [store(tmp_path) for _ in range(8)]
+    won = await asyncio.gather(*(files.acquire("abc") for files in orbits))
+    assert won.count(True) == 1
+
+
+@pytest.mark.parametrize("content", ["3000", "garbage", ""])
+async def test_a_lock_file_nobody_holds_is_taken_over(tmp_path: Path, content: str) -> None:
     sessions(tmp_path).mkdir(parents=True)
     (sessions(tmp_path) / "abc.lock").write_text(content)
     assert await store(tmp_path).acquire("abc")
-    assert (sessions(tmp_path) / "abc.lock").read_text() == str(ME)
+    assert (sessions(tmp_path) / "abc.lock").read_text() == str(os.getpid())
+
+
+async def test_a_lock_left_by_an_ended_process_is_taken_over(tmp_path: Path) -> None:
+    sessions(tmp_path).mkdir(parents=True)
+    hold_and_exit(sessions(tmp_path) / "abc.lock")
+    files = store(tmp_path)
+    await files.save(record())
+    assert [entry.locked for entry in await files.sessions()] == [False]
+    assert await files.acquire("abc")
 
 
 async def test_a_lock_that_cant_be_taken_raises(tmp_path: Path) -> None:
@@ -218,22 +266,37 @@ async def test_a_lock_that_cant_be_taken_raises(tmp_path: Path) -> None:
         await store(tmp_path).acquire("abc")
 
 
+async def test_a_lock_that_fails_after_opening_is_let_go(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    def fail(fd: int, length: int) -> None:
+        raise OSError("disk full")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "ftruncate", fail)
+        with pytest.raises(RuntimeError, match=r"Couldn't lock the session .*abc\.lock"):
+            await store(tmp_path).acquire("abc")
+    assert await store(tmp_path).acquire("abc")
+
+
 async def test_releasing_removes_our_lock(tmp_path: Path) -> None:
     files = store(tmp_path)
     await files.acquire("abc")
     await files.release("abc")
     assert list(sessions(tmp_path).iterdir()) == []
+    assert await store(tmp_path).acquire("abc")
 
 
 async def test_releasing_leaves_another_orbits_lock_and_a_missing_one_alone(
     tmp_path: Path,
 ) -> None:
-    sessions(tmp_path).mkdir(parents=True)
-    (sessions(tmp_path) / "abc.lock").write_text(str(OTHER))
+    holder = store(tmp_path)
+    await holder.acquire("abc")
     files = store(tmp_path)
     await files.release("abc")
     await files.release("never")
-    assert (sessions(tmp_path) / "abc.lock").read_text() == str(OTHER)
+    assert (sessions(tmp_path) / "abc.lock").read_text() == str(os.getpid())
+    assert not await files.acquire("abc")
 
 
 async def test_a_lock_that_cant_be_released_raises(
@@ -252,96 +315,28 @@ async def test_a_lock_that_cant_be_released_raises(
 
 async def test_a_cancelled_acquire_leaves_no_lock_behind(tmp_path: Path) -> None:
     sessions(tmp_path).mkdir(parents=True)
-    (sessions(tmp_path) / "abc.lock").write_text(str(OTHER))
-    asking, answer = threading.Event(), threading.Event()
-
-    def alive(pid: int) -> bool:
-        asking.set()
-        answer.wait()
-        return False
-
-    acquiring = asyncio.create_task(SessionFiles(tmp_path, pid=ME, alive=alive).acquire("abc"))
-    await asyncio.to_thread(asking.wait)
-    acquiring.cancel()
-    await asyncio.sleep(0)
-    answer.set()
+    with directory_held(sessions(tmp_path)):  # Holds the acquire mid-flight.
+        acquiring = asyncio.create_task(store(tmp_path).acquire("abc"))
+        await asyncio.sleep(0.05)
+        acquiring.cancel()
+        await asyncio.sleep(0)
     with pytest.raises(asyncio.CancelledError):
         await acquiring
     assert list(sessions(tmp_path).iterdir()) == []
-
-
-async def test_two_orbits_taking_over_the_same_stale_lock_cant_both_win(tmp_path: Path) -> None:
-    sessions(tmp_path).mkdir(parents=True)
-    (sessions(tmp_path) / "abc.lock").write_text("3000")
-    asking, answer = threading.Event(), threading.Event()
-
-    def slow_alive(pid: int) -> bool:
-        if pid == 3000:
-            asking.set()
-            answer.wait()
-        return pid in {ME, OTHER}
-
-    def alive(pid: int) -> bool:
-        return pid in {ME, OTHER}
-
-    slow = asyncio.create_task(SessionFiles(tmp_path, pid=ME, alive=slow_alive).acquire("abc"))
-    await asyncio.to_thread(asking.wait)
-    fast = asyncio.create_task(SessionFiles(tmp_path, pid=OTHER, alive=alive).acquire("abc"))
-    await asyncio.wait([fast], timeout=0.2)  # Unguarded, it takes over meanwhile.
-    answer.set()
-    won = dict(zip((ME, OTHER), await asyncio.gather(slow, fast), strict=True))
-    assert sorted(won.values()) == [False, True]
-    winner = next(pid for pid, took in won.items() if took)
-    assert (sessions(tmp_path) / "abc.lock").read_text() == str(winner)
+    assert await store(tmp_path).acquire("abc")
 
 
 async def test_a_cancelled_acquire_of_a_lock_we_hold_keeps_it(tmp_path: Path) -> None:
     files = store(tmp_path)
     assert await files.acquire("abc")
-    guard = os.open(sessions(tmp_path), os.O_RDONLY)
-    try:
-        fcntl.flock(guard, fcntl.LOCK_EX)  # Holds the second acquire mid-flight.
+    with directory_held(sessions(tmp_path)):
         acquiring = asyncio.create_task(files.acquire("abc"))
         await asyncio.sleep(0.05)
         acquiring.cancel()
         await asyncio.sleep(0)
-    finally:
-        os.close(guard)
     with pytest.raises(asyncio.CancelledError):
         await acquiring
-    assert (sessions(tmp_path) / "abc.lock").read_text() == str(ME)
-
-
-async def test_by_default_locks_name_this_process(tmp_path: Path) -> None:
-    files = SessionFiles(tmp_path)
-    await files.acquire("abc")
-    assert (sessions(tmp_path) / "abc.lock").read_text() == str(os.getpid())
-    assert not await SessionFiles(tmp_path, pid=os.getpid() + 1).acquire("abc")
-
-
-# Whether a process is alive
-
-
-def test_this_process_is_alive() -> None:
-    assert pid_alive(os.getpid())
-
-
-def test_an_ended_process_isnt_alive() -> None:
-    ended = subprocess.Popen([sys.executable, "-c", ""])
-    ended.wait()
-    assert not pid_alive(ended.pid)
-
-
-def test_a_process_id_too_large_to_exist_isnt_alive() -> None:
-    assert not pid_alive(10**30)
-
-
-def test_someone_elses_process_is_alive(monkeypatch: pytest.MonkeyPatch) -> None:
-    def refused(pid: int, signal: int) -> None:
-        raise PermissionError(pid)
-
-    monkeypatch.setattr(os, "kill", refused)
-    assert pid_alive(1)
+    assert not await store(tmp_path).acquire("abc")
 
 
 # The super review count
@@ -394,12 +389,3 @@ async def test_a_review_count_save_that_fails_writing_raises_and_leaves_no_tempo
     with pytest.raises(RuntimeError, match=r"Couldn't save the review count to .*reviews\.json"):
         await store(tmp_path).save_review_count(1)
     assert list(tmp_path.iterdir()) == []
-
-
-@pytest.mark.usefixtures("failing_fsync")
-async def test_an_acquire_that_fails_writing_raises_and_leaves_no_temporary_file(
-    tmp_path: Path,
-) -> None:
-    with pytest.raises(RuntimeError, match=r"Couldn't lock the session .*abc\.lock"):
-        await store(tmp_path).acquire("abc")
-    assert list(sessions(tmp_path).iterdir()) == []
