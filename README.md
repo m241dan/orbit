@@ -147,7 +147,8 @@ starts the highlight on that task. Activating the list, or scrolling it with the
 holds it: it stops scrolling by itself and its title reads `Task list · held`. The first `esc`
 leaves the list still held, with its highlight where it was; `esc` again, with the Task list
 selected, lets go: the list scrolls to the running task at once and follows it again. Switching
-sessions lets go too. [docs/task-list.md](docs/task-list.md) records the requirements.
+sessions lets go too, leaving list mode if the list was active.
+[docs/task-list.md](docs/task-list.md) records the requirements.
 
 `ctrl+r` runs the tasks one after another, each through a fresh **agent**: a new `claude -p`
 session connected to orbit's MCP server, so tasks don't share context with each other or with the

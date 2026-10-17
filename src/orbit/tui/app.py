@@ -566,11 +566,13 @@ class OrbitApp(App[None], inherit_bindings=False):
 
     def _render_session(self, event: SessionsListed | SessionOpened | PlannerReset) -> None:
         """Show the sessions listed, rule off the planner's conversation where it was reset, or
-        let the task list follow again in a session opened, whose contents come in their own
-        events."""
+        take the task list out of list mode and let it follow again in a session opened, whose
+        contents come in their own events."""
         if isinstance(event, SessionsListed):
             self._show_sessions(event.sessions)
         elif isinstance(event, SessionOpened):
+            if self.focused is self._task_list:
+                self.set_focus(None)
             self._task_list.let_go()
         else:
             self._feed.append(*planner_reset_entry(), PLANNER)

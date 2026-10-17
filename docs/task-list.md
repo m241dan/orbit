@@ -41,7 +41,7 @@ itself, until you take it over, and lets go again when you're done looking.
 
 - `esc` with the Task list window selected and nothing active (normal mode) scrolls to the active
   task and follows again; the title drops `· held`.
-- Opening a session lets go too.
+- Opening a session lets go too, returning an active list to normal mode first.
 - This is the "double escape", and mirrors the conversation's held entry and its second `esc`.
 
 ## How it will be built

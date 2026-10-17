@@ -1078,3 +1078,18 @@ async def test_opening_a_session_lets_go_of_the_list() -> None:
         assert task_list.following
         assert title(task_list) == "Task list"
         assert in_view(task_list, 25)
+
+
+async def test_opening_a_session_while_the_list_is_active_leaves_list_mode_and_lets_go() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        task_list = app.query_one(TaskList)
+        await feed(session, pilot, many(30))
+        await open_task_list(pilot)
+        opened = SessionOpened(session=SessionSummary(id="s", name="s"))
+        await feed(session, pilot, opened, many(30, running=25))
+        assert app.focused is None
+        assert task_list.following
+        assert title(task_list) == "Task list"
+        assert in_view(task_list, 25)
