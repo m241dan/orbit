@@ -15,13 +15,12 @@ from rich.syntax import Syntax
 from rich.text import Text
 
 from orbit.tui.view.detail import DIM, NO_DETAILS, WAITING, capped_with
-from orbit.tui.view.diffs import file_diff
+from orbit.tui.view.diff_numbers import NUMBERED_LINE, diff_numbers, numbered_diff
+from orbit.tui.view.diffs import FileDiff, file_diff
 from orbit.tui.view.tool_calls import ToolCall
 
 SYNTAX_THEME = "ansi_dark"
 """The highlighting theme, drawn in the terminal's own colours."""
-READ_LINE = re.compile(r" *(\d+)(?:→|\t)(.*)")
-"""A line of Claude Code's Read output: its line number, an arrow or a tab, then the line."""
 READ_SPAN = ("offset", "limit")
 HEADER = "bold"
 ERROR = "red"
@@ -85,7 +84,7 @@ def _numbered(lines: Iterable[str]) -> list[re.Match[str]]:
     """The numbered lines that ``lines`` start with."""
     matches = []
     for line in lines:
-        match = READ_LINE.fullmatch(line)
+        match = NUMBERED_LINE.fullmatch(line)
         if match is None:
             break
         matches.append(match)
@@ -124,21 +123,35 @@ def _search_view(call: ToolCall) -> RenderableType | None:
 
 
 def _diff_view(call: ToolCall) -> RenderableType | None:
-    """The file's path, the diff ``call`` makes to it, then its output, dim, or red if it
-    failed."""
+    """The file's path, the diff ``call`` makes to it, its lines numbered where that's sure,
+    then its output, dim, or red if it failed."""
     diff = file_diff(call.name, call.arguments)
     if diff is None:
         return None
-    lines = capped_with("\n".join(diff.lines), diff_text)
+    numbered, gutter = numbered_diff(diff.lines, _diff_numbers(call, diff))
+    lines = capped_with("\n".join(numbered), partial(diff_text, gutter=gutter))
     header = Group(Text(diff.path, style=HEADER), Rule(style=DIM), lines)
     style = ERROR if call.status == "failed" else DIM
     return _shown(header, call, lambda text: Text(text, style=style))
 
 
-def diff_text(diff: str) -> Text:
-    """The lines of ``diff``, removed ones red, added ones green and the rest dim."""
-    lines = diff.splitlines()
-    return Text("\n").join(Text(line, style=DIFF_STYLES.get(line[:1], DIM)) for line in lines)
+def _diff_numbers(call: ToolCall, diff: FileDiff) -> list[int | None]:
+    """The line numbers of ``diff``'s lines, as ``call``'s output shows them; none if it
+    failed."""
+    if call.status == "failed":
+        return [None] * len(diff.lines)
+    return diff_numbers(call.name, diff.lines, call.output)
+
+
+def diff_text(diff: str, gutter: int = 0) -> Text:
+    """The lines of ``diff``, each after a dim column ``gutter`` wide: removed ones red, added
+    ones green and the rest dim."""
+    return Text("\n").join(_diff_line(line, gutter) for line in diff.splitlines())
+
+
+def _diff_line(line: str, gutter: int) -> Text:
+    body = line[gutter:]
+    return Text.assemble((line[:gutter], DIM), (body, DIFF_STYLES.get(body[:1], DIM)))
 
 
 def _generic_view(call: ToolCall) -> RenderableType:

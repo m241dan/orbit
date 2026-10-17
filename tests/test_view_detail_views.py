@@ -242,16 +242,17 @@ def test_a_multi_edit_separates_its_edits_dimly() -> None:
 
 def test_a_write_shows_all_its_content_added() -> None:
     body = detail_body(call("Write", {"file_path": "a.py", "content": "x\ny"}, "Created."))
-    assert plain(body) == ["a.py", RULE, "+x", "+y", RULE, "Created."]
+    assert plain(body) == ["a.py", RULE, "1 +x", "2 +y", RULE, "Created."]
     assert style_of(body, "+y") == "green"
+    assert style_of(body, "2 ") == "dim"
 
 
 def test_a_long_diff_is_capped() -> None:
     content = "\n".join(f"x{i}" for i in range(250))
     lines = plain(detail_body(call("Write", {"file_path": "a.py", "content": content}, "ok")))
-    assert lines[2] == "+x0" and lines[101] == "+x99"
+    assert lines[2] == "  1 +x0" and lines[101] == "100 +x99"
     assert lines[102] == "… 50 lines omitted · y copies all …"
-    assert lines[103] == "+x150" and lines[-3:] == ["+x249", RULE, "ok"]
+    assert lines[103] == "151 +x150" and lines[-3:] == ["250 +x249", RULE, "ok"]
 
 
 def test_malformed_edits_fall_back_to_json() -> None:
@@ -262,3 +263,29 @@ def test_malformed_edits_fall_back_to_json() -> None:
 
 def test_diff_text_without_lines_is_empty() -> None:
     assert diff_text("").plain == ""
+
+
+EDITED = (
+    "The file a.py has been updated. Here's the result of running `cat -n` on a snippet of the"
+    " edited file:\n     7→a\n     8→B\n     9→c"
+)
+
+
+def test_an_edit_found_in_its_result_numbers_its_new_lines_dimly() -> None:
+    body = detail_body(edit("a\nb\nc", "a\nB\nc", EDITED))
+    assert plain(body)[2:6] == ["7  a", "  -b", "8 +B", "9  c"]
+    assert style_of(body, "8 ") == "dim"
+    assert style_of(body, "+B") == "green"
+
+
+def test_a_failed_edit_has_no_numbers() -> None:
+    failed = replace(edit("a\nb\nc", "a\nB\nc", EDITED), status="failed")
+    assert plain(detail_body(failed))[2:6] == [" a", "-b", "+B", " c"]
+
+
+def test_diff_text_styles_lines_after_their_numbers() -> None:
+    text = diff_text("1 +x", gutter=2)
+    assert [(span.start, span.end, span.style) for span in text.spans] == [
+        (0, 2, "dim"),
+        (2, 4, "green"),
+    ]

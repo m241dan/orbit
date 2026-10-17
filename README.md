@@ -215,8 +215,11 @@ form that suits the call's tool, a rule, then the output or orbit's reply:
 - Grep and Glob: the pattern (and `in` the path, if given), then the matches as plain lines.
 - Edit, MultiEdit and Write: the file's path, a rule, then the change as a diff: removed lines
   `-` in red, added lines `+` in green and unchanged ones dim, after a space. A MultiEdit shows
-  each edit's diff, a dim `⋯` between them, and a Write shows all its content as added. Then the
-  output, dim, or red if the call failed.
+  each edit's diff, a dim `⋯` between them, and a Write shows all its content as added. Line
+  numbers are best effort, right-aligned in a dim column before the lines: a Write's count from 1,
+  and an edit's unchanged and added lines are numbered where its new text is found, in just one
+  place, in the snippet of the file its result shows; removed lines, edits it can't place and
+  failed calls have none. Then the output, dim, or red if the call failed.
 - Every other tool: the arguments as highlighted JSON, then the output, indented and highlighted
   too if it's a JSON object or array.
 - A request to orbit: the arguments as highlighted JSON, then `orbit: ` and the reply, red if it's

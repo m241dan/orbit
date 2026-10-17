@@ -36,6 +36,7 @@ from orbit.tui.view.detail_views import (
     pretty_json,
     read_output,
 )
+from orbit.tui.view.diff_numbers import diff_numbers, edited_snippet, numbered_diff
 from orbit.tui.view.diffs import EDIT_SEPARATOR, FileDiff, file_diff, line_diff
 from orbit.tui.view.events import SUPERSEDED_UNLESS, coalesce
 from orbit.tui.view.panels import STALE_STYLE, USAGE_COLOURS, reset_label, step_lines, usage_lines
@@ -233,8 +234,10 @@ __all__ = [
     "detail_copy",
     "detail_covers",
     "detail_title",
+    "diff_numbers",
     "diff_text",
     "duration_text",
+    "edited_snippet",
     "elapsed_clock",
     "entry_label",
     "entry_markdown",
@@ -256,6 +259,7 @@ __all__ = [
     "model_label",
     "model_options",
     "note_entry",
+    "numbered_diff",
     "orbit_request_line",
     "output_entry",
     "pretty_json",

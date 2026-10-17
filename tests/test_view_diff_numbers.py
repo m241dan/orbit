@@ -1,0 +1,81 @@
+"""An edit's diff is numbered by where its new lines are found in the edited file."""
+
+from orbit.tui.view import EDIT_SEPARATOR, diff_numbers, edited_snippet, line_diff, numbered_diff
+
+HEADER = (
+    "The file /src/a.py has been updated. Here's the result of running `cat -n` on a snippet "
+    "of the edited file:"
+)
+ARROW_RESULT = f"{HEADER}\n   153→def go():\n   154→    x = 2\n   155→    return x\n   156→"
+TAB_RESULT = f"{HEADER}\n   153\tdef go():\n   154\t    x = 2\n   155\t    return x\n   156\t"
+
+
+def test_a_snippet_is_read_with_arrows() -> None:
+    assert edited_snippet(ARROW_RESULT) == [
+        (153, "def go():"),
+        (154, "    x = 2"),
+        (155, "    return x"),
+        (156, ""),
+    ]
+
+
+def test_a_snippet_is_read_with_tabs() -> None:
+    assert edited_snippet(TAB_RESULT) == edited_snippet(ARROW_RESULT)
+
+
+def test_an_edit_is_numbered_from_where_its_new_lines_are_found() -> None:
+    lines = line_diff("    x = 1\n    return x", "    x = 2\n    return x")
+    assert diff_numbers("Edit", lines, TAB_RESULT) == [None, 154, 155]
+
+
+def test_an_edit_whose_new_lines_arent_found_has_no_numbers() -> None:
+    lines = line_diff("x = 1", "x = 3")
+    assert diff_numbers("Edit", lines, ARROW_RESULT) == [None, None]
+
+
+def test_an_edit_whose_new_lines_run_past_the_snippet_has_no_numbers() -> None:
+    lines = line_diff("", "    return x\n\nmore")
+    assert diff_numbers("Edit", lines, ARROW_RESULT) == [None, None, None]
+
+
+def test_an_edit_whose_new_lines_are_found_twice_has_no_numbers() -> None:
+    result = f"{HEADER}\n     1→x\n     2→y\n     3→x\n     4→y"
+    assert diff_numbers("Edit", line_diff("x", "x\ny"), result) == [None, None]
+
+
+def test_the_following_lines_decide_between_two_places_for_the_first() -> None:
+    result = f"{HEADER}\n     1→x\n     2→y\n     3→x\n     4→z"
+    assert diff_numbers("Edit", line_diff("x", "x\nz"), result) == [3, 4]
+
+
+def test_a_found_edit_needs_its_lines_numbered_one_after_another() -> None:
+    result = f"{HEADER}\n     1→x\n     5→z"
+    assert diff_numbers("Edit", line_diff("x", "x\nz"), result) == [None, None]
+
+
+def test_an_edit_that_removes_everything_has_no_numbers() -> None:
+    assert diff_numbers("Edit", line_diff("x", ""), ARROW_RESULT) == [None]
+
+
+def test_output_without_a_snippet_has_no_numbers() -> None:
+    assert diff_numbers("Edit", line_diff("x", "def go():"), "Updated.") == [None, None]
+
+
+def test_a_multi_edit_numbers_each_edit_it_finds() -> None:
+    lines = [*line_diff("x", "def go():"), EDIT_SEPARATOR, *line_diff("y", "missing")]
+    assert diff_numbers("MultiEdit", lines, ARROW_RESULT) == [None, 153, None, None, None]
+
+
+def test_a_write_is_numbered_from_one() -> None:
+    assert diff_numbers("Write", ["+a", "+b"], "Created.") == [1, 2]
+
+
+def test_numbers_are_right_aligned_in_a_column_before_the_lines() -> None:
+    assert numbered_diff(["-a", "+b", EDIT_SEPARATOR, " c"], [None, 9, None, 10]) == (
+        ["   -a", " 9 +b", "   ⋯", "10  c"],
+        3,
+    )
+
+
+def test_a_diff_without_numbers_has_no_column() -> None:
+    assert numbered_diff(["-a", "+b"], [None, None]) == (["-a", "+b"], 0)
