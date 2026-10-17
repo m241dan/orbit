@@ -1097,3 +1097,43 @@ async def test_opening_a_session_while_the_list_is_active_leaves_list_mode_and_l
         assert task_list.following
         assert title(task_list) == "Task list"
         assert in_view(task_list, 25)
+
+
+async def test_opening_a_session_replaces_the_total_with_its_saved_spend() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        task_list = app.query_one(TaskList)
+        spent = Usage(input_tokens=1_000, cost_usd=0.84)
+        await feed(session, pilot, TurnFinished(turn_id="a", reason="completed", usage=spent))
+        saved = Usage(input_tokens=2_000, cost_usd=2.0)
+        opened = SessionOpened(session=SessionSummary(id="b", name="b", usage=saved))
+        await feed(session, pilot, opened)
+        assert task_list.border_subtitle == "session: 2k tok · $2.00"
+
+
+async def test_a_turn_after_opening_a_session_adds_to_its_total() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        task_list = app.query_one(TaskList)
+        await feed(
+            session,
+            pilot,
+            TurnFinished(turn_id="a", reason="completed", usage=Usage(cost_usd=0.84)),
+            SessionOpened(session=SessionSummary(id="b", name="b", usage=Usage(cost_usd=2.0))),
+            TurnFinished(turn_id="b", reason="completed", usage=Usage(cost_usd=0.5)),
+        )
+        assert task_list.border_subtitle == "session: 0 tok · $2.50"
+
+
+async def test_opening_a_new_session_clears_the_total() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        task_list = app.query_one(TaskList)
+        spent = Usage(input_tokens=1_000, cost_usd=0.84)
+        await feed(session, pilot, TurnFinished(turn_id="a", reason="completed", usage=spent))
+        await feed(session, pilot, SessionOpened(session=SessionSummary(id="n", name="n")))
+        assert not task_list.border_subtitle
+        assert task_list.session_usage == Usage()

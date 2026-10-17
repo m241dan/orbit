@@ -328,8 +328,10 @@ The planned improvements to the conversation window, and what is deferred, are i
 Each row of the task list shows its status: ⏳ pending, ◜ running (spinning), 🔍 verifying, ✅ done,
 ❗ failed verification, ❌ failed, ⌛ ran out of steps, 🏳 the agent gave up, 🛑 cancelled, 📝 a draft
 the planner proposed. Once a task has spent anything, its row ends with the tokens and dollars it
-spent (`1.2M tok · $0.84`), and the task list's subtitle shows the session's total
-(`session: 1.2M tok · $0.84`); token counts are rounded as in a turn's rule (see above). A failed
+spent (`1.2M tok · $0.84`), and the task list's subtitle shows the open session's total
+(`session: 1.2M tok · $0.84`): it starts from what the session's saved tasks spent when the session
+opens (none for a new session, which shows no total) and adds every turn that finishes in this run,
+the planner's included; token counts are rounded as in a turn's rule (see above). A failed
 task doesn't stop the rest; `ctrl+s` cancels the running task (stopping
 its agent) and skips the remaining ones. Running again skips tasks that completed, failed
 verification or were given up on, and editing a task makes it pending again. Tasks added while a

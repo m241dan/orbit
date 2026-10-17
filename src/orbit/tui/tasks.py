@@ -174,6 +174,12 @@ class TaskList(ListPane):
         self.session_usage += usage
         self.border_subtitle = f"session: {usage_label(self.session_usage)}"
 
+    def reset_usage(self, usage: Usage) -> None:
+        """Start the session's total afresh at ``usage``; a session that has spent nothing
+        shows no total."""
+        self.session_usage = usage
+        self.border_subtitle = "" if usage == Usage() else f"session: {usage_label(usage)}"
+
     def find(self, task_id: str) -> TaskState | None:
         """The task with id ``task_id``, if it's on the list."""
         return next((t for t in self.tasks if t.id == task_id), None)
