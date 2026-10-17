@@ -1,7 +1,7 @@
 import pytest
 
-from orbit.agent.domain.board import TaskBoard
-from orbit.protocol import Settings, TaskSpec, TaskState, Usage
+from orbit.agent.domain.board import TaskBoard, interrupted
+from orbit.protocol import Settings, TaskSpec, TaskState, TaskStatus, Usage
 
 ONE = TaskSpec(prompt="one")
 TWO = TaskSpec(prompt="two", settings=Settings(model="opus"))
@@ -241,3 +241,81 @@ def test_each_task_adds_up_the_usage_of_its_own_turns() -> None:
     # Editing a task makes it pending again, but what it spent stays spent.
     board.edit(first, TWO)
     assert board.get(first).usage.tokens == 120
+
+
+def test_restore_keeps_the_given_tasks_in_order() -> None:
+    saved = (TaskState(id="3", task=TWO), TaskState(id="1", task=ONE, status="completed"))
+    board = TaskBoard()
+    board.restore(saved)
+    assert board.tasks == saved
+
+
+def test_restore_replaces_what_the_board_held() -> None:
+    board = TaskBoard()
+    board.add(ONE)
+    board.add(TWO)
+    board.restore((TaskState(id="7", task=FIX),))
+    assert prompts(board) == ["fix it"]
+
+
+def test_restored_ids_carry_on_after_the_highest() -> None:
+    board = TaskBoard()
+    board.restore((TaskState(id="5", task=ONE), TaskState(id="2", task=TWO)))
+    assert board.add(FIX) == "6"
+
+
+def test_restored_ids_skip_past_tasks_removed_before_saving() -> None:
+    board = TaskBoard()
+    ids = [board.add(TaskSpec(prompt=str(i))) for i in range(3)]
+    board.remove(ids[-1])
+    saved = board.tasks
+    restored = TaskBoard()
+    restored.restore(saved)
+    assert restored.add(FIX) == "3"
+
+
+def test_restoring_no_tasks_starts_ids_again_from_one() -> None:
+    board = TaskBoard()
+    board.add(ONE)
+    board.restore(())
+    assert board.tasks == ()
+    assert board.add(TWO) == "1"
+
+
+def test_restore_keeps_non_numeric_ids_but_ignores_them_for_the_next_id() -> None:
+    board = TaskBoard()
+    saved = (TaskState(id="abc", task=ONE), TaskState(id="2", task=TWO))
+    board.restore(saved)
+    assert board.tasks == saved
+    assert board.add(FIX) == "3"
+
+
+@pytest.mark.parametrize("status", ["running", "verifying"])
+def test_a_crash_cancels_tasks_that_were_running(status: TaskStatus) -> None:
+    task = TaskState(id="1", task=ONE, status=status)
+    assert interrupted((task,)) == ((task.model_copy(update={"status": "cancelled"}),), 1)
+
+
+@pytest.mark.parametrize(
+    "status",
+    ["draft", "pending", "completed", "unverified", "gave_up", "cancelled", "error"],
+)
+def test_a_crash_leaves_tasks_that_were_not_running_alone(status: TaskStatus) -> None:
+    task = TaskState(id="1", task=ONE, status=status)
+    assert interrupted((task,)) == ((task,), 0)
+
+
+def test_a_crash_keeps_everything_but_the_status_and_counts_each_change() -> None:
+    usage = Usage(input_tokens=5)
+    fixed = TaskState(id="1", task=ONE, status="unverified", origin="review", batch="b", round=2)
+    fix = TaskState(
+        id="2", task=FIX, status="running", fixes="1", attempt=1, max_attempts=3, usage=usage
+    )
+    other = TaskState(id="3", task=TWO, status="verifying")
+    tasks, changed = interrupted((fixed, fix, other))
+    assert tasks == (
+        fixed,
+        fix.model_copy(update={"status": "cancelled"}),
+        other.model_copy(update={"status": "cancelled"}),
+    )
+    assert changed == 2

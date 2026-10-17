@@ -1,7 +1,7 @@
 """The task list: plain state the session publishes as snapshots."""
 
 import itertools
-from collections.abc import Collection
+from collections.abc import Collection, Sequence
 from typing import Any
 
 from orbit.protocol import (
@@ -20,6 +20,17 @@ SETTLED: frozenset[TaskStatus] = frozenset(
 )
 
 
+def interrupted(tasks: Sequence[TaskState]) -> tuple[tuple[TaskState, ...], int]:
+    """``tasks`` as a crash leaves them, and how many changed: those that were running are
+    cancelled, so the next run picks them up again."""
+    running = ("running", "verifying")
+    left = tuple(
+        state.model_copy(update={"status": "cancelled"}) if state.status in running else state
+        for state in tasks
+    )
+    return left, sum(state.status in running for state in tasks)
+
+
 def _in_roles(role: str, roles: Collection[str] | None, exclude: Collection[str]) -> bool:
     return role not in exclude and (roles is None or role in roles)
 
@@ -34,6 +45,13 @@ class TaskBoard:
     @property
     def tasks(self) -> tuple[TaskState, ...]:
         return tuple(self._tasks)
+
+    def restore(self, tasks: Sequence[TaskState]) -> None:
+        """Replace the board's tasks with ``tasks``, in order; new ids carry on after the
+        highest numeric one among them."""
+        self._tasks = list(tasks)
+        highest = max((int(state.id) for state in tasks if state.id.isdecimal()), default=0)
+        self._ids = itertools.count(highest + 1)
 
     def add(self, task: TaskSpec, fixes: str | None = None) -> str:
         """Add a pending ``task`` at the end; returns its id.
