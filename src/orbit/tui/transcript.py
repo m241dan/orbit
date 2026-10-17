@@ -7,6 +7,7 @@ from dataclasses import dataclass, replace
 from typing import Any, ClassVar, get_args
 
 from rich.console import Console, ConsoleOptions, RenderableType, RenderResult
+from rich.markdown import Heading, Markdown, MarkdownContext, MarkdownElement
 from rich.rule import Rule
 from rich.segment import Segment
 from rich.style import Style
@@ -37,7 +38,6 @@ from orbit.tui.view import (
     detail_covers,
     detail_title,
     entry_label,
-    entry_markdown,
     finishes,
     gutter,
     hanging_indent,
@@ -67,6 +67,33 @@ class Entry:
     agent: str | None = None
     turn: str | None = None
     call: ToolCall | None = None
+
+
+class LeftHeading(Heading):
+    """A heading drawn bold and left-aligned, h1 also underlined, rather than centred."""
+
+    def on_enter(self, context: MarkdownContext) -> None:
+        self.text = Text()
+        context.enter_style(Style(bold=True, underline=self.tag == "h1"))
+
+    def __rich_console__(self, console: Console, options: ConsoleOptions) -> RenderResult:
+        text = self.text.copy()
+        text.justify = "left"
+        yield text
+
+
+class EntryMarkdown(Markdown):
+    """Markdown as an entry shows it: headings drawn as :class:`LeftHeading`."""
+
+    elements: ClassVar[dict[str, type[MarkdownElement]]] = {
+        **Markdown.elements,
+        "heading_open": LeftHeading,
+    }
+
+
+def entry_markdown(text: str, style: Style) -> Markdown:
+    """``text`` as markdown in the entry's ``style``, its links shown as ``text (url)``."""
+    return EntryMarkdown(text, style=style, hyperlinks=False)
 
 
 @dataclass(frozen=True)
@@ -102,18 +129,26 @@ class GutteredEntry:
     heading: Text | None = None
     band: Style | None = None
 
-    def __rich_console__(self, console: Console, options: ConsoleOptions) -> RenderResult:
-        width = options.max_width - len(self.gutter)
+    def _rows(self, console: Console, options: ConsoleOptions) -> list[list[Segment]]:
+        """The rows of the entry's heading and body, drawn in ``options``' width."""
         shown = self.label if self.body is None else self.body
         parts = (shown,) if self.heading is None else (self.heading, shown)
-        for part in parts:
-            rows = console.render_lines(
-                part, options.update_width(width), style=self.band, pad=self.band is not None
+        return [
+            row
+            for part in parts
+            for row in console.render_lines(
+                part, options, style=self.band, pad=self.band is not None
             )
-            for row in rows:
-                yield Segment(self.gutter, self.gutter_style)
-                yield from row
-                yield Segment.line()
+        ]
+
+    def __rich_console__(self, console: Console, options: ConsoleOptions) -> RenderResult:
+        width = options.max_width - len(self.gutter)
+        rows = self._rows(console, options.update_width(width))
+        # Markdown that renders nothing, such as only whitespace, still gets a row to mark.
+        for row in rows or [[]]:
+            yield Segment(self.gutter, self.gutter_style)
+            yield from row
+            yield Segment.line()
         yield Segment.line()
 
 

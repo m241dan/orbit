@@ -2,12 +2,7 @@
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import ClassVar, Literal, assert_never
-
-from rich.console import Console, ConsoleOptions, RenderResult
-from rich.markdown import Heading, Markdown, MarkdownContext, MarkdownElement
-from rich.style import Style
-from rich.text import Text
+from typing import Literal, assert_never
 
 from orbit.protocol import (
     PLANNER,
@@ -116,33 +111,6 @@ def hanging_indent(kind: EntryKind, text: str) -> tuple[str, str]:
     beside it; nothing beside an assistant's message of a line."""
     first = entry_prefix(kind) + (EXPANDED_MARKER if collapsible(text) else "")
     return first, " " * len(first)
-
-
-class LeftHeading(Heading):
-    """A heading drawn bold and left-aligned, h1 also underlined, rather than centred."""
-
-    def on_enter(self, context: MarkdownContext) -> None:
-        self.text = Text()
-        context.enter_style(Style(bold=True, underline=self.tag == "h1"))
-
-    def __rich_console__(self, console: Console, options: ConsoleOptions) -> RenderResult:
-        text = self.text.copy()
-        text.justify = "left"
-        yield text
-
-
-class EntryMarkdown(Markdown):
-    """Markdown as an entry shows it: headings drawn as :class:`LeftHeading`."""
-
-    elements: ClassVar[dict[str, type[MarkdownElement]]] = {
-        **Markdown.elements,
-        "heading_open": LeftHeading,
-    }
-
-
-def entry_markdown(text: str, style: Style) -> Markdown:
-    """``text`` as markdown in the entry's ``style``, its links shown as ``text (url)``."""
-    return EntryMarkdown(text, style=style, hyperlinks=False)
 
 
 def speaker(agent: str | None) -> str | None:

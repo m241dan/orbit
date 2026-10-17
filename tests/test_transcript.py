@@ -27,7 +27,14 @@ from orbit.protocol import (
     Usage,
 )
 from orbit.tui import OrbitApp
-from orbit.tui.transcript import Entry, GutteredEntry, HangingIndent, Transcript, TranscriptLog
+from orbit.tui.transcript import (
+    Entry,
+    GutteredEntry,
+    HangingIndent,
+    Transcript,
+    TranscriptLog,
+    entry_markdown,
+)
 from orbit.tui.view import (
     GUTTER_BAR,
     GUTTER_MARKER,
@@ -681,9 +688,25 @@ async def test_awkward_markdown_stays_within_the_log(text: str) -> None:
         log.append(text, "assistant")
         await pilot.pause()
         rows = entry_rows(log, 0)
+        assert len(rows) >= 2
         assert rows[-1] == ""
         assert all(Text(row).cell_len <= log.size.width for row in rows)
         assert all(row.startswith(f"{GUTTER_BAR} ") for row in rows[:-1])
+
+
+@pytest.mark.parametrize("text", ["\n\n", " ", "<!-- x -->", "[a]: https://x"])
+async def test_markdown_that_renders_nothing_still_draws_a_gutter_row(text: str) -> None:
+    app = LogApp()
+    async with app.run_test() as pilot:
+        log = app.query_one(TranscriptLog)
+        log.append(text, "assistant")
+        await pilot.pause()
+        assert entry_rows(log, 0)[0].startswith(GUTTER_BAR)
+        assert entry_rows(log, 0)[-1] == ""
+        log.focus()
+        log.highlighted = 0
+        await pilot.pause()
+        assert entry_rows(log, 0)[0].startswith(GUTTER_MARKER)
 
 
 async def test_a_submitted_prompt_is_added_as_a_prompt_entry() -> None:
@@ -1702,3 +1725,39 @@ async def test_a_request_updates_under_all_and_its_roles_tab() -> None:
         assert labels(app)[1] == f"{ASKED} ✓ ok"
         await pilot.press("tab", "tab")  # coder
         assert labels(app) == ["▶ agent-1 (coder) started", f"{ASKED} ✓ ok"]
+
+
+def markdown_rows(text: str, width: int = 40) -> list[str]:
+    """``text``'s markdown as rendered ``width`` columns wide, a string per row."""
+    console = Console(width=width)
+    markdown = entry_markdown(text, Style())
+    lines = console.render_lines(markdown, console.options, pad=False)
+    return ["".join(segment.text for segment in line).rstrip() for line in lines]
+
+
+def test_markdown_headings_are_left_aligned_without_a_box() -> None:
+    rows = markdown_rows("# Title\n\n## Section\n\ntext")
+    assert rows == ["Title", "", "Section", "", "text"]
+
+
+def test_markdown_headings_are_bold_and_only_h1_underlined() -> None:
+    console = Console(width=40)
+    for text, underline in (("# Title", True), ("## Section", False)):
+        lines = console.render_lines(entry_markdown(text, Style()), console.options)
+        style = next(segment.style for segment in lines[0] if segment.text.strip())
+        assert style is not None and style.bold and bool(style.underline) is underline
+
+
+def test_markdown_shows_emphasis_code_and_lists_without_their_syntax() -> None:
+    assert markdown_rows("**bold** and `code`\n\n- item") == ["bold and code", "", " • item"]
+
+
+def test_markdown_links_show_their_url_after_their_text() -> None:
+    assert markdown_rows("see [docs](https://example.com)") == ["see docs (https://example.com)"]
+
+
+def test_markdown_takes_the_entrys_style_as_its_base() -> None:
+    console = Console(width=40)
+    style = Style(color="red")
+    lines = console.render_lines(entry_markdown("plain", style), console.options)
+    assert lines[0][0].style is not None and lines[0][0].style.color == style.color

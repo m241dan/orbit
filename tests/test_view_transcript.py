@@ -1,6 +1,4 @@
 import pytest
-from rich.console import Console
-from rich.style import Style
 
 from orbit.protocol import (
     PLANNER,
@@ -43,7 +41,6 @@ from orbit.tui.view import (
     conversation_title,
     duration_text,
     entry_label,
-    entry_markdown,
     entry_prefix,
     error_entry,
     exchange_entry,
@@ -306,42 +303,6 @@ def test_a_prompt_hangs_its_marker_and_any_collapse_marker_beside_its_markdown()
 
 def test_prompts_are_never_labelled() -> None:
     assert speaker_label("prompt", "agent-2", "agent-1") is None
-
-
-def markdown_rows(text: str, width: int = 40) -> list[str]:
-    """``text``'s markdown as rendered ``width`` columns wide, a string per row."""
-    console = Console(width=width)
-    markdown = entry_markdown(text, Style())
-    lines = console.render_lines(markdown, console.options, pad=False)
-    return ["".join(segment.text for segment in line).rstrip() for line in lines]
-
-
-def test_markdown_headings_are_left_aligned_without_a_box() -> None:
-    rows = markdown_rows("# Title\n\n## Section\n\ntext")
-    assert rows == ["Title", "", "Section", "", "text"]
-
-
-def test_markdown_headings_are_bold_and_only_h1_underlined() -> None:
-    console = Console(width=40)
-    for text, underline in (("# Title", True), ("## Section", False)):
-        lines = console.render_lines(entry_markdown(text, Style()), console.options)
-        style = next(segment.style for segment in lines[0] if segment.text.strip())
-        assert style is not None and style.bold and bool(style.underline) is underline
-
-
-def test_markdown_shows_emphasis_code_and_lists_without_their_syntax() -> None:
-    assert markdown_rows("**bold** and `code`\n\n- item") == ["bold and code", "", " • item"]
-
-
-def test_markdown_links_show_their_url_after_their_text() -> None:
-    assert markdown_rows("see [docs](https://example.com)") == ["see docs (https://example.com)"]
-
-
-def test_markdown_takes_the_entrys_style_as_its_base() -> None:
-    console = Console(width=40)
-    style = Style(color="red")
-    lines = console.render_lines(entry_markdown("plain", style), console.options)
-    assert lines[0][0].style is not None and lines[0][0].style.color == style.color
 
 
 def test_gutter_symbols_differ_and_fill_one_column() -> None:
