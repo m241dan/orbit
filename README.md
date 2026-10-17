@@ -35,7 +35,7 @@ uv run orbit chat                              # interactive agent session
 uv run orbit chat -C ~/code/other              # work on another project
 uv run orbit chat --new                        # start a new session rather than picking one
 uv run orbit chat --name "auth rework"         # start a new session with that name
-uv run orbit chat --model opus --tools full    # pick the planner's model and new tasks' tool access
+uv run orbit chat --model opus --tools full    # planner's model, new tasks' access (over saved)
 uv run orbit chat --no-verify                  # don't verify tasks (ctrl+e is refused)
 uv run orbit chat --no-review                  # don't review landed work
 uv run orbit chat --no-worktree                # tasks edit the current checkout; nothing is committed
@@ -78,15 +78,24 @@ In the app:
 | `a` / `r` / `x` | On a proposal of checks: accept it, ask for changes (type them, `enter` sends, `esc` goes back), or end the task (see [Setting up verification](#setting-up-verification)) |
 | `ctrl+c` | Quit |
 
-In a picker, `j`/`k` (or the arrow keys) move and `enter` chooses.
+In a picker, `j`/`k` (or the arrow keys) move and `enter` chooses. In the list of sessions, `r`
+renames the highlighted session and `x` deletes it (see [Sessions](#sessions)).
 
 ### Sessions
 
-A session is what orbit is working on: the task list, the review state, the planner's
-conversation, the planner's model and new tasks' tool access. Orbit saves the open session after
-every change to `.git/orbit/sessions/` (`.orbit/sessions/` outside a git repository), one JSON file
-per session, written atomically, so it survives a crash or `ctrl+c`. A new session is saved once you
-add a task or prompt the planner; quitting before that leaves nothing behind.
+A session is what orbit is working on: its task list, its review batches and rounds (see
+[Reviews](#reviews)), the planner's conversation, the planner's model and new tasks' tool access,
+and its name and when it was created and last active. The count of commits towards the next super
+review isn't a session's: it belongs to the repository, kept in `reviews.json` beside the sessions,
+and carries on across sessions and restarts.
+
+Orbit saves the open session after every change to `.git/orbit/sessions/` (`.orbit/sessions/`
+outside a git repository; inside one, even with `--no-worktree`), one JSON file per session. Each
+save replaces the file atomically, so a crash or `ctrl+c` leaves the last save whole. A new session
+is saved once you add a task or prompt the planner; quitting before that leaves nothing behind.
+Sessions are kept until you delete them: orbit never prunes them, and never overwrites a file it
+can't read. The design, and what is deliberately left for later, is in
+[docs/sessions.md](docs/sessions.md).
 
 At startup orbit lists the saved sessions to pick from: `+ new session` first, then the sessions,
 the most recently active first. Each row shows the session's name, when it was last active (local
@@ -103,11 +112,14 @@ session, as does picking the open session. Switching is refused, with an error s
 while tasks run, a review runs or the planner answers. Opening a session never starts work by
 itself: its pending tasks wait for `ctrl+r`. A task that was running or being verified when the
 session was last saved (orbit crashed, say) comes back cancelled, and orbit says how many were
-interrupted. The planner carries on its saved conversation, and the session's saved model and tool
+interrupted. An interrupted review ends as a cancelled one does: if its batch is then due a
+review, one is queued for the next run. The planner carries on its saved conversation, and the session's saved model and tool
 access come back, unless `--model` or `--tools` was given, which hold for this run.
 
 Each session is locked while an orbit has it open: in another orbit's list it shows `open in
-another orbit`, dimmed, and can't be opened. A session file that can't be read shows `unreadable:`
+another orbit`, dimmed, and can't be opened. The lock is a `.lock` file beside the session's,
+naming the orbit's process; a lock whose process has ended (orbit crashed, say) is stale, and the
+next orbit to open the session takes it over. A session file that can't be read shows `unreadable:`
 and the reason, and can't be opened either.
 
 In the list, `r` renames the highlighted session, the open one included: it asks for the new name,
@@ -498,7 +510,7 @@ planner tab gets a `*`.
 
 The planner is one agent for the whole session: each prompt resumes its conversation, so it
 remembers what you discussed. It reads your checkout and can search the web but can't edit your
-checkout, and uses the model you picked with `ctrl+o`.
+checkout, and uses the model you picked with `ctrl+o`, which is saved with the session.
 
 The planner's conversation is kept with its session, so it carries on across restarts and session
 switches. `ctrl+n` resets it, after you confirm (`y` to go ahead, `n`/`esc` to cancel): to pick up a
@@ -534,8 +546,9 @@ Every `super_review_every` commits (default 10, counting every commit orbit land
 `super-reviewer` (Opus by default) reviews the **whole codebase** at the latest commit, looking for
 duplication, structure that no longer fits and gaps in tests, and may suggest up to
 `super_review_suggestions` tasks (default 10). Those form a batch at round 1 and carry on like any
-other review's. `ctrl+g` asks for one straight away and restarts the count. A super review that
-falls due while review is paused waits until it resumes.
+other review's. `ctrl+g` asks for one straight away and restarts the count. The count belongs to
+the repository rather than to a session, so it carries on across sessions and restarts. A super
+review that falls due while review is paused waits until it resumes.
 
 The reviews orbit queued can't be edited: remove one instead. Reviews need the worktree;
 `--no-review` turns them off.
@@ -607,7 +620,8 @@ appears in the process list. Agents are started with `--strict-mcp-config` (only
 repository, stays out of agents' context).
 
 A model picked with `ctrl+o` applies from the planner's next prompt and keeps its conversation; the
-tool access picked with `ctrl+l` is what new tasks start with in the task editor. `ctrl+l` does not
+tool access picked with `ctrl+l` is what new tasks start with in the task editor. Both are saved
+with the session. `ctrl+l` does not
 change the planner's own tool access, which is the planner role's (`[roles.planner] tool_access` in
 `.orbit/config.toml`, `restricted` by default).
 
@@ -672,7 +686,9 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     `instructions/*.md`; `checks` runs a verification step as a process (`run_step`);
     `processes` runs a program to completion without leaving it behind; `workspace`
     fingerprints the git working tree; `usage_api` fetches the Claude subscription's usage
-    limits (`UsageApi`) with the token in `~/.claude/.credentials.json`.
+    limits (`UsageApi`) with the token in `~/.claude/.credentials.json`; `session_files` keeps
+    saved sessions (`SessionFiles`), one JSON file each with a lock file while an orbit has it
+    open, and the repository's super review count, in the directory `state_dir` picks.
   - `application`: `AgentSession` implements `Session`: it takes commands, asks the domain what
     follows, drives the ports and publishes events. `Tasks` (in `tasks`) holds the `TaskBoard`,
     marks tasks running and finished, and is the one place that publishes the board, whole, once
@@ -688,27 +704,35 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     the work lane's and the planner's turns through a `TurnSlot` each (also in `lanes`), which
     refuses a second turn and shows the lane busy while one runs; `FrontendReview` is where the
     user decides on proposed checks; `PlannerChat` is the planner's conversation, running each
-    turn and publishing how it ended. `ports` defines what it needs from outside (`AgentHost`,
+    turn and publishing how it ended; `SessionKeeper` (in `keeper`) is the open session: it
+    saves it after every change once it's used, and lists, opens, renames, deletes and switches
+    saved sessions through the store. `ports` defines what it needs from outside (`AgentHost`,
     `AgentLauncher`, `CoderTree`, `StepRunner`, `Workspace`, `ProposalReview`, `UsageSource`,
-    `ConfigWriter`).
-  - `domain`: the rules, with no I/O: the `TaskBoard` (task order, statuses, fix chains),
+    `ConfigWriter`, `SessionStore`).
+  - `domain`: the rules, with no I/O: the `TaskBoard` (task order, statuses, fix chains)
+    and what a crash leaves of its tasks (`interrupted`),
     `StepProgress` (each verification step's status, kept by the `Verifier` and the startup
     check), `AgentTask` (what orbit replies to an agent, and when its work is verified), the
     `AgentRegistry` (agent ids and tokens), `roles` (built-in roles, given their instructions,
     orbit's limits, its verification steps and worktree setup), `ReviewPlanner` (when to
     review, batches, rounds and caps), commit messages, when a task needs verifying, how many
-    fixes to try per step, and the fix prompt.
+    fixes to try per step, and the fix prompt. `sessions` holds the rules of saved sessions:
+    the `SessionRecord` and its format (versioned, with upgrades from older ones, or why a file
+    is unreadable), how the list of sessions summarizes and orders them, when one may be
+    opened, renamed or deleted, the notes and settings a resumed session starts with, and when a
+    lock is stale.
 - `orbit.tui`: frontend. Sends commands and renders events. Imports only `orbit.protocol`.
   `view` turns state and events into text and doesn't import Textual, with a module per area
   of the screen (`events`, `transcript`, `tool_calls`, `proposals`, `tasks`, `panels`, `agents`,
   `tabs`, `detail` and `detail_views` for the detail pane, `diffs` and `diff_numbers` for an
   edit's diff, `progress` for notes on a task's run, `rules` for the rules ending turns and
-  agents' runs, `turns` for the conversation's running turns, `working` for the working row, and `settings` and `common` for what they share); the widgets (`transcript`,
-  `conversation` for the `ConversationFeed`, which turns events into the transcript's entries,
-  `entries` for an entry and the renderables that draw it, `tabs`, `tasks`, `agents`,
-  `panels`, `detail` for the detail pane, `working` for the working row, `proposals`, the
-  proposal modal, and `widgets` for the building blocks they share) lay it out, and `app` is
-  the Textual app that holds them.
+  agents' runs, `turns` for the conversation's running turns, `working` for the working row,
+  `sessions` for the list of sessions, and `settings` and `common` for what they share); the
+  widgets (`transcript`, `conversation` for the `ConversationFeed`, which turns events into the
+  transcript's entries, `entries` for an entry and the renderables that draw it, `tabs`,
+  `tasks`, `agents`, `panels`, `detail` for the detail pane, `working` for the working row,
+  `proposals`, the proposal modal, `sessions`, the modal listing the sessions, and `widgets` for
+  the building blocks they share) lay it out, and `app` is the Textual app that holds them.
 - `orbit.cli`: the composition root, and the only place the two sides are wired together: it
   plugs the external adapters into `AgentSession` and hands that to the TUI. It runs the
   backend on its own thread and event loop through `orbit.protocol.ThreadedSession`, so neither

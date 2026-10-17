@@ -1,0 +1,77 @@
+# Saved sessions
+
+How orbit keeps the work in progress so you can come back to it, and what is deliberately left for
+later. README's [Sessions](../README.md#sessions) section says how to use them.
+
+## Goal
+
+Quitting orbit, or a crash, shouldn't lose what you were working on, and you should be able to keep
+several lines of work apart and switch between them.
+
+## What a session holds
+
+A session is one JSON record (`SessionRecord`, in `orbit.agent.domain.sessions`):
+
+- its id, its name, and when it was created and last active;
+- the task list, each task with its status, settings and usage;
+- the review lane's state: the review jobs it queued, their batches and rounds;
+- the planner's Claude conversation id, so its next prompt resumes that conversation;
+- the planner's model and new tasks' tool access.
+
+It doesn't hold the conversation window's transcript: a reopened session starts with an empty
+window and a note that it was resumed (see Deferred). Nor does it hold the count of commits towards
+the next super review, which belongs to the repository and is kept in `reviews.json` beside the
+sessions, or anything from `.orbit/config.toml`, which is read at startup as before.
+
+## Design
+
+- **Where.** `SessionFiles` keeps them in `.git/orbit/sessions/`, in the repository's shared git
+  directory, so every worktree of the repository sees the same sessions and the checkout never
+  does; outside a git repository, in `.orbit/sessions/` in the workspace. One `<id>.json` per
+  session.
+- **Writes.** A save writes a temporary file beside the record, syncs it, renames it over the
+  record and syncs the directory, so a crash leaves the old record or the new one, never half of
+  either. Saves run one at a time, the newest last, and only when something changed.
+- **When.** A session is saved after every change, but only once it's used: once it has a task
+  or you prompt the planner. Starting orbit and quitting leaves nothing behind.
+- **Format.** Each record carries a format version. Older versions are upgraded as they're read
+  (there are no upgrades yet); a newer one, or a file that isn't valid JSON or doesn't fit the
+  record, is unreadable. Unreadable files are listed with the reason, can be deleted, and are
+  never opened, renamed or overwritten.
+- **Lifetime.** Sessions are kept until you delete one; nothing is pruned. Deleting removes the
+  record and its lock, not Claude's own conversation files.
+- **Locks.** An orbit locks a session from its first save until it closes or switches away, by
+  creating `<id>.lock` naming its process, atomically, so two orbits can't both take it. Another
+  orbit lists the session as open elsewhere and won't open, rename or delete it. A lock whose
+  process has ended, or that names no process, is stale and is taken over. Renaming or deleting a
+  session that isn't open takes its lock for as long as that takes.
+- **Switching.** The startup list and `ctrl+p` open a saved session or start a new one. Switching
+  is refused while tasks run, a review runs or the planner answers, so nothing is running when the
+  session's contents are replaced. Opening a session never starts work. Drafts orbit added before
+  you picked at startup carry over into the session you pick, and the session they were added to
+  is then deleted.
+- **Crash recovery.** Tasks saved as running or verifying come back cancelled, so the next run
+  picks them up again, and orbit says how many. An interrupted review ends as a cancelled one
+  does: if its batch is then due a review, one is queued for the next run.
+- **Settings.** A session's saved model and tool access come back when it opens, except those
+  given on the command line with `--model` or `--tools`, which hold for the whole run.
+- **Layers.** The domain module holds the rules (the record and its format, summaries, when a
+  session may be opened, renamed or deleted, crash recovery, stale locks) without I/O. The
+  application's `SessionKeeper` decides when to save and drives switches through the
+  `SessionStore` port, and `SessionFiles` in `external` is the file adapter. The TUI's
+  `orbit.tui.view.sessions` holds the list's presentation rules, and `orbit.tui.sessions` the
+  modal.
+
+## Deferred (to do later)
+
+- **Restoring the conversation transcript when a session reopens.** The window would need an event
+  log per session, written as events are published; events versioned like the record, so a newer
+  orbit can still read an older log; and a replay on open that rebuilds the tabs, entries and
+  rules without re-running anything.
+- **Copying tasks between sessions**, such as moving unfinished work into a new session.
+- **Two orbits running tasks at once in one repository.** Locks protect sessions only. Every orbit
+  on a repository shares the coder's worktree, `.git/orbit/coder`, and its branch `orbit/coder`, so
+  two orbits running tasks at the same time, even in different sessions, would work in the same
+  tree. Making that safe needs a lock on the worktree, or a worktree per orbit.
+- **Process id reuse.** A lock is judged live by whether its process id is running, so a stale
+  lock whose id has been reused by an unrelated process looks live until that process ends.
