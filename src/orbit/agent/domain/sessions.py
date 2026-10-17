@@ -12,7 +12,7 @@ from datetime import datetime
 from functools import reduce
 from typing import Any
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationError
 from pydantic_core import from_json
 
 from orbit.agent.domain.reviews import LaneSnapshot
@@ -25,17 +25,18 @@ _MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct",
 
 Migration = Callable[[dict[str, Any]], dict[str, Any]]
 
-_TASKS = TypeAdapter(tuple[TaskState, ...])
-
 
 def _spent_by_tasks(record: dict[str, Any]) -> dict[str, Any]:
     """Version 1 ``record`` with what it spent: its tasks' usage, all that version 1 kept. With
-    tasks that can't be read, it's left for the record's validation to say why."""
+    tasks or usages that can't be read, it's left for the record's validation to say why."""
+    tasks = record.get("tasks", [])
+    if not isinstance(tasks, list) or not all(isinstance(task, dict) for task in tasks):
+        return record
     try:
-        tasks = _TASKS.validate_python(record.get("tasks", ()))
+        usages = [Usage.model_validate(task.get("usage", {})) for task in tasks]
     except ValidationError:
         return record
-    spent = sum((task.usage for task in tasks), Usage())
+    spent = sum(usages, Usage())
     return record | {"spent": spent.model_dump()}
 
 

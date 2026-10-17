@@ -172,6 +172,20 @@ def test_a_version_1_record_with_an_invalid_task_is_unreadable_for_that_task() -
     assert parse_record(json.dumps(data)) == Unreadable("tasks.0.task: Field required")
 
 
+def test_the_version_1_migration_sums_usages_of_tasks_with_fields_it_doesnt_know() -> None:
+    usages = (Usage(input_tokens=10, cost_usd=0.5), Usage(turns=2))
+    tasks = [{"id": str(n), "renamed": True, "usage": u.model_dump()} for n, u in enumerate(usages)]
+    migrated = sessions._MIGRATIONS[1]({"tasks": tasks})
+    assert Usage.model_validate(migrated["spent"]) == Usage(input_tokens=10, cost_usd=0.5, turns=2)
+
+
+@pytest.mark.parametrize("tasks", [{"0": {}}, [3], [{"usage": {"turns": -1}}]])
+def test_a_version_1_record_with_unreadable_tasks_is_left_for_validation(tasks: object) -> None:
+    data = version_1(()) | {"tasks": tasks}
+    assert "spent" not in sessions._MIGRATIONS[1](data)
+    assert isinstance(parse_record(json.dumps(data)), Unreadable)
+
+
 def version_2(reviews: object) -> dict[str, object]:
     """The fields of a version 2 record with ``reviews`` as saved."""
     return fields() | {"version": 2, "reviews": reviews}
