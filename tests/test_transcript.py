@@ -42,6 +42,7 @@ from orbit.tui.view import (
     GUTTER_BAR,
     GUTTER_MARKER,
     PROMPT_LINES_SHOWN,
+    PROMPT_MARKER,
     REPLY_LIMIT,
     SPINNER_FPS,
     EntryKind,
@@ -710,6 +711,27 @@ async def test_markdown_that_renders_nothing_still_draws_a_gutter_row(text: str)
         log.highlighted = 0
         await pilot.pause()
         assert entry_rows(log, 0)[0].startswith(GUTTER_MARKER)
+
+
+async def test_a_prompt_that_renders_nothing_still_draws_its_marker_in_its_band() -> None:
+    app = LogApp()
+    async with app.run_test() as pilot:
+        log = app.query_one(TranscriptLog)
+        log.append(Entry("<!-- x -->", "prompt"))
+        await pilot.pause()
+        assert entry_rows(log, 0)[0].startswith(f"{GUTTER_BAR} {PROMPT_MARKER}")
+        band = log.get_component_rich_style("transcript--prompt")
+        line = entry_lines(log, 0)[0]
+        gutter, *rest = backgrounds(line)
+        assert gutter is None and set(rest) == {band.bgcolor}
+        assert Segment.get_line_length(line) == log.size.width
+
+
+def test_a_hanging_indent_over_nothing_draws_its_first_prefix() -> None:
+    console = Console(width=40)
+    indent = HangingIndent(entry_markdown("<!-- x -->", Style()), PROMPT_MARKER, "  ", Style())
+    lines = console.render_lines(indent, console.options, pad=False)
+    assert ["".join(segment.text for segment in line) for line in lines] == [PROMPT_MARKER]
 
 
 async def test_a_submitted_prompt_is_added_as_a_prompt_entry() -> None:

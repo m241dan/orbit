@@ -98,7 +98,8 @@ def entry_markdown(text: str, style: Style) -> Markdown:
 @dataclass(frozen=True)
 class HangingIndent:
     """``body`` drawn in the width left beside its indent: ``first`` in front of its first row
-    and ``rest`` in front of every row after it, both in ``style``."""
+    and ``rest`` in front of every row after it, both in ``style``. A body that renders no rows,
+    such as markdown of only whitespace, still gets a row holding ``first``."""
 
     body: RenderableType
     first: str
@@ -108,7 +109,7 @@ class HangingIndent:
     def __rich_console__(self, console: Console, options: ConsoleOptions) -> RenderResult:
         width = options.max_width - len(self.first)
         rows = console.render_lines(self.body, options.update_width(width), pad=False)
-        for index, row in enumerate(rows):
+        for index, row in enumerate(rows or [[]]):
             yield Segment(self.rest if index else self.first, self.style)
             yield from row
             yield Segment.line()
@@ -143,8 +144,7 @@ class GutteredEntry:
     def __rich_console__(self, console: Console, options: ConsoleOptions) -> RenderResult:
         width = options.max_width - len(self.gutter)
         rows = self._rows(console, options.update_width(width))
-        # Markdown that renders nothing, such as only whitespace, still gets a row to mark.
-        for row in rows or [[]]:
+        for row in rows:
             yield Segment(self.gutter, self.gutter_style)
             yield from row
             yield Segment.line()
