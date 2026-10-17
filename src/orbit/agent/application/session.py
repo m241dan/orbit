@@ -21,7 +21,7 @@ from orbit.agent.application.keeper import (
     new_session_id,
 )
 from orbit.agent.application.lanes import TurnSlot
-from orbit.agent.application.planner import PlannerChat
+from orbit.agent.application.planner_seat import PlannerSeat, SeatHooks
 from orbit.agent.application.ports import ProposalReview, SessionStore, UsageSource
 from orbit.agent.application.proposals import FrontendReview
 from orbit.agent.application.review_lane import ReviewLane
@@ -34,7 +34,7 @@ from orbit.agent.application.work_lane import WorkLane
 from orbit.agent.domain.agents import Agent
 from orbit.agent.domain.board import WAITING, TaskBoard, interrupted
 from orbit.agent.domain.reviews import LaneSnapshot, PlannerSnapshot, ReviewPlanner
-from orbit.agent.domain.roles import REVIEW_ROLES, ConfigError, configure_prompt, role_task
+from orbit.agent.domain.roles import REVIEW_ROLES, configure_prompt, role_task
 from orbit.agent.domain.sessions import (
     EMPTY_NAME,
     SessionRecord,
@@ -49,7 +49,6 @@ from orbit.protocol import (
     PLANNER,
     AcceptTask,
     AddTask,
-    BusyChanged,
     CancelAgent,
     CancelTurn,
     Command,
@@ -63,7 +62,6 @@ from orbit.protocol import (
     NewSession,
     Notice,
     OpenSession,
-    PlannerReset,
     RemoveTask,
     RenameSession,
     RequestSuperReview,
@@ -76,7 +74,6 @@ from orbit.protocol import (
     SubmitPrompt,
     TaskSpec,
     TaskState,
-    TurnEndReason,
     TurnFinished,
     UpdateSettings,
     VerificationChanged,
@@ -89,10 +86,6 @@ CONFIGURING_NOTE = "A configurator task is already queued or running."
 TASKS_RUNNING = "Can't switch: tasks are running. Press ctrl+s to stop them."
 REVIEW_RUNNING = "Can't switch: a review is running. Press c on it in the agents pane to stop it."
 PLANNER_ANSWERING = "Can't switch: the planner is answering. Press ctrl+x to stop it."
-NO_PLANNER_MESSAGE = "Planning needs agents and a planner role."
-PLANNER_BUSY_RESET = "The planner is answering; press ctrl+x to stop it first."
-NOTHING_TO_RESET = "The planner has no conversation to reset."
-ROLE_KEPT = "Kept the planner's role, as the config is invalid"
 NO_REVIEWS = LaneSnapshot(planner=PlannerSnapshot())
 """The review state of a session that has had none."""
 
@@ -151,8 +144,8 @@ class AgentSession:
 
     The session owns the task board and reports it whole on every change. It starts two
     lanes: the planner's, whose turns answer prompts, and the work lane's, which runs the
-    tasks. ``WorkLane`` holds the rules of a task run: verification and fixes;
-    ``ReviewLane`` runs the reviews.
+    tasks. ``PlannerSeat`` holds the planner and its turns; ``WorkLane`` holds the rules of a
+    task run: verification and fixes; ``ReviewLane`` runs the reviews.
 
     With ``check_at_startup``, the ``verification`` steps also run once in the background as
     the events start, on the base commit; a failure adds a draft task to fix it. With a
@@ -203,11 +196,10 @@ class AgentSession:
         self._closing = False
         self._lane = self._review_lane()
         self._held = False  # The user cancelled: don't start work by itself.
-        self._planner = self._planner_chat()
-        self._retired: list[PlannerChat] = []  # Planners of sessions left or reset, still to close.
-        # What the opened session saved that no lane or planner here holds, kept to save back.
+        hooks = SeatHooks(self._save, self._keeper.use, self._step_names)
+        self._seat = PlannerSeat(self._desk, self._tasks, self._events, hooks)
+        # What the opened session saved that no review lane here holds, kept to save back.
         self._kept_reviews: LaneSnapshot | None = None
-        self._kept_conversation: str | None = None
         self._events.put_nowait(self._settings_changed())
         if workspace is not None:
             self._events.put_nowait(Notice(message=f"Workspace: {workspace}"))
@@ -216,7 +208,6 @@ class AgentSession:
         self._work = self._work_lane()
         post = self._events.put_nowait
         self._work_turns = TurnSlot("work", "Tasks are already running.", post)
-        self._planner_turns = TurnSlot("planner", "The planner is already answering.", post)
         self._usage = _usage_monitor(usage, self._events)
 
     def _work_lane(self) -> WorkLane | None:
@@ -374,7 +365,7 @@ class AgentSession:
             refusal = TASKS_RUNNING
         elif self._lane is not None and self._lane.running:
             refusal = REVIEW_RUNNING
-        elif self._planner_turns.running:
+        elif self._seat.running:
             refusal = PLANNER_ANSWERING
         else:
             return True
@@ -387,11 +378,10 @@ class AgentSession:
         if self._work is not None:
             self._work.reset()
         self._settings = resumed_settings(record.settings, self._given, self._pinned)
-        self._replace_planner(record.planner_conversation)
+        self._seat.replace(record.planner_conversation)
         if self._lane is not None:
             self._lane.load(record.reviews or NO_REVIEWS)
         self._kept_reviews = record.reviews
-        self._kept_conversation = record.planner_conversation
         return True
 
     def _clear(self) -> bool:
@@ -399,11 +389,10 @@ class AgentSession:
         self._replace_board(())
         if self._work is not None:
             self._work.reset()
-        self._replace_planner(None)
+        self._seat.replace(None)
         if self._lane is not None:
             self._lane.load(NO_REVIEWS)
         self._kept_reviews = None
-        self._kept_conversation = None
         return True
 
     def _replace_board(self, tasks: tuple[TaskState, ...]) -> None:
@@ -414,15 +403,6 @@ class AgentSession:
         for state in carried:
             self._board.append(state)
 
-    def _replace_planner(self, conversation: str | None) -> None:
-        """Have a new planner, carrying on ``conversation`` if there is one; the old one is
-        closed once the switch is done."""
-        if self._planner is not None:
-            self._retired.append(self._planner)
-        self._planner = self._planner_chat()
-        if self._planner is not None and conversation is not None:
-            self._planner.restore(conversation)
-
     async def _switched(
         self, left: Left, stopped: Collection[str], last_active: datetime | None
     ) -> None:
@@ -431,7 +411,7 @@ class AgentSession:
         session opened, last active at ``last_active``, holds."""
         discard, self._picking = self._picking, False
         await self._keeper.leave(left, discard)
-        await self._close_retired()
+        await self._seat.close_retired()
         if self._lane is not None:
             await self._lane.end_interrupted(stopped)
         await self._tasks.publish()
@@ -439,17 +419,12 @@ class AgentSession:
         summary = self._keeper.summary(self._board.tasks, last_active)
         await self._events.put(SessionOpened(session=summary))
 
-    async def _close_retired(self) -> None:
-        """Close the planners retired by leaving a session or by a reset."""
-        while self._retired:
-            await self._retired.pop().close()
-
     async def _handle_prompts(self, command: SubmitPrompt | CancelTurn | UpdateSettings) -> None:
         match command:
             case SubmitPrompt(text=text):
-                await self._submit(text)
+                await self._seat.submit(text, self._settings)
             case CancelTurn(lane="planner"):
-                self._planner_turns.cancel()
+                self._seat.cancel()
             case CancelTurn():
                 self._hold_work()
             case UpdateSettings(settings=settings):
@@ -458,52 +433,6 @@ class AgentSession:
                 await self._save()
             case _:
                 assert_never(command)
-
-    async def _reset_planner(self) -> None:
-        """End the planner's conversation, re-reading its role; refused while it answers, and
-        noted when it has no conversation yet."""
-        if self._desk is None or self._planner is None:
-            await self._events.put(ErrorOccurred(message=NO_PLANNER_MESSAGE))
-        elif self._planner_turns.running:
-            await self._events.put(ErrorOccurred(message=PLANNER_BUSY_RESET))
-        elif not self._planner.started:
-            await self._events.put(Notice(message=NOTHING_TO_RESET))
-        else:
-            await self._reread_planner_role(self._desk)
-            self._replace_planner(None)
-            await self._close_retired()
-            await self._events.put(PlannerReset())
-            await self._save()
-
-    async def _reread_planner_role(self, desk: AgentDesk) -> None:
-        """Have the planner's role as the project's config says now, if it can be read again;
-        an invalid config keeps the role it has, saying why."""
-        read = desk.agents.planner_role
-        if read is None:
-            return
-        role = read()
-        if isinstance(role, ConfigError):
-            await self._events.put(ErrorOccurred(message=f"{ROLE_KEPT}: {role}"))
-        else:
-            desk.use_role(PLANNER, role)
-
-    async def _submit(self, text: str) -> None:
-        """Start a turn of the planner's conversation, in its own lane."""
-        if self._planner is None:
-            await self._events.put(ErrorOccurred(message=NO_PLANNER_MESSAGE))
-            # Frees the prompt of a frontend that marked the lane busy when it sent this.
-            await self._events.put(BusyChanged(busy=False, lane="planner"))
-        else:
-            self._keeper.use()
-            await self._save()
-            await self._planner_turns.start(self._answer(self._planner, text, self._settings))
-
-    async def _answer(self, planner: PlannerChat, text: str, settings: Settings) -> TurnEndReason:
-        """``planner``'s turn on ``text``, saving the session after it, as its conversation
-        may have changed."""
-        reason = await planner.answer(text, settings)
-        await self._save()
-        return reason
 
     async def _handle_tasks(self, command: AddTask | RunTasks | ConfigureChecks) -> None:
         match command:
@@ -608,7 +537,7 @@ class AgentSession:
             case RequestSuperReview():
                 await self._super_review()
             case ResetPlanner():
-                await self._reset_planner()
+                await self._seat.reset()
             case _:
                 assert_never(command)
 
@@ -638,7 +567,7 @@ class AgentSession:
         if agent.role in REVIEW_ROLES and self._lane is not None:
             self._lane.cancel(agent.task_id)
         elif agent.role == PLANNER:
-            self._planner_turns.cancel()
+            self._seat.cancel()
         else:
             self._hold_work()
 
@@ -691,11 +620,10 @@ class AgentSession:
 
     def _contents(self) -> Contents:
         """What the session holds now, to save, with what it was opened with in place of the
-        reviews or planner conversation it has no lane or planner to hold."""
-        planner = self._planner
+        reviews it has no lane to hold."""
         return Contents(
             settings=self._settings,
-            planner_conversation=planner.conversation_id if planner else self._kept_conversation,
+            planner_conversation=self._seat.conversation_id,
             tasks=self._board.tasks,
             reviews=self._lane.snapshot() if self._lane else self._kept_reviews,
         )
@@ -710,11 +638,6 @@ class AgentSession:
             return False
         await self._tasks.publish()
         return True
-
-    def _planner_chat(self) -> PlannerChat | None:
-        if self._desk is None or PLANNER not in self._desk.agents.roles:
-            return None
-        return PlannerChat(self._desk, self._tasks, self._step_names)
 
     def _step_names(self) -> tuple[str, ...]:
         """The names of the steps verifying tasks now; none without verification."""
@@ -737,8 +660,8 @@ class AgentSession:
 
     def _stops(self) -> list[Callable[[], Awaitable[None]]]:
         """What :meth:`close` awaits, in order."""
-        parts = (self._startup, self._usage, self._lane, self._planner)
-        stops: list[Callable[[], Awaitable[None]]] = [self._stop_turns, self._close_retired]
+        parts = (self._startup, self._usage, self._lane, self._seat)
+        stops: list[Callable[[], Awaitable[None]]] = [self._stop_turns, self._seat.close_retired]
         stops += [part.close for part in parts if part is not None]
         if self._desk is not None:
             stops.append(self._desk.stop)
@@ -747,8 +670,8 @@ class AgentSession:
 
     async def _stop_turns(self) -> None:
         """Cancel the work lane's and the planner's turns, and wait for them to end."""
-        for slot in (self._work_turns, self._planner_turns):
-            await slot.close()
+        await self._work_turns.close()
+        await self._seat.stop_turn()
 
     async def events(self) -> AsyncIterator[Event]:
         if not self._announced:

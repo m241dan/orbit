@@ -710,15 +710,17 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     commits and merges verified work; `ReviewLane` runs reviews beside the work; `StartupCheck`
     runs the steps once on the base commit as orbit starts; `UsageMonitor` fetches the usage
     limits on a schedule and after an agent's turn; these three run their work through
-    `Background` (in `lanes`), which reports a crash rather than losing it, and the session runs
-    the work lane's and the planner's turns through a `TurnSlot` each (also in `lanes`), which
-    refuses a second turn and shows the lane busy while one runs; `FrontendReview` is where the
-    user decides on proposed checks; `PlannerChat` is the planner's conversation, running each
-    turn and publishing how it ended; `SessionKeeper` (in `keeper`) is the open session: it
-    saves it after every change once it's used, and lists, opens, renames, deletes and switches
-    saved sessions through the store. `ports` defines what it needs from outside (`AgentHost`,
-    `AgentLauncher`, `CoderTree`, `StepRunner`, `Workspace`, `ProposalReview`, `UsageSource`,
-    `ConfigWriter`, `SessionStore`).
+    `Background` (in `lanes`), which reports a crash rather than losing it, and the work lane's
+    and the planner's turns run through a `TurnSlot` each (also in `lanes`), which refuses a
+    second turn and shows the lane busy while one runs; `FrontendReview` is where the user
+    decides on proposed checks; `PlannerChat` is the planner's conversation, running each turn
+    and publishing how it ended; `PlannerSeat` (in `planner_seat`) is the planner's place in the
+    session: it holds the current `PlannerChat` and its turns, starts, cancels and resets them,
+    and closes the planners a switch or reset retired once that's done; `SessionKeeper` (in
+    `keeper`) is the open session: it saves it after every change once it's used, and lists,
+    opens, renames, deletes and switches saved sessions through the store. `ports` defines what
+    it needs from outside (`AgentHost`, `AgentLauncher`, `CoderTree`, `StepRunner`, `Workspace`,
+    `ProposalReview`, `UsageSource`, `ConfigWriter`, `SessionStore`).
   - `domain`: the rules, with no I/O: the `TaskBoard` (task order, statuses, fix chains)
     and what a crash leaves of its tasks (`interrupted`),
     `StepProgress` (each verification step's status, kept by the `Verifier` and the startup

@@ -4,7 +4,7 @@ role is read again from the project's config."""
 import asyncio
 
 from orbit.agent import AgentSession, ConfigError, Role
-from orbit.agent.application.session import (
+from orbit.agent.application.planner_seat import (
     NO_PLANNER_MESSAGE,
     NOTHING_TO_RESET,
     PLANNER_BUSY_RESET,
