@@ -145,6 +145,9 @@ the mark stays, the conversation stops following new output, and `enter` picks u
 `esc` again with the Conversation window selected lets go, and the conversation follows the latest
 output again. Each tab holds its own spot, kept while you switch tabs.
 
+The planned improvements to the conversation window, and what is deferred, are in
+[docs/conversation-window.md](docs/conversation-window.md).
+
 Each row of the task list shows its status: ⏳ pending, ◜ running (spinning), 🔍 verifying, ✅ done,
 ❗ failed verification, ❌ failed, ⌛ ran out of steps, 🏳 the agent gave up, 🛑 cancelled, 📝 a draft
 the planner proposed. A failed task doesn't stop the rest; `ctrl+s` cancels the running task (stopping
