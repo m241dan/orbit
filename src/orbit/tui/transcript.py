@@ -1,6 +1,7 @@
 """The conversation window: the transcript and its per-tab logs."""
 
 import time
+from bisect import bisect_left
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, replace
 from typing import Any, ClassVar, get_args
@@ -16,10 +17,11 @@ from textual.containers import Vertical
 from textual.timer import Timer
 from textual.widgets import OptionList, Static
 
-from orbit.protocol import Event
+from orbit.protocol import Event, ToolCallFinished, ToolCallStarted
 from orbit.tui.view import (
     SPINNER_FPS,
     EntryKind,
+    ToolCall,
     Working,
     WorkingView,
     banded,
@@ -33,6 +35,10 @@ from orbit.tui.view import (
     shows_markdown,
     speaker_label,
     starts_collapsed,
+    tool_call_entry,
+    tool_call_finished,
+    tool_call_started,
+    tool_call_unfinished,
     track_working,
     working_lines,
 )
@@ -43,12 +49,14 @@ from orbit.tui.widgets import ListPane
 class Entry:
     """A transcript entry: its ``text``, the ``kind`` it's styled as and the ``agent`` it's
     by, if any. An agent's message thinking out loud keeps the ``turn`` it's from, and is drawn
-    dim, until it's found to be the turn's final answer."""
+    dim, until it's found to be the turn's final answer. A tool call's entry keeps the ``call``,
+    which its text shows in a line."""
 
     text: str
     kind: EntryKind
     agent: str | None = None
     turn: str | None = None
+    call: ToolCall | None = None
 
 
 @dataclass(frozen=True)
@@ -112,7 +120,8 @@ class TranscriptLog(ListPane):
     screen, so switching tabs is instant and adding an entry costs the same however long the
     conversation gets. The cursor's entry is marked in the left gutter rather than highlighted.
     Hiding thinking leaves agents' dim messages out of the options; the entries are all kept,
-    and option indexes count only the entries shown."""
+    and option indexes count only the entries shown. A tool call is one line, updated in place
+    as it finishes, its spinner read off ``clock``."""
 
     DEFAULT_CSS = """
     TranscriptLog {
@@ -155,12 +164,19 @@ class TranscriptLog(ListPane):
         *(f"transcript--{kind}" for kind in get_args(EntryKind)),
     }
 
-    def __init__(self, shown: bool = False, thinking_hidden: bool = False) -> None:
+    def __init__(
+        self,
+        shown: bool = False,
+        thinking_hidden: bool = False,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
         super().__init__()
+        self.clock = clock
         self._entries: list[Entry] = []
         self._collapsed: list[bool] = []
         self._rows: list[int] = []  # The entry each option shows.
         self._marked: int | None = None  # The option drawn with the marker.
+        self._calls: dict[int, ToolCall] = {}  # The calls still running, by their entry.
         self._thinking_hidden = thinking_hidden
         self.set_class(shown, "-shown")
 
@@ -180,10 +196,11 @@ class TranscriptLog(ListPane):
         """Add an entry by ``agent``, dim while thinking out loud in ``turn``, collapsed if its
         kind starts so; the view stays pinned to the latest entry unless the list is active or
         holds a cursor."""
-        collapsed = starts_collapsed(kind, text)
-        entry = Entry(text, kind, agent, turn)
+        self._add(Entry(text, kind, agent, turn))
+
+    def _add(self, entry: Entry) -> None:
         self._entries.append(entry)
-        self._collapsed.append(collapsed)
+        self._collapsed.append(starts_collapsed(entry.kind, entry.text))
         if not self._shows(entry):
             return
         self._rows.append(len(self._entries) - 1)
@@ -202,6 +219,48 @@ class TranscriptLog(ListPane):
         index = rules[-1]
         self._entries[index] = Entry(text, kind, agent)
         self._redraw(self._rows.index(index))  # Rules are never hidden.
+
+    @property
+    def running(self) -> bool:
+        """Whether any tool call shown here is still running."""
+        return bool(self._calls)
+
+    def append_call(self, call: ToolCall, agent: str | None) -> None:
+        """Add ``agent``'s running ``call`` as a one-line entry, its spinner turning on
+        :meth:`tick`."""
+        self._calls[len(self._entries)] = call
+        self._add(Entry(*tool_call_entry(call, agent, self.clock()), agent, call=call))
+
+    def finish_call(self, event: ToolCallFinished) -> bool:
+        """Show the running call ``event`` finishes as finished, redrawn where it is; False,
+        and nothing changed, when no running call here is the one."""
+        for index, call in self._calls.items():
+            if (self._entries[index].agent, call.call_id) == (event.agent_id, event.call_id):
+                self._set_call(index, tool_call_finished(call, event))
+                return True
+        return False
+
+    def end_calls(self, agent: str | None) -> None:
+        """Show ``agent``'s calls still running as having no result, their turn over."""
+        for index, call in list(self._calls.items()):
+            if self._entries[index].agent == agent:
+                self._set_call(index, tool_call_unfinished(call))
+
+    def tick(self) -> None:
+        """Turn the spinners: redraw just the entries of running calls."""
+        for index, call in list(self._calls.items()):
+            self._set_call(index, call)
+
+    def _set_call(self, index: int, call: ToolCall) -> None:
+        """Make the entry at ``index`` show ``call``, redrawn where it is if its text changed;
+        a call no longer running stops turning."""
+        if call.status != "running":
+            del self._calls[index]
+        entry = self._entries[index]
+        text, kind = tool_call_entry(call, entry.agent, self.clock())
+        self._entries[index] = replace(entry, text=text, kind=kind, call=call)
+        if (text, kind) != (entry.text, entry.kind):
+            self._redraw(bisect_left(self._rows, index))  # Tool calls are never hidden.
 
     def release_cursor(self) -> None:
         """Let go of the held cursor, so the view follows the latest entry again."""
@@ -418,7 +477,9 @@ class Transcript(Vertical):
         self.only: str | None = None  # Show only this tab's entries, or all.
         self._label: str | None = None  # The shown tab's label; None for All.
         self.thinking_hidden = False
+        self.clock: Callable[[], float] = time.monotonic
         self._logs: dict[str | None, TranscriptLog] = {}
+        self._timer: Timer | None = None
 
     def compose(self) -> ComposeResult:
         yield WorkingRow()
@@ -457,6 +518,46 @@ class Transcript(Vertical):
         ``key`` names a tab, under that tab."""
         for tab in {None, key}:
             self._log(tab).replace_rule(agent, text, kind)
+
+    @property
+    def ticking(self) -> bool:
+        """Whether the spinners of running tool calls are turning."""
+        return self._timer is not None
+
+    def add_tool_call(self, event: ToolCallStarted, key: str | None) -> None:
+        """Add the call ``event`` starts as a running entry under All and, if ``key`` names a
+        tab, under that tab."""
+        call = tool_call_started(event)
+        for tab in {None, key}:
+            self._log(tab).append_call(call, event.agent_id)
+        self._keep_ticking()
+
+    def finish_tool_call(self, event: ToolCallFinished) -> bool:
+        """Show the call ``event`` finishes as finished in every log holding it; False when
+        none does."""
+        found = [log.finish_call(event) for log in self._logs.values()]
+        self._keep_ticking()
+        return any(found)
+
+    def end_tool_calls(self, agent: str | None) -> None:
+        """Show ``agent``'s calls still running as having no result, in every log."""
+        for log in self._logs.values():
+            log.end_calls(agent)
+        self._keep_ticking()
+
+    def tick(self) -> None:
+        """Turn the spinners of running tool calls."""
+        for log in self._logs.values():
+            log.tick()
+
+    def _keep_ticking(self) -> None:
+        """Tick while any tool call runs, and only then."""
+        running = any(log.running for log in self._logs.values())
+        if running and self._timer is None:
+            self._timer = self.set_interval(1 / SPINNER_FPS, self.tick)
+        elif not running and self._timer is not None:
+            self._timer.stop()
+            self._timer = None
 
     def add_thinking(self, text: str, key: str | None, agent: str | None, turn: str) -> None:
         """Add ``agent``'s message in ``turn``, dim as thinking out loud until it's promoted,
@@ -510,6 +611,6 @@ class Transcript(Vertical):
         return self._logs[key]
 
     def _new_log(self, key: str | None, shown: bool = False) -> TranscriptLog:
-        log = TranscriptLog(shown=shown, thinking_hidden=self.thinking_hidden)
+        log = TranscriptLog(shown, self.thinking_hidden, lambda: self.clock())
         self._logs[key] = log
         return log

@@ -27,13 +27,12 @@ from orbit.protocol import (
     TaskMerged,
     TaskState,
     ToolCallFinished,
-    ToolCallStarted,
     TurnEndReason,
     TurnFinished,
     Usage,
 )
-from orbit.tui.view.common import EntryKind
-from orbit.tui.view.tool_calls import orbit_request_text, tool_call_text
+from orbit.tui.view.common import EntryKind, spinner_frame
+from orbit.tui.view.tool_calls import ToolCall, orbit_request_text, tool_call_line
 
 SKIP_REASONS: dict[SkipReason, str] = {
     "tools_off": "tools were off",
@@ -188,26 +187,27 @@ def gutter(marked: bool) -> str:
     return f"{GUTTER_MARKER if marked else GUTTER_BAR} "
 
 
-def output_entry(
-    event: AssistantMessage | ToolCallStarted | ToolCallFinished,
-) -> tuple[str, EntryKind]:
-    """A piece of a turn's output as transcript text and the kind of entry to show it as.
+def output_entry(event: AssistantMessage | ToolCallFinished) -> tuple[str, EntryKind]:
+    """A piece of a turn's output as transcript text and the kind of entry to show it as: a
+    message, or the output of a tool call whose start wasn't shown.
 
-    An agent's tool calls and errors are labelled with the agent, to tell them from the
+    An agent's tool output and errors are labelled with the agent, to tell them from the
     conversation's; its messages are headed by a label row instead (see :func:`speaker_label`).
     """
     entry = _output(event)
     return entry if entry[1] == "assistant" else agent_labelled(entry, event.agent_id)
 
 
-def _output(
-    event: AssistantMessage | ToolCallStarted | ToolCallFinished,
-) -> tuple[str, EntryKind]:
+def tool_call_entry(call: ToolCall, agent: str | None, now: float) -> tuple[str, EntryKind]:
+    """``call`` by ``agent`` as its one-line entry, its spinner as it is at ``now`` seconds
+    while it runs, labelled with the agent like the rest of its output."""
+    return agent_labelled(tool_call_line(call, spinner_frame(now)), agent)
+
+
+def _output(event: AssistantMessage | ToolCallFinished) -> tuple[str, EntryKind]:
     match event:
         case AssistantMessage(text=text):
             return text, "assistant"
-        case ToolCallStarted(name=name, arguments=arguments):
-            return tool_call_text(name, arguments), "tool"
         case ToolCallFinished(output=output, is_error=True):
             return output, "error"
         case ToolCallFinished(output=output):

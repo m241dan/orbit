@@ -146,11 +146,16 @@ ends, its final answer (the messages after its last tool call) brightens, under 
 prompts stand out: each starts with `❯`, its following rows indented beneath it, on a faint band
 across the conversation's width, and renders as markdown too; a prompt of more than 15 lines
 starts collapsed (`❯ ▸ first line (+N lines)`), and an expanded one of several lines is marked
-`❯ ▾`. Task headers (`Task 3: …`) stay bold in the accent colour. A tool call shows as one line naming the tool and its main
-argument, such as the file or command, with its full arguments collapsed beneath it; an agent's
-request to orbit shows the same way. An entry of more than one line can be collapsed to its first
-line and a count of the rest, marked `▸` (`▾` when expanded); tool calls, their output and requests
-to orbit start collapsed. Press `enter` on the conversation to move between entries with `j`/`k`, `enter` again to collapse or
+`❯ ▾`. Task headers (`Task 3: …`) stay bold in the accent colour. A tool call and its result are
+one line, naming the tool and its main argument, such as the file or command, and updated in place:
+a spinner turns in front while it runs (`◜ Read src/x.py`), and once it finishes it reads
+`→ Read src/x.py ✓ 12 lines`, counting its output's lines, or `→ Read src/x.py ✗ 1 line` in the
+error colour if it failed. A call still running when its turn ends shows `→ Read src/x.py ⊘ no
+result`. A tool call's line can't be expanded; its full arguments and output are kept but not
+shown. An agent's request to orbit shows as one line naming the tool and its main argument, with
+its full arguments collapsed beneath it. An entry of more than one line can be collapsed to its
+first line and a count of the rest, marked `▸` (`▾` when expanded); requests to orbit start
+collapsed. Press `enter` on the conversation to move between entries with `j`/`k`, `enter` again to collapse or
 expand the one marked `▌` in the left gutter, and `esc` to leave. Leaving holds the marked entry:
 the mark stays, the conversation stops following new output, and `enter` picks up there again.
 `esc` again with the Conversation window selected lets go, and the conversation follows the latest

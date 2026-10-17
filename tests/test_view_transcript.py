@@ -31,9 +31,11 @@ from orbit.tui.view import (
     GUTTER_MARKER,
     PROMPT_LINES_SHOWN,
     PROMPT_MARKER,
+    SPINNER_FPS,
     DrawnRule,
     EntryKind,
     ExitRule,
+    ToolCall,
     activity_entry,
     agent_entry,
     agent_labelled,
@@ -58,6 +60,9 @@ from orbit.tui.view import (
     starts_collapsed,
     task_started_entry,
     token_text,
+    tool_call_entry,
+    tool_call_finished,
+    tool_call_started,
     turn_rule_entry,
     usage_text,
     verification_finished_entry,
@@ -68,8 +73,6 @@ from orbit.tui.view import (
 
 def test_turn_output_becomes_transcript_entries() -> None:
     assert output_entry(AssistantMessage(turn_id="t", text="hi")) == ("hi", "assistant")
-    started = ToolCallStarted(turn_id="t", call_id="c", name="Read", arguments={"file_path": "a"})
-    assert output_entry(started) == ('→ Read a\n{\n  "file_path": "a"\n}', "tool")
     assert output_entry(ToolCallFinished(turn_id="t", call_id="c", output="ok")) == ("ok", "tool")
     failed = ToolCallFinished(turn_id="t", call_id="c", output="no", is_error=True)
     assert output_entry(failed) == ("no", "error")
@@ -154,11 +157,7 @@ def test_unchanged_skip_reason_reads_naturally() -> None:
     assert "unchanged" in text and kind == "verify"
 
 
-def test_agent_tool_calls_and_errors_are_labelled_with_their_agent() -> None:
-    started = ToolCallStarted(
-        turn_id="t", call_id="c", name="Read", arguments={}, agent_id="agent-2"
-    )
-    assert output_entry(started) == ("agent-2: → Read", "tool")
+def test_agent_tool_output_and_errors_are_labelled_with_their_agent() -> None:
     failed = ToolCallFinished(turn_id="t", call_id="c", output="no", is_error=True, agent_id="a")
     assert output_entry(failed) == ("a: no", "error")
 
@@ -336,27 +335,34 @@ def test_gutter_is_two_columns_whether_marked_or_not() -> None:
     assert len(gutter(marked=False)) == len(gutter(marked=True)) == 2
 
 
-def test_a_tool_call_entry_collapses_its_full_arguments_beneath_a_summary() -> None:
-    arguments = {"file_path": "src/foo.py", "content": "a\nb"}
-    started = ToolCallStarted(turn_id="t", call_id="c", name="Write", arguments=arguments)
-    text, kind = output_entry(started)
-    first, _, rest = text.partition("\n")
-    assert first == "→ Write src/foo.py"
-    assert json.loads(rest) == arguments
-    assert starts_collapsed(kind, text)
-    assert entry_label(kind, text, collapsed=True) == "▸ → Write src/foo.py (+4 lines)"
+def read(arguments: dict[str, str] | None = None) -> ToolCall:
+    """A running call to Read with ``arguments``, by default a file's path."""
+    arguments = {"file_path": "a.py"} if arguments is None else arguments
+    return tool_call_started(
+        ToolCallStarted(turn_id="t", call_id="c", name="Read", arguments=arguments)
+    )
 
 
-def test_a_tool_call_entry_without_arguments_is_one_line() -> None:
-    started = ToolCallStarted(turn_id="t", call_id="c", name="mcp__orbit__get_task", arguments={})
-    text, _ = output_entry(started)
-    assert text == "→ mcp__orbit__get_task"
-    assert not collapsible(text)
+def test_a_running_tool_calls_entry_spins_beside_its_summary() -> None:
+    assert tool_call_entry(read(), None, 0.0) == ("◜ Read a.py", "tool")
+    assert tool_call_entry(read(), None, 1 / SPINNER_FPS) == ("◠ Read a.py", "tool")
 
 
-def test_a_tool_call_entrys_arguments_keep_non_ascii_text() -> None:
-    started = ToolCallStarted(turn_id="t", call_id="c", name="x", arguments={"a": "é"})
-    assert output_entry(started)[0] == '→ x {"a": "é"}\n{\n  "a": "é"\n}'
+def test_a_tool_calls_entry_is_labelled_with_its_agent() -> None:
+    assert tool_call_entry(read(), "agent-3", 0.0) == ("agent-3: ◜ Read a.py", "tool")
+
+
+def test_a_finished_tool_calls_entry_counts_its_outputs_lines() -> None:
+    finished = ToolCallFinished(turn_id="t", call_id="c", output="a\nb\nc")
+    call = tool_call_finished(read(), finished)
+    assert tool_call_entry(call, None, 0.0) == ("→ Read a.py ✓ 3 lines", "tool")
+    assert call.output == "a\nb\nc"
+
+
+def test_a_failed_tool_calls_entry_is_an_error() -> None:
+    failed = ToolCallFinished(turn_id="t", call_id="c", output="boom", is_error=True)
+    call = tool_call_finished(read(), failed)
+    assert tool_call_entry(call, None, 0.0) == ("→ Read a.py ✗ 1 line", "error")
 
 
 def ended(reason: TurnEndReason, usage: Usage | None = None) -> TurnFinished:

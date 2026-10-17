@@ -2,8 +2,12 @@
 
 import json
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass, replace
 from types import MappingProxyType
-from typing import Any
+from typing import Any, Literal, assert_never
+
+from orbit.protocol import ToolCallFinished, ToolCallStarted
+from orbit.tui.view.common import EntryKind
 
 TOOL_CALL_SUMMARY_LIMIT = 120
 """The most characters a tool call's summary line shows."""
@@ -95,12 +99,66 @@ def _clip(text: str, limit: int) -> str:
     return text if len(text) <= limit else f"{text[: limit - 1]}…"
 
 
-def tool_call_text(name: str, arguments: Mapping[str, Any]) -> str:
-    """A tool call as one line summing it up, with its full ``arguments`` on the lines after."""
-    if not arguments:
-        return f"→ {name}"
-    full = json.dumps(arguments, indent=2, ensure_ascii=False)
-    return f"→ {tool_call_summary(name, arguments)}\n{full}"
+def tool_call_title(name: str, arguments: Mapping[str, Any]) -> str:
+    """The line summing up a call to the tool ``name``: the tool alone without ``arguments``,
+    else its summary (see :func:`tool_call_summary`)."""
+    return tool_call_summary(name, arguments) if arguments else name
+
+
+ToolCallStatus = Literal["running", "passed", "failed", "no_result"]
+"""How a tool call went: still running, finished or failed, or ended with its turn before a
+result came."""
+
+
+@dataclass(frozen=True)
+class ToolCall:
+    """A tool call as its entry shows it: the ``call_id`` its result comes back with, its
+    ``summary`` and ``status``, and its full ``arguments`` and ``output``, kept for a closer
+    look."""
+
+    call_id: str
+    summary: str
+    arguments: Mapping[str, Any]
+    status: ToolCallStatus = "running"
+    output: str = ""
+
+
+def tool_call_started(event: ToolCallStarted) -> ToolCall:
+    """The call ``event`` starts, running."""
+    return ToolCall(event.call_id, tool_call_title(event.name, event.arguments), event.arguments)
+
+
+def tool_call_finished(call: ToolCall, event: ToolCallFinished) -> ToolCall:
+    """``call`` finished with ``event``'s output, failed if it's an error."""
+    return replace(call, status="failed" if event.is_error else "passed", output=event.output)
+
+
+def tool_call_unfinished(call: ToolCall) -> ToolCall:
+    """``call`` once its turn has ended: with no result if it was still running."""
+    return replace(call, status="no_result") if call.status == "running" else call
+
+
+def line_count(text: str) -> str:
+    """How many lines ``text`` has, as read: ``0 lines``, ``1 line``, ``2 lines``."""
+    count = len(text.splitlines())
+    return f"{count} line{'' if count == 1 else 's'}"
+
+
+def tool_call_line(call: ToolCall, frame: str) -> tuple[str, EntryKind]:
+    """``call`` as its entry's one line and the kind it's shown as: its summary behind the
+    spinner's ``frame`` while it runs, then marked with how it went and how many lines its
+    output has."""
+    match call.status:
+        case "running":
+            return f"{frame}{call.summary}", "tool"
+        case "passed":
+            return f"→ {call.summary} ✓ {line_count(call.output)}", "tool"
+        case "failed":
+            return f"→ {call.summary} ✗ {line_count(call.output)}", "error"
+        case "no_result":
+            return f"→ {call.summary} ⊘ no result", "tool"
+        case _:
+            assert_never(call.status)
 
 
 def orbit_request_text(tool: str, arguments: Mapping[str, Any]) -> str:

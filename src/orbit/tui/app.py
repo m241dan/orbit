@@ -594,6 +594,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         """Add or update the rule ending ``event``'s agent's run, under All and its tab, which
         is known by its id even once the tab has closed."""
         agent = event.agent_id
+        self._transcript.end_tool_calls(agent)
         drawn = self._drawn_rules.pop(agent, None)
         since = self._agent_since.pop(agent, None)
         elapsed = None if since is None else self.clock() - since
@@ -616,6 +617,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         if event.usage is not None:
             self._task_list.count(event.usage)
         steps = self._turns.pop((event.agent_id, event.turn_id), [])
+        self._transcript.end_tool_calls(event.agent_id)
         self._transcript.promote(event.agent_id, event.turn_id, final_answer(steps))
         started = self._turn_starts.pop((event.agent_id, event.turn_id), None)
         elapsed = None if started is None else self.clock() - started
@@ -637,13 +639,14 @@ class OrbitApp(App[None], inherit_bindings=False):
 
     def _output(self, event: AssistantMessage | ToolCallStarted | ToolCallFinished) -> None:
         """Show a piece of a turn's output: a message dim until its turn ends, a tool call's
-        start as a step in its turn."""
+        start as a step in its turn and an entry its result updates."""
         if isinstance(event, AssistantMessage):
             self._think(event)
-            return
-        if isinstance(event, ToolCallStarted):
+        elif isinstance(event, ToolCallStarted):
             self._step(event.agent_id, event.turn_id, "tool")
-        self._append(*output_entry(event), event.agent_id)
+            self._transcript.add_tool_call(event, self._tabs.key_of(event.agent_id))
+        elif not self._transcript.finish_tool_call(event):
+            self._append(*output_entry(event), event.agent_id)
 
     def _step(self, agent: str | None, turn: str, step: TurnStep) -> None:
         """Note ``step`` in ``agent``'s ``turn``, which decides its final answer when it ends."""

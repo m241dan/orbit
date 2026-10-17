@@ -2,8 +2,16 @@ from typing import Any
 
 import pytest
 
+from orbit.protocol import ToolCallFinished, ToolCallStarted
 from orbit.tui.view import (
+    ToolCall,
+    line_count,
+    tool_call_finished,
+    tool_call_line,
+    tool_call_started,
     tool_call_summary,
+    tool_call_title,
+    tool_call_unfinished,
 )
 
 
@@ -115,3 +123,69 @@ def test_tool_call_summary_cuts_121_characters_with_an_ellipsis() -> None:
     summary = tool_call_summary("Read", {"file_path": path})
     assert len(summary) == 120
     assert summary == f"Read {path[:114]}…"
+
+
+def test_a_tool_calls_title_is_its_summary() -> None:
+    assert tool_call_title("Read", {"file_path": "a.py"}) == "Read a.py"
+
+
+def test_a_tool_call_without_arguments_is_titled_by_the_tool_alone() -> None:
+    assert tool_call_title("Read", {}) == "Read"
+
+
+def started_call(call_id: str = "c") -> ToolCall:
+    arguments = {"file_path": "a.py"}
+    event = ToolCallStarted(turn_id="t", call_id=call_id, name="Read", arguments=arguments)
+    return tool_call_started(event)
+
+
+def test_a_started_call_runs_keeping_its_id_and_full_arguments() -> None:
+    assert started_call() == ToolCall("c", "Read a.py", {"file_path": "a.py"}, "running", "")
+
+
+def test_a_finished_call_keeps_its_output() -> None:
+    event = ToolCallFinished(turn_id="t", call_id="c", output="one\ntwo")
+    assert tool_call_finished(started_call(), event).output == "one\ntwo"
+
+
+@pytest.mark.parametrize(("is_error", "status"), [(False, "passed"), (True, "failed")])
+def test_a_finished_call_passed_or_failed_by_its_error(is_error: bool, status: str) -> None:
+    event = ToolCallFinished(turn_id="t", call_id="c", output="", is_error=is_error)
+    assert tool_call_finished(started_call(), event).status == status
+
+
+def test_a_running_call_ends_with_no_result() -> None:
+    assert tool_call_unfinished(started_call()).status == "no_result"
+
+
+def test_a_finished_call_keeps_its_result_when_its_turn_ends() -> None:
+    event = ToolCallFinished(turn_id="t", call_id="c", output="ok")
+    finished = tool_call_finished(started_call(), event)
+    assert tool_call_unfinished(finished) == finished
+
+
+@pytest.mark.parametrize(
+    ("text", "count"),
+    [("", "0 lines"), ("one", "1 line"), ("one\n", "1 line"), ("one\ntwo", "2 lines")],
+)
+def test_line_counts_read_in_the_singular_only_for_one(text: str, count: str) -> None:
+    assert line_count(text) == count
+
+
+def test_a_running_calls_line_puts_the_spinner_before_its_summary() -> None:
+    assert tool_call_line(started_call(), "◠ ") == ("◠ Read a.py", "tool")
+
+
+def test_a_passed_calls_line_is_ticked_with_its_line_count() -> None:
+    call = ToolCall("c", "Read a.py", {}, "passed", "a\nb")
+    assert tool_call_line(call, "◠ ") == ("→ Read a.py ✓ 2 lines", "tool")
+
+
+def test_a_failed_calls_line_is_crossed_as_an_error() -> None:
+    call = ToolCall("c", "Read a.py", {}, "failed", "")
+    assert tool_call_line(call, "◠ ") == ("→ Read a.py ✗ 0 lines", "error")
+
+
+def test_a_call_with_no_result_says_so_muted() -> None:
+    call = ToolCall("c", "Read a.py", {}, "no_result")
+    assert tool_call_line(call, "◠ ") == ("→ Read a.py ⊘ no result", "tool")

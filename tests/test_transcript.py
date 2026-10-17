@@ -26,7 +26,7 @@ from orbit.protocol import (
 )
 from orbit.tui import OrbitApp
 from orbit.tui.transcript import Entry, GutteredEntry, HangingIndent, Transcript, TranscriptLog
-from orbit.tui.view import GUTTER_BAR, GUTTER_MARKER, PROMPT_LINES_SHOWN, EntryKind
+from orbit.tui.view import GUTTER_BAR, GUTTER_MARKER, PROMPT_LINES_SHOWN, SPINNER_FPS, EntryKind
 from orbit.tui.widgets import PromptInput
 from tests.test_tui import FakeSession, feed_events, said, started
 
@@ -1034,8 +1034,8 @@ async def test_a_final_answer_brightens_under_all_and_its_roles_tab() -> None:
         assert transcript.entries("coder")[1] == Entry("done", "assistant", "agent-1")
 
 
-TOOL_ROWS = ["agent-1: → Read", "agent-1: found"]
-"""How a thinking turn's tool call and its output are labelled."""
+TOOL_ROWS = ["agent-1: → Read ✓ 1 line"]
+"""How a thinking turn's tool call, finished, is labelled."""
 
 
 def thinking_turn(agent_id: str = "agent-1", turn: str = "t") -> list[Event]:
@@ -1111,8 +1111,8 @@ async def test_a_hidden_cursors_entry_moves_the_cursor_to_the_entry_before_it() 
         log = visible_log(app)
         await pilot.press("t")
         assert app.focused is log
-        assert log.highlighted == 2 and labels(app)[2] == "agent-1: found"
-        assert gutters(app) == [GUTTER_BAR, GUTTER_BAR, GUTTER_MARKER]
+        assert log.highlighted == 1 and labels(app)[1] == "agent-1: → Read ✓ 1 line"
+        assert gutters(app) == [GUTTER_BAR, GUTTER_MARKER]
 
 
 async def test_a_hidden_cursors_entry_with_none_before_it_moves_to_the_one_after() -> None:
@@ -1122,7 +1122,7 @@ async def test_a_hidden_cursors_entry_with_none_before_it_moves_to_the_one_after
         await feed_events(session, pilot, *thinking_turn())
         await pilot.press("k", "enter", "home")  # At the first entry, a dim message.
         await pilot.press("t")
-        assert visible_log(app).highlighted == 0 and gutters(app) == [GUTTER_MARKER, GUTTER_BAR]
+        assert visible_log(app).highlighted == 0 and gutters(app) == [GUTTER_MARKER]
 
 
 async def test_a_hidden_cursors_entry_with_no_entry_left_leaves_no_cursor() -> None:
@@ -1140,11 +1140,11 @@ async def test_the_cursor_stays_on_its_entry_when_thinking_is_shown_again() -> N
     app = OrbitApp(session)
     async with app.run_test() as pilot:
         await feed_events(session, pilot, *thinking_turn())
-        await pilot.press("t", "k", "enter")  # On the tool output, the latest entry shown.
+        await pilot.press("t", "k", "enter")  # On the tool call, the latest entry shown.
         await pilot.press("t")
         log = visible_log(app)
-        assert log.highlighted == 2
-        assert gutters(app) == [GUTTER_BAR, GUTTER_BAR, GUTTER_MARKER, GUTTER_BAR]
+        assert log.highlighted == 1
+        assert gutters(app) == [GUTTER_BAR, GUTTER_MARKER, GUTTER_BAR]
 
 
 async def test_collapsed_entries_stay_so_across_hiding_and_showing_thinking() -> None:
@@ -1175,9 +1175,8 @@ async def test_a_turn_ending_on_a_tool_call_while_hidden_shows_only_its_rule() -
     async with app.run_test() as pilot:
         await feed_events(session, pilot, thought("agent-1", "looking"), tool_call("agent-1"))
         await pilot.press("t")
-        shown = labels(app)
         await feed_events(session, pilot, turn_ended("agent-1"))
-        assert labels(app) == [*shown, "agent-1 done"]
+        assert labels(app) == ["agent-1: → Read ⊘ no result", "agent-1 done"]
 
 
 async def test_speaker_labels_are_judged_on_the_entries_shown() -> None:
@@ -1381,3 +1380,203 @@ async def test_replacing_a_rule_in_a_log_without_one_leaves_it() -> None:
         log.append("hi", "agent", "agent-3")
         log.replace_rule("agent-3", "agent-3 stopped", "rule")
         assert log.entries == (Entry("hi", "agent", "agent-3"),)
+
+
+def call(agent_id: str, call_id: str, path: str = "a.py") -> ToolCallStarted:
+    return ToolCallStarted(
+        turn_id="t", call_id=call_id, name="Read", arguments={"file_path": path}, agent_id=agent_id
+    )
+
+
+def result(agent_id: str, call_id: str, output: str, is_error: bool = False) -> ToolCallFinished:
+    return ToolCallFinished(
+        turn_id="t", call_id=call_id, output=output, is_error=is_error, agent_id=agent_id
+    )
+
+
+def still(app: OrbitApp, at: float = 0.0) -> Transcript:
+    """The app's transcript, its spinners stopped at ``at`` seconds."""
+    transcript = app.query_one(Transcript)
+    transcript.clock = lambda: at
+    return transcript
+
+
+async def test_a_tool_call_and_its_result_are_one_entry_updated_in_place() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        still(app)
+        await feed_events(session, pilot, call("agent-1", "c1"))
+        assert labels(app) == ["agent-1: ◜ Read a.py"]
+        await feed_events(session, pilot, result("agent-1", "c1", "one\ntwo"))
+        assert labels(app) == ["agent-1: → Read a.py ✓ 2 lines"]
+        log = visible_log(app)
+        assert label_style(prompts(app)[0]) == log.get_component_rich_style(
+            "transcript--tool", partial=True
+        )
+
+
+async def test_a_tool_calls_entry_keeps_its_full_arguments_and_output() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, call("agent-1", "c1"), result("agent-1", "c1", "x\ny"))
+        kept = app.query_one(Transcript).entries(None)[0].call
+        assert kept is not None
+        assert (kept.arguments, kept.output) == ({"file_path": "a.py"}, "x\ny")
+
+
+async def test_a_failed_tool_call_is_crossed_in_the_error_style() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(
+            session, pilot, call("agent-1", "c1"), result("agent-1", "c1", "boom", is_error=True)
+        )
+        assert labels(app) == ["agent-1: → Read a.py ✗ 1 line"]
+        log = visible_log(app)
+        assert label_style(prompts(app)[0]) == log.get_component_rich_style(
+            "transcript--error", partial=True
+        )
+
+
+async def test_concurrent_tool_calls_finishing_out_of_order_update_their_own_entries() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        still(app)
+        await feed_events(
+            session,
+            pilot,
+            call("agent-1", "c1", "a.py"),
+            call("agent-1", "c2", "b.py"),
+            result("agent-1", "c2", ""),
+        )
+        assert labels(app) == ["agent-1: ◜ Read a.py", "agent-1: → Read b.py ✓ 0 lines"]
+        await feed_events(session, pilot, result("agent-1", "c1", "x"))
+        assert labels(app) == ["agent-1: → Read a.py ✓ 1 line", "agent-1: → Read b.py ✓ 0 lines"]
+
+
+async def test_a_result_updates_only_the_call_of_its_own_agent() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        still(app)
+        await feed_events(
+            session, pilot, call("agent-1", "c"), call("agent-2", "c"), result("agent-2", "c", "")
+        )
+        assert labels(app) == ["agent-1: ◜ Read a.py", "agent-2: → Read a.py ✓ 0 lines"]
+
+
+async def test_a_tool_call_unfinished_when_its_turn_ends_has_no_result() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        transcript = still(app)
+        await feed_events(
+            session, pilot, call("agent-1", "c1"), call("agent-2", "c2"), turn_ended("agent-1")
+        )
+        assert labels(app)[0] == "agent-1: → Read a.py ⊘ no result"
+        assert labels(app)[1] == "agent-2: ◜ Read a.py"
+        assert transcript.ticking
+
+
+async def test_a_tool_call_unfinished_when_its_agent_exits_has_no_result() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(
+            session,
+            pilot,
+            call("agent-1", "c1"),
+            AgentExited(agent_id="agent-1", reason="crashed"),
+        )
+        assert labels(app)[0] == "agent-1: → Read a.py ⊘ no result"
+        assert not app.query_one(Transcript).ticking
+
+
+async def test_a_result_after_its_turn_ended_is_an_entry_of_its_own() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(
+            session,
+            pilot,
+            call("agent-1", "c1"),
+            turn_ended("agent-1"),
+            result("agent-1", "c1", "x"),
+        )
+        assert labels(app) == ["agent-1: → Read a.py ⊘ no result", "agent-1 done", "agent-1: x"]
+
+
+async def test_a_tool_call_updates_under_all_and_its_roles_tab() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test(size=(120, 30)) as pilot:
+        await feed_events(
+            session, pilot, started("agent-1"), call("agent-1", "c1"), result("agent-1", "c1", "x")
+        )
+        assert labels(app)[1] == "agent-1: → Read a.py ✓ 1 line"
+        await pilot.press("tab", "tab")  # coder
+        assert labels(app) == ["▶ agent-1 (coder) started", "agent-1: → Read a.py ✓ 1 line"]
+
+
+async def test_a_tool_call_finishing_after_hidden_thinking_updates_its_own_row() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await pilot.press("t")
+        await feed_events(
+            session,
+            pilot,
+            thought("agent-1", "looking"),
+            tool_output("agent-1", "earlier"),
+            call("agent-1", "c1"),
+            result("agent-1", "c1", "x"),
+        )
+        assert labels(app) == ["agent-1: earlier", "agent-1: → Read a.py ✓ 1 line"]
+
+
+async def test_enter_on_a_tool_call_does_nothing() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, call("agent-1", "c1"), result("agent-1", "c1", "a\nb"))
+        await pilot.press("k", "enter", "enter")
+        assert labels(app) == ["agent-1: → Read a.py ✓ 2 lines"]
+        assert not visible_log(app).collapsed(0)
+
+
+async def test_a_running_tool_calls_spinner_turns_on_each_tick() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        transcript = still(app)
+        await feed_events(session, pilot, Notice(message="n"), call("agent-1", "c1"))
+        assert transcript.ticking
+        transcript.clock = lambda: 1 / SPINNER_FPS
+        transcript.tick()
+        assert labels(app) == ["📌 n", "agent-1: ◠ Read a.py"]
+
+
+async def test_spinners_stop_once_no_tool_call_runs() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        transcript = still(app)
+        await feed_events(session, pilot, call("agent-1", "c1"), result("agent-1", "c1", "x"))
+        assert not transcript.ticking
+        transcript.clock = lambda: 1 / SPINNER_FPS
+        transcript.tick()
+        assert labels(app) == ["agent-1: → Read a.py ✓ 1 line"]
+
+
+async def test_a_tick_within_a_frame_leaves_the_spinner_as_it_is() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        transcript = still(app)
+        await feed_events(session, pilot, call("agent-1", "c1"))
+        before = prompts(app)[0]
+        transcript.tick()
+        assert prompts(app)[0] is before
