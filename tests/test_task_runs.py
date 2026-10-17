@@ -127,6 +127,7 @@ async def test_running_does_nothing_when_nothing_is_runnable() -> None:
     session, _, launcher = session_for()
     stream = session.events()
     await anext(stream)  # Settings.
+    await anext(stream)  # The session opened.
     await session.send(RunTasks())
     await asyncio.sleep(0.01)
     assert nothing_queued(session)

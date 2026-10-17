@@ -548,8 +548,7 @@ class AgentSession:
             self._announced = True
             try:
                 await self._load_review_count()
-                if self._pick_session:
-                    await self._switcher.list_sessions("startup")
+                await self._announce_session()
                 await self._announce_leftovers()
             finally:  # A listener cancelled meanwhile mustn't keep the background from starting.
                 self._start_background()
@@ -572,6 +571,13 @@ class AgentSession:
         """Have the usage monitor fetch again, if due, once ``event`` ends an agent's turn."""
         if self._usage is not None and isinstance(event, TurnFinished) and event.agent_id:
             self._usage.nudge()
+
+    async def _announce_session(self) -> None:
+        """List the saved sessions to pick from, if asked to, or else announce the one open."""
+        if self._pick_session:
+            await self._switcher.list_sessions("startup")
+        else:
+            await self._switcher.announce()
 
     async def _announce_leftovers(self) -> None:
         """Tell the user about work earlier runs left in the coder's tree."""

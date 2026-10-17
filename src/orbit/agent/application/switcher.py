@@ -261,5 +261,10 @@ class SessionSwitcher:
             await parts.lane.end_interrupted(stopped)
         await parts.tasks.publish()
         await self._events.put(self._settings.changed())
-        summary = self._keeper.summary(parts.tasks.board.tasks, self.spent, last_active)
+        await self.announce(last_active)
+
+    async def announce(self, last_active: datetime | None = None) -> None:
+        """Publish the session open here, last active at ``last_active``, as opened."""
+        tasks = self._parts.tasks.board.tasks
+        summary = self._keeper.summary(tasks, self.spent, last_active)
         await self._events.put(SessionOpened(session=summary))

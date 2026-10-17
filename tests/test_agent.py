@@ -29,6 +29,7 @@ from orbit.protocol import (
     ErrorOccurred,
     Event,
     Notice,
+    SessionOpened,
     Settings,
     SettingsChanged,
     StepState,
@@ -102,6 +103,7 @@ async def test_a_prompt_without_a_planner_is_refused() -> None:
     assert isinstance(await anext(stream), SettingsChanged)
     assert await anext(stream) == ErrorOccurred(message="Planning needs agents and a planner role.")
     assert await anext(stream) == PLANNER_IDLE
+    assert isinstance(await anext(stream), SessionOpened)
     assert nothing_queued(session)
 
 
@@ -164,6 +166,7 @@ async def test_add_and_edit_tasks_publish_the_board() -> None:
     session = AgentSession()
     stream = session.events()
     assert isinstance(await anext(stream), SettingsChanged)
+    assert isinstance(await anext(stream), SessionOpened)
 
     await session.send(AddTask(task=TaskSpec(prompt="one")))
     [added] = (await anext(stream)).tasks  # type: ignore[union-attr]
@@ -227,6 +230,7 @@ async def test_verification_without_steps_notes_that_nothing_is_verified() -> No
     assert isinstance(await anext(stream), SettingsChanged)
     # No steps to announce, just the note.
     assert await anext(stream) == Notice(message=NO_STEPS_NOTE)
+    assert isinstance(await anext(stream), SessionOpened)
     assert nothing_queued(session)
 
 
@@ -235,6 +239,7 @@ async def test_session_notes_its_workspace_at_startup() -> None:
     stream = session.events()
     assert isinstance(await anext(stream), SettingsChanged)
     assert await anext(stream) == Notice(message="Workspace: /code/project")
+    assert isinstance(await anext(stream), SessionOpened)
     assert nothing_queued(session)
 
 

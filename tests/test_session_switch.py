@@ -115,9 +115,8 @@ def messages(kind: type[Notice] | type[ErrorOccurred], events: list[Event]) -> l
 async def opened(session: AgentSession, command: OpenSession | NewSession) -> list[Event]:
     """The events from sending ``command`` until its session is opened, and its notes."""
     await session.send(command)
-    events = await events_until(session, of_type(SessionOpened))
     await session.send(ListSessions())  # Marks the end of the notes that follow.
-    return events + await events_until(session, of_type(SessionsListed))
+    return await events_until(session, of_type(SessionsListed))
 
 
 async def refused(session: AgentSession, command: OpenSession | NewSession) -> list[str]:
@@ -173,6 +172,46 @@ async def test_sessions_are_listed_at_startup_for_the_user_to_pick_one() -> None
     listed = last_of(SessionsListed, await events_until(session, of_type(SessionsListed)))
     assert [s.id for s in listed.sessions] == ["old"]
     assert listed.reason == "startup"
+    await session.close()
+
+
+LEFTOVER = "2 commits on orbit/coder not yet merged into main."
+
+
+def starting(**session: Any) -> AgentSession:
+    """A session started without the list of sessions, whose coder's tree has a leftover;
+    ``session`` goes to :class:`AgentSession`."""
+    host = FakeHost()
+    tree = FakeTree(leftovers=(LEFTOVER,))
+    agents = Agents(host, ScriptedLauncher(host), lambda: "token", ROLES, Limits(), tree=tree)
+    return AgentSession(agents=agents, store=FakeStore(), clock=Ticks(), **session)
+
+
+async def test_a_session_started_without_the_list_is_announced_before_the_leftovers() -> None:
+    session = starting(name="auth rework")
+    events = await events_until(session, of_type(Notice))
+
+    kinds = [type(e) for e in events]
+    assert kinds.index(SessionOpened) < kinds.index(Notice)
+    opened = last_of(SessionOpened, events).session
+    assert (opened.name, opened.current, opened.counts) == ("auth rework", True, {})
+    assert opened.usage == Usage() and opened.last_active is None
+    await session.close()
+
+
+async def test_a_session_started_without_a_name_is_announced_by_its_start() -> None:
+    session = starting()
+    events = await events_until(session, of_type(SessionOpened))
+    assert last_of(SessionOpened, events).session.name == "Oct 17 14:30"
+    await session.close()
+
+
+async def test_a_session_started_with_the_list_isnt_announced() -> None:
+    session, _ = switching(FakeStore(), pick_session=True)
+    events = await events_until(session, of_type(SessionsListed))
+    await session.send(ListSessions())
+    events += await events_until(session, of_type(SessionsListed))
+    assert not [e for e in events if isinstance(e, SessionOpened)]
     await session.close()
 
 
