@@ -48,6 +48,14 @@ def test_the_omitted_line_counts_one_line_singly_and_dimly() -> None:
     assert (marker.plain, marker.style) == ("… 1 line omitted · y copies all …", "dim")
 
 
+def test_capped_with_counts_a_line_holding_a_form_feed_as_one_line() -> None:
+    output = numbered(201).replace("line 7", "line\x0c7")
+    drawn = capped_with(output, Text)
+    assert isinstance(drawn, Group)
+    marker = drawn.renderables[1]
+    assert isinstance(marker, Text) and marker.plain.startswith("… 1 line omitted")
+
+
 def test_capped_with_draws_output_of_the_limit_whole() -> None:
     output = numbered(DETAIL_LINE_LIMIT)
     assert capped_with(output, lambda text: text.upper()) == output.upper()

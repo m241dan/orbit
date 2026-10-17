@@ -67,12 +67,19 @@ def capped_with(
     """``output`` drawn by ``render``; with more than ``limit`` lines, just its first and last
     halves of that, each drawn on its own, with a dim line between them counting the lines left
     out and saying y copies them all."""
-    lines = output.splitlines()
+    lines = output_lines(output)
     if len(lines) <= limit:
         return render(output)
     kept = limit // 2
     head, tail = "\n".join(lines[:kept]), "\n".join(lines[-kept:])
     return Group(render(head), _omitted(len(lines) - 2 * kept), render(tail))
+
+
+def output_lines(output: str) -> list[str]:
+    """``output``'s lines, split only at newlines, so a form feed or the like stays in its
+    line."""
+    lines = output.split("\n")
+    return lines[:-1] if output.endswith("\n") else lines
 
 
 def _omitted(count: int) -> Text:

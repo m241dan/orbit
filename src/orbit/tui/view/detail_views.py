@@ -14,7 +14,7 @@ from rich.rule import Rule
 from rich.syntax import Syntax
 from rich.text import Text
 
-from orbit.tui.view.detail import DIM, EMPTY_DIFF, NO_DETAILS, WAITING, capped_with
+from orbit.tui.view.detail import DIM, EMPTY_DIFF, NO_DETAILS, WAITING, capped_with, output_lines
 from orbit.tui.view.diff_numbers import NUMBERED_LINE, diff_numbers, numbered_diff
 from orbit.tui.view.diffs import FileDiff, file_diff
 from orbit.tui.view.tool_calls import ToolCall
@@ -71,7 +71,7 @@ def _read_view(call: ToolCall) -> RenderableType | None:
 def read_output(path: str, output: str) -> RenderableType:
     """Read's ``output`` of the file at ``path``: its numbered lines highlighted for the file's
     type, numbers kept, then any lines after them as plain text; all plain without numbers."""
-    lines = _lines(output)
+    lines = output_lines(output)
     numbered = _numbered(lines)
     if not numbered:
         return Text(output)
@@ -79,13 +79,6 @@ def read_output(path: str, output: str) -> RenderableType:
     syntax = _syntax(code, Syntax.guess_lexer(path, code), start_line=int(numbered[0][1]))
     rest = lines[len(numbered) :]
     return Group(syntax, Text("\n".join(rest))) if rest else syntax
-
-
-def _lines(output: str) -> list[str]:
-    """``output``'s lines, split only at newlines, so a form feed or the like stays in its
-    line."""
-    lines = output.split("\n")
-    return lines[:-1] if output.endswith("\n") else lines
 
 
 def _numbered(lines: Iterable[str]) -> list[re.Match[str]]:

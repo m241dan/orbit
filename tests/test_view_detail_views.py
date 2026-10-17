@@ -126,6 +126,15 @@ def test_read_of_a_long_file_numbers_each_end_from_its_own_lines() -> None:
     assert lines[103] == "  201 x = 201" and lines[-1] == "  300 x = 300"
 
 
+def test_read_of_a_long_file_numbers_each_end_past_a_form_feed() -> None:
+    lines = [f"{n:6}→x = {n}" for n in range(1, 301)]
+    lines[4] = "     5→a\x0cb"
+    drawn = plain(detail_body(call("Read", {"file_path": "a.py"}, "\n".join(lines))))
+    shown = {line.split()[0] for line in drawn if line.split() and line.split()[0].isdigit()}
+    assert {str(n) for n in [*range(1, 101), *range(201, 301)]} <= shown
+    assert "→" not in "".join(drawn)
+
+
 def test_bash_shows_the_whole_command_then_its_output() -> None:
     body = detail_body(call("Bash", {"command": "cd x &&\n  ls"}, "a\nb"))
     assert plain(body) == ["$ cd x &&", "  ls", RULE, "a", "b"]
