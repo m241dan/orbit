@@ -220,7 +220,8 @@ class SessionStore(Protocol):
         ...
 
     async def sessions(self) -> list[StoredSession]:
-        """Every saved session, unreadable ones included, by id."""
+        """Every saved session, unreadable ones included, by id; none when the sessions can't
+        be listed at all."""
         ...
 
     async def delete(self, session_id: str) -> None:

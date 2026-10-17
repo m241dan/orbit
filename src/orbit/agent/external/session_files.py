@@ -211,11 +211,15 @@ class SessionFiles:
     def _list(self) -> list[StoredSession]:
         if not self._sessions.is_dir():
             return []
-        with _locked_dir(self._sessions, fcntl.LOCK_SH):
-            return [
-                StoredSession(path.stem, _read_record(path), self._held_elsewhere(path.stem))
-                for path in sorted(self._sessions.glob("*.json"))
-            ]
+        # Like a missing directory, one that can't be opened or locked has no sessions to list.
+        try:
+            with _locked_dir(self._sessions, fcntl.LOCK_SH):
+                return [
+                    StoredSession(path.stem, _read_record(path), self._held_elsewhere(path.stem))
+                    for path in sorted(self._sessions.glob("*.json"))
+                ]
+        except OSError:
+            return []
 
     def _held_elsewhere(self, session_id: str) -> bool:
         """Whether another orbit holds the session ``session_id``'s lock."""

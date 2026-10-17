@@ -135,6 +135,35 @@ async def test_without_a_sessions_directory_there_are_no_sessions(tmp_path: Path
     assert await store(tmp_path).sessions() == []
 
 
+async def test_a_sessions_directory_that_cant_be_opened_has_no_sessions(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    files = store(tmp_path)
+    await files.save(record())
+    real_open = os.open
+
+    def refused(path: str | Path, flags: int, mode: int = 0o777) -> int:
+        if Path(path) == sessions(tmp_path):
+            raise PermissionError("permission denied")
+        return real_open(path, flags, mode)
+
+    monkeypatch.setattr(os, "open", refused)
+    assert await files.sessions() == []
+
+
+async def test_a_sessions_directory_that_cant_be_locked_has_no_sessions(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    files = store(tmp_path)
+    await files.save(record())
+
+    def fail(fd: int, operation: int) -> None:
+        raise OSError("no locks")
+
+    monkeypatch.setattr(fcntl, "flock", fail)
+    assert await files.sessions() == []
+
+
 async def test_listing_gives_readable_and_unreadable_sessions_by_id(tmp_path: Path) -> None:
     files = store(tmp_path)
     await files.save(record("b"))
