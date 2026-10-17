@@ -82,10 +82,14 @@ def _write_atomic(path: Path, text: str) -> None:
 def _write_temp(path: Path, text: str) -> str:
     """A new file beside ``path`` holding ``text``, on disk; returns its path."""
     fd, temp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
-    with os.fdopen(fd, "w", encoding="utf-8") as file:
-        file.write(text)
-        file.flush()
-        os.fsync(file.fileno())
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as file:
+            file.write(text)
+            file.flush()
+            os.fsync(file.fileno())
+    except BaseException:
+        os.unlink(temp)
+        raise
     return temp
 
 

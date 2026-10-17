@@ -371,3 +371,38 @@ async def test_a_failed_review_count_save_raises(tmp_path: Path) -> None:
     (tmp_path / "reviews.json").mkdir()
     with pytest.raises(RuntimeError, match=r"Couldn't save the review count to .*reviews\.json"):
         await store(tmp_path).save_review_count(1)
+
+
+@pytest.fixture
+def failing_fsync(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fail(fd: int) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(os, "fsync", fail)
+
+
+@pytest.mark.usefixtures("failing_fsync")
+async def test_a_save_that_fails_writing_raises_and_leaves_no_temporary_file(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(RuntimeError, match=r"Couldn't save the session to .*abc\.json"):
+        await store(tmp_path).save(record())
+    assert list(sessions(tmp_path).iterdir()) == []
+
+
+@pytest.mark.usefixtures("failing_fsync")
+async def test_a_review_count_save_that_fails_writing_raises_and_leaves_no_temporary_file(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(RuntimeError, match=r"Couldn't save the review count to .*reviews\.json"):
+        await store(tmp_path).save_review_count(1)
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.usefixtures("failing_fsync")
+async def test_an_acquire_that_fails_writing_raises_and_leaves_no_temporary_file(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(RuntimeError, match=r"Couldn't lock the session .*abc\.lock"):
+        await store(tmp_path).acquire("abc")
+    assert list(sessions(tmp_path).iterdir()) == []
