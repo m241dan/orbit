@@ -19,9 +19,11 @@ from orbit.protocol import (
     ListSessions,
     NewSession,
     OpenSession,
+    PlannerReset,
     ProgressNoted,
     RemoveTask,
     RequestSuperReview,
+    ResetPlanner,
     ReviewStatus,
     RunTasks,
     SessionOpened,
@@ -106,6 +108,11 @@ def test_session_commands_and_events_round_trip() -> None:
     summary = SessionSummary(id="s1", name="auth", counts={"pending": 2}, current=True)
     for event in (SessionsListed(sessions=(summary,)), SessionOpened(session=summary)):
         assert event_adapter.validate_json(event.model_dump_json()) == event
+
+
+def test_planner_reset_command_and_event_round_trip() -> None:
+    assert command_adapter.validate_json(ResetPlanner().model_dump_json()) == ResetPlanner()
+    assert event_adapter.validate_json(PlannerReset().model_dump_json()) == PlannerReset()
 
 
 def test_rejects_empty_task_prompt() -> None:

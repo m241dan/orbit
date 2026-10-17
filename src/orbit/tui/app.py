@@ -33,9 +33,11 @@ from orbit.protocol import (
     Event,
     ListSessions,
     Notice,
+    PlannerReset,
     ProgressNoted,
     RemoveTask,
     RequestSuperReview,
+    ResetPlanner,
     ReviewStatus,
     RunTasks,
     Session,
@@ -78,12 +80,16 @@ from orbit.tui.view import (
     coalesce,
     decision_entry,
     model_options,
+    planner_reset_entry,
     tool_access_labels,
 )
 from orbit.tui.widgets import (
     CONFIGURE_MESSAGE,
     CONFIGURE_TITLE,
     CONFIGURE_YES,
+    RESET_MESSAGE,
+    RESET_TITLE,
+    RESET_YES,
     ChatPrompt,
     ConfirmScreen,
     PickerScreen,
@@ -187,6 +193,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         Binding("ctrl+t", "toggle_planner", "Planner"),
         Binding("ctrl+s", "cancel_turn", "Stop run"),
         Binding("ctrl+x", "stop_planner", "Stop planner"),
+        Binding("ctrl+n", "reset_planner", "Reset planner"),
         Binding("ctrl+o", "pick_model", "Model"),
         Binding("ctrl+l", "pick_tool_access", "Tools"),
         Binding("ctrl+p", "list_sessions", "Sessions"),
@@ -289,6 +296,7 @@ class OrbitApp(App[None], inherit_bindings=False):
             "release_cursor": self._normal_mode,
             "toggle_thinking": lambda: self._normal_mode() or self._in_transcript(),
             "configure_checks": self._on_main_screen,
+            "reset_planner": self._on_main_screen,
             "list_sessions": self._on_main_screen,
             "toggle_sidebar": lambda: self._on_main_screen() and self.focused is not self._prompt,
         }
@@ -426,6 +434,16 @@ class OrbitApp(App[None], inherit_bindings=False):
 
         self.push_screen(ConfirmScreen(CONFIGURE_TITLE, CONFIGURE_MESSAGE, CONFIGURE_YES), answered)
 
+    def action_reset_planner(self) -> None:
+        """Ask first, so a stray ctrl+n doesn't end the planner's conversation."""
+
+        async def answered(confirmed: bool | None) -> None:
+            # The backend refuses while the planner answers, or notes there's nothing to reset.
+            if confirmed:
+                await self._session.send(ResetPlanner())
+
+        self.push_screen(ConfirmScreen(RESET_TITLE, RESET_MESSAGE, RESET_YES), answered)
+
     async def action_list_sessions(self) -> None:
         """Ask for the saved sessions, which show in a modal once they're listed."""
         self._sessions_asked = True
@@ -532,12 +550,18 @@ class OrbitApp(App[None], inherit_bindings=False):
                 | StartupChecked()
             ):
                 self._feed.render(event)
-            case SessionsListed(sessions=sessions):
-                self._show_sessions(sessions)
-            case SessionOpened():
-                pass  # What the session holds comes in its own events.
+            case SessionsListed() | SessionOpened() | PlannerReset():
+                self._render_session(event)
             case _:
                 assert_never(event)
+
+    def _render_session(self, event: SessionsListed | SessionOpened | PlannerReset) -> None:
+        """Show the sessions listed, or rule off the planner's conversation where it was reset;
+        what a session opened holds comes in its own events."""
+        if isinstance(event, SessionsListed):
+            self._show_sessions(event.sessions)
+        elif isinstance(event, PlannerReset):
+            self._feed.append(*planner_reset_entry(), PLANNER)
 
     def _render_state(
         self,

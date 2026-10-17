@@ -20,6 +20,7 @@ from orbit.agent import (
     GitCoderTree,
     McpHost,
     OrbitConfig,
+    Role,
     SessionFiles,
     UsageApi,
     Verification,
@@ -32,7 +33,7 @@ from orbit.agent import (
     write_checks,
 )
 from orbit.profiling import profiled
-from orbit.protocol import Settings, ThreadedSession, ToolAccess
+from orbit.protocol import PLANNER, Settings, ThreadedSession, ToolAccess
 from orbit.tui import OrbitApp
 
 app = typer.Typer(help="Orbit command-line tool.", no_args_is_help=True)
@@ -209,7 +210,16 @@ def _agents(config: OrbitConfig, *, worktree: bool, review: bool) -> Agents:
         review=review,
         review_limits=config.review_limits,
         write_config=write_checks,
+        planner_role=_planner_role,
     )
+
+
+def _planner_role() -> Role | ConfigError:
+    """The planner's role as the project file says now, or why the file is invalid."""
+    try:
+        return read_config().roles[PLANNER]
+    except ConfigError as exc:
+        return exc
 
 
 def _launch(tui: OrbitApp, profile: Path | None) -> None:

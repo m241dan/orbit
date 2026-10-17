@@ -13,9 +13,11 @@ from orbit.agent import (
     MODEL_ALIASES,
     AgentSession,
     ClaudeCliRunner,
+    ConfigError,
     GitCoderTree,
     Limits,
     McpHost,
+    Role,
     SessionFiles,
     Setup,
     UsageApi,
@@ -399,6 +401,36 @@ def test_chat_sets_up_the_coder_tree_as_the_project_file_says(
     assert session.agents is not None
     assert isinstance(session.agents.tree, GitCoderTree)
     assert session.agents.tree.setup == Setup(command=("make", "deps"), watch=("deps.lock",))
+
+
+def planner_role_read_after(config: Path, text: str, launched: list[AgentSession]) -> object:
+    """The planner's role the chat's session reads again once ``config`` reads ``text``."""
+    [session] = launched
+    assert session.agents is not None and session.agents.planner_role is not None
+    config.write_text(text)
+    return session.agents.planner_role()
+
+
+def test_chat_rereads_the_planners_role_from_the_project_file(
+    launched: list[AgentSession], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    (tmp_path / ".orbit").mkdir()
+    config = tmp_path / ".orbit" / "config.toml"
+    monkeypatch.chdir(tmp_path)
+    assert runner.invoke(app, ["chat"]).exit_code == 0
+    role = planner_role_read_after(config, '[roles.planner]\nmodel = "opus"\n', launched)
+    assert isinstance(role, Role) and role.model == "opus"
+
+
+def test_rereading_an_invalid_project_file_gives_its_problems(
+    launched: list[AgentSession], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    (tmp_path / ".orbit").mkdir()
+    config = tmp_path / ".orbit" / "config.toml"
+    monkeypatch.chdir(tmp_path)
+    assert runner.invoke(app, ["chat"]).exit_code == 0
+    error = planner_role_read_after(config, "[roles.planner]\ntools = ['fly']\n", launched)
+    assert isinstance(error, ConfigError) and "roles.planner.tools" in str(error)
 
 
 def test_an_invalid_project_file_stops_chat_with_its_problems(

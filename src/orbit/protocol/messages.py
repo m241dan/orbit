@@ -188,6 +188,13 @@ class DeleteSession(_Message):
     session_id: str
 
 
+class ResetPlanner(_Message):
+    """End the planner's conversation, so the next prompt starts a fresh one, and re-read its
+    role from the project's config. Refused while the planner answers."""
+
+    type: Literal["reset_planner"] = "reset_planner"
+
+
 Command = Annotated[
     SubmitPrompt
     | CancelTurn
@@ -205,7 +212,8 @@ Command = Annotated[
     | OpenSession
     | NewSession
     | RenameSession
-    | DeleteSession,
+    | DeleteSession
+    | ResetPlanner,
     Field(discriminator="type"),
 ]
 
@@ -623,6 +631,13 @@ class SessionOpened(_Message):
     session: SessionSummary
 
 
+class PlannerReset(_Message):
+    """The planner's conversation ended at the user's ``ResetPlanner``; the next prompt starts
+    a fresh one."""
+
+    type: Literal["planner_reset"] = "planner_reset"
+
+
 Event = Annotated[
     SettingsChanged
     | TurnStarted
@@ -651,7 +666,8 @@ Event = Annotated[
     | ChecksProposed
     | UsageChanged
     | SessionsListed
-    | SessionOpened,
+    | SessionOpened
+    | PlannerReset,
     Field(discriminator="type"),
 ]
 

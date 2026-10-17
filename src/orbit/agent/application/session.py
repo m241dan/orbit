@@ -34,7 +34,7 @@ from orbit.agent.application.work_lane import WorkLane
 from orbit.agent.domain.agents import Agent
 from orbit.agent.domain.board import WAITING, TaskBoard, interrupted
 from orbit.agent.domain.reviews import LaneSnapshot, PlannerSnapshot, ReviewPlanner
-from orbit.agent.domain.roles import REVIEW_ROLES, configure_prompt, role_task
+from orbit.agent.domain.roles import REVIEW_ROLES, ConfigError, configure_prompt, role_task
 from orbit.agent.domain.sessions import (
     EMPTY_NAME,
     SessionRecord,
@@ -63,9 +63,11 @@ from orbit.protocol import (
     NewSession,
     Notice,
     OpenSession,
+    PlannerReset,
     RemoveTask,
     RenameSession,
     RequestSuperReview,
+    ResetPlanner,
     RunTasks,
     SessionOpened,
     SessionsListed,
@@ -87,6 +89,10 @@ CONFIGURING_NOTE = "A configurator task is already queued or running."
 TASKS_RUNNING = "Can't switch: tasks are running. Press ctrl+s to stop them."
 REVIEW_RUNNING = "Can't switch: a review is running. Press c on it in the agents pane to stop it."
 PLANNER_ANSWERING = "Can't switch: the planner is answering. Press ctrl+x to stop it."
+NO_PLANNER_MESSAGE = "Planning needs agents and a planner role."
+PLANNER_BUSY_RESET = "The planner is answering; press ctrl+x to stop it first."
+NOTHING_TO_RESET = "The planner has no conversation to reset."
+ROLE_KEPT = "Kept the planner's role, as the config is invalid"
 NO_REVIEWS = LaneSnapshot(planner=PlannerSnapshot())
 """The review state of a session that has had none."""
 
@@ -95,6 +101,7 @@ WorkCommand = (
     SubmitPrompt
     | CancelTurn
     | UpdateSettings
+    | ResetPlanner
     | AddTask
     | RunTasks
     | ConfigureChecks
@@ -282,7 +289,7 @@ class AgentSession:
                 await self._handle_tasks(command)
             case EditTask() | AcceptTask() | RemoveTask():
                 await self._handle_board(command)
-            case RequestSuperReview() | CancelAgent() | DecideProposal():
+            case RequestSuperReview() | CancelAgent() | DecideProposal() | ResetPlanner():
                 await self._handle_agents(command)
             case _:
                 assert_never(command)
@@ -441,11 +448,38 @@ class AgentSession:
             case _:
                 assert_never(command)
 
+    async def _reset_planner(self) -> None:
+        """End the planner's conversation, re-reading its role; refused while it answers, and
+        noted when it has no conversation yet."""
+        if self._desk is None or self._planner is None:
+            await self._events.put(ErrorOccurred(message=NO_PLANNER_MESSAGE))
+        elif self._planner_turns.running:
+            await self._events.put(ErrorOccurred(message=PLANNER_BUSY_RESET))
+        elif not self._planner.started:
+            await self._events.put(Notice(message=NOTHING_TO_RESET))
+        else:
+            await self._reread_planner_role(self._desk)
+            self._replace_planner(None)
+            await self._close_retired()
+            await self._events.put(PlannerReset())
+            await self._save()
+
+    async def _reread_planner_role(self, desk: AgentDesk) -> None:
+        """Have the planner's role as the project's config says now, if it can be read again;
+        an invalid config keeps the role it has, saying why."""
+        read = desk.agents.planner_role
+        if read is None:
+            return
+        role = read()
+        if isinstance(role, ConfigError):
+            await self._events.put(ErrorOccurred(message=f"{ROLE_KEPT}: {role}"))
+        else:
+            desk.use_role(PLANNER, role)
+
     async def _submit(self, text: str) -> None:
         """Start a turn of the planner's conversation, in its own lane."""
         if self._planner is None:
-            message = "Planning needs agents and a planner role."
-            await self._events.put(ErrorOccurred(message=message))
+            await self._events.put(ErrorOccurred(message=NO_PLANNER_MESSAGE))
             # Frees the prompt of a frontend that marked the lane busy when it sent this.
             await self._events.put(BusyChanged(busy=False, lane="planner"))
         else:
@@ -553,7 +587,7 @@ class AgentSession:
         self._work_turns.cancel()
 
     async def _handle_agents(
-        self, command: RequestSuperReview | CancelAgent | DecideProposal
+        self, command: RequestSuperReview | CancelAgent | DecideProposal | ResetPlanner
     ) -> None:
         match command:
             case CancelAgent(agent_id=agent_id):
@@ -562,6 +596,8 @@ class AgentSession:
                 await self._decide(command)
             case RequestSuperReview():
                 await self._super_review()
+            case ResetPlanner():
+                await self._reset_planner()
             case _:
                 assert_never(command)
 

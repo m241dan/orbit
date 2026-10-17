@@ -9,7 +9,7 @@ agent's role allows.
 import asyncio
 import uuid
 from collections.abc import Awaitable, Callable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Protocol
 
 from orbit.agent.application.ports import (
@@ -18,6 +18,7 @@ from orbit.agent.application.ports import (
     AgentLauncher,
     CoderTree,
     ConfigWriter,
+    PlannerRoleReader,
     ProposalReview,
     Publish,
     Reply,
@@ -86,6 +87,8 @@ class Agents:
     reviewed, within ``review_limits``. ``proposal_review`` is where the user decides on
     proposed checks; without it, proposals are refused. ``write_config`` saves the checks the
     user accepts into the project's config; without it, they're used but not saved.
+    ``planner_role`` reads the planner's role from the project's config again when the planner
+    is reset; without it, the planner keeps its role.
     """
 
     host: AgentHost
@@ -99,6 +102,7 @@ class Agents:
     review_limits: ReviewLimits = field(default_factory=ReviewLimits)
     proposal_review: ProposalReview | None = None
     write_config: ConfigWriter | None = None
+    planner_role: PlannerRoleReader | None = None
 
 
 class CallTarget(Protocol):
@@ -150,6 +154,10 @@ class AgentDesk:
         role = self.agents.roles[agent.role]
         url = await self.url()
         return AgentLaunch(agent, url, prompt, settings, cwd, role.instructions, role.tools)
+
+    def use_role(self, name: str, role: Role) -> None:
+        """Have ``role`` as the role ``name`` from now on."""
+        self.agents = replace(self.agents, roles={**self.agents.roles, name: role})
 
     def open(self, run: CallTarget, role: str, task_id: str) -> Agent:
         agent = self.registry.register(role, task_id)

@@ -64,6 +64,7 @@ from orbit.tui.view.rules import (
     duration_text,
     exit_rule,
     final_answer,
+    planner_reset_entry,
     turn_rule_entry,
     usage_text,
 )
@@ -316,6 +317,7 @@ __all__ = [
     "numbered_diff",
     "orbit_request_line",
     "output_entry",
+    "planner_reset_entry",
     "pretty_json",
     "progress_entry",
     "prompt_title",

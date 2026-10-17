@@ -68,6 +68,12 @@ class PlannerChat:
             return self._saved
         return self._desk.agents.launcher.conversation(self._agent.id)
 
+    @property
+    def started(self) -> bool:
+        """Whether the planner has a conversation to end: one restored, or one its first turn
+        opened."""
+        return self._agent is not None or self._saved is not None
+
     def restore(self, conversation_id: str) -> None:
         """Carry on the saved conversation ``conversation_id`` from the first turn on, which
         starts a fresh one instead if it can't be resumed."""

@@ -74,6 +74,7 @@ In the app:
 | `esc` | Stop typing, close the conversation's detail pane, leave a list or close a picker; with the conversation selected and nothing active, let go of its held entry, closing the detail pane, and follow the latest output again; with the detail pane selected, close it |
 | `ctrl+s` | Stop the task run (on any tab) |
 | `ctrl+x` | Stop the planner's turn, leaving the task run going |
+| `ctrl+n` | Reset the planner: after you confirm (`y` to go ahead, `n`/`esc` to cancel), end its conversation so the next prompt starts a fresh one, with its role read again from `.orbit/config.toml` (see [Planning with the planner](#planning-with-the-planner)) |
 | `a` / `r` / `x` | On a proposal of checks: accept it, ask for changes (type them, `enter` sends, `esc` goes back), or end the task (see [Setting up verification](#setting-up-verification)) |
 | `ctrl+c` | Quit |
 
@@ -498,6 +499,18 @@ planner tab gets a `*`.
 The planner is one agent for the whole session: each prompt resumes its conversation, so it
 remembers what you discussed. It reads your checkout and can search the web but can't edit your
 checkout, and uses the model you picked with `ctrl+o`.
+
+The planner's conversation is kept with its session, so it carries on across restarts and session
+switches. `ctrl+n` resets it, after you confirm (`y` to go ahead, `n`/`esc` to cancel): to pick up a
+change to the planner's role, or to clear a conversation grown too long. Orbit ends the planner's
+conversation, and its access to orbit, so the next prompt starts a fresh one, told the
+verification steps again, and saves the session without it. It reads `[roles.planner]` from
+`.orbit/config.toml` again, so a change to the planner's instructions, tools or tool access takes
+effect; other roles and settings stay as they were. If the file is invalid, the planner keeps its
+role and orbit shows the problem, but still resets the conversation. Draft tasks stay on the task
+list, the planner tab keeps its history, and the conversation shows a dim `── planner reset ──`
+rule under the planner tab and All. The reset is refused while the planner answers (stop it with
+`ctrl+x` first), and before its first prompt there's nothing to reset.
 
 ### Reviews
 

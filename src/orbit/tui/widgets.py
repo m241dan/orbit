@@ -354,6 +354,13 @@ CONFIGURE_TITLE = "Set up checks?"
 CONFIGURE_MESSAGE = "A configurator task will go to the front of the task list and run now."
 CONFIGURE_YES = "set up"
 
+RESET_TITLE = "Reset the planner?"
+RESET_MESSAGE = (
+    "The planner's conversation ends, and the next prompt starts a fresh one with its role"
+    " read again from .orbit/config.toml. Draft tasks stay."
+)
+RESET_YES = "reset"
+
 
 class ConfirmScreen(ModalScreen[bool]):
     """Asks ``title`` with ``message``; dismisses with True on ``y``, False on ``n`` or escape.

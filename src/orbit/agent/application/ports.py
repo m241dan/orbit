@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 from orbit.agent.domain.agents import Agent
-from orbit.agent.domain.roles import ChecksProposal, Setup
+from orbit.agent.domain.roles import ChecksProposal, ConfigError, Role, Setup
 from orbit.agent.domain.sessions import SessionRecord, Unreadable
 from orbit.agent.domain.usage import UsageFetch
 from orbit.agent.domain.verification import VerificationStep
@@ -22,6 +22,10 @@ StepRunner = Callable[[VerificationStep, str], Awaitable[tuple[bool, str]]]
 ConfigWriter = Callable[[str, ChecksProposal], None]
 """Makes accepted checks the verification steps and setup in the project config in a directory;
 raises ``RuntimeError`` when it can't."""
+
+PlannerRoleReader = Callable[[], Role | ConfigError]
+"""Reads the planner's role from the project's config again: the role, or why the config is
+invalid."""
 
 UsageSource = Callable[[], Awaitable[UsageFetch]]
 """Fetches the subscription's usage limits once."""
