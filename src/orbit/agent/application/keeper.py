@@ -1,9 +1,7 @@
 """Autosaving the open session: once it's been used, it's saved after every change, so a crash or
 ctrl+c loses nothing. A session nobody used is never written. The user can switch to another
-saved session, or a new one, letting go of the one open.
-
-The repository's count of commits since the last super review is kept here too, though it
-belongs to no one session.
+saved session, or a new one, letting go of the one open, and open, rename or delete other saved
+sessions, each under its lock.
 """
 
 import asyncio
@@ -11,13 +9,14 @@ import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Literal
 
-from orbit.agent.application.ports import Publish, SessionStore, StoredSession
+from orbit.agent.application.failures import ReportedOnce, outcome
+from orbit.agent.application.ports import Publish, SessionStore
 from orbit.agent.domain.reviews import LaneSnapshot
 from orbit.agent.domain.sessions import (
     OPEN_UNDELETABLE,
     SessionRecord,
+    Unreadable,
     default_name,
     deletion_refusal,
     locked_message,
@@ -44,8 +43,28 @@ Load = Callable[[SessionRecord], bool]
 """Switches the session to hold what a saved record does, unless that's refused now; returns
 whether it did."""
 
-SaveKind = Literal["session", "count"]
-"""What a save writes: the session, or the super review count."""
+
+@dataclass(frozen=True)
+class _Action[T]:
+    """What can be done to a saved session: its ``verb``, the ``check`` that makes of a session
+    what it acts on, or says why it can't be, and whether it ``reread``s the session under its
+    lock."""
+
+    verb: str
+    check: Callable[[str, SessionRecord | Unreadable, bool], T | str]
+    reread: bool = True
+
+
+def _deletable(
+    session_id: str, record: SessionRecord | Unreadable, locked: bool
+) -> SessionRecord | Unreadable | str:
+    """The saved session ``session_id``, as ``record``, to delete, or why it can't be."""
+    return deletion_refusal(session_id, record, locked) or record
+
+
+_OPEN = _Action("open", openable)
+_RENAME = _Action("rename", renamable)
+_DELETE = _Action("delete", _deletable, reread=False)
 
 
 @dataclass(frozen=True)
@@ -95,8 +114,7 @@ class SessionKeeper:
     the store from its first save until :meth:`close`, or until another session is opened in
     its place.
 
-    A failing save is reported once, until a save of the same kind (the session, or the super
-    review count) works again.
+    A failing save is reported once, until a save works again, or another session is opened.
     """
 
     def __init__(
@@ -117,11 +135,8 @@ class SessionKeeper:
         self._saved: Contents | None = None  # What the last save wrote.
         self._locked: bool | None = None  # Whether the lock was taken; None until tried.
         self._closed = False
-        # The kinds of save that failed, and were reported, since the last of each that worked.
-        self._failing: set[SaveKind] = set()
-        self._count: int | None = None  # The super review count the store holds.
+        self._saves = ReportedOnce(publish)
         self._saving = asyncio.Lock()  # Saves one at a time, so the newest is written last.
-        self._counting = asyncio.Lock()  # Likewise for count saves.
 
     def rename(self, name: str | None) -> None:
         """Name the session ``name``, unless it's none or blank; once used, it's saved again
@@ -178,7 +193,7 @@ class SessionKeeper:
             reviews=contents.reviews,
             spent=contents.spent,
         )
-        if await self._attempt("session", store.save(record)):
+        if await self._saves.attempt(store.save(record)):
             self._saved = contents
 
     async def summaries(self) -> tuple[SessionSummary, ...]:
@@ -199,74 +214,32 @@ class SessionKeeper:
         summary = tasks_summary(self.id, self.name, tasks, spent)
         return summary.model_copy(update={"current": True, "last_active": last_active})
 
-    async def _find(self, session_id: str) -> SessionRecord | str:
-        """The record of the saved session ``session_id``, to open, or why it can't be."""
-        stored = await self._stored(session_id)
-        if stored is None:
-            return missing_message(session_id)
-        return openable(stored.id, stored.record, stored.locked)
-
-    async def _stored(self, session_id: str) -> StoredSession | None:
-        """The saved session ``session_id``; none if there's no such session."""
-        stored = await self._store.sessions() if self._store else []
-        return next((each for each in stored if each.id == session_id), None)
-
     async def rename_saved(self, session_id: str, name: str) -> None:
         """Name the saved session ``session_id``, not the one open here, ``name``, holding its
         lock while it's rewritten. Problems are reported."""
-        stored = await self._stored(session_id)
-        if stored is None:
-            found: SessionRecord | str = missing_message(session_id)
-        else:
-            found = renamable(stored.id, stored.record, stored.locked)
-        if isinstance(found, str):
-            await self._publish(ErrorOccurred(message=found))
+        found = await self._claimed(session_id, _RENAME)
+        if found is None:
             return
         assert self._store is not None  # Only a store holds saved sessions.
-        if await self._claim(self._store, found.id, found.name, "rename"):
-            await self._rewrite(self._store, found.id, name)
-
-    async def _rewrite(self, store: SessionStore, session_id: str, name: str) -> None:
-        """Name the session ``session_id`` in ``store``, whose lock this orbit took to,
-        ``name``, renaming the record read under the lock so no work saved meanwhile is lost,
-        then let go of the lock; reports it if it can't be read or saved."""
         try:
-            loaded = await self._reported(store.load(session_id))
-            if loaded is None:
-                return
-            current = renamable(session_id, loaded, locked=False)
-            if isinstance(current, str):
-                await self._publish(ErrorOccurred(message=current))
-                return
-            await self._reported(store.save(current.model_copy(update={"name": name})))
+            await self._reported(self._store.save(found.model_copy(update={"name": name})))
         finally:
-            await self._release(store, session_id)
+            await self._release(self._store, session_id)
 
     async def delete_saved(self, session_id: str) -> None:
         """Delete the saved session ``session_id``, lock and all, unless it's the one open here
         or another orbit has it open. Problems are reported."""
-        stored = await self._stored(session_id)
-        refusal = self._deletion_refusal(session_id, stored)
-        if refusal is not None:
-            await self._publish(ErrorOccurred(message=refusal))
-            return
-        assert self._store is not None and stored is not None  # Found in the store.
-        name = record_name(session_id, stored.record)
-        if await self._claim(self._store, session_id, name, "delete"):
-            await self._delete(self._store, session_id)
-
-    def _deletion_refusal(self, session_id: str, stored: StoredSession | None) -> str | None:
-        """Why the session ``session_id``, saved as ``stored``, can't be deleted, if it can't."""
         if session_id == self.id:
-            return OPEN_UNDELETABLE
-        if stored is None:
-            return missing_message(session_id)
-        return deletion_refusal(session_id, stored.record, stored.locked)
+            await self._publish(ErrorOccurred(message=OPEN_UNDELETABLE))
+            return
+        if await self._claimed(session_id, _DELETE) is not None:
+            assert self._store is not None  # Only a store holds saved sessions.
+            await self._delete(self._store, session_id)
 
     async def _delete(self, store: SessionStore, session_id: str) -> None:
         """Delete the session ``session_id`` from ``store``, whose lock this orbit took to;
         reports it, letting go of the lock, if it can't be deleted."""
-        error = await _outcome(store.delete(session_id))
+        error = await outcome(store.delete(session_id))
         if isinstance(error, RuntimeError):
             await self._release(store, session_id)
             await self._publish(ErrorOccurred(message=str(error)))
@@ -276,7 +249,7 @@ class SessionKeeper:
         to its record as read once it's locked; returns what was opened, or none if it didn't
         switch. Problems are reported."""
         async with self._saving:
-            record = await self._locked_record(session_id)
+            record = await self._claimed(session_id, _OPEN)
             if record is None:
                 return None
             assert self._store is not None  # Only saved sessions are locked to open.
@@ -287,23 +260,54 @@ class SessionKeeper:
             self._locked = self.used = True
         return Opened(left, record)
 
-    async def _locked_record(self, session_id: str) -> SessionRecord | None:
-        """The record of the saved session ``session_id``, read again once its lock is taken,
-        so no work saved meanwhile is lost; none, reported and with the lock let go of, if it
-        can't be opened."""
-        found = await self._find(session_id)
-        if isinstance(found, str):
-            await self._publish(ErrorOccurred(message=found))
+    async def _claimed[T](self, session_id: str, action: _Action[T]) -> T | None:
+        """What ``action``'s check makes of the saved session ``session_id``, once its lock is
+        taken, read again under the lock if ``action`` needs it so no work saved meanwhile is
+        lost; none, reported and with any lock taken let go of, if it can't be ``action``ed."""
+        found = await self._found(session_id, action)
+        if found is None:
             return None
         assert self._store is not None  # Only a store holds saved sessions.
-        if not await self._claim(self._store, session_id, found.name):
+        name, checked = found
+        if not await self._claim(self._store, session_id, name, action.verb):
             return None
-        current = openable(session_id, await self._store.load(session_id), locked=False)
-        if isinstance(current, str):
-            await self._publish(ErrorOccurred(message=current))
-            await self._release(self._store, session_id)
-            return None
+        if not action.reread:
+            return checked
+        current: T | None = None
+        try:
+            current = await self._reread(self._store, session_id, action)
+        finally:
+            if current is None:
+                await self._release(self._store, session_id)
         return current
+
+    async def _found[T](self, session_id: str, action: _Action[T]) -> tuple[str, T] | None:
+        """The name of the saved session ``session_id`` and what ``action``'s check makes of it;
+        none, reported, if there's no such session or it can't be ``action``ed."""
+        stored = await self._store.sessions() if self._store else []
+        found = next((each for each in stored if each.id == session_id), None)
+        if found is None:
+            await self._publish(ErrorOccurred(message=missing_message(session_id)))
+            return None
+        checked = action.check(session_id, found.record, found.locked)
+        if isinstance(checked, str):
+            await self._publish(ErrorOccurred(message=checked))
+            return None
+        return record_name(session_id, found.record), checked
+
+    async def _reread[T](
+        self, store: SessionStore, session_id: str, action: _Action[T]
+    ) -> T | None:
+        """What ``action``'s check makes of the session ``session_id`` as ``store`` holds it now,
+        its lock taken; none, reported, if it can't be read or ``action``ed."""
+        loaded = await self._reported(store.load(session_id))
+        if loaded is None:
+            return None
+        checked = action.check(session_id, loaded, False)
+        if isinstance(checked, str):
+            await self._publish(ErrorOccurred(message=checked))
+            return None
+        return checked
 
     async def renew(self, name: str | None, commit: Commit) -> Left | None:
         """Make a new session ``name``d so (by the time, without a name) the one open here, if
@@ -327,9 +331,7 @@ class SessionKeeper:
             return
         await self._delete(self._store, left.id)
 
-    async def _claim(
-        self, store: SessionStore, session_id: str, name: str, action: str = "open"
-    ) -> bool:
+    async def _claim(self, store: SessionStore, session_id: str, name: str, action: str) -> bool:
         """Take the lock of the session ``session_id``, ``name``d so, in ``store``, to
         ``action`` it; reports it if it can't be taken."""
         acquired = await self._reported(store.acquire(session_id))
@@ -344,38 +346,8 @@ class SessionKeeper:
         left = Left(self.id if self._locked else None)
         self.id, self.name, self.created = session_id, name, created
         self.used, self._saved, self._locked = False, None, None
-        self._failing.discard("session")
+        self._saves.forget()
         return left
-
-    async def review_count(self) -> int | None:
-        """The repository's commits since the last super review; none without a store."""
-        if self._store is None:
-            return None
-        self._count = await self._store.review_count()
-        return self._count
-
-    async def save_review_count(self, count: int) -> None:
-        """Save ``count`` as the repository's commits since the last super review, if it
-        changed. Count saves are made one at a time, so the newest is written last."""
-        if self._store is None:
-            return
-        async with self._counting:
-            if count != self._count and await self._attempt(
-                "count", self._store.save_review_count(count)
-            ):
-                self._count = count
-
-    async def _attempt(self, kind: SaveKind, saving: Awaitable[None]) -> bool:
-        """Await ``saving``, a save of ``kind``; returns whether it worked. The first failure
-        since the last save of that kind that worked is reported, and work carries on."""
-        error = await _outcome(saving)
-        if not isinstance(error, RuntimeError):
-            self._failing.discard(kind)
-            return True
-        if kind not in self._failing:
-            self._failing.add(kind)
-            await self._publish(ErrorOccurred(message=str(error)))
-        return False
 
     async def close(self) -> None:
         """Stop saving, and let go of the session's lock if it was taken; reports it if the lock
@@ -393,16 +365,8 @@ class SessionKeeper:
     async def _reported[T](self, call: Awaitable[T], suffix: str = "") -> T | None:
         """What ``call``, to the store, returns; none if it fails, reported with ``suffix``
         after the store's message."""
-        outcome = await _outcome(call)
-        if isinstance(outcome, RuntimeError):
-            await self._publish(ErrorOccurred(message=f"{outcome}{suffix}"))
+        result = await outcome(call)
+        if isinstance(result, RuntimeError):
+            await self._publish(ErrorOccurred(message=f"{result}{suffix}"))
             return None
-        return outcome
-
-
-async def _outcome[T](call: Awaitable[T]) -> T | RuntimeError:
-    """What ``call``, to the store, returns, or the ``RuntimeError`` it raises when it fails."""
-    try:
-        return await call
-    except RuntimeError as exc:
-        return exc
+        return result

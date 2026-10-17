@@ -21,6 +21,7 @@ from orbit.agent.application.lanes import TurnSlot
 from orbit.agent.application.planner_seat import PlannerSeat, SeatHooks
 from orbit.agent.application.ports import ProposalReview, SessionStore, UsageSource
 from orbit.agent.application.proposals import FrontendReview
+from orbit.agent.application.review_count import ReviewCount
 from orbit.agent.application.review_lane import ReviewLane
 from orbit.agent.application.startup_check import AGENT_ID as STARTUP_AGENT
 from orbit.agent.application.startup_check import StartupCheck
@@ -162,6 +163,7 @@ class AgentSession:
         self._events: asyncio.Queue[Event] = asyncio.Queue()
         self._keeper = SessionKeeper(store, self._events.put, clock, new_id)
         self._keeper.rename(name)
+        self._review_count = ReviewCount(store, self._events.put)
         self._tasks = Tasks(TaskBoard(), self._events.put, self._save)
         self._board = self._tasks.board
         self._proposals = FrontendReview(self._events.put, self._agent_on)
@@ -471,12 +473,12 @@ class AgentSession:
         """Save the review state, which may have changed, and the repository's super review
         count."""
         assert self._lane is not None  # Only the review lane changes it.
-        await self._keeper.save_review_count(self._lane.planner.since_super)
+        await self._review_count.save(self._lane.planner.since_super)
         await self._save()
 
     async def _load_review_count(self) -> None:
         """Have the review planner count on from the repository's saved super review count."""
-        count = await self._keeper.review_count()
+        count = await self._review_count.load()
         if self._lane is not None and count is not None:
             self._lane.planner.since_super = count
 
