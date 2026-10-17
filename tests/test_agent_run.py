@@ -212,6 +212,25 @@ async def test_an_agent_that_never_asks_for_its_task_errors() -> None:
     assert (task.status, task.reason, task.reason_detail) == ("error", f"Error: {message}", message)
 
 
+async def test_an_errored_run_ends_with_its_first_error_not_a_later_one() -> None:
+    async def errs(call: Call) -> TurnEndReason:
+        return "error"
+
+    session, _, launcher = session_for(errs)
+    turn_error = "API Error: overloaded\nTry again later."
+    launcher.turn_errors.append(turn_error)
+    events = await asyncio.wait_for(run(session), 5)
+
+    errors = [e.message for e in events if isinstance(e, ErrorOccurred)]
+    assert errors == [turn_error, "agent-1 exited without calling get_task."]
+    [task] = board(events)
+    assert (task.status, task.reason, task.reason_detail) == (
+        "error",
+        "Error: API Error: overloaded",
+        turn_error,
+    )
+
+
 async def test_a_crashing_agent_is_reported_and_its_work_still_verified() -> None:
     async def crashes(call: Call) -> TurnEndReason:
         await call("get_task")

@@ -29,6 +29,7 @@ from orbit.protocol import (
     AssistantMessage,
     BusyChanged,
     BusyLane,
+    ErrorOccurred,
     Event,
     RunTasks,
     Settings,
@@ -113,6 +114,9 @@ class ScriptedLauncher:
         self.planner_afters: list[Callable[[], Awaitable[None]]] = []
         # The usage of each launch's turns, one launch at a time; one unmetered turn if none.
         self.usages: list[tuple[Usage, ...]] = []
+        # The error each launch's turn reports before it finishes, one launch at a time; none
+        # once out, as the CLI reports one for a turn that ends in error.
+        self.turn_errors: list[str] = []
         self.conversations: dict[str, str] = {}  # Agent id -> its conversation's id.
         self.resumed: list[str | None] = []  # The conversation each converse() carried on.
 
@@ -128,6 +132,8 @@ class ScriptedLauncher:
             return await self.host.call(agent.token, tool, **arguments)
 
         reason = await script(call)
+        if self.turn_errors:
+            yield ErrorOccurred(turn_id=agent.id, message=self.turn_errors.pop(0))
         for usage in self.usages.pop(0) if self.usages else (None,):
             yield TurnFinished(turn_id=agent.id, reason=reason, agent_id=agent.id, usage=usage)
 

@@ -89,9 +89,12 @@ async def test_an_agent_that_runs_past_its_roles_time_limit_is_stopped() -> None
     roles = {"coder": ROLES["coder"].model_copy(update={"timeout_minutes": 0.001})}
     session, _, _ = session_for(works_forever, roles=roles)
     events = await asyncio.wait_for(run(session, TaskSpec(prompt="Go", settings=Settings())), 5)
-    assert any(isinstance(e, ErrorOccurred) and "ran out of time" in e.message for e in events)
+    [message] = [
+        e.message for e in events if isinstance(e, ErrorOccurred) and "ran out of time" in e.message
+    ]
     assert AgentExited(agent_id="agent-1", reason="killed") in events
-    assert statuses(events) == ["error"]
+    [task] = board(events)
+    assert (task.status, task.reason, task.reason_detail) == ("error", f"Error: {message}", message)
 
 
 async def test_without_reviews_suggestions_are_refused() -> None:
