@@ -18,14 +18,18 @@ WAITING: frozenset[TaskStatus] = ACTIVE_STATUSES | {"pending"}
 # Statuses a run leaves alone; any other task is worth (another) run.
 SETTLED: frozenset[TaskStatus] = ACTIVE_STATUSES | {"draft", "completed", "unverified", "gave_up"}
 
+INTERRUPTED = "Interrupted: orbit stopped while it ran"
+"""Why a task that was running when orbit stopped is cancelled."""
+# What clears a task's reason for ending badly.
+_NO_REASON = {"reason": "", "reason_detail": ""}
+
 
 def interrupted(tasks: Sequence[TaskState]) -> tuple[tuple[TaskState, ...], int]:
     """``tasks`` as a crash leaves them, and how many changed: those that were running are
-    cancelled, so the next run picks them up again."""
+    cancelled, :data:`INTERRUPTED`, so the next run picks them up again."""
+    cancelled = {"status": "cancelled", "reason": INTERRUPTED, "reason_detail": ""}
     left = tuple(
-        state.model_copy(update={"status": "cancelled"})
-        if state.status in ACTIVE_STATUSES
-        else state
+        state.model_copy(update=cancelled) if state.status in ACTIVE_STATUSES else state
         for state in tasks
     )
     return left, sum(state.status in ACTIVE_STATUSES for state in tasks)
@@ -83,11 +87,12 @@ class TaskBoard:
         return state.id
 
     def edit(self, task_id: str, task: TaskSpec) -> None:
-        """Replace a task and make it pending again. Raises ``ValueError`` if it can't be."""
+        """Replace a task and make it pending again, without a reason for how it last ended.
+        Raises ``ValueError`` if it can't be."""
         current = self.get(task_id)
         if current.status in ACTIVE_STATUSES:
             raise ValueError(f"Task {task_id!r} can't be edited while it runs.")
-        fresh = {"task": task, "status": "pending", "attempt": 0, "max_attempts": 0}
+        fresh = {"task": task, "status": "pending", "attempt": 0, "max_attempts": 0} | _NO_REASON
         self._tasks[self.position(task_id)] = current.model_copy(update=fresh)
 
     def get(self, task_id: str) -> TaskState:
@@ -100,8 +105,11 @@ class TaskBoard:
         raise ValueError(f"No task with id {task_id!r}.")
 
     def set_status(self, task_id: str, status: TaskStatus) -> None:
-        index = self.position(task_id)
-        self._tasks[index] = self._tasks[index].model_copy(update={"status": status})
+        """Set task ``task_id``'s ``status``; one running again loses its last reason."""
+        update: dict[str, str] = {"status": status}
+        if status == "running":
+            update |= _NO_REASON
+        self._update(task_id, update)
 
     def set_attempt(self, task_id: str, attempt: int, max_attempts: int) -> None:
         """Task ``task_id``'s agent has been asked for fix ``attempt`` of ``max_attempts``."""
@@ -115,14 +123,16 @@ class TaskBoard:
         total = self._tasks[index].usage + usage
         self._tasks[index] = self._tasks[index].model_copy(update={"usage": total})
 
-    def finish(self, task_id: str, status: TaskStatus) -> None:
-        """Record how task ``task_id`` ended; a completed fix also completes what it fixed."""
-        self.set_status(task_id, status)
+    def finish(self, task_id: str, status: TaskStatus, reason: str = "", detail: str = "") -> None:
+        """Record how task ``task_id`` ended, and why: ``reason`` in a line, ``detail`` in full.
+        A completed fix also completes what it fixed."""
+        self._update(task_id, {"status": status, "reason": reason, "reason_detail": detail})
         if status == "completed":
             self.mark_fixed(task_id)
 
     def mark_fixed(self, task_id: str) -> None:
-        """Task ``task_id`` passed verification, so the tasks it was fixing are completed too.
+        """Task ``task_id`` passed verification, so the tasks it was fixing are completed too,
+        without the reasons they failed.
 
         Walks up the chain of fixes, stopping at a task that's no longer on the board. Tasks
         that aren't unverified any more (say, edited since) stay as they are.
@@ -130,7 +140,7 @@ class TaskBoard:
         fixed = self.find(self.get(task_id).fixes)
         while fixed is not None:
             if fixed.status == "unverified":
-                self.set_status(fixed.id, "completed")
+                self._update(fixed.id, {"status": "completed"} | _NO_REASON)
             fixed = self.find(fixed.fixes)
 
     def find(self, task_id: str | None) -> TaskState | None:
@@ -190,6 +200,11 @@ class TaskBoard:
         state = self._new(task, origin="review")
         self._tasks.append(state)
         return state.id
+
+    def _update(self, task_id: str, update: dict[str, str]) -> None:
+        """Change task ``task_id``'s fields as ``update`` says."""
+        index = self.position(task_id)
+        self._tasks[index] = self._tasks[index].model_copy(update=update)
 
     def _new(self, task: TaskSpec, **fields: Any) -> TaskState:
         """A new task state for ``task``, with the next id."""

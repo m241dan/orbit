@@ -1,6 +1,6 @@
 import pytest
 
-from orbit.agent.domain.board import SETTLED, WAITING, TaskBoard, interrupted
+from orbit.agent.domain.board import INTERRUPTED, SETTLED, WAITING, TaskBoard, interrupted
 from orbit.protocol import ACTIVE_STATUSES, Settings, TaskSpec, TaskState, TaskStatus, Usage
 
 ONE = TaskSpec(prompt="one")
@@ -121,6 +121,71 @@ def test_finishing_a_fix_completes_what_it_fixed_but_other_endings_do_not() -> N
     assert [t.status for t in board.tasks] == ["unverified", "error"]
     board.finish(fix, "completed")
     assert [t.status for t in board.tasks] == ["completed", "completed"]
+
+
+def reasons(board: TaskBoard) -> list[tuple[str, str]]:
+    return [(t.reason, t.reason_detail) for t in board.tasks]
+
+
+def test_finishing_with_a_reason_records_it() -> None:
+    board = TaskBoard()
+    first = board.add(ONE)
+    board.finish(first, "unverified", "Unit tests failed", "2 failed, 5 passed")
+    assert board.get(first).status == "unverified"
+    assert reasons(board) == [("Unit tests failed", "2 failed, 5 passed")]
+
+
+def test_finishing_as_completed_leaves_no_reason() -> None:
+    board = TaskBoard()
+    first = board.add(ONE)
+    board.finish(first, "error", "Crashed", "Traceback")
+    board.finish(first, "completed")
+    assert reasons(board) == [("", "")]
+
+
+def test_running_again_clears_the_reason() -> None:
+    board = TaskBoard()
+    first = board.add(ONE)
+    board.finish(first, "error", "Crashed", "Traceback")
+    board.set_status(first, "running")
+    assert reasons(board) == [("", "")]
+
+
+def test_other_status_changes_keep_the_reason() -> None:
+    board = TaskBoard()
+    first = board.add(ONE)
+    board.finish(first, "error", "Crashed", "Traceback")
+    board.set_status(first, "cancelled")
+    assert reasons(board) == [("Crashed", "Traceback")]
+
+
+def test_editing_clears_the_reason() -> None:
+    board = TaskBoard()
+    first = board.add(ONE)
+    board.finish(first, "gave_up", "Gave up", "It contradicts itself")
+    board.edit(first, TWO)
+    assert reasons(board) == [("", "")]
+
+
+def test_a_passing_fix_clears_the_reasons_of_the_tasks_it_completes() -> None:
+    board = TaskBoard()
+    first = board.add(ONE)
+    board.finish(first, "unverified", "Unit tests failed", "1 failed")
+    fix = board.add(FIX, fixes=first)
+    board.finish(fix, "unverified", "Lint failed", "E501")
+    fix_of_fix = board.add(FIX, fixes=fix)
+    board.finish(fix_of_fix, "completed")
+    assert [t.status for t in board.tasks] == ["completed"] * 3
+    assert reasons(board) == [("", "")] * 3
+
+
+def test_a_failing_fix_leaves_the_reason_of_what_it_fixed() -> None:
+    board = TaskBoard()
+    first = board.add(ONE)
+    board.finish(first, "unverified", "Unit tests failed", "1 failed")
+    fix = board.add(FIX, fixes=first)
+    board.finish(fix, "error", "Crashed", "Traceback")
+    assert reasons(board) == [("Unit tests failed", "1 failed"), ("Crashed", "Traceback")]
 
 
 def test_next_runnable_can_be_limited_to_roles_or_exclude_them() -> None:
@@ -298,7 +363,14 @@ def test_restore_keeps_non_numeric_ids_but_ignores_them_for_the_next_id() -> Non
 @pytest.mark.parametrize("status", ["running", "verifying"])
 def test_a_crash_cancels_tasks_that_were_running(status: TaskStatus) -> None:
     task = TaskState(id="1", task=ONE, status=status)
-    assert interrupted((task,)) == ((task.model_copy(update={"status": "cancelled"}),), 1)
+    cancelled = task.model_copy(update={"status": "cancelled", "reason": INTERRUPTED})
+    assert interrupted((task,)) == ((cancelled,), 1)
+
+
+def test_a_crash_gives_its_reason_in_place_of_any_earlier_one() -> None:
+    task = TaskState(id="1", task=ONE, status="running", reason="Old", reason_detail="Old detail")
+    (left,), _ = interrupted((task,))
+    assert (left.reason, left.reason_detail) == (INTERRUPTED, "")
 
 
 @pytest.mark.parametrize(
@@ -306,11 +378,11 @@ def test_a_crash_cancels_tasks_that_were_running(status: TaskStatus) -> None:
     ["draft", "pending", "completed", "unverified", "gave_up", "cancelled", "error"],
 )
 def test_a_crash_leaves_tasks_that_were_not_running_alone(status: TaskStatus) -> None:
-    task = TaskState(id="1", task=ONE, status=status)
+    task = TaskState(id="1", task=ONE, status=status, reason="Lint failed", reason_detail="E501")
     assert interrupted((task,)) == ((task,), 0)
 
 
-def test_a_crash_keeps_everything_but_the_status_and_counts_each_change() -> None:
+def test_a_crash_keeps_everything_but_the_status_and_reason_and_counts_each_change() -> None:
     usage = Usage(input_tokens=5)
     fixed = TaskState(id="1", task=ONE, status="unverified", origin="review", batch="b", round=2)
     fix = TaskState(
@@ -318,10 +390,11 @@ def test_a_crash_keeps_everything_but_the_status_and_counts_each_change() -> Non
     )
     other = TaskState(id="3", task=TWO, status="verifying")
     tasks, changed = interrupted((fixed, fix, other))
+    cancelled = {"status": "cancelled", "reason": INTERRUPTED}
     assert tasks == (
         fixed,
-        fix.model_copy(update={"status": "cancelled"}),
-        other.model_copy(update={"status": "cancelled"}),
+        fix.model_copy(update=cancelled),
+        other.model_copy(update=cancelled),
     )
     assert changed == 2
 

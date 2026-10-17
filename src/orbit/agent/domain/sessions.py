@@ -18,7 +18,7 @@ from pydantic_core import from_json
 from orbit.agent.domain.reviews import LaneSnapshot
 from orbit.protocol import SessionSummary, Settings, TaskState, Usage
 
-FORMAT_VERSION = 3
+FORMAT_VERSION = 4
 """The version of the record format this orbit writes, and the newest it reads."""
 
 _MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
@@ -50,11 +50,18 @@ def _without_rounds(record: dict[str, Any]) -> dict[str, Any]:
     return record | {"reviews": reviews | {"planner": planner}}
 
 
+def _unchanged(record: dict[str, Any]) -> dict[str, Any]:
+    """Version 3 ``record`` as it is: version 4 only added fields that have defaults."""
+    return record
+
+
 # By version N: what takes a record of version N and returns its fields in version N+1's shape.
 # The upgrade sets the version for it. Version 3 dropped the planner's rounds through a migration
 # rather than by having the snapshot ignore them, so that the format stays pinned by its fixtures
-# and the snapshot model keeps forbidding fields it doesn't know.
-_MIGRATIONS: dict[int, Migration] = {1: _spent_by_tasks, 2: _without_rounds}
+# and the snapshot model keeps forbidding fields it doesn't know. Version 4 added the reasons tasks
+# ended for; its version stops an older orbit, which forbids fields it doesn't know, at a clear
+# "written by a newer orbit" rather than a field it can't read.
+_MIGRATIONS: dict[int, Migration] = {1: _spent_by_tasks, 2: _without_rounds, 3: _unchanged}
 
 EMPTY_NAME = "A session needs a name."
 OPEN_UNDELETABLE = "Can't delete the open session."

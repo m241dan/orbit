@@ -35,7 +35,8 @@ sessions, or anything from `.orbit/config.toml`, which is read at startup as bef
 - **When.** A session is saved after every change, but only once it's used: once it has a task
   or you prompt the planner. Starting orbit and quitting leaves nothing behind.
 - **Format.** Each record carries a format version. Older versions are upgraded as they're read
-  (there are no upgrades yet); a newer one, or a file that isn't valid JSON or doesn't fit the
+  (version 2 added what the session spent, version 3 dropped the review planner's rounds, and
+  version 4 added why each task ended badly); a newer one, or a file that isn't valid JSON or doesn't fit the
   record, is unreadable. Unreadable files are listed with the reason, can be deleted, and are
   never opened, renamed or overwritten.
 - **Lifetime.** Sessions are kept until you delete one; nothing is pruned. Deleting removes the

@@ -289,7 +289,9 @@ class TaskState(_Message):
     after that task. ``attempt`` counts the fixes asked of the agent working on it, out
     of ``max_attempts``; both are 0 until verification first fails. A task a review
     suggested belongs to that review's ``batch``, at review ``round`` (0 otherwise).
-    ``usage`` adds up what every turn run for the task cost.
+    ``usage`` adds up what every turn run for the task cost. A task that ended badly says why
+    in ``reason``, one line such as ``Unit tests failed``, with the full text in
+    ``reason_detail``; both are empty otherwise.
     """
 
     id: str
@@ -302,6 +304,8 @@ class TaskState(_Message):
     batch: str | None = None
     round: int = Field(default=0, ge=0)
     usage: Usage = Usage()
+    reason: str = ""
+    reason_detail: str = ""
 
 
 class SessionSummary(_Message):

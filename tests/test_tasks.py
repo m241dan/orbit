@@ -50,6 +50,22 @@ async def test_finish_ends_the_task_and_publishes_it() -> None:
     assert len(published) == 2
 
 
+async def test_finish_records_why_the_task_ended() -> None:
+    published: list[Event] = []
+    tasks = tasks_on(published)
+    task_id = tasks.board.add(TaskSpec(prompt="a"))
+
+    await tasks.finish(task_id, "unverified", "Unit tests failed", "1 failed")
+
+    state = tasks.board.get(task_id)
+    assert (state.status, state.reason, state.reason_detail) == (
+        "unverified",
+        "Unit tests failed",
+        "1 failed",
+    )
+    assert published == [TasksChanged(tasks=tasks.board.tasks)]
+
+
 async def test_change_publishes_once_and_returns_the_changes_result() -> None:
     published: list[Event] = []
     tasks = tasks_on(published)

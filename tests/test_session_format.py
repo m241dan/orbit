@@ -23,12 +23,13 @@ BUMP = (
     "and a test that the old fixture migrates to it."
 )
 
-# Never edit these for a format change: they're what orbits at versions 1 to 3 wrote, and
-# they still need to read. A new version gets its own fixture (session-v4.json) and a
+# Never edit these for a format change: they're what orbits at versions 1 to 4 wrote, and
+# they still need to read. A new version gets its own fixture (session-v5.json) and a
 # migration test from the last one.
 SESSION_V1 = FIXTURES / "session-v1.json"
 SESSION_V2 = FIXTURES / "session-v2.json"
 SESSION_V3 = FIXTURES / "session-v3.json"
+SESSION_V4 = FIXTURES / "session-v4.json"
 
 COUNT_CHANGED = (
     "The saved review count format changed. Don't edit REVIEW_COUNT_V1: the counts orbits "
@@ -117,16 +118,25 @@ def reviews() -> LaneSnapshot:
     )
 
 
-def expected(spent: Usage = SPENT) -> SessionRecord:
+def ended() -> tuple[TaskState, ...]:
+    """:func:`tasks` with the reasons they ended, as version 4 keeps them."""
+    reasons = {
+        "2": {"reason": "Gave up", "reason_detail": "The task contradicts itself."},
+        "3": {"reason": "Unit tests failed", "reason_detail": "1 failed, 4 passed"},
+    }
+    return tuple(state.model_copy(update=reasons.get(state.id, {})) for state in tasks())
+
+
+def expected(spent: Usage = SPENT, states: tuple[TaskState, ...] | None = None) -> SessionRecord:
     return SessionRecord(
-        version=3,
+        version=4,
         id="s-golden",
         name="Golden session",
         created=datetime(2026, 10, 7, 9, 5, tzinfo=UTC),
         last_active=datetime(2026, 10, 17, 14, 30, tzinfo=timezone(timedelta(hours=2))),
         settings=Settings(model="opus", tool_access="full"),
         planner_conversation="conversation-1",
-        tasks=tasks(),
+        tasks=tasks() if states is None else states,
         reviews=reviews(),
         spent=spent,
     )
@@ -140,14 +150,18 @@ def test_a_version_2_session_file_migrates_to_dropping_the_planners_rounds() -> 
     assert parse_record(SESSION_V2.read_text(encoding="utf-8")) == expected()
 
 
-def test_a_version_3_session_file_reads_as_its_record() -> None:
+def test_a_version_3_session_file_migrates_to_tasks_without_reasons() -> None:
     assert parse_record(SESSION_V3.read_text(encoding="utf-8")) == expected()
 
 
-def test_a_session_record_is_written_in_the_version_3_format() -> None:
-    written = json.loads(record_json(expected()))
-    golden = json.loads(SESSION_V3.read_text(encoding="utf-8"))
-    assert written == golden, BUMP.format(fixture=SESSION_V3.name)
+def test_a_version_4_session_file_reads_as_its_record() -> None:
+    assert parse_record(SESSION_V4.read_text(encoding="utf-8")) == expected(states=ended())
+
+
+def test_a_session_record_is_written_in_the_version_4_format() -> None:
+    written = json.loads(record_json(expected(states=ended())))
+    golden = json.loads(SESSION_V4.read_text(encoding="utf-8"))
+    assert written == golden, BUMP.format(fixture=SESSION_V4.name)
 
 
 def test_a_version_1_review_count_reads_as_its_count() -> None:

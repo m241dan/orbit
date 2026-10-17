@@ -59,6 +59,9 @@ class Tasks:
         """Mark task ``task_id`` running and publish the board."""
         await self.change(lambda board: board.set_status(task_id, "running"))
 
-    async def finish(self, task_id: str, status: TaskStatus) -> None:
-        """Record that task ``task_id`` ended as ``status`` and publish the board."""
-        await self.change(lambda board: board.finish(task_id, status))
+    async def finish(
+        self, task_id: str, status: TaskStatus, reason: str = "", detail: str = ""
+    ) -> None:
+        """Record that task ``task_id`` ended as ``status``, for ``reason`` (``detail`` in full),
+        and publish the board."""
+        await self.change(lambda board: board.finish(task_id, status, reason, detail))
