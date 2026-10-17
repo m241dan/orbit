@@ -135,7 +135,7 @@ class AgentSession:
     settings, but for those ``pinned``, by field name, which keep the ``settings`` given here.
     With ``pick_session``, the saved sessions are listed as the events start, for the user to
     pick one; until they do, the session open is a new one, and what orbit adds to it carries
-    over into the one picked.
+    over into the one picked. Otherwise, the session open is announced as the events start.
     """
 
     def __init__(

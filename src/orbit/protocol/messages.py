@@ -641,7 +641,11 @@ class SessionsListed(_Message):
 
 
 class SessionOpened(_Message):
-    """The ``session`` now open, after ``OpenSession`` or ``NewSession``."""
+    """The ``session`` now open.
+
+    It's sent at the start, unless the sessions are listed to pick one, and after
+    ``OpenSession`` or ``NewSession``.
+    """
 
     type: Literal["session_opened"] = "session_opened"
     session: SessionSummary
