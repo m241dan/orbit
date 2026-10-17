@@ -135,7 +135,8 @@ output you haven't seen, a task note included, ends in `*`. Whichever tab is sho
 to the planner.
 
 Each entry is coloured by what it is: your prompts, agents' messages, tool calls and their output,
-verification and notices, and errors. A tool call shows as one line naming the tool and its main
+verification and notices, and errors. Agents' and the planner's messages render as markdown:
+headings, emphasis, lists, tables, highlighted code and links shown as `text (url)`. A tool call shows as one line naming the tool and its main
 argument, such as the file or command, with its full arguments collapsed beneath it; an agent's
 request to orbit shows the same way. An entry of more than one line can be collapsed to its first
 line and a count of the rest, marked `▸` (`▾` when expanded); tool calls, their output and requests

@@ -1,5 +1,8 @@
 import json
 
+from rich.console import Console
+from rich.style import Style
+
 from orbit.protocol import (
     AgentExited,
     AgentExitReason,
@@ -27,11 +30,14 @@ from orbit.tui.view import (
     agent_labelled,
     collapsible,
     entry_label,
+    entry_markdown,
     error_entry,
     exchange_entry,
     gutter,
+    hanging_indent,
     note_entry,
     output_entry,
+    shows_markdown,
     starts_collapsed,
     task_started_entry,
     turn_end_entry,
@@ -199,6 +205,59 @@ def test_entry_labels_mark_collapsible_entries_and_count_collapsed_lines() -> No
     assert entry_label("one\ntwo", collapsed=False) == "▾ one\ntwo"
     assert entry_label("one\ntwo", collapsed=True) == "▸ one (+1 line)"
     assert entry_label("one\ntwo\nthree", collapsed=True) == "▸ one (+2 lines)"
+
+
+def test_only_expanded_assistant_entries_show_markdown() -> None:
+    assert shows_markdown("assistant", collapsed=False)
+    assert not shows_markdown("assistant", collapsed=True)
+    assert not any(
+        shows_markdown(kind, collapsed=False)
+        for kind in ("user", "tool", "verify", "agent", "request", "error")
+    )
+
+
+def test_a_collapsible_entry_hangs_its_marker_beside_its_markdown() -> None:
+    assert hanging_indent("one\ntwo") == ("▾ ", "  ")
+
+
+def test_an_entry_of_one_line_has_no_hanging_indent() -> None:
+    assert hanging_indent("one") == ("", "")
+
+
+def markdown_rows(text: str, width: int = 40) -> list[str]:
+    """``text``'s markdown as rendered ``width`` columns wide, a string per row."""
+    console = Console(width=width)
+    markdown = entry_markdown(text, Style())
+    lines = console.render_lines(markdown, console.options, pad=False)
+    return ["".join(segment.text for segment in line).rstrip() for line in lines]
+
+
+def test_markdown_headings_are_left_aligned_without_a_box() -> None:
+    rows = markdown_rows("# Title\n\n## Section\n\ntext")
+    assert rows == ["Title", "", "Section", "", "text"]
+
+
+def test_markdown_headings_are_bold_and_only_h1_underlined() -> None:
+    console = Console(width=40)
+    for text, underline in (("# Title", True), ("## Section", False)):
+        lines = console.render_lines(entry_markdown(text, Style()), console.options)
+        style = next(segment.style for segment in lines[0] if segment.text.strip())
+        assert style is not None and style.bold and bool(style.underline) is underline
+
+
+def test_markdown_shows_emphasis_code_and_lists_without_their_syntax() -> None:
+    assert markdown_rows("**bold** and `code`\n\n- item") == ["bold and code", "", " • item"]
+
+
+def test_markdown_links_show_their_url_after_their_text() -> None:
+    assert markdown_rows("see [docs](https://example.com)") == ["see docs (https://example.com)"]
+
+
+def test_markdown_takes_the_entrys_style_as_its_base() -> None:
+    console = Console(width=40)
+    style = Style(color="red")
+    lines = console.render_lines(entry_markdown("plain", style), console.options)
+    assert lines[0][0].style is not None and lines[0][0].style.color == style.color
 
 
 def test_gutter_symbols_differ_and_fill_one_column() -> None:

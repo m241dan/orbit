@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from typing import Any, ClassVar, get_args
 
-from rich.console import Console, ConsoleOptions, RenderResult
+from rich.console import Console, ConsoleOptions, RenderableType, RenderResult
 from rich.segment import Segment
 from rich.style import Style
 from rich.text import Text
@@ -12,7 +12,16 @@ from textual.app import ComposeResult
 from textual.containers import Vertical
 from textual.widgets import OptionList
 
-from orbit.tui.view import EntryKind, collapsible, entry_label, gutter, starts_collapsed
+from orbit.tui.view import (
+    EntryKind,
+    collapsible,
+    entry_label,
+    entry_markdown,
+    gutter,
+    hanging_indent,
+    shows_markdown,
+    starts_collapsed,
+)
 from orbit.tui.widgets import ListPane
 
 Entry = tuple[str, EntryKind]
@@ -20,22 +29,49 @@ Entry = tuple[str, EntryKind]
 
 
 @dataclass(frozen=True)
+class HangingIndent:
+    """``body`` drawn in the width left beside its indent: ``first`` in front of its first row
+    and ``rest`` in front of every row after it, both in ``style``."""
+
+    body: RenderableType
+    first: str
+    rest: str
+    style: Style
+
+    def __rich_console__(self, console: Console, options: ConsoleOptions) -> RenderResult:
+        width = options.max_width - len(self.first)
+        rows = console.render_lines(self.body, options.update_width(width), pad=False)
+        for index, row in enumerate(rows):
+            yield Segment(self.rest if index else self.first, self.style)
+            yield from row
+            yield Segment.line()
+
+
+@dataclass(frozen=True)
 class GutteredEntry:
-    """A transcript entry as drawn: its ``label`` wrapped to the width left beside the
-    ``gutter``, which goes in front of every row in ``gutter_style``, then a blank row so the
-    entry reads as a paragraph."""
+    """A transcript entry as drawn: its ``body``, or its ``label`` when it has none, wrapped
+    to the width left beside the ``gutter``, which goes in front of every row in
+    ``gutter_style``, then a blank row so the entry reads as a paragraph."""
 
     label: Text
     gutter: str
     gutter_style: Style
+    body: RenderableType | None = None
 
     def __rich_console__(self, console: Console, options: ConsoleOptions) -> RenderResult:
         width = options.max_width - len(self.gutter)
-        for row in console.render_lines(self.label, options.update_width(width), pad=False):
+        shown = self.label if self.body is None else self.body
+        for row in console.render_lines(shown, options.update_width(width), pad=False):
             yield Segment(self.gutter, self.gutter_style)
             yield from row
             yield Segment.line()
         yield Segment.line()
+
+
+def markdown_body(text: str, style: Style) -> HangingIndent:
+    """``text`` drawn as markdown in ``style``, its marker hanging beside it if it has one."""
+    first, rest = hanging_indent(text)
+    return HangingIndent(entry_markdown(text, style), first, rest, style)
 
 
 class TranscriptLog(ListPane):
@@ -153,8 +189,10 @@ class TranscriptLog(ListPane):
         gutter_style = self.get_component_rich_style(
             "transcript--marker" if marked else "transcript--gutter", partial=True
         )
-        label = Text(entry_label(text, self._collapsed[index]), style=style)
-        return GutteredEntry(label, gutter(marked), gutter_style)
+        collapsed = self._collapsed[index]
+        label = Text(entry_label(text, collapsed), style=style)
+        body = markdown_body(text, style) if shows_markdown(kind, collapsed) else None
+        return GutteredEntry(label, gutter(marked), gutter_style, body)
 
 
 class Transcript(Vertical):

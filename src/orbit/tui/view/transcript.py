@@ -1,6 +1,11 @@
 """Transcript entries: what each piece of a conversation reads as."""
 
-from typing import assert_never
+from typing import ClassVar, assert_never
+
+from rich.console import Console, ConsoleOptions, RenderResult
+from rich.markdown import Heading, Markdown, MarkdownContext, MarkdownElement
+from rich.style import Style
+from rich.text import Text
 
 from orbit.protocol import (
     AgentExited,
@@ -48,6 +53,10 @@ def collapsible(text: str) -> bool:
     return "\n" in text
 
 
+EXPANDED_MARKER = "▾ "
+"""The marker in front of an expanded entry that can be collapsed."""
+
+
 def entry_label(text: str, collapsed: bool) -> str:
     """``text`` as its entry shows it. A collapsible entry starts with a marker; ``collapsed``,
     it shows only its first line and how many more there are."""
@@ -55,9 +64,54 @@ def entry_label(text: str, collapsed: bool) -> str:
         return text
     first, _, rest = text.partition("\n")
     if not collapsed:
-        return f"▾ {text}"
+        return f"{EXPANDED_MARKER}{text}"
     more = rest.count("\n") + 1
     return f"▸ {first} (+{more} line{'s' if more != 1 else ''})"
+
+
+MARKDOWN_KINDS: frozenset[EntryKind] = frozenset({"assistant"})
+"""Kinds whose entries show their text as markdown: agents' and the planner's messages."""
+
+
+def shows_markdown(kind: EntryKind, collapsed: bool) -> bool:
+    """Whether an entry of ``kind`` shows its text as markdown: one ``collapsed`` to its first
+    line shows that line as it is."""
+    return kind in MARKDOWN_KINDS and not collapsed
+
+
+def hanging_indent(text: str) -> tuple[str, str]:
+    """What goes in front of the first row of an entry's markdown and in front of every row
+    after it: the marker hanging beside a collapsible entry, nothing beside one of a line."""
+    if not collapsible(text):
+        return "", ""
+    return EXPANDED_MARKER, " " * len(EXPANDED_MARKER)
+
+
+class LeftHeading(Heading):
+    """A heading drawn bold and left-aligned, h1 also underlined, rather than centred."""
+
+    def on_enter(self, context: MarkdownContext) -> None:
+        self.text = Text()
+        context.enter_style(Style(bold=True, underline=self.tag == "h1"))
+
+    def __rich_console__(self, console: Console, options: ConsoleOptions) -> RenderResult:
+        text = self.text.copy()
+        text.justify = "left"
+        yield text
+
+
+class EntryMarkdown(Markdown):
+    """Markdown as an entry shows it: headings drawn as :class:`LeftHeading`."""
+
+    elements: ClassVar[dict[str, type[MarkdownElement]]] = {
+        **Markdown.elements,
+        "heading_open": LeftHeading,
+    }
+
+
+def entry_markdown(text: str, style: Style) -> Markdown:
+    """``text`` as markdown in the entry's ``style``, its links shown as ``text (url)``."""
+    return EntryMarkdown(text, style=style, hyperlinks=False)
 
 
 GUTTER_BAR = "│"

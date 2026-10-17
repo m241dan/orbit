@@ -4,13 +4,14 @@ and collapsed."""
 import pytest
 from rich.console import Console, ConsoleOptions, RenderResult
 from rich.style import Style
+from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.pilot import Pilot
 
 from orbit.protocol import AssistantMessage, Notice, ToolCallFinished
 from orbit.tui import OrbitApp
 from orbit.tui.transcript import GutteredEntry, Transcript, TranscriptLog
-from orbit.tui.view import GUTTER_BAR, GUTTER_MARKER
+from orbit.tui.view import GUTTER_BAR, GUTTER_MARKER, EntryKind
 from tests.test_tui import FakeSession, feed_events, said, started
 
 # Wraps in any window a test opens. At 40 columns a row beside the gutter holds two words but
@@ -89,13 +90,14 @@ async def test_entries_are_shown_as_paragraphs_separated_by_blank_lines() -> Non
     session = FakeSession()
     app = OrbitApp(session)
     async with app.run_test() as pilot:
-        await feed_events(session, pilot, started("agent-1"), said("agent-1", "hi\nthere"))
-        assert labels(app) == ["▶ agent-1 (coder) started", "▾ agent-1: hi\nthere"]
-        assert rendered(visible_log(app), 5) == [
+        await feed_events(session, pilot, started("agent-1"), said("agent-1", "hi\n\nthere"))
+        assert labels(app) == ["▶ agent-1 (coder) started", "▾ agent-1: hi\n\nthere"]
+        assert rendered(visible_log(app), 6) == [
             "│ ▶ agent-1 (coder) started",
             "",
             "│ ▾ agent-1: hi",
-            "│ there",
+            "│",
+            "│   there",
             "",
         ]
 
@@ -474,7 +476,7 @@ class LongLogApp(App[None]):
     def compose(self) -> ComposeResult:
         log = TranscriptLog(shown=True)
         for i in range(1000):
-            log.append(f"entry {i}\nmore", "tool" if i % 2 else "assistant")
+            log.append(f"entry {i}\nmore", "tool" if i % 2 else "agent")
         yield log
 
 
@@ -559,3 +561,110 @@ def rendered_tail(log: TranscriptLog, rows: int) -> list[str]:
     """The text of the last ``rows`` rows on screen as drawn."""
     height = log.scrollable_content_region.height
     return [log.render_line(y).text.rstrip() for y in range(height - rows, height)]
+
+
+class LogApp(App[None]):
+    """A shown log, empty until a test appends to it."""
+
+    def compose(self) -> ComposeResult:
+        yield TranscriptLog(shown=True)
+
+
+def entry_rows(log: TranscriptLog, index: int) -> list[str]:
+    """The rows of the entry at ``index`` as drawn at the log's width, gutter and all."""
+    prompt = log.get_option_at_index(index).prompt
+    assert isinstance(prompt, GutteredEntry)
+    console = Console(width=log.size.width)
+    lines = console.render_lines(prompt, console.options, pad=False)
+    return ["".join(segment.text for segment in line) for line in lines]
+
+
+async def test_an_agents_message_of_several_lines_hangs_its_marker_beside_its_markdown() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, said("agent-1", "**intro**\n\n- one\n- two"))
+        assert [row.rstrip() for row in entry_rows(visible_log(app), 0)] == [
+            "│ ▾ agent-1: intro",
+            "│",
+            "│    • one",
+            "│    • two",
+            "",
+        ]
+
+
+async def test_an_agents_message_wraps_beside_its_hanging_marker() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, said("agent-1", f"{LONG}\n\nend"))
+        rows = entry_rows(visible_log(app), 0)
+        assert rows[0].startswith(f"{GUTTER_BAR} ▾ agent-1: gutter")
+        assert all(row.startswith(f"{GUTTER_BAR}   ") for row in rows[1:-1])
+        words = " ".join(row[4:].strip() for row in rows[:-1]).split()
+        assert words == ["agent-1:", *LONG.split(), "end"]
+
+
+async def test_a_collapsed_agents_message_shows_its_first_line_as_it_is() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, said("agent-1", "**intro**\n\n- one"))
+        log = visible_log(app)
+        log.toggle(0)
+        await pilot.pause()
+        assert prompts(app)[0].body is None
+        assert [row.rstrip() for row in entry_rows(log, 0)] == [
+            "│ ▸ agent-1: **intro** (+2 lines)",
+            "",
+        ]
+
+
+async def test_an_agents_message_of_one_line_has_no_marker() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, said("agent-1", "**hi** `there`"))
+        assert [row.rstrip() for row in entry_rows(visible_log(app), 0)] == [
+            "│ agent-1: hi there",
+            "",
+        ]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "```python\nunclosed = 1\n",
+        "stray * and _ and ** marks_",
+        "",
+        "| a | b |\n|---|---|\n| " + "wide " * 40 + "| " + "cell " * 40 + "|",
+        "```\n" + "x" * 300 + "\n```",
+        "one\n\n```\n" + "y" * 300 + "\n```",
+    ],
+)
+async def test_awkward_markdown_stays_within_the_log(text: str) -> None:
+    app = LogApp()
+    async with app.run_test(size=(40, 24)) as pilot:
+        log = app.query_one(TranscriptLog)
+        log.append(text, "assistant")
+        await pilot.pause()
+        rows = entry_rows(log, 0)
+        assert rows[-1] == ""
+        assert all(Text(row).cell_len <= log.size.width for row in rows)
+        assert all(row.startswith(f"{GUTTER_BAR} ") for row in rows[:-1])
+
+
+@pytest.mark.parametrize("kind", ["user", "tool", "verify", "agent", "request", "error"])
+async def test_entries_other_than_agents_messages_show_their_text_as_it_is(
+    kind: EntryKind,
+) -> None:
+    app = LogApp()
+    async with app.run_test() as pilot:
+        log = app.query_one(TranscriptLog)
+        log.append("# **a**", kind)
+        log.append("# **a**\n- b", kind)
+        await pilot.pause()
+        if log.collapsed(1):
+            log.toggle(1)
+        assert [row.rstrip() for row in entry_rows(log, 0)] == ["│ # **a**", ""]
+        assert [row.rstrip() for row in entry_rows(log, 1)] == ["│ ▾ # **a**", "│ - b", ""]
