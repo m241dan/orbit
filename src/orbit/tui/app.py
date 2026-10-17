@@ -212,10 +212,10 @@ class OrbitApp(App[None], inherit_bindings=False):
         self._settings: Settings | None = None
         self._model_choices: tuple[str, ...] = ()
         self._proposal: ProposalScreen | None = None  # The proposal being shown, if any.
-        # How many ctrl+p listings are still to come; unasked, the sessions are listed at startup.
+        # How many ctrl+p listings are still to come; listings beyond them weren't asked for.
         self._sessions_asked = 0
-        # Whether the startup list was shown; listed unasked after that, the list was closed early.
-        self._startup_listed = False
+        # Whether sessions were listed or asked for; only the first listing before that is startup.
+        self._sessions_started = False
         self._sessions: SessionsScreen | None = None  # The list of sessions shown, if any.
         self.clock: Callable[[], float] = time.monotonic
         # Pickers are built once and installed so they open instantly.
@@ -451,21 +451,23 @@ class OrbitApp(App[None], inherit_bindings=False):
     async def action_list_sessions(self) -> None:
         """Ask for the saved sessions, which show in a modal once they're listed."""
         self._sessions_asked += 1
+        self._sessions_started = True
         await self._session.send(ListSessions())
 
     def _show_sessions(self, sessions: tuple[SessionSummary, ...]) -> None:
-        """Let the user pick one of ``sessions`` or start a new one; listed unasked, it's at
-        startup, where escape quits. Listed again while the list is shown, after a session was
-        renamed or deleted or asked for twice, they replace those it shows; listed unasked after
-        the startup list was closed, they're ignored."""
-        startup = not self._sessions_asked
+        """Let the user pick one of ``sessions`` or start a new one; listed first, before ctrl+p,
+        it's at startup, where escape quits. Listed again while the list is shown, after a session
+        was renamed or deleted or asked for twice, they replace those it shows; listed unasked
+        once the list was closed, they're ignored."""
+        startup = not self._sessions_started
+        self._sessions_started = True
+        asked = self._sessions_asked > 0
         self._sessions_asked = max(0, self._sessions_asked - 1)
         if self._sessions is not None:
             self._sessions.show(sessions)
             return
-        if startup and self._startup_listed:
+        if not (startup or asked):
             return
-        self._startup_listed |= startup
 
         async def chosen(choice: SessionChoice | None) -> None:
             self._sessions = None

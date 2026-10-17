@@ -189,7 +189,7 @@ async def test_escape_mid_session_keeps_the_current_session() -> None:
         assert app.is_running
 
 
-async def test_sessions_listed_unasked_after_ctrl_p_are_at_startup_again() -> None:
+async def test_sessions_listed_unasked_after_ctrl_p_open_no_picker() -> None:
     session = FakeSession()
     app = OrbitApp(session)
     async with app.run_test() as pilot:
@@ -198,9 +198,43 @@ async def test_sessions_listed_unasked_after_ctrl_p_are_at_startup_again() -> No
         await pilot.press("escape")
         await feed_events(session, pilot, LISTED)
 
-        screen = app.screen
-        assert isinstance(screen, SessionsScreen)
-        assert screen.startup
+        assert not any(isinstance(s, SessionsScreen) for s in app.screen_stack)
+        assert app.is_running
+
+
+async def test_the_answer_to_ctrl_p_after_the_startup_listing_closed_opens_no_picker() -> None:
+    for keys in (("j", "enter"), ("escape",)):
+        session = FakeSession()
+        app = OrbitApp(session)
+        async with app.run_test() as pilot:
+            await pilot.press("ctrl+p")
+            await feed_events(session, pilot, LISTED)
+            screen = app.screen
+            assert isinstance(screen, SessionsScreen)
+            assert not screen.startup
+            await pilot.press(*keys)
+            await feed_events(session, pilot, LISTED)
+            await pilot.press("escape")
+            await pilot.pause()
+
+            assert not any(isinstance(s, SessionsScreen) for s in app.screen_stack)
+            assert app.is_running
+
+
+async def test_the_listing_after_a_rename_opens_no_picker_once_closed() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await pilot.press("ctrl+p")
+        await feed_events(session, pilot, LISTED)
+        await pilot.press("j", "j", "r", "ctrl+u", *"jk", "enter", "escape")
+        await feed_events(session, pilot, LISTED)
+        await pilot.press("escape")
+        await pilot.pause()
+
+        assert session.commands == [ListSessions(), RenameSession(session_id="old", name="jk")]
+        assert not any(isinstance(s, SessionsScreen) for s in app.screen_stack)
+        assert app.is_running
 
 
 async def test_ctrl_p_does_nothing_over_another_modal() -> None:
