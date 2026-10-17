@@ -618,7 +618,8 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     fingerprints the git working tree; `usage_api` fetches the Claude subscription's usage
     limits (`UsageApi`) with the token in `~/.claude/.credentials.json`.
   - `application`: `AgentSession` implements `Session`: it takes commands, asks the domain what
-    follows, drives the ports and publishes events. `WorkLane` is the work lane: it runs the
+    follows, drives the ports and publishes events. `Tasks` (in `tasks`) holds the `TaskBoard`
+    and publishes it whole after each change, marking tasks running and finished. `WorkLane` is the work lane: it runs the
     board's tasks one at a time, queues a fix after each failed step and lands work that passes.
     `AgentRun` sees one task through one agent; `AgentDesk` (in `desk`) launches agents and
     routes their calls by token; `Verifier` runs the steps; `Lander` (in `landing`) commits and

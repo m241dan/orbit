@@ -15,10 +15,10 @@ from typing import Any, Literal
 
 from orbit.agent.application.desk import AgentDesk, Tool, dispatch, report_progress
 from orbit.agent.application.ports import ProposalDecision, Reply
+from orbit.agent.application.tasks import Tasks
 from orbit.agent.application.verifier import Failure, Verifier, first_failure
 from orbit.agent.domain.agent_task import FINISHED, AgentTask, Phase
 from orbit.agent.domain.agents import Agent, bootstrap_prompt
-from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.roles import (
     ChecksProposal,
     ConfigError,
@@ -33,7 +33,6 @@ from orbit.protocol import (
     AgentStarted,
     ErrorOccurred,
     TaskGaveUp,
-    TasksChanged,
     TaskStatus,
     TurnFinished,
     Usage,
@@ -93,17 +92,18 @@ def _fail(claim: "asyncio.Future[Reply] | None", exc: BaseException) -> None:
 
 
 class AgentRun:
-    """One agent working on task ``task_id`` of ``board``, from launch until it exits."""
+    """One agent working on task ``task_id`` of ``tasks``, from launch until it exits."""
 
     def __init__(
-        self, task_id: str, board: TaskBoard, verifier: Verifier | None, desk: AgentDesk
+        self, task_id: str, tasks: Tasks, verifier: Verifier | None, desk: AgentDesk
     ) -> None:
         self._task_id = task_id
-        self._board = board
+        self._tasks = tasks
+        self._board = tasks.board
         self._verifier = verifier
         self._desk = desk
         self._publish = desk.publish
-        self._work = AgentTask(board.get(task_id).task, desk.agents.limits)
+        self._work = AgentTask(self._board.get(task_id).task, desk.agents.limits)
         self._role: Role | None = desk.agents.roles.get(self._work.task.role)
         self._stream_task: asyncio.Task[None] | None = None  # The agent's process, once launched.
         self._inbox: asyncio.Queue[asyncio.Future[Reply] | _Proposal | Wake] = asyncio.Queue()
@@ -216,7 +216,7 @@ class AgentRun:
             self._board.add_usage(self._task_id, usage)
         except ValueError:
             return
-        await self._publish(TasksChanged(tasks=self._board.tasks))
+        await self._tasks.publish()
 
     async def _await_exit(self, stream: "asyncio.Task[None]") -> None:
         """Give a finished agent ``exit_grace`` seconds to exit on its own."""
@@ -296,8 +296,7 @@ class AgentRun:
             self._board.set_attempt(
                 self._task_id, self._work.attempt, self._work.limits.max_attempts
             )
-            self._board.set_status(self._task_id, "running")
-            await self._publish(TasksChanged(tasks=self._board.tasks))
+            await self._tasks.start(self._task_id)
         return reply
 
     async def _consider(self, proposal: _Proposal) -> None:

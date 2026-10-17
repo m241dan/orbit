@@ -13,8 +13,8 @@ from typing import Any
 
 from orbit.agent.application.desk import AgentDesk, Tool, dispatch, report_progress
 from orbit.agent.application.ports import Reply
+from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.agents import Agent
-from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.roles import suggested_task
 from orbit.agent.domain.verification import steps_note
 from orbit.protocol import (
@@ -26,7 +26,6 @@ from orbit.protocol import (
     ErrorOccurred,
     Event,
     Settings,
-    TasksChanged,
     TurnEndReason,
     TurnFinished,
 )
@@ -37,10 +36,11 @@ class PlannerChat:
     the verification steps tasks must pass now."""
 
     def __init__(
-        self, desk: AgentDesk, board: TaskBoard, step_names: Callable[[], tuple[str, ...]]
+        self, desk: AgentDesk, tasks: Tasks, step_names: Callable[[], tuple[str, ...]]
     ) -> None:
         self._desk = desk
-        self._board = board
+        self._tasks = tasks
+        self._board = tasks.board
         self._step_names = step_names
         self._agent: Agent | None = None
         self._told: tuple[str, ...] | None = None  # The steps the planner last heard about.
@@ -125,7 +125,7 @@ class PlannerChat:
         title, prompt = str(arguments.get("title", "")), str(arguments.get("prompt", ""))
         task = suggested_task(self._desk.agents.roles[CODER], title, prompt)
         task_id = self._board.add_draft(task)
-        await self._desk.publish(TasksChanged(tasks=self._board.tasks))
+        await self._tasks.publish()
         return Reply(f"Added draft task {task_id}; the user will accept or drop it.")
 
     async def _report_progress(self, arguments: dict[str, Any]) -> Reply:

@@ -12,7 +12,7 @@ from orbit.agent.application.agent_run import AgentRun
 from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.lanes import Background
 from orbit.agent.application.ports import CoderTree, Reply
-from orbit.agent.domain.board import TaskBoard
+from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.reviews import ReviewJob, ReviewPlanner, review_prompt
 from orbit.agent.domain.roles import REVIEW_ROLES, role_task, suggested_task
 from orbit.protocol import (
@@ -23,14 +23,13 @@ from orbit.protocol import (
     Notice,
     ReviewStatus,
     TaskOrigin,
-    TasksChanged,
     TaskState,
     TaskStatus,
 )
 
 
 class ReviewLane:
-    """Queues and runs reviews of ``board``'s tasks through ``desk``'s agents.
+    """Queues and runs reviews of ``tasks``' tasks through ``desk``'s agents.
 
     ``wake_work`` asks the work lane to run the suggestions a review queued.
     """
@@ -38,14 +37,15 @@ class ReviewLane:
     def __init__(
         self,
         desk: AgentDesk,
-        board: TaskBoard,
+        tasks: Tasks,
         planner: ReviewPlanner,
         wake_work: Callable[[], Awaitable[None]],
     ) -> None:
         assert desk.agents.tree is not None  # Reviews read commits.
         self._desk = desk
         self._tree: CoderTree = desk.agents.tree
-        self._board = board
+        self._tasks = tasks
+        self._board = tasks.board
         self.planner = planner
         self._wake_work = wake_work
         self._publish = desk.publish
@@ -109,7 +109,7 @@ class ReviewLane:
         origin: TaskOrigin = "super_review" if self._jobs[task_id].whole else "review"
         new_id = self._board.add_suggestion(task, batch, self.planner.round_of(batch), origin)
         self.planner.added(batch, new_id)
-        await self._publish(TasksChanged(tasks=self._board.tasks))
+        await self._tasks.publish()
         return Reply(f"Queued as task {new_id}.")
 
     def queued_by_orbit(self, task_id: str) -> bool:
@@ -157,7 +157,7 @@ class ReviewLane:
         task = role_task(role, self._desk.agents.roles[role], prompt)
         task_id = self._board.add_review(task)
         self._jobs[task_id], self._batches[task_id] = job, batch
-        await self._publish(TasksChanged(tasks=self._board.tasks))
+        await self._tasks.publish()
 
     async def _publish_status(self) -> None:
         status = ReviewStatus(
@@ -190,8 +190,7 @@ class ReviewLane:
 
     async def _review(self, task_id: str) -> None:
         job = self._jobs.get(task_id)
-        self._board.set_status(task_id, "running")
-        await self._publish(TasksChanged(tasks=self._board.tasks))
+        await self._tasks.start(task_id)
         status: TaskStatus = "cancelled"  # What the lane stopping leaves the review as.
         reviewer = asyncio.create_task(
             self._run_reviewer(task_id, job.commits[-1] if job else None)
@@ -204,8 +203,7 @@ class ReviewLane:
             raise
         finally:
             self._current = None
-            self._board.finish(task_id, status)
-            await self._publish(TasksChanged(tasks=self._board.tasks))
+            await self._tasks.finish(task_id, status)
             if not _being_cancelled():  # The lane stopping leaves its batches as they are.
                 await self._after(self._batches.get(task_id))
 
@@ -225,7 +223,7 @@ class ReviewLane:
         """Run the reviewer in a snapshot of ``commit``; a review the user queued works in place."""
         root = await self._tree.snapshot(commit) if commit else "."
         try:
-            return (await AgentRun(task_id, self._board, None, self._desk).run(None, root)).status
+            return (await AgentRun(task_id, self._tasks, None, self._desk).run(None, root)).status
         finally:
             if commit:
                 await self._tree.drop(root)

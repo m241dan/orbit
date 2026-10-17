@@ -17,6 +17,7 @@ from orbit.agent.application.proposals import FrontendReview
 from orbit.agent.application.review_lane import ReviewLane
 from orbit.agent.application.startup_check import AGENT_ID as STARTUP_AGENT
 from orbit.agent.application.startup_check import StartupCheck
+from orbit.agent.application.tasks import Tasks
 from orbit.agent.application.usage_monitor import UsageMonitor
 from orbit.agent.application.verifier import Verification, Verifier
 from orbit.agent.application.work_lane import WorkLane
@@ -47,7 +48,6 @@ from orbit.protocol import (
     Settings,
     SettingsChanged,
     SubmitPrompt,
-    TasksChanged,
     TaskSpec,
     TurnFinished,
     UpdateSettings,
@@ -62,15 +62,15 @@ CONFIGURING_NOTE = "A configurator task is already queued or running."
 
 def _verifier(
     verification: Verification | None,
-    board: TaskBoard,
+    tasks: Tasks,
     events: "asyncio.Queue[Event]",
     agents: Agents | None,
 ) -> Verifier | None:
-    """What checks tasks on ``board`` (in the agents' tree, if any); none without
+    """What checks ``tasks`` (in the agents' tree, if any); none without
     ``verification``."""
     if verification is None:
         return None
-    return Verifier(verification, board, events.put, agents.tree if agents else None)
+    return Verifier(verification, tasks, events.put, agents.tree if agents else None)
 
 
 def _usage_monitor(
@@ -112,11 +112,12 @@ class AgentSession:
     ) -> None:
         self._settings = settings or Settings()
         self._model_choices = tuple(model_choices)
-        self._board = TaskBoard()
         self._events: asyncio.Queue[Event] = asyncio.Queue()
+        self._tasks = Tasks(TaskBoard(), self._events.put)
+        self._board = self._tasks.board
         self._proposals = FrontendReview(self._events.put, self._agent_on)
         agents = _reviewed(agents, self._proposals)
-        self._verifier = _verifier(verification, self._board, self._events, agents)
+        self._verifier = _verifier(verification, self._tasks, self._events, agents)
         self._desk = AgentDesk(agents, self._events.put) if agents else None
         self._announced = False
         self._closing = False
@@ -137,7 +138,7 @@ class AgentSession:
     def _work_lane(self) -> WorkLane | None:
         if self._desk is None:
             return None
-        lane = WorkLane(self._desk, self._board, self._verifier, self._lane)
+        lane = WorkLane(self._desk, self._tasks, self._verifier, self._lane)
         lane.startup = self._startup
         return lane
 
@@ -164,7 +165,7 @@ class AgentSession:
         if self._desk is not None:
             settings = self._desk.agents.roles[CODER].settings
         self._board.add_draft(TaskSpec(prompt=startup_fix_prompt(step, output), settings=settings))
-        await self._publish_tasks()
+        await self._tasks.publish()
 
     @property
     def settings(self) -> Settings:
@@ -223,7 +224,7 @@ class AgentSession:
         match command:
             case AddTask(task=task):
                 self._board.add(task)
-                await self._publish_tasks()
+                await self._tasks.publish()
             case RunTasks():
                 await self._run_tasks_if_possible()
             case ConfigureChecks():
@@ -244,7 +245,7 @@ class AgentSession:
             await self._events.put(Notice(message=CONFIGURING_NOTE))
             return
         self._board.add_first(self._configurator_task(self._desk.agents))
-        await self._publish_tasks()
+        await self._tasks.publish()
         if not self._work_turns.running:
             await self._start_work(asked=True)
 
@@ -378,7 +379,7 @@ class AgentSession:
         if desk is None or not desk.agents.review or desk.agents.tree is None:
             return None
         planner = ReviewPlanner(desk.agents.review_limits)
-        lane = ReviewLane(desk, self._board, planner, self._wake_work)
+        lane = ReviewLane(desk, self._tasks, planner, self._wake_work)
         desk.suggest = lane.suggest
         return lane
 
@@ -390,13 +391,13 @@ class AgentSession:
         except ValueError as exc:
             await self._events.put(ErrorOccurred(message=str(exc)))
             return False
-        await self._publish_tasks()
+        await self._tasks.publish()
         return True
 
     def _planner_chat(self) -> PlannerChat | None:
         if self._desk is None or PLANNER not in self._desk.agents.roles:
             return None
-        return PlannerChat(self._desk, self._board, self._step_names)
+        return PlannerChat(self._desk, self._tasks, self._step_names)
 
     def _step_names(self) -> tuple[str, ...]:
         """The names of the steps verifying tasks now; none without verification."""
@@ -462,9 +463,6 @@ class AgentSession:
         tree = self._desk.agents.tree if self._desk else None
         for note in await tree.leftovers() if tree else []:
             await self._events.put(Notice(message=note))
-
-    async def _publish_tasks(self) -> None:
-        await self._events.put(TasksChanged(tasks=self._board.tasks))
 
     def _settings_changed(self) -> SettingsChanged:
         return SettingsChanged(settings=self._settings, model_choices=self._model_choices)

@@ -10,6 +10,7 @@ from orbit.agent import Verification, VerificationStep
 from orbit.agent.application.agent_run import AgentRun, Outcome
 from orbit.agent.application.desk import NOTE_LIMIT, AgentDesk, Agents, progress_note
 from orbit.agent.application.ports import CallHandler, ProposalDecision, Reply
+from orbit.agent.application.tasks import Tasks
 from orbit.agent.application.verifier import Verifier
 from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.board import TaskBoard
@@ -483,8 +484,9 @@ async def started(
     )
     tasks = TaskBoard()
     task_id = tasks.add(TaskSpec(prompt="a", role=role))
-    verifier = Verifier(verified(Steps()), tasks, publish)
-    agent_run = AgentRun(task_id, tasks, verifier, AgentDesk(agents, publish))
+    board = Tasks(tasks, publish)
+    verifier = Verifier(verified(Steps()), board, publish)
+    agent_run = AgentRun(task_id, board, verifier, AgentDesk(agents, publish))
     running = asyncio.create_task(agent_run.run(None, "."))
     await asyncio.wait_for(fetched.wait(), 5)
     return agent_run, running
@@ -629,7 +631,9 @@ def run_on(host: FakeHost, events: list[Event]) -> tuple[AgentDesk, "asyncio.Tas
     desk = desk_on(host, publish)
     tasks = TaskBoard()
     task_id = tasks.add(TaskSpec(prompt="a"))
-    return desk, asyncio.create_task(AgentRun(task_id, tasks, None, desk).run(None, "."))
+    return desk, asyncio.create_task(
+        AgentRun(task_id, Tasks(tasks, publish), None, desk).run(None, ".")
+    )
 
 
 def assert_closed_unannounced(desk: AgentDesk, events: list[Event]) -> None:

@@ -14,6 +14,7 @@ from orbit.agent import (
 )
 from orbit.agent.application.agent_run import AgentRun
 from orbit.agent.application.desk import AgentDesk, Agents
+from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.board import TaskBoard
 from orbit.protocol import (
@@ -435,7 +436,9 @@ async def test_usage_arriving_after_the_task_was_removed_is_skipped() -> None:
         events.append(event)
 
     desk = AgentDesk(Agents(host, launcher, lambda: "token-1", ROLES, exit_grace=0.5), publish)
-    outcome = await asyncio.wait_for(AgentRun(task_id, tasks, None, desk).run(None, "."), 5)
+    outcome = await asyncio.wait_for(
+        AgentRun(task_id, Tasks(tasks, publish), None, desk).run(None, "."), 5
+    )
     assert outcome.status == "completed"
     assert AgentExited(agent_id="agent-1", reason="finished") in events
     assert not [e for e in events if isinstance(e, ErrorOccurred | TasksChanged)]

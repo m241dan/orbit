@@ -13,14 +13,13 @@ from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.landing import Lander
 from orbit.agent.application.review_lane import ReviewLane
 from orbit.agent.application.startup_check import StartupCheck
+from orbit.agent.application.tasks import Tasks
 from orbit.agent.application.verifier import Failure, Verifier
-from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.commits import commit_message, configure_message
 from orbit.agent.domain.roles import REVIEW_ROLES, ChecksProposal
 from orbit.agent.domain.verification import FallbackFixes, fix_prompt
 from orbit.protocol import (
     ErrorOccurred,
-    TasksChanged,
     TaskSpec,
     TaskStarted,
     TaskStatus,
@@ -28,7 +27,7 @@ from orbit.protocol import (
 
 
 class WorkLane:
-    """Runs ``board``'s tasks through ``desk``'s agents, checked by ``verifier`` if any.
+    """Runs ``tasks``' tasks through ``desk``'s agents, checked by ``verifier`` if any.
 
     Reviews are left to ``review``, when there's a review lane. :meth:`run` is meant to run as
     a task of its own: cancelling it cancels the task running, and the run ends there.
@@ -37,12 +36,13 @@ class WorkLane:
     def __init__(
         self,
         desk: AgentDesk,
-        board: TaskBoard,
+        tasks: Tasks,
         verifier: Verifier | None,
         review: ReviewLane | None,
     ) -> None:
         self._desk = desk
-        self._board = board
+        self._tasks = tasks
+        self._board = tasks.board
         self._verifier = verifier
         self._publish = desk.publish
         self._review = review
@@ -68,8 +68,7 @@ class WorkLane:
 
     async def _run_task(self, task_id: str) -> TaskStatus:
         """Run one task through a new agent; returns its final status."""
-        self._board.set_status(task_id, "running")
-        await self._publish_tasks()
+        await self._tasks.start(task_id)
         if self.startup is not None:
             self.startup.release_panel()
         if self._verifier is not None:
@@ -79,8 +78,7 @@ class WorkLane:
         try:
             status = await self._outcome(task_id)
         finally:  # Even a bug ends the task, or the board could never run or drop it.
-            self._board.finish(task_id, status)
-            await self._publish_tasks()
+            await self._tasks.finish(task_id, status)
         await self._report_to_review(task_id)
         return status
 
@@ -113,7 +111,7 @@ class WorkLane:
         task = self._board.get(task_id).task
         verifier = self._verifier
         before = await verifier.state_before(task, root) if verifier is not None else None
-        outcome = await AgentRun(task_id, self._board, verifier, self._desk).run(before, root)
+        outcome = await AgentRun(task_id, self._tasks, verifier, self._desk).run(before, root)
         if outcome.checks is not None:
             assert verifier is not None  # Checks are only proposed to a verifier.
             await self._configure(verifier, outcome.checks, root)
@@ -179,6 +177,3 @@ class WorkLane:
         self._fallbacks.record(fix_id, task_id, step.name)
         if self._review is not None:
             self._review.joined(fix_id)
-
-    async def _publish_tasks(self) -> None:
-        await self._publish(TasksChanged(tasks=self._board.tasks))

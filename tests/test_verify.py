@@ -1,5 +1,6 @@
 import sys
 
+from orbit.agent.application.tasks import Tasks
 from orbit.agent.application.verifier import Verification, Verifier, first_failure
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.roles import Setup, setup_step
@@ -212,7 +213,9 @@ async def test_using_new_steps_replaces_the_steps_and_their_progress_together() 
     async def publish(event: Event) -> None:
         published.append(event)
 
-    verifier = Verifier(Verification((python_step("", "old"),), run_step), TaskBoard(), publish)
+    verifier = Verifier(
+        Verification((python_step("", "old"),), run_step), Tasks(TaskBoard(), publish), publish
+    )
     await verifier.reset()
     steps = (python_step("", "Lint"), python_step("", "Unit tests"))
     await verifier.use_steps(steps)

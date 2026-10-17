@@ -5,7 +5,7 @@ from dataclasses import dataclass, replace
 from typing import TypeVar
 
 from orbit.agent.application.ports import CoderTree, Publish, StepRunner, Workspace
-from orbit.agent.domain.board import TaskBoard
+from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.verification import (
     MAX_FALLBACK_FIXES,
     StepProgress,
@@ -16,7 +16,6 @@ from orbit.agent.domain.verification import (
 from orbit.protocol import (
     Notice,
     StepStatus,
-    TasksChanged,
     TaskSpec,
     VerificationChanged,
     VerificationFinished,
@@ -68,19 +67,20 @@ class Verification:
 
 
 class Verifier:
-    """Runs ``verification``'s steps on tasks of ``board``, publishing their progress as it
+    """Runs ``verification``'s steps on ``tasks``, publishing their progress as it
     goes."""
 
     def __init__(
         self,
         verification: Verification,
-        board: TaskBoard,
+        tasks: Tasks,
         publish: Publish,
         tree: CoderTree | None = None,
     ) -> None:
         self.verification = verification
         self._progress = StepProgress.of(step.name for step in verification.steps)
-        self._board = board
+        self._tasks = tasks
+        self._board = tasks.board
         self._publish = publish
         self._tree = tree
 
@@ -126,7 +126,7 @@ class Verifier:
             await self._publish(VerificationSkipped(task_id=task_id, reason=reason))
             return None
         self._board.set_status(task_id, "verifying")
-        await self._publish(TasksChanged(tasks=self._board.tasks))
+        await self._tasks.publish()
         return await self._tidily(self._verify(task_id, root))
 
     async def run_one(self, step: VerificationStep, root: str) -> tuple[bool, str]:

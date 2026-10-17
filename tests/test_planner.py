@@ -7,6 +7,7 @@ import pytest
 from orbit.agent import Agents, AgentSession
 from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.planner import PlannerChat
+from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.verification import steps_note
 from orbit.protocol import (
@@ -213,7 +214,7 @@ def steps_chat(
 
     desk = AgentDesk(Agents(host, launcher, lambda: "token-1", ROLES), publish)
     steps: list[tuple[str, ...]] = [("Ruff lint",)]
-    return PlannerChat(desk, TaskBoard(), lambda: steps[-1]), launcher, steps
+    return PlannerChat(desk, Tasks(TaskBoard(), publish), lambda: steps[-1]), launcher, steps
 
 
 async def turn(chat: PlannerChat, launcher: ScriptedLauncher, text: str) -> str:
