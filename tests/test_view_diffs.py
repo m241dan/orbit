@@ -4,7 +4,14 @@ from typing import Any
 
 import pytest
 
-from orbit.tui.view import EDIT_SEPARATOR, FileDiff, file_diff, line_diff
+from orbit.tui.view import (
+    EDIT_SEPARATOR,
+    FileDiff,
+    diff_change,
+    file_diff,
+    line_diff,
+    tool_result_summary,
+)
 
 
 def test_unchanged_lines_are_kept_around_the_removed_then_added_ones() -> None:
@@ -63,3 +70,36 @@ def test_other_tools_and_malformed_arguments_have_no_diff(
     name: str, arguments: dict[str, Any]
 ) -> None:
     assert file_diff(name, arguments) is None
+
+
+def test_an_edits_change_counts_its_added_and_removed_lines() -> None:
+    arguments = {"old_string": "a\nb\nc", "new_string": "a\nB\nc\nd"}
+    assert diff_change("Edit", arguments) == (2, 1)
+
+
+def test_a_multi_edits_change_counts_every_edit_but_not_the_separator() -> None:
+    edits = [{"old_string": "a", "new_string": "b"}, {"old_string": "c", "new_string": "c\nd"}]
+    assert diff_change("MultiEdit", {"edits": edits}) == (2, 1)
+
+
+def test_a_multi_edit_with_an_invalid_edit_has_no_change() -> None:
+    edits = [{"old_string": "a", "new_string": "b"}, {"old_string": "c"}]
+    assert diff_change("MultiEdit", {"edits": edits}) is None
+
+
+def test_a_writes_change_adds_every_line_of_its_content() -> None:
+    assert diff_change("Write", {"content": "one\n\ntwo\n"}) == (3, 0)
+
+
+def test_another_tool_has_no_change() -> None:
+    assert diff_change("Read", {"file_path": "a.py"}) is None
+
+
+def test_an_edits_summary_counts_the_lines_its_diff_shows() -> None:
+    arguments = {"file_path": "a.py", "old_string": "a\nb\nc\ne", "new_string": "a\nB\nc\nd"}
+    diff = file_diff("Edit", arguments)
+    assert diff is not None
+    added = sum(line.startswith("+") for line in diff.lines)
+    removed = sum(line.startswith("-") for line in diff.lines)
+    summary = tool_result_summary("Edit", arguments, "", is_error=False)
+    assert summary == f"✓ +{added} \N{MINUS SIGN}{removed}"

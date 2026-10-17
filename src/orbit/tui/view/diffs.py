@@ -34,6 +34,17 @@ def file_diff(name: str, arguments: Mapping[str, Any]) -> FileDiff | None:
     return None if lines is None else FileDiff(path, tuple(lines))
 
 
+def diff_change(name: str, arguments: Mapping[str, Any]) -> tuple[int, int] | None:
+    """How many lines the diff of a call to the tool ``name`` with ``arguments`` adds and
+    removes; None unless it's an Edit, MultiEdit or Write with the strings it needs."""
+    differ = DIFFERS.get(name)
+    lines = None if differ is None else differ(arguments)
+    if lines is None:
+        return None
+    added = sum(line.startswith("+") for line in lines)
+    return added, sum(line.startswith("-") for line in lines)
+
+
 def line_diff(old: str, new: str) -> list[str]:
     """The lines of ``old`` and ``new`` marked as removed, added or unchanged, in order."""
     old_lines, new_lines = text_lines(old), text_lines(new)

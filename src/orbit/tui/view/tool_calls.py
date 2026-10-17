@@ -1,15 +1,15 @@
 """Tool calls and agents' requests to orbit, summed up in a line."""
 
-import difflib
 import json
 import re
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from types import MappingProxyType
 from typing import Any, Literal, assert_never
 
 from orbit.protocol import AgentReply, AgentRequest, ToolCallFinished, ToolCallStarted
 from orbit.tui.view.common import EntryKind, clipped, counted, text_lines
+from orbit.tui.view.diffs import diff_change
 
 TOOL_CALL_SUMMARY_LIMIT = 120
 """The most cells a tool call's summary line takes."""
@@ -176,54 +176,22 @@ EXIT_CODE = re.compile(r"^Exit code (\d+)\b", re.MULTILINE)
 type ResultSummarizer = Callable[[Mapping[str, Any], str], str | None]
 
 
-def _line_change(old: str, new: str) -> tuple[int, int]:
-    """How many lines turning ``old`` into ``new`` adds and removes, unchanged lines aside."""
-    added = removed = 0
-    matcher = difflib.SequenceMatcher(None, text_lines(old), text_lines(new), autojunk=False)
-    for tag, old_start, old_end, new_start, new_end in matcher.get_opcodes():
-        if tag != "equal":
-            added += new_end - new_start
-            removed += old_end - old_start
-    return added, removed
-
-
-def _edit_change(edit: object) -> tuple[int, int] | None:
-    """The lines ``edit`` adds and removes, or None unless it has both strings."""
-    if not isinstance(edit, Mapping):
-        return None
-    old, new = edit.get("old_string"), edit.get("new_string")
-    if not isinstance(old, str) or not isinstance(new, str):
-        return None
-    return _line_change(old, new)
-
-
-def _changed(change: tuple[int, int] | None) -> str | None:
+def _changed(name: str, arguments: Mapping[str, Any]) -> str | None:
+    change = diff_change(name, arguments)
     return None if change is None else f"✓ +{change[0]} \N{MINUS SIGN}{change[1]}"
 
 
 def _edited(arguments: Mapping[str, Any], output: str) -> str | None:
-    return _changed(_edit_change(arguments))
+    return _changed("Edit", arguments)
 
 
 def _multi_edited(arguments: Mapping[str, Any], output: str) -> str | None:
-    edits = arguments.get("edits")
-    changes = [_edit_change(edit) for edit in edits] if isinstance(edits, list) else [None]
-    return _changed(_total(changes))
-
-
-def _total(changes: Iterable[tuple[int, int] | None]) -> tuple[int, int] | None:
-    """The lines all ``changes`` add and remove, or None if any of them is None."""
-    added = removed = 0
-    for change in changes:
-        if change is None:
-            return None
-        added, removed = added + change[0], removed + change[1]
-    return added, removed
+    return _changed("MultiEdit", arguments)
 
 
 def _written(arguments: Mapping[str, Any], output: str) -> str | None:
-    content = arguments.get("content")
-    return f"✓ +{len(text_lines(content))}" if isinstance(content, str) else None
+    change = diff_change("Write", arguments)
+    return None if change is None else f"✓ +{change[0]}"
 
 
 def _ran(arguments: Mapping[str, Any], output: str) -> str | None:
