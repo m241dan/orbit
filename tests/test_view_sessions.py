@@ -2,11 +2,16 @@ from datetime import UTC, datetime, timedelta, timezone
 
 from orbit.protocol import SessionSummary, Usage
 from orbit.tui.view import (
+    LIST_HINT,
+    NAME_HINT,
+    RENAME_HINT,
+    STARTUP_HINT,
     can_delete,
     can_open,
     delete_message,
     local_time,
     session_label,
+    sessions_hint,
     task_counts,
 )
 
@@ -88,3 +93,25 @@ def test_task_counts_leave_out_none_and_put_finished_work_first() -> None:
 
 def test_no_tasks_count_nothing() -> None:
     assert task_counts({}) == ""
+
+
+def test_the_list_hint_says_escape_closes_it() -> None:
+    hint = sessions_hint(startup=False, naming=False, renaming=False)
+    assert hint == LIST_HINT
+    assert hint.endswith("esc close")
+
+
+def test_at_startup_the_list_hint_says_escape_quits() -> None:
+    hint = sessions_hint(startup=True, naming=False, renaming=False)
+    assert hint == STARTUP_HINT
+    assert hint.endswith("esc quit")
+
+
+def test_naming_a_new_session_hints_enter_starts_it() -> None:
+    assert sessions_hint(startup=True, naming=True, renaming=False) == NAME_HINT
+    assert NAME_HINT.startswith("enter start")
+
+
+def test_renaming_a_session_hints_enter_renames_it() -> None:
+    assert sessions_hint(startup=False, naming=True, renaming=True) == RENAME_HINT
+    assert RENAME_HINT.startswith("enter rename")

@@ -16,6 +16,7 @@ from textual.widgets.option_list import Option
 
 from orbit.protocol import Settings, TaskSpec, TaskState, Usage
 from orbit.tui.view import (
+    TASK_EDITOR_HINT,
     TOOL_ACCESS_OPTIONS,
     active_task,
     follow_top,
@@ -24,6 +25,7 @@ from orbit.tui.view import (
     model_options,
     spinner_frame,
     split_prompt,
+    task_editor_title,
     task_label,
     task_list_title,
     task_numbers,
@@ -252,7 +254,7 @@ class TaskEditorScreen(ModalScreen[TaskSpec | None]):
 
     def __init__(self, task: TaskSpec | None, settings: Settings, models: Sequence[str]) -> None:
         super().__init__()
-        self.title_text = "New task" if task is None else "Edit task"
+        self.title_text = task_editor_title(new=task is None)
         self._prompt = "" if task is None else task.prompt
         self._settings = settings if task is None else task.settings
         self._role = TaskSpec.model_fields["role"].default if task is None else task.role
@@ -264,9 +266,7 @@ class TaskEditorScreen(ModalScreen[TaskSpec | None]):
         # Fields are reached with j/k, not by tabbing or clicking; the wheel still scrolls.
         with VerticalScroll(can_focus=False) as box:
             box.border_title = self.title_text
-            box.border_subtitle = (
-                "j/k move · J/K scroll · i type · enter choose · ctrl+s save · esc cancel"
-            )
+            box.border_subtitle = TASK_EDITOR_HINT
             yield PromptInput(value=title, placeholder="Press i to type", id="task-title")
             yield PromptBox(body, id="task-prompt")
             yield FieldBox("Model", model_label(self._settings), id="task-model")

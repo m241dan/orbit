@@ -5,10 +5,12 @@ from orbit.protocol import (
     Usage,
 )
 from orbit.tui.view import (
+    TASK_EDITOR_HINT,
     active_task,
     follow_top,
     join_prompt,
     split_prompt,
+    task_editor_title,
     task_list_title,
     task_numbers,
     usage_label,
@@ -150,3 +152,13 @@ def test_a_tall_row_shows_from_its_top_when_the_view_is_too_short() -> None:
 def test_a_held_task_list_says_so_in_its_title() -> None:
     assert task_list_title(held=False) == "Task list"
     assert task_list_title(held=True) == "Task list · held"
+
+
+def test_the_task_editor_is_titled_for_a_new_task_or_an_edit() -> None:
+    assert task_editor_title(new=True) == "New task"
+    assert task_editor_title(new=False) == "Edit task"
+
+
+def test_the_task_editor_hint_names_save_and_cancel() -> None:
+    assert "ctrl+s save" in TASK_EDITOR_HINT
+    assert TASK_EDITOR_HINT.endswith("esc cancel")

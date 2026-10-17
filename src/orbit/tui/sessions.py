@@ -21,13 +21,9 @@ from orbit.tui.view import (
     can_open,
     delete_message,
     session_label,
+    sessions_hint,
 )
 from orbit.tui.widgets import ConfirmScreen
-
-LIST_HINT = "j/k move · enter open · r rename · x delete · esc close"
-STARTUP_HINT = "j/k move · enter open · r rename · x delete · esc quit"
-NAME_HINT = "enter start · esc back"
-RENAME_HINT = "enter rename · esc back"
 
 SessionChoice = OpenSession | NewSession
 """What the user chose: a saved session to open, or a new one to start."""
@@ -85,16 +81,12 @@ class SessionsScreen(ModalScreen[SessionChoice | None]):
     def compose(self) -> ComposeResult:
         with Vertical() as box:
             box.border_title = SESSIONS_TITLE
-            box.border_subtitle = self._list_hint
+            box.border_subtitle = self._hint(naming=False)
             yield OptionList(NEW_SESSION_LABEL, *map(session_label, self.sessions))
             # Typing goes on from the end of a name being changed, rather than replacing it.
             name = Input(placeholder=NAME_PLACEHOLDER, id="session-name", select_on_focus=False)
             name.display = False
             yield name
-
-    @property
-    def _list_hint(self) -> str:
-        return STARTUP_HINT if self.startup else LIST_HINT
 
     def on_mount(self) -> None:
         self.query_one(OptionList).highlighted = 0
@@ -184,7 +176,7 @@ class SessionsScreen(ModalScreen[SessionChoice | None]):
         name = self.query_one(Input)
         name.display = on
         self._renaming = renaming
-        self.query_one(Vertical).border_subtitle = self._hint(on, renaming)
+        self.query_one(Vertical).border_subtitle = self._hint(naming=on, renaming=renaming)
         if on:
             name.value = renaming.name if renaming else ""
             name.focus()
@@ -192,8 +184,6 @@ class SessionsScreen(ModalScreen[SessionChoice | None]):
             name.clear()
             self.query_one(OptionList).focus()
 
-    def _hint(self, naming: bool, renaming: SessionSummary | None) -> str:
+    def _hint(self, *, naming: bool, renaming: SessionSummary | None = None) -> str:
         """The keys shown: the name box's while ``naming``, or the list's."""
-        if not naming:
-            return self._list_hint
-        return RENAME_HINT if renaming else NAME_HINT
+        return sessions_hint(startup=self.startup, naming=naming, renaming=renaming is not None)

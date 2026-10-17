@@ -9,6 +9,8 @@ from rich.text import Text
 from orbit.protocol import ACTIVE_STATUSES, TaskState, Usage
 from orbit.tui.view.common import STATUS_ICONS, model_label, token_text
 
+TASK_EDITOR_HINT = "j/k move · J/K scroll · i type · enter choose · ctrl+s save · esc cancel"
+
 
 def task_numbers(tasks: Sequence[TaskState]) -> list[str]:
     """Outline numbers: "1", "2", … for tasks, and "2.1", "2.2", … for the fixes under task 2.
@@ -99,6 +101,11 @@ def active_task(tasks: Sequence[TaskState]) -> int | None:
 def task_list_title(*, held: bool) -> str:
     """The task list's border title, which says when the list is held from following."""
     return "Task list · held" if held else "Task list"
+
+
+def task_editor_title(*, new: bool) -> str:
+    """The task editor's border title, for a ``new`` task or one being edited."""
+    return "New task" if new else "Edit task"
 
 
 def follow_top(

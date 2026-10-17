@@ -15,6 +15,10 @@ CURRENT_MARK = "● "
 LOCKED_NOTE = "open in another orbit"
 DELETE_TITLE = "Delete session"
 DELETE_YES = "delete"
+LIST_HINT = "j/k move · enter open · r rename · x delete · esc close"
+STARTUP_HINT = "j/k move · enter open · r rename · x delete · esc quit"
+NAME_HINT = "enter start · esc back"
+RENAME_HINT = "enter rename · esc back"
 
 # The order a session's task counts are shown in: finished work first, then what's still to do.
 COUNT_ORDER: tuple[TaskStatus, ...] = (
@@ -82,3 +86,11 @@ def task_counts(counts: dict[TaskStatus, int]) -> str:
     return " ".join(
         f"{counts[status]} {COUNT_ICONS[status]}" for status in COUNT_ORDER if counts.get(status)
     )
+
+
+def sessions_hint(*, startup: bool, naming: bool, renaming: bool) -> str:
+    """The keys the sessions modal shows: the name box's while ``naming`` (a new name for a
+    session when ``renaming``), or else the list's, where escape quits at ``startup``."""
+    if naming:
+        return RENAME_HINT if renaming else NAME_HINT
+    return STARTUP_HINT if startup else LIST_HINT
