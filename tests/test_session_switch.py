@@ -297,6 +297,43 @@ async def test_a_missing_session_is_refused() -> None:
     await session.close()
 
 
+async def test_a_session_saved_again_before_it_is_locked_opens_as_saved_last() -> None:
+    store = store_with(saved("auth", state("1", "completed")))
+    newer = saved("auth", state("1", "completed"), state("2", "running"), last_active=EARLIER)
+
+    async def save_newer() -> None:
+        store.on_acquire = None
+        store.saved.append(newer)
+
+    store.on_acquire = save_newer
+    session, _ = switching(store)
+    events = await opened(session, OpenSession(session_id="auth"))
+
+    board = last_of(TasksChanged, events).tasks
+    assert [t.status for t in board] == ["completed", "cancelled"]
+    assert messages(Notice, events) == [
+        'Resumed "auth" (last active Oct 15 09:00)',
+        "1 task was interrupted and is cancelled.",
+    ]
+    assert last_of(SessionOpened, events).session.last_active == EARLIER
+    assert store.last.tasks == board
+    await session.close()
+
+
+async def test_a_session_unreadable_once_locked_is_refused_and_lets_go_of_the_lock() -> None:
+    store = store_with(saved("auth"))
+
+    async def break_it() -> None:
+        store.broken["auth"] = "it isn't JSON"
+
+    store.on_acquire = break_it
+    session, _ = switching(store)
+    errors = await refused(session, OpenSession(session_id="auth"))
+    assert errors == ["Can't open the session auth: it isn't JSON."]
+    assert store.released == ["auth"] and store.locked == set()
+    await session.close()
+
+
 async def test_a_store_that_cant_lock_the_session_leaves_the_open_one_as_it_was() -> None:
     store = store_with(saved("auth", state("1", "pending")))
     session, _ = switching(store)

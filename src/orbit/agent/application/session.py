@@ -335,22 +335,14 @@ class AgentSession:
         or if it can't be opened; opening this session does nothing."""
         if session_id == self._keeper.id or not self._may_switch():
             return
-        found = await self._keeper.find(session_id)
-        if isinstance(found, str):
-            await self._events.put(ErrorOccurred(message=found))
-            return
-        await self._open(found)
-
-    async def _open(self, record: SessionRecord) -> None:
-        """Open the saved session ``record`` in place of this one, unless something runs once
-        it's locked."""
-        tasks, count = interrupted(record.tasks)
-        left = await self._keeper.open(
-            record, lambda: self._may_switch() and self._load(record, tasks)
+        opened = await self._keeper.open(
+            session_id, lambda record: self._may_switch() and self._load(record)
         )
-        if left is None:
+        if opened is None:
             return
-        await self._switched(left, _stopped(record.tasks, tasks), record.last_active)
+        record = opened.record
+        tasks, count = interrupted(record.tasks)
+        await self._switched(opened.left, _stopped(record.tasks, tasks), record.last_active)
         for note in resumed_notes(record, count):
             await self._events.put(Notice(message=note))
 
@@ -374,9 +366,9 @@ class AgentSession:
         self._events.put_nowait(ErrorOccurred(message=refusal))
         return False
 
-    def _load(self, record: SessionRecord, tasks: tuple[TaskState, ...]) -> bool:
-        """Hold what ``record`` does, with ``tasks`` as its board; returns True."""
-        self._replace_board(tasks)
+    def _load(self, record: SessionRecord) -> bool:
+        """Hold what ``record`` does, its tasks as interrupted; returns True."""
+        self._replace_board(interrupted(record.tasks)[0])
         if self._work is not None:
             self._work.reset()
         self._settings = resumed_settings(record.settings, self._given, self._pinned)

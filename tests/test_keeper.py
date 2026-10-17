@@ -343,7 +343,7 @@ async def test_a_lock_that_cannot_be_released_on_leaving_is_reported() -> None:
 async def test_a_lock_that_cannot_be_released_after_a_refused_open_is_reported() -> None:
     store = unreleasable_store_with("other")
     keeper, published = keeper_for(store)
-    assert await keeper.open(store.last, lambda: False) is None
+    assert await keeper.open("other", lambda record: False) is None
     assert published.errors == [UNLOCKABLE]
     assert keeper.id == "session-1"
 
@@ -362,3 +362,35 @@ async def test_a_failed_delete_whose_lock_cannot_be_released_reports_both() -> N
     keeper, published = keeper_for(store)
     await keeper.delete_saved("other")
     assert published.errors == [UNLOCKABLE, "Couldn't delete the session: read-only"]
+
+
+async def test_a_session_that_cannot_be_deleted_on_leaving_lets_go_of_its_lock() -> None:
+    store = FakeStore()
+    store.saved = [SessionRecord(id="old", name="old", created=START, last_active=START)]
+    store.locked = {"old"}
+    store.delete_failure = "Couldn't delete the session: read-only"
+    keeper, published = keeper_for(store)
+    await keeper.leave(Left("old"), discard=True)
+    assert published.errors == ["Couldn't delete the session: read-only"]
+    assert store.released == ["old"] and store.locked == set()
+
+
+async def test_a_session_unreadable_once_locked_is_not_opened_and_lets_go_of_its_lock() -> None:
+    store = FakeStore()
+    store.saved = [SessionRecord(id="other", name="other", created=START, last_active=START)]
+
+    async def break_it() -> None:
+        store.broken["other"] = "it isn't JSON"
+
+    store.on_acquire = break_it
+    keeper, published = keeper_for(store)
+    loaded: list[SessionRecord] = []
+
+    def load(record: SessionRecord) -> bool:
+        loaded.append(record)
+        return True
+
+    assert await keeper.open("other", load) is None
+    assert published.errors == ["Can't open the session other: it isn't JSON."]
+    assert loaded == [] and keeper.id == "session-1"
+    assert store.released == ["other"] and store.locked == set()

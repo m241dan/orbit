@@ -40,6 +40,10 @@ IdMaker = Callable[[], str]
 Commit = Callable[[], bool]
 """Switches what the session holds, unless that's refused now; returns whether it did."""
 
+Load = Callable[[SessionRecord], bool]
+"""Switches the session to hold what a saved record does, unless that's refused now; returns
+whether it did."""
+
 SaveKind = Literal["session", "count"]
 """What a save writes: the session, or the super review count."""
 
@@ -49,6 +53,15 @@ class Left:
     """The session a switch left: its ``id``, if its lock is still held, to :meth:`leave`."""
 
     id: str | None
+
+
+@dataclass(frozen=True)
+class Opened:
+    """A saved session opened: the session ``left`` for it, and the ``record`` it was opened
+    from, as read under its lock."""
+
+    left: Left
+    record: SessionRecord
 
 
 def local_now() -> datetime:
@@ -182,7 +195,7 @@ class SessionKeeper:
         summary = tasks_summary(self.id, self.name, tasks)
         return summary.model_copy(update={"current": True, "last_active": last_active})
 
-    async def find(self, session_id: str) -> SessionRecord | str:
+    async def _find(self, session_id: str) -> SessionRecord | str:
         """The record of the saved session ``session_id``, to open, or why it can't be."""
         stored = await self._stored(session_id)
         if stored is None:
@@ -254,20 +267,39 @@ class SessionKeeper:
             await self._release(store, session_id)
             await self._publish(ErrorOccurred(message=str(exc)))
 
-    async def open(self, record: SessionRecord, commit: Commit) -> Left | None:
-        """Make the saved session ``record`` the one open here, locked, if ``commit`` switches
-        to it once it's locked; returns the session left, or none if it didn't switch. Problems
-        are reported."""
-        assert self._store is not None  # Only saved sessions are found to open.
+    async def open(self, session_id: str, load: Load) -> Opened | None:
+        """Make the saved session ``session_id`` the one open here, locked, if ``load`` switches
+        to its record as read once it's locked; returns what was opened, or none if it didn't
+        switch. Problems are reported."""
         async with self._saving:
-            if not await self._claim(self._store, record.id, record.name):
+            record = await self._locked_record(session_id)
+            if record is None:
                 return None
-            if not commit():
+            assert self._store is not None  # Only saved sessions are locked to open.
+            if not load(record):
                 await self._release(self._store, record.id)
                 return None
             left = self._become(record.id, record.name, record.created)
             self._locked = self.used = True
-        return left
+        return Opened(left, record)
+
+    async def _locked_record(self, session_id: str) -> SessionRecord | None:
+        """The record of the saved session ``session_id``, read again once its lock is taken,
+        so no work saved meanwhile is lost; none, reported and with the lock let go of, if it
+        can't be opened."""
+        found = await self._find(session_id)
+        if isinstance(found, str):
+            await self._publish(ErrorOccurred(message=found))
+            return None
+        assert self._store is not None  # Only a store holds saved sessions.
+        if not await self._claim(self._store, session_id, found.name):
+            return None
+        current = openable(session_id, await self._store.load(session_id), locked=False)
+        if isinstance(current, str):
+            await self._publish(ErrorOccurred(message=current))
+            await self._release(self._store, session_id)
+            return None
+        return current
 
     async def renew(self, name: str | None, commit: Commit) -> Left | None:
         """Make a new session ``name``d so (by the time, without a name) the one open here, if
@@ -288,10 +320,7 @@ class SessionKeeper:
         if not discard:
             await self._release(self._store, left.id)
             return
-        try:
-            await self._store.delete(left.id)
-        except RuntimeError as exc:
-            await self._publish(ErrorOccurred(message=str(exc)))
+        await self._delete(self._store, left.id)
 
     async def _claim(
         self, store: SessionStore, session_id: str, name: str, action: str = "open"
