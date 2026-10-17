@@ -171,6 +171,23 @@ class NewSession(_Message):
     name: str | None = None
 
 
+class RenameSession(_Message):
+    """Name the session ``session_id`` ``name``; refused for an empty name, or a session that's
+    unreadable or open in another orbit. The sessions are listed again after."""
+
+    type: Literal["rename_session"] = "rename_session"
+    session_id: str
+    name: str
+
+
+class DeleteSession(_Message):
+    """Delete the saved session ``session_id``; refused for the open session, or one open in
+    another orbit. The sessions are listed again after."""
+
+    type: Literal["delete_session"] = "delete_session"
+    session_id: str
+
+
 Command = Annotated[
     SubmitPrompt
     | CancelTurn
@@ -186,7 +203,9 @@ Command = Annotated[
     | ConfigureChecks
     | ListSessions
     | OpenSession
-    | NewSession,
+    | NewSession
+    | RenameSession
+    | DeleteSession,
     Field(discriminator="type"),
 ]
 

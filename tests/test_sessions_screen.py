@@ -1,22 +1,26 @@
 """Picking a session: the modal shown at startup and on ctrl+p, opening a saved session or
-starting a new one."""
+starting a new one, and renaming or deleting saved ones."""
 
 from datetime import UTC, datetime
 
+from textual.containers import Vertical
 from textual.widgets import Input, OptionList
 
 from orbit.agent import AgentSession
 from orbit.protocol import (
+    DeleteSession,
     ErrorOccurred,
     ListSessions,
     NewSession,
     OpenSession,
+    RenameSession,
     SessionOpened,
     SessionsListed,
     SessionSummary,
 )
 from orbit.tui import OrbitApp
 from orbit.tui.sessions import SessionsScreen
+from orbit.tui.widgets import ConfirmScreen
 from tests.test_session_switch import saved, store_with
 from tests.test_tui import FakeSession, entries, feed_events
 
@@ -226,3 +230,163 @@ async def test_a_session_opened_adds_nothing_to_the_transcript() -> None:
     async with app.run_test() as pilot:
         await feed_events(session, pilot, SessionOpened(session=OLD))
         assert entries(app) == []
+
+
+def subtitle(screen: SessionsScreen) -> str:
+    return str(screen.query_one(Vertical).border_subtitle)
+
+
+async def test_r_asks_for_the_highlighted_sessions_new_name_starting_from_its_name() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, LISTED)
+        await pilot.press("j", "j", "r")
+
+        screen = app.screen
+        assert isinstance(screen, SessionsScreen)
+        name = screen.query_one(Input)
+        assert name.display and app.focused is name
+        assert name.value == "auth rework"
+        assert subtitle(screen) == "enter rename · esc back"
+        await pilot.press("ctrl+u", *"jk", "enter")
+
+        assert session.commands == [RenameSession(session_id="old", name="jk")]
+        assert app.screen is screen
+        assert not name.display
+        assert app.focused is screen.query_one(OptionList)
+        assert subtitle(screen) == "j/k move · enter open · r rename · x delete · esc quit"
+
+
+async def test_the_current_session_can_be_renamed() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, LISTED)
+        await pilot.press("j", "r", "!", "enter")
+        assert session.commands == [RenameSession(session_id="now", name="today!")]
+
+
+async def test_an_empty_new_name_keeps_the_old_one() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, LISTED)
+        await pilot.press("j", "r", "ctrl+u", "space", "enter")
+
+        assert session.commands == []
+        assert isinstance(app.screen, SessionsScreen)
+        assert not app.screen.query_one(Input).display
+
+
+async def test_escape_from_a_new_name_goes_back_to_the_list_without_renaming() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, LISTED)
+        await pilot.press("j", "r", "a", "escape")
+
+        screen = app.screen
+        assert isinstance(screen, SessionsScreen)
+        assert not screen.query_one(Input).display
+        await pilot.press("k", "enter")  # Back on the list: a new session, not a rename.
+        await pilot.press("enter")
+        assert session.commands == [NewSession(name=None)]
+
+
+async def test_r_and_x_do_nothing_on_new_session() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, LISTED)
+        await pilot.press("r", "x")
+
+        screen = app.screen
+        assert isinstance(screen, SessionsScreen)
+        assert not screen.query_one(Input).display
+        assert session.commands == []
+
+
+async def test_x_deletes_the_highlighted_session_once_confirmed() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, LISTED)
+        await pilot.press("j", "j", "x")
+
+        confirm = app.screen
+        assert isinstance(confirm, ConfirmScreen)
+        assert confirm.title_text == "Delete session"
+        assert confirm.message == (
+            'Delete "auth rework"? Its tasks and review state are gone for good.'
+        )
+        await pilot.press("y")
+
+        assert session.commands == [DeleteSession(session_id="old")]
+        assert isinstance(app.screen, SessionsScreen)
+
+
+async def test_n_or_escape_keeps_the_session() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, LISTED)
+        await pilot.press("j", "j", "x", "n", "x", "escape")
+
+        assert session.commands == []
+        assert isinstance(app.screen, SessionsScreen)
+
+
+async def test_deleting_a_session_open_somewhere_is_left_to_the_backend_to_refuse() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, LISTED)
+        await pilot.press("j", "x", "j", "j", "x")
+
+        assert session.commands == [
+            DeleteSession(session_id="now"),
+            DeleteSession(session_id="busy"),
+        ]
+        assert isinstance(app.screen, SessionsScreen)
+
+
+async def test_sessions_listed_again_refresh_the_list_shown_in_place() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, LISTED)
+        screen = app.screen
+        assert isinstance(screen, SessionsScreen)
+        await pilot.press("j", "j", "j")
+        renamed = OLD.model_copy(update={"name": "flags"})
+        await feed_events(session, pilot, SessionsListed(sessions=(CURRENT, renamed)))
+
+        assert screen is app.screen and isinstance(screen, SessionsScreen)
+        assert screen.sessions == (CURRENT, renamed)
+        assert options(screen) == [
+            "+ new session",
+            "● today · Oct 16 18:02",
+            "  flags · Oct 16 18:02",
+        ]
+        assert screen.query_one(OptionList).highlighted == 2  # Kept within the list.
+        await pilot.press("enter")
+        assert session.commands == [OpenSession(session_id="old")]
+
+
+async def test_renaming_and_deleting_through_the_backend_refresh_the_list() -> None:
+    store = store_with(saved("old"), saved("gone"))
+    backend = AgentSession(store=store, pick_session=True)
+    app = OrbitApp(backend)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, SessionsScreen)
+        await pilot.press("j", "x", "y")
+        await pilot.pause()
+        await pilot.press("r", "ctrl+u", *"new", "enter")
+        await pilot.pause()
+
+        assert screen is app.screen and isinstance(screen, SessionsScreen)
+        assert [(s.id, s.name) for s in screen.sessions] == [("old", "new")]
+        assert store.deleted == ["gone"]

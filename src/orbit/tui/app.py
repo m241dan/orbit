@@ -207,6 +207,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         self._proposal: ProposalScreen | None = None  # The proposal being shown, if any.
         # Whether ctrl+p asked for the sessions; unasked, they're listed at startup.
         self._sessions_asked = False
+        self._sessions: SessionsScreen | None = None  # The list of sessions shown, if any.
         self.clock: Callable[[], float] = time.monotonic
         # Pickers are built once and installed so they open instantly.
         self._model_picker = PickerScreen("Model", model_options(())[1])
@@ -432,15 +433,21 @@ class OrbitApp(App[None], inherit_bindings=False):
 
     def _show_sessions(self, sessions: tuple[SessionSummary, ...]) -> None:
         """Let the user pick one of ``sessions`` or start a new one; listed unasked, it's at
-        startup, where escape quits."""
+        startup, where escape quits. Listed again while the list is shown, after a session was
+        renamed or deleted, they replace those it shows."""
+        if self._sessions is not None:
+            self._sessions.show(sessions)
+            return
         startup, self._sessions_asked = not self._sessions_asked, False
 
         async def chosen(choice: SessionChoice | None) -> None:
+            self._sessions = None
             # Refusals come back as errors, shown like any other.
             if choice is not None:
                 await self._session.send(choice)
 
-        self.push_screen(SessionsScreen(sessions, startup=startup), chosen)
+        self._sessions = SessionsScreen(sessions, self._session.send, startup=startup)
+        self.push_screen(self._sessions, chosen)
 
     async def action_cancel_turn(self) -> None:
         # The planner has its own lane, stopped with ctrl+x; ctrl+s stops the task run.

@@ -5,10 +5,12 @@ from datetime import UTC, datetime, timedelta, timezone
 
 from orbit.agent.domain.reviews import BatchSnapshot, LaneSnapshot, PlannerSnapshot, ReviewJob
 from orbit.agent.domain.sessions import (
+    EMPTY_NAME,
     FORMAT_VERSION,
     SessionRecord,
     Unreadable,
     default_name,
+    deletion_refusal,
     lock_is_stale,
     lock_owner,
     newest_first,
@@ -16,9 +18,12 @@ from orbit.agent.domain.sessions import (
     parse_record,
     parse_review_count,
     record_json,
+    record_name,
+    renamable,
     resumed_notes,
     resumed_settings,
     review_count_json,
+    session_name,
     stored_summary,
     summarize,
     tasks_summary,
@@ -246,6 +251,49 @@ def test_a_locked_session_isnt_openable() -> None:
 def test_an_unreadable_session_isnt_openable() -> None:
     reason = openable("abc123", Unreadable("it isn't JSON"), locked=False)
     assert reason == "Can't open the session abc123: it isn't JSON."
+
+
+def test_a_readable_unlocked_session_is_renamable() -> None:
+    assert renamable("abc123", record(), locked=False) == record()
+
+
+def test_a_locked_session_isnt_renamable() -> None:
+    assert renamable("abc123", record(), locked=True) == (
+        "Can't rename \"Oct 7 09:05\": it's open in another orbit."
+    )
+
+
+def test_an_unreadable_session_isnt_renamable() -> None:
+    reason = renamable("abc123", Unreadable("it isn't JSON"), locked=False)
+    assert reason == "Can't rename the session abc123: it isn't JSON."
+
+
+def test_a_session_neither_open_here_nor_elsewhere_can_be_deleted() -> None:
+    assert deletion_refusal("abc123", record(), locked=False) is None
+
+
+def test_an_unreadable_session_can_be_deleted() -> None:
+    unreadable = Unreadable("it isn't JSON")
+    assert deletion_refusal("abc123", unreadable, locked=False) is None
+
+
+def test_a_session_open_in_another_orbit_cant_be_deleted() -> None:
+    refusal = deletion_refusal("abc123", Unreadable("it isn't JSON"), locked=True)
+    assert refusal == "Can't delete \"abc123\": it's open in another orbit."
+
+
+def test_a_record_goes_by_its_name_and_an_unreadable_one_by_its_id() -> None:
+    assert record_name("abc123", record()) == "Oct 7 09:05"
+    assert record_name("abc123", Unreadable("it isn't JSON")) == "abc123"
+
+
+def test_a_session_name_loses_the_spaces_around_it() -> None:
+    assert session_name("  auth rework ") == "auth rework"
+
+
+def test_an_empty_session_name_is_none() -> None:
+    assert session_name("  ") is None
+    assert EMPTY_NAME == "A session needs a name."
 
 
 def test_resuming_a_session_names_it_and_when_it_was_last_active() -> None:

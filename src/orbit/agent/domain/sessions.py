@@ -29,6 +29,9 @@ Migration = Callable[[dict[str, Any]], dict[str, Any]]
 # By version: what upgrades a record of that version to the next. None are needed yet.
 _MIGRATIONS: dict[int, Migration] = {}
 
+EMPTY_NAME = "A session needs a name."
+OPEN_UNDELETABLE = "Can't delete the open session."
+
 
 class SessionRecord(BaseModel):
     """A saved session ``id``, ``name``d by the user, with the ``settings`` its planner and new
@@ -167,16 +170,53 @@ def openable(
 ) -> SessionRecord | str:
     """The record of saved session ``session_id`` to open, or why it can't be opened: it's
     unreadable, or ``locked`` by another orbit."""
+    return _usable("open", session_id, record, locked)
+
+
+def renamable(
+    session_id: str, record: SessionRecord | Unreadable, locked: bool
+) -> SessionRecord | str:
+    """The record of saved session ``session_id`` to rename, or why it can't be renamed: it's
+    unreadable, or ``locked`` by another orbit."""
+    return _usable("rename", session_id, record, locked)
+
+
+def _usable(
+    action: str, session_id: str, record: SessionRecord | Unreadable, locked: bool
+) -> SessionRecord | str:
+    """The record of saved session ``session_id``, or why the user can't ``action`` it."""
     if isinstance(record, Unreadable):
-        return f"Can't open the session {session_id}: {record.reason}."
+        return f"Can't {action} the session {session_id}: {record.reason}."
     if locked:
-        return locked_message(record.name)
+        return locked_message(record.name, action)
     return record
 
 
-def locked_message(name: str) -> str:
-    """Why the session ``name`` can't be opened while another orbit has it open."""
-    return f"Can't open \"{name}\": it's open in another orbit."
+def deletion_refusal(
+    session_id: str, record: SessionRecord | Unreadable, locked: bool
+) -> str | None:
+    """Why the saved session ``session_id``, not the one open here, can't be deleted, if it
+    can't: it's ``locked`` by another orbit. An unreadable one can be. The open session can't
+    be deleted either (:data:`OPEN_UNDELETABLE`)."""
+    if locked:
+        return locked_message(record_name(session_id, record), "delete")
+    return None
+
+
+def record_name(session_id: str, record: SessionRecord | Unreadable) -> str:
+    """The name of the session ``session_id`` saved as ``record``; an unreadable one goes by its
+    id."""
+    return record.name if isinstance(record, SessionRecord) else session_id
+
+
+def session_name(name: str) -> str | None:
+    """``name`` as a session is named, without the spaces around it; none when it's empty."""
+    return name.strip() or None
+
+
+def locked_message(name: str, action: str = "open") -> str:
+    """Why the user can't ``action`` the session ``name`` while another orbit has it open."""
+    return f"Can't {action} \"{name}\": it's open in another orbit."
 
 
 def missing_message(session_id: str) -> str:

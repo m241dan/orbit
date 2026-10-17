@@ -12,15 +12,19 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime
 
-from orbit.agent.application.ports import Publish, SessionStore
+from orbit.agent.application.ports import Publish, SessionStore, StoredSession
 from orbit.agent.domain.reviews import LaneSnapshot
 from orbit.agent.domain.sessions import (
+    OPEN_UNDELETABLE,
     SessionRecord,
     default_name,
+    deletion_refusal,
     locked_message,
     missing_message,
     newest_first,
     openable,
+    record_name,
+    renamable,
     stored_summary,
     tasks_summary,
 )
@@ -96,8 +100,10 @@ class SessionKeeper:
         self._saving = asyncio.Lock()  # Saves one at a time, so the newest is written last.
 
     def rename(self, name: str | None) -> None:
-        """Name the session ``name``, unless it's none or blank."""
+        """Name the session ``name``, unless it's none or blank; once used, it's saved again
+        under that name."""
         self.name = (name or "").strip() or self.name
+        self._saved = None
 
     def use(self) -> None:
         """Mark the session used, so it's saved from now on."""
@@ -169,11 +175,70 @@ class SessionKeeper:
 
     async def find(self, session_id: str) -> SessionRecord | str:
         """The record of the saved session ``session_id``, to open, or why it can't be."""
+        stored = await self._stored(session_id)
+        if stored is None:
+            return missing_message(session_id)
+        return openable(stored.id, stored.record, stored.locked)
+
+    async def _stored(self, session_id: str) -> StoredSession | None:
+        """The saved session ``session_id``; none if there's no such session."""
         stored = await self._store.sessions() if self._store else []
-        for each in stored:
-            if each.id == session_id:
-                return openable(each.id, each.record, each.locked)
-        return missing_message(session_id)
+        return next((each for each in stored if each.id == session_id), None)
+
+    async def rename_saved(self, session_id: str, name: str) -> None:
+        """Name the saved session ``session_id``, not the one open here, ``name``, holding its
+        lock while it's rewritten. Problems are reported."""
+        stored = await self._stored(session_id)
+        if stored is None:
+            found: SessionRecord | str = missing_message(session_id)
+        else:
+            found = renamable(stored.id, stored.record, stored.locked)
+        if isinstance(found, str):
+            await self._publish(ErrorOccurred(message=found))
+            return
+        assert self._store is not None  # Only a store holds saved sessions.
+        if await self._claim(self._store, found.id, found.name, "rename"):
+            await self._rewrite(self._store, found.model_copy(update={"name": name}))
+
+    async def _rewrite(self, store: SessionStore, record: SessionRecord) -> None:
+        """Save ``record`` in ``store``, whose lock this orbit took to, then let go of the lock;
+        reports it if it can't be saved."""
+        try:
+            await store.save(record)
+        except RuntimeError as exc:
+            await self._publish(ErrorOccurred(message=str(exc)))
+        finally:
+            await store.release(record.id)
+
+    async def delete_saved(self, session_id: str) -> None:
+        """Delete the saved session ``session_id``, lock and all, unless it's the one open here
+        or another orbit has it open. Problems are reported."""
+        stored = await self._stored(session_id)
+        refusal = self._deletion_refusal(session_id, stored)
+        if refusal is not None:
+            await self._publish(ErrorOccurred(message=refusal))
+            return
+        assert self._store is not None and stored is not None  # Found in the store.
+        name = record_name(session_id, stored.record)
+        if await self._claim(self._store, session_id, name, "delete"):
+            await self._delete(self._store, session_id)
+
+    def _deletion_refusal(self, session_id: str, stored: StoredSession | None) -> str | None:
+        """Why the session ``session_id``, saved as ``stored``, can't be deleted, if it can't."""
+        if session_id == self.id:
+            return OPEN_UNDELETABLE
+        if stored is None:
+            return missing_message(session_id)
+        return deletion_refusal(session_id, stored.record, stored.locked)
+
+    async def _delete(self, store: SessionStore, session_id: str) -> None:
+        """Delete the session ``session_id`` from ``store``, whose lock this orbit took to;
+        reports it, letting go of the lock, if it can't be deleted."""
+        try:
+            await store.delete(session_id)
+        except RuntimeError as exc:
+            await store.release(session_id)
+            await self._publish(ErrorOccurred(message=str(exc)))
 
     async def open(self, record: SessionRecord, commit: Commit) -> Left | None:
         """Make the saved session ``record`` the one open here, locked, if ``commit`` switches
@@ -181,7 +246,7 @@ class SessionKeeper:
         are reported."""
         assert self._store is not None  # Only saved sessions are found to open.
         async with self._saving:
-            if not await self._claim(self._store, record):
+            if not await self._claim(self._store, record.id, record.name):
                 return None
             if not commit():
                 await self._store.release(record.id)
@@ -214,12 +279,15 @@ class SessionKeeper:
         except RuntimeError as exc:
             await self._publish(ErrorOccurred(message=str(exc)))
 
-    async def _claim(self, store: SessionStore, record: SessionRecord) -> bool:
-        """Take ``record``'s lock in ``store``, to open it; reports it if it can't be taken."""
+    async def _claim(
+        self, store: SessionStore, session_id: str, name: str, action: str = "open"
+    ) -> bool:
+        """Take the lock of the session ``session_id``, ``name``d so, in ``store``, to
+        ``action`` it; reports it if it can't be taken."""
         try:
-            if await store.acquire(record.id):
+            if await store.acquire(session_id):
                 return True
-            message = locked_message(record.name)
+            message = locked_message(name, action)
         except RuntimeError as exc:
             message = str(exc)
         await self._publish(ErrorOccurred(message=message))

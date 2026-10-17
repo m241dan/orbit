@@ -13,6 +13,8 @@ NEW_SESSION_LABEL = "+ new session"
 NAME_PLACEHOLDER = "Name (empty: the date and time)"
 CURRENT_MARK = "● "
 LOCKED_NOTE = "open in another orbit"
+DELETE_TITLE = "Delete session"
+DELETE_YES = "delete"
 
 # The order a session's task counts are shown in: finished work first, then what's still to do.
 COUNT_ORDER: tuple[TaskStatus, ...] = (
@@ -41,6 +43,16 @@ def session_label(summary: SessionSummary, zone: tzinfo | None = None) -> Text:
 def can_open(summary: SessionSummary) -> bool:
     """Whether ``summary``'s session can be opened: it's readable and no other orbit has it."""
     return not summary.locked and summary.unreadable is None
+
+
+def can_delete(summary: SessionSummary) -> bool:
+    """Whether ``summary``'s session may be deleted: it isn't open, here or in another orbit."""
+    return not summary.current and not summary.locked
+
+
+def delete_message(summary: SessionSummary) -> str:
+    """What deleting ``summary``'s session asks the user to confirm."""
+    return f'Delete "{summary.name}"? Its tasks and review state are gone for good.'
 
 
 def _details(summary: SessionSummary, zone: tzinfo | None) -> list[str]:

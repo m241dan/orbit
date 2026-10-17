@@ -1,7 +1,14 @@
 from datetime import UTC, datetime, timedelta, timezone
 
 from orbit.protocol import SessionSummary, Usage
-from orbit.tui.view import can_open, local_time, session_label, task_counts
+from orbit.tui.view import (
+    can_delete,
+    can_open,
+    delete_message,
+    local_time,
+    session_label,
+    task_counts,
+)
 
 ACTIVE = datetime(2026, 10, 16, 18, 2, tzinfo=UTC)
 
@@ -51,6 +58,19 @@ def test_only_readable_unlocked_sessions_can_be_opened() -> None:
     assert can_open(SessionSummary(id="s", name="a", current=True))
     assert not can_open(SessionSummary(id="s", name="a", locked=True))
     assert not can_open(SessionSummary(id="s", name="a", unreadable="gone"))
+
+
+def test_only_sessions_open_nowhere_can_be_deleted() -> None:
+    assert can_delete(SessionSummary(id="s", name="a"))
+    assert can_delete(SessionSummary(id="s", name="a", unreadable="gone"))
+    assert not can_delete(SessionSummary(id="s", name="a", current=True))
+    assert not can_delete(SessionSummary(id="s", name="a", locked=True))
+
+
+def test_deleting_asks_about_the_session_by_name() -> None:
+    assert delete_message(SessionSummary(id="s", name="auth rework")) == (
+        'Delete "auth rework"? Its tasks and review state are gone for good.'
+    )
 
 
 def test_last_activity_is_shown_in_the_zone_given() -> None:

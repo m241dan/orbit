@@ -109,6 +109,14 @@ Each session is locked while an orbit has it open: in another orbit's list it sh
 another orbit`, dimmed, and can't be opened. A session file that can't be read shows `unreadable:`
 and the reason, and can't be opened either.
 
+In the list, `r` renames the highlighted session, the open one included: it asks for the new name,
+starting from the old one; `enter` saves it (an empty name keeps the old one) and `esc` goes back.
+Names needn't be unique. `x` deletes the highlighted session after a `y`/`n` confirm (`esc` is no):
+its file goes, with any stale lock, while Claude's own conversation files stay. The open session
+can't be deleted, and a session open in another orbit can be neither renamed nor deleted; an
+unreadable one can be deleted but not renamed. The list refreshes after either. On `+ new session`,
+`r` and `x` do nothing.
+
 ### Tasks
 
 The task list queues prompts to run later. Each task has its own prompt, model and tool access, set

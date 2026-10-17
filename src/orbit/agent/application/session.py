@@ -35,7 +35,13 @@ from orbit.agent.domain.agents import Agent
 from orbit.agent.domain.board import WAITING, TaskBoard, interrupted
 from orbit.agent.domain.reviews import LaneSnapshot, PlannerSnapshot, ReviewPlanner
 from orbit.agent.domain.roles import REVIEW_ROLES, configure_prompt, role_task
-from orbit.agent.domain.sessions import SessionRecord, resumed_notes, resumed_settings
+from orbit.agent.domain.sessions import (
+    EMPTY_NAME,
+    SessionRecord,
+    resumed_notes,
+    resumed_settings,
+    session_name,
+)
 from orbit.agent.domain.verification import VerificationStep, startup_fix_prompt
 from orbit.protocol import (
     CODER,
@@ -49,6 +55,7 @@ from orbit.protocol import (
     Command,
     ConfigureChecks,
     DecideProposal,
+    DeleteSession,
     EditTask,
     ErrorOccurred,
     Event,
@@ -57,6 +64,7 @@ from orbit.protocol import (
     Notice,
     OpenSession,
     RemoveTask,
+    RenameSession,
     RequestSuperReview,
     RunTasks,
     SessionOpened,
@@ -82,7 +90,7 @@ PLANNER_ANSWERING = "Can't switch: the planner is answering. Press ctrl+x to sto
 NO_REVIEWS = LaneSnapshot(planner=PlannerSnapshot())
 """The review state of a session that has had none."""
 
-SessionCommand = ListSessions | OpenSession | NewSession
+SessionCommand = ListSessions | OpenSession | NewSession | RenameSession | DeleteSession
 WorkCommand = (
     SubmitPrompt
     | CancelTurn
@@ -287,11 +295,36 @@ class AgentSession:
                 await self._open_session(session_id)
             case NewSession(name=name):
                 await self._new_session(name)
+            case RenameSession() | DeleteSession():
+                await self._change_saved(command)
             case _:
                 assert_never(command)
 
     async def _list_sessions(self) -> None:
         await self._events.put(SessionsListed(sessions=await self._keeper.summaries()))
+
+    async def _change_saved(self, command: RenameSession | DeleteSession) -> None:
+        """Rename or delete a session, then list the sessions as they are after."""
+        match command:
+            case RenameSession(session_id=session_id, name=name):
+                await self._rename_session(session_id, name)
+            case DeleteSession(session_id=session_id):
+                await self._keeper.delete_saved(session_id)
+            case _:
+                assert_never(command)
+        await self._list_sessions()
+
+    async def _rename_session(self, session_id: str, name: str) -> None:
+        """Name the session ``session_id`` ``name``, saving it if it's saved; refused for an
+        empty name."""
+        named = session_name(name)
+        if named is None:
+            await self._events.put(ErrorOccurred(message=EMPTY_NAME))
+        elif session_id == self._keeper.id:
+            self._keeper.rename(named)
+            await self._save()
+        else:
+            await self._keeper.rename_saved(session_id, named)
 
     async def _open_session(self, session_id: str) -> None:
         """Open the saved session ``session_id`` in place of this one, without running
