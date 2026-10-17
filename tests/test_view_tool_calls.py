@@ -333,6 +333,35 @@ def test_a_failed_commands_result_shows_its_exit_code_when_it_has_one(
         ("No files found", "✓ 0 matches"),
         ("Found 2 files\na.py\nb.py", "✓ 2 matches"),
         ("a.py:3\nb.py:1\n\nFound 4 total occurrences across 2 files.", "✓ 2 matches"),
+        (
+            "a.py\nb.py\n(Results are truncated. Consider using a more specific path or pattern.)",
+            "✓ 2 matches",
+        ),
+        (
+            "a.py\n(Showing 1 of 5 matching files; 4 more are not listed."
+            " Narrow the pattern or path to see the rest.)",
+            "✓ 1 match",
+        ),
+        (
+            "a.py\nb.py\n(Showing the first 2 files; there are more than 2 matches."
+            " Narrow the pattern or path to see the rest.)",
+            "✓ 2 matches",
+        ),
+        (
+            "a.py:1:x\nb.py:2:x\n\n[Showing results with pagination = limit: 2, offset: 0]",
+            "✓ 2 matches",
+        ),
+        ("Found 1 file limit: 1, offset: 0\na.py", "✓ 1 match"),
+        (
+            "No entries at this offset\n\n[Showing results with pagination = offset: 9]",
+            "✓ 0 matches",
+        ),
+        ("No entries at this offset. [Showing results with pagination = offset: 9]", "✓ 0 matches"),
+        (
+            "No entries at this offset\n\nFound 3 total occurrences across 1 file."
+            " with pagination = offset: 9",
+            "✓ 0 matches",
+        ),
     ],
 )
 def test_a_searchs_result_counts_its_matches(name: str, output: str, summary: str) -> None:

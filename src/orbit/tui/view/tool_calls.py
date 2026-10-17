@@ -163,6 +163,14 @@ NO_MATCHES = frozenset({"No matches found", "No files found"})
 """What Claude Code's Grep and Glob say when they find nothing."""
 SEARCH_TALLY = re.compile(r"Found \d+ ")
 """The start of the line where Claude Code's Grep tallies its files or occurrences."""
+SEARCH_TRUNCATED = re.compile(
+    r"\((?:Results are truncated\. |Showing \d+ of \d+ matching files; "
+    r"|Showing the first \d+ files; )"
+)
+"""The start of the line where Claude Code's Glob notes that it listed only some files."""
+SEARCH_PAGINATION = re.compile(r"\[Showing results with pagination = |No entries at this offset\b")
+"""The start of the line where Claude Code's Grep notes how it paged its results, or that the
+page it was asked for is empty."""
 EXIT_CODE = re.compile(r"^Exit code (\d+)\b", re.MULTILINE)
 """The line where Claude Code says what a failed command exited with."""
 
@@ -223,9 +231,15 @@ def _ran(arguments: Mapping[str, Any], output: str) -> str | None:
     return "✓"
 
 
+def _is_match(line: str) -> bool:
+    """Whether ``line`` of a Grep or Glob output is a match, not a blank or a note about them."""
+    notes = (SEARCH_TALLY, SEARCH_TRUNCATED, SEARCH_PAGINATION)
+    return bool(line.strip()) and not any(note.match(line) for note in notes)
+
+
 def _found(arguments: Mapping[str, Any], output: str) -> str | None:
     lines = [] if output.strip() in NO_MATCHES else output.splitlines()
-    count = sum(1 for line in lines if line.strip() and not SEARCH_TALLY.match(line))
+    count = sum(1 for line in lines if _is_match(line))
     return f"✓ {count} match{'' if count == 1 else 'es'}"
 
 
