@@ -10,7 +10,7 @@ from textual import on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding, BindingType
 from textual.containers import Horizontal, Vertical
-from textual.widgets import Footer, Input, OptionList, Tabs
+from textual.widgets import Footer, OptionList, Tabs
 
 from orbit.protocol import (
     PLANNER,
@@ -88,9 +88,9 @@ from orbit.tui.widgets import (
     CONFIGURE_MESSAGE,
     CONFIGURE_TITLE,
     CONFIGURE_YES,
+    ChatPrompt,
     ConfirmScreen,
     PickerScreen,
-    PromptInput,
 )
 
 # Window reached from each window by h/j/k/l; missing means an edge.
@@ -157,7 +157,7 @@ class OrbitApp(App[None], inherit_bindings=False):
     CSS = """
     #side { width: 33%; }
     .selected { border: round $accent; }
-    PromptInput:focus, PromptBox:focus, TaskList:focus, Transcript:focus-within {
+    ChatPrompt:focus, PromptBox:focus, TaskList:focus, Transcript:focus-within {
         border: heavy $accent;
     }
     DetailPane.selected { border: none; border-top: solid $accent; }
@@ -221,7 +221,7 @@ class OrbitApp(App[None], inherit_bindings=False):
             with Vertical():
                 yield ConversationTabs(id="conversation-tabs")
                 yield Transcript(id="transcript")
-                yield PromptInput(
+                yield ChatPrompt(
                     placeholder="Press i to talk to the planner, esc to stop typing", id="prompt"
                 )
             with Vertical(id="side"):
@@ -238,7 +238,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         # Looked up once: a query walks the DOM, and events arrive many times a second.
         self._transcript = self.query_one(Transcript)
         self._tabs = self.query_one(ConversationTabs)
-        self._prompt = self.query_one(PromptInput)
+        self._prompt = self.query_one(ChatPrompt)
         self._task_list = self.query_one(TaskList)
         self._verification = self.query_one(VerificationPanel)
         self._usage = self.query_one(UsagePanel)
@@ -248,12 +248,12 @@ class OrbitApp(App[None], inherit_bindings=False):
         self.install_screen(self._tool_picker, "pick-tool-access")
         self._consume_events()
 
-    @on(Input.Submitted, "#prompt")
-    async def _submit(self, message: Input.Submitted) -> None:
-        text = message.value.strip()
+    @on(ChatPrompt.Submitted, "#prompt")
+    async def _submit(self, message: ChatPrompt.Submitted) -> None:
+        text = message.text.strip()
         if not text:
             return
-        message.input.clear()
+        message.prompt.clear()
         prompt = self._prompt
         prompt.action_normal_mode()
         # Busy from now, not from TurnStarted, so a second prompt can't race the turn.

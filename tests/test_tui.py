@@ -3,8 +3,9 @@ from collections.abc import AsyncGenerator, AsyncIterator, Iterator
 from contextlib import contextmanager
 
 import pytest
+from textual import events
 from textual.pilot import Pilot
-from textual.widgets import Footer, Input, OptionList, Tab
+from textual.widgets import Footer, OptionList, Tab
 from textual.worker import WorkerFailed
 
 from orbit.protocol import (
@@ -47,7 +48,7 @@ from orbit.tui.tabs import ConversationTabs
 from orbit.tui.tasks import TaskList
 from orbit.tui.transcript import Transcript, TranscriptLog
 from orbit.tui.view import EntryKind, coalesce, spinner_frame
-from orbit.tui.widgets import PickerScreen, PromptInput, SidePanel
+from orbit.tui.widgets import ChatPrompt, PickerScreen, SidePanel
 
 
 class FakeSession:
@@ -82,7 +83,7 @@ async def test_submit_sends_command_and_renders_events() -> None:
     app = OrbitApp(session)
     app.clock = lambda: 0.0
     async with app.run_test() as pilot:
-        prompt = app.query_one("#prompt", Input)
+        prompt = app.query_one("#prompt", ChatPrompt)
         await pilot.press("i", *"hi", "enter")
         assert session.commands == [SubmitPrompt(text="hi")]
         # Busy from now, not from the backend's notice, so a second prompt can't race it.
@@ -110,7 +111,7 @@ async def test_a_busy_planner_disables_the_prompt() -> None:
     async with app.run_test() as pilot:
         await session.queue.put(BusyChanged(busy=True, lane="planner"))
         await pilot.pause()
-        assert app.query_one(PromptInput).disabled
+        assert app.query_one(ChatPrompt).disabled
 
 
 async def test_ctrl_s_sends_cancel() -> None:
@@ -134,6 +135,22 @@ async def test_blank_submit_is_ignored() -> None:
         await pilot.press("i", "space", "enter")
         assert session.commands == []
         assert shown(app) == []
+
+
+async def test_a_pasted_multi_line_prompt_is_sent_whole_and_the_box_shrinks() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test(size=(80, 30)) as pilot:
+        prompt = app.query_one(ChatPrompt)
+        await pilot.press("i")
+        app.post_message(events.Paste("  first\nsecond\n"))
+        await pilot.pause()
+        assert prompt.region.height == 5  # three rows, the last empty, inside a border
+        await pilot.press("enter")
+        await pilot.pause()
+        assert session.commands == [SubmitPrompt(text="first\nsecond")]
+        assert prompt.text == ""
+        assert prompt.region.height == 3
 
 
 async def test_renders_tool_calls_errors_and_cancellation() -> None:
@@ -193,7 +210,7 @@ async def test_layout_stacks_display_over_prompt_over_footer() -> None:
     async with app.run_test(size=(80, 24)):
         tabs = app.query_one(ConversationTabs)
         transcript = app.query_one(Transcript)
-        prompt = app.query_one(PromptInput)
+        prompt = app.query_one(ChatPrompt)
         footer = app.query_one(Footer)
 
         assert tabs.region.y == 0
@@ -211,7 +228,7 @@ async def test_display_absorbs_resize_and_prompt_stays_at_bottom() -> None:
     app = OrbitApp(FakeSession())
     async with app.run_test(size=(80, 24)) as pilot:
         transcript = app.query_one(Transcript)
-        prompt = app.query_one(PromptInput)
+        prompt = app.query_one(ChatPrompt)
         footer = app.query_one(Footer)
         before = transcript.region.height
 
@@ -227,47 +244,47 @@ async def test_sections_are_labelled() -> None:
     app = OrbitApp(FakeSession())
     async with app.run_test():
         assert app.query_one(Transcript).border_title == "Conversation"
-        assert app.query_one(PromptInput).border_title == "Prompt · planner"
-        assert "planner" in app.query_one(PromptInput).placeholder
+        assert app.query_one(ChatPrompt).border_title == "Prompt · planner"
+        assert "planner" in str(app.query_one(ChatPrompt).placeholder)
 
 
 async def test_prompt_starts_in_normal_mode_and_ignores_typing_and_clicks() -> None:
     app = OrbitApp(FakeSession())
     async with app.run_test() as pilot:
-        prompt = app.query_one(PromptInput)
+        prompt = app.query_one(ChatPrompt)
         assert app.focused is None
         await pilot.press(*"hello")
         await pilot.click("#prompt")
         assert app.focused is None
-        assert prompt.value == ""
+        assert prompt.text == ""
 
 
 async def test_i_enters_insert_mode_without_typing_the_i() -> None:
     app = OrbitApp(FakeSession())
     async with app.run_test() as pilot:
-        prompt = app.query_one(PromptInput)
+        prompt = app.query_one(ChatPrompt)
         await pilot.press("i")
         assert app.focused is prompt
         await pilot.press(*"hi")
-        assert prompt.value == "hi"
+        assert prompt.text == "hi"
 
 
 async def test_escape_in_insert_mode_returns_to_normal_mode_without_cancelling() -> None:
     session = FakeSession()
     app = OrbitApp(session)
     async with app.run_test() as pilot:
-        prompt = app.query_one(PromptInput)
+        prompt = app.query_one(ChatPrompt)
         await pilot.press("i", "a", "escape")
         assert app.focused is None
         assert session.commands == []
 
         # Back in normal mode: keys don't type, the draft is kept, ctrl+s cancels.
         await pilot.press("b", "ctrl+s")
-        assert prompt.value == "a"
+        assert prompt.text == "a"
         assert session.commands == [CancelTurn()]
 
         await pilot.press("i", "b")
-        assert prompt.value == "ab"
+        assert prompt.text == "ab"
 
 
 async def test_submit_returns_to_normal_mode_and_finished_turn_stays_there() -> None:
@@ -286,7 +303,7 @@ async def test_submit_returns_to_normal_mode_and_finished_turn_stays_there() -> 
         await pilot.pause()
         assert app.focused is None
         await pilot.press("i")
-        assert app.focused is app.query_one(PromptInput)
+        assert app.focused is app.query_one(ChatPrompt)
 
 
 async def test_display_follows_latest_output() -> None:
@@ -314,8 +331,8 @@ async def test_settings_shown_under_prompt() -> None:
     session = FakeSession()
     app = OrbitApp(session)
     async with app.run_test() as pilot:
-        prompt = app.query_one(PromptInput)
-        assert not app.query_one(PromptInput).border_subtitle
+        prompt = app.query_one(ChatPrompt)
+        assert not app.query_one(ChatPrompt).border_subtitle
 
         await show_settings(session, pilot, Settings())
         assert prompt.border_subtitle == "planner's model: default · new tasks' tools: restricted"
@@ -344,7 +361,7 @@ async def test_display_waits_for_backend_to_confirm_settings() -> None:
     app = OrbitApp(session)
     async with app.run_test() as pilot:
         await show_settings(session, pilot, Settings())
-        prompt = app.query_one(PromptInput)
+        prompt = app.query_one(ChatPrompt)
         await pilot.press("ctrl+l", "down", "enter")
         await pilot.pause()
         assert prompt.border_subtitle == "planner's model: default · new tasks' tools: restricted"
@@ -480,7 +497,7 @@ async def test_ctrl_c_quits_even_with_prompt_focused() -> None:
     app = OrbitApp(FakeSession())
     async with app.run_test() as pilot:
         await pilot.press("i")
-        assert app.focused is app.query_one(PromptInput)
+        assert app.focused is app.query_one(ChatPrompt)
         await pilot.press("ctrl+c")
         await pilot.pause()
         assert not app.is_running
@@ -501,7 +518,7 @@ async def test_side_panels_fill_right_third_top_and_bottom() -> None:
         tasks = app.query_one("#task-list")
         steps = app.query_one("#verification-steps", SidePanel)
         transcript = app.query_one(Transcript).region
-        prompt = app.query_one(PromptInput).region
+        prompt = app.query_one(ChatPrompt).region
         assert (tasks.border_title, steps.border_title) == ("Task list", "Verification steps")
 
         agents = app.query_one("#agents")
@@ -593,7 +610,7 @@ async def test_i_jumps_to_prompt_from_any_window(keys: str) -> None:
     async with app.run_test() as pilot:
         await pilot.press(*keys, "i")
         assert selected(app) == ["prompt"]
-        assert app.focused is app.query_one(PromptInput)
+        assert app.focused is app.query_one(ChatPrompt)
 
         await pilot.press("escape")
         assert selected(app) == ["prompt"]
@@ -612,13 +629,13 @@ async def test_enter_on_prompt_does_nothing() -> None:
 async def test_i_on_prompt_enters_insert_mode_and_hjkl_type() -> None:
     app = OrbitApp(FakeSession())
     async with app.run_test() as pilot:
-        prompt = app.query_one(PromptInput)
+        prompt = app.query_one(ChatPrompt)
         normal_border = prompt.styles.border_top
         await pilot.press("k", "j", "i")
         assert app.focused is prompt
         assert prompt.styles.border_top != normal_border  # active, not just selected
         await pilot.press(*"hjkl")
-        assert prompt.value == "hjkl"
+        assert prompt.text == "hjkl"
         assert selected(app) == ["prompt"]
 
         await pilot.press("escape", "k")
@@ -698,7 +715,7 @@ async def test_the_tab_strip_starts_with_all_and_the_pinned_roles_and_never_take
         await pilot.press("k")
         assert app.query_one(Transcript).has_class("selected")
         await pilot.press("j")
-        assert app.query_one(PromptInput).has_class("selected")
+        assert app.query_one(ChatPrompt).has_class("selected")
 
 
 async def test_pinned_role_agents_add_no_tabs() -> None:
@@ -1116,7 +1133,7 @@ async def test_prompt_talks_to_the_planner_ctrl_s_stops_the_run_and_ctrl_x_the_p
     session = FakeSession()
     app = OrbitApp(session)
     async with app.run_test(size=(120, 30)) as pilot:
-        prompt = app.query_one(PromptInput)
+        prompt = app.query_one(ChatPrompt)
         await pilot.press("tab")
         assert prompt.border_title == "Prompt · planner"
         # ctrl+s stops the task run, even on the planner tab; ctrl+x stops the planner.
@@ -1141,7 +1158,7 @@ async def test_the_prompt_is_enabled_while_a_run_is_busy() -> None:
     session = FakeSession()
     app = OrbitApp(session)
     async with app.run_test(size=(120, 30)) as pilot:
-        prompt = app.query_one(PromptInput)
+        prompt = app.query_one(ChatPrompt)
         await feed_events(session, pilot, BusyChanged(busy=True))
         assert not prompt.disabled
         await pilot.press("i", *"plan", "enter")
@@ -1188,16 +1205,16 @@ async def test_ctrl_t_while_typing_keeps_the_prompt_and_its_text() -> None:
     app = OrbitApp(session)
     async with app.run_test(size=(120, 30)) as pilot:
         await feed_events(session, pilot, started("agent-1"))
-        prompt = app.query_one(PromptInput)
+        prompt = app.query_one(ChatPrompt)
         await pilot.press("i", *"hello")
         await pilot.press("ctrl+t")
         assert active_tab(app) == "planner"
         assert app.focused is prompt
-        assert prompt.value == "hello"
+        assert prompt.text == "hello"
         await pilot.press("ctrl+t")
         assert active_tab(app) == "All"
         assert app.focused is prompt
-        assert prompt.value == "hello"
+        assert prompt.text == "hello"
         assert session.commands == []
 
 

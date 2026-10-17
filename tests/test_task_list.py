@@ -25,7 +25,7 @@ from orbit.tui import OrbitApp
 from orbit.tui.tasks import TaskEditorScreen, TaskList
 from orbit.tui.transcript import Transcript
 from orbit.tui.view import spinner_frame, task_label, task_numbers, usage_label
-from orbit.tui.widgets import PickerScreen, PromptBox, PromptInput
+from orbit.tui.widgets import ChatPrompt, PickerScreen, PromptBox, PromptInput
 from tests.test_tui import FakeSession, picker, selected, show_settings
 
 
@@ -584,7 +584,7 @@ async def test_a_refused_planner_prompt_frees_the_prompt() -> None:
     session = FakeSession()
     app = OrbitApp(session)
     async with app.run_test(size=(120, 30)) as pilot:
-        prompt = app.query_one(PromptInput)
+        prompt = app.query_one(ChatPrompt)
         await pilot.press("ctrl+t", "i", *"plan", "enter")
         assert prompt.disabled
         refused = ErrorOccurred(message="Planning needs agents and a planner role.")
@@ -595,7 +595,7 @@ async def test_a_refused_planner_prompt_frees_the_prompt() -> None:
 async def test_a_planner_less_session_leaves_the_prompt_usable() -> None:
     app = OrbitApp(AgentSession())
     async with app.run_test(size=(120, 30)) as pilot:
-        prompt = app.query_one(PromptInput)
+        prompt = app.query_one(ChatPrompt)
         await pilot.press("ctrl+t", "i", *"plan", "enter")
         for _ in range(5):
             await pilot.pause()

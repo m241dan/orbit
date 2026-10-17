@@ -55,7 +55,7 @@ In the app:
 | Key | Action |
 |---|---|
 | `h` `j` `k` `l` | Move between windows (the selected one is highlighted); while the conversation's detail pane is open, `j` from the conversation selects the pane, and from the pane `k` goes back, `j` to the prompt and `l` to the task list |
-| `i` | Jump to the prompt, which talks to the planner, and start typing (vim-style insert mode) |
+| `i` | Jump to the prompt, which talks to the planner, and start typing (vim-style insert mode): long text wraps and the box grows up to 8 lines, then scrolls; `enter` sends, pasted text keeps its newlines, `esc` stops typing |
 | `enter` | On the conversation: activate it (`j`/`k` move between entries, `enter` collapses or expands the one marked `▌` in the left gutter, or opens the detail pane on a tool call or request, `J`/`K` scroll the open detail pane, `y` copies its call's whole output, `tab` activates it, `esc` closes the detail pane if it's open, else leaves and holds the marked entry); again, resume at the held entry |
 | `enter` | On the conversation's detail pane: activate it (`j`/`k` scroll it, `y` copies its call's whole output, `esc` leaves with the pane still open) |
 | `enter` | On the task list: activate it (`j`/`k` move, `enter` edits a task or adds one on `+ new task`, `a` accepts a draft, `x` removes a task, `esc` leaves) |
@@ -421,12 +421,14 @@ your checkout out of its way, it doesn't sandbox it.
 
 ### Planning with the planner
 
-The prompt talks to the planner (its title reads `Prompt · planner`); orbit is for planning, tasks
-and reviews, with no free-form chat besides. The **planner** tab, always second in the strip, shows
-just the planner conversation: your prompts, and the planner's messages, tool calls and exchanges
-with orbit (`ctrl+t` jumps there, and pressed again goes back to the tab you were on). Tell it
-what you want to build; it asks what's unclear and breaks the goal into small tasks, proposing each
-with `propose_task`. Its first prompt, and the first after the verification steps change, tells it
+The prompt talks to the planner (its title reads `Prompt · planner`). It wraps what you type and
+grows with it up to 8 lines, then scrolls, and shrinks again once sent; `enter` sends, and pasted
+text keeps its newlines. Orbit is for planning, tasks and reviews, with no free-form chat besides.
+The **planner** tab, always second in the strip, shows just the planner conversation: your
+prompts, and the planner's messages, tool calls and exchanges with orbit (`ctrl+t` jumps there,
+and pressed again goes back to the tab you were on). Tell it what you want to build; it asks
+what's unclear and breaks the goal into small tasks, proposing each with `propose_task`.
+Its first prompt, and the first after the verification steps change, tells it
 the steps each task must pass. Proposals appear in the task list as 📝 drafts, with the `coder`
 role's default settings, and never run on their own: on the task list, `a` accepts the highlighted
 draft (or edit it with `enter` and save, which accepts it too), and `x` removes it. Accepted tasks

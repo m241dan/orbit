@@ -36,7 +36,7 @@ from orbit.tui.view import (
     SPINNER_FPS,
     EntryKind,
 )
-from orbit.tui.widgets import PromptInput
+from orbit.tui.widgets import ChatPrompt
 from tests.test_tui import FakeSession, feed_events, said, started
 
 # Wraps in any window a test opens. At 40 columns a row beside the gutter holds two words but
@@ -1214,7 +1214,7 @@ async def test_t_types_into_the_prompt_rather_than_hiding_thinking() -> None:
     async with app.run_test() as pilot:
         await feed_events(session, pilot, thought("agent-1", "looking"))
         await pilot.press("i", "t")
-        assert app.query_one(PromptInput).value == "t"
+        assert app.query_one(ChatPrompt).text == "t"
         assert not app.query_one(Transcript).thinking_hidden
         assert labels(app) == ["looking"]
 

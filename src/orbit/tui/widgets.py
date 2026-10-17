@@ -9,6 +9,7 @@ from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
 from textual.containers import VerticalScroll
 from textual.css.styles import RulesMap
+from textual.message import Message
 from textual.screen import ModalScreen
 from textual.visual import VisualType
 from textual.widget import Widget
@@ -158,7 +159,7 @@ class SidePanel(VerticalScroll):
 
 
 class PromptInput(ModalFocus, Input):
-    """Single-line prompt box at the bottom of the screen.
+    """Single-line input, for a task's title.
 
     Vim-style: it only takes focus in insert mode (``enter_insert_mode``), and
     escape or losing focus returns to normal mode, where keys go to the app.
@@ -179,14 +180,59 @@ class PromptInput(ModalFocus, Input):
         # Keep the draft unselected so re-entering insert mode appends to it.
         super().__init__(select_on_focus=False, **kwargs)
 
+    def enter_insert_mode(self) -> None:
+        self._activate()
+
+
+class ChatPrompt(ModalFocus, TextArea):
+    """Prompt box at the bottom of the screen, which wraps its text and grows with it from
+    one row up to eight, then scrolls; enter sends it, and pasted newlines are kept.
+
+    Vim-style like ``PromptInput``: it only takes focus in insert mode
+    (``enter_insert_mode``), and escape or losing focus returns to normal mode.
+    """
+
+    DEFAULT_CSS = """
+    ChatPrompt {
+        height: auto;
+        max-height: 10;
+        border: round $secondary;
+    }
+    """
+
+    BINDINGS: ClassVar[list[BindingType]] = [
+        Binding("escape", "normal_mode", "Normal mode", show=False),
+        # Priority, to beat the text area's own enter, which types a newline.
+        Binding("enter", "submit", show=False, priority=True),
+    ]
+
+    class Submitted(Message):
+        """The user sent ``text``."""
+
+        def __init__(self, prompt: "ChatPrompt", text: str) -> None:
+            super().__init__()
+            self.prompt = prompt
+            self.text = text
+
+        @property
+        def control(self) -> "ChatPrompt":
+            return self.prompt
+
+    def __init__(self, *, placeholder: str = "", id: str | None = None) -> None:
+        super().__init__(soft_wrap=True, show_line_numbers=False, placeholder=placeholder, id=id)
+
     def on_mount(self) -> None:
         self.border_title = "Prompt · planner"
 
     def enter_insert_mode(self) -> None:
-        self._activate()
+        if self._activate():
+            self.move_cursor(self.document.end)
 
     def show_settings(self, settings: Settings) -> None:
         self.border_subtitle = settings_summary(settings)
+
+    def action_submit(self) -> None:
+        self.post_message(self.Submitted(self, self.text))
 
 
 class PromptBox(ModalFocus, TextArea):
