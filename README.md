@@ -56,8 +56,8 @@ In the app:
 |---|---|
 | `h` `j` `k` `l` | Move between windows (the selected one is highlighted); while the conversation's detail pane is open, `j` from the conversation selects the pane, and from the pane `k` goes back, `j` to the prompt and `l` to the task list |
 | `i` | Jump to the prompt, which talks to the planner, and start typing (vim-style insert mode) |
-| `enter` | On the conversation: activate it (`j`/`k` move between entries, `enter` collapses or expands the one marked `▌` in the left gutter, or opens the detail pane on a tool call or request, `J`/`K` scroll the open detail pane, `tab` activates it, `esc` closes the detail pane if it's open, else leaves and holds the marked entry); again, resume at the held entry |
-| `enter` | On the conversation's detail pane: activate it (`j`/`k` scroll it, `esc` leaves with the pane still open) |
+| `enter` | On the conversation: activate it (`j`/`k` move between entries, `enter` collapses or expands the one marked `▌` in the left gutter, or opens the detail pane on a tool call or request, `J`/`K` scroll the open detail pane, `y` copies its call's whole output, `tab` activates it, `esc` closes the detail pane if it's open, else leaves and holds the marked entry); again, resume at the held entry |
+| `enter` | On the conversation's detail pane: activate it (`j`/`k` scroll it, `y` copies its call's whole output, `esc` leaves with the pane still open) |
 | `enter` | On the task list: activate it (`j`/`k` move, `enter` edits a task or adds one on `+ new task`, `a` accepts a draft, `x` removes a task, `esc` leaves) |
 | `enter` | On the agents pane: activate it (`j`/`k` move, `c` cancels the highlighted agent's work, `esc` leaves) |
 | `t` | Hide agents' dim messages, still thinking out loud, in every tab; again, show them (works with the conversation activated too) |
@@ -206,10 +206,10 @@ and takes no room while nothing in the shown tab runs.
 
 `enter` on a tool call or a request to orbit, with the conversation activated, opens a detail pane
 below the conversation and its working row, taking 40% of the conversation's height and titled
-with the entry's line (`Detail · Read src/x.py`). It shows the call's arguments as `key: value`
+with the entry's line and a hint (`Detail · Read src/x.py · y copy`). It shows the call's arguments as `key: value`
 lines, a rule, then the output or orbit's reply as plain text; a call still running shows a dim
 `waiting for output…` until its result arrives, and the pane updates in place. Output of more
-than 200 lines shows its first 100, a dim `… N lines omitted …`, and its last 100. While the pane
+than 200 lines shows its first 100, a dim `… N lines omitted · y copies all …`, and its last 100. While the pane
 is open it follows the cursor as `j`/`k` move, showing a dim `No details for this entry` on other
 entries. The first `esc` closes it, staying in the list; the next leaves the list as usual.
 Switching tabs closes it, and it stays closed when you come back.
@@ -225,6 +225,12 @@ entry it shows, and keeps its place as the same entry updates, such as when a ru
 finishes. When the conversation is less than 20 rows high, the open pane covers all of it, the
 entries and working row hidden, until it closes or the terminal grows; `j`/`k` still move
 between entries underneath.
+
+`y`, from the conversation's list or the activated pane while the pane is open, copies the whole
+of its call to the clipboard: all of the output or orbit's reply, lines omitted from the pane
+included, or the arguments as JSON while the call still runs; a toast says `Copied N lines`. On
+an entry without details it does nothing. Copying uses the terminal's clipboard escape (OSC 52),
+which most terminals support; inside tmux it needs `set -g set-clipboard on`.
 
 The planned improvements to the conversation window, and what is deferred, are in
 [docs/conversation-window.md](docs/conversation-window.md).

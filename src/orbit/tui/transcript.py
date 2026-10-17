@@ -31,7 +31,9 @@ from orbit.tui.view import (
     banded,
     collapsible,
     conversation_title,
+    copied_note,
     detail_body,
+    detail_copy,
     detail_covers,
     detail_title,
     entry_label,
@@ -526,6 +528,7 @@ class DetailPane(ModalFocus, VerticalScroll):
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self._entry: int | None = None  # Where the entry shown is among its log's.
+        self.call: ToolCall | None = None  # The call whose details are shown, if any.
 
     def compose(self) -> ComposeResult:
         yield Static()
@@ -549,6 +552,7 @@ class DetailPane(ModalFocus, VerticalScroll):
         if not self.opened or entry != self._entry:
             self.scroll_home(animate=False)
         self._entry = entry
+        self.call = call
         self.border_title = detail_title(call)
         self.query_one(Static).update(detail_body(call))
         self.add_class("-open")
@@ -597,6 +601,7 @@ class Transcript(Vertical):
         Binding("J", "scroll_detail(1)", show=False),
         Binding("K", "scroll_detail(-1)", show=False),
         Binding("tab", "focus_detail", show=False),
+        Binding("y", "copy_detail", show=False),
     ]
 
     def __init__(self, **kwargs: Any) -> None:
@@ -630,6 +635,15 @@ class Transcript(Vertical):
     def action_focus_detail(self) -> None:
         """Activate the open detail pane, so j/k scroll it."""
         self.detail.enter_scroll_mode()
+
+    def action_copy_detail(self) -> None:
+        """Copy the whole of the open detail pane's call to the clipboard, if it shows one,
+        and say how many lines were copied."""
+        text = detail_copy(self.detail.call)
+        if text is None:
+            return
+        self.app.copy_to_clipboard(text)
+        self.app.notify(copied_note(text))
 
     def close_detail(self) -> None:
         """Stop inspecting the shown log's entries, closing the detail pane."""

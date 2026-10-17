@@ -64,7 +64,7 @@ async def test_enter_on_a_tool_call_opens_its_details() -> None:
         await feed_events(session, pilot, read("c1"), done("c1", "one\ntwo"))
         assert not pane(app).opened and pane(app).size.height == 0
         await inspecting(pilot)
-        assert pane(app).opened and pane(app).border_title == "Detail · Read a.py"
+        assert pane(app).opened and pane(app).border_title == "Detail · Read a.py · y copy"
         assert shown(app) == ["file_path: a.py", RULE, "one", "two"]
         assert app.focused is app.query_one(Transcript).shown
 
@@ -94,7 +94,7 @@ async def test_enter_on_a_request_opens_its_arguments_and_reply() -> None:
         reply = AgentReply(agent_id="agent-1", request_id="r", text="Merged.")
         await feed_events(session, pilot, request, reply)
         await inspecting(pilot)
-        assert pane(app).border_title == "Detail · complete_task Go"
+        assert pane(app).border_title == "Detail · complete_task Go · y copy"
         assert shown(app) == ["summary: Go", RULE, "Merged."]
 
 
@@ -116,9 +116,9 @@ async def test_the_pane_follows_the_cursor_and_notes_entries_without_details() -
             session, pilot, said("agent-1", "hi"), read("c1"), done("c1", "x"), read("c2", "b.py")
         )
         await inspecting(pilot)
-        assert pane(app).border_title == "Detail · Read b.py"
+        assert pane(app).border_title == "Detail · Read b.py · y copy"
         await pilot.press("k")
-        assert pane(app).border_title == "Detail · Read a.py"
+        assert pane(app).border_title == "Detail · Read a.py · y copy"
         assert shown(app) == ["file_path: a.py", RULE, "x"]
         await pilot.press("k")
         assert pane(app).opened and pane(app).border_title == "Detail"
@@ -345,7 +345,7 @@ async def test_the_pane_starts_at_the_top_for_another_entry() -> None:
         detail = await scrolling(app, session, pilot)
         await pilot.press("J", "J", "k")
         await pilot.pause()
-        assert detail.border_title == "Detail · Read a.py" and detail.scroll_y == 0
+        assert detail.border_title == "Detail · Read a.py · y copy" and detail.scroll_y == 0
 
 
 async def test_the_pane_keeps_its_place_as_its_entry_updates() -> None:

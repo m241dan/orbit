@@ -13,7 +13,9 @@ from orbit.tui.view import (
     ToolCallStatus,
     argument_lines,
     capped,
+    copied_note,
     detail_body,
+    detail_copy,
     detail_covers,
     detail_title,
 )
@@ -44,7 +46,7 @@ def test_the_pane_leaves_room_in_a_conversation_of_the_minimum_height() -> None:
 
 
 def test_the_title_names_the_calls_summary() -> None:
-    assert detail_title(read_call()) == "Detail · Read src/x.py"
+    assert detail_title(read_call()) == "Detail · Read src/x.py · y copy"
 
 
 def test_the_title_without_a_call_is_just_detail() -> None:
@@ -83,13 +85,35 @@ def test_longer_output_keeps_its_ends_and_counts_the_lines_omitted() -> None:
     lines = capped(numbered(250)).plain.split("\n")
     assert len(lines) == 201
     assert lines[:2] == ["line 0", "line 1"] and lines[99] == "line 99"
-    assert lines[100] == "… 50 lines omitted …"
+    assert lines[100] == "… 50 lines omitted · y copies all …"
     assert lines[101] == "line 150" and lines[-1] == "line 249"
 
 
 def test_the_omitted_line_is_dim() -> None:
     text = capped(numbered(201))
     marker = text.plain.split("\n")[100]
-    assert marker == "… 1 line omitted …"
+    assert marker == "… 1 line omitted · y copies all …"
     start = text.plain.index(marker)
     assert [span.style for span in text.spans if span.start == start] == ["dim"]
+
+
+def test_y_copies_a_finished_calls_whole_output() -> None:
+    output = numbered(250)
+    assert detail_copy(read_call(output=output)) == output
+
+
+def test_y_copies_a_running_calls_arguments_as_json() -> None:
+    call = ToolCall("c", "Bash", "Bash ls", {"command": "ls é", "n": 1})
+    assert detail_copy(call) == '{\n  "command": "ls é",\n  "n": 1\n}'
+
+
+def test_y_copies_nothing_without_a_call() -> None:
+    assert detail_copy(None) is None
+
+
+def test_the_copied_note_counts_lines() -> None:
+    assert copied_note("a\nb") == "Copied 2 lines"
+
+
+def test_the_copied_note_counts_one_line_singly() -> None:
+    assert copied_note("a") == "Copied 1 line"
