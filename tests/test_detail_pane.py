@@ -406,3 +406,48 @@ async def test_reopening_the_pane_starts_at_the_top() -> None:
         await pilot.press("J", "J", "escape", "enter")
         await pilot.pause()
         assert detail.opened and detail.scroll_y == 0
+
+
+async def test_another_call_finishing_leaves_the_open_pane_alone() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test(size=(80, 30)) as pilot:
+        await feed_events(session, pilot, read("c2", "b.py"))
+        detail = await scrolling(app, session, pilot)
+        await pilot.press("J", "J")
+        before = shown(app)
+        shows: list[object] = []
+        detail.show = lambda *args: shows.append(args)  # type: ignore[method-assign]
+        await feed_events(session, pilot, done("c2", "x"))
+        await pilot.pause()
+        assert shows == [] and shown(app) == before and detail.scroll_y == 2
+
+
+async def test_a_scrolled_pane_starts_at_the_top_for_another_call() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test(size=(80, 30)) as pilot:
+        long = "\n".join(f"line {n}" for n in range(150))
+        await feed_events(session, pilot, read("c0"), done("c0", "x"), read("c1"), done("c1", long))
+        await inspecting(pilot)
+        await pilot.pause()
+        pane(app).scroll_to(y=50, animate=False)
+        await pilot.pause()
+        assert pane(app).scroll_y == 50
+        await pilot.press("k")
+        await pilot.pause()
+        assert pane(app).border_title == "Detail · Read a.py · y copy" and pane(app).scroll_y == 0
+
+
+async def test_a_running_call_finishing_in_place_keeps_the_pane_s_offset() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test(size=(80, 30)) as pilot:
+        await feed_events(session, pilot, read("c1", LONG))
+        await inspecting(pilot)
+        await pilot.pause()
+        pane(app).scroll_to(y=5, animate=False)
+        await pilot.pause()
+        await feed_events(session, pilot, done("c1", LONG))
+        await pilot.pause()
+        assert shown(app)[-1] == "line 59" and pane(app).scroll_y == 5

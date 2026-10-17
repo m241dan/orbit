@@ -345,7 +345,7 @@ class TranscriptLog(ListPane):
         entry = self._entries[index]
         text, kind = tool_call_entry(call, entry.agent, self.clock())
         self._entries[index] = replace(entry, text=text, kind=kind, call=call)
-        if self.inspecting and call != entry.call:
+        if self.inspecting and call != entry.call and self.inspected == index:
             self.post_message(self.Inspect())
         if (text, kind) != (entry.text, entry.kind):
             self._redraw(bisect_left(self._rows, index))  # Tool calls are never hidden.
@@ -576,7 +576,6 @@ class DetailPane(ModalFocus, VerticalScroll):
 
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
-        self._entry: int | None = None  # Where the entry shown is among its log's.
         self.call: ToolCall | None = None  # The call whose details are shown, if any.
 
     def compose(self) -> ComposeResult:
@@ -595,16 +594,21 @@ class DetailPane(ModalFocus, VerticalScroll):
     def opened(self) -> bool:
         return self.has_class("-open")
 
-    def show(self, call: ToolCall | None, entry: int | None) -> None:
-        """Open, showing ``call``'s details, or a note that there are none, for the entry at
-        ``entry``; another entry than the one shown starts at the top."""
-        if not self.opened or entry != self._entry:
+    def show(self, call: ToolCall | None) -> None:
+        """Open, showing ``call``'s details, or a note that there are none; another call than
+        the one shown starts at the top, while the same one updated keeps its place."""
+        if not self.opened or self._another(call):
             self.scroll_home(animate=False)
-        self._entry = entry
         self.call = call
         self.border_title = detail_title(call)
         self.query_one(Static).update(detail_body(call))
         self.add_class("-open")
+
+    def _another(self, call: ToolCall | None) -> bool:
+        """Whether ``call`` is another call than the one shown, or none where one is."""
+        if call is None or self.call is None:
+            return call is not self.call
+        return call.call_id != self.call.call_id
 
     def close(self) -> None:
         """Close, leaving the pane if it's active."""
@@ -727,7 +731,7 @@ class Transcript(Vertical):
         event.stop()
         log = self.shown
         if log.inspecting:
-            self.detail.show(log.detail, log.inspected)
+            self.detail.show(log.detail)
         else:
             self.detail.close()
         self._fit_detail()
