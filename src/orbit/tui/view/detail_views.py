@@ -15,6 +15,7 @@ from rich.syntax import Syntax
 from rich.text import Text
 
 from orbit.tui.view.detail import DIM, NO_DETAILS, WAITING, capped_with
+from orbit.tui.view.diffs import file_diff
 from orbit.tui.view.tool_calls import ToolCall
 
 SYNTAX_THEME = "ansi_dark"
@@ -24,6 +25,8 @@ READ_LINE = re.compile(r" *(\d+)(?:→|\t)(.*)")
 READ_SPAN = ("offset", "limit")
 HEADER = "bold"
 ERROR = "red"
+DIFF_STYLES: Mapping[str, str] = MappingProxyType({"-": "red", "+": "green"})
+"""How a diff's removed and added lines are drawn; the rest are dim."""
 
 type Render = Callable[[str], RenderableType]
 type View = Callable[[ToolCall], RenderableType | None]
@@ -120,6 +123,24 @@ def _search_view(call: ToolCall) -> RenderableType | None:
     return _shown(header, call, Text)
 
 
+def _diff_view(call: ToolCall) -> RenderableType | None:
+    """The file's path, the diff ``call`` makes to it, then its output, dim, or red if it
+    failed."""
+    diff = file_diff(call.name, call.arguments)
+    if diff is None:
+        return None
+    lines = capped_with("\n".join(diff.lines), diff_text)
+    header = Group(Text(diff.path, style=HEADER), Rule(style=DIM), lines)
+    style = ERROR if call.status == "failed" else DIM
+    return _shown(header, call, lambda text: Text(text, style=style))
+
+
+def diff_text(diff: str) -> Text:
+    """The lines of ``diff``, removed ones red, added ones green and the rest dim."""
+    lines = diff.splitlines()
+    return Text("\n").join(Text(line, style=DIFF_STYLES.get(line[:1], DIM)) for line in lines)
+
+
 def _generic_view(call: ToolCall) -> RenderableType:
     """``call``'s arguments as JSON, then its output, as JSON too if it is a JSON object or
     array."""
@@ -163,6 +184,9 @@ TOOL_VIEWS: Mapping[str, View] = MappingProxyType(
         "Bash": _bash_view,
         "Grep": _search_view,
         "Glob": _search_view,
+        "Edit": _diff_view,
+        "MultiEdit": _diff_view,
+        "Write": _diff_view,
     }
 )
 """How the detail pane shows the calls of the tools that have a view of their own."""

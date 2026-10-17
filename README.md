@@ -213,15 +213,19 @@ form that suits the call's tool, a rule, then the output or orbit's reply:
   file's type, with their line numbers; a file type it doesn't know stays plain.
 - Bash: `$ ` and the whole command, then the output in its own colours.
 - Grep and Glob: the pattern (and `in` the path, if given), then the matches as plain lines.
-- Edit, MultiEdit, Write and every other tool: the arguments as highlighted JSON, then the output,
-  indented and highlighted too if it's a JSON object or array.
+- Edit, MultiEdit and Write: the file's path, a rule, then the change as a diff: removed lines
+  `-` in red, added lines `+` in green and unchanged ones dim, after a space. A MultiEdit shows
+  each edit's diff, a dim `⋯` between them, and a Write shows all its content as added. Then the
+  output, dim, or red if the call failed.
+- Every other tool: the arguments as highlighted JSON, then the output, indented and highlighted
+  too if it's a JSON object or array.
 - A request to orbit: the arguments as highlighted JSON, then `orbit: ` and the reply, red if it's
   an error.
 
 A call whose arguments don't fit its tool's view shows them as JSON instead. A call still running
-shows a dim `waiting for output…` until its result arrives, and the pane updates in place. Output
-of more than 200 lines shows its first 100, a dim `… N lines omitted · y copies all …`, and its
-last 100, cut before it's highlighted. While the pane
+shows a dim `waiting for output…` until its result arrives, and the pane updates in place. Output,
+or an edit's diff, of more than 200 lines shows its first 100, a dim `… N lines omitted · y copies
+all …`, and its last 100, cut before it's highlighted. While the pane
 is open it follows the cursor as `j`/`k` move, showing a dim `No details for this entry` on other
 entries. The first `esc` closes it, staying in the list; the next leaves the list as usual.
 Switching tabs closes it, and it stays closed when you come back.
@@ -240,7 +244,8 @@ between entries underneath.
 
 `y`, from the conversation's list or the activated pane while the pane is open, copies the whole
 of its call to the clipboard: all of the output or orbit's reply, lines omitted from the pane
-included, or the arguments as JSON while the call still runs; a toast says `Copied N lines`. On
+included, or the arguments as JSON while the call still runs; for an Edit, MultiEdit or Write,
+the whole diff instead; a toast says `Copied N lines`. On
 an entry without details it does nothing. Copying uses the terminal's clipboard escape (OSC 52),
 which most terminals support; inside tmux it needs `set -g set-clipboard on`.
 

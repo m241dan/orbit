@@ -28,7 +28,15 @@ from orbit.tui.view.detail import (
     detail_covers,
     detail_title,
 )
-from orbit.tui.view.detail_views import TOOL_VIEWS, detail_body, pretty_json, read_output
+from orbit.tui.view.detail_views import (
+    DIFF_STYLES,
+    TOOL_VIEWS,
+    detail_body,
+    diff_text,
+    pretty_json,
+    read_output,
+)
+from orbit.tui.view.diffs import EDIT_SEPARATOR, FileDiff, file_diff, line_diff
 from orbit.tui.view.events import SUPERSEDED_UNLESS, coalesce
 from orbit.tui.view.panels import STALE_STYLE, USAGE_COLOURS, reset_label, step_lines, usage_lines
 from orbit.tui.view.progress import TaskProgress, progress_entry, task_note
@@ -155,6 +163,8 @@ __all__ = [
     "DETAIL_HEIGHT",
     "DETAIL_LINE_LIMIT",
     "DETAIL_TITLE",
+    "DIFF_STYLES",
+    "EDIT_SEPARATOR",
     "EXIT_LABELS",
     "EXPANDED_MARKER",
     "GUTTER_BAR",
@@ -197,6 +207,7 @@ __all__ = [
     "EntryKind",
     "EntryMarkdown",
     "ExitRule",
+    "FileDiff",
     "LeftHeading",
     "RunningAgent",
     "RunningCall",
@@ -222,6 +233,7 @@ __all__ = [
     "detail_copy",
     "detail_covers",
     "detail_title",
+    "diff_text",
     "duration_text",
     "elapsed_clock",
     "entry_label",
@@ -230,12 +242,14 @@ __all__ = [
     "error_entry",
     "exchange_entry",
     "exit_rule",
+    "file_diff",
     "final_answer",
     "finishes",
     "gutter",
     "hanging_indent",
     "join_prompt",
     "line_count",
+    "line_diff",
     "mark_planner_busy",
     "mark_tab_read",
     "mark_tab_unread",

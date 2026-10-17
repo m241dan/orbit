@@ -86,6 +86,24 @@ def test_y_copies_a_running_calls_arguments_as_json() -> None:
     assert detail_copy(call) == '{\n  "command": "ls é",\n  "n": 1\n}'
 
 
+def test_y_copies_an_edits_whole_diff() -> None:
+    content = numbered(250)
+    call = ToolCall("c", "Write", "Write a.py", {"file_path": "a.py", "content": content})
+    assert detail_copy(call) == "\n".join(f"+{line}" for line in content.splitlines())
+
+
+def test_y_copies_a_finished_edits_diff_rather_than_its_output() -> None:
+    arguments = {"file_path": "a.py", "old_string": "a", "new_string": "b"}
+    call = ToolCall("c", "Edit", "Edit a.py", arguments, "passed", "Updated.")
+    assert detail_copy(call) == "-a\n+b"
+
+
+def test_y_copies_a_request_named_like_an_edit_by_its_reply() -> None:
+    arguments = {"file_path": "a.py", "content": "x"}
+    call = ToolCall("c", "Write", "Write", arguments, "passed", "Merged.", request=True)
+    assert detail_copy(call) == "Merged."
+
+
 def test_y_copies_nothing_without_a_call() -> None:
     assert detail_copy(None) is None
 

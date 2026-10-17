@@ -1,6 +1,7 @@
 """The detail pane shows each tool's call in the form that suits it."""
 
 import io
+from dataclasses import replace
 from typing import Any
 
 from rich.console import Console, RenderableType
@@ -14,6 +15,7 @@ from orbit.tui.view import (
     ToolCall,
     ToolCallStatus,
     detail_body,
+    diff_text,
     pretty_json,
     read_output,
 )
@@ -194,3 +196,69 @@ def test_malformed_arguments_fall_back_to_json() -> None:
 def test_arguments_that_arent_json_are_shown_as_text() -> None:
     body = detail_body(call("Odd", {"when": object}, "out"))
     assert plain(body)[1] == '  "when": "<class \'object\'>"'
+
+
+def edit(old: str, new: str, output: str = "Updated.", **more: Any) -> ToolCall:
+    arguments = {"file_path": "a.py", "old_string": old, "new_string": new, **more}
+    return call("Edit", arguments, output)
+
+
+def test_an_edit_shows_the_path_its_diff_then_its_output() -> None:
+    body = detail_body(edit("a\nb\nc", "a\nB\nc"))
+    assert plain(body) == ["a.py", RULE, " a", "-b", "+B", " c", RULE, "Updated."]
+    assert style_of(body, "a.py") == "bold"
+
+
+def test_an_edits_lines_are_red_removed_green_added_and_dim_unchanged() -> None:
+    body = detail_body(edit("a\nb", "a\nB"))
+    assert style_of(body, "-b") == "red"
+    assert style_of(body, "+B") == "green"
+    assert style_of(body, " a") == "dim"
+    assert style_of(body, "Updated.") == "dim"
+
+
+def test_replace_all_doesnt_change_an_edits_view() -> None:
+    assert plain(detail_body(edit("x", "y", replace_all=True))) == plain(
+        detail_body(edit("x", "y"))
+    )
+
+
+def test_a_failed_edits_output_is_red() -> None:
+    failed = replace(edit("x", "y", "String not found"), status="failed")
+    assert style_of(detail_body(failed), "String not found") == "red"
+
+
+def test_a_running_edit_shows_its_diff_then_waits() -> None:
+    running = replace(edit("x", "y"), status="running")
+    assert plain(detail_body(running))[-1] == WAITING
+
+
+def test_a_multi_edit_separates_its_edits_dimly() -> None:
+    edits = [{"old_string": "a", "new_string": "b"}, {"old_string": "c", "new_string": "d"}]
+    body = detail_body(call("MultiEdit", {"file_path": "a.py", "edits": edits}, "Done."))
+    assert plain(body) == ["a.py", RULE, "-a", "+b", "⋯", "-c", "+d", RULE, "Done."]
+    assert style_of(body, "⋯") == "dim"
+
+
+def test_a_write_shows_all_its_content_added() -> None:
+    body = detail_body(call("Write", {"file_path": "a.py", "content": "x\ny"}, "Created."))
+    assert plain(body) == ["a.py", RULE, "+x", "+y", RULE, "Created."]
+    assert style_of(body, "+y") == "green"
+
+
+def test_a_long_diff_is_capped() -> None:
+    content = "\n".join(f"x{i}" for i in range(250))
+    lines = plain(detail_body(call("Write", {"file_path": "a.py", "content": content}, "ok")))
+    assert lines[2] == "+x0" and lines[101] == "+x99"
+    assert lines[102] == "… 50 lines omitted · y copies all …"
+    assert lines[103] == "+x150" and lines[-3:] == ["+x249", RULE, "ok"]
+
+
+def test_malformed_edits_fall_back_to_json() -> None:
+    for name in ("Edit", "MultiEdit", "Write"):
+        body = detail_body(call(name, {"file_path": "a.py"}, "out"))
+        assert plain(body) == ["{", '  "file_path": "a.py"', "}", RULE, "out"]
+
+
+def test_diff_text_without_lines_is_empty() -> None:
+    assert diff_text("").plain == ""
