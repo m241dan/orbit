@@ -195,9 +195,13 @@ def _pipes(
     return process.stdin, process.stdout, process.stderr
 
 
-def _crash(status: int, stderr: str) -> RuntimeError:
+class _Crashed(RuntimeError):
+    """The CLI ran but exited without finishing the turn."""
+
+
+def _crash(status: int, stderr: str) -> _Crashed:
     """The error for a CLI that exited without finishing the turn."""
-    return RuntimeError(stderr or f"claude exited with status {status}")
+    return _Crashed(stderr or f"claude exited with status {status}")
 
 
 class ClaudeCliRunner:
@@ -214,15 +218,15 @@ class ClaudeCliRunner:
 
     async def converse(self, turn_id: str, launch: AgentLaunch) -> AsyncIterator[Event]:
         """A turn of the agent's conversation: its first starts a Claude session, later ones
-        resume it, each agent's apart from the others'. A resuming turn that fails before the
-        CLI reports its session raises ResumeFailed."""
+        resume it, each agent's apart from the others'. A resuming turn whose CLI exits before
+        reporting its session raises ResumeFailed."""
         agent_id = launch.agent.id
         resume = self._conversations.get(agent_id)
         turn = self._turn(launch, resume)
         try:
             async for event in turn.run(turn_id, launch.prompt):
                 yield event
-        except Exception as exc:
+        except _Crashed as exc:
             if resume and not turn.session_id:
                 raise ResumeFailed(str(exc)) from exc
             raise

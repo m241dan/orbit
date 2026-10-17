@@ -342,6 +342,27 @@ async def test_a_new_turn_failing_is_not_a_failure_to_resume(tmp_path: Path) -> 
     assert not isinstance(raised.value, ResumeFailed)
 
 
+async def test_a_resumed_turn_whose_cli_cannot_start_is_not_a_failure_to_resume(
+    tmp_path: Path,
+) -> None:
+    runner = ClaudeCliRunner(command=(str(tmp_path / "no-such-claude"),))
+    runner.set_conversation("agent-3", "saved-7")
+    with pytest.raises(RuntimeError, match=r"Could not start .*no-such-claude") as raised:
+        await run(runner, "Carry on.")
+    assert not isinstance(raised.value, ResumeFailed)
+    assert runner.conversation("agent-3") == "saved-7"
+
+
+async def test_a_resumed_turn_with_unexpected_output_is_not_a_failure_to_resume(
+    tmp_path: Path,
+) -> None:
+    runner, _ = make_runner(tmp_path, stdout=["Error: something odd"])
+    runner.set_conversation("agent-3", "saved-7")
+    with pytest.raises(RuntimeError, match="Unexpected output from claude") as raised:
+        await run(runner, "Carry on.")
+    assert not isinstance(raised.value, ResumeFailed)
+
+
 async def test_runner_skips_blank_lines(tmp_path: Path) -> None:
     runner, _ = make_runner(tmp_path, stdout=["", *lines(TEXT), "  ", *lines(RESULT)])
     events = await run(runner, "hi")
