@@ -14,7 +14,7 @@ from rich.rule import Rule
 from rich.syntax import Syntax
 from rich.text import Text
 
-from orbit.tui.view.detail import DIM, NO_DETAILS, WAITING, capped_with
+from orbit.tui.view.detail import DIM, EMPTY_DIFF, NO_DETAILS, WAITING, capped_with
 from orbit.tui.view.diff_numbers import NUMBERED_LINE, diff_numbers, numbered_diff
 from orbit.tui.view.diffs import FileDiff, file_diff
 from orbit.tui.view.tool_calls import ToolCall
@@ -131,16 +131,23 @@ def _search_view(call: ToolCall) -> RenderableType | None:
 
 
 def _diff_view(call: ToolCall) -> RenderableType | None:
-    """The file's path, the diff ``call`` makes to it, its lines numbered where that's sure,
-    then its output, dim, or red if it failed."""
+    """The file's path, the diff ``call`` makes to it, its lines numbered where that's sure, or
+    a dim note when it has none, then its output, dim, or red if it failed."""
     diff = file_diff(call.name, call.arguments)
     if diff is None:
         return None
-    numbered, gutter = numbered_diff(diff.lines, _diff_numbers(call, diff))
-    lines = capped_with("\n".join(numbered), partial(diff_text, gutter=gutter))
-    header = Group(Text(diff.path, style=HEADER), Rule(style=DIM), lines)
+    header = Group(Text(diff.path, style=HEADER), Rule(style=DIM), _diff_lines(call, diff))
     style = ERROR if call.status == "failed" else DIM
     return _shown(header, call, lambda text: Text(text, style=style))
+
+
+def _diff_lines(call: ToolCall, diff: FileDiff) -> RenderableType:
+    """``diff``'s lines, numbered as ``call``'s output shows them and capped, or a dim note
+    when it has none."""
+    if not diff.lines:
+        return Text(EMPTY_DIFF, style=DIM)
+    numbered, gutter = numbered_diff(diff.lines, _diff_numbers(call, diff))
+    return capped_with("\n".join(numbered), partial(diff_text, gutter=gutter))
 
 
 def _diff_numbers(call: ToolCall, diff: FileDiff) -> list[int | None]:

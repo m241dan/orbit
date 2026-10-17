@@ -94,6 +94,17 @@ def test_y_copies_a_finished_edits_diff_rather_than_its_output() -> None:
     assert detail_copy(call) == "-a\n+b"
 
 
+def test_y_copies_a_finished_empty_writes_output() -> None:
+    arguments = {"file_path": "a.py", "content": ""}
+    call = ToolCall("c", "Write", "Write a.py", arguments, "passed", "Created.")
+    assert detail_copy(call) == "Created."
+
+
+def test_y_copies_a_running_empty_writes_arguments_as_json() -> None:
+    call = ToolCall("c", "Write", "Write a.py", {"file_path": "a.py", "content": ""})
+    assert detail_copy(call) == '{\n  "file_path": "a.py",\n  "content": ""\n}'
+
+
 def test_y_copies_a_request_named_like_an_edit_by_its_reply() -> None:
     arguments = {"file_path": "a.py", "content": "x"}
     call = ToolCall("c", "Write", "Write", arguments, "passed", "Merged.", request=True)

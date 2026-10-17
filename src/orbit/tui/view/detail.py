@@ -20,6 +20,7 @@ COPY_HINT = "y copy"
 COPY_ALL_HINT = "y copies all"
 NO_DETAILS = "No details for this entry"
 WAITING = "waiting for output…"
+EMPTY_DIFF = "no lines changed"
 DIM = "dim"
 
 
@@ -35,17 +36,23 @@ def detail_title(call: ToolCall | None) -> str:
 
 
 def detail_copy(call: ToolCall | None) -> str | None:
-    """What y copies from the detail pane for ``call``: the whole diff an edit makes, else its
-    whole output or reply, or its arguments as JSON while it runs or when it has no output;
-    None when there's no call."""
+    """What y copies from the detail pane for ``call``: the whole diff an edit makes, if it has
+    lines, else its whole output or reply, or its arguments as JSON while it runs or when it has
+    no output; None when there's no call."""
     if call is None:
         return None
-    diff = None if call.request else file_diff(call.name, call.arguments)
-    if diff is not None:
-        return "\n".join(diff.lines)
+    diff = _diff_copy(call)
+    if diff:
+        return diff
     if call.status in ("running", "no_result") or not call.output:
         return json.dumps(call.arguments, indent=2, ensure_ascii=False)
     return call.output
+
+
+def _diff_copy(call: ToolCall) -> str:
+    """The whole diff ``call`` makes, if it's an edit; empty otherwise."""
+    diff = None if call.request else file_diff(call.name, call.arguments)
+    return "" if diff is None else "\n".join(diff.lines)
 
 
 def copied_note(text: str) -> str:

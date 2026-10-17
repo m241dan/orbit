@@ -10,6 +10,7 @@ from rich.text import Text
 
 from orbit.tui.view import (
     DETAIL_LINE_LIMIT,
+    EMPTY_DIFF,
     NO_DETAILS,
     WAITING,
     ToolCall,
@@ -261,6 +262,17 @@ def test_a_write_shows_all_its_content_added() -> None:
     assert plain(body) == ["a.py", RULE, "1 +x", "2 +y", RULE, "Created."]
     assert style_of(body, "+y") == "green"
     assert style_of(body, "2 ") == "dim"
+
+
+def test_an_empty_write_notes_dimly_that_no_lines_changed() -> None:
+    body = detail_body(call("Write", {"file_path": "a.py", "content": ""}, "Created."))
+    assert plain(body) == ["a.py", RULE, EMPTY_DIFF, RULE, "Created."]
+    assert style_of(body, EMPTY_DIFF) == "dim"
+
+
+def test_a_multi_edit_without_edits_notes_that_no_lines_changed() -> None:
+    body = detail_body(call("MultiEdit", {"file_path": "a.py", "edits": []}, "Done."))
+    assert plain(body) == ["a.py", RULE, EMPTY_DIFF, RULE, "Done."]
 
 
 def test_a_long_diff_is_capped() -> None:

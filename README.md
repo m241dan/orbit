@@ -217,7 +217,9 @@ form that suits the call's tool, a rule, then the output or orbit's reply:
 - Grep and Glob: the pattern (and `in` the path, if given), then the matches as plain lines.
 - Edit, MultiEdit and Write: the file's path, a rule, then the change as a diff: removed lines
   `-` in red, added lines `+` in green and unchanged ones dim, after a space. A MultiEdit shows
-  each edit's diff, a dim `⋯` between them, and a Write shows all its content as added. Line
+  each edit's diff, a dim `⋯` between them, and a Write shows all its content as added. A change
+  with no lines, such as a Write of an empty file or a MultiEdit without edits, shows a dim `no
+  lines changed` instead. Line
   numbers are best effort, right-aligned in a dim column before the lines: a Write's count from 1,
   and an edit's unchanged and added lines are numbered where its new text is found, in just one
   place, in the snippet of the file its result shows; removed lines, edits it can't place and
@@ -251,7 +253,7 @@ between entries underneath.
 `y`, from the conversation's list or the activated pane while the pane is open, copies the whole
 of its call to the clipboard: all of the output or orbit's reply, lines omitted from the pane
 included, or the arguments as JSON while the call still runs or when it has no output; for an Edit, MultiEdit or Write,
-the whole diff instead; a toast says `Copied N lines`. On
+the whole diff instead, unless it has no lines; a toast says `Copied N lines`. On
 an entry without details it does nothing. Copying uses the terminal's clipboard escape (OSC 52),
 which most terminals support; inside tmux it needs `set -g set-clipboard on`.
 
