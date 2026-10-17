@@ -1,5 +1,7 @@
 from textual import events, on
 from textual.app import App, ComposeResult
+from textual.pilot import Pilot
+from textual.widgets.text_area import Location
 
 from orbit.tui.widgets import ChatPrompt
 
@@ -25,6 +27,15 @@ def rows(prompt: ChatPrompt) -> int:
     return prompt.region.height - 2
 
 
+async def delete_back_to(pilot: Pilot[None], prompt: ChatPrompt, end: Location) -> None:
+    """Cuts the prompt's text back to ``end`` directly, then deletes one more character by
+    pressing backspace, as the user would."""
+    prompt.delete(end, prompt.document.end)
+    prompt.move_cursor(end)
+    await pilot.press("backspace")
+    await pilot.pause()
+
+
 async def test_starts_one_row_high_in_normal_mode() -> None:
     app = ChatApp()
     async with app.run_test(size=(WIDTH, 30)) as pilot:
@@ -40,7 +51,7 @@ async def test_a_long_line_wraps_and_grows_the_box() -> None:
     async with app.run_test(size=(WIDTH, 30)) as pilot:
         prompt = app.query_one(ChatPrompt)
         prompt.enter_insert_mode()
-        await pilot.press(*"word " * 12)
+        prompt.insert("word " * 12)
         await pilot.pause()
         assert "\n" not in prompt.text
         assert rows(prompt) == 2
@@ -51,7 +62,7 @@ async def test_grows_up_to_eight_rows_then_scrolls() -> None:
     async with app.run_test(size=(WIDTH, 30)) as pilot:
         prompt = app.query_one(ChatPrompt)
         prompt.enter_insert_mode()
-        await pilot.press(*"word " * 50)
+        prompt.insert("word " * 50)
         await pilot.pause()
         assert rows(prompt) == 8
         assert prompt.max_scroll_y > 0
@@ -112,14 +123,12 @@ async def test_shrinks_as_wrapped_text_is_deleted() -> None:
     async with app.run_test(size=(WIDTH, 30)) as pilot:
         prompt = app.query_one(ChatPrompt)
         prompt.enter_insert_mode()
-        await pilot.press(*"word " * 50)
+        prompt.insert("word " * 50)
         await pilot.pause()
         assert rows(prompt) == 8
-        await pilot.press(*["backspace"] * 200)
-        await pilot.pause()
+        await delete_back_to(pilot, prompt, (0, 51))
         assert 1 < rows(prompt) < 8
-        await pilot.press(*["backspace"] * 45)
-        await pilot.pause()
+        await delete_back_to(pilot, prompt, (0, 6))
         assert prompt.text == "word "
         assert rows(prompt) == 1
         assert prompt.max_scroll_y == 0
@@ -134,7 +143,6 @@ async def test_shrinks_as_pasted_lines_are_deleted() -> None:
         app.post_message(events.Paste("one\ntwo\nthree"))
         await pilot.pause()
         assert rows(prompt) == 3
-        await pilot.press(*["backspace"] * len("\ntwo\nthree"))
-        await pilot.pause()
+        await delete_back_to(pilot, prompt, (1, 0))
         assert prompt.text == "one"
         assert rows(prompt) == 1
