@@ -643,8 +643,8 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
   `view` turns state and events into text and doesn't import Textual, with a module per area
   of the screen (`events`, `transcript`, `tool_calls`, `proposals`, `tasks`, `panels`, `agents`,
   `tabs`, `detail` and `detail_views` for the detail pane, `diffs` and `diff_numbers` for an
-  edit's diff, `progress` for notes on a task's run, `turns` for the conversation's running
-  turns, `working` for the working row, and `settings` and `common` for what they share); the widgets (`transcript`,
+  edit's diff, `progress` for notes on a task's run, `rules` for the rules ending turns and
+  agents' runs, `turns` for the conversation's running turns, `working` for the working row, and `settings` and `common` for what they share); the widgets (`transcript`,
   `tabs`, `tasks`, `agents`, `panels`, `proposals`, the proposal modal, and `widgets` for the
   building blocks they share) lay it out, and `app` is the Textual
   app that holds them.

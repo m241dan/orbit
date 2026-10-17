@@ -3,6 +3,7 @@
 from typing import assert_never
 
 from orbit.protocol import (
+    SkipReason,
     StepState,
     TaskMerged,
     TaskStarted,
@@ -13,13 +14,14 @@ from orbit.protocol import (
 )
 from orbit.tui.view.common import EntryKind
 from orbit.tui.view.tabs import task_tab_key
-from orbit.tui.view.transcript import (
-    note_entry,
-    task_started_entry,
-    verification_finished_entry,
-    verification_skipped_entry,
-    verification_started_entry,
-)
+from orbit.tui.view.transcript import note_entry
+
+SKIP_REASONS: dict[SkipReason, str] = {
+    "tools_off": "tools were off",
+    "no_changes": "no files changed",
+    "unchanged": "unchanged since the last failed check",
+    "no_steps": "no verification steps configured",
+}
 
 TaskProgress = (
     TaskStarted | VerificationStarted | VerificationSkipped | VerificationFinished | TaskMerged
@@ -72,3 +74,25 @@ def verification_entry(
             return verification_finished_entry(steps[step], passed)
         case _:
             assert_never(event)
+
+
+def task_started_entry(number: str, state: TaskState | None) -> tuple[str, EntryKind]:
+    """A task's header: its ``number`` and prompt; a task that isn't on the list (``state``
+    None) is headed by ``number`` alone, which is then its id."""
+    if state is None:
+        return f"Task {number}", "user"
+    return f"Task {number}: {state.task.prompt}", "user"
+
+
+def verification_started_entry(step: StepState) -> tuple[str, EntryKind]:
+    return f"🔍 Verifying: {step.name}…", "verify"
+
+
+def verification_skipped_entry(reason: SkipReason) -> tuple[str, EntryKind]:
+    return f"⏩ Verification skipped: {SKIP_REASONS[reason]}", "verify"
+
+
+def verification_finished_entry(step: StepState, passed: bool) -> tuple[str, EntryKind]:
+    if passed:
+        return f"✅ Verification passed: {step.name}", "verify"
+    return f"❌ Verification failed: {step.name}", "error"

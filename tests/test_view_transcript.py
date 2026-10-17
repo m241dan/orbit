@@ -1,9 +1,5 @@
-import pytest
-
 from orbit.protocol import (
     PLANNER,
-    AgentExited,
-    AgentExitReason,
     AgentReply,
     AgentRequest,
     AgentStarted,
@@ -11,16 +7,10 @@ from orbit.protocol import (
     ErrorOccurred,
     Notice,
     ProgressNoted,
-    StepState,
     TaskGaveUp,
     TaskMerged,
-    TaskSpec,
-    TaskState,
     ToolCallFinished,
     ToolCallStarted,
-    TurnEndReason,
-    TurnFinished,
-    Usage,
 )
 from orbit.tui.view import (
     GUTTER_BAR,
@@ -29,9 +19,6 @@ from orbit.tui.view import (
     PROMPT_MARKER,
     REPLY_LIMIT,
     SPINNER_FPS,
-    DrawnRule,
-    EntryKind,
-    ExitRule,
     ToolCall,
     activity_entry,
     agent_entry,
@@ -39,13 +26,10 @@ from orbit.tui.view import (
     banded,
     collapsible,
     conversation_title,
-    duration_text,
     entry_label,
     entry_prefix,
     error_entry,
     exchange_entry,
-    exit_rule,
-    final_answer,
     gutter,
     hanging_indent,
     note_entry,
@@ -56,16 +40,10 @@ from orbit.tui.view import (
     speaker,
     speaker_label,
     starts_collapsed,
-    task_started_entry,
     tool_call_entry,
     tool_call_finished,
     tool_call_started,
     tool_call_unfinished,
-    turn_rule_entry,
-    usage_text,
-    verification_finished_entry,
-    verification_skipped_entry,
-    verification_started_entry,
 )
 
 
@@ -74,21 +52,6 @@ def test_turn_output_becomes_transcript_entries() -> None:
     assert output_entry(ToolCallFinished(turn_id="t", call_id="c", output="ok")) == ("ok", "tool")
     failed = ToolCallFinished(turn_id="t", call_id="c", output="no", is_error=True)
     assert output_entry(failed) == ("no", "error")
-
-
-def test_task_progress_entries() -> None:
-    state = TaskState(id="7", task=TaskSpec(prompt="do it"))
-    assert task_started_entry("1.2", state) == ("Task 1.2: do it", "user")
-    # A task that isn't on the list has no prompt to show, only its id.
-    assert task_started_entry("9", None) == ("Task 9", "user")
-    step = StepState(name="Lint")
-    assert verification_started_entry(step) == ("🔍 Verifying: Lint…", "verify")
-    assert verification_skipped_entry("no_changes") == (
-        "⏩ Verification skipped: no files changed",
-        "verify",
-    )
-    assert verification_finished_entry(step, True) == ("✅ Verification passed: Lint", "verify")
-    assert verification_finished_entry(step, False) == ("❌ Verification failed: Lint", "error")
 
 
 def test_agent_lifecycle_becomes_transcript_entries() -> None:
@@ -166,17 +129,6 @@ def test_a_reply_to_no_request_shown_is_an_entry_of_its_own() -> None:
 def test_a_progress_note_is_an_entry() -> None:
     note = ProgressNoted(agent_id="agent-1", task_id="1", note="tests written")
     assert exchange_entry(note) == ("agent-1: tests written", "agent")
-
-
-def test_no_steps_skip_reason_reads_naturally() -> None:
-    text, kind = verification_skipped_entry("no_steps")
-    assert text == "⏩ Verification skipped: no verification steps configured"
-    assert kind == "verify"
-
-
-def test_unchanged_skip_reason_reads_naturally() -> None:
-    text, kind = verification_skipped_entry("unchanged")
-    assert "unchanged" in text and kind == "verify"
 
 
 def test_agent_tool_output_and_errors_are_labelled_with_their_agent() -> None:
@@ -364,70 +316,6 @@ def test_a_failed_tool_calls_entry_is_an_error() -> None:
     assert tool_call_entry(call, None, 0.0) == ("→ Read a.py ✗ 1 line", "error")
 
 
-def ended(reason: TurnEndReason, usage: Usage | None = None) -> TurnFinished:
-    return TurnFinished(turn_id="t", agent_id="agent-3", reason=reason, usage=usage)
-
-
-@pytest.mark.parametrize(
-    ("reason", "label", "kind"),
-    [
-        ("completed", "done", "rule"),
-        ("cancelled", "stopped", "rule"),
-        ("max_steps", "out of steps", "rule"),
-        ("error", "error", "error_rule"),
-    ],
-)
-def test_a_turns_rule_says_how_it_ended_in_its_kind(
-    reason: TurnEndReason, label: str, kind: EntryKind
-) -> None:
-    assert turn_rule_entry(ended(reason), None, None) == (label, kind)
-
-
-def test_a_turns_rule_is_headed_by_its_speaker() -> None:
-    assert turn_rule_entry(ended("completed"), 250.0, "agent-3") == ("agent-3 done · 4m10s", "rule")
-
-
-def test_a_turns_rule_without_usage_shows_the_time_elapsed() -> None:
-    assert turn_rule_entry(ended("cancelled"), 42.7, None) == ("stopped · 42s", "rule")
-
-
-def test_a_turns_rule_with_usage_shows_its_time_and_tokens() -> None:
-    usage = Usage(
-        input_tokens=200_000,
-        cache_creation_input_tokens=1_000_000,
-        cache_read_input_tokens=50_000,
-        output_tokens=8_400,
-        duration_ms=72_500,
-    )
-    assert turn_rule_entry(ended("completed", usage), 5.0, None) == (
-        "done · 1m12s · ↑1.2M ↓8.4k",
-        "rule",
-    )
-
-
-@pytest.mark.parametrize(
-    ("seconds", "text"),
-    [
-        (0, "0s"),
-        (59.9, "59s"),
-        (60, "1m00s"),
-        (72, "1m12s"),
-        (3599, "59m59s"),
-        (3600, "1h00m"),
-        (3780, "1h03m"),
-    ],
-)
-def test_durations_read_in_seconds_minutes_or_hours(seconds: float, text: str) -> None:
-    assert duration_text(seconds) == text
-
-
-def test_usage_reads_input_with_the_cache_up_and_output_down() -> None:
-    usage = Usage(
-        input_tokens=10, cache_creation_input_tokens=20, cache_read_input_tokens=30, output_tokens=5
-    )
-    assert usage_text(usage) == "↑60 ↓5"
-
-
 def test_only_rule_kinds_are_ruled() -> None:
     assert ruled("rule")
     assert ruled("error_rule")
@@ -440,26 +328,6 @@ def test_an_error_is_labelled_with_its_agent() -> None:
         "error",
     )
     assert error_entry(ErrorOccurred(message="boom")) == ("boom", "error")
-
-
-def test_only_the_message_after_the_last_tool_call_is_the_final_answer() -> None:
-    assert final_answer(["message", "tool", "message"]) == (1,)
-
-
-def test_a_turn_of_a_message_alone_has_it_as_its_final_answer() -> None:
-    assert final_answer(["message"]) == (0,)
-
-
-def test_a_turn_ending_on_a_tool_call_has_no_final_answer() -> None:
-    assert final_answer(["message", "tool"]) == ()
-
-
-def test_every_message_after_the_last_tool_call_is_the_final_answer() -> None:
-    assert final_answer(["tool", "message", "tool", "message", "message"]) == (1, 2)
-
-
-def test_a_turn_with_no_output_has_no_final_answer() -> None:
-    assert final_answer([]) == ()
 
 
 def test_the_prompt_title_names_the_planner_and_notes_when_it_is_busy() -> None:
@@ -475,51 +343,3 @@ def test_the_conversation_title_names_the_tab_shown_after_all() -> None:
 def test_the_conversation_title_notes_hidden_thinking() -> None:
     assert conversation_title(None, True) == "Conversation · thinking hidden"
     assert conversation_title("coder", True) == "Conversation · coder · thinking hidden"
-
-
-def exited(reason: AgentExitReason) -> AgentExited:
-    return AgentExited(agent_id="agent-3", reason=reason)
-
-
-@pytest.mark.parametrize(
-    ("reason", "text", "kind"),
-    [
-        ("finished", "agent-3 done · 42s", "rule"),
-        ("killed", "agent-3 stopped · 42s", "rule"),
-        ("crashed", "agent-3 crashed · 42s", "error_rule"),
-    ],
-)
-def test_an_agent_exiting_without_a_turn_rule_adds_its_own(
-    reason: AgentExitReason, text: str, kind: EntryKind
-) -> None:
-    assert exit_rule(exited(reason), None, 42.5, "agent-3") == ExitRule(text, kind, False)
-
-
-def test_an_agents_own_exit_rule_shows_no_time_when_unknown() -> None:
-    assert exit_rule(exited("crashed"), None, None, None) == ExitRule(
-        "crashed", "error_rule", False
-    )
-
-
-def test_an_agent_finishing_after_its_turn_rule_adds_nothing() -> None:
-    assert exit_rule(exited("finished"), DrawnRule(ended("completed"), 5.0), 9.0, "agent-3") is None
-
-
-@pytest.mark.parametrize("reason", ["cancelled", "max_steps", "error"])
-def test_an_agent_killed_after_a_rule_not_done_leaves_it(reason: TurnEndReason) -> None:
-    assert exit_rule(exited("killed"), DrawnRule(ended(reason), 5.0), 9.0, "agent-3") is None
-
-
-def test_an_agent_killed_after_a_done_rule_turns_it_stopped_keeping_its_cost() -> None:
-    usage = Usage(input_tokens=210_000, output_tokens=12_000, duration_ms=250_000)
-    drawn = DrawnRule(ended("completed", usage), 5.0)
-    assert exit_rule(exited("killed"), drawn, 9.0, "agent-3") == ExitRule(
-        "agent-3 stopped · 4m10s · ↑210k ↓12k", "rule", True
-    )
-
-
-def test_an_agent_crashing_after_a_done_rule_turns_it_a_crashed_error_rule() -> None:
-    drawn = DrawnRule(ended("completed"), 42.0)
-    assert exit_rule(exited("crashed"), drawn, 9.0, None) == ExitRule(
-        "crashed · 42s", "error_rule", True
-    )

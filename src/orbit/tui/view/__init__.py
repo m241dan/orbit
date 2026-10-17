@@ -44,8 +44,29 @@ from orbit.tui.view.diff_numbers import diff_numbers, edited_snippet, numbered_d
 from orbit.tui.view.diffs import EDIT_SEPARATOR, FileDiff, diff_change, file_diff, line_diff
 from orbit.tui.view.events import SUPERSEDED_UNLESS, coalesce
 from orbit.tui.view.panels import STALE_STYLE, USAGE_COLOURS, reset_label, step_lines, usage_lines
-from orbit.tui.view.progress import TaskProgress, progress_entry, task_note
+from orbit.tui.view.progress import (
+    SKIP_REASONS,
+    TaskProgress,
+    progress_entry,
+    task_note,
+    task_started_entry,
+    verification_finished_entry,
+    verification_skipped_entry,
+    verification_started_entry,
+)
 from orbit.tui.view.proposals import DECISION_NOTES, decision_entry, proposal_text
+from orbit.tui.view.rules import (
+    EXIT_LABELS,
+    TURN_END_LABELS,
+    DrawnRule,
+    ExitRule,
+    TurnStep,
+    duration_text,
+    exit_rule,
+    final_answer,
+    turn_rule_entry,
+    usage_text,
+)
 from orbit.tui.view.settings import (
     TOOL_ACCESS_DESCRIPTIONS,
     TOOL_ACCESS_LABELS,
@@ -94,7 +115,6 @@ from orbit.tui.view.transcript import (
     BANDED_KINDS,
     COLLAPSED_KINDS,
     CONVERSATION_TITLE,
-    EXIT_LABELS,
     EXPANDED_MARKER,
     GUTTER_BAR,
     GUTTER_MARKER,
@@ -103,26 +123,18 @@ from orbit.tui.view.transcript import (
     PROMPT_LINES_SHOWN,
     PROMPT_MARKER,
     RULE_KINDS,
-    SKIP_REASONS,
     STARTUP_TAIL_LINES,
-    TURN_END_LABELS,
     AgentNote,
-    DrawnRule,
-    ExitRule,
-    TurnStep,
     activity_entry,
     agent_entry,
     agent_labelled,
     banded,
     collapsible,
     conversation_title,
-    duration_text,
     entry_label,
     entry_prefix,
     error_entry,
     exchange_entry,
-    exit_rule,
-    final_answer,
     gutter,
     hanging_indent,
     note_entry,
@@ -134,13 +146,7 @@ from orbit.tui.view.transcript import (
     speaker_label,
     starts_collapsed,
     startup_entry,
-    task_started_entry,
     tool_call_entry,
-    turn_rule_entry,
-    usage_text,
-    verification_finished_entry,
-    verification_skipped_entry,
-    verification_started_entry,
 )
 from orbit.tui.view.turns import (
     ExitedAgent,

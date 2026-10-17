@@ -12,7 +12,7 @@ from orbit.protocol import (
     TurnFinished,
     TurnStarted,
 )
-from orbit.tui.view.transcript import DrawnRule, TurnStep, final_answer
+from orbit.tui.view.rules import DrawnRule, TurnStep, final_answer
 
 type TurnKey = tuple[str | None, str]
 """A turn by its agent (None for a turn orbit ended itself, with no agent) and id: turn ids

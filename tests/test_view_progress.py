@@ -8,7 +8,13 @@ from orbit.protocol import (
     VerificationSkipped,
     VerificationStarted,
 )
-from orbit.tui.view import task_note
+from orbit.tui.view import (
+    task_note,
+    task_started_entry,
+    verification_finished_entry,
+    verification_skipped_entry,
+    verification_started_entry,
+)
 
 CODER_TASK = TaskState(id="7", task=TaskSpec(prompt="do it"))
 STEPS = (StepState(name="Lint"), StepState(name="Tests"))
@@ -58,3 +64,29 @@ def test_a_merge_is_noted_under_the_tasks_tab() -> None:
         ("⇢ Merged into the base branch.", "verify"),
         "coder",
     )
+
+
+def test_task_progress_entries() -> None:
+    state = TaskState(id="7", task=TaskSpec(prompt="do it"))
+    assert task_started_entry("1.2", state) == ("Task 1.2: do it", "user")
+    # A task that isn't on the list has no prompt to show, only its id.
+    assert task_started_entry("9", None) == ("Task 9", "user")
+    step = StepState(name="Lint")
+    assert verification_started_entry(step) == ("🔍 Verifying: Lint…", "verify")
+    assert verification_skipped_entry("no_changes") == (
+        "⏩ Verification skipped: no files changed",
+        "verify",
+    )
+    assert verification_finished_entry(step, True) == ("✅ Verification passed: Lint", "verify")
+    assert verification_finished_entry(step, False) == ("❌ Verification failed: Lint", "error")
+
+
+def test_no_steps_skip_reason_reads_naturally() -> None:
+    text, kind = verification_skipped_entry("no_steps")
+    assert text == "⏩ Verification skipped: no verification steps configured"
+    assert kind == "verify"
+
+
+def test_unchanged_skip_reason_reads_naturally() -> None:
+    text, kind = verification_skipped_entry("unchanged")
+    assert "unchanged" in text and kind == "verify"
