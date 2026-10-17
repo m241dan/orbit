@@ -16,7 +16,7 @@ from orbit.agent.application.agent_run import AgentRun
 from orbit.agent.application.desk import AgentDesk, Agents
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.agent_task import Limits
-from orbit.agent.domain.board import TaskBoard
+from orbit.agent.domain.board import WAITING, TaskBoard
 from orbit.protocol import (
     AddTask,
     AgentExited,
@@ -261,6 +261,25 @@ async def test_a_fallback_fix_runs_next_with_the_failed_tasks_settings() -> None
     assert (fix.fixes, fix.task.settings) == (one.id, settings)
     assert [launch.agent.task_id for launch in launcher.launches] == [one.id, fix.id, two.id]
     assert statuses(events) == ["completed", "completed", "completed"]
+
+
+async def test_a_fallback_fix_is_shown_before_the_failed_task_ends() -> None:
+    session, _, _ = session_for(
+        keeps_claiming,
+        claims_done,
+        verification=verified(Steps(False, False, True)),
+        limits=Limits(max_attempts=1),
+    )
+    events = await asyncio.wait_for(run(session, TaskSpec(prompt="one")), 5)
+    fix_shown = first_board(events, lambda tasks: len(tasks) == 2)
+    ended = first_board(events, lambda tasks: tasks[0].status not in WAITING)
+    assert fix_shown < ended
+
+
+def first_board(events: list[Event], shows: Callable[[tuple[TaskState, ...]], bool]) -> int:
+    """How many boards were published before the first that ``shows`` what's wanted."""
+    boards = [e.tasks for e in events if isinstance(e, TasksChanged)]
+    return next(i for i, tasks in enumerate(boards) if shows(tasks))
 
 
 async def test_a_fix_completes_after_the_task_it_fixed_is_removed() -> None:

@@ -22,6 +22,7 @@ from orbit.agent.application.tasks import Tasks
 from orbit.agent.application.verifier import Failure, Verifier, first_failure
 from orbit.agent.domain.agent_task import FINISHED, AgentTask, Phase
 from orbit.agent.domain.agents import Agent, bootstrap_prompt
+from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.roles import (
     ChecksProposal,
     ConfigError,
@@ -215,11 +216,8 @@ class AgentRun:
     async def _count(self, usage: Usage) -> None:
         """Add what one of the agent's turns cost to its task's total, unless the task was
         removed once it finished: its last turn's usage arrives after it's completed."""
-        try:
-            self._board.add_usage(self._task_id, usage)
-        except ValueError:
-            return
-        await self._tasks.publish()
+        with suppress(ValueError):
+            await self._tasks.change(lambda board: board.add_usage(self._task_id, usage))
 
     async def _await_exit(self, stream: "asyncio.Task[None]") -> None:
         """Give a finished agent ``exit_grace`` seconds to exit on its own."""
@@ -296,11 +294,13 @@ class AgentRun:
         if self._work.phase == "working":
             assert self._verifier is not None  # Only verification fails.
             self._failed_state = await self._verifier.fingerprint(self._root)
-            self._board.set_attempt(
-                self._task_id, self._work.attempt, self._work.limits.max_attempts
-            )
-            await self._tasks.start(self._task_id)
+            await self._tasks.change(self._retry)
         return reply
+
+    def _retry(self, board: TaskBoard) -> None:
+        """Have the task running again on ``board``, on its next attempt."""
+        board.set_attempt(self._task_id, self._work.attempt, self._work.limits.max_attempts)
+        board.set_status(self._task_id, "running")
 
     async def _consider(self, proposal: _Proposal) -> None:
         """Try ``proposal``, have the user decide on it if it works, and answer the agent."""

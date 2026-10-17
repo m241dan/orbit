@@ -15,6 +15,7 @@ from orbit.agent.application.review_lane import ReviewLane
 from orbit.agent.application.startup_check import StartupCheck
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.application.verifier import Failure, Verifier
+from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.commits import commit_message, configure_message
 from orbit.agent.domain.roles import REVIEW_ROLES, ChecksProposal
 from orbit.agent.domain.verification import FallbackFixes, fix_prompt
@@ -177,7 +178,11 @@ class WorkLane:
             return
         settings = self._board.get(task_id).task.settings
         fix = TaskSpec(prompt=fix_prompt(step, output), settings=settings)
-        fix_id = self._board.add(fix, fixes=task_id)
-        self._fallbacks.record(fix_id, task_id, step.name)
-        if self._review is not None:
-            self._review.joined(fix_id)
+
+        def add(board: TaskBoard) -> None:
+            fix_id = board.add(fix, fixes=task_id)
+            self._fallbacks.record(fix_id, task_id, step.name)
+            if self._review is not None:
+                self._review.joined(fix_id)
+
+        await self._tasks.change(add)

@@ -194,8 +194,7 @@ class PlannerChat:
             return Reply(suggestion, is_error=True)
         title, prompt = suggestion
         task = suggested_task(self._desk.agents.roles[CODER], title, prompt)
-        task_id = self._board.add_draft(task)
-        await self._tasks.publish()
+        task_id = await self._tasks.change(lambda board: board.add_draft(task))
         return Reply(f"Added draft task {task_id}; the user will accept or drop it.")
 
     async def _report_progress(self, arguments: dict[str, Any]) -> Reply:

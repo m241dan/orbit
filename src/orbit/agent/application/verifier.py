@@ -125,8 +125,7 @@ class Verifier:
             await self.publish_steps()
             await self._publish(VerificationSkipped(task_id=task_id, reason=reason))
             return None
-        self._board.set_status(task_id, "verifying")
-        await self._tasks.publish()
+        await self._tasks.change(lambda board: board.set_status(task_id, "verifying"))
         return await self._tidily(self._verify(task_id, root))
 
     async def run_one(self, step: VerificationStep, root: str) -> tuple[bool, str]:

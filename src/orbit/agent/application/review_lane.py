@@ -13,6 +13,7 @@ from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.lanes import Background
 from orbit.agent.application.ports import CoderTree, Reply
 from orbit.agent.application.tasks import Changed, Tasks, unchanged
+from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.reviews import (
     LaneSnapshot,
     ReviewJob,
@@ -144,9 +145,13 @@ class ReviewLane:
             return Reply(refusal, is_error=True)
         task = suggested_task(self._desk.agents.roles[CODER], title, prompt)
         origin: TaskOrigin = "super_review" if self._jobs[task_id].whole else "review"
-        new_id = self._board.add_suggestion(task, batch, self.planner.round_of(batch), origin)
-        self.planner.added(batch, new_id)
-        await self._tasks.publish()
+
+        def add(board: TaskBoard) -> str:
+            new_id = board.add_suggestion(task, batch, self.planner.round_of(batch), origin)
+            self.planner.added(batch, new_id)
+            return new_id
+
+        new_id = await self._tasks.change(add)
         return Reply(f"Queued as task {new_id}.")
 
     def queued_by_orbit(self, task_id: str) -> bool:
@@ -196,9 +201,12 @@ class ReviewLane:
         role = SUPER_REVIEWER if job.whole else REVIEWER
         prompt = review_prompt(job, diff, self.planner.cap(job))
         task = role_task(role, self._desk.agents.roles[role], prompt)
-        task_id = self._board.add_review(task)
-        self._jobs[task_id], self._batches[task_id] = job, batch
-        await self._tasks.publish()
+
+        def add(board: TaskBoard) -> None:
+            task_id = board.add_review(task)
+            self._jobs[task_id], self._batches[task_id] = job, batch
+
+        await self._tasks.change(add)
 
     async def _publish_status(self) -> None:
         status = ReviewStatus(

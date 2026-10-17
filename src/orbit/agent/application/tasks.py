@@ -28,6 +28,13 @@ class Tasks:
     def board(self) -> TaskBoard:
         return self._board
 
+    async def change[T](self, change: Callable[[TaskBoard], T]) -> T:
+        """Apply ``change`` to the board and publish it; returns what ``change`` returned. A
+        ``ValueError`` from the board escapes with nothing published."""
+        result = change(self._board)
+        await self.publish()
+        return result
+
     async def publish(self) -> None:
         """Publish the board as it is now."""
         await self._publish(TasksChanged(tasks=self._board.tasks))
@@ -35,10 +42,8 @@ class Tasks:
 
     async def start(self, task_id: str) -> None:
         """Mark task ``task_id`` running and publish the board."""
-        self._board.set_status(task_id, "running")
-        await self.publish()
+        await self.change(lambda board: board.set_status(task_id, "running"))
 
     async def finish(self, task_id: str, status: TaskStatus) -> None:
         """Record that task ``task_id`` ended as ``status`` and publish the board."""
-        self._board.finish(task_id, status)
-        await self.publish()
+        await self.change(lambda board: board.finish(task_id, status))

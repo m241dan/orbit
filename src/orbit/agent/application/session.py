@@ -8,7 +8,7 @@ import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable, Collection, Sequence
 from dataclasses import replace
 from datetime import datetime
-from typing import Any, assert_never
+from typing import assert_never
 
 from orbit.agent.application.desk import AgentDesk, Agents
 from orbit.agent.application.keeper import (
@@ -240,8 +240,8 @@ class AgentSession:
         settings = Settings()
         if self._desk is not None:
             settings = self._desk.agents.roles[CODER].settings
-        self._board.add_draft(TaskSpec(prompt=startup_fix_prompt(step, output), settings=settings))
-        await self._tasks.publish()
+        task = TaskSpec(prompt=startup_fix_prompt(step, output), settings=settings)
+        await self._tasks.change(lambda board: board.add_draft(task))
 
     @property
     def settings(self) -> Settings:
@@ -398,6 +398,7 @@ class AgentSession:
     def _replace_board(self, tasks: tuple[TaskState, ...]) -> None:
         """Have ``tasks`` on the board, and after them, while no session was picked yet, the
         tasks orbit added."""
+        # Published with the rest of the session opened, in _switched, not half-switched here.
         carried = self._board.tasks if self._picking else ()
         self._board.restore(tasks)
         for state in carried:
@@ -437,8 +438,7 @@ class AgentSession:
     async def _handle_tasks(self, command: AddTask | RunTasks | ConfigureChecks) -> None:
         match command:
             case AddTask(task=task):
-                self._board.add(task)
-                await self._tasks.publish()
+                await self._tasks.change(lambda board: board.add(task))
             case RunTasks():
                 await self._run_tasks_if_possible()
             case ConfigureChecks():
@@ -458,8 +458,8 @@ class AgentSession:
         if self._configuring():
             await self._events.put(Notice(message=CONFIGURING_NOTE))
             return
-        self._board.add_first(self._configurator_task(self._desk.agents))
-        await self._tasks.publish()
+        task = self._configurator_task(self._desk.agents)
+        await self._tasks.change(lambda board: board.add_first(task))
         if not self._work_turns.running:
             await self._start_work(asked=True)
 
@@ -478,7 +478,7 @@ class AgentSession:
             case EditTask(task_id=task_id, task=task):
                 await self._edit(task_id, task)
             case AcceptTask(task_id=task_id):
-                await self._change(self._board.accept, task_id)
+                await self._change(lambda board: board.accept(task_id))
             case RemoveTask(task_id=task_id):
                 await self._remove(task_id)
             case _:
@@ -491,14 +491,14 @@ class AgentSession:
             message = "Reviews can't be edited; remove it instead."
             await self._events.put(ErrorOccurred(message=message))
             return
-        if await self._change(self._board.edit, task_id, task) and self._lane is not None:
+        if await self._change(lambda board: board.edit(task_id, task)) and self._lane is not None:
             self._lane.edited(task_id)
             await self._reviews_changed()
 
     async def _remove(self, task_id: str) -> None:
         """Remove a task, and take it out of its review batch, if any."""
         state = self._board.find(task_id)
-        if await self._change(self._board.remove, task_id) and self._lane is not None:
+        if await self._change(lambda board: board.remove(task_id)) and self._lane is not None:
             assert state is not None  # The board removed it, so it was there.
             await self._lane.removed(task_id, state)
 
@@ -628,15 +628,14 @@ class AgentSession:
             reviews=self._lane.snapshot() if self._lane else self._kept_reviews,
         )
 
-    async def _change(self, change: Callable[..., None], *arguments: Any) -> bool:
-        """Change the board, publishing it, or report why the change was refused; returns
-        whether it was changed."""
+    async def _change(self, change: Callable[[TaskBoard], None]) -> bool:
+        """Make ``change`` to the board, publishing it, or report why the change was refused;
+        returns whether it was changed."""
         try:
-            change(*arguments)
+            await self._tasks.change(change)
         except ValueError as exc:
             await self._events.put(ErrorOccurred(message=str(exc)))
             return False
-        await self._tasks.publish()
         return True
 
     def _step_names(self) -> tuple[str, ...]:
