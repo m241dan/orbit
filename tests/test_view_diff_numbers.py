@@ -23,6 +23,10 @@ def test_a_snippet_is_read_with_tabs() -> None:
     assert edited_snippet(TAB_RESULT) == edited_snippet(ARROW_RESULT)
 
 
+def test_a_snippet_line_holding_a_form_feed_stays_one_line() -> None:
+    assert edited_snippet(f"{HEADER}\n     7→a\x0cb\n     8→c") == [(7, "a\x0cb"), (8, "c")]
+
+
 def test_an_edit_is_numbered_from_where_its_new_lines_are_found() -> None:
     lines = line_diff("    x = 1\n    return x", "    x = 2\n    return x")
     assert diff_numbers("Edit", lines, TAB_RESULT) == [None, 154, 155]

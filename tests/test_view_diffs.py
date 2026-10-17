@@ -36,6 +36,16 @@ def test_a_write_adds_every_line_of_its_content() -> None:
     assert diff == FileDiff("a.py", ("+one", "+", "+two"))
 
 
+def test_a_write_adds_a_line_holding_a_form_feed_as_one_line() -> None:
+    diff = file_diff("Write", {"file_path": "a.py", "content": "a\x0cb\nc\n"})
+    assert diff == FileDiff("a.py", ("+a\x0cb", "+c"))
+
+
+def test_an_edit_diffs_a_line_holding_a_form_feed_as_one_line() -> None:
+    diff = file_diff("Edit", {"file_path": "a.py", "old_string": "a", "new_string": "b\x0cc"})
+    assert diff == FileDiff("a.py", ("-a", "+b\x0cc"))
+
+
 @pytest.mark.parametrize(
     ("name", "arguments"),
     [

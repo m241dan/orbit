@@ -208,7 +208,13 @@ def test_a_finished_call_keeps_its_result_when_its_turn_ends() -> None:
 
 @pytest.mark.parametrize(
     ("text", "count"),
-    [("", "0 lines"), ("one", "1 line"), ("one\n", "1 line"), ("one\ntwo", "2 lines")],
+    [
+        ("", "0 lines"),
+        ("one", "1 line"),
+        ("one\n", "1 line"),
+        ("one\ntwo", "2 lines"),
+        ("a\x0cb\nc", "2 lines"),
+    ],
 )
 def test_line_counts_read_in_the_singular_only_for_one(text: str, count: str) -> None:
     assert line_count(text) == count
@@ -279,6 +285,16 @@ def test_a_multi_edit_without_edits_changes_nothing() -> None:
 def test_a_writes_result_counts_the_lines_it_wrote() -> None:
     arguments = {"file_path": "a", "content": "a\nb\n"}
     assert tool_result_summary("Write", arguments, "ok", False) == "✓ +2"
+
+
+def test_a_write_counts_a_line_holding_a_form_feed_once() -> None:
+    arguments = {"file_path": "a.py", "content": "a\x0cb\nc\n"}
+    assert tool_result_summary("Write", arguments, "ok", False) == "✓ +2"
+
+
+def test_an_edit_counts_a_line_holding_a_form_feed_once() -> None:
+    arguments = {"file_path": "a.py", "old_string": "a", "new_string": "b\x0cc"}
+    assert tool_result_summary("Edit", arguments, "ok", False) == "✓ +1 \N{MINUS SIGN}1"
 
 
 @pytest.mark.parametrize(

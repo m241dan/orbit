@@ -4,6 +4,7 @@ that its result shows; never a number that may be wrong."""
 import re
 from collections.abc import Iterator, Sequence
 
+from orbit.tui.view.common import text_lines
 from orbit.tui.view.diffs import EDIT_SEPARATOR
 
 NUMBERED_LINE = re.compile(r" *(\d+)(?:→|\t)(.*)")
@@ -15,7 +16,7 @@ type Snippet = Sequence[tuple[int, str]]
 def edited_snippet(output: str) -> list[tuple[int, str]]:
     """The numbered lines of the edited file that an edit's ``output`` shows, with their
     numbers."""
-    matches = (NUMBERED_LINE.fullmatch(line) for line in output.splitlines())
+    matches = (NUMBERED_LINE.fullmatch(line) for line in text_lines(output))
     return [(int(match[1]), match[2]) for match in matches if match is not None]
 
 

@@ -1,5 +1,5 @@
-"""What the other view modules share: entry kinds, the spinner, status icons, model labels
-and token counts."""
+"""What the other view modules share: entry kinds, the spinner, status icons, model labels,
+token counts, counted nouns and the lines of text."""
 
 from typing import Literal
 
@@ -50,6 +50,22 @@ STEP_ICONS: dict[StepStatus, str] = {
 def spinner_frame(now: float) -> str:
     """The spinner frame at ``now`` seconds, padded to two columns like the emoji beside it."""
     return SPINNER_FRAMES[int(now * SPINNER_FPS) % len(SPINNER_FRAMES)] + " "
+
+
+def text_lines(text: str) -> list[str]:
+    """``text``'s lines, split only at newlines, so a form feed or the like stays in its line;
+    none for empty text, and without a carriage return before a newline or an empty line
+    after the last newline."""
+    if not text:
+        return []
+    return [line.removesuffix("\r") for line in text.removesuffix("\n").split("\n")]
+
+
+def counted(count: int, singular: str, plural: str | None = None) -> str:
+    """``count`` and ``singular``, or ``plural`` (``singular`` and an s by default) unless the
+    count is one: ``1 line``, ``2 lines``."""
+    noun = singular if count == 1 else plural or f"{singular}s"
+    return f"{count} {noun}"
 
 
 def model_label(settings: Settings) -> str:

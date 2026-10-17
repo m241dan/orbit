@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any
 
+from orbit.tui.view.common import text_lines
+
 EDIT_SEPARATOR = "⋯"
 """The line between the diffs of a MultiEdit's edits."""
 
@@ -34,7 +36,7 @@ def file_diff(name: str, arguments: Mapping[str, Any]) -> FileDiff | None:
 
 def line_diff(old: str, new: str) -> list[str]:
     """The lines of ``old`` and ``new`` marked as removed, added or unchanged, in order."""
-    old_lines, new_lines = old.splitlines(), new.splitlines()
+    old_lines, new_lines = text_lines(old), text_lines(new)
     matcher = difflib.SequenceMatcher(None, old_lines, new_lines, autojunk=False)
     lines: list[str] = []
     for tag, old_start, old_end, new_start, new_end in matcher.get_opcodes():
@@ -73,7 +75,7 @@ def _multi_edit(arguments: Mapping[str, Any]) -> list[str] | None:
 def _write(arguments: Mapping[str, Any]) -> list[str] | None:
     """Every line of the content written, as added."""
     content = arguments.get("content")
-    return None if not isinstance(content, str) else [f"+{line}" for line in content.splitlines()]
+    return None if not isinstance(content, str) else [f"+{line}" for line in text_lines(content)]
 
 
 DIFFERS: Mapping[str, Differ] = MappingProxyType(

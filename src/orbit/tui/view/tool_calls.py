@@ -9,7 +9,7 @@ from types import MappingProxyType
 from typing import Any, Literal, assert_never
 
 from orbit.protocol import AgentReply, AgentRequest, ToolCallFinished, ToolCallStarted
-from orbit.tui.view.common import EntryKind, clipped
+from orbit.tui.view.common import EntryKind, clipped, counted, text_lines
 
 TOOL_CALL_SUMMARY_LIMIT = 120
 """The most cells a tool call's summary line takes."""
@@ -155,8 +155,7 @@ def tool_call_unfinished(call: ToolCall) -> ToolCall:
 
 def line_count(text: str) -> str:
     """How many lines ``text`` has, as read: ``0 lines``, ``1 line``, ``2 lines``."""
-    count = len(text.splitlines())
-    return f"{count} line{'' if count == 1 else 's'}"
+    return counted(len(text_lines(text)), "line")
 
 
 NO_MATCHES = frozenset({"No matches found", "No files found"})
@@ -180,7 +179,7 @@ type ResultSummarizer = Callable[[Mapping[str, Any], str], str | None]
 def _line_change(old: str, new: str) -> tuple[int, int]:
     """How many lines turning ``old`` into ``new`` adds and removes, unchanged lines aside."""
     added = removed = 0
-    matcher = difflib.SequenceMatcher(None, old.splitlines(), new.splitlines(), autojunk=False)
+    matcher = difflib.SequenceMatcher(None, text_lines(old), text_lines(new), autojunk=False)
     for tag, old_start, old_end, new_start, new_end in matcher.get_opcodes():
         if tag != "equal":
             added += new_end - new_start
@@ -224,7 +223,7 @@ def _total(changes: Iterable[tuple[int, int] | None]) -> tuple[int, int] | None:
 
 def _written(arguments: Mapping[str, Any], output: str) -> str | None:
     content = arguments.get("content")
-    return f"✓ +{len(content.splitlines())}" if isinstance(content, str) else None
+    return f"✓ +{len(text_lines(content))}" if isinstance(content, str) else None
 
 
 def _ran(arguments: Mapping[str, Any], output: str) -> str | None:
@@ -238,9 +237,9 @@ def _is_match(line: str) -> bool:
 
 
 def _found(arguments: Mapping[str, Any], output: str) -> str | None:
-    lines = [] if output.strip() in NO_MATCHES else output.splitlines()
+    lines = [] if output.strip() in NO_MATCHES else text_lines(output)
     count = sum(1 for line in lines if _is_match(line))
-    return f"✓ {count} match{'' if count == 1 else 'es'}"
+    return f"✓ {counted(count, 'match', 'matches')}"
 
 
 RESULT_SUMMARIES: Mapping[str, ResultSummarizer] = MappingProxyType(

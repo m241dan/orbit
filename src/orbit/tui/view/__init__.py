@@ -12,8 +12,10 @@ from orbit.tui.view.common import (
     STEP_ICONS,
     TOKEN_UNITS,
     EntryKind,
+    counted,
     model_label,
     spinner_frame,
+    text_lines,
     token_text,
 )
 from orbit.tui.view.detail import (
@@ -244,6 +246,7 @@ __all__ = [
     "collapsible",
     "conversation_title",
     "copied_note",
+    "counted",
     "decision_entry",
     "detail_body",
     "detail_copy",
@@ -300,6 +303,7 @@ __all__ = [
     "task_numbers",
     "task_started_entry",
     "task_tab_key",
+    "text_lines",
     "token_text",
     "tool_access_labels",
     "tool_call_entry",

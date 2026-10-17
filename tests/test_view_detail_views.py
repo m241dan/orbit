@@ -320,6 +320,15 @@ def test_a_failed_edit_has_no_numbers() -> None:
     assert plain(detail_body(failed))[2:6] == [" a", "-b", "+B", " c"]
 
 
+def test_diff_text_keeps_a_line_holding_a_form_feed_whole() -> None:
+    text = diff_text("+a\x0cb\n c")
+    assert text.plain == "+ab\n c"
+    assert [(span.start, span.end, span.style) for span in text.spans] == [
+        (0, 3, "green"),
+        (4, 6, "dim"),
+    ]
+
+
 def test_diff_text_styles_lines_after_their_numbers() -> None:
     text = diff_text("1 +x", gutter=2)
     assert [(span.start, span.end, span.style) for span in text.spans] == [

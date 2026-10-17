@@ -127,6 +127,10 @@ def test_the_copied_note_counts_lines() -> None:
     assert copied_note("a\nb") == "Copied 2 lines"
 
 
+def test_the_copied_note_counts_only_newlines() -> None:
+    assert copied_note("a\x0cb\nc") == "Copied 2 lines"
+
+
 def test_the_copied_note_counts_one_line_singly() -> None:
     assert copied_note("a") == "Copied 1 line"
 

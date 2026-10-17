@@ -14,7 +14,8 @@ from rich.rule import Rule
 from rich.syntax import Syntax
 from rich.text import Text
 
-from orbit.tui.view.detail import DIM, EMPTY_DIFF, NO_DETAILS, WAITING, capped_with, output_lines
+from orbit.tui.view.common import text_lines
+from orbit.tui.view.detail import DIM, EMPTY_DIFF, NO_DETAILS, WAITING, capped_with
 from orbit.tui.view.diff_numbers import NUMBERED_LINE, diff_numbers, numbered_diff
 from orbit.tui.view.diffs import FileDiff, file_diff
 from orbit.tui.view.tool_calls import ToolCall
@@ -71,7 +72,7 @@ def _read_view(call: ToolCall) -> RenderableType | None:
 def read_output(path: str, output: str) -> RenderableType:
     """Read's ``output`` of the file at ``path``: its numbered lines highlighted for the file's
     type, numbers kept, then any lines after them as plain text; all plain without numbers."""
-    lines = output_lines(output)
+    lines = text_lines(output)
     numbered = _numbered(lines)
     if not numbered:
         return Text(output)
@@ -154,7 +155,7 @@ def _diff_numbers(call: ToolCall, diff: FileDiff) -> list[int | None]:
 def diff_text(diff: str, gutter: int = 0) -> Text:
     """The lines of ``diff``, each after a dim column ``gutter`` wide: removed ones red, added
     ones green and the rest dim."""
-    return Text("\n").join(_diff_line(line, gutter) for line in diff.splitlines())
+    return Text("\n").join(_diff_line(line, gutter) for line in text_lines(diff))
 
 
 def _diff_line(line: str, gutter: int) -> Text:

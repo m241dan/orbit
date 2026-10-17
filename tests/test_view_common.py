@@ -7,6 +7,8 @@ from orbit.protocol import (
 )
 from orbit.tui.view import (
     STATUS_ICONS,
+    counted,
+    text_lines,
     token_text,
 )
 
@@ -38,3 +40,30 @@ def test_every_task_status_has_an_icon_except_running_which_spins() -> None:
 )
 def test_token_counts_are_compact_and_rounded_down(count: int, text: str) -> None:
     assert token_text(count) == text
+
+
+@pytest.mark.parametrize(
+    ("text", "lines"),
+    [
+        ("", []),
+        ("one", ["one"]),
+        ("one\n", ["one"]),
+        ("one\n\ntwo", ["one", "", "two"]),
+        ("a\x0cb\x1cc\x85d\u2028e", ["a\x0cb\x1cc\x85d\u2028e"]),
+        ("one\r\ntwo\r\n", ["one", "two"]),
+    ],
+)
+def test_text_lines_split_only_at_newlines(text: str, lines: list[str]) -> None:
+    assert text_lines(text) == lines
+
+
+@pytest.mark.parametrize(("count", "text"), [(0, "0 lines"), (1, "1 line"), (2, "2 lines")])
+def test_counted_is_singular_only_for_one(count: int, text: str) -> None:
+    assert counted(count, "line") == text
+
+
+def test_counted_takes_an_irregular_plural() -> None:
+    assert (counted(1, "match", "matches"), counted(3, "match", "matches")) == (
+        "1 match",
+        "3 matches",
+    )

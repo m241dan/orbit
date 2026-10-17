@@ -25,7 +25,7 @@ from orbit.protocol import (
     TurnFinished,
     Usage,
 )
-from orbit.tui.view.common import EntryKind, spinner_frame, token_text
+from orbit.tui.view.common import EntryKind, counted, spinner_frame, text_lines, token_text
 from orbit.tui.view.tool_calls import ToolCall, orbit_request_line, tool_call_line
 
 SKIP_REASONS: dict[SkipReason, str] = {
@@ -82,7 +82,7 @@ def _collapse_label(text: str, collapsed: bool) -> str:
     if not collapsed:
         return f"{EXPANDED_MARKER}{text}"
     more = rest.count("\n") + 1
-    return f"▸ {first} (+{more} line{'s' if more != 1 else ''})"
+    return f"▸ {first} (+{counted(more, 'line')})"
 
 
 MARKDOWN_KINDS: frozenset[EntryKind] = frozenset({"assistant", "prompt"})
@@ -241,7 +241,7 @@ def startup_entry(event: StartupChecked) -> tuple[str, EntryKind]:
     draft task added to fix it."""
     if event.passed:
         return "✅ Startup check passed", "verify"
-    tail = "\n".join(event.output.splitlines()[-STARTUP_TAIL_LINES:])
+    tail = "\n".join(text_lines(event.output)[-STARTUP_TAIL_LINES:])
     return (
         f"❌ Startup check failed: {event.step}\n\n{tail}\n\n"
         f"📝 Added a draft task: Fix failing check: {event.step}. If the steps themselves are"

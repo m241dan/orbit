@@ -6,6 +6,7 @@ from collections.abc import Callable
 from rich.console import Group, RenderableType
 from rich.text import Text
 
+from orbit.tui.view.common import counted, text_lines
 from orbit.tui.view.diffs import file_diff
 from orbit.tui.view.tool_calls import ToolCall
 
@@ -57,8 +58,7 @@ def _diff_copy(call: ToolCall) -> str:
 
 def copied_note(text: str) -> str:
     """The note that ``text`` was copied, counting its lines."""
-    count = len(text.splitlines())
-    return f"Copied {count} line{'' if count == 1 else 's'}"
+    return f"Copied {counted(len(text_lines(text)), 'line')}"
 
 
 def capped_with(
@@ -67,7 +67,7 @@ def capped_with(
     """``output`` drawn by ``render``; with more than ``limit`` lines, just its first and last
     halves of that, each drawn on its own, with a dim line between them counting the lines left
     out and saying y copies them all."""
-    lines = output_lines(output)
+    lines = text_lines(output)
     if len(lines) <= limit:
         return render(output)
     kept = limit // 2
@@ -75,13 +75,5 @@ def capped_with(
     return Group(render(head), _omitted(len(lines) - 2 * kept), render(tail))
 
 
-def output_lines(output: str) -> list[str]:
-    """``output``'s lines, split only at newlines, so a form feed or the like stays in its
-    line."""
-    lines = output.split("\n")
-    return lines[:-1] if output.endswith("\n") else lines
-
-
 def _omitted(count: int) -> Text:
-    lines = f"{count} line{'' if count == 1 else 's'}"
-    return Text(f"… {lines} omitted · {COPY_ALL_HINT} …", style=DIM)
+    return Text(f"… {counted(count, 'line')} omitted · {COPY_ALL_HINT} …", style=DIM)
