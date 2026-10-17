@@ -10,10 +10,12 @@ from orbit.protocol import (
     EditTask,
     ErrorOccurred,
     Event,
+    OpenSession,
     RemoveTask,
     RequestSuperReview,
     RunTasks,
     SessionOpened,
+    SessionsListed,
     SessionSummary,
     Settings,
     TasksChanged,
@@ -25,6 +27,7 @@ from orbit.protocol import (
     Usage,
 )
 from orbit.tui import OrbitApp
+from orbit.tui.sessions import SessionsScreen
 from orbit.tui.tasks import TaskEditorScreen, TaskList
 from orbit.tui.transcript import Transcript
 from orbit.tui.view import spinner_frame, task_label, task_numbers, usage_label
@@ -1093,6 +1096,26 @@ async def test_opening_a_session_while_the_list_is_active_leaves_list_mode_and_l
         await open_task_list(pilot)
         opened = SessionOpened(session=SessionSummary(id="s", name="s"))
         await feed(session, pilot, opened, many(30, running=25))
+        assert app.focused is None
+        assert task_list.following
+        assert title(task_list) == "Task list"
+        assert in_view(task_list, 25)
+
+
+async def test_switching_session_through_ctrl_p_while_the_list_is_active_leaves_list_mode() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        task_list = app.query_one(TaskList)
+        await feed(session, pilot, many(30))
+        await open_task_list(pilot)
+        await pilot.press("ctrl+p")
+        other = SessionSummary(id="old", name="old")
+        await feed(session, pilot, SessionsListed(sessions=(other,), reason="asked"))
+        await pilot.press("j", "enter")
+        await feed(session, pilot, SessionOpened(session=other), many(30, running=25))
+        assert session.commands[-1] == OpenSession(session_id="old")
+        assert not isinstance(app.screen, SessionsScreen)
         assert app.focused is None
         assert task_list.following
         assert title(task_list) == "Task list"
