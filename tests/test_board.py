@@ -1,7 +1,7 @@
 import pytest
 
-from orbit.agent.domain.board import TaskBoard, interrupted
-from orbit.protocol import Settings, TaskSpec, TaskState, TaskStatus, Usage
+from orbit.agent.domain.board import SETTLED, WAITING, TaskBoard, interrupted
+from orbit.protocol import ACTIVE_STATUSES, Settings, TaskSpec, TaskState, TaskStatus, Usage
 
 ONE = TaskSpec(prompt="one")
 TWO = TaskSpec(prompt="two", settings=Settings(model="opus"))
@@ -10,6 +10,11 @@ FIX = TaskSpec(prompt="fix it")
 
 def prompts(board: TaskBoard) -> list[str]:
     return [t.task.prompt for t in board.tasks]
+
+
+def test_active_tasks_are_waiting_and_settled() -> None:
+    assert ACTIVE_STATUSES <= WAITING
+    assert ACTIVE_STATUSES <= SETTLED
 
 
 def test_starts_empty() -> None:

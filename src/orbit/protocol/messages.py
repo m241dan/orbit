@@ -275,6 +275,9 @@ TaskStatus = Literal[
 ``draft``: the planner proposed it; it waits to be accepted.
 """
 
+ACTIVE_STATUSES: frozenset[TaskStatus] = frozenset({"running", "verifying"})
+"""Statuses of a task an agent is working on or orbit is verifying."""
+
 TaskOrigin = Literal["manual", "planner", "review", "super_review"]
 """Who queued a task: the user, the planner, or a (super) review's suggestions."""
 

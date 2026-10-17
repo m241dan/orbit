@@ -6,7 +6,7 @@ from collections.abc import Sequence
 from rich.cells import cell_len
 from rich.text import Text
 
-from orbit.protocol import TaskState, Usage
+from orbit.protocol import ACTIVE_STATUSES, TaskState, Usage
 from orbit.tui.view.common import STATUS_ICONS, model_label, token_text
 
 
@@ -93,7 +93,7 @@ def usage_label(usage: Usage) -> str:
 
 def active_task(tasks: Sequence[TaskState]) -> int | None:
     """The index of the topmost task that's running or verifying, in any role; None if none."""
-    return next((i for i, t in enumerate(tasks) if t.status in ("running", "verifying")), None)
+    return next((i for i, t in enumerate(tasks) if t.status in ACTIVE_STATUSES), None)
 
 
 def task_list_title(*, held: bool) -> str:

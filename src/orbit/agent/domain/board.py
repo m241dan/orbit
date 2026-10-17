@@ -5,6 +5,7 @@ from collections.abc import Collection, Sequence
 from typing import Any
 
 from orbit.protocol import (
+    ACTIVE_STATUSES,
     TaskOrigin,
     TaskSpec,
     TaskState,
@@ -13,22 +14,21 @@ from orbit.protocol import (
 )
 
 # Statuses of a task that's yet to finish: still to run, or running.
-WAITING: frozenset[TaskStatus] = frozenset({"pending", "running", "verifying"})
+WAITING: frozenset[TaskStatus] = ACTIVE_STATUSES | {"pending"}
 # Statuses a run leaves alone; any other task is worth (another) run.
-SETTLED: frozenset[TaskStatus] = frozenset(
-    {"draft", "running", "verifying", "completed", "unverified", "gave_up"}
-)
+SETTLED: frozenset[TaskStatus] = ACTIVE_STATUSES | {"draft", "completed", "unverified", "gave_up"}
 
 
 def interrupted(tasks: Sequence[TaskState]) -> tuple[tuple[TaskState, ...], int]:
     """``tasks`` as a crash leaves them, and how many changed: those that were running are
     cancelled, so the next run picks them up again."""
-    running = ("running", "verifying")
     left = tuple(
-        state.model_copy(update={"status": "cancelled"}) if state.status in running else state
+        state.model_copy(update={"status": "cancelled"})
+        if state.status in ACTIVE_STATUSES
+        else state
         for state in tasks
     )
-    return left, sum(state.status in running for state in tasks)
+    return left, sum(state.status in ACTIVE_STATUSES for state in tasks)
 
 
 def _in_roles(role: str, roles: Collection[str] | None, exclude: Collection[str]) -> bool:
@@ -85,7 +85,7 @@ class TaskBoard:
     def edit(self, task_id: str, task: TaskSpec) -> None:
         """Replace a task and make it pending again. Raises ``ValueError`` if it can't be."""
         current = self.get(task_id)
-        if current.status in ("running", "verifying"):
+        if current.status in ACTIVE_STATUSES:
             raise ValueError(f"Task {task_id!r} can't be edited while it runs.")
         fresh = {"task": task, "status": "pending", "attempt": 0, "max_attempts": 0}
         self._tasks[self.position(task_id)] = current.model_copy(update=fresh)
@@ -170,7 +170,7 @@ class TaskBoard:
         tasks if it was one.
         """
         removed = self.get(task_id)
-        if removed.status in ("running", "verifying"):
+        if removed.status in ACTIVE_STATUSES:
             raise ValueError(f"Task {task_id!r} can't be removed while it runs.")
         del self._tasks[self.position(task_id)]
         self._tasks = [

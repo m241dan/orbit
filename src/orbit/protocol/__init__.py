@@ -1,6 +1,7 @@
 """Shared contract between the frontend and the backend."""
 
 from orbit.protocol.messages import (
+    ACTIVE_STATUSES,
     BUILT_IN_ROLE_NAMES,
     CODER,
     CONFIGURATOR,
@@ -85,6 +86,7 @@ from orbit.protocol.session import Session
 from orbit.protocol.threaded import ThreadedSession
 
 __all__ = [
+    "ACTIVE_STATUSES",
     "BUILT_IN_ROLE_NAMES",
     "CODER",
     "CONFIGURATOR",
