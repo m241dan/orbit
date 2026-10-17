@@ -204,6 +204,22 @@ async def test_sessions_listed_unasked_after_ctrl_p_open_no_picker() -> None:
         assert app.is_running
 
 
+async def test_a_startup_listing_after_ctrl_p_opens_a_list_escape_closes() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await pilot.press("ctrl+p")
+        await feed_events(session, pilot, LISTED)
+        screen = app.screen
+        assert isinstance(screen, SessionsScreen)
+        assert not screen.startup
+        await pilot.press("escape")
+        await pilot.pause()
+
+        assert not any(isinstance(s, SessionsScreen) for s in app.screen_stack)
+        assert app.is_running
+
+
 async def test_a_ctrl_p_answer_after_the_startup_list_closed_opens_one_escape_closes() -> None:
     session = FakeSession()
     app = OrbitApp(session)

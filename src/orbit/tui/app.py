@@ -212,6 +212,8 @@ class OrbitApp(App[None], inherit_bindings=False):
         self._model_choices: tuple[str, ...] = ()
         self._proposal: ProposalScreen | None = None  # The proposal being shown, if any.
         self._sessions: SessionsScreen | None = None  # The list of sessions shown, if any.
+        # Whether the user pressed ctrl+p, after which no list opens as the startup list.
+        self._asked_sessions = False
         self.clock: Callable[[], float] = time.monotonic
         # Pickers are built once and installed so they open instantly.
         self._model_picker = PickerScreen("Model", model_options(())[1])
@@ -445,12 +447,13 @@ class OrbitApp(App[None], inherit_bindings=False):
 
     async def action_list_sessions(self) -> None:
         """Ask for the saved sessions, which show in a modal once they're listed."""
+        self._asked_sessions = True
         await self._session.send(ListSessions())
 
     def _show_sessions(self, listed: SessionsListed) -> None:
-        """Let the user pick one of the sessions ``listed`` or start a new one; at startup, escape
-        quits. Listed while the list is shown, they replace those it shows; refreshed after a
-        rename or delete once the list was closed, they're ignored."""
+        """Let the user pick one of the sessions ``listed`` or start a new one; at startup, before
+        any ctrl+p, escape quits. Listed while the list is shown, they replace those it shows;
+        refreshed after a rename or delete once the list was closed, they're ignored."""
         if self._sessions is not None:
             self._sessions.show(listed.sessions)
             return
@@ -463,7 +466,7 @@ class OrbitApp(App[None], inherit_bindings=False):
             if choice is not None:
                 await self._session.send(choice)
 
-        startup = listed.reason == "startup"
+        startup = listed.reason == "startup" and not self._asked_sessions
         self._sessions = SessionsScreen(listed.sessions, self._session.send, startup=startup)
         self.push_screen(self._sessions, chosen)
 
