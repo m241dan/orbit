@@ -185,6 +185,27 @@ async def test_suggestions_over_the_cap_or_already_queued_are_refused() -> None:
     assert len([t for t in board(events) if t.batch]) == 2
 
 
+async def test_a_suggestion_without_a_title_is_refused_and_not_counted() -> None:
+    replies: list[Reply] = []
+    session, _, _ = session_for(
+        claims_done,
+        claims_done,
+        claims_done,
+        reviewers=(suggests(" ", "Add tests", "Rename x", replies=replies), suggests()),
+        tree=FakeTree(),
+        review=True,
+        review_limits=ReviewLimits(rounds=1, suggestions=2),
+    )
+    await start(session)
+    events = await asyncio.wait_for(settle(session), 10)
+    assert [r.is_error for r in replies] == [True, False, False]
+    assert replies[0].text == "A task needs a title."
+    assert [t.task.prompt.split("\n")[0] for t in board(events) if t.batch] == [
+        "Add tests",
+        "Rename x",
+    ]
+
+
 async def test_without_review_nothing_is_reviewed() -> None:
     session, _, _ = session_for(claims_done, tree=FakeTree())
     await start(session)

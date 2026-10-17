@@ -16,7 +16,7 @@ from orbit.agent.application.desk import AgentDesk, Tool, dispatch, report_progr
 from orbit.agent.application.ports import Reply, ResumeFailed
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.agents import Agent
-from orbit.agent.domain.roles import suggested_task
+from orbit.agent.domain.roles import suggested_task, task_suggestion
 from orbit.agent.domain.verification import steps_note
 from orbit.protocol import (
     CODER,
@@ -189,7 +189,10 @@ class PlannerChat:
             await self._desk.publish(AgentExited(agent_id=self._agent.id, reason="finished"))
 
     async def _propose_task(self, arguments: dict[str, Any]) -> Reply:
-        title, prompt = str(arguments.get("title", "")), str(arguments.get("prompt", ""))
+        suggestion = task_suggestion(arguments)
+        if isinstance(suggestion, str):
+            return Reply(suggestion, is_error=True)
+        title, prompt = suggestion
         task = suggested_task(self._desk.agents.roles[CODER], title, prompt)
         task_id = self._board.add_draft(task)
         await self._tasks.publish()

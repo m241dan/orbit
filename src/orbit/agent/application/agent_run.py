@@ -27,6 +27,7 @@ from orbit.agent.domain.roles import (
     ConfigError,
     Role,
     parse_proposal,
+    task_suggestion,
 )
 from orbit.agent.domain.verification import VerificationStep, check_reply
 from orbit.protocol import (
@@ -362,7 +363,10 @@ class AgentRun:
     async def _suggest_task(self, arguments: dict[str, Any]) -> Reply:
         if self._desk.suggest is None:
             return Reply("Orbit isn't taking suggestions.", is_error=True)
-        title, prompt = str(arguments.get("title", "")), str(arguments.get("prompt", ""))
+        suggestion = task_suggestion(arguments)
+        if isinstance(suggestion, str):
+            return Reply(suggestion, is_error=True)
+        title, prompt = suggestion
         return await self._desk.suggest(self._task_id, title, prompt)
 
     async def _propose_checks(self, arguments: dict[str, Any]) -> Reply:

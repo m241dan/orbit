@@ -7,7 +7,7 @@ import pytest
 from orbit.agent import Agents, AgentSession
 from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.planner import RESUME_FAILED_NOTE, PlannerChat
-from orbit.agent.application.ports import ResumeFailed
+from orbit.agent.application.ports import Reply, ResumeFailed
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.verification import steps_note
@@ -26,6 +26,7 @@ from orbit.protocol import (
     RunTasks,
     Settings,
     SubmitPrompt,
+    TasksChanged,
     TaskSpec,
     TurnEndReason,
     TurnFinished,
@@ -85,6 +86,20 @@ async def test_prompts_to_the_planner_go_to_it_and_proposals_become_drafts() -> 
     ]
     assert drafts[0].task.settings.tool_access == "full"  # The coder role's default.
     assert any(isinstance(e, TurnStarted) and e.agent_id == "agent-1" for e in events)
+
+
+async def test_a_proposal_without_a_title_is_refused_and_adds_no_draft() -> None:
+    replies: list[Reply] = []
+
+    async def proposes_untitled(call: Call) -> TurnEndReason:
+        replies.append(await call("propose_task", title=" \n", prompt="Do X."))
+        return "completed"
+
+    session, _, launcher = session_for()
+    launcher.planner_turns = [proposes_untitled]
+    events = await plan(session, "Plan it.")
+    assert replies == [Reply("A task needs a title.", is_error=True)]
+    assert not any(isinstance(e, TasksChanged) for e in events)
 
 
 async def test_the_first_turn_says_which_agent_is_the_planner() -> None:

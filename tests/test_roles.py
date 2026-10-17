@@ -14,6 +14,7 @@ from orbit.agent.domain.roles import (
     parse_proposal,
     role_task,
     suggested_task,
+    task_suggestion,
 )
 from orbit.agent.domain.verification import VerificationStep
 from orbit.protocol import BUILT_IN_ROLE_NAMES, Settings, TaskSpec
@@ -269,3 +270,31 @@ def test_a_suggested_task_is_a_coders_titled_prompt() -> None:
     assert suggested_task(coder, " Add the flag \n", "\nAdd --fast. ") == TaskSpec(
         prompt="Add the flag\n\nAdd --fast.", settings=Settings(tool_access="full")
     )
+
+
+def test_a_suggested_task_without_a_prompt_is_just_its_title() -> None:
+    coder = BUILT_IN_ROLES["coder"]
+    assert suggested_task(coder, "Add the flag", " \n").prompt == "Add the flag"
+
+
+def test_a_task_suggestion_is_its_stripped_title_and_prompt() -> None:
+    arguments = {"title": " Add the flag ", "prompt": "\nAdd --fast. "}
+    assert task_suggestion(arguments) == ("Add the flag", "Add --fast.")
+
+
+def test_a_task_suggestions_title_is_flattened_to_one_line() -> None:
+    arguments = {"title": "Fix A\n  and\tB\n", "prompt": "Both."}
+    assert task_suggestion(arguments) == ("Fix A and B", "Both.")
+
+
+@pytest.mark.parametrize("title", ["", " \n\t "])
+def test_a_task_suggestion_with_a_blank_title_is_refused(title: str) -> None:
+    assert task_suggestion({"title": title, "prompt": "Do X"}) == "A task needs a title."
+
+
+def test_a_task_suggestion_without_a_title_is_refused() -> None:
+    assert task_suggestion({"prompt": "Do X"}) == "A task needs a title."
+
+
+def test_a_task_suggestion_without_a_prompt_has_an_empty_one() -> None:
+    assert task_suggestion({"title": "Tidy"}) == ("Tidy", "")

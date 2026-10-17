@@ -86,7 +86,17 @@ def role_task(role_name: str, role: Role, prompt: str) -> TaskSpec:
 
 def suggested_task(coder: Role, title: str, prompt: str) -> TaskSpec:
     """A coder's task an agent suggested or proposed, as ``title`` and ``prompt``."""
-    return role_task(CODER, coder, f"{title.strip()}\n\n{prompt.strip()}")
+    title, prompt = title.strip(), prompt.strip()
+    return role_task(CODER, coder, f"{title}\n\n{prompt}" if prompt else title)
+
+
+def task_suggestion(arguments: Mapping[str, Any]) -> tuple[str, str] | str:
+    """The title, on one line, and prompt of the task an agent suggested or proposed with
+    ``arguments``; or why it's refused."""
+    title = " ".join(str(arguments.get("title", "")).split())
+    if not title:
+        return "A task needs a title."
+    return title, str(arguments.get("prompt", "")).strip()
 
 
 _BUILT_IN_FIELDS: dict[str, dict[str, Any]] = {

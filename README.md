@@ -502,8 +502,8 @@ text keeps its newlines. Orbit is for planning, tasks and reviews, with no free-
 The **planner** tab, always second in the strip, shows just the planner conversation: your
 prompts, and the planner's messages, tool calls and exchanges with orbit (`ctrl+t` jumps there,
 and pressed again goes back to the tab you were on). Tell it what you want to build; it asks
-what's unclear and breaks the goal into small tasks, proposing each with `propose_task`.
-Its first prompt, and the first after the verification steps change, tells it
+what's unclear and breaks the goal into small tasks, proposing each with `propose_task` (a title
+is required, and kept to one line). Its first prompt, and the first after the verification steps change, tells it
 the steps each task must pass. Proposals appear in the task list as 📝 drafts, with the `coder`
 role's default settings, and never run on their own: on the task list, `a` accepts the highlighted
 draft (or edit it with `enter` and save, which accepts it too), and `x` removes it. Accepted tasks
@@ -538,8 +538,8 @@ rule under the planner tab and All. The reset is refused while the planner answe
 
 Every commit from one of your tasks is reviewed in the background while the next task runs. Orbit
 queues a `reviewer` task (it shows in the task list) carrying the commit's diff, and runs it in a
-read-only snapshot of that commit. The reviewer suggests follow-ups with `suggest_task`: each becomes
-a task at the end of the queue (with the `coder` role's default settings), and once the review ends
+read-only snapshot of that commit. The reviewer suggests follow-ups with `suggest_task` (a title
+is required, and kept to one line): each becomes a task at the end of the queue (with the `coder` role's default settings), and once the review ends
 orbit runs them, unless you pressed `ctrl+s` since your last `ctrl+r`.
 
 Suggestions from one review form a **batch**. When every task in a batch has finished, the batch's
