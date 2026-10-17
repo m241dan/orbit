@@ -110,6 +110,13 @@ def test_read_output_without_line_numbers_is_plain() -> None:
     assert plain(read_output("a.py", "one\ntwo")) == ["one", "two"]
 
 
+def test_read_numbers_lines_past_a_form_feed() -> None:
+    body = read_output("a.py", "     1→a = 1\n     2→b\x0cc\n     3→d = 3\n")
+    numbered = [line[:4] for line in plain(body) if line[:4] in ("  1 ", "  2 ", "  3 ")]
+    assert numbered == ["  1 ", "  2 ", "  3 "]
+    assert "→" not in "".join(plain(body))
+
+
 def test_read_of_a_long_file_numbers_each_end_from_its_own_lines() -> None:
     output = "\n".join(f"{n:6}→x = {n}" for n in range(1, 301))
     lines = plain(detail_body(call("Read", {"file_path": "a.py"}, output)))
@@ -156,6 +163,15 @@ def test_pretty_json_leaves_text_and_bare_values_alone() -> None:
     assert pretty_json("not json") is None
     assert pretty_json("42") is None
     assert pretty_json('["é"]') == '[\n  "é"\n]'
+
+
+def test_pretty_json_leaves_too_deeply_nested_text_alone() -> None:
+    assert pretty_json("[" * 100000) is None
+
+
+def test_too_deeply_nested_output_is_shown_as_text() -> None:
+    body = detail_body(call("WebFetch", {}, "[" * 100000))
+    assert "".join(plain(body)[1:]) == "[" * 100000
 
 
 def test_a_running_call_shows_its_header_then_waits_dimly() -> None:

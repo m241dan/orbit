@@ -8,7 +8,6 @@ from orbit.tui.view import (
     DETAIL_LINE_LIMIT,
     ToolCall,
     ToolCallStatus,
-    capped,
     capped_with,
     copied_note,
     detail_copy,
@@ -41,25 +40,12 @@ def test_the_title_without_a_call_is_just_detail() -> None:
     assert detail_title(None) == "Detail"
 
 
-def test_output_of_the_limit_is_shown_whole() -> None:
-    output = numbered(DETAIL_LINE_LIMIT)
-    assert capped(output).plain == output
-
-
-def test_longer_output_keeps_its_ends_and_counts_the_lines_omitted() -> None:
-    lines = capped(numbered(250)).plain.split("\n")
-    assert len(lines) == 201
-    assert lines[:2] == ["line 0", "line 1"] and lines[99] == "line 99"
-    assert lines[100] == "… 50 lines omitted · y copies all …"
-    assert lines[101] == "line 150" and lines[-1] == "line 249"
-
-
-def test_the_omitted_line_is_dim() -> None:
-    text = capped(numbered(201))
-    marker = text.plain.split("\n")[100]
-    assert marker == "… 1 line omitted · y copies all …"
-    start = text.plain.index(marker)
-    assert [span.style for span in text.spans if span.start == start] == ["dim"]
+def test_the_omitted_line_counts_one_line_singly_and_dimly() -> None:
+    drawn = capped_with(numbered(201), Text)
+    assert isinstance(drawn, Group)
+    marker = drawn.renderables[1]
+    assert isinstance(marker, Text)
+    assert (marker.plain, marker.style) == ("… 1 line omitted · y copies all …", "dim")
 
 
 def test_capped_with_draws_output_of_the_limit_whole() -> None:
@@ -126,9 +112,8 @@ def test_the_copied_note_counts_one_line_singly() -> None:
     assert copied_note("a") == "Copied 1 line"
 
 
-def test_output_ending_in_a_newline_has_no_trailing_blank_line() -> None:
-    assert capped("a\nb\n").plain == "a\nb"
-
-
 def test_capped_output_ending_in_a_newline_has_no_trailing_blank_line() -> None:
-    assert capped(numbered(250) + "\n").plain.split("\n")[-1] == "line 249"
+    drawn = capped_with(numbered(250) + "\n", Text)
+    assert isinstance(drawn, Group)
+    tail = drawn.renderables[-1]
+    assert isinstance(tail, Text) and tail.plain.split("\n")[-1] == "line 249"

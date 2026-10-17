@@ -54,23 +54,12 @@ def copied_note(text: str) -> str:
     return f"Copied {count} line{'' if count == 1 else 's'}"
 
 
-def capped(output: str, limit: int = DETAIL_LINE_LIMIT) -> Text:
-    """``output``'s lines as plain text, without a trailing newline; with more than ``limit``
-    lines, just its first and last halves of that, a dim line between them counting the lines
-    left out and saying y copies them all."""
-    lines = output.splitlines()
-    if len(lines) <= limit:
-        return Text("\n".join(lines))
-    kept = limit // 2
-    marker = _omitted(len(lines) - 2 * kept)
-    return Text("\n").join([Text("\n".join(lines[:kept])), marker, Text("\n".join(lines[-kept:]))])
-
-
 def capped_with(
     output: str, render: Callable[[str], RenderableType], limit: int = DETAIL_LINE_LIMIT
 ) -> RenderableType:
     """``output`` drawn by ``render``; with more than ``limit`` lines, just its first and last
-    halves of that, each drawn on its own, with the dim line of :func:`capped` between them."""
+    halves of that, each drawn on its own, with a dim line between them counting the lines left
+    out and saying y copies them all."""
     lines = output.splitlines()
     if len(lines) <= limit:
         return render(output)
