@@ -141,6 +141,8 @@ the title or prompt (`esc` stops; `enter` stops in the title and adds a line in 
 `esc` discards. A task needs a title; the prompt may be empty.
 
 The task list belongs to the open session, which orbit saves as you go (see [Sessions](#sessions)).
+The planned behaviour of following the active task, and holding the list, is in
+[docs/task-list.md](docs/task-list.md).
 
 `ctrl+r` runs the tasks one after another, each through a fresh **agent**: a new `claude -p`
 session connected to orbit's MCP server, so tasks don't share context with each other or with the
