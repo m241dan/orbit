@@ -92,7 +92,8 @@ class AgentSession:
 
     The session owns the task board and reports it whole on every change. It starts two
     lanes: the planner's, whose turns answer prompts, and the work lane's, which runs the
-    tasks. ``WorkLane`` holds the rules of a task run: verification, fixes and reviews.
+    tasks. ``WorkLane`` holds the rules of a task run: verification and fixes;
+    ``ReviewLane`` runs the reviews.
 
     With ``check_at_startup``, the ``verification`` steps also run once in the background as
     the events start, on the base commit; a failure adds a draft task to fix it. With a

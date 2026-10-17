@@ -5,16 +5,19 @@ arrive at the :class:`~orbit.agent.application.desk.AgentDesk`, which passes eac
 :class:`AgentRun` for that agent.
 Verification runs in the run's own task, not in a call's, so it carries on if the agent
 disconnects while waiting for the result. So does trying a proposal of checks, and asking the
-user what they make of it.
+user what they make of it, which a :class:`ProposalTrial` does.
 """
 
 import asyncio
+from collections.abc import Sequence
 from contextlib import suppress
 from dataclasses import dataclass
+from functools import partial
 from typing import Any, Literal
 
 from orbit.agent.application.desk import AgentDesk, Tool, dispatch, report_progress
-from orbit.agent.application.ports import ProposalDecision, Reply
+from orbit.agent.application.ports import Reply
+from orbit.agent.application.proposal_trial import ProposalTrial
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.application.verifier import Failure, Verifier, first_failure
 from orbit.agent.domain.agent_task import FINISHED, AgentTask, Phase
@@ -24,9 +27,8 @@ from orbit.agent.domain.roles import (
     ConfigError,
     Role,
     parse_proposal,
-    setup_step,
 )
-from orbit.agent.domain.verification import check_reply
+from orbit.agent.domain.verification import VerificationStep, check_reply
 from orbit.protocol import (
     AgentExited,
     AgentExitReason,
@@ -302,45 +304,24 @@ class AgentRun:
     async def _consider(self, proposal: _Proposal) -> None:
         """Try ``proposal``, have the user decide on it if it works, and answer the agent."""
         try:
-            reply = await self._decide(proposal.checks)
+            verdict = await self._trial().decide(proposal.checks)
         except BaseException as exc:
             _fail(proposal.answer, exc)
             raise
-        _answer(proposal.answer, Reply(reply))
+        if verdict.accepted is not None:
+            self._accepted = verdict.accepted
+        _answer(proposal.answer, Reply(verdict.reply))
 
-    async def _decide(self, checks: ChecksProposal) -> str:
-        failure = await self._try(checks)
-        if failure is not None:
-            return self._work.proposal_failed(*failure)
-        decision = await self._review(checks)
-        if decision is None:
-            return self._work.ended()
-        if decision.action == "accept":
-            self._accepted = checks
-            return self._work.accepted()
-        if decision.action == "revise":
-            return self._work.revise(decision.feedback)
-        return self._work.ended()
-
-    async def _review(self, checks: ChecksProposal) -> ProposalDecision | None:
-        """The user's decision on ``checks``; ``None`` if the agent exits before they decide."""
+    def _trial(self) -> ProposalTrial:
         review = self._desk.agents.proposal_review
         assert review is not None  # Proposals are refused without one.
         assert self._stream_task is not None  # Proposals come from a launched agent.
-        decision = asyncio.ensure_future(review.review(self._task_id, checks))
-        try:
-            await asyncio.wait({decision, self._stream_task}, return_when=asyncio.FIRST_COMPLETED)
-        finally:
-            decision.cancel()
-        return decision.result() if decision.done() else None
+        ask = partial(review.review, self._task_id)
+        return ProposalTrial(self._work, self._run_steps, ask, self._stream_task)
 
-    async def _try(self, checks: ChecksProposal) -> Failure | None:
-        """Run ``checks``' setup, then each step, in the agent's tree; returns the first
-        failure."""
+    async def _run_steps(self, steps: Sequence[VerificationStep]) -> Failure | None:
+        """Run ``steps`` in the agent's tree until one fails; returns that failure."""
         assert self._verifier is not None  # Proposals are refused without one.
-        steps = checks.steps
-        if checks.setup is not None:
-            steps = (setup_step(checks.setup), *steps)
         async with self._checking:
             return await first_failure(steps, self._verifier.run_one, self._root)
 

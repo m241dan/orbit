@@ -621,7 +621,8 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     follows, drives the ports and publishes events. `Tasks` (in `tasks`) holds the `TaskBoard`
     and publishes it whole after each change, marking tasks running and finished. `WorkLane` is the work lane: it runs the
     board's tasks one at a time, queues a fix after each failed step and lands work that passes.
-    `AgentRun` sees one task through one agent; `AgentDesk` (in `desk`) launches agents and
+    `AgentRun` sees one task through one agent, and a `ProposalTrial` (in `proposal_trial`)
+    tries the checks a configurator proposes and has the user decide on them; `AgentDesk` (in `desk`) launches agents and
     routes their calls by token; `Verifier` runs the steps; `Lander` (in `landing`) commits and
     merges verified work; `ReviewLane` runs reviews beside the work; `StartupCheck` runs the
     steps once on the base commit as orbit starts; `UsageMonitor` fetches the usage limits on a
@@ -646,9 +647,11 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
   `tabs`, `detail` and `detail_views` for the detail pane, `diffs` and `diff_numbers` for an
   edit's diff, `progress` for notes on a task's run, `rules` for the rules ending turns and
   agents' runs, `turns` for the conversation's running turns, `working` for the working row, and `settings` and `common` for what they share); the widgets (`transcript`,
-  `tabs`, `tasks`, `agents`, `panels`, `proposals`, the proposal modal, and `widgets` for the
-  building blocks they share) lay it out, and `app` is the Textual
-  app that holds them.
+  `conversation` for the `ConversationFeed`, which turns events into the transcript's entries,
+  `entries` for an entry and the renderables that draw it, `tabs`, `tasks`, `agents`,
+  `panels`, `detail` for the detail pane, `working` for the working row, `proposals`, the
+  proposal modal, and `widgets` for the building blocks they share) lay it out, and `app` is
+  the Textual app that holds them.
 - `orbit.cli`: the composition root, and the only place the two sides are wired together: it
   plugs the external adapters into `AgentSession` and hands that to the TUI. It runs the
   backend on its own thread and event loop through `orbit.protocol.ThreadedSession`, so neither
