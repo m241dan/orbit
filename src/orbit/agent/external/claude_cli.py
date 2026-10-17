@@ -10,6 +10,7 @@ process list.
 """
 
 import asyncio
+import contextlib
 import json
 import os
 from collections.abc import AsyncIterator, Mapping, Sequence
@@ -195,6 +196,16 @@ def _pipes(
     return process.stdin, process.stdout, process.stderr
 
 
+async def _send(stdin: asyncio.StreamWriter, prompt: str) -> None:
+    """Write ``prompt`` to the CLI and close its stdin."""
+    # A CLI that exits before reading its prompt (rejecting its flags, say) breaks the pipe;
+    # what it printed says why, so the turn reads that rather than failing here.
+    with contextlib.suppress(BrokenPipeError, ConnectionResetError):
+        stdin.write(prompt.encode())
+        await stdin.drain()
+    stdin.close()
+
+
 class _Crashed(RuntimeError):
     """The CLI ran but exited without finishing the turn."""
 
@@ -315,9 +326,7 @@ class _Turn:
         stdin, stdout, stderr_pipe = _pipes(process)
         stderr = asyncio.create_task(stderr_pipe.read())
         try:
-            stdin.write(prompt.encode())
-            await stdin.drain()
-            stdin.close()
+            await _send(stdin, prompt)
             finished = False
             async for event in self._read_events(turn_id, stdout):
                 finished = finished or isinstance(event, TurnFinished)

@@ -3,8 +3,10 @@
 Usage: python fake_claude.py SCENARIO.json [claude args...]
 
 The scenario is ``{"stdout": [str, ...], "stderr": str, "exit": int, "hang": bool}``.
-Each run appends ``{"argv": [...], "stdin": str, "pid": int, "env": {...}, "cwd": str}`` to
-``SCENARIO.json.calls``; ``env`` holds the variables in ``RECORDED_ENV`` that are set.
+With ``"exit_at_once": true`` it writes ``stderr`` and exits with ``exit`` before reading its
+stdin or recording the call, like a CLI rejecting its arguments. Otherwise each run appends
+``{"argv": [...], "stdin": str, "pid": int, "env": {...}, "cwd": str}`` to ``SCENARIO.json.calls``;
+``env`` holds the variables in ``RECORDED_ENV`` that are set.
 """
 
 import json
@@ -25,6 +27,9 @@ RECORDED_ENV = (
 def main() -> int:
     scenario_path = Path(sys.argv[1])
     scenario = json.loads(scenario_path.read_text())
+    if scenario.get("exit_at_once"):
+        sys.stderr.write(scenario.get("stderr", ""))
+        return int(scenario.get("exit", 0))
     env = {name: os.environ[name] for name in RECORDED_ENV if name in os.environ}
     record = {
         "argv": sys.argv[2:],

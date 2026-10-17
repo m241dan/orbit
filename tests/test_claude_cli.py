@@ -363,6 +363,29 @@ async def test_a_resumed_turn_with_unexpected_output_is_not_a_failure_to_resume(
     assert not isinstance(raised.value, ResumeFailed)
 
 
+# Larger than a pipe's buffer, so sending it to a CLI that has exited breaks the pipe.
+LARGE_PROMPT = "x" * (4 * 1024 * 1024)
+
+
+async def test_an_agent_whose_cli_exits_before_reading_its_prompt_crashes_with_its_stderr(
+    tmp_path: Path,
+) -> None:
+    runner, _ = make_runner(tmp_path, exit_at_once=True, stderr="error: unknown option\n", exit=1)
+    launch = AgentLaunch(AGENT, URL, LARGE_PROMPT, Settings(), ".", "Write code.", TOOLS)
+    with pytest.raises(RuntimeError, match=r"^error: unknown option$"):
+        [e async for e in runner.run_agent(launch)]
+
+
+async def test_a_resumed_turn_whose_cli_exits_before_reading_its_prompt_fails_to_resume(
+    tmp_path: Path,
+) -> None:
+    stderr = "No conversation found with session ID: saved-7\n"
+    runner, _ = make_runner(tmp_path, exit_at_once=True, stderr=stderr, exit=1)
+    runner.set_conversation("agent-3", "saved-7")
+    with pytest.raises(ResumeFailed, match=r"^No conversation found with session ID: saved-7$"):
+        await run(runner, LARGE_PROMPT)
+
+
 async def test_runner_skips_blank_lines(tmp_path: Path) -> None:
     runner, _ = make_runner(tmp_path, stdout=["", *lines(TEXT), "  ", *lines(RESULT)])
     events = await run(runner, "hi")
