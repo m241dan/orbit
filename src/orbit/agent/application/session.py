@@ -7,15 +7,12 @@ ports to do it, and reports what happened as events.
 import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable, Collection, Sequence
 from dataclasses import replace
-from datetime import datetime
 from typing import assert_never
 
 from orbit.agent.application.desk import AgentDesk, Agents
 from orbit.agent.application.keeper import (
     Clock,
-    Contents,
     IdMaker,
-    Left,
     SessionKeeper,
     local_now,
     new_session_id,
@@ -27,21 +24,20 @@ from orbit.agent.application.proposals import FrontendReview
 from orbit.agent.application.review_lane import ReviewLane
 from orbit.agent.application.startup_check import AGENT_ID as STARTUP_AGENT
 from orbit.agent.application.startup_check import StartupCheck
+from orbit.agent.application.switcher import (
+    SessionCommand,
+    SessionSwitcher,
+    SettingsAccess,
+    SwitchParts,
+)
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.application.usage_monitor import UsageMonitor
 from orbit.agent.application.verifier import Verification, Verifier
 from orbit.agent.application.work_lane import WorkLane
 from orbit.agent.domain.agents import Agent
-from orbit.agent.domain.board import WAITING, TaskBoard, interrupted
-from orbit.agent.domain.reviews import LaneSnapshot, PlannerSnapshot, ReviewPlanner
+from orbit.agent.domain.board import WAITING, TaskBoard
+from orbit.agent.domain.reviews import ReviewPlanner
 from orbit.agent.domain.roles import REVIEW_ROLES, configure_prompt, role_task
-from orbit.agent.domain.sessions import (
-    EMPTY_NAME,
-    SessionRecord,
-    resumed_notes,
-    resumed_settings,
-    session_name,
-)
 from orbit.agent.domain.verification import VerificationStep, startup_fix_prompt
 from orbit.protocol import (
     CODER,
@@ -54,30 +50,20 @@ from orbit.protocol import (
     Command,
     ConfigureChecks,
     DecideProposal,
-    DeleteSession,
     EditTask,
     ErrorOccurred,
     Event,
-    ListingReason,
-    ListSessions,
-    NewSession,
     Notice,
-    OpenSession,
     RemoveTask,
-    RenameSession,
     RequestSuperReview,
     ResetPlanner,
     RunTasks,
-    SessionOpened,
-    SessionsListed,
     Settings,
     SettingsChanged,
     SubmitPrompt,
     TaskSpec,
-    TaskState,
     TurnFinished,
     UpdateSettings,
-    Usage,
     VerificationChanged,
 )
 
@@ -85,13 +71,6 @@ NO_STEPS_NOTE = "No verification steps configured. Press ctrl+e to set them up."
 NO_AGENTS_MESSAGE = "Tasks need agents, and none are set up."
 NO_VERIFY_MESSAGE = "Setting up checks needs verification on; orbit was started with --no-verify."
 CONFIGURING_NOTE = "A configurator task is already queued or running."
-TASKS_RUNNING = "Can't switch: tasks are running. Press ctrl+s to stop them."
-REVIEW_RUNNING = "Can't switch: a review is running. Press c on it in the agents pane to stop it."
-PLANNER_ANSWERING = "Can't switch: the planner is answering. Press ctrl+x to stop it."
-NO_REVIEWS = LaneSnapshot(planner=PlannerSnapshot())
-"""The review state of a session that has had none."""
-
-SessionCommand = ListSessions | OpenSession | NewSession | RenameSession | DeleteSession
 WorkCommand = (
     SubmitPrompt
     | CancelTurn
@@ -107,11 +86,6 @@ WorkCommand = (
     | CancelAgent
     | DecideProposal
 )
-
-
-def _stopped(saved: Sequence[TaskState], now: Sequence[TaskState]) -> list[str]:
-    """The ids of the tasks ``saved`` that are otherwise ``now``, as they were interrupted."""
-    return [task.id for task, was in zip(now, saved, strict=True) if task != was]
 
 
 def _verifier(
@@ -147,7 +121,8 @@ class AgentSession:
     The session owns the task board and reports it whole on every change. It starts two
     lanes: the planner's, whose turns answer prompts, and the work lane's, which runs the
     tasks. ``PlannerSeat`` holds the planner and its turns; ``WorkLane`` holds the rules of a
-    task run: verification and fixes; ``ReviewLane`` runs the reviews.
+    task run: verification and fixes; ``ReviewLane`` runs the reviews; ``SessionSwitcher``
+    switches between saved sessions.
 
     With ``check_at_startup``, the ``verification`` steps also run once in the background as
     the events start, on the base commit; a failure adds a draft task to fix it. With a
@@ -183,7 +158,6 @@ class AgentSession:
         self._given = self._settings
         self._pinned = tuple(pinned)
         self._pick_session = pick_session
-        self._picking = pick_session  # No session picked yet: this one's tasks carry over.
         self._model_choices = tuple(model_choices)
         self._events: asyncio.Queue[Event] = asyncio.Queue()
         self._keeper = SessionKeeper(store, self._events.put, clock, new_id)
@@ -193,7 +167,6 @@ class AgentSession:
         self._proposals = FrontendReview(self._events.put, self._agent_on)
         agents = _reviewed(agents, self._proposals)
         self._verifier = _verifier(verification, self._tasks, self._events, agents)
-        self._spent = Usage()  # What the session's agents have spent, the planner's included.
         self._desk = AgentDesk(agents, self._publish_agents) if agents else None
         self._announced = False
         self._closing = False
@@ -201,8 +174,6 @@ class AgentSession:
         self._held = False  # The user cancelled: don't start work by itself.
         hooks = SeatHooks(self._save, self._keeper.use, self._step_names)
         self._seat = PlannerSeat(self._desk, self._tasks, self._events, hooks)
-        # What the opened session saved that no review lane here holds, kept to save back.
-        self._kept_reviews: LaneSnapshot | None = None
         self._events.put_nowait(self._settings_changed())
         if workspace is not None:
             self._events.put_nowait(Notice(message=f"Workspace: {workspace}"))
@@ -212,6 +183,30 @@ class AgentSession:
         post = self._events.put_nowait
         self._work_turns = TurnSlot("work", "Tasks are already running.", post)
         self._usage = _usage_monitor(usage, self._events)
+        self._switcher = self._session_switcher(pick_session)
+
+    def _session_switcher(self, picking: bool) -> SessionSwitcher:
+        """What switches this session between saved ones, still ``picking`` one if so."""
+        parts = SwitchParts(
+            self._keeper,
+            self._tasks,
+            self._seat,
+            self._lane,
+            self._work,
+            lambda: self._work_turns.running,
+        )
+        access = SettingsAccess(
+            lambda: self._settings,
+            self._set_settings,
+            self._settings_changed,
+            self._given,
+            self._pinned,
+        )
+        return SessionSwitcher(parts, access, self._events, picking)
+
+    def _set_settings(self, settings: Settings) -> None:
+        """Have the session use ``settings`` from now on."""
+        self._settings = settings
 
     def _work_lane(self) -> WorkLane | None:
         if self._desk is None:
@@ -273,9 +268,9 @@ class AgentSession:
 
     async def send(self, command: Command) -> None:
         if isinstance(command, SessionCommand):
-            await self._handle_sessions(command)
+            await self._switcher.handle(command)
         else:
-            self._picking = False  # The user works on in this session.
+            self._switcher.stay()
             await self._handle_work(command)
 
     async def _handle_work(self, command: WorkCommand) -> None:
@@ -290,140 +285,6 @@ class AgentSession:
                 await self._handle_agents(command)
             case _:
                 assert_never(command)
-
-    async def _handle_sessions(self, command: SessionCommand) -> None:
-        match command:
-            case ListSessions():
-                await self._list_sessions("asked")
-            case OpenSession(session_id=session_id):
-                await self._open_session(session_id)
-            case NewSession(name=name):
-                await self._new_session(name)
-            case RenameSession() | DeleteSession():
-                await self._change_saved(command)
-            case _:
-                assert_never(command)
-
-    async def _list_sessions(self, reason: ListingReason) -> None:
-        summaries = await self._keeper.summaries()
-        await self._events.put(SessionsListed(sessions=summaries, reason=reason))
-
-    async def _change_saved(self, command: RenameSession | DeleteSession) -> None:
-        """Rename or delete a session, then list the sessions as they are after."""
-        match command:
-            case RenameSession(session_id=session_id, name=name):
-                await self._rename_session(session_id, name)
-            case DeleteSession(session_id=session_id):
-                await self._keeper.delete_saved(session_id)
-            case _:
-                assert_never(command)
-        await self._list_sessions("refreshed")
-
-    async def _rename_session(self, session_id: str, name: str) -> None:
-        """Name the session ``session_id`` ``name``, saving it if it's saved; refused for an
-        empty name."""
-        named = session_name(name)
-        if named is None:
-            await self._events.put(ErrorOccurred(message=EMPTY_NAME))
-        elif session_id == self._keeper.id:
-            self._keeper.rename(named)
-            await self._save()
-        else:
-            await self._keeper.rename_saved(session_id, named)
-
-    async def _open_session(self, session_id: str) -> None:
-        """Open the saved session ``session_id`` in place of this one, without running
-        anything: what was running when it was saved is cancelled. Refused while anything runs,
-        or if it can't be opened; opening this session does nothing."""
-        if session_id == self._keeper.id or not self._may_switch():
-            return
-        opened = await self._keeper.open(
-            session_id, lambda record: self._may_switch() and self._load(record)
-        )
-        if opened is None:
-            return
-        record = opened.record
-        tasks, count = interrupted(record.tasks)
-        await self._switched(opened.left, _stopped(record.tasks, tasks), record.last_active)
-        for note in resumed_notes(record, count):
-            await self._events.put(Notice(message=note))
-
-    async def _new_session(self, name: str | None) -> None:
-        """Start a new session ``name``d so in place of this one; refused while anything
-        runs."""
-        left = await self._keeper.renew(name, lambda: self._may_switch() and self._clear())
-        if left is not None:
-            await self._switched(left, (), None)
-
-    def _may_switch(self) -> bool:
-        """Whether the session may be switched now, as nothing runs; otherwise says what runs."""
-        if self._work_turns.running:
-            refusal = TASKS_RUNNING
-        elif self._lane is not None and self._lane.running:
-            refusal = REVIEW_RUNNING
-        elif self._seat.running:
-            refusal = PLANNER_ANSWERING
-        else:
-            return True
-        self._events.put_nowait(ErrorOccurred(message=refusal))
-        return False
-
-    def _load(self, record: SessionRecord) -> bool:
-        """Hold what ``record`` does, its tasks as interrupted; returns True."""
-        settings = resumed_settings(record.settings, self._given, self._pinned)
-        tasks = interrupted(record.tasks)[0]
-        self._spent = record.spent
-        return self._hold(tasks, settings, record.planner_conversation, record.reviews)
-
-    def _clear(self) -> bool:
-        """Hold what a new session does, keeping the settings and having spent nothing; returns
-        True."""
-        self._spent = Usage()
-        return self._hold((), self._settings, None, None)
-
-    def _hold(
-        self,
-        tasks: tuple[TaskState, ...],
-        settings: Settings,
-        conversation: str | None,
-        reviews: LaneSnapshot | None,
-    ) -> bool:
-        """Hold a session's ``tasks``, ``settings``, planner ``conversation`` and ``reviews``,
-        with no fix counts; returns True."""
-        self._replace_board(tasks)
-        if self._work is not None:
-            self._work.reset()
-        self._settings = settings
-        self._seat.replace(conversation)
-        if self._lane is not None:
-            self._lane.load(reviews or NO_REVIEWS)
-        self._kept_reviews = reviews
-        return True
-
-    def _replace_board(self, tasks: tuple[TaskState, ...]) -> None:
-        """Have ``tasks`` on the board, and after them, while no session was picked yet, the
-        tasks orbit added."""
-        # Published with the rest of the session opened, in _switched, not half-switched here.
-        carried = self._board.tasks if self._picking else ()
-        self._board.restore(tasks)
-        for state in carried:
-            self._board.append(state)
-
-    async def _switched(
-        self, left: Left, stopped: Collection[str], last_active: datetime | None
-    ) -> None:
-        """Finish a switch from the session ``left``, deleting it if its tasks carried over:
-        close its planner, end the reviews ``stopped`` when it was saved, and publish what the
-        session opened, last active at ``last_active``, holds."""
-        discard, self._picking = self._picking, False
-        await self._keeper.leave(left, discard)
-        await self._seat.close_retired()
-        if self._lane is not None:
-            await self._lane.end_interrupted(stopped)
-        await self._tasks.publish()
-        await self._events.put(self._settings_changed())
-        summary = self._keeper.summary(self._board.tasks, self._spent, last_active)
-        await self._events.put(SessionOpened(session=summary))
 
     async def _handle_prompts(self, command: SubmitPrompt | CancelTurn | UpdateSettings) -> None:
         match command:
@@ -621,25 +482,14 @@ class AgentSession:
 
     async def _save(self) -> None:
         """Save the session, if it's used, as it is now."""
-        await self._keeper.save(self._contents)
-
-    def _contents(self) -> Contents:
-        """What the session holds now, to save, with what it was opened with in place of the
-        reviews it has no lane to hold."""
-        return Contents(
-            settings=self._settings,
-            planner_conversation=self._seat.conversation_id,
-            tasks=self._board.tasks,
-            reviews=self._lane.snapshot() if self._lane else self._kept_reviews,
-            spent=self._spent,
-        )
+        await self._keeper.save(self._switcher.contents)
 
     async def _publish_agents(self, event: Event) -> None:
         """Publish ``event``, from the agents; one that ends a turn adds what the turn cost to
         what the session spent, and saves it."""
         await self._events.put(event)
         if isinstance(event, TurnFinished) and event.usage is not None:
-            self._spent += event.usage
+            self._switcher.spent += event.usage
             await self._save()
 
     async def _change(self, change: Callable[[TaskBoard], None]) -> bool:
@@ -692,7 +542,7 @@ class AgentSession:
             try:
                 await self._load_review_count()
                 if self._pick_session:
-                    await self._list_sessions("startup")
+                    await self._switcher.list_sessions("startup")
                 await self._announce_leftovers()
             finally:  # A listener cancelled meanwhile mustn't keep the background from starting.
                 self._start_background()
