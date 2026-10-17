@@ -59,6 +59,21 @@ def test_an_edit_also_fitting_mid_line_elsewhere_has_no_numbers() -> None:
     assert diff_numbers("Edit", line_diff("q\ny", "x\ny"), result) == [None, None, None]
 
 
+def test_an_edits_middle_lines_must_equal_whole_lines() -> None:
+    result = f"{HEADER}\n     1→a\n     2→xbx\n     3→c\n     4→za\n     5→b\n     6→c"
+    assert diff_numbers("Edit", line_diff("q", "a\nb\nc"), result) == [None, 4, 5, 6]
+
+
+def test_an_edits_first_line_must_end_its_line() -> None:
+    result = f"{HEADER}\n     1→xay\n     2→b\n     3→a\n     4→b"
+    assert diff_numbers("Edit", line_diff("q", "a\nb"), result) == [None, 3, 4]
+
+
+def test_an_edits_last_line_must_start_its_line() -> None:
+    result = f"{HEADER}\n     1→a\n     2→xby\n     3→a\n     4→b"
+    assert diff_numbers("Edit", line_diff("q", "a\nb"), result) == [None, 3, 4]
+
+
 def test_a_one_line_edit_also_fitting_inside_another_line_has_no_numbers() -> None:
     result = f"{HEADER}\n     1→def f(x):\n     2→    f(x)\n     3→)"
     assert diff_numbers("Edit", line_diff("x)", ")"), result) == [None, None]
