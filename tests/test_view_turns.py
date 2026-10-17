@@ -105,3 +105,12 @@ def test_an_exit_mid_turn_gives_the_final_answers_of_only_its_agents_open_turns(
     after, exit_ = agent_exited(turns, exited("a"), 7)
     assert exit_.answers == (("t", (0,)), ("u", ()))
     assert after.steps == {("b", "t"): ("message",)}
+
+
+def test_an_exit_mid_turn_leaves_no_state_for_its_agent() -> None:
+    turns = turn_started(turn_started(Turns(), started("a"), 1), started("b"), 2)
+    turns = turn_output(turn_output(turns, said("a")), said("b"))
+    after, _ = agent_exited(turns, exited("a"), 7)
+    assert after == Turns(
+        steps={("b", "t"): ("message",)}, started={("b", "t"): 2}, agent_since={"b": 2}
+    )

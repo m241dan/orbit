@@ -106,7 +106,8 @@ def agent_exited(turns: Turns, event: AgentExited, now: float) -> tuple[Turns, E
     )
     turns = replace(
         turns,
-        steps={key: steps for key, steps in turns.steps.items() if key[0] != agent},
+        steps=_not_of(turns.steps, agent),
+        started=_not_of(turns.started, agent),
         agent_since=_without(turns.agent_since, agent),
         drawn=_without(turns.drawn, agent),
     )
@@ -120,6 +121,11 @@ def _open_answers(
     return tuple(
         (turn, final_answer(said)) for (owner, turn), said in steps.items() if owner == agent
     )
+
+
+def _not_of[V](mapping: Mapping[TurnKey, V], agent: str) -> dict[TurnKey, V]:
+    """``mapping`` without ``agent``'s turns."""
+    return {key: value for key, value in mapping.items() if key[0] != agent}
 
 
 def _without[K, V](mapping: Mapping[K, V], key: K) -> dict[K, V]:
