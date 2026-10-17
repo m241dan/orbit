@@ -11,6 +11,7 @@ from orbit.tui.view.common import STATUS_ICONS, model_label, token_text
 from orbit.tui.view.detail_views import ERROR
 
 TASK_EDITOR_HINT = "j/k move · J/K scroll · i type · enter choose · ctrl+s save · esc cancel"
+REASON_HINT = "j/k scroll · y copy · esc close"
 
 
 def task_numbers(tasks: Sequence[TaskState]) -> list[str]:
@@ -69,6 +70,21 @@ def _reason_line(line: str, width: int | None) -> Text:
     if width is not None:
         text.truncate(width, overflow="ellipsis")
     return text
+
+
+def reason_title(state: TaskState, number: str) -> str:
+    """The reason modal's title for task ``number``: why it stopped, if cancelled, else why it
+    failed."""
+    ending = "stopped" if state.status == "cancelled" else "failed"
+    return f"Why task {number} {ending}"
+
+
+def reason_text(state: TaskState) -> str:
+    """Why ``state`` ended, in full: its reason, then a blank line and its detail, if it has
+    one. It's what the reason modal shows and what y copies."""
+    if not state.reason_detail:
+        return state.reason
+    return f"{state.reason}\n\n{state.reason_detail}"
 
 
 def split_prompt(prompt: str) -> tuple[str, str]:

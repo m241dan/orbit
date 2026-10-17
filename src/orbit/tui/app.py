@@ -71,7 +71,7 @@ from orbit.tui.panels import UsagePanel, VerificationPanel
 from orbit.tui.proposals import ProposalScreen
 from orbit.tui.sessions import SessionChoice, SessionsScreen
 from orbit.tui.tabs import ConversationTabs
-from orbit.tui.tasks import TaskEditorScreen, TaskList
+from orbit.tui.tasks import ReasonScreen, TaskEditorScreen, TaskList
 from orbit.tui.transcript import Transcript
 from orbit.tui.view import (
     PLANNER_BUSY,
@@ -420,6 +420,10 @@ class OrbitApp(App[None], inherit_bindings=False):
     @on(TaskList.Remove)
     async def _remove_task(self, message: TaskList.Remove) -> None:
         await self._session.send(RemoveTask(task_id=message.task_id))
+
+    @on(TaskList.ShowReason)
+    def _show_reason(self, message: TaskList.ShowReason) -> None:
+        self.push_screen(ReasonScreen(message.state, message.number))
 
     async def action_super_review(self) -> None:
         # Reviews have their own lane, so this works while tasks run.

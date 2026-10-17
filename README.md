@@ -60,7 +60,7 @@ In the app:
 | `i` | Jump to the prompt, which talks to the planner, and start typing (vim-style insert mode): long text wraps and the box grows up to 8 lines, then scrolls; `enter` sends, pasted text keeps its newlines, `esc` stops typing |
 | `enter` | On the conversation: activate it (`j`/`k` move between entries, `enter` collapses or expands the one marked `▌` in the left gutter, or opens the detail pane on a tool call or request, `J`/`K` scroll the open detail pane, `y` copies its call's whole output, `tab` activates it, `esc` closes the detail pane if it's open, else leaves and holds the marked entry); again, resume at the held entry |
 | `enter` | On the conversation's detail pane: activate it (`j`/`k` scroll it, `y` copies its call's whole output, `esc` leaves with the pane still open) |
-| `enter` | On the task list: activate and hold it (`j`/`k` move, `enter` edits a task or adds one on `+ new task`, `a` accepts a draft, `x` removes a task, `esc` leaves, the list still held) |
+| `enter` | On the task list: activate and hold it (`j`/`k` move, `enter` edits a task or adds one on `+ new task`, `a` accepts a draft, `x` removes a task, `f` shows why a task failed or stopped, `esc` leaves, the list still held) |
 | `enter` | On the agents pane: activate it (`j`/`k` move, `c` cancels the highlighted agent's work, `esc` leaves) |
 | `t` | Hide agents' dim messages, still thinking out loud, in every tab; again, show them (works with the conversation activated too) |
 | `ctrl+b` | Hide the sidebar so the conversation takes the full width (`h`/`j`/`k`/`l` skip its windows meanwhile); again, show it as it was (not while typing) |
@@ -153,6 +153,12 @@ leaves the list still held, with its highlight where it was; `esc` again, with t
 selected, lets go: the list scrolls to the running task at once and follows it again. Switching
 sessions lets go too, leaving list mode if the list was active.
 [docs/task-list.md](docs/task-list.md) records the requirements.
+
+With the list active, `f` on a task that failed, gave up or stopped opens a modal saying why in
+full, titled `Why task 3 failed` (or `stopped`, for a cancelled task): the reason on the row's
+`↳` line, then the details, such as the failing step's command and output, the agent's whole
+give-up reason or the error. `j`/`k` (or the arrow keys) scroll it, `y` copies it all and `esc`
+closes it. It shows the task as it was when opened, even as the list changes underneath.
 
 `ctrl+r` runs the tasks one after another, each through a fresh **agent**: a new `claude -p`
 session connected to orbit's MCP server, so tasks don't share context with each other or with the

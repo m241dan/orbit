@@ -1,4 +1,5 @@
-"""The task list window and the modal that edits one task."""
+"""The task list window, the modal that edits one task and the one that says why a task
+ended."""
 
 import time
 from collections.abc import Callable, Sequence
@@ -16,13 +17,17 @@ from textual.widgets.option_list import Option
 
 from orbit.protocol import Settings, TaskSpec, TaskState, Usage
 from orbit.tui.view import (
+    REASON_HINT,
     TASK_EDITOR_HINT,
     TOOL_ACCESS_OPTIONS,
     active_task,
+    copied_note,
     follow_top,
     join_prompt,
     model_label,
     model_options,
+    reason_text,
+    reason_title,
     spinner_frame,
     split_prompt,
     task_editor_title,
@@ -41,10 +46,11 @@ class TaskList(ListPane):
     """The backend's task list plus a trailing "new task" row.
 
     Like the prompt, it only takes focus once activated (``enter_list_mode``);
-    then j/k move, enter picks a row, ``a`` accepts a draft, ``x`` removes a task and
-    escape returns to window navigation. Its border shows what the session's turns cost.
-    While following, it scrolls to keep the active task (``active_task``) in view; activating
-    it or scrolling it with the mouse wheel holds it where it is, until ``let_go``.
+    then j/k move, enter picks a row, ``a`` accepts a draft, ``x`` removes a task, ``f`` shows
+    why a task ended and escape returns to window navigation. Its border shows what the
+    session's turns cost. While following, it scrolls to keep the active task
+    (``active_task``) in view; activating it or scrolling it with the mouse wheel holds it
+    where it is, until ``let_go``.
     """
 
     class Accept(Message):
@@ -61,6 +67,14 @@ class TaskList(ListPane):
             super().__init__()
             self.task_id = task_id
 
+    class ShowReason(Message):
+        """The user asked why ``state``, task ``number`` on the list, ended."""
+
+        def __init__(self, state: TaskState, number: str) -> None:
+            super().__init__()
+            self.state = state
+            self.number = number
+
     DEFAULT_CSS = """
     TaskList {
         height: 1fr;
@@ -71,6 +85,7 @@ class TaskList(ListPane):
     BINDINGS: ClassVar[list[BindingType]] = [
         Binding("a", "accept", show=False),
         Binding("x", "remove", show=False),
+        Binding("f", "show_reason", show=False),
     ]
 
     def __init__(self, *, id: str) -> None:
@@ -129,6 +144,11 @@ class TaskList(ListPane):
         state = self._highlighted_task()
         if state is not None:
             self.post_message(self.Remove(state.id))
+
+    def action_show_reason(self) -> None:
+        state = self._highlighted_task()
+        if state is not None and state.reason:
+            self.post_message(self.ShowReason(state, self.numbers_by_id[state.id]))
 
     def _highlighted_task(self) -> TaskState | None:
         """The task the highlight is on; ``None`` on the new-task row."""
@@ -360,3 +380,50 @@ class TaskEditorScreen(ModalScreen[TaskSpec | None]):
         self._settings = self._settings.model_copy(update=changes)
         self.query_one("#task-model", FieldBox).update(model_label(self._settings))
         self.query_one("#task-tools", FieldBox).update(self._settings.tool_access)
+
+
+class ReasonScreen(ModalScreen[None]):
+    """Why task ``number`` ended, in full, as ``state`` had it when opened.
+
+    j/k and the arrow keys scroll, y copies the text and escape closes.
+    """
+
+    AUTO_FOCUS = None
+    DEFAULT_CSS = """
+    ReasonScreen { align: center middle; }
+    ReasonScreen > VerticalScroll {
+        width: 100;
+        max-width: 90%;
+        height: auto;
+        max-height: 80%;
+        border: round $accent;
+        padding: 0 1;
+    }
+    """
+    BINDINGS: ClassVar[list[BindingType]] = [
+        Binding("j,down", "scroll(1)", show=False),
+        Binding("k,up", "scroll(-1)", show=False),
+        Binding("y", "copy", show=False),
+        Binding("escape", "close", show=False),
+    ]
+
+    def __init__(self, state: TaskState, number: str) -> None:
+        super().__init__()
+        self.title_text = reason_title(state, number)
+        self.text = reason_text(state)
+
+    def compose(self) -> ComposeResult:
+        with VerticalScroll(can_focus=False) as box:
+            box.border_title = self.title_text
+            box.border_subtitle = REASON_HINT
+            yield Static(Text(self.text), id="reason-body")
+
+    def action_scroll(self, step: int) -> None:
+        self.query_one(VerticalScroll).scroll_relative(y=step, animate=False)
+
+    def action_copy(self) -> None:
+        self.app.copy_to_clipboard(self.text)
+        self.app.notify(copied_note(self.text))
+
+    def action_close(self) -> None:
+        self.dismiss(None)
