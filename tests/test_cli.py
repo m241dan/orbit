@@ -26,6 +26,7 @@ from orbit.agent import (
 )
 from orbit.agent.application.ports import UsageSource
 from orbit.agent.domain.reviews import ReviewLimits
+from orbit.agent.domain.sessions import default_name
 from orbit.cli import app
 from orbit.protocol import Notice, Settings, ThreadedSession
 
@@ -225,6 +226,29 @@ def test_chat_runs_tui_against_claude_cli(launched: list[AgentSession]) -> None:
     assert session.settings == Settings()
     assert session.pinned == ()
     assert session.model_choices == MODEL_ALIASES
+
+
+def test_chat_has_the_user_pick_a_session_at_startup(launched: list[AgentSession]) -> None:
+    assert runner.invoke(app, ["chat"]).exit_code == 0
+
+    [session] = launched
+    assert session._pick_session
+
+
+def test_chat_new_starts_a_new_session_named_for_the_time(launched: list[AgentSession]) -> None:
+    assert runner.invoke(app, ["chat", "--new"]).exit_code == 0
+
+    [session] = launched
+    assert not session._pick_session
+    assert session.saved_session.name == default_name(session.saved_session.created)
+
+
+def test_chat_name_starts_a_new_session_with_that_name(launched: list[AgentSession]) -> None:
+    assert runner.invoke(app, ["chat", "--name", "auth rework"]).exit_code == 0
+
+    [session] = launched
+    assert not session._pick_session
+    assert session.saved_session.name == "auth rework"
 
 
 def test_chat_accepts_model_and_tool_access(launched: list[AgentSession]) -> None:

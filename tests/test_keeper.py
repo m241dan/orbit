@@ -42,6 +42,19 @@ def test_a_new_session_is_named_for_when_it_was_opened() -> None:
     assert not keeper.used
 
 
+def test_a_session_can_be_renamed() -> None:
+    keeper, _ = keeper_for(FakeStore())
+    keeper.rename(" auth rework ")
+    assert keeper.name == "auth rework"
+
+
+def test_a_blank_or_missing_name_keeps_the_sessions_name() -> None:
+    keeper, _ = keeper_for(FakeStore())
+    keeper.rename(" ")
+    keeper.rename(None)
+    assert keeper.name == "Oct 17 14:30"
+
+
 def test_by_default_sessions_get_fresh_ids_and_the_local_time() -> None:
     assert new_session_id() != new_session_id()
     assert local_now().utcoffset() is not None

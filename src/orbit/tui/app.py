@@ -31,6 +31,7 @@ from orbit.protocol import (
     EditTask,
     ErrorOccurred,
     Event,
+    ListSessions,
     Notice,
     ProgressNoted,
     RemoveTask,
@@ -40,6 +41,7 @@ from orbit.protocol import (
     Session,
     SessionOpened,
     SessionsListed,
+    SessionSummary,
     Settings,
     SettingsChanged,
     StartupChecked,
@@ -66,6 +68,7 @@ from orbit.tui.conversation import ConversationFeed
 from orbit.tui.detail import DetailPane
 from orbit.tui.panels import UsagePanel, VerificationPanel
 from orbit.tui.proposals import ProposalScreen
+from orbit.tui.sessions import SessionChoice, SessionsScreen
 from orbit.tui.tabs import ConversationTabs
 from orbit.tui.tasks import TaskEditorScreen, TaskList
 from orbit.tui.transcript import Transcript
@@ -147,6 +150,8 @@ async def _next_batch(queue: asyncio.Queue[Event | None], limit: int) -> list[Ev
 # Not inheriting App's bindings drops its ctrl+q quit and ctrl+c "how to quit" hint.
 class OrbitApp(App[None], inherit_bindings=False):
     TITLE = "orbit"
+    # ctrl+p lists the sessions instead.
+    ENABLE_COMMAND_PALETTE = False
     # Start in normal mode: nothing focused; h/j/k/l move the selected window.
     AUTO_FOCUS = None
     CSS = """
@@ -184,6 +189,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         Binding("ctrl+x", "stop_planner", "Stop planner"),
         Binding("ctrl+o", "pick_model", "Model"),
         Binding("ctrl+l", "pick_tool_access", "Tools"),
+        Binding("ctrl+p", "list_sessions", "Sessions"),
         # check_action keeps it from the prompt while typing, which may want ctrl+b itself.
         Binding("ctrl+b", "toggle_sidebar", "Sidebar"),
     ]
@@ -199,6 +205,8 @@ class OrbitApp(App[None], inherit_bindings=False):
         self._settings: Settings | None = None
         self._model_choices: tuple[str, ...] = ()
         self._proposal: ProposalScreen | None = None  # The proposal being shown, if any.
+        # Whether ctrl+p asked for the sessions; unasked, they're listed at startup.
+        self._sessions_asked = False
         self.clock: Callable[[], float] = time.monotonic
         # Pickers are built once and installed so they open instantly.
         self._model_picker = PickerScreen("Model", model_options(())[1])
@@ -280,6 +288,7 @@ class OrbitApp(App[None], inherit_bindings=False):
             "release_cursor": self._normal_mode,
             "toggle_thinking": lambda: self._normal_mode() or self._in_transcript(),
             "configure_checks": self._on_main_screen,
+            "list_sessions": self._on_main_screen,
             "toggle_sidebar": lambda: self._on_main_screen() and self.focused is not self._prompt,
         }
         condition = conditions.get(action)
@@ -416,6 +425,23 @@ class OrbitApp(App[None], inherit_bindings=False):
 
         self.push_screen(ConfirmScreen(CONFIGURE_TITLE, CONFIGURE_MESSAGE, CONFIGURE_YES), answered)
 
+    async def action_list_sessions(self) -> None:
+        """Ask for the saved sessions, which show in a modal once they're listed."""
+        self._sessions_asked = True
+        await self._session.send(ListSessions())
+
+    def _show_sessions(self, sessions: tuple[SessionSummary, ...]) -> None:
+        """Let the user pick one of ``sessions`` or start a new one; listed unasked, it's at
+        startup, where escape quits."""
+        startup, self._sessions_asked = not self._sessions_asked, False
+
+        async def chosen(choice: SessionChoice | None) -> None:
+            # Refusals come back as errors, shown like any other.
+            if choice is not None:
+                await self._session.send(choice)
+
+        self.push_screen(SessionsScreen(sessions, startup=startup), chosen)
+
     async def action_cancel_turn(self) -> None:
         # The planner has its own lane, stopped with ctrl+x; ctrl+s stops the task run.
         await self._session.send(CancelTurn(lane="work"))
@@ -499,8 +525,10 @@ class OrbitApp(App[None], inherit_bindings=False):
                 | StartupChecked()
             ):
                 self._feed.render(event)
-            case SessionsListed() | SessionOpened():
-                pass  # Nothing shows sessions yet.
+            case SessionsListed(sessions=sessions):
+                self._show_sessions(sessions)
+            case SessionOpened():
+                pass  # What the session holds comes in its own events.
             case _:
                 assert_never(event)
 

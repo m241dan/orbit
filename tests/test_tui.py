@@ -20,9 +20,6 @@ from orbit.protocol import (
     ErrorOccurred,
     Event,
     Notice,
-    SessionOpened,
-    SessionsListed,
-    SessionSummary,
     Settings,
     SettingsChanged,
     StepState,
@@ -246,19 +243,6 @@ async def test_usage_changes_add_nothing_to_the_transcript() -> None:
     app = OrbitApp(session)
     async with app.run_test() as pilot:
         await session.queue.put(UsageChanged(status="unavailable", detail="not logged in"))
-        await session.queue.put(Notice(message="1 stash"))
-        await pilot.pause()
-
-        assert entries(app) == [("📌 1 stash", "verify")]
-
-
-async def test_session_events_add_nothing_to_the_transcript() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        summary = SessionSummary(id="s", name="auth rework")
-        await session.queue.put(SessionsListed(sessions=(summary,)))
-        await session.queue.put(SessionOpened(session=summary))
         await session.queue.put(Notice(message="1 stash"))
         await pilot.pause()
 

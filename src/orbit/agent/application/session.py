@@ -144,11 +144,12 @@ class AgentSession:
     ``usage`` source, the subscription's usage limits are fetched in the background too.
 
     The session open here is saved in ``store``, if there is one, once it's used; ``clock``
-    tells the time and ``new_id`` makes its id. The user can open another saved session, or a
-    new one, in its place: one opened has its saved settings, but for those ``pinned``, by
-    field name, which keep the ``settings`` given here. With ``pick_session``, the saved
-    sessions are listed as the events start, for the user to pick one; until they do, the
-    session open is a new one, and what orbit adds to it carries over into the one picked.
+    tells the time, ``new_id`` makes its id and ``name`` names it (by the time, if none). The
+    user can open another saved session, or a new one, in its place: one opened has its saved
+    settings, but for those ``pinned``, by field name, which keep the ``settings`` given here.
+    With ``pick_session``, the saved sessions are listed as the events start, for the user to
+    pick one; until they do, the session open is a new one, and what orbit adds to it carries
+    over into the one picked.
     """
 
     def __init__(
@@ -166,6 +167,7 @@ class AgentSession:
         new_id: IdMaker = new_session_id,
         pinned: Collection[str] = (),
         pick_session: bool = False,
+        name: str | None = None,
     ) -> None:
         self._settings = settings or Settings()
         self._given = self._settings
@@ -175,6 +177,7 @@ class AgentSession:
         self._model_choices = tuple(model_choices)
         self._events: asyncio.Queue[Event] = asyncio.Queue()
         self._keeper = SessionKeeper(store, self._events.put, clock, new_id)
+        self._keeper.rename(name)
         self._tasks = Tasks(TaskBoard(), self._events.put, self._save)
         self._board = self._tasks.board
         self._proposals = FrontendReview(self._events.put, self._agent_on)

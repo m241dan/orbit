@@ -95,6 +95,10 @@ class SessionKeeper:
         self._count: int | None = None  # The super review count the store holds.
         self._saving = asyncio.Lock()  # Saves one at a time, so the newest is written last.
 
+    def rename(self, name: str | None) -> None:
+        """Name the session ``name``, unless it's none or blank."""
+        self.name = (name or "").strip() or self.name
+
     def use(self) -> None:
         """Mark the session used, so it's saved from now on."""
         self.used = True

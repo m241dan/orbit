@@ -54,6 +54,25 @@ def _workspace(path: Path) -> Path:
     return Path(top) if top else resolved
 
 
+# Options declared apart, so chat stays short.
+NewOption = Annotated[
+    bool,
+    typer.Option(
+        "--new", help="Start a new session rather than picking one of the saved sessions."
+    ),
+]
+NameOption = Annotated[
+    str | None, typer.Option(help="Start a new session with this name (implies --new).")
+]
+ProfileOption = Annotated[
+    Path | None,
+    typer.Option(
+        help="Write a profile of each thread, and a log of every time the UI or backend was"
+        " blocked for over 50 ms, to this directory.",
+    ),
+]
+
+
 @app.command()
 def chat(
     workspace: Annotated[
@@ -106,15 +125,14 @@ def chat(
             " your Claude login's token from ~/.claude/.credentials.json.",
         ),
     ] = True,
-    profile: Annotated[
-        Path | None,
-        typer.Option(
-            help="Write a profile of each thread, and a log of every time the UI or backend was"
-            " blocked for over 50 ms, to this directory.",
-        ),
-    ] = None,
+    new: NewOption = False,
+    name: NameOption = None,
+    profile: ProfileOption = None,
 ) -> None:
     """Start an interactive agent session.
+
+    At startup, pick a saved session or start a new one (or start one with --new); ctrl+p
+    switches later.
 
     In the app: h/j/k/l move between windows; i jumps to the prompt, which talks to
     the planner, whose proposals wait on the task list as drafts, and ctrl+s stops the run;
@@ -149,6 +167,8 @@ def chat(
             usage=usage_source,
             store=SessionFiles(state_dir(str(root))),
             pinned=pinned,
+            pick_session=not new and name is None,
+            name=name,
         ),
         _thread_context(profile),
     )

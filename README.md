@@ -33,6 +33,8 @@ uv run pre-commit install
 ```sh
 uv run orbit chat                              # interactive agent session
 uv run orbit chat -C ~/code/other              # work on another project
+uv run orbit chat --new                        # start a new session rather than picking one
+uv run orbit chat --name "auth rework"         # start a new session with that name
 uv run orbit chat --model opus --tools full    # pick the planner's model and new tasks' tool access
 uv run orbit chat --no-verify                  # don't verify tasks (ctrl+e is refused)
 uv run orbit chat --no-review                  # don't review landed work
@@ -68,6 +70,7 @@ In the app:
 | `ctrl+e` | Set up (or redo) the verification steps: after you confirm (`y` to go ahead, `n`/`esc` to cancel), queue a configurator task first and run it (see [Setting up verification](#setting-up-verification)) |
 | `ctrl+o` | Pick the planner's model (default, fable, opus, sonnet, haiku; new tasks default to it too) |
 | `ctrl+l` | Pick the tool access level new tasks start with in the task editor (off, restricted, full) |
+| `ctrl+p` | Switch sessions: open a saved one or start a new one (see [Sessions](#sessions)) |
 | `esc` | Stop typing, close the conversation's detail pane, leave a list or close a picker; with the conversation selected and nothing active, let go of its held entry, closing the detail pane, and follow the latest output again; with the detail pane selected, close it |
 | `ctrl+s` | Stop the task run (on any tab) |
 | `ctrl+x` | Stop the planner's turn, leaving the task run going |
@@ -75,6 +78,36 @@ In the app:
 | `ctrl+c` | Quit |
 
 In a picker, `j`/`k` (or the arrow keys) move and `enter` chooses.
+
+### Sessions
+
+A session is what orbit is working on: the task list, the review state, the planner's
+conversation, the planner's model and new tasks' tool access. Orbit saves the open session after
+every change to `.git/orbit/sessions/` (`.orbit/sessions/` outside a git repository), one JSON file
+per session, written atomically, so it survives a crash or `ctrl+c`. A new session is saved once you
+add a task or prompt the planner; quitting before that leaves nothing behind.
+
+At startup orbit lists the saved sessions to pick from: `+ new session` first, then the sessions,
+the most recently active first. Each row shows the session's name, when it was last active (local
+time), how many of its tasks stand at each status, by the task list's icons (`3 ✅ 2 ⏳ 1 📝`), and
+what they cost (`1.2M tok · $0.84`); `●` marks the open session. `j`/`k` (or the arrow keys) move
+and `enter` opens the highlighted session. On `+ new session`, `enter` asks for a name: `enter`
+starts the session, named for the date and time if you leave the name empty, and `esc` goes back to
+the list. `esc` on the list quits orbit. Any draft orbit added before you picked, such as a fix for
+a step that failed the startup check, carries over into the session you pick. `--new` skips the list
+and starts a new session, and `--name NAME` starts one named `NAME`.
+
+`ctrl+p` shows the same list later, to switch sessions; there `esc` closes it and keeps the open
+session, as does picking the open session. Switching is refused, with an error saying what to stop,
+while tasks run, a review runs or the planner answers. Opening a session never starts work by
+itself: its pending tasks wait for `ctrl+r`. A task that was running or being verified when the
+session was last saved (orbit crashed, say) comes back cancelled, and orbit says how many were
+interrupted. The planner carries on its saved conversation, and the session's saved model and tool
+access come back, unless `--model` or `--tools` was given, which hold for this run.
+
+Each session is locked while an orbit has it open: in another orbit's list it shows `open in
+another orbit`, dimmed, and can't be opened. A session file that can't be read shows `unreadable:`
+and the reason, and can't be opened either.
 
 ### Tasks
 
@@ -86,11 +119,7 @@ the title or prompt (`esc` stops; `enter` stops in the title and adds a line in 
 `enter` on model or tools opens a picker, `ctrl+s` saves (from anywhere, even while typing) and
 `esc` discards. A task needs a title; the prompt may be empty.
 
-Orbit saves the session as you go: the task list, the review state, the planner's conversation,
-its model and new tasks' tool access are written to `.git/orbit/sessions/` (or `.orbit/sessions/`
-outside a git repository) after every change, so they survive a crash or `ctrl+c`. Each run starts a
-new session, saved once you add a task or prompt the planner; quitting before that leaves nothing
-behind. Reopening a saved session comes in a later change.
+The task list belongs to the open session, which orbit saves as you go (see [Sessions](#sessions)).
 
 `ctrl+r` runs the tasks one after another, each through a fresh **agent**: a new `claude -p`
 session connected to orbit's MCP server, so tasks don't share context with each other or with the
