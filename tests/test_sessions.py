@@ -2,7 +2,11 @@
 
 import json
 from datetime import UTC, datetime, timedelta, timezone
+from typing import Any
 
+import pytest
+
+from orbit.agent.domain import sessions
 from orbit.agent.domain.reviews import BatchSnapshot, LaneSnapshot, PlannerSnapshot, ReviewJob
 from orbit.agent.domain.sessions import (
     EMPTY_NAME,
@@ -124,6 +128,23 @@ def test_a_record_from_a_newer_orbit_is_unreadable() -> None:
 def test_a_record_from_before_the_first_version_is_unreadable() -> None:
     data = fields() | {"version": 0}
     assert parse_record(json.dumps(data)) == Unreadable("its version is unknown: 0")
+
+
+def rename_title(record: dict[str, Any]) -> dict[str, Any]:
+    migrated = {key: value for key, value in record.items() if key != "title"}
+    return migrated | {"name": record["title"]}
+
+
+def test_an_older_record_is_migrated_and_stamped_with_the_new_version(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(sessions, "FORMAT_VERSION", 2)
+    monkeypatch.setitem(sessions._MIGRATIONS, 1, rename_title)
+    data = {key: value for key, value in fields().items() if key != "name"}
+    old = data | {"version": 1, "title": "Old name"}
+    result = parse_record(json.dumps(old))
+    assert isinstance(result, SessionRecord)
+    assert (result.version, result.name) == (2, "Old name")
 
 
 def test_a_record_missing_a_field_is_unreadable() -> None:

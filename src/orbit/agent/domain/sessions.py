@@ -26,7 +26,8 @@ _MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct",
 
 Migration = Callable[[dict[str, Any]], dict[str, Any]]
 
-# By version: what upgrades a record of that version to the next. None are needed yet.
+# By version N: what takes a record of version N and returns its fields in version N+1's shape.
+# The upgrade sets the version for it. None are needed yet.
 _MIGRATIONS: dict[int, Migration] = {}
 
 EMPTY_NAME = "A session needs a name."
@@ -111,8 +112,12 @@ def _upgraded(data: dict[str, Any]) -> dict[str, Any] | Unreadable:
         )
     if version < 1:
         return Unreadable(f"its version is unknown: {version}")
-    migrations = (_MIGRATIONS[old] for old in range(version, FORMAT_VERSION))
-    return reduce(lambda record, migrate: migrate(record), migrations, data)
+    return reduce(_migrated, range(version, FORMAT_VERSION), data)
+
+
+def _migrated(record: dict[str, Any], old: int) -> dict[str, Any]:
+    """``record``, of version ``old``, upgraded to the next version."""
+    return _MIGRATIONS[old](record) | {"version": old + 1}
 
 
 def _first_problem(error: ValidationError) -> str:
