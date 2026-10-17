@@ -60,11 +60,13 @@ from orbit.protocol import (
     VerificationStarted,
 )
 from orbit.tui.agents import AgentsPane
+from orbit.tui.detail import DetailPane
+from orbit.tui.entries import Entry
 from orbit.tui.panels import UsagePanel, VerificationPanel
 from orbit.tui.proposals import ProposalScreen
 from orbit.tui.tabs import ConversationTabs
 from orbit.tui.tasks import TaskEditorScreen, TaskList
-from orbit.tui.transcript import DetailPane, Entry, Transcript
+from orbit.tui.transcript import Transcript
 from orbit.tui.view import (
     PLANNER_BUSY,
     TOOL_ACCESS_OPTIONS,

@@ -1,44 +1,38 @@
-"""The conversation window: the transcript and its per-tab logs."""
+"""The conversation window: the transcript, coordinating its per-tab logs, the working row
+and the detail pane."""
 
 import time
 from bisect import bisect_left
 from collections.abc import Callable, Iterable, Mapping
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from typing import Any, ClassVar, get_args
 
-from rich.console import Console, ConsoleOptions, RenderableType, RenderResult
-from rich.markdown import Heading, Markdown, MarkdownContext, MarkdownElement
+from rich.console import RenderableType
 from rich.rule import Rule
-from rich.segment import Segment
 from rich.style import Style
 from rich.text import Text
 from textual import on
 from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
-from textual.containers import Vertical, VerticalScroll
+from textual.containers import Vertical
 from textual.message import Message
-from textual.reactive import reactive
-from textual.widgets import OptionList, Static
+from textual.widgets import OptionList
 
 from orbit.protocol import AgentReply, AgentRequest, Event, ToolCallFinished, ToolCallStarted
+from orbit.tui.detail import DetailPane
+from orbit.tui.entries import Entry, GutteredEntry, markdown_body
 from orbit.tui.view import (
-    DETAIL_HEIGHT,
     EntryKind,
     ToolCall,
-    Working,
-    WorkingView,
     banded,
     collapsible,
     conversation_title,
     copied_note,
-    detail_body,
     detail_copy,
     detail_covers,
-    detail_title,
     entry_label,
     finishes,
     gutter,
-    hanging_indent,
     ruled,
     shows_markdown,
     speaker_label,
@@ -47,115 +41,9 @@ from orbit.tui.view import (
     tool_call_finished,
     tool_call_started,
     tool_call_unfinished,
-    track_working,
-    working_lines,
 )
-from orbit.tui.widgets import ListPane, ModalFocus, Ticker
-
-
-@dataclass(frozen=True)
-class Entry:
-    """A transcript entry: its ``text``, the ``kind`` it's styled as, the ``agent`` it's by,
-    if any, and the ``speaker`` it's spoken by (see :func:`speaker`). An agent's message thinking
-    out loud keeps the ``turn`` it's from, and is drawn dim, until it's found to be the turn's
-    final answer. A tool call's entry keeps the ``call``, which its text shows in a line."""
-
-    text: str
-    kind: EntryKind
-    agent: str | None = None
-    turn: str | None = None
-    call: ToolCall | None = None
-    speaker: str | None = None
-
-
-class LeftHeading(Heading):
-    """A heading drawn bold and left-aligned, h1 also underlined, rather than centred."""
-
-    def on_enter(self, context: MarkdownContext) -> None:
-        self.text = Text()
-        context.enter_style(Style(bold=True, underline=self.tag == "h1"))
-
-    def __rich_console__(self, console: Console, options: ConsoleOptions) -> RenderResult:
-        text = self.text.copy()
-        text.justify = "left"
-        yield text
-
-
-class EntryMarkdown(Markdown):
-    """Markdown as an entry shows it: headings drawn as :class:`LeftHeading`."""
-
-    elements: ClassVar[dict[str, type[MarkdownElement]]] = {
-        **Markdown.elements,
-        "heading_open": LeftHeading,
-    }
-
-
-def entry_markdown(text: str, style: Style) -> Markdown:
-    """``text`` as markdown in the entry's ``style``, its links shown as ``text (url)``."""
-    return EntryMarkdown(text, style=style, hyperlinks=False)
-
-
-@dataclass(frozen=True)
-class HangingIndent:
-    """``body`` drawn in the width left beside its indent: ``first`` in front of its first row
-    and ``rest`` in front of every row after it, both in ``style``. A body that renders no rows,
-    such as markdown of only whitespace, still gets a row holding ``first``."""
-
-    body: RenderableType
-    first: str
-    rest: str
-    style: Style
-
-    def __rich_console__(self, console: Console, options: ConsoleOptions) -> RenderResult:
-        width = options.max_width - len(self.first)
-        rows = console.render_lines(self.body, options.update_width(width), pad=False)
-        for index, row in enumerate(rows or [[]]):
-            yield Segment(self.rest if index else self.first, self.style)
-            yield from row
-            yield Segment.line()
-
-
-@dataclass(frozen=True)
-class GutteredEntry:
-    """A transcript entry as drawn: its ``heading`` if it has one, then its ``body``, or its
-    ``label`` when it has none, wrapped to the width left beside the ``gutter``, which goes in
-    front of every row in ``gutter_style``, then a blank row so the entry reads as a
-    paragraph. With a ``band``, every row is filled to its end in that style."""
-
-    label: Text
-    gutter: str
-    gutter_style: Style
-    body: RenderableType | None = None
-    heading: Text | None = None
-    band: Style | None = None
-
-    def _rows(self, console: Console, options: ConsoleOptions) -> list[list[Segment]]:
-        """The rows of the entry's heading and body, drawn in ``options``' width."""
-        shown = self.label if self.body is None else self.body
-        parts = (shown,) if self.heading is None else (self.heading, shown)
-        return [
-            row
-            for part in parts
-            for row in console.render_lines(
-                part, options, style=self.band, pad=self.band is not None
-            )
-        ]
-
-    def __rich_console__(self, console: Console, options: ConsoleOptions) -> RenderResult:
-        width = options.max_width - len(self.gutter)
-        rows = self._rows(console, options.update_width(width))
-        for row in rows:
-            yield Segment(self.gutter, self.gutter_style)
-            yield from row
-            yield Segment.line()
-        yield Segment.line()
-
-
-def markdown_body(kind: EntryKind, text: str, style: Style) -> HangingIndent:
-    """``text`` drawn as markdown in ``style``, the prefix and marker of an entry of ``kind``
-    hanging beside it if it has them."""
-    first, rest = hanging_indent(kind, text)
-    return HangingIndent(entry_markdown(text, style), first, rest, style)
+from orbit.tui.widgets import ListPane, Ticker
+from orbit.tui.working import WorkingRow
 
 
 class TranscriptLog(ListPane):
@@ -274,9 +162,6 @@ class TranscriptLog(ListPane):
         """Add ``entry``, dim while its agent thinks out loud in its turn, collapsed if its
         kind starts so; the view stays pinned to the latest entry unless the list is active or
         holds a cursor."""
-        self._add(entry)
-
-    def _add(self, entry: Entry) -> None:
         self._entries.append(entry)
         self._collapsed.append(starts_collapsed(entry.kind, entry.text))
         if self._shows(entry):
@@ -312,7 +197,7 @@ class TranscriptLog(ListPane):
         spinner turning on :meth:`tick`."""
         self._calls[len(self._entries)] = call
         text, kind = tool_call_entry(call, agent, self.clock())
-        self._add(Entry(text, kind, agent, call=call, speaker=speaker))
+        self.append(Entry(text, kind, agent, call=call, speaker=speaker))
 
     def finish_call(self, event: ToolCallFinished | AgentReply) -> bool:
         """Show the running call or request ``event`` finishes as finished, redrawn where it
@@ -492,138 +377,6 @@ class TranscriptLog(ListPane):
         if label is None:
             return None
         return Text(label, style=self.get_component_rich_style("transcript--label", partial=True))
-
-
-class WorkingRow(Static):
-    """What's running right now under the shown tab, one line per agent, below the
-    logs; hidden while nothing shown runs. The :class:`Transcript` ticks its spinners and
-    clocks while something runs."""
-
-    DEFAULT_CSS = """
-    WorkingRow {
-        display: none;
-        height: auto;
-        color: $text-muted;
-    }
-    WorkingRow.-running { display: block; }
-    """
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.clock: Callable[[], float] = time.monotonic
-        self.working: Working = ()
-        self.lines: tuple[str, ...] = ()
-        self._roles: Mapping[str, str] = {}
-        self._shown: str | None = None
-
-    @property
-    def running(self) -> bool:
-        """Whether any agent runs."""
-        return bool(self.working)
-
-    def track(self, event: Event, roles: Mapping[str, str]) -> None:
-        """Follow who runs after ``event``, with ``roles`` placing agents in tabs."""
-        self.working = track_working(self.working, event, self.clock())
-        self._roles = roles
-        self.tick()
-
-    def show_tab(self, key: str | None) -> None:
-        """Show what runs under the tab keyed ``key``; None is All."""
-        self._shown = key
-        self.tick()
-
-    def on_resize(self) -> None:
-        self.tick()
-
-    def tick(self) -> None:
-        """Redraw the lines, if they changed."""
-        view = WorkingView(self.working, self._roles, self._shown)
-        lines = working_lines(view, self.clock(), self.size.width)
-        if lines == self.lines:
-            return
-        self.lines = lines
-        unwrapped = Text("\n", no_wrap=True, overflow="ellipsis")
-        self.update(unwrapped.join(Text(line) for line in lines))
-        self.set_class(bool(lines), "-running")
-
-
-class DetailPane(ModalFocus, VerticalScroll):
-    """The full content of the tool call or request under the conversation's cursor, below
-    the logs and the working row, taking ``share`` percent of the conversation, or all of it
-    while ``covering``; hidden until opened. Activated, j/k scroll it and escape leaves."""
-
-    class Focused(Message):
-        """The pane was activated."""
-
-    DEFAULT_CSS = """
-    DetailPane {
-        display: none;
-        border-top: solid $primary;
-        border-title-align: left;
-    }
-    DetailPane.-open { display: block; }
-    """
-    BINDINGS: ClassVar[list[BindingType]] = [
-        Binding("j", "scroll(1)", show=False),
-        Binding("k", "scroll(-1)", show=False),
-        Binding("escape", "normal_mode", show=False),
-    ]
-
-    share: reactive[int] = reactive(DETAIL_HEIGHT)
-    covering: reactive[bool] = reactive(False)
-
-    def __init__(self, **kwargs: Any) -> None:
-        super().__init__(**kwargs)
-        self.call: ToolCall | None = None  # The call whose details are shown, if any.
-
-    def compose(self) -> ComposeResult:
-        yield Static()
-
-    def watch_share(self) -> None:
-        self._fit()
-
-    def watch_covering(self) -> None:
-        self._fit()
-
-    def _fit(self) -> None:
-        self.styles.height = "1fr" if self.covering else f"{self.share}%"
-
-    @property
-    def opened(self) -> bool:
-        return self.has_class("-open")
-
-    def show(self, call: ToolCall | None) -> None:
-        """Open, showing ``call``'s details, or a note that there are none; another call than
-        the one shown starts at the top, while the same one updated keeps its place."""
-        if not self.opened or self._another(call):
-            self.scroll_home(animate=False)
-        self.call = call
-        self.border_title = detail_title(call)
-        self.query_one(Static).update(detail_body(call))
-        self.add_class("-open")
-
-    def _another(self, call: ToolCall | None) -> bool:
-        """Whether ``call`` is another call than the one shown, or none where one is."""
-        if call is None or self.call is None:
-            return call is not self.call
-        return call.call_id != self.call.call_id
-
-    def close(self) -> None:
-        """Close, leaving the pane if it's active."""
-        if self.has_focus:
-            self.screen.set_focus(None)
-        self.remove_class("-open")
-
-    def enter_scroll_mode(self) -> None:
-        """Activate the pane, so j/k scroll it."""
-        self._activate()
-
-    def on_focus(self) -> None:
-        self.post_message(self.Focused())
-
-    def action_scroll(self, step: int) -> None:
-        """Scroll ``step`` lines."""
-        self.scroll_relative(y=step, animate=False)
 
 
 class Transcript(Vertical):

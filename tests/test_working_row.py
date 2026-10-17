@@ -12,7 +12,8 @@ from orbit.protocol import (
 )
 from orbit.tui import OrbitApp
 from orbit.tui.tabs import ConversationTabs
-from orbit.tui.transcript import Transcript, WorkingRow
+from orbit.tui.transcript import Transcript
+from orbit.tui.working import WorkingRow
 from tests.test_transcript import labels
 from tests.test_tui import FakeSession, feed_events, started
 

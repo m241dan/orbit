@@ -16,9 +16,11 @@ from orbit.protocol import (
     TurnStarted,
 )
 from orbit.tui import OrbitApp
-from orbit.tui.transcript import DetailPane, Transcript, TranscriptLog, WorkingRow
+from orbit.tui.detail import DetailPane
+from orbit.tui.transcript import Transcript, TranscriptLog
 from orbit.tui.view import DETAIL_COVER_BELOW, DETAIL_HEIGHT, NO_DETAILS, WAITING
 from orbit.tui.widgets import ChatPrompt, ConfirmScreen
+from orbit.tui.working import WorkingRow
 from tests.test_tui import FakeSession, feed_events, said, started
 
 

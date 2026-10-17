@@ -30,14 +30,8 @@ from orbit.protocol import (
     Usage,
 )
 from orbit.tui import OrbitApp
-from orbit.tui.transcript import (
-    Entry,
-    GutteredEntry,
-    HangingIndent,
-    Transcript,
-    TranscriptLog,
-    entry_markdown,
-)
+from orbit.tui.entries import Entry, GutteredEntry, HangingIndent, entry_markdown
+from orbit.tui.transcript import Transcript, TranscriptLog
 from orbit.tui.view import (
     GUTTER_BAR,
     GUTTER_MARKER,

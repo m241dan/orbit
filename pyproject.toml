@@ -145,10 +145,13 @@ forbidden_modules = [
     "textual",
     "orbit.tui.agents",
     "orbit.tui.app",
+    "orbit.tui.detail",
+    "orbit.tui.entries",
     "orbit.tui.panels",
     "orbit.tui.proposals",
     "orbit.tui.tabs",
     "orbit.tui.tasks",
     "orbit.tui.transcript",
     "orbit.tui.widgets",
+    "orbit.tui.working",
 ]
