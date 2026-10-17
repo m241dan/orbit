@@ -107,6 +107,8 @@ NEIGHBORS: dict[str, dict[str, str]] = {
 }
 # The conversation's moves that differ while its detail pane is open.
 OPEN_DETAIL_NEIGHBORS: dict[str, str] = {"j": "detail"}
+# The windows in the sidebar, which h/j/k/l skip while ctrl+b hides it.
+SIDEBAR_WINDOWS = frozenset({"task-list", "verification-steps", "agents"})
 
 # Most events rendered in one go, so a flood still lets the screen repaint now and then.
 BATCH_LIMIT = 500
@@ -190,6 +192,8 @@ class OrbitApp(App[None], inherit_bindings=False):
         Binding("ctrl+x", "stop_planner", "Stop planner"),
         Binding("ctrl+o", "pick_model", "Model"),
         Binding("ctrl+l", "pick_tool_access", "Tools"),
+        # check_action keeps it from the prompt while typing, which may want ctrl+b itself.
+        Binding("ctrl+b", "toggle_sidebar", "Sidebar"),
     ]
 
     def __init__(self, session: Session) -> None:
@@ -244,6 +248,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         self._verification = self.query_one(VerificationPanel)
         self._usage = self.query_one(UsagePanel)
         self._agents = self.query_one(AgentsPane)
+        self._side = self.query_one("#side")
         self.query_one(f"#{self._selected}").add_class("selected")
         self.install_screen(self._model_picker, "pick-model")
         self.install_screen(self._tool_picker, "pick-tool-access")
@@ -277,17 +282,25 @@ class OrbitApp(App[None], inherit_bindings=False):
         """The windows h/j/k/l reach from the selected one."""
         neighbors = NEIGHBORS[self._selected]
         if self._selected == "transcript" and self._transcript.detail.opened:
-            return neighbors | OPEN_DETAIL_NEIGHBORS
-        return neighbors
+            neighbors = neighbors | OPEN_DETAIL_NEIGHBORS
+        if self._side.display:
+            return neighbors
+        return {key: window for key, window in neighbors.items() if window not in SIDEBAR_WINDOWS}
 
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
-        if action in ("cycle_tab", "release_cursor"):
-            return self._normal_mode()
-        if action == "toggle_thinking":
-            return self._normal_mode() or self._in_transcript()
-        if action == "configure_checks":
-            return len(self.screen_stack) == 1
-        return True
+        conditions: dict[str, Callable[[], bool]] = {
+            "cycle_tab": self._normal_mode,
+            "release_cursor": self._normal_mode,
+            "toggle_thinking": lambda: self._normal_mode() or self._in_transcript(),
+            "configure_checks": self._on_main_screen,
+            "toggle_sidebar": lambda: self._on_main_screen() and self.focused is not self._prompt,
+        }
+        condition = conditions.get(action)
+        return condition is None or condition()
+
+    def _on_main_screen(self) -> bool:
+        """No modal screen is open."""
+        return len(self.screen_stack) == 1
 
     def _normal_mode(self) -> bool:
         """Nothing focused on the main screen: no typing, list mode or modal screen."""
@@ -300,6 +313,15 @@ class OrbitApp(App[None], inherit_bindings=False):
     def action_toggle_thinking(self) -> None:
         """Hide agents' messages while they're still thinking out loud, or show them again."""
         self._transcript.toggle_thinking()
+
+    def action_toggle_sidebar(self) -> None:
+        """Hide the sidebar so the conversation takes the full width, or show it again; hiding
+        leaves a sidebar window for the conversation."""
+        side = self._side
+        side.display = not side.display
+        if not side.display and self._selected in SIDEBAR_WINDOWS:
+            self.set_focus(None)
+            self._select("transcript")
 
     def action_cycle_tab(self, step: int) -> None:
         tabs = self._tabs
