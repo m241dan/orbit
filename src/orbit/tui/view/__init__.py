@@ -58,6 +58,7 @@ from orbit.tui.view.tool_calls import (
     tool_call_summary,
     tool_call_title,
     tool_call_unfinished,
+    tool_result_summary,
 )
 from orbit.tui.view.transcript import (
     BANDED_KINDS,
@@ -239,6 +240,7 @@ __all__ = [
     "tool_call_summary",
     "tool_call_title",
     "tool_call_unfinished",
+    "tool_result_summary",
     "track_agents",
     "track_roles",
     "track_tabs",

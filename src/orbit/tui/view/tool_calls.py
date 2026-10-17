@@ -1,7 +1,9 @@
 """Tool calls and agents' requests to orbit, summed up in a line."""
 
+import difflib
 import json
-from collections.abc import Callable, Mapping
+import re
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, replace
 from types import MappingProxyType
 from typing import Any, Literal, assert_never
@@ -112,11 +114,12 @@ result came."""
 
 @dataclass(frozen=True)
 class ToolCall:
-    """A tool call as its entry shows it: the ``call_id`` its result comes back with, its
-    ``summary`` and ``status``, and its full ``arguments`` and ``output``, kept for a closer
-    look."""
+    """A tool call as its entry shows it: the ``call_id`` its result comes back with, the tool's
+    ``name``, its ``summary`` and ``status``, and its full ``arguments`` and ``output``, kept for
+    a closer look."""
 
     call_id: str
+    name: str
     summary: str
     arguments: Mapping[str, Any]
     status: ToolCallStatus = "running"
@@ -125,7 +128,8 @@ class ToolCall:
 
 def tool_call_started(event: ToolCallStarted) -> ToolCall:
     """The call ``event`` starts, running."""
-    return ToolCall(event.call_id, tool_call_title(event.name, event.arguments), event.arguments)
+    title = tool_call_title(event.name, event.arguments)
+    return ToolCall(event.call_id, event.name, title, event.arguments)
 
 
 def tool_call_finished(call: ToolCall, event: ToolCallFinished) -> ToolCall:
@@ -144,21 +148,129 @@ def line_count(text: str) -> str:
     return f"{count} line{'' if count == 1 else 's'}"
 
 
+NO_MATCHES = frozenset({"No matches found", "No files found"})
+"""What Claude Code's Grep and Glob say when they find nothing."""
+SEARCH_TALLY = re.compile(r"Found \d+ ")
+"""The start of the line where Claude Code's Grep tallies its files or occurrences."""
+EXIT_CODE = re.compile(r"^Exit code (\d+)\b", re.MULTILINE)
+"""The line where Claude Code says what a failed command exited with."""
+
+type ResultSummarizer = Callable[[Mapping[str, Any], str], str | None]
+
+
+def _line_change(old: str, new: str) -> tuple[int, int]:
+    """How many lines turning ``old`` into ``new`` adds and removes, unchanged lines aside."""
+    added = removed = 0
+    matcher = difflib.SequenceMatcher(None, old.splitlines(), new.splitlines(), autojunk=False)
+    for tag, old_start, old_end, new_start, new_end in matcher.get_opcodes():
+        if tag != "equal":
+            added += new_end - new_start
+            removed += old_end - old_start
+    return added, removed
+
+
+def _edit_change(edit: object) -> tuple[int, int] | None:
+    """The lines ``edit`` adds and removes, or None unless it has both strings."""
+    if not isinstance(edit, Mapping):
+        return None
+    old, new = edit.get("old_string"), edit.get("new_string")
+    if not isinstance(old, str) or not isinstance(new, str):
+        return None
+    return _line_change(old, new)
+
+
+def _changed(change: tuple[int, int] | None) -> str | None:
+    return None if change is None else f"✓ +{change[0]} \N{MINUS SIGN}{change[1]}"
+
+
+def _edited(arguments: Mapping[str, Any], output: str) -> str | None:
+    return _changed(_edit_change(arguments))
+
+
+def _multi_edited(arguments: Mapping[str, Any], output: str) -> str | None:
+    edits = arguments.get("edits")
+    changes = [_edit_change(edit) for edit in edits] if isinstance(edits, list) else [None]
+    return _changed(_total(changes))
+
+
+def _total(changes: Iterable[tuple[int, int] | None]) -> tuple[int, int] | None:
+    """The lines all ``changes`` add and remove, or None if any of them is None."""
+    added = removed = 0
+    for change in changes:
+        if change is None:
+            return None
+        added, removed = added + change[0], removed + change[1]
+    return added, removed
+
+
+def _written(arguments: Mapping[str, Any], output: str) -> str | None:
+    content = arguments.get("content")
+    return f"✓ +{len(content.splitlines())}" if isinstance(content, str) else None
+
+
+def _ran(arguments: Mapping[str, Any], output: str) -> str | None:
+    return "✓"
+
+
+def _found(arguments: Mapping[str, Any], output: str) -> str | None:
+    lines = [] if output.strip() in NO_MATCHES else output.splitlines()
+    count = sum(1 for line in lines if line.strip() and not SEARCH_TALLY.match(line))
+    return f"✓ {count} match{'' if count == 1 else 'es'}"
+
+
+RESULT_SUMMARIES: Mapping[str, ResultSummarizer] = MappingProxyType(
+    {
+        "Read": lambda arguments, output: f"✓ {line_count(output)}",
+        "Edit": _edited,
+        "MultiEdit": _multi_edited,
+        "Write": _written,
+        "Bash": _ran,
+        "Grep": _found,
+        "Glob": _found,
+    }
+)
+"""How to sum up what a call to each of Claude Code's built-in tools did, when it succeeds."""
+
+
+def tool_result_summary(
+    name: str, arguments: Mapping[str, Any], output: str, is_error: bool
+) -> str:
+    """What a finished call to the tool ``name`` did, as you'd glance for it: ticked with lines
+    added and removed for an edit, matches for a search, lines for the rest; crossed with a
+    command's exit code, or the output's lines."""
+    if is_error:
+        return _failure_summary(name, output)
+    summarize = RESULT_SUMMARIES.get(name)
+    summary = None if summarize is None else summarize(arguments, output)
+    return f"✓ {line_count(output)}" if summary is None else summary
+
+
+def _failure_summary(name: str, output: str) -> str:
+    if name != "Bash":
+        return f"✗ {line_count(output)}"
+    exit_code = EXIT_CODE.search(output)
+    return "✗" if exit_code is None else f"✗ exit {exit_code[1]}"
+
+
 def tool_call_line(call: ToolCall, frame: str) -> tuple[str, EntryKind]:
     """``call`` as its entry's one line and the kind it's shown as: its summary behind the
-    spinner's ``frame`` while it runs, then marked with how it went and how many lines its
-    output has."""
+    spinner's ``frame`` while it runs, then marked with how it went and what it did (see
+    :func:`tool_result_summary`)."""
     match call.status:
         case "running":
             return f"{frame}{call.summary}", "tool"
         case "passed":
-            return f"→ {call.summary} ✓ {line_count(call.output)}", "tool"
+            return f"→ {call.summary} {_result(call, is_error=False)}", "tool"
         case "failed":
-            return f"→ {call.summary} ✗ {line_count(call.output)}", "error"
+            return f"→ {call.summary} {_result(call, is_error=True)}", "error"
         case "no_result":
             return f"→ {call.summary} ⊘ no result", "tool"
         case _:
             assert_never(call.status)
+
+
+def _result(call: ToolCall, *, is_error: bool) -> str:
+    return tool_result_summary(call.name, call.arguments, call.output, is_error)
 
 
 def orbit_request_text(tool: str, arguments: Mapping[str, Any]) -> str:

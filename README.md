@@ -148,9 +148,14 @@ across the conversation's width, and renders as markdown too; a prompt of more t
 starts collapsed (`❯ ▸ first line (+N lines)`), and an expanded one of several lines is marked
 `❯ ▾`. Task headers (`Task 3: …`) stay bold in the accent colour. A tool call and its result are
 one line, naming the tool and its main argument, such as the file or command, and updated in place:
-a spinner turns in front while it runs (`◜ Read src/x.py`), and once it finishes it reads
-`→ Read src/x.py ✓ 12 lines`, counting its output's lines, or `→ Read src/x.py ✗ 1 line` in the
-error colour if it failed. A call still running when its turn ends shows `→ Read src/x.py ⊘ no
+a spinner turns in front while it runs (`◜ Read src/x.py`), and once it finishes it says what it
+did, ticked `✓` or, in the error colour, crossed `✗`. A read counts its lines (`→ Read src/x.py ✓
+12 lines`); an edit counts the lines it adds and removes, leaving out unchanged ones (`✓ +3 −1`,
+summed over a MultiEdit's edits), and a write the lines it wrote (`✓ +40`); a command is ticked
+alone (`✓`) and, if it fails, shows its exit code (`✗ exit 1`, or `✗` without one); a Grep or
+Glob counts its matches (`✓ 4 matches`, `✓ 1 match`, `✓ 0 matches` when it finds nothing). Any
+other tool, any other failure, and a call whose arguments don't fit count the output's lines
+(`✓ 5 lines`, `✗ 1 line`). A call still running when its turn ends shows `→ Read src/x.py ⊘ no
 result`. A tool call's line can't be expanded; its full arguments and output are kept but not
 shown. An agent's request to orbit shows as one line naming the tool and its main argument, with
 its full arguments collapsed beneath it. An entry of more than one line can be collapsed to its

@@ -12,6 +12,7 @@ from orbit.tui.view import (
     tool_call_summary,
     tool_call_title,
     tool_call_unfinished,
+    tool_result_summary,
 )
 
 
@@ -140,7 +141,9 @@ def started_call(call_id: str = "c") -> ToolCall:
 
 
 def test_a_started_call_runs_keeping_its_id_and_full_arguments() -> None:
-    assert started_call() == ToolCall("c", "Read a.py", {"file_path": "a.py"}, "running", "")
+    assert started_call() == ToolCall(
+        "c", "Read", "Read a.py", {"file_path": "a.py"}, "running", ""
+    )
 
 
 def test_a_finished_call_keeps_its_output() -> None:
@@ -177,15 +180,131 @@ def test_a_running_calls_line_puts_the_spinner_before_its_summary() -> None:
 
 
 def test_a_passed_calls_line_is_ticked_with_its_line_count() -> None:
-    call = ToolCall("c", "Read a.py", {}, "passed", "a\nb")
+    call = ToolCall("c", "Read", "Read a.py", {}, "passed", "a\nb")
     assert tool_call_line(call, "◠ ") == ("→ Read a.py ✓ 2 lines", "tool")
 
 
 def test_a_failed_calls_line_is_crossed_as_an_error() -> None:
-    call = ToolCall("c", "Read a.py", {}, "failed", "")
+    call = ToolCall("c", "Read", "Read a.py", {}, "failed", "")
     assert tool_call_line(call, "◠ ") == ("→ Read a.py ✗ 0 lines", "error")
 
 
 def test_a_call_with_no_result_says_so_muted() -> None:
-    call = ToolCall("c", "Read a.py", {}, "no_result")
+    call = ToolCall("c", "Read", "Read a.py", {}, "no_result")
     assert tool_call_line(call, "◠ ") == ("→ Read a.py ⊘ no result", "tool")
+
+
+def test_a_calls_line_sums_up_its_result_by_its_tool() -> None:
+    call = ToolCall("c", "Bash", "Bash ls", {"command": "ls"}, "passed", "a\nb")
+    assert tool_call_line(call, "◠ ") == ("→ Bash ls ✓", "tool")
+
+
+def test_a_failed_calls_line_sums_up_its_result_by_its_tool() -> None:
+    call = ToolCall("c", "Bash", "Bash ls", {"command": "ls"}, "failed", "Exit code 2")
+    assert tool_call_line(call, "◠ ") == ("→ Bash ls ✗ exit 2", "error")
+
+
+def test_a_reads_result_counts_its_lines() -> None:
+    assert tool_result_summary("Read", {"file_path": "a"}, "a\nb\nc", False) == "✓ 3 lines"
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "summary"),
+    [
+        ("a", "b", "✓ +1 \N{MINUS SIGN}1"),
+        ("a\nb\nc", "a\nB\nc", "✓ +1 \N{MINUS SIGN}1"),
+        ("a\nc", "a\nb1\nb2\nc", "✓ +2 \N{MINUS SIGN}0"),
+        ("a\nb\nc", "a", "✓ +0 \N{MINUS SIGN}2"),
+        ("", "x\ny", "✓ +2 \N{MINUS SIGN}0"),
+    ],
+)
+def test_an_edits_result_counts_the_lines_it_changes_leaving_out_unchanged_ones(
+    old: str, new: str, summary: str
+) -> None:
+    arguments = {"file_path": "a", "old_string": old, "new_string": new}
+    assert tool_result_summary("Edit", arguments, "ok", False) == summary
+
+
+def test_a_multi_edits_result_sums_its_edits_changes() -> None:
+    edits = [
+        {"old_string": "a", "new_string": "b\nc"},
+        {"old_string": "x\ny\nz", "new_string": "x"},
+    ]
+    assert tool_result_summary("MultiEdit", {"edits": edits}, "ok", False) == "✓ +2 \N{MINUS SIGN}3"
+
+
+def test_a_multi_edit_without_edits_changes_nothing() -> None:
+    assert tool_result_summary("MultiEdit", {"edits": []}, "ok", False) == "✓ +0 \N{MINUS SIGN}0"
+
+
+def test_a_writes_result_counts_the_lines_it_wrote() -> None:
+    arguments = {"file_path": "a", "content": "a\nb\n"}
+    assert tool_result_summary("Write", arguments, "ok", False) == "✓ +2"
+
+
+@pytest.mark.parametrize(
+    ("name", "arguments"),
+    [
+        ("Edit", {}),
+        ("Edit", {"old_string": "a"}),
+        ("Edit", {"old_string": 1, "new_string": "b"}),
+        ("MultiEdit", {}),
+        ("MultiEdit", {"edits": "a"}),
+        ("MultiEdit", {"edits": [{"old_string": "a", "new_string": "b"}, "c"]}),
+        ("MultiEdit", {"edits": [{"old_string": "a"}]}),
+        ("Write", {}),
+        ("Write", {"content": ["a"]}),
+    ],
+)
+def test_a_result_with_malformed_arguments_counts_its_outputs_lines(
+    name: str, arguments: dict[str, Any]
+) -> None:
+    assert tool_result_summary(name, arguments, "a\nb", False) == "✓ 2 lines"
+
+
+def test_a_commands_result_is_ticked_alone() -> None:
+    assert tool_result_summary("Bash", {"command": "ls"}, "a\nb", False) == "✓"
+
+
+@pytest.mark.parametrize(
+    ("output", "summary"),
+    [
+        ("Exit code 1", "✗ exit 1"),
+        ("boom\nExit code 127\nmore\nExit code 3", "✗ exit 127"),
+        ("Exit code 12abc", "✗"),
+        ("not Exit code 2", "✗"),
+        ("boom", "✗"),
+        ("", "✗"),
+    ],
+)
+def test_a_failed_commands_result_shows_its_exit_code_when_it_has_one(
+    output: str, summary: str
+) -> None:
+    assert tool_result_summary("Bash", {"command": "ls"}, output, True) == summary
+
+
+@pytest.mark.parametrize("name", ["Grep", "Glob"])
+@pytest.mark.parametrize(
+    ("output", "summary"),
+    [
+        ("a.py\nb.py\n\nc.py\n", "✓ 3 matches"),
+        ("a.py", "✓ 1 match"),
+        ("", "✓ 0 matches"),
+        ("No matches found", "✓ 0 matches"),
+        ("No files found", "✓ 0 matches"),
+        ("Found 2 files\na.py\nb.py", "✓ 2 matches"),
+        ("a.py:3\nb.py:1\n\nFound 4 total occurrences across 2 files.", "✓ 2 matches"),
+    ],
+)
+def test_a_searchs_result_counts_its_matches(name: str, output: str, summary: str) -> None:
+    assert tool_result_summary(name, {"pattern": "x"}, output, False) == summary
+
+
+@pytest.mark.parametrize("name", ["Read", "Edit", "Write", "Grep", "mcp__x__y", "WebFetch"])
+def test_any_other_failed_result_counts_its_outputs_lines(name: str) -> None:
+    assert tool_result_summary(name, {}, "boom\nExit code 1", True) == "✗ 2 lines"
+
+
+@pytest.mark.parametrize("name", ["WebFetch", "mcp__orbit__get_task", "Agent"])
+def test_any_other_tools_result_counts_its_outputs_lines(name: str) -> None:
+    assert tool_result_summary(name, {}, "a", False) == "✓ 1 line"
