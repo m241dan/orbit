@@ -628,9 +628,10 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     reports a crash rather than losing it, and the session runs the work lane's and the
     planner's turns through a `TurnSlot` each (also in `lanes`), which refuses a second turn
     and shows the lane busy while one runs; `FrontendReview` is where the user decides on
-    proposed checks; `PlannerChat` is the planner's conversation. `ports` defines what it needs
-    from outside (`AgentHost`, `AgentLauncher`, `CoderTree`, `StepRunner`, `Workspace`,
-    `ProposalReview`, `UsageSource`, `ConfigWriter`).
+    proposed checks; `PlannerChat` is the planner's conversation, running each turn and
+    publishing how it ended. `ports` defines what it needs from outside (`AgentHost`,
+    `AgentLauncher`, `CoderTree`, `StepRunner`, `Workspace`, `ProposalReview`, `UsageSource`,
+    `ConfigWriter`).
   - `domain`: the rules, with no I/O: the `TaskBoard` (task order, statuses, fix chains),
     `StepProgress` (each verification step's status, kept by the `Verifier` and the startup
     check), `AgentTask` (what orbit replies to an agent, and when its work is verified), the

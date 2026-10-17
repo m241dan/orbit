@@ -109,13 +109,13 @@ class TaskBoard:
         Walks up the chain of fixes, stopping at a task that's no longer on the board. Tasks
         that aren't unverified any more (say, edited since) stay as they are.
         """
-        fixed = self._find(self.get(task_id).fixes)
+        fixed = self.find(self.get(task_id).fixes)
         while fixed is not None:
             if fixed.status == "unverified":
                 self.set_status(fixed.id, "completed")
-            fixed = self._find(fixed.fixes)
+            fixed = self.find(fixed.fixes)
 
-    def _find(self, task_id: str | None) -> TaskState | None:
+    def find(self, task_id: str | None) -> TaskState | None:
         """Task ``task_id``, or None if there's no such task on the board."""
         return next((state for state in self._tasks if state.id == task_id), None)
 

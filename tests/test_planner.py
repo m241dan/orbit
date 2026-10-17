@@ -10,6 +10,7 @@ from orbit.agent.application.planner import PlannerChat
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.verification import steps_note
 from orbit.protocol import (
+    PLAN_TASK,
     AcceptTask,
     AddTask,
     AgentExited,
@@ -24,6 +25,7 @@ from orbit.protocol import (
     SubmitPrompt,
     TaskSpec,
     TurnEndReason,
+    TurnFinished,
     TurnStarted,
 )
 from tests.agent_fakes import (
@@ -196,14 +198,18 @@ async def test_closing_ends_the_planners_access() -> None:
     assert await asyncio.wait_for(anext(session.events()), 5) == exited
 
 
-def steps_chat(*turns: Script) -> tuple[PlannerChat, ScriptedLauncher, list[tuple[str, ...]]]:
-    """A planner chat playing ``turns``, whose steps are the last in the list it returns."""
+def steps_chat(
+    *turns: Script, published: list[Event] | None = None
+) -> tuple[PlannerChat, ScriptedLauncher, list[tuple[str, ...]]]:
+    """A planner chat playing ``turns``, whose steps are the last in the list it returns; what
+    it publishes goes to ``published``."""
     host = FakeHost()
     launcher = ScriptedLauncher(host)
     launcher.planner_turns = list(turns)
+    sink = published if published is not None else []
 
     async def publish(event: Event) -> None:
-        pass
+        sink.append(event)
 
     desk = AgentDesk(Agents(host, launcher, lambda: "token-1", ROLES), publish)
     steps: list[tuple[str, ...]] = [("Ruff lint",)]
@@ -271,3 +277,44 @@ async def test_the_planners_agent_id_is_known_once_its_first_turn_opens_it() -> 
     assert chat.agent_id is None
     await turn(chat, launcher, "Plan.")
     assert chat.agent_id == "agent-1"
+
+
+def turn_id_of(published: list[Event]) -> str:
+    started = next(e for e in published if isinstance(e, TurnStarted))
+    return started.turn_id
+
+
+async def test_answering_publishes_a_completed_turn_and_returns_completed() -> None:
+    published: list[Event] = []
+    chat, _, _ = steps_chat(chats, published=published)
+    assert await chat.answer("Plan.", Settings()) == "completed"
+    turn_id = turn_id_of(published)
+    assert published == [
+        AgentStarted(agent_id="agent-1", role="planner", task_id=PLAN_TASK),
+        TurnStarted(turn_id=turn_id, agent_id="agent-1"),
+        TurnFinished(turn_id=turn_id, agent_id="agent-1", reason="completed"),
+    ]
+
+
+async def test_answering_a_cancelled_turn_publishes_it_cancelled_and_returns_cancelled() -> None:
+    published: list[Event] = []
+    chat, launcher, _ = steps_chat(hangs, published=published)
+    answering = asyncio.create_task(chat.answer("Plan.", Settings()))
+    while not launcher.launches:
+        await asyncio.sleep(0)
+    answering.cancel()
+    assert await answering == "cancelled"
+    finished = TurnFinished(turn_id=turn_id_of(published), agent_id="agent-1", reason="cancelled")
+    assert published[-1] == finished
+
+
+async def test_answering_a_failed_turn_publishes_the_error_and_returns_error() -> None:
+    published: list[Event] = []
+    chat, _, _ = steps_chat(fails, published=published)
+    assert await chat.answer("Plan.", Settings()) == "error"
+    turn_id = turn_id_of(published)
+    message = "Could not start 'claude'."
+    assert published[-2:] == [
+        ErrorOccurred(turn_id=turn_id, agent_id="agent-1", message=message),
+        TurnFinished(turn_id=turn_id, agent_id="agent-1", reason="error"),
+    ]

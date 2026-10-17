@@ -6,6 +6,8 @@ and they wait on the board as drafts until the user accepts them. Its first prom
 after the verification steps change, tells it the steps each task must pass.
 """
 
+import asyncio
+import uuid
 from collections.abc import AsyncIterator, Callable
 from typing import Any
 
@@ -21,9 +23,11 @@ from orbit.protocol import (
     PLANNER,
     AgentExited,
     AgentStarted,
+    ErrorOccurred,
     Event,
     Settings,
     TasksChanged,
+    TurnEndReason,
     TurnFinished,
 )
 
@@ -49,6 +53,34 @@ class PlannerChat:
     def agent_id(self) -> str | None:
         """The id of the planner's agent; none before its first turn opens it."""
         return self._agent.id if self._agent else None
+
+    async def answer(self, text: str, settings: Settings) -> TurnEndReason:
+        """Run a turn of the planner's on ``text``, publishing its events; returns how it ended.
+
+        A cancelled turn ends as cancelled rather than raising, and one that fails ends in error.
+        """
+        turn_id = uuid.uuid4().hex
+        reason: TurnEndReason = "completed"
+        try:
+            async for event in self.run_turn(turn_id, text, settings):
+                if isinstance(event, TurnFinished):
+                    reason = event.reason
+                await self._desk.publish(event)
+        except asyncio.CancelledError:
+            reason = "cancelled"
+            await self._desk.publish(
+                TurnFinished(turn_id=turn_id, agent_id=self.agent_id, reason=reason)
+            )
+        except Exception as exc:
+            reason = "error"
+            agent_id = self.agent_id
+            await self._desk.publish(
+                ErrorOccurred(turn_id=turn_id, agent_id=agent_id, message=str(exc))
+            )
+            await self._desk.publish(
+                TurnFinished(turn_id=turn_id, agent_id=agent_id, reason=reason)
+            )
+        return reason
 
     async def run_turn(self, turn_id: str, prompt: str, settings: Settings) -> AsyncIterator[Event]:
         """Tell the planner ``prompt``, with the session's model, and yield what it does."""

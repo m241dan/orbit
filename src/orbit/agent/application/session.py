@@ -5,7 +5,6 @@ ports to do it, and reports what happened as events.
 """
 
 import asyncio
-import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from dataclasses import replace
 from typing import Any, assert_never
@@ -50,8 +49,6 @@ from orbit.protocol import (
     SubmitPrompt,
     TasksChanged,
     TaskSpec,
-    TaskState,
-    TurnEndReason,
     TurnFinished,
     UpdateSettings,
     VerificationChanged,
@@ -220,7 +217,7 @@ class AgentSession:
             # Frees the prompt of a frontend that marked the lane busy when it sent this.
             await self._events.put(BusyChanged(busy=False, lane="planner"))
         else:
-            await self._planner_turns.start(self._run_turn(self._planner, text, self._settings))
+            await self._planner_turns.start(self._planner.answer(text, self._settings))
 
     async def _handle_tasks(self, command: AddTask | RunTasks | ConfigureChecks) -> None:
         match command:
@@ -284,13 +281,10 @@ class AgentSession:
 
     async def _remove(self, task_id: str) -> None:
         """Remove a task, and take it out of its review batch, if any."""
-        state = self._state_of(task_id)
+        state = self._board.find(task_id)
         if await self._change(self._board.remove, task_id) and self._lane is not None:
             assert state is not None  # The board removed it, so it was there.
             await self._lane.removed(task_id, state)
-
-    def _state_of(self, task_id: str) -> TaskState | None:
-        return next((t for t in self._board.tasks if t.id == task_id), None)
 
     async def _run_tasks_if_possible(self) -> None:
         if self._work is None:
@@ -471,29 +465,6 @@ class AgentSession:
 
     async def _publish_tasks(self) -> None:
         await self._events.put(TasksChanged(tasks=self._board.tasks))
-
-    async def _run_turn(self, planner: PlannerChat, text: str, settings: Settings) -> TurnEndReason:
-        """Run one turn of the planner's, publishing its events; returns how it ended."""
-        turn_id = uuid.uuid4().hex
-        reason: TurnEndReason = "completed"
-        try:
-            async for event in planner.run_turn(turn_id, text, settings):
-                if isinstance(event, TurnFinished):
-                    reason = event.reason
-                await self._events.put(event)
-        except asyncio.CancelledError:
-            reason = "cancelled"
-            await self._events.put(
-                TurnFinished(turn_id=turn_id, agent_id=planner.agent_id, reason=reason)
-            )
-        except Exception as exc:
-            reason = "error"
-            agent_id = planner.agent_id
-            await self._events.put(
-                ErrorOccurred(turn_id=turn_id, agent_id=agent_id, message=str(exc))
-            )
-            await self._events.put(TurnFinished(turn_id=turn_id, agent_id=agent_id, reason=reason))
-        return reason
 
     def _settings_changed(self) -> SettingsChanged:
         return SettingsChanged(settings=self._settings, model_choices=self._model_choices)
