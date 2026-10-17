@@ -390,3 +390,33 @@ async def test_renaming_and_deleting_through_the_backend_refresh_the_list() -> N
         assert screen is app.screen and isinstance(screen, SessionsScreen)
         assert [(s.id, s.name) for s in screen.sessions] == [("old", "new")]
         assert store.deleted == ["gone"]
+
+
+async def test_ctrl_p_twice_shows_one_list_that_escape_closes() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await pilot.press("ctrl+p", "ctrl+p")
+        await feed_events(session, pilot, LISTED, LISTED)
+
+        shown = [s for s in app.screen_stack if isinstance(s, SessionsScreen)]
+        assert len(shown) == 1
+        assert not shown[0].startup
+        await pilot.press("escape")
+        await pilot.pause()
+        assert app.is_running
+        assert len(app.screen_stack) == 1
+
+
+async def test_a_listing_answering_ctrl_p_is_never_at_startup() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await pilot.press("ctrl+p", "ctrl+p")
+        await feed_events(session, pilot, LISTED)
+        await pilot.press("escape")
+        await feed_events(session, pilot, LISTED)
+
+        screen = app.screen
+        assert isinstance(screen, SessionsScreen)
+        assert not screen.startup

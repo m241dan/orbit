@@ -102,6 +102,8 @@ class SessionsScreen(ModalScreen[SessionChoice | None]):
     def show(self, sessions: Sequence[SessionSummary]) -> None:
         """List ``sessions`` in place of those listed, keeping the highlight where it was."""
         self.sessions = tuple(sessions)
+        if not self.is_mounted:  # Listed again before it's on screen: compose lists them.
+            return
         options = self.query_one(OptionList)
         highlighted = options.highlighted or 0
         options.clear_options()

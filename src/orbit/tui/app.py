@@ -212,8 +212,8 @@ class OrbitApp(App[None], inherit_bindings=False):
         self._settings: Settings | None = None
         self._model_choices: tuple[str, ...] = ()
         self._proposal: ProposalScreen | None = None  # The proposal being shown, if any.
-        # Whether ctrl+p asked for the sessions; unasked, they're listed at startup.
-        self._sessions_asked = False
+        # How many ctrl+p listings are still to come; unasked, the sessions are listed at startup.
+        self._sessions_asked = 0
         self._sessions: SessionsScreen | None = None  # The list of sessions shown, if any.
         self.clock: Callable[[], float] = time.monotonic
         # Pickers are built once and installed so they open instantly.
@@ -448,17 +448,18 @@ class OrbitApp(App[None], inherit_bindings=False):
 
     async def action_list_sessions(self) -> None:
         """Ask for the saved sessions, which show in a modal once they're listed."""
-        self._sessions_asked = True
+        self._sessions_asked += 1
         await self._session.send(ListSessions())
 
     def _show_sessions(self, sessions: tuple[SessionSummary, ...]) -> None:
         """Let the user pick one of ``sessions`` or start a new one; listed unasked, it's at
         startup, where escape quits. Listed again while the list is shown, after a session was
-        renamed or deleted, they replace those it shows."""
+        renamed or deleted or asked for twice, they replace those it shows."""
+        startup = not self._sessions_asked
+        self._sessions_asked = max(0, self._sessions_asked - 1)
         if self._sessions is not None:
             self._sessions.show(sessions)
             return
-        startup, self._sessions_asked = not self._sessions_asked, False
 
         async def chosen(choice: SessionChoice | None) -> None:
             self._sessions = None
