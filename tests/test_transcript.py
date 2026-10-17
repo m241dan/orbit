@@ -45,7 +45,7 @@ from orbit.tui.view import (
     EntryKind,
 )
 from orbit.tui.widgets import ChatPrompt
-from tests.test_tui import FakeSession, feed_events, said, started
+from tests.test_tui import STRIP, FakeSession, feed_events, said, started, tab_strip
 
 # Wraps in any window a test opens. At 40 columns a row beside the gutter holds two words but
 # would hold three if wrapped at the full width, so cropping a row would lose text.
@@ -1531,10 +1531,16 @@ async def test_an_agent_killed_after_a_done_rule_turns_that_rule_stopped() -> No
 async def test_a_temporary_tab_agents_exit_rule_lands_in_its_tab() -> None:
     session = FakeSession()
     app = OrbitApp(session)
+    now = [10.0]
+    app.clock = lambda: now[0]
     async with app.run_test() as pilot:
         await feed_events(session, pilot, started("agent-3", "checker"))
+        now[0] = 52.0
         await feed_events(session, pilot, AgentExited(agent_id="agent-3", reason="crashed"))
-        assert texts(app, "agent-3")[-1] == ("agent-3 crashed · 0s", "error_rule")
+        rule = ("agent-3 crashed · 42s", "error_rule")
+        assert texts(app, "agent-3")[-1] == rule
+        assert texts(app, None)[-1] == rule
+        assert tab_strip(app) == STRIP
 
 
 async def test_replacing_a_rule_in_a_log_without_one_leaves_it() -> None:
