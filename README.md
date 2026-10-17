@@ -221,9 +221,10 @@ form that suits the call's tool, a rule, then the output or orbit's reply:
   with no lines, such as a Write of an empty file or a MultiEdit without edits, shows a dim `no
   lines changed` instead. Line
   numbers are best effort, right-aligned in a dim column before the lines: a Write's count from 1,
-  and an edit's unchanged and added lines are numbered where its new text is found, in just one
-  place, in the snippet of the file its result shows; removed lines, edits it can't place and
-  failed calls have none. Then the output, dim, or red if the call failed.
+  and an edit's unchanged and added lines are numbered where its new text fits, in just one
+  place, in the snippet of the file its result shows (its first line may end a line of the file
+  and its last start one, or a single line sit inside one); removed lines, edits it can't place
+  and failed calls have none. Then the output, dim, or red if the call failed.
 - Every other tool: the arguments as highlighted JSON, then the output, indented and highlighted
   too if it's a JSON object or array.
 - A request to orbit: the arguments as highlighted JSON, then `orbit: ` and the reply, red if it's

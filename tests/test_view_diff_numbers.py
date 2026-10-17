@@ -48,6 +48,30 @@ def test_the_following_lines_decide_between_two_places_for_the_first() -> None:
     assert diff_numbers("Edit", line_diff("x", "x\nz"), result) == [3, 4]
 
 
+def test_an_edit_starting_and_ending_mid_line_is_numbered_where_it_fits() -> None:
+    result = f"{HEADER}\n     4→def f(a, b):\n     5→    y = foo(a,\n     6→        b)\n     7→"
+    lines = line_diff("bar(a,\n        b", "foo(a,\n        b")
+    assert diff_numbers("Edit", lines, result) == [None, 5, 6]
+
+
+def test_an_edit_also_fitting_mid_line_elsewhere_has_no_numbers() -> None:
+    result = f"{HEADER}\n     1→x\n     2→y\n     3→ax\n     4→y"
+    assert diff_numbers("Edit", line_diff("q\ny", "x\ny"), result) == [None, None, None]
+
+
+def test_a_one_line_edit_also_fitting_inside_another_line_has_no_numbers() -> None:
+    result = f"{HEADER}\n     1→def f(x):\n     2→    f(x)\n     3→)"
+    assert diff_numbers("Edit", line_diff("x)", ")"), result) == [None, None]
+
+
+def test_a_one_line_edit_inside_a_line_is_numbered() -> None:
+    assert diff_numbers("Edit", line_diff("1", "= 2"), ARROW_RESULT) == [None, 154]
+
+
+def test_an_empty_new_line_fits_every_line() -> None:
+    assert diff_numbers("Edit", line_diff("x", "\n"), ARROW_RESULT) == [None, None]
+
+
 def test_a_found_edit_needs_its_lines_numbered_one_after_another() -> None:
     result = f"{HEADER}\n     1→x\n     5→z"
     assert diff_numbers("Edit", line_diff("x", "x\nz"), result) == [None, None]

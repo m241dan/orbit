@@ -46,19 +46,34 @@ def _edits(lines: Sequence[str]) -> Iterator[list[str]]:
 
 
 def _start(snippet: Snippet, new: Sequence[str]) -> int | None:
-    """The line number at which the ``new`` lines appear in ``snippet``, if they do in just
-    one place."""
+    """The line number at which the ``new`` lines fit in ``snippet``, if they do in just one
+    place."""
     starts = [number for index, (number, _) in enumerate(snippet) if _found(snippet[index:], new)]
     return starts[0] if new and len(starts) == 1 else None
 
 
 def _found(snippet: Snippet, new: Sequence[str]) -> bool:
-    """Whether ``snippet`` starts with the ``new`` lines, numbered one after another."""
+    """Whether the ``new`` lines fit the start of ``snippet``, numbered one after another."""
     if len(snippet) < len(new):
         return False
     first = snippet[0][0]
-    expected = [(first + offset, line) for offset, line in enumerate(new)]
-    return list(snippet[: len(new)]) == expected
+    return all(
+        number == first + offset and _fits(line, offset, new)
+        for offset, (number, line) in enumerate(snippet[: len(new)])
+    )
+
+
+def _fits(line: str, offset: int, new: Sequence[str]) -> bool:
+    """Whether the ``new`` line at ``offset`` could be in the file's ``line``: an edit's text
+    may start and end mid-line, so the first may be a line's tail and the last its head."""
+    part = new[offset]
+    if len(new) == 1:
+        return part in line
+    if offset == 0:
+        return line.endswith(part)
+    if offset == len(new) - 1:
+        return line.startswith(part)
+    return line == part
 
 
 def _numbered(lines: Sequence[str], start: int | None) -> list[int | None]:
