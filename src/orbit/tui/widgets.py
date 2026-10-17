@@ -184,12 +184,20 @@ class PromptInput(ModalFocus, Input):
         self._activate()
 
 
-class ChatPrompt(ModalFocus, TextArea):
+class ModalTextArea(ModalFocus, TextArea):
+    """Text area with Vim-style focus: it only takes focus in insert mode
+    (``enter_insert_mode``), which puts the cursor at the end so typing appends."""
+
+    def enter_insert_mode(self) -> None:
+        if self._activate():
+            self.move_cursor(self.document.end)
+
+
+class ChatPrompt(ModalTextArea):
     """Prompt box at the bottom of the screen, which wraps its text and grows with it from
     one row up to eight, then scrolls; enter sends it, and pasted newlines are kept.
 
-    Vim-style like ``PromptInput``: it only takes focus in insert mode
-    (``enter_insert_mode``), and escape or losing focus returns to normal mode.
+    Vim-style like ``ModalTextArea``: escape or losing focus returns to normal mode.
     """
 
     DEFAULT_CSS = """
@@ -224,10 +232,6 @@ class ChatPrompt(ModalFocus, TextArea):
     def on_mount(self) -> None:
         self.show_busy(False)
 
-    def enter_insert_mode(self) -> None:
-        if self._activate():
-            self.move_cursor(self.document.end)
-
     def show_busy(self, busy: bool) -> None:
         self.border_title = prompt_title(busy)
 
@@ -238,12 +242,11 @@ class ChatPrompt(ModalFocus, TextArea):
         self.post_message(self.Submitted(self, self.text))
 
 
-class PromptBox(ModalFocus, TextArea):
+class PromptBox(ModalTextArea):
     """Multi-line prompt box, for a task's whole prompt.
 
-    Vim-style like ``PromptInput``: it only takes focus in insert mode
-    (``enter_insert_mode``), which puts the cursor at the end so typing appends, and
-    escape or losing focus returns to normal mode, where keys go to the app.
+    Vim-style like ``ModalTextArea``: escape or losing focus returns to normal mode, where
+    keys go to the app.
     """
 
     DEFAULT_CSS = """
@@ -259,10 +262,6 @@ class PromptBox(ModalFocus, TextArea):
 
     def __init__(self, text: str = "", **kwargs: Any) -> None:
         super().__init__(text, soft_wrap=True, show_line_numbers=False, **kwargs)
-
-    def enter_insert_mode(self) -> None:
-        if self._activate():
-            self.move_cursor(self.document.end)
 
 
 class PickerScreen(ModalScreen[int | None]):

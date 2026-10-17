@@ -105,3 +105,36 @@ async def test_insert_mode_does_nothing_while_disabled() -> None:
         prompt.enter_insert_mode()
         await pilot.pause()
         assert app.focused is None
+
+
+async def test_shrinks_as_wrapped_text_is_deleted() -> None:
+    app = ChatApp()
+    async with app.run_test(size=(WIDTH, 30)) as pilot:
+        prompt = app.query_one(ChatPrompt)
+        prompt.enter_insert_mode()
+        await pilot.press(*"word " * 50)
+        await pilot.pause()
+        assert rows(prompt) == 8
+        await pilot.press(*["backspace"] * 200)
+        await pilot.pause()
+        assert 1 < rows(prompt) < 8
+        await pilot.press(*["backspace"] * 45)
+        await pilot.pause()
+        assert prompt.text == "word "
+        assert rows(prompt) == 1
+        assert prompt.max_scroll_y == 0
+
+
+async def test_shrinks_as_pasted_lines_are_deleted() -> None:
+    app = ChatApp()
+    async with app.run_test(size=(WIDTH, 30)) as pilot:
+        prompt = app.query_one(ChatPrompt)
+        prompt.enter_insert_mode()
+        await pilot.pause()
+        app.post_message(events.Paste("one\ntwo\nthree"))
+        await pilot.pause()
+        assert rows(prompt) == 3
+        await pilot.press(*["backspace"] * len("\ntwo\nthree"))
+        await pilot.pause()
+        assert prompt.text == "one"
+        assert rows(prompt) == 1
