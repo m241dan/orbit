@@ -86,7 +86,8 @@ class TaskList(ListPane):
         self._redraw()
 
     def on_resize(self) -> None:
-        self._follow()
+        # OptionList re-measures its rows in its own resize handler, which runs after this one.
+        self.call_after_refresh(self._follow)
 
     def enter_list_mode(self) -> None:
         """Activate and hold the list, with the highlight on the active task if there is one."""

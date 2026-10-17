@@ -900,6 +900,41 @@ async def test_the_list_follows_the_active_task_when_resized() -> None:
         assert in_view(task_list, 12)
 
 
+def wordy(count: int, running: int) -> TasksChanged:
+    """A board like ``many``'s, but with titles long enough to wrap in a narrow list."""
+    tasks = board(*(f"task {n} " + "word " * 30 for n in range(count))).tasks
+    changed = tasks[running].model_copy(update={"status": "running"})
+    return TasksChanged(tasks=(*tasks[:running], changed, *tasks[running + 1 :]))
+
+
+async def test_the_list_follows_the_active_task_when_a_resize_rewraps_the_rows() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test(size=(400, 60)) as pilot:
+        task_list = app.query_one(TaskList)
+        await feed(session, pilot, wordy(30, running=25))
+        await pilot.resize_terminal(80, 30)
+        await pilot.pause()
+        assert task_list.row_lines()[25][1] > 1  # The rows really did wrap.
+        assert in_view(task_list, 25)
+
+
+async def test_following_leaves_the_highlight_alone() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        task_list = app.query_one(TaskList)
+        await feed(session, pilot, many(30, running=1))
+        await open_task_list(pilot)
+        await pilot.press("k", "escape", "escape")
+        assert task_list.following
+        assert task_list.highlighted == 0
+        await feed(session, pilot, many(30, running=25))
+        assert task_list.scroll_y > 0
+        assert in_view(task_list, 25)
+        assert task_list.highlighted == 0
+
+
 async def test_activating_the_list_highlights_the_active_task() -> None:
     session = FakeSession()
     app = OrbitApp(session)
