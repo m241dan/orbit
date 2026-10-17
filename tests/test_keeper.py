@@ -259,6 +259,38 @@ async def test_session_and_count_save_failures_are_each_reported() -> None:
     assert published.errors == ["A", "B"]
 
 
+async def test_a_failing_count_save_is_reported_once_though_session_saves_work() -> None:
+    store = FakeStore()
+    keeper, published = keeper_for(store)
+    store.count_failure = "full"
+    await keeper.save_review_count(1)
+    await save(keeper, WITH_TASK)
+    await keeper.save_review_count(2)
+    assert published.errors == ["full"]
+    assert len(store.saved) == 1
+
+
+async def test_a_failing_session_save_is_reported_again_in_a_new_session() -> None:
+    store = FakeStore()
+    keeper, published = keeper_for(store)
+    store.failure = "full"
+    await save(keeper, WITH_TASK)
+    await keeper.renew("next", lambda: True)
+    store.failure = "still full"
+    await save(keeper, WITH_TASK)
+    assert published.errors == ["full", "still full"]
+
+
+async def test_a_failing_count_save_is_reported_once_across_new_sessions() -> None:
+    store = FakeStore()
+    keeper, published = keeper_for(store)
+    store.count_failure = "full"
+    await keeper.save_review_count(1)
+    await keeper.renew("next", lambda: True)
+    await keeper.save_review_count(2)
+    assert published.errors == ["full"]
+
+
 async def test_count_saves_at_once_are_written_in_turn_the_newest_last() -> None:
     store = FakeStore()
     store.count_yields = [3, 0]
