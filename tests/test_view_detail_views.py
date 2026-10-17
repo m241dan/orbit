@@ -178,7 +178,7 @@ def test_a_failed_request_shows_orbits_reply_in_red() -> None:
 def test_a_requests_long_reply_is_capped() -> None:
     body = detail_body(call("give_up", {}, numbered(DETAIL_LINE_LIMIT + 1), request=True))
     lines = plain(body)
-    assert lines[2] == "orbit: line 0" and lines[-1] == "line 200"
+    assert lines[1] == "orbit: line 0" and lines[-1] == "line 200"
     assert "… 1 line omitted · y copies all …" in lines
 
 
@@ -289,3 +289,12 @@ def test_diff_text_styles_lines_after_their_numbers() -> None:
         (0, 2, "dim"),
         (2, 4, "green"),
     ]
+
+
+def test_a_call_without_arguments_begins_with_the_rule() -> None:
+    assert plain(detail_body(call("mcp__x__ping", {}, "pong"))) == [RULE, "pong"]
+
+
+def test_a_request_without_arguments_begins_with_the_rule() -> None:
+    body = detail_body(call("get_task", {}, "Do it.", request=True))
+    assert plain(body) == [RULE, "orbit: Do it."]

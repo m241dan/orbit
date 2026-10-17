@@ -55,12 +55,12 @@ def copied_note(text: str) -> str:
 
 
 def capped(output: str, limit: int = DETAIL_LINE_LIMIT) -> Text:
-    """``output`` as plain text; with more than ``limit`` lines, just its first and last
-    halves of that, a dim line between them counting the lines left out and saying y copies
-    them all."""
+    """``output``'s lines as plain text, without a trailing newline; with more than ``limit``
+    lines, just its first and last halves of that, a dim line between them counting the lines
+    left out and saying y copies them all."""
     lines = output.splitlines()
     if len(lines) <= limit:
-        return Text(output)
+        return Text("\n".join(lines))
     kept = limit // 2
     marker = _omitted(len(lines) - 2 * kept)
     return Text("\n").join([Text("\n".join(lines[:kept])), marker, Text("\n".join(lines[-kept:]))])

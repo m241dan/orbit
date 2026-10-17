@@ -35,7 +35,7 @@ def detail_body(call: ToolCall | None) -> RenderableType:
     """What the detail pane shows for ``call``: a header in the form that suits its tool, a
     rule, then its output or orbit's reply, or a dim note that it's still waiting; a dim note
     when there's no call. A call whose arguments don't suit its tool's view shows them as
-    JSON."""
+    JSON, or nothing when it has none, so its body begins with the rule."""
     if call is None:
         return Text(NO_DETAILS, style=DIM)
     view = _request_view if call.request else TOOL_VIEWS.get(call.name, _generic_view)
@@ -43,12 +43,13 @@ def detail_body(call: ToolCall | None) -> RenderableType:
     return _generic_view(call) if body is None else body
 
 
-def _shown(header: RenderableType, call: ToolCall, render: Render) -> Group:
-    """``header``, a rule, then ``call``'s output capped and drawn by ``render``, or a dim note
-    while it runs."""
+def _shown(header: RenderableType | None, call: ToolCall, render: Render) -> Group:
+    """``header``, if there is one, a rule, then ``call``'s output capped and drawn by
+    ``render``, or a dim note while it runs."""
     waiting = call.status == "running"
     output = Text(WAITING, style=DIM) if waiting else capped_with(call.output, render)
-    return Group(header, Rule(style=DIM), output)
+    rule = Rule(style=DIM)
+    return Group(rule, output) if header is None else Group(header, rule, output)
 
 
 def _string(arguments: Mapping[str, Any], key: str) -> str | None:
@@ -155,12 +156,12 @@ def _diff_line(line: str, gutter: int) -> Text:
 
 
 def _generic_view(call: ToolCall) -> RenderableType:
-    """``call``'s arguments as JSON, then its output, as JSON too if it is a JSON object or
-    array."""
+    """``call``'s arguments as JSON, if it has any, then its output, as JSON too if it is a
+    JSON object or array."""
     pretty = pretty_json(call.output)
     if pretty is None:
-        return _shown(_json(call.arguments), call, Text)
-    return _shown(_json(call.arguments), replace(call, output=pretty), _json_syntax)
+        return _shown(_arguments(call), call, Text)
+    return _shown(_arguments(call), replace(call, output=pretty), _json_syntax)
 
 
 def pretty_json(text: str) -> str | None:
@@ -176,8 +177,10 @@ def _dumped(value: object) -> str:
     return json.dumps(value, indent=2, ensure_ascii=False, default=str)
 
 
-def _json(value: object) -> Syntax:
-    return _json_syntax(_dumped(value))
+def _arguments(call: ToolCall) -> Syntax | None:
+    """``call``'s arguments as JSON; None when it has none, so its body begins with the
+    rule."""
+    return _json_syntax(_dumped(call.arguments)) if call.arguments else None
 
 
 def _json_syntax(text: str) -> Syntax:
@@ -185,10 +188,11 @@ def _json_syntax(text: str) -> Syntax:
 
 
 def _request_view(call: ToolCall) -> RenderableType:
-    """A request's arguments as JSON, then orbit's reply, red if it's an error."""
+    """A request's arguments as JSON, if it has any, then orbit's reply, red if it's an
+    error."""
     style = ERROR if call.status == "failed" else ""
     reply = replace(call, output=f"orbit: {call.output}")
-    return _shown(_json(call.arguments), reply, lambda text: Text(text, style=style))
+    return _shown(_arguments(call), reply, lambda text: Text(text, style=style))
 
 
 TOOL_VIEWS: Mapping[str, View] = MappingProxyType(

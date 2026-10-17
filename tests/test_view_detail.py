@@ -114,3 +114,11 @@ def test_the_copied_note_counts_lines() -> None:
 
 def test_the_copied_note_counts_one_line_singly() -> None:
     assert copied_note("a") == "Copied 1 line"
+
+
+def test_output_ending_in_a_newline_has_no_trailing_blank_line() -> None:
+    assert capped("a\nb\n").plain == "a\nb"
+
+
+def test_capped_output_ending_in_a_newline_has_no_trailing_blank_line() -> None:
+    assert capped(numbered(250) + "\n").plain.split("\n")[-1] == "line 249"
