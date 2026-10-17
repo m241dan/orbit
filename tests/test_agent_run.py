@@ -6,6 +6,7 @@ from typing import Any
 
 import pytest
 
+from orbit.agent import Verification, VerificationStep
 from orbit.agent.application.agent_run import AgentRun, Outcome
 from orbit.agent.application.desk import NOTE_LIMIT, AgentDesk, Agents, progress_note
 from orbit.agent.application.ports import CallHandler, ProposalDecision, Reply
@@ -35,6 +36,7 @@ from orbit.protocol import (
 )
 from tests.agent_fakes import (
     ROLES,
+    STEP,
     URL,
     Call,
     FailingHost,
@@ -654,3 +656,75 @@ async def test_a_run_cancelled_while_the_host_starts_closes_its_agent_unannounce
         await running
     assert_closed_unannounced(desk, events)
     await desk.stop()
+
+
+GIT_FAILED = RuntimeError("git status failed")
+
+
+class BreakingWorkspace(FakeWorkspace):
+    """Reports ``states`` in turn as the tree's state, then fails as git might."""
+
+    async def __call__(self, root: str) -> object:
+        if not self.states:
+            raise GIT_FAILED
+        return await super().__call__(root)
+
+
+async def breaking_step(step: VerificationStep, root: str) -> tuple[bool, str]:
+    raise GIT_FAILED
+
+
+async def held_reply(tool: str, events: list[Event], **options: Any) -> Reply:
+    """The reply to the agent's call to ``tool``, made in a task of its own so it outlives
+    the agent, which is stopped once the run fails; ``events`` gets the session's events."""
+    calls: list[asyncio.Future[Reply]] = []
+    proposing = tool == "propose_checks"
+
+    async def calls_once(call: Call) -> TurnEndReason:
+        await call("get_task")
+        arguments = {"steps": [LINT]} if proposing else {"summary": "done"}
+        calls.append(asyncio.ensure_future(call(tool, **arguments)))
+        await asyncio.shield(calls[0])
+        return "completed"
+
+    session, _, _ = session_for(calls_once, **options)
+    task = TaskSpec(prompt="a", role="configurator" if proposing else "coder")
+    events.extend(await asyncio.wait_for(run(session, task), 5))
+    return await asyncio.wait_for(calls[0], 5)
+
+
+async def test_a_claim_whose_verification_breaks_gets_an_error_reply() -> None:
+    events: list[Event] = []
+    verification = verified(Steps(), BreakingWorkspace("before"))
+    reply = await held_reply("complete_task", events, verification=verification)
+    assert reply == Reply("Orbit couldn't check your work: git status failed", is_error=True)
+    assert [t.status for t in board(events)] == ["error"]
+
+
+async def test_a_proposal_whose_trial_breaks_gets_an_error_reply() -> None:
+    events: list[Event] = []
+    verification = Verification((STEP,), breaking_step)
+    reply = await held_reply(
+        "propose_checks", events, verification=verification, proposal_review=Undecided()
+    )
+    assert reply == Reply("Orbit couldn't check your work: git status failed", is_error=True)
+    assert [t.status for t in board(events)] == ["error"]
+
+
+async def test_a_call_orbit_fails_to_handle_is_answered_and_reported() -> None:
+    answers: list[Reply] = []
+
+    async def checks(call: Call) -> TurnEndReason:
+        await call("get_task")
+        answers.append(await call("run_check", step="Unit tests"))
+        await call("give_up", reason="orbit is broken")
+        return "completed"
+
+    verification = Verification((STEP,), breaking_step)
+    session, _, _ = session_for(checks, verification=verification)
+    events = await asyncio.wait_for(run(session), 5)
+    message = "Orbit failed to handle run_check: git status failed"
+    assert answers == [Reply(message, is_error=True)]
+    assert ErrorOccurred(agent_id="agent-1", message=message) in events
+    [answer] = [e for e in events if isinstance(e, AgentReply) and e.is_error]
+    assert answer.text == message

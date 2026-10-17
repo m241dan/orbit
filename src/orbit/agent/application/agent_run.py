@@ -83,6 +83,15 @@ def _cancel(claim: "asyncio.Future[Reply] | None") -> None:
     _answer(claim, Reply("The task was cancelled.", is_error=True))
 
 
+def _fail(claim: "asyncio.Future[Reply] | None", exc: BaseException) -> None:
+    """Answer ``claim``, if it's still waiting, with why orbit stopped checking: it was
+    cancelled, or ``exc`` went wrong."""
+    if isinstance(exc, asyncio.CancelledError):
+        _cancel(claim)
+    else:
+        _answer(claim, Reply(f"Orbit couldn't check your work: {exc}", is_error=True))
+
+
 class AgentRun:
     """One agent working on task ``task_id`` of ``board``, from launch until it exits."""
 
@@ -266,8 +275,8 @@ class AgentRun:
         """Check the work, then answer ``claim`` (if the agent made one) with the verdict."""
         try:
             failure = await self._check(before)
-        except asyncio.CancelledError:
-            _cancel(claim)
+        except BaseException as exc:
+            _fail(claim, exc)
             raise
         reply = self._work.passed() if failure is None else await self._failed(failure)
         _answer(claim, Reply(reply))
@@ -295,8 +304,8 @@ class AgentRun:
         """Try ``proposal``, have the user decide on it if it works, and answer the agent."""
         try:
             reply = await self._decide(proposal.checks)
-        except asyncio.CancelledError:
-            _cancel(proposal.answer)
+        except BaseException as exc:
+            _fail(proposal.answer, exc)
             raise
         _answer(proposal.answer, Reply(reply))
 

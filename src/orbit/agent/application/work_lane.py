@@ -146,7 +146,7 @@ class WorkLane:
         else:
             message = commit_message(state.task, outcome.summaries, fix=state.fixes is not None)
         verifier = self._verifier if self._desk.agents.roles[state.task.role].verify else None
-        lander = Lander(self._desk.agents.tree, self._board, verifier, self._publish)
+        lander = Lander(self._desk.agents.tree, verifier, self._publish)
         landing = await lander.land(task_id, message, root, self._starts.pop(task_id))
         if landing.failure is not None:
             return Outcome("unverified", landing.failure)

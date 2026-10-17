@@ -4,7 +4,6 @@ from dataclasses import dataclass
 
 from orbit.agent.application.ports import CoderTree, Merge, Publish
 from orbit.agent.application.verifier import Failure, Verifier
-from orbit.agent.domain.board import TaskBoard
 from orbit.protocol import TaskMerged
 
 # Times the work is rebased onto a base that keeps moving before orbit stops trying.
@@ -23,15 +22,8 @@ class Landing:
 class Lander:
     """Commits and merges tasks' work from ``tree``, verifying it again after a rebase."""
 
-    def __init__(
-        self,
-        tree: CoderTree,
-        board: TaskBoard,
-        verifier: Verifier | None,
-        publish: Publish,
-    ) -> None:
+    def __init__(self, tree: CoderTree, verifier: Verifier | None, publish: Publish) -> None:
         self._tree = tree
-        self._board = board
         self._verifier = verifier
         self._publish = publish
 

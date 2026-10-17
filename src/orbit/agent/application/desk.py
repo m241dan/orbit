@@ -26,7 +26,7 @@ from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.agents import Agent, AgentRegistry
 from orbit.agent.domain.reviews import ReviewLimits
 from orbit.agent.domain.roles import ORBIT_TOOLS, Role
-from orbit.protocol import AgentReply, AgentRequest, ProgressNoted, Settings
+from orbit.protocol import AgentReply, AgentRequest, ErrorOccurred, ProgressNoted, Settings
 
 # The refusal of a call from an agent that isn't running.
 UNKNOWN_AGENT = Reply("Unknown or expired agent token.", is_error=True)
@@ -177,10 +177,22 @@ class AgentDesk:
             AgentRequest(agent_id=agent.id, request_id=request_id, tool=tool, arguments=arguments)
         )
         run = self._runs.get(agent.id)  # Its run may have closed it during the publish.
-        reply = UNKNOWN_AGENT if run is None else await run.handle(tool, arguments)
+        reply = UNKNOWN_AGENT if run is None else await self._answer(agent, run, tool, arguments)
         await self.publish(
             AgentReply(
                 agent_id=agent.id, request_id=request_id, text=reply.text, is_error=reply.is_error
             )
         )
         return reply
+
+    async def _answer(
+        self, agent: Agent, run: CallTarget, tool: str, arguments: dict[str, Any]
+    ) -> Reply:
+        """``run``'s answer to ``agent``'s call; if handling it fails, the failure is reported
+        and is the answer."""
+        try:
+            return await run.handle(tool, arguments)
+        except Exception as exc:
+            message = f"Orbit failed to handle {tool}: {exc}"
+            await self.publish(ErrorOccurred(agent_id=agent.id, message=message))
+            return Reply(message, is_error=True)
