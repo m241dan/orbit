@@ -86,6 +86,12 @@ the title or prompt (`esc` stops; `enter` stops in the title and adds a line in 
 `enter` on model or tools opens a picker, `ctrl+s` saves (from anywhere, even while typing) and
 `esc` discards. A task needs a title; the prompt may be empty.
 
+Orbit saves the session as you go: the task list, the review state, the planner's conversation,
+its model and new tasks' tool access are written to `.git/orbit/sessions/` (or `.orbit/sessions/`
+outside a git repository) after every change, so they survive a crash or `ctrl+c`. Each run starts a
+new session, saved once you add a task or prompt the planner; quitting before that leaves nothing
+behind. Reopening a saved session comes in a later change.
+
 `ctrl+r` runs the tasks one after another, each through a fresh **agent**: a new `claude -p`
 session connected to orbit's MCP server, so tasks don't share context with each other or with the
 planner. The agent is told only who it is (`agent-1`, `agent-2`, …) and to fetch its task:

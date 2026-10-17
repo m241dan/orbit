@@ -10,9 +10,17 @@ from dataclasses import replace
 from typing import Any, assert_never
 
 from orbit.agent.application.desk import AgentDesk, Agents
+from orbit.agent.application.keeper import (
+    Clock,
+    Contents,
+    IdMaker,
+    SessionKeeper,
+    local_now,
+    new_session_id,
+)
 from orbit.agent.application.lanes import TurnSlot
 from orbit.agent.application.planner import PlannerChat
-from orbit.agent.application.ports import ProposalReview, UsageSource
+from orbit.agent.application.ports import ProposalReview, SessionStore, UsageSource
 from orbit.agent.application.proposals import FrontendReview
 from orbit.agent.application.review_lane import ReviewLane
 from orbit.agent.application.startup_check import AGENT_ID as STARTUP_AGENT
@@ -49,6 +57,7 @@ from orbit.protocol import (
     SettingsChanged,
     SubmitPrompt,
     TaskSpec,
+    TurnEndReason,
     TurnFinished,
     UpdateSettings,
     VerificationChanged,
@@ -98,6 +107,9 @@ class AgentSession:
     With ``check_at_startup``, the ``verification`` steps also run once in the background as
     the events start, on the base commit; a failure adds a draft task to fix it. With a
     ``usage`` source, the subscription's usage limits are fetched in the background too.
+
+    The session open here is saved in ``store``, if there is one, once it's used; ``clock``
+    tells the time and ``new_id`` makes its id.
     """
 
     def __init__(
@@ -110,11 +122,15 @@ class AgentSession:
         check_at_startup: bool = False,
         *,
         usage: UsageSource | None = None,
+        store: SessionStore | None = None,
+        clock: Clock = local_now,
+        new_id: IdMaker = new_session_id,
     ) -> None:
         self._settings = settings or Settings()
         self._model_choices = tuple(model_choices)
         self._events: asyncio.Queue[Event] = asyncio.Queue()
-        self._tasks = Tasks(TaskBoard(), self._events.put)
+        self._keeper = SessionKeeper(store, self._events.put, clock, new_id)
+        self._tasks = Tasks(TaskBoard(), self._events.put, self._save)
         self._board = self._tasks.board
         self._proposals = FrontendReview(self._events.put, self._agent_on)
         agents = _reviewed(agents, self._proposals)
@@ -173,6 +189,11 @@ class AgentSession:
         return self._settings
 
     @property
+    def saved_session(self) -> SessionKeeper:
+        """The session open here, which is saved as it changes."""
+        return self._keeper
+
+    @property
     def model_choices(self) -> tuple[str, ...]:
         return self._model_choices
 
@@ -208,6 +229,7 @@ class AgentSession:
             case UpdateSettings(settings=settings):
                 self._settings = settings
                 await self._events.put(self._settings_changed())
+                await self._save()
             case _:
                 assert_never(command)
 
@@ -219,7 +241,16 @@ class AgentSession:
             # Frees the prompt of a frontend that marked the lane busy when it sent this.
             await self._events.put(BusyChanged(busy=False, lane="planner"))
         else:
-            await self._planner_turns.start(self._planner.answer(text, self._settings))
+            self._keeper.use()
+            await self._save()
+            await self._planner_turns.start(self._answer(self._planner, text, self._settings))
+
+    async def _answer(self, planner: PlannerChat, text: str, settings: Settings) -> TurnEndReason:
+        """``planner``'s turn on ``text``, saving the session after it, as its conversation
+        may have changed."""
+        reason = await planner.answer(text, settings)
+        await self._save()
+        return reason
 
     async def _handle_tasks(self, command: AddTask | RunTasks | ConfigureChecks) -> None:
         match command:
@@ -280,6 +311,7 @@ class AgentSession:
             return
         if await self._change(self._board.edit, task_id, task) and self._lane is not None:
             self._lane.edited(task_id)
+            await self._reviews_changed()
 
     async def _remove(self, task_id: str) -> None:
         """Remove a task, and take it out of its review batch, if any."""
@@ -381,8 +413,35 @@ class AgentSession:
             return None
         planner = ReviewPlanner(desk.agents.review_limits)
         lane = ReviewLane(desk, self._tasks, planner, self._wake_work)
+        lane.changed = self._reviews_changed
         desk.suggest = lane.suggest
         return lane
+
+    async def _reviews_changed(self) -> None:
+        """Save the review state, which may have changed, and the repository's super review
+        count."""
+        assert self._lane is not None  # Only the review lane changes it.
+        await self._keeper.save_review_count(self._lane.planner.since_super)
+        await self._save()
+
+    async def _load_review_count(self) -> None:
+        """Have the review planner count on from the repository's saved super review count."""
+        count = await self._keeper.review_count()
+        if self._lane is not None and count is not None:
+            self._lane.planner.since_super = count
+
+    async def _save(self) -> None:
+        """Save the session, if it's used, as it is now."""
+        await self._keeper.save(self._contents)
+
+    def _contents(self) -> Contents:
+        """What the session holds now, to save."""
+        return Contents(
+            settings=self._settings,
+            planner_conversation=self._planner.conversation_id if self._planner else None,
+            tasks=self._board.tasks,
+            reviews=self._lane.snapshot() if self._lane else None,
+        )
 
     async def _change(self, change: Callable[..., None], *arguments: Any) -> bool:
         """Change the board, publishing it, or report why the change was refused; returns
@@ -406,8 +465,9 @@ class AgentSession:
 
     async def close(self) -> None:
         """Cancel the work in progress, which stops its agent, then stop the startup check, the
-        usage monitor, the review lane, the planner and the agents' host, in that order. Each is
-        stopped even if one before it fails; the first failure is raised after."""
+        usage monitor, the review lane, the planner, the agents' host and the saving of the
+        session, releasing its lock, in that order. Each is stopped even if one before it fails;
+        the first failure is raised after."""
         self._closing = True
         failure: Exception | None = None
         for stop in self._stops():
@@ -425,6 +485,7 @@ class AgentSession:
         stops += [part.close for part in parts if part is not None]
         if self._desk is not None:
             stops.append(self._desk.stop)
+        stops.append(self._keeper.close)
         return stops
 
     async def _stop_turns(self) -> None:
@@ -436,6 +497,7 @@ class AgentSession:
         if not self._announced:
             self._announced = True
             try:
+                await self._load_review_count()
                 await self._announce_leftovers()
             finally:  # A listener cancelled meanwhile mustn't keep the background from starting.
                 self._start_background()

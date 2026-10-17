@@ -20,12 +20,14 @@ from orbit.agent import (
     GitCoderTree,
     McpHost,
     OrbitConfig,
+    SessionFiles,
     UsageApi,
     Verification,
     git_top_level,
     in_git_work_tree,
     read_config,
     run_step,
+    state_dir,
     workspace_state,
     write_checks,
 )
@@ -148,6 +150,7 @@ def chat(
             workspace=str(root),
             check_at_startup=True,
             usage=usage_source,
+            store=SessionFiles(state_dir(str(root))),
         ),
         _thread_context(profile),
     )

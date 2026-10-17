@@ -1,0 +1,214 @@
+"""Keeping the open session saved: only once it's used, after each change, locked while open."""
+
+import asyncio
+from datetime import timedelta
+
+from orbit.agent.application.keeper import Contents, SessionKeeper, local_now, new_session_id
+from orbit.agent.domain.reviews import LaneSnapshot, PlannerSnapshot
+from orbit.protocol import ErrorOccurred, Event, Settings, TaskSpec, TaskState
+from tests.agent_fakes import START, FakeStore, Ticks
+
+TASK = TaskState(id="1", task=TaskSpec(prompt="Add a flag."))
+EMPTY = Contents(settings=Settings(), planner_conversation=None, tasks=(), reviews=None)
+WITH_TASK = Contents(settings=Settings(), planner_conversation=None, tasks=(TASK,), reviews=None)
+
+
+class Published:
+    """Collects what a keeper publishes."""
+
+    def __init__(self) -> None:
+        self.events: list[Event] = []
+
+    async def __call__(self, event: Event) -> None:
+        self.events.append(event)
+
+    @property
+    def errors(self) -> list[str]:
+        return [e.message for e in self.events if isinstance(e, ErrorOccurred)]
+
+
+def keeper_for(store: FakeStore | None) -> tuple[SessionKeeper, Published]:
+    published = Published()
+    return SessionKeeper(store, published, Ticks(), lambda: "session-1"), published
+
+
+async def save(keeper: SessionKeeper, contents: Contents) -> None:
+    await keeper.save(lambda: contents)
+
+
+def test_a_new_session_is_named_for_when_it_was_opened() -> None:
+    keeper, _ = keeper_for(FakeStore())
+    assert (keeper.id, keeper.created, keeper.name) == ("session-1", START, "Oct 17 14:30")
+    assert not keeper.used
+
+
+def test_by_default_sessions_get_fresh_ids_and_the_local_time() -> None:
+    assert new_session_id() != new_session_id()
+    assert local_now().utcoffset() is not None
+
+
+async def test_an_unused_session_is_not_saved_or_locked() -> None:
+    store = FakeStore()
+    keeper, _ = keeper_for(store)
+    await save(keeper, EMPTY)
+    await keeper.close()
+    assert store.saved == [] and store.locked == set() and store.released == []
+
+
+async def test_a_session_with_a_task_is_saved_as_it_is() -> None:
+    store = FakeStore()
+    keeper, _ = keeper_for(store)
+    reviews = LaneSnapshot(planner=PlannerSnapshot())
+    contents = Contents(
+        settings=Settings(model="opus"), planner_conversation="c1", tasks=(TASK,), reviews=reviews
+    )
+    await save(keeper, contents)
+    assert keeper.used
+    [record] = store.saved
+    assert (record.id, record.name, record.created) == ("session-1", "Oct 17 14:30", START)
+    assert record.settings == Settings(model="opus") and record.planner_conversation == "c1"
+    assert record.tasks == (TASK,) and record.reviews == reviews
+
+
+async def test_a_session_marked_used_is_saved_without_tasks() -> None:
+    store = FakeStore()
+    keeper, _ = keeper_for(store)
+    keeper.use()
+    await save(keeper, EMPTY)
+    assert [r.tasks for r in store.saved] == [()]
+
+
+async def test_a_session_that_had_a_task_stays_used_without_it() -> None:
+    store = FakeStore()
+    keeper, _ = keeper_for(store)
+    await save(keeper, WITH_TASK)
+    await save(keeper, EMPTY)
+    assert [r.tasks for r in store.saved] == [(TASK,), ()]
+
+
+async def test_an_unchanged_session_is_not_saved_again() -> None:
+    store = FakeStore()
+    keeper, _ = keeper_for(store)
+    await save(keeper, WITH_TASK)
+    await save(keeper, WITH_TASK)
+    assert len(store.saved) == 1
+
+
+async def test_each_save_is_last_active_when_it_was_saved() -> None:
+    store = FakeStore()
+    keeper, _ = keeper_for(store)
+    await save(keeper, WITH_TASK)
+    await save(keeper, EMPTY)
+    assert [r.last_active for r in store.saved] == [
+        START + timedelta(minutes=1),
+        START + timedelta(minutes=2),
+    ]
+    assert all(r.created == START for r in store.saved)
+
+
+async def test_saves_at_once_are_written_in_turn_the_newest_last() -> None:
+    store = FakeStore()
+    keeper, _ = keeper_for(store)
+    current = [WITH_TASK]
+    first = asyncio.ensure_future(keeper.save(lambda: current[0]))
+    await asyncio.sleep(0)  # The first save is writing.
+    current[0] = EMPTY
+    await asyncio.gather(first, keeper.save(lambda: current[0]))
+    assert [r.tasks for r in store.saved] == [(TASK,), ()]
+
+
+async def test_the_session_is_locked_on_its_first_save_and_released_on_close() -> None:
+    store = FakeStore()
+    keeper, _ = keeper_for(store)
+    await save(keeper, WITH_TASK)
+    assert store.locked == {"session-1"}
+    await save(keeper, EMPTY)
+    await keeper.close()
+    assert store.locked == set() and store.released == ["session-1"]
+
+
+async def test_a_closed_session_is_not_saved() -> None:
+    store = FakeStore()
+    keeper, _ = keeper_for(store)
+    await keeper.close()
+    await save(keeper, WITH_TASK)
+    assert store.saved == [] and store.released == []
+
+
+async def test_a_lock_held_elsewhere_is_reported_and_nothing_is_saved() -> None:
+    store = FakeStore()
+    store.free = False
+    keeper, published = keeper_for(store)
+    await save(keeper, WITH_TASK)
+    await save(keeper, EMPTY)
+    await keeper.close()
+    assert published.errors == [
+        "Another orbit has the session session-1 open, so it won't be saved."
+    ]
+    assert store.saved == [] and store.released == []
+
+
+async def test_a_lock_that_cannot_be_taken_is_reported() -> None:
+    store = FakeStore()
+    store.lock_failure = "Couldn't lock the session x.lock: disk full"
+    keeper, published = keeper_for(store)
+    await save(keeper, WITH_TASK)
+    assert published.errors == [
+        "Couldn't lock the session x.lock: disk full; the session won't be saved."
+    ]
+    assert store.saved == []
+
+
+async def test_a_failing_save_is_reported_once_and_tried_again_at_the_next_change() -> None:
+    store = FakeStore()
+    store.failure = "Couldn't save the session: disk full"
+    keeper, published = keeper_for(store)
+    await save(keeper, WITH_TASK)
+    await save(keeper, EMPTY)
+    assert published.errors == ["Couldn't save the session: disk full"]
+    store.failure = None
+    await save(keeper, EMPTY)
+    assert [r.tasks for r in store.saved] == [()]
+
+
+async def test_a_save_failing_again_after_one_worked_is_reported_again() -> None:
+    store = FakeStore()
+    keeper, published = keeper_for(store)
+    store.failure = "full"
+    await save(keeper, WITH_TASK)
+    store.failure = None
+    await save(keeper, WITH_TASK)
+    store.failure = "full again"
+    await save(keeper, EMPTY)
+    assert published.errors == ["full", "full again"]
+
+
+async def test_without_a_store_nothing_is_saved_or_read() -> None:
+    keeper, published = keeper_for(None)
+    keeper.use()
+    await save(keeper, WITH_TASK)
+    await keeper.save_review_count(3)
+    assert await keeper.review_count() is None
+    await keeper.close()
+    assert published.events == []
+
+
+async def test_the_review_count_is_read_and_saved_when_it_changes() -> None:
+    store = FakeStore(count=4)
+    keeper, _ = keeper_for(store)
+    assert await keeper.review_count() == 4
+    await keeper.save_review_count(4)
+    await keeper.save_review_count(5)
+    await keeper.save_review_count(5)
+    assert store.counts == [5]
+
+
+async def test_a_review_count_that_cannot_be_saved_is_reported_and_tried_again() -> None:
+    store = FakeStore()
+    store.failure = "Couldn't save the review count: disk full"
+    keeper, published = keeper_for(store)
+    await keeper.save_review_count(1)
+    store.failure = None
+    await keeper.save_review_count(1)
+    assert published.errors == ["Couldn't save the review count: disk full"]
+    assert store.counts == [1]

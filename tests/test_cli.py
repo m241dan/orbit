@@ -16,6 +16,7 @@ from orbit.agent import (
     GitCoderTree,
     Limits,
     McpHost,
+    SessionFiles,
     Setup,
     UsageApi,
     Verification,
@@ -157,6 +158,32 @@ def test_a_workspace_outside_git_is_used_as_given(
     assert Path.cwd() == plain.resolve()
     [session] = launched
     assert session.agents is not None and session.agents.tree is None
+
+
+def test_chat_saves_sessions_in_the_git_directory_inside_a_repository(
+    launched: list[AgentSession], tmp_path: Path
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    assert runner.invoke(app, ["chat", "-C", str(repo)]).exit_code == 0
+
+    [session] = launched
+    store = session.saved_session._store
+    assert isinstance(store, SessionFiles)
+    assert store._sessions == repo.resolve() / ".git" / "orbit" / "sessions"
+
+
+def test_chat_saves_sessions_in_the_workspace_outside_git(
+    launched: list[AgentSession], tmp_path: Path
+) -> None:
+    assert runner.invoke(app, ["chat", "-C", str(tmp_path)]).exit_code == 0
+
+    [session] = launched
+    store = session.saved_session._store
+    assert isinstance(store, SessionFiles)
+    assert store._sessions == tmp_path.resolve() / ".orbit" / "sessions"
+    assert not (tmp_path / ".orbit").exists()  # Nothing was used, so nothing was saved.
 
 
 def test_a_missing_workspace_stops_chat(launched: list[AgentSession], tmp_path: Path) -> None:

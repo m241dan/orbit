@@ -4,12 +4,22 @@ CLI, and a step runner and workspace for verification."""
 import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable, Collection, Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from orbit.agent import Agents, AgentSession, Verification, VerificationStep
-from orbit.agent.application.ports import AgentLaunch, CallHandler, Merge, Reply, UsageSource
+from orbit.agent.application.ports import (
+    AgentLaunch,
+    CallHandler,
+    Merge,
+    Reply,
+    SessionStore,
+    StoredSession,
+    UsageSource,
+)
 from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.roles import REVIEW_ROLES, Setup, built_in_roles
+from orbit.agent.domain.sessions import SessionRecord, Unreadable
 from orbit.protocol import (
     BUILT_IN_ROLE_NAMES,
     AddTask,
@@ -167,6 +177,80 @@ class Steps:
         return passed, "all good" if passed else "1 test failed"
 
 
+START = datetime(2026, 10, 17, 14, 30, tzinfo=UTC)
+"""When a :class:`Ticks` clock starts."""
+
+
+class Ticks:
+    """A clock that starts at :data:`START` and moves a minute on each time it's read."""
+
+    def __init__(self) -> None:
+        self.reads = 0
+
+    def __call__(self) -> datetime:
+        self.reads += 1
+        return START + timedelta(minutes=self.reads - 1)
+
+
+class FakeStore:
+    """Saved sessions kept in memory, holding the super review ``count``.
+
+    ``failure``, while set, is the error every save raises; ``free`` says whether the lock can
+    be taken, and ``lock_failure``, if set, is the error taking it raises.
+    """
+
+    def __init__(self, count: int = 0) -> None:
+        self.saved: list[SessionRecord] = []
+        self.locked: set[str] = set()
+        self.released: list[str] = []
+        self.count = count
+        self.counts: list[int] = []  # Each count saved.
+        self.failure: str | None = None
+        self.free = True
+        self.lock_failure: str | None = None
+
+    @property
+    def last(self) -> SessionRecord:
+        return self.saved[-1]
+
+    async def save(self, record: SessionRecord) -> None:
+        if self.failure is not None:
+            raise RuntimeError(self.failure)
+        await asyncio.sleep(0)  # Saving takes a while, as writing a file does.
+        self.saved.append(record)
+
+    async def load(self, session_id: str) -> SessionRecord | Unreadable:
+        found = [r for r in self.saved if r.id == session_id]
+        return found[-1] if found else Unreadable("it doesn't exist")
+
+    async def sessions(self) -> list[StoredSession]:
+        latest = {r.id: r for r in self.saved}
+        return [StoredSession(i, r, False) for i, r in sorted(latest.items())]
+
+    async def delete(self, session_id: str) -> None:
+        self.saved = [r for r in self.saved if r.id != session_id]
+
+    async def acquire(self, session_id: str) -> bool:
+        if self.lock_failure is not None:
+            raise RuntimeError(self.lock_failure)
+        if self.free:
+            self.locked.add(session_id)
+        return self.free
+
+    async def release(self, session_id: str) -> None:
+        self.released.append(session_id)
+        self.locked.discard(session_id)
+
+    async def review_count(self) -> int:
+        return self.count
+
+    async def save_review_count(self, count: int) -> None:
+        if self.failure is not None:
+            raise RuntimeError(self.failure)
+        self.count = count
+        self.counts.append(count)
+
+
 STEP = VerificationStep(name="Unit tests", command=("pytest",))
 
 
@@ -274,10 +358,12 @@ def session_for(
     reviewers: Sequence[Script] = (),
     check_at_startup: bool = False,
     usage: UsageSource | None = None,
+    store: SessionStore | None = None,
     **options: Any,
 ) -> tuple[AgentSession, FakeHost, ScriptedLauncher]:
     """A session whose tasks run through agents playing ``scripts``, one per launch, and
-    whose reviews run through agents playing ``reviewers``, with usage from ``usage``.
+    whose reviews run through agents playing ``reviewers``, with usage from ``usage``. It's
+    saved in ``store``, if given, as ``session-1``, on a :class:`Ticks` clock.
 
     ``options`` go to :class:`Agents`, such as ``limits``, ``tree`` or ``roles`` (:data:`ROLES`
     unless given).
@@ -292,6 +378,9 @@ def session_for(
         agents=agents,
         check_at_startup=check_at_startup,
         usage=usage,
+        store=store,
+        clock=Ticks(),
+        new_id=lambda: "session-1",
     )
     return session, host, launcher
 

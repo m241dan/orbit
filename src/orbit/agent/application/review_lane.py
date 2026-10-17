@@ -12,7 +12,7 @@ from orbit.agent.application.agent_run import AgentRun
 from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.lanes import Background
 from orbit.agent.application.ports import CoderTree, Reply
-from orbit.agent.application.tasks import Tasks
+from orbit.agent.application.tasks import Changed, Tasks, unchanged
 from orbit.agent.domain.reviews import (
     LaneSnapshot,
     ReviewJob,
@@ -36,7 +36,8 @@ from orbit.protocol import (
 class ReviewLane:
     """Queues and runs reviews of ``tasks``' tasks through ``desk``'s agents.
 
-    ``wake_work`` asks the work lane to run the suggestions a review queued.
+    ``wake_work`` asks the work lane to run the suggestions a review queued, and ``changed`` is
+    called after the lane's state may have changed.
     """
 
     def __init__(
@@ -53,6 +54,7 @@ class ReviewLane:
         self._board = tasks.board
         self.planner = planner
         self._wake_work = wake_work
+        self.changed: Changed = unchanged
         self._publish = desk.publish
         self._jobs: dict[str, ReviewJob] = {}  # Review task id -> what it reviews.
         self._batches: dict[str, str] = {}  # Review task id -> the batch it suggests into.
@@ -84,6 +86,7 @@ class ReviewLane:
         await self._queue(self.planner.landed(self._board.get(task_id), commit))
         if self.planner.count():
             await self._queue(self.planner.super_review(commit))
+        await self.changed()  # The count changed even if no review is due.
 
     async def super_review(self) -> None:
         """Queue a super review of the codebase as the user has it: the base's latest commit.
@@ -158,9 +161,11 @@ class ReviewLane:
         diff = None if job is None else await self._diff(job)
         if job is None or diff is None:  # No review is due, or its diff can't be read.
             await self._publish_status()
+            await self.changed()
             return
         await self._add(job, diff)
         await self._publish_status()
+        await self.changed()
         if run:
             self.kick()
 
