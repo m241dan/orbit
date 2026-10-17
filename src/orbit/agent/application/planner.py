@@ -3,7 +3,8 @@
 The planner is one agent for the whole session. Each prompt is a turn of its conversation,
 resumed from the last, so it remembers what was said; it proposes tasks with ``propose_task``,
 and they wait on the board as drafts until the user accepts them. Its first prompt, and the first
-after the verification steps change, tells it the steps each task must pass.
+after the verification steps change, tells it the steps each task must pass. A restored session
+carries on its saved conversation, or starts a fresh one if that can't be resumed.
 """
 
 import asyncio
@@ -12,7 +13,7 @@ from collections.abc import AsyncIterator, Callable
 from typing import Any
 
 from orbit.agent.application.desk import AgentDesk, Tool, dispatch, report_progress
-from orbit.agent.application.ports import Reply
+from orbit.agent.application.ports import Reply, ResumeFailed
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.agents import Agent
 from orbit.agent.domain.roles import suggested_task
@@ -25,10 +26,14 @@ from orbit.protocol import (
     AgentStarted,
     ErrorOccurred,
     Event,
+    Notice,
     Settings,
     TurnEndReason,
     TurnFinished,
+    TurnStarted,
 )
+
+RESUME_FAILED_NOTE = "Couldn't resume the planner's conversation; starting fresh."
 
 
 class PlannerChat:
@@ -44,6 +49,7 @@ class PlannerChat:
         self._step_names = step_names
         self._agent: Agent | None = None
         self._told: tuple[str, ...] | None = None  # The steps the planner last heard about.
+        self._saved: str | None = None  # The saved conversation, until a turn resumes it.
         self._tools: dict[str, Tool] = {
             "propose_task": self._propose_task,
             "report_progress": self._report_progress,
@@ -53,6 +59,19 @@ class PlannerChat:
     def agent_id(self) -> str | None:
         """The id of the planner's agent; none before its first turn opens it."""
         return self._agent.id if self._agent else None
+
+    @property
+    def conversation_id(self) -> str | None:
+        """The id of the planner's Claude conversation, which may change after each turn; the
+        restored one before the first turn, and otherwise none until a turn starts it."""
+        if self._agent is None:
+            return self._saved
+        return self._desk.agents.launcher.conversation(self._agent.id)
+
+    def restore(self, conversation_id: str) -> None:
+        """Carry on the saved conversation ``conversation_id`` from the first turn on, which
+        starts a fresh one instead if it can't be resumed."""
+        self._saved = conversation_id
 
     async def answer(self, text: str, settings: Settings) -> TurnEndReason:
         """Run a turn of the planner's on ``text``, publishing its events; returns how it ended.
@@ -91,13 +110,52 @@ class PlannerChat:
         return reason
 
     async def run_turn(self, turn_id: str, prompt: str, settings: Settings) -> AsyncIterator[Event]:
-        """Tell the planner ``prompt``, with the session's model, and yield what it does."""
-        if self._agent is None:
-            self._agent = self._desk.open(self, PLANNER, PLAN_TASK)
-            # The frontend learns from this which agent's output is the planner's.
-            await self._desk.publish(
-                AgentStarted(agent_id=self._agent.id, role=PLANNER, task_id=PLAN_TASK)
-            )
+        """Tell the planner ``prompt``, with the session's model, and yield what it does. If it
+        can't resume a saved conversation, the prompt goes to a fresh one, with a Notice."""
+        await self._open()
+        saved, self._saved = self._saved, None
+        try:
+            async for event in self._converse(turn_id, prompt, settings):
+                yield event
+        except ResumeFailed:
+            if saved is None:
+                raise
+            async for event in self._start_fresh(turn_id, prompt, settings):
+                yield event
+        except asyncio.CancelledError:
+            self._saved = saved  # It may not have reached the saved conversation yet.
+            raise
+
+    async def _open(self) -> None:
+        """Open the planner's agent unless it's open, carrying on the saved conversation if
+        there is one."""
+        if self._agent is not None:
+            return
+        self._agent = self._desk.open(self, PLANNER, PLAN_TASK)
+        if self._saved is not None:
+            self._desk.agents.launcher.set_conversation(self._agent.id, self._saved)
+        # The frontend learns from this which agent's output is the planner's.
+        await self._desk.publish(
+            AgentStarted(agent_id=self._agent.id, role=PLANNER, task_id=PLAN_TASK)
+        )
+
+    async def _start_fresh(
+        self, turn_id: str, prompt: str, settings: Settings
+    ) -> AsyncIterator[Event]:
+        """Turn ``turn_id`` again, in a fresh conversation, after its TurnStarted is out."""
+        assert self._agent is not None  # It was opened to try resuming.
+        self._desk.agents.launcher.set_conversation(self._agent.id, None)
+        self._told = None  # A fresh conversation hasn't heard the steps.
+        yield Notice(message=RESUME_FAILED_NOTE)
+        async for event in self._converse(turn_id, prompt, settings):
+            if not isinstance(event, TurnStarted):
+                yield event
+
+    async def _converse(
+        self, turn_id: str, prompt: str, settings: Settings
+    ) -> AsyncIterator[Event]:
+        """Turn ``turn_id`` of the planner's conversation, on ``prompt``."""
+        assert self._agent is not None
         role = self._desk.agents.roles[PLANNER]
         own = Settings(model=settings.model, tool_access=role.tool_access)
         steps = self._step_names()

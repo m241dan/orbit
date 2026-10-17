@@ -15,7 +15,7 @@ import os
 from collections.abc import AsyncIterator, Mapping, Sequence
 from typing import Any
 
-from orbit.agent.application.ports import AgentLaunch
+from orbit.agent.application.ports import AgentLaunch, ResumeFailed
 from orbit.agent.domain.agents import Agent
 from orbit.agent.domain.roles import ORBIT_TOOLS
 from orbit.protocol import (
@@ -214,15 +214,37 @@ class ClaudeCliRunner:
 
     async def converse(self, turn_id: str, launch: AgentLaunch) -> AsyncIterator[Event]:
         """A turn of the agent's conversation: its first starts a Claude session, later ones
-        resume it, each agent's apart from the others'."""
+        resume it, each agent's apart from the others'. A resuming turn that fails before the
+        CLI reports its session raises ResumeFailed."""
         agent_id = launch.agent.id
-        turn = self._turn(launch, self._conversations.get(agent_id))
+        resume = self._conversations.get(agent_id)
+        turn = self._turn(launch, resume)
         try:
             async for event in turn.run(turn_id, launch.prompt):
                 yield event
+        except Exception as exc:
+            if resume and not turn.session_id:
+                raise ResumeFailed(str(exc)) from exc
+            raise
         finally:
-            if turn.session_id:
-                self._conversations[agent_id] = turn.session_id
+            self._remember(agent_id, turn)
+
+    def _remember(self, agent_id: str, turn: "_Turn") -> None:
+        """Note the Claude session ``turn`` ran in as agent ``agent_id``'s, if it reported one."""
+        if turn.session_id:
+            self._conversations[agent_id] = turn.session_id
+
+    def conversation(self, agent_id: str) -> str | None:
+        """The id of the Claude session agent ``agent_id``'s turns resume."""
+        return self._conversations.get(agent_id)
+
+    def set_conversation(self, agent_id: str, conversation_id: str | None) -> None:
+        """Have agent ``agent_id``'s next turn resume the Claude session ``conversation_id``, or
+        start a new one when it's ``None``."""
+        if conversation_id is None:
+            self._conversations.pop(agent_id, None)
+        else:
+            self._conversations[agent_id] = conversation_id
 
     def _turn(self, launch: AgentLaunch, resume: str | None) -> "_Turn":
         """A turn of ``launch``'s agent, resuming the Claude session ``resume`` if given."""

@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 
 from orbit.agent import ClaudeCliRunner
-from orbit.agent.application.ports import AgentLaunch
+from orbit.agent.application.ports import AgentLaunch, ResumeFailed
 from orbit.agent.domain.agents import Agent
 from orbit.agent.domain.roles import ORBIT_TOOLS
 from orbit.agent.external.claude_cli import AGENT_RULES, TOOL_TIMEOUT_MS, translate
@@ -290,6 +290,56 @@ async def test_runner_does_not_resume_without_session_id(tmp_path: Path) -> None
     await run(runner, "second")
 
     assert all("--resume" not in call["argv"] for call in calls(scenario))
+
+
+async def test_a_conversation_set_for_an_agent_is_resumed_on_its_first_turn(
+    tmp_path: Path,
+) -> None:
+    runner, scenario = make_runner(tmp_path, stdout=lines(*TRANSCRIPT))
+    runner.set_conversation("agent-3", "saved-7")
+    assert runner.conversation("agent-3") == "saved-7"
+    await run(runner, "Carry on.")
+    [call] = calls(scenario)
+    assert own_args(call)[-2:] == ["--resume", "saved-7"]
+    assert runner.conversation("agent-3") == SESSION_ID  # What the CLI reported.
+
+
+async def test_the_conversation_is_known_after_a_turn_and_can_be_dropped(tmp_path: Path) -> None:
+    runner, scenario = make_runner(tmp_path, stdout=lines(*TRANSCRIPT))
+    assert runner.conversation("agent-3") is None
+    await run(runner, "first")
+    assert runner.conversation("agent-3") == SESSION_ID
+    runner.set_conversation("agent-3", None)
+    runner.set_conversation("agent-3", None)  # Dropping none is fine too.
+    await run(runner, "second")
+    assert all("--resume" not in call["argv"] for call in calls(scenario))
+
+
+async def test_a_resumed_turn_failing_before_the_cli_reports_its_session_fails_to_resume(
+    tmp_path: Path,
+) -> None:
+    stderr = "No conversation found with session ID: saved-7\n"
+    runner, _ = make_runner(tmp_path, stderr=stderr, exit=1)
+    runner.set_conversation("agent-3", "saved-7")
+    with pytest.raises(ResumeFailed, match=r"^No conversation found with session ID: saved-7$"):
+        await run(runner, "Carry on.")
+
+
+async def test_a_resumed_turn_failing_after_the_cli_reports_its_session_just_fails(
+    tmp_path: Path,
+) -> None:
+    runner, _ = make_runner(tmp_path, stdout=lines(INIT), stderr="Invalid API key\n", exit=1)
+    runner.set_conversation("agent-3", "saved-7")
+    with pytest.raises(RuntimeError, match=r"^Invalid API key$") as raised:
+        await run(runner, "Carry on.")
+    assert not isinstance(raised.value, ResumeFailed)
+
+
+async def test_a_new_turn_failing_is_not_a_failure_to_resume(tmp_path: Path) -> None:
+    runner, _ = make_runner(tmp_path, exit=3)
+    with pytest.raises(RuntimeError) as raised:
+        await run(runner, "hi")
+    assert not isinstance(raised.value, ResumeFailed)
 
 
 async def test_runner_skips_blank_lines(tmp_path: Path) -> None:

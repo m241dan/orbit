@@ -101,6 +101,8 @@ class ScriptedLauncher:
         self.planner_afters: list[Callable[[], Awaitable[None]]] = []
         # The usage of each launch's turns, one launch at a time; one unmetered turn if none.
         self.usages: list[tuple[Usage, ...]] = []
+        self.conversations: dict[str, str] = {}  # Agent id -> its conversation's id.
+        self.resumed: list[str | None] = []  # The conversation each converse() carried on.
 
     async def run_agent(self, launch: AgentLaunch) -> AsyncIterator[Event]:
         self.launches.append(launch)
@@ -117,9 +119,21 @@ class ScriptedLauncher:
         for usage in self.usages.pop(0) if self.usages else (None,):
             yield TurnFinished(turn_id=agent.id, reason=reason, agent_id=agent.id, usage=usage)
 
+    def conversation(self, agent_id: str) -> str | None:
+        return self.conversations.get(agent_id)
+
+    def set_conversation(self, agent_id: str, conversation_id: str | None) -> None:
+        if conversation_id is None:
+            self.conversations.pop(agent_id, None)
+        else:
+            self.conversations[agent_id] = conversation_id
+
     async def converse(self, turn_id: str, launch: AgentLaunch) -> AsyncIterator[Event]:
+        """A turn of the next planner script, which starts the conversation
+        ``conversation-<agent id>`` unless it carries one on."""
         self.launches.append(launch)
         agent = launch.agent
+        self.resumed.append(self.conversations.get(agent.id))
         yield TurnStarted(turn_id=turn_id, agent_id=agent.id)
         if self.planner_replies:
             text = self.planner_replies.pop(0)
@@ -129,6 +143,7 @@ class ScriptedLauncher:
             return await self.host.call(agent.token, tool, **arguments)
 
         reason = await self.planner_turns.pop(0)(call)
+        self.conversations.setdefault(agent.id, f"conversation-{agent.id}")
         yield TurnFinished(turn_id=turn_id, reason=reason, agent_id=agent.id)
         if self.planner_afters:
             await self.planner_afters.pop(0)()

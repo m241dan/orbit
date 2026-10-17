@@ -70,6 +70,11 @@ class AgentLaunch:
     tools: tuple[str, ...]
 
 
+class ResumeFailed(RuntimeError):
+    """A turn resuming a conversation failed before the CLI reported the conversation it ran
+    in, as when that conversation is gone."""
+
+
 class AgentLauncher(Protocol):
     """Starts agents as processes."""
 
@@ -85,7 +90,18 @@ class AgentLauncher(Protocol):
     def converse(self, turn_id: str, launch: AgentLaunch) -> AsyncIterator[Event]:
         """Run one turn, ``turn_id``, of the agent's ongoing conversation, ``launch.prompt``
         being what it's told: the first turn starts it, and later ones carry it on. Yields and
-        stops like :meth:`run_agent`."""
+        stops like :meth:`run_agent`; a turn carrying it on that fails before it's known to
+        have done so raises :class:`ResumeFailed`."""
+        ...
+
+    def conversation(self, agent_id: str) -> str | None:
+        """The id of the Claude conversation agent ``agent_id``'s turns carry on; ``None``
+        before one has started it."""
+        ...
+
+    def set_conversation(self, agent_id: str, conversation_id: str | None) -> None:
+        """Have agent ``agent_id``'s next turn carry on the conversation ``conversation_id``, or
+        start a new one when it's ``None``."""
         ...
 
 

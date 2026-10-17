@@ -6,7 +6,8 @@ import pytest
 
 from orbit.agent import Agents, AgentSession
 from orbit.agent.application.desk import AgentDesk
-from orbit.agent.application.planner import PlannerChat
+from orbit.agent.application.planner import RESUME_FAILED_NOTE, PlannerChat
+from orbit.agent.application.ports import ResumeFailed
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.verification import steps_note
@@ -19,6 +20,7 @@ from orbit.protocol import (
     BusyChanged,
     ErrorOccurred,
     Event,
+    Notice,
     ProgressNoted,
     RemoveTask,
     RunTasks,
@@ -358,3 +360,86 @@ async def test_a_turn_failing_after_it_finished_reports_the_error_but_no_second_
         TurnFinished(turn_id=turn_id, agent_id="agent-1", reason="completed"),
         ErrorOccurred(turn_id=turn_id, agent_id="agent-1", message=message),
     ]
+
+
+async def resume_lost(call: Call) -> TurnEndReason:
+    raise ResumeFailed("No conversation found with session ID: saved-1")
+
+
+async def test_the_conversation_id_is_known_once_a_turn_starts_it() -> None:
+    chat, launcher, _ = steps_chat(chats)
+    assert chat.conversation_id is None
+    await turn(chat, launcher, "Plan.")
+    assert chat.conversation_id == "conversation-agent-1"
+    assert launcher.resumed == [None]
+
+
+async def test_a_restored_conversation_is_carried_on_from_the_first_turn() -> None:
+    chat, launcher, _ = steps_chat(chats, chats)
+    chat.restore("saved-1")
+    assert chat.conversation_id == "saved-1"
+    await turn(chat, launcher, "Carry on.")
+    await turn(chat, launcher, "And more.")
+    assert launcher.resumed == ["saved-1", "saved-1"]
+    assert chat.conversation_id == "saved-1"
+
+
+async def test_a_conversation_that_cannot_be_resumed_starts_fresh_on_the_same_prompt() -> None:
+    published: list[Event] = []
+    chat, launcher, _ = steps_chat(resume_lost, chats, published=published)
+    chat.restore("saved-1")
+    assert await chat.answer("Carry on.", Settings()) == "completed"
+    turn_id = turn_id_of(published)
+    assert published == [
+        AgentStarted(agent_id="agent-1", role="planner", task_id=PLAN_TASK),
+        TurnStarted(turn_id=turn_id, agent_id="agent-1"),
+        Notice(message=RESUME_FAILED_NOTE),
+        TurnFinished(turn_id=turn_id, agent_id="agent-1", reason="completed"),
+    ]
+    assert launcher.resumed == ["saved-1", None]
+    fresh = launcher.launches[-1].prompt
+    assert fresh == f"{steps_note(('Ruff lint',))}\n\nCarry on."
+    assert chat.conversation_id == "conversation-agent-1"
+
+
+async def test_once_the_saved_conversation_resumed_failures_to_resume_are_not_retried() -> None:
+    chat, launcher, _ = steps_chat(chats, resume_lost, chats)
+    chat.restore("saved-1")
+    await turn(chat, launcher, "Plan.")
+    with pytest.raises(ResumeFailed):
+        await turn(chat, launcher, "More.")
+    assert launcher.resumed == ["saved-1", "saved-1"]
+
+
+async def test_starting_fresh_is_tried_once() -> None:
+    published: list[Event] = []
+    chat, launcher, _ = steps_chat(resume_lost, fails, published=published)
+    chat.restore("saved-1")
+    assert await chat.answer("Carry on.", Settings()) == "error"
+    assert len(launcher.launches) == 2
+    assert Notice(message=RESUME_FAILED_NOTE) in published
+    assert finished_turns(published)[-1] == TurnFinished(
+        turn_id=turn_id_of(published), agent_id="agent-1", reason="error"
+    )
+
+
+async def test_a_failure_to_resume_without_a_saved_conversation_is_not_retried() -> None:
+    published: list[Event] = []
+    chat, launcher, _ = steps_chat(chats, resume_lost, published=published)
+    await turn(chat, launcher, "Plan.")
+    assert await chat.answer("More.", Settings()) == "error"
+    assert len(launcher.launches) == 2
+    assert not any(isinstance(e, Notice) for e in published)
+
+
+async def test_a_cancelled_first_turn_still_falls_back_if_the_saved_one_is_gone() -> None:
+    chat, launcher, _ = steps_chat(hangs, resume_lost, chats)
+    chat.restore("saved-1")
+    first = asyncio.create_task(turn(chat, launcher, "Plan."))
+    while not launcher.launches:
+        await asyncio.sleep(0)
+    first.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await first
+    await turn(chat, launcher, "Again.")
+    assert launcher.resumed == ["saved-1", "saved-1", None]
