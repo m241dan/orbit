@@ -325,9 +325,9 @@ which most terminals support; inside tmux it needs `set -g set-clipboard on`.
 The planned improvements to the conversation window, and what is deferred, are in
 [docs/conversation-window.md](docs/conversation-window.md).
 
-Each row of the task list shows its status: ⏳ pending, ◜ running (spinning), 🔍 verifying, ✅ done,
-❗ failed verification, ❌ failed, ⌛ ran out of steps, 🏳 the agent gave up, 🛑 cancelled, 📝 a draft
-the planner proposed. Once a task has spent anything, its row ends with the tokens and dollars it
+Each row of the task list shows its status: 📝 a draft the planner proposed, ⏳ pending, ◜ running
+(spinning), 🔍 verifying, ✅ done, ❗ failed verification, 🏳 the agent gave up, 🛑 cancelled, ❌
+failed. Once a task has spent anything, its row ends with the tokens and dollars it
 spent (`1.2M tok · $0.84`), and the task list's subtitle shows the open session's total
 (`session: 1.2M tok · $0.84`): it starts from what the session's saved tasks spent when the session
 opens (none for a new session, which shows no total) and adds every turn that finishes in this run,

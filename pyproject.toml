@@ -141,18 +141,6 @@ allow_indirect_imports = true
 name = "TUI view is independent of Textual"
 type = "forbidden"
 source_modules = ["orbit.tui.view"]
-forbidden_modules = [
-    "textual",
-    "orbit.tui.agents",
-    "orbit.tui.app",
-    "orbit.tui.conversation",
-    "orbit.tui.detail",
-    "orbit.tui.entries",
-    "orbit.tui.panels",
-    "orbit.tui.proposals",
-    "orbit.tui.tabs",
-    "orbit.tui.tasks",
-    "orbit.tui.transcript",
-    "orbit.tui.widgets",
-    "orbit.tui.working",
-]
+# Every other module in the frontend is a widget; the view's own modules may import each other.
+forbidden_modules = ["textual", "orbit.tui.*"]
+ignore_imports = ["orbit.tui.view.** -> orbit.tui.view.**", "orbit.tui.view -> orbit.tui.view.*"]
