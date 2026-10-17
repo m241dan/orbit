@@ -549,7 +549,8 @@ class WorkingRow(Static):
         if lines == self.lines:
             return
         self.lines = lines
-        self.update("\n".join(lines))
+        unwrapped = Text("\n", no_wrap=True, overflow="ellipsis")
+        self.update(unwrapped.join(Text(line) for line in lines))
         self.set_class(bool(lines), "-running")
 
 

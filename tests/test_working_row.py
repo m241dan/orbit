@@ -171,3 +171,28 @@ async def test_a_long_call_is_clipped_to_the_row_and_refit_on_resize() -> None:
         await pilot.resize_terminal(100, 24)
         await pilot.pause()
         assert len(lines(row)[0]) == row.size.width
+
+
+async def test_markup_in_a_call_shows_literally() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    command = "echo [/] [red]x[/red]"
+    call = ToolCallStarted(
+        turn_id="t", agent_id="agent-2", call_id="c1", name="Bash", arguments={"command": command}
+    )
+    async with app.run_test(size=(80, 24)) as pilot:
+        row = await opened(app, pilot)
+        await fed(session, pilot, started("agent-2"), turn("agent-2"), call)
+        assert lines(row) == (f"◜ agent-2 · Bash {command} 0:00 · 0:00",)
+        assert str(row.render()) == f"◜ agent-2 · Bash {command} 0:00 · 0:00"
+
+
+async def test_a_line_too_wide_for_the_row_does_not_wrap() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test(size=(80, 24)) as pilot:
+        row = await opened(app, pilot)
+        await fed(
+            session, pilot, started("agent-2"), turn("agent-2"), read("agent-2", "c1", "日" * 60)
+        )
+        assert row.size.height == 1

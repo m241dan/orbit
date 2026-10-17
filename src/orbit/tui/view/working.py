@@ -3,6 +3,8 @@
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 
+from rich.cells import cell_len
+
 from orbit.protocol import (
     PLANNER,
     AgentExited,
@@ -12,7 +14,7 @@ from orbit.protocol import (
     TurnFinished,
     TurnStarted,
 )
-from orbit.tui.view.common import spinner_frame
+from orbit.tui.view.common import clipped, spinner_frame
 from orbit.tui.view.tool_calls import tool_call_summary
 
 WORKING_LINES_SHOWN = 3
@@ -117,12 +119,8 @@ def working_line(running: RunningAgent, label: str, now: float, width: int) -> s
     others = len(running.calls) - 1
     more = f" (+{others} running)" if others else ""
     tail = f"{more} {elapsed_clock(now - latest.since)} · {turn}"
-    room = max(width - len(head) - len(tail), 1)
-    return f"{head}{_clip(latest.summary, room)}{tail}"
-
-
-def _clip(text: str, limit: int) -> str:
-    return text if len(text) <= limit else f"{text[: limit - 1]}…"
+    room = max(width - cell_len(head) - cell_len(tail), 1)
+    return f"{head}{clipped(latest.summary, room)}{tail}"
 
 
 @dataclass(frozen=True)

@@ -9,12 +9,12 @@ from types import MappingProxyType
 from typing import Any, Literal, assert_never
 
 from orbit.protocol import AgentReply, AgentRequest, ToolCallFinished, ToolCallStarted
-from orbit.tui.view.common import EntryKind
+from orbit.tui.view.common import EntryKind, clipped
 
 TOOL_CALL_SUMMARY_LIMIT = 120
-"""The most characters a tool call's summary line shows."""
+"""The most cells a tool call's summary line takes."""
 REPLY_LIMIT = 60
-"""The most characters of orbit's reply a request's line shows."""
+"""The most cells of orbit's reply a request's line takes."""
 ORBIT_TOOL_PREFIX = "mcp__orbit__"
 ORBIT_TOOL_FIELDS = ("summary", "title", "note", "reason", "name")
 """The arguments of orbit's own tools that sum up a call, best first."""
@@ -77,7 +77,7 @@ def tool_call_summary(name: str, arguments: Mapping[str, Any]) -> str:
         summary = _orbit_tool_summary(name.removeprefix(ORBIT_TOOL_PREFIX), arguments)
     else:
         summary = _built_in_tool_summary(name, arguments)
-    return _clip(summary, TOOL_CALL_SUMMARY_LIMIT)
+    return clipped(summary, TOOL_CALL_SUMMARY_LIMIT)
 
 
 def _orbit_tool_summary(tool: str, arguments: Mapping[str, Any]) -> str:
@@ -97,10 +97,6 @@ def _built_in_tool_summary(name: str, arguments: Mapping[str, Any]) -> str:
 def _squeezed(text: str) -> str:
     """``text`` with each run of whitespace, newlines included, as a single space."""
     return " ".join(text.split())
-
-
-def _clip(text: str, limit: int) -> str:
-    return text if len(text) <= limit else f"{text[: limit - 1]}…"
 
 
 def tool_call_title(name: str, arguments: Mapping[str, Any]) -> str:
@@ -131,7 +127,7 @@ class ToolCall:
 def tool_call_started(event: ToolCallStarted | AgentRequest) -> ToolCall:
     """The call ``event`` starts, running: a tool call, or an agent's request to orbit."""
     if isinstance(event, AgentRequest):
-        summary = _clip(_orbit_tool_summary(event.tool, event.arguments), TOOL_CALL_SUMMARY_LIMIT)
+        summary = clipped(_orbit_tool_summary(event.tool, event.arguments), TOOL_CALL_SUMMARY_LIMIT)
         return ToolCall(event.request_id, event.tool, summary, event.arguments, request=True)
     title = tool_call_title(event.name, event.arguments)
     return ToolCall(event.call_id, event.name, title, event.arguments)
@@ -308,5 +304,5 @@ def orbit_request_line(call: ToolCall, agent: str | None, frame: str) -> tuple[s
 
 def _replied(mark: str, reply: str) -> str:
     """``mark`` followed by the first line of ``reply``, clipped, if it has one."""
-    first = _clip(reply.strip().partition("\n")[0].strip(), REPLY_LIMIT)
+    first = clipped(reply.strip().partition("\n")[0].strip(), REPLY_LIMIT)
     return f"{mark} {first}" if first else mark

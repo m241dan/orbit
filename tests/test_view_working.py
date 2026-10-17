@@ -1,5 +1,7 @@
 """The working row's state and lines: who runs, which calls, and how each line reads."""
 
+from rich.cells import cell_len
+
 from orbit.protocol import (
     AgentExited,
     Event,
@@ -176,3 +178,17 @@ def test_a_role_tab_shows_only_its_agents() -> None:
 def test_the_planner_tab_shows_only_the_planner() -> None:
     working = tracked((turn(None), 0), (turn("agent-2"), 0))
     assert working_lines(WorkingView(working, ROLES, "planner"), 0, WIDE) == ("◜ planner · 0:00",)
+
+
+def test_a_wide_call_is_clipped_to_fit_the_width_in_cells() -> None:
+    running = RunningAgent("agent-3", 0, (RunningCall("c1", "Bash " + "日" * 50, 0),))
+    line = working_line(running, "agent-3", 0, 40)
+    assert cell_len(line) == 40
+    assert line == "◜ agent-3 · Bash 日日日日日… 0:00 · 0:00"
+
+
+def test_a_wide_call_split_by_the_clip_is_padded_to_fit_the_width() -> None:
+    running = RunningAgent("agent-3", 0, (RunningCall("c1", "Bash " + "日" * 50, 0),))
+    line = working_line(running, "agent-3", 0, 41)
+    assert cell_len(line) == 41
+    assert line == "◜ agent-3 · Bash 日日日日日 … 0:00 · 0:00"

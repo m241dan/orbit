@@ -2,6 +2,8 @@
 
 from typing import Literal
 
+from rich.cells import cell_len, set_cell_size
+
 from orbit.protocol import Settings, StepStatus, TaskStatus
 
 EntryKind = Literal[
@@ -51,3 +53,8 @@ def spinner_frame(now: float) -> str:
 
 def model_label(settings: Settings) -> str:
     return settings.model or "default"
+
+
+def clipped(text: str, limit: int) -> str:
+    """``text``, or as much of it as fits ``limit`` cells with an ellipsis after it."""
+    return text if cell_len(text) <= limit else f"{set_cell_size(text, limit - 1)}…"
