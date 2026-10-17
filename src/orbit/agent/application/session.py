@@ -58,6 +58,7 @@ from orbit.protocol import (
     EditTask,
     ErrorOccurred,
     Event,
+    ListingReason,
     ListSessions,
     NewSession,
     Notice,
@@ -291,7 +292,7 @@ class AgentSession:
     async def _handle_sessions(self, command: SessionCommand) -> None:
         match command:
             case ListSessions():
-                await self._list_sessions()
+                await self._list_sessions("asked")
             case OpenSession(session_id=session_id):
                 await self._open_session(session_id)
             case NewSession(name=name):
@@ -301,8 +302,9 @@ class AgentSession:
             case _:
                 assert_never(command)
 
-    async def _list_sessions(self) -> None:
-        await self._events.put(SessionsListed(sessions=await self._keeper.summaries()))
+    async def _list_sessions(self, reason: ListingReason) -> None:
+        summaries = await self._keeper.summaries()
+        await self._events.put(SessionsListed(sessions=summaries, reason=reason))
 
     async def _change_saved(self, command: RenameSession | DeleteSession) -> None:
         """Rename or delete a session, then list the sessions as they are after."""
@@ -313,7 +315,7 @@ class AgentSession:
                 await self._keeper.delete_saved(session_id)
             case _:
                 assert_never(command)
-        await self._list_sessions()
+        await self._list_sessions("refreshed")
 
     async def _rename_session(self, session_id: str, name: str) -> None:
         """Name the session ``session_id`` ``name``, saving it if it's saved; refused for an
@@ -679,7 +681,7 @@ class AgentSession:
             try:
                 await self._load_review_count()
                 if self._pick_session:
-                    await self._list_sessions()
+                    await self._list_sessions("startup")
                 await self._announce_leftovers()
             finally:  # A listener cancelled meanwhile mustn't keep the background from starting.
                 self._start_background()

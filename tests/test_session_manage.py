@@ -31,6 +31,15 @@ def names(sessions: tuple[SessionSummary, ...]) -> dict[str, str]:
     return {s.id: s.name for s in sessions}
 
 
+async def test_the_sessions_listed_after_a_rename_or_delete_are_refreshed() -> None:
+    session, _ = switching(store_with(saved("old"), saved("gone")))
+    for command in (RenameSession(session_id="old", name="new"), DeleteSession(session_id="gone")):
+        await session.send(command)
+        listed = last_of(SessionsListed, await events_until(session, of_type(SessionsListed)))
+        assert listed.reason == "refreshed"
+    await session.close()
+
+
 async def test_a_saved_session_is_renamed_under_its_lock() -> None:
     store = store_with(saved("old"))
     session, _ = switching(store)

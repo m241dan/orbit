@@ -106,7 +106,8 @@ def test_session_commands_and_events_round_trip() -> None:
     for command in (ListSessions(), OpenSession(session_id="s1"), NewSession(name="auth")):
         assert command_adapter.validate_json(command.model_dump_json()) == command
     summary = SessionSummary(id="s1", name="auth", counts={"pending": 2}, current=True)
-    for event in (SessionsListed(sessions=(summary,)), SessionOpened(session=summary)):
+    listed = SessionsListed(sessions=(summary,), reason="asked")
+    for event in (listed, SessionOpened(session=summary)):
         assert event_adapter.validate_json(event.model_dump_json()) == event
 
 

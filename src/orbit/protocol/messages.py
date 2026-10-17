@@ -620,11 +620,20 @@ class UsageChanged(_Message):
     retry_at: AwareDatetime | None = None
 
 
+ListingReason = Literal["startup", "asked", "refreshed"]
+"""Why sessions are listed: for the user to pick one at startup, in answer to
+``ListSessions``, or because a rename or delete changed them."""
+
+
 class SessionsListed(_Message):
-    """The saved sessions, the most recently active first; those that can't be read come last."""
+    """The saved sessions, the most recently active first; those that can't be read come last.
+
+    The ``reason`` says what the listing answers.
+    """
 
     type: Literal["sessions_listed"] = "sessions_listed"
     sessions: tuple[SessionSummary, ...]
+    reason: ListingReason
 
 
 class SessionOpened(_Message):

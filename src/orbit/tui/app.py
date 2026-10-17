@@ -43,7 +43,6 @@ from orbit.protocol import (
     Session,
     SessionOpened,
     SessionsListed,
-    SessionSummary,
     Settings,
     SettingsChanged,
     StartupChecked,
@@ -212,10 +211,6 @@ class OrbitApp(App[None], inherit_bindings=False):
         self._settings: Settings | None = None
         self._model_choices: tuple[str, ...] = ()
         self._proposal: ProposalScreen | None = None  # The proposal being shown, if any.
-        # How many ctrl+p listings are still to come; listings beyond them weren't asked for.
-        self._sessions_asked = 0
-        # Whether sessions were listed or asked for; only the first listing before that is startup.
-        self._sessions_started = False
         self._sessions: SessionsScreen | None = None  # The list of sessions shown, if any.
         self.clock: Callable[[], float] = time.monotonic
         # Pickers are built once and installed so they open instantly.
@@ -450,23 +445,16 @@ class OrbitApp(App[None], inherit_bindings=False):
 
     async def action_list_sessions(self) -> None:
         """Ask for the saved sessions, which show in a modal once they're listed."""
-        self._sessions_asked += 1
-        self._sessions_started = True
         await self._session.send(ListSessions())
 
-    def _show_sessions(self, sessions: tuple[SessionSummary, ...]) -> None:
-        """Let the user pick one of ``sessions`` or start a new one; listed first, before ctrl+p,
-        it's at startup, where escape quits. Listed again while the list is shown, after a session
-        was renamed or deleted or asked for twice, they replace those it shows; listed unasked
-        once the list was closed, they're ignored."""
-        startup = not self._sessions_started
-        self._sessions_started = True
-        asked = self._sessions_asked > 0
-        self._sessions_asked = max(0, self._sessions_asked - 1)
+    def _show_sessions(self, listed: SessionsListed) -> None:
+        """Let the user pick one of the sessions ``listed`` or start a new one; at startup, escape
+        quits. Listed while the list is shown, they replace those it shows; refreshed after a
+        rename or delete once the list was closed, they're ignored."""
         if self._sessions is not None:
-            self._sessions.show(sessions)
+            self._sessions.show(listed.sessions)
             return
-        if not (startup or asked):
+        if listed.reason == "refreshed":
             return
 
         async def chosen(choice: SessionChoice | None) -> None:
@@ -475,7 +463,8 @@ class OrbitApp(App[None], inherit_bindings=False):
             if choice is not None:
                 await self._session.send(choice)
 
-        self._sessions = SessionsScreen(sessions, self._session.send, startup=startup)
+        startup = listed.reason == "startup"
+        self._sessions = SessionsScreen(listed.sessions, self._session.send, startup=startup)
         self.push_screen(self._sessions, chosen)
 
     async def action_cancel_turn(self) -> None:
@@ -571,7 +560,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         take the task list out of list mode, let it follow again and start its total from the
         spend of a session opened, whose contents come in their own events."""
         if isinstance(event, SessionsListed):
-            self._show_sessions(event.sessions)
+            self._show_sessions(event)
         elif isinstance(event, SessionOpened):
             if self.focused is self._task_list:
                 self.set_focus(None)

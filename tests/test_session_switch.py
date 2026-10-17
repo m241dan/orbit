@@ -138,6 +138,7 @@ async def test_sessions_list_newest_first_marking_the_current_locked_and_unreada
     await session.send(ListSessions())
     listed = last_of(SessionsListed, await events_until(session, of_type(SessionsListed)))
 
+    assert listed.reason == "asked"
     flags = [(s.id, s.current, s.locked, s.unreadable) for s in listed.sessions]
     assert flags == [
         ("session-1", True, False, None),
@@ -160,6 +161,7 @@ async def test_sessions_are_listed_at_startup_for_the_user_to_pick_one() -> None
     session, _ = switching(store_with(saved("old")), pick_session=True)
     listed = last_of(SessionsListed, await events_until(session, of_type(SessionsListed)))
     assert [s.id for s in listed.sessions] == ["old"]
+    assert listed.reason == "startup"
     await session.close()
 
 
