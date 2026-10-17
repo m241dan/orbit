@@ -9,21 +9,21 @@ user what they make of it, which a :class:`ProposalTrial` does.
 """
 
 import asyncio
-from collections.abc import Sequence
+from collections.abc import Awaitable, Sequence
 from contextlib import suppress
 from dataclasses import dataclass
 from functools import partial
 from typing import Any, Literal
 
 from orbit.agent.application.desk import AgentDesk, Tool, dispatch, report_progress
-from orbit.agent.application.ports import Reply
+from orbit.agent.application.ports import Publish, Reply
 from orbit.agent.application.proposal_trial import ProposalTrial
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.application.verifier import Failure, Verifier, first_failure
 from orbit.agent.domain.agent_task import FINISHED, AgentTask, Phase
 from orbit.agent.domain.agents import Agent, bootstrap_prompt
 from orbit.agent.domain.board import TaskBoard
-from orbit.agent.domain.endings import Ending, error, run_ending, unaccepted
+from orbit.agent.domain.endings import Ending, bug, error, run_ending, unaccepted
 from orbit.agent.domain.roles import (
     ChecksProposal,
     ConfigError,
@@ -76,6 +76,30 @@ def ended(status: TaskStatus, why: Ending) -> Outcome:
     """A task's ending as ``status``, with nothing to show for it, for the reason ``why``."""
     reason, detail = why
     return Outcome(status, reason=reason, detail=detail)
+
+
+async def see_to_end(
+    tasks: Tasks, task_id: str, default: Outcome, outcome: Awaitable[Outcome]
+) -> Outcome:
+    """The ``outcome`` task ``task_id`` of ``tasks`` reached, recorded as its end. It ends as
+    ``default`` if ``outcome`` is cancelled, and in error, re-raised, if ``outcome`` breaks on a
+    bug: a task left running could never be run or dropped."""
+    reached = default
+    try:
+        reached = await outcome
+    except Exception as exc:
+        reached = ended("error", bug(exc))
+        raise
+    finally:
+        await tasks.finish(task_id, reached.status, reached.reason, reached.detail)
+    return reached
+
+
+async def tree_failed(publish: Publish, exc: RuntimeError) -> Outcome:
+    """A task's ending in error because git or its tree failed with ``exc``, published with
+    ``publish``."""
+    await publish(ErrorOccurred(message=str(exc)))
+    return ended("error", error(str(exc)))
 
 
 @dataclass(frozen=True)

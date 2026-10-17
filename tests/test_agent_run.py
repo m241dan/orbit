@@ -7,14 +7,14 @@ from typing import Any
 import pytest
 
 from orbit.agent import Verification, VerificationStep
-from orbit.agent.application.agent_run import AgentRun, Outcome
+from orbit.agent.application.agent_run import AgentRun, Outcome, see_to_end, tree_failed
 from orbit.agent.application.desk import NOTE_LIMIT, AgentDesk, Agents, progress_note
 from orbit.agent.application.ports import CallHandler, ProposalDecision, Reply
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.application.verifier import Verifier
 from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.board import TaskBoard
-from orbit.agent.domain.endings import STOPPED_BY_YOU
+from orbit.agent.domain.endings import BUG, STOPPED_BY_YOU
 from orbit.agent.domain.roles import ChecksProposal
 from orbit.agent.domain.verification import failure_report
 from orbit.protocol import (
@@ -825,3 +825,69 @@ async def test_a_call_orbit_fails_to_handle_is_answered_and_reported() -> None:
     assert ErrorOccurred(agent_id="agent-1", message=message) in events
     [answer] = [e for e in events if isinstance(e, AgentReply) and e.is_error]
     assert answer.text == message
+
+
+def started_task() -> tuple[Tasks, str]:
+    """Tasks on a new board, publishing nowhere, and the id of a task started on it."""
+
+    async def publish(event: Event) -> None:
+        pass
+
+    tasks = Tasks(TaskBoard(), publish)
+    return tasks, tasks.board.add(TaskSpec(prompt="a"))
+
+
+def ending(tasks: Tasks, task_id: str) -> tuple[str, str, str]:
+    state = tasks.board.get(task_id)
+    return state.status, state.reason, state.reason_detail
+
+
+DEFAULT = Outcome("cancelled", reason="Cancelled")
+
+
+async def test_see_to_end_records_the_outcome_reached() -> None:
+    tasks, task_id = started_task()
+
+    async def reached() -> Outcome:
+        return Outcome("completed")
+
+    assert await see_to_end(tasks, task_id, DEFAULT, reached()) == Outcome("completed")
+    assert ending(tasks, task_id) == ("completed", "", "")
+
+
+async def test_see_to_end_records_a_bug_and_re_raises_it() -> None:
+    tasks, task_id = started_task()
+
+    async def broken() -> Outcome:
+        raise KeyError("oops")
+
+    with pytest.raises(KeyError):
+        await see_to_end(tasks, task_id, DEFAULT, broken())
+    assert ending(tasks, task_id) == ("error", BUG, "'oops'")
+
+
+async def test_see_to_end_records_the_default_when_cancelled() -> None:
+    tasks, task_id = started_task()
+
+    async def cancelled() -> Outcome:
+        raise asyncio.CancelledError
+
+    with pytest.raises(asyncio.CancelledError):
+        await see_to_end(tasks, task_id, DEFAULT, cancelled())
+    assert ending(tasks, task_id) == ("cancelled", "Cancelled", "")
+
+
+async def test_tree_failed_publishes_the_error_and_ends_in_it() -> None:
+    published: list[Event] = []
+
+    async def publish(event: Event) -> None:
+        published.append(event)
+
+    outcome = await tree_failed(publish, RuntimeError("git broke"))
+
+    assert published == [ErrorOccurred(message="git broke")]
+    assert (outcome.status, outcome.reason, outcome.detail) == (
+        "error",
+        "Error: git broke",
+        "git broke",
+    )

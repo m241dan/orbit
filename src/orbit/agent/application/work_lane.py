@@ -8,7 +8,7 @@ hears how each task ended.
 import asyncio
 from collections.abc import Collection
 
-from orbit.agent.application.agent_run import AgentRun, Outcome, ended
+from orbit.agent.application.agent_run import AgentRun, Outcome, ended, see_to_end, tree_failed
 from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.landing import Lander
 from orbit.agent.application.review_lane import ReviewLane
@@ -17,7 +17,7 @@ from orbit.agent.application.tasks import Tasks
 from orbit.agent.application.verifier import Failure, Verifier
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.commits import commit_message, configure_message
-from orbit.agent.domain.endings import BUG, CANCELLED, STOPPED_BY_YOU, bug, error
+from orbit.agent.domain.endings import BUG, CANCELLED, STOPPED_BY_YOU
 from orbit.agent.domain.roles import REVIEW_ROLES, ChecksProposal
 from orbit.agent.domain.verification import FallbackFixes, failure_reason, fix_prompt
 from orbit.protocol import (
@@ -87,14 +87,8 @@ class WorkLane:
         if self._verifier is not None:
             await self._verifier.reset()
         await self._publish(TaskStarted(task_id=task_id))
-        outcome = Outcome("error", reason=BUG)  # What a bug in the run leaves the task as.
-        try:
-            outcome = await self._outcome(task_id)
-        except Exception as exc:
-            outcome = ended("error", bug(exc))
-            raise
-        finally:  # Even a bug ends the task, or the board could never run or drop it.
-            await self._tasks.finish(task_id, outcome.status, outcome.reason, outcome.detail)
+        default = Outcome("error", reason=BUG)  # What a bug in the run leaves the task as.
+        outcome = await see_to_end(self._tasks, task_id, default, self._outcome(task_id))
         await self._report_to_review(task_id)
         return outcome.status
 
@@ -108,8 +102,7 @@ class WorkLane:
             # Read after the await: the user may have stopped the run meanwhile.
             return ended("cancelled", (STOPPED_BY_YOU if self._stopped else CANCELLED, ""))
         except RuntimeError as exc:  # Git or the tree's setup failed.
-            await self._publish(ErrorOccurred(message=str(exc)))
-            return ended("error", error(str(exc)))
+            return await tree_failed(self._publish, exc)
 
     async def _report_to_review(self, task_id: str) -> None:
         """Tell the review lane how task ``task_id`` ended."""

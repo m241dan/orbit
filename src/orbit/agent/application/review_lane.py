@@ -8,13 +8,13 @@ review is due and stops reviews generating work forever.
 import asyncio
 from collections.abc import Awaitable, Callable, Collection
 
-from orbit.agent.application.agent_run import AgentRun, Outcome, ended
+from orbit.agent.application.agent_run import AgentRun, Outcome, ended, see_to_end, tree_failed
 from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.lanes import Background
 from orbit.agent.application.ports import CoderTree, Reply
 from orbit.agent.application.tasks import Changed, Tasks, unchanged
 from orbit.agent.domain.board import TaskBoard
-from orbit.agent.domain.endings import CANCELLED, REVIEW_STOPPED_BY_YOU, bug, error
+from orbit.agent.domain.endings import CANCELLED, REVIEW_STOPPED_BY_YOU
 from orbit.agent.domain.reviews import (
     LaneSnapshot,
     ReviewJob,
@@ -240,24 +240,20 @@ class ReviewLane:
     async def _review(self, task_id: str) -> None:
         job = self._jobs.get(task_id)
         await self._tasks.start(task_id)
-        outcome = ended("cancelled", (CANCELLED, ""))  # What the lane stopping leaves it as.
+        default = ended("cancelled", (CANCELLED, ""))  # What the lane stopping leaves it as.
         reviewer = asyncio.create_task(
             self._run_reviewer(task_id, job.commits[-1] if job else None)
         )
         self._current = (task_id, reviewer)
-        try:
-            outcome = await self._outcome(reviewer)
-        except Exception as exc:  # A bug; the review still ends, or its batch would stay open.
-            outcome = ended("error", bug(exc))
-            raise
+        try:  # Even a bug ends the review, or its batch would stay open.
+            await see_to_end(self._tasks, task_id, default, self._outcome(reviewer))
         finally:
-            self._current = None
-            await self._tasks.finish(task_id, outcome.status, outcome.reason, outcome.detail)
             if not _being_cancelled():  # The lane stopping leaves its batches as they are.
                 await self._after(self._batches.get(task_id))
 
     async def _outcome(self, reviewer: asyncio.Task[Outcome]) -> Outcome:
-        """How the review ``reviewer`` ended; anything unexpected escapes."""
+        """How the review ``reviewer`` ended, which is no longer the current one; anything
+        unexpected escapes."""
         try:
             return await reviewer
         except asyncio.CancelledError:
@@ -266,8 +262,9 @@ class ReviewLane:
             # Only :meth:`cancel`, which the user asks for, stops a review on its own.
             return ended("cancelled", (REVIEW_STOPPED_BY_YOU, ""))
         except RuntimeError as exc:  # Git couldn't make or drop the snapshot.
-            await self._publish(ErrorOccurred(message=str(exc)))
-            return ended("error", error(str(exc)))
+            return await tree_failed(self._publish, exc)
+        finally:
+            self._current = None
 
     async def _run_reviewer(self, task_id: str, commit: str | None) -> Outcome:
         """Run the reviewer in a snapshot of ``commit``; a review the user queued works in place."""
