@@ -119,8 +119,8 @@ When usage is rate limited or unavailable, it dims the last good numbers and add
 
 The conversation shows everything in one timeline: each agent's own messages, headed by the
 agent's id in a muted row whenever the speaker changes, its tool calls, prefixed with its id, and
-its exchanges with orbit (`agent-1 → orbit: complete_task …`,
-`orbit → agent-1: …`) in their own colour. The tabs above it narrow it: **All** shows everything,
+its requests to orbit and orbit's replies (`agent-1 → orbit complete_task … ✓ …`) in their own
+colour. The tabs above it narrow it: **All** shows everything,
 then come a pinned tab for each built-in role, labelled by its name: **planner**, **coder**,
 **reviewer**, **super-reviewer** and **configurator**. The pinned tabs are there from the start and
 keep the whole session's history; every agent in a role shares its tab (two reviewers running at
@@ -157,10 +157,15 @@ Glob counts its matches (`✓ 4 matches`, `✓ 1 match`, `✓ 0 matches` when it
 other tool, any other failure, and a call whose arguments don't fit count the output's lines
 (`✓ 5 lines`, `✗ 1 line`). A call still running when its turn ends shows `→ Read src/x.py ⊘ no
 result`. A tool call's line can't be expanded; its full arguments and output are kept but not
-shown. An agent's request to orbit shows as one line naming the tool and its main argument, with
-its full arguments collapsed beneath it. An entry of more than one line can be collapsed to its
-first line and a count of the rest, marked `▸` (`▾` when expanded); requests to orbit start
-collapsed. Press `enter` on the conversation to move between entries with `j`/`k`, `enter` again to collapse or
+shown. An agent's request to orbit and orbit's reply are one line too, naming the agent, orbit's
+tool and its main argument, and updated in place: a spinner turns in front while the agent waits
+(`◜ agent-3 → orbit complete_task Add a flag`), then the reply's first line follows, clipped to
+about 60 characters, ticked (`agent-3 → orbit complete_task Add a flag ✓ All checks passed.`) or,
+in the error colour, crossed (`✗ No task assigned.`). A request still waiting when its agent exits
+shows `⊘ no reply`, muted. A reply to no request shown gets an entry of its own (`orbit →
+agent-3: …`). Like a tool call's, a request's line can't be expanded; its full arguments and reply
+are kept but not shown. An entry of more than one line can be collapsed to its first line and a
+count of the rest, marked `▸` (`▾` when expanded). Press `enter` on the conversation to move between entries with `j`/`k`, `enter` again to collapse or
 expand the one marked `▌` in the left gutter, and `esc` to leave. Leaving holds the marked entry:
 the mark stays, the conversation stops following new output, and `enter` picks up there again.
 `esc` again with the Conversation window selected lets go, and the conversation follows the latest
@@ -315,7 +320,8 @@ line saying they all passed on the current code. Then:
 | `x` | End the task; it's marked 🛑 cancelled |
 
 Your decision is noted in the conversation (`orbit → agent-3: proposal accepted`, `… changes
-asked for: add mypy`, `… task ended`), followed by orbit's reply to the agent. The agent revises
+asked for: add mypy`, `… task ended`), and orbit's reply to the agent completes its request's
+line above. The agent revises
 up to `fix_attempts` times. If it's cancelled or exits while its proposal is showing, the window
 closes and the task is cancelled.
 

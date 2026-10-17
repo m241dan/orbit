@@ -8,11 +8,13 @@ from dataclasses import dataclass, replace
 from types import MappingProxyType
 from typing import Any, Literal, assert_never
 
-from orbit.protocol import ToolCallFinished, ToolCallStarted
+from orbit.protocol import AgentReply, AgentRequest, ToolCallFinished, ToolCallStarted
 from orbit.tui.view.common import EntryKind
 
 TOOL_CALL_SUMMARY_LIMIT = 120
 """The most characters a tool call's summary line shows."""
+REPLY_LIMIT = 60
+"""The most characters of orbit's reply a request's line shows."""
 ORBIT_TOOL_PREFIX = "mcp__orbit__"
 ORBIT_TOOL_FIELDS = ("summary", "title", "note", "reason", "name")
 """The arguments of orbit's own tools that sum up a call, best first."""
@@ -108,15 +110,14 @@ def tool_call_title(name: str, arguments: Mapping[str, Any]) -> str:
 
 
 ToolCallStatus = Literal["running", "passed", "failed", "no_result"]
-"""How a tool call went: still running, finished or failed, or ended with its turn before a
-result came."""
+"""How a tool call went: still running, finished or failed, or ended before a result came."""
 
 
 @dataclass(frozen=True)
 class ToolCall:
     """A tool call as its entry shows it: the ``call_id`` its result comes back with, the tool's
     ``name``, its ``summary`` and ``status``, and its full ``arguments`` and ``output``, kept for
-    a closer look."""
+    a closer look. A ``request`` is an agent's call to orbit, its output orbit's reply."""
 
     call_id: str
     name: str
@@ -124,21 +125,35 @@ class ToolCall:
     arguments: Mapping[str, Any]
     status: ToolCallStatus = "running"
     output: str = ""
+    request: bool = False
 
 
-def tool_call_started(event: ToolCallStarted) -> ToolCall:
-    """The call ``event`` starts, running."""
+def tool_call_started(event: ToolCallStarted | AgentRequest) -> ToolCall:
+    """The call ``event`` starts, running: a tool call, or an agent's request to orbit."""
+    if isinstance(event, AgentRequest):
+        summary = _clip(_orbit_tool_summary(event.tool, event.arguments), TOOL_CALL_SUMMARY_LIMIT)
+        return ToolCall(event.request_id, event.tool, summary, event.arguments, request=True)
     title = tool_call_title(event.name, event.arguments)
     return ToolCall(event.call_id, event.name, title, event.arguments)
 
 
-def tool_call_finished(call: ToolCall, event: ToolCallFinished) -> ToolCall:
-    """``call`` finished with ``event``'s output, failed if it's an error."""
-    return replace(call, status="failed" if event.is_error else "passed", output=event.output)
+def finishes(event: ToolCallFinished | AgentReply, call: ToolCall, agent: str | None) -> bool:
+    """Whether ``event`` is the result of ``agent``'s ``call``: a tool's output for a tool call,
+    orbit's reply for a request."""
+    if isinstance(event, AgentReply):
+        return call.request and (agent, call.call_id) == (event.agent_id, event.request_id)
+    return not call.request and (agent, call.call_id) == (event.agent_id, event.call_id)
+
+
+def tool_call_finished(call: ToolCall, event: ToolCallFinished | AgentReply) -> ToolCall:
+    """``call`` finished with ``event``'s output or reply, failed if it's an error."""
+    output = event.text if isinstance(event, AgentReply) else event.output
+    return replace(call, status="failed" if event.is_error else "passed", output=output)
 
 
 def tool_call_unfinished(call: ToolCall) -> ToolCall:
-    """``call`` once its turn has ended: with no result if it was still running."""
+    """``call`` once its turn, or its agent, has ended: with no result if it was still
+    running."""
     return replace(call, status="no_result") if call.status == "running" else call
 
 
@@ -273,10 +288,25 @@ def _result(call: ToolCall, *, is_error: bool) -> str:
     return tool_result_summary(call.name, call.arguments, call.output, is_error)
 
 
-def orbit_request_text(tool: str, arguments: Mapping[str, Any]) -> str:
-    """A request to orbit's ``tool`` as one line summing it up, with its full ``arguments`` on
-    the lines after."""
-    if not arguments:
-        return tool
-    summary = _clip(_orbit_tool_summary(tool, arguments), TOOL_CALL_SUMMARY_LIMIT)
-    return f"{summary}\n{json.dumps(arguments, indent=2, ensure_ascii=False)}"
+def orbit_request_line(call: ToolCall, agent: str | None, frame: str) -> tuple[str, EntryKind]:
+    """``agent``'s request ``call`` to orbit as its entry's one line and the kind it's shown
+    as: its summary behind the spinner's ``frame`` while it waits, then marked with how it went
+    and the first line of orbit's reply, clipped."""
+    head = f"{agent} → orbit {call.summary}"
+    match call.status:
+        case "running":
+            return f"{frame}{head}", "request"
+        case "passed":
+            return f"{head} {_replied('✓', call.output)}", "request"
+        case "failed":
+            return f"{head} {_replied('✗', call.output)}", "error"
+        case "no_result":
+            return f"{head} ⊘ no reply", "tool"
+        case _:
+            assert_never(call.status)
+
+
+def _replied(mark: str, reply: str) -> str:
+    """``mark`` followed by the first line of ``reply``, clipped, if it has one."""
+    first = _clip(reply.strip().partition("\n")[0].strip(), REPLY_LIMIT)
+    return f"{mark} {first}" if first else mark

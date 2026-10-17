@@ -1,5 +1,3 @@
-import json
-
 import pytest
 from rich.console import Console
 from rich.style import Style
@@ -31,6 +29,7 @@ from orbit.tui.view import (
     GUTTER_MARKER,
     PROMPT_LINES_SHOWN,
     PROMPT_MARKER,
+    REPLY_LIMIT,
     SPINNER_FPS,
     DrawnRule,
     EntryKind,
@@ -63,6 +62,7 @@ from orbit.tui.view import (
     tool_call_entry,
     tool_call_finished,
     tool_call_started,
+    tool_call_unfinished,
     turn_rule_entry,
     usage_text,
     verification_finished_entry,
@@ -100,50 +100,74 @@ def test_agent_lifecycle_becomes_transcript_entries() -> None:
     assert agent_entry(gave_up) == ("🏳 agent-1 gave up: unclear spec", "error")
 
 
-def test_agent_exchanges_become_transcript_entries() -> None:
-    reply = AgentReply(agent_id="agent-1", request_id="r", text="Checks passed.")
-    assert exchange_entry(reply) == ("orbit → agent-1: Checks passed.", "agent")
-    refused = AgentReply(agent_id="agent-1", request_id="r", text="No task.", is_error=True)
-    assert exchange_entry(refused) == ("orbit → agent-1: No task.", "error")
-    note = ProgressNoted(agent_id="agent-1", task_id="1", note="tests written")
-    assert exchange_entry(note) == ("agent-1: tests written", "agent")
+def asked(arguments: dict[str, str] | None = None, tool: str = "complete_task") -> ToolCall:
+    """agent-1's request to orbit's ``tool`` with ``arguments``, by default a summary."""
+    arguments = {"summary": "Add a flag"} if arguments is None else arguments
+    request = AgentRequest(agent_id="agent-1", request_id="r", tool=tool, arguments=arguments)
+    return tool_call_started(request)
 
 
-def test_an_orbit_request_collapses_its_full_arguments_beneath_a_summary() -> None:
-    arguments = {"title": "Add a flag", "prompt": "First paragraph.\n\nSecond paragraph."}
-    request = AgentRequest(
-        agent_id="agent-1", request_id="r", tool="suggest_task", arguments=arguments
-    )
-    text, kind = exchange_entry(request)
-    first, _, rest = text.partition("\n")
-    assert first == "agent-1 → orbit: suggest_task Add a flag"
-    assert json.loads(rest) == arguments
-    assert starts_collapsed(kind, text)
+def replied(text: str, is_error: bool = False) -> ToolCall:
+    reply = AgentReply(agent_id="agent-1", request_id="r", text=text, is_error=is_error)
+    return tool_call_finished(asked(), reply)
+
+
+def test_a_waiting_orbit_requests_entry_spins_beside_its_agent_and_summary() -> None:
+    entry = tool_call_entry(asked(), "agent-1", 0.0)
+    assert entry == ("◜ agent-1 → orbit complete_task Add a flag", "request")
+
+
+def test_an_answered_orbit_requests_entry_shows_the_replys_first_line() -> None:
+    entry = tool_call_entry(replied("Checks passed.\nMerged."), "agent-1", 0.0)
+    assert entry == ("agent-1 → orbit complete_task Add a flag ✓ Checks passed.", "request")
+
+
+def test_a_refused_orbit_requests_entry_is_an_error() -> None:
+    entry = tool_call_entry(replied("No task.", is_error=True), "agent-1", 0.0)
+    assert entry == ("agent-1 → orbit complete_task Add a flag ✗ No task.", "error")
+
+
+def test_an_orbit_requests_reply_is_clipped_to_fit() -> None:
+    text, _ = tool_call_entry(replied("a" * 100), "agent-1", 0.0)
+    assert text.endswith(f" ✓ {'a' * (REPLY_LIMIT - 1)}…")
+
+
+def test_an_empty_reply_leaves_only_the_tick() -> None:
+    text, _ = tool_call_entry(replied(""), "agent-1", 0.0)
+    assert text == "agent-1 → orbit complete_task Add a flag ✓"
+
+
+def test_an_unanswered_orbit_request_has_no_reply() -> None:
+    entry = tool_call_entry(tool_call_unfinished(asked()), "agent-1", 0.0)
+    assert entry == ("agent-1 → orbit complete_task Add a flag ⊘ no reply", "tool")
+
+
+def test_an_orbit_request_keeps_its_full_arguments_and_reply() -> None:
+    call = replied("Checks passed.\nMerged.")
+    assert call.arguments == {"summary": "Add a flag"}
+    assert call.output == "Checks passed.\nMerged."
 
 
 def test_an_orbit_request_summary_is_clipped_to_the_tool_call_limit() -> None:
     title = "a" * 200
-    request = AgentRequest(
-        agent_id="agent-1", request_id="r", tool="suggest_task", arguments={"title": title}
-    )
-    first = exchange_entry(request)[0].partition("\n")[0]
-    assert first == f"agent-1 → orbit: suggest_task {title[:106]}…"
+    call = asked({"title": title}, tool="suggest_task")
+    assert call.summary == f"suggest_task {title[:106]}…"
 
 
-def test_an_orbit_request_without_arguments_is_one_line() -> None:
-    request = AgentRequest(agent_id="agent-1", request_id="r", tool="get_task", arguments={})
-    text, _ = exchange_entry(request)
-    assert text == "agent-1 → orbit: get_task"
-    assert not collapsible(text)
+def test_an_orbit_request_without_arguments_shows_its_tool() -> None:
+    assert asked({}, tool="get_task").summary == "get_task"
 
 
-def test_an_orbit_request_keeps_non_ascii_arguments() -> None:
-    request = AgentRequest(
-        agent_id="agent-1", request_id="r", tool="complete_task", arguments={"summary": "café ✓"}
-    )
-    text, _ = exchange_entry(request)
-    assert text.partition("\n")[0] == "agent-1 → orbit: complete_task café ✓"
-    assert '"café ✓"' in text
+def test_a_reply_to_no_request_shown_is_an_entry_of_its_own() -> None:
+    reply = AgentReply(agent_id="agent-1", request_id="r", text="Checks passed.")
+    assert exchange_entry(reply) == ("orbit → agent-1: Checks passed.", "agent")
+    refused = AgentReply(agent_id="agent-1", request_id="r", text="No task.", is_error=True)
+    assert exchange_entry(refused) == ("orbit → agent-1: No task.", "error")
+
+
+def test_a_progress_note_is_an_entry() -> None:
+    note = ProgressNoted(agent_id="agent-1", task_id="1", note="tests written")
+    assert exchange_entry(note) == ("agent-1: tests written", "agent")
 
 
 def test_no_steps_skip_reason_reads_naturally() -> None:
@@ -208,10 +232,11 @@ def test_entries_are_labelled_by_their_agent_when_they_have_one() -> None:
     assert agent_labelled(("boom", "error"), None) == ("boom", "error")
 
 
-def test_only_tool_and_request_entries_start_collapsed() -> None:
-    assert starts_collapsed("tool", "a\nb") and starts_collapsed("request", "a\nb")
+def test_only_tool_entries_start_collapsed() -> None:
+    assert starts_collapsed("tool", "a\nb")
     assert not any(
-        starts_collapsed(kind, "a\nb") for kind in ("user", "assistant", "verify", "agent", "error")
+        starts_collapsed(kind, "a\nb")
+        for kind in ("user", "assistant", "verify", "agent", "request", "error")
     )
 
 

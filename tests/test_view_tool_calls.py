@@ -2,9 +2,10 @@ from typing import Any
 
 import pytest
 
-from orbit.protocol import ToolCallFinished, ToolCallStarted
+from orbit.protocol import AgentReply, AgentRequest, ToolCallFinished, ToolCallStarted
 from orbit.tui.view import (
     ToolCall,
+    finishes,
     line_count,
     tool_call_finished,
     tool_call_line,
@@ -155,6 +156,44 @@ def test_a_finished_call_keeps_its_output() -> None:
 def test_a_finished_call_passed_or_failed_by_its_error(is_error: bool, status: str) -> None:
     event = ToolCallFinished(turn_id="t", call_id="c", output="", is_error=is_error)
     assert tool_call_finished(started_call(), event).status == status
+
+
+def asked_call(request_id: str = "r") -> ToolCall:
+    event = AgentRequest(agent_id="agent-1", request_id=request_id, tool="get_task", arguments={})
+    return tool_call_started(event)
+
+
+def reply(request_id: str = "r", agent_id: str = "agent-1") -> AgentReply:
+    return AgentReply(agent_id=agent_id, request_id=request_id, text="ok")
+
+
+def test_a_request_to_orbit_is_a_call_waiting_for_its_reply() -> None:
+    assert asked_call() == ToolCall("r", "get_task", "get_task", {}, "running", "", request=True)
+
+
+def test_a_reply_finishes_its_agents_request_of_the_same_id() -> None:
+    assert finishes(reply(), asked_call(), "agent-1")
+
+
+@pytest.mark.parametrize(
+    ("event", "agent"), [(reply("other"), "agent-1"), (reply(agent_id="agent-2"), "agent-1")]
+)
+def test_a_reply_doesnt_finish_another_request(event: AgentReply, agent: str) -> None:
+    assert not finishes(event, asked_call(), agent)
+
+
+def test_a_reply_doesnt_finish_a_tool_call_of_the_same_id() -> None:
+    assert not finishes(reply("c"), started_call("c"), None)
+
+
+def test_a_tool_result_finishes_its_call_but_not_a_request_of_the_same_id() -> None:
+    event = ToolCallFinished(turn_id="t", call_id="r", output="", agent_id="agent-1")
+    assert finishes(event, started_call("r"), "agent-1")
+    assert not finishes(event, asked_call("r"), "agent-1")
+
+
+def test_a_replied_request_keeps_the_reply_as_its_output() -> None:
+    assert tool_call_finished(asked_call(), reply()).output == "ok"
 
 
 def test_a_running_call_ends_with_no_result() -> None:

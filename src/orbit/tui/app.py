@@ -580,21 +580,31 @@ class OrbitApp(App[None], inherit_bindings=False):
             self._prompt.disabled = busy
             self._tabs.set_planner_busy(busy)
 
-    def _render_activity(self, event: AgentNote | AgentExited) -> None:
+    def _render_activity(self, event: AgentNote | AgentRequest | AgentExited) -> None:
         """Show an agent's activity, a notice or the startup check's result; an agent's exit
-        ends its run in one rule."""
+        ends its run in one rule, and a request to orbit is an entry its reply updates."""
         if isinstance(event, AgentExited):
             self._agent_exited(event)
-            return
-        if isinstance(event, AgentStarted):
-            self._agent_since[event.agent_id] = self.clock()
-        self._append(*activity_entry(event), getattr(event, "agent_id", None))
+        elif isinstance(event, AgentRequest):
+            self._transcript.add_tool_call(event, self._tabs.key_of(event.agent_id))
+        elif isinstance(event, AgentReply):
+            self._replied(event)
+        else:
+            if isinstance(event, AgentStarted):
+                self._agent_since[event.agent_id] = self.clock()
+            self._append(*activity_entry(event), getattr(event, "agent_id", None))
+
+    def _replied(self, event: AgentReply) -> None:
+        """Show orbit's reply on the request it answers, or as an entry of its own when no
+        request shown is the one."""
+        if not self._transcript.finish_tool_call(event):
+            self._append(*activity_entry(event), event.agent_id)
 
     def _agent_exited(self, event: AgentExited) -> None:
         """Add or update the rule ending ``event``'s agent's run, under All and its tab, which
         is known by its id even once the tab has closed."""
         agent = event.agent_id
-        self._transcript.end_tool_calls(agent)
+        self._transcript.end_tool_calls(agent, requests=True)
         drawn = self._drawn_rules.pop(agent, None)
         since = self._agent_since.pop(agent, None)
         elapsed = None if since is None else self.clock() - since

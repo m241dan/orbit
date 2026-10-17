@@ -14,7 +14,6 @@ from orbit.protocol import (
     AgentExited,
     AgentExitReason,
     AgentReply,
-    AgentRequest,
     AgentStarted,
     AssistantMessage,
     ErrorOccurred,
@@ -32,7 +31,7 @@ from orbit.protocol import (
     Usage,
 )
 from orbit.tui.view.common import EntryKind, spinner_frame
-from orbit.tui.view.tool_calls import ToolCall, orbit_request_text, tool_call_line
+from orbit.tui.view.tool_calls import ToolCall, orbit_request_line, tool_call_line
 
 SKIP_REASONS: dict[SkipReason, str] = {
     "tools_off": "tools were off",
@@ -42,9 +41,8 @@ SKIP_REASONS: dict[SkipReason, str] = {
 }
 
 
-COLLAPSED_KINDS: frozenset[EntryKind] = frozenset({"tool", "request"})
-"""Kinds whose entries start collapsed: tool output and the arguments of agents' requests to
-orbit are long and rarely read."""
+COLLAPSED_KINDS: frozenset[EntryKind] = frozenset({"tool"})
+"""Kinds whose entries start collapsed: tool output is long and rarely read."""
 
 PROMPT_LINES_SHOWN = 15
 """The most lines a prompt of the user's starts expanded with."""
@@ -200,7 +198,10 @@ def output_entry(event: AssistantMessage | ToolCallFinished) -> tuple[str, Entry
 
 def tool_call_entry(call: ToolCall, agent: str | None, now: float) -> tuple[str, EntryKind]:
     """``call`` by ``agent`` as its one-line entry, its spinner as it is at ``now`` seconds
-    while it runs, labelled with the agent like the rest of its output."""
+    while it runs: a tool call labelled with the agent like the rest of its output, a request
+    to orbit naming the agent as it asks."""
+    if call.request:
+        return orbit_request_line(call, agent, spinner_frame(now))
     return agent_labelled(tool_call_line(call, spinner_frame(now)), agent)
 
 
@@ -241,11 +242,10 @@ def agent_entry(event: AgentStarted | TaskGaveUp) -> tuple[str, EntryKind]:
             assert_never(event)
 
 
-def exchange_entry(event: AgentRequest | AgentReply | ProgressNoted) -> tuple[str, EntryKind]:
-    """A message between an agent and orbit, as a transcript entry."""
+def exchange_entry(event: AgentReply | ProgressNoted) -> tuple[str, EntryKind]:
+    """A message between an agent and orbit, as a transcript entry: a reply to no request
+    shown, or a progress note."""
     match event:
-        case AgentRequest(agent_id=agent, tool=tool, arguments=arguments):
-            return f"{agent} → orbit: {orbit_request_text(tool, arguments)}", "request"
         case AgentReply(agent_id=agent, text=text, is_error=is_error):
             return f"orbit → {agent}: {text}", "error" if is_error else "agent"
         case ProgressNoted(agent_id=agent, note=note):
@@ -288,9 +288,7 @@ def note_entry(event: TaskMerged | Notice | StartupChecked) -> tuple[str, EntryK
             assert_never(event)
 
 
-AgentNote = (
-    AgentStarted | TaskGaveUp | AgentRequest | AgentReply | ProgressNoted | Notice | StartupChecked
-)
+AgentNote = AgentStarted | TaskGaveUp | AgentReply | ProgressNoted | Notice | StartupChecked
 """Events shown as a single transcript entry each: agents' activity, notices and the startup
 check's result."""
 
@@ -298,7 +296,7 @@ check's result."""
 def activity_entry(event: AgentNote) -> tuple[str, EntryKind]:
     if isinstance(event, AgentStarted | TaskGaveUp):
         return agent_entry(event)
-    if isinstance(event, AgentRequest | AgentReply | ProgressNoted):
+    if isinstance(event, AgentReply | ProgressNoted):
         return exchange_entry(event)
     return note_entry(event)
 

@@ -13,6 +13,8 @@ from textual.pilot import Pilot
 from orbit.protocol import (
     PLANNER,
     AgentExited,
+    AgentReply,
+    AgentRequest,
     AssistantMessage,
     ErrorOccurred,
     Event,
@@ -26,7 +28,14 @@ from orbit.protocol import (
 )
 from orbit.tui import OrbitApp
 from orbit.tui.transcript import Entry, GutteredEntry, HangingIndent, Transcript, TranscriptLog
-from orbit.tui.view import GUTTER_BAR, GUTTER_MARKER, PROMPT_LINES_SHOWN, SPINNER_FPS, EntryKind
+from orbit.tui.view import (
+    GUTTER_BAR,
+    GUTTER_MARKER,
+    PROMPT_LINES_SHOWN,
+    REPLY_LIMIT,
+    SPINNER_FPS,
+    EntryKind,
+)
 from orbit.tui.widgets import PromptInput
 from tests.test_tui import FakeSession, feed_events, said, started
 
@@ -1580,3 +1589,136 @@ async def test_a_tick_within_a_frame_leaves_the_spinner_as_it_is() -> None:
         before = prompts(app)[0]
         transcript.tick()
         assert prompts(app)[0] is before
+
+
+def ask(agent_id: str, request_id: str = "r") -> AgentRequest:
+    return AgentRequest(
+        agent_id=agent_id,
+        request_id=request_id,
+        tool="complete_task",
+        arguments={"summary": "Add a flag"},
+    )
+
+
+def answer(agent_id: str, text: str, request_id: str = "r", is_error: bool = False) -> AgentReply:
+    return AgentReply(agent_id=agent_id, request_id=request_id, text=text, is_error=is_error)
+
+
+ASKED = "agent-1 → orbit complete_task Add a flag"
+"""How agent-1's request to orbit reads in its entry."""
+
+
+async def test_a_request_to_orbit_and_its_reply_are_one_entry_updated_in_place() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        transcript = still(app)
+        await feed_events(session, pilot, ask("agent-1"))
+        assert labels(app) == [f"◜ {ASKED}"]
+        assert transcript.ticking
+        await feed_events(session, pilot, answer("agent-1", "Checks passed.\nMerged."))
+        assert labels(app) == [f"{ASKED} ✓ Checks passed."]
+        assert not transcript.ticking
+        assert label_style(prompts(app)[0]) == visible_log(app).get_component_rich_style(
+            "transcript--request", partial=True
+        )
+
+
+async def test_a_refused_request_is_crossed_in_the_error_style() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, ask("agent-1"), answer("agent-1", "No.", is_error=True))
+        assert labels(app) == [f"{ASKED} ✗ No."]
+        assert label_style(prompts(app)[0]) == visible_log(app).get_component_rich_style(
+            "transcript--error", partial=True
+        )
+
+
+async def test_a_long_reply_is_clipped_to_one_line() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, ask("agent-1"), answer("agent-1", "a" * 200))
+        assert labels(app) == [f"{ASKED} ✓ {'a' * (REPLY_LIMIT - 1)}…"]
+
+
+async def test_a_requests_entry_keeps_its_full_arguments_and_reply() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, ask("agent-1"), answer("agent-1", "x\ny"))
+        kept = app.query_one(Transcript).entries(None)[0].call
+        assert kept is not None
+        assert (kept.arguments, kept.output) == ({"summary": "Add a flag"}, "x\ny")
+
+
+async def test_a_reply_to_an_unknown_request_is_an_entry_of_its_own() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        still(app)
+        await feed_events(session, pilot, ask("agent-1"), answer("agent-1", "ok", "other"))
+        assert labels(app) == [f"◜ {ASKED}", "orbit → agent-1: ok"]
+
+
+async def test_a_reply_doesnt_finish_a_tool_call_of_the_same_id() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        still(app)
+        await feed_events(session, pilot, call("agent-1", "r"), answer("agent-1", "ok"))
+        assert labels(app) == ["agent-1: ◜ Read a.py", "orbit → agent-1: ok"]
+
+
+async def test_a_request_keeps_waiting_when_its_turn_ends() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        still(app)
+        await feed_events(session, pilot, ask("agent-1"), turn_ended("agent-1"))
+        assert labels(app) == [f"◜ {ASKED}", "agent-1 done"]
+
+
+async def test_a_request_unanswered_when_its_agent_exits_has_no_reply() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        transcript = still(app)
+        await feed_events(
+            session,
+            pilot,
+            ask("agent-1"),
+            ask("agent-2"),
+            AgentExited(agent_id="agent-1", reason="crashed"),
+        )
+        assert labels(app)[:2] == [
+            f"{ASKED} ⊘ no reply",
+            "◜ agent-2 → orbit complete_task Add a flag",
+        ]
+        assert label_style(prompts(app)[0]) == visible_log(app).get_component_rich_style(
+            "transcript--tool", partial=True
+        )
+        assert transcript.ticking
+
+
+async def test_a_request_updates_under_all_and_its_roles_tab() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test(size=(120, 30)) as pilot:
+        await feed_events(
+            session, pilot, started("agent-1"), ask("agent-1"), answer("agent-1", "ok")
+        )
+        assert labels(app)[1] == f"{ASKED} ✓ ok"
+        await pilot.press("tab", "tab")  # coder
+        assert labels(app) == ["▶ agent-1 (coder) started", f"{ASKED} ✓ ok"]
+
+
+async def test_enter_on_a_request_does_nothing() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, ask("agent-1"), answer("agent-1", "a\nb"))
+        await pilot.press("k", "enter", "enter")
+        assert labels(app) == [f"{ASKED} ✓ a"]
+        assert not visible_log(app).collapsed(0)

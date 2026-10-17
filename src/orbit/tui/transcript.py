@@ -17,7 +17,7 @@ from textual.containers import Vertical
 from textual.timer import Timer
 from textual.widgets import OptionList, Static
 
-from orbit.protocol import Event, ToolCallFinished, ToolCallStarted
+from orbit.protocol import AgentReply, AgentRequest, Event, ToolCallFinished, ToolCallStarted
 from orbit.tui.view import (
     SPINNER_FPS,
     EntryKind,
@@ -29,6 +29,7 @@ from orbit.tui.view import (
     conversation_title,
     entry_label,
     entry_markdown,
+    finishes,
     gutter,
     hanging_indent,
     ruled,
@@ -231,19 +232,20 @@ class TranscriptLog(ListPane):
         self._calls[len(self._entries)] = call
         self._add(Entry(*tool_call_entry(call, agent, self.clock()), agent, call=call))
 
-    def finish_call(self, event: ToolCallFinished) -> bool:
-        """Show the running call ``event`` finishes as finished, redrawn where it is; False,
-        and nothing changed, when no running call here is the one."""
+    def finish_call(self, event: ToolCallFinished | AgentReply) -> bool:
+        """Show the running call or request ``event`` finishes as finished, redrawn where it
+        is; False, and nothing changed, when no running call here is the one."""
         for index, call in self._calls.items():
-            if (self._entries[index].agent, call.call_id) == (event.agent_id, event.call_id):
+            if finishes(event, call, self._entries[index].agent):
                 self._set_call(index, tool_call_finished(call, event))
                 return True
         return False
 
-    def end_calls(self, agent: str | None) -> None:
-        """Show ``agent``'s calls still running as having no result, their turn over."""
+    def end_calls(self, agent: str | None, requests: bool) -> None:
+        """Show ``agent``'s tool calls still running as having no result, their turn over, and
+        its requests to orbit with no reply too if ``requests``, the agent gone."""
         for index, call in list(self._calls.items()):
-            if self._entries[index].agent == agent:
+            if self._entries[index].agent == agent and (requests or not call.request):
                 self._set_call(index, tool_call_unfinished(call))
 
     def tick(self) -> None:
@@ -521,28 +523,29 @@ class Transcript(Vertical):
 
     @property
     def ticking(self) -> bool:
-        """Whether the spinners of running tool calls are turning."""
+        """Whether the spinners of running tool calls and requests are turning."""
         return self._timer is not None
 
-    def add_tool_call(self, event: ToolCallStarted, key: str | None) -> None:
-        """Add the call ``event`` starts as a running entry under All and, if ``key`` names a
-        tab, under that tab."""
+    def add_tool_call(self, event: ToolCallStarted | AgentRequest, key: str | None) -> None:
+        """Add the call or request to orbit ``event`` starts as a running entry under All and,
+        if ``key`` names a tab, under that tab."""
         call = tool_call_started(event)
         for tab in {None, key}:
             self._log(tab).append_call(call, event.agent_id)
         self._keep_ticking()
 
-    def finish_tool_call(self, event: ToolCallFinished) -> bool:
-        """Show the call ``event`` finishes as finished in every log holding it; False when
-        none does."""
+    def finish_tool_call(self, event: ToolCallFinished | AgentReply) -> bool:
+        """Show the call or request ``event`` finishes as finished in every log holding it;
+        False when none does."""
         found = [log.finish_call(event) for log in self._logs.values()]
         self._keep_ticking()
         return any(found)
 
-    def end_tool_calls(self, agent: str | None) -> None:
-        """Show ``agent``'s calls still running as having no result, in every log."""
+    def end_tool_calls(self, agent: str | None, requests: bool = False) -> None:
+        """Show ``agent``'s tool calls still running as having no result, in every log, and
+        its requests to orbit with no reply too if ``requests``."""
         for log in self._logs.values():
-            log.end_calls(agent)
+            log.end_calls(agent, requests)
         self._keep_ticking()
 
     def tick(self) -> None:
