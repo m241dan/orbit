@@ -60,26 +60,31 @@ class PlannerChat:
         A cancelled turn ends as cancelled rather than raising, and one that fails ends in error.
         """
         turn_id = uuid.uuid4().hex
-        reason: TurnEndReason = "completed"
+        finished: TurnEndReason | None = None  # How it ended, once its TurnFinished is out.
         try:
             async for event in self.run_turn(turn_id, text, settings):
-                if isinstance(event, TurnFinished):
-                    reason = event.reason
                 await self._desk.publish(event)
+                if isinstance(event, TurnFinished):
+                    finished = event.reason
         except asyncio.CancelledError:
-            reason = "cancelled"
-            await self._desk.publish(
-                TurnFinished(turn_id=turn_id, agent_id=self.agent_id, reason=reason)
-            )
+            return await self._end(turn_id, finished, "cancelled")
         except Exception as exc:
-            reason = "error"
-            agent_id = self.agent_id
             await self._desk.publish(
-                ErrorOccurred(turn_id=turn_id, agent_id=agent_id, message=str(exc))
+                ErrorOccurred(turn_id=turn_id, agent_id=self.agent_id, message=str(exc))
             )
-            await self._desk.publish(
-                TurnFinished(turn_id=turn_id, agent_id=agent_id, reason=reason)
-            )
+            return await self._end(turn_id, finished, "error")
+        return finished or "completed"
+
+    async def _end(
+        self, turn_id: str, finished: TurnEndReason | None, reason: TurnEndReason
+    ) -> TurnEndReason:
+        """How turn ``turn_id`` ended: ``finished`` if its TurnFinished was published, otherwise
+        ``reason``, publishing a TurnFinished for it."""
+        if finished is not None:
+            return finished
+        await self._desk.publish(
+            TurnFinished(turn_id=turn_id, agent_id=self.agent_id, reason=reason)
+        )
         return reason
 
     async def run_turn(self, turn_id: str, prompt: str, settings: Settings) -> AsyncIterator[Event]:

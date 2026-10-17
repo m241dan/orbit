@@ -97,6 +97,8 @@ class ScriptedLauncher:
         self.launches: list[AgentLaunch] = []
         self.planner_turns: list[Script] = []  # Played by converse(), one per turn.
         self.planner_replies: list[str] = []  # What the planner says, a turn at a time.
+        # What each planner turn does after its TurnFinished, a turn at a time.
+        self.planner_afters: list[Callable[[], Awaitable[None]]] = []
         # The usage of each launch's turns, one launch at a time; one unmetered turn if none.
         self.usages: list[tuple[Usage, ...]] = []
 
@@ -128,6 +130,8 @@ class ScriptedLauncher:
 
         reason = await self.planner_turns.pop(0)(call)
         yield TurnFinished(turn_id=turn_id, reason=reason, agent_id=agent.id)
+        if self.planner_afters:
+            await self.planner_afters.pop(0)()
 
 
 class Steps:

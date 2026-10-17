@@ -318,3 +318,42 @@ async def test_answering_a_failed_turn_publishes_the_error_and_returns_error() -
         ErrorOccurred(turn_id=turn_id, agent_id="agent-1", message=message),
         TurnFinished(turn_id=turn_id, agent_id="agent-1", reason="error"),
     ]
+
+
+async def blocks() -> None:
+    await asyncio.Event().wait()
+
+
+async def breaks() -> None:
+    raise RuntimeError("Could not save the session.")
+
+
+def finished_turns(published: list[Event]) -> list[Event]:
+    return [e for e in published if isinstance(e, TurnFinished)]
+
+
+async def test_cancelling_a_turn_after_it_finished_publishes_one_finish_and_returns_it() -> None:
+    published: list[Event] = []
+    chat, launcher, _ = steps_chat(chats, published=published)
+    launcher.planner_replies.append("Here is a plan.")
+    launcher.planner_afters.append(blocks)
+    answering = asyncio.create_task(chat.answer("Plan.", Settings()))
+    while not finished_turns(published):
+        await asyncio.sleep(0)
+    answering.cancel()
+    assert await answering == "completed"
+    finished = TurnFinished(turn_id=turn_id_of(published), agent_id="agent-1", reason="completed")
+    assert finished_turns(published) == [finished]
+
+
+async def test_a_turn_failing_after_it_finished_reports_the_error_but_no_second_finish() -> None:
+    published: list[Event] = []
+    chat, launcher, _ = steps_chat(chats, published=published)
+    launcher.planner_afters.append(breaks)
+    assert await chat.answer("Plan.", Settings()) == "completed"
+    turn_id = turn_id_of(published)
+    message = "Could not save the session."
+    assert published[-2:] == [
+        TurnFinished(turn_id=turn_id, agent_id="agent-1", reason="completed"),
+        ErrorOccurred(turn_id=turn_id, agent_id="agent-1", message=message),
+    ]
