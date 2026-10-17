@@ -132,9 +132,8 @@ class ConversationFeed:
     def _render_progress(self, event: TaskProgress) -> None:
         """Note a task run's progress in the transcript: under its role's tab, and All,
         marking that tab unread when it isn't being shown."""
-        task_list = self.task_list
-        state = task_list.find(event.task_id)
-        number = None if state is None else task_list.numbers[task_list.position(event.task_id)]
+        state = self.task_list.find(event.task_id)
+        number = self.task_list.numbers_by_id.get(event.task_id)
         (text, kind), key = task_note(event, state, number, self.verification.steps)
         self.tabs.mark_unread(key)
         self.transcript.add_entry(Entry(text, kind), key)

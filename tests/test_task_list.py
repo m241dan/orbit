@@ -162,6 +162,16 @@ async def test_list_shows_the_board_the_backend_reports() -> None:
         ]
 
 
+async def test_list_numbers_its_tasks_by_id() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        one, two = board("one", "two").tasks
+        fix = TaskState(id="3", task=TaskSpec(prompt="fix one"), fixes="1")
+        await feed(session, pilot, TasksChanged(tasks=(one, fix, two)))
+        assert app.query_one(TaskList).numbers_by_id == {"1": "1", "3": "1.1", "2": "2"}
+
+
 async def test_running_tasks_spin_in_place() -> None:
     session = FakeSession()
     app = OrbitApp(session)

@@ -23,19 +23,38 @@ def test_agents_are_tracked_from_their_events() -> None:
     ):
         rows = track_agents(rows, event)
     assert rows == (
-        AgentRow("agent-1", "coder", "1", waiting_on="complete_task"),
+        AgentRow("agent-1", "coder", "1", open_requests=(("r", "complete_task"),)),
         AgentRow("agent-2", "reviewer", "2"),
     )
     rows = track_agents(rows, AgentReply(agent_id="agent-1", request_id="r", text="ok"))
-    assert rows[0].waiting_on is None
+    assert rows[0].open_requests == ()
     rows = track_agents(rows, AgentExited(agent_id="agent-2", reason="finished"))
     assert [r.agent_id for r in rows] == ["agent-1"]
     assert track_agents(rows, Notice(message="x")) == rows
 
 
+def test_an_agent_waits_until_every_open_request_is_answered() -> None:
+    rows: tuple[AgentRow, ...] = ()
+    for event in (
+        AgentStarted(agent_id="agent-1", role="coder", task_id="1"),
+        AgentRequest(agent_id="agent-1", request_id="a", tool="complete_task", arguments={}),
+        AgentRequest(agent_id="agent-1", request_id="b", tool="report_progress", arguments={}),
+        AgentReply(agent_id="agent-1", request_id="b", text="ok"),
+    ):
+        rows = track_agents(rows, event)
+    assert agent_line(rows[0], "1") == "agent-1 coder · task 1 · waiting on complete_task"
+    rows = track_agents(rows, AgentReply(agent_id="agent-1", request_id="a", text="ok"))
+    assert agent_line(rows[0], "1") == "agent-1 coder · task 1 · working"
+
+
+def test_an_agent_line_names_its_earliest_open_request() -> None:
+    row = AgentRow("agent-1", "coder", "1", open_requests=(("a", "complete_task"), ("b", "x")))
+    assert agent_line(row, "1") == "agent-1 coder · task 1 · waiting on complete_task"
+
+
 def test_agent_lines_say_what_each_is_doing() -> None:
     assert agent_line(AgentRow("agent-1", "coder", "4"), "2") == "agent-1 coder · task 2 · working"
-    waiting = AgentRow("agent-3", "reviewer", "5", waiting_on="complete_task")
+    waiting = AgentRow("agent-3", "reviewer", "5", open_requests=(("r", "complete_task"),))
     assert agent_line(waiting, "3") == "agent-3 reviewer · task 3 · waiting on complete_task"
     planner = AgentRow("agent-4", "planner", "plan")
     assert agent_line(planner, None) == "agent-4 planner · planning · working"

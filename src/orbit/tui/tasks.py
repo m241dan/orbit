@@ -70,6 +70,7 @@ class TaskList(ListPane):
         super().__init__(id=id)
         self.tasks: tuple[TaskState, ...] = ()
         self.numbers: list[str] = []
+        self.numbers_by_id: dict[str, str] = {}
         self.clock: Callable[[], float] = time.monotonic
         self.session_usage = Usage()
         self._ticker = Ticker(self, self.tick)
@@ -108,6 +109,7 @@ class TaskList(ListPane):
         if tasks == self.tasks:
             return
         self.tasks, self.numbers = tasks, task_numbers(tasks)
+        self.numbers_by_id = dict(zip((t.id for t in tasks), self.numbers, strict=True))
         self._redraw()
         self._ticker.keep(any(t.status == "running" for t in tasks))
 
@@ -120,9 +122,6 @@ class TaskList(ListPane):
         """Add what a turn cost to the session's total."""
         self.session_usage += usage
         self.border_subtitle = f"session: {usage_label(self.session_usage)}"
-
-    def position(self, task_id: str) -> int:
-        return next(i for i, t in enumerate(self.tasks) if t.id == task_id)
 
     def find(self, task_id: str) -> TaskState | None:
         """The task with id ``task_id``, if it's on the list."""

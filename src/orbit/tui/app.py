@@ -530,10 +530,8 @@ class OrbitApp(App[None], inherit_bindings=False):
         self._withdraw_proposal(event)
 
     def _show_tasks(self, tasks: tuple[TaskState, ...]) -> None:
-        task_list = self._task_list
-        task_list.show(tasks)
-        numbers = dict(zip((t.id for t in task_list.tasks), task_list.numbers, strict=True))
-        self._agents.number_tasks(numbers)
+        self._task_list.show(tasks)
+        self._agents.number_tasks(self._task_list.numbers_by_id)
 
     def _show_progress(
         self, event: VerificationChanged | ReviewStatus | ChecksProposed | UsageChanged

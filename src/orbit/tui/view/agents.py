@@ -16,12 +16,13 @@ from orbit.protocol import (
 
 @dataclass(frozen=True)
 class AgentRow:
-    """A running agent: which, in what role, on which task, and the orbit tool it waits on."""
+    """A running agent: which, in what role, on which task, and its unanswered orbit calls
+    as ``(request_id, tool)`` pairs, oldest first."""
 
     agent_id: str
     role: str
     task_id: str
-    waiting_on: str | None = None
+    open_requests: tuple[tuple[str, str], ...] = ()
 
 
 def track_agents(rows: tuple[AgentRow, ...], event: Event) -> tuple[AgentRow, ...]:
@@ -31,12 +32,27 @@ def track_agents(rows: tuple[AgentRow, ...], event: Event) -> tuple[AgentRow, ..
     if isinstance(event, AgentExited):
         return tuple(row for row in rows if row.agent_id != event.agent_id)
     if isinstance(event, AgentRequest | AgentReply):
-        return _waiting(rows, event.agent_id, getattr(event, "tool", None))
+        return _track_requests(rows, event)
     return rows
 
 
-def _waiting(rows: tuple[AgentRow, ...], agent: str, tool: str | None) -> tuple[AgentRow, ...]:
-    return tuple(replace(r, waiting_on=tool) if r.agent_id == agent else r for r in rows)
+def _track_requests(
+    rows: tuple[AgentRow, ...], event: AgentRequest | AgentReply
+) -> tuple[AgentRow, ...]:
+    """``rows`` with the request ``event`` makes opened, or the one it answers closed."""
+    return tuple(_answer(row, event) for row in rows)
+
+
+def _answer(row: AgentRow, event: AgentRequest | AgentReply) -> AgentRow:
+    """``row`` with ``event``'s request opened, or the request it replies to closed, if
+    ``event`` is from ``row``'s agent."""
+    if row.agent_id != event.agent_id:
+        return row
+    if isinstance(event, AgentRequest):
+        opened = (*row.open_requests, (event.request_id, event.tool))
+        return replace(row, open_requests=opened)
+    still_open = tuple(pair for pair in row.open_requests if pair[0] != event.request_id)
+    return replace(row, open_requests=still_open)
 
 
 def agent_line(row: AgentRow, number: str | None) -> str:
@@ -49,7 +65,7 @@ def agent_line(row: AgentRow, number: str | None) -> str:
         task = "planning"
     else:
         task = f"task {row.task_id}"
-    doing = f"waiting on {row.waiting_on}" if row.waiting_on else "working"
+    doing = f"waiting on {row.open_requests[0][1]}" if row.open_requests else "working"
     return f"{row.agent_id} {row.role} · {task} · {doing}"
 
 
