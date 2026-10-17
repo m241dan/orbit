@@ -86,6 +86,16 @@ def test_y_copies_a_running_calls_arguments_as_json() -> None:
     assert detail_copy(call) == '{\n  "command": "ls é",\n  "n": 1\n}'
 
 
+def test_y_copies_the_arguments_of_a_call_that_lost_its_result() -> None:
+    call = ToolCall("c", "Bash", "Bash ls", {"command": "ls"}, "no_result")
+    assert detail_copy(call) == '{\n  "command": "ls"\n}'
+
+
+def test_y_copies_the_arguments_of_a_finished_call_with_no_output() -> None:
+    call = ToolCall("c", "Bash", "Bash true", {"command": "true"}, "passed", "")
+    assert detail_copy(call) == '{\n  "command": "true"\n}'
+
+
 def test_y_copies_an_edits_whole_diff() -> None:
     content = numbered(250)
     call = ToolCall("c", "Write", "Write a.py", {"file_path": "a.py", "content": content})

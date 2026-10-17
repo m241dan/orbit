@@ -250,7 +250,7 @@ between entries underneath.
 
 `y`, from the conversation's list or the activated pane while the pane is open, copies the whole
 of its call to the clipboard: all of the output or orbit's reply, lines omitted from the pane
-included, or the arguments as JSON while the call still runs; for an Edit, MultiEdit or Write,
+included, or the arguments as JSON while the call still runs or when it has no output; for an Edit, MultiEdit or Write,
 the whole diff instead; a toast says `Copied N lines`. On
 an entry without details it does nothing. Copying uses the terminal's clipboard escape (OSC 52),
 which most terminals support; inside tmux it needs `set -g set-clipboard on`.
