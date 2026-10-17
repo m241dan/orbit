@@ -20,12 +20,20 @@ from orbit.tui.view import (
     gutter,
     hanging_indent,
     shows_markdown,
+    speaker_label,
     starts_collapsed,
 )
 from orbit.tui.widgets import ListPane
 
-Entry = tuple[str, EntryKind]
-"""A transcript entry: its text and how it's styled."""
+
+@dataclass(frozen=True)
+class Entry:
+    """A transcript entry: its ``text``, the ``kind`` it's styled as and the ``agent`` it's
+    by, if any."""
+
+    text: str
+    kind: EntryKind
+    agent: str | None = None
 
 
 @dataclass(frozen=True)
@@ -49,22 +57,26 @@ class HangingIndent:
 
 @dataclass(frozen=True)
 class GutteredEntry:
-    """A transcript entry as drawn: its ``body``, or its ``label`` when it has none, wrapped
-    to the width left beside the ``gutter``, which goes in front of every row in
-    ``gutter_style``, then a blank row so the entry reads as a paragraph."""
+    """A transcript entry as drawn: its ``heading`` if it has one, then its ``body``, or its
+    ``label`` when it has none, wrapped to the width left beside the ``gutter``, which goes in
+    front of every row in ``gutter_style``, then a blank row so the entry reads as a
+    paragraph."""
 
     label: Text
     gutter: str
     gutter_style: Style
     body: RenderableType | None = None
+    heading: Text | None = None
 
     def __rich_console__(self, console: Console, options: ConsoleOptions) -> RenderResult:
         width = options.max_width - len(self.gutter)
         shown = self.label if self.body is None else self.body
-        for row in console.render_lines(shown, options.update_width(width), pad=False):
-            yield Segment(self.gutter, self.gutter_style)
-            yield from row
-            yield Segment.line()
+        parts = (shown,) if self.heading is None else (self.heading, shown)
+        for part in parts:
+            for row in console.render_lines(part, options.update_width(width), pad=False):
+                yield Segment(self.gutter, self.gutter_style)
+                yield from row
+                yield Segment.line()
         yield Segment.line()
 
 
@@ -100,6 +112,7 @@ class TranscriptLog(ListPane):
     TranscriptLog .transcript--error { color: $text-error; }
     TranscriptLog .transcript--gutter { color: $text-muted; }
     TranscriptLog .transcript--marker { color: $accent; }
+    TranscriptLog .transcript--label { color: $text-muted; }
     TranscriptLog > .option-list--option-highlighted,
     TranscriptLog:focus > .option-list--option-highlighted,
     TranscriptLog > .option-list--option-hover {
@@ -111,6 +124,7 @@ class TranscriptLog(ListPane):
     COMPONENT_CLASSES: ClassVar[set[str]] = {
         "transcript--gutter",
         "transcript--marker",
+        "transcript--label",
         *(f"transcript--{kind}" for kind in get_args(EntryKind)),
     }
 
@@ -131,11 +145,11 @@ class TranscriptLog(ListPane):
             self.highlighted = self.option_count - 1
         super().enter_list_mode()
 
-    def append(self, text: str, kind: EntryKind) -> None:
-        """Add an entry, collapsed if its kind starts so; the view stays pinned to the latest
-        entry unless the list is active or holds a cursor."""
+    def append(self, text: str, kind: EntryKind, agent: str | None = None) -> None:
+        """Add an entry by ``agent``, collapsed if its kind starts so; the view stays pinned to
+        the latest entry unless the list is active or holds a cursor."""
         collapsed = starts_collapsed(kind) and collapsible(text)
-        self._entries.append((text, kind))
+        self._entries.append(Entry(text, kind, agent))
         self._collapsed.append(collapsed)
         self.add_option(self._prompt(len(self._entries) - 1))
         if not self.has_focus and self.highlighted is None:
@@ -159,8 +173,7 @@ class TranscriptLog(ListPane):
     def toggle(self, index: int) -> None:
         """Collapse the entry at ``index`` if it's expanded, and the other way round; an entry
         of one line stays as it is."""
-        text, _ = self._entries[index]
-        if not collapsible(text):
+        if not collapsible(self._entries[index].text):
             return
         self._collapsed[index] = not self._collapsed[index]
         self._redraw(index)
@@ -183,16 +196,26 @@ class TranscriptLog(ListPane):
 
     def _prompt(self, index: int) -> GutteredEntry:
         # Partial styles, so no background of their own paints a band across the entry.
-        text, kind = self._entries[index]
+        entry = self._entries[index]
         marked = index == self._marked
-        style = self.get_component_rich_style(f"transcript--{kind}", partial=True)
+        style = self.get_component_rich_style(f"transcript--{entry.kind}", partial=True)
         gutter_style = self.get_component_rich_style(
             "transcript--marker" if marked else "transcript--gutter", partial=True
         )
         collapsed = self._collapsed[index]
-        label = Text(entry_label(text, collapsed), style=style)
-        body = markdown_body(text, style) if shows_markdown(kind, collapsed) else None
-        return GutteredEntry(label, gutter(marked), gutter_style, body)
+        label = Text(entry_label(entry.text, collapsed), style=style)
+        body = markdown_body(entry.text, style) if shows_markdown(entry.kind, collapsed) else None
+        return GutteredEntry(label, gutter(marked), gutter_style, body, self._heading(index))
+
+    def _heading(self, index: int) -> Text | None:
+        """The label row heading the entry at ``index``, when it's an agent's message and the
+        speaker changed from the entry before it."""
+        entry = self._entries[index]
+        previous = self._entries[index - 1].agent if index else None
+        label = speaker_label(entry.kind, entry.agent, previous)
+        if label is None:
+            return None
+        return Text(label, style=self.get_component_rich_style("transcript--label", partial=True))
 
 
 class Transcript(Vertical):
@@ -234,10 +257,12 @@ class Transcript(Vertical):
         """The entries under the tab keyed ``key``; None is All."""
         return self._logs[key].entries if key in self._logs else ()
 
-    def add_entry(self, text: str, kind: EntryKind, key: str | None = None) -> None:
-        """Add an entry under All and, if ``key`` names a tab, under that tab."""
+    def add_entry(
+        self, text: str, kind: EntryKind, key: str | None = None, agent: str | None = None
+    ) -> None:
+        """Add an entry by ``agent`` under All and, if ``key`` names a tab, under that tab."""
         for tab in {None, key}:
-            self._log(tab).append(text, kind)
+            self._log(tab).append(text, kind, agent)
 
     def enter_list_mode(self) -> None:
         """Activate the shown log: j/k move between its entries, enter collapses or expands

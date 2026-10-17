@@ -12,10 +12,9 @@ from orbit.protocol import (
 )
 from orbit.tui import OrbitApp
 from orbit.tui.panels import VerificationPanel
-from orbit.tui.transcript import Transcript
 from orbit.tui.view import spinner_frame, step_lines
 from tests.test_task_list import feed
-from tests.test_tui import FakeSession
+from tests.test_tui import FakeSession, entries
 
 
 def steps(app: OrbitApp) -> str:
@@ -93,8 +92,7 @@ async def test_verification_progress_is_reported_in_the_transcript() -> None:
             VerificationStarted(task_id="1", step=1),
             VerificationFinished(task_id="1", step=1, passed=False),
         )
-        entries = list(app.query_one(Transcript).entries(None))
-        assert entries == [
+        assert entries(app) == [
             ("🔍 Verifying: Unit tests…", "verify"),
             ("✅ Verification passed: Unit tests", "verify"),
             ("🔍 Verifying: Lint…", "verify"),
@@ -112,8 +110,7 @@ async def test_skipped_verification_says_why_in_the_transcript() -> None:
             VerificationSkipped(task_id="1", reason="tools_off"),
             VerificationSkipped(task_id="2", reason="no_changes"),
         )
-        entries = list(app.query_one(Transcript).entries(None))
-        assert entries == [
+        assert entries(app) == [
             ("⏩ Verification skipped: tools were off", "verify"),
             ("⏩ Verification skipped: no files changed", "verify"),
         ]
@@ -143,9 +140,8 @@ async def test_the_startup_checks_result_is_noted_in_the_transcript() -> None:
             StartupChecked(passed=True),
             StartupChecked(passed=False, step="Lint", output=output),
         )
-        passed, failed = list(app.query_one(Transcript).entries(None))
+        passed, (text, kind) = entries(app)
         assert passed == ("✅ Startup check passed", "verify")
-        text, kind = failed
         assert kind == "error"
         tail = "\n".join(f"line {n}" for n in range(11, 31))
         assert text == (

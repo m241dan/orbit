@@ -8,6 +8,7 @@ from rich.style import Style
 from rich.text import Text
 
 from orbit.protocol import (
+    PLANNER,
     AgentExited,
     AgentExitReason,
     AgentReply,
@@ -114,6 +115,21 @@ def entry_markdown(text: str, style: Style) -> Markdown:
     return EntryMarkdown(text, style=style, hyperlinks=False)
 
 
+def speaker(agent: str | None) -> str | None:
+    """Who ``agent``'s entries are spoken by: the agent, or None for the planner's and those
+    with no agent, which are one speaker of their own."""
+    return None if agent == PLANNER else agent
+
+
+def speaker_label(kind: EntryKind, agent: str | None, previous: str | None) -> str | None:
+    """The label heading an entry of ``kind`` by ``agent``: the agent's id, for an agent's
+    message when the ``previous`` entry in its log was by someone else; None otherwise."""
+    current = speaker(agent)
+    if kind not in MARKDOWN_KINDS or current is None or current == speaker(previous):
+        return None
+    return current
+
+
 GUTTER_BAR = "│"
 """The dim bar in front of each line of an entry the cursor isn't on."""
 GUTTER_MARKER = "▌"
@@ -131,9 +147,11 @@ def output_entry(
 ) -> tuple[str, EntryKind]:
     """A piece of a turn's output as transcript text and the kind of entry to show it as.
 
-    An agent's output is labelled with the agent, to tell it from the conversation's.
+    An agent's tool calls and errors are labelled with the agent, to tell them from the
+    conversation's; its messages are headed by a label row instead (see :func:`speaker_label`).
     """
-    return agent_labelled(_output(event), event.agent_id)
+    entry = _output(event)
+    return entry if entry[1] in MARKDOWN_KINDS else agent_labelled(entry, event.agent_id)
 
 
 def _output(

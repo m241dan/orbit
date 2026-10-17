@@ -4,6 +4,7 @@ from rich.console import Console
 from rich.style import Style
 
 from orbit.protocol import (
+    PLANNER,
     AgentExited,
     AgentExitReason,
     AgentReply,
@@ -38,6 +39,7 @@ from orbit.tui.view import (
     note_entry,
     output_entry,
     shows_markdown,
+    speaker_label,
     starts_collapsed,
     task_started_entry,
     turn_end_entry,
@@ -150,15 +152,37 @@ def test_unchanged_skip_reason_reads_naturally() -> None:
     assert "unchanged" in text and kind == "verify"
 
 
-def test_agent_output_is_labelled_with_its_agent() -> None:
-    said = AssistantMessage(turn_id="t", text="on it", agent_id="agent-2")
-    assert output_entry(said) == ("agent-2: on it", "assistant")
+def test_agent_tool_calls_and_errors_are_labelled_with_their_agent() -> None:
     started = ToolCallStarted(
         turn_id="t", call_id="c", name="Read", arguments={}, agent_id="agent-2"
     )
     assert output_entry(started) == ("agent-2: → Read", "tool")
     failed = ToolCallFinished(turn_id="t", call_id="c", output="no", is_error=True, agent_id="a")
     assert output_entry(failed) == ("a: no", "error")
+
+
+def test_an_agents_message_leaves_its_agent_out_of_its_text() -> None:
+    said = AssistantMessage(turn_id="t", text="on it", agent_id="agent-2")
+    assert output_entry(said) == ("on it", "assistant")
+
+
+def test_an_agents_message_is_labelled_when_the_speaker_changes() -> None:
+    assert speaker_label("assistant", "agent-2", None) == "agent-2"
+    assert speaker_label("assistant", "agent-2", "agent-1") == "agent-2"
+    assert speaker_label("assistant", "agent-2", PLANNER) == "agent-2"
+
+
+def test_an_agents_message_after_its_own_entry_is_not_labelled() -> None:
+    assert speaker_label("assistant", "agent-2", "agent-2") is None
+
+
+def test_the_planners_messages_are_never_labelled() -> None:
+    assert speaker_label("assistant", None, "agent-1") is None
+    assert speaker_label("assistant", PLANNER, "agent-1") is None
+
+
+def test_entries_other_than_messages_are_never_labelled() -> None:
+    assert speaker_label("tool", "agent-2", "agent-1") is None
 
 
 def test_merges_and_notices_become_transcript_entries() -> None:

@@ -501,8 +501,8 @@ async def test_started_task_is_announced_in_the_transcript() -> None:
         )
         entries = app.query_one(Transcript).entries(None)
         # Announced by the number the list shows.
-        assert [text for text, _ in entries] == ["Task 2: two", "Task 1.1: fix one"]
-        assert entries[0][1] == "user"
+        assert [entry.text for entry in entries] == ["Task 2: two", "Task 1.1: fix one"]
+        assert entries[0].kind == "user"
 
 
 async def test_side_windows_do_not_take_focus_on_click() -> None:

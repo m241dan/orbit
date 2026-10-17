@@ -116,14 +116,17 @@ When usage is rate limited or unavailable, it dims the last good numbers and add
 (`usage: rate limited, retrying …` or `usage unavailable: …`); when there are no limits, it says
 `no usage limits reported`. It's display only: it can't be focused, and `h`/`j`/`k`/`l` skip it.
 
-The conversation shows everything in one timeline: each agent's own messages and tool calls,
-prefixed with its id, and its exchanges with orbit (`agent-1 → orbit: complete_task …`,
+The conversation shows everything in one timeline: each agent's own messages, headed by the
+agent's id in a muted row whenever the speaker changes, its tool calls, prefixed with its id, and
+its exchanges with orbit (`agent-1 → orbit: complete_task …`,
 `orbit → agent-1: …`) in their own colour. The tabs above it narrow it: **All** shows everything,
 then come a pinned tab for each built-in role, labelled by its name: **planner**, **coder**,
 **reviewer**, **super-reviewer** and **configurator**. The pinned tabs are there from the start and
 keep the whole session's history; every agent in a role shares its tab (two reviewers running at
-once both show under **reviewer**), each entry prefixed with its agent's id, so you can tell them
-apart. Agents in any other role, such as the startup check (`checker`) or a custom role from
+once both show under **reviewer**), each message headed and every other entry prefixed with its
+agent's id, so you can tell them apart. Whether the speaker changed is judged within the tab: under
+All, where agents interleave, messages are headed more often. The planner's messages are never
+headed. Agents in any other role, such as the startup check (`checker`) or a custom role from
 `.orbit/config.toml`, get a temporary tab of their own after the pinned ones, labelled by role
 (`checker`, `checker 2`, …), which closes when the agent exits; their entries stay under All. A
 role's tab also shows its tasks' headers (`Task 2: …`), verification results and merge notes, so a

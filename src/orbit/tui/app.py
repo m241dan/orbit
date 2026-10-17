@@ -561,4 +561,4 @@ class OrbitApp(App[None], inherit_bindings=False):
     def _append(self, text: str, kind: EntryKind, agent: str | None = None) -> None:
         # Entries are kept by tab: a pinned role's agents' under its tab.
         key = self._tabs.key_of(agent)
-        self._transcript.add_entry(text, kind, key)
+        self._transcript.add_entry(text, kind, key, agent)

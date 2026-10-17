@@ -10,7 +10,7 @@ from textual.pilot import Pilot
 
 from orbit.protocol import AssistantMessage, Notice, ToolCallFinished
 from orbit.tui import OrbitApp
-from orbit.tui.transcript import GutteredEntry, Transcript, TranscriptLog
+from orbit.tui.transcript import Entry, GutteredEntry, Transcript, TranscriptLog
 from orbit.tui.view import GUTTER_BAR, GUTTER_MARKER, EntryKind
 from tests.test_tui import FakeSession, feed_events, said, started
 
@@ -77,9 +77,9 @@ async def test_entries_are_kept_under_all_and_under_their_tab() -> None:
         )
         transcript = app.query_one(Transcript)
         assert transcript.entries(None) == (
-            ("▶ agent-1 (coder) started", "agent"),
-            ("agent-1: hi", "assistant"),
-            ("📌 n", "verify"),
+            Entry("▶ agent-1 (coder) started", "agent", "agent-1"),
+            Entry("hi", "assistant", "agent-1"),
+            Entry("📌 n", "verify"),
         )
         # agent-1 runs in a pinned role, so its entries belong to the role's tab.
         assert transcript.entries("coder") == transcript.entries(None)[:2]
@@ -91,11 +91,11 @@ async def test_entries_are_shown_as_paragraphs_separated_by_blank_lines() -> Non
     app = OrbitApp(session)
     async with app.run_test() as pilot:
         await feed_events(session, pilot, started("agent-1"), said("agent-1", "hi\n\nthere"))
-        assert labels(app) == ["▶ agent-1 (coder) started", "▾ agent-1: hi\n\nthere"]
+        assert labels(app) == ["▶ agent-1 (coder) started", "▾ hi\n\nthere"]
         assert rendered(visible_log(app), 6) == [
             "│ ▶ agent-1 (coder) started",
             "",
-            "│ ▾ agent-1: hi",
+            "│ ▾ hi",
             "│",
             "│   there",
             "",
@@ -141,7 +141,7 @@ async def test_every_wrapped_row_of_an_entry_keeps_its_gutter() -> None:
     session = FakeSession()
     app = OrbitApp(session)
     async with app.run_test(size=(40, 24)) as pilot:
-        await feed_events(session, pilot, said("agent-1", LONG))
+        await feed_events(session, pilot, AssistantMessage(turn_id="t", text=LONG))
         log = visible_log(app)
         rows = log.virtual_size.height
         assert rows > 3  # The entry wraps onto several rows, then a blank one.
@@ -294,9 +294,9 @@ async def test_a_tab_shows_only_its_entries_and_all_shows_every_one() -> None:
         assert len(app.query(TranscriptLog)) == 3  # All, and a log per tab with entries.
         await pilot.press("tab")  # planner
         assert app.query_one(Transcript).only == "planner"
-        assert labels(app) == ["▶ agent-2 (planner) started", "agent-2: planning"]
+        assert labels(app) == ["▶ agent-2 (planner) started", "planning"]
         await pilot.press("tab")  # coder
-        assert labels(app) == ["▶ agent-1 (coder) started", "agent-1: coding"]
+        assert labels(app) == ["▶ agent-1 (coder) started", "coding"]
         await pilot.press("tab")  # reviewer: no entries, so its log is built now
         assert labels(app) == []
         assert len(app.query(TranscriptLog)) == 4
@@ -311,11 +311,11 @@ async def test_output_for_a_tab_not_shown_is_there_when_it_is() -> None:
     async with app.run_test(size=(120, 30)) as pilot:
         await feed_events(session, pilot, started("agent-1"), said("agent-1", "first"))
         await pilot.press("tab", "tab")  # coder: its log is built and shown
-        assert labels(app) == ["▶ agent-1 (coder) started", "agent-1: first"]
+        assert labels(app) == ["▶ agent-1 (coder) started", "first"]
         await pilot.press("tab", "tab", "tab", "tab")  # All: coder's log is hidden
         await feed_events(session, pilot, said("agent-1", "second"))
         await pilot.press("tab", "tab")
-        assert labels(app)[-1] == "agent-1: second"
+        assert labels(app)[-1] == "second"
 
 
 async def test_lines_are_wrapped_again_for_a_new_window_size() -> None:
@@ -585,7 +585,8 @@ async def test_an_agents_message_of_several_lines_hangs_its_marker_beside_its_ma
     async with app.run_test() as pilot:
         await feed_events(session, pilot, said("agent-1", "**intro**\n\n- one\n- two"))
         assert [row.rstrip() for row in entry_rows(visible_log(app), 0)] == [
-            "│ ▾ agent-1: intro",
+            "│ agent-1",
+            "│ ▾ intro",
             "│",
             "│    • one",
             "│    • two",
@@ -599,10 +600,11 @@ async def test_an_agents_message_wraps_beside_its_hanging_marker() -> None:
     async with app.run_test() as pilot:
         await feed_events(session, pilot, said("agent-1", f"{LONG}\n\nend"))
         rows = entry_rows(visible_log(app), 0)
-        assert rows[0].startswith(f"{GUTTER_BAR} ▾ agent-1: gutter")
-        assert all(row.startswith(f"{GUTTER_BAR}   ") for row in rows[1:-1])
-        words = " ".join(row[4:].strip() for row in rows[:-1]).split()
-        assert words == ["agent-1:", *LONG.split(), "end"]
+        assert rows[0] == f"{GUTTER_BAR} agent-1"
+        assert rows[1].startswith(f"{GUTTER_BAR} ▾ gutter")
+        assert all(row.startswith(f"{GUTTER_BAR}   ") for row in rows[2:-1])
+        words = " ".join(row[4:].strip() for row in rows[1:-1]).split()
+        assert words == [*LONG.split(), "end"]
 
 
 async def test_a_collapsed_agents_message_shows_its_first_line_as_it_is() -> None:
@@ -615,7 +617,8 @@ async def test_a_collapsed_agents_message_shows_its_first_line_as_it_is() -> Non
         await pilot.pause()
         assert prompts(app)[0].body is None
         assert [row.rstrip() for row in entry_rows(log, 0)] == [
-            "│ ▸ agent-1: **intro** (+2 lines)",
+            "│ agent-1",
+            "│ ▸ **intro** (+2 lines)",
             "",
         ]
 
@@ -626,7 +629,8 @@ async def test_an_agents_message_of_one_line_has_no_marker() -> None:
     async with app.run_test() as pilot:
         await feed_events(session, pilot, said("agent-1", "**hi** `there`"))
         assert [row.rstrip() for row in entry_rows(visible_log(app), 0)] == [
-            "│ agent-1: hi there",
+            "│ agent-1",
+            "│ hi there",
             "",
         ]
 
@@ -668,3 +672,108 @@ async def test_entries_other_than_agents_messages_show_their_text_as_it_is(
             log.toggle(1)
         assert [row.rstrip() for row in entry_rows(log, 0)] == ["│ # **a**", ""]
         assert [row.rstrip() for row in entry_rows(log, 1)] == ["│ ▾ # **a**", "│ - b", ""]
+
+
+def headings(app: OrbitApp) -> list[str | None]:
+    """The label row heading each of the shown log's entries, if it has one."""
+    return [None if prompt.heading is None else prompt.heading.plain for prompt in prompts(app)]
+
+
+async def test_an_agents_first_message_is_headed_by_a_muted_label_row() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, said("agent-1", "hi"))
+        log = visible_log(app)
+        assert headings(app) == ["agent-1"]
+        heading = prompts(app)[0].heading
+        assert heading is not None
+        style = heading.get_style_at_offset(Console(), 0)
+        assert style == log.get_component_rich_style("transcript--label", partial=True)
+        assert [row.rstrip() for row in entry_rows(log, 0)] == ["│ agent-1", "│ hi", ""]
+
+
+async def test_the_label_row_takes_the_cursors_marker() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, said("agent-1", "hi"))
+        await pilot.press("k", "enter")
+        rows = entry_rows(visible_log(app), 0)
+        assert [row.rstrip() for row in rows] == ["▌ agent-1", "▌ hi", ""]
+
+
+async def test_an_agents_messages_in_a_row_are_labelled_once() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(
+            session,
+            pilot,
+            said("agent-1", "looking"),
+            tool_output("agent-1", "found"),
+            said("agent-1", "done"),
+        )
+        assert headings(app) == ["agent-1", None, None]
+
+
+async def test_another_agent_in_between_brings_the_label_back() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(
+            session,
+            pilot,
+            said("agent-1", "first"),
+            said("agent-2", "second"),
+            said("agent-1", "third"),
+        )
+        assert headings(app) == ["agent-1", "agent-2", "agent-1"]
+
+
+async def test_the_planners_messages_are_never_labelled() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await pilot.press("i", *"hi", "enter")
+        await feed_events(
+            session,
+            pilot,
+            AssistantMessage(turn_id="t", text="planning"),
+            said("agent-1", "coding"),
+            AssistantMessage(turn_id="t", text="planned"),
+        )
+        assert headings(app) == [None, None, "agent-1", None]
+
+
+async def test_the_speaker_is_judged_within_each_tab() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test(size=(120, 30)) as pilot:
+        await feed_events(
+            session,
+            pilot,
+            started("agent-1"),
+            started("agent-2", "reviewer"),
+            said("agent-1", "coding"),
+            said("agent-2", "reviewing"),
+            said("agent-1", "more"),
+        )
+        # Under All the reviewer speaks in between; under coder agent-1 speaks throughout.
+        assert headings(app) == [None, None, "agent-1", "agent-2", "agent-1"]
+        await pilot.press("tab", "tab")  # coder
+        assert labels(app) == ["▶ agent-1 (coder) started", "coding", "more"]
+        assert headings(app) == [None, None, None]
+
+
+async def test_a_collapsed_agents_message_keeps_its_label_row() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, said("agent-1", "one\ntwo"))
+        log = visible_log(app)
+        log.toggle(0)
+        await pilot.pause()
+        assert log.collapsed(0)
+        assert headings(app) == ["agent-1"]
+        assert entry_rows(log, 0)[0].rstrip() == "│ agent-1"

@@ -193,7 +193,7 @@ async def test_a_real_planners_reply_shows_on_the_planner_tab() -> None:
         assert tab_strip(app)[:3] == ["All", "planner *", "coder"]
         await pilot.press("escape", "ctrl+t")
         assert active_tab(app) == "planner"
-        assert "agent-1: Here's a plan." in shown(app)
+        assert "Here's a plan." in shown(app)
         assert "agent-1 planner · planning · working" in rows(app.query_one(AgentsPane))
 
 

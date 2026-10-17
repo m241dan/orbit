@@ -668,12 +668,12 @@ def tab_strip(app: OrbitApp) -> list[str]:
 def shown(app: OrbitApp) -> list[str]:
     """The texts of the entries on the tab being shown."""
     transcript = app.query_one(Transcript)
-    return [text for text, _ in transcript.entries(transcript.only)]
+    return [entry.text for entry in transcript.entries(transcript.only)]
 
 
 def entries(app: OrbitApp) -> list[tuple[str, EntryKind]]:
     """Every entry, with its kind, as the All tab has them."""
-    return list(app.query_one(Transcript).entries(None))
+    return [(entry.text, entry.kind) for entry in app.query_one(Transcript).entries(None)]
 
 
 def started(agent_id: str, role: str = "coder") -> AgentStarted:
@@ -751,9 +751,9 @@ async def test_clicking_a_tab_shows_only_that_agents_conversation() -> None:
         assert app.focused is None
         assert transcript.only == "reviewer"
         assert transcript.border_title == "Conversation · ● reviewer"
-        assert shown(app) == ["▶ agent-2 (reviewer) started", "agent-2: reviewing"]
+        assert shown(app) == ["▶ agent-2 (reviewer) started", "reviewing"]
         await feed_events(session, pilot, said("agent-1", "more"))
-        assert shown(app) == ["▶ agent-2 (reviewer) started", "agent-2: reviewing"]
+        assert shown(app) == ["▶ agent-2 (reviewer) started", "reviewing"]
 
         await pilot.click(tabs[0])
         await pilot.pause()
@@ -787,7 +787,7 @@ async def test_an_exited_agents_tab_goes_and_its_entries_stay_under_all() -> Non
         assert tab_strip(app) == STRIP
         assert transcript.only is None
         assert transcript.border_title == "Conversation"
-        assert "agent-1: coding" in shown(app)
+        assert "coding" in shown(app)
 
 
 async def test_the_shown_tabs_title_follows_its_relabelling() -> None:
@@ -827,10 +827,10 @@ async def test_coder_output_lands_in_the_coder_tab_and_stays_after_it_exits() ->
         await feed_events(session, pilot, started("agent-2"), said("agent-2", "more"))
         assert shown(app) == [
             "▶ agent-1 (coder) started",
-            "agent-1: coding",
+            "coding",
             "■ agent-1 exited",
             "▶ agent-2 (coder) started",
-            "agent-2: more",
+            "more",
         ]
 
 
@@ -1050,13 +1050,13 @@ async def test_planner_output_shows_under_planner_and_all_but_not_other_tabs() -
         planner = [
             "plan",
             "▶ agent-1 (planner) started",
-            "agent-1: drafting",
+            "drafting",
             "orbit → agent-1: Added.",
         ]
         assert shown(app) == planner
 
         await pilot.press("tab")
-        assert shown(app) == ["▶ agent-2 (coder) started", "agent-2: coding"]
+        assert shown(app) == ["▶ agent-2 (coder) started", "coding"]
         # Output while another tab is shown marks the planner tab.
         await feed_events(session, pilot, said("agent-1", "more"))
         assert tab_strip(app) == ["All", "● planner *", "● coder", *PINNED[2:]]
@@ -1066,8 +1066,8 @@ async def test_planner_output_shows_under_planner_and_all_but_not_other_tabs() -
         assert shown(app) == [
             *planner,
             "▶ agent-2 (coder) started",
-            "agent-2: coding",
-            "agent-1: more",
+            "coding",
+            "more",
         ]
 
         # The planner exiting leaves its tab, and only its busy lane clears its marker.
