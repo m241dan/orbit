@@ -368,25 +368,31 @@ class AgentSession:
 
     def _load(self, record: SessionRecord) -> bool:
         """Hold what ``record`` does, its tasks as interrupted; returns True."""
-        self._replace_board(interrupted(record.tasks)[0])
-        if self._work is not None:
-            self._work.reset()
-        self._settings = resumed_settings(record.settings, self._given, self._pinned)
-        self._seat.replace(record.planner_conversation)
-        if self._lane is not None:
-            self._lane.load(record.reviews or NO_REVIEWS)
-        self._kept_reviews = record.reviews
-        return True
+        settings = resumed_settings(record.settings, self._given, self._pinned)
+        tasks = interrupted(record.tasks)[0]
+        return self._hold(tasks, settings, record.planner_conversation, record.reviews)
 
     def _clear(self) -> bool:
-        """Hold what a new session does; returns True."""
-        self._replace_board(())
+        """Hold what a new session does, keeping the settings; returns True."""
+        return self._hold((), self._settings, None, None)
+
+    def _hold(
+        self,
+        tasks: tuple[TaskState, ...],
+        settings: Settings,
+        conversation: str | None,
+        reviews: LaneSnapshot | None,
+    ) -> bool:
+        """Hold a session's ``tasks``, ``settings``, planner ``conversation`` and ``reviews``,
+        with no fix counts; returns True."""
+        self._replace_board(tasks)
         if self._work is not None:
             self._work.reset()
-        self._seat.replace(None)
+        self._settings = settings
+        self._seat.replace(conversation)
         if self._lane is not None:
-            self._lane.load(NO_REVIEWS)
-        self._kept_reviews = None
+            self._lane.load(reviews or NO_REVIEWS)
+        self._kept_reviews = reviews
         return True
 
     def _replace_board(self, tasks: tuple[TaskState, ...]) -> None:

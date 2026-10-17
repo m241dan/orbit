@@ -8,6 +8,7 @@ from orbit.agent.domain.reviews import BatchSnapshot, LaneSnapshot, PlannerSnaps
 from orbit.agent.domain.sessions import SessionRecord
 from orbit.protocol import (
     Event,
+    Notice,
     OpenSession,
     ReviewStatus,
     RunTasks,
@@ -20,7 +21,7 @@ from orbit.protocol import (
 )
 from tests.agent_fakes import Call, FakeStore, FakeTree, ScriptedLauncher, session_for
 from tests.test_review_lane import claims_done, start
-from tests.test_session_switch import last_of, opened, saved, store_with, switching
+from tests.test_session_switch import last_of, messages, opened, saved, store_with, switching
 
 
 async def suggesting() -> tuple[AgentSession, FakeStore]:
@@ -171,4 +172,24 @@ async def test_opening_publishes_the_saved_review_status() -> None:
     session, _, store, events = await reopened(crashed()[:1], paused)
     assert last_of(ReviewStatus, events) == ReviewStatus(paused=True, open_batches=0)
     assert reviews_of(store) == paused
+    await session.close()
+
+
+def pause_notes(events: list[Event]) -> list[str]:
+    return [m for m in messages(Notice, events) if m.startswith("Review paused")]
+
+
+async def test_each_paused_session_opened_notes_its_pause_once() -> None:
+    paused = reviewing().model_copy(update={"planner": PlannerSnapshot(paused=True)})
+    first = saved("auth", *crashed()[:1], reviews=paused)
+    store = store_with(first, first.model_copy(update={"id": "docs", "name": "docs"}))
+    session, _ = switching(store)
+    assert len(pause_notes(await opened(session, OpenSession(session_id="auth")))) == 1
+    assert len(pause_notes(await opened(session, OpenSession(session_id="docs")))) == 1
+    await session.close()
+
+
+async def test_opening_a_session_whose_review_is_not_paused_notes_no_pause() -> None:
+    session, _, _, events = await reopened(crashed(), reviewing())
+    assert pause_notes(events) == []
     await session.close()

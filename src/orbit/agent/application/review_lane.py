@@ -78,12 +78,14 @@ class ReviewLane:
         """Replace the lane's state with ``snapshot``'s; :meth:`end_interrupted` follows."""
         self.planner.restore(snapshot.planner)
         self._jobs, self._batches = dict(snapshot.jobs), dict(snapshot.batches)
-        self._status = None  # Whatever it is, the restored status is news.
+        self._status = None  # Whatever it is, the restored status is news,
+        self._paused_noted = False  # and so is a pause.
 
     async def end_interrupted(self, interrupted: Collection[str]) -> None:
         """End the reviews in ``interrupted``, which were stopped by a crash, as a cancelled
         review ends: a review of their batch that's due is queued, for the next run. Then
-        publish the review status."""
+        note a pause and publish the review status."""
+        await self._note_pause()
         for task_id in interrupted:
             batch = self._batches.get(task_id)
             if batch is not None and batch in self.planner.open_batches:
