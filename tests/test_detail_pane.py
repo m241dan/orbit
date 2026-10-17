@@ -65,7 +65,7 @@ async def test_enter_on_a_tool_call_opens_its_details() -> None:
         assert not pane(app).opened and pane(app).size.height == 0
         await inspecting(pilot)
         assert pane(app).opened and pane(app).border_title == "Detail · Read a.py · y copy"
-        assert shown(app) == ["file_path: a.py", RULE, "one", "two"]
+        assert shown(app) == ["a.py", RULE, "one", "two"]
         assert app.focused is app.query_one(Transcript).shown
 
 
@@ -95,7 +95,7 @@ async def test_enter_on_a_request_opens_its_arguments_and_reply() -> None:
         await feed_events(session, pilot, request, reply)
         await inspecting(pilot)
         assert pane(app).border_title == "Detail · complete_task Go · y copy"
-        assert shown(app) == ["summary: Go", RULE, "Merged."]
+        assert shown(app) == ["{", '  "summary": "Go"', "}", RULE, "orbit: Merged."]
 
 
 async def test_enter_on_a_message_still_collapses_and_expands_it() -> None:
@@ -119,7 +119,7 @@ async def test_the_pane_follows_the_cursor_and_notes_entries_without_details() -
         assert pane(app).border_title == "Detail · Read b.py · y copy"
         await pilot.press("k")
         assert pane(app).border_title == "Detail · Read a.py · y copy"
-        assert shown(app) == ["file_path: a.py", RULE, "x"]
+        assert shown(app) == ["a.py", RULE, "x"]
         await pilot.press("k")
         assert pane(app).opened and pane(app).border_title == "Detail"
         assert shown(app) == [NO_DETAILS]
@@ -131,10 +131,10 @@ async def test_a_running_call_waits_then_shows_its_result_in_place() -> None:
     async with app.run_test(size=(80, 30)) as pilot:
         await feed_events(session, pilot, read("c1"))
         await inspecting(pilot)
-        assert shown(app) == ["file_path: a.py", RULE, WAITING]
+        assert shown(app) == ["a.py", RULE, WAITING]
         await feed_events(session, pilot, done("c1", "done"))
         await pilot.pause()
-        assert shown(app) == ["file_path: a.py", RULE, "done"]
+        assert shown(app) == ["a.py", RULE, "done"]
 
 
 async def test_escape_closes_the_pane_first_then_leaves_list_mode() -> None:

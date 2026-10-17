@@ -206,10 +206,22 @@ and takes no room while nothing in the shown tab runs.
 
 `enter` on a tool call or a request to orbit, with the conversation activated, opens a detail pane
 below the conversation and its working row, taking 40% of the conversation's height and titled
-with the entry's line and a hint (`Detail · Read src/x.py · y copy`). It shows the call's arguments as `key: value`
-lines, a rule, then the output or orbit's reply as plain text; a call still running shows a dim
-`waiting for output…` until its result arrives, and the pane updates in place. Output of more
-than 200 lines shows its first 100, a dim `… N lines omitted · y copies all …`, and its last 100. While the pane
+with the entry's line and a hint (`Detail · Read src/x.py · y copy`). It shows a header in the
+form that suits the call's tool, a rule, then the output or orbit's reply:
+
+- Read: the file's path (with `offset` and `limit` if given), then its lines highlighted for the
+  file's type, with their line numbers; a file type it doesn't know stays plain.
+- Bash: `$ ` and the whole command, then the output in its own colours.
+- Grep and Glob: the pattern (and `in` the path, if given), then the matches as plain lines.
+- Edit, MultiEdit, Write and every other tool: the arguments as highlighted JSON, then the output,
+  indented and highlighted too if it's a JSON object or array.
+- A request to orbit: the arguments as highlighted JSON, then `orbit: ` and the reply, red if it's
+  an error.
+
+A call whose arguments don't fit its tool's view shows them as JSON instead. A call still running
+shows a dim `waiting for output…` until its result arrives, and the pane updates in place. Output
+of more than 200 lines shows its first 100, a dim `… N lines omitted · y copies all …`, and its
+last 100, cut before it's highlighted. While the pane
 is open it follows the cursor as `j`/`k` move, showing a dim `No details for this entry` on other
 entries. The first `esc` closes it, staying in the list; the next leaves the list as usual.
 Switching tabs closes it, and it stays closed when you come back.

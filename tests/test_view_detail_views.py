@@ -1,0 +1,196 @@
+"""The detail pane shows each tool's call in the form that suits it."""
+
+import io
+from typing import Any
+
+from rich.console import Console, RenderableType
+from rich.segment import Segment
+from rich.text import Text
+
+from orbit.tui.view import (
+    DETAIL_LINE_LIMIT,
+    NO_DETAILS,
+    WAITING,
+    ToolCall,
+    ToolCallStatus,
+    detail_body,
+    pretty_json,
+    read_output,
+)
+
+RULE = "─" * 60
+READ_OUTPUT = (
+    "    41→def go(x: int) -> int:\n"
+    '    42→    """Go."""\n'
+    "    43→\n"
+    "    44→    return x\n"
+    "\n"
+    "<system-reminder>\n"
+    "Whenever you read a file, check it.\n"
+    "</system-reminder>"
+)
+
+
+def call(
+    name: str,
+    arguments: dict[str, Any],
+    output: str = "",
+    status: ToolCallStatus = "passed",
+    request: bool = False,
+) -> ToolCall:
+    return ToolCall("c", name, name, arguments, status, output, request)
+
+
+def plain(renderable: RenderableType) -> list[str]:
+    """``renderable``'s lines as drawn 60 columns wide, without styles."""
+    out = io.StringIO()
+    Console(width=60, file=out, color_system=None).print(renderable)
+    return [line.rstrip() for line in out.getvalue().splitlines()]
+
+
+def segments(renderable: RenderableType) -> list[Segment]:
+    """``renderable``'s styled pieces as drawn 60 columns wide."""
+    console = Console(width=60, file=io.StringIO(), color_system="truecolor")
+    return list(console.render(renderable))
+
+
+def style_of(renderable: RenderableType, text: str) -> str:
+    """The style of the first piece of ``renderable`` reading ``text``."""
+    return next(str(piece.style) for piece in segments(renderable) if piece.text == text)
+
+
+def numbered(count: int) -> str:
+    return "\n".join(f"line {i}" for i in range(count))
+
+
+def test_no_call_shows_a_dim_note() -> None:
+    body = detail_body(None)
+    assert isinstance(body, Text)
+    assert (body.plain, body.style) == (NO_DETAILS, "dim")
+
+
+def test_read_shows_the_path_then_the_numbered_lines_and_what_follows() -> None:
+    body = detail_body(call("Read", {"file_path": "src/go.py"}, READ_OUTPUT))
+    assert plain(body) == [
+        "src/go.py",
+        RULE,
+        "  41 def go(x: int) -> int:",
+        '  42     """Go."""',
+        "  43",
+        "  44     return x",
+        "",
+        "<system-reminder>",
+        "Whenever you read a file, check it.",
+        "</system-reminder>",
+    ]
+
+
+def test_read_highlights_code_by_the_files_extension() -> None:
+    body = detail_body(call("Read", {"file_path": "src/go.py"}, READ_OUTPUT))
+    assert style_of(body, "def") == "bright_blue on default"
+    assert style_of(body, "41 ") == "dim"
+
+
+def test_read_of_an_unknown_file_type_keeps_numbers_but_no_highlighting() -> None:
+    body = read_output("notes.zzz", "     1\tdef x\n     2\tend")
+    assert plain(body) == ["  1 def x", "  2 end"]
+    assert style_of(body, "def x") == "on default"
+
+
+def test_read_names_the_offset_and_limit_dimly() -> None:
+    body = detail_body(call("Read", {"file_path": "a.py", "offset": 41, "limit": 4}, "x"))
+    assert plain(body)[0] == "a.py (offset 41, limit 4)"
+    assert style_of(body, "a.py") == "bold"
+    assert style_of(body, " (offset 41, limit 4)") == "dim"
+
+
+def test_read_output_without_line_numbers_is_plain() -> None:
+    assert plain(read_output("a.py", "one\ntwo")) == ["one", "two"]
+
+
+def test_read_of_a_long_file_numbers_each_end_from_its_own_lines() -> None:
+    output = "\n".join(f"{n:6}→x = {n}" for n in range(1, 301))
+    lines = plain(detail_body(call("Read", {"file_path": "a.py"}, output)))
+    assert lines[2] == "    1 x = 1" and lines[101] == "  100 x = 100"
+    assert lines[102] == "… 100 lines omitted · y copies all …"
+    assert lines[103] == "  201 x = 201" and lines[-1] == "  300 x = 300"
+
+
+def test_bash_shows_the_whole_command_then_its_output() -> None:
+    body = detail_body(call("Bash", {"command": "cd x &&\n  ls"}, "a\nb"))
+    assert plain(body) == ["$ cd x &&", "  ls", RULE, "a", "b"]
+
+
+def test_bash_keeps_the_outputs_colours() -> None:
+    body = detail_body(call("Bash", {"command": "ls"}, "\x1b[31mred\x1b[0m plain"))
+    assert plain(body)[-1] == "red plain"
+    assert style_of(body, "red") == "color(1)"
+
+
+def test_grep_shows_the_pattern_and_path_then_the_matches() -> None:
+    body = detail_body(call("Grep", {"pattern": "def go", "path": "src"}, "a.py\nb.py"))
+    assert plain(body) == ["def go in src", RULE, "a.py", "b.py"]
+    assert style_of(body, "def go") == "bold"
+
+
+def test_glob_without_a_path_shows_just_the_pattern() -> None:
+    body = detail_body(call("Glob", {"pattern": "**/*.py"}, "a.py"))
+    assert plain(body) == ["**/*.py", RULE, "a.py"]
+
+
+def test_other_tools_show_their_arguments_as_highlighted_json() -> None:
+    body = detail_body(call("WebSearch", {"query": "rich", "n": 3}, "Found it"))
+    assert plain(body) == ["{", '  "query": "rich",', '  "n": 3', "}", RULE, "Found it"]
+    assert style_of(body, '"query"') != style_of(body, '"rich"')
+
+
+def test_json_output_is_indented_and_highlighted() -> None:
+    body = detail_body(call("mcp__x__list", {}, '{"items": [1]}'))
+    assert plain(body)[-5:] == ["{", '  "items": [', "    1", "  ]", "}"]
+    assert style_of(body, "1") != "on default"
+
+
+def test_pretty_json_leaves_text_and_bare_values_alone() -> None:
+    assert pretty_json("not json") is None
+    assert pretty_json("42") is None
+    assert pretty_json('["é"]') == '[\n  "é"\n]'
+
+
+def test_a_running_call_shows_its_header_then_waits_dimly() -> None:
+    body = detail_body(call("Bash", {"command": "ls"}, status="running"))
+    assert plain(body) == ["$ ls", RULE, WAITING]
+    assert style_of(body, WAITING) == "dim"
+
+
+def test_a_request_shows_its_arguments_then_orbits_reply() -> None:
+    body = detail_body(call("complete_task", {"summary": "Go"}, "Merged.", request=True))
+    assert plain(body) == ["{", '  "summary": "Go"', "}", RULE, "orbit: Merged."]
+    assert style_of(body, "orbit: Merged.") == "None"
+
+
+def test_a_failed_request_shows_orbits_reply_in_red() -> None:
+    failed = call("complete_task", {}, "Checks failed.", "failed", request=True)
+    assert style_of(detail_body(failed), "orbit: Checks failed.") == "red"
+
+
+def test_a_requests_long_reply_is_capped() -> None:
+    body = detail_body(call("give_up", {}, numbered(DETAIL_LINE_LIMIT + 1), request=True))
+    lines = plain(body)
+    assert lines[2] == "orbit: line 0" and lines[-1] == "line 200"
+    assert "… 1 line omitted · y copies all …" in lines
+
+
+def test_a_bash_calls_long_output_is_capped_before_drawing() -> None:
+    lines = plain(detail_body(call("Bash", {"command": "seq"}, numbered(250))))
+    assert len(lines) == 2 + 201 and lines[102] == "… 50 lines omitted · y copies all …"
+
+
+def test_malformed_arguments_fall_back_to_json() -> None:
+    for name in ("Read", "Bash", "Grep"):
+        body = detail_body(call(name, {"file_path": 1, "command": None}, "out"))
+        assert plain(body)[:2] == ["{", '  "file_path": 1,'] and plain(body)[-1] == "out"
+
+
+def test_arguments_that_arent_json_are_shown_as_text() -> None:
+    body = detail_body(call("Odd", {"when": object}, "out"))
+    assert plain(body)[1] == '  "when": "<class \'object\'>"'

@@ -1,11 +1,9 @@
 """The detail pane: the full content of a tool call or request to orbit."""
 
 import json
-from collections.abc import Mapping
-from typing import Any
+from collections.abc import Callable
 
 from rich.console import Group, RenderableType
-from rich.rule import Rule
 from rich.text import Text
 
 from orbit.tui.view.tool_calls import ToolCall
@@ -51,25 +49,6 @@ def copied_note(text: str) -> str:
     return f"Copied {count} line{'' if count == 1 else 's'}"
 
 
-def detail_body(call: ToolCall | None) -> RenderableType:
-    """What the detail pane shows for ``call``: its arguments, a rule, then its output or reply,
-    or a dim note that it's still waiting; a dim note when there's no call."""
-    if call is None:
-        return Text(NO_DETAILS, style=DIM)
-    output = Text(WAITING, style=DIM) if call.status == "running" else capped(call.output)
-    return Group(argument_lines(call.arguments), Rule(style=DIM), output)
-
-
-def argument_lines(arguments: Mapping[str, Any]) -> Text:
-    """``arguments`` as ``key: value`` lines, text kept as it is, with its newlines, and
-    anything else as JSON."""
-    return Text("\n".join(f"{key}: {_shown(value)}" for key, value in arguments.items()))
-
-
-def _shown(value: object) -> str:
-    return value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
-
-
 def capped(output: str, limit: int = DETAIL_LINE_LIMIT) -> Text:
     """``output`` as plain text; with more than ``limit`` lines, just its first and last
     halves of that, a dim line between them counting the lines left out and saying y copies
@@ -78,7 +57,23 @@ def capped(output: str, limit: int = DETAIL_LINE_LIMIT) -> Text:
     if len(lines) <= limit:
         return Text(output)
     kept = limit // 2
-    omitted = len(lines) - 2 * kept
-    count = f"{omitted} line{'' if omitted == 1 else 's'}"
-    marker = Text(f"… {count} omitted · {COPY_ALL_HINT} …", style=DIM)
+    marker = _omitted(len(lines) - 2 * kept)
     return Text("\n").join([Text("\n".join(lines[:kept])), marker, Text("\n".join(lines[-kept:]))])
+
+
+def capped_with(
+    output: str, render: Callable[[str], RenderableType], limit: int = DETAIL_LINE_LIMIT
+) -> RenderableType:
+    """``output`` drawn by ``render``; with more than ``limit`` lines, just its first and last
+    halves of that, each drawn on its own, with the dim line of :func:`capped` between them."""
+    lines = output.splitlines()
+    if len(lines) <= limit:
+        return render(output)
+    kept = limit // 2
+    head, tail = "\n".join(lines[:kept]), "\n".join(lines[-kept:])
+    return Group(render(head), _omitted(len(lines) - 2 * kept), render(tail))
+
+
+def _omitted(count: int) -> Text:
+    lines = f"{count} line{'' if count == 1 else 's'}"
+    return Text(f"… {lines} omitted · {COPY_ALL_HINT} …", style=DIM)

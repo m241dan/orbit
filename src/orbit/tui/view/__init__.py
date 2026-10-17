@@ -21,14 +21,14 @@ from orbit.tui.view.detail import (
     DETAIL_TITLE,
     NO_DETAILS,
     WAITING,
-    argument_lines,
     capped,
+    capped_with,
     copied_note,
-    detail_body,
     detail_copy,
     detail_covers,
     detail_title,
 )
+from orbit.tui.view.detail_views import TOOL_VIEWS, detail_body, pretty_json, read_output
 from orbit.tui.view.events import SUPERSEDED_UNLESS, coalesce
 from orbit.tui.view.panels import STALE_STYLE, USAGE_COLOURS, reset_label, step_lines, usage_lines
 from orbit.tui.view.progress import TaskProgress, progress_entry, task_note
@@ -184,6 +184,7 @@ __all__ = [
     "TOOL_ACCESS_LABELS",
     "TOOL_ACCESS_OPTIONS",
     "TOOL_CALL_SUMMARY_LIMIT",
+    "TOOL_VIEWS",
     "TURN_END_LABELS",
     "USAGE_COLOURS",
     "WAITING",
@@ -209,9 +210,9 @@ __all__ = [
     "agent_entry",
     "agent_labelled",
     "agent_line",
-    "argument_lines",
     "banded",
     "capped",
+    "capped_with",
     "coalesce",
     "collapsible",
     "conversation_title",
@@ -243,8 +244,10 @@ __all__ = [
     "note_entry",
     "orbit_request_line",
     "output_entry",
+    "pretty_json",
     "progress_entry",
     "proposal_text",
+    "read_output",
     "reset_label",
     "review_line",
     "ruled",

@@ -1,20 +1,16 @@
 """The detail pane shows a tool call's or request's full arguments and output."""
 
 from rich.console import Group
-from rich.rule import Rule
 from rich.text import Text
 
 from orbit.tui.view import (
     DETAIL_COVER_BELOW,
     DETAIL_LINE_LIMIT,
-    NO_DETAILS,
-    WAITING,
     ToolCall,
     ToolCallStatus,
-    argument_lines,
     capped,
+    capped_with,
     copied_note,
-    detail_body,
     detail_copy,
     detail_covers,
     detail_title,
@@ -23,14 +19,6 @@ from orbit.tui.view import (
 
 def read_call(status: ToolCallStatus = "passed", output: str = "one\ntwo") -> ToolCall:
     return ToolCall("c", "Read", "Read src/x.py", {"file_path": "src/x.py"}, status, output)
-
-
-def parts(call: ToolCall) -> tuple[Text, Rule, Text]:
-    body = detail_body(call)
-    assert isinstance(body, Group)
-    arguments, rule, output = body.renderables
-    assert isinstance(arguments, Text) and isinstance(rule, Rule) and isinstance(output, Text)
-    return arguments, rule, output
 
 
 def numbered(count: int) -> str:
@@ -53,29 +41,6 @@ def test_the_title_without_a_call_is_just_detail() -> None:
     assert detail_title(None) == "Detail"
 
 
-def test_no_call_shows_a_dim_note() -> None:
-    body = detail_body(None)
-    assert isinstance(body, Text)
-    assert (body.plain, body.style) == (NO_DETAILS, "dim")
-
-
-def test_a_finished_call_shows_its_arguments_a_rule_and_its_output() -> None:
-    arguments, _, output = parts(read_call())
-    assert arguments.plain == "file_path: src/x.py"
-    assert output.plain == "one\ntwo"
-
-
-def test_a_running_call_shows_its_arguments_then_waits_dimly() -> None:
-    arguments, _, output = parts(read_call("running", ""))
-    assert arguments.plain == "file_path: src/x.py"
-    assert (output.plain, output.style) == (WAITING, "dim")
-
-
-def test_arguments_keep_their_newlines_and_show_the_rest_as_json() -> None:
-    lines = argument_lines({"command": "a\nb", "todos": [{"x": "é"}], "n": 3})
-    assert lines.plain == 'command: a\nb\ntodos: [{"x": "é"}]\nn: 3'
-
-
 def test_output_of_the_limit_is_shown_whole() -> None:
     output = numbered(DETAIL_LINE_LIMIT)
     assert capped(output).plain == output
@@ -95,6 +60,20 @@ def test_the_omitted_line_is_dim() -> None:
     assert marker == "… 1 line omitted · y copies all …"
     start = text.plain.index(marker)
     assert [span.style for span in text.spans if span.start == start] == ["dim"]
+
+
+def test_capped_with_draws_output_of_the_limit_whole() -> None:
+    output = numbered(DETAIL_LINE_LIMIT)
+    assert capped_with(output, lambda text: text.upper()) == output.upper()
+
+
+def test_capped_with_draws_each_end_of_longer_output_around_the_dim_count() -> None:
+    drawn = capped_with(numbered(250), lambda text: Text(text.upper()))
+    assert isinstance(drawn, Group)
+    head, marker, tail = drawn.renderables
+    assert isinstance(head, Text) and isinstance(marker, Text) and isinstance(tail, Text)
+    assert head.plain.split("\n")[-1] == "LINE 99" and tail.plain.split("\n")[0] == "LINE 150"
+    assert (marker.plain, marker.style) == ("… 50 lines omitted · y copies all …", "dim")
 
 
 def test_y_copies_a_finished_calls_whole_output() -> None:
