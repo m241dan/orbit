@@ -412,6 +412,7 @@ class Transcript(Vertical):
         super().__init__(**kwargs)
         self.only: str | None = None  # Show only this tab's entries, or all.
         self._label: str | None = None  # The shown tab's label; None for All.
+        self._session: str | None = None  # The open session's name, once one is known.
         self.thinking_hidden = False
         self.clock: Callable[[], float] = time.monotonic
         self._logs: dict[str | None, TranscriptLog] = {}
@@ -593,8 +594,15 @@ class Transcript(Vertical):
         # Laid out once shown, which is when its end is known.
         self.call_after_refresh(log.show_place)
 
+    def show_session(self, name: str | None) -> None:
+        """End the title with the open session's ``name``, or with none."""
+        self._session = name
+        self._retitle()
+
     def _retitle(self) -> None:
-        self.border_title = conversation_title(self._label, self.thinking_hidden)
+        self.border_title = conversation_title(
+            self._label, self.thinking_hidden, session=self._session
+        )
 
     def _log(self, key: str | None) -> TranscriptLog:
         if key not in self._logs:

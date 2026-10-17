@@ -130,6 +130,10 @@ can't be deleted, and a session open in another orbit can be neither renamed nor
 unreadable one can be deleted but not renamed. The list refreshes after either. On `+ new session`,
 `r` and `x` do nothing.
 
+The Conversation window's title ends with the open session's name, cut to 30 characters
+(`Conversation — auth rework`). It follows a rename of the open session and a switch to another,
+and shows no name before you pick one at startup.
+
 ### Tasks
 
 The task list queues prompts to run later. Each task has its own prompt, model and tool access, set
@@ -255,9 +259,11 @@ tokens. It lands under All and the agent's tab, a temporary tab included.
 
 Press `t` (with nothing being typed) to hide agents' dim messages, so only final answers, tool
 calls and everything else show, in every tab at once, tabs opened later included; the window's title
-reads `Conversation · thinking hidden` while they're hidden, and `t` again shows them. A message that
-brightens at the end of its turn appears. If the marked entry is hidden, the mark moves to the
-nearest entry still shown, the one before it first. Agents' label rows follow the entries shown,
+reads `Conversation · thinking hidden` while they're hidden, and `t` again shows them. The title
+ends with the open session's name, cut to 30 characters
+(`Conversation · coder · thinking hidden — auth rework`), and follows renames and switches. A
+message that brightens at the end of its turn appears. If the marked entry is hidden, the mark moves
+to the nearest entry still shown, the one before it first. Agents' label rows follow the entries shown,
 and the setting isn't kept across restarts.
 
 A muted working row, pinned below the conversation, shows what runs right now: a line for each

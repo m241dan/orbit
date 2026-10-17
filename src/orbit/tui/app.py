@@ -450,6 +450,13 @@ class OrbitApp(App[None], inherit_bindings=False):
         self._asked_sessions = True
         await self._session.send(ListSessions())
 
+    def _name_current(self, listed: SessionsListed) -> None:
+        """Title the conversation with the name of the open session among those ``listed``,
+        renamed perhaps; a listing without it leaves the title as it is."""
+        current = [summary for summary in listed.sessions if summary.current]
+        if current:
+            self._transcript.show_session(current[0].name)
+
     def _show_sessions(self, listed: SessionsListed) -> None:
         """Let the user pick one of the sessions ``listed`` or start a new one; at startup, before
         any ctrl+p, escape quits. Listed while the list is shown, they replace those it shows;
@@ -561,10 +568,13 @@ class OrbitApp(App[None], inherit_bindings=False):
     def _render_session(self, event: SessionsListed | SessionOpened | PlannerReset) -> None:
         """Show the sessions listed, rule off the planner's conversation where it was reset, or
         take the task list out of list mode, let it follow again and start its total from the
-        spend of a session opened, whose contents come in their own events."""
+        spend of a session opened, whose contents come in their own events. The conversation's
+        title follows the open session's name."""
         if isinstance(event, SessionsListed):
+            self._name_current(event)
             self._show_sessions(event)
         elif isinstance(event, SessionOpened):
+            self._transcript.show_session(event.session.name)
             if self.focused is self._task_list:
                 self.set_focus(None)
             self._task_list.let_go()

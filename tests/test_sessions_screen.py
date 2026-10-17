@@ -17,9 +17,12 @@ from orbit.protocol import (
     SessionOpened,
     SessionsListed,
     SessionSummary,
+    Usage,
 )
 from orbit.tui import OrbitApp
 from orbit.tui.sessions import SessionsScreen
+from orbit.tui.tasks import TaskList
+from orbit.tui.transcript import Transcript
 from orbit.tui.widgets import ConfirmScreen
 from tests.test_session_switch import saved, store_with
 from tests.test_tui import FakeSession, entries, feed_events
@@ -526,3 +529,58 @@ async def test_ctrl_p_after_the_startup_picker_opens_a_picker_again() -> None:
         screen = app.screen
         assert isinstance(screen, SessionsScreen)
         assert not screen.startup
+
+
+def conversation_title(app: OrbitApp) -> str:
+    return str(app.query_one(Transcript).border_title)
+
+
+async def test_the_conversation_title_is_plain_before_any_session_event() -> None:
+    app = OrbitApp(FakeSession())
+    async with app.run_test():
+        assert conversation_title(app) == "Conversation"
+
+
+async def test_a_session_opened_names_the_conversation_through_tabs_and_hidden_thinking() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test(size=(120, 30)) as pilot:
+        await feed_events(session, pilot, SessionOpened(session=OLD))
+        assert conversation_title(app) == "Conversation — auth rework"
+        await pilot.press("tab", "tab", "t")  # coder
+        assert conversation_title(app) == "Conversation · coder · thinking hidden — auth rework"
+
+
+async def test_a_refreshed_listing_with_the_list_closed_renames_the_conversation() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        spent = Usage(input_tokens=2_000, cost_usd=2.0)
+        await feed_events(
+            session, pilot, SessionOpened(session=OLD.model_copy(update={"usage": spent}))
+        )
+        renamed = OLD.model_copy(update={"name": "flags", "current": True})
+        await feed_events(session, pilot, SessionsListed(sessions=(renamed,), reason="refreshed"))
+        assert not isinstance(app.screen, SessionsScreen)
+        assert conversation_title(app) == "Conversation — flags"
+        assert app.query_one(TaskList).border_subtitle == "session: 2k tok · $2.00"
+
+
+async def test_a_listing_shown_in_the_list_renames_the_conversation() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, SessionOpened(session=CURRENT), ASKED)
+        renamed = CURRENT.model_copy(update={"name": "flags"})
+        await feed_events(session, pilot, SessionsListed(sessions=(renamed,), reason="refreshed"))
+        assert isinstance(app.screen, SessionsScreen)
+        assert conversation_title(app) == "Conversation — flags"
+
+
+async def test_a_listing_without_a_current_session_keeps_the_conversation_title() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, SessionOpened(session=OLD))
+        await feed_events(session, pilot, SessionsListed(sessions=(OLD,), reason="refreshed"))
+        assert conversation_title(app) == "Conversation — auth rework"
