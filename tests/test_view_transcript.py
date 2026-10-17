@@ -343,3 +343,32 @@ def test_the_conversation_title_names_the_tab_shown_after_all() -> None:
 def test_the_conversation_title_notes_hidden_thinking() -> None:
     assert conversation_title(None, True) == "Conversation · thinking hidden"
     assert conversation_title("coder", True) == "Conversation · coder · thinking hidden"
+
+
+def test_the_conversation_title_ends_with_the_session_name_after_all() -> None:
+    assert conversation_title(None, False, session="auth rework") == "Conversation — auth rework"
+
+
+def test_the_conversation_title_ends_with_the_session_name_after_a_tab_label() -> None:
+    title = conversation_title("coder", False, session="auth rework")
+    assert title == "Conversation · coder — auth rework"
+
+
+def test_the_conversation_title_ends_with_the_session_name_after_hidden_thinking() -> None:
+    title = conversation_title("coder", True, session="auth rework")
+    assert title == "Conversation · coder · thinking hidden — auth rework"
+
+
+def test_the_conversation_title_keeps_a_30_character_session_name_whole() -> None:
+    name = "a" * 30
+    assert conversation_title(None, False, session=name) == f"Conversation — {name}"
+
+
+def test_the_conversation_title_cuts_a_31_character_session_name_to_30() -> None:
+    name = "a" * 30 + "b"
+    title = conversation_title(None, False, session=name)
+    assert title == f"Conversation — {'a' * 29}…"
+
+
+def test_the_conversation_title_is_plain_with_an_empty_session_name() -> None:
+    assert conversation_title("coder", False, session="") == "Conversation · coder"

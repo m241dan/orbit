@@ -107,13 +107,27 @@ CONVERSATION_TITLE = "Conversation"
 """The conversation window's title, before its tab's label and filter."""
 
 
-def conversation_title(label: str | None, thinking_hidden: bool) -> str:
+SESSION_NAME_WIDTH = 30
+"""The most characters of the open session's name the conversation window's title shows."""
+
+
+def conversation_title(
+    label: str | None, thinking_hidden: bool, *, session: str | None = None
+) -> str:
     """The conversation window's title: the tab's ``label`` after it unless All is shown
-    (None), and a note when ``thinking_hidden``."""
+    (None), a note when ``thinking_hidden``, and the open ``session``'s name, if it has one,
+    at the end."""
     parts = [CONVERSATION_TITLE, *(() if label is None else (label,))]
     if thinking_hidden:
         parts.append("thinking hidden")
-    return " · ".join(parts)
+    title = " · ".join(parts)
+    return f"{title} — {_session_name(session)}" if session else title
+
+
+def _session_name(name: str) -> str:
+    if len(name) <= SESSION_NAME_WIDTH:
+        return name
+    return name[: SESSION_NAME_WIDTH - 1] + "…"
 
 
 PLANNER_BUSY = "Planner is busy"
