@@ -60,8 +60,8 @@ from orbit.protocol import (
     VerificationStarted,
 )
 from orbit.tui.agents import AgentsPane
+from orbit.tui.conversation import ConversationFeed
 from orbit.tui.detail import DetailPane
-from orbit.tui.entries import Entry
 from orbit.tui.panels import UsagePanel, VerificationPanel
 from orbit.tui.proposals import ProposalScreen
 from orbit.tui.tabs import ConversationTabs
@@ -70,26 +70,10 @@ from orbit.tui.transcript import Transcript
 from orbit.tui.view import (
     PLANNER_BUSY,
     TOOL_ACCESS_OPTIONS,
-    AgentNote,
-    EntryKind,
-    TaskProgress,
-    Turns,
-    activity_entry,
-    agent_exited,
-    agent_started,
     coalesce,
     decision_entry,
-    error_entry,
-    exit_rule,
     model_options,
-    output_entry,
-    speaker,
-    task_note,
     tool_access_labels,
-    turn_finished,
-    turn_output,
-    turn_rule_entry,
-    turn_started,
 )
 from orbit.tui.widgets import (
     CONFIGURE_MESSAGE,
@@ -214,8 +198,6 @@ class OrbitApp(App[None], inherit_bindings=False):
         self._model_choices: tuple[str, ...] = ()
         self._proposal: ProposalScreen | None = None  # The proposal being shown, if any.
         self.clock: Callable[[], float] = time.monotonic
-        # The running turns and agents, timed by ``clock``.
-        self._turns = Turns()
         # Pickers are built once and installed so they open instantly.
         self._model_picker = PickerScreen("Model", model_options(())[1])
         self._tool_picker = PickerScreen("Tool access", tool_access_labels())
@@ -248,6 +230,10 @@ class OrbitApp(App[None], inherit_bindings=False):
         self._usage = self.query_one(UsagePanel)
         self._agents = self.query_one(AgentsPane)
         self._side = self.query_one("#side")
+        # Read through, so a clock set later still times the conversation.
+        self._feed = ConversationFeed(
+            self._transcript, self._tabs, self._task_list, self._verification, lambda: self.clock()
+        )
         self.query_one(f"#{self._selected}").add_class("selected")
         self.install_screen(self._model_picker, "pick-model")
         self.install_screen(self._tool_picker, "pick-tool-access")
@@ -267,7 +253,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         prompt.action_normal_mode()
         # Busy from now, not from TurnStarted, so a second prompt can't race the turn.
         self._set_busy("planner", True)
-        self._append(text, "prompt", PLANNER)
+        self._feed.append(text, "prompt", PLANNER)
         await self._session.send(SubmitPrompt(text=text))
 
     # Window navigation only applies at the top level, when no window is active.
@@ -496,18 +482,12 @@ class OrbitApp(App[None], inherit_bindings=False):
                 | AssistantMessage()
                 | ToolCallStarted()
                 | ToolCallFinished()
-            ):
-                self._render_conversation(event)
-            case (
-                TaskStarted()
+                | TaskStarted()
                 | VerificationStarted()
                 | VerificationSkipped()
                 | VerificationFinished()
                 | TaskMerged()
-            ):
-                self._render_progress(event)
-            case (
-                AgentStarted()
+                | AgentStarted()
                 | TaskGaveUp()
                 | AgentExited()
                 | AgentRequest()
@@ -516,7 +496,7 @@ class OrbitApp(App[None], inherit_bindings=False):
                 | Notice()
                 | StartupChecked()
             ):
-                self._render_activity(event)
+                self._feed.render(event)
             case _:
                 assert_never(event)
 
@@ -542,37 +522,6 @@ class OrbitApp(App[None], inherit_bindings=False):
                 self._show_progress(event)
             case _:
                 assert_never(event)
-
-    def _render_conversation(
-        self,
-        event: TurnStarted
-        | TurnFinished
-        | ErrorOccurred
-        | AssistantMessage
-        | ToolCallStarted
-        | ToolCallFinished,
-    ) -> None:
-        match event:
-            case TurnStarted():
-                self._turn_started(event)
-            case TurnFinished():
-                self._turn_finished(event)
-            case ErrorOccurred():
-                self._append(*error_entry(event), event.agent_id)
-            case AssistantMessage() | ToolCallStarted() | ToolCallFinished():
-                self._output(event)
-            case _:
-                assert_never(event)
-
-    def _render_progress(self, event: TaskProgress) -> None:
-        """Note a task run's progress in the transcript: under its role's tab, and All,
-        marking that tab unread when it isn't being shown."""
-        task_list = self._task_list
-        state = task_list.find(event.task_id)
-        number = None if state is None else task_list.numbers[task_list.position(event.task_id)]
-        (text, kind), key = task_note(event, state, number, self._verification.steps)
-        self._tabs.mark_unread(key)
-        self._transcript.add_entry(Entry(text, kind), key)
 
     def _follow_agents(self, event: Event) -> None:
         self._agents.track(event)
@@ -607,7 +556,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         async def decided(decision: DecideProposal | None) -> None:
             self._proposal = None
             if decision is not None:
-                self._append(*decision_entry(event.agent_id, decision), event.agent_id)
+                self._feed.append(*decision_entry(event.agent_id, decision), event.agent_id)
                 await self._session.send(decision)
 
         self.push_screen(screen, decided)
@@ -629,87 +578,3 @@ class OrbitApp(App[None], inherit_bindings=False):
         if lane == "planner":
             self._prompt.show_busy(busy)
             self._tabs.set_planner_busy(busy)
-
-    def _render_activity(self, event: AgentNote | AgentRequest | AgentExited) -> None:
-        """Show an agent's activity, a notice or the startup check's result; an agent's exit
-        ends its run in one rule, and a request to orbit is an entry its reply updates."""
-        if isinstance(event, AgentExited):
-            self._agent_exited(event)
-        elif isinstance(event, AgentRequest):
-            self._add_tool_call(event)
-        elif isinstance(event, AgentReply):
-            self._replied(event)
-        else:
-            if isinstance(event, AgentStarted):
-                self._turns = agent_started(self._turns, event, self.clock())
-            self._append(*activity_entry(event), getattr(event, "agent_id", None))
-
-    def _replied(self, event: AgentReply) -> None:
-        """Show orbit's reply on the request it answers, or as an entry of its own when no
-        request shown is the one."""
-        if not self._transcript.finish_tool_call(event):
-            self._append(*activity_entry(event), event.agent_id)
-
-    def _agent_exited(self, event: AgentExited) -> None:
-        """Add or update the rule ending ``event``'s agent's run, under All and its tab, which
-        is known by its id even once the tab has closed."""
-        agent = event.agent_id
-        self._transcript.end_tool_calls(agent, requests=True)
-        self._turns, exited = agent_exited(self._turns, event, self.clock())
-        for turn, answer in exited.answers:
-            self._transcript.promote(agent, turn, answer)
-        rule = exit_rule(event, exited.drawn, exited.elapsed, self._speaker(agent))
-        if rule is None:
-            return
-        if rule.replaces:
-            self._transcript.replace_rule(rule.text, rule.kind, self._tabs.key_of(agent), agent)
-        else:
-            self._append(rule.text, rule.kind, agent)
-
-    def _turn_started(self, event: TurnStarted) -> None:
-        # The prompt follows BusyChanged, which also covers task runs.
-        self._turns = turn_started(self._turns, event, self.clock())
-
-    def _turn_finished(self, event: TurnFinished) -> None:
-        if event.usage is not None:
-            self._task_list.count(event.usage)
-        self._transcript.end_tool_calls(event.agent_id)
-        self._turns, finished = turn_finished(self._turns, event, self.clock())
-        self._transcript.promote(event.agent_id, event.turn_id, finished.answer)
-        self._append(
-            *turn_rule_entry(event, finished.elapsed, self._speaker(event.agent_id)),
-            event.agent_id,
-        )
-
-    def _speaker(self, agent: str | None) -> str | None:
-        """Who ``agent``'s entries are spoken by: the agent, but not the planner."""
-        return speaker(agent, self._tabs.roles)
-
-    def _think(self, event: AssistantMessage) -> None:
-        """Show ``event``'s message dim, as thinking out loud until its turn ends."""
-        agent = event.agent_id
-        self._turns = turn_output(self._turns, event)
-        who = self._speaker(agent)
-        thinking = Entry(event.text, "assistant", agent, event.turn_id, speaker=who)
-        self._transcript.add_entry(thinking, self._tabs.key_of(agent))
-
-    def _output(self, event: AssistantMessage | ToolCallStarted | ToolCallFinished) -> None:
-        """Show a piece of a turn's output: a message dim until its turn ends, a tool call's
-        start as a step in its turn and an entry its result updates."""
-        if isinstance(event, AssistantMessage):
-            self._think(event)
-        elif isinstance(event, ToolCallStarted):
-            self._turns = turn_output(self._turns, event)
-            self._add_tool_call(event)
-        elif not self._transcript.finish_tool_call(event):
-            self._append(*output_entry(event), event.agent_id)
-
-    def _add_tool_call(self, event: ToolCallStarted | AgentRequest) -> None:
-        """Add the call or request to orbit ``event`` starts as a running entry."""
-        agent = event.agent_id
-        self._transcript.add_tool_call(event, self._tabs.key_of(agent), self._speaker(agent))
-
-    def _append(self, text: str, kind: EntryKind, agent: str | None = None) -> None:
-        # Entries are kept by tab: a pinned role's agents' under its tab.
-        entry = Entry(text, kind, agent, speaker=self._speaker(agent))
-        self._transcript.add_entry(entry, self._tabs.key_of(agent))

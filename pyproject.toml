@@ -145,6 +145,7 @@ forbidden_modules = [
     "textual",
     "orbit.tui.agents",
     "orbit.tui.app",
+    "orbit.tui.conversation",
     "orbit.tui.detail",
     "orbit.tui.entries",
     "orbit.tui.panels",
