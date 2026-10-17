@@ -1,6 +1,6 @@
 """Transcript entries: what each piece of a conversation reads as."""
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Literal, assert_never
 
@@ -113,11 +113,11 @@ def hanging_indent(kind: EntryKind, text: str) -> tuple[str, str]:
     return first, " " * len(first)
 
 
-def speaker(agent: str | None, key: str | None) -> str | None:
-    """Who ``agent``'s entries under the tab keyed ``key`` are spoken by: the agent, or None
-    for the planner's, under the planner's tab, and those with no agent, which are one speaker
-    of their own."""
-    return None if key == PLANNER else agent
+def speaker(agent: str | None, roles: Mapping[str, str]) -> str | None:
+    """Who ``agent``'s entries are spoken by: the agent, or None for the planner's, which are
+    those of an agent ``roles`` has pinned in the planner role, the user's prompts to it
+    (agent ``PLANNER``) and those with no agent, all one speaker of their own."""
+    return None if agent is None or roles.get(agent, agent) == PLANNER else agent
 
 
 CONVERSATION_TITLE = "Conversation"

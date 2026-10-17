@@ -199,19 +199,22 @@ def test_an_agents_message_after_its_own_entry_is_not_labelled() -> None:
     assert speaker_label("assistant", "agent-2", "agent-2") is None
 
 
+ROLES = {"agent-1": PLANNER, "agent-2": "coder"}
+
+
 def test_the_planners_messages_are_never_labelled() -> None:
-    assert speaker_label("assistant", None, "agent-1") is None
+    assert speaker_label("assistant", speaker("agent-1", ROLES), "agent-2") is None
 
 
-def test_an_agent_speaks_for_itself_under_its_tab() -> None:
-    assert speaker("agent-1", "agent-1") == "agent-1"
-    assert speaker("agent-1", "coder") == "agent-1"
+def test_an_agent_speaks_for_itself() -> None:
+    assert speaker("agent-2", ROLES) == "agent-2"
+    assert speaker("agent-9", ROLES) == "agent-9"
 
 
-def test_the_planner_and_entries_with_no_agent_are_one_speaker() -> None:
-    assert speaker("agent-1", PLANNER) is None
-    assert speaker(PLANNER, PLANNER) is None
-    assert speaker(None, "coder") is None
+def test_the_planner_its_prompts_and_entries_with_no_agent_are_one_speaker() -> None:
+    assert speaker("agent-1", ROLES) is None
+    assert speaker(PLANNER, ROLES) is None
+    assert speaker(None, ROLES) is None
 
 
 def test_entries_other_than_messages_are_never_labelled() -> None:

@@ -16,6 +16,7 @@ from orbit.protocol import (
 )
 from orbit.tui.view.common import clipped, spinner_frame
 from orbit.tui.view.tool_calls import tool_call_summary
+from orbit.tui.view.transcript import speaker
 
 WORKING_LINES_SHOWN = 3
 """The most running agents the row shows before summing up the rest in a ``+N more`` line."""
@@ -94,8 +95,10 @@ def working_key(agent: str | None, roles: Mapping[str, str]) -> str:
 
 
 def working_label(agent: str | None, roles: Mapping[str, str]) -> str:
-    """Who a working line names: ``planner`` for the planner, else the agent's id."""
-    return PLANNER if agent is None or roles.get(agent) == PLANNER else agent
+    """Who a working line names: ``planner`` for the planner (see :func:`speaker`), else the
+    agent's id."""
+    named = speaker(agent, roles)
+    return PLANNER if named is None else named
 
 
 def elapsed_clock(seconds: float) -> str:

@@ -64,7 +64,7 @@ from orbit.tui.panels import UsagePanel, VerificationPanel
 from orbit.tui.proposals import ProposalScreen
 from orbit.tui.tabs import ConversationTabs
 from orbit.tui.tasks import TaskEditorScreen, TaskList
-from orbit.tui.transcript import DetailPane, Transcript
+from orbit.tui.transcript import DetailPane, Entry, Transcript
 from orbit.tui.view import (
     PLANNER_BUSY,
     TOOL_ACCESS_OPTIONS,
@@ -81,6 +81,7 @@ from orbit.tui.view import (
     final_answer,
     model_options,
     output_entry,
+    speaker,
     task_note,
     tool_access_labels,
     turn_rule_entry,
@@ -573,7 +574,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         number = None if state is None else task_list.numbers[task_list.position(event.task_id)]
         (text, kind), key = task_note(event, state, number, self._verification.steps)
         self._tabs.mark_unread(key)
-        self._transcript.add_entry(text, kind, key)
+        self._transcript.add_entry(Entry(text, kind), key)
 
     def _follow_agents(self, event: Event) -> None:
         self._agents.track(event)
@@ -637,7 +638,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         if isinstance(event, AgentExited):
             self._agent_exited(event)
         elif isinstance(event, AgentRequest):
-            self._transcript.add_tool_call(event, self._tabs.key_of(event.agent_id))
+            self._add_tool_call(event)
         elif isinstance(event, AgentReply):
             self._replied(event)
         else:
@@ -699,14 +700,16 @@ class OrbitApp(App[None], inherit_bindings=False):
         self._transcript.promote(agent, turn, final_answer(steps))
 
     def _speaker(self, agent: str | None) -> str | None:
-        """Who heads ``agent``'s rules: the agent, but not the planner, alone in its tab."""
-        return None if self._tabs.key_of(agent) == PLANNER else agent
+        """Who ``agent``'s entries are spoken by: the agent, but not the planner."""
+        return speaker(agent, self._tabs.roles)
 
     def _think(self, event: AssistantMessage) -> None:
         """Show ``event``'s message dim, as thinking out loud until its turn ends."""
-        self._step(event.agent_id, event.turn_id, "message")
-        key = self._tabs.key_of(event.agent_id)
-        self._transcript.add_thinking(event.text, key, event.agent_id, event.turn_id)
+        agent = event.agent_id
+        self._step(agent, event.turn_id, "message")
+        who = self._speaker(agent)
+        thinking = Entry(event.text, "assistant", agent, event.turn_id, speaker=who)
+        self._transcript.add_entry(thinking, self._tabs.key_of(agent))
 
     def _output(self, event: AssistantMessage | ToolCallStarted | ToolCallFinished) -> None:
         """Show a piece of a turn's output: a message dim until its turn ends, a tool call's
@@ -715,9 +718,14 @@ class OrbitApp(App[None], inherit_bindings=False):
             self._think(event)
         elif isinstance(event, ToolCallStarted):
             self._step(event.agent_id, event.turn_id, "tool")
-            self._transcript.add_tool_call(event, self._tabs.key_of(event.agent_id))
+            self._add_tool_call(event)
         elif not self._transcript.finish_tool_call(event):
             self._append(*output_entry(event), event.agent_id)
+
+    def _add_tool_call(self, event: ToolCallStarted | AgentRequest) -> None:
+        """Add the call or request to orbit ``event`` starts as a running entry."""
+        agent = event.agent_id
+        self._transcript.add_tool_call(event, self._tabs.key_of(agent), self._speaker(agent))
 
     def _step(self, agent: str | None, turn: str, step: TurnStep) -> None:
         """Note ``step`` in ``agent``'s ``turn``, which decides its final answer when it ends."""
@@ -725,5 +733,5 @@ class OrbitApp(App[None], inherit_bindings=False):
 
     def _append(self, text: str, kind: EntryKind, agent: str | None = None) -> None:
         # Entries are kept by tab: a pinned role's agents' under its tab.
-        key = self._tabs.key_of(agent)
-        self._transcript.add_entry(text, kind, key, agent)
+        entry = Entry(text, kind, agent, speaker=self._speaker(agent))
+        self._transcript.add_entry(entry, self._tabs.key_of(agent))

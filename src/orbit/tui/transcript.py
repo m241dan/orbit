@@ -43,7 +43,6 @@ from orbit.tui.view import (
     hanging_indent,
     ruled,
     shows_markdown,
-    speaker,
     speaker_label,
     starts_collapsed,
     tool_call_entry,
@@ -59,7 +58,7 @@ from orbit.tui.widgets import ListPane, ModalFocus
 @dataclass(frozen=True)
 class Entry:
     """A transcript entry: its ``text``, the ``kind`` it's styled as, the ``agent`` it's by,
-    if any, and the ``key`` of the tab it belongs to besides All. An agent's message thinking
+    if any, and the ``speaker`` it's spoken by (see :func:`speaker`). An agent's message thinking
     out loud keeps the ``turn`` it's from, and is drawn dim, until it's found to be the turn's
     final answer. A tool call's entry keeps the ``call``, which its text shows in a line."""
 
@@ -68,12 +67,7 @@ class Entry:
     agent: str | None = None
     turn: str | None = None
     call: ToolCall | None = None
-    key: str | None = None
-
-    @property
-    def speaker(self) -> str | None:
-        """Who the entry is spoken by (see :func:`speaker`)."""
-        return speaker(self.agent, self.key)
+    speaker: str | None = None
 
 
 class LeftHeading(Heading):
@@ -308,12 +302,12 @@ class TranscriptLog(ListPane):
         """Whether any tool call shown here is still running."""
         return bool(self._calls)
 
-    def append_call(self, call: ToolCall, agent: str | None, key: str | None) -> None:
-        """Add ``agent``'s running ``call``, under the tab keyed ``key``, as a one-line entry,
-        its spinner turning on :meth:`tick`."""
+    def append_call(self, call: ToolCall, agent: str | None, speaker: str | None) -> None:
+        """Add ``agent``'s running ``call``, spoken by ``speaker``, as a one-line entry, its
+        spinner turning on :meth:`tick`."""
         self._calls[len(self._entries)] = call
         text, kind = tool_call_entry(call, agent, self.clock())
-        self._add(Entry(text, kind, agent, call=call, key=key))
+        self._add(Entry(text, kind, agent, call=call, speaker=speaker))
 
     def finish_call(self, event: ToolCallFinished | AgentReply) -> bool:
         """Show the running call or request ``event`` finishes as finished, redrawn where it
@@ -745,12 +739,10 @@ class Transcript(Vertical):
         """The entries under the tab keyed ``key``; None is All."""
         return self._logs[key].entries if key in self._logs else ()
 
-    def add_entry(
-        self, text: str, kind: EntryKind, key: str | None = None, agent: str | None = None
-    ) -> None:
-        """Add an entry by ``agent`` under All and, if ``key`` names a tab, under that tab."""
+    def add_entry(self, entry: Entry, key: str | None = None) -> None:
+        """Add ``entry`` under All and, if ``key`` names a tab, under that tab."""
         for tab in {None, key}:
-            self._log(tab).append(Entry(text, kind, agent, key=key))
+            self._log(tab).append(entry)
 
     def replace_rule(self, text: str, kind: EntryKind, key: str | None, agent: str) -> None:
         """Make ``agent``'s latest rule read ``text`` as a ``kind`` entry, under All and, if
@@ -763,12 +755,14 @@ class Transcript(Vertical):
         """Whether the spinners of running tool calls and requests are turning."""
         return self._timer is not None
 
-    def add_tool_call(self, event: ToolCallStarted | AgentRequest, key: str | None) -> None:
-        """Add the call or request to orbit ``event`` starts as a running entry under All and,
-        if ``key`` names a tab, under that tab."""
+    def add_tool_call(
+        self, event: ToolCallStarted | AgentRequest, key: str | None, speaker: str | None
+    ) -> None:
+        """Add the call or request to orbit ``event`` starts, spoken by ``speaker``, as a
+        running entry under All and, if ``key`` names a tab, under that tab."""
         call = tool_call_started(event)
         for tab in {None, key}:
-            self._log(tab).append_call(call, event.agent_id, key)
+            self._log(tab).append_call(call, event.agent_id, speaker)
         self._keep_ticking()
 
     def finish_tool_call(self, event: ToolCallFinished | AgentReply) -> bool:
@@ -798,12 +792,6 @@ class Transcript(Vertical):
         elif not running and self._timer is not None:
             self._timer.stop()
             self._timer = None
-
-    def add_thinking(self, text: str, key: str | None, agent: str | None, turn: str) -> None:
-        """Add ``agent``'s message in ``turn``, dim as thinking out loud until it's promoted,
-        under All and, if ``key`` names a tab, under that tab."""
-        for tab in {None, key}:
-            self._log(tab).append(Entry(text, "assistant", agent, turn, key=key))
 
     def promote(self, agent: str | None, turn: str, places: Iterable[int]) -> None:
         """Draw at full brightness, in every log holding them, the messages ``agent`` thought

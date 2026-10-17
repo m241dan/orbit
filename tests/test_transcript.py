@@ -11,11 +11,13 @@ from textual.app import App, ComposeResult
 from textual.pilot import Pilot
 
 from orbit.protocol import (
+    PLAN_TASK,
     PLANNER,
     AgentExited,
     AgentExitReason,
     AgentReply,
     AgentRequest,
+    AgentStarted,
     AssistantMessage,
     ErrorOccurred,
     Event,
@@ -112,8 +114,8 @@ async def test_entries_are_kept_under_all_and_under_their_tab() -> None:
         )
         transcript = app.query_one(Transcript)
         assert transcript.entries(None) == (
-            Entry("▶ agent-1 (coder) started", "agent", "agent-1", key="coder"),
-            Entry("hi", "assistant", "agent-1", "t", key="coder"),
+            Entry("▶ agent-1 (coder) started", "agent", "agent-1", speaker="agent-1"),
+            Entry("hi", "assistant", "agent-1", "t", speaker="agent-1"),
             Entry("📌 n", "verify"),
         )
         # agent-1 runs in a pinned role, so its entries belong to the role's tab.
@@ -714,9 +716,7 @@ async def test_a_submitted_prompt_is_added_as_a_prompt_entry() -> None:
     app = OrbitApp(FakeSession())
     async with app.run_test() as pilot:
         await pilot.press("i", *"hi", "enter")
-        assert app.query_one(Transcript).entries(None) == (
-            Entry("hi", "prompt", PLANNER, key=PLANNER),
-        )
+        assert app.query_one(Transcript).entries(None) == (Entry("hi", "prompt", PLANNER),)
         assert [row.rstrip() for row in entry_rows(visible_log(app), 0)] == ["│ ❯ hi", ""]
 
 
@@ -912,6 +912,18 @@ async def test_a_real_planners_messages_are_never_labelled() -> None:
         assert headings(app) == [None, None, None, None, "agent-2", None]
         await pilot.press("ctrl+t")  # The planner tab.
         assert labels(app) == ["▶ agent-1 (planner) started", "❯ hi", "planning", "planned"]
+        assert headings(app) == [None, None, None, None]
+
+
+async def test_the_planners_message_after_a_prompt_has_no_heading() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        planner = AgentStarted(agent_id="agent-1", role=PLANNER, task_id=PLAN_TASK)
+        await feed_events(session, pilot, planner)
+        await pilot.press("i", *"hi", "enter")
+        await feed_events(session, pilot, said("agent-1", "plan"), turn_ended("agent-1"))
+        assert labels(app) == ["▶ agent-1 (planner) started", "❯ hi", "plan", "done"]
         assert headings(app) == [None, None, None, None]
 
 
@@ -1143,7 +1155,8 @@ async def test_a_final_answer_brightens_under_all_and_its_roles_tab() -> None:
         await pilot.press("tab", "tab")  # coder
         assert brightness(app) == ["bright"]
         transcript = app.query_one(Transcript)
-        assert transcript.entries("coder")[1] == Entry("done", "assistant", "agent-1", key="coder")
+        done = Entry("done", "assistant", "agent-1", speaker="agent-1")
+        assert transcript.entries("coder")[1] == done
 
 
 TOOL_ROWS = ["agent-1: → Read ✓ 1 line"]
@@ -1393,10 +1406,10 @@ async def test_a_turns_rule_follows_its_last_entry_timed_from_its_start() -> Non
         now[0] = 350.0
         await feed_events(session, pilot, thought("agent-3", "done"), turn_ended("agent-3"))
         transcript = app.query_one(Transcript)
-        rule = Entry("agent-3 done · 4m10s", "rule", "agent-3", key="coder")
+        rule = Entry("agent-3 done · 4m10s", "rule", "agent-3", speaker="agent-3")
         for key in (None, "coder"):
             assert transcript.entries(key)[-2:] == (
-                Entry("done", "assistant", "agent-3", key="coder"),
+                Entry("done", "assistant", "agent-3", speaker="agent-3"),
                 rule,
             )
 
