@@ -18,6 +18,7 @@ from orbit.protocol import (
 from orbit.tui import OrbitApp
 from orbit.tui.transcript import DetailPane, Transcript, TranscriptLog, WorkingRow
 from orbit.tui.view import DETAIL_COVER_BELOW, DETAIL_HEIGHT, NO_DETAILS, WAITING
+from orbit.tui.widgets import ChatPrompt, ConfirmScreen
 from tests.test_tui import FakeSession, feed_events, said, started
 
 
@@ -148,6 +149,43 @@ async def test_escape_closes_the_pane_first_then_leaves_list_mode() -> None:
         assert not pane(app).opened and app.focused is log
         await pilot.press("escape")
         assert app.focused is None and log.highlighted == 0
+
+
+async def test_focus_leaving_the_conversation_closes_the_pane() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test(size=(80, 30)) as pilot:
+        await feed_events(session, pilot, read("c1"), done("c1", "x"))
+        await inspecting(pilot)
+        log = app.query_one(Transcript).shown
+        app.query_one(ChatPrompt).enter_insert_mode()
+        await pilot.pause()
+        assert not pane(app).opened and not log.inspecting
+
+
+async def test_escape_after_focus_left_keeps_the_pane_closed() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test(size=(80, 30)) as pilot:
+        await feed_events(session, pilot, read("c1"), done("c1", "x"))
+        await inspecting(pilot)
+        app.query_one(ChatPrompt).enter_insert_mode()
+        await pilot.pause()
+        app.screen.set_focus(None)
+        await pilot.press("escape")
+        assert not pane(app).opened
+
+
+async def test_a_dialog_over_the_conversation_leaves_the_pane_open() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test(size=(80, 30)) as pilot:
+        await feed_events(session, pilot, read("c1"), done("c1", "x"))
+        await inspecting(pilot)
+        await pilot.press("ctrl+e")
+        assert isinstance(app.screen, ConfirmScreen)
+        await pilot.press("n")
+        assert pane(app).opened and app.focused is app.query_one(Transcript).shown
 
 
 async def test_a_closed_pane_stays_closed_as_the_cursor_moves() -> None:

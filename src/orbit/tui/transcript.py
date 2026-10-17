@@ -259,6 +259,13 @@ class TranscriptLog(ListPane):
         else:
             super().action_normal_mode()
 
+    def on_blur(self) -> None:
+        """Leave list mode and, unless the detail pane took focus, stop inspecting: the pane
+        only follows a log in list mode."""
+        super().on_blur()
+        if self.inspecting and not isinstance(self.screen.focused, DetailPane):
+            self.inspect(False)
+
     def enter_list_mode(self) -> None:
         """Activate the list, starting at the latest entry when it holds no cursor."""
         if self.highlighted is None and self.option_count:

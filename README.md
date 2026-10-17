@@ -233,7 +233,8 @@ or an edit's diff, of more than 200 lines shows its first 100, a dim `… N line
 all …`, and its last 100, cut before it's highlighted. While the pane
 is open it follows the cursor as `j`/`k` move, showing a dim `No details for this entry` on other
 entries. The first `esc` closes it, staying in the list; the next leaves the list as usual.
-Switching tabs closes it, and it stays closed when you come back.
+Switching tabs closes it, and it stays closed when you come back; leaving the list any other way
+than `tab` to the pane, such as activating the prompt, closes it too.
 
 `J`/`K` scroll the open pane a line at a time from the conversation's list. To scroll it on its
 own, `tab` from the list activates the pane, where `j`/`k` scroll it; `esc` leaves it selected and
