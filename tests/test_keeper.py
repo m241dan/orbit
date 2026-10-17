@@ -218,10 +218,47 @@ async def test_the_review_count_is_read_and_saved_when_it_changes() -> None:
 
 async def test_a_review_count_that_cannot_be_saved_is_reported_and_tried_again() -> None:
     store = FakeStore()
-    store.failure = "Couldn't save the review count: disk full"
+    store.count_failure = "Couldn't save the review count: disk full"
     keeper, published = keeper_for(store)
     await keeper.save_review_count(1)
-    store.failure = None
+    store.count_failure = None
     await keeper.save_review_count(1)
     assert published.errors == ["Couldn't save the review count: disk full"]
+    assert store.counts == [1]
+
+
+async def test_a_failing_session_save_is_reported_once_though_count_saves_work() -> None:
+    store = FakeStore()
+    keeper, published = keeper_for(store)
+    store.failure = "full"
+    await save(keeper, WITH_TASK)
+    await keeper.save_review_count(1)
+    await save(keeper, EMPTY)
+    assert published.errors == ["full"]
+    assert store.counts == [1]
+
+
+async def test_session_and_count_save_failures_are_each_reported() -> None:
+    store = FakeStore()
+    keeper, published = keeper_for(store)
+    store.failure = "A"
+    await save(keeper, WITH_TASK)
+    store.count_failure = "B"
+    await keeper.save_review_count(1)
+    assert published.errors == ["A", "B"]
+
+
+async def test_count_saves_at_once_are_written_in_turn_the_newest_last() -> None:
+    store = FakeStore()
+    store.count_yields = [3, 0]
+    keeper, _ = keeper_for(store)
+    await asyncio.gather(keeper.save_review_count(1), keeper.save_review_count(2))
+    assert store.counts == [1, 2] and store.count == 2
+
+
+async def test_a_count_saved_while_another_waited_is_not_saved_again() -> None:
+    store = FakeStore()
+    store.count_yields = [1]
+    keeper, _ = keeper_for(store)
+    await asyncio.gather(keeper.save_review_count(1), keeper.save_review_count(1))
     assert store.counts == [1]

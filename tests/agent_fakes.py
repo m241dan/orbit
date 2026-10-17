@@ -195,7 +195,9 @@ class Ticks:
 class FakeStore:
     """Saved sessions kept in memory, holding the super review ``count``.
 
-    ``failure``, while set, is the error every save raises; ``free`` says whether the lock can
+    ``failure``, while set, is the error every session save raises, and ``count_failure`` the
+    error every count save raises; ``count_yields`` lists how many times each count save in
+    turn yields before it's written (none once it runs out). ``free`` says whether the lock can
     be taken, and ``lock_failure``, if set, is the error taking it raises. Sessions in
     ``elsewhere`` are locked by another orbit, those in ``broken`` are unreadable for the reason
     given, and ``delete_failure``, if set, is the error deleting one raises. ``on_acquire``, if
@@ -209,6 +211,8 @@ class FakeStore:
         self.count = count
         self.counts: list[int] = []  # Each count saved.
         self.failure: str | None = None
+        self.count_failure: str | None = None
+        self.count_yields: list[int] = []
         self.free = True
         self.lock_failure: str | None = None
         self.elsewhere: set[str] = set()
@@ -262,8 +266,10 @@ class FakeStore:
         return self.count
 
     async def save_review_count(self, count: int) -> None:
-        if self.failure is not None:
-            raise RuntimeError(self.failure)
+        if self.count_failure is not None:
+            raise RuntimeError(self.count_failure)
+        for _ in range(self.count_yields.pop(0) if self.count_yields else 0):
+            await asyncio.sleep(0)  # Saving takes a while, as writing a file does.
         self.count = count
         self.counts.append(count)
 

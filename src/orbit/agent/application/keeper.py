@@ -11,6 +11,7 @@ import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Literal
 
 from orbit.agent.application.ports import Publish, SessionStore, StoredSession
 from orbit.agent.domain.reviews import LaneSnapshot
@@ -38,6 +39,9 @@ IdMaker = Callable[[], str]
 
 Commit = Callable[[], bool]
 """Switches what the session holds, unless that's refused now; returns whether it did."""
+
+SaveKind = Literal["session", "count"]
+"""What a save writes: the session, or the super review count."""
 
 
 @dataclass(frozen=True)
@@ -75,6 +79,9 @@ class SessionKeeper:
     It's ``used`` once it has a task or :meth:`use` is called, and only then saved, locked in
     the store from its first save until :meth:`close`, or until another session is opened in
     its place.
+
+    A failing save is reported once, until a save of the same kind (the session, or the super
+    review count) works again.
     """
 
     def __init__(
@@ -95,9 +102,11 @@ class SessionKeeper:
         self._saved: Contents | None = None  # What the last save wrote.
         self._locked: bool | None = None  # Whether the lock was taken; None until tried.
         self._closed = False
-        self._failing = False  # A save failed, and was reported, since the last that worked.
+        # The kinds of save that failed, and were reported, since the last of each that worked.
+        self._failing: set[SaveKind] = set()
         self._count: int | None = None  # The super review count the store holds.
         self._saving = asyncio.Lock()  # Saves one at a time, so the newest is written last.
+        self._counting = asyncio.Lock()  # Likewise for count saves.
 
     def rename(self, name: str | None) -> None:
         """Name the session ``name``, unless it's none or blank; once used, it's saved again
@@ -154,7 +163,7 @@ class SessionKeeper:
             tasks=contents.tasks,
             reviews=contents.reviews,
         )
-        if await self._attempt(store.save(record)):
+        if await self._attempt("session", store.save(record)):
             self._saved = contents
 
     async def summaries(self) -> tuple[SessionSummary, ...]:
@@ -297,7 +306,8 @@ class SessionKeeper:
         """Be the session ``session_id``, unused and unsaved so far; returns the one left."""
         left = Left(self.id if self._locked else None)
         self.id, self.name, self.created = session_id, name, created
-        self.used, self._saved, self._locked, self._failing = False, None, None, False
+        self.used, self._saved, self._locked = False, None, None
+        self._failing.discard("session")
         return left
 
     async def review_count(self) -> int | None:
@@ -309,23 +319,26 @@ class SessionKeeper:
 
     async def save_review_count(self, count: int) -> None:
         """Save ``count`` as the repository's commits since the last super review, if it
-        changed."""
-        if self._store is None or count == self._count:
+        changed. Count saves are made one at a time, so the newest is written last."""
+        if self._store is None:
             return
-        if await self._attempt(self._store.save_review_count(count)):
-            self._count = count
+        async with self._counting:
+            if count != self._count and await self._attempt(
+                "count", self._store.save_review_count(count)
+            ):
+                self._count = count
 
-    async def _attempt(self, saving: Awaitable[None]) -> bool:
-        """Await ``saving``; returns whether it worked. The first failure since the last save
-        that worked is reported, and work carries on."""
+    async def _attempt(self, kind: SaveKind, saving: Awaitable[None]) -> bool:
+        """Await ``saving``, a save of ``kind``; returns whether it worked. The first failure
+        since the last save of that kind that worked is reported, and work carries on."""
         try:
             await saving
         except RuntimeError as exc:
-            if not self._failing:
-                self._failing = True
+            if kind not in self._failing:
+                self._failing.add(kind)
                 await self._publish(ErrorOccurred(message=str(exc)))
             return False
-        self._failing = False
+        self._failing.discard(kind)
         return True
 
     async def close(self) -> None:
