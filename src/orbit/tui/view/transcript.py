@@ -113,10 +113,11 @@ def hanging_indent(kind: EntryKind, text: str) -> tuple[str, str]:
     return first, " " * len(first)
 
 
-def speaker(agent: str | None) -> str | None:
-    """Who ``agent``'s entries are spoken by: the agent, or None for the planner's and those
-    with no agent, which are one speaker of their own."""
-    return None if agent == PLANNER else agent
+def speaker(agent: str | None, key: str | None) -> str | None:
+    """Who ``agent``'s entries under the tab keyed ``key`` are spoken by: the agent, or None
+    for the planner's, under the planner's tab, and those with no agent, which are one speaker
+    of their own."""
+    return None if key == PLANNER else agent
 
 
 CONVERSATION_TITLE = "Conversation"
@@ -141,11 +142,11 @@ def prompt_title(busy: bool) -> str:
     return " · ".join(["Prompt", PLANNER, *(("busy",) if busy else ())])
 
 
-def speaker_label(kind: EntryKind, agent: str | None, previous: str | None) -> str | None:
-    """The label heading an entry of ``kind`` by ``agent``: the agent's id, for an agent's
-    message when the ``previous`` entry in its log was by someone else; None otherwise."""
-    current = speaker(agent)
-    if kind != "assistant" or current is None or current == speaker(previous):
+def speaker_label(kind: EntryKind, current: str | None, previous: str | None) -> str | None:
+    """The label heading an entry of ``kind`` spoken by ``current`` (see :func:`speaker`): the
+    speaker, for an agent's message when the ``previous`` entry in its log was spoken by
+    someone else; None otherwise."""
+    if kind != "assistant" or current is None or current == previous:
         return None
     return current
 

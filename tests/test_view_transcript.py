@@ -53,6 +53,7 @@ from orbit.tui.view import (
     prompt_title,
     ruled,
     shows_markdown,
+    speaker,
     speaker_label,
     starts_collapsed,
     task_started_entry,
@@ -192,7 +193,6 @@ def test_an_agents_message_leaves_its_agent_out_of_its_text() -> None:
 def test_an_agents_message_is_labelled_when_the_speaker_changes() -> None:
     assert speaker_label("assistant", "agent-2", None) == "agent-2"
     assert speaker_label("assistant", "agent-2", "agent-1") == "agent-2"
-    assert speaker_label("assistant", "agent-2", PLANNER) == "agent-2"
 
 
 def test_an_agents_message_after_its_own_entry_is_not_labelled() -> None:
@@ -201,7 +201,17 @@ def test_an_agents_message_after_its_own_entry_is_not_labelled() -> None:
 
 def test_the_planners_messages_are_never_labelled() -> None:
     assert speaker_label("assistant", None, "agent-1") is None
-    assert speaker_label("assistant", PLANNER, "agent-1") is None
+
+
+def test_an_agent_speaks_for_itself_under_its_tab() -> None:
+    assert speaker("agent-1", "agent-1") == "agent-1"
+    assert speaker("agent-1", "coder") == "agent-1"
+
+
+def test_the_planner_and_entries_with_no_agent_are_one_speaker() -> None:
+    assert speaker("agent-1", PLANNER) is None
+    assert speaker(PLANNER, PLANNER) is None
+    assert speaker(None, "coder") is None
 
 
 def test_entries_other_than_messages_are_never_labelled() -> None:

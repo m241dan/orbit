@@ -43,6 +43,7 @@ from orbit.tui.view import (
     hanging_indent,
     ruled,
     shows_markdown,
+    speaker,
     speaker_label,
     starts_collapsed,
     tool_call_entry,
@@ -57,16 +58,22 @@ from orbit.tui.widgets import ListPane, ModalFocus
 
 @dataclass(frozen=True)
 class Entry:
-    """A transcript entry: its ``text``, the ``kind`` it's styled as and the ``agent`` it's
-    by, if any. An agent's message thinking out loud keeps the ``turn`` it's from, and is drawn
-    dim, until it's found to be the turn's final answer. A tool call's entry keeps the ``call``,
-    which its text shows in a line."""
+    """A transcript entry: its ``text``, the ``kind`` it's styled as, the ``agent`` it's by,
+    if any, and the ``key`` of the tab it belongs to besides All. An agent's message thinking
+    out loud keeps the ``turn`` it's from, and is drawn dim, until it's found to be the turn's
+    final answer. A tool call's entry keeps the ``call``, which its text shows in a line."""
 
     text: str
     kind: EntryKind
     agent: str | None = None
     turn: str | None = None
     call: ToolCall | None = None
+    key: str | None = None
+
+    @property
+    def speaker(self) -> str | None:
+        """Who the entry is spoken by (see :func:`speaker`)."""
+        return speaker(self.agent, self.key)
 
 
 class LeftHeading(Heading):
@@ -264,13 +271,11 @@ class TranscriptLog(ListPane):
             self.highlighted = self.option_count - 1
         super().enter_list_mode()
 
-    def append(
-        self, text: str, kind: EntryKind, agent: str | None = None, turn: str | None = None
-    ) -> None:
-        """Add an entry by ``agent``, dim while thinking out loud in ``turn``, collapsed if its
+    def append(self, entry: Entry) -> None:
+        """Add ``entry``, dim while its agent thinks out loud in its turn, collapsed if its
         kind starts so; the view stays pinned to the latest entry unless the list is active or
         holds a cursor."""
-        self._add(Entry(text, kind, agent, turn))
+        self._add(entry)
 
     def _add(self, entry: Entry) -> None:
         self._entries.append(entry)
@@ -291,7 +296,7 @@ class TranscriptLog(ListPane):
         if not rules:
             return
         index = rules[-1]
-        self._entries[index] = Entry(text, kind, agent)
+        self._entries[index] = replace(self._entries[index], text=text, kind=kind)
         self._redraw(self._rows.index(index))  # Rules are never hidden.
 
     @property
@@ -299,11 +304,12 @@ class TranscriptLog(ListPane):
         """Whether any tool call shown here is still running."""
         return bool(self._calls)
 
-    def append_call(self, call: ToolCall, agent: str | None) -> None:
-        """Add ``agent``'s running ``call`` as a one-line entry, its spinner turning on
-        :meth:`tick`."""
+    def append_call(self, call: ToolCall, agent: str | None, key: str | None) -> None:
+        """Add ``agent``'s running ``call``, under the tab keyed ``key``, as a one-line entry,
+        its spinner turning on :meth:`tick`."""
         self._calls[len(self._entries)] = call
-        self._add(Entry(*tool_call_entry(call, agent, self.clock()), agent, call=call))
+        text, kind = tool_call_entry(call, agent, self.clock())
+        self._add(Entry(text, kind, agent, call=call, key=key))
 
     def finish_call(self, event: ToolCallFinished | AgentReply) -> bool:
         """Show the running call or request ``event`` finishes as finished, redrawn where it
@@ -470,8 +476,8 @@ class TranscriptLog(ListPane):
         """The label row heading the entry at option ``row``, when it's an agent's message and
         the speaker changed from the entry shown before it."""
         entry = self._entries[self._rows[row]]
-        previous = self._entries[self._rows[row - 1]].agent if row else None
-        label = speaker_label(entry.kind, entry.agent, previous)
+        previous = self._entries[self._rows[row - 1]].speaker if row else None
+        label = speaker_label(entry.kind, entry.speaker, previous)
         if label is None:
             return None
         return Text(label, style=self.get_component_rich_style("transcript--label", partial=True))
@@ -731,7 +737,7 @@ class Transcript(Vertical):
     ) -> None:
         """Add an entry by ``agent`` under All and, if ``key`` names a tab, under that tab."""
         for tab in {None, key}:
-            self._log(tab).append(text, kind, agent)
+            self._log(tab).append(Entry(text, kind, agent, key=key))
 
     def replace_rule(self, text: str, kind: EntryKind, key: str | None, agent: str) -> None:
         """Make ``agent``'s latest rule read ``text`` as a ``kind`` entry, under All and, if
@@ -749,7 +755,7 @@ class Transcript(Vertical):
         if ``key`` names a tab, under that tab."""
         call = tool_call_started(event)
         for tab in {None, key}:
-            self._log(tab).append_call(call, event.agent_id)
+            self._log(tab).append_call(call, event.agent_id, key)
         self._keep_ticking()
 
     def finish_tool_call(self, event: ToolCallFinished | AgentReply) -> bool:
@@ -784,7 +790,7 @@ class Transcript(Vertical):
         """Add ``agent``'s message in ``turn``, dim as thinking out loud until it's promoted,
         under All and, if ``key`` names a tab, under that tab."""
         for tab in {None, key}:
-            self._log(tab).append(text, "assistant", agent, turn)
+            self._log(tab).append(Entry(text, "assistant", agent, turn, key=key))
 
     def promote(self, agent: str | None, turn: str, places: Iterable[int]) -> None:
         """Draw at full brightness, in every log holding them, the messages ``agent`` thought

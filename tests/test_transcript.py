@@ -111,8 +111,8 @@ async def test_entries_are_kept_under_all_and_under_their_tab() -> None:
         )
         transcript = app.query_one(Transcript)
         assert transcript.entries(None) == (
-            Entry("▶ agent-1 (coder) started", "agent", "agent-1"),
-            Entry("hi", "assistant", "agent-1", "t"),
+            Entry("▶ agent-1 (coder) started", "agent", "agent-1", key="coder"),
+            Entry("hi", "assistant", "agent-1", "t", key="coder"),
             Entry("📌 n", "verify"),
         )
         # agent-1 runs in a pinned role, so its entries belong to the role's tab.
@@ -140,8 +140,8 @@ async def test_entry_kinds_style_the_entries() -> None:
     app = LogApp()
     async with app.run_test() as pilot:
         log = app.query_one(TranscriptLog)
-        log.append("Task 1: do it", "user")
-        log.append("plain", "assistant")
+        log.append(Entry("Task 1: do it", "user"))
+        log.append(Entry("plain", "assistant"))
         await pilot.pause()
         header, plain = (label_style(entry(log, index)) for index in range(2))
         assert header == log.get_component_rich_style("transcript--user", partial=True)
@@ -509,7 +509,7 @@ class LongLogApp(App[None]):
     def compose(self) -> ComposeResult:
         log = TranscriptLog(shown=True)
         for i in range(1000):
-            log.append(f"entry {i}\nmore", "tool" if i % 2 else "agent")
+            log.append(Entry(f"entry {i}\nmore", "tool" if i % 2 else "agent"))
         yield log
 
 
@@ -685,7 +685,7 @@ async def test_awkward_markdown_stays_within_the_log(text: str) -> None:
     app = LogApp()
     async with app.run_test(size=(40, 24)) as pilot:
         log = app.query_one(TranscriptLog)
-        log.append(text, "assistant")
+        log.append(Entry(text, "assistant"))
         await pilot.pause()
         rows = entry_rows(log, 0)
         assert len(rows) >= 2
@@ -699,7 +699,7 @@ async def test_markdown_that_renders_nothing_still_draws_a_gutter_row(text: str)
     app = LogApp()
     async with app.run_test() as pilot:
         log = app.query_one(TranscriptLog)
-        log.append(text, "assistant")
+        log.append(Entry(text, "assistant"))
         await pilot.pause()
         assert entry_rows(log, 0)[0].startswith(GUTTER_BAR)
         assert entry_rows(log, 0)[-1] == ""
@@ -713,7 +713,9 @@ async def test_a_submitted_prompt_is_added_as_a_prompt_entry() -> None:
     app = OrbitApp(FakeSession())
     async with app.run_test() as pilot:
         await pilot.press("i", *"hi", "enter")
-        assert app.query_one(Transcript).entries(None) == (Entry("hi", "prompt", PLANNER),)
+        assert app.query_one(Transcript).entries(None) == (
+            Entry("hi", "prompt", PLANNER, key=PLANNER),
+        )
         assert [row.rstrip() for row in entry_rows(visible_log(app), 0)] == ["│ ❯ hi", ""]
 
 
@@ -723,7 +725,7 @@ async def appended(*entries: tuple[str, EntryKind]) -> list[list[str]]:
     async with app.run_test() as pilot:
         log = app.query_one(TranscriptLog)
         for text, kind in entries:
-            log.append(text, kind)
+            log.append(Entry(text, kind))
         await pilot.pause()
         return [[row.rstrip() for row in entry_rows(log, i)] for i in range(len(entries))]
 
@@ -749,7 +751,7 @@ async def test_every_row_of_a_prompt_is_banded_across_the_width_beside_the_gutte
     app = LogApp()
     async with app.run_test() as pilot:
         log = app.query_one(TranscriptLog)
-        log.append(f"{LONG}\n\nend", "prompt")
+        log.append(Entry(f"{LONG}\n\nend", "prompt"))
         await pilot.pause()
         band = log.get_component_rich_style("transcript--prompt")
         assert band.bgcolor is not None and not band.bold
@@ -765,7 +767,7 @@ async def test_task_headers_stay_bold_and_plain_without_a_band() -> None:
     app = LogApp()
     async with app.run_test() as pilot:
         log = app.query_one(TranscriptLog)
-        log.append("Task 3: **do** it", "user")
+        log.append(Entry("Task 3: **do** it", "user"))
         await pilot.pause()
         header = entry(log, 0)
         assert header.band is None and header.body is None
@@ -781,8 +783,8 @@ async def test_a_prompt_longer_than_its_lines_shown_starts_collapsed() -> None:
     app = LogApp()
     async with app.run_test() as pilot:
         log = app.query_one(TranscriptLog)
-        log.append(prompt_of(PROMPT_LINES_SHOWN + 1), "prompt")
-        log.append(prompt_of(PROMPT_LINES_SHOWN), "prompt")
+        log.append(Entry(prompt_of(PROMPT_LINES_SHOWN + 1), "prompt"))
+        log.append(Entry(prompt_of(PROMPT_LINES_SHOWN), "prompt"))
         await pilot.pause()
         assert log.collapsed(0) and not log.collapsed(1)
         assert entry(log, 0).body is None
@@ -794,7 +796,7 @@ async def test_a_prompt_toggles_between_collapsed_and_expanded() -> None:
     app = LogApp()
     async with app.run_test() as pilot:
         log = app.query_one(TranscriptLog)
-        log.append("one\n\ntwo", "prompt")
+        log.append(Entry("one\n\ntwo", "prompt"))
         await pilot.pause()
         log.toggle(0)
         await pilot.pause()
@@ -812,8 +814,8 @@ async def test_entries_other_than_agents_messages_show_their_text_as_it_is(
     app = LogApp()
     async with app.run_test() as pilot:
         log = app.query_one(TranscriptLog)
-        log.append("# **a**", kind)
-        log.append("# **a**\n- b", kind)
+        log.append(Entry("# **a**", kind))
+        log.append(Entry("# **a**\n- b", kind))
         await pilot.pause()
         if log.collapsed(1):
             log.toggle(1)
@@ -891,6 +893,25 @@ async def test_the_planners_messages_are_never_labelled() -> None:
             AssistantMessage(turn_id="t", text="planned"),
         )
         assert headings(app) == [None, None, "agent-1", None]
+
+
+async def test_a_real_planners_messages_are_never_labelled() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test(size=(120, 30)) as pilot:
+        await feed_events(session, pilot, started("agent-1", "planner"), started("agent-2"))
+        await pilot.press("i", *"hi", "enter")
+        await feed_events(
+            session,
+            pilot,
+            said("agent-1", "planning"),
+            said("agent-2", "coding"),
+            said("agent-1", "planned"),
+        )
+        assert headings(app) == [None, None, None, None, "agent-2", None]
+        await pilot.press("ctrl+t")  # The planner tab.
+        assert labels(app) == ["▶ agent-1 (planner) started", "❯ hi", "planning", "planned"]
+        assert headings(app) == [None, None, None, None]
 
 
 async def test_the_speaker_is_judged_within_each_tab() -> None:
@@ -1063,7 +1084,7 @@ async def test_a_final_answer_brightens_under_all_and_its_roles_tab() -> None:
         await pilot.press("tab", "tab")  # coder
         assert brightness(app) == ["bright"]
         transcript = app.query_one(Transcript)
-        assert transcript.entries("coder")[1] == Entry("done", "assistant", "agent-1")
+        assert transcript.entries("coder")[1] == Entry("done", "assistant", "agent-1", key="coder")
 
 
 TOOL_ROWS = ["agent-1: → Read ✓ 1 line"]
@@ -1264,9 +1285,12 @@ async def test_a_turns_rule_follows_its_last_entry_timed_from_its_start() -> Non
         now[0] = 350.0
         await feed_events(session, pilot, thought("agent-3", "done"), turn_ended("agent-3"))
         transcript = app.query_one(Transcript)
-        rule = Entry("agent-3 done · 4m10s", "rule", "agent-3")
+        rule = Entry("agent-3 done · 4m10s", "rule", "agent-3", key="coder")
         for key in (None, "coder"):
-            assert transcript.entries(key)[-2:] == (Entry("done", "assistant", "agent-3"), rule)
+            assert transcript.entries(key)[-2:] == (
+                Entry("done", "assistant", "agent-3", key="coder"),
+                rule,
+            )
 
 
 async def test_a_turns_rule_with_usage_shows_its_time_and_tokens() -> None:
@@ -1409,7 +1433,7 @@ async def test_replacing_a_rule_in_a_log_without_one_leaves_it() -> None:
     app = LogApp()
     async with app.run_test():
         log = app.query_one(TranscriptLog)
-        log.append("hi", "agent", "agent-3")
+        log.append(Entry("hi", "agent", "agent-3"))
         log.replace_rule("agent-3", "agent-3 stopped", "rule")
         assert log.entries == (Entry("hi", "agent", "agent-3"),)
 
