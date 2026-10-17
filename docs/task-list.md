@@ -46,6 +46,7 @@ itself, until you take it over, and lets go again when you're done looking.
 ## How it will be built
 
 1. The active-task view rule, follow scrolling, and activation landing on the active task.
+   Done.
 2. Holding (on activating and on the mouse wheel), the `· held` title, and `esc` letting go.
 
 ## Out of scope

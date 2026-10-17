@@ -108,7 +108,15 @@ from orbit.tui.view.tabs import (
     track_roles,
     track_tabs,
 )
-from orbit.tui.view.tasks import join_prompt, split_prompt, task_label, task_numbers, usage_label
+from orbit.tui.view.tasks import (
+    active_task,
+    follow_top,
+    join_prompt,
+    split_prompt,
+    task_label,
+    task_numbers,
+    usage_label,
+)
 from orbit.tui.view.tool_calls import (
     KEY_ARGUMENTS,
     ORBIT_TOOL_FIELDS,
@@ -267,6 +275,7 @@ __all__ = [
     "Turns",
     "Working",
     "WorkingView",
+    "active_task",
     "activity_entry",
     "agent_entry",
     "agent_exited",
@@ -302,6 +311,7 @@ __all__ = [
     "file_diff",
     "final_answer",
     "finishes",
+    "follow_top",
     "gutter",
     "hanging_indent",
     "join_prompt",

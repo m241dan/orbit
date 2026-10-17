@@ -93,6 +93,11 @@ class ListPane(ModalFocus, OptionList):
         if self._activate() and self.highlighted is None and self.option_count:
             self.highlighted = 0
 
+    def row_lines(self) -> list[tuple[int, int]]:
+        """Each row's first line and height, once the list is measured; none before."""
+        tops, heights = self._index_to_line, self._heights
+        return [(tops[i], heights[i]) for i in range(len(tops))]
+
     def show_rows(self, rows: Sequence[Row], trailing: Option | None = None) -> None:
         """Show ``rows``, then ``trailing`` if given. The same keys in the same order have the
         rows whose label changed relabelled in place; otherwise the rows are rebuilt, the

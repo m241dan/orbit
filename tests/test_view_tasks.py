@@ -1,9 +1,12 @@
 from orbit.protocol import (
     TaskSpec,
     TaskState,
+    TaskStatus,
     Usage,
 )
 from orbit.tui.view import (
+    active_task,
+    follow_top,
     join_prompt,
     split_prompt,
     task_numbers,
@@ -83,3 +86,61 @@ def test_task_list_and_turn_rule_read_the_same_count_alike() -> None:
     usage = Usage(input_tokens=14_500)
     assert usage_label(usage) == "14k tok · $0.00"
     assert usage_text(usage) == "↑14k ↓0"
+
+
+def states(*statuses: TaskStatus) -> list[TaskState]:
+    return [
+        TaskState(id=str(i), task=TaskSpec(prompt=str(i)), status=status)
+        for i, status in enumerate(statuses)
+    ]
+
+
+def test_no_task_running_or_verifying_means_no_active_task() -> None:
+    assert active_task([]) is None
+    assert active_task(states("completed", "pending", "draft", "error")) is None
+
+
+def test_the_one_running_task_is_active() -> None:
+    assert active_task(states("completed", "running", "pending")) == 1
+
+
+def test_the_topmost_of_several_running_or_verifying_tasks_is_active() -> None:
+    assert active_task(states("completed", "verifying", "running", "verifying")) == 1
+    assert active_task(states("pending", "running", "verifying")) == 1
+
+
+def test_a_verifying_task_is_active_whatever_its_role() -> None:
+    review = TaskState(id="r", task=TaskSpec(prompt="r", role="reviewer"), status="verifying")
+    assert active_task([*states("completed"), review]) == 1
+
+
+TWO_LINE_ROWS = [(0, 2), (2, 2), (4, 2), (6, 2), (8, 2), (10, 2)]
+
+
+def test_a_row_in_view_needs_no_scroll() -> None:
+    assert follow_top(TWO_LINE_ROWS, 1, 0, 6) is None
+    assert follow_top(TWO_LINE_ROWS, 4, 4, 6) is None
+
+
+def test_a_row_below_the_view_scrolls_up_to_the_views_bottom() -> None:
+    assert follow_top(TWO_LINE_ROWS, 4, 0, 6) == 4
+    # Half in view counts as out of view.
+    assert follow_top(TWO_LINE_ROWS, 2, 0, 5) == 1
+
+
+def test_a_row_above_the_view_comes_in_with_the_row_above_it() -> None:
+    assert follow_top(TWO_LINE_ROWS, 2, 8, 6) == 2
+    assert follow_top(TWO_LINE_ROWS, 2, 5, 6) == 2
+
+
+def test_the_top_row_needs_no_context_above_it() -> None:
+    assert follow_top(TWO_LINE_ROWS, 0, 4, 6) == 0
+
+
+def test_a_tall_row_shows_from_its_top_when_the_view_is_too_short() -> None:
+    rows = [(0, 2), (2, 5), (7, 2)]
+    # No room for the row above it.
+    assert follow_top(rows, 1, 6, 6) == 2
+    # Taller than the view: its top shows, whichever side it's on.
+    assert follow_top(rows, 1, 6, 4) == 2
+    assert follow_top(rows, 1, 0, 4) == 2

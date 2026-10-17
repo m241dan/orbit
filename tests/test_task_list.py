@@ -191,8 +191,8 @@ async def test_running_tasks_spin_in_place() -> None:
                 )
             ),
         )
-        await open_task_list(pilot)
-        await pilot.press("j", "j")
+        await open_task_list(pilot)  # On the running task, "two".
+        await pilot.press("j")
         assert [r.split("\n")[0] for r in rows(app)[:3]] == [
             "1. ✅ one",
             "2. ◜  two",
@@ -831,3 +831,89 @@ async def test_task_list_ticks_only_while_a_task_runs() -> None:
         assert tasks.ticking
         await feed(session, pilot, board("one", "two", status="verifying"))
         assert not tasks.ticking
+
+
+def many(count: int, running: int | None = None) -> TasksChanged:
+    """A board of ``count`` pending tasks, with task ``running`` (from 0) running if given."""
+    tasks = board(*(f"task {n}" for n in range(count))).tasks
+    if running is not None:
+        changed = tasks[running].model_copy(update={"status": "running"})
+        tasks = (*tasks[:running], changed, *tasks[running + 1 :])
+    return TasksChanged(tasks=tasks)
+
+
+def in_view(task_list: TaskList, index: int) -> bool:
+    top, height = task_list.row_lines()[index]
+    view_top = round(task_list.scroll_y)
+    return view_top <= top and top + height <= view_top + task_list.scrollable_content_region.height
+
+
+async def test_the_list_follows_the_active_task_down_the_board() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        task_list = app.query_one(TaskList)
+        assert task_list.following
+        await feed(session, pilot, many(30))
+        assert task_list.scroll_y == 0  # Nothing active: it stays put.
+        await feed(session, pilot, many(30, running=25))
+        assert in_view(task_list, 25)
+        # Scrolled just enough: the task is on the last lines.
+        top, height = task_list.row_lines()[25]
+        assert top + height == task_list.scroll_y + task_list.scrollable_content_region.height
+        assert task_list.highlighted is None  # Following only scrolls.
+
+
+async def test_the_list_scrolls_back_up_to_the_active_task_with_a_row_above_it() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        task_list = app.query_one(TaskList)
+        await feed(session, pilot, many(30, running=25))
+        await feed(session, pilot, many(30, running=3))
+        assert task_list.scroll_y == task_list.row_lines()[2][0]
+
+
+async def test_the_list_does_not_scroll_while_the_active_task_is_in_view() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        task_list = app.query_one(TaskList)
+        await feed(session, pilot, many(30, running=25))
+        scroll_y = task_list.scroll_y
+        await feed(session, pilot, many(30, running=24))
+        assert task_list.scroll_y == scroll_y
+
+
+async def test_the_list_follows_the_active_task_when_resized() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test(size=(120, 60)) as pilot:
+        task_list = app.query_one(TaskList)
+        await feed(session, pilot, many(30, running=12))
+        assert task_list.scroll_y == 0
+        await pilot.resize_terminal(120, 24)
+        await pilot.pause()
+        assert in_view(task_list, 12)
+
+
+async def test_activating_the_list_highlights_the_active_task() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        task_list = app.query_one(TaskList)
+        await feed(session, pilot, many(30, running=25))
+        await open_task_list(pilot)
+        assert task_list.highlighted == 25
+        assert in_view(task_list, 25)
+        # It lands there even when the highlight was elsewhere.
+        await pilot.press("k", "k", "escape", "enter")
+        assert task_list.highlighted == 25
+
+
+def test_a_list_not_laid_out_yet_has_nothing_to_follow() -> None:
+    task_list = TaskList(id="task-list")
+    verifying = board("one", status="verifying").tasks
+    task_list.show(verifying)
+    assert task_list.row_lines() == []
+    assert task_list.scroll_y == 0

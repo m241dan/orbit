@@ -17,6 +17,8 @@ from textual.widgets.option_list import Option
 from orbit.protocol import Settings, TaskSpec, TaskState, Usage
 from orbit.tui.view import (
     TOOL_ACCESS_OPTIONS,
+    active_task,
+    follow_top,
     join_prompt,
     model_label,
     model_options,
@@ -38,6 +40,7 @@ class TaskList(ListPane):
     Like the prompt, it only takes focus once activated (``enter_list_mode``);
     then j/k move, enter picks a row, ``a`` accepts a draft, ``x`` removes a task and
     escape returns to window navigation. Its border shows what the session's turns cost.
+    While following, it scrolls to keep the active task (``active_task``) in view.
     """
 
     class Accept(Message):
@@ -74,10 +77,21 @@ class TaskList(ListPane):
         self.clock: Callable[[], float] = time.monotonic
         self.session_usage = Usage()
         self._ticker = Ticker(self, self.tick)
+        self.following = True
 
     def on_mount(self) -> None:
         self.border_title = "Task list"
         self._redraw()
+
+    def on_resize(self) -> None:
+        self._follow()
+
+    def enter_list_mode(self) -> None:
+        """Activate the list, with the highlight on the active task if there is one."""
+        super().enter_list_mode()
+        index = active_task(self.tasks)
+        if index is not None and self.can_focus:
+            self.highlighted = index
 
     def action_accept(self) -> None:
         state = self._highlighted_task()
@@ -112,6 +126,20 @@ class TaskList(ListPane):
         self.numbers_by_id = dict(zip((t.id for t in tasks), self.numbers, strict=True))
         self._redraw()
         self._ticker.keep(any(t.status == "running" for t in tasks))
+        self._follow()
+
+    def _follow(self) -> None:
+        """Scroll just enough to bring the active task into view, if following; the
+        highlight stays where it is."""
+        index = active_task(self.tasks)
+        if not self.following or index is None:
+            return
+        rows = self.row_lines()
+        if index >= len(rows):  # Not measured yet, before the list has a size.
+            return
+        top = follow_top(rows, index, round(self.scroll_y), self.scrollable_content_region.height)
+        if top is not None:
+            self.scroll_to(y=top, animate=False, immediate=True)
 
     @property
     def ticking(self) -> bool:

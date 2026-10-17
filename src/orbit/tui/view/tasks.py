@@ -89,3 +89,27 @@ def _trim_body(body: str) -> str:
 def usage_label(usage: Usage) -> str:
     """Tokens and cost, shortly: ``1.2M tok · $0.84``."""
     return f"{token_text(usage.tokens)} tok · ${usage.cost_usd:.2f}"
+
+
+def active_task(tasks: Sequence[TaskState]) -> int | None:
+    """The index of the topmost task that's running or verifying, in any role; None if none."""
+    return next((i for i, t in enumerate(tasks) if t.status in ("running", "verifying")), None)
+
+
+def follow_top(
+    rows: Sequence[tuple[int, int]], index: int, view_top: int, view_height: int
+) -> int | None:
+    """The scroll position that brings row ``index`` just into view, with the row above it
+    too where there's room; None when the row is already in view.
+
+    ``rows`` are each row's first line and height, and the view shows ``view_height`` lines
+    from line ``view_top``.
+    """
+    top, height = rows[index]
+    bottom = top + height
+    if view_top <= top and bottom <= view_top + view_height:
+        return None
+    if top >= view_top:  # Below the view: bring its bottom up to the view's bottom.
+        return min(bottom - view_height, top)
+    context = rows[index - 1][0] if index else top
+    return context if bottom - context <= view_height else top
