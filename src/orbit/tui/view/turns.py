@@ -15,8 +15,8 @@ from orbit.protocol import (
 from orbit.tui.view.transcript import DrawnRule, TurnStep, final_answer
 
 type TurnKey = tuple[str | None, str]
-"""A turn by its agent (None for the planner) and id: turn ids needn't be unique across
-agents."""
+"""A turn by its agent (None for a turn orbit ended itself, with no agent) and id: turn ids
+needn't be unique across agents."""
 
 
 @dataclass(frozen=True)

@@ -18,7 +18,6 @@ from orbit.tui.view import (
     WorkingView,
     elapsed_clock,
     track_working,
-    working_key,
     working_label,
     working_line,
     working_lines,
@@ -101,11 +100,7 @@ def test_other_events_leave_the_working_state_alone() -> None:
     assert track_working(working, Notice(message="hi"), 1) is working
 
 
-def test_the_planner_shows_under_the_planner_tab_and_by_name() -> None:
-    assert working_key(None, ROLES) == "planner"
-    assert working_key("agent-1", ROLES) == "planner"
-    assert working_key("agent-2", ROLES) == "coder"
-    assert working_key("agent-9", ROLES) == "agent-9"
+def test_the_planner_is_named_planner() -> None:
     assert working_label(None, ROLES) == "planner"
     assert working_label("agent-1", ROLES) == "planner"
     assert working_label("agent-2", ROLES) == "agent-2"
@@ -176,8 +171,14 @@ def test_a_role_tab_shows_only_its_agents() -> None:
 
 
 def test_the_planner_tab_shows_only_the_planner() -> None:
-    working = tracked((turn(None), 0), (turn("agent-2"), 0))
+    working = tracked((turn("agent-1"), 0), (turn("agent-2"), 0))
     assert working_lines(WorkingView(working, ROLES, "planner"), 0, WIDE) == ("◜ planner · 0:00",)
+
+
+def test_a_turn_with_no_agent_shows_under_all_only() -> None:
+    working = tracked((turn(None), 0))
+    assert working_lines(WorkingView(working, ROLES, None), 0, WIDE) == ("◜ planner · 0:00",)
+    assert working_lines(WorkingView(working, ROLES, "planner"), 0, WIDE) == ()
 
 
 def test_a_wide_call_is_clipped_to_fit_the_width_in_cells() -> None:

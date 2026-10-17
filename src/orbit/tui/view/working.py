@@ -15,6 +15,7 @@ from orbit.protocol import (
     TurnStarted,
 )
 from orbit.tui.view.common import clipped, spinner_frame
+from orbit.tui.view.tabs import tab_key
 from orbit.tui.view.tool_calls import tool_call_summary
 from orbit.tui.view.transcript import speaker
 
@@ -33,8 +34,8 @@ class RunningCall:
 
 @dataclass(frozen=True)
 class RunningAgent:
-    """An agent (None for the planner) whose turn started at ``since`` and hasn't ended, with
-    its unfinished ``calls`` in the order they started."""
+    """An agent (None for a turn orbit ended itself, with no agent) whose turn started at
+    ``since`` and hasn't ended, with its unfinished ``calls`` in the order they started."""
 
     agent: str | None
     since: float
@@ -88,12 +89,6 @@ def _with_calls(
     )
 
 
-def working_key(agent: str | None, roles: Mapping[str, str]) -> str:
-    """The tab ``agent``'s working line shows under besides All: the planner's (agent None, or
-    in the planner role), its pinned role's, or its own."""
-    return PLANNER if agent is None else roles.get(agent, agent)
-
-
 def working_label(agent: str | None, roles: Mapping[str, str]) -> str:
     """Who a working line names: ``planner`` for the planner (see :func:`speaker`), else the
     agent's id."""
@@ -142,7 +137,7 @@ def working_lines(view: WorkingView, now: float, width: int) -> tuple[str, ...]:
     visible = [
         running
         for running in view.working
-        if view.shown is None or working_key(running.agent, view.roles) == view.shown
+        if view.shown is None or tab_key(running.agent, view.roles) == view.shown
     ]
     lines = [
         working_line(running, working_label(running.agent, view.roles), now, width)
