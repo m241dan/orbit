@@ -701,6 +701,14 @@ async def test_a_claim_whose_verification_breaks_gets_an_error_reply() -> None:
     assert [t.status for t in board(events)] == ["error"]
 
 
+async def test_a_claim_whose_failure_cannot_be_recorded_gets_an_error_reply() -> None:
+    events: list[Event] = []
+    verification = verified(Steps(False), BreakingWorkspace("before", "after"))
+    reply = await held_reply("complete_task", events, verification=verification)
+    assert reply == Reply("Orbit couldn't check your work: git status failed", is_error=True)
+    assert [t.status for t in board(events)] == ["error"]
+
+
 async def test_a_proposal_whose_trial_breaks_gets_an_error_reply() -> None:
     events: list[Event] = []
     verification = Verification((STEP,), breaking_step)

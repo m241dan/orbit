@@ -275,10 +275,10 @@ class AgentRun:
         """Check the work, then answer ``claim`` (if the agent made one) with the verdict."""
         try:
             failure = await self._check(before)
+            reply = self._work.passed() if failure is None else await self._failed(failure)
         except BaseException as exc:
             _fail(claim, exc)
             raise
-        reply = self._work.passed() if failure is None else await self._failed(failure)
         _answer(claim, Reply(reply))
 
     async def _check(self, before: object) -> Failure | None:
