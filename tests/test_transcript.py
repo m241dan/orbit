@@ -1281,6 +1281,38 @@ async def test_a_message_promoted_while_thinking_is_hidden_appears() -> None:
         assert brightness(app) == ["bright"]
 
 
+async def test_a_latest_message_promoted_while_hidden_is_appended_without_a_rebuild() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, *thinking_turn())
+        await pilot.press("t", "k", "enter")  # On the tool call, the latest entry shown.
+        log = visible_log(app)
+        first = log.get_option_at_index(0)
+        app.query_one(Transcript).promote("agent-1", "t", [1])  # "done", its final answer.
+        await pilot.pause()
+        assert labels(app) == [*TOOL_ROWS, "done"]
+        assert log.get_option_at_index(0) is first
+        assert log.highlighted == 0 and gutters(app) == [GUTTER_MARKER, GUTTER_BAR]
+
+
+async def test_a_message_promoted_before_an_entry_shown_while_hidden_takes_its_place() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, *thinking_turn())
+        await pilot.press("t")
+        await feed_events(
+            session,
+            pilot,
+            thought("agent-2", "reviewing", "t2"),
+            turn_ended("agent-2", "t2"),
+            turn_ended("agent-1"),
+        )
+        assert labels(app) == [*TOOL_ROWS, "done", "reviewing", "agent-2 done", "agent-1 done"]
+        assert brightness(app) == ["bright", "bright"]
+
+
 async def test_a_turn_ending_on_a_tool_call_while_hidden_shows_only_its_rule() -> None:
     session = FakeSession()
     app = OrbitApp(session)
@@ -1309,6 +1341,23 @@ async def test_speaker_labels_are_judged_on_the_entries_shown() -> None:
         assert headings(app) == ["agent-1", None, None, None]
         await pilot.press("t")
         assert headings(app) == ["agent-1", None, "agent-2", "agent-1", None]
+
+
+async def test_speaker_labels_are_judged_on_the_entries_appended_while_hidden() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        transcript = app.query_one(Transcript)
+        await pilot.press("t")
+        await feed_events(session, pilot, thought("agent-1", "first", "t1"))
+        transcript.promote("agent-1", "t1", [0])
+        await feed_events(
+            session, pilot, thought("agent-2", "thinking", "t2"), thought("agent-1", "second", "t3")
+        )
+        transcript.promote("agent-1", "t3", [0])
+        await pilot.pause()
+        assert labels(app) == ["first", "second"]
+        assert headings(app) == ["agent-1", None]
 
 
 async def test_t_types_into_the_prompt_rather_than_hiding_thinking() -> None:

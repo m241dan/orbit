@@ -280,9 +280,13 @@ class TranscriptLog(ListPane):
     def _add(self, entry: Entry) -> None:
         self._entries.append(entry)
         self._collapsed.append(starts_collapsed(entry.kind, entry.text))
-        if not self._shows(entry):
-            return
-        self._rows.append(len(self._entries) - 1)
+        if self._shows(entry):
+            self._show_after(len(self._entries) - 1)
+
+    def _show_after(self, index: int) -> None:
+        """Add the entry at ``index``, which comes after every entry shown, as the last option,
+        the view pinned to it unless the list is active or holds a cursor."""
+        self._rows.append(index)
         self.add_option(self._prompt(len(self._rows) - 1))
         if not self.has_focus and self.highlighted is None:
             self.scroll_end(animate=False)
@@ -369,12 +373,20 @@ class TranscriptLog(ListPane):
 
     def _show_promoted(self, promoted: list[int]) -> None:
         """Show the entries at ``promoted``, just brightened: redrawn where they were, or
-        added among the options when thinking was hidden."""
+        added among the options when thinking was hidden: after them if they all come after
+        the last entry shown, else by rebuilding the options."""
         if not self._thinking_hidden:
             for index in promoted:  # Every entry is shown, each at its own option.
                 self._redraw(index)
-        elif promoted:
+        elif self._after_rows(promoted):
+            for index in sorted(promoted):
+                self._show_after(index)
+        else:
             self._show_rows()
+
+    def _after_rows(self, indexes: list[int]) -> bool:
+        """Whether every entry at ``indexes`` comes after the last entry shown."""
+        return not self._rows or all(index > self._rows[-1] for index in indexes)
 
     def hide_thinking(self, hidden: bool) -> None:
         """Leave out agents' dim messages if ``hidden``, or show them again, the cursor moving
