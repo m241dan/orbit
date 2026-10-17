@@ -9,7 +9,6 @@ overwrites or deletes a file it can't read unless asked to delete that session. 
 import asyncio
 import fcntl
 import os
-import subprocess
 import tempfile
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -27,6 +26,7 @@ from orbit.agent.domain.sessions import (
     record_json,
     review_count_json,
 )
+from orbit.agent.external.git_tree import ORBIT_DIR, git_common_dir
 
 SESSIONS = "sessions"
 REVIEWS = "reviews.json"
@@ -36,24 +36,8 @@ def state_dir(workspace: str) -> Path:
     """The directory orbit keeps saved sessions in for ``workspace``: ``orbit`` in the
     repository's shared git directory, or ``.orbit`` in ``workspace`` outside a repository (or
     without git)."""
-    common = _git_common_dir(workspace)
-    return Path(common) / "orbit" if common else Path(workspace) / ".orbit"
-
-
-def _git_common_dir(path: str) -> str | None:
-    """The git directory the repository ``path`` is in shares among its worktrees; none outside
-    one (or without git)."""
-    try:
-        result = subprocess.run(
-            ("git", "rev-parse", "--path-format=absolute", "--git-common-dir"),
-            cwd=path,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-    except FileNotFoundError:
-        return None
-    return result.stdout.strip() if result.returncode == 0 else None
+    common = git_common_dir(workspace)
+    return Path(common) / ORBIT_DIR if common else Path(workspace) / ".orbit"
 
 
 def pid_alive(pid: int) -> bool:

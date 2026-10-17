@@ -12,7 +12,12 @@ import pytest
 
 from orbit.agent.domain.roles import Setup
 from orbit.agent.external import git_tree
-from orbit.agent.external.git_tree import GitCoderTree, git_top_level, in_git_work_tree
+from orbit.agent.external.git_tree import (
+    GitCoderTree,
+    git_common_dir,
+    git_top_level,
+    in_git_work_tree,
+)
 
 
 def git(cwd: Path, *args: str) -> str:
@@ -361,30 +366,51 @@ async def test_no_leftovers_once_everything_is_merged(repo: Path) -> None:
     assert await tree.leftovers() == []
 
 
-def test_in_git_work_tree_tells_repositories_apart(repo: Path, tmp_path: Path) -> None:
-    outside = tmp_path / "plain"
-    outside.mkdir()
+@pytest.fixture
+def outside(tmp_path: Path) -> Path:
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    return plain
+
+
+def test_in_git_work_tree_tells_repositories_apart(repo: Path, outside: Path) -> None:
     assert in_git_work_tree(str(repo))
     assert not in_git_work_tree(str(outside))
 
 
-def test_without_git_nothing_is_a_work_tree(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
+def test_in_git_work_tree_is_false_inside_the_git_directory(repo: Path) -> None:
+    assert not in_git_work_tree(str(repo / ".git"))
+
+
+def test_without_git_nothing_is_found(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
     def missing(*args: object, **kwargs: object) -> None:
         raise FileNotFoundError("git")
 
     monkeypatch.setattr(subprocess, "run", missing)
     assert not in_git_work_tree(str(repo))
     assert git_top_level(str(repo)) is None
+    assert git_common_dir(str(repo)) is None
 
 
-def test_git_top_level_is_the_work_trees_root(repo: Path, tmp_path: Path) -> None:
+def test_git_top_level_is_the_work_trees_root(repo: Path, outside: Path) -> None:
     sub = repo / "sub" / "deeper"
     sub.mkdir(parents=True)
-    outside = tmp_path / "plain"
-    outside.mkdir()
     assert git_top_level(str(sub)) == str(repo.resolve())
     assert git_top_level(str(repo)) == str(repo.resolve())
     assert git_top_level(str(outside)) is None
+
+
+def test_git_common_dir_is_the_repositorys_git_directory(repo: Path, outside: Path) -> None:
+    sub = repo / "sub"
+    sub.mkdir()
+    assert git_common_dir(str(sub)) == str(repo.resolve() / ".git")
+    assert git_common_dir(str(outside)) is None
+
+
+def test_git_common_dir_of_a_linked_worktree_is_the_main_repositorys(repo: Path) -> None:
+    linked = repo.parent / "linked"
+    git(repo, "worktree", "add", "-q", str(linked))
+    assert git_common_dir(str(linked)) == str(repo.resolve() / ".git")
 
 
 async def test_head_is_the_trees_latest_commit(repo: Path) -> None:

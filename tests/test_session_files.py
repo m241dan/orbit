@@ -13,6 +13,7 @@ import pytest
 
 from orbit.agent.application.ports import SessionStore, StoredSession
 from orbit.agent.domain.sessions import SessionRecord, Unreadable, record_json
+from orbit.agent.external.git_tree import GitCoderTree
 from orbit.agent.external.session_files import SessionFiles, pid_alive, state_dir
 
 ME = 1000
@@ -57,14 +58,11 @@ def test_in_a_repository_sessions_live_in_the_git_directory(repo: Path) -> None:
     assert state_dir(str(repo)) == repo / ".git" / "orbit"
 
 
-def test_in_a_repositorys_subdirectory_sessions_still_live_in_the_git_directory(
-    repo: Path,
-) -> None:
-    (repo / "sub").mkdir()
-    assert state_dir(str(repo / "sub")) == repo / ".git" / "orbit"
+def test_outside_a_repository_sessions_live_in_the_workspace(tmp_path: Path) -> None:
+    assert state_dir(str(tmp_path)) == tmp_path / ".orbit"
 
 
-def test_in_a_linked_worktree_sessions_live_in_the_shared_git_directory(repo: Path) -> None:
+async def test_sessions_live_beside_the_coders_worktree(repo: Path) -> None:
     git(
         repo,
         "-c",
@@ -77,23 +75,8 @@ def test_in_a_linked_worktree_sessions_live_in_the_shared_git_directory(repo: Pa
         "-m",
         "x",
     )
-    linked = repo.parent / "linked"
-    git(repo, "worktree", "add", "-q", str(linked))
-    assert state_dir(str(linked)) == repo / ".git" / "orbit"
-
-
-def test_outside_a_repository_sessions_live_in_the_workspace(tmp_path: Path) -> None:
-    assert state_dir(str(tmp_path)) == tmp_path / ".orbit"
-
-
-def test_without_git_sessions_live_in_the_workspace(
-    monkeypatch: pytest.MonkeyPatch, repo: Path
-) -> None:
-    def missing(*args: object, **kwargs: object) -> None:
-        raise FileNotFoundError("git")
-
-    monkeypatch.setattr(subprocess, "run", missing)
-    assert state_dir(str(repo)) == repo / ".orbit"
+    coder = Path(await GitCoderTree(str(repo)).prepare(keep=False))
+    assert coder.parent == state_dir(str(repo))
 
 
 # Saving and loading

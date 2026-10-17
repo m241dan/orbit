@@ -25,36 +25,36 @@ STASH_MESSAGE = "orbit: unverified work"
 IGNORE_HEADER = "# Created by orbit's verification checks:"
 # Snapshot directories in ``.git/orbit``: ``snapshot-…`` now, ``review-…`` from older versions.
 SNAPSHOT_PREFIXES = ("snapshot-", "review-")
+# Orbit's directory in the repository's shared git directory: saved sessions, the review count,
+# the coder's worktree and snapshots all live in it.
+ORBIT_DIR = "orbit"
 
 
-def in_git_work_tree(path: str) -> bool:
-    """Whether ``path`` is inside a git work tree (and git can be run)."""
+def _git_query(path: str, *args: str) -> str | None:
+    """What ``git args`` prints in ``path``, stripped; ``None`` when it fails or git is missing."""
     try:
         result = subprocess.run(
-            ("git", "rev-parse", "--is-inside-work-tree"),
-            cwd=path,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-    except FileNotFoundError:
-        return False
-    return result.stdout.strip() == "true"
-
-
-def git_top_level(path: str) -> str | None:
-    """The top level of the git work tree ``path`` is in; none outside one (or without git)."""
-    try:
-        result = subprocess.run(
-            ("git", "rev-parse", "--show-toplevel"),
-            cwd=path,
-            capture_output=True,
-            text=True,
-            check=False,
+            ("git", *args), cwd=path, capture_output=True, text=True, check=False
         )
     except FileNotFoundError:
         return None
     return result.stdout.strip() if result.returncode == 0 else None
+
+
+def in_git_work_tree(path: str) -> bool:
+    """Whether ``path`` is inside a git work tree (and git can be run)."""
+    return _git_query(path, "rev-parse", "--is-inside-work-tree") == "true"
+
+
+def git_top_level(path: str) -> str | None:
+    """The top level of the git work tree ``path`` is in; none outside one (or without git)."""
+    return _git_query(path, "rev-parse", "--show-toplevel")
+
+
+def git_common_dir(path: str) -> str | None:
+    """The git directory the repository ``path`` is in shares among its worktrees; none outside
+    one (or without git)."""
+    return _git_query(path, "rev-parse", "--path-format=absolute", "--git-common-dir")
 
 
 async def _run(command: Sequence[str], cwd: Path) -> tuple[bool, str]:
@@ -340,10 +340,10 @@ class GitCoderTree:
         return output
 
     async def _path(self) -> Path:
-        common = await self._git(
-            self._root, "rev-parse", "--path-format=absolute", "--git-common-dir"
-        )
-        return Path(common) / "orbit" / "coder"
+        common = await asyncio.to_thread(git_common_dir, str(self._root))
+        if common is None:
+            raise RuntimeError(f"{self._root} isn't in a git repository, or git can't be run.")
+        return Path(common) / ORBIT_DIR / "coder"
 
     async def _base_branch(self) -> str | None:
         """The base branch: the one checked out when the tree started, or now, before it has."""
