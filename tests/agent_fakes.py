@@ -202,7 +202,8 @@ class FakeStore:
     be taken, and ``lock_failure``, if set, is the error taking it raises. Sessions in
     ``elsewhere`` are locked by another orbit, those in ``broken`` are unreadable for the reason
     given, and ``delete_failure``, if set, is the error deleting one raises, and
-    ``release_failure`` the error letting go of a lock raises. ``on_acquire``, if set, is awaited
+    ``release_failure`` the error letting go of a lock raises, and ``load_failure`` the error
+    loading one raises. ``on_acquire``, if set, is awaited
     as a lock is taken.
     """
 
@@ -222,6 +223,7 @@ class FakeStore:
         self.deleted: list[str] = []
         self.delete_failure: str | None = None
         self.release_failure: str | None = None
+        self.load_failure: str | None = None
         self.on_acquire: Callable[[], Awaitable[None]] | None = None
 
     @property
@@ -235,6 +237,8 @@ class FakeStore:
         self.saved.append(record)
 
     async def load(self, session_id: str) -> SessionRecord | Unreadable:
+        if self.load_failure is not None:
+            raise RuntimeError(self.load_failure)
         if session_id in self.broken:
             return Unreadable(self.broken[session_id])
         found = [r for r in self.saved if r.id == session_id]

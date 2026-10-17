@@ -155,14 +155,13 @@ class SessionKeeper:
 
     async def _acquire(self, store: SessionStore) -> bool:
         """Take the session's lock in ``store``; reports it if it can't be taken."""
-        try:
-            if await store.acquire(self.id):
-                return True
+        acquired = await self._reported(store.acquire(self.id), "; the session won't be saved.")
+        if acquired is None:
+            return False
+        if not acquired:
             message = f"Another orbit has the session {self.id} open, so it won't be saved."
-        except RuntimeError as exc:
-            message = f"{exc}; the session won't be saved."
-        await self._publish(ErrorOccurred(message=message))
-        return False
+            await self._publish(ErrorOccurred(message=message))
+        return acquired
 
     async def _write(self, store: SessionStore, contents: Contents) -> None:
         """Save ``contents`` as the session in ``store``, now its last active time."""
@@ -227,13 +226,14 @@ class SessionKeeper:
         ``name``, renaming the record read under the lock so no work saved meanwhile is lost,
         then let go of the lock; reports it if it can't be read or saved."""
         try:
-            current = renamable(session_id, await store.load(session_id), locked=False)
+            loaded = await self._reported(store.load(session_id))
+            if loaded is None:
+                return
+            current = renamable(session_id, loaded, locked=False)
             if isinstance(current, str):
                 await self._publish(ErrorOccurred(message=current))
                 return
-            await store.save(current.model_copy(update={"name": name}))
-        except RuntimeError as exc:
-            await self._publish(ErrorOccurred(message=str(exc)))
+            await self._reported(store.save(current.model_copy(update={"name": name})))
         finally:
             await self._release(store, session_id)
 
@@ -261,11 +261,10 @@ class SessionKeeper:
     async def _delete(self, store: SessionStore, session_id: str) -> None:
         """Delete the session ``session_id`` from ``store``, whose lock this orbit took to;
         reports it, letting go of the lock, if it can't be deleted."""
-        try:
-            await store.delete(session_id)
-        except RuntimeError as exc:
+        error = await _outcome(store.delete(session_id))
+        if isinstance(error, RuntimeError):
             await self._release(store, session_id)
-            await self._publish(ErrorOccurred(message=str(exc)))
+            await self._publish(ErrorOccurred(message=str(error)))
 
     async def open(self, session_id: str, load: Load) -> Opened | None:
         """Make the saved session ``session_id`` the one open here, locked, if ``load`` switches
@@ -327,14 +326,12 @@ class SessionKeeper:
     ) -> bool:
         """Take the lock of the session ``session_id``, ``name``d so, in ``store``, to
         ``action`` it; reports it if it can't be taken."""
-        try:
-            if await store.acquire(session_id):
-                return True
-            message = locked_message(name, action)
-        except RuntimeError as exc:
-            message = str(exc)
-        await self._publish(ErrorOccurred(message=message))
-        return False
+        acquired = await self._reported(store.acquire(session_id))
+        if acquired is None:
+            return False
+        if not acquired:
+            await self._publish(ErrorOccurred(message=locked_message(name, action)))
+        return acquired
 
     def _become(self, session_id: str, name: str, created: datetime) -> Left:
         """Be the session ``session_id``, unused and unsaved so far; returns the one left."""
@@ -365,15 +362,14 @@ class SessionKeeper:
     async def _attempt(self, kind: SaveKind, saving: Awaitable[None]) -> bool:
         """Await ``saving``, a save of ``kind``; returns whether it worked. The first failure
         since the last save of that kind that worked is reported, and work carries on."""
-        try:
-            await saving
-        except RuntimeError as exc:
-            if kind not in self._failing:
-                self._failing.add(kind)
-                await self._publish(ErrorOccurred(message=str(exc)))
-            return False
-        self._failing.discard(kind)
-        return True
+        error = await _outcome(saving)
+        if not isinstance(error, RuntimeError):
+            self._failing.discard(kind)
+            return True
+        if kind not in self._failing:
+            self._failing.add(kind)
+            await self._publish(ErrorOccurred(message=str(error)))
+        return False
 
     async def close(self) -> None:
         """Stop saving, and let go of the session's lock if it was taken; reports it if the lock
@@ -386,7 +382,21 @@ class SessionKeeper:
     async def _release(self, store: SessionStore, session_id: str) -> None:
         """Let go of the session ``session_id``'s lock in ``store``; reports it if it can't be
         let go of."""
-        try:
-            await store.release(session_id)
-        except RuntimeError as exc:
-            await self._publish(ErrorOccurred(message=str(exc)))
+        await self._reported(store.release(session_id))
+
+    async def _reported[T](self, call: Awaitable[T], suffix: str = "") -> T | None:
+        """What ``call``, to the store, returns; none if it fails, reported with ``suffix``
+        after the store's message."""
+        outcome = await _outcome(call)
+        if isinstance(outcome, RuntimeError):
+            await self._publish(ErrorOccurred(message=f"{outcome}{suffix}"))
+            return None
+        return outcome
+
+
+async def _outcome[T](call: Awaitable[T]) -> T | RuntimeError:
+    """What ``call``, to the store, returns, or the ``RuntimeError`` it raises when it fails."""
+    try:
+        return await call
+    except RuntimeError as exc:
+        return exc

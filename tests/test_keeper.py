@@ -356,6 +356,16 @@ async def test_a_failed_rename_whose_lock_cannot_be_released_reports_both() -> N
     assert published.errors == ["Couldn't save the session: disk full", UNLOCKABLE]
 
 
+async def test_a_rename_whose_session_cannot_be_read_is_reported_and_lets_go_of_its_lock() -> None:
+    store = FakeStore()
+    store.saved = [SessionRecord(id="other", name="other", created=START, last_active=START)]
+    store.load_failure = "Couldn't read the session: permission denied"
+    keeper, published = keeper_for(store)
+    await keeper.rename_saved("other", "Renamed")
+    assert published.errors == ["Couldn't read the session: permission denied"]
+    assert store.released == ["other"] and store.last.name == "other"
+
+
 async def test_a_failed_delete_whose_lock_cannot_be_released_reports_both() -> None:
     store = unreleasable_store_with("other")
     store.delete_failure = "Couldn't delete the session: read-only"
