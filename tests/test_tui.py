@@ -87,7 +87,7 @@ async def test_submit_sends_command_and_renders_events() -> None:
         await pilot.press("i", *"hi", "enter")
         assert session.commands == [SubmitPrompt(text="hi")]
         # Busy from now, not from the backend's notice, so a second prompt can't race it.
-        assert prompt.disabled
+        assert prompt.border_title == "Prompt · planner · busy"
 
         for event in (
             BusyChanged(busy=True, lane="planner"),
@@ -98,20 +98,64 @@ async def test_submit_sends_command_and_renders_events() -> None:
             await session.queue.put(event)
         await pilot.pause()
         assert shown(app) == ["hi", "hello back", "done · 0s"]
-        assert prompt.disabled
+        assert prompt.border_title == "Prompt · planner · busy"
 
         await session.queue.put(BusyChanged(busy=False, lane="planner"))
         await pilot.pause()
-        assert not prompt.disabled
+        assert prompt.border_title == "Prompt · planner"
 
 
-async def test_a_busy_planner_disables_the_prompt() -> None:
+async def test_the_prompt_takes_typing_while_the_planner_is_busy() -> None:
     session = FakeSession()
     app = OrbitApp(session)
     async with app.run_test() as pilot:
-        await session.queue.put(BusyChanged(busy=True, lane="planner"))
-        await pilot.pause()
-        assert app.query_one(ChatPrompt).disabled
+        await feed_events(session, pilot, BusyChanged(busy=True, lane="planner"))
+        prompt = app.query_one(ChatPrompt)
+        await pilot.press("i", *"hi")
+        assert app.focused is prompt
+        assert prompt.text == "hi"
+
+
+async def test_enter_while_the_planner_is_busy_keeps_the_draft_and_says_so(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    notes: list[tuple[str, object]] = []
+    monkeypatch.setattr(app, "notify", lambda text, **kw: notes.append((text, kw["severity"])))
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, BusyChanged(busy=True, lane="planner"))
+        prompt = app.query_one(ChatPrompt)
+        await pilot.press("i", *"hi", "left", "enter")
+        assert session.commands == []
+        assert prompt.text == "hi"
+        assert prompt.cursor_location == (0, 1)
+        assert app.focused is prompt
+        assert notes == [("Planner is busy", "warning")]
+
+
+async def test_enter_sends_the_kept_draft_once_the_planner_is_free() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, BusyChanged(busy=True, lane="planner"))
+        prompt = app.query_one(ChatPrompt)
+        await pilot.press("i", *"hi", "enter")
+        await feed_events(session, pilot, BusyChanged(busy=False, lane="planner"))
+        assert session.commands == []
+        # Still in insert mode, so enter alone sends it.
+        await pilot.press("enter")
+        assert session.commands == [SubmitPrompt(text="hi")]
+        assert prompt.text == ""
+
+
+async def test_a_rapid_second_enter_sends_nothing() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await pilot.press("i", *"a", "enter", "i", *"b", "enter")
+        assert session.commands == [SubmitPrompt(text="a")]
+        assert app.query_one(ChatPrompt).text == "b"
 
 
 async def test_ctrl_s_sends_cancel() -> None:
@@ -296,12 +340,9 @@ async def test_submit_returns_to_normal_mode_and_finished_turn_stays_there() -> 
 
         await session.queue.put(BusyChanged(busy=True, lane="planner"))
         await pilot.pause()
-        await pilot.press("i")
-        assert app.focused is None  # can't edit while the planner answers
-
         await session.queue.put(BusyChanged(busy=False, lane="planner"))
         await pilot.pause()
-        assert app.focused is None
+        assert app.focused is None  # the planner going free doesn't focus the prompt
         await pilot.press("i")
         assert app.focused is app.query_one(ChatPrompt)
 
@@ -1139,7 +1180,7 @@ async def test_prompt_talks_to_the_planner_ctrl_s_stops_the_run_and_ctrl_x_the_p
         # ctrl+s stops the task run, even on the planner tab; ctrl+x stops the planner.
         await pilot.press("i", *"plan", "enter", "ctrl+s", "ctrl+x")
         await pilot.press("shift+tab")
-        assert prompt.border_title == "Prompt · planner"
+        assert prompt.border_title == "Prompt · planner · busy"
         await feed_events(session, pilot, BusyChanged(busy=False, lane="planner"))
         await pilot.press("i", *"hi", "enter", "ctrl+s", "ctrl+x")
         assert session.commands == [
@@ -1160,15 +1201,15 @@ async def test_the_prompt_is_enabled_while_a_run_is_busy() -> None:
     async with app.run_test(size=(120, 30)) as pilot:
         prompt = app.query_one(ChatPrompt)
         await feed_events(session, pilot, BusyChanged(busy=True))
-        assert not prompt.disabled
+        assert prompt.border_title == "Prompt · planner"
         await pilot.press("i", *"plan", "enter")
-        assert prompt.disabled  # Until the planner answers.
+        assert prompt.border_title == "Prompt · planner · busy"  # Until the planner answers.
         await feed_events(session, pilot, BusyChanged(busy=False, lane="planner"))
-        assert not prompt.disabled
+        assert prompt.border_title == "Prompt · planner"
         # The work lane going idle doesn't free the prompt while the planner answers.
         await pilot.press("i", *"more", "enter")
         await feed_events(session, pilot, BusyChanged(busy=False, lane="work"))
-        assert prompt.disabled
+        assert prompt.border_title == "Prompt · planner · busy"
 
 
 async def test_ctrl_t_jumps_to_the_planner_tab_and_back() -> None:

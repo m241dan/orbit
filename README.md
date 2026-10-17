@@ -435,7 +435,9 @@ draft (or edit it with `enter` and save, which accepts it too), and `x` removes 
 run with the rest when you press `ctrl+r`.
 
 The planner answers in a lane of its own, so you can plan while tasks run (and press `ctrl+r`
-while it answers); the prompt waits only for the planner's own reply. `ctrl+x` stops only the
+while it answers). While the planner answers, its tab shows `●` and the prompt's title reads
+`Prompt · planner · busy`; you can still type in the prompt, but `enter` only says `Planner is
+busy` and keeps your text, to send with `enter` once the planner is free. `ctrl+x` stops only the
 planner's turn and leaves the task run going; `ctrl+s` stops the task run, whichever tab is shown. The
 task list beside it fills with
 drafts as the planner proposes them; when it says something while you're on another tab, the

@@ -586,10 +586,10 @@ async def test_a_refused_planner_prompt_frees_the_prompt() -> None:
     async with app.run_test(size=(120, 30)) as pilot:
         prompt = app.query_one(ChatPrompt)
         await pilot.press("ctrl+t", "i", *"plan", "enter")
-        assert prompt.disabled
+        assert prompt.border_title == "Prompt · planner · busy"
         refused = ErrorOccurred(message="Planning needs agents and a planner role.")
         await feed(session, pilot, refused, BusyChanged(busy=False, lane="planner"))
-        assert not prompt.disabled
+        assert prompt.border_title == "Prompt · planner"
 
 
 async def test_a_planner_less_session_leaves_the_prompt_usable() -> None:
@@ -599,7 +599,7 @@ async def test_a_planner_less_session_leaves_the_prompt_usable() -> None:
         await pilot.press("ctrl+t", "i", *"plan", "enter")
         for _ in range(5):
             await pilot.pause()
-        assert not prompt.disabled
+        assert prompt.border_title == "Prompt · planner"
 
 
 def options(task_list: TaskList) -> list[object]:

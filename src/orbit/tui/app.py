@@ -66,6 +66,7 @@ from orbit.tui.tabs import ConversationTabs
 from orbit.tui.tasks import TaskEditorScreen, TaskList
 from orbit.tui.transcript import DetailPane, Transcript
 from orbit.tui.view import (
+    PLANNER_BUSY,
     TOOL_ACCESS_OPTIONS,
     AgentNote,
     DrawnRule,
@@ -252,6 +253,10 @@ class OrbitApp(App[None], inherit_bindings=False):
     async def _submit(self, message: ChatPrompt.Submitted) -> None:
         text = message.text.strip()
         if not text:
+            return
+        if self._busy["planner"]:
+            # Keep the draft for when the planner is free; the user sends it again then.
+            self.notify(PLANNER_BUSY, severity="warning")
             return
         message.prompt.clear()
         prompt = self._prompt
@@ -601,8 +606,7 @@ class OrbitApp(App[None], inherit_bindings=False):
     def _set_busy(self, lane: BusyLane, busy: bool) -> None:
         self._busy[lane] = busy
         if lane == "planner":
-            # Take prompts only while the planner is free, and mark its tab while it isn't.
-            self._prompt.disabled = busy
+            self._prompt.show_busy(busy)
             self._tabs.set_planner_busy(busy)
 
     def _render_activity(self, event: AgentNote | AgentRequest | AgentExited) -> None:

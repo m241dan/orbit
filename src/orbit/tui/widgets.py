@@ -17,7 +17,7 @@ from textual.widgets import Input, OptionList, Static, TextArea
 from textual.widgets.option_list import Option
 
 from orbit.protocol import Settings
-from orbit.tui.view import settings_summary
+from orbit.tui.view import prompt_title, settings_summary
 
 if TYPE_CHECKING:
     _WidgetMixin = Widget
@@ -222,11 +222,14 @@ class ChatPrompt(ModalFocus, TextArea):
         super().__init__(soft_wrap=True, show_line_numbers=False, placeholder=placeholder, id=id)
 
     def on_mount(self) -> None:
-        self.border_title = "Prompt · planner"
+        self.show_busy(False)
 
     def enter_insert_mode(self) -> None:
         if self._activate():
             self.move_cursor(self.document.end)
+
+    def show_busy(self, busy: bool) -> None:
+        self.border_title = prompt_title(busy)
 
     def show_settings(self, settings: Settings) -> None:
         self.border_subtitle = settings_summary(settings)

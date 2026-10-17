@@ -53,6 +53,7 @@ from orbit.tui.view import (
     hanging_indent,
     note_entry,
     output_entry,
+    prompt_title,
     ruled,
     shows_markdown,
     speaker_label,
@@ -508,6 +509,11 @@ def test_every_message_after_the_last_tool_call_is_the_final_answer() -> None:
 
 def test_a_turn_with_no_output_has_no_final_answer() -> None:
     assert final_answer([]) == ()
+
+
+def test_the_prompt_title_names_the_planner_and_notes_when_it_is_busy() -> None:
+    assert prompt_title(False) == "Prompt · planner"
+    assert prompt_title(True) == "Prompt · planner · busy"
 
 
 def test_the_conversation_title_names_the_tab_shown_after_all() -> None:

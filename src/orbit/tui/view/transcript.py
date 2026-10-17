@@ -164,6 +164,15 @@ def conversation_title(label: str | None, thinking_hidden: bool) -> str:
     return " · ".join(parts)
 
 
+PLANNER_BUSY = "Planner is busy"
+"""The note when the user sends a prompt while the planner is still answering."""
+
+
+def prompt_title(busy: bool) -> str:
+    """The prompt box's title, naming the planner it talks to and whether it's ``busy``."""
+    return " · ".join(["Prompt", PLANNER, *(("busy",) if busy else ())])
+
+
 def speaker_label(kind: EntryKind, agent: str | None, previous: str | None) -> str | None:
     """The label heading an entry of ``kind`` by ``agent``: the agent's id, for an agent's
     message when the ``previous`` entry in its log was by someone else; None otherwise."""
