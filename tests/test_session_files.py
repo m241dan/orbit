@@ -1,6 +1,7 @@
 """Saved sessions on disk: where they live, their files, their locks and the review count."""
 
 import asyncio
+import fcntl
 import os
 import subprocess
 import sys
@@ -270,6 +271,48 @@ async def test_a_cancelled_acquire_leaves_no_lock_behind(tmp_path: Path) -> None
     with pytest.raises(asyncio.CancelledError):
         await acquiring
     assert list(sessions(tmp_path).iterdir()) == []
+
+
+async def test_two_orbits_taking_over_the_same_stale_lock_cant_both_win(tmp_path: Path) -> None:
+    sessions(tmp_path).mkdir(parents=True)
+    (sessions(tmp_path) / "abc.lock").write_text("3000")
+    asking, answer = threading.Event(), threading.Event()
+
+    def slow_alive(pid: int) -> bool:
+        if pid == 3000:
+            asking.set()
+            answer.wait()
+        return pid in {ME, OTHER}
+
+    def alive(pid: int) -> bool:
+        return pid in {ME, OTHER}
+
+    slow = asyncio.create_task(SessionFiles(tmp_path, pid=ME, alive=slow_alive).acquire("abc"))
+    await asyncio.to_thread(asking.wait)
+    fast = asyncio.create_task(SessionFiles(tmp_path, pid=OTHER, alive=alive).acquire("abc"))
+    await asyncio.wait([fast], timeout=0.2)  # Unguarded, it takes over meanwhile.
+    answer.set()
+    won = dict(zip((ME, OTHER), await asyncio.gather(slow, fast), strict=True))
+    assert sorted(won.values()) == [False, True]
+    winner = next(pid for pid, took in won.items() if took)
+    assert (sessions(tmp_path) / "abc.lock").read_text() == str(winner)
+
+
+async def test_a_cancelled_acquire_of_a_lock_we_hold_keeps_it(tmp_path: Path) -> None:
+    files = store(tmp_path)
+    assert await files.acquire("abc")
+    guard = os.open(sessions(tmp_path), os.O_RDONLY)
+    try:
+        fcntl.flock(guard, fcntl.LOCK_EX)  # Holds the second acquire mid-flight.
+        acquiring = asyncio.create_task(files.acquire("abc"))
+        await asyncio.sleep(0.05)
+        acquiring.cancel()
+        await asyncio.sleep(0)
+    finally:
+        os.close(guard)
+    with pytest.raises(asyncio.CancelledError):
+        await acquiring
+    assert (sessions(tmp_path) / "abc.lock").read_text() == str(ME)
 
 
 async def test_by_default_locks_name_this_process(tmp_path: Path) -> None:

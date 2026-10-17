@@ -7,10 +7,13 @@ overwrites or deletes a file it can't read unless asked to delete that session. 
 """
 
 import asyncio
+import fcntl
 import os
 import subprocess
 import tempfile
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from enum import Enum, auto
 from pathlib import Path
 
 from orbit.agent.application.ports import StoredSession
@@ -111,6 +114,26 @@ def _read_lock(path: Path) -> str:
         return ""
 
 
+@contextmanager
+def _exclusive(directory: Path) -> Iterator[None]:
+    """Hold an exclusive lock on ``directory`` itself, so that orbits taking locks in it take
+    them one at a time."""
+    fd = os.open(directory, os.O_RDONLY)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        os.close(fd)
+
+
+class _Taken(Enum):
+    """What came of trying to take a session's lock."""
+
+    CREATED = auto()
+    OURS = auto()
+    REFUSED = auto()
+
+
 class SessionFiles:
     """Saved sessions in ``directory``'s ``sessions`` directory, with the review count beside it.
 
@@ -152,11 +175,13 @@ class SessionFiles:
     async def acquire(self, session_id: str) -> bool:
         taking = asyncio.ensure_future(asyncio.to_thread(self._acquire, session_id))
         try:
-            return await asyncio.shield(taking)
+            return await asyncio.shield(taking) is not _Taken.REFUSED
         except asyncio.CancelledError:
-            # The thread carries on; once it's done, let go of any lock it took.
+            # The thread carries on; once it's done, let go of any lock it created (but not one
+            # we already held).
             await asyncio.wait([taking])
-            await self.release(session_id)
+            if taking.exception() is None and taking.result() is _Taken.CREATED:
+                await self.release(session_id)
             raise
 
     async def release(self, session_id: str) -> None:
@@ -196,24 +221,30 @@ class SessionFiles:
         text = _read_lock(lock)
         return lock_owner(text) != self._pid and not lock_is_stale(text, self._alive)
 
-    def _acquire(self, session_id: str) -> bool:
+    def _acquire(self, session_id: str) -> _Taken:
         lock = self._file(session_id, ".lock")
         try:
-            return self._take(lock)
+            lock.parent.mkdir(parents=True, exist_ok=True)
+            with _exclusive(lock.parent):
+                return self._take(lock)
         except OSError as error:
             raise RuntimeError(f"Couldn't lock the session {lock}: {error}") from error
 
-    def _take(self, lock: Path) -> bool:
-        """Take ``lock`` unless another running orbit holds it; returns whether it's ours."""
-        lock.parent.mkdir(parents=True, exist_ok=True)
+    def _take(self, lock: Path) -> _Taken:
+        """Take ``lock`` unless another running orbit holds it; returns whether this created it,
+        found it already ours, or was refused.
+
+        Callers hold the sessions directory's exclusive lock, so no other orbit takes over a
+        stale lock between this deciding it's stale and replacing it.
+        """
         if self._create_lock(lock):
-            return True
+            return _Taken.CREATED
         if self._held_elsewhere(lock):
-            return False
+            return _Taken.REFUSED
         if lock_owner(_read_lock(lock)) == self._pid:
-            return True
+            return _Taken.OURS
         lock.unlink(missing_ok=True)  # Stale: its orbit has ended.
-        return self._create_lock(lock)
+        return _Taken.CREATED if self._create_lock(lock) else _Taken.REFUSED
 
     def _create_lock(self, lock: Path) -> bool:
         """Create ``lock`` naming this process, complete, unless it exists; returns whether it
