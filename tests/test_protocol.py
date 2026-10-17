@@ -16,11 +16,17 @@ from orbit.protocol import (
     CancelTurn,
     EditTask,
     ErrorOccurred,
+    ListSessions,
+    NewSession,
+    OpenSession,
     ProgressNoted,
     RemoveTask,
     RequestSuperReview,
     ReviewStatus,
     RunTasks,
+    SessionOpened,
+    SessionsListed,
+    SessionSummary,
     Settings,
     SettingsChanged,
     StartupChecked,
@@ -92,6 +98,14 @@ def test_task_commands_round_trip() -> None:
     for command in (AddTask(task=task), EditTask(task_id="1", task=task), RunTasks()):
         assert command_adapter.validate_json(command.model_dump_json()) == command
     assert TaskSpec(prompt="write docs").settings == Settings()
+
+
+def test_session_commands_and_events_round_trip() -> None:
+    for command in (ListSessions(), OpenSession(session_id="s1"), NewSession(name="auth")):
+        assert command_adapter.validate_json(command.model_dump_json()) == command
+    summary = SessionSummary(id="s1", name="auth", counts={"pending": 2}, current=True)
+    for event in (SessionsListed(sessions=(summary,)), SessionOpened(session=summary)):
+        assert event_adapter.validate_json(event.model_dump_json()) == event
 
 
 def test_rejects_empty_task_prompt() -> None:

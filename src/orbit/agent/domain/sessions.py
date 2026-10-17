@@ -7,7 +7,7 @@ decide when a session's lock, held by the orbit that has it open, may be taken o
 """
 
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Callable, Collection, Iterable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from functools import reduce
@@ -63,9 +63,14 @@ class Unreadable:
     reason: str
 
 
+def short_time(when: datetime) -> str:
+    """``when`` as the user reads it, such as ``Oct 17 14:30``."""
+    return f"{_MONTHS[when.month - 1]} {when.day} {when:%H:%M}"
+
+
 def default_name(when: datetime) -> str:
     """The name of a session started at ``when``, such as ``Oct 17 14:30``."""
-    return f"{_MONTHS[when.month - 1]} {when.day} {when:%H:%M}"
+    return short_time(when)
 
 
 def record_json(record: SessionRecord) -> str:
@@ -117,15 +122,83 @@ def _first_problem(error: ValidationError) -> str:
 def summarize(record: SessionRecord, current: bool = False, locked: bool = False) -> SessionSummary:
     """``record`` as the list of sessions shows it; ``current`` if it's the session open here,
     ``locked`` if another orbit has it open."""
-    return SessionSummary(
-        id=record.id,
-        name=record.name,
-        last_active=record.last_active,
-        counts=dict(Counter(task.status for task in record.tasks)),
-        usage=sum((task.usage for task in record.tasks), Usage()),
-        current=current,
-        locked=locked,
+    summary = tasks_summary(record.id, record.name, record.tasks)
+    return summary.model_copy(
+        update={"last_active": record.last_active, "current": current, "locked": locked}
     )
+
+
+def tasks_summary(session_id: str, name: str, tasks: Sequence[TaskState]) -> SessionSummary:
+    """The session ``session_id``, ``name``d so and holding ``tasks``, as the list of sessions
+    shows it, without a last active time."""
+    return SessionSummary(
+        id=session_id,
+        name=name,
+        counts=dict(Counter(task.status for task in tasks)),
+        usage=sum((task.usage for task in tasks), Usage()),
+    )
+
+
+def stored_summary(
+    session_id: str, record: SessionRecord | Unreadable, current: bool, locked: bool
+) -> SessionSummary:
+    """The session ``session_id`` saved as ``record`` (or unreadable), as the list of sessions
+    shows it; see :func:`summarize`. An unreadable one goes by its id."""
+    if isinstance(record, SessionRecord):
+        return summarize(record, current, locked)
+    return SessionSummary(
+        id=session_id, name=session_id, current=current, locked=locked, unreadable=record.reason
+    )
+
+
+def newest_first(summaries: Iterable[SessionSummary]) -> tuple[SessionSummary, ...]:
+    """``summaries`` by when they were last active, the latest first; those with no time come
+    last."""
+    return tuple(sorted(summaries, key=_activity, reverse=True))
+
+
+def _activity(summary: SessionSummary) -> tuple[bool, float]:
+    last = summary.last_active
+    return last is not None, last.timestamp() if last else 0.0
+
+
+def openable(
+    session_id: str, record: SessionRecord | Unreadable, locked: bool
+) -> SessionRecord | str:
+    """The record of saved session ``session_id`` to open, or why it can't be opened: it's
+    unreadable, or ``locked`` by another orbit."""
+    if isinstance(record, Unreadable):
+        return f"Can't open the session {session_id}: {record.reason}."
+    if locked:
+        return locked_message(record.name)
+    return record
+
+
+def locked_message(name: str) -> str:
+    """Why the session ``name`` can't be opened while another orbit has it open."""
+    return f"Can't open \"{name}\": it's open in another orbit."
+
+
+def missing_message(session_id: str) -> str:
+    """Why the session ``session_id``, which isn't saved, can't be opened."""
+    return f"There's no saved session {session_id!r}."
+
+
+def resumed_notes(record: SessionRecord, interrupted: int) -> tuple[str, ...]:
+    """What to tell the user on opening ``record``, in which ``interrupted`` tasks were
+    cancelled because they were running when it was last saved."""
+    resumed = f'Resumed "{record.name}" (last active {short_time(record.last_active)})'
+    if interrupted == 0:
+        return (resumed,)
+    if interrupted == 1:
+        return resumed, "1 task was interrupted and is cancelled."
+    return resumed, f"{interrupted} tasks were interrupted and are cancelled."
+
+
+def resumed_settings(saved: Settings, given: Settings, pinned: Collection[str]) -> Settings:
+    """The settings to resume a session ``saved`` with: those settings, except the ones
+    ``pinned``, by field name, which are as ``given``."""
+    return saved.model_copy(update={name: getattr(given, name) for name in pinned})
 
 
 def lock_owner(text: str) -> int | None:

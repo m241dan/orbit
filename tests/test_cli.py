@@ -223,6 +223,7 @@ def test_chat_runs_tui_against_claude_cli(launched: list[AgentSession]) -> None:
     assert session.agents is not None
     assert isinstance(session.agents.launcher, ClaudeCliRunner)  # The planner's too.
     assert session.settings == Settings()
+    assert session.pinned == ()
     assert session.model_choices == MODEL_ALIASES
 
 
@@ -232,6 +233,16 @@ def test_chat_accepts_model_and_tool_access(launched: list[AgentSession]) -> Non
     assert result.exit_code == 0
     [session] = launched
     assert session.settings == Settings(model="opus", tool_access="full")
+    assert session.pinned == ("model", "tool_access")
+
+
+def test_chat_pins_only_the_settings_given(launched: list[AgentSession]) -> None:
+    result = runner.invoke(app, ["chat", "--tools", "off"])
+
+    assert result.exit_code == 0
+    [session] = launched
+    assert session.settings == Settings(tool_access="off")
+    assert session.pinned == ("tool_access",)
 
 
 def test_chat_rejects_unknown_tool_access(launched: list[AgentSession]) -> None:

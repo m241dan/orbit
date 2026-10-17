@@ -1,5 +1,6 @@
 """Autosaving the open session: once it's been used, it's saved after every change, so a crash or
-ctrl+c loses nothing. A session nobody used is never written.
+ctrl+c loses nothing. A session nobody used is never written. The user can switch to another
+saved session, or a new one, letting go of the one open.
 
 The repository's count of commits since the last super review is kept here too, though it
 belongs to no one session.
@@ -13,14 +14,33 @@ from datetime import datetime
 
 from orbit.agent.application.ports import Publish, SessionStore
 from orbit.agent.domain.reviews import LaneSnapshot
-from orbit.agent.domain.sessions import SessionRecord, default_name
-from orbit.protocol import ErrorOccurred, Settings, TaskState
+from orbit.agent.domain.sessions import (
+    SessionRecord,
+    default_name,
+    locked_message,
+    missing_message,
+    newest_first,
+    openable,
+    stored_summary,
+    tasks_summary,
+)
+from orbit.protocol import ErrorOccurred, SessionSummary, Settings, TaskState
 
 Clock = Callable[[], datetime]
 """The time now, timezone-aware."""
 
 IdMaker = Callable[[], str]
 """Makes a fresh, unique id."""
+
+Commit = Callable[[], bool]
+"""Switches what the session holds, unless that's refused now; returns whether it did."""
+
+
+@dataclass(frozen=True)
+class Left:
+    """The session a switch left: its ``id``, if its lock is still held, to :meth:`leave`."""
+
+    id: str | None
 
 
 def local_now() -> datetime:
@@ -49,7 +69,8 @@ class SessionKeeper:
     ``publish``. ``clock`` tells the time, and ``new_id`` makes the session's id.
 
     It's ``used`` once it has a task or :meth:`use` is called, and only then saved, locked in
-    the store from its first save until :meth:`close`.
+    the store from its first save until :meth:`close`, or until another session is opened in
+    its place.
     """
 
     def __init__(
@@ -62,6 +83,7 @@ class SessionKeeper:
         self._store = store
         self._publish = publish
         self._clock = clock
+        self._new_id = new_id
         self.id = new_id()
         self.created = clock()
         self.name = default_name(self.created)
@@ -124,6 +146,87 @@ class SessionKeeper:
         )
         if await self._attempt(store.save(record)):
             self._saved = contents
+
+    async def summaries(self) -> tuple[SessionSummary, ...]:
+        """The saved sessions, the most recently active first, the one open here marked
+        current; none without a store."""
+        if self._store is None:
+            return ()
+        stored = await self._store.sessions()
+        return newest_first(
+            stored_summary(s.id, s.record, s.id == self.id, s.locked) for s in stored
+        )
+
+    def summary(self, tasks: tuple[TaskState, ...], last_active: datetime | None) -> SessionSummary:
+        """The session open here, holding ``tasks`` and ``last_active`` then, as the list of
+        sessions shows it."""
+        summary = tasks_summary(self.id, self.name, tasks)
+        return summary.model_copy(update={"current": True, "last_active": last_active})
+
+    async def find(self, session_id: str) -> SessionRecord | str:
+        """The record of the saved session ``session_id``, to open, or why it can't be."""
+        stored = await self._store.sessions() if self._store else []
+        for each in stored:
+            if each.id == session_id:
+                return openable(each.id, each.record, each.locked)
+        return missing_message(session_id)
+
+    async def open(self, record: SessionRecord, commit: Commit) -> Left | None:
+        """Make the saved session ``record`` the one open here, locked, if ``commit`` switches
+        to it once it's locked; returns the session left, or none if it didn't switch. Problems
+        are reported."""
+        assert self._store is not None  # Only saved sessions are found to open.
+        async with self._saving:
+            if not await self._claim(self._store, record):
+                return None
+            if not commit():
+                await self._store.release(record.id)
+                return None
+            left = self._become(record.id, record.name, record.created)
+            self._locked = self.used = True
+        return left
+
+    async def renew(self, name: str | None, commit: Commit) -> Left | None:
+        """Make a new session ``name``d so (by the time, without a name) the one open here, if
+        ``commit`` switches to it; returns the session left, or none if it didn't switch."""
+        async with self._saving:
+            if not commit():
+                return None
+            created = self._clock()
+            named = (name or "").strip() or default_name(created)
+            return self._become(self._new_id(), named, created)
+
+    async def leave(self, left: Left, discard: bool) -> None:
+        """Let go of the lock of the session ``left``, if it's held, or delete that session if
+        ``discard``; reports it if it can't be deleted."""
+        if left.id is None:
+            return
+        assert self._store is not None  # Only a store holds locks.
+        if not discard:
+            await self._store.release(left.id)
+            return
+        try:
+            await self._store.delete(left.id)
+        except RuntimeError as exc:
+            await self._publish(ErrorOccurred(message=str(exc)))
+
+    async def _claim(self, store: SessionStore, record: SessionRecord) -> bool:
+        """Take ``record``'s lock in ``store``, to open it; reports it if it can't be taken."""
+        try:
+            if await store.acquire(record.id):
+                return True
+            message = locked_message(record.name)
+        except RuntimeError as exc:
+            message = str(exc)
+        await self._publish(ErrorOccurred(message=message))
+        return False
+
+    def _become(self, session_id: str, name: str, created: datetime) -> Left:
+        """Be the session ``session_id``, unused and unsaved so far; returns the one left."""
+        left = Left(self.id if self._locked else None)
+        self.id, self.name, self.created = session_id, name, created
+        self.used, self._saved, self._locked, self._failing = False, None, None, False
+        return left
 
     async def review_count(self) -> int | None:
         """The repository's commits since the last super review; none without a store."""

@@ -38,6 +38,8 @@ from orbit.protocol import (
     ReviewStatus,
     RunTasks,
     Session,
+    SessionOpened,
+    SessionsListed,
     Settings,
     SettingsChanged,
     StartupChecked,
@@ -497,6 +499,8 @@ class OrbitApp(App[None], inherit_bindings=False):
                 | StartupChecked()
             ):
                 self._feed.render(event)
+            case SessionsListed() | SessionOpened():
+                pass  # Nothing shows sessions yet.
             case _:
                 assert_never(event)
 

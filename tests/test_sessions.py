@@ -11,11 +11,17 @@ from orbit.agent.domain.sessions import (
     default_name,
     lock_is_stale,
     lock_owner,
+    newest_first,
+    openable,
     parse_record,
     parse_review_count,
     record_json,
+    resumed_notes,
+    resumed_settings,
     review_count_json,
+    stored_summary,
     summarize,
+    tasks_summary,
 )
 from orbit.protocol import SessionSummary, Settings, TaskSpec, TaskState, TaskStatus, Usage
 
@@ -198,3 +204,61 @@ def test_the_review_count_round_trips_through_json() -> None:
 def test_an_unreadable_review_count_is_zero() -> None:
     texts = ("", "{oops", "[]", '{"since_super": -1}', '{"since_super": "many"}')
     assert [parse_review_count(text) for text in texts] == [0] * 5
+
+
+def test_a_summary_of_tasks_has_no_last_active_time() -> None:
+    summary = tasks_summary("new", "Fresh", (task("1", "draft"),))
+    assert summary == SessionSummary(id="new", name="Fresh", counts={"draft": 1})
+
+
+def test_a_readable_stored_session_is_summarized_from_its_record() -> None:
+    assert stored_summary("abc123", record(), True, False) == summarize(record(), current=True)
+
+
+def test_an_unreadable_stored_session_goes_by_its_id_and_says_why() -> None:
+    summary = stored_summary("broken", Unreadable("it isn't JSON"), False, True)
+    assert summary == SessionSummary(
+        id="broken", name="broken", locked=True, unreadable="it isn't JSON"
+    )
+
+
+def summary_at(session_id: str, when: datetime | None) -> SessionSummary:
+    return SessionSummary(id=session_id, name=session_id, last_active=when)
+
+
+def test_sessions_list_newest_first_with_undated_ones_last() -> None:
+    old = summary_at("old", CREATED)
+    new = summary_at("new", ACTIVE)
+    undated = summary_at("undated", None)
+    assert newest_first([undated, old, new]) == (new, old, undated)
+
+
+def test_a_readable_unlocked_session_is_openable() -> None:
+    assert openable("abc123", record(), locked=False) == record()
+
+
+def test_a_locked_session_isnt_openable() -> None:
+    assert openable("abc123", record(), locked=True) == (
+        "Can't open \"Oct 7 09:05\": it's open in another orbit."
+    )
+
+
+def test_an_unreadable_session_isnt_openable() -> None:
+    reason = openable("abc123", Unreadable("it isn't JSON"), locked=False)
+    assert reason == "Can't open the session abc123: it isn't JSON."
+
+
+def test_resuming_a_session_names_it_and_when_it_was_last_active() -> None:
+    assert resumed_notes(record(), 0) == ('Resumed "Oct 7 09:05" (last active Oct 17 14:30)',)
+
+
+def test_resuming_says_how_many_tasks_were_interrupted() -> None:
+    assert resumed_notes(record(), 1)[1:] == ("1 task was interrupted and is cancelled.",)
+    assert resumed_notes(record(), 3)[1:] == ("3 tasks were interrupted and are cancelled.",)
+
+
+def test_resumed_settings_are_the_saved_ones_but_for_those_pinned() -> None:
+    saved = Settings(model="opus", tool_access="full")
+    given = Settings(model="haiku", tool_access="off")
+    assert resumed_settings(saved, given, ()) == saved
+    assert resumed_settings(saved, given, ("model",)) == Settings(model="haiku", tool_access="full")

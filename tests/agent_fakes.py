@@ -196,7 +196,10 @@ class FakeStore:
     """Saved sessions kept in memory, holding the super review ``count``.
 
     ``failure``, while set, is the error every save raises; ``free`` says whether the lock can
-    be taken, and ``lock_failure``, if set, is the error taking it raises.
+    be taken, and ``lock_failure``, if set, is the error taking it raises. Sessions in
+    ``elsewhere`` are locked by another orbit, those in ``broken`` are unreadable for the reason
+    given, and ``delete_failure``, if set, is the error deleting one raises. ``on_acquire``, if
+    set, is awaited as a lock is taken.
     """
 
     def __init__(self, count: int = 0) -> None:
@@ -208,6 +211,11 @@ class FakeStore:
         self.failure: str | None = None
         self.free = True
         self.lock_failure: str | None = None
+        self.elsewhere: set[str] = set()
+        self.broken: dict[str, str] = {}
+        self.deleted: list[str] = []
+        self.delete_failure: str | None = None
+        self.on_acquire: Callable[[], Awaitable[None]] | None = None
 
     @property
     def last(self) -> SessionRecord:
@@ -224,15 +232,24 @@ class FakeStore:
         return found[-1] if found else Unreadable("it doesn't exist")
 
     async def sessions(self) -> list[StoredSession]:
-        latest = {r.id: r for r in self.saved}
-        return [StoredSession(i, r, False) for i, r in sorted(latest.items())]
+        latest: dict[str, SessionRecord | Unreadable] = {r.id: r for r in self.saved}
+        latest |= {i: Unreadable(reason) for i, reason in self.broken.items()}
+        return [StoredSession(i, r, i in self.elsewhere) for i, r in sorted(latest.items())]
 
     async def delete(self, session_id: str) -> None:
+        if self.delete_failure is not None:
+            raise RuntimeError(self.delete_failure)
+        self.deleted.append(session_id)
         self.saved = [r for r in self.saved if r.id != session_id]
+        self.locked.discard(session_id)
 
     async def acquire(self, session_id: str) -> bool:
+        if self.on_acquire is not None:
+            await self.on_acquire()
         if self.lock_failure is not None:
             raise RuntimeError(self.lock_failure)
+        if session_id in self.elsewhere:
+            return False
         if self.free:
             self.locked.add(session_id)
         return self.free

@@ -148,6 +148,29 @@ class DecideProposal(_Message):
     feedback: str = ""
 
 
+class ListSessions(_Message):
+    """Ask for the saved sessions, answered with ``SessionsListed``."""
+
+    type: Literal["list_sessions"] = "list_sessions"
+
+
+class OpenSession(_Message):
+    """Switch to saved session ``session_id``: its tasks, review state, planner conversation and
+    settings replace the open session's, and nothing runs until asked. Refused while tasks, a
+    review or the planner run."""
+
+    type: Literal["open_session"] = "open_session"
+    session_id: str
+
+
+class NewSession(_Message):
+    """Switch to a new, empty session ``name``d so, or by the time it started if ``name`` is
+    none; refused as ``OpenSession`` is."""
+
+    type: Literal["new_session"] = "new_session"
+    name: str | None = None
+
+
 Command = Annotated[
     SubmitPrompt
     | CancelTurn
@@ -160,7 +183,10 @@ Command = Annotated[
     | RemoveTask
     | CancelAgent
     | DecideProposal
-    | ConfigureChecks,
+    | ConfigureChecks
+    | ListSessions
+    | OpenSession
+    | NewSession,
     Field(discriminator="type"),
 ]
 
@@ -564,6 +590,20 @@ class UsageChanged(_Message):
     retry_at: AwareDatetime | None = None
 
 
+class SessionsListed(_Message):
+    """The saved sessions, the most recently active first; those that can't be read come last."""
+
+    type: Literal["sessions_listed"] = "sessions_listed"
+    sessions: tuple[SessionSummary, ...]
+
+
+class SessionOpened(_Message):
+    """The ``session`` now open, after ``OpenSession`` or ``NewSession``."""
+
+    type: Literal["session_opened"] = "session_opened"
+    session: SessionSummary
+
+
 Event = Annotated[
     SettingsChanged
     | TurnStarted
@@ -590,7 +630,9 @@ Event = Annotated[
     | Notice
     | ReviewStatus
     | ChecksProposed
-    | UsageChanged,
+    | UsageChanged
+    | SessionsListed
+    | SessionOpened,
     Field(discriminator="type"),
 ]
 

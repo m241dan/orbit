@@ -5,8 +5,9 @@ ports to do it, and reports what happened as events.
 """
 
 import asyncio
-from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Collection, Sequence
 from dataclasses import replace
+from datetime import datetime
 from typing import Any, assert_never
 
 from orbit.agent.application.desk import AgentDesk, Agents
@@ -14,6 +15,7 @@ from orbit.agent.application.keeper import (
     Clock,
     Contents,
     IdMaker,
+    Left,
     SessionKeeper,
     local_now,
     new_session_id,
@@ -30,9 +32,10 @@ from orbit.agent.application.usage_monitor import UsageMonitor
 from orbit.agent.application.verifier import Verification, Verifier
 from orbit.agent.application.work_lane import WorkLane
 from orbit.agent.domain.agents import Agent
-from orbit.agent.domain.board import WAITING, TaskBoard
-from orbit.agent.domain.reviews import ReviewPlanner
+from orbit.agent.domain.board import WAITING, TaskBoard, interrupted
+from orbit.agent.domain.reviews import LaneSnapshot, PlannerSnapshot, ReviewPlanner
 from orbit.agent.domain.roles import REVIEW_ROLES, configure_prompt, role_task
+from orbit.agent.domain.sessions import SessionRecord, resumed_notes, resumed_settings
 from orbit.agent.domain.verification import VerificationStep, startup_fix_prompt
 from orbit.protocol import (
     CODER,
@@ -49,14 +52,20 @@ from orbit.protocol import (
     EditTask,
     ErrorOccurred,
     Event,
+    ListSessions,
+    NewSession,
     Notice,
+    OpenSession,
     RemoveTask,
     RequestSuperReview,
     RunTasks,
+    SessionOpened,
+    SessionsListed,
     Settings,
     SettingsChanged,
     SubmitPrompt,
     TaskSpec,
+    TaskState,
     TurnEndReason,
     TurnFinished,
     UpdateSettings,
@@ -67,6 +76,32 @@ NO_STEPS_NOTE = "No verification steps configured. Press ctrl+e to set them up."
 NO_AGENTS_MESSAGE = "Tasks need agents, and none are set up."
 NO_VERIFY_MESSAGE = "Setting up checks needs verification on; orbit was started with --no-verify."
 CONFIGURING_NOTE = "A configurator task is already queued or running."
+TASKS_RUNNING = "Can't switch: tasks are running. Press ctrl+s to stop them."
+REVIEW_RUNNING = "Can't switch: a review is running. Press c on it in the agents pane to stop it."
+PLANNER_ANSWERING = "Can't switch: the planner is answering. Press ctrl+x to stop it."
+NO_REVIEWS = LaneSnapshot(planner=PlannerSnapshot())
+"""The review state of a session that has had none."""
+
+SessionCommand = ListSessions | OpenSession | NewSession
+WorkCommand = (
+    SubmitPrompt
+    | CancelTurn
+    | UpdateSettings
+    | AddTask
+    | RunTasks
+    | ConfigureChecks
+    | EditTask
+    | AcceptTask
+    | RemoveTask
+    | RequestSuperReview
+    | CancelAgent
+    | DecideProposal
+)
+
+
+def _stopped(saved: Sequence[TaskState], now: Sequence[TaskState]) -> list[str]:
+    """The ids of the tasks ``saved`` that are otherwise ``now``, as they were interrupted."""
+    return [task.id for task, was in zip(now, saved, strict=True) if task != was]
 
 
 def _verifier(
@@ -109,7 +144,11 @@ class AgentSession:
     ``usage`` source, the subscription's usage limits are fetched in the background too.
 
     The session open here is saved in ``store``, if there is one, once it's used; ``clock``
-    tells the time and ``new_id`` makes its id.
+    tells the time and ``new_id`` makes its id. The user can open another saved session, or a
+    new one, in its place: one opened has its saved settings, but for those ``pinned``, by
+    field name, which keep the ``settings`` given here. With ``pick_session``, the saved
+    sessions are listed as the events start, for the user to pick one; until they do, the
+    session open is a new one, and what orbit adds to it carries over into the one picked.
     """
 
     def __init__(
@@ -125,8 +164,14 @@ class AgentSession:
         store: SessionStore | None = None,
         clock: Clock = local_now,
         new_id: IdMaker = new_session_id,
+        pinned: Collection[str] = (),
+        pick_session: bool = False,
     ) -> None:
         self._settings = settings or Settings()
+        self._given = self._settings
+        self._pinned = tuple(pinned)
+        self._pick_session = pick_session
+        self._picking = pick_session  # No session picked yet: this one's tasks carry over.
         self._model_choices = tuple(model_choices)
         self._events: asyncio.Queue[Event] = asyncio.Queue()
         self._keeper = SessionKeeper(store, self._events.put, clock, new_id)
@@ -141,6 +186,7 @@ class AgentSession:
         self._lane = self._review_lane()
         self._held = False  # The user cancelled: don't start work by itself.
         self._planner = self._planner_chat()
+        self._retired: list[PlannerChat] = []  # Planners of sessions left, still to close.
         self._events.put_nowait(self._settings_changed())
         if workspace is not None:
             self._events.put_nowait(Notice(message=f"Workspace: {workspace}"))
@@ -194,6 +240,11 @@ class AgentSession:
         return self._keeper
 
     @property
+    def pinned(self) -> tuple[str, ...]:
+        """The settings, by field name, that a session opened keeps as given here."""
+        return self._pinned
+
+    @property
     def model_choices(self) -> tuple[str, ...]:
         return self._model_choices
 
@@ -206,6 +257,13 @@ class AgentSession:
         return self._verifier.verification if self._verifier else None
 
     async def send(self, command: Command) -> None:
+        if isinstance(command, SessionCommand):
+            await self._handle_sessions(command)
+        else:
+            self._picking = False  # The user works on in this session.
+            await self._handle_work(command)
+
+    async def _handle_work(self, command: WorkCommand) -> None:
         match command:
             case SubmitPrompt() | CancelTurn() | UpdateSettings():
                 await self._handle_prompts(command)
@@ -217,6 +275,120 @@ class AgentSession:
                 await self._handle_agents(command)
             case _:
                 assert_never(command)
+
+    async def _handle_sessions(self, command: SessionCommand) -> None:
+        match command:
+            case ListSessions():
+                await self._list_sessions()
+            case OpenSession(session_id=session_id):
+                await self._open_session(session_id)
+            case NewSession(name=name):
+                await self._new_session(name)
+            case _:
+                assert_never(command)
+
+    async def _list_sessions(self) -> None:
+        await self._events.put(SessionsListed(sessions=await self._keeper.summaries()))
+
+    async def _open_session(self, session_id: str) -> None:
+        """Open the saved session ``session_id`` in place of this one, without running
+        anything: what was running when it was saved is cancelled. Refused while anything runs,
+        or if it can't be opened; opening this session does nothing."""
+        if session_id == self._keeper.id or not self._may_switch():
+            return
+        found = await self._keeper.find(session_id)
+        if isinstance(found, str):
+            await self._events.put(ErrorOccurred(message=found))
+            return
+        await self._open(found)
+
+    async def _open(self, record: SessionRecord) -> None:
+        """Open the saved session ``record`` in place of this one, unless something runs once
+        it's locked."""
+        tasks, count = interrupted(record.tasks)
+        left = await self._keeper.open(
+            record, lambda: self._may_switch() and self._load(record, tasks)
+        )
+        if left is None:
+            return
+        await self._switched(left, _stopped(record.tasks, tasks), record.last_active)
+        for note in resumed_notes(record, count):
+            await self._events.put(Notice(message=note))
+
+    async def _new_session(self, name: str | None) -> None:
+        """Start a new session ``name``d so in place of this one; refused while anything
+        runs."""
+        left = await self._keeper.renew(name, lambda: self._may_switch() and self._clear())
+        if left is not None:
+            await self._switched(left, (), None)
+
+    def _may_switch(self) -> bool:
+        """Whether the session may be switched now, as nothing runs; otherwise says what runs."""
+        if self._work_turns.running:
+            refusal = TASKS_RUNNING
+        elif self._lane is not None and self._lane.running:
+            refusal = REVIEW_RUNNING
+        elif self._planner_turns.running:
+            refusal = PLANNER_ANSWERING
+        else:
+            return True
+        self._events.put_nowait(ErrorOccurred(message=refusal))
+        return False
+
+    def _load(self, record: SessionRecord, tasks: tuple[TaskState, ...]) -> bool:
+        """Hold what ``record`` does, with ``tasks`` as its board; returns True."""
+        self._replace_board(tasks)
+        self._settings = resumed_settings(record.settings, self._given, self._pinned)
+        self._replace_planner(record.planner_conversation)
+        if self._lane is not None:
+            self._lane.load(record.reviews or NO_REVIEWS)
+        return True
+
+    def _clear(self) -> bool:
+        """Hold what a new session does; returns True."""
+        self._replace_board(())
+        self._replace_planner(None)
+        if self._lane is not None:
+            self._lane.load(NO_REVIEWS)
+        return True
+
+    def _replace_board(self, tasks: tuple[TaskState, ...]) -> None:
+        """Have ``tasks`` on the board, and after them, while no session was picked yet, the
+        tasks orbit added."""
+        carried = self._board.tasks if self._picking else ()
+        self._board.restore(tasks)
+        for state in carried:
+            self._board.append(state)
+
+    def _replace_planner(self, conversation: str | None) -> None:
+        """Have a new planner, carrying on ``conversation`` if there is one; the old one is
+        closed once the switch is done."""
+        if self._planner is not None:
+            self._retired.append(self._planner)
+        self._planner = self._planner_chat()
+        if self._planner is not None and conversation is not None:
+            self._planner.restore(conversation)
+
+    async def _switched(
+        self, left: Left, stopped: Collection[str], last_active: datetime | None
+    ) -> None:
+        """Finish a switch from the session ``left``, deleting it if its tasks carried over:
+        close its planner, end the reviews ``stopped`` when it was saved, and publish what the
+        session opened, last active at ``last_active``, holds."""
+        discard, self._picking = self._picking, False
+        await self._keeper.leave(left, discard)
+        await self._close_retired()
+        if self._lane is not None:
+            await self._lane.end_interrupted(stopped)
+        await self._tasks.publish()
+        await self._events.put(self._settings_changed())
+        summary = self._keeper.summary(self._board.tasks, last_active)
+        await self._events.put(SessionOpened(session=summary))
+
+    async def _close_retired(self) -> None:
+        """Close the planners of the sessions left."""
+        while self._retired:
+            await self._retired.pop().close()
 
     async def _handle_prompts(self, command: SubmitPrompt | CancelTurn | UpdateSettings) -> None:
         match command:
@@ -481,7 +653,7 @@ class AgentSession:
     def _stops(self) -> list[Callable[[], Awaitable[None]]]:
         """What :meth:`close` awaits, in order."""
         parts = (self._startup, self._usage, self._lane, self._planner)
-        stops: list[Callable[[], Awaitable[None]]] = [self._stop_turns]
+        stops: list[Callable[[], Awaitable[None]]] = [self._stop_turns, self._close_retired]
         stops += [part.close for part in parts if part is not None]
         if self._desk is not None:
             stops.append(self._desk.stop)
@@ -498,6 +670,8 @@ class AgentSession:
             self._announced = True
             try:
                 await self._load_review_count()
+                if self._pick_session:
+                    await self._list_sessions()
                 await self._announce_leftovers()
             finally:  # A listener cancelled meanwhile mustn't keep the background from starting.
                 self._start_background()

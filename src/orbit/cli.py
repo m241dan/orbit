@@ -72,12 +72,12 @@ def chat(
         ),
     ] = None,
     tools: Annotated[
-        ToolAccess,
+        ToolAccess | None,
         typer.Option(
             help="Default tool access for new tasks: off (none), restricted (read-only; anything"
-            " needing approval is refused), full (auto-approve everything)."
+            " needing approval is refused; the default), full (auto-approve everything)."
         ),
-    ] = "restricted",
+    ] = None,
     verify: Annotated[
         bool,
         typer.Option(
@@ -134,12 +134,9 @@ def chat(
     except ConfigError as exc:
         typer.echo(f"Invalid orbit configuration: {exc}", err=True)
         raise typer.Exit(2) from None
-    steps = config.verification.steps
-    verification = (
-        Verification(steps, run_step, workspace_state, config.fallback_fixes) if verify else None
-    )
+    verification = _verification(config) if verify else None
     agents = _agents(config, worktree=worktree, review=review)
-    settings = Settings(model=model, tool_access=tools)
+    settings, pinned = _settings(model, tools)
     usage_source = UsageApi() if usage else None
     session = ThreadedSession(
         lambda: AgentSession(
@@ -151,10 +148,24 @@ def chat(
             check_at_startup=True,
             usage=usage_source,
             store=SessionFiles(state_dir(str(root))),
+            pinned=pinned,
         ),
         _thread_context(profile),
     )
     _launch(OrbitApp(session), profile)
+
+
+def _verification(config: OrbitConfig) -> Verification:
+    """What verifies tasks with ``config``'s steps, run as processes."""
+    steps = config.verification.steps
+    return Verification(steps, run_step, workspace_state, config.fallback_fixes)
+
+
+def _settings(model: str | None, tools: ToolAccess | None) -> tuple[Settings, list[str]]:
+    """The settings ``model`` and ``tools`` ask for, and the names of those given, which hold
+    even in a session saved with other settings."""
+    settings = Settings(model=model, tool_access=tools or "restricted")
+    return settings, [name for name, given in (("model", model), ("tool_access", tools)) if given]
 
 
 def _thread_context(profile: Path | None) -> Callable[[], AbstractContextManager[None]] | None:

@@ -319,3 +319,11 @@ def test_a_crash_keeps_everything_but_the_status_and_counts_each_change() -> Non
         other.model_copy(update={"status": "cancelled"}),
     )
     assert changed == 2
+
+
+def test_an_appended_task_keeps_its_state_under_the_next_id() -> None:
+    board = TaskBoard()
+    board.restore((TaskState(id="4", task=ONE),))
+    draft = TaskState(id="1", task=FIX, status="draft", origin="planner")
+    assert board.append(draft) == "5"
+    assert board.tasks[-1] == draft.model_copy(update={"id": "5"})

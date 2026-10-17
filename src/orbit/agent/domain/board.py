@@ -178,6 +178,13 @@ class TaskBoard:
             for state in self._tasks
         ]
 
+    def append(self, state: TaskState) -> str:
+        """Add ``state``, a task from another board, at the end as it is but with the next id;
+        returns that id."""
+        new_id = str(next(self._ids))
+        self._tasks.append(state.model_copy(update={"id": new_id}))
+        return new_id
+
     def add_review(self, task: TaskSpec) -> str:
         """Add a review orbit queued itself, at the end; returns its id."""
         state = self._new(task, origin="review")

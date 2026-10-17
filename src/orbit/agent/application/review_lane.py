@@ -69,12 +69,27 @@ class ReviewLane:
             planner=self.planner.snapshot(), jobs=dict(self._jobs), batches=dict(self._batches)
         )
 
+    @property
+    def running(self) -> bool:
+        """Whether reviews are being run."""
+        return self._background.running
+
     async def restore(self, snapshot: LaneSnapshot, interrupted: Collection[str] = ()) -> None:
         """Replace the lane's state with ``snapshot``'s, without running anything. The reviews
         in ``interrupted`` were stopped by a crash, so they end as a cancelled review does: a
         review of their batch that's due is queued, for the next run."""
+        self.load(snapshot)
+        await self.end_interrupted(interrupted)
+
+    def load(self, snapshot: LaneSnapshot) -> None:
+        """Replace the lane's state with ``snapshot``'s; :meth:`end_interrupted` follows."""
         self.planner.restore(snapshot.planner)
         self._jobs, self._batches = dict(snapshot.jobs), dict(snapshot.batches)
+        self._status = None  # Whatever it is, the restored status is news.
+
+    async def end_interrupted(self, interrupted: Collection[str]) -> None:
+        """End the reviews in ``interrupted``, as :meth:`restore` does, and publish the review
+        status."""
         for task_id in interrupted:
             batch = self._batches.get(task_id)
             if batch is not None and batch in self.planner.open_batches:
