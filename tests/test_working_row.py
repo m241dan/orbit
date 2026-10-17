@@ -42,6 +42,11 @@ def lines(row: WorkingRow) -> tuple[str, ...]:
     return row.lines
 
 
+def ticking(app: OrbitApp) -> bool:
+    """Whether the conversation's spinners and clocks are turning."""
+    return app.query_one(Transcript).ticking
+
+
 async def opened(app: OrbitApp, pilot: Pilot[None]) -> WorkingRow:
     """The app's working row, its clock stopped at ``NOW``."""
     row = app.query_one(WorkingRow)
@@ -61,7 +66,7 @@ async def test_the_row_is_hidden_and_still_while_nothing_runs() -> None:
         row = await opened(app, pilot)
         assert lines(row) == ()
         assert row.size.height == 0
-        assert not row.ticking
+        assert not ticking(app)
         assert not row.focusable
 
 
@@ -73,11 +78,11 @@ async def test_the_planner_shows_while_its_turn_runs() -> None:
         await fed(session, pilot, started("agent-1", "planner"), turn("agent-1"))
         assert lines(row) == ("◜ planner · 0:00",)
         assert row.size.height == 1
-        assert row.ticking
+        assert ticking(app)
         await fed(session, pilot, finished("agent-1"))
         assert lines(row) == ()
         assert row.size.height == 0
-        assert not row.ticking
+        assert not ticking(app)
 
 
 async def test_the_row_follows_tool_calls_starting_and_finishing() -> None:
@@ -104,6 +109,21 @@ async def test_the_clocks_tick_while_something_runs() -> None:
         assert lines(row) == ("◜ agent-2 · 0:12",)
 
 
+async def test_one_ticker_turns_a_call_and_its_row_until_the_turn_ends() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test(size=(80, 24)) as pilot:
+        row = await opened(app, pilot)
+        await fed(session, pilot, started("agent-2"), turn("agent-2"), read("agent-2", "c1", "a"))
+        assert ticking(app)
+        row.clock = lambda: NOW + 12
+        app.query_one(Transcript).tick()
+        assert lines(row) == ("◜ agent-2 · Read a 0:12 · 0:12",)
+        await fed(session, pilot, finished("agent-2"))
+        assert lines(row) == ()
+        assert not ticking(app)
+
+
 async def test_four_running_agents_show_three_lines_and_how_many_more() -> None:
     session = FakeSession()
     app = OrbitApp(session)
@@ -128,7 +148,7 @@ async def test_an_agent_exiting_leaves_the_row() -> None:
         await fed(session, pilot, started("agent-2"), turn("agent-2"))
         await fed(session, pilot, AgentExited(agent_id="agent-2", reason="crashed"))
         assert lines(row) == ()
-        assert not row.ticking
+        assert not ticking(app)
 
 
 async def test_each_tab_shows_only_its_own_running_agents() -> None:
@@ -148,7 +168,7 @@ async def test_each_tab_shows_only_its_own_running_agents() -> None:
         await pilot.pause()
         assert lines(row) == ()
         assert row.size.height == 0
-        assert row.ticking  # Others still run.
+        assert ticking(app)  # Others still run.
 
 
 async def test_the_row_sits_below_the_shown_log() -> None:

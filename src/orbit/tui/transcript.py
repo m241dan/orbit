@@ -491,8 +491,8 @@ class TranscriptLog(ListPane):
 
 class WorkingRow(Static):
     """What's running right now under the shown tab, one line per agent, below the
-    logs; hidden while nothing shown runs. Its spinners and clocks tick only while something
-    runs."""
+    logs; hidden while nothing shown runs. The :class:`Transcript` ticks its spinners and
+    clocks while something runs."""
 
     DEFAULT_CSS = """
     WorkingRow {
@@ -510,22 +510,16 @@ class WorkingRow(Static):
         self.lines: tuple[str, ...] = ()
         self._roles: Mapping[str, str] = {}
         self._shown: str | None = None
-        self._timer: Timer | None = None
 
     @property
-    def ticking(self) -> bool:
-        """Whether the spinners are turning."""
-        return self._timer is not None
+    def running(self) -> bool:
+        """Whether any agent runs."""
+        return bool(self.working)
 
     def track(self, event: Event, roles: Mapping[str, str]) -> None:
         """Follow who runs after ``event``, with ``roles`` placing agents in tabs."""
         self.working = track_working(self.working, event, self.clock())
         self._roles = roles
-        if self.working and self._timer is None:
-            self._timer = self.set_interval(1 / SPINNER_FPS, self.tick)
-        elif not self.working and self._timer is not None:
-            self._timer.stop()
-            self._timer = None
         self.tick()
 
     def show_tab(self, key: str | None) -> None:
@@ -734,6 +728,7 @@ class Transcript(Vertical):
     def track(self, event: Event, roles: Mapping[str, str]) -> None:
         """Follow who runs after ``event``, with ``roles`` placing agents in tabs."""
         self.working.track(event, roles)
+        self._keep_ticking()
 
     def entries(self, key: str | None) -> tuple[Entry, ...]:
         """The entries under the tab keyed ``key``; None is All."""
@@ -752,7 +747,8 @@ class Transcript(Vertical):
 
     @property
     def ticking(self) -> bool:
-        """Whether the spinners of running tool calls and requests are turning."""
+        """Whether the spinners and clocks of running agents, tool calls and requests are
+        turning."""
         return self._timer is not None
 
     def add_tool_call(
@@ -780,13 +776,20 @@ class Transcript(Vertical):
         self._keep_ticking()
 
     def tick(self) -> None:
-        """Turn the spinners of running tool calls."""
+        """Turn the spinners of running tool calls, and those and the clocks of the working
+        row."""
         for log in self._logs.values():
             log.tick()
+        self.working.tick()
+
+    @property
+    def _anything_runs(self) -> bool:
+        """Whether any agent or tool call runs."""
+        return self.working.running or any(log.running for log in self._logs.values())
 
     def _keep_ticking(self) -> None:
-        """Tick while any tool call runs, and only then."""
-        running = any(log.running for log in self._logs.values())
+        """Tick while any agent or tool call runs, and only then."""
+        running = self._anything_runs
         if running and self._timer is None:
             self._timer = self.set_interval(1 / SPINNER_FPS, self.tick)
         elif not running and self._timer is not None:
