@@ -47,6 +47,7 @@ from tests.agent_fakes import (
     ScriptedLauncher,
     Steps,
     board,
+    queued,
     replies,
     run,
     session_for,
@@ -430,9 +431,7 @@ async def test_closing_stops_the_running_agent_and_the_host() -> None:
     await session.close()  # Closing twice is harmless.
 
     assert host.stops == 1
-    events: list[Event] = []
-    while not session._events.empty():
-        events.append(session._events.get_nowait())
+    events = queued(session)
     assert AgentExited(agent_id="agent-1", reason="killed") in events
 
 

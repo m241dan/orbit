@@ -23,6 +23,8 @@ from orbit.protocol import (
     RunTasks,
     TasksChanged,
     TaskSpec,
+    TaskState,
+    TaskStatus,
     TurnEndReason,
 )
 from tests.agent_fakes import (
@@ -31,7 +33,11 @@ from tests.agent_fakes import (
     Script,
     ScriptedLauncher,
     Steps,
+    Stop,
     board,
+    events_until,
+    lane_of,
+    queued,
     session_for,
     verified,
 )
@@ -111,6 +117,22 @@ def reviewers_of(launcher: ScriptedLauncher) -> list[str]:
 
 def statuses_of(events: list[Event], role: str) -> list[str]:
     return [t.status for t in board(events) if t.task.role == role]
+
+
+def task_is(task_id: str, status: TaskStatus) -> Stop:
+    """Stops when task ``task_id`` is published with ``status``."""
+    return Stop(
+        f"task_is({task_id!r}, {status!r})",
+        lambda e: (
+            isinstance(e, TasksChanged)
+            and any(t.id == task_id and t.status == status for t in e.tasks)
+        ),
+    )
+
+
+def latest_board(events: list[Event]) -> tuple[TaskState, ...]:
+    """The tasks last published in ``events``, or none if none were."""
+    return board(events) if any(isinstance(e, TasksChanged) for e in events) else ()
 
 
 async def start(session: AgentSession, *prompts: str) -> None:
@@ -282,8 +304,7 @@ async def test_closing_stops_a_running_review() -> None:
     await asyncio.wait_for(reviewing.wait(), 10)
     await asyncio.wait_for(session.close(), 5)
     collecting.cancel()
-    while not session._events.empty():
-        events.append(session._events.get_nowait())
+    events += queued(session)
     assert AgentExited(agent_id="agent-2", reason="killed") in events
     assert tree.dropped == ["/work/review-c1"]
 
@@ -512,8 +533,7 @@ async def test_a_cancelled_reviewer_that_suggested_is_not_run_again() -> None:
     await asyncio.wait_for(suggested.wait(), 10)
     [reviewer] = reviewers_of(launcher)
     await session.send(CancelAgent(agent_id=reviewer))
-    while session._board.get("2").status != "cancelled":
-        await asyncio.sleep(0.01)
+    await events_until(session, task_is("2", "cancelled"))
     await session.send(RunTasks())
     await asyncio.sleep(0.05)
     release.set()
@@ -557,9 +577,7 @@ async def test_cancelling_an_unknown_agent_is_reported() -> None:
 
 async def test_cancelling_a_review_that_is_not_running_does_nothing() -> None:
     session, _, _ = session_for(tree=FakeTree(), review=True)
-    lane = session._lane
-    assert lane is not None
-    lane.cancel("42")
+    lane_of(session).cancel("42")
 
 
 async def test_a_review_can_suggest_after_its_first_suggestion_landed() -> None:
@@ -701,7 +719,7 @@ async def test_a_queued_review_that_is_removed_leaves_no_batch_open() -> None:
     await start(session, "one", "two")
     events: list[Event] = []
     collecting = asyncio.ensure_future(settle(session, events))
-    while [t.task.role for t in session._board.tasks].count("reviewer") < 2:
+    while [t.task.role for t in latest_board(events)].count("reviewer") < 2:
         await asyncio.sleep(0.01)
     await session.send(RemoveTask(task_id="4"))
     gate.set()
@@ -731,9 +749,7 @@ async def edit_a_user_review(session: AgentSession) -> list[Event]:
     """The events after adding a reviewer task to ``session`` and editing its prompt."""
     await session.send(AddTask(task=TaskSpec(prompt="Review the parser", role="reviewer")))
     await session.send(EditTask(task_id="1", task=TaskSpec(prompt="Again", role="reviewer")))
-    events: list[Event] = []
-    while not session._events.empty():
-        events.append(session._events.get_nowait())
+    events = queued(session)
     await session.close()
     return events
 

@@ -12,6 +12,7 @@ from orbit.agent.application.planner_seat import (
 )
 from orbit.agent.domain.verification import steps_note
 from orbit.protocol import (
+    AddTask,
     AgentExited,
     CancelTurn,
     ErrorOccurred,
@@ -21,6 +22,8 @@ from orbit.protocol import (
     PlannerReset,
     ResetPlanner,
     SubmitPrompt,
+    TasksChanged,
+    TaskSpec,
 )
 from tests.agent_fakes import (
     ROLES,
@@ -99,7 +102,9 @@ async def test_draft_tasks_stay_after_a_reset() -> None:
     launcher.planner_turns = [proposes_two]
     drafts = board(await plan(session, "Plan."))
     await reset(session)
-    assert session._board.tasks == drafts
+    await session.send(AddTask(task=TaskSpec(prompt="One more.")))
+    after = board(await events_until(session, of_type(TasksChanged)))
+    assert after[:-1] == drafts
     await session.close()
 
 

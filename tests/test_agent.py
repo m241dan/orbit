@@ -43,7 +43,17 @@ from orbit.protocol import (
     VerificationChanged,
     VerificationFinished,
 )
-from tests.agent_fakes import STEP, Call, FakeTree, Steps, events_until, idle, session_for
+from tests.agent_fakes import (
+    STEP,
+    Call,
+    FakeTree,
+    Steps,
+    events_until,
+    idle,
+    nothing_queued,
+    planner_turn,
+    session_for,
+)
 
 PLANNER_IDLE = BusyChanged(busy=False, lane="planner")
 
@@ -92,7 +102,7 @@ async def test_a_prompt_without_a_planner_is_refused() -> None:
     assert isinstance(await anext(stream), SettingsChanged)
     assert await anext(stream) == ErrorOccurred(message="Planning needs agents and a planner role.")
     assert await anext(stream) == PLANNER_IDLE
-    assert session._events.empty()
+    assert nothing_queued(session)
 
 
 async def test_session_reports_the_planners_errors() -> None:
@@ -173,7 +183,7 @@ async def test_a_turn_started_as_the_last_ends_is_not_reported_idle() -> None:
     await session.send(SubmitPrompt(text="one"))
     # The race sits between the task ending and its done-callback reporting idle, which no
     # event marks: TurnFinished comes before the end, BusyChanged after the callback.
-    turn = session._seat.turn
+    turn = planner_turn(session)
     assert turn is not None
     while not turn.done():
         await asyncio.sleep(0)
@@ -217,7 +227,7 @@ async def test_verification_without_steps_notes_that_nothing_is_verified() -> No
     assert isinstance(await anext(stream), SettingsChanged)
     # No steps to announce, just the note.
     assert await anext(stream) == Notice(message=NO_STEPS_NOTE)
-    assert session._events.empty()
+    assert nothing_queued(session)
 
 
 async def test_session_notes_its_workspace_at_startup() -> None:
@@ -225,7 +235,7 @@ async def test_session_notes_its_workspace_at_startup() -> None:
     stream = session.events()
     assert isinstance(await anext(stream), SettingsChanged)
     assert await anext(stream) == Notice(message="Workspace: /code/project")
-    assert session._events.empty()
+    assert nothing_queued(session)
 
 
 async def test_planner_turns_are_not_verified() -> None:
@@ -236,7 +246,7 @@ async def test_planner_turns_are_not_verified() -> None:
 
     assert not any(isinstance(e, VerificationChanged | VerificationFinished) for e in events[1:])
     await asyncio.sleep(0.01)
-    assert session._events.empty()
+    assert nothing_queued(session)
 
 
 async def no_usage() -> UsageFetch:

@@ -30,7 +30,8 @@ from orbit.agent.application.ports import UsageSource
 from orbit.agent.domain.reviews import ReviewLimits
 from orbit.agent.domain.sessions import default_name
 from orbit.cli import app
-from orbit.protocol import Notice, Settings, ThreadedSession
+from orbit.protocol import Notice, SessionsListed, Settings, ThreadedSession
+from tests.agent_fakes import queued, store_of
 
 runner = CliRunner()
 
@@ -94,10 +95,17 @@ def restore_cwd(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def notices(session: AgentSession) -> list[str]:
-    events = []
-    while not session._events.empty():
-        events.append(session._events.get_nowait())
-    return [e.message for e in events if isinstance(e, Notice)]
+    return [e.message for e in queued(session) if isinstance(e, Notice)]
+
+
+def lists_sessions_at_startup(session: AgentSession) -> bool:
+    """Whether ``session`` lists the saved sessions as its events start."""
+
+    async def listed() -> bool:
+        await anext(session.events())  # Its settings; the startup listing is queued by then.
+        return any(isinstance(e, SessionsListed) for e in queued(session))
+
+    return asyncio.run(listed())
 
 
 def test_chat_works_in_the_current_directory_by_default(
@@ -172,7 +180,7 @@ def test_chat_saves_sessions_in_the_git_directory_inside_a_repository(
     assert runner.invoke(app, ["chat", "-C", str(repo)]).exit_code == 0
 
     [session] = launched
-    store = session.saved_session._store
+    store = store_of(session)
     assert isinstance(store, SessionFiles)
     assert store._sessions == repo.resolve() / ".git" / "orbit" / "sessions"
 
@@ -183,7 +191,7 @@ def test_chat_saves_sessions_in_the_workspace_outside_git(
     assert runner.invoke(app, ["chat", "-C", str(tmp_path)]).exit_code == 0
 
     [session] = launched
-    store = session.saved_session._store
+    store = store_of(session)
     assert isinstance(store, SessionFiles)
     assert store._sessions == tmp_path.resolve() / ".orbit" / "sessions"
     assert not (tmp_path / ".orbit").exists()  # Nothing was used, so nothing was saved.
@@ -230,26 +238,35 @@ def test_chat_runs_tui_against_claude_cli(launched: list[AgentSession]) -> None:
     assert session.model_choices == MODEL_ALIASES
 
 
-def test_chat_has_the_user_pick_a_session_at_startup(launched: list[AgentSession]) -> None:
+def test_chat_has_the_user_pick_a_session_at_startup(
+    launched: list[AgentSession], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.chdir(tmp_path)
     assert runner.invoke(app, ["chat"]).exit_code == 0
 
     [session] = launched
-    assert session._pick_session
+    assert lists_sessions_at_startup(session)
 
 
-def test_chat_new_starts_a_new_session_named_for_the_time(launched: list[AgentSession]) -> None:
+def test_chat_new_starts_a_new_session_named_for_the_time(
+    launched: list[AgentSession], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.chdir(tmp_path)
     assert runner.invoke(app, ["chat", "--new"]).exit_code == 0
 
     [session] = launched
-    assert not session._pick_session
+    assert not lists_sessions_at_startup(session)
     assert session.saved_session.name == default_name(session.saved_session.created)
 
 
-def test_chat_name_starts_a_new_session_with_that_name(launched: list[AgentSession]) -> None:
+def test_chat_name_starts_a_new_session_with_that_name(
+    launched: list[AgentSession], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.chdir(tmp_path)
     assert runner.invoke(app, ["chat", "--name", "auth rework"]).exit_code == 0
 
     [session] = launched
-    assert not session._pick_session
+    assert not lists_sessions_at_startup(session)
     assert session.saved_session.name == "auth rework"
 
 

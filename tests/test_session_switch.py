@@ -43,8 +43,11 @@ from tests.agent_fakes import (
     Script,
     ScriptedLauncher,
     Steps,
+    Stop,
     Ticks,
     agent_exited,
+    all_of,
+    board,
     events_until,
     idle,
     of_type,
@@ -339,11 +342,12 @@ async def test_a_store_that_cant_lock_the_session_leaves_the_open_one_as_it_was(
     session, _ = switching(store)
     await session.send(AddTask(task=TASK))
     store.lock_failure = "Couldn't lock the session: disk full"
-    assert await refused(session, OpenSession(session_id="auth")) == [
-        "Couldn't lock the session: disk full"
-    ]
+    await session.send(OpenSession(session_id="auth"))
+    await session.send(ListSessions())
+    events = await events_until(session, of_type(SessionsListed))
+    assert messages(ErrorOccurred, events) == ["Couldn't lock the session: disk full"]
     assert session.saved_session.id == "session-1"
-    assert [t.task for t in session._board.tasks] == [TASK]
+    assert [t.task for t in board(events)] == [TASK]  # Its last board is the one it had.
     await session.close()
 
 
@@ -367,11 +371,8 @@ async def test_switching_is_refused_while_a_review_runs() -> None:
     )
     await session.send(AddTask(task=TASK))
     await session.send(RunTasks())
-    await events_until(
-        session, lambda e: isinstance(e, AgentStarted) and e.role == "reviewer", timeout=10
-    )
-    while session._work_turns.running:
-        await asyncio.sleep(0.01)
+    reviewing = Stop("reviewer", lambda e: isinstance(e, AgentStarted) and e.role == "reviewer")
+    await events_until(session, all_of(reviewing, idle("work")), timeout=10)
     assert await refused(session, OpenSession(session_id="auth")) == [REVIEW_RUNNING]
     await session.close()
 
@@ -571,8 +572,7 @@ async def test_a_session_without_agents_opens_its_board_and_settings() -> None:
     events = await opened(session, OpenSession(session_id="auth"))
     assert [t.id for t in last_of(TasksChanged, events).tasks] == ["1"]
     assert session.settings == settings
-    await opened(session, NewSession())
-    assert session._board.tasks == ()
+    assert board(await opened(session, NewSession())) == ()
     await session.close()
 
 

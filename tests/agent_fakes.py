@@ -17,6 +17,7 @@ from orbit.agent.application.ports import (
     StoredSession,
     UsageSource,
 )
+from orbit.agent.application.review_lane import ReviewLane
 from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.roles import REVIEW_ROLES, Setup, built_in_roles
 from orbit.agent.domain.sessions import SessionRecord, Unreadable
@@ -452,6 +453,17 @@ def agent_exited(agent_id: str) -> Stop:
     )
 
 
+def all_of(*stops: Stop) -> Stop:
+    """Stops once each of ``stops`` has matched an event, in any order."""
+    left = list(stops)
+
+    def matches(event: Event) -> bool:
+        left[:] = [stop for stop in left if not stop(event)]
+        return not left
+
+    return Stop(f"all_of{stops!r}", matches)
+
+
 def of_type(kind: type) -> Stop:
     """Stops at the first event of type ``kind``."""
     return Stop(f"of_type({kind.__name__})", lambda e: isinstance(e, kind))
@@ -489,3 +501,40 @@ def board(events: list[Event]) -> tuple[TaskState, ...]:
 
 def replies(events: list[Event]) -> list[str]:
     return [e.text for e in events if isinstance(e, AgentReply)]
+
+
+# The only helpers that reach into a session's private state, so its refactors touch only them.
+
+
+def queued(session: AgentSession) -> list[Event]:
+    """Take the events the session has queued but not yet published."""
+    events: list[Event] = []
+    while not session._events.empty():
+        events.append(session._events.get_nowait())
+    return events
+
+
+def nothing_queued(session: AgentSession) -> bool:
+    """Whether the session has no events queued to publish."""
+    return session._events.empty()
+
+
+async def publish(session: AgentSession, event: Event) -> None:
+    """Queue ``event`` for the session to publish, as its parts do."""
+    await session._events.put(event)
+
+
+def lane_of(session: AgentSession) -> ReviewLane:
+    """The session's review lane, which it must have."""
+    assert session._lane is not None
+    return session._lane
+
+
+def planner_turn(session: AgentSession) -> "asyncio.Task[object] | None":
+    """The planner's current turn, if it has one."""
+    return session._seat.turn
+
+
+def store_of(session: AgentSession) -> SessionStore | None:
+    """Where the session is saved, if anywhere."""
+    return session.saved_session._store

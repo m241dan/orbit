@@ -51,6 +51,7 @@ from tests.agent_fakes import (
     ScriptedLauncher,
     Steps,
     board,
+    nothing_queued,
     run,
     session_for,
     verified,
@@ -124,7 +125,7 @@ async def test_running_does_nothing_when_nothing_is_runnable() -> None:
     await anext(stream)  # Settings.
     await session.send(RunTasks())
     await asyncio.sleep(0.01)
-    assert session._events.empty()
+    assert nothing_queued(session)
     assert launcher.launches == []
 
 

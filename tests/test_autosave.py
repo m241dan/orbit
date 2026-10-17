@@ -2,8 +2,7 @@
 
 import asyncio
 
-from orbit.agent import AgentSession, Verification, VerificationStep
-from orbit.agent.application.review_lane import ReviewLane
+from orbit.agent import Verification, VerificationStep
 from orbit.agent.domain.reviews import ReviewLimits
 from orbit.protocol import (
     AddTask,
@@ -28,6 +27,7 @@ from tests.agent_fakes import (
     board,
     events_until,
     idle,
+    lane_of,
     of_type,
     session_for,
 )
@@ -142,11 +142,6 @@ async def test_a_save_that_fails_is_reported_once_and_work_carries_on() -> None:
     assert errors(events) == ["Couldn't save the session: disk full"]
     assert store.saved == []
     await session.close()
-
-
-def lane_of(session: AgentSession) -> ReviewLane:
-    assert session._lane is not None
-    return session._lane
 
 
 async def test_the_review_state_and_the_repositorys_super_count_are_saved() -> None:
