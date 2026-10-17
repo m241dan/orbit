@@ -137,6 +137,15 @@ async def test_an_interrupted_reviews_batch_waits_for_its_work_without_running_i
     assert [t.status for t in board_of(session).tasks] == ["completed", "cancelled", "pending"]
 
 
+async def test_an_interrupted_review_whose_batch_waits_is_not_run_again() -> None:
+    session, launcher = await restored(crashed("pending"), reviewing("3"), "2")
+    lane_of(session).kick()
+    await asyncio.sleep(0.05)
+    assert launcher.launches == []
+    assert board_of(session).get("2").status == "cancelled"
+    await session.close()
+
+
 async def test_an_interrupted_reviews_finished_batch_is_queued_for_review_but_not_run() -> None:
     tasks = crashed("completed")
     session, launcher = await restored(tasks, reviewing("3", finished=frozenset({"3"})), "2")

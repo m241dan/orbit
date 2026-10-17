@@ -260,6 +260,24 @@ def test_suggesting_into_a_closed_batch_is_refused() -> None:
     assert refusal is not None and "over" in refusal
 
 
+def test_suggesting_into_a_batch_whose_review_ended_is_refused() -> None:
+    reviews = planner()
+    batch = filled(reviews, "2")
+    assert batch in reviews.open_batches
+    refusal = reviews.refusal(batch, "Late", queued=())
+    assert refusal is not None and "review is over" in refusal
+
+
+def test_a_batch_is_filling_only_while_its_review_runs() -> None:
+    reviews = planner()
+    batch = reviews.open_batch(ReviewJob(commits=("a",), round=0, batch=None))
+    reviews.added(batch, "2")
+    assert reviews.filling(batch)
+    reviews.review_ended(batch)
+    assert not reviews.filling(batch)
+    assert not reviews.filling("batch-9")
+
+
 def test_removing_a_batchs_last_unfinished_task_has_the_batch_reviewed_without_it() -> None:
     reviews = planner()
     batch = filled(reviews, "2", "3")

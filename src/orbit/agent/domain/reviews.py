@@ -150,6 +150,10 @@ class ReviewPlanner:
     def open_batches(self) -> tuple[str, ...]:
         return tuple(self._open)
 
+    def filling(self, batch: str) -> bool:
+        """Whether ``batch`` is open and its review may still suggest into it."""
+        return batch in self._open and self._open[batch].filling
+
     def round_of(self, batch: str) -> int:
         return self._rounds[batch]
 
@@ -181,8 +185,9 @@ class ReviewPlanner:
 
     def refusal(self, batch: str, title: str, queued: Sequence[TaskState]) -> str | None:
         """Why a suggestion titled ``title`` can't join ``batch``; ``None`` if it can."""
-        if batch not in self._open:
-            return "This review's suggestions are closed: its batch is over."
+        closed = self._closed(batch)
+        if closed is not None:
+            return closed
         cap = self._open[batch].cap
         if len(self._open[batch].tasks) >= cap:
             return f"This review has already suggested {cap} tasks, the most allowed."
@@ -190,6 +195,14 @@ class ReviewPlanner:
         for state in queued:
             if state.status in WAITING and _normalized(state.task.prompt) == wanted:
                 return f"Task {state.id} already covers that."
+        return None
+
+    def _closed(self, batch: str) -> str | None:
+        """Why ``batch`` takes no more suggestions; ``None`` if its review is still filling it."""
+        if batch not in self._open:
+            return "This review's suggestions are closed: its batch is over."
+        if not self._open[batch].filling:
+            return "This review's suggestions are closed: its review is over."
         return None
 
     def count(self) -> bool:

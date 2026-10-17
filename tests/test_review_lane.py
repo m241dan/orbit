@@ -466,6 +466,46 @@ async def test_cancelling_a_reviewer_stops_its_review_and_the_lane_carries_on() 
     assert statuses_of(events, "coder") == ["completed", "completed"]
 
 
+async def test_a_cancelled_reviewer_that_suggested_is_not_run_again() -> None:
+    suggested, release = asyncio.Event(), asyncio.Event()
+
+    async def suggests_then_waits(call: Call) -> TurnEndReason:
+        await call("get_task")
+        await call("suggest_task", title="Add tests", prompt="Please add tests.")
+        suggested.set()
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+    async def waits_then_done(call: Call) -> TurnEndReason:
+        await release.wait()
+        return await claims_done(call)
+
+    session, _, launcher = session_for(
+        claims_done,
+        waits_then_done,
+        reviewers=(suggests_then_waits, suggests()),
+        tree=FakeTree(),
+        review=True,
+    )
+    await start(session)
+    await asyncio.wait_for(suggested.wait(), 10)
+    [reviewer] = reviewers_of(launcher)
+    await session.send(CancelAgent(agent_id=reviewer))
+    while session._board.get("2").status != "cancelled":
+        await asyncio.sleep(0.01)
+    await session.send(RunTasks())
+    await asyncio.sleep(0.05)
+    release.set()
+    events = await asyncio.wait_for(settle(session), 10)
+    assert reviewers_of(launcher)[0] == reviewer
+    assert [la.agent.task_id for la in launcher.launches].count("2") == 1
+    assert [(t.task.role, t.status) for t in board(events)][:3] == [
+        ("coder", "completed"),
+        ("reviewer", "cancelled"),
+        ("coder", "completed"),
+    ]
+
+
 async def test_cancelling_the_coder_is_like_escape() -> None:
     working = asyncio.Event()
 

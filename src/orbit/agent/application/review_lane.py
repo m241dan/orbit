@@ -229,9 +229,9 @@ class ReviewLane:
             await self._review(task_id)
 
     def _spent(self) -> set[str]:
-        """Reviews that ended, however they did: their batch is over, so running them again
-        could suggest nothing."""
-        return {t for t, b in self._batches.items() if b not in self.planner.open_batches}
+        """Reviews that ended, however they did: their batch is over or no longer filling, so
+        running them again could suggest nothing."""
+        return {t for t, b in self._batches.items() if not self.planner.filling(b)}
 
     async def _review(self, task_id: str) -> None:
         job = self._jobs.get(task_id)
