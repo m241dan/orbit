@@ -291,3 +291,19 @@ async def test_a_panel_without_a_width_yet_lays_out_every_change(
         now[0] += 1 / 8
         panel.tick()
         assert layouts == [True, True]  # The spinner's frame too, as its wrapping is unknown.
+
+
+async def test_panel_ticks_only_while_a_step_runs() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        panel = app.query_one(VerificationPanel)
+        assert not panel.ticking
+        await feed(session, pilot, report("pending", "pending"))
+        assert not panel.ticking
+        await feed(session, pilot, report("running", "pending"))
+        assert panel.ticking
+        await feed(session, pilot, report("passed", "running"))
+        assert panel.ticking
+        await feed(session, pilot, report("passed", "passed"))
+        assert not panel.ticking

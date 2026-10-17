@@ -1,6 +1,6 @@
 """Building blocks of the orbit screen."""
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 from rich.text import Text
@@ -11,19 +11,43 @@ from textual.containers import VerticalScroll
 from textual.css.styles import RulesMap
 from textual.message import Message
 from textual.screen import ModalScreen
+from textual.timer import Timer
 from textual.visual import VisualType
 from textual.widget import Widget
 from textual.widgets import Input, OptionList, Static, TextArea
 from textual.widgets.option_list import Option
 
 from orbit.protocol import Settings
-from orbit.tui.view import prompt_title, settings_summary
+from orbit.tui.view import SPINNER_FPS, prompt_title, settings_summary
 
 if TYPE_CHECKING:
     _WidgetMixin = Widget
 else:
     # Not a Widget at runtime, so Textual still inherits the base's CSS and component classes.
     _WidgetMixin = object
+
+
+class Ticker:
+    """Calls ``tick`` as fast as spinners turn, on ``owner``'s timer, but only while kept
+    running, so nothing redraws while nothing spins."""
+
+    def __init__(self, owner: Widget, tick: Callable[[], None]) -> None:
+        self._owner = owner
+        self._tick = tick
+        self._timer: Timer | None = None
+
+    @property
+    def ticking(self) -> bool:
+        """Whether the timer runs."""
+        return self._timer is not None
+
+    def keep(self, running: bool) -> None:
+        """Tick while ``running``, starting the timer if it's stopped, and stop it if not."""
+        if running and self._timer is None:
+            self._timer = self._owner.set_interval(1 / SPINNER_FPS, self._tick)
+        elif not running and self._timer is not None:
+            self._timer.stop()
+            self._timer = None
 
 
 class ModalFocus(_WidgetMixin):

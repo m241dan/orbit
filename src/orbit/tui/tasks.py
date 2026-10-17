@@ -16,7 +16,6 @@ from textual.widgets.option_list import Option
 
 from orbit.protocol import Settings, TaskSpec, TaskState, Usage
 from orbit.tui.view import (
-    SPINNER_FPS,
     TOOL_ACCESS_OPTIONS,
     join_prompt,
     model_label,
@@ -28,7 +27,7 @@ from orbit.tui.view import (
     tool_access_labels,
     usage_label,
 )
-from orbit.tui.widgets import ListPane, PickerScreen, PromptBox, PromptInput
+from orbit.tui.widgets import ListPane, PickerScreen, PromptBox, PromptInput, Ticker
 
 NEW_TASK_LABEL = "+ new task"
 
@@ -73,11 +72,11 @@ class TaskList(ListPane):
         self.numbers: list[str] = []
         self.clock: Callable[[], float] = time.monotonic
         self.session_usage = Usage()
+        self._ticker = Ticker(self, self.tick)
 
     def on_mount(self) -> None:
         self.border_title = "Task list"
         self._redraw()
-        self.set_interval(1 / SPINNER_FPS, self.tick)
 
     def action_accept(self) -> None:
         state = self._highlighted_task()
@@ -110,6 +109,12 @@ class TaskList(ListPane):
             return
         self.tasks, self.numbers = tasks, task_numbers(tasks)
         self._redraw()
+        self._ticker.keep(any(t.status == "running" for t in tasks))
+
+    @property
+    def ticking(self) -> bool:
+        """Whether the spinners of running tasks are turning."""
+        return self._ticker.ticking
 
     def count(self, usage: Usage) -> None:
         """Add what a turn cost to the session's total."""

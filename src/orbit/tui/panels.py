@@ -9,8 +9,8 @@ from textual.app import ComposeResult
 from textual.widgets import Static
 
 from orbit.protocol import StepState, UsageChanged
-from orbit.tui.view import SPINNER_FPS, spinner_frame, step_lines, usage_lines
-from orbit.tui.widgets import SidePanel
+from orbit.tui.view import spinner_frame, step_lines, usage_lines
+from orbit.tui.widgets import SidePanel, Ticker
 
 NO_STEPS_TEXT = "No verification steps"
 
@@ -32,12 +32,15 @@ class VerificationPanel(SidePanel):
         self._since = 0.0
         self._text = NO_STEPS_TEXT  # What the panel shows now.
         self._height: int | None = None  # Its rows when last drawn, if its width was known.
+        self._ticker = Ticker(self, self.tick)
 
     def compose(self) -> ComposeResult:
         yield Static(NO_STEPS_TEXT)
 
-    def on_mount(self) -> None:
-        self.set_interval(1 / SPINNER_FPS, self.tick)
+    @property
+    def ticking(self) -> bool:
+        """Whether the running step's spinner and clock are turning."""
+        return self._ticker.ticking
 
     def show(self, steps: Sequence[StepState], title: str = "") -> None:
         self.steps, self.title = tuple(steps), title
@@ -46,6 +49,7 @@ class VerificationPanel(SidePanel):
             self._since = self.clock()
         self._running_step = running
         self.tick()
+        self._ticker.keep(running is not None)
 
     def tick(self) -> None:
         """Redraw the steps, if they or the spinner's frame changed since the last time."""

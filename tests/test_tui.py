@@ -869,6 +869,7 @@ async def test_the_shown_tabs_title_follows_its_relabelling() -> None:
 async def test_coder_output_lands_in_the_coder_tab_and_stays_after_it_exits() -> None:
     session = FakeSession()
     app = OrbitApp(session)
+    app.clock = lambda: 0.0
     async with app.run_test(size=(120, 30)) as pilot:
         await feed_events(session, pilot, started("agent-1"), said("agent-1", "coding"))
         assert tab_strip(app) == ["All", "planner", "● coder *", *PINNED[2:]]
@@ -1089,6 +1090,7 @@ async def test_escape_keeps_its_behaviour_while_the_conversation_holds_a_cursor(
 async def test_planner_output_shows_under_planner_and_all_but_not_other_tabs() -> None:
     session = FakeSession()
     app = OrbitApp(session)
+    app.clock = lambda: 0.0
     async with app.run_test(size=(120, 30)) as pilot:
         # The user's planner prompt is on the planner tab before the planner starts.
         await pilot.press("i", *"plan", "enter", "tab")

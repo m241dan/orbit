@@ -808,3 +808,17 @@ async def test_spinning_and_relabelling_redraw_only_their_rows() -> None:
         task_list.show((one, running, done))
         assert cached_rows(task_list) == before - {2}
         assert rows(app)[2] == str(task_label(done, "3", spinner_frame(0.25)))
+
+
+async def test_task_list_ticks_only_while_a_task_runs() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        tasks = app.query_one(TaskList)
+        assert not tasks.ticking
+        await feed(session, pilot, board("one", "two"))
+        assert not tasks.ticking
+        await feed(session, pilot, board("one", "two", status="running"))
+        assert tasks.ticking
+        await feed(session, pilot, board("one", "two", status="verifying"))
+        assert not tasks.ticking

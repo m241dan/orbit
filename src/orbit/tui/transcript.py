@@ -18,13 +18,11 @@ from textual.binding import Binding, BindingType
 from textual.containers import Vertical, VerticalScroll
 from textual.message import Message
 from textual.reactive import reactive
-from textual.timer import Timer
 from textual.widgets import OptionList, Static
 
 from orbit.protocol import AgentReply, AgentRequest, Event, ToolCallFinished, ToolCallStarted
 from orbit.tui.view import (
     DETAIL_HEIGHT,
-    SPINNER_FPS,
     EntryKind,
     ToolCall,
     Working,
@@ -52,7 +50,7 @@ from orbit.tui.view import (
     track_working,
     working_lines,
 )
-from orbit.tui.widgets import ListPane, ModalFocus
+from orbit.tui.widgets import ListPane, ModalFocus, Ticker
 
 
 @dataclass(frozen=True)
@@ -664,7 +662,7 @@ class Transcript(Vertical):
         self.thinking_hidden = False
         self.clock: Callable[[], float] = time.monotonic
         self._logs: dict[str | None, TranscriptLog] = {}
-        self._timer: Timer | None = None
+        self._ticker = Ticker(self, self.tick)
 
     def compose(self) -> ComposeResult:
         yield self._new_log(None, shown=True)
@@ -760,7 +758,7 @@ class Transcript(Vertical):
     def ticking(self) -> bool:
         """Whether the spinners and clocks of running agents, tool calls and requests are
         turning."""
-        return self._timer is not None
+        return self._ticker.ticking
 
     def add_tool_call(
         self, event: ToolCallStarted | AgentRequest, key: str | None, speaker: str | None
@@ -800,12 +798,7 @@ class Transcript(Vertical):
 
     def _keep_ticking(self) -> None:
         """Tick while any agent or tool call runs, and only then."""
-        running = self._anything_runs
-        if running and self._timer is None:
-            self._timer = self.set_interval(1 / SPINNER_FPS, self.tick)
-        elif not running and self._timer is not None:
-            self._timer.stop()
-            self._timer = None
+        self._ticker.keep(self._anything_runs)
 
     def promote(self, agent: str | None, turn: str, places: Iterable[int]) -> None:
         """Draw at full brightness, in every log holding them, the messages ``agent`` thought
