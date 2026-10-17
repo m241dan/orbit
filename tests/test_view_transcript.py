@@ -38,6 +38,7 @@ from orbit.tui.view import (
     entry_prefix,
     error_entry,
     exchange_entry,
+    final_answer,
     gutter,
     hanging_indent,
     note_entry,
@@ -381,3 +382,23 @@ def test_an_error_is_labelled_with_its_agent() -> None:
         "error",
     )
     assert error_entry(ErrorOccurred(message="boom")) == ("boom", "error")
+
+
+def test_only_the_message_after_the_last_tool_call_is_the_final_answer() -> None:
+    assert final_answer(["message", "tool", "message"]) == (1,)
+
+
+def test_a_turn_of_a_message_alone_has_it_as_its_final_answer() -> None:
+    assert final_answer(["message"]) == (0,)
+
+
+def test_a_turn_ending_on_a_tool_call_has_no_final_answer() -> None:
+    assert final_answer(["message", "tool"]) == ()
+
+
+def test_every_message_after_the_last_tool_call_is_the_final_answer() -> None:
+    assert final_answer(["tool", "message", "tool", "message", "message"]) == (1, 2)
+
+
+def test_a_turn_with_no_output_has_no_final_answer() -> None:
+    assert final_answer([]) == ()

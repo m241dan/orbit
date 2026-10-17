@@ -68,10 +68,12 @@ from orbit.tui.view import (
     TOOL_ACCESS_OPTIONS,
     EntryKind,
     TaskProgress,
+    TurnStep,
     activity_entry,
     coalesce,
     decision_entry,
     error_entry,
+    final_answer,
     model_options,
     output_entry,
     task_note,
@@ -188,6 +190,9 @@ class OrbitApp(App[None], inherit_bindings=False):
         self._settings: Settings | None = None
         self._model_choices: tuple[str, ...] = ()
         self._proposal: ProposalScreen | None = None  # The proposal being shown, if any.
+        # The steps of each running turn, by its agent and id: turn ids needn't be unique
+        # across agents.
+        self._turns: dict[tuple[str | None, str], list[TurnStep]] = {}
         # Pickers are built once and installed so they open instantly.
         self._model_picker = PickerScreen("Model", model_options(())[1])
         self._tool_picker = PickerScreen("Tool access", tool_access_labels())
@@ -481,7 +486,7 @@ class OrbitApp(App[None], inherit_bindings=False):
             case ErrorOccurred():
                 self._append(*error_entry(event), event.agent_id)
             case AssistantMessage() | ToolCallStarted() | ToolCallFinished():
-                self._append(*output_entry(event), event.agent_id)
+                self._output(event)
             case _:
                 assert_never(event)
 
@@ -557,6 +562,28 @@ class OrbitApp(App[None], inherit_bindings=False):
         entry = turn_finished_entry(event)
         if entry is not None:
             self._append(*entry, event.agent_id)
+        steps = self._turns.pop((event.agent_id, event.turn_id), [])
+        self._transcript.promote(event.agent_id, event.turn_id, final_answer(steps))
+
+    def _think(self, event: AssistantMessage) -> None:
+        """Show ``event``'s message dim, as thinking out loud until its turn ends."""
+        self._step(event.agent_id, event.turn_id, "message")
+        key = self._tabs.key_of(event.agent_id)
+        self._transcript.add_thinking(event.text, key, event.agent_id, event.turn_id)
+
+    def _output(self, event: AssistantMessage | ToolCallStarted | ToolCallFinished) -> None:
+        """Show a piece of a turn's output: a message dim until its turn ends, a tool call's
+        start as a step in its turn."""
+        if isinstance(event, AssistantMessage):
+            self._think(event)
+            return
+        if isinstance(event, ToolCallStarted):
+            self._step(event.agent_id, event.turn_id, "tool")
+        self._append(*output_entry(event), event.agent_id)
+
+    def _step(self, agent: str | None, turn: str, step: TurnStep) -> None:
+        """Note ``step`` in ``agent``'s ``turn``, which decides its final answer when it ends."""
+        self._turns.setdefault((agent, turn), []).append(step)
 
     def _append(self, text: str, kind: EntryKind, agent: str | None = None) -> None:
         # Entries are kept by tab: a pinned role's agents' under its tab.

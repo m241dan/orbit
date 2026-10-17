@@ -1,6 +1,7 @@
 """The conversation window: the transcript and its per-tab logs."""
 
-from dataclasses import dataclass
+from collections.abc import Iterable
+from dataclasses import dataclass, replace
 from typing import Any, ClassVar, get_args
 
 from rich.console import Console, ConsoleOptions, RenderableType, RenderResult
@@ -30,11 +31,13 @@ from orbit.tui.widgets import ListPane
 @dataclass(frozen=True)
 class Entry:
     """A transcript entry: its ``text``, the ``kind`` it's styled as and the ``agent`` it's
-    by, if any."""
+    by, if any. An agent's message thinking out loud keeps the ``turn`` it's from, and is drawn
+    dim, until it's found to be the turn's final answer."""
 
     text: str
     kind: EntryKind
     agent: str | None = None
+    turn: str | None = None
 
 
 @dataclass(frozen=True)
@@ -120,6 +123,7 @@ class TranscriptLog(ListPane):
     TranscriptLog .transcript--gutter { color: $text-muted; }
     TranscriptLog .transcript--marker { color: $accent; }
     TranscriptLog .transcript--label { color: $text-muted; }
+    TranscriptLog .transcript--thinking { color: $text-muted; }
     TranscriptLog > .option-list--option-highlighted,
     TranscriptLog:focus > .option-list--option-highlighted,
     TranscriptLog > .option-list--option-hover {
@@ -132,6 +136,7 @@ class TranscriptLog(ListPane):
         "transcript--gutter",
         "transcript--marker",
         "transcript--label",
+        "transcript--thinking",
         *(f"transcript--{kind}" for kind in get_args(EntryKind)),
     }
 
@@ -152,11 +157,14 @@ class TranscriptLog(ListPane):
             self.highlighted = self.option_count - 1
         super().enter_list_mode()
 
-    def append(self, text: str, kind: EntryKind, agent: str | None = None) -> None:
-        """Add an entry by ``agent``, collapsed if its kind starts so; the view stays pinned to
-        the latest entry unless the list is active or holds a cursor."""
+    def append(
+        self, text: str, kind: EntryKind, agent: str | None = None, turn: str | None = None
+    ) -> None:
+        """Add an entry by ``agent``, dim while thinking out loud in ``turn``, collapsed if its
+        kind starts so; the view stays pinned to the latest entry unless the list is active or
+        holds a cursor."""
         collapsed = starts_collapsed(kind, text)
-        self._entries.append(Entry(text, kind, agent))
+        self._entries.append(Entry(text, kind, agent, turn))
         self._collapsed.append(collapsed)
         self.add_option(self._prompt(len(self._entries) - 1))
         if not self.has_focus and self.highlighted is None:
@@ -173,6 +181,19 @@ class TranscriptLog(ListPane):
             self.scroll_end(animate=False)
         else:
             self.scroll_to_highlight()
+
+    def promote(self, agent: str | None, turn: str, places: Iterable[int]) -> None:
+        """Draw at full brightness the messages ``agent`` thought out loud in ``turn`` at
+        ``places`` among them, redrawing only those; a log without them is left as it is."""
+        thinking = self._thinking(agent, turn)
+        for index in (thinking[place] for place in places if place < len(thinking)):
+            self._entries[index] = replace(self._entries[index], turn=None)
+            self._redraw(index)
+
+    def _thinking(self, agent: str | None, turn: str) -> list[int]:
+        """Where the messages ``agent`` is thinking out loud in ``turn`` are, in order."""
+        entries = self._entries
+        return [i for i, entry in enumerate(entries) if (entry.agent, entry.turn) == (agent, turn)]
 
     def collapsed(self, index: int) -> bool:
         return self._collapsed[index]
@@ -207,7 +228,8 @@ class TranscriptLog(ListPane):
         entry = self._entries[index]
         marked = index == self._marked
         band = banded(entry.kind)
-        style = self.get_component_rich_style(f"transcript--{entry.kind}", partial=not band)
+        component = "thinking" if entry.turn is not None else entry.kind
+        style = self.get_component_rich_style(f"transcript--{component}", partial=not band)
         gutter_style = self.get_component_rich_style(
             "transcript--marker" if marked else "transcript--gutter", partial=True
         )
@@ -276,6 +298,19 @@ class Transcript(Vertical):
         """Add an entry by ``agent`` under All and, if ``key`` names a tab, under that tab."""
         for tab in {None, key}:
             self._log(tab).append(text, kind, agent)
+
+    def add_thinking(self, text: str, key: str | None, agent: str | None, turn: str) -> None:
+        """Add ``agent``'s message in ``turn``, dim as thinking out loud until it's promoted,
+        under All and, if ``key`` names a tab, under that tab."""
+        for tab in {None, key}:
+            self._log(tab).append(text, "assistant", agent, turn)
+
+    def promote(self, agent: str | None, turn: str, places: Iterable[int]) -> None:
+        """Draw at full brightness, in every log holding them, the messages ``agent`` thought
+        out loud in ``turn`` at ``places`` among them."""
+        shown = tuple(places)
+        for log in self._logs.values():
+            log.promote(agent, turn, shown)
 
     def enter_list_mode(self) -> None:
         """Activate the shown log: j/k move between its entries, enter collapses or expands

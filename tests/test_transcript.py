@@ -10,7 +10,15 @@ from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.pilot import Pilot
 
-from orbit.protocol import PLANNER, AssistantMessage, Notice, ToolCallFinished
+from orbit.protocol import (
+    PLANNER,
+    AssistantMessage,
+    Notice,
+    ToolCallFinished,
+    ToolCallStarted,
+    TurnEndReason,
+    TurnFinished,
+)
 from orbit.tui import OrbitApp
 from orbit.tui.transcript import Entry, GutteredEntry, Transcript, TranscriptLog
 from orbit.tui.view import GUTTER_BAR, GUTTER_MARKER, PROMPT_LINES_SHOWN, EntryKind
@@ -82,7 +90,7 @@ async def test_entries_are_kept_under_all_and_under_their_tab() -> None:
         transcript = app.query_one(Transcript)
         assert transcript.entries(None) == (
             Entry("▶ agent-1 (coder) started", "agent", "agent-1"),
-            Entry("hi", "assistant", "agent-1"),
+            Entry("hi", "assistant", "agent-1", "t"),
             Entry("📌 n", "verify"),
         )
         # agent-1 runs in a pinned role, so its entries belong to the role's tab.
@@ -878,3 +886,138 @@ async def test_a_collapsed_agents_message_keeps_its_label_row() -> None:
         assert log.collapsed(0)
         assert headings(app) == ["agent-1"]
         assert entry_rows(log, 0)[0].rstrip() == "│ agent-1"
+
+
+def thought(agent_id: str, text: str, turn: str = "t") -> AssistantMessage:
+    return AssistantMessage(turn_id=turn, text=text, agent_id=agent_id)
+
+
+def tool_call(agent_id: str, turn: str = "t") -> ToolCallStarted:
+    return ToolCallStarted(turn_id=turn, call_id="c", name="Read", arguments={}, agent_id=agent_id)
+
+
+def turn_ended(agent_id: str, turn: str = "t", reason: TurnEndReason = "completed") -> TurnFinished:
+    return TurnFinished(turn_id=turn, agent_id=agent_id, reason=reason)
+
+
+def brightness(app: OrbitApp) -> list[str]:
+    """How each of the shown log's agents' messages is drawn: dim or bright."""
+    log = visible_log(app)
+    dim = log.get_component_rich_style("transcript--thinking", partial=True)
+    bright = log.get_component_rich_style("transcript--assistant", partial=True)
+    names = {dim: "dim", bright: "bright"}
+    return [names[label_style(prompt)] for prompt in prompts(app) if prompt.body is not None]
+
+
+async def test_an_agents_message_arrives_dim_under_a_muted_label_row() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, thought("agent-1", "looking"))
+        log = visible_log(app)
+        assert brightness(app) == ["dim"]
+        thinking = log.get_component_rich_style("transcript--thinking", partial=True)
+        assert thinking != log.get_component_rich_style("transcript--assistant", partial=True)
+        heading = prompts(app)[0].heading
+        assert heading is not None
+        label = log.get_component_rich_style("transcript--label", partial=True)
+        assert heading.get_style_at_offset(Console(), 0) == label
+
+
+async def test_only_the_message_after_the_last_tool_call_brightens_when_the_turn_ends() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(
+            session,
+            pilot,
+            thought("agent-1", "looking"),
+            tool_call("agent-1"),
+            tool_output("agent-1", "found"),
+            thought("agent-1", "done"),
+        )
+        assert brightness(app) == ["dim", "dim"]
+        await feed_events(session, pilot, turn_ended("agent-1"))
+        assert brightness(app) == ["dim", "bright"]
+
+
+@pytest.mark.parametrize("reason", ["completed", "cancelled", "error", "max_steps"])
+async def test_a_turn_of_a_message_alone_brightens_it_however_it_ends(
+    reason: TurnEndReason,
+) -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(
+            session, pilot, thought("agent-1", "done"), turn_ended("agent-1", reason=reason)
+        )
+        assert brightness(app) == ["bright"]
+
+
+async def test_a_turn_ending_on_a_tool_call_brightens_nothing() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(
+            session,
+            pilot,
+            thought("agent-1", "looking"),
+            tool_call("agent-1"),
+            turn_ended("agent-1"),
+        )
+        assert brightness(app) == ["dim"]
+
+
+async def test_every_message_after_the_last_tool_call_brightens() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(
+            session,
+            pilot,
+            tool_call("agent-1"),
+            thought("agent-1", "found it"),
+            thought("agent-1", "done"),
+            turn_ended("agent-1"),
+        )
+        assert brightness(app) == ["bright", "bright"]
+
+
+@pytest.mark.parametrize("first", ["agent-1", "agent-2"])
+async def test_concurrent_turns_brighten_only_their_own_messages(first: str) -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    turns = {"agent-1": "t1", "agent-2": "t2"}
+    async with app.run_test() as pilot:
+        await feed_events(
+            session,
+            pilot,
+            thought("agent-1", "one", "t1"),
+            thought("agent-2", "two", "t2"),
+            turn_ended(first, turns[first]),
+        )
+        expected = {"agent-1": ["bright", "dim"], "agent-2": ["dim", "bright"]}[first]
+        assert brightness(app) == expected
+        last = "agent-2" if first == "agent-1" else "agent-1"
+        await feed_events(session, pilot, turn_ended(last, turns[last]))
+        assert brightness(app) == ["bright", "bright"]
+
+
+async def test_a_final_answer_brightens_under_all_and_its_roles_tab() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test(size=(120, 30)) as pilot:
+        await feed_events(
+            session,
+            pilot,
+            started("agent-1"),
+            started("agent-2", "reviewer"),
+            thought("agent-1", "done", "t1"),
+            thought("agent-2", "reviewing", "t2"),
+            turn_ended("agent-1", "t1"),
+        )
+        assert brightness(app) == ["bright", "dim"]
+        await pilot.press("tab", "tab")  # coder
+        assert brightness(app) == ["bright"]
+        transcript = app.query_one(Transcript)
+        assert transcript.entries("coder")[1] == Entry("done", "assistant", "agent-1")

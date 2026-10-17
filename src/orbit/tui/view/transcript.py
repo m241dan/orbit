@@ -1,6 +1,7 @@
 """Transcript entries: what each piece of a conversation reads as."""
 
-from typing import ClassVar, assert_never
+from collections.abc import Sequence
+from typing import ClassVar, Literal, assert_never
 
 from rich.console import Console, ConsoleOptions, RenderResult
 from rich.markdown import Heading, Markdown, MarkdownContext, MarkdownElement
@@ -198,6 +199,20 @@ def _output(
             return output, "tool"
         case _:
             assert_never(event)
+
+
+TurnStep = Literal["message", "tool"]
+"""What a turn's output was, in order: a message, or the start of a tool call."""
+
+
+def final_answer(steps: Sequence[TurnStep]) -> tuple[int, ...]:
+    """Which of a turn's messages are its final answer, by their place among the turn's
+    messages: those after its last tool call, given the turn's ``steps``. A turn that ends on a
+    tool call has none."""
+    last_tool = max((index for index, step in enumerate(steps) if step == "tool"), default=-1)
+    trailing = len(steps) - last_tool - 1
+    total = steps.count("message")
+    return tuple(range(total - trailing, total))
 
 
 EXIT_ENTRIES: dict[AgentExitReason, tuple[str, EntryKind]] = {
