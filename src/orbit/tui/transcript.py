@@ -14,6 +14,7 @@ from textual.widgets import OptionList
 
 from orbit.tui.view import (
     EntryKind,
+    banded,
     collapsible,
     entry_label,
     entry_markdown,
@@ -60,29 +61,34 @@ class GutteredEntry:
     """A transcript entry as drawn: its ``heading`` if it has one, then its ``body``, or its
     ``label`` when it has none, wrapped to the width left beside the ``gutter``, which goes in
     front of every row in ``gutter_style``, then a blank row so the entry reads as a
-    paragraph."""
+    paragraph. With a ``band``, every row is filled to its end in that style."""
 
     label: Text
     gutter: str
     gutter_style: Style
     body: RenderableType | None = None
     heading: Text | None = None
+    band: Style | None = None
 
     def __rich_console__(self, console: Console, options: ConsoleOptions) -> RenderResult:
         width = options.max_width - len(self.gutter)
         shown = self.label if self.body is None else self.body
         parts = (shown,) if self.heading is None else (self.heading, shown)
         for part in parts:
-            for row in console.render_lines(part, options.update_width(width), pad=False):
+            rows = console.render_lines(
+                part, options.update_width(width), style=self.band, pad=self.band is not None
+            )
+            for row in rows:
                 yield Segment(self.gutter, self.gutter_style)
                 yield from row
                 yield Segment.line()
         yield Segment.line()
 
 
-def markdown_body(text: str, style: Style) -> HangingIndent:
-    """``text`` drawn as markdown in ``style``, its marker hanging beside it if it has one."""
-    first, rest = hanging_indent(text)
+def markdown_body(kind: EntryKind, text: str, style: Style) -> HangingIndent:
+    """``text`` drawn as markdown in ``style``, the prefix and marker of an entry of ``kind``
+    hanging beside it if it has them."""
+    first, rest = hanging_indent(kind, text)
     return HangingIndent(entry_markdown(text, style), first, rest, style)
 
 
@@ -105,6 +111,7 @@ class TranscriptLog(ListPane):
     TranscriptLog:focus { border: none; background-tint: $foreground 0%; }
     TranscriptLog.-shown { display: block; }
     TranscriptLog .transcript--user { color: $text-accent; text-style: bold; }
+    TranscriptLog .transcript--prompt { background: $foreground 5%; }
     TranscriptLog .transcript--tool { color: $text-muted; }
     TranscriptLog .transcript--verify { color: $text-warning; }
     TranscriptLog .transcript--agent { color: $text-accent; }
@@ -148,7 +155,7 @@ class TranscriptLog(ListPane):
     def append(self, text: str, kind: EntryKind, agent: str | None = None) -> None:
         """Add an entry by ``agent``, collapsed if its kind starts so; the view stays pinned to
         the latest entry unless the list is active or holds a cursor."""
-        collapsed = starts_collapsed(kind) and collapsible(text)
+        collapsed = starts_collapsed(kind, text)
         self._entries.append(Entry(text, kind, agent))
         self._collapsed.append(collapsed)
         self.add_option(self._prompt(len(self._entries) - 1))
@@ -195,17 +202,23 @@ class TranscriptLog(ListPane):
         self.replace_prompt(index, self._prompt(index))
 
     def _prompt(self, index: int) -> GutteredEntry:
-        # Partial styles, so no background of their own paints a band across the entry.
+        # Partial styles, so no background of their own paints a band across the entry; a
+        # banded kind's full style, whose translucent background is blended with the log's.
         entry = self._entries[index]
         marked = index == self._marked
-        style = self.get_component_rich_style(f"transcript--{entry.kind}", partial=True)
+        band = banded(entry.kind)
+        style = self.get_component_rich_style(f"transcript--{entry.kind}", partial=not band)
         gutter_style = self.get_component_rich_style(
             "transcript--marker" if marked else "transcript--gutter", partial=True
         )
         collapsed = self._collapsed[index]
-        label = Text(entry_label(entry.text, collapsed), style=style)
-        body = markdown_body(entry.text, style) if shows_markdown(entry.kind, collapsed) else None
-        return GutteredEntry(label, gutter(marked), gutter_style, body, self._heading(index))
+        label = Text(entry_label(entry.kind, entry.text, collapsed), style=style)
+        markdown = shows_markdown(entry.kind, collapsed)
+        body = markdown_body(entry.kind, entry.text, style) if markdown else None
+        heading = self._heading(index)
+        return GutteredEntry(
+            label, gutter(marked), gutter_style, body, heading, style if band else None
+        )
 
     def _heading(self, index: int) -> Text | None:
         """The label row heading the entry at ``index``, when it's an agent's message and the

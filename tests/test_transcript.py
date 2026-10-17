@@ -2,16 +2,18 @@
 and collapsed."""
 
 import pytest
+from rich.color import Color
 from rich.console import Console, ConsoleOptions, RenderResult
+from rich.segment import Segment
 from rich.style import Style
 from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.pilot import Pilot
 
-from orbit.protocol import AssistantMessage, Notice, ToolCallFinished
+from orbit.protocol import PLANNER, AssistantMessage, Notice, ToolCallFinished
 from orbit.tui import OrbitApp
 from orbit.tui.transcript import Entry, GutteredEntry, Transcript, TranscriptLog
-from orbit.tui.view import GUTTER_BAR, GUTTER_MARKER, EntryKind
+from orbit.tui.view import GUTTER_BAR, GUTTER_MARKER, PROMPT_LINES_SHOWN, EntryKind
 from tests.test_tui import FakeSession, feed_events, said, started
 
 # Wraps in any window a test opens. At 40 columns a row beside the gutter holds two words but
@@ -23,14 +25,16 @@ def visible_log(app: OrbitApp) -> TranscriptLog:
     return app.query_one("Transcript > TranscriptLog.-shown", TranscriptLog)
 
 
+def entry(log: TranscriptLog, index: int) -> GutteredEntry:
+    """The entry at ``index`` as the log draws it."""
+    prompt = log.get_option_at_index(index).prompt
+    assert isinstance(prompt, GutteredEntry)
+    return prompt
+
+
 def prompts(app: OrbitApp) -> list[GutteredEntry]:
     log = visible_log(app)
-    entries = []
-    for index in range(log.option_count):
-        prompt = log.get_option_at_index(index).prompt
-        assert isinstance(prompt, GutteredEntry)
-        entries.append(prompt)
-    return entries
+    return [entry(log, index) for index in range(log.option_count)]
 
 
 def labels(app: OrbitApp) -> list[str]:
@@ -103,18 +107,17 @@ async def test_entries_are_shown_as_paragraphs_separated_by_blank_lines() -> Non
 
 
 async def test_entry_kinds_style_the_entries() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
+    app = LogApp()
     async with app.run_test() as pilot:
-        await pilot.press("i", *"hi", "enter")
-        await feed_events(session, pilot, AssistantMessage(turn_id="t", text="plain"))
-        log = visible_log(app)
-        user, plain = prompts(app)
-        user_style, plain_style = (label_style(prompt) for prompt in (user, plain))
-        assert user_style == log.get_component_rich_style("transcript--user", partial=True)
-        assert isinstance(user_style, Style) and user_style.bold
-        assert plain_style == log.get_component_rich_style("transcript--assistant", partial=True)
-        assert user_style.bgcolor is None
+        log = app.query_one(TranscriptLog)
+        log.append("Task 1: do it", "user")
+        log.append("plain", "assistant")
+        await pilot.pause()
+        header, plain = (label_style(entry(log, index)) for index in range(2))
+        assert header == log.get_component_rich_style("transcript--user", partial=True)
+        assert isinstance(header, Style) and header.bold
+        assert plain == log.get_component_rich_style("transcript--assistant", partial=True)
+        assert header.bgcolor is None
 
 
 async def test_every_entry_has_a_dim_bar_in_its_gutter_without_a_cursor() -> None:
@@ -570,13 +573,15 @@ class LogApp(App[None]):
         yield TranscriptLog(shown=True)
 
 
-def entry_rows(log: TranscriptLog, index: int) -> list[str]:
+def entry_lines(log: TranscriptLog, index: int) -> list[list[Segment]]:
     """The rows of the entry at ``index`` as drawn at the log's width, gutter and all."""
-    prompt = log.get_option_at_index(index).prompt
-    assert isinstance(prompt, GutteredEntry)
     console = Console(width=log.size.width)
-    lines = console.render_lines(prompt, console.options, pad=False)
-    return ["".join(segment.text for segment in line) for line in lines]
+    return console.render_lines(entry(log, index), console.options, pad=False)
+
+
+def entry_rows(log: TranscriptLog, index: int) -> list[str]:
+    """The text of the rows of the entry at ``index``, gutter and all."""
+    return ["".join(segment.text for segment in line) for line in entry_lines(log, index)]
 
 
 async def test_an_agents_message_of_several_lines_hangs_its_marker_beside_its_markdown() -> None:
@@ -656,6 +661,102 @@ async def test_awkward_markdown_stays_within_the_log(text: str) -> None:
         assert rows[-1] == ""
         assert all(Text(row).cell_len <= log.size.width for row in rows)
         assert all(row.startswith(f"{GUTTER_BAR} ") for row in rows[:-1])
+
+
+async def test_a_submitted_prompt_is_added_as_a_prompt_entry() -> None:
+    app = OrbitApp(FakeSession())
+    async with app.run_test() as pilot:
+        await pilot.press("i", *"hi", "enter")
+        assert app.query_one(Transcript).entries(None) == (Entry("hi", "prompt", PLANNER),)
+        assert [row.rstrip() for row in entry_rows(visible_log(app), 0)] == ["│ ❯ hi", ""]
+
+
+async def appended(*entries: tuple[str, EntryKind]) -> list[list[str]]:
+    """The rows of each of ``entries`` appended to a log, as drawn."""
+    app = LogApp()
+    async with app.run_test() as pilot:
+        log = app.query_one(TranscriptLog)
+        for text, kind in entries:
+            log.append(text, kind)
+        await pilot.pause()
+        return [[row.rstrip() for row in entry_rows(log, i)] for i in range(len(entries))]
+
+
+async def test_a_prompt_hangs_its_markers_beside_its_markdown() -> None:
+    (rows,) = await appended(("**intro**\n\n- one\n- two", "prompt"))
+    assert rows == ["│ ❯ ▾ intro", "│", "│      • one", "│      • two", ""]
+
+
+async def test_a_prompt_renders_a_fenced_code_block() -> None:
+    (rows,) = await appended(("run:\n\n```\nx = 1\n```", "prompt"))
+    assert rows[0] == "│ ❯ ▾ run:"
+    assert "│      x = 1" in rows
+    assert not any("```" in row for row in rows)
+
+
+def backgrounds(line: list[Segment]) -> list[Color | None]:
+    """The background of each segment of ``line``."""
+    return [None if segment.style is None else segment.style.bgcolor for segment in line]
+
+
+async def test_every_row_of_a_prompt_is_banded_across_the_width_beside_the_gutter() -> None:
+    app = LogApp()
+    async with app.run_test() as pilot:
+        log = app.query_one(TranscriptLog)
+        log.append(f"{LONG}\n\nend", "prompt")
+        await pilot.pause()
+        band = log.get_component_rich_style("transcript--prompt")
+        assert band.bgcolor is not None and not band.bold
+        lines = entry_lines(log, 0)
+        assert len(lines) > 3 and backgrounds(lines[-1]) == []
+        for line in lines[:-1]:
+            gutter, *rest = backgrounds(line)
+            assert gutter is None and set(rest) == {band.bgcolor}
+            assert Segment.get_line_length(line) == log.size.width
+
+
+async def test_task_headers_stay_bold_and_plain_without_a_band() -> None:
+    app = LogApp()
+    async with app.run_test() as pilot:
+        log = app.query_one(TranscriptLog)
+        log.append("Task 3: **do** it", "user")
+        await pilot.pause()
+        header = entry(log, 0)
+        assert header.band is None and header.body is None
+        assert [row.rstrip() for row in entry_rows(log, 0)] == ["│ Task 3: **do** it", ""]
+        assert label_style(header).bold
+
+
+def prompt_of(lines: int) -> str:
+    return "\n".join(f"line {i}" for i in range(lines))
+
+
+async def test_a_prompt_longer_than_its_lines_shown_starts_collapsed() -> None:
+    app = LogApp()
+    async with app.run_test() as pilot:
+        log = app.query_one(TranscriptLog)
+        log.append(prompt_of(PROMPT_LINES_SHOWN + 1), "prompt")
+        log.append(prompt_of(PROMPT_LINES_SHOWN), "prompt")
+        await pilot.pause()
+        assert log.collapsed(0) and not log.collapsed(1)
+        assert entry(log, 0).body is None
+        assert entry(log, 0).label.plain == f"❯ ▸ line 0 (+{PROMPT_LINES_SHOWN} lines)"
+        assert entry(log, 1).body is not None
+
+
+async def test_a_prompt_toggles_between_collapsed_and_expanded() -> None:
+    app = LogApp()
+    async with app.run_test() as pilot:
+        log = app.query_one(TranscriptLog)
+        log.append("one\n\ntwo", "prompt")
+        await pilot.pause()
+        log.toggle(0)
+        await pilot.pause()
+        assert log.collapsed(0)
+        assert [row.rstrip() for row in entry_rows(log, 0)] == ["│ ❯ ▸ one (+2 lines)", ""]
+        log.toggle(0)
+        await pilot.pause()
+        assert [row.rstrip() for row in entry_rows(log, 0)] == ["│ ❯ ▾ one", "│", "│     two", ""]
 
 
 @pytest.mark.parametrize("kind", ["user", "tool", "verify", "agent", "request", "error"])

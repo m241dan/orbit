@@ -26,12 +26,16 @@ from orbit.protocol import (
 from orbit.tui.view import (
     GUTTER_BAR,
     GUTTER_MARKER,
+    PROMPT_LINES_SHOWN,
+    PROMPT_MARKER,
     activity_entry,
     agent_entry,
     agent_labelled,
+    banded,
     collapsible,
     entry_label,
     entry_markdown,
+    entry_prefix,
     error_entry,
     exchange_entry,
     gutter,
@@ -113,7 +117,7 @@ def test_an_orbit_request_collapses_its_full_arguments_beneath_a_summary() -> No
     first, _, rest = text.partition("\n")
     assert first == "agent-1 → orbit: suggest_task Add a flag"
     assert json.loads(rest) == arguments
-    assert starts_collapsed(kind)
+    assert starts_collapsed(kind, text)
 
 
 def test_an_orbit_request_summary_is_clipped_to_the_tool_call_limit() -> None:
@@ -212,10 +216,20 @@ def test_entries_are_labelled_by_their_agent_when_they_have_one() -> None:
 
 
 def test_only_tool_and_request_entries_start_collapsed() -> None:
-    assert starts_collapsed("tool") and starts_collapsed("request")
+    assert starts_collapsed("tool", "a\nb") and starts_collapsed("request", "a\nb")
     assert not any(
-        starts_collapsed(kind) for kind in ("user", "assistant", "verify", "agent", "error")
+        starts_collapsed(kind, "a\nb") for kind in ("user", "assistant", "verify", "agent", "error")
     )
+
+
+def test_an_entry_of_one_line_never_starts_collapsed() -> None:
+    assert not starts_collapsed("tool", "a")
+
+
+def test_a_prompt_starts_collapsed_only_past_its_lines_shown() -> None:
+    lines = [f"line {i}" for i in range(PROMPT_LINES_SHOWN + 1)]
+    assert starts_collapsed("prompt", "\n".join(lines))
+    assert not starts_collapsed("prompt", "\n".join(lines[:-1]))
 
 
 def test_an_entry_is_collapsible_when_it_has_more_than_one_line() -> None:
@@ -224,16 +238,34 @@ def test_an_entry_is_collapsible_when_it_has_more_than_one_line() -> None:
 
 
 def test_entry_labels_mark_collapsible_entries_and_count_collapsed_lines() -> None:
-    assert entry_label("one", collapsed=False) == "one"
-    assert entry_label("one", collapsed=True) == "one"
-    assert entry_label("one\ntwo", collapsed=False) == "▾ one\ntwo"
-    assert entry_label("one\ntwo", collapsed=True) == "▸ one (+1 line)"
-    assert entry_label("one\ntwo\nthree", collapsed=True) == "▸ one (+2 lines)"
+    assert entry_label("tool", "one", collapsed=False) == "one"
+    assert entry_label("tool", "one", collapsed=True) == "one"
+    assert entry_label("tool", "one\ntwo", collapsed=False) == "▾ one\ntwo"
+    assert entry_label("tool", "one\ntwo", collapsed=True) == "▸ one (+1 line)"
+    assert entry_label("tool", "one\ntwo\nthree", collapsed=True) == "▸ one (+2 lines)"
 
 
-def test_only_expanded_assistant_entries_show_markdown() -> None:
+def test_a_prompts_label_puts_the_prompt_marker_ahead_of_the_collapse_marker() -> None:
+    assert entry_label("prompt", "one", collapsed=False) == "❯ one"
+    assert entry_label("prompt", "one\ntwo", collapsed=False) == "❯ ▾ one\ntwo"
+    assert entry_label("prompt", "one\ntwo", collapsed=True) == "❯ ▸ one (+1 line)"
+
+
+def test_only_prompts_have_a_prefix() -> None:
+    assert entry_prefix("prompt") == PROMPT_MARKER
+    assert not any(entry_prefix(kind) for kind in ("user", "assistant", "tool", "error"))
+
+
+def test_only_prompts_are_banded() -> None:
+    assert banded("prompt")
+    assert not any(banded(kind) for kind in ("user", "assistant", "tool", "error"))
+
+
+def test_only_expanded_assistant_and_prompt_entries_show_markdown() -> None:
     assert shows_markdown("assistant", collapsed=False)
     assert not shows_markdown("assistant", collapsed=True)
+    assert shows_markdown("prompt", collapsed=False)
+    assert not shows_markdown("prompt", collapsed=True)
     assert not any(
         shows_markdown(kind, collapsed=False)
         for kind in ("user", "tool", "verify", "agent", "request", "error")
@@ -241,11 +273,20 @@ def test_only_expanded_assistant_entries_show_markdown() -> None:
 
 
 def test_a_collapsible_entry_hangs_its_marker_beside_its_markdown() -> None:
-    assert hanging_indent("one\ntwo") == ("▾ ", "  ")
+    assert hanging_indent("assistant", "one\ntwo") == ("▾ ", "  ")
 
 
 def test_an_entry_of_one_line_has_no_hanging_indent() -> None:
-    assert hanging_indent("one") == ("", "")
+    assert hanging_indent("assistant", "one") == ("", "")
+
+
+def test_a_prompt_hangs_its_marker_and_any_collapse_marker_beside_its_markdown() -> None:
+    assert hanging_indent("prompt", "one") == ("❯ ", "  ")
+    assert hanging_indent("prompt", "one\ntwo") == ("❯ ▾ ", "    ")
+
+
+def test_prompts_are_never_labelled() -> None:
+    assert speaker_label("prompt", "agent-2", "agent-1") is None
 
 
 def markdown_rows(text: str, width: int = 40) -> list[str]:
@@ -308,8 +349,8 @@ def test_a_tool_call_entry_collapses_its_full_arguments_beneath_a_summary() -> N
     first, _, rest = text.partition("\n")
     assert first == "→ Write src/foo.py"
     assert json.loads(rest) == arguments
-    assert starts_collapsed(kind)
-    assert entry_label(text, collapsed=True) == "▸ → Write src/foo.py (+4 lines)"
+    assert starts_collapsed(kind, text)
+    assert entry_label(kind, text, collapsed=True) == "▸ → Write src/foo.py (+4 lines)"
 
 
 def test_a_tool_call_entry_without_arguments_is_one_line() -> None:

@@ -139,7 +139,11 @@ to the planner.
 
 Each entry is coloured by what it is: your prompts, agents' messages, tool calls and their output,
 verification and notices, and errors. Agents' and the planner's messages render as markdown:
-headings, emphasis, lists, tables, highlighted code and links shown as `text (url)`. A tool call shows as one line naming the tool and its main
+headings, emphasis, lists, tables, highlighted code and links shown as `text (url)`. Your own
+prompts stand out: each starts with `❯`, its following rows indented beneath it, on a faint band
+across the conversation's width, and renders as markdown too; a prompt of more than 15 lines
+starts collapsed (`❯ ▸ first line (+N lines)`), and an expanded one of several lines is marked
+`❯ ▾`. Task headers (`Task 3: …`) stay bold in the accent colour. A tool call shows as one line naming the tool and its main
 argument, such as the file or command, with its full arguments collapsed beneath it; an agent's
 request to orbit shows the same way. An entry of more than one line can be collapsed to its first
 line and a count of the rest, marked `▸` (`▾` when expanded); tool calls, their output and requests

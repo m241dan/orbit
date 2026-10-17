@@ -44,9 +44,17 @@ COLLAPSED_KINDS: frozenset[EntryKind] = frozenset({"tool", "request"})
 """Kinds whose entries start collapsed: tool output and the arguments of agents' requests to
 orbit are long and rarely read."""
 
+PROMPT_LINES_SHOWN = 15
+"""The most lines a prompt of the user's starts expanded with."""
 
-def starts_collapsed(kind: EntryKind) -> bool:
-    return kind in COLLAPSED_KINDS
+
+def starts_collapsed(kind: EntryKind, text: str) -> bool:
+    """Whether an entry of ``kind`` showing ``text`` starts collapsed: one of
+    :data:`COLLAPSED_KINDS` with lines to collapse, or a prompt of the user's longer than
+    :data:`PROMPT_LINES_SHOWN`."""
+    if kind == "prompt":
+        return text.count("\n") >= PROMPT_LINES_SHOWN
+    return kind in COLLAPSED_KINDS and collapsible(text)
 
 
 def collapsible(text: str) -> bool:
@@ -56,11 +64,23 @@ def collapsible(text: str) -> bool:
 
 EXPANDED_MARKER = "▾ "
 """The marker in front of an expanded entry that can be collapsed."""
+PROMPT_MARKER = "❯ "
+"""The marker in front of the user's prompts, ahead of any collapse marker."""
 
 
-def entry_label(text: str, collapsed: bool) -> str:
-    """``text`` as its entry shows it. A collapsible entry starts with a marker; ``collapsed``,
-    it shows only its first line and how many more there are."""
+def entry_prefix(kind: EntryKind) -> str:
+    """What goes in front of an entry of ``kind`` before anything else: the prompt marker for
+    the user's prompts, nothing for the rest."""
+    return PROMPT_MARKER if kind == "prompt" else ""
+
+
+def entry_label(kind: EntryKind, text: str, collapsed: bool) -> str:
+    """``text`` as an entry of ``kind`` shows it, after its prefix. A collapsible entry starts
+    with a marker; ``collapsed``, it shows only its first line and how many more there are."""
+    return entry_prefix(kind) + _collapse_label(text, collapsed)
+
+
+def _collapse_label(text: str, collapsed: bool) -> str:
     if not collapsible(text):
         return text
     first, _, rest = text.partition("\n")
@@ -70,8 +90,9 @@ def entry_label(text: str, collapsed: bool) -> str:
     return f"▸ {first} (+{more} line{'s' if more != 1 else ''})"
 
 
-MARKDOWN_KINDS: frozenset[EntryKind] = frozenset({"assistant"})
-"""Kinds whose entries show their text as markdown: agents' and the planner's messages."""
+MARKDOWN_KINDS: frozenset[EntryKind] = frozenset({"assistant", "prompt"})
+"""Kinds whose entries show their text as markdown: agents' and the planner's messages, and
+the user's prompts."""
 
 
 def shows_markdown(kind: EntryKind, collapsed: bool) -> bool:
@@ -80,12 +101,21 @@ def shows_markdown(kind: EntryKind, collapsed: bool) -> bool:
     return kind in MARKDOWN_KINDS and not collapsed
 
 
-def hanging_indent(text: str) -> tuple[str, str]:
+BANDED_KINDS: frozenset[EntryKind] = frozenset({"prompt"})
+"""Kinds whose entries are drawn on a band of their style's background across their width:
+the user's prompts, so they stand out."""
+
+
+def banded(kind: EntryKind) -> bool:
+    return kind in BANDED_KINDS
+
+
+def hanging_indent(kind: EntryKind, text: str) -> tuple[str, str]:
     """What goes in front of the first row of an entry's markdown and in front of every row
-    after it: the marker hanging beside a collapsible entry, nothing beside one of a line."""
-    if not collapsible(text):
-        return "", ""
-    return EXPANDED_MARKER, " " * len(EXPANDED_MARKER)
+    after it: the prefix of an entry of ``kind`` and the marker of a collapsible entry, hanging
+    beside it; nothing beside an assistant's message of a line."""
+    first = entry_prefix(kind) + (EXPANDED_MARKER if collapsible(text) else "")
+    return first, " " * len(first)
 
 
 class LeftHeading(Heading):
@@ -125,7 +155,7 @@ def speaker_label(kind: EntryKind, agent: str | None, previous: str | None) -> s
     """The label heading an entry of ``kind`` by ``agent``: the agent's id, for an agent's
     message when the ``previous`` entry in its log was by someone else; None otherwise."""
     current = speaker(agent)
-    if kind not in MARKDOWN_KINDS or current is None or current == speaker(previous):
+    if kind != "assistant" or current is None or current == speaker(previous):
         return None
     return current
 
@@ -151,7 +181,7 @@ def output_entry(
     conversation's; its messages are headed by a label row instead (see :func:`speaker_label`).
     """
     entry = _output(event)
-    return entry if entry[1] in MARKDOWN_KINDS else agent_labelled(entry, event.agent_id)
+    return entry if entry[1] == "assistant" else agent_labelled(entry, event.agent_id)
 
 
 def _output(
