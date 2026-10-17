@@ -10,7 +10,7 @@ from orbit.protocol import (
     SessionSummary,
 )
 from tests.agent_fakes import FakeStore, events_until, of_type
-from tests.test_session_switch import TASK, last_of, messages, saved, store_with, switching
+from tests.test_session_switch import EARLIER, TASK, last_of, messages, saved, store_with, switching
 
 Managing = RenameSession | DeleteSession
 
@@ -121,6 +121,38 @@ async def test_a_rename_that_cannot_be_saved_is_reported_and_lets_go_of_the_lock
     errors = await errors_of(session, RenameSession(session_id="old", name="new"))
 
     assert errors == ["Disk full."]
+    assert store.released == ["old"] and store.locked == set()
+    await session.close()
+
+
+async def test_a_rename_renames_the_record_saved_by_the_time_the_lock_is_taken() -> None:
+    store = store_with(saved("old"))
+    newer = saved("old", last_active=EARLIER)
+
+    async def save_newer() -> None:
+        store.saved.append(newer)
+
+    store.on_acquire = save_newer
+    session, _ = switching(store)
+    await listed_after(session, RenameSession(session_id="old", name="new"))
+
+    assert store.last == newer.model_copy(update={"name": "new"})
+    assert store.released == ["old"] and store.locked == set()
+    await session.close()
+
+
+async def test_a_session_unreadable_by_the_time_the_lock_is_taken_is_not_renamed() -> None:
+    store = store_with(saved("old"))
+
+    async def break_it() -> None:
+        store.broken["old"] = "it isn't JSON"
+
+    store.on_acquire = break_it
+    session, _ = switching(store)
+    errors = await errors_of(session, RenameSession(session_id="old", name="new"))
+
+    assert errors == ["Can't rename the session old: it isn't JSON."]
+    assert store.saved == [saved("old")]
     assert store.released == ["old"] and store.locked == set()
     await session.close()
 

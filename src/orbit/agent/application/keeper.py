@@ -207,17 +207,22 @@ class SessionKeeper:
             return
         assert self._store is not None  # Only a store holds saved sessions.
         if await self._claim(self._store, found.id, found.name, "rename"):
-            await self._rewrite(self._store, found.model_copy(update={"name": name}))
+            await self._rewrite(self._store, found.id, name)
 
-    async def _rewrite(self, store: SessionStore, record: SessionRecord) -> None:
-        """Save ``record`` in ``store``, whose lock this orbit took to, then let go of the lock;
-        reports it if it can't be saved."""
+    async def _rewrite(self, store: SessionStore, session_id: str, name: str) -> None:
+        """Name the session ``session_id`` in ``store``, whose lock this orbit took to,
+        ``name``, renaming the record read under the lock so no work saved meanwhile is lost,
+        then let go of the lock; reports it if it can't be read or saved."""
         try:
-            await store.save(record)
+            current = renamable(session_id, await store.load(session_id), locked=False)
+            if isinstance(current, str):
+                await self._publish(ErrorOccurred(message=current))
+                return
+            await store.save(current.model_copy(update={"name": name}))
         except RuntimeError as exc:
             await self._publish(ErrorOccurred(message=str(exc)))
         finally:
-            await store.release(record.id)
+            await store.release(session_id)
 
     async def delete_saved(self, session_id: str) -> None:
         """Delete the saved session ``session_id``, lock and all, unless it's the one open here

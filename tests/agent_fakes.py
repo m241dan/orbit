@@ -234,6 +234,8 @@ class FakeStore:
         self.saved.append(record)
 
     async def load(self, session_id: str) -> SessionRecord | Unreadable:
+        if session_id in self.broken:
+            return Unreadable(self.broken[session_id])
         found = [r for r in self.saved if r.id == session_id]
         return found[-1] if found else Unreadable("it doesn't exist")
 
