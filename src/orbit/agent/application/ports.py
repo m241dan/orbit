@@ -8,6 +8,7 @@ from typing import Any, Protocol
 
 from orbit.agent.domain.agents import Agent
 from orbit.agent.domain.roles import ChecksProposal, Setup
+from orbit.agent.domain.sessions import SessionRecord, Unreadable
 from orbit.agent.domain.usage import UsageFetch
 from orbit.agent.domain.verification import VerificationStep
 from orbit.protocol import Event, MergeResult, ProposalAction, Settings
@@ -172,4 +173,55 @@ class ProposalReview(Protocol):
     async def review(self, task_id: str, proposal: ChecksProposal) -> ProposalDecision:
         """Show the user ``proposal``, which task ``task_id``'s agent made and orbit tried;
         returns their decision."""
+        ...
+
+
+@dataclass(frozen=True)
+class StoredSession:
+    """A saved session's file: its session ``id``, the ``record`` in it or why that's
+    unreadable, and whether another running orbit has it open (``locked``)."""
+
+    id: str
+    record: SessionRecord | Unreadable
+    locked: bool
+
+
+class SessionStore(Protocol):
+    """Where saved sessions are kept, each locked while an orbit has it open, along with the
+    repository's count of commits since the last super review."""
+
+    async def save(self, record: SessionRecord) -> None:
+        """Save ``record``, replacing the one saved with its id; raises ``RuntimeError`` when
+        it can't."""
+        ...
+
+    async def load(self, session_id: str) -> SessionRecord | Unreadable:
+        """The record saved as ``session_id``, or why it can't be read (missing included)."""
+        ...
+
+    async def sessions(self) -> list[StoredSession]:
+        """Every saved session, unreadable ones included, by id."""
+        ...
+
+    async def delete(self, session_id: str) -> None:
+        """Delete the session ``session_id`` and its lock, readable or not; raises
+        ``RuntimeError`` when it can't."""
+        ...
+
+    async def acquire(self, session_id: str) -> bool:
+        """Lock the session ``session_id`` for this orbit; returns ``False`` when another
+        running orbit has it locked. A lock left by one that ended is taken over."""
+        ...
+
+    async def release(self, session_id: str) -> None:
+        """Unlock the session ``session_id``, if this orbit holds its lock."""
+        ...
+
+    async def review_count(self) -> int:
+        """The commits since the last super review; 0 when none is saved or it's unreadable."""
+        ...
+
+    async def save_review_count(self, count: int) -> None:
+        """Save ``count`` as the commits since the last super review; raises ``RuntimeError``
+        when it can't."""
         ...

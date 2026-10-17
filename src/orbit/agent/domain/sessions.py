@@ -2,7 +2,8 @@
 
 A saved session keeps its task list, its review state, the planner's conversation and the
 settings it ran with. It is unrelated to the backend's connection, :class:`AgentSession`. The
-caller reads and writes the files and the clock; these rules only shape what's in them.
+caller reads and writes the files and the clock; these rules only shape what's in them, and
+decide when a session's lock, held by the orbit that has it open, may be taken over.
 """
 
 from collections import Counter
@@ -45,6 +46,14 @@ class SessionRecord(BaseModel):
     planner_conversation: str | None = None
     tasks: tuple[TaskState, ...] = ()
     reviews: LaneSnapshot | None = None
+
+
+class _ReviewCount(BaseModel):
+    """The commits since the last super review, kept per repository."""
+
+    model_config = ConfigDict(frozen=True)
+
+    since_super: int = Field(ge=0)
 
 
 @dataclass(frozen=True)
@@ -117,3 +126,33 @@ def summarize(record: SessionRecord, current: bool = False, locked: bool = False
         current=current,
         locked=locked,
     )
+
+
+def lock_owner(text: str) -> int | None:
+    """The process id a session lock's ``text`` names; ``None`` when it isn't one."""
+    stripped = text.strip()
+    if not (stripped.isascii() and stripped.isdecimal()):
+        return None
+    pid = int(stripped)
+    return pid if pid > 0 else None
+
+
+def lock_is_stale(text: str, alive: Callable[[int], bool]) -> bool:
+    """Whether a session lock reading ``text`` may be taken over: it names no process, or one
+    that ``alive`` says has ended."""
+    owner = lock_owner(text)
+    return owner is None or not alive(owner)
+
+
+def review_count_json(count: int) -> str:
+    """``count`` commits since the last super review as JSON text, for
+    :func:`parse_review_count` to read back."""
+    return _ReviewCount(since_super=count).model_dump_json()
+
+
+def parse_review_count(text: str) -> int:
+    """The commits since the last super review in JSON ``text``; 0 when it's unreadable."""
+    try:
+        return _ReviewCount.model_validate_json(text).since_super
+    except ValidationError:
+        return 0

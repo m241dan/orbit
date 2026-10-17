@@ -9,8 +9,12 @@ from orbit.agent.domain.sessions import (
     SessionRecord,
     Unreadable,
     default_name,
+    lock_is_stale,
+    lock_owner,
     parse_record,
+    parse_review_count,
     record_json,
+    review_count_json,
     summarize,
 )
 from orbit.protocol import SessionSummary, Settings, TaskSpec, TaskState, TaskStatus, Usage
@@ -158,3 +162,39 @@ def test_a_summary_of_a_session_without_tasks_is_empty_and_neither_current_nor_l
         False,
     )
     assert summary.unreadable is None
+
+
+def test_a_lock_names_its_owners_process_id() -> None:
+    assert lock_owner("4242\n") == 4242
+
+
+def test_a_lock_that_isnt_a_positive_process_id_has_no_owner() -> None:
+    assert [lock_owner(text) for text in ("", "orbit", "-3", "0", "4.2", "٣")] == [None] * 6
+
+
+def test_a_lock_whose_process_is_alive_isnt_stale() -> None:
+    assert not lock_is_stale("4242", lambda pid: pid == 4242)
+
+
+def test_a_lock_whose_process_is_dead_is_stale() -> None:
+    assert lock_is_stale("4242", lambda pid: False)
+
+
+def test_a_lock_without_an_owner_is_stale_without_asking_about_a_process() -> None:
+    asked: list[int] = []
+
+    def alive(pid: int) -> bool:
+        asked.append(pid)
+        return True
+
+    assert lock_is_stale("garbage", alive)
+    assert asked == []
+
+
+def test_the_review_count_round_trips_through_json() -> None:
+    assert parse_review_count(review_count_json(7)) == 7
+
+
+def test_an_unreadable_review_count_is_zero() -> None:
+    texts = ("", "{oops", "[]", '{"since_super": -1}', '{"since_super": "many"}')
+    assert [parse_review_count(text) for text in texts] == [0] * 5

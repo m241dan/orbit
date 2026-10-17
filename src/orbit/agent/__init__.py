@@ -12,7 +12,9 @@ from orbit.agent.application.ports import (
     ConfigWriter,
     ProposalDecision,
     ProposalReview,
+    SessionStore,
     StepRunner,
+    StoredSession,
     Workspace,
 )
 from orbit.agent.application.session import NO_STEPS_NOTE, AgentSession
@@ -25,6 +27,7 @@ from orbit.agent.external.claude_cli import MODEL_ALIASES, ClaudeCliRunner
 from orbit.agent.external.config_file import read_config, write_checks
 from orbit.agent.external.git_tree import GitCoderTree, git_top_level, in_git_work_tree
 from orbit.agent.external.mcp_host import McpHost
+from orbit.agent.external.session_files import SessionFiles, state_dir
 from orbit.agent.external.usage_api import UsageApi
 from orbit.agent.external.workspace import workspace_state
 
@@ -44,8 +47,11 @@ __all__ = [
     "ProposalDecision",
     "ProposalReview",
     "Role",
+    "SessionFiles",
+    "SessionStore",
     "Setup",
     "StepRunner",
+    "StoredSession",
     "UsageApi",
     "Verification",
     "VerificationStep",
@@ -54,6 +60,7 @@ __all__ = [
     "in_git_work_tree",
     "read_config",
     "run_step",
+    "state_dir",
     "workspace_state",
     "write_checks",
 ]
