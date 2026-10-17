@@ -121,6 +121,13 @@ def failure_report(step: VerificationStep, output: str) -> str:
     )
 
 
+def failure_reason(step: VerificationStep, output: str, rebased: bool = False) -> tuple[str, str]:
+    """Why a task ended unverified because ``step`` failed with ``output``, in a line and in
+    full; ``rebased`` when it failed rechecking the work after a rebase."""
+    reason = f"{step.name} failed" + (" after rebasing" if rebased else "")
+    return reason, failure_report(step, output)
+
+
 def check_reply(step: VerificationStep, passed: bool, output: str) -> str:
     """The reply to an agent that ran ``step`` itself: the trimmed ``output`` if it failed, else
     just that it ``passed``, with the output's last line (usually a summary) if there is one."""

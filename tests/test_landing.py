@@ -11,6 +11,7 @@ from orbit.agent.application.startup_check import StartupCheck
 from orbit.agent.application.usage_monitor import UsageMonitor
 from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.usage import UsageFetch, UsageUnavailable
+from orbit.agent.domain.verification import failure_report
 from orbit.protocol import (
     ErrorOccurred,
     Event,
@@ -23,10 +24,12 @@ from orbit.protocol import (
 )
 from tests.agent_fakes import (
     ROLES,
+    STEP,
     Call,
     FakeTree,
     Steps,
     board,
+    ended_unverified,
     run,
     session_for,
     verified,
@@ -132,6 +135,18 @@ async def test_rebased_work_that_fails_verification_falls_back() -> None:
     assert len(launcher.launches) == 2
     assert tree.prepared == [False, True]
     assert statuses(events) == ["completed", "completed"]
+
+
+async def test_rebased_work_that_fails_verification_says_it_failed_after_rebasing() -> None:
+    tree = FakeTree(Merge("rebased"))
+    session, _, _ = session_for(
+        claims_done, claims_done, verification=verified(Steps(True, False, True)), tree=tree
+    )
+    events = await asyncio.wait_for(run(session), 5)
+
+    first = ended_unverified(events, "1")
+    assert first.reason == "Unit tests failed after rebasing"
+    assert first.reason_detail == failure_report(STEP, "1 test failed")
 
 
 async def test_work_that_cannot_be_merged_stays_completed_with_the_reason() -> None:

@@ -18,7 +18,7 @@ from orbit.agent.application.verifier import Failure, Verifier
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.commits import commit_message, configure_message
 from orbit.agent.domain.roles import REVIEW_ROLES, ChecksProposal
-from orbit.agent.domain.verification import FallbackFixes, fix_prompt
+from orbit.agent.domain.verification import FallbackFixes, failure_reason, fix_prompt
 from orbit.protocol import (
     ErrorOccurred,
     TaskSpec,
@@ -79,25 +79,25 @@ class WorkLane:
         if self._verifier is not None:
             await self._verifier.reset()
         await self._publish(TaskStarted(task_id=task_id))
-        status: TaskStatus = "error"  # What a bug in the run leaves the task as.
+        outcome = Outcome("error")  # What a bug in the run leaves the task as.
         try:
-            status = await self._outcome(task_id)
+            outcome = await self._outcome(task_id)
         finally:  # Even a bug ends the task, or the board could never run or drop it.
-            await self._tasks.finish(task_id, status)
+            await self._tasks.finish(task_id, outcome.status, outcome.reason, outcome.detail)
         await self._report_to_review(task_id)
-        return status
+        return outcome.status
 
-    async def _outcome(self, task_id: str) -> TaskStatus:
+    async def _outcome(self, task_id: str) -> Outcome:
         """How task ``task_id``'s run through an agent ended; anything unexpected escapes."""
         try:
             return await self._run_agent(task_id)
         except asyncio.CancelledError:
             if self._verifier is not None:
                 await self._verifier.cancel()
-            return "cancelled"
+            return Outcome("cancelled")
         except RuntimeError as exc:  # Git or the tree's setup failed.
             await self._publish(ErrorOccurred(message=str(exc)))
-            return "error"
+            return Outcome("error")
 
     async def _report_to_review(self, task_id: str) -> None:
         """Tell the review lane how task ``task_id`` ended."""
@@ -109,7 +109,7 @@ class WorkLane:
         else:
             await self._review.ended(task_id)
 
-    async def _run_agent(self, task_id: str) -> TaskStatus:
+    async def _run_agent(self, task_id: str) -> Outcome:
         """Run task ``task_id`` through a new agent and land its work; a fallback queues a fix
         for a fresh one."""
         root = await self._prepare(task_id)
@@ -125,7 +125,7 @@ class WorkLane:
         if outcome.failure is not None and outcome.status == "unverified":
             assert verifier is not None  # Only verification fails.
             await self._queue_fix(verifier, task_id, outcome.failure)
-        return outcome.status
+        return outcome
 
     async def _configure(self, verifier: Verifier, checks: ChecksProposal, root: str) -> None:
         """Save the ``checks`` the user accepted into the config at ``root``, and use them from
@@ -152,7 +152,8 @@ class WorkLane:
         lander = Lander(self._desk.agents.tree, verifier, self._publish)
         landing = await lander.land(task_id, message, root, self._starts.pop(task_id))
         if landing.failure is not None:
-            return Outcome("unverified", landing.failure)
+            reason, detail = failure_reason(*landing.failure, rebased=True)
+            return Outcome("unverified", landing.failure, reason=reason, detail=detail)
         if landing.commit is not None:
             self._landed[task_id] = landing.commit
         return outcome

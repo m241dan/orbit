@@ -30,7 +30,7 @@ from orbit.agent.domain.roles import (
     parse_proposal,
     task_suggestion,
 )
-from orbit.agent.domain.verification import VerificationStep, check_reply
+from orbit.agent.domain.verification import VerificationStep, check_reply, failure_reason
 from orbit.protocol import (
     AgentExited,
     AgentExitReason,
@@ -59,12 +59,15 @@ STATUSES: dict[Phase, TaskStatus] = {
 @dataclass(frozen=True)
 class Outcome:
     """How a task ended: its status, the failure to hand a fresh agent if it fell back, the
-    agent's summaries of what it did, one per claim, and the checks the user accepted from it."""
+    agent's summaries of what it did, one per claim, the checks the user accepted from it, and
+    why it ended badly, in a line (``reason``) and in full (``detail``)."""
 
     status: TaskStatus
     failure: Failure | None = None
     summaries: tuple[str, ...] = ()
     checks: ChecksProposal | None = None
+    reason: str = ""
+    detail: str = ""
 
 
 @dataclass(frozen=True)
@@ -152,7 +155,15 @@ class AgentRun:
             self._desk.close(self.agent)  # Even if the agent never got as far as starting.
             self._drain()
         status = STATUSES[self._work.phase]
-        return Outcome(status, self._failure, tuple(self._work.summaries), self._accepted)
+        reason, detail = self._why(status)
+        summaries = tuple(self._work.summaries)
+        return Outcome(status, self._failure, summaries, self._accepted, reason, detail)
+
+    def _why(self, status: TaskStatus) -> tuple[str, str]:
+        """Why the task ended as ``status``: the step that failed, if it fell back for one."""
+        if status != "unverified" or self._failure is None:
+            return "", ""
+        return failure_reason(*self._failure)
 
     async def _see_through(self, before: object) -> None:
         """Launch the agent and serve it until the task is finished, then stop it."""

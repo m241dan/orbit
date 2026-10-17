@@ -15,6 +15,7 @@ from orbit.agent.application.verifier import Verifier
 from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.roles import ChecksProposal
+from orbit.agent.domain.verification import failure_report
 from orbit.protocol import (
     AddTask,
     AgentExited,
@@ -47,6 +48,7 @@ from tests.agent_fakes import (
     ScriptedLauncher,
     Steps,
     board,
+    ended_unverified,
     queued,
     replies,
     run,
@@ -139,6 +141,33 @@ async def test_once_its_fixes_run_out_a_fresh_agent_takes_over() -> None:
     assert fix.task.prompt.startswith("Fix the failed verification step: Unit tests")
 
 
+async def test_a_task_that_falls_back_ends_unverified_with_the_failed_step_as_its_reason() -> None:
+    session, _, _ = session_for(
+        keeps_claiming,
+        claims_done,
+        verification=verified(Steps(False, False, True)),
+        limits=Limits(max_attempts=1),
+    )
+    events = await asyncio.wait_for(run(session), 5)
+
+    first = ended_unverified(events, "1")
+    assert first.reason == "Unit tests failed"
+    assert first.reason_detail == failure_report(STEP, "1 test failed")
+
+
+async def test_a_passing_fix_clears_the_reason_its_parent_failed() -> None:
+    session, _, _ = session_for(
+        keeps_claiming,
+        claims_done,
+        verification=verified(Steps(False, False, True)),
+        limits=Limits(max_attempts=1),
+    )
+    events = await asyncio.wait_for(run(session), 5)
+
+    first, _ = board(events)
+    assert (first.status, first.reason, first.reason_detail) == ("completed", "", "")
+
+
 async def test_fallbacks_stop_after_the_chain_runs_out_of_fixes() -> None:
     session, _, launcher = session_for(
         keeps_claiming,
@@ -150,6 +179,7 @@ async def test_fallbacks_stop_after_the_chain_runs_out_of_fixes() -> None:
 
     assert len(launcher.launches) == 2
     assert [t.status for t in board(events)] == ["unverified", "unverified"]
+    assert [t.reason for t in board(events)] == ["Unit tests failed", "Unit tests failed"]
     assert any(isinstance(e, ErrorOccurred) and "fix attempts" in e.message for e in events)
 
 
@@ -399,6 +429,20 @@ async def test_an_agent_that_stops_without_changing_anything_falls_back_unverifi
     assert VerificationSkipped(task_id="1", reason="unchanged") in events
     assert [launch.agent.id for launch in launcher.launches] == ["agent-1", "agent-2"]
     assert [t.status for t in board(events)] == ["completed", "completed"]
+
+
+async def test_an_agent_that_stops_without_changing_anything_keeps_its_last_failure() -> None:
+    workspace = FakeWorkspace("before", "edited", "edited", "edited", "fix-before", "fixed")
+    session, _, _ = session_for(
+        stops_after_a_fix_request,
+        claims_done,
+        verification=verified(Steps(False, True), workspace),
+    )
+    events = await asyncio.wait_for(run(session), 5)
+
+    first = ended_unverified(events, "1")
+    assert first.reason == "Unit tests failed"
+    assert first.reason_detail == failure_report(STEP, "1 test failed")
 
 
 async def test_an_agent_that_stops_after_changing_files_is_verified_again() -> None:

@@ -505,6 +505,17 @@ def board(events: list[Event]) -> tuple[TaskState, ...]:
     return [e for e in events if isinstance(e, TasksChanged)][-1].tasks
 
 
+def ended_unverified(events: list[Event], task_id: str) -> TaskState:
+    """Task ``task_id`` as the board first showed it ended unverified."""
+    return next(
+        t
+        for e in events
+        if isinstance(e, TasksChanged)
+        for t in e.tasks
+        if t.id == task_id and t.status == "unverified"
+    )
+
+
 def replies(events: list[Event]) -> list[str]:
     return [e.text for e in events if isinstance(e, AgentReply)]
 

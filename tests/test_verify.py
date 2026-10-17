@@ -12,6 +12,8 @@ from orbit.agent.domain.verification import (
     StepProgress,
     VerificationStep,
     check_reply,
+    failure_reason,
+    failure_report,
     fix_prompt,
     may_change_files,
     skip_reason,
@@ -101,6 +103,23 @@ def test_fix_prompt_keeps_the_start_and_end_of_long_output() -> None:
 def test_short_output_is_quoted_whole_without_surrounding_whitespace() -> None:
     assert trim_output("  \nFAILED\n\n") == "FAILED"
     assert trim_output("x" * OUTPUT_LIMIT) == "x" * OUTPUT_LIMIT
+
+
+def test_a_failure_reason_names_the_step_and_reports_it_in_full() -> None:
+    step = VerificationStep(name="Unit tests", command=("pytest",))
+    output = "FAILED " + "x" * OUTPUT_LIMIT
+    reason, detail = failure_reason(step, output)
+    assert reason == "Unit tests failed"
+    assert detail == failure_report(step, output)
+    assert CUT in detail
+
+
+def test_a_failure_after_a_rebase_says_so() -> None:
+    step = VerificationStep(name="Lint", command=("ruff", "check"))
+    assert failure_reason(step, "E501", rebased=True) == (
+        "Lint failed after rebasing",
+        failure_report(step, "E501"),
+    )
 
 
 def test_a_failed_check_replies_with_its_trimmed_output() -> None:
