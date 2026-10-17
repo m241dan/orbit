@@ -2,6 +2,8 @@
 
 from orbit.agent.domain.reviews import (
     DIFF_LIMIT,
+    BatchSnapshot,
+    PlannerSnapshot,
     ReviewJob,
     ReviewLimits,
     ReviewPlanner,
@@ -327,3 +329,82 @@ def test_reopening_a_task_outside_any_open_batch_changes_nothing() -> None:
     reviews.reopened(state("9", status="pending", origin="review", batch="batch-7"))
     job = reviews.landed(state("2", origin="review", batch=batch), "c2")
     assert job == ReviewJob(commits=("c2",), round=1, batch=batch)
+
+
+def busy() -> ReviewPlanner:
+    """A planner part way through a session: paused, one batch closed, one waiting for a task
+    and one still filling."""
+    reviews = planner(rounds=1, cap=2)
+    done = filled(reviews, "2")
+    reviews.landed(state("2", origin="review", batch=done), "c2")
+    waiting = filled(reviews, "3", "4")
+    reviews.ended(state("3", status="gave_up", origin="review", batch=waiting))
+    reviews.open_batch(ReviewJob(commits=("c5",), round=0, batch=None))
+    return reviews
+
+
+def restored(snapshot: PlannerSnapshot) -> ReviewPlanner:
+    reviews = planner(rounds=1, cap=2)
+    reviews.restore(PlannerSnapshot.model_validate_json(snapshot.model_dump_json()))
+    return reviews
+
+
+def test_a_snapshot_holds_the_planners_session_state() -> None:
+    reviews = planner(rounds=1, cap=2)
+    batch = filled(reviews, "2", "3")
+    reviews.ended(state("2", status="gave_up", origin="review", batch=batch))
+    reviews.landed(state("3", origin="review", batch=batch), "c3")
+    reviews.open_batch(ReviewJob(commits=("c4",), round=0, batch=None))
+    assert reviews.snapshot() == PlannerSnapshot(
+        paused=True,
+        next_batch=3,
+        batches={"batch-2": BatchSnapshot(round=1, cap=2)},
+        rounds={"batch-1": 1, "batch-2": 1},
+    )
+
+
+def test_a_snapshot_survives_json_and_restores_the_same_state() -> None:
+    reviews = busy()
+    assert restored(reviews.snapshot()).snapshot() == reviews.snapshot()
+
+
+def test_a_restored_planner_numbers_batches_on_from_where_it_was() -> None:
+    reviews = busy()
+    again = restored(reviews.snapshot())
+    job = ReviewJob(commits=("c6",), round=0, batch=None)
+    assert again.open_batch(job) == reviews.open_batch(job) == "batch-4"
+
+
+def test_a_restored_planner_refuses_and_reviews_as_before() -> None:
+    reviews = busy()
+    again = restored(reviews.snapshot())
+    for each in (reviews, again):
+        assert each.refusal("batch-3", "Add tests", ()) is None
+        each.added("batch-3", "5")
+        each.added("batch-3", "6")
+        assert each.refusal("batch-3", "More", ()) is not None
+        assert each.refusal("batch-1", "More", ()) is not None
+        assert each.review_ended("batch-3") is None
+        each.landed(state("5", origin="review", batch="batch-3"), "c5")
+        assert each.round_of("batch-3") == 1
+    assert again.landed(state("6", origin="review", batch="batch-3"), "c6") is None
+    assert reviews.landed(state("6", origin="review", batch="batch-3"), "c6") is None
+    assert again.snapshot() == reviews.snapshot()
+
+
+def test_restoring_replaces_what_the_planner_had() -> None:
+    reviews = busy()
+    reviews.restore(PlannerSnapshot())
+    assert reviews.snapshot() == PlannerSnapshot()
+    assert not reviews.open_batches
+
+
+def test_the_super_review_count_is_kept_apart_from_snapshots() -> None:
+    reviews = ReviewPlanner(ReviewLimits(super_every=3))
+    reviews.count()
+    snapshot = reviews.snapshot()
+    reviews.since_super = 2
+    reviews.restore(snapshot)
+    assert reviews.since_super == 2
+    assert reviews.count()
+    assert reviews.since_super == 0

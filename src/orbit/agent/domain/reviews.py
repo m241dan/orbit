@@ -7,9 +7,10 @@ reviewed: review pauses until the user's next task lands, which bounds how much 
 generate by themselves.
 """
 
-import itertools
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+
+from pydantic import BaseModel, ConfigDict
 
 from orbit.agent.domain.board import WAITING
 from orbit.protocol import TaskState
@@ -57,16 +58,82 @@ class _Batch:
     filling: bool = True  # Its review is still running, and may suggest more.
 
 
+class BatchSnapshot(BaseModel):
+    """An open batch as it stands: see :class:`ReviewPlanner`."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    round: int
+    cap: int
+    tasks: tuple[str, ...] = ()
+    finished: frozenset[str] = frozenset()
+    commits: tuple[str, ...] = ()
+    missing: tuple[str, ...] = ()
+    filling: bool = True
+
+
+class PlannerSnapshot(BaseModel):
+    """A :class:`ReviewPlanner`'s state for one session: whether review is ``paused``, the
+    number of the ``next_batch``, the ``batches`` still open and every batch's round. The
+    count towards a super review isn't in it: that's kept per repository."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    paused: bool = False
+    next_batch: int = 1
+    batches: dict[str, BatchSnapshot] = {}
+    rounds: dict[str, int] = {}
+
+
 class ReviewPlanner:
     """Tracks batches and decides when to review, within ``limits``."""
 
     def __init__(self, limits: ReviewLimits) -> None:
         self.limits = limits
         self.paused = False
-        self._since_super = 0
-        self._ids = itertools.count(1)
+        self.since_super = 0  # Commits since the last super review.
+        self._next_batch = 1
         self._open: dict[str, _Batch] = {}
         self._rounds: dict[str, int] = {}
+
+    def snapshot(self) -> PlannerSnapshot:
+        """The planner's state for this session, to :meth:`restore` later."""
+        batches = {
+            batch_id: BatchSnapshot(
+                round=batch.round,
+                cap=batch.cap,
+                tasks=tuple(batch.tasks),
+                finished=frozenset(batch.finished),
+                commits=tuple(batch.commits),
+                missing=tuple(batch.missing),
+                filling=batch.filling,
+            )
+            for batch_id, batch in self._open.items()
+        }
+        return PlannerSnapshot(
+            paused=self.paused,
+            next_batch=self._next_batch,
+            batches=batches,
+            rounds=dict(self._rounds),
+        )
+
+    def restore(self, snapshot: PlannerSnapshot) -> None:
+        """Replace the planner's state with ``snapshot``'s; the super review count is kept."""
+        self.paused = snapshot.paused
+        self._next_batch = snapshot.next_batch
+        self._open = {
+            batch_id: _Batch(
+                round=batch.round,
+                cap=batch.cap,
+                tasks=list(batch.tasks),
+                finished=set(batch.finished),
+                commits=list(batch.commits),
+                missing=list(batch.missing),
+                filling=batch.filling,
+            )
+            for batch_id, batch in snapshot.batches.items()
+        }
+        self._rounds = dict(snapshot.rounds)
 
     @property
     def open_batches(self) -> tuple[str, ...]:
@@ -81,7 +148,8 @@ class ReviewPlanner:
 
     def open_batch(self, job: ReviewJob) -> str:
         """Start the batch for ``job``'s suggestions; returns its id."""
-        batch = f"batch-{next(self._ids)}"
+        batch = f"batch-{self._next_batch}"
+        self._next_batch += 1
         self._open[batch] = _Batch(round=job.round + 1, cap=self.cap(job))
         self._rounds[batch] = job.round + 1
         return batch
@@ -116,15 +184,15 @@ class ReviewPlanner:
     def count(self) -> bool:
         """A commit landed; returns whether a super review is due now. One that falls due
         while review is paused waits until it resumes."""
-        self._since_super += 1
-        if self._since_super < self.limits.super_every or self.paused:
+        self.since_super += 1
+        if self.since_super < self.limits.super_every or self.paused:
             return False
-        self._since_super = 0
+        self.since_super = 0
         return True
 
     def super_review(self, commit: str) -> ReviewJob:
         """A super review of the codebase at ``commit``; the count starts again."""
-        self._since_super = 0
+        self.since_super = 0
         return ReviewJob(commits=(commit,), round=0, batch=None, whole=True)
 
     def landed(self, state: TaskState, commit: str) -> ReviewJob | None:

@@ -6,14 +6,21 @@ review is due and stops reviews generating work forever.
 """
 
 import asyncio
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Collection
+
+from pydantic import BaseModel, ConfigDict
 
 from orbit.agent.application.agent_run import AgentRun
 from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.lanes import Background
 from orbit.agent.application.ports import CoderTree, Reply
 from orbit.agent.application.tasks import Tasks
-from orbit.agent.domain.reviews import ReviewJob, ReviewPlanner, review_prompt
+from orbit.agent.domain.reviews import (
+    PlannerSnapshot,
+    ReviewJob,
+    ReviewPlanner,
+    review_prompt,
+)
 from orbit.agent.domain.roles import REVIEW_ROLES, role_task, suggested_task
 from orbit.protocol import (
     CODER,
@@ -26,6 +33,17 @@ from orbit.protocol import (
     TaskState,
     TaskStatus,
 )
+
+
+class LaneSnapshot(BaseModel):
+    """A :class:`ReviewLane`'s state for one session: its ``planner``'s, and for each review
+    task it queued, the ``jobs`` it reviews and the ``batches`` it suggests into."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    planner: PlannerSnapshot
+    jobs: dict[str, ReviewJob] = {}
+    batches: dict[str, str] = {}
 
 
 class ReviewLane:
@@ -55,6 +73,24 @@ class ReviewLane:
         self._current: tuple[str, asyncio.Task[TaskStatus]] | None = None  # The review running.
         self._paused_noted = False
         self._status: ReviewStatus | None = None
+
+    def snapshot(self) -> LaneSnapshot:
+        """The lane's state for this session, to :meth:`restore` later."""
+        return LaneSnapshot(
+            planner=self.planner.snapshot(), jobs=dict(self._jobs), batches=dict(self._batches)
+        )
+
+    async def restore(self, snapshot: LaneSnapshot, interrupted: Collection[str] = ()) -> None:
+        """Replace the lane's state with ``snapshot``'s, without running anything. The reviews
+        in ``interrupted`` were stopped by a crash, so they end as a cancelled review does: a
+        review of their batch that's due is queued, for the next run."""
+        self.planner.restore(snapshot.planner)
+        self._jobs, self._batches = dict(snapshot.jobs), dict(snapshot.batches)
+        for task_id in interrupted:
+            batch = self._batches.get(task_id)
+            if batch is not None and batch in self.planner.open_batches:
+                await self._queue(self.planner.review_ended(batch), run=False)
+        await self._publish_status()
 
     async def landed(self, task_id: str, commit: str) -> None:
         """Task ``task_id`` landed ``commit``."""
@@ -129,7 +165,8 @@ class ReviewLane:
     async def close(self) -> None:
         await self._background.close()
 
-    async def _queue(self, job: ReviewJob | None) -> None:
+    async def _queue(self, job: ReviewJob | None, run: bool = True) -> None:
+        """Queue ``job``'s review, if there is one, and run it unless ``run`` is false."""
         await self._note_pause()
         diff = None if job is None else await self._diff(job)
         if job is None or diff is None:  # No review is due, or its diff can't be read.
@@ -137,7 +174,8 @@ class ReviewLane:
             return
         await self._add(job, diff)
         await self._publish_status()
-        self.kick()
+        if run:
+            self.kick()
 
     async def _diff(self, job: ReviewJob) -> str | None:
         """The diff ``job``'s reviewer is shown; none, reported, if git can't show it."""
