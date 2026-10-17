@@ -31,7 +31,9 @@ from orbit.tui.view import (
     GUTTER_MARKER,
     PROMPT_LINES_SHOWN,
     PROMPT_MARKER,
+    DrawnRule,
     EntryKind,
+    ExitRule,
     activity_entry,
     agent_entry,
     agent_labelled,
@@ -44,6 +46,7 @@ from orbit.tui.view import (
     entry_prefix,
     error_entry,
     exchange_entry,
+    exit_rule,
     final_answer,
     gutter,
     hanging_indent,
@@ -92,13 +95,6 @@ def test_agent_lifecycle_becomes_transcript_entries() -> None:
     assert agent_entry(started) == ("▶ agent-1 (coder) started", "agent")
     gave_up = TaskGaveUp(agent_id="agent-1", task_id="1", reason="unclear spec")
     assert agent_entry(gave_up) == ("🏳 agent-1 gave up: unclear spec", "error")
-    exits: dict[AgentExitReason, tuple[str, str]] = {
-        "finished": ("■ agent-1 exited", "agent"),
-        "killed": ("■ agent-1 stopped", "agent"),
-        "crashed": ("■ agent-1 crashed", "error"),
-    }
-    for reason, entry in exits.items():
-        assert agent_entry(AgentExited(agent_id="agent-1", reason=reason)) == entry
 
 
 def test_agent_exchanges_become_transcript_entries() -> None:
@@ -491,3 +487,51 @@ def test_the_conversation_title_names_the_tab_shown_after_all() -> None:
 def test_the_conversation_title_notes_hidden_thinking() -> None:
     assert conversation_title(None, True) == "Conversation · thinking hidden"
     assert conversation_title("coder", True) == "Conversation · coder · thinking hidden"
+
+
+def exited(reason: AgentExitReason) -> AgentExited:
+    return AgentExited(agent_id="agent-3", reason=reason)
+
+
+@pytest.mark.parametrize(
+    ("reason", "text", "kind"),
+    [
+        ("finished", "agent-3 done · 42s", "rule"),
+        ("killed", "agent-3 stopped · 42s", "rule"),
+        ("crashed", "agent-3 crashed · 42s", "error_rule"),
+    ],
+)
+def test_an_agent_exiting_without_a_turn_rule_adds_its_own(
+    reason: AgentExitReason, text: str, kind: EntryKind
+) -> None:
+    assert exit_rule(exited(reason), None, 42.5, "agent-3") == ExitRule(text, kind, False)
+
+
+def test_an_agents_own_exit_rule_shows_no_time_when_unknown() -> None:
+    assert exit_rule(exited("crashed"), None, None, None) == ExitRule(
+        "crashed", "error_rule", False
+    )
+
+
+def test_an_agent_finishing_after_its_turn_rule_adds_nothing() -> None:
+    assert exit_rule(exited("finished"), DrawnRule(ended("completed"), 5.0), 9.0, "agent-3") is None
+
+
+@pytest.mark.parametrize("reason", ["cancelled", "max_steps", "error"])
+def test_an_agent_killed_after_a_rule_not_done_leaves_it(reason: TurnEndReason) -> None:
+    assert exit_rule(exited("killed"), DrawnRule(ended(reason), 5.0), 9.0, "agent-3") is None
+
+
+def test_an_agent_killed_after_a_done_rule_turns_it_stopped_keeping_its_cost() -> None:
+    usage = Usage(input_tokens=210_000, output_tokens=12_000, duration_ms=250_000)
+    drawn = DrawnRule(ended("completed", usage), 5.0)
+    assert exit_rule(exited("killed"), drawn, 9.0, "agent-3") == ExitRule(
+        "agent-3 stopped · 4m10s · ↑210k ↓12k", "rule", True
+    )
+
+
+def test_an_agent_crashing_after_a_done_rule_turns_it_a_crashed_error_rule() -> None:
+    drawn = DrawnRule(ended("completed"), 42.0)
+    assert exit_rule(exited("crashed"), drawn, 9.0, None) == ExitRule(
+        "crashed · 42s", "error_rule", True
+    )

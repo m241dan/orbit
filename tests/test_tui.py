@@ -829,7 +829,7 @@ async def test_coder_output_lands_in_the_coder_tab_and_stays_after_it_exits() ->
         assert shown(app) == [
             "▶ agent-1 (coder) started",
             "coding",
-            "■ agent-1 exited",
+            "agent-1 done · 0s",
             "▶ agent-2 (coder) started",
             "more",
         ]
@@ -1082,7 +1082,7 @@ async def test_planner_output_shows_under_planner_and_all_but_not_other_tabs() -
         assert tab_strip(app) == ["All", "● planner", *PINNED[1:]]
         await feed_events(session, pilot, BusyChanged(busy=False, lane="planner"))
         assert tab_strip(app) == STRIP
-        assert shown(app)[-1] == "■ agent-1 exited"
+        assert shown(app)[-1] == "done · 0s"
 
 
 async def test_planner_turn_rules_and_errors_show_under_planner_and_all() -> None:

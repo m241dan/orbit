@@ -67,6 +67,8 @@ from orbit.tui.tasks import TaskEditorScreen, TaskList
 from orbit.tui.transcript import Transcript
 from orbit.tui.view import (
     TOOL_ACCESS_OPTIONS,
+    AgentNote,
+    DrawnRule,
     EntryKind,
     TaskProgress,
     TurnStep,
@@ -74,6 +76,7 @@ from orbit.tui.view import (
     coalesce,
     decision_entry,
     error_entry,
+    exit_rule,
     final_answer,
     model_options,
     output_entry,
@@ -199,6 +202,10 @@ class OrbitApp(App[None], inherit_bindings=False):
         self.clock: Callable[[], float] = time.monotonic
         # When each running turn started, by ``clock``, keyed like ``_turns``.
         self._turn_starts: dict[tuple[str | None, str], float] = {}
+        # When each running agent's last turn started, or the agent if no turn has, by its id.
+        self._agent_since: dict[str, float] = {}
+        # The rule drawn for each running agent's last turn, until another starts.
+        self._drawn_rules: dict[str, DrawnRule] = {}
         # Pickers are built once and installed so they open instantly.
         self._model_picker = PickerScreen("Model", model_options(())[1])
         self._tool_picker = PickerScreen("Tool access", tool_access_labels())
@@ -458,7 +465,7 @@ class OrbitApp(App[None], inherit_bindings=False):
                 | Notice()
                 | StartupChecked()
             ):
-                self._append(*activity_entry(event), getattr(event, "agent_id", None))
+                self._render_activity(event)
             case _:
                 assert_never(event)
 
@@ -496,8 +503,7 @@ class OrbitApp(App[None], inherit_bindings=False):
     ) -> None:
         match event:
             case TurnStarted():
-                # The prompt follows BusyChanged, which also covers task runs.
-                self._turn_starts[event.agent_id, event.turn_id] = self.clock()
+                self._turn_started(event)
             case TurnFinished():
                 self._turn_finished(event)
             case ErrorOccurred():
@@ -573,21 +579,54 @@ class OrbitApp(App[None], inherit_bindings=False):
             self._prompt.disabled = busy
             self._tabs.set_planner_busy(busy)
 
+    def _render_activity(self, event: AgentNote | AgentExited) -> None:
+        """Show an agent's activity, a notice or the startup check's result; an agent's exit
+        ends its run in one rule."""
+        if isinstance(event, AgentExited):
+            self._agent_exited(event)
+            return
+        if isinstance(event, AgentStarted):
+            self._agent_since[event.agent_id] = self.clock()
+        self._append(*activity_entry(event), getattr(event, "agent_id", None))
+
+    def _agent_exited(self, event: AgentExited) -> None:
+        """Add or update the rule ending ``event``'s agent's run, under All and its tab, which
+        is known by its id even once the tab has closed."""
+        agent = event.agent_id
+        drawn = self._drawn_rules.pop(agent, None)
+        since = self._agent_since.pop(agent, None)
+        elapsed = None if since is None else self.clock() - since
+        rule = exit_rule(event, drawn, elapsed, self._speaker(agent))
+        if rule is None:
+            return
+        if rule.replaces:
+            self._transcript.replace_rule(rule.text, rule.kind, self._tabs.key_of(agent), agent)
+        else:
+            self._append(rule.text, rule.kind, agent)
+
+    def _turn_started(self, event: TurnStarted) -> None:
+        # The prompt follows BusyChanged, which also covers task runs.
+        now = self._turn_starts[event.agent_id, event.turn_id] = self.clock()
+        if event.agent_id is not None:
+            self._agent_since[event.agent_id] = now
+            self._drawn_rules.pop(event.agent_id, None)
+
     def _turn_finished(self, event: TurnFinished) -> None:
         if event.usage is not None:
             self._task_list.count(event.usage)
         steps = self._turns.pop((event.agent_id, event.turn_id), [])
         self._transcript.promote(event.agent_id, event.turn_id, final_answer(steps))
-        self._append(*self._turn_rule(event), event.agent_id)
-
-    def _turn_rule(self, event: TurnFinished) -> tuple[str, EntryKind]:
-        """The rule ending ``event``'s turn, timed from its start if that was seen; the
-        planner's, alone in its tab, isn't headed by its id."""
         started = self._turn_starts.pop((event.agent_id, event.turn_id), None)
         elapsed = None if started is None else self.clock() - started
-        agent = event.agent_id
-        speaker = None if self._tabs.key_of(agent) == PLANNER else agent
-        return turn_rule_entry(event, elapsed, speaker)
+        self._append(
+            *turn_rule_entry(event, elapsed, self._speaker(event.agent_id)), event.agent_id
+        )
+        if event.agent_id is not None:
+            self._drawn_rules[event.agent_id] = DrawnRule(event, elapsed)
+
+    def _speaker(self, agent: str | None) -> str | None:
+        """Who heads ``agent``'s rules: the agent, but not the planner, alone in its tab."""
+        return None if self._tabs.key_of(agent) == PLANNER else agent
 
     def _think(self, event: AssistantMessage) -> None:
         """Show ``event``'s message dim, as thinking out loud until its turn ends."""

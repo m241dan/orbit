@@ -164,6 +164,13 @@ tokens it read (`↑`, input including cache writes and reads) and wrote (`↓`)
 (`812`, `8.4k`, `14k`, `1.2M`). An agent's rule starts with its id (`── agent-3 done · 4m10s ──`);
 the planner's doesn't.
 
+An agent's run ends in exactly one rule, with no separate exit line. When the agent exits after
+its last turn's rule, that rule stays, except that a `done` rule turns `stopped` if the agent was
+killed, or `crashed` in red if it crashed. When it exits with no rule since its last turn started,
+say crashing mid-turn, the exit draws its own: `── agent-3 crashed · 42s ──` in red, or `stopped`
+or `done` muted, timed from its last turn's start (or the agent's, if no turn started), without
+tokens. It lands under All and the agent's tab, a temporary tab included.
+
 Press `t` (with nothing being typed) to hide agents' dim messages, so only final answers, tool
 calls and everything else show, in every tab at once, tabs opened later included; the window's title
 reads `Conversation · thinking hidden` while they're hidden, and `t` again shows them. A message that

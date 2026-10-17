@@ -183,6 +183,18 @@ class TranscriptLog(ListPane):
         if not self.has_focus and self.highlighted is None:
             self.scroll_end(animate=False)
 
+    def replace_rule(self, agent: str, text: str, kind: EntryKind) -> None:
+        """Make ``agent``'s latest rule read ``text`` as a ``kind`` entry, redrawn where it
+        is; a log without one is left as it is."""
+        rules = [
+            i for i, entry in enumerate(self._entries) if entry.agent == agent and ruled(entry.kind)
+        ]
+        if not rules:
+            return
+        index = rules[-1]
+        self._entries[index] = Entry(text, kind, agent)
+        self._redraw(self._rows.index(index))  # Rules are never hidden.
+
     def release_cursor(self) -> None:
         """Let go of the held cursor, so the view follows the latest entry again."""
         self.highlighted = None
@@ -362,6 +374,12 @@ class Transcript(Vertical):
         """Add an entry by ``agent`` under All and, if ``key`` names a tab, under that tab."""
         for tab in {None, key}:
             self._log(tab).append(text, kind, agent)
+
+    def replace_rule(self, text: str, kind: EntryKind, key: str | None, agent: str) -> None:
+        """Make ``agent``'s latest rule read ``text`` as a ``kind`` entry, under All and, if
+        ``key`` names a tab, under that tab."""
+        for tab in {None, key}:
+            self._log(tab).replace_rule(agent, text, kind)
 
     def add_thinking(self, text: str, key: str | None, agent: str | None, turn: str) -> None:
         """Add ``agent``'s message in ``turn``, dim as thinking out loud until it's promoted,

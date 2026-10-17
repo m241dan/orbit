@@ -1,6 +1,7 @@
 """Transcript entries: what each piece of a conversation reads as."""
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import ClassVar, Literal, assert_never
 
 from rich.console import Console, ConsoleOptions, RenderResult
@@ -229,23 +230,13 @@ def final_answer(steps: Sequence[TurnStep]) -> tuple[int, ...]:
     return tuple(range(total - trailing, total))
 
 
-EXIT_ENTRIES: dict[AgentExitReason, tuple[str, EntryKind]] = {
-    "finished": ("exited", "agent"),
-    "killed": ("stopped", "agent"),
-    "crashed": ("crashed", "error"),
-}
-
-
-def agent_entry(event: AgentStarted | TaskGaveUp | AgentExited) -> tuple[str, EntryKind]:
-    """An agent starting, giving up or ending, as a transcript entry."""
+def agent_entry(event: AgentStarted | TaskGaveUp) -> tuple[str, EntryKind]:
+    """An agent starting or giving up, as a transcript entry."""
     match event:
         case AgentStarted(agent_id=agent, role=role):
             return f"▶ {agent} ({role}) started", "agent"
         case TaskGaveUp(agent_id=agent, reason=reason):
             return f"🏳 {agent} gave up: {reason}", "error"
-        case AgentExited(agent_id=agent, reason=reason):
-            text, kind = EXIT_ENTRIES[reason]
-            return f"■ {agent} {text}", kind
         case _:
             assert_never(event)
 
@@ -298,21 +289,14 @@ def note_entry(event: TaskMerged | Notice | StartupChecked) -> tuple[str, EntryK
 
 
 AgentNote = (
-    AgentStarted
-    | TaskGaveUp
-    | AgentExited
-    | AgentRequest
-    | AgentReply
-    | ProgressNoted
-    | Notice
-    | StartupChecked
+    AgentStarted | TaskGaveUp | AgentRequest | AgentReply | ProgressNoted | Notice | StartupChecked
 )
 """Events shown as a single transcript entry each: agents' activity, notices and the startup
 check's result."""
 
 
 def activity_entry(event: AgentNote) -> tuple[str, EntryKind]:
-    if isinstance(event, AgentStarted | TaskGaveUp | AgentExited):
+    if isinstance(event, AgentStarted | TaskGaveUp):
         return agent_entry(event)
     if isinstance(event, AgentRequest | AgentReply | ProgressNoted):
         return exchange_entry(event)
@@ -321,7 +305,7 @@ def activity_entry(event: AgentNote) -> tuple[str, EntryKind]:
 
 RULE_KINDS: frozenset[EntryKind] = frozenset({"rule", "error_rule"})
 """Kinds whose entries are drawn as a horizontal rule across their width, their text set in
-it: the rule ending every turn."""
+it: the rule ending every turn, and an agent's run."""
 
 
 def ruled(kind: EntryKind) -> bool:
@@ -390,8 +374,59 @@ def turn_rule_entry(
     how long it took (the usage's time, else ``elapsed`` seconds, if known) and its tokens when
     it has usage. A turn ending in an error is a rule of its own kind."""
     label = TURN_END_LABELS[event.reason]
-    parts = [label if speaker is None else f"{speaker} {label}", *_turn_cost(event.usage, elapsed)]
-    return " · ".join(parts), "error_rule" if event.reason == "error" else "rule"
+    return _rule(label, speaker, _turn_cost(event.usage, elapsed), event.reason == "error")
+
+
+def _rule(label: str, speaker: str | None, cost: list[str], error: bool) -> tuple[str, EntryKind]:
+    """A rule reading ``label``, headed by its ``speaker`` if any, then its ``cost``; an
+    ``error`` rule is of its own kind."""
+    parts = [label if speaker is None else f"{speaker} {label}", *cost]
+    return " · ".join(parts), "error_rule" if error else "rule"
+
+
+EXIT_LABELS: dict[AgentExitReason, str] = {
+    "finished": "done",
+    "killed": "stopped",
+    "crashed": "crashed",
+}
+
+
+@dataclass(frozen=True)
+class DrawnRule:
+    """The rule drawn for an agent's last turn: the ``turn``'s end, ``elapsed`` seconds after
+    it started, if known."""
+
+    turn: TurnFinished
+    elapsed: float | None
+
+
+@dataclass(frozen=True)
+class ExitRule:
+    """The rule an agent's exit draws: its ``text`` and ``kind``, either replacing the rule of
+    the agent's last turn (``replaces``) or added after it."""
+
+    text: str
+    kind: EntryKind
+    replaces: bool
+
+
+def exit_rule(
+    event: AgentExited, drawn: DrawnRule | None, elapsed: float | None, speaker: str | None
+) -> ExitRule | None:
+    """What ``event``'s agent exiting does to the rules ending its run, so the run ends in
+    one: with a rule ``drawn`` for its last turn, a ``done`` one turns ``stopped`` or
+    ``crashed`` when the agent was killed or crashed, and is left as it is otherwise (None).
+    With none, a rule of its own says how the agent exited, headed by its ``speaker`` if any,
+    ``elapsed`` seconds after its last turn (or the agent) started, if known."""
+    label = EXIT_LABELS[event.reason]
+    crashed = event.reason == "crashed"
+    if drawn is None:
+        cost = [] if elapsed is None else [duration_text(elapsed)]
+        return ExitRule(*_rule(label, speaker, cost, crashed), replaces=False)
+    if event.reason == "finished" or drawn.turn.reason != "completed":
+        return None
+    cost = _turn_cost(drawn.turn.usage, drawn.elapsed)
+    return ExitRule(*_rule(label, speaker, cost, crashed), replaces=True)
 
 
 def error_entry(event: ErrorOccurred) -> tuple[str, EntryKind]:

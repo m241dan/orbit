@@ -12,6 +12,7 @@ from textual.pilot import Pilot
 
 from orbit.protocol import (
     PLANNER,
+    AgentExited,
     AssistantMessage,
     ErrorOccurred,
     Event,
@@ -1293,3 +1294,90 @@ async def test_rules_and_errors_have_their_own_styles() -> None:
         error_rule = log.get_component_rich_style("transcript--error_rule", partial=True)
         assert rule == log.get_component_rich_style("transcript--tool", partial=True)
         assert error_rule == log.get_component_rich_style("transcript--error", partial=True)
+
+
+def texts(app: OrbitApp, key: str | None) -> list[tuple[str, EntryKind]]:
+    return [(entry.text, entry.kind) for entry in app.query_one(Transcript).entries(key)]
+
+
+async def test_an_agent_finishing_after_its_turn_ends_in_that_one_rule() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    app.clock = lambda: 0.0
+    async with app.run_test() as pilot:
+        exit_ = AgentExited(agent_id="agent-3", reason="finished")
+        await feed_events(session, pilot, started("agent-3"), turn_began("agent-3"))
+        await feed_events(session, pilot, turn_ended("agent-3"), exit_)
+        assert texts(app, None) == [
+            ("▶ agent-3 (coder) started", "agent"),
+            ("agent-3 done · 0s", "rule"),
+        ]
+
+
+async def test_an_agent_crashing_mid_turn_ends_in_a_crashed_rule_timed_from_the_turn() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    now = [100.0]
+    app.clock = lambda: now[0]
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, started("agent-3"), turn_ended("agent-3"))
+        now[0] = 120.0
+        await feed_events(session, pilot, turn_began("agent-3", "t2"))
+        now[0] = 162.0
+        await feed_events(session, pilot, AgentExited(agent_id="agent-3", reason="crashed"))
+        assert texts(app, "coder")[-2:] == [
+            ("agent-3 done", "rule"),
+            ("agent-3 crashed · 42s", "error_rule"),
+        ]
+
+
+async def test_an_agent_exiting_before_any_turn_is_timed_from_its_start() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    now = [10.0]
+    app.clock = lambda: now[0]
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, started("agent-3"))
+        now[0] = 82.0
+        await feed_events(session, pilot, AgentExited(agent_id="agent-3", reason="killed"))
+        assert texts(app, None)[-1] == ("agent-3 stopped · 1m12s", "rule")
+
+
+async def test_an_agent_exiting_unseen_ends_in_an_untimed_rule() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, AgentExited(agent_id="agent-3", reason="finished"))
+        assert texts(app, None) == [("agent-3 done", "rule")]
+
+
+async def test_an_agent_killed_after_a_done_rule_turns_that_rule_stopped() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    app.clock = lambda: 0.0
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, started("agent-3"), turn_began("agent-3"))
+        await feed_events(session, pilot, turn_ended("agent-3"), said("agent-1", "elsewhere"))
+        await feed_events(session, pilot, AgentExited(agent_id="agent-3", reason="killed"))
+        for key in (None, "coder"):
+            assert ("agent-3 stopped · 0s", "rule") in texts(app, key)
+            assert ("agent-3 done · 0s", "rule") not in texts(app, key)
+        assert labels(app)[-2:] == ["agent-3 stopped · 0s", "elsewhere"]
+
+
+async def test_a_temporary_tab_agents_exit_rule_lands_in_its_tab() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, started("agent-3", "checker"))
+        await feed_events(session, pilot, AgentExited(agent_id="agent-3", reason="crashed"))
+        assert texts(app, "agent-3")[-1] == ("agent-3 crashed · 0s", "error_rule")
+
+
+async def test_replacing_a_rule_in_a_log_without_one_leaves_it() -> None:
+    app = LogApp()
+    async with app.run_test():
+        log = app.query_one(TranscriptLog)
+        log.append("hi", "agent", "agent-3")
+        log.replace_rule("agent-3", "agent-3 stopped", "rule")
+        assert log.entries == (Entry("hi", "agent", "agent-3"),)
