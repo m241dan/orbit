@@ -526,6 +526,7 @@ class OrbitApp(App[None], inherit_bindings=False):
     def _follow_agents(self, event: Event) -> None:
         self._agents.track(event)
         self._tabs.track(event)
+        self._transcript.track(event, self._tabs.roles)
         self._withdraw_proposal(event)
 
     def _show_tasks(self, tasks: tuple[TaskState, ...]) -> None:

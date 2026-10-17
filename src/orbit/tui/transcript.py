@@ -1,6 +1,7 @@
 """The conversation window: the transcript and its per-tab logs."""
 
-from collections.abc import Iterable
+import time
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, replace
 from typing import Any, ClassVar, get_args
 
@@ -12,10 +13,15 @@ from rich.text import Text
 from textual import on
 from textual.app import ComposeResult
 from textual.containers import Vertical
-from textual.widgets import OptionList
+from textual.timer import Timer
+from textual.widgets import OptionList, Static
 
+from orbit.protocol import Event
 from orbit.tui.view import (
+    SPINNER_FPS,
     EntryKind,
+    Working,
+    WorkingView,
     banded,
     collapsible,
     conversation_title,
@@ -27,6 +33,8 @@ from orbit.tui.view import (
     shows_markdown,
     speaker_label,
     starts_collapsed,
+    track_working,
+    working_lines,
 )
 from orbit.tui.widgets import ListPane
 
@@ -327,6 +335,65 @@ class TranscriptLog(ListPane):
         return Text(label, style=self.get_component_rich_style("transcript--label", partial=True))
 
 
+class WorkingRow(Static):
+    """What's running right now under the shown tab, one line per agent, docked below the
+    logs; hidden while nothing shown runs. Its spinners and clocks tick only while something
+    runs."""
+
+    DEFAULT_CSS = """
+    WorkingRow {
+        dock: bottom;
+        display: none;
+        height: auto;
+        color: $text-muted;
+    }
+    WorkingRow.-running { display: block; }
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.clock: Callable[[], float] = time.monotonic
+        self.working: Working = ()
+        self.lines: tuple[str, ...] = ()
+        self._roles: Mapping[str, str] = {}
+        self._shown: str | None = None
+        self._timer: Timer | None = None
+
+    @property
+    def ticking(self) -> bool:
+        """Whether the spinners are turning."""
+        return self._timer is not None
+
+    def track(self, event: Event, roles: Mapping[str, str]) -> None:
+        """Follow who runs after ``event``, with ``roles`` placing agents in tabs."""
+        self.working = track_working(self.working, event, self.clock())
+        self._roles = roles
+        if self.working and self._timer is None:
+            self._timer = self.set_interval(1 / SPINNER_FPS, self.tick)
+        elif not self.working and self._timer is not None:
+            self._timer.stop()
+            self._timer = None
+        self.tick()
+
+    def show_tab(self, key: str | None) -> None:
+        """Show what runs under the tab keyed ``key``; None is All."""
+        self._shown = key
+        self.tick()
+
+    def on_resize(self) -> None:
+        self.tick()
+
+    def tick(self) -> None:
+        """Redraw the lines, if they changed."""
+        view = WorkingView(self.working, self._roles, self._shown)
+        lines = working_lines(view, self.clock(), self.size.width)
+        if lines == self.lines:
+            return
+        self.lines = lines
+        self.update("\n".join(lines))
+        self.set_class(bool(lines), "-running")
+
+
 class Transcript(Vertical):
     """Main display: the running conversation, pinned to the latest output unless the shown
     tab's log holds a cursor.
@@ -354,6 +421,7 @@ class Transcript(Vertical):
         self._logs: dict[str | None, TranscriptLog] = {}
 
     def compose(self) -> ComposeResult:
+        yield WorkingRow()
         yield self._new_log(None, shown=True)
 
     def on_mount(self) -> None:
@@ -363,6 +431,15 @@ class Transcript(Vertical):
     def shown(self) -> TranscriptLog:
         """The log of the tab being shown."""
         return self._logs[self.only]
+
+    @property
+    def working(self) -> WorkingRow:
+        """The row of what's running, below the logs."""
+        return self.query_one(WorkingRow)
+
+    def track(self, event: Event, roles: Mapping[str, str]) -> None:
+        """Follow who runs after ``event``, with ``roles`` placing agents in tabs."""
+        self.working.track(event, roles)
 
     def entries(self, key: str | None) -> tuple[Entry, ...]:
         """The entries under the tab keyed ``key``; None is All."""
@@ -418,6 +495,7 @@ class Transcript(Vertical):
         self.only = key
         self._label = None if key is None else label
         self._retitle()
+        self.working.show_tab(key)
         log = self._log(key)
         log.add_class("-shown")
         # Laid out once shown, which is when its end is known.

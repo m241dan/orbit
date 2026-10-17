@@ -1,0 +1,178 @@
+"""The working row's state and lines: who runs, which calls, and how each line reads."""
+
+from orbit.protocol import (
+    AgentExited,
+    Event,
+    Notice,
+    ToolCallFinished,
+    ToolCallStarted,
+    TurnFinished,
+    TurnStarted,
+)
+from orbit.tui.view import (
+    RunningAgent,
+    RunningCall,
+    Working,
+    WorkingView,
+    elapsed_clock,
+    track_working,
+    working_key,
+    working_label,
+    working_line,
+    working_lines,
+)
+
+ROLES = {"agent-1": "planner", "agent-2": "coder", "agent-3": "coder"}
+WIDE = 200
+
+
+def tracked(*events: tuple[Event, float]) -> Working:
+    working: Working = ()
+    for event, now in events:
+        working = track_working(working, event, now)
+    return working
+
+
+def turn(agent: str | None) -> TurnStarted:
+    return TurnStarted(turn_id="t", agent_id=agent)
+
+
+def finished(agent: str | None) -> TurnFinished:
+    return TurnFinished(turn_id="t", agent_id=agent, reason="completed")
+
+
+def bash(agent: str | None, call_id: str, command: str = "uv run pytest") -> ToolCallStarted:
+    return ToolCallStarted(
+        turn_id="t", agent_id=agent, call_id=call_id, name="Bash", arguments={"command": command}
+    )
+
+
+def done(agent: str | None, call_id: str) -> ToolCallFinished:
+    return ToolCallFinished(turn_id="t", agent_id=agent, call_id=call_id, output="")
+
+
+def test_nobody_runs_before_a_turn_starts() -> None:
+    assert tracked() == ()
+    assert working_lines(WorkingView((), ROLES, None), 0, WIDE) == ()
+
+
+def test_a_started_turn_runs_until_it_finishes() -> None:
+    working = tracked((turn("agent-1"), 5))
+    assert working == (RunningAgent("agent-1", 5),)
+    assert tracked((turn("agent-1"), 5), (finished("agent-1"), 9)) == ()
+
+
+def test_an_agent_exiting_stops_its_turn() -> None:
+    working = tracked((turn("agent-2"), 0), (bash("agent-2", "c1"), 1))
+    assert track_working(working, AgentExited(agent_id="agent-2", reason="finished"), 2) == ()
+
+
+def test_tool_calls_are_kept_until_they_finish() -> None:
+    working = tracked((turn("agent-2"), 0), (bash("agent-2", "c1"), 1), (bash("agent-2", "c2"), 2))
+    assert working[0].calls == (
+        RunningCall("c1", "Bash uv run pytest", 1),
+        RunningCall("c2", "Bash uv run pytest", 2),
+    )
+    assert track_working(working, done("agent-2", "c1"), 3)[0].calls == (
+        RunningCall("c2", "Bash uv run pytest", 2),
+    )
+
+
+def test_calls_by_an_agent_not_running_are_ignored() -> None:
+    working = tracked((turn("agent-2"), 0), (bash("agent-3", "c1"), 1))
+    assert working == (RunningAgent("agent-2", 0),)
+
+
+def test_unfinished_calls_are_dropped_when_the_turn_ends() -> None:
+    working = tracked((turn("agent-2"), 0), (bash("agent-2", "c1"), 1), (finished("agent-2"), 2))
+    assert working == ()
+    assert track_working(working, turn("agent-2"), 3) == (RunningAgent("agent-2", 3),)
+
+
+def test_a_restarted_turn_moves_to_the_end() -> None:
+    working = tracked((turn("agent-2"), 0), (turn("agent-3"), 1), (turn("agent-2"), 2))
+    assert [running.agent for running in working] == ["agent-3", "agent-2"]
+
+
+def test_other_events_leave_the_working_state_alone() -> None:
+    working = tracked((turn("agent-2"), 0))
+    assert track_working(working, Notice(message="hi"), 1) is working
+
+
+def test_the_planner_shows_under_the_planner_tab_and_by_name() -> None:
+    assert working_key(None, ROLES) == "planner"
+    assert working_key("agent-1", ROLES) == "planner"
+    assert working_key("agent-2", ROLES) == "coder"
+    assert working_key("agent-9", ROLES) == "agent-9"
+    assert working_label(None, ROLES) == "planner"
+    assert working_label("agent-1", ROLES) == "planner"
+    assert working_label("agent-2", ROLES) == "agent-2"
+
+
+def test_clocks_read_minutes_and_seconds_then_hours() -> None:
+    assert elapsed_clock(0) == "0:00"
+    assert elapsed_clock(12.9) == "0:12"
+    assert elapsed_clock(220) == "3:40"
+    assert elapsed_clock(3600) == "1:00:00"
+    assert elapsed_clock(3725) == "1:02:05"
+
+
+def test_a_line_without_calls_shows_the_turn_time() -> None:
+    assert working_line(RunningAgent("agent-3", 2), "agent-3", 222, WIDE) == "◜ agent-3 · 3:40"
+
+
+def test_a_line_shows_the_latest_call_and_its_time() -> None:
+    running = RunningAgent("agent-3", 2, (RunningCall("c1", "Bash uv run pytest", 210),))
+    assert (
+        working_line(running, "agent-3", 222, WIDE) == "◜ agent-3 · Bash uv run pytest 0:12 · 3:40"
+    )
+
+
+def test_a_line_counts_the_other_running_calls() -> None:
+    calls = (
+        RunningCall("c1", "Bash ls", 0),
+        RunningCall("c2", "Bash pwd", 0),
+        RunningCall("c3", "Read src/x.py", 212),
+    )
+    line = working_line(RunningAgent("agent-3", 2, calls), "agent-3", 222, WIDE)
+    assert line == "◜ agent-3 · Read src/x.py (+2 running) 0:10 · 3:40"
+
+
+def test_a_long_call_is_clipped_to_fit_the_width() -> None:
+    running = RunningAgent("agent-3", 0, (RunningCall("c1", "Bash " + "x" * 100, 0),))
+    line = working_line(running, "agent-3", 0, 40)
+    assert len(line) == 40
+    assert line == "◜ agent-3 · Bash xxxxxxxxxx… 0:00 · 0:00"
+
+
+def test_a_call_keeps_at_least_its_ellipsis_in_a_narrow_row() -> None:
+    running = RunningAgent("agent-3", 0, (RunningCall("c1", "Bash ls", 0),))
+    assert working_line(running, "agent-3", 0, 5) == "◜ agent-3 · … 0:00 · 0:00"
+
+
+def test_lines_follow_turn_start_and_stop_at_three_then_sum_up() -> None:
+    working = tracked(*[(turn(f"agent-{n}"), n) for n in (4, 5, 6, 7)])
+    lines = working_lines(WorkingView(working, {}, None), 12, WIDE)
+    assert lines == (
+        "◜ agent-4 · 0:08",
+        "◜ agent-5 · 0:07",
+        "◜ agent-6 · 0:06",
+        "+1 more",
+    )
+
+
+def test_all_shows_every_running_agent_with_the_planner() -> None:
+    working = tracked((turn("agent-1"), 0), (turn("agent-2"), 0), (turn("agent-9"), 0))
+    lines = working_lines(WorkingView(working, ROLES, None), 0, WIDE)
+    assert lines == ("◜ planner · 0:00", "◜ agent-2 · 0:00", "◜ agent-9 · 0:00")
+
+
+def test_a_role_tab_shows_only_its_agents() -> None:
+    working = tracked((turn("agent-1"), 0), (turn("agent-2"), 0), (turn("agent-3"), 0))
+    lines = working_lines(WorkingView(working, ROLES, "coder"), 0, WIDE)
+    assert lines == ("◜ agent-2 · 0:00", "◜ agent-3 · 0:00")
+
+
+def test_the_planner_tab_shows_only_the_planner() -> None:
+    working = tracked((turn(None), 0), (turn("agent-2"), 0))
+    assert working_lines(WorkingView(working, ROLES, "planner"), 0, WIDE) == ("◜ planner · 0:00",)

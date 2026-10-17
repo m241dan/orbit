@@ -178,6 +178,16 @@ brightens at the end of its turn appears. If the marked entry is hidden, the mar
 nearest entry still shown, the one before it first. Agents' label rows follow the entries shown,
 and the setting isn't kept across restarts.
 
+A muted working row, pinned below the conversation, shows what runs right now: a line for each
+agent whose turn has started and not yet ended, oldest turn first, such as
+`◜ agent-3 · Bash uv run pytest 0:12 · 3:40`. That's the spinner, the agent (`planner` for the
+planner), its latest tool call still running, clipped to fit (`Read src/x.py (+2 running)` when
+others run alongside it), how long that call has run, and how long the turn has; an agent between
+tool calls shows just its turn's time (`◜ agent-3 · 3:40`). Times read `0:12`, `3:40`, or
+`1:02:05` from an hour. All shows every running agent, a role's tab only that role's agents, and
+the planner tab only the planner. It shows at most three lines, then `+2 more`, can't be selected,
+and takes no room while nothing in the shown tab runs.
+
 The planned improvements to the conversation window, and what is deferred, are in
 [docs/conversation-window.md](docs/conversation-window.md).
 
