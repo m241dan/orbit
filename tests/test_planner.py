@@ -264,3 +264,10 @@ async def test_the_planner_hears_the_steps_again_after_a_cancelled_turn() -> Non
         await first
     again = await turn(chat, launcher, "Again.")
     assert again == f"{steps_note(('Ruff lint',))}\n\nAgain."
+
+
+async def test_the_planners_agent_id_is_known_once_its_first_turn_opens_it() -> None:
+    chat, launcher, _ = steps_chat(chats)
+    assert chat.agent_id is None
+    await turn(chat, launcher, "Plan.")
+    assert chat.agent_id == "agent-1"

@@ -104,9 +104,10 @@ async def test_session_reports_the_planners_errors() -> None:
     started = events[1]
     assert isinstance(started, TurnStarted)
     turn_id = started.turn_id
+    assert started.agent_id == "agent-1"  # The planner's, from its AgentStarted.
     assert events[2:] == [
-        ErrorOccurred(turn_id=turn_id, message="boom"),
-        TurnFinished(turn_id=turn_id, reason="error"),
+        ErrorOccurred(turn_id=turn_id, agent_id="agent-1", message="boom"),
+        TurnFinished(turn_id=turn_id, agent_id="agent-1", reason="error"),
         PLANNER_IDLE,
     ]
 

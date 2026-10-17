@@ -483,11 +483,16 @@ class AgentSession:
                 await self._events.put(event)
         except asyncio.CancelledError:
             reason = "cancelled"
-            await self._events.put(TurnFinished(turn_id=turn_id, reason=reason))
+            await self._events.put(
+                TurnFinished(turn_id=turn_id, agent_id=planner.agent_id, reason=reason)
+            )
         except Exception as exc:
             reason = "error"
-            await self._events.put(ErrorOccurred(turn_id=turn_id, message=str(exc)))
-            await self._events.put(TurnFinished(turn_id=turn_id, reason=reason))
+            agent_id = planner.agent_id
+            await self._events.put(
+                ErrorOccurred(turn_id=turn_id, agent_id=agent_id, message=str(exc))
+            )
+            await self._events.put(TurnFinished(turn_id=turn_id, agent_id=agent_id, reason=reason))
         return reason
 
     def _settings_changed(self) -> SettingsChanged:

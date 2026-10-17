@@ -13,6 +13,7 @@ from orbit.protocol import (
 from orbit.tui import OrbitApp
 from orbit.tui.tabs import ConversationTabs
 from orbit.tui.transcript import Transcript, WorkingRow
+from tests.test_transcript import labels
 from tests.test_tui import FakeSession, feed_events, started
 
 NOW = 222.0  # Shows the spinner's first frame.
@@ -196,3 +197,17 @@ async def test_a_line_too_wide_for_the_row_does_not_wrap() -> None:
             session, pilot, started("agent-2"), turn("agent-2"), read("agent-2", "c1", "日" * 60)
         )
         assert row.size.height == 1
+
+
+async def test_a_cancelled_planner_turn_leaves_the_row_and_ends_its_running_call() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test(size=(80, 24)) as pilot:
+        row = await opened(app, pilot)
+        planner = (started("agent-1", "planner"), turn("agent-1"), read("agent-1", "c1", "a.py"))
+        await fed(session, pilot, *planner)
+        assert lines(row) == ("◜ planner · Read a.py 0:00 · 0:00",)
+        cancelled = TurnFinished(turn_id="t", agent_id="agent-1", reason="cancelled")
+        await fed(session, pilot, cancelled)
+        assert lines(row) == ()
+        assert "agent-1: → Read a.py ⊘ no result" in labels(app)

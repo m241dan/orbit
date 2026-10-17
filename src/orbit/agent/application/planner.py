@@ -45,6 +45,11 @@ class PlannerChat:
             "report_progress": self._report_progress,
         }
 
+    @property
+    def agent_id(self) -> str | None:
+        """The id of the planner's agent; none before its first turn opens it."""
+        return self._agent.id if self._agent else None
+
     async def run_turn(self, turn_id: str, prompt: str, settings: Settings) -> AsyncIterator[Event]:
         """Tell the planner ``prompt``, with the session's model, and yield what it does."""
         if self._agent is None:

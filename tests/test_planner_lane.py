@@ -5,6 +5,7 @@ import asyncio
 from orbit.agent.application.ports import Reply
 from orbit.protocol import (
     AddTask,
+    AgentStarted,
     BusyChanged,
     CancelAgent,
     CancelTurn,
@@ -131,6 +132,18 @@ async def test_cancelling_the_planners_agent_stops_only_its_turn() -> None:
     gate.set()
     events = await events_until(session, lambda e: e == WORK_IDLE)
     assert [t.status for t in board(events)] == ["completed"]
+
+
+async def test_a_cancelled_planner_turn_ends_as_the_planners() -> None:
+    session, _, launcher = session_for()
+    launcher.planner_turns = [gated_planner(asyncio.Event())]
+    await session.send(SubmitPrompt(text="Plan."))
+    opened, turn = (await events_until(session, lambda e: isinstance(e, TurnStarted)))[-2:]
+    assert isinstance(opened, AgentStarted) and isinstance(turn, TurnStarted)
+    await session.send(CancelTurn(lane="planner"))
+    events = await events_until(session, lambda e: e == PLANNER_IDLE)
+    finished = TurnFinished(turn_id=turn.turn_id, agent_id=opened.agent_id, reason="cancelled")
+    assert finished in events
 
 
 async def test_closing_stops_the_planners_turn() -> None:
