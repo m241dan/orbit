@@ -205,6 +205,9 @@ class AgentSession:
         self._held = False  # The user cancelled: don't start work by itself.
         self._planner = self._planner_chat()
         self._retired: list[PlannerChat] = []  # Planners of sessions left, still to close.
+        # What the opened session saved that no lane or planner here holds, kept to save back.
+        self._kept_reviews: LaneSnapshot | None = None
+        self._kept_conversation: str | None = None
         self._events.put_nowait(self._settings_changed())
         if workspace is not None:
             self._events.put_nowait(Notice(message=f"Workspace: {workspace}"))
@@ -385,6 +388,8 @@ class AgentSession:
         self._replace_planner(record.planner_conversation)
         if self._lane is not None:
             self._lane.load(record.reviews or NO_REVIEWS)
+        self._kept_reviews = record.reviews
+        self._kept_conversation = record.planner_conversation
         return True
 
     def _clear(self) -> bool:
@@ -393,6 +398,8 @@ class AgentSession:
         self._replace_planner(None)
         if self._lane is not None:
             self._lane.load(NO_REVIEWS)
+        self._kept_reviews = None
+        self._kept_conversation = None
         return True
 
     def _replace_board(self, tasks: tuple[TaskState, ...]) -> None:
@@ -679,12 +686,14 @@ class AgentSession:
         await self._keeper.save(self._contents)
 
     def _contents(self) -> Contents:
-        """What the session holds now, to save."""
+        """What the session holds now, to save, with what it was opened with in place of the
+        reviews or planner conversation it has no lane or planner to hold."""
+        planner = self._planner
         return Contents(
             settings=self._settings,
-            planner_conversation=self._planner.conversation_id if self._planner else None,
+            planner_conversation=planner.conversation_id if planner else self._kept_conversation,
             tasks=self._board.tasks,
-            reviews=self._lane.snapshot() if self._lane else None,
+            reviews=self._lane.snapshot() if self._lane else self._kept_reviews,
         )
 
     async def _change(self, change: Callable[..., None], *arguments: Any) -> bool:

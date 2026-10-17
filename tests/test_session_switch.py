@@ -477,3 +477,30 @@ async def test_a_session_without_agents_opens_its_board_and_settings() -> None:
     await opened(session, NewSession())
     assert session._board.tasks == ()
     await session.close()
+
+
+async def test_a_session_without_reviews_keeps_the_reviews_of_the_session_it_opens() -> None:
+    reviews = LaneSnapshot(planner=PlannerSnapshot(paused=True))
+    store = store_with(saved("auth", reviews=reviews))
+    session, _ = switching(store, reviews=False)
+    await opened(session, OpenSession(session_id="auth"))
+    await session.send(AddTask(task=TASK))
+    await events_until(session, of_type(TasksChanged))
+    assert store.last.id == "auth" and store.last.reviews == reviews
+    await opened(session, NewSession())
+    await session.send(AddTask(task=TASK))
+    await events_until(session, of_type(TasksChanged))
+    assert store.last.id != "auth" and store.last.reviews is None
+    await session.close()
+
+
+async def test_a_session_without_a_planner_keeps_the_conversation_of_the_session_it_opens() -> None:
+    store = store_with(saved("auth", state("1", "pending"), planner_conversation="conv-1"))
+    session = AgentSession(store=store, clock=Ticks())
+    await opened(session, OpenSession(session_id="auth"))
+    assert store.last.id == "auth" and store.last.planner_conversation == "conv-1"
+    await opened(session, NewSession())
+    await session.send(AddTask(task=TASK))
+    await events_until(session, of_type(TasksChanged))
+    assert store.last.id != "auth" and store.last.planner_conversation is None
+    await session.close()
