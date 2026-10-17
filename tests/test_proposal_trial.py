@@ -74,6 +74,7 @@ async def test_accepted_checks_end_the_task_and_come_back() -> None:
     verdict, work = await decide(Steps(), User(ProposalDecision("accept")))
     assert verdict.accepted == CHECKS
     assert verdict.reply.startswith("The user accepted your proposal.")
+    assert verdict.failure is None
     assert work.phase == "done"
 
 
@@ -97,6 +98,7 @@ async def test_a_failing_step_asks_for_a_revision_without_asking_the_user() -> N
     verdict, work = await decide(Steps(failing="Tests"), user)
     assert verdict.accepted is None
     assert "Your proposed step 'Tests' failed." in verdict.reply
+    assert verdict.failure == (TESTS, "1 error")
     assert user.shown == []
     assert work.phase == "working"
 
@@ -105,6 +107,7 @@ async def test_a_revision_passes_on_the_users_feedback() -> None:
     verdict, work = await decide(Steps(), User(ProposalDecision("revise", "Add mypy.")))
     assert verdict.accepted is None
     assert "> Add mypy." in verdict.reply
+    assert verdict.failure is None
     assert work.phase == "working"
 
 
@@ -112,6 +115,7 @@ async def test_the_user_can_end_the_task() -> None:
     verdict, work = await decide(Steps(), User(ProposalDecision("end")))
     assert verdict.accepted is None
     assert verdict.reply.startswith("The user ended this task.")
+    assert verdict.failure is None
     assert work.phase == "ended"
 
 

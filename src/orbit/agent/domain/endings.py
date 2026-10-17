@@ -1,4 +1,4 @@
-"""Why a task ended other than completed or unverified: a line for the board, and the full text.
+"""Why a task ended other than completed: a line for the board, and the full text.
 
 Each ending is a ``(reason, detail)`` pair; the detail is ``""`` when the reason says it all.
 """
