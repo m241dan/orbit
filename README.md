@@ -59,6 +59,7 @@ In the app:
 | `enter` | On the conversation: activate it (`j`/`k` move between entries, `enter` collapses or expands the one marked `▌` in the left gutter, `esc` leaves and holds the marked entry); again, resume at the held entry |
 | `enter` | On the task list: activate it (`j`/`k` move, `enter` edits a task or adds one on `+ new task`, `a` accepts a draft, `x` removes a task, `esc` leaves) |
 | `enter` | On the agents pane: activate it (`j`/`k` move, `c` cancels the highlighted agent's work, `esc` leaves) |
+| `t` | Hide agents' dim messages, still thinking out loud, in every tab; again, show them (works with the conversation activated too) |
 | `ctrl+t` | Jump to the **planner** tab; again, back to the tab you were on |
 | `ctrl+r` | Run the tasks that haven't completed yet |
 | `ctrl+g` | Ask for a super review of the whole codebase now (works while tasks run) |
@@ -154,6 +155,13 @@ expand the one marked `▌` in the left gutter, and `esc` to leave. Leaving hold
 the mark stays, the conversation stops following new output, and `enter` picks up there again.
 `esc` again with the Conversation window selected lets go, and the conversation follows the latest
 output again. Each tab holds its own spot, kept while you switch tabs.
+
+Press `t` (with nothing being typed) to hide agents' dim messages, so only final answers, tool
+calls and everything else show, in every tab at once, tabs opened later included; the window's title
+reads `Conversation · thinking hidden` while they're hidden, and `t` again shows them. A message that
+brightens at the end of its turn appears. If the marked entry is hidden, the mark moves to the
+nearest entry still shown, the one before it first. Agents' label rows follow the entries shown,
+and the setting isn't kept across restarts.
 
 The planned improvements to the conversation window, and what is deferred, are in
 [docs/conversation-window.md](docs/conversation-window.md).

@@ -169,6 +169,8 @@ class OrbitApp(App[None], inherit_bindings=False):
         Binding("tab", "cycle_tab(1)", "Next tab", key_display="Tab", priority=True),
         Binding("shift+tab", "cycle_tab(-1)", show=False, priority=True),
         Binding("i", "insert_mode", "Type"),
+        # check_action keeps it to normal mode and the conversation's list mode.
+        Binding("t", "toggle_thinking", "Thinking"),
         Binding("ctrl+r", "run_tasks", "Run tasks"),
         Binding("ctrl+g", "super_review", "Super review"),
         Binding("ctrl+e", "configure_checks", "Set up checks"),
@@ -252,6 +254,8 @@ class OrbitApp(App[None], inherit_bindings=False):
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
         if action in ("cycle_tab", "release_cursor"):
             return self._normal_mode()
+        if action == "toggle_thinking":
+            return self._normal_mode() or self._in_transcript()
         if action == "configure_checks":
             return len(self.screen_stack) == 1
         return True
@@ -259,6 +263,14 @@ class OrbitApp(App[None], inherit_bindings=False):
     def _normal_mode(self) -> bool:
         """Nothing focused on the main screen: no typing, list mode or modal screen."""
         return len(self.screen_stack) == 1 and self.focused is None
+
+    def _in_transcript(self) -> bool:
+        """The conversation is active, its shown log in list mode, on the main screen."""
+        return len(self.screen_stack) == 1 and self.focused is self._transcript.shown
+
+    def action_toggle_thinking(self) -> None:
+        """Hide agents' messages while they're still thinking out loud, or show them again."""
+        self._transcript.toggle_thinking()
 
     def action_cycle_tab(self, step: int) -> None:
         tabs = self._tabs

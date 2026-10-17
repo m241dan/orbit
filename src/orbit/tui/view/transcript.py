@@ -152,6 +152,19 @@ def speaker(agent: str | None) -> str | None:
     return None if agent == PLANNER else agent
 
 
+CONVERSATION_TITLE = "Conversation"
+"""The conversation window's title, before its tab's label and filter."""
+
+
+def conversation_title(label: str | None, thinking_hidden: bool) -> str:
+    """The conversation window's title: the tab's ``label`` after it unless All is shown
+    (None), and a note when ``thinking_hidden``."""
+    parts = [CONVERSATION_TITLE, *(() if label is None else (label,))]
+    if thinking_hidden:
+        parts.append("thinking hidden")
+    return " · ".join(parts)
+
+
 def speaker_label(kind: EntryKind, agent: str | None, previous: str | None) -> str | None:
     """The label heading an entry of ``kind`` by ``agent``: the agent's id, for an agent's
     message when the ``previous`` entry in its log was by someone else; None otherwise."""

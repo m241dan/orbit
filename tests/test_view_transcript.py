@@ -33,6 +33,7 @@ from orbit.tui.view import (
     agent_labelled,
     banded,
     collapsible,
+    conversation_title,
     entry_label,
     entry_markdown,
     entry_prefix,
@@ -402,3 +403,13 @@ def test_every_message_after_the_last_tool_call_is_the_final_answer() -> None:
 
 def test_a_turn_with_no_output_has_no_final_answer() -> None:
     assert final_answer([]) == ()
+
+
+def test_the_conversation_title_names_the_tab_shown_after_all() -> None:
+    assert conversation_title(None, False) == "Conversation"
+    assert conversation_title("coder", False) == "Conversation · coder"
+
+
+def test_the_conversation_title_notes_hidden_thinking() -> None:
+    assert conversation_title(None, True) == "Conversation · thinking hidden"
+    assert conversation_title("coder", True) == "Conversation · coder · thinking hidden"
