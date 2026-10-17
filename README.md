@@ -60,7 +60,7 @@ In the app:
 | `i` | Jump to the prompt, which talks to the planner, and start typing (vim-style insert mode): long text wraps and the box grows up to 8 lines, then scrolls; `enter` sends, pasted text keeps its newlines, `esc` stops typing |
 | `enter` | On the conversation: activate it (`j`/`k` move between entries, `enter` collapses or expands the one marked `▌` in the left gutter, or opens the detail pane on a tool call or request, `J`/`K` scroll the open detail pane, `y` copies its call's whole output, `tab` activates it, `esc` closes the detail pane if it's open, else leaves and holds the marked entry); again, resume at the held entry |
 | `enter` | On the conversation's detail pane: activate it (`j`/`k` scroll it, `y` copies its call's whole output, `esc` leaves with the pane still open) |
-| `enter` | On the task list: activate it (`j`/`k` move, `enter` edits a task or adds one on `+ new task`, `a` accepts a draft, `x` removes a task, `esc` leaves) |
+| `enter` | On the task list: activate and hold it (`j`/`k` move, `enter` edits a task or adds one on `+ new task`, `a` accepts a draft, `x` removes a task, `esc` leaves, the list still held) |
 | `enter` | On the agents pane: activate it (`j`/`k` move, `c` cancels the highlighted agent's work, `esc` leaves) |
 | `t` | Hide agents' dim messages, still thinking out loud, in every tab; again, show them (works with the conversation activated too) |
 | `ctrl+b` | Hide the sidebar so the conversation takes the full width (`h`/`j`/`k`/`l` skip its windows meanwhile); again, show it as it was (not while typing) |
@@ -71,7 +71,7 @@ In the app:
 | `ctrl+o` | Pick the planner's model (default, fable, opus, sonnet, haiku; new tasks default to it too) |
 | `ctrl+l` | Pick the tool access level new tasks start with in the task editor (off, restricted, full) |
 | `ctrl+p` | Switch sessions: open a saved one or start a new one (see [Sessions](#sessions)) |
-| `esc` | Stop typing, close the conversation's detail pane, leave a list or close a picker; with the conversation selected and nothing active, let go of its held entry, closing the detail pane, and follow the latest output again; with the detail pane selected, close it |
+| `esc` | Stop typing, close the conversation's detail pane, leave a list or close a picker; with the conversation selected and nothing active, let go of its held entry, closing the detail pane, and follow the latest output again; with the detail pane selected, close it; with the Task list selected and nothing active, let go of the held list and follow the active task again |
 | `ctrl+s` | Stop the task run (on any tab) |
 | `ctrl+x` | Stop the planner's turn, leaving the task run going |
 | `ctrl+n` | Reset the planner: after you confirm (`y` to go ahead, `n`/`esc` to cancel), end its conversation so the next prompt starts a fresh one, with its role read again from `.orbit/config.toml` (see [Planning with the planner](#planning-with-the-planner)) |
@@ -143,8 +143,11 @@ the title or prompt (`esc` stops; `enter` stops in the title and adds a line in 
 The task list belongs to the open session, which orbit saves as you go (see [Sessions](#sessions)).
 It keeps the topmost running or verifying task in view, scrolling just enough to show it with the
 row above it, and only when it would otherwise be out of view; activating the list with `enter`
-starts the highlight on that task. The planned behaviour of holding the list is in
-[docs/task-list.md](docs/task-list.md).
+starts the highlight on that task. Activating the list, or scrolling it with the mouse wheel,
+holds it: it stops scrolling by itself and its title reads `Task list · held`. The first `esc`
+leaves the list still held, with its highlight where it was; `esc` again, with the Task list
+selected, lets go: the list scrolls to the running task at once and follows it again. Switching
+sessions lets go too. [docs/task-list.md](docs/task-list.md) records the requirements.
 
 `ctrl+r` runs the tasks one after another, each through a fresh **agent**: a new `claude -p`
 session connected to orbit's MCP server, so tasks don't share context with each other or with the

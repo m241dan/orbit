@@ -347,9 +347,11 @@ class OrbitApp(App[None], inherit_bindings=False):
 
     def action_release_cursor(self) -> None:
         """With the conversation selected, let go of its held cursor; with its detail pane
-        selected, close the pane."""
+        selected, close the pane; with the task list selected, let go of it."""
         if self._selected == "transcript":
             self._transcript.release_cursor()
+        elif self._selected == "task-list":
+            self._task_list.let_go()
         elif self._selected == "detail":
             self._transcript.close_detail()
             self._select("transcript")
@@ -556,11 +558,14 @@ class OrbitApp(App[None], inherit_bindings=False):
                 assert_never(event)
 
     def _render_session(self, event: SessionsListed | SessionOpened | PlannerReset) -> None:
-        """Show the sessions listed, or rule off the planner's conversation where it was reset;
-        what a session opened holds comes in its own events."""
+        """Show the sessions listed, rule off the planner's conversation where it was reset, or
+        let the task list follow again in a session opened, whose contents come in their own
+        events."""
         if isinstance(event, SessionsListed):
             self._show_sessions(event.sessions)
-        elif isinstance(event, PlannerReset):
+        elif isinstance(event, SessionOpened):
+            self._task_list.let_go()
+        else:
             self._feed.append(*planner_reset_entry(), PLANNER)
 
     def _render_state(

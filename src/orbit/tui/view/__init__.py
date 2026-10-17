@@ -114,6 +114,7 @@ from orbit.tui.view.tasks import (
     join_prompt,
     split_prompt,
     task_label,
+    task_list_title,
     task_numbers,
     usage_label,
 )
@@ -350,6 +351,7 @@ __all__ = [
     "tab_labels",
     "task_counts",
     "task_label",
+    "task_list_title",
     "task_note",
     "task_numbers",
     "task_started_entry",

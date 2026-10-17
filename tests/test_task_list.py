@@ -1,3 +1,4 @@
+from textual import events
 from textual.containers import VerticalScroll
 from textual.pilot import Pilot
 
@@ -12,6 +13,8 @@ from orbit.protocol import (
     RemoveTask,
     RequestSuperReview,
     RunTasks,
+    SessionOpened,
+    SessionSummary,
     Settings,
     TasksChanged,
     TaskSpec,
@@ -917,3 +920,126 @@ def test_a_list_not_laid_out_yet_has_nothing_to_follow() -> None:
     task_list.show(verifying)
     assert task_list.row_lines() == []
     assert task_list.scroll_y == 0
+
+
+def title(task_list: TaskList) -> str:
+    return str(task_list.border_title)
+
+
+def wheel(task_list: TaskList, down: bool = True) -> None:
+    """Scroll ``task_list`` one notch with the mouse wheel."""
+    kind = events.MouseScrollDown if down else events.MouseScrollUp
+    task_list.post_message(kind(task_list, 0, 0, 0, 1 if down else -1, 0, False, False, False))
+
+
+async def test_activating_the_list_holds_it() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        task_list = app.query_one(TaskList)
+        assert title(task_list) == "Task list"
+        await open_task_list(pilot)
+        assert not task_list.following
+        assert title(task_list) == "Task list · held"
+
+
+async def test_the_first_escape_leaves_list_mode_still_held() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        task_list = app.query_one(TaskList)
+        await feed(session, pilot, many(30, running=25))
+        await open_task_list(pilot)
+        await pilot.press("k", "escape")
+        assert app.focused is None
+        assert not task_list.following
+        assert title(task_list) == "Task list · held"
+        assert task_list.highlighted == 24
+
+
+async def test_escape_again_lets_go_and_scrolls_to_the_active_task() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        task_list = app.query_one(TaskList)
+        await feed(session, pilot, many(30, running=25))
+        await open_task_list(pilot)
+        await pilot.press(*"k" * 25, "escape")
+        assert task_list.scroll_y == 0
+        await pilot.press("escape")
+        assert task_list.following
+        assert title(task_list) == "Task list"
+        assert in_view(task_list, 25)
+        assert task_list.highlighted == 0  # Letting go only scrolls.
+
+
+async def test_the_mouse_wheel_holds_the_list() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        task_list = app.query_one(TaskList)
+        await feed(session, pilot, many(30))
+        wheel(task_list)
+        await pilot.pause()
+        assert not task_list.following
+        assert title(task_list) == "Task list · held"
+        await pilot.press("l", "k", "escape")
+        wheel(task_list, down=False)
+        await pilot.pause()
+        assert not task_list.following
+
+
+async def test_following_scrolls_do_not_hold_the_list() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        task_list = app.query_one(TaskList)
+        await feed(session, pilot, many(30, running=25))
+        await feed(session, pilot, many(30, running=3))
+        assert task_list.scroll_y > 0
+        assert task_list.following
+        assert title(task_list) == "Task list"
+
+
+async def test_a_held_list_does_not_scroll_as_the_board_changes() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        task_list = app.query_one(TaskList)
+        await feed(session, pilot, many(30))
+        await open_task_list(pilot)
+        await pilot.press("escape")
+        await feed(session, pilot, many(30, running=25))
+        assert task_list.scroll_y == 0
+        await pilot.resize_terminal(100, 20)
+        await pilot.pause()
+        assert task_list.scroll_y == 0
+
+
+async def test_escape_on_a_list_not_held_is_harmless() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        task_list = app.query_one(TaskList)
+        await feed(session, pilot, many(30, running=25))
+        scroll_y = task_list.scroll_y
+        await pilot.press("l", "k", "escape")
+        assert selected(app) == ["task-list"]
+        assert task_list.following
+        assert task_list.scroll_y == scroll_y
+        assert title(task_list) == "Task list"
+
+
+async def test_opening_a_session_lets_go_of_the_list() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        task_list = app.query_one(TaskList)
+        await feed(session, pilot, many(30))
+        await open_task_list(pilot)
+        await pilot.press("escape")
+        opened = SessionOpened(session=SessionSummary(id="s", name="s"))
+        await feed(session, pilot, opened, many(30, running=25))
+        assert task_list.following
+        assert title(task_list) == "Task list"
+        assert in_view(task_list, 25)

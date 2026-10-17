@@ -25,6 +25,7 @@ from orbit.tui.view import (
     spinner_frame,
     split_prompt,
     task_label,
+    task_list_title,
     task_numbers,
     tool_access_labels,
     usage_label,
@@ -40,7 +41,8 @@ class TaskList(ListPane):
     Like the prompt, it only takes focus once activated (``enter_list_mode``);
     then j/k move, enter picks a row, ``a`` accepts a draft, ``x`` removes a task and
     escape returns to window navigation. Its border shows what the session's turns cost.
-    While following, it scrolls to keep the active task (``active_task``) in view.
+    While following, it scrolls to keep the active task (``active_task``) in view; activating
+    it or scrolling it with the mouse wheel holds it where it is, until ``let_go``.
     """
 
     class Accept(Message):
@@ -80,18 +82,38 @@ class TaskList(ListPane):
         self.following = True
 
     def on_mount(self) -> None:
-        self.border_title = "Task list"
+        self.border_title = task_list_title(held=False)
         self._redraw()
 
     def on_resize(self) -> None:
         self._follow()
 
     def enter_list_mode(self) -> None:
-        """Activate the list, with the highlight on the active task if there is one."""
+        """Activate and hold the list, with the highlight on the active task if there is one."""
+        self._hold()
         super().enter_list_mode()
         index = active_task(self.tasks)
         if index is not None and self.can_focus:
             self.highlighted = index
+
+    def on_mouse_scroll_down(self) -> None:
+        self._hold()
+
+    def on_mouse_scroll_up(self) -> None:
+        self._hold()
+
+    def _hold(self) -> None:
+        """Stop following, so the list stays where the user put it."""
+        self.following = False
+        self.border_title = task_list_title(held=True)
+
+    def let_go(self) -> None:
+        """Follow the active task again, scrolling to it at once; nothing if not held."""
+        if self.following:
+            return
+        self.following = True
+        self.border_title = task_list_title(held=False)
+        self._follow()
 
     def action_accept(self) -> None:
         state = self._highlighted_task()

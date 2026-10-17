@@ -1,8 +1,8 @@
 # Task list requirements
 
 The agreed requirements for making orbit's task list follow the task that's running, and what is
-deliberately left out. This is the source of truth for the work that follows. README's
-[Tasks](../README.md#tasks) section says how the task list works today.
+deliberately left out. Both steps are built; README's [Tasks](../README.md#tasks) section says how
+the task list works, and this stays as the record of what was agreed.
 
 ## Goal
 
@@ -41,6 +41,7 @@ itself, until you take it over, and lets go again when you're done looking.
 
 - `esc` with the Task list window selected and nothing active (normal mode) scrolls to the active
   task and follows again; the title drops `· held`.
+- Opening a session lets go too.
 - This is the "double escape", and mirrors the conversation's held entry and its second `esc`.
 
 ## How it will be built
@@ -48,6 +49,7 @@ itself, until you take it over, and lets go again when you're done looking.
 1. The active-task view rule, follow scrolling, and activation landing on the active task.
    Done.
 2. Holding (on activating and on the mouse wheel), the `· held` title, and `esc` letting go.
+   Done.
 
 ## Out of scope
 

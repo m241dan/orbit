@@ -96,6 +96,11 @@ def active_task(tasks: Sequence[TaskState]) -> int | None:
     return next((i for i, t in enumerate(tasks) if t.status in ("running", "verifying")), None)
 
 
+def task_list_title(*, held: bool) -> str:
+    """The task list's border title, which says when the list is held from following."""
+    return "Task list · held" if held else "Task list"
+
+
 def follow_top(
     rows: Sequence[tuple[int, int]], index: int, view_top: int, view_height: int
 ) -> int | None:

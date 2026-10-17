@@ -9,6 +9,7 @@ from orbit.tui.view import (
     follow_top,
     join_prompt,
     split_prompt,
+    task_list_title,
     task_numbers,
     usage_label,
     usage_text,
@@ -144,3 +145,8 @@ def test_a_tall_row_shows_from_its_top_when_the_view_is_too_short() -> None:
     # Taller than the view: its top shows, whichever side it's on.
     assert follow_top(rows, 1, 6, 4) == 2
     assert follow_top(rows, 1, 0, 4) == 2
+
+
+def test_a_held_task_list_says_so_in_its_title() -> None:
+    assert task_list_title(held=False) == "Task list"
+    assert task_list_title(held=True) == "Task list · held"
