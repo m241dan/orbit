@@ -4,6 +4,7 @@ Each ending is a ``(reason, detail)`` pair; the detail is ``""`` when the reason
 """
 
 from orbit.agent.domain.agent_task import Phase
+from orbit.agent.domain.verification import VerificationStep, failure_report
 from orbit.protocol import TaskStatus
 
 Ending = tuple[str, str]
@@ -19,6 +20,11 @@ CANCELLED = "Cancelled"
 """Why a task cancelled any other way, such as by orbit quitting, is cancelled."""
 BUG = "Error: orbit hit a bug running this task"
 """Why a task whose run broke on something orbit didn't expect ends in error."""
+INTERRUPTED = "Interrupted: orbit stopped while it ran"
+"""Why a task that was running when orbit stopped is cancelled."""
+NO_PROPOSAL = "Ended without an accepted proposal"
+"""Why a task whose agent's proposal of checks was never accepted, nor last failed, is
+unverified."""
 
 PHASE_ERRORS: dict[Phase, str] = {
     "assigned": "The agent exited before fetching its task",
@@ -61,6 +67,15 @@ def run_ending(status: TaskStatus, phase: Phase, given_up: str, failed: str | No
         case "cancelled":
             return ENDED_AT_PROPOSAL, ""
     return "", ""
+
+
+def unaccepted(failed: tuple[VerificationStep, str] | None) -> Ending:
+    """Why a task ended unverified without its proposal of checks accepted: its last proposal
+    ``failed`` when tried, at that step with that output, or else :data:`NO_PROPOSAL`."""
+    if failed is None:
+        return NO_PROPOSAL, ""
+    step, output = failed
+    return f"Proposed check {step.name} failed", failure_report(step, output)
 
 
 def _headed(heading: str, text: str) -> str:

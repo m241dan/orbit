@@ -20,10 +20,12 @@ Ask = Callable[[ChecksProposal], Awaitable[ProposalDecision]]
 
 @dataclass(frozen=True)
 class Verdict:
-    """What to reply to the agent about its proposal, and the checks if the user accepted them."""
+    """What to reply to the agent about its proposal, the checks if the user accepted them, and
+    how they failed if they did when tried."""
 
     reply: str
     accepted: ChecksProposal | None = None
+    failure: Failure | None = None
 
 
 class ProposalTrial:
@@ -42,7 +44,7 @@ class ProposalTrial:
         """Try ``checks`` and, if they pass, have the user decide on them; returns the verdict."""
         failure = await self._try(checks)
         if failure is not None:
-            return Verdict(self._work.proposal_failed(*failure))
+            return Verdict(self._work.proposal_failed(*failure), failure=failure)
         decision = await self._review(checks)
         if decision is None:
             return Verdict(self._work.ended())

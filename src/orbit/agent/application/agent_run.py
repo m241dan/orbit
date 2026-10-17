@@ -23,7 +23,7 @@ from orbit.agent.application.verifier import Failure, Verifier, first_failure
 from orbit.agent.domain.agent_task import FINISHED, AgentTask, Phase
 from orbit.agent.domain.agents import Agent, bootstrap_prompt
 from orbit.agent.domain.board import TaskBoard
-from orbit.agent.domain.endings import Ending, error, run_ending
+from orbit.agent.domain.endings import Ending, error, run_ending, unaccepted
 from orbit.agent.domain.roles import (
     ChecksProposal,
     ConfigError,
@@ -128,6 +128,8 @@ class AgentRun:
         self._failure: Failure | None = None
         self._failed_state: object = None  # The tree when verification last failed.
         self._accepted: ChecksProposal | None = None
+        # How the last proposal failed when tried; never a fix task's failure, so kept apart.
+        self._proposal_failure: Failure | None = None
         self._agent: Agent | None = None
         self._root = "."
         self._tools: dict[str, Tool] = {
@@ -171,10 +173,13 @@ class AgentRun:
         return Outcome(status, self._failure, summaries, self._accepted, reason, detail)
 
     def _why(self, status: TaskStatus) -> Ending:
-        """Why the task ended as ``status``: the step that failed, if it fell back for one, or
-        else how the run ended."""
+        """Why the task ended as ``status``: the step that failed, if it fell back for one, its
+        proposal that was never accepted, if it fell back without one, or else how the run
+        ended."""
         if status == "unverified" and self._failure is not None:
             return failure_reason(*self._failure)
+        if status == "unverified":
+            return unaccepted(self._proposal_failure)
         return run_ending(status, self._work.phase, self._given_up, self._error)
 
     async def _noting(self, event: Event) -> None:
@@ -346,6 +351,7 @@ class AgentRun:
             raise
         if verdict.accepted is not None:
             self._accepted = verdict.accepted
+        self._proposal_failure = verdict.failure
         _answer(proposal.answer, Reply(verdict.reply))
 
     def _trial(self) -> ProposalTrial:

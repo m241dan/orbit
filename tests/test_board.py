@@ -1,6 +1,7 @@
 import pytest
 
-from orbit.agent.domain.board import INTERRUPTED, SETTLED, WAITING, TaskBoard, interrupted
+from orbit.agent.domain.board import SETTLED, WAITING, TaskBoard, interrupted
+from orbit.agent.domain.endings import INTERRUPTED
 from orbit.protocol import ACTIVE_STATUSES, Settings, TaskSpec, TaskState, TaskStatus, Usage
 
 ONE = TaskSpec(prompt="one")

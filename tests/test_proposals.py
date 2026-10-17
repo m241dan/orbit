@@ -7,9 +7,9 @@ from typing import Any
 from orbit.agent.application.ports import ProposalDecision
 from orbit.agent.application.session import AgentSession
 from orbit.agent.domain.agent_task import Limits
-from orbit.agent.domain.endings import ENDED_AT_PROPOSAL
+from orbit.agent.domain.endings import ENDED_AT_PROPOSAL, NO_PROPOSAL
 from orbit.agent.domain.roles import ChecksProposal, Setup
-from orbit.agent.domain.verification import VerificationStep
+from orbit.agent.domain.verification import VerificationStep, failure_report
 from orbit.protocol import (
     AddTask,
     AgentExited,
@@ -51,6 +51,18 @@ class Review:
 def status(events: list[Event]) -> str:
     [task] = board(events)
     return task.status
+
+
+def why(events: list[Event]) -> tuple[str, str, str]:
+    [task] = board(events)
+    return task.status, task.reason, task.reason_detail
+
+
+LINT_FAILED = (
+    "unverified",
+    "Proposed check Lint failed",
+    failure_report(VerificationStep("Lint", ("ruff", "check")), "1 test failed"),
+)
 
 
 def proposes(*arguments: dict[str, Any], replies: list[str]) -> Any:
@@ -157,7 +169,20 @@ async def test_revisions_are_capped_and_the_reply_says_so() -> None:
     assert "(Revision 1 of 1.)" in replies[0]
     assert "> Faster, please." in replies[1]
     assert "all 1 revisions" in replies[1] and "End your turn now." in replies[1]
-    assert status(events) == "unverified"
+    assert why(events) == ("unverified", NO_PROPOSAL, "")
+
+
+async def test_a_proposal_failing_when_revisions_run_out_says_so_without_a_fix_task() -> None:
+    events, replies = await configure(
+        {"steps": [LINT]},
+        {"steps": [LINT]},
+        review=Review(),
+        steps=Steps(False, False),
+        limits=Limits(max_attempts=1),
+    )
+    assert "all 1 revisions" in replies[1]
+    assert [task.task.role for task in board(events)] == ["configurator"]
+    assert why(events) == LINT_FAILED
 
 
 async def test_invalid_proposals_are_refused_with_the_reason() -> None:
@@ -363,7 +388,7 @@ async def test_a_configurator_that_exits_without_proposing_is_unverified() -> No
         leaves, verification=verified(Steps()), proposal_review=Review(), tree=FakeTree()
     )
     events = await asyncio.wait_for(run(session, CONFIGURE), 5)
-    assert status(events) == "unverified"
+    assert why(events) == ("unverified", NO_PROPOSAL, "")
 
 
 async def test_a_configurator_that_exits_after_a_failure_or_revise_reply_is_unverified() -> None:
@@ -371,7 +396,7 @@ async def test_a_configurator_that_exits_after_a_failure_or_revise_reply_is_unve
         {"steps": [LINT]}, review=Review(), steps=Steps(False), tree=FakeTree()
     )
     assert "propose_checks again" in replies[0]
-    assert status(events) == "unverified"
+    assert why(events) == LINT_FAILED
     events, replies = await configure(
         {"steps": [LINT]},
         review=Review(ProposalDecision("revise", "Add mypy.")),
@@ -379,4 +404,4 @@ async def test_a_configurator_that_exits_after_a_failure_or_revise_reply_is_unve
         tree=FakeTree(),
     )
     assert "> Add mypy." in replies[0]
-    assert status(events) == "unverified"
+    assert why(events) == ("unverified", NO_PROPOSAL, "")

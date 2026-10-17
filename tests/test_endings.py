@@ -3,12 +3,15 @@
 from orbit.agent.domain.endings import (
     BUG,
     ENDED_AT_PROPOSAL,
+    NO_PROPOSAL,
     bug,
     error,
     first_line,
     gave_up,
     run_ending,
+    unaccepted,
 )
+from orbit.agent.domain.verification import VerificationStep, failure_report
 
 
 def test_the_first_line_skips_blank_lines_and_strips_it() -> None:
@@ -64,3 +67,15 @@ def test_a_run_that_ended_cancelled_was_ended_at_its_proposal() -> None:
 
 def test_a_run_that_completed_has_no_reason() -> None:
     assert run_ending("completed", "done", "", None) == ("", "")
+
+
+def test_a_proposal_never_made_or_accepted_says_so() -> None:
+    assert unaccepted(None) == (NO_PROPOSAL, "")
+
+
+def test_a_proposal_that_last_failed_gives_the_step_and_its_report() -> None:
+    step = VerificationStep("Lint", ("ruff", "check"))
+    assert unaccepted((step, "E501")) == (
+        "Proposed check Lint failed",
+        failure_report(step, "E501"),
+    )

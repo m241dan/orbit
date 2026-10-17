@@ -4,6 +4,7 @@ import itertools
 from collections.abc import Collection, Sequence
 from typing import Any
 
+from orbit.agent.domain.endings import INTERRUPTED
 from orbit.protocol import (
     ACTIVE_STATUSES,
     TaskOrigin,
@@ -18,8 +19,6 @@ WAITING: frozenset[TaskStatus] = ACTIVE_STATUSES | {"pending"}
 # Statuses a run leaves alone; any other task is worth (another) run.
 SETTLED: frozenset[TaskStatus] = ACTIVE_STATUSES | {"draft", "completed", "unverified", "gave_up"}
 
-INTERRUPTED = "Interrupted: orbit stopped while it ran"
-"""Why a task that was running when orbit stopped is cancelled."""
 # What clears a task's reason for ending badly.
 _NO_REASON = {"reason": "", "reason_detail": ""}
 
