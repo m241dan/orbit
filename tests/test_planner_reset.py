@@ -17,6 +17,7 @@ from orbit.protocol import (
     ErrorOccurred,
     Event,
     Notice,
+    OpenSession,
     PlannerReset,
     ResetPlanner,
     SubmitPrompt,
@@ -33,6 +34,7 @@ from tests.agent_fakes import (
     session_for,
 )
 from tests.test_planner import chats, hangs, plan, proposes_two, steps_chat
+from tests.test_session_switch import opened, saved, store_with, switching
 
 NEW_ROLE = ROLES["planner"].model_copy(
     update={"instructions": "Plan small.", "tools": ("propose_task",)}
@@ -157,3 +159,18 @@ async def test_a_restored_conversation_can_be_reset_before_its_first_prompt() ->
     assert not chat.started
     chat.restore("saved-1")
     assert chat.started
+
+
+async def test_resetting_a_restored_conversation_starts_the_next_prompt_afresh() -> None:
+    store = store_with(saved("auth", planner_conversation="conversation-x"))
+    session, launcher = switching(store)
+    await opened(session, OpenSession(session_id="auth"))
+    events = await reset(session)
+    assert not any(isinstance(e, AgentExited | Notice) for e in events)
+    await asyncio.sleep(0.01)  # Saving takes a while.
+    assert store.last.planner_conversation is None
+    launcher.planner_turns = [chats]
+    await plan(session, "Plan.")
+    assert launcher.resumed == [None]
+    assert launcher.launches[-1].prompt == f"{steps_note(())}\n\nPlan."
+    await session.close()

@@ -204,7 +204,7 @@ class AgentSession:
         self._lane = self._review_lane()
         self._held = False  # The user cancelled: don't start work by itself.
         self._planner = self._planner_chat()
-        self._retired: list[PlannerChat] = []  # Planners of sessions left, still to close.
+        self._retired: list[PlannerChat] = []  # Planners of sessions left or reset, still to close.
         # What the opened session saved that no lane or planner here holds, kept to save back.
         self._kept_reviews: LaneSnapshot | None = None
         self._kept_conversation: str | None = None
@@ -440,7 +440,7 @@ class AgentSession:
         await self._events.put(SessionOpened(session=summary))
 
     async def _close_retired(self) -> None:
-        """Close the planners of the sessions left."""
+        """Close the planners retired by leaving a session or by a reset."""
         while self._retired:
             await self._retired.pop().close()
 

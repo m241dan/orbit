@@ -183,7 +183,7 @@ class PlannerChat:
         return await dispatch(PLANNER, role, self._tools, tool, arguments)
 
     async def close(self) -> None:
-        """End the planner's conversation, at the session's end."""
+        """End the planner's conversation, at the session's end or on a reset."""
         if self._agent is not None:
             self._desk.close(self._agent)
             await self._desk.publish(AgentExited(agent_id=self._agent.id, reason="finished"))
