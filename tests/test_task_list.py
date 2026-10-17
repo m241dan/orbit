@@ -1,3 +1,4 @@
+from rich.cells import cell_len
 from textual import events
 from textual.containers import VerticalScroll
 from textual.pilot import Pilot
@@ -129,6 +130,44 @@ def test_label_shows_what_a_task_spent_once_it_spent_anything() -> None:
 def test_fix_tasks_are_indented_under_their_task() -> None:
     fix = TaskState(id="2", task=TaskSpec(prompt="Fix it"), fixes="1")
     assert str(task_label(fix, "1.1", "◠ ")) == "   1.1 ⏳ Fix it\n          default · restricted"
+
+
+def test_a_task_with_a_reason_shows_it_on_a_dim_red_line_under_the_details() -> None:
+    state = TaskState(
+        id="1", task=TaskSpec(prompt="go"), status="unverified", reason="Unit tests failed"
+    )
+    label = task_label(state, "1", "◠ ", width=80)
+    assert str(label) == "1. ❗ go\n      default · restricted\n      ↳ Unit tests failed"
+    reason_start = str(label).index("↳")
+    assert any(
+        span.style == "dim red" and span.start <= reason_start < span.end for span in label.spans
+    )
+
+
+def test_a_task_without_a_reason_keeps_its_two_lines() -> None:
+    state = TaskState(id="1", task=TaskSpec(prompt="go"), status="completed")
+    assert str(task_label(state, "1", "◠ ", width=80)) == "1. ✅ go\n      default · restricted"
+
+
+def test_a_fix_tasks_reason_lines_up_under_its_details() -> None:
+    fix = TaskState(
+        id="2", task=TaskSpec(prompt="Fix it"), fixes="1", status="error", reason="boom"
+    )
+    assert str(task_label(fix, "1.1", "◠ ", width=80)) == (
+        "   1.1 ❌ Fix it\n          default · restricted\n          ↳ boom"
+    )
+
+
+def test_a_reason_is_shown_whole_without_a_width() -> None:
+    state = TaskState(id="1", task=TaskSpec(prompt="go"), status="unverified", reason="word " * 20)
+    assert str(task_label(state, "1", "◠ ")).split("\n")[2] == f"      ↳ {'word ' * 20}"
+
+
+def test_a_long_reason_is_cut_to_the_width_with_an_ellipsis() -> None:
+    state = TaskState(id="1", task=TaskSpec(prompt="go"), status="unverified", reason="word " * 20)
+    reason_line = str(task_label(state, "1", "◠ ", width=20)).split("\n")[2]
+    assert reason_line == "      ↳ word word w…"
+    assert cell_len(reason_line) == 20
 
 
 def test_tasks_are_numbered_and_every_fix_in_a_chain_under_the_first_task() -> None:
@@ -920,6 +959,59 @@ async def test_the_list_follows_the_active_task_when_a_resize_rewraps_the_rows()
         await pilot.pause()
         assert task_list.row_lines()[25][1] > 1  # The rows really did wrap.
         assert in_view(task_list, 25)
+
+
+def with_reasons(
+    changed: TasksChanged, *indices: int, reason: str = "Unit tests failed"
+) -> TasksChanged:
+    """``changed`` with the tasks at ``indices`` ended unverified for ``reason``."""
+    tasks = list(changed.tasks)
+    for i in indices:
+        tasks[i] = tasks[i].model_copy(update={"status": "unverified", "reason": reason})
+    return TasksChanged(tasks=tuple(tasks))
+
+
+async def test_the_list_follows_the_active_task_below_rows_with_a_reason() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        task_list = app.query_one(TaskList)
+        await feed(session, pilot, with_reasons(many(30, running=25), *range(25)))
+        heights = [height for _, height in task_list.row_lines()]
+        assert heights[24] == heights[26] + 1  # The reason's line.
+        assert in_view(task_list, 25)
+        top, height = task_list.row_lines()[25]
+        assert top + height == task_list.scroll_y + task_list.scrollable_content_region.height
+
+
+async def test_the_list_follows_the_active_task_as_reasons_come_and_go_above_it() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        task_list = app.query_one(TaskList)
+        await feed(session, pilot, many(30, running=25))
+        await feed(session, pilot, with_reasons(many(30, running=25), *range(25)))
+        await pilot.pause()
+        assert in_view(task_list, 25)
+        await feed(session, pilot, many(30, running=25))
+        await pilot.pause()
+        heights = [height for _, height in task_list.row_lines()]
+        assert heights[24] == heights[26]
+        assert in_view(task_list, 25)
+
+
+async def test_a_long_reason_is_cut_to_the_list_rather_than_wrapped() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test(size=(400, 30)) as pilot:
+        task_list = app.query_one(TaskList)
+        await feed(session, pilot, with_reasons(many(2), 0, reason="word " * 200))
+        for size in ((400, 30), (80, 30)):
+            await pilot.resize_terminal(*size)
+            await pilot.pause()
+            heights = [height for _, height in task_list.row_lines()]
+            assert heights[0] == heights[1] + 1  # The reason takes one line, however long.
+            assert rows(app)[0].endswith("…")
 
 
 async def test_following_leaves_the_highlight_alone() -> None:

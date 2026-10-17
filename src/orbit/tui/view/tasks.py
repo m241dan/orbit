@@ -8,6 +8,7 @@ from rich.text import Text
 
 from orbit.protocol import ACTIVE_STATUSES, TaskState, Usage
 from orbit.tui.view.common import STATUS_ICONS, model_label, token_text
+from orbit.tui.view.detail_views import ERROR
 
 TASK_EDITOR_HINT = "j/k move · J/K scroll · i type · enter choose · ctrl+s save · esc cancel"
 
@@ -36,11 +37,12 @@ def task_numbers(tasks: Sequence[TaskState]) -> list[str]:
     return numbers
 
 
-def task_label(state: TaskState, number: str, frame: str) -> Text:
-    """A row: number, status and title, with the settings lined up under the title.
+def task_label(state: TaskState, number: str, frame: str, *, width: int | None = None) -> Text:
+    """A row: number, status and title, with the settings lined up under the title, and
+    under them why the task ended, if it has a reason.
 
     Fix tasks are indented under the task they belong to. A running task shows the
-    spinner ``frame``.
+    spinner ``frame``. The reason's line is cut to ``width`` cells with an ellipsis, if given.
     """
     settings = state.task.settings
     head = f"{number}. " if state.fixes is None else f"   {number} "
@@ -55,7 +57,18 @@ def task_label(state: TaskState, number: str, frame: str) -> Text:
     if state.usage != Usage():
         details += f" · {usage_label(state.usage)}"
     label.append(details, style="dim")
+    if state.reason:
+        label.append("\n")
+        label.append_text(_reason_line(f"{indent}↳ {state.reason}", width))
     return label
+
+
+def _reason_line(line: str, width: int | None) -> Text:
+    """``line`` in dim red, cut to ``width`` cells with an ellipsis if given."""
+    text = Text(line, style=f"dim {ERROR}")
+    if width is not None:
+        text.truncate(width, overflow="ellipsis")
+    return text
 
 
 def split_prompt(prompt: str) -> tuple[str, str]:

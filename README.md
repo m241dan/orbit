@@ -333,7 +333,8 @@ The planned improvements to the conversation window, and what is deferred, are i
 
 Each row of the task list shows its status: 📝 a draft the planner proposed, ⏳ pending, ◜ running
 (spinning), 🔍 verifying, ✅ done, ❗ failed verification, 🏳 the agent gave up, 🛑 cancelled, ❌
-failed. Once a task has spent anything, its row ends with the tokens and dollars it
+failed. A task that failed, gave up or stopped shows why on a line under it (`↳ Unit tests
+failed`), cut to the list's width. Once a task has spent anything, its row ends with the tokens and dollars it
 spent (`1.2M tok · $0.84`), and the task list's subtitle shows the open session's total
 (`session: 1.2M tok · $0.84`): everything the session's agents have spent, the planner's turns and
 tasks since removed included. It's saved with the session, so a session opened again (or listed

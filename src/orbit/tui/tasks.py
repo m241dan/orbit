@@ -88,7 +88,9 @@ class TaskList(ListPane):
         self._redraw()
 
     def on_resize(self) -> None:
-        # OptionList re-measures its rows in its own resize handler, which runs after this one.
+        # Reasons are cut to the list's width, so a new width relabels their rows. OptionList
+        # re-measures its rows in its own resize handler, which runs after this one.
+        self._redraw()
         self.call_after_refresh(self._follow)
 
     def enter_list_mode(self) -> None:
@@ -192,11 +194,17 @@ class TaskList(ListPane):
 
     def _redraw(self) -> None:
         """Show the tasks, relabelling in place the rows whose label changed."""
-        frame = spinner_frame(self.clock())
+        frame, width = spinner_frame(self.clock()), self._row_width()
         rows = [
-            (t.id, task_label(t, n, frame)) for t, n in zip(self.tasks, self.numbers, strict=True)
+            (t.id, task_label(t, n, frame, width=width))
+            for t, n in zip(self.tasks, self.numbers, strict=True)
         ]
         self.show_rows(rows, Option(Text(NEW_TASK_LABEL, style="dim italic")))
+
+    def _row_width(self) -> int:
+        """The cells a row's line has, leaving room for a vertical scrollbar whether or not
+        one shows, so a scrollbar coming or going never rewraps a row."""
+        return self.content_region.width - self.styles.scrollbar_size_vertical
 
 
 class FieldBox(Static):

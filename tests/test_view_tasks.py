@@ -162,3 +162,12 @@ def test_the_task_editor_is_titled_for_a_new_task_or_an_edit() -> None:
 def test_the_task_editor_hint_names_save_and_cancel() -> None:
     assert "ctrl+s save" in TASK_EDITOR_HINT
     assert TASK_EDITOR_HINT.endswith("esc cancel")
+
+
+def test_a_three_line_row_above_the_active_row_shifts_where_it_follows_to() -> None:
+    rows = [(0, 2), (2, 3), (5, 2), (7, 2)]
+    # Below the view: its bottom comes up to the view's bottom, past the taller row.
+    assert follow_top(rows, 3, 0, 6) == 3
+    # Above the view: it comes in with the whole three-line row above it.
+    assert follow_top(rows, 2, 7, 6) == 2
+    assert follow_top(rows, 2, 7, 4) == 5
