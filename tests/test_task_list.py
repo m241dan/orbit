@@ -1019,9 +1019,13 @@ async def test_the_mouse_wheel_holds_the_list() -> None:
         assert not task_list.following
         assert title(task_list) == "Task list · held"
         await pilot.press("l", "k", "escape")
+        assert task_list.following
+        assert title(task_list) == "Task list"
+        assert selected(app) == ["task-list"]
         wheel(task_list, down=False)
         await pilot.pause()
         assert not task_list.following
+        assert title(task_list) == "Task list · held"
 
 
 async def test_following_scrolls_do_not_hold_the_list() -> None:
