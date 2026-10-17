@@ -8,12 +8,13 @@ review is due and stops reviews generating work forever.
 import asyncio
 from collections.abc import Awaitable, Callable, Collection
 
-from orbit.agent.application.agent_run import AgentRun
+from orbit.agent.application.agent_run import AgentRun, Outcome, ended
 from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.lanes import Background
 from orbit.agent.application.ports import CoderTree, Reply
 from orbit.agent.application.tasks import Changed, Tasks, unchanged
 from orbit.agent.domain.board import TaskBoard
+from orbit.agent.domain.endings import CANCELLED, REVIEW_STOPPED_BY_YOU, bug, error
 from orbit.agent.domain.reviews import (
     LaneSnapshot,
     ReviewJob,
@@ -30,7 +31,6 @@ from orbit.protocol import (
     ReviewStatus,
     TaskOrigin,
     TaskState,
-    TaskStatus,
 )
 
 
@@ -60,7 +60,7 @@ class ReviewLane:
         self._jobs: dict[str, ReviewJob] = {}  # Review task id -> what it reviews.
         self._batches: dict[str, str] = {}  # Review task id -> the batch it suggests into.
         self._background = Background("review", desk.publish)
-        self._current: tuple[str, asyncio.Task[TaskStatus]] | None = None  # The review running.
+        self._current: tuple[str, asyncio.Task[Outcome]] | None = None  # The review running.
         self._paused_noted = False
         self._status: ReviewStatus | None = None
 
@@ -240,39 +240,40 @@ class ReviewLane:
     async def _review(self, task_id: str) -> None:
         job = self._jobs.get(task_id)
         await self._tasks.start(task_id)
-        status: TaskStatus = "cancelled"  # What the lane stopping leaves the review as.
+        outcome = ended("cancelled", (CANCELLED, ""))  # What the lane stopping leaves it as.
         reviewer = asyncio.create_task(
             self._run_reviewer(task_id, job.commits[-1] if job else None)
         )
         self._current = (task_id, reviewer)
         try:
-            status = await self._outcome(reviewer)
-        except Exception:  # A bug; the review still ends, or its batch would stay open.
-            status = "error"
+            outcome = await self._outcome(reviewer)
+        except Exception as exc:  # A bug; the review still ends, or its batch would stay open.
+            outcome = ended("error", bug(exc))
             raise
         finally:
             self._current = None
-            await self._tasks.finish(task_id, status)
+            await self._tasks.finish(task_id, outcome.status, outcome.reason, outcome.detail)
             if not _being_cancelled():  # The lane stopping leaves its batches as they are.
                 await self._after(self._batches.get(task_id))
 
-    async def _outcome(self, reviewer: asyncio.Task[TaskStatus]) -> TaskStatus:
+    async def _outcome(self, reviewer: asyncio.Task[Outcome]) -> Outcome:
         """How the review ``reviewer`` ended; anything unexpected escapes."""
         try:
             return await reviewer
         except asyncio.CancelledError:
             if _being_cancelled():  # The lane itself is stopping, not just this review.
                 raise
-            return "cancelled"
+            # Only :meth:`cancel`, which the user asks for, stops a review on its own.
+            return ended("cancelled", (REVIEW_STOPPED_BY_YOU, ""))
         except RuntimeError as exc:  # Git couldn't make or drop the snapshot.
             await self._publish(ErrorOccurred(message=str(exc)))
-            return "error"
+            return ended("error", error(str(exc)))
 
-    async def _run_reviewer(self, task_id: str, commit: str | None) -> TaskStatus:
+    async def _run_reviewer(self, task_id: str, commit: str | None) -> Outcome:
         """Run the reviewer in a snapshot of ``commit``; a review the user queued works in place."""
         root = await self._tree.snapshot(commit) if commit else "."
         try:
-            return (await AgentRun(task_id, self._tasks, None, self._desk).run(None, root)).status
+            return await AgentRun(task_id, self._tasks, None, self._desk).run(None, root)
         finally:
             if commit:
                 await self._tree.drop(root)

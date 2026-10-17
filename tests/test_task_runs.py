@@ -19,6 +19,7 @@ from orbit.agent.application.desk import AgentDesk, Agents
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.board import WAITING, TaskBoard
+from orbit.agent.domain.endings import BUG, CANCELLED
 from orbit.protocol import (
     AddTask,
     AgentExited,
@@ -548,7 +549,42 @@ async def test_a_task_whose_lane_crashes_ends_in_error() -> None:
     events = await asyncio.wait_for(run(session, TaskSpec(prompt="a")), 5)
     message = "The work lane stopped on an unexpected error: ValueError('boom')"
     assert ErrorOccurred(message=message) in events
-    assert statuses(events) == ["error"] and launcher.launches == []
+    assert launcher.launches == []
+    [task] = board(events)
+    assert (task.status, task.reason, task.reason_detail) == ("error", BUG, "boom")
+
+
+async def test_a_task_whose_tree_cant_be_readied_ends_in_error_saying_why() -> None:
+    tree = FakeTree()
+    message = "git worktree add failed\nfatal: no space left on device"
+    tree.failures["prepare"] = RuntimeError(message)
+    session, _, _ = session_for(claims_done, tree=tree)
+    events = await asyncio.wait_for(run(session, TaskSpec(prompt="a")), 5)
+    assert ErrorOccurred(message=message) in events
+    [task] = board(events)
+    assert (task.status, task.reason, task.reason_detail) == (
+        "error",
+        "Error: git worktree add failed",
+        message,
+    )
+
+
+async def test_a_task_cancelled_as_the_session_closes_is_just_cancelled() -> None:
+    working = asyncio.Event()
+
+    async def works_forever(call: Call) -> TurnEndReason:
+        await call("get_task")
+        working.set()
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+    session, _, _ = session_for(works_forever)
+    await session.send(AddTask(task=TaskSpec(prompt="a")))
+    await session.send(RunTasks())
+    await asyncio.wait_for(working.wait(), 5)
+    await session.close()
+    [task] = board(queued(session))
+    assert (task.status, task.reason, task.reason_detail) == ("cancelled", CANCELLED, "")
 
 
 async def test_cancelling_a_run_before_it_starts_is_no_error() -> None:

@@ -8,7 +8,7 @@ hears how each task ended.
 import asyncio
 from collections.abc import Collection
 
-from orbit.agent.application.agent_run import AgentRun, Outcome
+from orbit.agent.application.agent_run import AgentRun, Outcome, ended
 from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.landing import Lander
 from orbit.agent.application.review_lane import ReviewLane
@@ -17,6 +17,7 @@ from orbit.agent.application.tasks import Tasks
 from orbit.agent.application.verifier import Failure, Verifier
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.commits import commit_message, configure_message
+from orbit.agent.domain.endings import BUG, CANCELLED, STOPPED_BY_YOU, bug, error
 from orbit.agent.domain.roles import REVIEW_ROLES, ChecksProposal
 from orbit.agent.domain.verification import FallbackFixes, failure_reason, fix_prompt
 from orbit.protocol import (
@@ -53,10 +54,16 @@ class WorkLane:
         # Fixes queued per step along each chain, kept across runs so a restart can't reset
         # the cap.
         self._fallbacks = FallbackFixes()
+        self._stopped = False  # The user stopped the run going now.
 
     def reset(self) -> None:
         """Forget the fix counts of the session left, whose task ids the next one reuses."""
         self._fallbacks = FallbackFixes()
+
+    def stopped_by_user(self) -> None:
+        """The run going now is being cancelled because the user stopped it, which the task it
+        cancels says."""
+        self._stopped = True
 
     def next_work(self, tried: Collection[str] = ()) -> str | None:
         """The next task for the work lane; reviews have their own lane, if there is one."""
@@ -66,6 +73,7 @@ class WorkLane:
     async def run(self) -> None:
         """Run the tasks waiting, in order, until none are left or one is cancelled."""
         tried: set[str] = set()
+        self._stopped = False
         while (task_id := self.next_work(tried)) is not None:
             tried.add(task_id)
             if await self._run_task(task_id) == "cancelled":
@@ -79,9 +87,12 @@ class WorkLane:
         if self._verifier is not None:
             await self._verifier.reset()
         await self._publish(TaskStarted(task_id=task_id))
-        outcome = Outcome("error")  # What a bug in the run leaves the task as.
+        outcome = Outcome("error", reason=BUG)  # What a bug in the run leaves the task as.
         try:
             outcome = await self._outcome(task_id)
+        except Exception as exc:
+            outcome = ended("error", bug(exc))
+            raise
         finally:  # Even a bug ends the task, or the board could never run or drop it.
             await self._tasks.finish(task_id, outcome.status, outcome.reason, outcome.detail)
         await self._report_to_review(task_id)
@@ -94,10 +105,11 @@ class WorkLane:
         except asyncio.CancelledError:
             if self._verifier is not None:
                 await self._verifier.cancel()
-            return Outcome("cancelled")
+            # Read after the await: the user may have stopped the run meanwhile.
+            return ended("cancelled", (STOPPED_BY_YOU if self._stopped else CANCELLED, ""))
         except RuntimeError as exc:  # Git or the tree's setup failed.
             await self._publish(ErrorOccurred(message=str(exc)))
-            return Outcome("error")
+            return ended("error", error(str(exc)))
 
     async def _report_to_review(self, task_id: str) -> None:
         """Tell the review lane how task ``task_id`` ended."""

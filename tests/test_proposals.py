@@ -7,6 +7,7 @@ from typing import Any
 from orbit.agent.application.ports import ProposalDecision
 from orbit.agent.application.session import AgentSession
 from orbit.agent.domain.agent_task import Limits
+from orbit.agent.domain.endings import ENDED_AT_PROPOSAL
 from orbit.agent.domain.roles import ChecksProposal, Setup
 from orbit.agent.domain.verification import VerificationStep
 from orbit.protocol import (
@@ -140,7 +141,8 @@ async def test_the_user_can_end_it_which_cancels_the_task() -> None:
         {"steps": [LINT]}, review=Review(ProposalDecision("end")), steps=Steps(True)
     )
     assert "ended" in replies[0] and "End your turn now." in replies[0]
-    assert status(events) == "cancelled"
+    [task] = board(events)
+    assert (task.status, task.reason, task.reason_detail) == ("cancelled", ENDED_AT_PROPOSAL, "")
 
 
 async def test_revisions_are_capped_and_the_reply_says_so() -> None:

@@ -23,6 +23,7 @@ from orbit.agent.application.verifier import Failure, Verifier, first_failure
 from orbit.agent.domain.agent_task import FINISHED, AgentTask, Phase
 from orbit.agent.domain.agents import Agent, bootstrap_prompt
 from orbit.agent.domain.board import TaskBoard
+from orbit.agent.domain.endings import Ending, error, run_ending
 from orbit.agent.domain.roles import (
     ChecksProposal,
     ConfigError,
@@ -36,6 +37,7 @@ from orbit.protocol import (
     AgentExitReason,
     AgentStarted,
     ErrorOccurred,
+    Event,
     TaskGaveUp,
     TaskStatus,
     TurnFinished,
@@ -68,6 +70,12 @@ class Outcome:
     checks: ChecksProposal | None = None
     reason: str = ""
     detail: str = ""
+
+
+def ended(status: TaskStatus, why: Ending) -> Outcome:
+    """A task's ending as ``status``, with nothing to show for it, for the reason ``why``."""
+    reason, detail = why
+    return Outcome(status, reason=reason, detail=detail)
 
 
 @dataclass(frozen=True)
@@ -109,7 +117,9 @@ class AgentRun:
         self._board = tasks.board
         self._verifier = verifier
         self._desk = desk
-        self._publish = desk.publish
+        self._publish = self._noting
+        self._error: str | None = None  # The first error published while the agent ran.
+        self._given_up = ""  # Why the agent gave up, if it did.
         self._work = AgentTask(self._board.get(task_id).task, desk.agents.limits)
         self._role: Role | None = desk.agents.roles.get(self._work.task.role)
         self._stream_task: asyncio.Task[None] | None = None  # The agent's process, once launched.
@@ -145,8 +155,9 @@ class AgentRun:
         state there beforehand."""
         task = self._work.task
         if self._role is None:
-            await self._publish(ErrorOccurred(message=f"No role named {task.role!r}."))
-            return Outcome("error")
+            message = f"No role named {task.role!r}."
+            await self._publish(ErrorOccurred(message=message))
+            return ended("error", error(message))
         self._root = root
         self._agent = self._desk.open(self, task.role, self._task_id)
         try:
@@ -159,11 +170,18 @@ class AgentRun:
         summaries = tuple(self._work.summaries)
         return Outcome(status, self._failure, summaries, self._accepted, reason, detail)
 
-    def _why(self, status: TaskStatus) -> tuple[str, str]:
-        """Why the task ended as ``status``: the step that failed, if it fell back for one."""
-        if status != "unverified" or self._failure is None:
-            return "", ""
-        return failure_reason(*self._failure)
+    def _why(self, status: TaskStatus) -> Ending:
+        """Why the task ended as ``status``: the step that failed, if it fell back for one, or
+        else how the run ended."""
+        if status == "unverified" and self._failure is not None:
+            return failure_reason(*self._failure)
+        return run_ending(status, self._work.phase, self._given_up, self._error)
+
+    async def _noting(self, event: Event) -> None:
+        """Publish ``event``, keeping the first error's message to say why the run ended."""
+        if isinstance(event, ErrorOccurred) and self._error is None:
+            self._error = event.message
+        await self._desk.publish(event)
 
     async def _see_through(self, before: object) -> None:
         """Launch the agent and serve it until the task is finished, then stop it."""
@@ -406,6 +424,7 @@ class AgentRun:
         reply = self._work.give_up(reason)
         if self._work.phase != "gave_up":
             return Reply(reply, is_error=True)
+        self._given_up = reason
         await self._publish(
             TaskGaveUp(agent_id=self.agent.id, task_id=self._task_id, reason=reason)
         )

@@ -392,7 +392,9 @@ class AgentSession:
     def _hold_work(self) -> None:
         """Cancel the work lane's run, and hold it until the user asks for work again."""
         self._held = True
-        self._work_turns.cancel()
+        if self._work_turns.cancel():
+            assert self._work is not None  # Only the work lane takes work turns.
+            self._work.stopped_by_user()
 
     async def _handle_agents(
         self, command: RequestSuperReview | CancelAgent | DecideProposal | ResetPlanner

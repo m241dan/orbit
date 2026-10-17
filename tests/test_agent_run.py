@@ -14,6 +14,7 @@ from orbit.agent.application.tasks import Tasks
 from orbit.agent.application.verifier import Verifier
 from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.board import TaskBoard
+from orbit.agent.domain.endings import STOPPED_BY_YOU
 from orbit.agent.domain.roles import ChecksProposal
 from orbit.agent.domain.verification import failure_report
 from orbit.protocol import (
@@ -205,8 +206,10 @@ async def test_an_agent_that_never_asks_for_its_task_errors() -> None:
     events = await asyncio.wait_for(run(session), 5)
 
     assert steps.runs == []
-    assert [t.status for t in board(events)] == ["error"]
-    assert any(isinstance(e, ErrorOccurred) and "get_task" in e.message for e in events)
+    message = "agent-1 exited without calling get_task."
+    assert ErrorOccurred(agent_id="agent-1", message=message) in events
+    [task] = board(events)
+    assert (task.status, task.reason, task.reason_detail) == ("error", f"Error: {message}", message)
 
 
 async def test_a_crashing_agent_is_reported_and_its_work_still_verified() -> None:
@@ -237,6 +240,25 @@ async def test_giving_up_ends_the_task() -> None:
         TaskGaveUp(agent_id="agent-1", task_id="1", reason="the spec contradicts itself") in events
     )
     assert [t.status for t in board(events)] == ["gave_up"]
+
+
+async def test_giving_up_gives_the_first_line_of_the_reason_and_keeps_it_whole() -> None:
+    reason = "The spec contradicts itself.\n\nIt asks for both a flag and no flags."
+
+    async def gives_up(call: Call) -> TurnEndReason:
+        await call("get_task")
+        await call("give_up", reason=reason)
+        return "completed"
+
+    session, _, _ = session_for(gives_up, verification=verified(Steps()))
+    events = await asyncio.wait_for(run(session), 5)
+
+    [task] = board(events)
+    assert (task.status, task.reason, task.reason_detail) == (
+        "gave_up",
+        "Gave up: The spec contradicts itself.",
+        reason,
+    )
 
 
 async def test_agents_can_run_a_check_themselves() -> None:
@@ -406,7 +428,8 @@ async def test_cancelling_a_working_agent_without_verification() -> None:
         events.append(event)
         if event == BusyChanged(busy=False):
             break
-    assert [t.status for t in board(events)] == ["cancelled"]
+    [task] = board(events)
+    assert (task.status, task.reason, task.reason_detail) == ("cancelled", STOPPED_BY_YOU, "")
     assert AgentExited(agent_id="agent-1", reason="killed") in events
 
 

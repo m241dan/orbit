@@ -7,6 +7,7 @@ from collections.abc import Callable
 from orbit.agent import AgentSession
 from orbit.agent.application.ports import Reply
 from orbit.agent.domain.agent_task import Limits
+from orbit.agent.domain.endings import BUG, CANCELLED, REVIEW_STOPPED_BY_YOU, STOPPED_BY_YOU
 from orbit.agent.domain.reviews import ReviewLimits
 from orbit.protocol import (
     AddTask,
@@ -504,8 +505,29 @@ async def test_cancelling_a_reviewer_stops_its_review_and_the_lane_carries_on() 
     await session.send(CancelAgent(agent_id=reviewer))
     await asyncio.wait_for(collecting, 10)
     assert statuses_of(events, "reviewer") == ["cancelled", "completed"]
+    stopped = next(t for t in board(events) if t.task.role == "reviewer")
+    assert (stopped.reason, stopped.reason_detail) == (REVIEW_STOPPED_BY_YOU, "")
     assert AgentExited(agent_id=reviewer, reason="killed") in events
     assert statuses_of(events, "coder") == ["completed", "completed"]
+
+
+async def test_a_review_cancelled_as_the_session_closes_is_just_cancelled() -> None:
+    reviewing = asyncio.Event()
+
+    async def endless(call: Call) -> TurnEndReason:
+        await call("get_task")
+        reviewing.set()
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+    session, _, _ = session_for(claims_done, reviewers=(endless,), tree=FakeTree(), review=True)
+    await start(session)
+    collecting = asyncio.ensure_future(settle(session, until=lambda _: reviewing.is_set()))
+    await asyncio.wait_for(reviewing.wait(), 10)
+    await asyncio.wait_for(collecting, 10)
+    await session.close()
+    [review] = [t for t in board(queued(session)) if t.task.role == "reviewer"]
+    assert (review.status, review.reason, review.reason_detail) == ("cancelled", CANCELLED, "")
 
 
 async def test_a_cancelled_reviewer_that_suggested_is_not_run_again() -> None:
@@ -564,7 +586,10 @@ async def test_cancelling_the_coder_is_like_escape() -> None:
         settle(session, until=lambda ev: [t.status for t in board(ev)] == ["cancelled", "pending"]),
         10,
     )
-    assert [t.status for t in board(events)] == ["cancelled", "pending"]
+    assert [(t.status, t.reason, t.reason_detail) for t in board(events)] == [
+        ("cancelled", STOPPED_BY_YOU, ""),
+        ("pending", "", ""),
+    ]
 
 
 async def test_cancelling_an_unknown_agent_is_reported() -> None:
@@ -639,7 +664,10 @@ async def test_a_snapshot_that_fails_errors_the_review_and_the_next_review_still
     events = await asyncio.wait_for(settle(session), 10)
     assert statuses_of(events, "reviewer") == ["error", "completed"]
     assert statuses_of(events, "coder") == ["completed", "completed"]
-    assert ErrorOccurred(message="git worktree add failed: no space left") in events
+    message = "git worktree add failed: no space left"
+    assert ErrorOccurred(message=message) in events
+    errored = next(t for t in board(events) if t.status == "error")
+    assert (errored.reason, errored.reason_detail) == (f"Error: {message}", message)
     assert [e for e in events if isinstance(e, ReviewStatus)][-1].open_batches == 0
     assert tree.snapshots == ["c2"] and tree.dropped == ["/work/review-c2"]
 
@@ -669,7 +697,12 @@ async def test_an_unexpected_error_in_the_review_lane_is_reported() -> None:
     events = await asyncio.wait_for(settle(session), 10)
     message = "The review lane stopped on an unexpected error: ValueError('the lane tripped')"
     assert ErrorOccurred(message=message) in events
-    assert statuses_of(events, "reviewer") == ["error"]
+    [review] = [t for t in board(events) if t.task.role == "reviewer"]
+    assert (review.status, review.reason, review.reason_detail) == (
+        "error",
+        BUG,
+        "the lane tripped",
+    )
     assert [e for e in events if isinstance(e, ReviewStatus)][-1].open_batches == 0
 
 

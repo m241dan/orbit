@@ -72,7 +72,12 @@ async def test_a_task_in_an_unknown_role_fails_without_an_agent() -> None:
     events = await asyncio.wait_for(run(session, TaskSpec(prompt="Boo", role="ghost")), 5)
     assert launcher.launches == []
     assert ErrorOccurred(message="No role named 'ghost'.") in events
-    assert statuses(events) == ["error"]
+    [task] = board(events)
+    assert (task.status, task.reason, task.reason_detail) == (
+        "error",
+        "Error: No role named 'ghost'.",
+        "No role named 'ghost'.",
+    )
 
 
 async def test_an_agent_that_runs_past_its_roles_time_limit_is_stopped() -> None:
