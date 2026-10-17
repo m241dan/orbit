@@ -1546,16 +1546,6 @@ async def test_a_tool_call_finishing_after_hidden_thinking_updates_its_own_row()
         assert labels(app) == ["agent-1: earlier", "agent-1: → Read a.py ✓ 1 line"]
 
 
-async def test_enter_on_a_tool_call_does_nothing() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        await feed_events(session, pilot, call("agent-1", "c1"), result("agent-1", "c1", "a\nb"))
-        await pilot.press("k", "enter", "enter")
-        assert labels(app) == ["agent-1: → Read a.py ✓ 2 lines"]
-        assert not visible_log(app).collapsed(0)
-
-
 async def test_a_running_tool_calls_spinner_turns_on_each_tick() -> None:
     session = FakeSession()
     app = OrbitApp(session)
@@ -1712,13 +1702,3 @@ async def test_a_request_updates_under_all_and_its_roles_tab() -> None:
         assert labels(app)[1] == f"{ASKED} ✓ ok"
         await pilot.press("tab", "tab")  # coder
         assert labels(app) == ["▶ agent-1 (coder) started", f"{ASKED} ✓ ok"]
-
-
-async def test_enter_on_a_request_does_nothing() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        await feed_events(session, pilot, ask("agent-1"), answer("agent-1", "a\nb"))
-        await pilot.press("k", "enter", "enter")
-        assert labels(app) == [f"{ASKED} ✓ a"]
-        assert not visible_log(app).collapsed(0)

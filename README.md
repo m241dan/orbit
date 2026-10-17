@@ -56,7 +56,7 @@ In the app:
 |---|---|
 | `h` `j` `k` `l` | Move between windows (the selected one is highlighted) |
 | `i` | Jump to the prompt, which talks to the planner, and start typing (vim-style insert mode) |
-| `enter` | On the conversation: activate it (`j`/`k` move between entries, `enter` collapses or expands the one marked `▌` in the left gutter, `esc` leaves and holds the marked entry); again, resume at the held entry |
+| `enter` | On the conversation: activate it (`j`/`k` move between entries, `enter` collapses or expands the one marked `▌` in the left gutter, or opens the detail pane on a tool call or request, `esc` closes the detail pane if it's open, else leaves and holds the marked entry); again, resume at the held entry |
 | `enter` | On the task list: activate it (`j`/`k` move, `enter` edits a task or adds one on `+ new task`, `a` accepts a draft, `x` removes a task, `esc` leaves) |
 | `enter` | On the agents pane: activate it (`j`/`k` move, `c` cancels the highlighted agent's work, `esc` leaves) |
 | `t` | Hide agents' dim messages, still thinking out loud, in every tab; again, show them (works with the conversation activated too) |
@@ -66,7 +66,7 @@ In the app:
 | `ctrl+e` | Set up (or redo) the verification steps: after you confirm (`y` to go ahead, `n`/`esc` to cancel), queue a configurator task first and run it (see [Setting up verification](#setting-up-verification)) |
 | `ctrl+o` | Pick the planner's model (default, fable, opus, sonnet, haiku; new tasks default to it too) |
 | `ctrl+l` | Pick the tool access level new tasks start with in the task editor (off, restricted, full) |
-| `esc` | Stop typing, leave a list or close a picker; with the conversation selected and nothing active, let go of its held entry and follow the latest output again |
+| `esc` | Stop typing, close the conversation's detail pane, leave a list or close a picker; with the conversation selected and nothing active, let go of its held entry and follow the latest output again |
 | `ctrl+s` | Stop the task run (on any tab) |
 | `ctrl+x` | Stop the planner's turn, leaving the task run going |
 | `a` / `r` / `x` | On a proposal of checks: accept it, ask for changes (type them, `enter` sends, `esc` goes back), or end the task (see [Setting up verification](#setting-up-verification)) |
@@ -156,15 +156,15 @@ alone (`✓`) and, if it fails, shows its exit code (`✗ exit 1`, or `✗` with
 Glob counts its matches (`✓ 4 matches`, `✓ 1 match`, `✓ 0 matches` when it finds nothing). Any
 other tool, any other failure, and a call whose arguments don't fit count the output's lines
 (`✓ 5 lines`, `✗ 1 line`). A call still running when its turn ends shows `→ Read src/x.py ⊘ no
-result`. A tool call's line can't be expanded; its full arguments and output are kept but not
-shown. An agent's request to orbit and orbit's reply are one line too, naming the agent, orbit's
+result`. A tool call's line can't be expanded; `enter` on it shows its details instead (see
+below). An agent's request to orbit and orbit's reply are one line too, naming the agent, orbit's
 tool and its main argument, and updated in place: a spinner turns in front while the agent waits
 (`◜ agent-3 → orbit complete_task Add a flag`), then the reply's first line follows, clipped to
 about 60 characters, ticked (`agent-3 → orbit complete_task Add a flag ✓ All checks passed.`) or,
 in the error colour, crossed (`✗ No task assigned.`). A request still waiting when its agent exits
 shows `⊘ no reply`, muted. A reply to no request shown gets an entry of its own (`orbit →
-agent-3: …`). Like a tool call's, a request's line can't be expanded; its full arguments and reply
-are kept but not shown. An entry of more than one line can be collapsed to its first line and a
+agent-3: …`). Like a tool call's, a request's line can't be expanded; `enter` on it shows its
+details. An entry of more than one line can be collapsed to its first line and a
 count of the rest, marked `▸` (`▾` when expanded). Press `enter` on the conversation to move between entries with `j`/`k`, `enter` again to collapse or
 expand the one marked `▌` in the left gutter, and `esc` to leave. Leaving holds the marked entry:
 the mark stays, the conversation stops following new output, and `enter` picks up there again.
@@ -202,6 +202,16 @@ tool calls shows just its turn's time (`◜ agent-3 · 3:40`). Times read `0:12`
 `1:02:05` from an hour. All shows every running agent, a role's tab only that role's agents, and
 the planner tab only the planner. It shows at most three lines, then `+2 more`, can't be selected,
 and takes no room while nothing in the shown tab runs.
+
+`enter` on a tool call or a request to orbit, with the conversation activated, opens a detail pane
+below the conversation and its working row, taking 40% of the conversation's height and titled
+with the entry's line (`Detail · Read src/x.py`). It shows the call's arguments as `key: value`
+lines, a rule, then the output or orbit's reply as plain text; a call still running shows a dim
+`waiting for output…` until its result arrives, and the pane updates in place. Output of more
+than 200 lines shows its first 100, a dim `… N lines omitted …`, and its last 100. While the pane
+is open it follows the cursor as `j`/`k` move, showing a dim `No details for this entry` on other
+entries. The first `esc` closes it, staying in the list; the next leaves the list as usual.
+Switching tabs closes it, and it stays closed when you come back.
 
 The planned improvements to the conversation window, and what is deferred, are in
 [docs/conversation-window.md](docs/conversation-window.md).

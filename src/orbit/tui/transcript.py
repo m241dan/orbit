@@ -13,12 +13,15 @@ from rich.style import Style
 from rich.text import Text
 from textual import on
 from textual.app import ComposeResult
-from textual.containers import Vertical
+from textual.containers import Vertical, VerticalScroll
+from textual.message import Message
+from textual.reactive import reactive
 from textual.timer import Timer
 from textual.widgets import OptionList, Static
 
 from orbit.protocol import AgentReply, AgentRequest, Event, ToolCallFinished, ToolCallStarted
 from orbit.tui.view import (
+    DETAIL_HEIGHT,
     SPINNER_FPS,
     EntryKind,
     ToolCall,
@@ -27,6 +30,8 @@ from orbit.tui.view import (
     banded,
     collapsible,
     conversation_title,
+    detail_body,
+    detail_title,
     entry_label,
     entry_markdown,
     finishes,
@@ -122,7 +127,12 @@ class TranscriptLog(ListPane):
     conversation gets. The cursor's entry is marked in the left gutter rather than highlighted.
     Hiding thinking leaves agents' dim messages out of the options; the entries are all kept,
     and option indexes count only the entries shown. A tool call is one line, updated in place
-    as it finishes, its spinner read off ``clock``."""
+    as it finishes, its spinner read off ``clock``. Inspecting, enter on a tool call or
+    request asks for its details, which follow the cursor until escape."""
+
+    class Inspect(Message):
+        """What the detail pane should show may have changed: whether the log is
+        :attr:`inspecting`, or its :attr:`detail`."""
 
     DEFAULT_CSS = """
     TranscriptLog {
@@ -179,11 +189,31 @@ class TranscriptLog(ListPane):
         self._marked: int | None = None  # The option drawn with the marker.
         self._calls: dict[int, ToolCall] = {}  # The calls still running, by their entry.
         self._thinking_hidden = thinking_hidden
+        self.inspecting = False  # Whether the detail pane shows the cursor's entry.
         self.set_class(shown, "-shown")
 
     @property
     def entries(self) -> tuple[Entry, ...]:
         return tuple(self._entries)
+
+    @property
+    def detail(self) -> ToolCall | None:
+        """The tool call or request of the cursor's entry, if it's one."""
+        if self.highlighted is None:
+            return None
+        return self._entries[self._rows[self.highlighted]].call
+
+    def inspect(self, inspecting: bool) -> None:
+        """Show the cursor's entry's details as it moves if ``inspecting``, or stop."""
+        self.inspecting = inspecting
+        self.post_message(self.Inspect())
+
+    def action_normal_mode(self) -> None:
+        """Stop inspecting if the log is, else leave list mode."""
+        if self.inspecting:
+            self.inspect(False)
+        else:
+            super().action_normal_mode()
 
     def enter_list_mode(self) -> None:
         """Activate the list, starting at the latest entry when it holds no cursor."""
@@ -261,6 +291,8 @@ class TranscriptLog(ListPane):
         entry = self._entries[index]
         text, kind = tool_call_entry(call, entry.agent, self.clock())
         self._entries[index] = replace(entry, text=text, kind=kind, call=call)
+        if self.inspecting and call != entry.call:
+            self.post_message(self.Inspect())
         if (text, kind) != (entry.text, entry.kind):
             self._redraw(bisect_left(self._rows, index))  # Tool calls are never hidden.
 
@@ -347,11 +379,17 @@ class TranscriptLog(ListPane):
         for index in (previous, highlighted):
             if index is not None:
                 self._redraw(index)
+        if self.inspecting:
+            self.post_message(self.Inspect())
 
     @on(OptionList.OptionSelected)
-    def _toggle(self, event: OptionList.OptionSelected) -> None:
+    def _select(self, event: OptionList.OptionSelected) -> None:
+        """Inspect a tool call or request; collapse or expand any other entry."""
         event.stop()
-        self.toggle(event.option_index)
+        if self._entries[self._rows[event.option_index]].call is None:
+            self.toggle(event.option_index)
+        else:
+            self.inspect(True)
 
     def _redraw(self, row: int) -> None:
         self.replace_prompt(row, self._prompt(row))
@@ -397,13 +435,12 @@ class TranscriptLog(ListPane):
 
 
 class WorkingRow(Static):
-    """What's running right now under the shown tab, one line per agent, docked below the
+    """What's running right now under the shown tab, one line per agent, below the
     logs; hidden while nothing shown runs. Its spinners and clocks tick only while something
     runs."""
 
     DEFAULT_CSS = """
     WorkingRow {
-        dock: bottom;
         display: none;
         height: auto;
         color: $text-muted;
@@ -455,6 +492,44 @@ class WorkingRow(Static):
         self.set_class(bool(lines), "-running")
 
 
+class DetailPane(VerticalScroll):
+    """The full content of the tool call or request under the conversation's cursor, below
+    the logs and the working row, taking ``share`` percent of the conversation; hidden until
+    opened."""
+
+    can_focus = False
+
+    DEFAULT_CSS = """
+    DetailPane {
+        display: none;
+        border-top: solid $primary;
+        border-title-align: left;
+    }
+    DetailPane.-open { display: block; }
+    """
+
+    share: reactive[int] = reactive(DETAIL_HEIGHT)
+
+    def compose(self) -> ComposeResult:
+        yield Static()
+
+    def watch_share(self, share: int) -> None:
+        self.styles.height = f"{share}%"
+
+    @property
+    def opened(self) -> bool:
+        return self.has_class("-open")
+
+    def show(self, call: ToolCall | None) -> None:
+        """Open, showing ``call``'s details, or a note that there are none."""
+        self.border_title = detail_title(call)
+        self.query_one(Static).update(detail_body(call))
+        self.add_class("-open")
+
+    def close(self) -> None:
+        self.remove_class("-open")
+
+
 class Transcript(Vertical):
     """Main display: the running conversation, pinned to the latest output unless the shown
     tab's log holds a cursor.
@@ -484,8 +559,9 @@ class Transcript(Vertical):
         self._timer: Timer | None = None
 
     def compose(self) -> ComposeResult:
-        yield WorkingRow()
         yield self._new_log(None, shown=True)
+        yield WorkingRow()
+        yield DetailPane()
 
     def on_mount(self) -> None:
         self._retitle()
@@ -499,6 +575,21 @@ class Transcript(Vertical):
     def working(self) -> WorkingRow:
         """The row of what's running, below the logs."""
         return self.query_one(WorkingRow)
+
+    @property
+    def detail(self) -> DetailPane:
+        """The pane of the shown log's inspected entry, below the working row."""
+        return self.query_one(DetailPane)
+
+    @on(TranscriptLog.Inspect)
+    def _inspect(self, event: TranscriptLog.Inspect) -> None:
+        """Show the shown log's inspected entry's details, or close the pane."""
+        event.stop()
+        log = self.shown
+        if log.inspecting:
+            self.detail.show(log.detail)
+        else:
+            self.detail.close()
 
     def track(self, event: Event, roles: Mapping[str, str]) -> None:
         """Follow who runs after ``event``, with ``roles`` placing agents in tabs."""
@@ -595,6 +686,8 @@ class Transcript(Vertical):
         """Show only the tab keyed ``key``'s entries, titled by its tab ``label``, or all."""
         if self.shown.has_focus:
             self.screen.set_focus(None)
+        self.shown.inspecting = False
+        self.detail.close()
         self.shown.remove_class("-shown")
         self.only = key
         self._label = None if key is None else label
@@ -610,7 +703,7 @@ class Transcript(Vertical):
 
     def _log(self, key: str | None) -> TranscriptLog:
         if key not in self._logs:
-            self.mount(self._new_log(key))
+            self.mount(self._new_log(key), before=self.working)
         return self._logs[key]
 
     def _new_log(self, key: str | None, shown: bool = False) -> TranscriptLog:
