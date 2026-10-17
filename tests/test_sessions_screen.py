@@ -420,3 +420,29 @@ async def test_a_listing_answering_ctrl_p_is_never_at_startup() -> None:
         screen = app.screen
         assert isinstance(screen, SessionsScreen)
         assert not screen.startup
+
+
+async def test_a_late_listing_after_the_picker_closed_opens_no_picker() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, LISTED)
+        await pilot.press("j", "j", "j", "x", "k", "enter")
+        await feed_events(session, pilot, LISTED)
+
+        assert session.commands == [DeleteSession(session_id="busy"), OpenSession(session_id="old")]
+        assert not any(isinstance(s, SessionsScreen) for s in app.screen_stack)
+        assert app.is_running
+
+
+async def test_ctrl_p_after_the_startup_picker_opens_a_picker_again() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, LISTED)
+        await pilot.press("j", "enter", "ctrl+p")
+        await feed_events(session, pilot, LISTED)
+
+        screen = app.screen
+        assert isinstance(screen, SessionsScreen)
+        assert not screen.startup
