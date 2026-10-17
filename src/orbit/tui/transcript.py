@@ -827,7 +827,9 @@ class Transcript(Vertical):
         self.shown.enter_list_mode()
 
     def release_cursor(self) -> None:
-        """Let go of the shown log's cursor, so it follows the latest entry again."""
+        """Let go of the shown log's cursor, so it follows the latest entry again, closing the
+        detail pane that showed its entry."""
+        self.close_detail()
         self.shown.release_cursor()
 
     def show_only(self, key: str | None, label: str = "") -> None:

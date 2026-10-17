@@ -270,7 +270,7 @@ async def test_tab_from_the_list_with_the_pane_closed_leaves_the_pane_alone() ->
     async with app.run_test(size=(80, 30)) as pilot:
         await feed_events(session, pilot, read("c1"), done("c1", "x"))
         await pilot.press("k", "enter", "tab")
-        assert app.focused is not pane(app) and selected(app) == ["transcript"]
+        assert app.focused is app.query_one(Transcript).shown and selected(app) == ["transcript"]
 
 
 async def test_escape_from_the_pane_leaves_it_selected_and_open() -> None:
@@ -280,6 +280,29 @@ async def test_escape_from_the_pane_leaves_it_selected_and_open() -> None:
         await scrolling(app, session, pilot)
         await pilot.press("tab", "escape")
         assert app.focused is None and pane(app).opened and selected(app) == ["detail"]
+
+
+async def test_letting_go_of_the_held_entry_closes_the_pane() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test(size=(80, 30)) as pilot:
+        await scrolling(app, session, pilot)
+        await pilot.press("tab", "escape", "k", "escape")
+        log = app.query_one(Transcript).shown
+        assert not pane(app).opened and selected(app) == ["transcript"]
+        assert log.highlighted is None and log.inspecting is False
+
+
+async def test_letting_go_of_the_held_entry_uncovers_the_conversation() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test(size=(80, SHORT)) as pilot:
+        await scrolling(app, session, pilot)
+        await pilot.press("tab", "escape", "k", "escape")
+        await pilot.pause()
+        transcript = app.query_one(Transcript)
+        assert not transcript.has_class("-covered")
+        assert transcript.shown.size.height == transcript.content_size.height
 
 
 async def test_window_moves_reach_the_open_pane_between_conversation_and_prompt() -> None:

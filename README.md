@@ -68,7 +68,7 @@ In the app:
 | `ctrl+e` | Set up (or redo) the verification steps: after you confirm (`y` to go ahead, `n`/`esc` to cancel), queue a configurator task first and run it (see [Setting up verification](#setting-up-verification)) |
 | `ctrl+o` | Pick the planner's model (default, fable, opus, sonnet, haiku; new tasks default to it too) |
 | `ctrl+l` | Pick the tool access level new tasks start with in the task editor (off, restricted, full) |
-| `esc` | Stop typing, close the conversation's detail pane, leave a list or close a picker; with the conversation selected and nothing active, let go of its held entry and follow the latest output again; with the detail pane selected, close it |
+| `esc` | Stop typing, close the conversation's detail pane, leave a list or close a picker; with the conversation selected and nothing active, let go of its held entry, closing the detail pane, and follow the latest output again; with the detail pane selected, close it |
 | `ctrl+s` | Stop the task run (on any tab) |
 | `ctrl+x` | Stop the planner's turn, leaving the task run going |
 | `a` / `r` / `x` | On a proposal of checks: accept it, ask for changes (type them, `enter` sends, `esc` goes back), or end the task (see [Setting up verification](#setting-up-verification)) |
@@ -171,8 +171,8 @@ details. An entry of more than one line can be collapsed to its first line and a
 count of the rest, marked `▸` (`▾` when expanded). Press `enter` on the conversation to move between entries with `j`/`k`, `enter` again to collapse or
 expand the one marked `▌` in the left gutter, and `esc` to leave. Leaving holds the marked entry:
 the mark stays, the conversation stops following new output, and `enter` picks up there again.
-`esc` again with the Conversation window selected lets go, and the conversation follows the latest
-output again. Each tab holds its own spot, kept while you switch tabs.
+`esc` again with the Conversation window selected lets go, closing the detail pane if it's open, and
+the conversation follows the latest output again. Each tab holds its own spot, kept while you switch tabs.
 
 Every turn, the planner's and each agent's, ends with a muted rule across the conversation's width,
 under All and the agent's tab: `── done · 1m12s · ↑1.2M ↓8k ──`. It says how the turn ended
