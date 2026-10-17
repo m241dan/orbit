@@ -927,6 +927,27 @@ async def test_the_planners_message_after_a_prompt_has_no_heading() -> None:
         assert headings(app) == [None, None, None, None]
 
 
+async def test_the_planners_message_has_no_heading_when_it_starts_after_the_prompt() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test(size=(120, 30)) as pilot:
+        await pilot.press("i", *"hi", "enter")
+        await feed_events(
+            session,
+            pilot,
+            AgentStarted(agent_id="agent-1", role=PLANNER, task_id=PLAN_TASK),
+            said("agent-1", "plan"),
+            said("agent-2", "code"),
+            said("agent-1", "more"),
+        )
+        started = "▶ agent-1 (planner) started"
+        assert labels(app) == ["❯ hi", started, "plan", "code", "more"]
+        assert headings(app) == [None, None, None, "agent-2", None]
+        await pilot.press("ctrl+t")  # The planner tab.
+        assert labels(app) == ["❯ hi", started, "plan", "more"]
+        assert headings(app) == [None, None, None, None]
+
+
 async def test_the_speaker_is_judged_within_each_tab() -> None:
     session = FakeSession()
     app = OrbitApp(session)
