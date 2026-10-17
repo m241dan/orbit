@@ -4,9 +4,9 @@ import asyncio
 
 from orbit.agent import AgentSession
 from orbit.agent.application.ports import Reply
-from orbit.agent.application.review_lane import LaneSnapshot, ReviewLane
+from orbit.agent.application.review_lane import ReviewLane
 from orbit.agent.domain.board import TaskBoard, interrupted
-from orbit.agent.domain.reviews import BatchSnapshot, PlannerSnapshot, ReviewJob
+from orbit.agent.domain.reviews import BatchSnapshot, LaneSnapshot, PlannerSnapshot, ReviewJob
 from orbit.protocol import ReviewStatus, TaskOrigin, TaskSpec, TaskState, TaskStatus, TurnEndReason
 from tests.agent_fakes import Call, FakeTree, ScriptedLauncher, session_for
 from tests.test_review_lane import claims_done, start

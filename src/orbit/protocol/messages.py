@@ -248,6 +248,22 @@ class TaskState(_Message):
     usage: Usage = Usage()
 
 
+class SessionSummary(_Message):
+    """A saved session as the list of sessions shows it: how many of its tasks stand at each
+    status in ``counts``, and what they cost together in ``usage``. ``current`` marks the
+    session open here, ``locked`` one open in another orbit, and ``unreadable`` says why a
+    session can't be opened, if it can't."""
+
+    id: str
+    name: str
+    last_active: AwareDatetime | None = None
+    counts: dict[TaskStatus, int] = {}
+    usage: Usage = Usage()
+    current: bool = False
+    locked: bool = False
+    unreadable: str | None = None
+
+
 StepStatus = Literal["pending", "running", "passed", "failed", "cancelled", "skipped"]
 
 

@@ -8,15 +8,13 @@ review is due and stops reviews generating work forever.
 import asyncio
 from collections.abc import Awaitable, Callable, Collection
 
-from pydantic import BaseModel, ConfigDict
-
 from orbit.agent.application.agent_run import AgentRun
 from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.lanes import Background
 from orbit.agent.application.ports import CoderTree, Reply
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.reviews import (
-    PlannerSnapshot,
+    LaneSnapshot,
     ReviewJob,
     ReviewPlanner,
     review_prompt,
@@ -33,17 +31,6 @@ from orbit.protocol import (
     TaskState,
     TaskStatus,
 )
-
-
-class LaneSnapshot(BaseModel):
-    """A :class:`ReviewLane`'s state for one session: its ``planner``'s, and for each review
-    task it queued, the ``jobs`` it reviews and the ``batches`` it suggests into."""
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    planner: PlannerSnapshot
-    jobs: dict[str, ReviewJob] = {}
-    batches: dict[str, str] = {}
 
 
 class ReviewLane:

@@ -85,6 +85,17 @@ class PlannerSnapshot(BaseModel):
     rounds: dict[str, int] = {}
 
 
+class LaneSnapshot(BaseModel):
+    """A :class:`ReviewLane`'s state for one session: its ``planner``'s, and for each review
+    task it queued, the ``jobs`` it reviews and the ``batches`` it suggests into."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    planner: PlannerSnapshot
+    jobs: dict[str, ReviewJob] = {}
+    batches: dict[str, str] = {}
+
+
 class ReviewPlanner:
     """Tracks batches and decides when to review, within ``limits``."""
 
