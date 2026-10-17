@@ -488,11 +488,11 @@ class AgentSession:
 
     async def _publish_agents(self, event: Event) -> None:
         """Publish ``event``, from the agents; one that ends a turn adds what the turn cost to
-        what the session spent, and saves it."""
-        await self._events.put(event)
+        what the session spent. Publishing never suspends, so a turn is not cancelled between
+        its TurnFinished and its own bookkeeping, which saves the session after it."""
         if isinstance(event, TurnFinished) and event.usage is not None:
             self._switcher.spent += event.usage
-            await self._save()
+        await self._events.put(event)
 
     async def _change(self, change: Callable[[TaskBoard], None]) -> bool:
         """Make ``change`` to the board, publishing it, or report why the change was refused;

@@ -14,6 +14,7 @@ from orbit.protocol import (
     AddTask,
     AgentExited,
     AgentStarted,
+    CancelTurn,
     ErrorOccurred,
     Event,
     ListSessions,
@@ -128,6 +129,10 @@ async def refused(session: AgentSession, command: OpenSession | NewSession) -> l
 
 async def chats(call: Call) -> TurnEndReason:
     return "completed"
+
+
+async def hangs_after() -> None:
+    await asyncio.Event().wait()
 
 
 async def hangs(call: Call) -> TurnEndReason:
@@ -531,6 +536,49 @@ async def test_a_reopened_session_has_spent_what_it_showed_live() -> None:
     reopened = last_of(SessionOpened, await opened(session, OpenSession(session_id="session-1")))
     assert (fresh.session.usage, reopened.session.usage) == (Usage(), spent)
     assert store.last.spent == spent
+    await session.close()
+
+
+async def test_an_agents_turn_counts_toward_its_tasks_usage_and_the_saved_spent() -> None:
+    store = FakeStore()
+    session, launcher = switching(store, claims_done, reviews=False)
+    usage = Usage(output_tokens=100, cost_usd=1.0, turns=3)
+    launcher.usages = [(usage,)]
+    await session.send(AddTask(task=TaskSpec(prompt="Look.", settings=Settings(tool_access="off"))))
+    await session.send(RunTasks())
+    events = await events_until(session, idle())
+    assert last_of(TasksChanged, events).tasks[0].usage == usage
+    assert store.last.spent == usage
+    await session.close()
+
+
+class HeldStore(FakeStore):
+    """A store whose saves of a session that has spent something wait for ``gate``."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.gate = asyncio.Event()
+
+    async def save(self, record: SessionRecord) -> None:
+        if record.spent != Usage():
+            await self.gate.wait()
+        await super().save(record)
+
+
+async def test_a_planner_turn_cancelled_once_it_finished_ends_once_and_is_saved_spent() -> None:
+    store = HeldStore()
+    session, launcher = switching(store, reviews=False)
+    usage = Usage(input_tokens=400, cost_usd=0.4, turns=1)
+    launcher.planner_turns = [chats]
+    launcher.planner_usages = [usage]
+    launcher.planner_afters = [hangs_after]
+    await session.send(SubmitPrompt(text="Plan it."))
+    events = await events_until(session, of_type(TurnFinished))
+    await session.send(CancelTurn(lane="planner"))
+    store.gate.set()
+    events += await events_until(session, idle("planner"))
+    assert [e.usage for e in events if isinstance(e, TurnFinished)] == [usage]
+    assert store.last.spent == usage
     await session.close()
 
 

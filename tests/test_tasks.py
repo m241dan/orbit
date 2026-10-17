@@ -109,3 +109,18 @@ async def test_a_value_error_after_the_board_changed_escapes_refused() -> None:
         await tasks.change(adds, ignored)
 
     assert len(tasks.board.tasks) == 1
+
+
+async def test_a_change_made_elsewhere_is_acted_on_with_nothing_published() -> None:
+    published: list[Event] = []
+    acted: list[str] = []
+
+    async def changed() -> None:
+        acted.append("changed")
+
+    async def publish(event: Event) -> None:
+        published.append(event)
+
+    await Tasks(TaskBoard(), publish, changed).changed_elsewhere()
+
+    assert (acted, published) == (["changed"], [])

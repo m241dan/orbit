@@ -51,6 +51,10 @@ class Tasks:
         await self._publish(TasksChanged(tasks=self._board.tasks))
         await self._changed()
 
+    async def changed_elsewhere(self) -> None:
+        """Act on a change made outside the board, as on one made to it."""
+        await self._changed()
+
     async def start(self, task_id: str) -> None:
         """Mark task ``task_id`` running and publish the board."""
         await self.change(lambda board: board.set_status(task_id, "running"))

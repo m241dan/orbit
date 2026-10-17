@@ -81,10 +81,6 @@ def _answer(claim: "asyncio.Future[Reply] | None", reply: Reply) -> None:
         claim.set_result(reply)
 
 
-async def _ignore_refusal(error: ValueError) -> None:
-    """Ignores the board refusing a change."""
-
-
 def _cancel(claim: "asyncio.Future[Reply] | None") -> None:
     """Answer ``claim``, if it's still waiting, with the reply that the task was cancelled."""
     _answer(claim, Reply("The task was cancelled.", is_error=True))
@@ -221,8 +217,13 @@ class AgentRun:
         """Add what one of the agent's turns cost to its task's total, unless the task was
         removed once it finished: its last turn's usage arrives after it's completed."""
         await self._tasks.change(
-            lambda board: board.add_usage(self._task_id, usage), refused=_ignore_refusal
+            lambda board: board.add_usage(self._task_id, usage), refused=self._uncounted
         )
+
+    async def _uncounted(self, error: ValueError) -> None:
+        """Act on a turn's usage the board refused for a removed task: what the session spent
+        still changed."""
+        await self._tasks.changed_elsewhere()
 
     async def _await_exit(self, stream: "asyncio.Task[None]") -> None:
         """Give a finished agent ``exit_grace`` seconds to exit on its own."""

@@ -48,6 +48,7 @@ from tests.agent_fakes import (
     ROLES,
     Call,
     FakeHost,
+    FakeStore,
     FakeTree,
     FakeWorkspace,
     ScriptedLauncher,
@@ -465,6 +466,28 @@ async def test_usage_arriving_after_the_task_was_removed_is_skipped() -> None:
     assert outcome.status == "completed"
     assert AgentExited(agent_id="agent-1", reason="finished") in events
     assert not [e for e in events if isinstance(e, ErrorOccurred | TasksChanged)]
+
+
+async def test_usage_arriving_after_the_task_was_removed_is_saved_in_what_the_session_spent() -> (
+    None
+):
+    store = FakeStore()
+    session, _, launcher = session_for(store=store)
+    await session.send(AddTask(task=TaskSpec(prompt="a")))
+    tasks = session._board
+
+    async def claims_done_then_removed(call: Call) -> TurnEndReason:
+        reason = await claims_done(call)
+        tasks.set_status("1", "completed")
+        tasks.remove("1")
+        return reason
+
+    launcher.scripts = [claims_done_then_removed]
+    launcher.usages = [(Usage(input_tokens=10),)]
+    assert session._desk is not None
+    await asyncio.wait_for(AgentRun("1", session._tasks, None, session._desk).run(None, "."), 5)
+    assert store.last.spent == Usage(input_tokens=10)
+    await session.close()
 
 
 async def test_a_failure_saving_usage_is_reported_not_taken_for_a_removed_task() -> None:
