@@ -13,6 +13,7 @@ from textual.pilot import Pilot
 from orbit.protocol import (
     PLANNER,
     AgentExited,
+    AgentExitReason,
     AgentReply,
     AgentRequest,
     AssistantMessage,
@@ -1065,6 +1066,64 @@ async def test_concurrent_turns_brighten_only_their_own_messages(first: str) -> 
         last = "agent-2" if first == "agent-1" else "agent-1"
         await feed_events(session, pilot, turn_ended(last, turns[last]))
         assert brightness(app) == ["bright", "bright"]
+
+
+@pytest.mark.parametrize("reason", ["killed", "crashed"])
+async def test_an_agent_exiting_mid_turn_brightens_its_final_answer(
+    reason: AgentExitReason,
+) -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(
+            session,
+            pilot,
+            thought("agent-1", "done"),
+            AgentExited(agent_id="agent-1", reason=reason),
+        )
+        assert brightness(app) == ["bright"]
+
+
+async def test_an_agent_exiting_mid_turn_on_a_tool_call_brightens_nothing() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(
+            session,
+            pilot,
+            thought("agent-1", "looking"),
+            tool_call("agent-1"),
+            AgentExited(agent_id="agent-1", reason="crashed"),
+        )
+        assert brightness(app) == ["dim"]
+
+
+async def test_an_agent_exiting_after_its_turn_ended_keeps_its_final_answer_bright() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(
+            session,
+            pilot,
+            thought("agent-1", "done"),
+            turn_ended("agent-1"),
+            AgentExited(agent_id="agent-1", reason="finished"),
+        )
+        assert brightness(app) == ["bright"]
+
+
+async def test_an_agent_exiting_leaves_another_agents_open_turn_dim() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(
+            session,
+            pilot,
+            thought("agent-1", "one", "t1"),
+            thought("agent-2", "two", "t2"),
+            AgentExited(agent_id="agent-1", reason="killed"),
+        )
+        assert brightness(app) == ["bright", "dim"]
 
 
 async def test_a_final_answer_brightens_under_all_and_its_roles_tab() -> None:

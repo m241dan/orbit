@@ -656,6 +656,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         is known by its id even once the tab has closed."""
         agent = event.agent_id
         self._transcript.end_tool_calls(agent, requests=True)
+        self._promote_open_turns(agent)
         drawn = self._drawn_rules.pop(agent, None)
         since = self._agent_since.pop(agent, None)
         elapsed = None if since is None else self.clock() - since
@@ -677,9 +678,8 @@ class OrbitApp(App[None], inherit_bindings=False):
     def _turn_finished(self, event: TurnFinished) -> None:
         if event.usage is not None:
             self._task_list.count(event.usage)
-        steps = self._turns.pop((event.agent_id, event.turn_id), [])
         self._transcript.end_tool_calls(event.agent_id)
-        self._transcript.promote(event.agent_id, event.turn_id, final_answer(steps))
+        self._promote(event.agent_id, event.turn_id)
         started = self._turn_starts.pop((event.agent_id, event.turn_id), None)
         elapsed = None if started is None else self.clock() - started
         self._append(
@@ -687,6 +687,16 @@ class OrbitApp(App[None], inherit_bindings=False):
         )
         if event.agent_id is not None:
             self._drawn_rules[event.agent_id] = DrawnRule(event, elapsed)
+
+    def _promote_open_turns(self, agent: str) -> None:
+        """Finish every turn ``agent`` left open: one stopped or crashed sends no TurnFinished."""
+        for owner, turn in [key for key in self._turns if key[0] == agent]:
+            self._promote(owner, turn)
+
+    def _promote(self, agent: str | None, turn: str) -> None:
+        """Forget ``agent``'s ``turn`` and brighten its final answer."""
+        steps = self._turns.pop((agent, turn), [])
+        self._transcript.promote(agent, turn, final_answer(steps))
 
     def _speaker(self, agent: str | None) -> str | None:
         """Who heads ``agent``'s rules: the agent, but not the planner, alone in its tab."""

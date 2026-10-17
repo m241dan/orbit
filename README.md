@@ -144,9 +144,10 @@ Each entry is coloured by what it is: your prompts, agents' messages, tool calls
 verification and notices, and errors. Agents' and the planner's messages render as markdown:
 headings, emphasis, lists, tables, highlighted code and links shown as `text (url)`. They show dim
 while the agent works, as it thinks out loud between tool calls; when its turn ends, however it
-ends, its final answer (the messages after its last tool call) brightens, under All and its tab. Your own
-prompts stand out: each starts with `❯`, its following rows indented beneath it, on a faint band
-across the conversation's width, and renders as markdown too; a prompt of more than 15 lines
+ends, even by the agent being stopped or crashing, its final answer (the messages after its last
+tool call) brightens, under All and its tab. Your own prompts stand out: each starts with `❯`, its
+following rows indented beneath it, on a faint band across the conversation's width, and renders as
+markdown too; a prompt of more than 15 lines
 starts collapsed (`❯ ▸ first line (+N lines)`), and an expanded one of several lines is marked
 `❯ ▾`. Task headers (`Task 3: …`) stay bold in the accent colour. A tool call and its result are
 one line, naming the tool and its main argument, such as the file or command, and updated in place:
