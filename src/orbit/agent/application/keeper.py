@@ -342,8 +342,13 @@ class SessionKeeper:
         return True
 
     async def close(self) -> None:
-        """Stop saving, and let go of the session's lock if it was taken."""
+        """Stop saving, and let go of the session's lock if it was taken; reports it if the lock
+        can't be let go of."""
         async with self._saving:
             self._closed = True
-            if self._store is not None and self._locked:
+            if self._store is None or not self._locked:
+                return
+            try:
                 await self._store.release(self.id)
+            except RuntimeError as exc:
+                await self._publish(ErrorOccurred(message=str(exc)))

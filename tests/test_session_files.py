@@ -253,6 +253,20 @@ async def test_releasing_leaves_another_orbits_lock_and_a_missing_one_alone(
     assert (sessions(tmp_path) / "abc.lock").read_text() == str(OTHER)
 
 
+async def test_a_lock_that_cant_be_released_raises(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    files = store(tmp_path)
+    await files.acquire("abc")
+
+    def refused(path: Path, missing_ok: bool = False) -> None:
+        raise PermissionError("read-only")
+
+    monkeypatch.setattr(Path, "unlink", refused)
+    with pytest.raises(RuntimeError, match=r"Couldn't unlock the session .*abc\.lock: read-only"):
+        await files.release("abc")
+
+
 async def test_a_cancelled_acquire_leaves_no_lock_behind(tmp_path: Path) -> None:
     sessions(tmp_path).mkdir(parents=True)
     (sessions(tmp_path) / "abc.lock").write_text(str(OTHER))

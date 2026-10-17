@@ -234,7 +234,8 @@ class SessionStore(Protocol):
         ...
 
     async def release(self, session_id: str) -> None:
-        """Unlock the session ``session_id``, if this orbit holds its lock."""
+        """Unlock the session ``session_id``, if this orbit holds its lock; raises
+        ``RuntimeError`` when it can't."""
         ...
 
     async def review_count(self) -> int:

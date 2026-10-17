@@ -263,8 +263,12 @@ class SessionFiles:
         return True
 
     def _release(self, lock: Path) -> None:
-        if lock_owner(_read_lock(lock)) == self._pid:
+        if lock_owner(_read_lock(lock)) != self._pid:
+            return
+        try:
             lock.unlink(missing_ok=True)
+        except OSError as error:
+            raise RuntimeError(f"Couldn't unlock the session {lock}: {error}") from error
 
     def _read_review_count(self) -> int:
         try:

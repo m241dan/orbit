@@ -238,6 +238,17 @@ async def test_a_failing_session_save_is_reported_once_though_count_saves_work()
     assert store.counts == [1]
 
 
+async def test_a_failing_session_save_is_reported_once_across_review_lane_changes() -> None:
+    store = FakeStore()
+    keeper, published = keeper_for(store)
+    store.failure = "Couldn't save the session: sessions/ unwritable"
+    for count, contents in enumerate((WITH_TASK, EMPTY, WITH_TASK, EMPTY), start=1):
+        await keeper.save_review_count(count)
+        await save(keeper, contents)
+    assert published.errors == ["Couldn't save the session: sessions/ unwritable"]
+    assert store.counts == [1, 2, 3, 4] and store.saved == []
+
+
 async def test_session_and_count_save_failures_are_each_reported() -> None:
     store = FakeStore()
     keeper, published = keeper_for(store)
@@ -262,3 +273,14 @@ async def test_a_count_saved_while_another_waited_is_not_saved_again() -> None:
     keeper, _ = keeper_for(store)
     await asyncio.gather(keeper.save_review_count(1), keeper.save_review_count(1))
     assert store.counts == [1]
+
+
+async def test_a_lock_that_cannot_be_released_on_close_is_reported() -> None:
+    store = FakeStore()
+    store.release_failure = "Couldn't unlock the session x.lock: read-only"
+    keeper, published = keeper_for(store)
+    await save(keeper, WITH_TASK)
+    await keeper.close()
+    assert published.errors == ["Couldn't unlock the session x.lock: read-only"]
+    await save(keeper, EMPTY)
+    assert len(store.saved) == 1

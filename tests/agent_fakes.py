@@ -200,8 +200,9 @@ class FakeStore:
     turn yields before it's written (none once it runs out). ``free`` says whether the lock can
     be taken, and ``lock_failure``, if set, is the error taking it raises. Sessions in
     ``elsewhere`` are locked by another orbit, those in ``broken`` are unreadable for the reason
-    given, and ``delete_failure``, if set, is the error deleting one raises. ``on_acquire``, if
-    set, is awaited as a lock is taken.
+    given, and ``delete_failure``, if set, is the error deleting one raises, and
+    ``release_failure`` the error letting go of a lock raises. ``on_acquire``, if set, is awaited
+    as a lock is taken.
     """
 
     def __init__(self, count: int = 0) -> None:
@@ -219,6 +220,7 @@ class FakeStore:
         self.broken: dict[str, str] = {}
         self.deleted: list[str] = []
         self.delete_failure: str | None = None
+        self.release_failure: str | None = None
         self.on_acquire: Callable[[], Awaitable[None]] | None = None
 
     @property
@@ -259,6 +261,8 @@ class FakeStore:
         return self.free
 
     async def release(self, session_id: str) -> None:
+        if self.release_failure is not None:
+            raise RuntimeError(self.release_failure)
         self.released.append(session_id)
         self.locked.discard(session_id)
 
