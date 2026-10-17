@@ -3,13 +3,21 @@
 import asyncio
 from datetime import timedelta
 
-from orbit.agent.application.keeper import Contents, SessionKeeper, local_now, new_session_id
+from orbit.agent.application.keeper import (
+    Contents,
+    Left,
+    SessionKeeper,
+    local_now,
+    new_session_id,
+)
 from orbit.agent.domain.reviews import LaneSnapshot, PlannerSnapshot
+from orbit.agent.domain.sessions import SessionRecord
 from orbit.protocol import ErrorOccurred, Event, Settings, TaskSpec, TaskState
 from tests.agent_fakes import START, FakeStore, Ticks
 
 TASK = TaskState(id="1", task=TaskSpec(prompt="Add a flag."))
 EMPTY = Contents(settings=Settings(), planner_conversation=None, tasks=(), reviews=None)
+UNLOCKABLE = "Couldn't unlock the session x.lock: read-only"
 WITH_TASK = Contents(settings=Settings(), planner_conversation=None, tasks=(TASK,), reviews=None)
 
 
@@ -309,10 +317,48 @@ async def test_a_count_saved_while_another_waited_is_not_saved_again() -> None:
 
 async def test_a_lock_that_cannot_be_released_on_close_is_reported() -> None:
     store = FakeStore()
-    store.release_failure = "Couldn't unlock the session x.lock: read-only"
+    store.release_failure = UNLOCKABLE
     keeper, published = keeper_for(store)
     await save(keeper, WITH_TASK)
     await keeper.close()
-    assert published.errors == ["Couldn't unlock the session x.lock: read-only"]
+    assert published.errors == [UNLOCKABLE]
     await save(keeper, EMPTY)
     assert len(store.saved) == 1
+
+
+def unreleasable_store_with(session_id: str) -> FakeStore:
+    """A store holding the session ``session_id``, whose locks can't be let go of."""
+    store = FakeStore()
+    store.saved = [SessionRecord(id=session_id, name=session_id, created=START, last_active=START)]
+    store.release_failure = UNLOCKABLE
+    return store
+
+
+async def test_a_lock_that_cannot_be_released_on_leaving_is_reported() -> None:
+    keeper, published = keeper_for(unreleasable_store_with("old"))
+    await keeper.leave(Left("old"), discard=False)
+    assert published.errors == [UNLOCKABLE]
+
+
+async def test_a_lock_that_cannot_be_released_after_a_refused_open_is_reported() -> None:
+    store = unreleasable_store_with("other")
+    keeper, published = keeper_for(store)
+    assert await keeper.open(store.last, lambda: False) is None
+    assert published.errors == [UNLOCKABLE]
+    assert keeper.id == "session-1"
+
+
+async def test_a_failed_rename_whose_lock_cannot_be_released_reports_both() -> None:
+    store = unreleasable_store_with("other")
+    store.failure = "Couldn't save the session: disk full"
+    keeper, published = keeper_for(store)
+    await keeper.rename_saved("other", "Renamed")
+    assert published.errors == ["Couldn't save the session: disk full", UNLOCKABLE]
+
+
+async def test_a_failed_delete_whose_lock_cannot_be_released_reports_both() -> None:
+    store = unreleasable_store_with("other")
+    store.delete_failure = "Couldn't delete the session: read-only"
+    keeper, published = keeper_for(store)
+    await keeper.delete_saved("other")
+    assert published.errors == [UNLOCKABLE, "Couldn't delete the session: read-only"]

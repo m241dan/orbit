@@ -345,6 +345,23 @@ async def test_a_cancelled_acquire_whose_lock_fails_stays_cancelled(
     assert (sessions(tmp_path) / "abc.lock").read_text() == "3000"
 
 
+async def test_a_cancelled_acquire_whose_lock_cant_be_released_stays_cancelled(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    def refused(path: Path, missing_ok: bool = False) -> None:
+        raise PermissionError("read-only")
+
+    sessions(tmp_path).mkdir(parents=True)
+    monkeypatch.setattr(Path, "unlink", refused)
+    with directory_held(sessions(tmp_path)):
+        acquiring = asyncio.create_task(store(tmp_path).acquire("abc"))
+        await asyncio.sleep(0.05)
+        acquiring.cancel()
+        await asyncio.sleep(0)
+    with pytest.raises(asyncio.CancelledError):
+        await acquiring
+
+
 async def test_a_cancelled_acquire_of_a_lock_we_hold_keeps_it(tmp_path: Path) -> None:
     files = store(tmp_path)
     assert await files.acquire("abc")

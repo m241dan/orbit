@@ -222,7 +222,7 @@ class SessionKeeper:
         except RuntimeError as exc:
             await self._publish(ErrorOccurred(message=str(exc)))
         finally:
-            await store.release(session_id)
+            await self._release(store, session_id)
 
     async def delete_saved(self, session_id: str) -> None:
         """Delete the saved session ``session_id``, lock and all, unless it's the one open here
@@ -251,7 +251,7 @@ class SessionKeeper:
         try:
             await store.delete(session_id)
         except RuntimeError as exc:
-            await store.release(session_id)
+            await self._release(store, session_id)
             await self._publish(ErrorOccurred(message=str(exc)))
 
     async def open(self, record: SessionRecord, commit: Commit) -> Left | None:
@@ -263,7 +263,7 @@ class SessionKeeper:
             if not await self._claim(self._store, record.id, record.name):
                 return None
             if not commit():
-                await self._store.release(record.id)
+                await self._release(self._store, record.id)
                 return None
             left = self._become(record.id, record.name, record.created)
             self._locked = self.used = True
@@ -281,12 +281,12 @@ class SessionKeeper:
 
     async def leave(self, left: Left, discard: bool) -> None:
         """Let go of the lock of the session ``left``, if it's held, or delete that session if
-        ``discard``; reports it if it can't be deleted."""
+        ``discard``; reports it if it can't be let go of or deleted."""
         if left.id is None:
             return
         assert self._store is not None  # Only a store holds locks.
         if not discard:
-            await self._store.release(left.id)
+            await self._release(self._store, left.id)
             return
         try:
             await self._store.delete(left.id)
@@ -351,9 +351,13 @@ class SessionKeeper:
         can't be let go of."""
         async with self._saving:
             self._closed = True
-            if self._store is None or not self._locked:
-                return
-            try:
-                await self._store.release(self.id)
-            except RuntimeError as exc:
-                await self._publish(ErrorOccurred(message=str(exc)))
+            if self._store is not None and self._locked:
+                await self._release(self._store, self.id)
+
+    async def _release(self, store: SessionStore, session_id: str) -> None:
+        """Let go of the session ``session_id``'s lock in ``store``; reports it if it can't be
+        let go of."""
+        try:
+            await store.release(session_id)
+        except RuntimeError as exc:
+            await self._publish(ErrorOccurred(message=str(exc)))

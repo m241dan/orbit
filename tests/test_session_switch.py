@@ -513,6 +513,18 @@ async def test_once_the_user_works_in_the_session_its_tasks_stay_with_it() -> No
     await session.close()
 
 
+async def test_a_switch_whose_old_lock_cant_be_released_still_opens_the_session() -> None:
+    store = store_with(saved("auth"))
+    session, _ = switching(store)
+    await session.send(AddTask(task=TASK))
+    await events_until(session, of_type(TasksChanged))
+    store.release_failure = "Couldn't unlock the session: read-only"
+    events = await opened(session, OpenSession(session_id="auth"))
+    assert last_of(SessionOpened, events).session.id == "auth"
+    assert messages(ErrorOccurred, events) == ["Couldn't unlock the session: read-only"]
+    await session.close()
+
+
 async def test_a_session_without_agents_opens_its_board_and_settings() -> None:
     settings = Settings(model="opus")
     store = store_with(saved("auth", state("1", "pending"), settings=settings))

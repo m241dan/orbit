@@ -17,7 +17,7 @@ import fcntl
 import os
 import tempfile
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from enum import Enum, auto
 from pathlib import Path
 
@@ -178,10 +178,11 @@ class SessionFiles:
             return await asyncio.shield(taking) is not _Taken.REFUSED
         except asyncio.CancelledError:
             # The thread carries on; once it's done, let go of any lock it created (but not one
-            # we already held).
+            # we already held). A lock that can't be let go of mustn't lose the cancellation.
             await asyncio.wait([taking])
             if taking.exception() is None and taking.result() is _Taken.CREATED:
-                await self.release(session_id)
+                with suppress(RuntimeError):
+                    await self.release(session_id)
             raise
 
     async def release(self, session_id: str) -> None:
