@@ -47,17 +47,6 @@ class ReviewLimits:
     super_suggestions: int = 10
 
 
-@dataclass
-class _Batch:
-    round: int
-    cap: int
-    tasks: list[str] = field(default_factory=list)
-    finished: set[str] = field(default_factory=set)
-    commits: list[str] = field(default_factory=list)
-    missing: list[str] = field(default_factory=list)
-    filling: bool = True  # Its review is still running, and may suggest more.
-
-
 class BatchSnapshot(BaseModel):
     """An open batch as it stands: see :class:`ReviewPlanner`."""
 
@@ -70,6 +59,42 @@ class BatchSnapshot(BaseModel):
     commits: tuple[str, ...] = ()
     missing: tuple[str, ...] = ()
     filling: bool = True
+
+
+@dataclass
+class _Batch:
+    round: int
+    cap: int
+    tasks: list[str] = field(default_factory=list)
+    finished: set[str] = field(default_factory=set)
+    commits: list[str] = field(default_factory=list)
+    missing: list[str] = field(default_factory=list)
+    filling: bool = True  # Its review is still running, and may suggest more.
+
+    def frozen(self) -> BatchSnapshot:
+        """The batch as it stands, to save."""
+        return BatchSnapshot(
+            round=self.round,
+            cap=self.cap,
+            tasks=tuple(self.tasks),
+            finished=frozenset(self.finished),
+            commits=tuple(self.commits),
+            missing=tuple(self.missing),
+            filling=self.filling,
+        )
+
+    @classmethod
+    def thawed(cls, snapshot: BatchSnapshot) -> "_Batch":
+        """The batch ``snapshot`` saved."""
+        return cls(
+            round=snapshot.round,
+            cap=snapshot.cap,
+            tasks=list(snapshot.tasks),
+            finished=set(snapshot.finished),
+            commits=list(snapshot.commits),
+            missing=list(snapshot.missing),
+            filling=snapshot.filling,
+        )
 
 
 class PlannerSnapshot(BaseModel):
@@ -109,18 +134,7 @@ class ReviewPlanner:
 
     def snapshot(self) -> PlannerSnapshot:
         """The planner's state for this session, to :meth:`restore` later."""
-        batches = {
-            batch_id: BatchSnapshot(
-                round=batch.round,
-                cap=batch.cap,
-                tasks=tuple(batch.tasks),
-                finished=frozenset(batch.finished),
-                commits=tuple(batch.commits),
-                missing=tuple(batch.missing),
-                filling=batch.filling,
-            )
-            for batch_id, batch in self._open.items()
-        }
+        batches = {batch_id: batch.frozen() for batch_id, batch in self._open.items()}
         return PlannerSnapshot(
             paused=self.paused,
             next_batch=self._next_batch,
@@ -133,16 +147,7 @@ class ReviewPlanner:
         self.paused = snapshot.paused
         self._next_batch = snapshot.next_batch
         self._open = {
-            batch_id: _Batch(
-                round=batch.round,
-                cap=batch.cap,
-                tasks=list(batch.tasks),
-                finished=set(batch.finished),
-                commits=list(batch.commits),
-                missing=list(batch.missing),
-                filling=batch.filling,
-            )
-            for batch_id, batch in snapshot.batches.items()
+            batch_id: _Batch.thawed(batch) for batch_id, batch in snapshot.batches.items()
         }
         self._rounds = dict(snapshot.rounds)
 

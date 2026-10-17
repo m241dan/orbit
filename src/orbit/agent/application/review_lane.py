@@ -64,7 +64,7 @@ class ReviewLane:
         self._status: ReviewStatus | None = None
 
     def snapshot(self) -> LaneSnapshot:
-        """The lane's state for this session, to :meth:`restore` later."""
+        """The lane's state for this session, to :meth:`load` later."""
         return LaneSnapshot(
             planner=self.planner.snapshot(), jobs=dict(self._jobs), batches=dict(self._batches)
         )
@@ -74,13 +74,6 @@ class ReviewLane:
         """Whether reviews are being run."""
         return self._background.running
 
-    async def restore(self, snapshot: LaneSnapshot, interrupted: Collection[str] = ()) -> None:
-        """Replace the lane's state with ``snapshot``'s, without running anything. The reviews
-        in ``interrupted`` were stopped by a crash, so they end as a cancelled review does: a
-        review of their batch that's due is queued, for the next run."""
-        self.load(snapshot)
-        await self.end_interrupted(interrupted)
-
     def load(self, snapshot: LaneSnapshot) -> None:
         """Replace the lane's state with ``snapshot``'s; :meth:`end_interrupted` follows."""
         self.planner.restore(snapshot.planner)
@@ -88,8 +81,9 @@ class ReviewLane:
         self._status = None  # Whatever it is, the restored status is news.
 
     async def end_interrupted(self, interrupted: Collection[str]) -> None:
-        """End the reviews in ``interrupted``, as :meth:`restore` does, and publish the review
-        status."""
+        """End the reviews in ``interrupted``, which were stopped by a crash, as a cancelled
+        review ends: a review of their batch that's due is queued, for the next run. Then
+        publish the review status."""
         for task_id in interrupted:
             batch = self._batches.get(task_id)
             if batch is not None and batch in self.planner.open_batches:

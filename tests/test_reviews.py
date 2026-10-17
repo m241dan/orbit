@@ -1,5 +1,7 @@
 """When reviews happen and what they may suggest: rounds, batches, the breaker and caps."""
 
+from dataclasses import fields
+
 from orbit.agent.domain.reviews import (
     DIFF_LIMIT,
     BatchSnapshot,
@@ -7,6 +9,7 @@ from orbit.agent.domain.reviews import (
     ReviewJob,
     ReviewLimits,
     ReviewPlanner,
+    _Batch,
     review_prompt,
 )
 from orbit.protocol import TaskSpec, TaskState, TaskStatus
@@ -384,6 +387,23 @@ def test_a_snapshot_holds_the_planners_session_state() -> None:
 def test_a_snapshot_survives_json_and_restores_the_same_state() -> None:
     reviews = busy()
     assert restored(reviews.snapshot()).snapshot() == reviews.snapshot()
+
+
+def test_a_batch_and_its_snapshot_have_the_same_fields() -> None:
+    assert [f.name for f in fields(_Batch)] == list(BatchSnapshot.model_fields)
+
+
+def test_a_batch_thawed_from_a_snapshot_freezes_back_to_it() -> None:
+    snapshot = BatchSnapshot(
+        round=2,
+        cap=4,
+        tasks=("5", "6"),
+        finished=frozenset({"5"}),
+        commits=("c5",),
+        missing=("6",),
+        filling=False,
+    )
+    assert _Batch.thawed(snapshot).frozen() == snapshot
 
 
 def test_a_restored_planner_numbers_batches_on_from_where_it_was() -> None:

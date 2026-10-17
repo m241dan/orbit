@@ -1,35 +1,31 @@
-"""Snapshots of the review lane: restored as they were, with crash-interrupted reviews ended."""
+"""Snapshots of the review lane: restored as they were when a saved session is opened, with
+the reviews its crash interrupted ended."""
 
 import asyncio
 
 from orbit.agent import AgentSession
-from orbit.agent.application.ports import Reply
-from orbit.agent.application.review_lane import ReviewLane
-from orbit.agent.domain.board import TaskBoard, interrupted
 from orbit.agent.domain.reviews import BatchSnapshot, LaneSnapshot, PlannerSnapshot, ReviewJob
-from orbit.protocol import ReviewStatus, TaskOrigin, TaskSpec, TaskState, TaskStatus, TurnEndReason
-from tests.agent_fakes import Call, FakeTree, ScriptedLauncher, session_for
+from orbit.agent.domain.sessions import SessionRecord
+from orbit.protocol import (
+    Event,
+    OpenSession,
+    ReviewStatus,
+    RunTasks,
+    TaskOrigin,
+    TasksChanged,
+    TaskSpec,
+    TaskState,
+    TaskStatus,
+    TurnEndReason,
+)
+from tests.agent_fakes import Call, FakeStore, FakeTree, ScriptedLauncher, session_for
 from tests.test_review_lane import claims_done, start
+from tests.test_session_switch import last_of, opened, saved, store_with, switching
 
 
-def lane_of(session: AgentSession) -> ReviewLane:
-    lane = session._lane
-    assert lane is not None
-    return lane
-
-
-def board_of(session: AgentSession) -> TaskBoard:
-    return session._board
-
-
-def idle_session() -> tuple[AgentSession, ScriptedLauncher]:
-    """A session with reviews on that has run nothing."""
-    session, _, launcher = session_for(tree=FakeTree(), review=True)
-    return session, launcher
-
-
-async def suggesting() -> tuple[AgentSession, ScriptedLauncher]:
-    """A session whose review of its one task suggested a task and is still running."""
+async def suggesting() -> tuple[AgentSession, FakeStore]:
+    """A session saved in its store whose review of its one task suggested a task and is
+    still running."""
     suggested = asyncio.Event()
 
     async def review(call: Call) -> TurnEndReason:
@@ -39,38 +35,43 @@ async def suggesting() -> tuple[AgentSession, ScriptedLauncher]:
         await asyncio.Event().wait()
         raise AssertionError("unreachable")
 
-    session, _, launcher = session_for(
-        claims_done, reviewers=(review,), tree=FakeTree(), review=True
+    store = FakeStore()
+    session, _, _ = session_for(
+        claims_done, reviewers=(review,), tree=FakeTree(), review=True, store=store
     )
     await start(session)
     await asyncio.wait_for(suggested.wait(), 10)
-    return session, launcher
+    return session, store
 
 
-async def test_a_restored_lane_has_the_state_it_was_snapshotted_with() -> None:
-    session, _ = await suggesting()
-    snapshot = lane_of(session).snapshot()
-    again, launcher = idle_session()
-    board_of(again).restore(board_of(session).tasks)
-    await lane_of(again).restore(LaneSnapshot.model_validate_json(snapshot.model_dump_json()))
-    assert lane_of(again).snapshot() == snapshot
+def from_disk(record: SessionRecord) -> SessionRecord:
+    """``record`` as it's read back after being written."""
+    return SessionRecord.model_validate_json(record.model_dump_json())
+
+
+def reviews_of(store: FakeStore) -> LaneSnapshot:
+    """The review state last saved in ``store``."""
+    reviews = store.last.reviews
+    assert reviews is not None
+    return reviews
+
+
+async def test_an_opened_session_has_the_reviews_it_was_saved_with() -> None:
+    crashing, kept = await suggesting()
+    record = from_disk(kept.last.model_copy(update={"id": "auth"}))
+    snapshot = reviews_of(kept)
     assert snapshot.batches == {"2": "batch-1"}
-    assert lane_of(again).queued_by_orbit("2")
+    store = store_with(record)
+    session, launcher = switching(store)
+    events = await opened(session, OpenSession(session_id="auth"))
+
+    # The running review was interrupted, so its batch no longer fills.
+    batch = snapshot.planner.batches["batch-1"].model_copy(update={"filling": False})
+    planner = snapshot.planner.model_copy(update={"batches": {"batch-1": batch}})
+    assert reviews_of(store) == snapshot.model_copy(update={"planner": planner})
+    assert last_of(ReviewStatus, events) == ReviewStatus(paused=False, open_batches=1)
     assert launcher.launches == []
-    await session.close()
-
-
-async def test_a_restored_lane_answers_suggestions_as_before() -> None:
-    session, _ = await suggesting()
-    snapshot = lane_of(session).snapshot()
-    again, _ = idle_session()
-    board_of(again).restore(board_of(session).tasks)
-    await lane_of(again).restore(snapshot)
-    for each in (session, again):
-        repeat = await lane_of(each).suggest("2", "Add tests", "Again.")
-        assert repeat == Reply("Task 3 already covers that.", is_error=True)
-        assert await lane_of(each).suggest("2", "Rename x", "Please.") == Reply("Queued as task 4.")
-    assert board_of(again).tasks == board_of(session).tasks
+    await crashing.close()
     await session.close()
 
 
@@ -81,13 +82,14 @@ def task(task_id: str, role: str, status: TaskStatus, origin: TaskOrigin = "manu
 
 
 def crashed(*suggestions: TaskStatus) -> tuple[TaskState, ...]:
-    """A board left by a crash during the review of task 1, which suggested ``suggestions``."""
+    """A board saved as a crash came during the review of task 1, which suggested
+    ``suggestions``."""
     tasks = [task("1", "coder", "completed"), task("2", "reviewer", "running", "review")]
     tasks += [
         task(str(n), "coder", status, "review").model_copy(update={"batch": "batch-1", "round": 1})
         for n, status in enumerate(suggestions, start=3)
     ]
-    return interrupted(tasks)[0]
+    return tuple(tasks)
 
 
 def reviewing(*suggestions: str, finished: frozenset[str] = frozenset()) -> LaneSnapshot:
@@ -102,70 +104,71 @@ def reviewing(*suggestions: str, finished: frozenset[str] = frozenset()) -> Lane
     )
 
 
-async def restored(
-    tasks: tuple[TaskState, ...], snapshot: LaneSnapshot, *stopped: str
-) -> tuple[AgentSession, ScriptedLauncher]:
-    session, launcher = idle_session()
-    board_of(session).restore(tasks)
-    await lane_of(session).restore(snapshot, interrupted=stopped)
-    return session, launcher
+async def reopened(
+    tasks: tuple[TaskState, ...], snapshot: LaneSnapshot
+) -> tuple[AgentSession, ScriptedLauncher, FakeStore, list[Event]]:
+    """A session that opened the session saved with ``tasks`` and ``snapshot``, its store and
+    the events from opening it."""
+    store = store_with(saved("auth", *tasks, reviews=snapshot))
+    session, launcher = switching(store)
+    events = await opened(session, OpenSession(session_id="auth"))
+    return session, launcher, store, events
+
+
+def statuses(events: list[Event]) -> list[TaskStatus]:
+    return [t.status for t in last_of(TasksChanged, events).tasks]
 
 
 async def test_an_interrupted_review_that_suggested_nothing_closes_its_batch() -> None:
-    session, _ = await restored(crashed(), reviewing(), "2")
-    assert lane_of(session).planner.open_batches == ()
-    refusal = await lane_of(session).suggest("2", "Add tests", "Please.")
-    assert refusal == Reply(
-        "This review's suggestions are closed: its batch is over.", is_error=True
-    )
+    session, _, store, events = await reopened(crashed(), reviewing())
+    assert reviews_of(store).planner.batches == {}
+    assert last_of(ReviewStatus, events) == ReviewStatus(paused=False, open_batches=0)
+    assert statuses(events) == ["completed", "cancelled"]
+    await session.close()
 
 
 async def test_an_interrupted_review_whose_batch_closed_is_not_run_again() -> None:
-    session, launcher = await restored(crashed(), reviewing(), "2")
-    lane_of(session).kick()
+    session, launcher, store, _ = await reopened(crashed(), reviewing())
+    await session.send(RunTasks())
     await asyncio.sleep(0.05)
     assert launcher.launches == []
-    assert board_of(session).get("2").status == "cancelled"
+    assert [t.status for t in store.last.tasks] == ["completed", "cancelled"]
     await session.close()
 
 
 async def test_an_interrupted_reviews_batch_waits_for_its_work_without_running_it() -> None:
-    session, launcher = await restored(crashed("pending"), reviewing("3"), "2")
-    assert lane_of(session).snapshot().planner.batches["batch-1"].filling is False
+    session, launcher, store, events = await reopened(crashed("pending"), reviewing("3"))
+    assert reviews_of(store).planner.batches["batch-1"].filling is False
+    assert last_of(ReviewStatus, events) == ReviewStatus(paused=False, open_batches=1)
     await asyncio.sleep(0.05)
     assert launcher.launches == []
-    assert [t.status for t in board_of(session).tasks] == ["completed", "cancelled", "pending"]
-
-
-async def test_an_interrupted_review_whose_batch_waits_is_not_run_again() -> None:
-    session, launcher = await restored(crashed("pending"), reviewing("3"), "2")
-    lane_of(session).kick()
-    await asyncio.sleep(0.05)
-    assert launcher.launches == []
-    assert board_of(session).get("2").status == "cancelled"
+    assert statuses(events) == ["completed", "cancelled", "pending"]
     await session.close()
 
 
 async def test_an_interrupted_reviews_finished_batch_is_queued_for_review_but_not_run() -> None:
-    tasks = crashed("completed")
-    session, launcher = await restored(tasks, reviewing("3", finished=frozenset({"3"})), "2")
+    snapshot = reviewing("3", finished=frozenset({"3"}))
+    session, launcher, store, events = await reopened(crashed("completed"), snapshot)
     await asyncio.sleep(0.05)
     assert launcher.launches == []
-    added = board_of(session).tasks[-1]
+    added = last_of(TasksChanged, events).tasks[-1]
     assert (added.id, added.task.role, added.status) == ("4", "reviewer", "pending")
-    assert lane_of(session).snapshot().batches == {"2": "batch-1", "4": "batch-2"}
+    assert reviews_of(store).batches == {"2": "batch-1", "4": "batch-2"}
+    await session.close()
 
 
 async def test_interrupted_tasks_that_are_not_open_reviews_change_nothing() -> None:
     snapshot = reviewing().model_copy(update={"planner": PlannerSnapshot(next_batch=2)})
-    session, _ = await restored(crashed(), snapshot, "1", "2")
-    assert lane_of(session).snapshot() == snapshot
+    tasks = (task("1", "coder", "running"), *crashed()[1:])
+    session, _, store, events = await reopened(tasks, snapshot)
+    assert statuses(events) == ["cancelled", "cancelled"]
+    assert reviews_of(store) == snapshot
+    await session.close()
 
 
-async def test_restoring_publishes_the_restored_review_status() -> None:
+async def test_opening_publishes_the_saved_review_status() -> None:
     paused = reviewing().model_copy(update={"planner": PlannerSnapshot(paused=True)})
-    session, _ = await restored(crashed(), paused)
-    events = []
-    while not session._events.empty():
-        events.append(session._events.get_nowait())
-    assert ReviewStatus(paused=True, open_batches=0) in events
+    session, _, store, events = await reopened(crashed()[:1], paused)
+    assert last_of(ReviewStatus, events) == ReviewStatus(paused=True, open_batches=0)
+    assert reviews_of(store) == paused
+    await session.close()

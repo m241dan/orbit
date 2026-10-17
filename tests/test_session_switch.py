@@ -53,7 +53,6 @@ from tests.agent_fakes import (
 )
 from tests.test_agent_run import keeps_claiming
 from tests.test_review_lane import claims_done
-from tests.test_review_lane_snapshots import lane_of, reviewing
 
 YESTERDAY = datetime(2026, 10, 16, 18, 2, tzinfo=UTC)
 EARLIER = datetime(2026, 10, 15, 9, 0, tzinfo=UTC)
@@ -229,24 +228,15 @@ async def test_settings_given_on_the_command_line_override_the_saved_ones() -> N
     await session.close()
 
 
-async def test_an_opened_session_restores_its_reviews_ending_interrupted_ones() -> None:
-    review = TaskState(
-        id="2", task=TaskSpec(prompt="Review.", role="reviewer"), status="running", origin="review"
-    )
-    record = saved("auth", state("1", "completed"), review, reviews=reviewing())
-    session, _ = switching(store_with(record))
-    events = await opened(session, OpenSession(session_id="auth"))
-    assert lane_of(session).planner.open_batches == ()
-    assert last_of(ReviewStatus, events) == ReviewStatus(paused=False, open_batches=0)
-    await session.close()
-
-
 async def test_a_session_saved_without_reviews_opens_with_none() -> None:
-    session, _ = switching(store_with(saved("auth")))
     paused = LaneSnapshot(planner=PlannerSnapshot(paused=True))
-    await lane_of(session).restore(paused)
-    await opened(session, OpenSession(session_id="auth"))
-    assert lane_of(session).snapshot() == LaneSnapshot(planner=PlannerSnapshot())
+    store = store_with(saved("paused", reviews=paused), saved("auth"))
+    session, _ = switching(store)
+    await opened(session, OpenSession(session_id="paused"))
+    assert store.last.reviews == paused
+    events = await opened(session, OpenSession(session_id="auth"))
+    assert store.last.reviews == LaneSnapshot(planner=PlannerSnapshot())
+    assert last_of(ReviewStatus, events) == ReviewStatus(paused=False, open_batches=0)
     await session.close()
 
 
