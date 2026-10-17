@@ -70,7 +70,7 @@ def test_the_default_name_drops_the_days_leading_zero_but_pads_the_time() -> Non
 
 
 def test_a_new_record_carries_the_current_format_version() -> None:
-    assert record().version == FORMAT_VERSION == 2
+    assert record().version == FORMAT_VERSION == 3
 
 
 def test_a_record_round_trips_through_json() -> None:
@@ -78,7 +78,6 @@ def test_a_record_round_trips_through_json() -> None:
         planner=PlannerSnapshot(
             next_batch=2,
             batches={"b1": BatchSnapshot(round=1, cap=5, tasks=("3",), finished=frozenset({"3"}))},
-            rounds={"b1": 1},
         ),
         jobs={"4": ReviewJob(commits=("c1", "c2"), round=1, batch="b1", missing=("2",))},
         batches={"4": "b1"},
@@ -136,13 +135,13 @@ def rename_title(record: dict[str, Any]) -> dict[str, Any]:
 def test_an_older_record_is_migrated_and_stamped_with_the_new_version(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(sessions, "FORMAT_VERSION", 3)
-    monkeypatch.setitem(sessions._MIGRATIONS, 2, rename_title)
+    monkeypatch.setattr(sessions, "FORMAT_VERSION", 4)
+    monkeypatch.setitem(sessions._MIGRATIONS, 3, rename_title)
     data = {key: value for key, value in fields().items() if key != "name"}
-    old = data | {"version": 2, "title": "Old name"}
+    old = data | {"version": 3, "title": "Old name"}
     result = parse_record(json.dumps(old))
     assert isinstance(result, SessionRecord)
-    assert (result.version, result.name) == (3, "Old name")
+    assert (result.version, result.name) == (4, "Old name")
 
 
 def version_1(tasks: tuple[TaskState, ...]) -> dict[str, Any]:
@@ -171,6 +170,36 @@ def test_a_version_1_record_without_tasks_has_spent_nothing() -> None:
 def test_a_version_1_record_with_an_invalid_task_is_unreadable_for_that_task() -> None:
     data = version_1(()) | {"tasks": [{"id": "1"}]}
     assert parse_record(json.dumps(data)) == Unreadable("tasks.0.task: Field required")
+
+
+def version_2(reviews: object) -> dict[str, object]:
+    """The fields of a version 2 record with ``reviews`` as saved."""
+    return fields() | {"version": 2, "reviews": reviews}
+
+
+def test_a_version_2_records_planner_rounds_are_dropped() -> None:
+    planner = {"next_batch": 2, "batches": {"b1": {"round": 1, "cap": 5}}, "rounds": {"b1": 1}}
+    result = parse_record(json.dumps(version_2({"planner": planner})))
+    assert isinstance(result, SessionRecord)
+    assert result.reviews == LaneSnapshot(
+        planner=PlannerSnapshot(next_batch=2, batches={"b1": BatchSnapshot(round=1, cap=5)})
+    )
+
+
+def test_a_version_2_record_without_reviews_reads_without_them() -> None:
+    result = parse_record(json.dumps(version_2(None)))
+    assert isinstance(result, SessionRecord)
+    assert result.reviews is None
+
+
+def test_a_version_2_record_with_an_invalid_planner_is_unreadable_for_it() -> None:
+    result = parse_record(json.dumps(version_2({"planner": 3})))
+    assert isinstance(result, Unreadable)
+    assert result.reason.startswith("reviews.planner: ")
+
+
+def test_a_saved_planner_snapshot_has_no_rounds() -> None:
+    assert "rounds" not in PlannerSnapshot().model_dump()
 
 
 def test_a_record_missing_a_field_is_unreadable() -> None:

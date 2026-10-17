@@ -99,7 +99,7 @@ def reviewing(*suggestions: str, finished: frozenset[str] = frozenset()) -> Lane
         round=1, cap=5, tasks=suggestions, finished=finished, commits=tuple(sorted(finished))
     )
     return LaneSnapshot(
-        planner=PlannerSnapshot(next_batch=2, batches={"batch-1": batch}, rounds={"batch-1": 1}),
+        planner=PlannerSnapshot(next_batch=2, batches={"batch-1": batch}),
         jobs={"2": ReviewJob(commits=("c1",), round=0, batch=None)},
         batches={"2": "batch-1"},
     )

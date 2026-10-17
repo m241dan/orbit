@@ -84,7 +84,6 @@ def test_a_batch_whose_tasks_all_failed_is_not_reviewed() -> None:
 def test_a_batch_with_no_suggestions_is_closed_without_a_review() -> None:
     reviews = planner()
     batch = filled(reviews)
-    assert reviews.round_of(batch) == 1
     assert batch not in reviews.open_batches
 
 
@@ -380,7 +379,6 @@ def test_a_snapshot_holds_the_planners_session_state() -> None:
         paused=True,
         next_batch=3,
         batches={"batch-2": BatchSnapshot(round=1, cap=2)},
-        rounds={"batch-1": 1, "batch-2": 1},
     )
 
 

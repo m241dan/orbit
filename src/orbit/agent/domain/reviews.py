@@ -99,15 +99,14 @@ class _Batch:
 
 class PlannerSnapshot(BaseModel):
     """A :class:`ReviewPlanner`'s state for one session: whether review is ``paused``, the
-    number of the ``next_batch``, the ``batches`` still open and every batch's round. The
-    count towards a super review isn't in it: that's kept per repository."""
+    number of the ``next_batch`` and the ``batches`` still open. The count towards a super
+    review isn't in it: that's kept per repository."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     paused: bool = False
     next_batch: int = 1
     batches: dict[str, BatchSnapshot] = {}
-    rounds: dict[str, int] = {}
 
 
 class LaneSnapshot(BaseModel):
@@ -130,17 +129,11 @@ class ReviewPlanner:
         self.since_super = 0  # Commits since the last super review.
         self._next_batch = 1
         self._open: dict[str, _Batch] = {}
-        self._rounds: dict[str, int] = {}
 
     def snapshot(self) -> PlannerSnapshot:
         """The planner's state for this session, to :meth:`restore` later."""
         batches = {batch_id: batch.frozen() for batch_id, batch in self._open.items()}
-        return PlannerSnapshot(
-            paused=self.paused,
-            next_batch=self._next_batch,
-            batches=batches,
-            rounds=dict(self._rounds),
-        )
+        return PlannerSnapshot(paused=self.paused, next_batch=self._next_batch, batches=batches)
 
     def restore(self, snapshot: PlannerSnapshot) -> None:
         """Replace the planner's state with ``snapshot``'s; the super review count is kept."""
@@ -149,7 +142,6 @@ class ReviewPlanner:
         self._open = {
             batch_id: _Batch.thawed(batch) for batch_id, batch in snapshot.batches.items()
         }
-        self._rounds = dict(snapshot.rounds)
 
     @property
     def open_batches(self) -> tuple[str, ...]:
@@ -160,7 +152,8 @@ class ReviewPlanner:
         return batch in self._open and self._open[batch].filling
 
     def round_of(self, batch: str) -> int:
-        return self._rounds[batch]
+        """The round of open ``batch``'s tasks; it's only asked about open batches."""
+        return self._open[batch].round
 
     def cap(self, job: ReviewJob) -> int:
         """The tasks ``job``'s review may suggest."""
@@ -171,7 +164,6 @@ class ReviewPlanner:
         batch = f"batch-{self._next_batch}"
         self._next_batch += 1
         self._open[batch] = _Batch(round=job.round + 1, cap=self.cap(job))
-        self._rounds[batch] = job.round + 1
         return batch
 
     def added(self, batch: str, task_id: str) -> None:
