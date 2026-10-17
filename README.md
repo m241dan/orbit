@@ -329,10 +329,10 @@ Each row of the task list shows its status: 📝 a draft the planner proposed, �
 (spinning), 🔍 verifying, ✅ done, ❗ failed verification, 🏳 the agent gave up, 🛑 cancelled, ❌
 failed. Once a task has spent anything, its row ends with the tokens and dollars it
 spent (`1.2M tok · $0.84`), and the task list's subtitle shows the open session's total
-(`session: 1.2M tok · $0.84`): it starts from what the session's saved tasks spent when the session
-opens (none for a new session, which shows no total) and adds every turn that finishes in this run,
-the planner's included; token counts are rounded as in a turn's rule (see above). A failed
-task doesn't stop the rest; `ctrl+s` cancels the running task (stopping
+(`session: 1.2M tok · $0.84`): everything the session's agents have spent, the planner's turns and
+tasks since removed included. It's saved with the session, so a session opened again (or listed
+with `ctrl+p`) shows the same total; a new session starts with none, and shows no total. Token
+counts are rounded as in a turn's rule (see above). A failed task doesn't stop the rest; `ctrl+s` cancels the running task (stopping
 its agent) and skips the remaining ones. Running again skips tasks that completed, failed
 verification or were given up on, and editing a task makes it pending again. Tasks added while a
 run is going join it; the running task can't be edited.

@@ -12,22 +12,36 @@ from datetime import datetime
 from functools import reduce
 from typing import Any
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationError
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 from pydantic_core import from_json
 
 from orbit.agent.domain.reviews import LaneSnapshot
 from orbit.protocol import SessionSummary, Settings, TaskState, Usage
 
-FORMAT_VERSION = 1
+FORMAT_VERSION = 2
 """The version of the record format this orbit writes, and the newest it reads."""
 
 _MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 
 Migration = Callable[[dict[str, Any]], dict[str, Any]]
 
+_TASKS = TypeAdapter(tuple[TaskState, ...])
+
+
+def _spent_by_tasks(record: dict[str, Any]) -> dict[str, Any]:
+    """Version 1 ``record`` with what it spent: its tasks' usage, all that version 1 kept. With
+    tasks that can't be read, it's left for the record's validation to say why."""
+    try:
+        tasks = _TASKS.validate_python(record.get("tasks", ()))
+    except ValidationError:
+        return record
+    spent = sum((task.usage for task in tasks), Usage())
+    return record | {"spent": spent.model_dump()}
+
+
 # By version N: what takes a record of version N and returns its fields in version N+1's shape.
-# The upgrade sets the version for it. None are needed yet.
-_MIGRATIONS: dict[int, Migration] = {}
+# The upgrade sets the version for it.
+_MIGRATIONS: dict[int, Migration] = {1: _spent_by_tasks}
 
 EMPTY_NAME = "A session needs a name."
 OPEN_UNDELETABLE = "Can't delete the open session."
@@ -36,7 +50,8 @@ OPEN_UNDELETABLE = "Can't delete the open session."
 class SessionRecord(BaseModel):
     """A saved session ``id``, ``name``d by the user, with the ``settings`` its planner and new
     tasks use, the planner's Claude conversation, its ``tasks`` and, when reviews are on, its
-    ``reviews``' state."""
+    ``reviews``' state, and what its agents have ``spent`` in all, the planner and tasks since
+    removed included."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -49,6 +64,7 @@ class SessionRecord(BaseModel):
     planner_conversation: str | None = None
     tasks: tuple[TaskState, ...] = ()
     reviews: LaneSnapshot | None = None
+    spent: Usage = Usage()
 
 
 class _ReviewCount(BaseModel):
@@ -129,20 +145,19 @@ def _first_problem(error: ValidationError) -> str:
 def summarize(record: SessionRecord, current: bool = False, locked: bool = False) -> SessionSummary:
     """``record`` as the list of sessions shows it; ``current`` if it's the session open here,
     ``locked`` if another orbit has it open."""
-    summary = tasks_summary(record.id, record.name, record.tasks)
+    summary = tasks_summary(record.id, record.name, record.tasks, record.spent)
     return summary.model_copy(
         update={"last_active": record.last_active, "current": current, "locked": locked}
     )
 
 
-def tasks_summary(session_id: str, name: str, tasks: Sequence[TaskState]) -> SessionSummary:
-    """The session ``session_id``, ``name``d so and holding ``tasks``, as the list of sessions
-    shows it, without a last active time."""
+def tasks_summary(
+    session_id: str, name: str, tasks: Sequence[TaskState], spent: Usage
+) -> SessionSummary:
+    """The session ``session_id``, ``name``d so, holding ``tasks`` and having ``spent`` so much,
+    as the list of sessions shows it, without a last active time."""
     return SessionSummary(
-        id=session_id,
-        name=name,
-        counts=dict(Counter(task.status for task in tasks)),
-        usage=sum((task.usage for task in tasks), Usage()),
+        id=session_id, name=name, counts=dict(Counter(task.status for task in tasks)), usage=spent
     )
 
 

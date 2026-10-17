@@ -20,6 +20,7 @@ from orbit.protocol import (
     NewSession,
     Notice,
     OpenSession,
+    RemoveTask,
     ReviewStatus,
     RunTasks,
     SessionOpened,
@@ -33,6 +34,8 @@ from orbit.protocol import (
     TaskState,
     TaskStatus,
     TurnEndReason,
+    TurnFinished,
+    Usage,
 )
 from tests.agent_fakes import (
     ROLES,
@@ -493,6 +496,51 @@ async def test_a_new_session_keeps_no_fix_counts_from_the_one_before() -> None:
         ("2", "unverified", None),
         ("3", "unverified", "2"),
     ]
+    await session.close()
+
+
+def spent_live(events: list[Event]) -> Usage:
+    """What the turns ending among ``events`` cost, as the task list adds it up live."""
+    finished = (e.usage for e in events if isinstance(e, TurnFinished) and e.usage is not None)
+    return sum(finished, Usage())
+
+
+async def spent_on_a_removed_task(session: AgentSession, launcher: ScriptedLauncher) -> Usage:
+    """What ``session`` spent, as its events showed it, on a planner turn and a task that was
+    removed once it ran."""
+    launcher.planner_turns = [chats]
+    launcher.planner_usages = [Usage(input_tokens=400, cost_usd=0.4, turns=1)]
+    launcher.usages = [(Usage(output_tokens=100, cost_usd=1.0, turns=3),)]
+    await session.send(SubmitPrompt(text="Plan it."))
+    events = await events_until(session, idle("planner"))
+    await session.send(AddTask(task=TaskSpec(prompt="Look.", settings=Settings(tool_access="off"))))
+    await session.send(RunTasks())
+    events += await events_until(session, idle())
+    await session.send(RemoveTask(task_id="1"))
+    events += await events_until(session, of_type(TasksChanged))
+    return spent_live(events)
+
+
+async def test_a_reopened_session_has_spent_what_it_showed_live() -> None:
+    store = FakeStore()
+    session, launcher = switching(store, claims_done, reviews=False)
+    spent = await spent_on_a_removed_task(session, launcher)
+    assert spent == Usage(input_tokens=400, output_tokens=100, cost_usd=1.4, turns=4)
+
+    fresh = last_of(SessionOpened, await opened(session, NewSession()))
+    reopened = last_of(SessionOpened, await opened(session, OpenSession(session_id="session-1")))
+    assert (fresh.session.usage, reopened.session.usage) == (Usage(), spent)
+    assert store.last.spent == spent
+    await session.close()
+
+
+async def test_the_sessions_list_shows_what_a_session_spent() -> None:
+    session, launcher = switching(FakeStore(), claims_done, reviews=False)
+    spent = await spent_on_a_removed_task(session, launcher)
+    await opened(session, NewSession())
+    await session.send(ListSessions())
+    listed = last_of(SessionsListed, await events_until(session, of_type(SessionsListed)))
+    assert {s.id: s.usage for s in listed.sessions} == {"session-1": spent}
     await session.close()
 
 

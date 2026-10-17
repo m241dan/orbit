@@ -23,10 +23,11 @@ BUMP = (
     "and a test that the old fixture migrates to it."
 )
 
-# Never edit this for a format change: it's what orbits at version 1 wrote, and they still
-# need to read. A new version gets its own fixture (session-v2.json) and a migration test
-# from this one.
+# Never edit these for a format change: they're what orbits at versions 1 and 2 wrote, and
+# they still need to read. A new version gets its own fixture (session-v3.json) and a
+# migration test from the last one.
 SESSION_V1 = FIXTURES / "session-v1.json"
+SESSION_V2 = FIXTURES / "session-v2.json"
 
 COUNT_CHANGED = (
     "The saved review count format changed. Don't edit REVIEW_COUNT_V1: the counts orbits "
@@ -38,19 +39,33 @@ COUNT_CHANGED = (
 REVIEW_COUNT_V1 = '{"since_super":7}'
 
 
+USAGE = Usage(
+    input_tokens=100,
+    output_tokens=20,
+    cache_creation_input_tokens=30,
+    cache_read_input_tokens=40,
+    cost_usd=1.25,
+    turns=6,
+    duration_ms=7000,
+)
+
+# What the session spent, its planner and a task since removed included.
+SPENT = Usage(
+    input_tokens=300,
+    output_tokens=50,
+    cache_creation_input_tokens=60,
+    cache_read_input_tokens=80,
+    cost_usd=2.5,
+    turns=9,
+    duration_ms=12000,
+)
+
+
 def tasks() -> tuple[TaskState, ...]:
     spec = TaskSpec(
         prompt="Add the parser", settings=Settings(model="sonnet", tool_access="off"), role="writer"
     )
-    usage = Usage(
-        input_tokens=100,
-        output_tokens=20,
-        cache_creation_input_tokens=30,
-        cache_read_input_tokens=40,
-        cost_usd=1.25,
-        turns=6,
-        duration_ms=7000,
-    )
+    usage = USAGE
     return (
         TaskState(
             id="1",
@@ -103,9 +118,9 @@ def reviews() -> LaneSnapshot:
     )
 
 
-def expected() -> SessionRecord:
+def expected(spent: Usage = SPENT) -> SessionRecord:
     return SessionRecord(
-        version=1,
+        version=2,
         id="s-golden",
         name="Golden session",
         created=datetime(2026, 10, 7, 9, 5, tzinfo=UTC),
@@ -114,17 +129,22 @@ def expected() -> SessionRecord:
         planner_conversation="conversation-1",
         tasks=tasks(),
         reviews=reviews(),
+        spent=spent,
     )
 
 
-def test_a_version_1_session_file_reads_as_its_record() -> None:
-    assert parse_record(SESSION_V1.read_text(encoding="utf-8")) == expected()
+def test_a_version_1_session_file_migrates_to_having_spent_what_its_tasks_did() -> None:
+    assert parse_record(SESSION_V1.read_text(encoding="utf-8")) == expected(spent=USAGE)
 
 
-def test_a_session_record_is_written_in_the_version_1_format() -> None:
+def test_a_version_2_session_file_reads_as_its_record() -> None:
+    assert parse_record(SESSION_V2.read_text(encoding="utf-8")) == expected()
+
+
+def test_a_session_record_is_written_in_the_version_2_format() -> None:
     written = json.loads(record_json(expected()))
-    golden = json.loads(SESSION_V1.read_text(encoding="utf-8"))
-    assert written == golden, BUMP.format(fixture=SESSION_V1.name)
+    golden = json.loads(SESSION_V2.read_text(encoding="utf-8"))
+    assert written == golden, BUMP.format(fixture=SESSION_V2.name)
 
 
 def test_a_version_1_review_count_reads_as_its_count() -> None:

@@ -29,7 +29,7 @@ from orbit.agent.domain.sessions import (
     stored_summary,
     tasks_summary,
 )
-from orbit.protocol import ErrorOccurred, SessionSummary, Settings, TaskState
+from orbit.protocol import ErrorOccurred, SessionSummary, Settings, TaskState, Usage
 
 Clock = Callable[[], datetime]
 """The time now, timezone-aware."""
@@ -77,12 +77,14 @@ def new_session_id() -> str:
 @dataclass(frozen=True)
 class Contents:
     """What a saved session holds of the work: the ``settings`` its planner and new tasks use,
-    the planner's Claude conversation, its ``tasks`` and its ``reviews``' state, if any."""
+    the planner's Claude conversation, its ``tasks``, its ``reviews``' state, if any, and what
+    its agents have ``spent`` in all."""
 
     settings: Settings
     planner_conversation: str | None
     tasks: tuple[TaskState, ...]
     reviews: LaneSnapshot | None
+    spent: Usage
 
 
 class SessionKeeper:
@@ -174,6 +176,7 @@ class SessionKeeper:
             planner_conversation=contents.planner_conversation,
             tasks=contents.tasks,
             reviews=contents.reviews,
+            spent=contents.spent,
         )
         if await self._attempt("session", store.save(record)):
             self._saved = contents
@@ -188,10 +191,12 @@ class SessionKeeper:
             stored_summary(s.id, s.record, s.id == self.id, s.locked) for s in stored
         )
 
-    def summary(self, tasks: tuple[TaskState, ...], last_active: datetime | None) -> SessionSummary:
-        """The session open here, holding ``tasks`` and ``last_active`` then, as the list of
-        sessions shows it."""
-        summary = tasks_summary(self.id, self.name, tasks)
+    def summary(
+        self, tasks: tuple[TaskState, ...], spent: Usage, last_active: datetime | None
+    ) -> SessionSummary:
+        """The session open here, holding ``tasks``, having ``spent`` so much and
+        ``last_active`` then, as the list of sessions shows it."""
+        summary = tasks_summary(self.id, self.name, tasks, spent)
         return summary.model_copy(update={"current": True, "last_active": last_active})
 
     async def _find(self, session_id: str) -> SessionRecord | str:

@@ -1,6 +1,7 @@
 """Keeping the open session saved: only once it's used, after each change, locked while open."""
 
 import asyncio
+from dataclasses import replace
 from datetime import timedelta
 
 from orbit.agent.application.keeper import (
@@ -12,13 +13,16 @@ from orbit.agent.application.keeper import (
 )
 from orbit.agent.domain.reviews import LaneSnapshot, PlannerSnapshot
 from orbit.agent.domain.sessions import SessionRecord
-from orbit.protocol import ErrorOccurred, Event, Settings, TaskSpec, TaskState
+from orbit.protocol import ErrorOccurred, Event, Settings, TaskSpec, TaskState, Usage
 from tests.agent_fakes import START, FakeStore, Ticks
 
 TASK = TaskState(id="1", task=TaskSpec(prompt="Add a flag."))
-EMPTY = Contents(settings=Settings(), planner_conversation=None, tasks=(), reviews=None)
+EMPTY = Contents(
+    settings=Settings(), planner_conversation=None, tasks=(), reviews=None, spent=Usage()
+)
+SPENT = Usage(input_tokens=500, cost_usd=1.4, turns=3)
 UNLOCKABLE = "Couldn't unlock the session x.lock: read-only"
-WITH_TASK = Contents(settings=Settings(), planner_conversation=None, tasks=(TASK,), reviews=None)
+WITH_TASK = replace(EMPTY, tasks=(TASK,))
 
 
 class Published:
@@ -81,14 +85,32 @@ async def test_a_session_with_a_task_is_saved_as_it_is() -> None:
     keeper, _ = keeper_for(store)
     reviews = LaneSnapshot(planner=PlannerSnapshot())
     contents = Contents(
-        settings=Settings(model="opus"), planner_conversation="c1", tasks=(TASK,), reviews=reviews
+        settings=Settings(model="opus"),
+        planner_conversation="c1",
+        tasks=(TASK,),
+        reviews=reviews,
+        spent=SPENT,
     )
     await save(keeper, contents)
     assert keeper.used
     [record] = store.saved
     assert (record.id, record.name, record.created) == ("session-1", "Oct 17 14:30", START)
     assert record.settings == Settings(model="opus") and record.planner_conversation == "c1"
-    assert record.tasks == (TASK,) and record.reviews == reviews
+    assert record.tasks == (TASK,) and record.reviews == reviews and record.spent == SPENT
+
+
+async def test_a_session_that_spent_more_is_saved_again() -> None:
+    store = FakeStore()
+    keeper, _ = keeper_for(store)
+    await save(keeper, WITH_TASK)
+    await save(keeper, replace(WITH_TASK, spent=SPENT))
+    assert [r.spent for r in store.saved] == [Usage(), SPENT]
+
+
+def test_the_open_sessions_summary_shows_what_it_spent() -> None:
+    keeper, _ = keeper_for(FakeStore())
+    summary = keeper.summary((TASK,), SPENT, None)
+    assert (summary.usage, summary.counts, summary.current) == (SPENT, {"pending": 1}, True)
 
 
 async def test_a_session_marked_used_is_saved_without_tasks() -> None:

@@ -70,7 +70,7 @@ def test_the_default_name_drops_the_days_leading_zero_but_pads_the_time() -> Non
 
 
 def test_a_new_record_carries_the_current_format_version() -> None:
-    assert record().version == FORMAT_VERSION == 1
+    assert record().version == FORMAT_VERSION == 2
 
 
 def test_a_record_round_trips_through_json() -> None:
@@ -136,13 +136,41 @@ def rename_title(record: dict[str, Any]) -> dict[str, Any]:
 def test_an_older_record_is_migrated_and_stamped_with_the_new_version(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(sessions, "FORMAT_VERSION", 2)
-    monkeypatch.setitem(sessions._MIGRATIONS, 1, rename_title)
+    monkeypatch.setattr(sessions, "FORMAT_VERSION", 3)
+    monkeypatch.setitem(sessions._MIGRATIONS, 2, rename_title)
     data = {key: value for key, value in fields().items() if key != "name"}
-    old = data | {"version": 1, "title": "Old name"}
+    old = data | {"version": 2, "title": "Old name"}
     result = parse_record(json.dumps(old))
     assert isinstance(result, SessionRecord)
-    assert (result.version, result.name) == (2, "Old name")
+    assert (result.version, result.name) == (3, "Old name")
+
+
+def version_1(tasks: tuple[TaskState, ...]) -> dict[str, Any]:
+    """The fields of a version 1 record holding ``tasks``: it had no spent total."""
+    data = json.loads(record_json(record(tasks)))
+    assert isinstance(data, dict)
+    del data["spent"]
+    return data | {"version": 1}
+
+
+def test_a_version_1_record_has_spent_what_its_tasks_did() -> None:
+    tasks = (task("1", usage=Usage(input_tokens=10, cost_usd=0.5)), task("2", usage=Usage(turns=2)))
+    result = parse_record(json.dumps(version_1(tasks)))
+    assert isinstance(result, SessionRecord)
+    assert result.spent == Usage(input_tokens=10, cost_usd=0.5, turns=2)
+
+
+def test_a_version_1_record_without_tasks_has_spent_nothing() -> None:
+    data = version_1(())
+    del data["tasks"]
+    result = parse_record(json.dumps(data))
+    assert isinstance(result, SessionRecord)
+    assert result.spent == Usage()
+
+
+def test_a_version_1_record_with_an_invalid_task_is_unreadable_for_that_task() -> None:
+    data = version_1(()) | {"tasks": [{"id": "1"}]}
+    assert parse_record(json.dumps(data)) == Unreadable("tasks.0.task: Field required")
 
 
 def test_a_record_missing_a_field_is_unreadable() -> None:
@@ -163,21 +191,20 @@ def test_a_record_with_a_naive_time_is_unreadable() -> None:
     assert result.reason.startswith("created: ")
 
 
-def test_a_summary_counts_tasks_by_status_and_adds_up_their_usage() -> None:
+def test_a_summary_counts_tasks_by_status_and_shows_what_the_session_spent() -> None:
     tasks = (
         task("1", "completed", Usage(input_tokens=100, cost_usd=0.5, turns=1)),
-        task("2", "completed", Usage(output_tokens=20, cost_usd=0.25, turns=2)),
-        task("3", "gave_up", Usage(cache_read_input_tokens=3)),
-        task("4"),
+        task("2", "gave_up", Usage(cache_read_input_tokens=3)),
+        task("3"),
     )
-    assert summarize(record(tasks), current=True, locked=True) == SessionSummary(
+    spent = Usage(input_tokens=900, cost_usd=1.4, turns=4)
+    saved = record(tasks).model_copy(update={"spent": spent})
+    assert summarize(saved, current=True, locked=True) == SessionSummary(
         id="abc123",
         name="Oct 7 09:05",
         last_active=ACTIVE,
-        counts={"completed": 2, "gave_up": 1, "pending": 1},
-        usage=Usage(
-            input_tokens=100, output_tokens=20, cache_read_input_tokens=3, cost_usd=0.75, turns=3
-        ),
+        counts={"completed": 1, "gave_up": 1, "pending": 1},
+        usage=spent,
         current=True,
         locked=True,
     )
@@ -204,8 +231,10 @@ def test_an_unreadable_review_count_is_zero() -> None:
 
 
 def test_a_summary_of_tasks_has_no_last_active_time() -> None:
-    summary = tasks_summary("new", "Fresh", (task("1", "draft"),))
-    assert summary == SessionSummary(id="new", name="Fresh", counts={"draft": 1})
+    summary = tasks_summary("new", "Fresh", (task("1", "draft"),), Usage(turns=1))
+    assert summary == SessionSummary(
+        id="new", name="Fresh", counts={"draft": 1}, usage=Usage(turns=1)
+    )
 
 
 def test_a_readable_stored_session_is_summarized_from_its_record() -> None:

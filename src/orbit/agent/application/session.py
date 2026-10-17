@@ -77,6 +77,7 @@ from orbit.protocol import (
     TaskState,
     TurnFinished,
     UpdateSettings,
+    Usage,
     VerificationChanged,
 )
 
@@ -192,7 +193,8 @@ class AgentSession:
         self._proposals = FrontendReview(self._events.put, self._agent_on)
         agents = _reviewed(agents, self._proposals)
         self._verifier = _verifier(verification, self._tasks, self._events, agents)
-        self._desk = AgentDesk(agents, self._events.put) if agents else None
+        self._spent = Usage()  # What the session's agents have spent, the planner's included.
+        self._desk = AgentDesk(agents, self._publish_agents) if agents else None
         self._announced = False
         self._closing = False
         self._lane = self._review_lane()
@@ -370,10 +372,13 @@ class AgentSession:
         """Hold what ``record`` does, its tasks as interrupted; returns True."""
         settings = resumed_settings(record.settings, self._given, self._pinned)
         tasks = interrupted(record.tasks)[0]
+        self._spent = record.spent
         return self._hold(tasks, settings, record.planner_conversation, record.reviews)
 
     def _clear(self) -> bool:
-        """Hold what a new session does, keeping the settings; returns True."""
+        """Hold what a new session does, keeping the settings and having spent nothing; returns
+        True."""
+        self._spent = Usage()
         return self._hold((), self._settings, None, None)
 
     def _hold(
@@ -417,7 +422,7 @@ class AgentSession:
             await self._lane.end_interrupted(stopped)
         await self._tasks.publish()
         await self._events.put(self._settings_changed())
-        summary = self._keeper.summary(self._board.tasks, last_active)
+        summary = self._keeper.summary(self._board.tasks, self._spent, last_active)
         await self._events.put(SessionOpened(session=summary))
 
     async def _handle_prompts(self, command: SubmitPrompt | CancelTurn | UpdateSettings) -> None:
@@ -626,7 +631,16 @@ class AgentSession:
             planner_conversation=self._seat.conversation_id,
             tasks=self._board.tasks,
             reviews=self._lane.snapshot() if self._lane else self._kept_reviews,
+            spent=self._spent,
         )
+
+    async def _publish_agents(self, event: Event) -> None:
+        """Publish ``event``, from the agents; one that ends a turn adds what the turn cost to
+        what the session spent, and saves it."""
+        await self._events.put(event)
+        if isinstance(event, TurnFinished) and event.usage is not None:
+            self._spent += event.usage
+            await self._save()
 
     async def _change(self, change: Callable[[TaskBoard], None]) -> bool:
         """Make ``change`` to the board, publishing it, or report why the change was refused;
