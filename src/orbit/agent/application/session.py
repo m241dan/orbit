@@ -496,13 +496,18 @@ class AgentSession:
 
     async def _change(self, change: Callable[[TaskBoard], None]) -> bool:
         """Make ``change`` to the board, publishing it, or report why the change was refused;
-        returns whether it was changed."""
-        try:
-            await self._tasks.change(change)
-        except ValueError as exc:
-            await self._events.put(ErrorOccurred(message=str(exc)))
-            return False
-        return True
+        returns whether it was changed. Errors from publishing or saving the change escape."""
+
+        def made(board: TaskBoard) -> bool:
+            change(board)
+            return True
+
+        return await self._tasks.change(made, refused=self._refused)
+
+    async def _refused(self, error: ValueError) -> bool:
+        """Report why the board refused a change; returns that nothing was changed."""
+        await self._events.put(ErrorOccurred(message=str(error)))
+        return False
 
     def _step_names(self) -> tuple[str, ...]:
         """The names of the steps verifying tasks now; none without verification."""

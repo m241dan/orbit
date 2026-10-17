@@ -68,3 +68,44 @@ async def test_change_refused_by_the_board_publishes_nothing() -> None:
         await tasks.change(lambda board: board.remove("missing"))
 
     assert published == []
+
+
+def removes_missing(board: TaskBoard) -> str:
+    """Removes a task that isn't on ``board``, which the board refuses."""
+    board.remove("missing")
+    return "removed"
+
+
+def adds(board: TaskBoard) -> None:
+    """Adds a task to ``board``."""
+    board.add(TaskSpec(prompt="a"))
+
+
+async def ignored(error: ValueError) -> None:
+    """Ignores the board refusing a change."""
+
+
+async def test_change_refused_by_the_board_is_handed_to_refused_with_nothing_published() -> None:
+    published: list[Event] = []
+    tasks = tasks_on(published)
+    errors: list[ValueError] = []
+
+    async def refused(error: ValueError) -> str:
+        errors.append(error)
+        return "refused"
+
+    assert await tasks.change(removes_missing, refused) == "refused"
+    assert len(errors) == 1
+    assert published == []
+
+
+async def test_a_value_error_after_the_board_changed_escapes_refused() -> None:
+    async def publish(event: Event) -> None:
+        raise ValueError("publishing tripped")
+
+    tasks = Tasks(TaskBoard(), publish)
+
+    with pytest.raises(ValueError, match="publishing tripped"):
+        await tasks.change(adds, ignored)
+
+    assert len(tasks.board.tasks) == 1

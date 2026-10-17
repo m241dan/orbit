@@ -5,6 +5,8 @@ import sys
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 
+import pytest
+
 from orbit.agent import (
     NO_STEPS_NOTE,
     AgentSession,
@@ -52,6 +54,7 @@ from tests.agent_fakes import (
     Steps,
     board,
     nothing_queued,
+    queued,
     run,
     session_for,
     verified,
@@ -462,6 +465,46 @@ async def test_usage_arriving_after_the_task_was_removed_is_skipped() -> None:
     assert outcome.status == "completed"
     assert AgentExited(agent_id="agent-1", reason="finished") in events
     assert not [e for e in events if isinstance(e, ErrorOccurred | TasksChanged)]
+
+
+async def test_a_failure_saving_usage_is_reported_not_taken_for_a_removed_task() -> None:
+    tasks = TaskBoard()
+    task_id = tasks.add(TaskSpec(prompt="a"))
+    host = FakeHost()
+    launcher = ScriptedLauncher(host, claims_done)
+    launcher.usages = [(Usage(input_tokens=10),)]
+
+    events: list[Event] = []
+
+    async def publish(event: Event) -> None:
+        events.append(event)
+
+    async def changed() -> None:
+        if tasks.get(task_id).usage != Usage():
+            raise ValueError("saving tripped")
+
+    desk = AgentDesk(Agents(host, launcher, lambda: "token-1", ROLES, exit_grace=0.5), publish)
+    run = AgentRun(task_id, Tasks(tasks, publish, changed), None, desk)
+    await asyncio.wait_for(run.run(None, "."), 5)
+    assert tasks.get(task_id).usage == Usage(input_tokens=10)
+    assert ErrorOccurred(agent_id="agent-1", message="saving tripped") in events
+
+
+async def test_a_failure_saving_a_change_the_board_made_is_not_reported_as_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session, _, _ = session_for()
+    await session.send(AddTask(task=TaskSpec(prompt="a")))
+
+    async def broken(contents: object) -> None:
+        raise ValueError("saving tripped")
+
+    monkeypatch.setattr(session._keeper, "save", broken)
+    with pytest.raises(ValueError, match="saving tripped"):
+        await session.send(RemoveTask(task_id="1"))
+    assert session._board.tasks == ()
+    assert not [e for e in queued(session) if isinstance(e, ErrorOccurred)]
+    await session.close()
 
 
 async def test_an_unexpected_error_in_the_work_lane_is_reported() -> None:

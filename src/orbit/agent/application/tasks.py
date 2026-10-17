@@ -28,10 +28,21 @@ class Tasks:
     def board(self) -> TaskBoard:
         return self._board
 
-    async def change[T](self, change: Callable[[TaskBoard], T]) -> T:
-        """Apply ``change`` to the board and publish it; returns what ``change`` returned. A
-        ``ValueError`` from the board escapes with nothing published."""
-        result = change(self._board)
+    async def change[T](
+        self,
+        change: Callable[[TaskBoard], T],
+        refused: Callable[[ValueError], Awaitable[T]] | None = None,
+    ) -> T:
+        """Apply ``change`` to the board and publish it; returns what ``change`` returned. If the
+        board refuses it with a ``ValueError``, nothing is published and that error escapes, or
+        is handed to ``refused``, whose result is returned. Errors from publishing always
+        escape."""
+        try:
+            result = change(self._board)
+        except ValueError as exc:
+            if refused is None:
+                raise
+            return await refused(exc)
         await self.publish()
         return result
 
