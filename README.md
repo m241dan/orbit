@@ -54,9 +54,10 @@ In the app:
 
 | Key | Action |
 |---|---|
-| `h` `j` `k` `l` | Move between windows (the selected one is highlighted) |
+| `h` `j` `k` `l` | Move between windows (the selected one is highlighted); while the conversation's detail pane is open, `j` from the conversation selects the pane, and from the pane `k` goes back, `j` to the prompt and `l` to the task list |
 | `i` | Jump to the prompt, which talks to the planner, and start typing (vim-style insert mode) |
-| `enter` | On the conversation: activate it (`j`/`k` move between entries, `enter` collapses or expands the one marked `▌` in the left gutter, or opens the detail pane on a tool call or request, `esc` closes the detail pane if it's open, else leaves and holds the marked entry); again, resume at the held entry |
+| `enter` | On the conversation: activate it (`j`/`k` move between entries, `enter` collapses or expands the one marked `▌` in the left gutter, or opens the detail pane on a tool call or request, `J`/`K` scroll the open detail pane, `tab` activates it, `esc` closes the detail pane if it's open, else leaves and holds the marked entry); again, resume at the held entry |
+| `enter` | On the conversation's detail pane: activate it (`j`/`k` scroll it, `esc` leaves with the pane still open) |
 | `enter` | On the task list: activate it (`j`/`k` move, `enter` edits a task or adds one on `+ new task`, `a` accepts a draft, `x` removes a task, `esc` leaves) |
 | `enter` | On the agents pane: activate it (`j`/`k` move, `c` cancels the highlighted agent's work, `esc` leaves) |
 | `t` | Hide agents' dim messages, still thinking out loud, in every tab; again, show them (works with the conversation activated too) |
@@ -66,7 +67,7 @@ In the app:
 | `ctrl+e` | Set up (or redo) the verification steps: after you confirm (`y` to go ahead, `n`/`esc` to cancel), queue a configurator task first and run it (see [Setting up verification](#setting-up-verification)) |
 | `ctrl+o` | Pick the planner's model (default, fable, opus, sonnet, haiku; new tasks default to it too) |
 | `ctrl+l` | Pick the tool access level new tasks start with in the task editor (off, restricted, full) |
-| `esc` | Stop typing, close the conversation's detail pane, leave a list or close a picker; with the conversation selected and nothing active, let go of its held entry and follow the latest output again |
+| `esc` | Stop typing, close the conversation's detail pane, leave a list or close a picker; with the conversation selected and nothing active, let go of its held entry and follow the latest output again; with the detail pane selected, close it |
 | `ctrl+s` | Stop the task run (on any tab) |
 | `ctrl+x` | Stop the planner's turn, leaving the task run going |
 | `a` / `r` / `x` | On a proposal of checks: accept it, ask for changes (type them, `enter` sends, `esc` goes back), or end the task (see [Setting up verification](#setting-up-verification)) |
@@ -212,6 +213,18 @@ than 200 lines shows its first 100, a dim `… N lines omitted …`, and its las
 is open it follows the cursor as `j`/`k` move, showing a dim `No details for this entry` on other
 entries. The first `esc` closes it, staying in the list; the next leaves the list as usual.
 Switching tabs closes it, and it stays closed when you come back.
+
+`J`/`K` scroll the open pane a line at a time from the conversation's list. To scroll it on its
+own, `tab` from the list activates the pane, where `j`/`k` scroll it; `esc` leaves it selected and
+still open, still following the conversation's held entry. While it's open, the pane is a window
+of its own, between the conversation and the prompt: `j` from the conversation selects it, `enter`
+activates it again, `k` goes back to the conversation, `j` on to the prompt and `l` to the task
+list; the prompt's `k` still goes to the conversation. `esc` with the pane selected closes it.
+Whenever the pane closes, the conversation is selected again. The pane starts at the top for each
+entry it shows, and keeps its place as the same entry updates, such as when a running call
+finishes. When the conversation is less than 20 rows high, the open pane covers all of it, the
+entries and working row hidden, until it closes or the terminal grows; `j`/`k` still move
+between entries underneath.
 
 The planned improvements to the conversation window, and what is deferred, are in
 [docs/conversation-window.md](docs/conversation-window.md).

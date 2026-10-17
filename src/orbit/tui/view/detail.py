@@ -12,12 +12,19 @@ from orbit.tui.view.tool_calls import ToolCall
 
 DETAIL_HEIGHT = 40
 """How much of the conversation's height the detail pane takes, in percent."""
+DETAIL_COVER_BELOW = 20
+"""The conversation's height, in rows, below which the open detail pane covers all of it."""
 DETAIL_LINE_LIMIT = 200
 """The most lines of output the detail pane shows; longer output keeps its two ends."""
 DETAIL_TITLE = "Detail"
 NO_DETAILS = "No details for this entry"
 WAITING = "waiting for output…"
 DIM = "dim"
+
+
+def detail_covers(height: int) -> bool:
+    """Whether the open detail pane covers the whole conversation, ``height`` rows high."""
+    return height < DETAIL_COVER_BELOW
 
 
 def detail_title(call: ToolCall | None) -> str:

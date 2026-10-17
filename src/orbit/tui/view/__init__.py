@@ -15,6 +15,7 @@ from orbit.tui.view.common import (
     spinner_frame,
 )
 from orbit.tui.view.detail import (
+    DETAIL_COVER_BELOW,
     DETAIL_HEIGHT,
     DETAIL_LINE_LIMIT,
     DETAIL_TITLE,
@@ -23,6 +24,7 @@ from orbit.tui.view.detail import (
     argument_lines,
     capped,
     detail_body,
+    detail_covers,
     detail_title,
 )
 from orbit.tui.view.events import SUPERSEDED_UNLESS, coalesce
@@ -147,6 +149,7 @@ __all__ = [
     "COLLAPSED_KINDS",
     "CONVERSATION_TITLE",
     "DECISION_NOTES",
+    "DETAIL_COVER_BELOW",
     "DETAIL_HEIGHT",
     "DETAIL_LINE_LIMIT",
     "DETAIL_TITLE",
@@ -212,6 +215,7 @@ __all__ = [
     "conversation_title",
     "decision_entry",
     "detail_body",
+    "detail_covers",
     "detail_title",
     "duration_text",
     "elapsed_clock",

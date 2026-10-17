@@ -13,6 +13,7 @@ from rich.style import Style
 from rich.text import Text
 from textual import on
 from textual.app import ComposeResult
+from textual.binding import Binding, BindingType
 from textual.containers import Vertical, VerticalScroll
 from textual.message import Message
 from textual.reactive import reactive
@@ -31,6 +32,7 @@ from orbit.tui.view import (
     collapsible,
     conversation_title,
     detail_body,
+    detail_covers,
     detail_title,
     entry_label,
     entry_markdown,
@@ -48,7 +50,7 @@ from orbit.tui.view import (
     track_working,
     working_lines,
 )
-from orbit.tui.widgets import ListPane
+from orbit.tui.widgets import ListPane, ModalFocus
 
 
 @dataclass(frozen=True)
@@ -197,11 +199,15 @@ class TranscriptLog(ListPane):
         return tuple(self._entries)
 
     @property
+    def inspected(self) -> int | None:
+        """Where the cursor's entry is among the entries, if there's a cursor."""
+        return None if self.highlighted is None else self._rows[self.highlighted]
+
+    @property
     def detail(self) -> ToolCall | None:
         """The tool call or request of the cursor's entry, if it's one."""
-        if self.highlighted is None:
-            return None
-        return self._entries[self._rows[self.highlighted]].call
+        index = self.inspected
+        return None if index is None else self._entries[index].call
 
     def inspect(self, inspecting: bool) -> None:
         """Show the cursor's entry's details as it moves if ``inspecting``, or stop."""
@@ -492,12 +498,13 @@ class WorkingRow(Static):
         self.set_class(bool(lines), "-running")
 
 
-class DetailPane(VerticalScroll):
+class DetailPane(ModalFocus, VerticalScroll):
     """The full content of the tool call or request under the conversation's cursor, below
-    the logs and the working row, taking ``share`` percent of the conversation; hidden until
-    opened."""
+    the logs and the working row, taking ``share`` percent of the conversation, or all of it
+    while ``covering``; hidden until opened. Activated, j/k scroll it and escape leaves."""
 
-    can_focus = False
+    class Focused(Message):
+        """The pane was activated."""
 
     DEFAULT_CSS = """
     DetailPane {
@@ -507,27 +514,61 @@ class DetailPane(VerticalScroll):
     }
     DetailPane.-open { display: block; }
     """
+    BINDINGS: ClassVar[list[BindingType]] = [
+        Binding("j", "scroll(1)", show=False),
+        Binding("k", "scroll(-1)", show=False),
+        Binding("escape", "normal_mode", show=False),
+    ]
 
     share: reactive[int] = reactive(DETAIL_HEIGHT)
+    covering: reactive[bool] = reactive(False)
+
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._entry: int | None = None  # Where the entry shown is among its log's.
 
     def compose(self) -> ComposeResult:
         yield Static()
 
-    def watch_share(self, share: int) -> None:
-        self.styles.height = f"{share}%"
+    def watch_share(self) -> None:
+        self._fit()
+
+    def watch_covering(self) -> None:
+        self._fit()
+
+    def _fit(self) -> None:
+        self.styles.height = "1fr" if self.covering else f"{self.share}%"
 
     @property
     def opened(self) -> bool:
         return self.has_class("-open")
 
-    def show(self, call: ToolCall | None) -> None:
-        """Open, showing ``call``'s details, or a note that there are none."""
+    def show(self, call: ToolCall | None, entry: int | None) -> None:
+        """Open, showing ``call``'s details, or a note that there are none, for the entry at
+        ``entry``; another entry than the one shown starts at the top."""
+        if not self.opened or entry != self._entry:
+            self.scroll_home(animate=False)
+        self._entry = entry
         self.border_title = detail_title(call)
         self.query_one(Static).update(detail_body(call))
         self.add_class("-open")
 
     def close(self) -> None:
+        """Close, leaving the pane if it's active."""
+        if self.has_focus:
+            self.screen.set_focus(None)
         self.remove_class("-open")
+
+    def enter_scroll_mode(self) -> None:
+        """Activate the pane, so j/k scroll it."""
+        self._activate()
+
+    def on_focus(self) -> None:
+        self.post_message(self.Focused())
+
+    def action_scroll(self, step: int) -> None:
+        """Scroll ``step`` lines."""
+        self.scroll_relative(y=step, animate=False)
 
 
 class Transcript(Vertical):
@@ -547,7 +588,16 @@ class Transcript(Vertical):
         border: round $primary;
         padding: 0 1;
     }
+    /* Kept displayed, at no height, so a log in list mode keeps its focus. */
+    Transcript.-covered > TranscriptLog { height: 0; }
+    Transcript.-covered > WorkingRow { display: none; }
     """
+    BINDINGS: ClassVar[list[BindingType]] = [
+        # Within the conversation: from its list, or the pane itself, while the pane is open.
+        Binding("J", "scroll_detail(1)", show=False),
+        Binding("K", "scroll_detail(-1)", show=False),
+        Binding("tab", "focus_detail", show=False),
+    ]
 
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
@@ -561,10 +611,37 @@ class Transcript(Vertical):
     def compose(self) -> ComposeResult:
         yield self._new_log(None, shown=True)
         yield WorkingRow()
-        yield DetailPane()
+        yield DetailPane(id="detail")
 
     def on_mount(self) -> None:
         self._retitle()
+
+    def on_resize(self) -> None:
+        self._fit_detail()
+
+    def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
+        # The conversation's own keys all work on the detail pane, so only while it's open.
+        return self.detail.opened
+
+    def action_scroll_detail(self, step: int) -> None:
+        """Scroll the open detail pane ``step`` lines."""
+        self.detail.action_scroll(step)
+
+    def action_focus_detail(self) -> None:
+        """Activate the open detail pane, so j/k scroll it."""
+        self.detail.enter_scroll_mode()
+
+    def close_detail(self) -> None:
+        """Stop inspecting the shown log's entries, closing the detail pane."""
+        self.shown.inspecting = False
+        self.detail.close()
+        self._fit_detail()
+
+    def _fit_detail(self) -> None:
+        """Have the open detail pane cover the whole conversation when it's short, or not."""
+        covering = self.detail.opened and detail_covers(self.content_size.height)
+        self.set_class(covering, "-covered")
+        self.detail.covering = covering
 
     @property
     def shown(self) -> TranscriptLog:
@@ -587,9 +664,10 @@ class Transcript(Vertical):
         event.stop()
         log = self.shown
         if log.inspecting:
-            self.detail.show(log.detail)
+            self.detail.show(log.detail, log.inspected)
         else:
             self.detail.close()
+        self._fit_detail()
 
     def track(self, event: Event, roles: Mapping[str, str]) -> None:
         """Follow who runs after ``event``, with ``roles`` placing agents in tabs."""
@@ -686,8 +764,7 @@ class Transcript(Vertical):
         """Show only the tab keyed ``key``'s entries, titled by its tab ``label``, or all."""
         if self.shown.has_focus:
             self.screen.set_focus(None)
-        self.shown.inspecting = False
-        self.detail.close()
+        self.close_detail()
         self.shown.remove_class("-shown")
         self.only = key
         self._label = None if key is None else label

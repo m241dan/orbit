@@ -17,7 +17,7 @@ from orbit.protocol import (
 )
 from orbit.tui import OrbitApp
 from orbit.tui.transcript import DetailPane, Transcript, TranscriptLog, WorkingRow
-from orbit.tui.view import DETAIL_HEIGHT, NO_DETAILS, WAITING
+from orbit.tui.view import DETAIL_COVER_BELOW, DETAIL_HEIGHT, NO_DETAILS, WAITING
 from tests.test_tui import FakeSession, feed_events, said, started
 
 
@@ -176,3 +176,195 @@ async def test_switching_tabs_closes_the_pane_for_good() -> None:
 
 def test_a_log_without_a_cursor_has_no_details() -> None:
     assert TranscriptLog().detail is None
+
+
+LONG = "\n".join(f"line {n}" for n in range(60))
+
+
+async def scrolling(app: OrbitApp, session: FakeSession, pilot: Pilot[None]) -> DetailPane:
+    """Open the details of a call with long output, from the conversation's list."""
+    await feed_events(session, pilot, read("c1"), done("c1", LONG))
+    await inspecting(pilot)
+    await pilot.pause()
+    return pane(app)
+
+
+async def test_shift_j_and_k_scroll_the_open_pane_from_the_list() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test(size=(80, 30)) as pilot:
+        detail = await scrolling(app, session, pilot)
+        await pilot.press("J", "J", "J")
+        assert detail.scroll_y == 3
+        await pilot.press("K")
+        assert detail.scroll_y == 2
+        assert app.focused is app.query_one(Transcript).shown
+
+
+async def test_shift_j_does_nothing_while_the_pane_is_closed() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test(size=(80, 30)) as pilot:
+        await feed_events(session, pilot, read("c1"), done("c1", LONG))
+        await pilot.press("k", "enter", "J")
+        assert not pane(app).opened and pane(app).scroll_y == 0
+
+
+def selected(app: OrbitApp) -> list[str]:
+    return [widget.id or "" for widget in app.query(".selected")]
+
+
+async def test_tab_from_the_list_activates_the_open_pane_and_j_scrolls_it() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test(size=(80, 30)) as pilot:
+        detail = await scrolling(app, session, pilot)
+        await pilot.press("tab")
+        assert app.focused is detail and selected(app) == ["detail"]
+        await pilot.press("j", "j", "k")
+        assert detail.scroll_y == 1
+        assert app.query_one(Transcript).shown.highlighted == 0
+
+
+async def test_tab_from_the_list_with_the_pane_closed_leaves_the_pane_alone() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test(size=(80, 30)) as pilot:
+        await feed_events(session, pilot, read("c1"), done("c1", "x"))
+        await pilot.press("k", "enter", "tab")
+        assert app.focused is not pane(app) and selected(app) == ["transcript"]
+
+
+async def test_escape_from_the_pane_leaves_it_selected_and_open() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test(size=(80, 30)) as pilot:
+        await scrolling(app, session, pilot)
+        await pilot.press("tab", "escape")
+        assert app.focused is None and pane(app).opened and selected(app) == ["detail"]
+
+
+async def test_window_moves_reach_the_open_pane_between_conversation_and_prompt() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test(size=(80, 30)) as pilot:
+        detail = await scrolling(app, session, pilot)
+        await pilot.press("tab", "escape", "k")
+        assert selected(app) == ["transcript"]
+        await pilot.press("j")
+        assert selected(app) == ["detail"]
+        await pilot.press("enter", "j")
+        assert app.focused is detail and detail.scroll_y == 1
+        await pilot.press("escape", "j")
+        assert selected(app) == ["prompt"]
+
+
+async def test_the_pane_s_other_moves_go_to_the_task_list() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test(size=(80, 30)) as pilot:
+        await scrolling(app, session, pilot)
+        await pilot.press("tab", "escape", "l")
+        assert selected(app) == ["task-list"]
+
+
+async def test_j_from_the_conversation_reaches_the_prompt_while_the_pane_is_closed() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test(size=(80, 30)) as pilot:
+        await pilot.press("k", "j")
+        assert selected(app) == ["prompt"]
+
+
+async def test_escape_on_the_selected_pane_closes_it_and_selects_the_conversation() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test(size=(80, 30)) as pilot:
+        await scrolling(app, session, pilot)
+        await pilot.press("tab", "escape", "escape")
+        assert not pane(app).opened and selected(app) == ["transcript"]
+        assert app.query_one(Transcript).shown.highlighted == 0
+
+
+async def test_closing_the_active_pane_leaves_it_for_the_conversation() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test(size=(120, 30)) as pilot:
+        await scrolling(app, session, pilot)
+        await pilot.press("tab", "ctrl+t")  # The planner tab closes the pane.
+        await pilot.pause()
+        assert app.focused is None and selected(app) == ["transcript"]
+
+
+SHORT = DETAIL_COVER_BELOW + 6  # Terminal rows leaving the conversation just short of it.
+
+
+async def test_on_a_short_terminal_the_open_pane_covers_the_conversation() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test(size=(80, SHORT)) as pilot:
+        transcript = app.query_one(Transcript)
+        assert transcript.content_size.height < DETAIL_COVER_BELOW
+        detail = await scrolling(app, session, pilot)
+        assert detail.size.height + 1 == transcript.content_size.height
+        assert transcript.shown.size.height == 0
+        assert app.focused is transcript.shown
+
+
+async def test_closing_the_covering_pane_shows_the_conversation_again() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test(size=(80, SHORT)) as pilot:
+        await scrolling(app, session, pilot)
+        await pilot.press("escape")
+        await pilot.pause()
+        transcript = app.query_one(Transcript)
+        assert transcript.shown.size.height == transcript.content_size.height
+
+
+async def test_growing_the_terminal_gives_the_conversation_back_its_room() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test(size=(80, SHORT)) as pilot:
+        detail = await scrolling(app, session, pilot)
+        await pilot.resize_terminal(80, 40)
+        await pilot.pause()
+        transcript = app.query_one(Transcript)
+        assert detail.size.height + 1 == transcript.content_size.height * DETAIL_HEIGHT // 100
+        assert transcript.shown.size.height > 0
+        await pilot.resize_terminal(80, SHORT)
+        await pilot.pause()
+        assert transcript.shown.size.height == 0
+
+
+async def test_the_pane_starts_at_the_top_for_another_entry() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test(size=(80, 30)) as pilot:
+        await feed_events(session, pilot, read("c0"), done("c0", LONG))
+        detail = await scrolling(app, session, pilot)
+        await pilot.press("J", "J", "k")
+        await pilot.pause()
+        assert detail.border_title == "Detail · Read a.py" and detail.scroll_y == 0
+
+
+async def test_the_pane_keeps_its_place_as_its_entry_updates() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test(size=(80, 30)) as pilot:
+        await feed_events(session, pilot, read("c1", LONG))
+        await inspecting(pilot)
+        await pilot.press("J", "J")
+        await feed_events(session, pilot, done("c1", "x"))
+        await pilot.pause()
+        assert shown(app)[-1] == "x" and pane(app).scroll_y == 2
+
+
+async def test_reopening_the_pane_starts_at_the_top() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test(size=(80, 30)) as pilot:
+        detail = await scrolling(app, session, pilot)
+        await pilot.press("J", "J", "escape", "enter")
+        await pilot.pause()
+        assert detail.opened and detail.scroll_y == 0

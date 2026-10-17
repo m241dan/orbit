@@ -64,7 +64,7 @@ from orbit.tui.panels import UsagePanel, VerificationPanel
 from orbit.tui.proposals import ProposalScreen
 from orbit.tui.tabs import ConversationTabs
 from orbit.tui.tasks import TaskEditorScreen, TaskList
-from orbit.tui.transcript import Transcript
+from orbit.tui.transcript import DetailPane, Transcript
 from orbit.tui.view import (
     TOOL_ACCESS_OPTIONS,
     AgentNote,
@@ -94,14 +94,18 @@ from orbit.tui.widgets import (
 )
 
 # Window reached from each window by h/j/k/l; missing means an edge.
-# Conversation over prompt on the left, task list over verification steps on the right.
+# Conversation over prompt on the left, task list over verification steps on the right; the
+# conversation's detail pane, while it's open, between the conversation and the prompt.
 NEIGHBORS: dict[str, dict[str, str]] = {
     "transcript": {"j": "prompt", "l": "task-list"},
+    "detail": {"k": "transcript", "j": "prompt", "l": "task-list"},
     "prompt": {"k": "transcript", "l": "verification-steps"},
     "task-list": {"h": "transcript", "j": "verification-steps"},
     "verification-steps": {"h": "prompt", "k": "task-list", "j": "agents"},
     "agents": {"h": "prompt", "k": "verification-steps"},
 }
+# The conversation's moves that differ while its detail pane is open.
+OPEN_DETAIL_NEIGHBORS: dict[str, str] = {"j": "detail"}
 
 # Most events rendered in one go, so a flood still lets the screen repaint now and then.
 BATCH_LIMIT = 500
@@ -156,6 +160,8 @@ class OrbitApp(App[None], inherit_bindings=False):
     PromptInput:focus, PromptBox:focus, TaskList:focus, Transcript:focus-within {
         border: heavy $accent;
     }
+    DetailPane.selected { border: none; border-top: solid $accent; }
+    DetailPane:focus { border-top: heavy $accent; }
     """
     BINDINGS: ClassVar[list[BindingType]] = [
         # Priority, so it beats the prompt's own ctrl+c (copy).
@@ -258,9 +264,16 @@ class OrbitApp(App[None], inherit_bindings=False):
     # Window navigation only applies at the top level, when no window is active.
 
     def action_move(self, direction: str) -> None:
-        target = NEIGHBORS[self._selected].get(direction)
+        target = self._neighbors().get(direction)
         if target is not None and self.focused is None:
             self._select(target)
+
+    def _neighbors(self) -> dict[str, str]:
+        """The windows h/j/k/l reach from the selected one."""
+        neighbors = NEIGHBORS[self._selected]
+        if self._selected == "transcript" and self._transcript.detail.opened:
+            return neighbors | OPEN_DETAIL_NEIGHBORS
+        return neighbors
 
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
         if action in ("cycle_tab", "release_cursor"):
@@ -297,11 +310,21 @@ class OrbitApp(App[None], inherit_bindings=False):
             self._agents.enter_list_mode()
         elif self._selected == "transcript":
             self._transcript.enter_list_mode()
+        elif self._selected == "detail":
+            self._transcript.detail.enter_scroll_mode()
 
     def action_release_cursor(self) -> None:
-        """With the conversation selected, let go of its held cursor."""
+        """With the conversation selected, let go of its held cursor; with its detail pane
+        selected, close the pane."""
         if self._selected == "transcript":
             self._transcript.release_cursor()
+        elif self._selected == "detail":
+            self._transcript.close_detail()
+            self._select("transcript")
+
+    @on(DetailPane.Focused)
+    def _detail_focused(self) -> None:
+        self._select("detail")
 
     def action_insert_mode(self) -> None:
         """Shortcut from any window: select the prompt and start typing."""
@@ -346,6 +369,8 @@ class OrbitApp(App[None], inherit_bindings=False):
         agent = tabs.agent_of(event.tab.id or "")
         tabs.mark_read(agent)
         self._transcript.show_only(agent, event.tab.label_text)
+        if self._selected == "detail":  # Its pane just closed.
+            self._select("transcript")
 
     @on(AgentsPane.Cancel)
     async def _cancel_agent(self, message: AgentsPane.Cancel) -> None:

@@ -5,6 +5,7 @@ from rich.rule import Rule
 from rich.text import Text
 
 from orbit.tui.view import (
+    DETAIL_COVER_BELOW,
     DETAIL_LINE_LIMIT,
     NO_DETAILS,
     WAITING,
@@ -13,6 +14,7 @@ from orbit.tui.view import (
     argument_lines,
     capped,
     detail_body,
+    detail_covers,
     detail_title,
 )
 
@@ -31,6 +33,14 @@ def parts(call: ToolCall) -> tuple[Text, Rule, Text]:
 
 def numbered(count: int) -> str:
     return "\n".join(f"line {i}" for i in range(count))
+
+
+def test_the_pane_covers_a_conversation_shorter_than_the_minimum() -> None:
+    assert detail_covers(DETAIL_COVER_BELOW - 1)
+
+
+def test_the_pane_leaves_room_in_a_conversation_of_the_minimum_height() -> None:
+    assert not detail_covers(DETAIL_COVER_BELOW)
 
 
 def test_the_title_names_the_calls_summary() -> None:
