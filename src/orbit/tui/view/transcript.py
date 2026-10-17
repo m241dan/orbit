@@ -29,6 +29,7 @@ from orbit.protocol import (
     ToolCallStarted,
     TurnEndReason,
     TurnFinished,
+    Usage,
 )
 from orbit.tui.view.common import EntryKind
 from orbit.tui.view.tool_calls import orbit_request_text, tool_call_text
@@ -318,18 +319,79 @@ def activity_entry(event: AgentNote) -> tuple[str, EntryKind]:
     return note_entry(event)
 
 
-def turn_end_entry(reason: TurnEndReason) -> tuple[str, EntryKind] | None:
-    """A note on how a turn ended, unless it ended as expected or its error was shown."""
-    if reason in ("completed", "error"):
-        return None
-    return f"[turn ended: {reason}]", "tool"
+RULE_KINDS: frozenset[EntryKind] = frozenset({"rule", "error_rule"})
+"""Kinds whose entries are drawn as a horizontal rule across their width, their text set in
+it: the rule ending every turn."""
 
 
-def turn_finished_entry(event: TurnFinished) -> tuple[str, EntryKind] | None:
-    """A note on how ``event``'s turn ended, labelled with its agent; None when the turn ended
-    as expected or its error was shown."""
-    entry = turn_end_entry(event.reason)
-    return None if entry is None else agent_labelled(entry, event.agent_id)
+def ruled(kind: EntryKind) -> bool:
+    return kind in RULE_KINDS
+
+
+TURN_END_LABELS: dict[TurnEndReason, str] = {
+    "completed": "done",
+    "cancelled": "stopped",
+    "max_steps": "out of steps",
+    "error": "error",
+}
+
+
+def duration_text(seconds: float) -> str:
+    """``seconds`` as a turn's time reads: ``42s``, ``1m12s``, or ``1h03m`` from an hour."""
+    whole = int(seconds)
+    minutes, secs = divmod(whole, 60)
+    hours, minutes = divmod(minutes, 60)
+    if hours:
+        return f"{hours}h{minutes:02d}m"
+    if minutes:
+        return f"{minutes}m{secs:02d}s"
+    return f"{secs}s"
+
+
+TOKEN_UNITS = ((1_000_000, "M"), (1_000, "k"))
+"""The units token counts are shown in, largest first."""
+
+
+def token_text(count: int) -> str:
+    """``count`` tokens, compact: as they are below a thousand, else in thousands (``k``) or
+    millions (``M``), rounded down, with one decimal below 10 of the unit (``1.2M``, ``14k``)."""
+    for unit, suffix in TOKEN_UNITS:
+        if count >= unit:
+            return _in_unit(count, unit) + suffix
+    return str(count)
+
+
+def _in_unit(count: int, unit: int) -> str:
+    tenths = count * 10 // unit
+    if tenths >= 100 or tenths % 10 == 0:
+        return str(count // unit)
+    return f"{tenths // 10}.{tenths % 10}"
+
+
+def usage_text(usage: Usage) -> str:
+    """The tokens a turn read (``↑``, its input with what was cached and read from the cache)
+    and wrote (``↓``)."""
+    read = usage.input_tokens + usage.cache_creation_input_tokens + usage.cache_read_input_tokens
+    return f"↑{token_text(read)} ↓{token_text(usage.output_tokens)}"
+
+
+def _turn_cost(usage: Usage | None, elapsed: float | None) -> list[str]:
+    """How long a turn took, the ``usage``'s time else ``elapsed`` seconds if known, and its
+    tokens when it has ``usage``."""
+    if usage is None:
+        return [] if elapsed is None else [duration_text(elapsed)]
+    return [duration_text(usage.duration_ms / 1000), usage_text(usage)]
+
+
+def turn_rule_entry(
+    event: TurnFinished, elapsed: float | None, speaker: str | None
+) -> tuple[str, EntryKind]:
+    """The rule ending ``event``'s turn: how it ended, headed by its ``speaker`` if any, then
+    how long it took (the usage's time, else ``elapsed`` seconds, if known) and its tokens when
+    it has usage. A turn ending in an error is a rule of its own kind."""
+    label = TURN_END_LABELS[event.reason]
+    parts = [label if speaker is None else f"{speaker} {label}", *_turn_cost(event.usage, elapsed)]
+    return " · ".join(parts), "error_rule" if event.reason == "error" else "rule"
 
 
 def error_entry(event: ErrorOccurred) -> tuple[str, EntryKind]:

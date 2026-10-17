@@ -4,7 +4,18 @@ from typing import Literal
 
 from orbit.protocol import Settings, StepStatus, TaskStatus
 
-EntryKind = Literal["user", "prompt", "assistant", "tool", "verify", "agent", "request", "error"]
+EntryKind = Literal[
+    "user",
+    "prompt",
+    "assistant",
+    "tool",
+    "verify",
+    "agent",
+    "request",
+    "error",
+    "rule",
+    "error_rule",
+]
 """How a transcript entry is styled."""
 
 

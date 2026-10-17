@@ -156,6 +156,14 @@ the mark stays, the conversation stops following new output, and `enter` picks u
 `esc` again with the Conversation window selected lets go, and the conversation follows the latest
 output again. Each tab holds its own spot, kept while you switch tabs.
 
+Every turn, the planner's and each agent's, ends with a muted rule across the conversation's width,
+under All and the agent's tab: `── done · 1m12s · ↑1.2M ↓8k ──`. It says how the turn ended
+(`done`, `stopped`, `out of steps`, or `error` in red, even when the error itself was already
+shown), how long it took (`42s`, `1m12s`, `1h03m`), and, when the turn reports its usage, the
+tokens it read (`↑`, input including cache writes and reads) and wrote (`↓`), rounded down
+(`812`, `8.4k`, `14k`, `1.2M`). An agent's rule starts with its id (`── agent-3 done · 4m10s ──`);
+the planner's doesn't.
+
 Press `t` (with nothing being typed) to hide agents' dim messages, so only final answers, tool
 calls and everything else show, in every tab at once, tabs opened later included; the window's title
 reads `Conversation · thinking hidden` while they're hidden, and `t` again shows them. A message that

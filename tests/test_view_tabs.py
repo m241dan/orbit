@@ -86,11 +86,10 @@ def test_events_with_no_agent_mark_nothing() -> None:
     assert track_tabs(tabs, Notice(message="x"), active=None) is tabs
 
 
-def test_a_turn_ending_as_expected_marks_nothing() -> None:
+def test_a_turn_ending_marks_its_tab_for_its_rule() -> None:
     tabs = (ConversationTab("agent-1", "coder"),)
-    for reason in ("completed", "error"):
-        event = TurnFinished(turn_id="t", agent_id="agent-1", reason=reason)
-        assert track_tabs(tabs, event) is tabs
+    event = TurnFinished(turn_id="t", agent_id="agent-1", reason="completed")
+    assert track_tabs(tabs, event) == (ConversationTab("agent-1", "coder", True),)
 
 
 def test_marking_a_tab_read_clears_only_its_marker() -> None:

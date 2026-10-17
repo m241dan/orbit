@@ -13,15 +13,18 @@ from textual.pilot import Pilot
 from orbit.protocol import (
     PLANNER,
     AssistantMessage,
+    ErrorOccurred,
     Event,
     Notice,
     ToolCallFinished,
     ToolCallStarted,
     TurnEndReason,
     TurnFinished,
+    TurnStarted,
+    Usage,
 )
 from orbit.tui import OrbitApp
-from orbit.tui.transcript import Entry, GutteredEntry, Transcript, TranscriptLog
+from orbit.tui.transcript import Entry, GutteredEntry, HangingIndent, Transcript, TranscriptLog
 from orbit.tui.view import GUTTER_BAR, GUTTER_MARKER, PROMPT_LINES_SHOWN, EntryKind
 from orbit.tui.widgets import PromptInput
 from tests.test_tui import FakeSession, feed_events, said, started
@@ -908,7 +911,12 @@ def brightness(app: OrbitApp) -> list[str]:
     dim = log.get_component_rich_style("transcript--thinking", partial=True)
     bright = log.get_component_rich_style("transcript--assistant", partial=True)
     names = {dim: "dim", bright: "bright"}
-    return [names[label_style(prompt)] for prompt in prompts(app) if prompt.body is not None]
+    return [names[label_style(prompt)] for prompt in prompts(app) if is_markdown(prompt)]
+
+
+def is_markdown(prompt: GutteredEntry) -> bool:
+    """Whether ``prompt`` draws markdown: an agent's message rather than a rule, say."""
+    return isinstance(prompt.body, HangingIndent)
 
 
 async def test_an_agents_message_arrives_dim_under_a_muted_label_row() -> None:
@@ -1057,7 +1065,7 @@ async def test_hidden_thinking_leaves_bright_messages_shown() -> None:
     async with app.run_test() as pilot:
         await feed_events(session, pilot, *thinking_turn(), turn_ended("agent-1"))
         await pilot.press("t")
-        assert labels(app) == [*TOOL_ROWS, "done"]
+        assert labels(app) == [*TOOL_ROWS, "done", "agent-1 done"]
         assert brightness(app) == ["bright"]
 
 
@@ -1156,11 +1164,11 @@ async def test_a_message_promoted_while_thinking_is_hidden_appears() -> None:
         await feed_events(session, pilot, *thinking_turn())
         await pilot.press("t")
         await feed_events(session, pilot, turn_ended("agent-1"))
-        assert labels(app) == [*TOOL_ROWS, "done"]
+        assert labels(app) == [*TOOL_ROWS, "done", "agent-1 done"]
         assert brightness(app) == ["bright"]
 
 
-async def test_a_turn_ending_on_a_tool_call_while_hidden_shows_nothing_more() -> None:
+async def test_a_turn_ending_on_a_tool_call_while_hidden_shows_only_its_rule() -> None:
     session = FakeSession()
     app = OrbitApp(session)
     async with app.run_test() as pilot:
@@ -1168,7 +1176,7 @@ async def test_a_turn_ending_on_a_tool_call_while_hidden_shows_nothing_more() ->
         await pilot.press("t")
         shown = labels(app)
         await feed_events(session, pilot, turn_ended("agent-1"))
-        assert labels(app) == shown
+        assert labels(app) == [*shown, "agent-1 done"]
 
 
 async def test_speaker_labels_are_judged_on_the_entries_shown() -> None:
@@ -1184,11 +1192,11 @@ async def test_speaker_labels_are_judged_on_the_entries_shown() -> None:
             thought("agent-1", "second", "t3"),
             turn_ended("agent-1", "t3"),
         )
-        assert headings(app) == ["agent-1", "agent-2", "agent-1"]
+        assert headings(app) == ["agent-1", None, "agent-2", "agent-1", None]
         await pilot.press("t")
-        assert headings(app) == ["agent-1", None]
+        assert headings(app) == ["agent-1", None, None, None]
         await pilot.press("t")
-        assert headings(app) == ["agent-1", "agent-2", "agent-1"]
+        assert headings(app) == ["agent-1", None, "agent-2", "agent-1", None]
 
 
 async def test_t_types_into_the_prompt_rather_than_hiding_thinking() -> None:
@@ -1208,3 +1216,80 @@ async def test_t_does_nothing_on_a_modal_screen() -> None:
     async with app.run_test() as pilot:
         await pilot.press("ctrl+e", "t")
         assert not app.query_one(Transcript).thinking_hidden
+
+
+def turn_began(agent_id: str, turn: str = "t") -> TurnStarted:
+    return TurnStarted(turn_id=turn, agent_id=agent_id)
+
+
+async def test_a_turns_rule_follows_its_last_entry_timed_from_its_start() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    now = [100.0]
+    app.clock = lambda: now[0]
+    async with app.run_test(size=(120, 30)) as pilot:
+        await feed_events(session, pilot, started("agent-3"), turn_began("agent-3"))
+        now[0] = 350.0
+        await feed_events(session, pilot, thought("agent-3", "done"), turn_ended("agent-3"))
+        transcript = app.query_one(Transcript)
+        rule = Entry("agent-3 done · 4m10s", "rule", "agent-3")
+        for key in (None, "coder"):
+            assert transcript.entries(key)[-2:] == (Entry("done", "assistant", "agent-3"), rule)
+
+
+async def test_a_turns_rule_with_usage_shows_its_time_and_tokens() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        usage = Usage(input_tokens=210_000, output_tokens=12_000, duration_ms=72_000)
+        ended = TurnFinished(turn_id="t", agent_id="agent-3", reason="completed", usage=usage)
+        await feed_events(session, pilot, turn_began("agent-3"), ended)
+        assert labels(app) == ["agent-3 done · 1m12s · ↑210k ↓12k"]
+
+
+async def test_a_turn_whose_error_was_shown_still_ends_in_an_error_rule() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(
+            session,
+            pilot,
+            ErrorOccurred(agent_id="agent-3", message="boom"),
+            turn_ended("agent-3", reason="error"),
+        )
+        entries = app.query_one(Transcript).entries(None)
+        assert [(entry.text, entry.kind) for entry in entries] == [
+            ("agent-3: boom", "error"),
+            ("agent-3 error", "error_rule"),
+        ]
+
+
+@pytest.mark.parametrize(
+    ("reason", "component"),
+    [("completed", "rule"), ("max_steps", "rule"), ("error", "error_rule")],
+)
+async def test_a_turns_rule_is_drawn_across_the_width_in_its_style(
+    reason: TurnEndReason, component: str
+) -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test(size=(60, 20)) as pilot:
+        await feed_events(session, pilot, turn_ended("agent-3", reason=reason))
+        log = visible_log(app)
+        style = log.get_component_rich_style(f"transcript--{component}", partial=True)
+        assert label_style(entry(log, 0)) == style
+        row = entry_rows(log, 0)[0]
+        assert row.startswith(f"{GUTTER_BAR} ──")
+        assert row.endswith("──") and len(row) == log.size.width
+        segments = [s for s in entry_lines(log, 0)[0] if s.text.strip("─ ")]
+        assert all(segment.style == style for segment in segments[1:])
+
+
+async def test_rules_and_errors_have_their_own_styles() -> None:
+    app = OrbitApp(FakeSession())
+    async with app.run_test():
+        log = visible_log(app)
+        rule = log.get_component_rich_style("transcript--rule", partial=True)
+        error_rule = log.get_component_rich_style("transcript--error_rule", partial=True)
+        assert rule == log.get_component_rich_style("transcript--tool", partial=True)
+        assert error_rule == log.get_component_rich_style("transcript--error", partial=True)

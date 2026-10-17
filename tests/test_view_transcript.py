@@ -1,5 +1,6 @@
 import json
 
+import pytest
 from rich.console import Console
 from rich.style import Style
 
@@ -21,19 +22,23 @@ from orbit.protocol import (
     TaskState,
     ToolCallFinished,
     ToolCallStarted,
+    TurnEndReason,
     TurnFinished,
+    Usage,
 )
 from orbit.tui.view import (
     GUTTER_BAR,
     GUTTER_MARKER,
     PROMPT_LINES_SHOWN,
     PROMPT_MARKER,
+    EntryKind,
     activity_entry,
     agent_entry,
     agent_labelled,
     banded,
     collapsible,
     conversation_title,
+    duration_text,
     entry_label,
     entry_markdown,
     entry_prefix,
@@ -44,12 +49,14 @@ from orbit.tui.view import (
     hanging_indent,
     note_entry,
     output_entry,
+    ruled,
     shows_markdown,
     speaker_label,
     starts_collapsed,
     task_started_entry,
-    turn_end_entry,
-    turn_finished_entry,
+    token_text,
+    turn_rule_entry,
+    usage_text,
     verification_finished_entry,
     verification_skipped_entry,
     verification_started_entry,
@@ -63,13 +70,6 @@ def test_turn_output_becomes_transcript_entries() -> None:
     assert output_entry(ToolCallFinished(turn_id="t", call_id="c", output="ok")) == ("ok", "tool")
     failed = ToolCallFinished(turn_id="t", call_id="c", output="no", is_error=True)
     assert output_entry(failed) == ("no", "error")
-
-
-def test_only_unexpected_turn_endings_are_noted() -> None:
-    assert turn_end_entry("completed") is None
-    assert turn_end_entry("error") is None  # its error message was shown already
-    assert turn_end_entry("cancelled") == ("[turn ended: cancelled]", "tool")
-    assert turn_end_entry("max_steps") == ("[turn ended: max_steps]", "tool")
 
 
 def test_task_progress_entries() -> None:
@@ -211,10 +211,6 @@ def test_activity_entries_cover_agents_exchanges_and_notices() -> None:
 def test_entries_are_labelled_by_their_agent_when_they_have_one() -> None:
     assert agent_labelled(("boom", "error"), "agent-1") == ("agent-1: boom", "error")
     assert agent_labelled(("boom", "error"), None) == ("boom", "error")
-    end = turn_end_entry("cancelled")
-    assert end is not None
-    assert agent_labelled(end, "agent-2") == ("agent-2: [turn ended: cancelled]", "tool")
-    assert agent_labelled(end, None) == end
 
 
 def test_only_tool_and_request_entries_start_collapsed() -> None:
@@ -367,14 +363,96 @@ def test_a_tool_call_entrys_arguments_keep_non_ascii_text() -> None:
     assert output_entry(started)[0] == '→ x {"a": "é"}\n{\n  "a": "é"\n}'
 
 
-def test_an_unexpected_turn_ending_is_labelled_with_its_agent() -> None:
-    cancelled = TurnFinished(turn_id="t", agent_id="agent-1", reason="cancelled")
-    assert turn_finished_entry(cancelled) == ("agent-1: [turn ended: cancelled]", "tool")
-    assert turn_finished_entry(TurnFinished(turn_id="t", reason="max_steps")) == (
-        "[turn ended: max_steps]",
-        "tool",
+def ended(reason: TurnEndReason, usage: Usage | None = None) -> TurnFinished:
+    return TurnFinished(turn_id="t", agent_id="agent-3", reason=reason, usage=usage)
+
+
+@pytest.mark.parametrize(
+    ("reason", "label", "kind"),
+    [
+        ("completed", "done", "rule"),
+        ("cancelled", "stopped", "rule"),
+        ("max_steps", "out of steps", "rule"),
+        ("error", "error", "error_rule"),
+    ],
+)
+def test_a_turns_rule_says_how_it_ended_in_its_kind(
+    reason: TurnEndReason, label: str, kind: EntryKind
+) -> None:
+    assert turn_rule_entry(ended(reason), None, None) == (label, kind)
+
+
+def test_a_turns_rule_is_headed_by_its_speaker() -> None:
+    assert turn_rule_entry(ended("completed"), 250.0, "agent-3") == ("agent-3 done · 4m10s", "rule")
+
+
+def test_a_turns_rule_without_usage_shows_the_time_elapsed() -> None:
+    assert turn_rule_entry(ended("cancelled"), 42.7, None) == ("stopped · 42s", "rule")
+
+
+def test_a_turns_rule_with_usage_shows_its_time_and_tokens() -> None:
+    usage = Usage(
+        input_tokens=200_000,
+        cache_creation_input_tokens=1_000_000,
+        cache_read_input_tokens=50_000,
+        output_tokens=8_400,
+        duration_ms=72_500,
     )
-    assert turn_finished_entry(TurnFinished(turn_id="t", agent_id="a", reason="completed")) is None
+    assert turn_rule_entry(ended("completed", usage), 5.0, None) == (
+        "done · 1m12s · ↑1.2M ↓8.4k",
+        "rule",
+    )
+
+
+@pytest.mark.parametrize(
+    ("seconds", "text"),
+    [
+        (0, "0s"),
+        (59.9, "59s"),
+        (60, "1m00s"),
+        (72, "1m12s"),
+        (3599, "59m59s"),
+        (3600, "1h00m"),
+        (3780, "1h03m"),
+    ],
+)
+def test_durations_read_in_seconds_minutes_or_hours(seconds: float, text: str) -> None:
+    assert duration_text(seconds) == text
+
+
+@pytest.mark.parametrize(
+    ("count", "text"),
+    [
+        (0, "0"),
+        (812, "812"),
+        (999, "999"),
+        (1000, "1k"),
+        (1250, "1.2k"),
+        (8000, "8k"),
+        (9999, "9.9k"),
+        (10000, "10k"),
+        (14_200, "14k"),
+        (999_999, "999k"),
+        (1_000_000, "1M"),
+        (1_250_000, "1.2M"),
+        (12_000_000, "12M"),
+    ],
+)
+def test_token_counts_are_compact_and_rounded_down(count: int, text: str) -> None:
+    assert token_text(count) == text
+
+
+def test_usage_reads_input_with_the_cache_up_and_output_down() -> None:
+    usage = Usage(
+        input_tokens=10, cache_creation_input_tokens=20, cache_read_input_tokens=30, output_tokens=5
+    )
+    assert usage_text(usage) == "↑60 ↓5"
+
+
+def test_only_rule_kinds_are_ruled() -> None:
+    assert ruled("rule")
+    assert ruled("error_rule")
+    assert not ruled("tool")
 
 
 def test_an_error_is_labelled_with_its_agent() -> None:

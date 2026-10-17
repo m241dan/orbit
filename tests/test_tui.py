@@ -80,6 +80,7 @@ async def test_quitting_closes_the_session() -> None:
 async def test_submit_sends_command_and_renders_events() -> None:
     session = FakeSession()
     app = OrbitApp(session)
+    app.clock = lambda: 0.0
     async with app.run_test() as pilot:
         prompt = app.query_one("#prompt", Input)
         await pilot.press("i", *"hi", "enter")
@@ -95,7 +96,7 @@ async def test_submit_sends_command_and_renders_events() -> None:
         ):
             await session.queue.put(event)
         await pilot.pause()
-        assert shown(app) == ["hi", "hello back"]
+        assert shown(app) == ["hi", "hello back", "done · 0s"]
         assert prompt.disabled
 
         await session.queue.put(BusyChanged(busy=False, lane="planner"))
@@ -156,7 +157,7 @@ async def test_renders_tool_calls_errors_and_cancellation() -> None:
             ("HI", "tool"),
             ("KeyError", "error"),
             ("boom", "error"),
-            ("[turn ended: cancelled]", "tool"),
+            ("stopped", "rule"),
         ]
 
 
@@ -862,7 +863,7 @@ async def test_concurrent_reviewers_share_the_reviewer_tab() -> None:
             "▶ agent-1 (reviewer) started",
             "▶ agent-2 (reviewer) started",
             "agent-1: boom",
-            "agent-2: [turn ended: cancelled]",
+            "agent-2 stopped",
         ]
         await pilot.press(*["shift+tab"] * 3)
         assert active_tab(app) == "All"
@@ -1084,7 +1085,7 @@ async def test_planner_output_shows_under_planner_and_all_but_not_other_tabs() -
         assert shown(app)[-1] == "■ agent-1 exited"
 
 
-async def test_planner_turn_end_notes_and_errors_show_under_planner_and_all() -> None:
+async def test_planner_turn_rules_and_errors_show_under_planner_and_all() -> None:
     session = FakeSession()
     app = OrbitApp(session)
     async with app.run_test(size=(120, 30)) as pilot:
@@ -1103,7 +1104,8 @@ async def test_planner_turn_end_notes_and_errors_show_under_planner_and_all() ->
 
         await pilot.press("shift+tab", "shift+tab")
         assert active_tab(app) == "All"
-        entries = ["agent-1: [turn ended: cancelled]", "agent-1: boom"]
+        # The planner's rule isn't headed by its id.
+        entries = ["stopped", "agent-1: boom"]
         assert shown(app)[-2:] == entries
 
         await pilot.press("tab")

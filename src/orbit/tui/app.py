@@ -1,7 +1,8 @@
 """Textual frontend. Talks to the backend only through a protocol Session."""
 
 import asyncio
-from collections.abc import AsyncGenerator, AsyncIterator
+import time
+from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from contextlib import aclosing, suppress
 from typing import ClassVar, assert_never
 
@@ -78,7 +79,7 @@ from orbit.tui.view import (
     output_entry,
     task_note,
     tool_access_labels,
-    turn_finished_entry,
+    turn_rule_entry,
 )
 from orbit.tui.widgets import (
     CONFIGURE_MESSAGE,
@@ -195,6 +196,9 @@ class OrbitApp(App[None], inherit_bindings=False):
         # The steps of each running turn, by its agent and id: turn ids needn't be unique
         # across agents.
         self._turns: dict[tuple[str | None, str], list[TurnStep]] = {}
+        self.clock: Callable[[], float] = time.monotonic
+        # When each running turn started, by ``clock``, keyed like ``_turns``.
+        self._turn_starts: dict[tuple[str | None, str], float] = {}
         # Pickers are built once and installed so they open instantly.
         self._model_picker = PickerScreen("Model", model_options(())[1])
         self._tool_picker = PickerScreen("Tool access", tool_access_labels())
@@ -492,7 +496,8 @@ class OrbitApp(App[None], inherit_bindings=False):
     ) -> None:
         match event:
             case TurnStarted():
-                pass  # The prompt follows BusyChanged, which also covers task runs.
+                # The prompt follows BusyChanged, which also covers task runs.
+                self._turn_starts[event.agent_id, event.turn_id] = self.clock()
             case TurnFinished():
                 self._turn_finished(event)
             case ErrorOccurred():
@@ -571,11 +576,18 @@ class OrbitApp(App[None], inherit_bindings=False):
     def _turn_finished(self, event: TurnFinished) -> None:
         if event.usage is not None:
             self._task_list.count(event.usage)
-        entry = turn_finished_entry(event)
-        if entry is not None:
-            self._append(*entry, event.agent_id)
         steps = self._turns.pop((event.agent_id, event.turn_id), [])
         self._transcript.promote(event.agent_id, event.turn_id, final_answer(steps))
+        self._append(*self._turn_rule(event), event.agent_id)
+
+    def _turn_rule(self, event: TurnFinished) -> tuple[str, EntryKind]:
+        """The rule ending ``event``'s turn, timed from its start if that was seen; the
+        planner's, alone in its tab, isn't headed by its id."""
+        started = self._turn_starts.pop((event.agent_id, event.turn_id), None)
+        elapsed = None if started is None else self.clock() - started
+        agent = event.agent_id
+        speaker = None if self._tabs.key_of(agent) == PLANNER else agent
+        return turn_rule_entry(event, elapsed, speaker)
 
     def _think(self, event: AssistantMessage) -> None:
         """Show ``event``'s message dim, as thinking out loud until its turn ends."""

@@ -5,6 +5,7 @@ from dataclasses import dataclass, replace
 from typing import Any, ClassVar, get_args
 
 from rich.console import Console, ConsoleOptions, RenderableType, RenderResult
+from rich.rule import Rule
 from rich.segment import Segment
 from rich.style import Style
 from rich.text import Text
@@ -22,6 +23,7 @@ from orbit.tui.view import (
     entry_markdown,
     gutter,
     hanging_indent,
+    ruled,
     shows_markdown,
     speaker_label,
     starts_collapsed,
@@ -127,6 +129,8 @@ class TranscriptLog(ListPane):
     TranscriptLog .transcript--marker { color: $accent; }
     TranscriptLog .transcript--label { color: $text-muted; }
     TranscriptLog .transcript--thinking { color: $text-muted; }
+    TranscriptLog .transcript--rule { color: $text-muted; }
+    TranscriptLog .transcript--error_rule { color: $text-error; }
     TranscriptLog > .option-list--option-highlighted,
     TranscriptLog:focus > .option-list--option-highlighted,
     TranscriptLog > .option-list--option-hover {
@@ -285,12 +289,20 @@ class TranscriptLog(ListPane):
         )
         collapsed = self._collapsed[index]
         label = Text(entry_label(entry.kind, entry.text, collapsed), style=style)
-        markdown = shows_markdown(entry.kind, collapsed)
-        body = markdown_body(entry.kind, entry.text, style) if markdown else None
+        body = self._body(entry, collapsed, style)
         heading = self._heading(row)
         return GutteredEntry(
             label, gutter(marked), gutter_style, body, heading, style if band else None
         )
+
+    @staticmethod
+    def _body(entry: Entry, collapsed: bool, style: Style) -> RenderableType | None:
+        """What the entry draws instead of its label: a rule, or markdown, if it does."""
+        if ruled(entry.kind):
+            return Rule(Text(entry.text, style=style), style=style)
+        if shows_markdown(entry.kind, collapsed):
+            return markdown_body(entry.kind, entry.text, style)
+        return None
 
     def _heading(self, row: int) -> Text | None:
         """The label row heading the entry at option ``row``, when it's an agent's message and

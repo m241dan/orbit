@@ -23,7 +23,6 @@ from orbit.protocol import (
     ToolCallStarted,
     TurnFinished,
 )
-from orbit.tui.view.transcript import turn_end_entry
 
 ALL_TAB_LABEL = "All"
 """The fixed first tab, showing every conversation; it isn't one of the tracked tabs."""
@@ -63,8 +62,7 @@ _TabOutput = (
     | ErrorOccurred
     | TurnFinished
 )
-"""Events that can add an entry to their agent's conversation; a turn's end only does when
-it gets a note."""
+"""Events that add an entry to their agent's conversation; a turn's end adds its rule."""
 
 _TAB_OUTPUT: tuple[type[_TabOutput], ...] = get_args(_TabOutput)
 """The classes in ``_TabOutput``, for ``isinstance``."""
@@ -123,10 +121,7 @@ def _close_tab(
 
 
 def _is_tab_output(event: Event) -> TypeGuard[_TabOutput]:
-    """Whether ``event`` adds an entry to its agent's conversation; a turn's end only does
-    when it gets a note."""
-    if isinstance(event, TurnFinished):
-        return turn_end_entry(event.reason) is not None
+    """Whether ``event`` adds an entry to its agent's conversation."""
     return isinstance(event, _TAB_OUTPUT)
 
 
