@@ -618,20 +618,21 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     fingerprints the git working tree; `usage_api` fetches the Claude subscription's usage
     limits (`UsageApi`) with the token in `~/.claude/.credentials.json`.
   - `application`: `AgentSession` implements `Session`: it takes commands, asks the domain what
-    follows, drives the ports and publishes events. `Tasks` (in `tasks`) holds the `TaskBoard`
-    and publishes it whole after each change, marking tasks running and finished. `WorkLane` is the work lane: it runs the
-    board's tasks one at a time, queues a fix after each failed step and lands work that passes.
-    `AgentRun` sees one task through one agent, and a `ProposalTrial` (in `proposal_trial`)
-    tries the checks a configurator proposes and has the user decide on them; `AgentDesk` (in `desk`) launches agents and
-    routes their calls by token; `Verifier` runs the steps; `Lander` (in `landing`) commits and
-    merges verified work; `ReviewLane` runs reviews beside the work; `StartupCheck` runs the
-    steps once on the base commit as orbit starts; `UsageMonitor` fetches the usage limits on a
-    schedule and after an agent's turn; these three run their work through `Background` (in `lanes`), which
-    reports a crash rather than losing it, and the session runs the work lane's and the
-    planner's turns through a `TurnSlot` each (also in `lanes`), which refuses a second turn
-    and shows the lane busy while one runs; `FrontendReview` is where the user decides on
-    proposed checks; `PlannerChat` is the planner's conversation, running each turn and
-    publishing how it ended. `ports` defines what it needs from outside (`AgentHost`,
+    follows, drives the ports and publishes events. `Tasks` (in `tasks`) holds the `TaskBoard`,
+    marks tasks running and finished, and is the one place that publishes the board, whole, once
+    its callers have changed it. `WorkLane` is the work lane: it runs the board's tasks one at a
+    time, queues a fix after each failed step and lands work that passes. `AgentRun` sees one
+    task through one agent, and a `ProposalTrial` (in `proposal_trial`) tries the checks a
+    configurator proposes and has the user decide on them; `AgentDesk` (in `desk`) launches
+    agents and routes their calls by token; `Verifier` runs the steps; `Lander` (in `landing`)
+    commits and merges verified work; `ReviewLane` runs reviews beside the work; `StartupCheck`
+    runs the steps once on the base commit as orbit starts; `UsageMonitor` fetches the usage
+    limits on a schedule and after an agent's turn; these three run their work through
+    `Background` (in `lanes`), which reports a crash rather than losing it, and the session runs
+    the work lane's and the planner's turns through a `TurnSlot` each (also in `lanes`), which
+    refuses a second turn and shows the lane busy while one runs; `FrontendReview` is where the
+    user decides on proposed checks; `PlannerChat` is the planner's conversation, running each
+    turn and publishing how it ended. `ports` defines what it needs from outside (`AgentHost`,
     `AgentLauncher`, `CoderTree`, `StepRunner`, `Workspace`, `ProposalReview`, `UsageSource`,
     `ConfigWriter`).
   - `domain`: the rules, with no I/O: the `TaskBoard` (task order, statuses, fix chains),

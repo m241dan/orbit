@@ -57,7 +57,10 @@ class PlannerChat:
     async def answer(self, text: str, settings: Settings) -> TurnEndReason:
         """Run a turn of the planner's on ``text``, publishing its events; returns how it ended.
 
-        A cancelled turn ends as cancelled rather than raising, and one that fails ends in error.
+        A turn cancelled before its TurnFinished is out ends as cancelled rather than raising,
+        and one that fails then ends in error. Once its TurnFinished is out, a cancelled or
+        failed turn returns that TurnFinished's reason without publishing another; a failure is
+        still reported with ErrorOccurred.
         """
         turn_id = uuid.uuid4().hex
         finished: TurnEndReason | None = None  # How it ended, once its TurnFinished is out.
