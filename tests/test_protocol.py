@@ -262,6 +262,7 @@ def test_usage_adds_up_and_counts_every_kind_of_token() -> None:
         duration_ms=10,
     )
     assert total.tokens == 10
+    assert total.read_tokens == 8
     assert Usage().tokens == 0
 
 

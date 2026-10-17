@@ -25,7 +25,7 @@ from orbit.protocol import (
     TurnFinished,
     Usage,
 )
-from orbit.tui.view.common import EntryKind, spinner_frame
+from orbit.tui.view.common import EntryKind, spinner_frame, token_text
 from orbit.tui.view.tool_calls import ToolCall, orbit_request_line, tool_call_line
 
 SKIP_REASONS: dict[SkipReason, str] = {
@@ -308,31 +308,10 @@ def duration_text(seconds: float) -> str:
     return f"{secs}s"
 
 
-TOKEN_UNITS = ((1_000_000, "M"), (1_000, "k"))
-"""The units token counts are shown in, largest first."""
-
-
-def token_text(count: int) -> str:
-    """``count`` tokens, compact: as they are below a thousand, else in thousands (``k``) or
-    millions (``M``), rounded down, with one decimal below 10 of the unit (``1.2M``, ``14k``)."""
-    for unit, suffix in TOKEN_UNITS:
-        if count >= unit:
-            return _in_unit(count, unit) + suffix
-    return str(count)
-
-
-def _in_unit(count: int, unit: int) -> str:
-    tenths = count * 10 // unit
-    if tenths >= 100 or tenths % 10 == 0:
-        return str(count // unit)
-    return f"{tenths // 10}.{tenths % 10}"
-
-
 def usage_text(usage: Usage) -> str:
     """The tokens a turn read (``↑``, its input with what was cached and read from the cache)
     and wrote (``↓``)."""
-    read = usage.input_tokens + usage.cache_creation_input_tokens + usage.cache_read_input_tokens
-    return f"↑{token_text(read)} ↓{token_text(usage.output_tokens)}"
+    return f"↑{token_text(usage.read_tokens)} ↓{token_text(usage.output_tokens)}"
 
 
 def _turn_cost(usage: Usage | None, elapsed: float | None) -> list[str]:

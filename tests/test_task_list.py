@@ -103,14 +103,13 @@ def test_running_tasks_show_the_spinner_frame() -> None:
 def test_usage_reads_as_tokens_and_cost() -> None:
     assert usage_label(Usage(input_tokens=512)) == "512 tok · $0.00"
     assert usage_label(Usage(input_tokens=12_000, output_tokens=345, cost_usd=0.1)) == (
-        "12.3k tok · $0.10"
+        "12k tok · $0.10"
     )
     big = Usage(cache_read_input_tokens=1_200_000, output_tokens=34_567, cost_usd=0.836)
     assert usage_label(big) == "1.2M tok · $0.84"
     assert usage_label(Usage(input_tokens=999)) == "999 tok · $0.00"
-    assert usage_label(Usage(input_tokens=1_000)) == "1.0k tok · $0.00"
-    assert usage_label(Usage(input_tokens=999_949)) == "999.9k tok · $0.00"
-    assert usage_label(Usage(input_tokens=999_950)) == "1.0M tok · $0.00"
+    assert usage_label(Usage(input_tokens=1_000)) == "1k tok · $0.00"
+    assert usage_label(Usage(input_tokens=999_950)) == "999k tok · $0.00"
 
 
 def test_label_shows_what_a_task_spent_once_it_spent_anything() -> None:

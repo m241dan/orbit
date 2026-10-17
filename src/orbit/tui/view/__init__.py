@@ -10,9 +10,11 @@ from orbit.tui.view.common import (
     SPINNER_FRAMES,
     STATUS_ICONS,
     STEP_ICONS,
+    TOKEN_UNITS,
     EntryKind,
     model_label,
     spinner_frame,
+    token_text,
 )
 from orbit.tui.view.detail import (
     DETAIL_COVER_BELOW,
@@ -101,7 +103,6 @@ from orbit.tui.view.transcript import (
     RULE_KINDS,
     SKIP_REASONS,
     STARTUP_TAIL_LINES,
-    TOKEN_UNITS,
     TURN_END_LABELS,
     AgentNote,
     DrawnRule,
@@ -132,7 +133,6 @@ from orbit.tui.view.transcript import (
     starts_collapsed,
     startup_entry,
     task_started_entry,
-    token_text,
     tool_call_entry,
     turn_rule_entry,
     usage_text,

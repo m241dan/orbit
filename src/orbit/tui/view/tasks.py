@@ -7,7 +7,7 @@ from rich.cells import cell_len
 from rich.text import Text
 
 from orbit.protocol import TaskState, Usage
-from orbit.tui.view.common import STATUS_ICONS, model_label
+from orbit.tui.view.common import STATUS_ICONS, model_label, token_text
 
 
 def task_numbers(tasks: Sequence[TaskState]) -> list[str]:
@@ -88,13 +88,4 @@ def _trim_body(body: str) -> str:
 
 def usage_label(usage: Usage) -> str:
     """Tokens and cost, shortly: ``1.2M tok · $0.84``."""
-    return f"{_count_label(usage.tokens)} tok · ${usage.cost_usd:.2f}"
-
-
-def _count_label(count: int) -> str:
-    # Pick the unit by what the next smaller one would round to, so 999,950 reads "1.0M", not
-    # "1000.0k".
-    for size, suffix in ((1_000_000, "M"), (1_000, "k")):
-        if round(count / (size // 1_000), 1) >= 1_000:
-            return f"{count / size:.1f}{suffix}"
-    return str(count)
+    return f"{token_text(usage.tokens)} tok · ${usage.cost_usd:.2f}"

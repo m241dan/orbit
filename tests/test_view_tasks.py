@@ -1,11 +1,14 @@
 from orbit.protocol import (
     TaskSpec,
     TaskState,
+    Usage,
 )
 from orbit.tui.view import (
     join_prompt,
     split_prompt,
     task_numbers,
+    usage_label,
+    usage_text,
 )
 
 
@@ -74,3 +77,9 @@ def test_task_numbers_number_a_fix_whose_task_is_missing_as_a_top_level_task() -
     orphan = TaskState(id="2", task=TaskSpec(prompt="fix"), fixes="gone")
     fix = TaskState(id="3", task=TaskSpec(prompt="fix"), fixes="2")
     assert task_numbers([orphan, fix]) == ["1", "1.1"]
+
+
+def test_task_list_and_turn_rule_read_the_same_count_alike() -> None:
+    usage = Usage(input_tokens=14_500)
+    assert usage_label(usage) == "14k tok · $0.00"
+    assert usage_text(usage) == "↑14k ↓0"

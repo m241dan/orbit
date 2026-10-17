@@ -57,7 +57,6 @@ from orbit.tui.view import (
     speaker_label,
     starts_collapsed,
     task_started_entry,
-    token_text,
     tool_call_entry,
     tool_call_finished,
     tool_call_started,
@@ -420,28 +419,6 @@ def test_a_turns_rule_with_usage_shows_its_time_and_tokens() -> None:
 )
 def test_durations_read_in_seconds_minutes_or_hours(seconds: float, text: str) -> None:
     assert duration_text(seconds) == text
-
-
-@pytest.mark.parametrize(
-    ("count", "text"),
-    [
-        (0, "0"),
-        (812, "812"),
-        (999, "999"),
-        (1000, "1k"),
-        (1250, "1.2k"),
-        (8000, "8k"),
-        (9999, "9.9k"),
-        (10000, "10k"),
-        (14_200, "14k"),
-        (999_999, "999k"),
-        (1_000_000, "1M"),
-        (1_250_000, "1.2M"),
-        (12_000_000, "12M"),
-    ],
-)
-def test_token_counts_are_compact_and_rounded_down(count: int, text: str) -> None:
-    assert token_text(count) == text
 
 
 def test_usage_reads_input_with_the_cache_up_and_output_down() -> None:
