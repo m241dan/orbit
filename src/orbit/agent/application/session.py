@@ -384,6 +384,8 @@ class AgentSession:
     def _load(self, record: SessionRecord, tasks: tuple[TaskState, ...]) -> bool:
         """Hold what ``record`` does, with ``tasks`` as its board; returns True."""
         self._replace_board(tasks)
+        if self._work is not None:
+            self._work.reset()
         self._settings = resumed_settings(record.settings, self._given, self._pinned)
         self._replace_planner(record.planner_conversation)
         if self._lane is not None:
@@ -395,6 +397,8 @@ class AgentSession:
     def _clear(self) -> bool:
         """Hold what a new session does; returns True."""
         self._replace_board(())
+        if self._work is not None:
+            self._work.reset()
         self._replace_planner(None)
         if self._lane is not None:
             self._lane.load(NO_REVIEWS)

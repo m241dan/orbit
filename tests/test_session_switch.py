@@ -49,7 +49,9 @@ from tests.agent_fakes import (
     idle,
     of_type,
     session_for,
+    verified,
 )
+from tests.test_agent_run import keeps_claiming
 from tests.test_review_lane import claims_done
 from tests.test_review_lane_snapshots import lane_of, reviewing
 
@@ -407,6 +409,60 @@ async def test_a_new_session_has_a_fresh_planner_conversation() -> None:
     await events_until(session, idle("planner"))
     assert launcher.resumed == [None, None]
     assert any(isinstance(e, AgentExited) for e in events)
+    await session.close()
+
+
+async def with_a_chain_out_of_fixes(store: FakeStore, *scripts: Script) -> AgentSession:
+    """A session whose task 1 failed verification until its fix, task 2, ran out of fixes,
+    whose later tasks run through agents playing ``scripts``."""
+    always_fails = Steps(*[False] * 40)
+    session, _ = switching(
+        store,
+        keeps_claiming,
+        keeps_claiming,
+        *scripts,
+        reviews=False,
+        verification=verified(always_fails, fallback_fixes=1),
+    )
+    await session.send(AddTask(task=TASK))
+    await session.send(RunTasks())
+    await events_until(session, idle())
+    return session
+
+
+async def ran(session: AgentSession, *tasks: TaskSpec) -> tuple[TaskState, ...]:
+    """The board once ``tasks`` were added and ran."""
+    for task in tasks:
+        await session.send(AddTask(task=task))
+    await session.send(RunTasks())
+    return last_of(TasksChanged, await events_until(session, idle())).tasks
+
+
+async def test_a_session_opened_keeps_no_fix_counts_from_the_one_before() -> None:
+    store = store_with(saved("auth", state("1", "completed")))
+    session = await with_a_chain_out_of_fixes(store, keeps_claiming, keeps_claiming)
+    await opened(session, OpenSession(session_id="auth"))
+    board = await ran(session, TASK)
+    assert [(t.id, t.status, t.fixes) for t in board] == [
+        ("1", "completed", None),
+        ("2", "unverified", None),
+        ("3", "unverified", "2"),
+    ]
+    await session.close()
+
+
+async def test_a_new_session_keeps_no_fix_counts_from_the_one_before() -> None:
+    session = await with_a_chain_out_of_fixes(
+        FakeStore(), claims_done, keeps_claiming, keeps_claiming
+    )
+    await opened(session, NewSession())
+    unchecked = TaskSpec(prompt="Look around.", settings=Settings(tool_access="off"))
+    board = await ran(session, unchecked, TASK)
+    assert [(t.id, t.status, t.fixes) for t in board] == [
+        ("1", "completed", None),
+        ("2", "unverified", None),
+        ("3", "unverified", "2"),
+    ]
     await session.close()
 
 

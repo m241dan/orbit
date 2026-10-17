@@ -53,6 +53,10 @@ class WorkLane:
         # the cap.
         self._fallbacks = FallbackFixes()
 
+    def reset(self) -> None:
+        """Forget the fix counts of the session left, whose task ids the next one reuses."""
+        self._fallbacks = FallbackFixes()
+
     def next_work(self, tried: Collection[str] = ()) -> str | None:
         """The next task for the work lane; reviews have their own lane, if there is one."""
         exclude = REVIEW_ROLES if self._review is not None else ()
