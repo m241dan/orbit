@@ -539,6 +539,7 @@ async def test_a_session_that_cant_be_deleted_as_its_tasks_carry_over_is_reporte
     await events_until(session, agent_exited("startup-check"))
     events = await opened(session, NewSession())
     assert messages(ErrorOccurred, events) == ["Couldn't delete the session: read-only"]
+    assert store.released == ["session-1"]
     await session.close()
 
 

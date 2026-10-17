@@ -385,6 +385,14 @@ async def test_a_session_that_cannot_be_deleted_on_leaving_lets_go_of_its_lock()
     assert store.released == ["old"] and store.locked == set()
 
 
+async def test_a_session_that_cannot_be_deleted_or_let_go_of_on_leaving_reports_both() -> None:
+    store = unreleasable_store_with("old")
+    store.delete_failure = "Couldn't delete the session: read-only"
+    keeper, published = keeper_for(store)
+    await keeper.leave(Left("old"), discard=True)
+    assert published.errors == [UNLOCKABLE, "Couldn't delete the session: read-only"]
+
+
 async def test_a_session_unreadable_once_locked_is_not_opened_and_lets_go_of_its_lock() -> None:
     store = FakeStore()
     store.saved = [SessionRecord(id="other", name="other", created=START, last_active=START)]

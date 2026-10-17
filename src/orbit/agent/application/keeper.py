@@ -312,7 +312,8 @@ class SessionKeeper:
 
     async def leave(self, left: Left, discard: bool) -> None:
         """Let go of the lock of the session ``left``, if it's held, or delete that session if
-        ``discard``; reports it if it can't be let go of or deleted."""
+        ``discard``; reports it if it can't be let go of or deleted, letting go of the lock if
+        it can't be deleted."""
         if left.id is None:
             return
         assert self._store is not None  # Only a store holds locks.
