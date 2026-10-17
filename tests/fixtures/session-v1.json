@@ -1,0 +1,155 @@
+{
+  "version": 1,
+  "id": "s-golden",
+  "name": "Golden session",
+  "created": "2026-10-07T09:05:00Z",
+  "last_active": "2026-10-17T14:30:00+02:00",
+  "settings": {
+    "model": "opus",
+    "tool_access": "full"
+  },
+  "planner_conversation": "conversation-1",
+  "tasks": [
+    {
+      "id": "1",
+      "task": {
+        "prompt": "Add the parser",
+        "settings": {
+          "model": "sonnet",
+          "tool_access": "off"
+        },
+        "role": "writer"
+      },
+      "status": "completed",
+      "fixes": null,
+      "origin": "planner",
+      "attempt": 2,
+      "max_attempts": 3,
+      "batch": null,
+      "round": 0,
+      "usage": {
+        "input_tokens": 100,
+        "output_tokens": 20,
+        "cache_creation_input_tokens": 30,
+        "cache_read_input_tokens": 40,
+        "cost_usd": 1.25,
+        "turns": 6,
+        "duration_ms": 7000
+      }
+    },
+    {
+      "id": "2",
+      "task": {
+        "prompt": "Fix the parser",
+        "settings": {
+          "model": null,
+          "tool_access": "restricted"
+        },
+        "role": "coder"
+      },
+      "status": "gave_up",
+      "fixes": "1",
+      "origin": "review",
+      "attempt": 1,
+      "max_attempts": 2,
+      "batch": "b1",
+      "round": 2,
+      "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "cost_usd": 0.0,
+        "turns": 0,
+        "duration_ms": 0
+      }
+    },
+    {
+      "id": "3",
+      "task": {
+        "prompt": "Review the whole codebase",
+        "settings": {
+          "model": null,
+          "tool_access": "restricted"
+        },
+        "role": "reviewer"
+      },
+      "status": "unverified",
+      "fixes": null,
+      "origin": "super_review",
+      "attempt": 0,
+      "max_attempts": 0,
+      "batch": null,
+      "round": 0,
+      "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "cost_usd": 0.0,
+        "turns": 0,
+        "duration_ms": 0
+      }
+    },
+    {
+      "id": "4",
+      "task": {
+        "prompt": "Document the parser",
+        "settings": {
+          "model": null,
+          "tool_access": "restricted"
+        },
+        "role": "coder"
+      },
+      "status": "draft",
+      "fixes": null,
+      "origin": "manual",
+      "attempt": 0,
+      "max_attempts": 0,
+      "batch": null,
+      "round": 0,
+      "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "cost_usd": 0.0,
+        "turns": 0,
+        "duration_ms": 0
+      }
+    }
+  ],
+  "reviews": {
+    "planner": {
+      "paused": true,
+      "next_batch": 3,
+      "batches": {
+        "b2": {
+          "round": 2,
+          "cap": 4,
+          "tasks": ["2", "5"],
+          "finished": ["2"],
+          "commits": ["c3"],
+          "missing": ["2"],
+          "filling": false
+        }
+      },
+      "rounds": {
+        "b1": 1,
+        "b2": 2
+      }
+    },
+    "jobs": {
+      "3": {
+        "commits": ["c1", "c2"],
+        "round": 1,
+        "batch": "b1",
+        "missing": ["6"],
+        "whole": true
+      }
+    },
+    "batches": {
+      "3": "b2"
+    }
+  }
+}
