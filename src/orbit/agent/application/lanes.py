@@ -7,7 +7,8 @@ from contextlib import suppress
 from typing import Any
 
 from orbit.agent.application.ports import Publish
-from orbit.protocol import BusyChanged, BusyLane, ErrorOccurred, Event
+from orbit.agent.domain.refusals import Refused
+from orbit.protocol import BUSY, BusyChanged, BusyLane, ErrorOccurred, Event
 
 
 def crash_of(task: "asyncio.Task[object]") -> BaseException | None:
@@ -64,8 +65,8 @@ class Background:
 
 class TurnSlot:
     """Runs one turn at a time in busy lane ``lane``, which the frontend shows as busy while a
-    turn runs. A second turn is refused with ``refusal``. Events go out through ``post``, which
-    must not block: a turn's end is reported from its done-callback."""
+    turn runs. A second turn is refused, as busy, with ``refusal``. Events go out through
+    ``post``, which must not block: a turn's end is reported from its done-callback."""
 
     def __init__(self, lane: BusyLane, refusal: str, post: Callable[[Event], None]) -> None:
         self._lane: BusyLane = lane
@@ -82,18 +83,16 @@ class TurnSlot:
         """The current or last turn; none before the first."""
         return self._turn
 
-    async def start(self, work: Coroutine[Any, Any, object]) -> bool:
+    async def start(self, work: Coroutine[Any, Any, object]) -> None:
         """Run ``work`` as the lane's turn, unless a turn still runs: then close ``work`` and
-        say why; returns whether it started."""
+        raise :class:`Refused`."""
         if self.running:
             work.close()
-            self._post(ErrorOccurred(message=self._refusal))
-            return False
+            raise Refused(BUSY, self._refusal)
         self._post(BusyChanged(busy=True, lane=self._lane))
         self._turn = asyncio.create_task(work)
         # A callback, so it also runs if the work is cancelled before it starts.
         self._turn.add_done_callback(self._ended)
-        return True
 
     def cancel(self) -> bool:
         """Cancel the turn if it still runs; returns whether it did."""

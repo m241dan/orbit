@@ -4,6 +4,7 @@ import asyncio
 
 from orbit.agent.application.ports import Reply
 from orbit.protocol import (
+    BUSY,
     PLANNER,
     UNKNOWN,
     AddTask,
@@ -93,8 +94,9 @@ async def test_the_planner_takes_one_prompt_at_a_time() -> None:
     launcher.planner_turns = [gated_planner(gate)]
     await send(session, SendMessage(agent=PLANNER, text="Plan."))
     await send(session, SendMessage(agent=PLANNER, text="More."))
-    events = await events_until(session, lambda e: isinstance(e, ErrorOccurred))
-    assert errors(events) == ["The planner is already answering."]
+    events = await events_until(session, lambda e: isinstance(e, CommandRefused))
+    assert events[-1] == refused(BUSY, "The planner is already answering.")
+    assert errors(events) == []
     gate.set()
     await events_until(session, lambda e: e == PLANNER_IDLE)
     assert len(launcher.launches) == 1

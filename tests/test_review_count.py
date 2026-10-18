@@ -91,7 +91,7 @@ async def test_a_failing_count_save_is_reported_once_across_new_sessions() -> No
     keeper, count, published = both_for(store)
     store.count_failure = "full"
     await count.save(1)
-    await keeper.renew("next", lambda: True)
+    await keeper.renew("next", lambda: None)
     await count.save(2)
     assert published.errors == ["full"]
 

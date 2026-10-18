@@ -15,8 +15,9 @@ from typing import Any
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationError
 from pydantic_core import from_json
 
+from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.reviews import LaneSnapshot
-from orbit.protocol import SessionSummary, Settings, TaskState, Usage
+from orbit.protocol import INVALID, LOCKED, SessionSummary, Settings, TaskState, Usage
 
 FORMAT_VERSION = 4
 """The version of the record format this orbit writes, and the newest it reads."""
@@ -206,7 +207,7 @@ def _activity(summary: SessionSummary) -> tuple[bool, float]:
 
 def openable(
     session_id: str, record: SessionRecord | Unreadable, locked: bool
-) -> SessionRecord | str:
+) -> SessionRecord | Refused:
     """The record of saved session ``session_id`` to open, or why it can't be opened: it's
     unreadable, or ``locked`` by another orbit."""
     return _usable("open", session_id, record, locked)
@@ -214,7 +215,7 @@ def openable(
 
 def renamable(
     session_id: str, record: SessionRecord | Unreadable, locked: bool
-) -> SessionRecord | str:
+) -> SessionRecord | Refused:
     """The record of saved session ``session_id`` to rename, or why it can't be renamed: it's
     unreadable, or ``locked`` by another orbit."""
     return _usable("rename", session_id, record, locked)
@@ -222,23 +223,23 @@ def renamable(
 
 def _usable(
     action: str, session_id: str, record: SessionRecord | Unreadable, locked: bool
-) -> SessionRecord | str:
+) -> SessionRecord | Refused:
     """The record of saved session ``session_id``, or why the user can't ``action`` it."""
     if isinstance(record, Unreadable):
-        return f"Can't {action} the session {session_id}: {record.reason}."
+        return Refused(INVALID, f"Can't {action} the session {session_id}: {record.reason}.")
     if locked:
-        return locked_message(record.name, action)
+        return Refused(LOCKED, locked_message(record.name, action))
     return record
 
 
 def deletion_refusal(
     session_id: str, record: SessionRecord | Unreadable, locked: bool
-) -> str | None:
+) -> Refused | None:
     """Why the saved session ``session_id``, not the one open here, can't be deleted, if it
     can't: it's ``locked`` by another orbit. An unreadable one can be. The open session can't
     be deleted either (:data:`OPEN_UNDELETABLE`)."""
     if locked:
-        return locked_message(record_name(session_id, record), "delete")
+        return Refused(LOCKED, locked_message(record_name(session_id, record), "delete"))
     return None
 
 

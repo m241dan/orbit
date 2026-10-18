@@ -2,7 +2,11 @@
 
 from orbit.agent import AgentSession
 from orbit.protocol import (
+    INVALID,
+    LOCKED,
+    UNKNOWN,
     AddTask,
+    CommandRefused,
     DeleteSession,
     ErrorOccurred,
     RenameSession,
@@ -25,6 +29,18 @@ async def errors_of(session: AgentSession, command: Managing) -> list[str]:
     """The errors sending ``command`` reports before the sessions are listed again."""
     await send(session, command)
     return messages(ErrorOccurred, await events_until(session, of_type(SessionsListed)))
+
+
+async def refusal_of(session: AgentSession, command: Managing) -> tuple[str, str]:
+    """The code and message ``command`` is refused with, once the sessions are listed again
+    before it, and with no error reported."""
+    await send(session, command)
+    events = await events_until(session, of_type(CommandRefused))
+    refused = events[-1]
+    assert isinstance(refused, CommandRefused)
+    assert last_of(SessionsListed, events).reason == "refreshed"
+    assert messages(ErrorOccurred, events) == []
+    return refused.code, refused.message
 
 
 def names(sessions: tuple[SessionSummary, ...]) -> dict[str, str]:
@@ -77,9 +93,9 @@ async def test_renaming_a_new_unsaved_session_only_names_it() -> None:
 async def test_an_empty_name_is_refused() -> None:
     store = store_with(saved("old"))
     session, _ = switching(store)
-    errors = await errors_of(session, RenameSession(session_id="old", name="  "))
+    refusal = await refusal_of(session, RenameSession(session_id="old", name="  "))
 
-    assert errors == ["A session needs a name."]
+    assert refusal == (INVALID, "A session needs a name.")
     assert store.saved == [saved("old")]
     await session.close()
 
@@ -88,9 +104,9 @@ async def test_renaming_a_session_open_in_another_orbit_is_refused() -> None:
     store = store_with(saved("old"))
     store.elsewhere.add("old")
     session, _ = switching(store)
-    errors = await errors_of(session, RenameSession(session_id="old", name="new"))
+    refusal = await refusal_of(session, RenameSession(session_id="old", name="new"))
 
-    assert errors == ["Can't rename \"old\": it's open in another orbit."]
+    assert refusal == (LOCKED, "Can't rename \"old\": it's open in another orbit.")
     assert store.saved == [saved("old")]
     await session.close()
 
@@ -99,9 +115,9 @@ async def test_renaming_a_session_another_orbit_locks_meanwhile_is_refused() -> 
     store = store_with(saved("old"))
     store.free = False
     session, _ = switching(store)
-    errors = await errors_of(session, RenameSession(session_id="old", name="new"))
+    refusal = await refusal_of(session, RenameSession(session_id="old", name="new"))
 
-    assert errors == ["Can't rename \"old\": it's open in another orbit."]
+    assert refusal == (LOCKED, "Can't rename \"old\": it's open in another orbit.")
     assert store.saved == [saved("old")]
     await session.close()
 
@@ -110,16 +126,16 @@ async def test_renaming_an_unreadable_session_is_refused() -> None:
     store = FakeStore()
     store.broken["bad"] = "it isn't JSON"
     session, _ = switching(store)
-    errors = await errors_of(session, RenameSession(session_id="bad", name="new"))
+    refusal = await refusal_of(session, RenameSession(session_id="bad", name="new"))
 
-    assert errors == ["Can't rename the session bad: it isn't JSON."]
+    assert refusal == (INVALID, "Can't rename the session bad: it isn't JSON.")
     await session.close()
 
 
 async def test_renaming_a_session_that_isnt_saved_is_refused() -> None:
     session = AgentSession()
-    errors = await errors_of(session, RenameSession(session_id="gone", name="new"))
-    assert errors == ["There's no saved session 'gone'."]
+    refusal = await refusal_of(session, RenameSession(session_id="gone", name="new"))
+    assert refusal == (UNKNOWN, "There's no saved session 'gone'.")
     await session.close()
 
 
@@ -158,9 +174,9 @@ async def test_a_session_unreadable_by_the_time_the_lock_is_taken_is_not_renamed
 
     store.on_acquire = break_it
     session, _ = switching(store)
-    errors = await errors_of(session, RenameSession(session_id="old", name="new"))
+    refusal = await refusal_of(session, RenameSession(session_id="old", name="new"))
 
-    assert errors == ["Can't rename the session old: it isn't JSON."]
+    assert refusal == (INVALID, "Can't rename the session old: it isn't JSON.")
     assert store.saved == [saved("old")]
     assert store.released == ["old"] and store.locked == set()
     await session.close()
@@ -191,9 +207,9 @@ async def test_deleting_the_open_session_is_refused() -> None:
     store = FakeStore()
     session, _ = switching(store)
     await send(session, AddTask(task=TASK))
-    errors = await errors_of(session, DeleteSession(session_id="session-1"))
+    refusal = await refusal_of(session, DeleteSession(session_id="session-1"))
 
-    assert errors == ["Can't delete the open session."]
+    assert refusal == (INVALID, "Can't delete the open session.")
     assert store.deleted == []
     await session.close()
 
@@ -202,9 +218,9 @@ async def test_deleting_a_session_open_in_another_orbit_is_refused() -> None:
     store = store_with(saved("old"))
     store.elsewhere.add("old")
     session, _ = switching(store)
-    errors = await errors_of(session, DeleteSession(session_id="old"))
+    refusal = await refusal_of(session, DeleteSession(session_id="old"))
 
-    assert errors == ["Can't delete \"old\": it's open in another orbit."]
+    assert refusal == (LOCKED, "Can't delete \"old\": it's open in another orbit.")
     assert store.deleted == []
     await session.close()
 
@@ -213,17 +229,17 @@ async def test_deleting_a_session_another_orbit_locks_meanwhile_is_refused() -> 
     store = store_with(saved("old"))
     store.free = False
     session, _ = switching(store)
-    errors = await errors_of(session, DeleteSession(session_id="old"))
+    refusal = await refusal_of(session, DeleteSession(session_id="old"))
 
-    assert errors == ["Can't delete \"old\": it's open in another orbit."]
+    assert refusal == (LOCKED, "Can't delete \"old\": it's open in another orbit.")
     assert store.deleted == []
     await session.close()
 
 
 async def test_deleting_a_session_that_isnt_saved_is_refused() -> None:
     session, _ = switching(FakeStore())
-    errors = await errors_of(session, DeleteSession(session_id="gone"))
-    assert errors == ["There's no saved session 'gone'."]
+    refusal = await refusal_of(session, DeleteSession(session_id="gone"))
+    assert refusal == (UNKNOWN, "There's no saved session 'gone'.")
     await session.close()
 
 

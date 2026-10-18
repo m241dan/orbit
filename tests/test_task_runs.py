@@ -27,6 +27,7 @@ from orbit.protocol import (
     AgentExited,
     BusyChanged,
     CancelTurn,
+    CommandRefused,
     EditTask,
     ErrorOccurred,
     Event,
@@ -49,6 +50,7 @@ from orbit.protocol import (
 )
 from tests.agent_fakes import (
     ACCEPTED,
+    COMMAND_ID,
     ROLES,
     Call,
     FakeHost,
@@ -184,9 +186,12 @@ async def test_running_is_refused_while_a_run_runs() -> None:
     events: list[Event] = []
     async for event in payloads(session):
         events.append(event)
-        if isinstance(event, ErrorOccurred):
+        if isinstance(event, CommandRefused):
             break
-    assert events[-1] == ErrorOccurred(message="Tasks are already running.")
+    assert events[-1] == CommandRefused(
+        command_id=COMMAND_ID, code=BUSY, message="Tasks are already running."
+    )
+    assert not any(isinstance(event, ErrorOccurred) for event in events)
     gate.set()
     assert statuses(await asyncio.wait_for(idle(session), 5)) == ["completed", "completed"]
     assert len(launcher.launches) == 2

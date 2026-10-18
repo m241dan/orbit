@@ -14,6 +14,7 @@ from orbit.agent.domain.verification import steps_note
 from orbit.protocol import (
     BUSY,
     INVALID,
+    NOT_CONFIGURED,
     PLAN_TASK,
     PLANNER,
     UNKNOWN,
@@ -123,22 +124,25 @@ async def test_the_first_turn_says_which_agent_is_the_planner() -> None:
 
 async def refused_planning(session: AgentSession) -> list[Event]:
     await send(session, SendMessage(agent=PLANNER, text="Plan."))
-    stream = payloads(session)
-    return [await anext(stream), await anext(stream), await anext(stream)]
+    return await events_until(session, lambda e: isinstance(e, CommandRefused))
+
+
+NO_PLANNER = refused(NOT_CONFIGURED, "Planning needs agents and a planner role.")
 
 
 async def test_planning_needs_agents() -> None:
     events = await refused_planning(AgentSession())
-    assert any(isinstance(e, ErrorOccurred) and "planner" in e.message for e in events)
-    assert events[-1] == BusyChanged(busy=False, lane="planner")  # Frees the prompt.
+    assert events[-1] == NO_PLANNER
+    assert BusyChanged(busy=False, lane="planner") in events  # Frees the prompt.
+    assert not any(isinstance(e, ErrorOccurred) for e in events)
 
 
 async def test_planning_needs_a_planner_role() -> None:
     roles = {name: role for name, role in ROLES.items() if name != "planner"}
     session, _, _ = session_for(roles=roles)
     events = await refused_planning(session)
-    assert any(isinstance(e, ErrorOccurred) and "planner" in e.message for e in events)
-    assert events[-1] == BusyChanged(busy=False, lane="planner")
+    assert events[-1] == NO_PLANNER
+    assert BusyChanged(busy=False, lane="planner") in events
 
 
 async def test_accepted_drafts_run_and_dropped_ones_go() -> None:

@@ -13,6 +13,7 @@ from orbit.agent.application.review_lane import ReviewLane
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.application.work_lane import WorkLane
 from orbit.agent.domain.board import interrupted
+from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.reviews import LaneSnapshot, PlannerSnapshot
 from orbit.agent.domain.sessions import (
     EMPTY_NAME,
@@ -22,8 +23,9 @@ from orbit.agent.domain.sessions import (
     session_name,
 )
 from orbit.protocol import (
+    BUSY,
+    INVALID,
     DeleteSession,
-    ErrorOccurred,
     Event,
     ListingReason,
     ListSessions,
@@ -143,23 +145,26 @@ class SessionSwitcher:
         await self._keeper.save(self.contents)
 
     async def _change_saved(self, command: RenameSession | DeleteSession) -> None:
-        """Rename or delete a session, then list the sessions as they are after."""
-        match command:
-            case RenameSession(session_id=session_id, name=name):
-                await self._rename_session(session_id, name)
-            case DeleteSession(session_id=session_id):
-                await self._keeper.delete_saved(session_id)
-            case _:
-                assert_never(command)
-        await self.list_sessions("refreshed")
+        """Rename or delete a session, then list the sessions as they are after, refused or
+        not."""
+        try:
+            match command:
+                case RenameSession(session_id=session_id, name=name):
+                    await self._rename_session(session_id, name)
+                case DeleteSession(session_id=session_id):
+                    await self._keeper.delete_saved(session_id)
+                case _:
+                    assert_never(command)
+        finally:
+            await self.list_sessions("refreshed")
 
     async def _rename_session(self, session_id: str, name: str) -> None:
         """Name the session ``session_id`` ``name``, saving it if it's saved; refused for an
         empty name."""
         named = session_name(name)
         if named is None:
-            await self._events.put(ErrorOccurred(message=EMPTY_NAME))
-        elif session_id == self._keeper.id:
+            raise Refused(INVALID, EMPTY_NAME)
+        if session_id == self._keeper.id:
             self._keeper.rename(named)
             await self.save()
         else:
@@ -169,11 +174,10 @@ class SessionSwitcher:
         """Open the saved session ``session_id`` in place of this one, without running
         anything: what was running when it was saved is cancelled. Refused while anything runs,
         or if it can't be opened; opening this session does nothing."""
-        if session_id == self._keeper.id or not self._may_switch():
+        if session_id == self._keeper.id:
             return
-        opened = await self._keeper.open(
-            session_id, lambda record: self._may_switch() and self._load(record)
-        )
+        self._may_switch()
+        opened = await self._keeper.open(session_id, self._load)
         if opened is None:
             return
         record = opened.record
@@ -185,12 +189,11 @@ class SessionSwitcher:
     async def _new_session(self, name: str | None) -> None:
         """Start a new session ``name``d so in place of this one; refused while anything
         runs."""
-        left = await self._keeper.renew(name, lambda: self._may_switch() and self._clear())
-        if left is not None:
-            await self._switched(left, (), None)
+        left = await self._keeper.renew(name, self._clear)
+        await self._switched(left, (), None)
 
-    def _may_switch(self) -> bool:
-        """Whether the session may be switched now, as nothing runs; otherwise says what runs."""
+    def _may_switch(self) -> None:
+        """Refuse a switch, raising :class:`Refused`, while anything runs, saying what runs."""
         lane = self._parts.lane
         if self._parts.tasks_running():
             refusal = TASKS_RUNNING
@@ -199,23 +202,24 @@ class SessionSwitcher:
         elif self._parts.seat.running:
             refusal = PLANNER_ANSWERING
         else:
-            return True
-        self._events.put_nowait(ErrorOccurred(message=refusal))
-        return False
+            return
+        raise Refused(BUSY, refusal)
 
-    def _load(self, record: SessionRecord) -> bool:
-        """Hold what ``record`` does, its tasks as interrupted; returns True."""
+    def _load(self, record: SessionRecord) -> None:
+        """Hold what ``record`` does, its tasks as interrupted; refused while anything runs."""
+        self._may_switch()
         given = self._settings
         settings = resumed_settings(record.settings, given.given, given.pinned)
         tasks = interrupted(record.tasks)[0]
         self.spent = record.spent
-        return self._hold(tasks, settings, record.planner_conversation, record.reviews)
+        self._hold(tasks, settings, record.planner_conversation, record.reviews)
 
-    def _clear(self) -> bool:
-        """Hold what a new session does, keeping the settings and having spent nothing; returns
-        True."""
+    def _clear(self) -> None:
+        """Hold what a new session does, keeping the settings and having spent nothing; refused
+        while anything runs."""
+        self._may_switch()
         self.spent = Usage()
-        return self._hold((), self._settings.get(), None, None)
+        self._hold((), self._settings.get(), None, None)
 
     def _hold(
         self,
@@ -223,9 +227,9 @@ class SessionSwitcher:
         settings: Settings,
         conversation: str | None,
         reviews: LaneSnapshot | None,
-    ) -> bool:
+    ) -> None:
         """Hold a session's ``tasks``, ``settings``, planner ``conversation`` and ``reviews``,
-        with no fix counts; returns True."""
+        with no fix counts."""
         parts = self._parts
         self._replace_board(tasks)
         if parts.work is not None:
@@ -235,7 +239,6 @@ class SessionSwitcher:
         if parts.lane is not None:
             parts.lane.load(reviews or NO_REVIEWS)
         self._kept_reviews = reviews
-        return True
 
     def _replace_board(self, tasks: tuple[TaskState, ...]) -> None:
         """Have ``tasks`` on the board, and after them, while no session was picked yet, the

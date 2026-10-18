@@ -9,8 +9,11 @@ from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.lanes import TurnSlot
 from orbit.agent.application.planner import PlannerChat
 from orbit.agent.application.tasks import Tasks
+from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.roles import ConfigError
 from orbit.protocol import (
+    BUSY,
+    NOT_CONFIGURED,
     PLANNER,
     PLANNER_LANE,
     BusyChanged,
@@ -80,15 +83,14 @@ class PlannerSeat:
 
     async def submit(self, text: str, settings: Settings) -> None:
         """Start a turn of the planner's conversation on ``text`` with ``settings``, in its
-        own lane; refused without a planner."""
+        own lane; refused without a planner, or while it answers."""
         if self._planner is None:
-            await self._events.put(ErrorOccurred(message=NO_PLANNER_MESSAGE))
             # Frees the prompt of a frontend that marked the lane busy when it sent this.
             await self._events.put(BusyChanged(busy=False, lane=PLANNER_LANE))
-        else:
-            self._hooks.use()
-            await self._hooks.save()
-            await self._turns.start(self._answer(self._planner, text, settings))
+            raise Refused(NOT_CONFIGURED, NO_PLANNER_MESSAGE)
+        self._hooks.use()
+        await self._hooks.save()
+        await self._turns.start(self._answer(self._planner, text, settings))
 
     async def _answer(self, planner: PlannerChat, text: str, settings: Settings) -> TurnEndReason:
         """``planner``'s turn on ``text``, saving the session after it, as its conversation
@@ -120,10 +122,10 @@ class PlannerSeat:
         """End the planner's conversation, re-reading its role; refused while it answers, and
         noted when it has no conversation yet."""
         if self._desk is None or self._planner is None:
-            await self._events.put(ErrorOccurred(message=NO_PLANNER_MESSAGE))
-        elif self._turns.running:
-            await self._events.put(ErrorOccurred(message=PLANNER_BUSY_RESET))
-        elif not self._planner.started:
+            raise Refused(NOT_CONFIGURED, NO_PLANNER_MESSAGE)
+        if self._turns.running:
+            raise Refused(BUSY, PLANNER_BUSY_RESET)
+        if not self._planner.started:
             await self._events.put(Notice(message=NOTHING_TO_RESET))
         else:
             await self._reread_role(self._desk)

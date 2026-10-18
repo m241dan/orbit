@@ -4,6 +4,8 @@ import asyncio
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 
+import pytest
+
 from orbit.agent import Agents, ConfigError, Role
 from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.planner_seat import (
@@ -17,7 +19,10 @@ from orbit.agent.application.planner_seat import (
 from orbit.agent.application.ports import PlannerRoleReader
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.board import TaskBoard
+from orbit.agent.domain.refusals import Refused
 from orbit.protocol import (
+    BUSY,
+    NOT_CONFIGURED,
     PLANNER,
     AgentExited,
     BusyChanged,
@@ -88,18 +93,17 @@ async def answered(seated: Seated) -> list[Event]:
 
 async def test_submitting_without_a_planner_is_refused_and_frees_the_prompt() -> None:
     seated_ = seated(roles=None)
-    await seated_.seat.submit("Plan.", Settings())
-    assert seated_.published() == [
-        ErrorOccurred(message=NO_PLANNER_MESSAGE),
-        BusyChanged(busy=False, lane="planner"),
-    ]
+    with pytest.raises(Refused) as refused:
+        await seated_.seat.submit("Plan.", Settings())
+    assert (refused.value.code, str(refused.value)) == (NOT_CONFIGURED, NO_PLANNER_MESSAGE)
+    assert seated_.published() == [BusyChanged(busy=False, lane="planner")]
     assert seated_.calls == []
 
 
 async def test_a_planner_role_is_needed_too() -> None:
     seated_ = seated(roles={"coder": ROLES["coder"]})
-    await seated_.seat.submit("Plan.", Settings())
-    assert seated_.published()[0] == ErrorOccurred(message=NO_PLANNER_MESSAGE)
+    with pytest.raises(Refused, match=NO_PLANNER_MESSAGE):
+        await seated_.seat.submit("Plan.", Settings())
 
 
 async def test_a_turn_marks_the_session_used_and_saves_before_and_after() -> None:
@@ -177,8 +181,10 @@ async def test_a_reset_ends_the_conversation_and_saves() -> None:
 
 async def test_a_reset_needs_a_planner() -> None:
     seated_ = seated(roles=None)
-    await seated_.seat.reset()
-    assert seated_.published() == [ErrorOccurred(message=NO_PLANNER_MESSAGE)]
+    with pytest.raises(Refused) as refused:
+        await seated_.seat.reset()
+    assert (refused.value.code, str(refused.value)) == (NOT_CONFIGURED, NO_PLANNER_MESSAGE)
+    assert seated_.published() == []
 
 
 async def test_a_reset_is_refused_while_the_planner_answers() -> None:
@@ -186,8 +192,10 @@ async def test_a_reset_is_refused_while_the_planner_answers() -> None:
     seated_.launcher.planner_turns = [hangs]
     await seated_.seat.submit("Plan.", Settings())
     seated_.published()
-    await seated_.seat.reset()
-    assert seated_.published() == [ErrorOccurred(message=PLANNER_BUSY_RESET)]
+    with pytest.raises(Refused) as refused:
+        await seated_.seat.reset()
+    assert (refused.value.code, str(refused.value)) == (BUSY, PLANNER_BUSY_RESET)
+    assert seated_.published() == []
     await seated_.seat.stop_turn()
 
 

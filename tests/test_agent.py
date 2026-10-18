@@ -22,6 +22,7 @@ from orbit.agent.application.usage_monitor import UsageMonitor
 from orbit.agent.domain.usage import UsageFetch, UsageUnavailable
 from orbit.agent.domain.verification import MAX_FALLBACK_FIXES
 from orbit.protocol import (
+    NOT_CONFIGURED,
     PLANNER,
     UNKNOWN,
     AddTask,
@@ -107,9 +108,10 @@ async def test_a_prompt_without_a_planner_is_refused() -> None:
     await send(session, SendMessage(agent=PLANNER, text="hello"))
     stream = payloads(session)
     assert isinstance(await anext(stream), SettingsChanged)
-    assert await anext(stream) == ErrorOccurred(message="Planning needs agents and a planner role.")
     assert await anext(stream) == PLANNER_IDLE
-    assert await anext(stream) == ACCEPTED
+    assert await anext(stream) == refused(
+        NOT_CONFIGURED, "Planning needs agents and a planner role."
+    )
     assert isinstance(await anext(stream), SessionOpened)
     assert nothing_queued(session)
 

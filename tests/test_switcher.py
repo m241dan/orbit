@@ -4,6 +4,8 @@ import asyncio
 from datetime import UTC, datetime
 from itertools import count
 
+import pytest
+
 from orbit.agent.application.keeper import SessionKeeper
 from orbit.agent.application.planner_seat import PlannerSeat, SeatHooks
 from orbit.agent.application.switcher import (
@@ -14,10 +16,11 @@ from orbit.agent.application.switcher import (
 )
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.board import TaskBoard
+from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.reviews import LaneSnapshot, PlannerSnapshot
 from orbit.agent.domain.sessions import SessionRecord
 from orbit.protocol import (
-    ErrorOccurred,
+    BUSY,
     Event,
     NewSession,
     OpenSession,
@@ -82,8 +85,10 @@ async def test_switching_is_refused_while_tasks_run() -> None:
     held = Held(Settings())
     held.running = True
     switcher, events, _ = switcher_for(FakeStore(), held)
-    await switcher.handle(NewSession(name="other"))
-    assert drained(events) == [ErrorOccurred(message=TASKS_RUNNING)]
+    with pytest.raises(Refused) as refused:
+        await switcher.handle(NewSession(name="other"))
+    assert (refused.value.code, str(refused.value)) == (BUSY, TASKS_RUNNING)
+    assert drained(events) == []
 
 
 async def test_a_switch_publishes_the_tasks_then_the_settings_then_the_session() -> None:

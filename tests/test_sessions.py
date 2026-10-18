@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 
 from orbit.agent.domain import sessions
+from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.reviews import BatchSnapshot, LaneSnapshot, PlannerSnapshot, ReviewJob
 from orbit.agent.domain.sessions import (
     EMPTY_NAME,
@@ -30,7 +31,16 @@ from orbit.agent.domain.sessions import (
     summarize,
     tasks_summary,
 )
-from orbit.protocol import SessionSummary, Settings, TaskSpec, TaskState, TaskStatus, Usage
+from orbit.protocol import (
+    INVALID,
+    LOCKED,
+    SessionSummary,
+    Settings,
+    TaskSpec,
+    TaskState,
+    TaskStatus,
+    Usage,
+)
 
 CREATED = datetime(2026, 10, 7, 9, 5, tzinfo=UTC)
 ACTIVE = datetime(2026, 10, 17, 14, 30, tzinfo=timezone(timedelta(hours=2)))
@@ -323,19 +333,25 @@ def test_sessions_list_newest_first_with_undated_ones_last() -> None:
     assert newest_first([undated, old, new]) == (new, old, undated)
 
 
+def refused(refusal: object) -> tuple[str, str]:
+    """The code and message of ``refusal``, which must be a refusal."""
+    assert isinstance(refusal, Refused)
+    return refusal.code, refusal.message
+
+
 def test_a_readable_unlocked_session_is_openable() -> None:
     assert openable("abc123", record(), locked=False) == record()
 
 
 def test_a_locked_session_isnt_openable() -> None:
-    assert openable("abc123", record(), locked=True) == (
-        "Can't open \"Oct 7 09:05\": it's open in another orbit."
-    )
+    refusal = openable("abc123", record(), locked=True)
+    message = "Can't open \"Oct 7 09:05\": it's open in another orbit."
+    assert refused(refusal) == (LOCKED, message)
 
 
 def test_an_unreadable_session_isnt_openable() -> None:
-    reason = openable("abc123", Unreadable("it isn't JSON"), locked=False)
-    assert reason == "Can't open the session abc123: it isn't JSON."
+    refusal = openable("abc123", Unreadable("it isn't JSON"), locked=False)
+    assert refused(refusal) == (INVALID, "Can't open the session abc123: it isn't JSON.")
 
 
 def test_a_readable_unlocked_session_is_renamable() -> None:
@@ -343,14 +359,14 @@ def test_a_readable_unlocked_session_is_renamable() -> None:
 
 
 def test_a_locked_session_isnt_renamable() -> None:
-    assert renamable("abc123", record(), locked=True) == (
-        "Can't rename \"Oct 7 09:05\": it's open in another orbit."
-    )
+    refusal = renamable("abc123", record(), locked=True)
+    message = "Can't rename \"Oct 7 09:05\": it's open in another orbit."
+    assert refused(refusal) == (LOCKED, message)
 
 
 def test_an_unreadable_session_isnt_renamable() -> None:
-    reason = renamable("abc123", Unreadable("it isn't JSON"), locked=False)
-    assert reason == "Can't rename the session abc123: it isn't JSON."
+    refusal = renamable("abc123", Unreadable("it isn't JSON"), locked=False)
+    assert refused(refusal) == (INVALID, "Can't rename the session abc123: it isn't JSON.")
 
 
 def test_a_session_neither_open_here_nor_elsewhere_can_be_deleted() -> None:
@@ -364,7 +380,7 @@ def test_an_unreadable_session_can_be_deleted() -> None:
 
 def test_a_session_open_in_another_orbit_cant_be_deleted() -> None:
     refusal = deletion_refusal("abc123", Unreadable("it isn't JSON"), locked=True)
-    assert refusal == "Can't delete \"abc123\": it's open in another orbit."
+    assert refused(refusal) == (LOCKED, "Can't delete \"abc123\": it's open in another orbit.")
 
 
 def test_a_record_goes_by_its_name_and_an_unreadable_one_by_its_id() -> None:

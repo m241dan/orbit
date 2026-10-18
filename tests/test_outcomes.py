@@ -4,12 +4,18 @@ code and a message, in place of any other answer."""
 import asyncio
 
 from orbit.agent import AgentSession
+from orbit.agent.application.planner_seat import (
+    NO_PLANNER_MESSAGE,
+    NOTHING_TO_RESET,
+    PLANNER_BUSY_RESET,
+)
 from orbit.agent.application.session import CONFIGURING_NOTE, NO_AGENTS_MESSAGE
 from orbit.protocol import (
     BUSY,
     CONFIGURE_CHECKS,
     INVALID,
     NOT_CONFIGURED,
+    PLANNER,
     SUPER_REVIEW,
     UNKNOWN,
     WRONG_SESSION,
@@ -23,13 +29,16 @@ from orbit.protocol import (
     FireTrigger,
     Notice,
     RemoveTask,
+    ResetConversation,
     RunTasks,
+    SendMessage,
     TasksChanged,
     TaskSpec,
     TurnEndReason,
 )
-from tests.agent_fakes import Call, events_until, queued, session_for
+from tests.agent_fakes import Call, FakeStore, events_until, queued, session_for
 from tests.test_configure_key import Configurator, no_steps
+from tests.test_planner import hangs
 
 TASK = TaskSpec(prompt="Add a flag.")
 OUTCOMES = (CommandAccepted, CommandRefused)
@@ -158,3 +167,82 @@ async def test_a_configurator_already_queued_is_noted_and_the_command_accepted()
     noted = events.index(Notice(message=CONFIGURING_NOTE))
     assert noted > events.index(CommandAccepted(command_id="first"))
     assert not any(isinstance(event, CommandRefused) for event in events)
+
+
+async def answering() -> AgentSession:
+    """A session whose planner is answering, and goes on until cancelled."""
+    session, _, launcher = session_for()
+    launcher.planner_turns = [hangs]
+    await send_as(session, "plan", SendMessage(agent=PLANNER, text="Plan."))
+    await events_until(session, lambda event: event == CommandAccepted(command_id="plan"))
+    while not launcher.launches:
+        await asyncio.sleep(0)
+    return session
+
+
+async def test_a_message_to_the_planner_while_it_answers_is_refused_as_busy() -> None:
+    session = await answering()
+    refused = await refusal(session, "c9", SendMessage(agent=PLANNER, text="More."))
+    await session.close()
+
+    assert (refused.code, refused.message) == (BUSY, "The planner is already answering.")
+
+
+async def test_a_message_without_a_planner_is_refused_as_not_configured() -> None:
+    session = AgentSession()
+    refused = await refusal(session, "c10", SendMessage(agent=PLANNER, text="Plan."))
+    await session.close()
+
+    assert (refused.code, refused.message) == (NOT_CONFIGURED, NO_PLANNER_MESSAGE)
+
+
+async def test_resetting_the_planner_while_it_answers_is_refused_as_busy() -> None:
+    session = await answering()
+    refused = await refusal(session, "c11", ResetConversation(agent=PLANNER))
+    await session.close()
+
+    assert (refused.code, refused.message) == (BUSY, PLANNER_BUSY_RESET)
+
+
+async def test_a_reset_with_nothing_to_reset_is_noted_and_accepted() -> None:
+    session, _, _ = session_for()
+    await send_as(session, "c12", ResetConversation(agent=PLANNER))
+    events = await outcome(session)
+    await session.close()
+
+    assert events[-2:] == [Notice(message=NOTHING_TO_RESET), CommandAccepted(command_id="c12")]
+
+
+async def test_running_tasks_while_they_run_is_refused_as_busy() -> None:
+    started = asyncio.Event()
+
+    async def waits(call: Call) -> TurnEndReason:
+        await call("get_task")
+        started.set()
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+    session, _, _ = session_for(waits)
+    await send_as(session, "add", AddTask(task=TASK))
+    await send_as(session, "run", RunTasks())
+    await asyncio.wait_for(started.wait(), 5)
+    await send_as(session, "next", AddTask(task=TASK))
+    await events_until(session, lambda event: event == CommandAccepted(command_id="next"))
+    refused = await refusal(session, "c13", RunTasks())
+    await session.close()
+
+    assert (refused.code, refused.message) == (BUSY, "Tasks are already running.")
+
+
+async def test_a_save_that_cannot_take_its_lock_is_an_error_not_a_refusal() -> None:
+    store = FakeStore()
+    store.free = False
+    session = AgentSession(store=store, new_id=lambda: "session-1")
+    await send_as(session, "c14", AddTask(task=TASK))
+    events = await outcome(session)
+    await session.close()
+
+    message = "Another orbit has the session session-1 open, so it won't be saved."
+    assert ErrorOccurred(message=message) in events
+    assert events[-1] == CommandAccepted(command_id="c14")
+    assert not any(isinstance(event, OUTCOMES) for event in queued(session))

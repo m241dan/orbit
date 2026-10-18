@@ -11,11 +11,16 @@ from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.reviews import LaneSnapshot, PlannerSnapshot
 from orbit.agent.domain.sessions import SessionRecord
 from orbit.protocol import (
+    BUSY,
+    INVALID,
+    LOCKED,
     PLANNER,
+    UNKNOWN,
     AddTask,
     AgentExited,
     AgentStarted,
     CancelTurn,
+    CommandRefused,
     ErrorOccurred,
     Event,
     ListSessions,
@@ -121,11 +126,15 @@ async def opened(session: AgentSession, command: OpenSession | NewSession) -> li
     return await events_until(session, of_type(SessionsListed))
 
 
-async def refused(session: AgentSession, command: OpenSession | NewSession) -> list[str]:
-    """The errors sending ``command`` reports, which ends in a refusal."""
+async def refused(
+    session: AgentSession, command: OpenSession | NewSession
+) -> list[tuple[str, str]]:
+    """The codes and messages ``command`` is refused with, reporting no error."""
     await send(session, command)
     await send(session, ListSessions())
-    return messages(ErrorOccurred, await events_until(session, of_type(SessionsListed)))
+    events = await events_until(session, of_type(SessionsListed))
+    assert messages(ErrorOccurred, events) == []
+    return [(e.code, e.message) for e in events if isinstance(e, CommandRefused)]
 
 
 async def chats(call: Call) -> TurnEndReason:
@@ -320,7 +329,7 @@ async def test_a_session_open_in_another_orbit_is_refused() -> None:
     store.elsewhere.add("auth")
     session, _ = switching(store)
     errors = await refused(session, OpenSession(session_id="auth"))
-    assert errors == ["Can't open \"auth rework\": it's open in another orbit."]
+    assert errors == [(LOCKED, "Can't open \"auth rework\": it's open in another orbit.")]
     await session.close()
 
 
@@ -329,7 +338,7 @@ async def test_a_session_locked_as_it_is_opened_is_refused() -> None:
     store.free = False
     session, _ = switching(store)
     errors = await refused(session, OpenSession(session_id="auth"))
-    assert errors == ["Can't open \"auth\": it's open in another orbit."]
+    assert errors == [(LOCKED, "Can't open \"auth\": it's open in another orbit.")]
     await session.close()
 
 
@@ -338,14 +347,14 @@ async def test_an_unreadable_session_is_refused() -> None:
     store.broken["broken"] = "it isn't JSON"
     session, _ = switching(store)
     errors = await refused(session, OpenSession(session_id="broken"))
-    assert errors == ["Can't open the session broken: it isn't JSON."]
+    assert errors == [(INVALID, "Can't open the session broken: it isn't JSON.")]
     await session.close()
 
 
 async def test_a_missing_session_is_refused() -> None:
     session, _ = switching(FakeStore())
     errors = await refused(session, OpenSession(session_id="gone"))
-    assert errors == ["There's no saved session 'gone'."]
+    assert errors == [(UNKNOWN, "There's no saved session 'gone'.")]
     await session.close()
 
 
@@ -381,7 +390,7 @@ async def test_a_session_unreadable_once_locked_is_refused_and_lets_go_of_the_lo
     store.on_acquire = break_it
     session, _ = switching(store)
     errors = await refused(session, OpenSession(session_id="auth"))
-    assert errors == ["Can't open the session auth: it isn't JSON."]
+    assert errors == [(INVALID, "Can't open the session auth: it isn't JSON.")]
     assert store.released == ["auth"] and store.locked == set()
     await session.close()
 
@@ -406,8 +415,8 @@ async def test_switching_is_refused_while_tasks_run() -> None:
     await send(session, AddTask(task=TASK))
     await send(session, RunTasks())
     await events_until(session, of_type(AgentStarted))
-    assert await refused(session, OpenSession(session_id="auth")) == [TASKS_RUNNING]
-    assert await refused(session, NewSession()) == [TASKS_RUNNING]
+    assert await refused(session, OpenSession(session_id="auth")) == [(BUSY, TASKS_RUNNING)]
+    assert await refused(session, NewSession()) == [(BUSY, TASKS_RUNNING)]
     assert store.locked == {"session-1"} and store.released == []
     assert session.saved_session.id == "session-1"
     await session.close()
@@ -422,7 +431,7 @@ async def test_switching_is_refused_while_a_review_runs() -> None:
     await send(session, RunTasks())
     reviewing = Stop("reviewer", lambda e: isinstance(e, AgentStarted) and e.role == "reviewer")
     await events_until(session, all_of(reviewing, idle("work")), timeout=10)
-    assert await refused(session, OpenSession(session_id="auth")) == [REVIEW_RUNNING]
+    assert await refused(session, OpenSession(session_id="auth")) == [(BUSY, REVIEW_RUNNING)]
     await session.close()
 
 
@@ -431,8 +440,8 @@ async def test_switching_is_refused_while_the_planner_answers() -> None:
     launcher.planner_turns = [hangs]
     await send(session, SendMessage(agent=PLANNER, text="Plan it."))
     await events_until(session, of_type(AgentStarted))
-    assert await refused(session, OpenSession(session_id="auth")) == [PLANNER_ANSWERING]
-    assert await refused(session, NewSession(name="other")) == [PLANNER_ANSWERING]
+    assert await refused(session, OpenSession(session_id="auth")) == [(BUSY, PLANNER_ANSWERING)]
+    assert await refused(session, NewSession(name="other")) == [(BUSY, PLANNER_ANSWERING)]
     assert session.saved_session.name != "other"
     await session.close()
 
@@ -447,7 +456,7 @@ async def test_work_started_while_a_session_is_locked_to_open_refuses_the_switch
         await send(session, RunTasks())
 
     store.on_acquire = run
-    assert await refused(session, OpenSession(session_id="auth")) == [TASKS_RUNNING]
+    assert await refused(session, OpenSession(session_id="auth")) == [(BUSY, TASKS_RUNNING)]
     assert store.locked == {"session-1"} and store.released == ["auth"]
     await session.close()
 

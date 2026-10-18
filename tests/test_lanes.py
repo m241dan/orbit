@@ -5,7 +5,11 @@ import asyncio
 import inspect
 from contextlib import suppress
 
+import pytest
+
 from orbit.agent.application.lanes import Background, TurnSlot
+from orbit.agent.domain.refusals import Refused
+from orbit.protocol import BUSY as BUSY_CODE
 from orbit.protocol import BusyChanged, ErrorOccurred, Event
 
 
@@ -122,7 +126,7 @@ async def test_a_turn_shows_the_lane_busy_until_it_ends() -> None:
     turns, posted = slot()
     work = Work()
 
-    assert await turns.start(work("first"))
+    await turns.start(work("first"))
     await work.started.wait()
     assert turns.running and posted == [BUSY]
 
@@ -139,9 +143,11 @@ async def test_a_turn_while_one_runs_is_refused_and_closed() -> None:
     await work.started.wait()
     second = work("second")
 
-    assert not await turns.start(second)
+    with pytest.raises(Refused) as refused:
+        await turns.start(second)
 
-    assert posted == [BUSY, ErrorOccurred(message="Busy already.")]
+    assert (refused.value.code, str(refused.value)) == (BUSY_CODE, "Busy already.")
+    assert posted == [BUSY]
     assert inspect.getcoroutinestate(second) == "CORO_CLOSED"
     await turns.close()
 

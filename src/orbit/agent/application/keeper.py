@@ -12,6 +12,7 @@ from datetime import datetime
 
 from orbit.agent.application.failures import ReportedOnce, outcome
 from orbit.agent.application.ports import Publish, SessionStore
+from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.reviews import LaneSnapshot
 from orbit.agent.domain.sessions import (
     OPEN_UNDELETABLE,
@@ -28,7 +29,16 @@ from orbit.agent.domain.sessions import (
     stored_summary,
     tasks_summary,
 )
-from orbit.protocol import ErrorOccurred, SessionSummary, Settings, TaskState, Usage
+from orbit.protocol import (
+    INVALID,
+    LOCKED,
+    UNKNOWN,
+    ErrorOccurred,
+    SessionSummary,
+    Settings,
+    TaskState,
+    Usage,
+)
 
 Clock = Callable[[], datetime]
 """The time now, timezone-aware."""
@@ -36,28 +46,28 @@ Clock = Callable[[], datetime]
 IdMaker = Callable[[], str]
 """Makes a fresh, unique id."""
 
-Commit = Callable[[], bool]
-"""Switches what the session holds, unless that's refused now; returns whether it did."""
+Commit = Callable[[], None]
+"""Switches what the session holds, unless that's refused now: then raises :class:`Refused`."""
 
-Load = Callable[[SessionRecord], bool]
-"""Switches the session to hold what a saved record does, unless that's refused now; returns
-whether it did."""
+Load = Callable[[SessionRecord], None]
+"""Switches the session to hold what a saved record does, unless that's refused now: then raises
+:class:`Refused`."""
 
 
 @dataclass(frozen=True)
 class _Action[T]:
     """What can be done to a saved session: its ``verb``, the ``check`` that makes of a session
-    what it acts on, or says why it can't be, and whether it ``reread``s the session under its
-    lock."""
+    what it acts on, or the refusal saying why it can't be, and whether it ``reread``s the
+    session under its lock."""
 
     verb: str
-    check: Callable[[str, SessionRecord | Unreadable, bool], T | str]
+    check: Callable[[str, SessionRecord | Unreadable, bool], T | Refused]
     reread: bool = True
 
 
 def _deletable(
     session_id: str, record: SessionRecord | Unreadable, locked: bool
-) -> SessionRecord | Unreadable | str:
+) -> SessionRecord | Unreadable | Refused:
     """The saved session ``session_id``, as ``record``, to delete, or why it can't be."""
     return deletion_refusal(session_id, record, locked) or record
 
@@ -216,7 +226,8 @@ class SessionKeeper:
 
     async def rename_saved(self, session_id: str, name: str) -> None:
         """Name the saved session ``session_id``, not the one open here, ``name``, holding its
-        lock while it's rewritten. Problems are reported."""
+        lock while it's rewritten. Refused (raising :class:`Refused`) if it can't be renamed;
+        store problems are reported."""
         found = await self._claimed(session_id, _RENAME)
         if found is None:
             return
@@ -228,10 +239,10 @@ class SessionKeeper:
 
     async def delete_saved(self, session_id: str) -> None:
         """Delete the saved session ``session_id``, lock and all, unless it's the one open here
-        or another orbit has it open. Problems are reported."""
+        or another orbit has it open: then raises :class:`Refused`. Store problems are
+        reported."""
         if session_id == self.id:
-            await self._publish(ErrorOccurred(message=OPEN_UNDELETABLE))
-            return
+            raise Refused(INVALID, OPEN_UNDELETABLE)
         if await self._claimed(session_id, _DELETE) is not None:
             assert self._store is not None  # Only a store holds saved sessions.
             await self._delete(self._store, session_id)
@@ -246,16 +257,19 @@ class SessionKeeper:
 
     async def open(self, session_id: str, load: Load) -> Opened | None:
         """Make the saved session ``session_id`` the one open here, locked, if ``load`` switches
-        to its record as read once it's locked; returns what was opened, or none if it didn't
-        switch. Problems are reported."""
+        to its record as read once it's locked; returns what was opened, or none if a store
+        problem, reported, kept it from opening. A refusal, its own or ``load``'s, raises
+        :class:`Refused`, with the session's lock let go of."""
         async with self._saving:
             record = await self._claimed(session_id, _OPEN)
             if record is None:
                 return None
             assert self._store is not None  # Only saved sessions are locked to open.
-            if not load(record):
+            try:
+                load(record)
+            except Refused:
                 await self._release(self._store, record.id)
-                return None
+                raise
             left = self._become(record.id, record.name, record.created)
             self._locked = self.used = True
         return Opened(left, record)
@@ -263,12 +277,10 @@ class SessionKeeper:
     async def _claimed[T](self, session_id: str, action: _Action[T]) -> T | None:
         """What ``action``'s check makes of the saved session ``session_id``, once its lock is
         taken, read again under the lock if ``action`` needs it so no work saved meanwhile is
-        lost; none, reported and with any lock taken let go of, if it can't be ``action``ed."""
-        found = await self._found(session_id, action)
-        if found is None:
-            return None
+        lost; none, reported, on a store problem. A refusal raises :class:`Refused`. Either way,
+        any lock taken is let go of."""
+        name, checked = await self._found(session_id, action)
         assert self._store is not None  # Only a store holds saved sessions.
-        name, checked = found
         if not await self._claim(self._store, session_id, name, action.verb):
             return None
         if not action.reread:
@@ -281,40 +293,38 @@ class SessionKeeper:
                 await self._release(self._store, session_id)
         return current
 
-    async def _found[T](self, session_id: str, action: _Action[T]) -> tuple[str, T] | None:
+    async def _found[T](self, session_id: str, action: _Action[T]) -> tuple[str, T]:
         """The name of the saved session ``session_id`` and what ``action``'s check makes of it;
-        none, reported, if there's no such session or it can't be ``action``ed."""
+        raises :class:`Refused` if there's no such session or it can't be ``action``ed."""
         stored = await self._store.sessions() if self._store else []
         found = next((each for each in stored if each.id == session_id), None)
         if found is None:
-            await self._publish(ErrorOccurred(message=missing_message(session_id)))
-            return None
+            raise Refused(UNKNOWN, missing_message(session_id))
         checked = action.check(session_id, found.record, found.locked)
-        if isinstance(checked, str):
-            await self._publish(ErrorOccurred(message=checked))
-            return None
+        if isinstance(checked, Refused):
+            raise checked
         return record_name(session_id, found.record), checked
 
     async def _reread[T](
         self, store: SessionStore, session_id: str, action: _Action[T]
     ) -> T | None:
         """What ``action``'s check makes of the session ``session_id`` as ``store`` holds it now,
-        its lock taken; none, reported, if it can't be read or ``action``ed."""
+        its lock taken; none, reported, if it can't be read, and raises :class:`Refused` if it
+        can't be ``action``ed."""
         loaded = await self._reported(store.load(session_id))
         if loaded is None:
             return None
         checked = action.check(session_id, loaded, False)
-        if isinstance(checked, str):
-            await self._publish(ErrorOccurred(message=checked))
-            return None
+        if isinstance(checked, Refused):
+            raise checked
         return checked
 
-    async def renew(self, name: str | None, commit: Commit) -> Left | None:
+    async def renew(self, name: str | None, commit: Commit) -> Left:
         """Make a new session ``name``d so (by the time, without a name) the one open here, if
-        ``commit`` switches to it; returns the session left, or none if it didn't switch."""
+        ``commit`` switches to it; returns the session left. A refused ``commit`` raises
+        :class:`Refused`, leaving the session open as it was."""
         async with self._saving:
-            if not commit():
-                return None
+            commit()
             created = self._clock()
             named = (name or "").strip() or default_name(created)
             return self._become(self._new_id(), named, created)
@@ -333,13 +343,14 @@ class SessionKeeper:
 
     async def _claim(self, store: SessionStore, session_id: str, name: str, action: str) -> bool:
         """Take the lock of the session ``session_id``, ``name``d so, in ``store``, to
-        ``action`` it; reports it if it can't be taken."""
+        ``action`` it; returns whether it did, reporting a store problem, and raises
+        :class:`Refused` if another orbit holds it."""
         acquired = await self._reported(store.acquire(session_id))
         if acquired is None:
             return False
         if not acquired:
-            await self._publish(ErrorOccurred(message=locked_message(name, action)))
-        return acquired
+            raise Refused(LOCKED, locked_message(name, action))
+        return True
 
     def _become(self, session_id: str, name: str, created: datetime) -> Left:
         """Be the session ``session_id``, unused and unsaved so far; returns the one left."""

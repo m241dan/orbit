@@ -12,6 +12,8 @@ from orbit.agent.application.planner_seat import (
 )
 from orbit.agent.domain.verification import steps_note
 from orbit.protocol import (
+    BUSY,
+    NOT_CONFIGURED,
     PLANNER,
     UNKNOWN,
     AddTask,
@@ -58,7 +60,7 @@ async def reset(session: AgentSession) -> list[Event]:
 async def refusal(session: AgentSession) -> Event:
     """What asking to reset the planner is answered with, when it's refused."""
     await send(session, ResetConversation(agent=PLANNER))
-    answered = Stop("refused", lambda e: isinstance(e, ErrorOccurred | Notice))
+    answered = Stop("refused", lambda e: isinstance(e, CommandRefused | Notice))
     return (await events_until(session, answered))[-1]
 
 
@@ -145,7 +147,7 @@ async def test_a_reset_is_refused_while_the_planner_answers() -> None:
     await send(session, SendMessage(agent=PLANNER, text="Plan."))
     while not launcher.launches:
         await asyncio.sleep(0)
-    assert await refusal(session) == ErrorOccurred(message=PLANNER_BUSY_RESET)
+    assert await refusal(session) == refused(BUSY, PLANNER_BUSY_RESET)
     await send(session, CancelTurn(lane="planner"))
     events = await events_until(session, idle("planner"))
     assert not any(isinstance(e, ConversationReset | AgentExited) for e in events)
@@ -160,7 +162,7 @@ async def test_before_the_first_prompt_there_is_nothing_to_reset() -> None:
 
 async def test_resetting_needs_a_planner() -> None:
     session = AgentSession()
-    assert await refusal(session) == ErrorOccurred(message=NO_PLANNER_MESSAGE)
+    assert await refusal(session) == refused(NOT_CONFIGURED, NO_PLANNER_MESSAGE)
     await session.close()
 
 

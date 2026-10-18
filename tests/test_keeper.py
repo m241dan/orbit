@@ -4,6 +4,8 @@ import asyncio
 from dataclasses import replace
 from datetime import timedelta
 
+import pytest
+
 from orbit.agent.application.keeper import (
     Contents,
     Left,
@@ -11,9 +13,10 @@ from orbit.agent.application.keeper import (
     local_now,
     new_session_id,
 )
+from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.reviews import LaneSnapshot, PlannerSnapshot
 from orbit.agent.domain.sessions import SessionRecord
-from orbit.protocol import ErrorOccurred, Event, Settings, TaskSpec, TaskState, Usage
+from orbit.protocol import BUSY, ErrorOccurred, Event, Settings, TaskSpec, TaskState, Usage
 from tests.agent_fakes import START, FakeStore, Ticks
 
 TASK = TaskState(id="1", task=TaskSpec(prompt="Add a flag."))
@@ -239,7 +242,7 @@ async def test_a_failing_session_save_is_reported_again_in_a_new_session() -> No
     keeper, published = keeper_for(store)
     store.failure = "full"
     await save(keeper, WITH_TASK)
-    await keeper.renew("next", lambda: True)
+    await keeper.renew("next", lambda: None)
     store.failure = "still full"
     await save(keeper, WITH_TASK)
     assert published.errors == ["full", "still full"]
@@ -270,10 +273,15 @@ async def test_a_lock_that_cannot_be_released_on_leaving_is_reported() -> None:
     assert published.errors == [UNLOCKABLE]
 
 
+def refuses(record: SessionRecord) -> None:
+    raise Refused(BUSY, "Busy.")
+
+
 async def test_a_lock_that_cannot_be_released_after_a_refused_open_is_reported() -> None:
     store = unreleasable_store_with("other")
     keeper, published = keeper_for(store)
-    assert await keeper.open("other", lambda record: False) is None
+    with pytest.raises(Refused):
+        await keeper.open("other", refuses)
     assert published.errors == [UNLOCKABLE]
     assert keeper.id == "session-1"
 
@@ -334,12 +342,9 @@ async def test_a_session_unreadable_once_locked_is_not_opened_and_lets_go_of_its
     keeper, published = keeper_for(store)
     loaded: list[SessionRecord] = []
 
-    def load(record: SessionRecord) -> bool:
-        loaded.append(record)
-        return True
-
-    assert await keeper.open("other", load) is None
-    assert published.errors == ["Can't open the session other: it isn't JSON."]
+    with pytest.raises(Refused, match="it isn't JSON"):
+        await keeper.open("other", loaded.append)
+    assert published.errors == []
     assert loaded == [] and keeper.id == "session-1"
     assert store.released == ["other"] and store.locked == set()
 
@@ -349,7 +354,7 @@ async def test_an_open_whose_reread_fails_is_reported_and_lets_go_of_its_lock() 
     store.saved = [SessionRecord(id="other", name="other", created=START, last_active=START)]
     store.load_failure = "Couldn't read the session: permission denied"
     keeper, published = keeper_for(store)
-    assert await keeper.open("other", lambda record: True) is None
+    assert await keeper.open("other", lambda record: None) is None
     assert published.errors == ["Couldn't read the session: permission denied"]
     assert keeper.id == "session-1"
     assert store.released == ["other"] and store.locked == set()
