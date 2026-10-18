@@ -98,11 +98,13 @@ from orbit.tui.view import (
     RESET_MESSAGE,
     RESET_TITLE,
     RESET_YES,
+    SIDEBAR_WINDOWS,
     coalesce,
     decision_entry,
     edit_refusal,
     model_choices,
     model_options,
+    neighbors,
     planner_reset_entry,
     tool_access_choices,
     tool_access_labels,
@@ -115,22 +117,6 @@ from orbit.tui.widgets import (
     PickerScreen,
     mark_selected,
 )
-
-# Window reached from each window by h/j/k/l; missing means an edge.
-# Conversation over prompt on the left, task list over verification steps on the right; the
-# conversation's detail pane, while it's open, between the conversation and the prompt.
-NEIGHBORS: dict[str, dict[str, str]] = {
-    "transcript": {"j": "prompt", "l": "task-list"},
-    "detail": {"k": "transcript", "j": "prompt", "l": "task-list"},
-    "prompt": {"k": "transcript", "l": "verification-steps"},
-    "task-list": {"h": "transcript", "j": "verification-steps"},
-    "verification-steps": {"h": "prompt", "k": "task-list", "j": "agents"},
-    "agents": {"h": "prompt", "k": "verification-steps"},
-}
-# The conversation's moves that differ while its detail pane is open.
-OPEN_DETAIL_NEIGHBORS: dict[str, str] = {"j": "detail"}
-# The windows in the sidebar, which h/j/k/l skip while ctrl+b hides it.
-SIDEBAR_WINDOWS = frozenset({"task-list", "verification-steps", "agents"})
 
 # Most events rendered in one go, so a flood still lets the screen repaint now and then.
 BATCH_LIMIT = 500
@@ -317,12 +303,7 @@ class OrbitApp(App[None], inherit_bindings=False):
 
     def _neighbors(self) -> dict[str, str]:
         """The windows h/j/k/l reach from the selected one."""
-        neighbors = NEIGHBORS[self._selected]
-        if self._selected == "transcript" and self._transcript.detail.opened:
-            neighbors = neighbors | OPEN_DETAIL_NEIGHBORS
-        if self._side.display:
-            return neighbors
-        return {key: window for key, window in neighbors.items() if window not in SIDEBAR_WINDOWS}
+        return neighbors(self._selected, self._transcript.detail.opened, self._side.display)
 
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
         conditions: dict[str, Callable[[], bool]] = {

@@ -236,6 +236,7 @@ from orbit.tui.view.turns import (
     turn_output,
     turn_started,
 )
+from orbit.tui.view.windows import NEIGHBORS, OPEN_DETAIL_NEIGHBORS, SIDEBAR_WINDOWS, neighbors
 from orbit.tui.view.working import (
     WORKING_LINES_SHOWN,
     RunningAgent,
@@ -282,11 +283,13 @@ __all__ = [
     "MARKDOWN_KINDS",
     "NAME_HINT",
     "NAME_PLACEHOLDER",
+    "NEIGHBORS",
     "NEW_SESSION_LABEL",
     "NEW_TASK_LABEL",
     "NO_AGENTS_LABEL",
     "NO_DETAILS",
     "NO_STEPS_TEXT",
+    "OPEN_DETAIL_NEIGHBORS",
     "ORBIT_TOOL_FIELDS",
     "ORBIT_TOOL_PREFIX",
     "PINNED_TABS",
@@ -304,6 +307,7 @@ __all__ = [
     "RULE_KINDS",
     "RUNNING_MARK",
     "SESSIONS_TITLE",
+    "SIDEBAR_WINDOWS",
     "SKIP_REASONS",
     "SPINNER_FPS",
     "SPINNER_FRAMES",
@@ -401,6 +405,7 @@ __all__ = [
     "model_label",
     "model_options",
     "nearest_row",
+    "neighbors",
     "note_entry",
     "numbered_diff",
     "orbit_request_line",
