@@ -18,6 +18,7 @@ from orbit.agent.application.keeper import (
     new_session_id,
 )
 from orbit.agent.application.lanes import TurnSlot
+from orbit.agent.application.outbox import Outbox
 from orbit.agent.application.planner_seat import PlannerSeat, SeatHooks
 from orbit.agent.application.ports import ProposalReview, SessionStore, UsageSource
 from orbit.agent.application.proposals import FrontendReview
@@ -51,7 +52,6 @@ from orbit.protocol import (
     NOT_CONFIGURED,
     PLANNER,
     PLANNER_LANE,
-    SESSIONLESS_EVENTS,
     SUPER_REVIEW,
     UNKNOWN,
     WORK_LANE,
@@ -173,8 +173,7 @@ class AgentSession:
         self._pinned = tuple(pinned)
         self._pick_session = pick_session
         self._model_choices = tuple(model_choices)
-        self._events: asyncio.Queue[Event] = asyncio.Queue()
-        self._seq = 0  # The last event's place in the stream, counted across sessions.
+        self._events = Outbox(lambda: self._keeper.id)
         self._keeper = SessionKeeper(store, self._events.put, clock, new_id)
         self._keeper.rename(name)
         self._review_count = ReviewCount(store, self._events.put)
@@ -613,16 +612,9 @@ class AgentSession:
             finally:  # A listener cancelled meanwhile mustn't keep the background from starting.
                 self._start_background()
         while True:
-            event = await self._events.get()
-            self._nudge_usage(event)
-            yield self._enveloped(event)
-
-    def _enveloped(self, event: Event) -> EventEnvelope:
-        """``event`` in its envelope: the next ``seq``, and the open session, unless the event
-        belongs to none."""
-        self._seq += 1
-        session = None if isinstance(event, SESSIONLESS_EVENTS) else self._keeper.id
-        return EventEnvelope(seq=self._seq, session=session, payload=event)
+            envelope = await self._events.envelope()
+            self._nudge_usage(envelope.payload)
+            yield envelope
 
     def _start_background(self) -> None:
         """Start the startup check and the usage monitor, if there are any and the session isn't

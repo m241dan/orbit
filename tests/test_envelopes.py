@@ -126,3 +126,17 @@ async def test_usage_belongs_to_no_session() -> None:
 
     assert usage.session is None
     assert usage.workspace == DEFAULT_WORKSPACE
+
+
+async def test_an_event_keeps_the_session_it_was_published_in_when_read_after_a_switch() -> None:
+    session = saved_session()
+    await send(session, AddTask(task=TaskSpec(prompt="Add a flag.")))
+    await send(session, NewSession(name="other"))
+    envelopes = await envelopes_until(session, SessionOpened)
+    after = await envelopes_until(session, SessionOpened)
+    await session.close()
+
+    tasks = [e for e in envelopes if isinstance(e.payload, TasksChanged)]
+    assert tasks[0].session == "session-1"
+    assert after[-1].session == "session-2"
+    assert {e.session for e in after} - {None} == {"session-2"}
