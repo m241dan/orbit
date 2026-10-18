@@ -4,14 +4,17 @@ import pytest
 from pydantic import ValidationError
 
 from orbit.protocol import (
+    CODER,
     CONFIGURE_CHECKS,
     INTERNAL,
     MANUAL_ORIGIN,
     PLANNER,
+    PLANNER_LANE,
     PLANNER_ORIGIN,
     REVIEW_ORIGIN,
     SUPER_REVIEW,
     SUPER_REVIEW_ORIGIN,
+    WORK_LANE,
     AcceptTask,
     AddTask,
     AgentExited,
@@ -22,17 +25,20 @@ from orbit.protocol import (
     BusyChanged,
     CancelAgent,
     CancelTurn,
+    ChecksProposed,
     ConversationReset,
     EditTask,
     ErrorOccurred,
     FireTrigger,
     ListSessions,
     NewSession,
+    OpenRequest,
     OpenSession,
     ProgressNoted,
     RemoveTask,
     ResetConversation,
     ReviewStatus,
+    RunningAgent,
     RunTasks,
     SendMessage,
     SessionOpened,
@@ -40,6 +46,7 @@ from orbit.protocol import (
     SessionSummary,
     Settings,
     SettingsChanged,
+    Snapshot,
     StartupChecked,
     StepState,
     TaskGaveUp,
@@ -373,3 +380,22 @@ def test_usage_changed_json_rejects_a_zoneless_time() -> None:
 def test_an_error_needs_a_code() -> None:
     with pytest.raises(ValidationError):
         ErrorOccurred.model_validate({"message": "boom"})
+
+
+def test_a_snapshot_round_trips_with_its_running_agents_and_their_open_requests() -> None:
+    request = OpenRequest(request_id="r1", tool="get_task")
+    agent = RunningAgent(agent_id="agent-1", role=CODER, task_id="1", open_requests=(request,))
+    snapshot = Snapshot(
+        session=SessionSummary(id="s1", name="auth", current=True),
+        settings=Settings(model="opus"),
+        model_choices=("opus",),
+        busy={WORK_LANE: True, PLANNER_LANE: False},
+        tasks=(TaskState(id="1", task=TaskSpec(prompt="Add a flag."), status="running"),),
+        steps=(StepState(name="Unit tests"),),
+        steps_title="Startup check",
+        review=ReviewStatus(paused=False, open_batches=1),
+        proposals=(ChecksProposed(agent_id="agent-1", task_id="1", steps=()),),
+        agents=(agent,),
+    )
+
+    assert event_adapter.validate_json(snapshot.model_dump_json()) == snapshot

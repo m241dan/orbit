@@ -11,6 +11,8 @@ from orbit.protocol import (
     AgentStarted,
     Event,
     ReviewStatus,
+    RunningAgent,
+    Snapshot,
 )
 
 NO_AGENTS_LABEL = "No agents running"
@@ -28,14 +30,27 @@ class AgentRow:
 
 
 def track_agents(rows: tuple[AgentRow, ...], event: Event) -> tuple[AgentRow, ...]:
-    """The running agents after ``event``."""
+    """The running agents after ``event``; a snapshot replaces them."""
+    if isinstance(event, Snapshot):
+        return tuple(_row(agent) for agent in event.agents)
+    if isinstance(event, AgentRequest | AgentReply):
+        return _track_requests(rows, event)
+    return _track_starts(rows, event)
+
+
+def _track_starts(rows: tuple[AgentRow, ...], event: Event) -> tuple[AgentRow, ...]:
+    """``rows`` with the agent ``event`` starts added, or the one it exits removed."""
     if isinstance(event, AgentStarted):
         return (*rows, AgentRow(event.agent_id, event.role, event.task_id))
     if isinstance(event, AgentExited):
         return tuple(row for row in rows if row.agent_id != event.agent_id)
-    if isinstance(event, AgentRequest | AgentReply):
-        return _track_requests(rows, event)
     return rows
+
+
+def _row(agent: RunningAgent) -> AgentRow:
+    """``agent`` as a row, with its open requests."""
+    requests = tuple((r.request_id, r.tool) for r in agent.open_requests)
+    return AgentRow(agent.agent_id, agent.role, agent.task_id, requests)
 
 
 def _track_requests(

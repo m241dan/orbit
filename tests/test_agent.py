@@ -37,6 +37,7 @@ from orbit.protocol import (
     SessionOpened,
     Settings,
     SettingsChanged,
+    Snapshot,
     StepState,
     TasksChanged,
     TaskSpec,
@@ -76,8 +77,8 @@ async def fails(call: Call) -> TurnEndReason:
 
 
 async def collect_run(session: AgentSession) -> list[Event]:
-    """Events until the planner goes idle, ignoring settings announcements."""
-    return await events_until(session, idle("planner"), skip=(SettingsChanged,))
+    """Events until the planner goes idle, ignoring settings announcements and snapshots."""
+    return await events_until(session, idle("planner"), skip=(SettingsChanged, Snapshot))
 
 
 def turns(events: list[Event]) -> list[Event]:
@@ -108,6 +109,7 @@ async def test_a_prompt_without_a_planner_is_refused() -> None:
     session = AgentSession()
     await send(session, SendMessage(agent=PLANNER, text="hello"))
     stream = payloads(session)
+    assert isinstance(await anext(stream), Snapshot)
     assert isinstance(await anext(stream), SettingsChanged)
     assert isinstance(await anext(stream), SessionOpened)
     assert await anext(stream) == PLANNER_IDLE
@@ -147,7 +149,9 @@ async def test_session_announces_initial_settings() -> None:
     settings = Settings(model="opus", tool_access="off")
     session = AgentSession(settings, model_choices=("opus", "sonnet"))
     assert session.settings == settings
-    assert await anext(payloads(session)) == SettingsChanged(
+    stream = payloads(session)
+    assert isinstance(await anext(stream), Snapshot)
+    assert await anext(stream) == SettingsChanged(
         settings=settings, model_choices=("opus", "sonnet")
     )
 
@@ -156,6 +160,7 @@ async def test_the_planner_takes_the_model_from_updated_settings() -> None:
     session, _, launcher = session_for()
     launcher.planner_turns = [chats, chats]
     stream = payloads(session)
+    assert isinstance(await anext(stream), Snapshot)
     assert await anext(stream) == SettingsChanged(settings=Settings())
 
     await send(session, SendMessage(agent=PLANNER, text="one"))
@@ -175,6 +180,7 @@ async def test_the_planner_takes_the_model_from_updated_settings() -> None:
 async def test_add_and_edit_tasks_publish_the_board() -> None:
     session = AgentSession()
     stream = payloads(session)
+    assert isinstance(await anext(stream), Snapshot)
     assert isinstance(await anext(stream), SettingsChanged)
     assert isinstance(await anext(stream), SessionOpened)
 
@@ -231,6 +237,7 @@ async def test_session_announces_verification_steps() -> None:
     session = AgentSession(verification=verified((FAILING_STEP,)))
     assert session.verification == verified((FAILING_STEP,))
     stream = payloads(session)
+    assert isinstance(await anext(stream), Snapshot)
     assert isinstance(await anext(stream), SettingsChanged)
     assert await anext(stream) == VerificationChanged(steps=(StepState(name="always fails"),))
 
@@ -239,6 +246,7 @@ async def test_verification_without_steps_notes_that_nothing_is_verified() -> No
     session = AgentSession(verification=verified(()))
     assert session.verification == verified(())
     stream = payloads(session)
+    assert isinstance(await anext(stream), Snapshot)
     assert isinstance(await anext(stream), SettingsChanged)
     # No steps to announce, just the note.
     assert await anext(stream) == Notice(message=NO_STEPS_NOTE)
@@ -249,6 +257,7 @@ async def test_verification_without_steps_notes_that_nothing_is_verified() -> No
 async def test_session_notes_its_workspace_at_startup() -> None:
     session = AgentSession(workspace="/code/project")
     stream = payloads(session)
+    assert isinstance(await anext(stream), Snapshot)
     assert isinstance(await anext(stream), SettingsChanged)
     assert await anext(stream) == Notice(message="Workspace: /code/project")
     assert isinstance(await anext(stream), SessionOpened)

@@ -66,7 +66,7 @@ class AgentsPane(ListPane):
     def _shown_numbers(self, numbers: Mapping[str, str]) -> list[str | None]:
         return [numbers.get(row.task_id) for row in self.rows]
 
-    def show_review(self, status: ReviewStatus) -> None:
+    def show_review(self, status: ReviewStatus | None) -> None:
         self.border_subtitle = review_line(status)
 
     def _redraw(self) -> None:

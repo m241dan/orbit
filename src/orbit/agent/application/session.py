@@ -7,6 +7,7 @@ ports to do it, and reports what happened as events.
 import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable, Collection, Sequence
 from dataclasses import replace
+from datetime import datetime
 from typing import assert_never
 
 from orbit import __version__
@@ -75,10 +76,13 @@ from orbit.protocol import (
     Notice,
     RemoveTask,
     ResetConversation,
+    RunningAgent,
     RunTasks,
     SendMessage,
     Settings,
     SettingsChanged,
+    Snapshot,
+    StepState,
     TaskSpec,
     TurnFinished,
     UpdateSettings,
@@ -155,8 +159,9 @@ class AgentSession:
     too, from then on.
 
     Every stream opens with ``Hello``: the session publishes nothing, and refuses every other
-    command, until it's answered with ``Welcome``; what the session had to say before then
-    follows it.
+    command, until it's answered with ``Welcome``. A ``Snapshot`` of the session open follows
+    it, after the latest usage if any was fetched, then what the session had to say before
+    then; every switch of session ends with a ``Snapshot`` too.
 
     The session open here is saved in ``store``, if there is one, once it's used; ``clock``
     tells the time, ``new_id`` makes its id and ``name`` names it (by the time, if none). The
@@ -227,6 +232,7 @@ class AgentSession:
             self._lane,
             self._work,
             lambda: self._work_turns.running,
+            self._snapshot,
         )
         access = SettingsAccess(
             lambda: self._settings,
@@ -332,9 +338,9 @@ class AgentSession:
             raise Refused(WRONG_SESSION, message)
 
     async def _hello(self, hello: Hello, command_id: str) -> None:
-        """Welcome the frontend that sent ``hello`` as ``command_id``, then publish what the
-        session had to say before it and announce the session; refused for a second Hello, or
-        another protocol version."""
+        """Welcome the frontend that sent ``hello`` as ``command_id``, then publish the latest
+        usage, if any, and a snapshot, what the session had to say before it, and announce the
+        session; refused for a second Hello, or another protocol version."""
         if self._welcomed:
             raise Refused(INVALID, HELLO_AGAIN_MESSAGE)
         if hello.protocol_version != PROTOCOL_VERSION:
@@ -345,7 +351,7 @@ class AgentSession:
             )
             raise Refused(INCOMPATIBLE, message)
         self._welcomed = True
-        await self._events.put(Welcome(command_id=command_id, server_version=__version__))
+        await self._welcome(command_id)
         for event in self._opening:
             await self._events.put(event)
         self._opening.clear()
@@ -355,6 +361,14 @@ class AgentSession:
             await self._announce_leftovers()
         finally:  # A sender cancelled meanwhile mustn't keep the background from starting.
             self._start_background()
+
+    async def _welcome(self, command_id: str) -> None:
+        """Answer Hello ``command_id`` with ``Welcome``, then the latest usage, if any was
+        fetched, and a snapshot of the session."""
+        await self._events.put(Welcome(command_id=command_id, server_version=__version__))
+        if self._usage is not None and self._usage.latest is not None:
+            await self._events.put(self._usage.latest)
+        await self._events.put(self._snapshot())
 
     async def _handle(self, command: SessionCommand | WorkCommand) -> None:
         if isinstance(command, SessionCommand):
@@ -690,6 +704,36 @@ class AgentSession:
         tree = self._desk.agents.tree if self._desk else None
         for note in await tree.leftovers() if tree else []:
             await self._events.put(Notice(message=note))
+
+    def _snapshot(self, last_active: datetime | None = None) -> Snapshot:
+        """The session open here, last active at ``last_active``, as it stands now."""
+        steps, title = self._steps_shown()
+        return Snapshot(
+            session=self._switcher.summary(last_active),
+            settings=self._settings,
+            model_choices=self._model_choices,
+            busy={WORK_LANE: self._work_turns.running, PLANNER_LANE: self._seat.running},
+            tasks=self._board.tasks,
+            steps=steps,
+            steps_title=title,
+            review=self._lane.status if self._lane else None,
+            proposals=self._proposals.waiting,
+            agents=self._running_agents(),
+        )
+
+    def _steps_shown(self) -> tuple[tuple[StepState, ...], str]:
+        """The verification steps the panel shows, and their title: the startup check's while
+        it has the panel, else those verifying tasks; none without verification."""
+        startup = self._startup.panel if self._startup else None
+        if startup is not None:
+            return startup.steps, startup.title
+        return (self._verifier.progress.steps if self._verifier else ()), ""
+
+    def _running_agents(self) -> tuple[RunningAgent, ...]:
+        """The agents running, the startup check first while it runs."""
+        startup = self._startup.agent if self._startup else None
+        agents = self._desk.running if self._desk else ()
+        return agents if startup is None else (startup, *agents)
 
     def _settings_changed(self) -> SettingsChanged:
         return SettingsChanged(settings=self._settings, model_choices=self._model_choices)

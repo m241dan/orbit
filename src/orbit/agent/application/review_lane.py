@@ -213,10 +213,13 @@ class ReviewLane:
 
         await self._tasks.change(add)
 
+    @property
+    def status(self) -> ReviewStatus:
+        """Whether review is paused, and how many batches are open, now."""
+        return ReviewStatus(paused=self.planner.paused, open_batches=len(self.planner.open_batches))
+
     async def _publish_status(self) -> None:
-        status = ReviewStatus(
-            paused=self.planner.paused, open_batches=len(self.planner.open_batches)
-        )
+        status = self.status
         if status != self._status:
             self._status = status
             await self._publish(status)

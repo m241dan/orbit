@@ -43,6 +43,7 @@ from orbit.protocol import (
     Session,
     Settings,
     SettingsChanged,
+    Snapshot,
     TasksChanged,
     TaskSpec,
     TaskState,
@@ -587,6 +588,7 @@ def queued(session: AgentSession) -> list[Event]:
     events: list[Event] = []
     while not session._events.empty():
         events.append(session._events.get_nowait())
+        session._events._stamps.popleft()  # Its stamp goes with it.
     return events
 
 
@@ -620,3 +622,24 @@ def planner_turn(session: AgentSession) -> "asyncio.Task[object] | None":
 def store_of(session: AgentSession) -> SessionStore | None:
     """Where the session is saved, if anywhere."""
     return session.saved_session._store
+
+
+def snapshot_of(session: AgentSession) -> Snapshot:
+    """The snapshot of the session as it stands now."""
+    return session._snapshot()
+
+
+def put_on_board(session: AgentSession, *tasks: TaskSpec) -> None:
+    """Put ``tasks`` on the session's board without publishing it, as if it opened with them."""
+    for task in tasks:
+        session._board.add(task)
+
+
+async def fetch_usage_unseen(session: AgentSession) -> None:
+    """Have the session's usage monitor fetch once before Hello, dropping what it published."""
+    monitor = session._usage
+    assert monitor is not None
+    monitor.start()
+    while monitor.latest is None:
+        await asyncio.sleep(0)
+    queued(session)

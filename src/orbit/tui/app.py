@@ -57,8 +57,10 @@ from orbit.protocol import (
     Session,
     SessionOpened,
     SessionsListed,
+    SessionSummary,
     Settings,
     SettingsChanged,
+    Snapshot,
     StartupChecked,
     TaskGaveUp,
     TaskMerged,
@@ -619,29 +621,50 @@ class OrbitApp(App[None], inherit_bindings=False):
                 | StartupChecked()
             ):
                 self._feed.render(event)
-            case SessionsListed() | SessionOpened() | ConversationReset():
+            case SessionsListed() | SessionOpened() | ConversationReset() | Snapshot():
                 self._render_session(event)
             case CommandAccepted() | CommandRefused() | Welcome():
                 self._render_outcome(event)
             case _:
                 assert_never(event)
 
-    def _render_session(self, event: SessionsListed | SessionOpened | ConversationReset) -> None:
-        """Show the sessions listed, rule off the planner's conversation where it was reset, or
-        take the task list out of list mode, let it follow again and start its total from the
-        spend of a session opened, whose contents come in their own events. The conversation's
-        title follows the open session's name."""
+    def _render_session(
+        self, event: SessionsListed | SessionOpened | ConversationReset | Snapshot
+    ) -> None:
+        """Show the sessions listed, rule off the planner's conversation where it was reset,
+        show a snapshot of the session open, or take the task list out of list mode, let it
+        follow again and start its total from the spend of a session opened, whose contents
+        come in their own events. The conversation's title follows the open session's name."""
         if isinstance(event, SessionsListed):
             self._name_current(event)
             self._show_sessions(event)
+        elif isinstance(event, Snapshot):
+            self._render_snapshot(event)
         elif isinstance(event, SessionOpened):
-            self._transcript.show_session(event.session.name)
-            if self.focused is self._task_list:
-                self.set_focus(None)
-            self._task_list.let_go()
-            self._task_list.reset_usage(event.session.usage)
+            self._open_session(event.session)
         else:
             self._feed.append(*planner_reset_entry(), PLANNER)
+
+    def _open_session(self, session: SessionSummary) -> None:
+        """Title the conversation with ``session``'s name, take the task list out of list
+        mode, let it follow again and start its total from what ``session`` spent."""
+        self._transcript.show_session(session.name)
+        if self.focused is self._task_list:
+            self.set_focus(None)
+        self._task_list.let_go()
+        self._task_list.reset_usage(session.usage)
+
+    def _render_snapshot(self, snapshot: Snapshot) -> None:
+        """Replace the state shown, but for the transcript, with ``snapshot``'s, and open the
+        session it holds; the agents pane follows it as it follows every event."""
+        self._show_settings(snapshot.settings, snapshot.model_choices)
+        for lane, busy in snapshot.busy.items():
+            self._set_busy(lane, busy)
+        self._show_tasks(snapshot.tasks)
+        self._verification.show(snapshot.steps, snapshot.steps_title)
+        self._agents.show_review(snapshot.review)
+        self._follow_proposals(snapshot.proposals)
+        self._open_session(snapshot.session)
 
     def _render_state(
         self,
@@ -695,12 +718,23 @@ class OrbitApp(App[None], inherit_bindings=False):
         screen = self._proposal = ProposalScreen(event)
 
         async def decided(decision: DecideProposal | None) -> None:
-            self._proposal = None
+            if self._proposal is screen:  # Not one shown since.
+                self._proposal = None
             if decision is not None:
                 self._feed.append(*decision_entry(event.agent_id, decision), event.agent_id)
                 await self._send(decision)
 
         self.push_screen(screen, decided)
+
+    def _follow_proposals(self, proposals: tuple[ChecksProposed, ...]) -> None:
+        """Close the proposal shown unless it's among ``proposals``, still waiting; then, with
+        none shown, show the first of them."""
+        screen = self._proposal
+        if screen is not None and screen.proposal not in proposals:
+            screen.dismiss(None)
+            screen = self._proposal = None
+        if screen is None and proposals:
+            self._show_proposal(proposals[0])
 
     def _withdraw_proposal(self, event: Event) -> None:
         """Close the proposal shown, if ``event`` is its agent exiting."""

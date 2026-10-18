@@ -35,8 +35,10 @@ from orbit.protocol import (
     RenameSession,
     SessionOpened,
     SessionsListed,
+    SessionSummary,
     Settings,
     SettingsChanged,
+    Snapshot,
     TaskState,
     Usage,
 )
@@ -59,7 +61,8 @@ def _stopped(saved: Sequence[TaskState], now: Sequence[TaskState]) -> list[str]:
 class SwitchParts:
     """What a switch replaces the contents of: the ``keeper`` saving the session, its ``tasks``,
     its planner ``seat``, its review ``lane`` and ``work`` lane, if any, and whether
-    ``tasks_running`` now."""
+    ``tasks_running`` now; and the ``snapshot`` of the session open, last active then, that
+    follows a switch."""
 
     keeper: SessionKeeper
     tasks: Tasks
@@ -67,6 +70,7 @@ class SwitchParts:
     lane: ReviewLane | None
     work: WorkLane | None
     tasks_running: Callable[[], bool]
+    snapshot: Callable[[datetime | None], Snapshot]
 
 
 @dataclass(frozen=True)
@@ -255,7 +259,7 @@ class SessionSwitcher:
     ) -> None:
         """Finish a switch from the session ``left``, deleting it if its tasks carried over:
         close its planner, end the reviews ``stopped`` when it was saved, and publish what the
-        session opened, last active at ``last_active``, holds."""
+        session opened, last active at ``last_active``, holds, then its snapshot."""
         parts = self._parts
         discard, self._picking = self._picking, False
         await self._keeper.leave(left, discard)
@@ -265,9 +269,13 @@ class SessionSwitcher:
         await parts.tasks.publish()
         await self._events.put(self._settings.changed())
         await self.announce(last_active)
+        await self._events.put(parts.snapshot(last_active))
+
+    def summary(self, last_active: datetime | None = None) -> SessionSummary:
+        """The session open here, last active at ``last_active``, as the list of sessions
+        shows it."""
+        return self._keeper.summary(self._parts.tasks.board.tasks, self.spent, last_active)
 
     async def announce(self, last_active: datetime | None = None) -> None:
         """Publish the session open here, last active at ``last_active``, as opened."""
-        tasks = self._parts.tasks.board.tasks
-        summary = self._keeper.summary(tasks, self.spent, last_active)
-        await self._events.put(SessionOpened(session=summary))
+        await self._events.put(SessionOpened(session=self.summary(last_active)))

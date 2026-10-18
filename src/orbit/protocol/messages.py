@@ -764,6 +764,46 @@ class ConversationReset(_Message):
     agent: str
 
 
+class OpenRequest(_Message):
+    """A call ``request_id`` to orbit's ``tool`` that an agent made and orbit hasn't answered."""
+
+    request_id: str
+    tool: str
+
+
+class RunningAgent(_Message):
+    """Agent ``agent_id``, running in the ``role`` on task ``task_id``, with its
+    ``open_requests``, oldest first."""
+
+    agent_id: str
+    role: str
+    task_id: str
+    open_requests: tuple[OpenRequest, ...] = ()
+
+
+class Snapshot(_Message):
+    """The open session as it stands, sent after ``Welcome`` and after every switch; its
+    envelope's ``seq`` is the point it's current to.
+
+    It holds the ``session``'s summary, its ``settings`` and ``model_choices``, whether each
+    lane is ``busy``, its ``tasks``, the verification ``steps`` and the ``steps_title`` they
+    show under, the ``review`` status (none when reviews are off), the checks ``proposals``
+    waiting for a decision, and the ``agents`` running.
+    """
+
+    type: Literal["snapshot"] = "snapshot"
+    session: SessionSummary
+    settings: Settings
+    model_choices: tuple[str, ...]
+    busy: dict[BusyLane, bool]
+    tasks: tuple[TaskState, ...]
+    steps: tuple[StepState, ...]
+    steps_title: str = ""
+    review: ReviewStatus | None
+    proposals: tuple[ChecksProposed, ...]
+    agents: tuple[RunningAgent, ...]
+
+
 Event = Annotated[
     SettingsChanged
     | TurnStarted
@@ -794,6 +834,7 @@ Event = Annotated[
     | SessionsListed
     | SessionOpened
     | ConversationReset
+    | Snapshot
     | Welcome
     | CommandAccepted
     | CommandRefused,

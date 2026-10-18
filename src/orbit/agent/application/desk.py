@@ -32,7 +32,9 @@ from orbit.protocol import (
     AgentReply,
     AgentRequest,
     ErrorOccurred,
+    OpenRequest,
     ProgressNoted,
+    RunningAgent,
     Settings,
 )
 
@@ -128,6 +130,8 @@ class AgentDesk:
         # Takes a review task's suggestions: its id, then the suggestion's title and prompt.
         self.suggest: Callable[[str, str, str], Awaitable[Reply]] | None = None
         self._runs: dict[str, CallTarget] = {}
+        # The calls not yet answered, by request id, with the agent that made each.
+        self._requests: dict[str, tuple[str, OpenRequest]] = {}
         self._starting: asyncio.Task[str] | None = None  # The host's start, shared by callers.
 
     async def url(self) -> str:
@@ -175,6 +179,23 @@ class AgentDesk:
         """Running agent ``agent_id``, if there is one."""
         return next((agent for agent in self.registry.live if agent.id == agent_id), None)
 
+    @property
+    def running(self) -> tuple[RunningAgent, ...]:
+        """The agents running, oldest first, each with its calls not yet answered."""
+        return tuple(
+            RunningAgent(
+                agent_id=agent.id,
+                role=agent.role,
+                task_id=agent.task_id,
+                open_requests=self._open_requests(agent.id),
+            )
+            for agent in self.registry.live
+        )
+
+    def _open_requests(self, agent_id: str) -> tuple[OpenRequest, ...]:
+        """Agent ``agent_id``'s calls not yet answered, oldest first."""
+        return tuple(request for of, request in self._requests.values() if of == agent_id)
+
     def working_on(self, task_id: str) -> Agent:
         """The running agent working on task ``task_id``; there must be one."""
         return next(agent for agent in self.registry.live if agent.task_id == task_id)
@@ -188,17 +209,27 @@ class AgentDesk:
         if agent is None:
             return UNKNOWN_AGENT
         request_id = uuid.uuid4().hex
-        await self.publish(
-            AgentRequest(agent_id=agent.id, request_id=request_id, tool=tool, arguments=arguments)
-        )
-        run = self._runs.get(agent.id)  # Its run may have closed it during the publish.
-        reply = UNKNOWN_AGENT if run is None else await self._answer(agent, run, tool, arguments)
+        self._requests[request_id] = (agent.id, OpenRequest(request_id=request_id, tool=tool))
+        try:
+            reply = await self._request(agent, request_id, tool, arguments)
+        finally:
+            del self._requests[request_id]
         await self.publish(
             AgentReply(
                 agent_id=agent.id, request_id=request_id, text=reply.text, is_error=reply.is_error
             )
         )
         return reply
+
+    async def _request(
+        self, agent: Agent, request_id: str, tool: str, arguments: dict[str, Any]
+    ) -> Reply:
+        """Publish ``agent``'s call ``request_id``, then answer it."""
+        await self.publish(
+            AgentRequest(agent_id=agent.id, request_id=request_id, tool=tool, arguments=arguments)
+        )
+        run = self._runs.get(agent.id)  # Its run may have closed it during the publish.
+        return UNKNOWN_AGENT if run is None else await self._answer(agent, run, tool, arguments)
 
     async def _answer(
         self, agent: Agent, run: CallTarget, tool: str, arguments: dict[str, Any]

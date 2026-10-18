@@ -1,0 +1,197 @@
+"""The snapshot of the open session, sent after Welcome and after every switch."""
+
+import asyncio
+
+from orbit.agent import AgentSession, Verification
+from orbit.agent.application.startup_check import AGENT_ID as STARTUP_AGENT
+from orbit.agent.application.startup_check import ROLE as STARTUP_ROLE
+from orbit.agent.application.startup_check import TITLE as STARTUP_TITLE
+from orbit.agent.domain.usage import UsageReport
+from orbit.protocol import (
+    CONFIGURATOR,
+    PLANNER_LANE,
+    STARTUP_TASK,
+    WORK_LANE,
+    AddTask,
+    AgentReply,
+    ChecksProposed,
+    DecideProposal,
+    Event,
+    NewSession,
+    ReviewStatus,
+    RunningAgent,
+    RunTasks,
+    SessionOpened,
+    Settings,
+    Snapshot,
+    StepState,
+    TaskSpec,
+    Usage,
+    Welcome,
+)
+from tests.agent_fakes import (
+    STEP,
+    FakeTree,
+    Steps,
+    events_until,
+    fetch_usage_unseen,
+    greet,
+    of_type,
+    put_on_board,
+    send,
+    session_for,
+    snapshot_of,
+    verified,
+)
+from tests.test_proposals import CONFIGURE, LINT, proposes
+from tests.test_usage_monitor import LIMITS, Source
+
+
+def last_of[E](kind: type[E], events: list[Event]) -> E:
+    return [e for e in events if isinstance(e, kind)][-1]
+
+
+TASKS = (TaskSpec(prompt="Add a flag."), TaskSpec(prompt="Document it."))
+
+
+async def opening(session: AgentSession, count: int) -> list[Event]:
+    """The first ``count`` events once ``session`` is greeted, its Welcome first."""
+    await greet(session)
+    stream = session.events()
+    return [(await asyncio.wait_for(anext(stream), 1)).payload for _ in range(count)]
+
+
+async def test_welcome_is_followed_by_a_snapshot_of_the_open_session() -> None:
+    session, _, _ = session_for(verification=verified(Steps()))
+    put_on_board(session, *TASKS)
+    welcome, snapshot = await opening(session, 2)
+    await session.close()
+
+    assert isinstance(welcome, Welcome)
+    assert isinstance(snapshot, Snapshot)
+    assert [t.task for t in snapshot.tasks] == list(TASKS)
+    assert snapshot.steps == (StepState(name=STEP.name),)
+    assert snapshot.steps_title == ""
+    assert snapshot.busy == {WORK_LANE: False, PLANNER_LANE: False}
+    assert snapshot.session == session.saved_session.summary(snapshot.tasks, Usage(), None)
+    assert (snapshot.settings, snapshot.model_choices) == (Settings(), ())
+    assert (snapshot.review, snapshot.proposals, snapshot.agents) == (None, (), ())
+
+
+async def test_a_session_without_verification_or_agents_snapshots_none() -> None:
+    session = AgentSession(settings=Settings(model="opus"), model_choices=("opus", "sonnet"))
+    _, snapshot = await opening(session, 2)
+    await session.close()
+
+    assert isinstance(snapshot, Snapshot)
+    assert (snapshot.steps, snapshot.agents) == ((), ())
+    assert (snapshot.settings, snapshot.model_choices) == (
+        Settings(model="opus"),
+        ("opus", "sonnet"),
+    )
+
+
+async def test_with_reviews_on_the_snapshot_has_the_review_status() -> None:
+    session, _, _ = session_for(tree=FakeTree(), review=True)
+    _, snapshot = await opening(session, 2)
+    await session.close()
+
+    assert isinstance(snapshot, Snapshot)
+    assert snapshot.review == ReviewStatus(paused=False, open_batches=0)
+
+
+async def test_usage_fetched_before_hello_comes_right_before_the_snapshot() -> None:
+    session, _, _ = session_for(usage=Source(UsageReport(LIMITS)))
+    await fetch_usage_unseen(session)
+    events = await opening(session, 3)
+    await session.close()
+
+    assert [type(e).__name__ for e in events] == ["Welcome", "UsageChanged", "Snapshot"]
+
+
+async def test_with_no_usage_fetched_welcome_is_followed_by_the_snapshot() -> None:
+    session, _, _ = session_for(usage=Source(UsageReport(LIMITS)))
+    events = await opening(session, 2)
+    await session.close()
+
+    assert [type(e).__name__ for e in events] == ["Welcome", "Snapshot"]
+
+
+async def proposal_waiting(session: AgentSession) -> ChecksProposed:
+    """Run a configurator task in ``session`` up to the proposal it waits on."""
+    await send(session, AddTask(task=CONFIGURE))
+    await send(session, RunTasks())
+    events = await events_until(session, of_type(ChecksProposed))
+    proposal = events[-1]
+    assert isinstance(proposal, ChecksProposed)
+    return proposal
+
+
+def proposing() -> AgentSession:
+    """A session whose configurator proposes a lint step for the frontend to decide on."""
+    replies: list[str] = []
+    session, _, _ = session_for(
+        proposes({"steps": [LINT]}, replies=replies),
+        verification=verified(Steps(True, True)),
+        tree=FakeTree(),
+    )
+    return session
+
+
+async def test_a_waiting_proposal_is_in_the_snapshot_until_decided() -> None:
+    session = proposing()
+    proposal = await proposal_waiting(session)
+    waiting = snapshot_of(session).proposals
+    await send(session, DecideProposal(task_id=proposal.task_id, action="accept"))
+    decided = snapshot_of(session).proposals
+    await session.close()
+
+    assert waiting == (proposal,)
+    assert decided == ()
+
+
+async def test_an_unanswered_call_is_an_open_request_of_its_agent_until_replied_to() -> None:
+    session = proposing()
+    proposal = await proposal_waiting(session)
+    [waiting] = snapshot_of(session).agents
+    await send(session, DecideProposal(task_id=proposal.task_id, action="accept"))
+    await events_until(session, of_type(AgentReply))
+    agents = snapshot_of(session).agents
+    await session.close()
+
+    [request] = waiting.open_requests
+    assert (waiting.agent_id, waiting.role, waiting.task_id) == ("agent-1", CONFIGURATOR, "1")
+    assert request.tool == "propose_checks"
+    assert all(not agent.open_requests for agent in agents)
+
+
+async def test_a_new_session_is_snapshot_empty_after_the_switch() -> None:
+    session, _, _ = session_for()
+    await send(session, AddTask(task=TASKS[0]))
+    await send(session, NewSession(name="other"))
+    events = await events_until(session, of_type(SessionOpened))
+    events += await events_until(session, of_type(Snapshot))
+    await session.close()
+
+    snapshot = events[-1]
+    assert isinstance(snapshot, Snapshot)
+    assert snapshot.tasks == ()
+    assert snapshot.session == last_of(SessionOpened, events).session
+    assert snapshot.session.name == "other"
+
+
+async def test_while_the_startup_check_runs_it_is_a_running_agent_with_the_panel() -> None:
+    steps = Steps(True)
+    steps.gate = asyncio.Event()
+    session, _, _ = session_for(verification=Verification((STEP,), steps), check_at_startup=True)
+    await greet(session)
+    while not steps.runs:
+        await asyncio.sleep(0)
+    snapshot = snapshot_of(session)
+    steps.gate.set()
+    await session.close()
+
+    startup = RunningAgent(agent_id=STARTUP_AGENT, role=STARTUP_ROLE, task_id=STARTUP_TASK)
+    assert snapshot.agents == (startup,)
+    assert snapshot.steps == (StepState(name=STEP.name, status="running"),)
+    assert snapshot.steps_title == STARTUP_TITLE

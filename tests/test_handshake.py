@@ -20,6 +20,7 @@ from orbit.protocol import (
     RunTasks,
     SessionOpened,
     SettingsChanged,
+    Snapshot,
     TasksChanged,
     TaskSpec,
     Welcome,
@@ -70,16 +71,17 @@ async def test_nothing_is_published_before_hello() -> None:
     await session.close()
 
 
-async def test_hello_is_welcomed_then_the_startup_events_follow_in_order() -> None:
+async def test_hello_is_welcomed_then_a_snapshot_and_the_startup_events_follow_in_order() -> None:
     session = AgentSession(workspace="/work")
     await greet(session)
-    events = await published(session, 4)
+    events = await published(session, 5)
     await session.close()
 
     assert events[0] == Welcome(command_id=HELLO_ID, server_version=__version__)
-    assert isinstance(events[1], SettingsChanged)
-    assert events[2] == Notice(message="Workspace: /work")
-    assert isinstance(events[3], SessionOpened)
+    assert isinstance(events[1], Snapshot)
+    assert isinstance(events[2], SettingsChanged)
+    assert events[3] == Notice(message="Workspace: /work")
+    assert isinstance(events[4], SessionOpened)
     assert nothing_queued(session)
 
 
@@ -104,7 +106,7 @@ async def test_a_second_hello_is_refused_as_invalid() -> None:
     session = AgentSession()
     await greet(session)
     await send_as(session, "again", HELLO)
-    events = await published(session, 4)
+    events = await published(session, 5)
     await session.close()
 
     assert events[-1] == CommandRefused(

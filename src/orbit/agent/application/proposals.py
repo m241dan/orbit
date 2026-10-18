@@ -28,15 +28,23 @@ class FrontendReview:
         self._publish = publish
         self._agent_of = agent_of
         self._waiting: dict[str, asyncio.Future[ProposalDecision]] = {}
+        self._shown: dict[str, ChecksProposed] = {}  # The undecided ones, by task id.
+
+    @property
+    def waiting(self) -> tuple[ChecksProposed, ...]:
+        """The proposals waiting for a decision, oldest first."""
+        return tuple(self._shown.values())
 
     async def review(self, task_id: str, proposal: ChecksProposal) -> ProposalDecision:
         decision: asyncio.Future[ProposalDecision] = asyncio.get_running_loop().create_future()
         self._waiting[task_id] = decision
         try:
-            await self._publish(proposed(self._agent_of(task_id), task_id, proposal))
+            event = self._shown[task_id] = proposed(self._agent_of(task_id), task_id, proposal)
+            await self._publish(event)
             return await decision
         finally:
             del self._waiting[task_id]
+            self._shown.pop(task_id, None)
 
     def decide(self, command: DecideProposal) -> bool:
         """Settle the proposal ``command`` decides; whether one was waiting."""
@@ -44,4 +52,5 @@ class FrontendReview:
         if decision is None or decision.done():
             return False
         decision.set_result(ProposalDecision(command.action, command.feedback))
+        del self._shown[command.task_id]
         return True

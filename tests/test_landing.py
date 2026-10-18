@@ -178,7 +178,7 @@ async def test_leftovers_from_earlier_runs_are_announced_once_at_the_start() -> 
     tree = FakeTree(leftovers=("2 commits on orbit/coder not yet merged into main.",))
     session, _, _ = session_for(tree=tree)
     stream = payloads(session)
-    first = [await anext(stream) for _ in range(3)]
+    first = [await anext(stream) for _ in range(4)]
     assert Notice(message="2 commits on orbit/coder not yet merged into main.") in first
     # A second listener isn't told again.
     waiting = asyncio.ensure_future(anext(payloads(session)))

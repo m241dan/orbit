@@ -38,6 +38,7 @@ from orbit.protocol import (
     RemoveTask,
     RunTasks,
     Settings,
+    Snapshot,
     StepState,
     TasksChanged,
     TaskSpec,
@@ -137,6 +138,7 @@ async def test_running_again_runs_only_tasks_that_did_not_finish() -> None:
 async def test_running_does_nothing_when_nothing_is_runnable() -> None:
     session, _, launcher = session_for()
     stream = payloads(session)
+    await anext(stream)  # The snapshot.
     await anext(stream)  # Settings.
     await anext(stream)  # The session opened.
     await send(session, RunTasks())
@@ -150,7 +152,7 @@ async def test_running_without_agents_is_refused() -> None:
     await send(session, AddTask(task=TaskSpec(prompt="a")))
     await send(session, RunTasks())
     stream = payloads(session)
-    events = [await anext(stream) for _ in range(5)]
+    events = [await anext(stream) for _ in range(6)]
     assert refused(NOT_CONFIGURED, "Tasks need agents, and none are set up.") in events
     assert not any(isinstance(event, ErrorOccurred) for event in events)
 
@@ -427,7 +429,8 @@ async def test_without_steps_tasks_skip_verification_and_say_so() -> None:
     workspace = FakeWorkspace("a", "b")
     session, _, _ = session_for(claims_done, verification=Verification((), Steps(), workspace))
     events = await asyncio.wait_for(run(session), 5)
-    assert events[0] == Notice(message=NO_STEPS_NOTE)
+    assert isinstance(events[0], Snapshot)
+    assert events[1] == Notice(message=NO_STEPS_NOTE)
     assert [e for e in events if isinstance(e, Notice)] == [Notice(message=NO_STEPS_NOTE)]
     assert VerificationSkipped(task_id="1", reason="no_steps") in events
     assert statuses(events) == ["completed"]

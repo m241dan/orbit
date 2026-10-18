@@ -25,8 +25,10 @@ from orbit.protocol import (
     NewSession,
     OpenSession,
     SessionOpened,
+    SessionSummary,
     Settings,
     SettingsChanged,
+    Snapshot,
     TasksChanged,
     TaskSpec,
     Usage,
@@ -38,11 +40,27 @@ REVIEWS = LaneSnapshot(planner=PlannerSnapshot(paused=True))
 
 
 class Held:
-    """A session's settings and whether its tasks run, as the switcher sees them."""
+    """A session's settings and whether its tasks run, as the switcher sees them, and when
+    the sessions it was asked to snapshot were last active."""
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self.running = False
+        self.snapshots: list[datetime | None] = []
+
+    def snapshot(self, last_active: datetime | None) -> Snapshot:
+        self.snapshots.append(last_active)
+        return Snapshot(
+            session=SessionSummary(id="snapshot", name="snapshot"),
+            settings=self.settings,
+            model_choices=(),
+            busy={},
+            tasks=(),
+            steps=(),
+            review=None,
+            proposals=(),
+            agents=(),
+        )
 
     def set(self, settings: Settings) -> None:
         self.settings = settings
@@ -64,7 +82,7 @@ def switcher_for(
     keeper = SessionKeeper(store, events.put, Ticks(), lambda: next(ids))
     tasks = Tasks(TaskBoard(), events.put)
     seat = PlannerSeat(None, tasks, events, SeatHooks(nothing, keeper.use, tuple))
-    parts = SwitchParts(keeper, tasks, seat, None, None, lambda: held.running)
+    parts = SwitchParts(keeper, tasks, seat, None, None, lambda: held.running, held.snapshot)
     access = SettingsAccess(lambda: held.settings, held.set, held.changed, held.settings, pinned)
     return SessionSwitcher(parts, access, events, picking), events, tasks
 
@@ -91,11 +109,22 @@ async def test_switching_is_refused_while_tasks_run() -> None:
     assert drained(events) == []
 
 
-async def test_a_switch_publishes_the_tasks_then_the_settings_then_the_session() -> None:
-    switcher, events, _ = switcher_for(FakeStore(), Held(Settings()))
+async def test_a_switch_publishes_the_tasks_settings_and_session_then_a_snapshot() -> None:
+    held = Held(Settings())
+    switcher, events, _ = switcher_for(FakeStore(), held)
     await switcher.handle(NewSession(name="other"))
     kinds = [type(e) for e in drained(events)]
-    assert kinds == [TasksChanged, SettingsChanged, SessionOpened]
+    assert kinds == [TasksChanged, SettingsChanged, SessionOpened, Snapshot]
+    assert held.snapshots == [None]
+
+
+async def test_an_opened_sessions_snapshot_is_as_it_was_last_active() -> None:
+    store = FakeStore()
+    store.saved = [saved()]
+    held = Held(Settings())
+    switcher, _, _ = switcher_for(store, held)
+    await switcher.handle(OpenSession(session_id="auth"))
+    assert held.snapshots == [EARLIER]
 
 
 async def test_announcing_publishes_the_session_open_as_current() -> None:

@@ -4,7 +4,12 @@ from orbit.protocol import (
     AgentRequest,
     AgentStarted,
     Notice,
+    OpenRequest,
     ReviewStatus,
+    RunningAgent,
+    SessionSummary,
+    Settings,
+    Snapshot,
 )
 from orbit.tui.view import (
     NO_AGENTS_LABEL,
@@ -32,6 +37,29 @@ def test_agents_are_tracked_from_their_events() -> None:
     rows = track_agents(rows, AgentExited(agent_id="agent-2", reason="finished"))
     assert [r.agent_id for r in rows] == ["agent-1"]
     assert track_agents(rows, Notice(message="x")) == rows
+
+
+def test_a_snapshot_replaces_the_rows_with_its_agents_and_their_open_requests() -> None:
+    rows = (AgentRow("agent-1", "coder", "1"),)
+    request = OpenRequest(request_id="r", tool="get_task")
+    snapshot = Snapshot(
+        session=SessionSummary(id="s1", name="auth"),
+        settings=Settings(),
+        model_choices=(),
+        busy={},
+        tasks=(),
+        steps=(),
+        review=None,
+        proposals=(),
+        agents=(
+            RunningAgent(
+                agent_id="agent-2", role="reviewer", task_id="2", open_requests=(request,)
+            ),
+        ),
+    )
+    assert track_agents(rows, snapshot) == (
+        AgentRow("agent-2", "reviewer", "2", open_requests=(("r", "get_task"),)),
+    )
 
 
 def test_an_agent_waits_until_every_open_request_is_answered() -> None:

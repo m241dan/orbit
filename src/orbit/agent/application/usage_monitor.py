@@ -17,7 +17,7 @@ from orbit.agent.domain.usage import (
     refresh_due,
     usage_event,
 )
-from orbit.protocol import UsageLimit
+from orbit.protocol import UsageChanged, UsageLimit
 
 Clock = Callable[[], float]
 """Seconds on a clock that only goes forward."""
@@ -51,6 +51,12 @@ class UsageMonitor:
         self._last: tuple[float, UsageFetch] | None = None
         self._wake = asyncio.Event()
         self._background = Background("usage", publish)
+        self._latest: UsageChanged | None = None
+
+    @property
+    def latest(self) -> UsageChanged | None:
+        """What the last fetch published; none before the first."""
+        return self._latest
 
     def start(self) -> None:
         self._background.start(self._run())
@@ -70,7 +76,8 @@ class UsageMonitor:
     async def _run(self) -> None:
         while True:
             outcome = await self._fetch()
-            await self._publish(usage_event(outcome, self._limits, self._now()))
+            self._latest = usage_event(outcome, self._limits, self._now())
+            await self._publish(self._latest)
             if isinstance(outcome, UsageReport):
                 self._limits = outcome.limits
             await self._wait(next_delay(outcome))

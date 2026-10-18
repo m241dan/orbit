@@ -22,6 +22,7 @@ from orbit.protocol import (
     AgentStarted,
     ErrorOccurred,
     Notice,
+    RunningAgent,
     StartupChecked,
     StepStatus,
     VerificationChanged,
@@ -55,9 +56,11 @@ class StartupCheck:
         self._add_fix = add_fix
         self._progress = StepProgress.of(step.name for step in verification.steps)
         self._shown = True  # Whether it still has the verification panel.
+        self._started = False
         self._background = Background("startup check", publish)
 
     def start(self) -> None:
+        self._started = True
         self._background.start(self._run())
 
     def release_panel(self) -> None:
@@ -67,6 +70,21 @@ class StartupCheck:
     @property
     def running(self) -> bool:
         return self._background.running
+
+    @property
+    def agent(self) -> RunningAgent | None:
+        """The check as a running agent, while it runs."""
+        if not self.running:
+            return None
+        return RunningAgent(agent_id=AGENT_ID, role=ROLE, task_id=STARTUP_TASK)
+
+    @property
+    def panel(self) -> VerificationChanged | None:
+        """What it shows in the verification panel; none before it starts, or once a task's
+        verification took the panel over."""
+        if not self._started or not self._shown:
+            return None
+        return self._panel()
 
     def cancel(self) -> None:
         self._background.cancel()
@@ -144,4 +162,7 @@ class StartupCheck:
 
     async def _show(self) -> None:
         if self._shown:
-            await self._publish(VerificationChanged(steps=self._progress.steps, title=TITLE))
+            await self._publish(self._panel())
+
+    def _panel(self) -> VerificationChanged:
+        return VerificationChanged(steps=self._progress.steps, title=TITLE)
