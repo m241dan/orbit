@@ -790,7 +790,9 @@ class SqliteStore:
 
     def _trim(self, session_id: str, limit: int, target: int) -> None:
         """Delete the session ``session_id``'s oldest events, if its log is over ``limit``
-        bytes, keeping the latest that together come under ``target``."""
+        bytes, keeping the latest that together come under ``target``, and always its newest:
+        a newest event of ``target`` bytes or more is kept alone, over ``target`` or even
+        ``limit`` until a later one is appended."""
         key = (self._workspace, session_id)
         with self._transaction():
             row = self._db.execute(
@@ -798,12 +800,14 @@ class SqliteStore:
             ).fetchone()
             if row is None or row[0] <= limit:
                 return
-            # An event goes when it and those after it come to the target or more.
+            # An event goes when it and those after it come to the target or more, but the
+            # newest stays so that reopening the session shows where it was.
             (cut,) = self._db.execute(
                 """SELECT max(seq) FROM (
-                    SELECT seq, sum(size) OVER (ORDER BY seq DESC) AS kept FROM events
+                    SELECT seq, sum(size) OVER (ORDER BY seq DESC) AS kept,
+                        row_number() OVER (ORDER BY seq DESC) AS place FROM events
                     WHERE workspace_id = ? AND session_id = ?
-                ) WHERE kept >= ?""",
+                ) WHERE kept >= ? AND place > 1""",
                 (*key, target),
             ).fetchone()
             self._db.execute(
@@ -829,13 +833,8 @@ class SqliteStore:
     def _bounds(self, session_id: str, since: int) -> LogBounds:
         """The bounds of the session ``session_id``'s log in the workspace's, for a frontend that
         saw the events up to ``since``."""
-        # Once every event kept is trimmed, the oldest that could be kept is after the last cut.
         (first,) = self._db.execute(
-            """SELECT coalesce(
-                (SELECT min(seq) FROM events WHERE workspace_id = ?1 AND session_id = ?2),
-                (SELECT trimmed_seq + 1 FROM logs
-                    WHERE workspace_id = ?1 AND session_id = ?2 AND trimmed_seq > 0)
-            )""",
+            "SELECT min(seq) FROM events WHERE workspace_id = ? AND session_id = ?",
             (self._workspace, session_id),
         ).fetchone()
         (others,) = self._db.execute(

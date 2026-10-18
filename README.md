@@ -579,7 +579,8 @@ last half of it, around a marker such as `… 182 KB cut by orbit's tool_output_
 conversation shows live is never cut, only what's kept for later. After each batch of events it
 writes, orbit checks the size of each session it wrote to: a session whose stored events come to
 more than `session_log_mb` has its oldest events deleted until they come to under 90% of it, so
-the newest are kept and it isn't trimmed again with every event. Other sessions are untouched.
+the newest are kept and it isn't trimmed again with every event. The newest event is always kept,
+even one bigger than that on its own. Other sessions are untouched.
 Paging back through a trimmed session ends at the line "Older events were removed
 (session_log_mb)", and a frontend reconnecting from before the removed events gets the session
 afresh. An unknown key in `[storage]`,

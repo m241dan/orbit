@@ -320,7 +320,9 @@ class EventLog(Protocol):
     async def trim(self, session_id: str, limit: int, target: int) -> None:
         """When the log of the session ``session_id`` holds more than ``limit`` bytes, delete
         its oldest events until it holds less than ``target``, noting that it was trimmed;
-        raises ``RuntimeError`` when it can't."""
+        its newest event is always kept, so one of ``target`` bytes or more leaves the log over
+        ``target``, or even ``limit``, until a later event is appended. Raises ``RuntimeError``
+        when it can't."""
         ...
 
     async def trimmed(self, session_id: str) -> bool:

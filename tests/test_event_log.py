@@ -496,16 +496,31 @@ async def test_the_oldest_page_after_trimming_has_nothing_more(
     )
 
 
-async def test_a_log_trimmed_whole_is_bounded_after_its_last_trimmed_event(
-    open_store: Opener, workspace: Path
+async def test_a_log_whose_newest_event_alone_reaches_the_target_keeps_that_event(
+    open_store: Opener, state: Path, workspace: Path
 ) -> None:
     store = await open_store(workspace)
     await store.append("abc", [big(1), big(2)])
     await store.trim("abc", 1, 1)
 
-    assert await store.recent("abc", 10) == []
-    assert await store.bounds("abc", 2) == LogBounds(first_seq=3, others_seq=0, own_seq=2)
-    assert await store.bounds("abc", 1) == LogBounds(first_seq=3, others_seq=0, own_seq=None)
+    assert await store.recent("abc", 10) == [big(2)]
+    assert await store.trimmed("abc")
+    assert stored_sizes(state)["abc"] == (len(encode(big(2)).encode()), 1)
+    assert await store.before("abc", 2, 10) == ([], False)
+    assert await store.bounds("abc", 2) == LogBounds(first_seq=2, others_seq=0, own_seq=2)
+    assert await store.bounds("abc", 1) == LogBounds(first_seq=2, others_seq=0, own_seq=1)
+
+
+async def test_a_log_of_one_event_over_the_limit_is_kept_untrimmed(
+    open_store: Opener, state: Path, workspace: Path
+) -> None:
+    store = await open_store(workspace)
+    await store.append("abc", [big(1)])
+    await store.trim("abc", 1, 1)
+
+    assert await store.recent("abc", 10) == [big(1)]
+    assert not await store.trimmed("abc")
+    assert stored_sizes(state)["abc"] == (len(encode(big(1)).encode()), 0)
 
 
 async def test_deleting_a_session_forgets_its_trimmed_log(
