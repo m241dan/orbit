@@ -37,10 +37,10 @@ def test_without_steps_the_brief_names_no_checks() -> None:
 
 def test_the_brief_names_the_checks_and_how_many_the_agent_may_run() -> None:
     agent_task = AgentTask(TaskSpec(prompt="Add a flag."), Limits(max_checks=7))
-    brief = agent_task.get_task(("Ruff lint", "Unit tests, 100% coverage"), can_check=True)
+    brief = agent_task.get_task(("Ruff lint", "Unit tests, full coverage"), can_check=True)
     assert (
         "Orbit verifies your work with these checks, in order:"
-        " `Ruff lint`, `Unit tests, 100% coverage`." in brief
+        " `Ruff lint`, `Unit tests, full coverage`." in brief
     )
     assert "run each of them with run_check" in brief and "7 runs in all" in brief
 

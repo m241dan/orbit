@@ -122,7 +122,7 @@ ORBITS_OWN_STEPS = [
         "Code quality (Lizard)",
         ("uv", "run", "lizard", "src", "tests", "-w", "-C", "6", "-L", "100", "-a", "5"),
     ),
-    ("Unit tests, 100% coverage", ("uv", "run", "pytest", "--cov", "--cov-fail-under=100")),
+    ("Unit tests with 100% coverage", ("uv", "run", "pytest", "--cov", "--cov-fail-under=100")),
 ]
 
 

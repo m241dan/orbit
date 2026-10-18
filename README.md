@@ -392,7 +392,7 @@ shows up in seconds:
 5. Code quality (Lizard): `uv run lizard src tests -w -C 6 -L 100 -a 5`. Every function, tests
    included, must have a cyclomatic complexity of at most 6, at most 100 lines and at most 5
    parameters.
-6. Unit tests, 100% coverage: `uv run pytest --cov --cov-fail-under=100`
+6. Unit tests with 100% coverage: `uv run pytest --cov --cov-fail-under=100`
 
 **Startup check.** When orbit starts with verification on and at least one step configured, it
 runs the steps once in the background against the base commit, so a broken setup shows up while

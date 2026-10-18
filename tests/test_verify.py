@@ -178,14 +178,14 @@ def test_a_setup_runs_as_a_step_named_setup() -> None:
 
 
 def test_the_steps_note_lists_the_steps_each_task_must_pass() -> None:
-    note = steps_note(("Ruff lint", "Unit tests, 100% coverage"))
-    assert note.endswith("with these checks, in order: `Ruff lint`, `Unit tests, 100% coverage`.")
+    note = steps_note(("Ruff lint", "Unit tests, full coverage"))
+    assert note.endswith("with these checks, in order: `Ruff lint`, `Unit tests, full coverage`.")
     assert "must" not in note  # How to work is the planner's instructions, not the note.
 
 
 def test_a_step_list_puts_each_name_in_backticks() -> None:
-    assert step_list(["Ruff lint", "Unit tests, 100% coverage"]) == (
-        "`Ruff lint`, `Unit tests, 100% coverage`"
+    assert step_list(["Ruff lint", "Unit tests, full coverage"]) == (
+        "`Ruff lint`, `Unit tests, full coverage`"
     )
 
 
