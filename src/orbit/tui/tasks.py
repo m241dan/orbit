@@ -17,6 +17,7 @@ from textual.widgets.option_list import Option
 
 from orbit.protocol import Settings, TaskSpec, TaskState, Usage
 from orbit.tui.view import (
+    NEW_TASK_LABEL,
     REASON_HINT,
     TASK_EDITOR_HINT,
     TOOL_ACCESS_OPTIONS,
@@ -28,13 +29,13 @@ from orbit.tui.view import (
     model_options,
     reason_text,
     reason_title,
+    session_usage_subtitle,
     spinner_frame,
     split_prompt,
     task_editor_title,
     task_label,
     task_list_title,
     task_numbers,
-    usage_label,
 )
 from orbit.tui.widgets import (
     ListPane,
@@ -44,8 +45,6 @@ from orbit.tui.widgets import (
     Ticker,
     mark_selected,
 )
-
-NEW_TASK_LABEL = "+ new task"
 
 
 class TaskList(ListPane):
@@ -202,13 +201,13 @@ class TaskList(ListPane):
     def count(self, usage: Usage) -> None:
         """Add what a turn cost to the session's total."""
         self.session_usage += usage
-        self.border_subtitle = f"session: {usage_label(self.session_usage)}"
+        self.border_subtitle = session_usage_subtitle(self.session_usage)
 
     def reset_usage(self, usage: Usage) -> None:
         """Start the session's total afresh at ``usage``; a session that has spent nothing
         shows no total."""
         self.session_usage = usage
-        self.border_subtitle = "" if usage == Usage() else f"session: {usage_label(usage)}"
+        self.border_subtitle = session_usage_subtitle(usage)
 
     def find(self, task_id: str) -> TaskState | None:
         """The task with id ``task_id``, if it's on the list."""

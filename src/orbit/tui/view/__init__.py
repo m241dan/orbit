@@ -4,7 +4,7 @@ The widgets decide where things go and when they redraw; this package decides wh
 one module per area of the screen.
 """
 
-from orbit.tui.view.agents import AgentRow, agent_line, review_line, track_agents
+from orbit.tui.view.agents import NO_AGENTS_LABEL, AgentRow, agent_line, review_line, track_agents
 from orbit.tui.view.common import (
     SPINNER_FPS,
     SPINNER_FRAMES,
@@ -17,6 +17,15 @@ from orbit.tui.view.common import (
     spinner_frame,
     text_lines,
     token_text,
+)
+from orbit.tui.view.confirm import (
+    CONFIGURE_MESSAGE,
+    CONFIGURE_TITLE,
+    CONFIGURE_YES,
+    RESET_MESSAGE,
+    RESET_TITLE,
+    RESET_YES,
+    confirm_hint,
 )
 from orbit.tui.view.detail import (
     DETAIL_COVER_BELOW,
@@ -43,7 +52,14 @@ from orbit.tui.view.detail_views import (
 from orbit.tui.view.diff_numbers import diff_numbers, edited_snippet, numbered_diff
 from orbit.tui.view.diffs import EDIT_SEPARATOR, FileDiff, diff_change, file_diff, line_diff
 from orbit.tui.view.events import SUPERSEDED_UNLESS, coalesce
-from orbit.tui.view.panels import STALE_STYLE, USAGE_COLOURS, reset_label, step_lines, usage_lines
+from orbit.tui.view.panels import (
+    NO_STEPS_TEXT,
+    STALE_STYLE,
+    USAGE_COLOURS,
+    reset_label,
+    step_lines,
+    usage_lines,
+)
 from orbit.tui.view.progress import (
     SKIP_REASONS,
     TaskProgress,
@@ -54,7 +70,15 @@ from orbit.tui.view.progress import (
     verification_skipped_entry,
     verification_started_entry,
 )
-from orbit.tui.view.proposals import DECISION_NOTES, decision_entry, proposal_text
+from orbit.tui.view.proposals import (
+    DECISION_NOTES,
+    FEEDBACK_HINT,
+    FEEDBACK_PLACEHOLDER,
+    PROPOSAL_KEYS_HINT,
+    decision_entry,
+    proposal_text,
+    proposal_title,
+)
 from orbit.tui.view.rules import (
     EXIT_LABELS,
     TURN_END_LABELS,
@@ -114,6 +138,7 @@ from orbit.tui.view.tabs import (
     track_tabs,
 )
 from orbit.tui.view.tasks import (
+    NEW_TASK_LABEL,
     REASON_HINT,
     TASK_EDITOR_HINT,
     active_task,
@@ -122,6 +147,7 @@ from orbit.tui.view.tasks import (
     join_prompt,
     reason_text,
     reason_title,
+    session_usage_subtitle,
     split_prompt,
     task_editor_title,
     task_label,
@@ -215,6 +241,9 @@ __all__ = [
     "ALL_TAB_LABEL",
     "BANDED_KINDS",
     "COLLAPSED_KINDS",
+    "CONFIGURE_MESSAGE",
+    "CONFIGURE_TITLE",
+    "CONFIGURE_YES",
     "CONVERSATION_TITLE",
     "COUNT_ICONS",
     "COUNT_ORDER",
@@ -231,6 +260,8 @@ __all__ = [
     "EMPTY_DIFF",
     "EXIT_LABELS",
     "EXPANDED_MARKER",
+    "FEEDBACK_HINT",
+    "FEEDBACK_PLACEHOLDER",
     "GUTTER_BAR",
     "GUTTER_MARKER",
     "KEY_ARGUMENTS",
@@ -240,16 +271,23 @@ __all__ = [
     "NAME_HINT",
     "NAME_PLACEHOLDER",
     "NEW_SESSION_LABEL",
+    "NEW_TASK_LABEL",
+    "NO_AGENTS_LABEL",
     "NO_DETAILS",
+    "NO_STEPS_TEXT",
     "ORBIT_TOOL_FIELDS",
     "ORBIT_TOOL_PREFIX",
     "PINNED_TABS",
     "PLANNER_BUSY",
     "PROMPT_LINES_SHOWN",
     "PROMPT_MARKER",
+    "PROPOSAL_KEYS_HINT",
     "REASON_HINT",
     "RENAME_HINT",
     "REPLY_LIMIT",
+    "RESET_MESSAGE",
+    "RESET_TITLE",
+    "RESET_YES",
     "ROLE_TABS",
     "RULE_KINDS",
     "RUNNING_MARK",
@@ -307,6 +345,7 @@ __all__ = [
     "capped_with",
     "coalesce",
     "collapsible",
+    "confirm_hint",
     "conversation_title",
     "copied_note",
     "counted",
@@ -353,6 +392,7 @@ __all__ = [
     "progress_entry",
     "prompt_title",
     "proposal_text",
+    "proposal_title",
     "read_output",
     "reason_text",
     "reason_title",
@@ -360,6 +400,7 @@ __all__ = [
     "review_line",
     "ruled",
     "session_label",
+    "session_usage_subtitle",
     "sessions_hint",
     "settings_summary",
     "shows_markdown",

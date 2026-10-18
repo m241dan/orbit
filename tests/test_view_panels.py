@@ -6,6 +6,7 @@ from orbit.protocol import (
     UsageLimit,
 )
 from orbit.tui.view import (
+    NO_STEPS_TEXT,
     reset_label,
     step_lines,
     usage_lines,
@@ -120,3 +121,7 @@ def test_reset_label_on_another_day_names_the_day() -> None:
     assert reset_label(datetime(2026, 10, 19, 9, 0, tzinfo=TZ), NOW) == "Mon 9:00am"
     # Midnight UTC on the 17th is still the 16th at NOW's offset.
     assert reset_label(datetime(2026, 10, 17, 0, 0, tzinfo=UTC), NOW) == "8:00pm"
+
+
+def test_a_panel_without_steps_says_so() -> None:
+    assert NO_STEPS_TEXT == "No verification steps"

@@ -7,6 +7,7 @@ from orbit.protocol import (
     ReviewStatus,
 )
 from orbit.tui.view import (
+    NO_AGENTS_LABEL,
     AgentRow,
     agent_line,
     review_line,
@@ -68,3 +69,7 @@ def test_the_review_line_says_whether_review_is_paused() -> None:
     assert review_line(ReviewStatus(paused=False, open_batches=0)) == "review: active"
     assert review_line(ReviewStatus(paused=False, open_batches=2)) == "review: active · 2 open"
     assert review_line(ReviewStatus(paused=True, open_batches=0)) == "review: paused"
+
+
+def test_an_empty_agents_pane_says_no_agents_run() -> None:
+    assert NO_AGENTS_LABEL == "No agents running"

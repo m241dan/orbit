@@ -5,11 +5,20 @@ import shlex
 from orbit.protocol import ChecksProposed, DecideProposal, ProposalAction
 from orbit.tui.view.common import EntryKind
 
+PROPOSAL_KEYS_HINT = "a accept · r revise · x end"
+FEEDBACK_HINT = "enter send · esc back"
+FEEDBACK_PLACEHOLDER = "What should change?"
+
 DECISION_NOTES: dict[ProposalAction, str] = {
     "accept": "proposal accepted",
     "revise": "changes asked for: ",
     "end": "task ended",
 }
+
+
+def proposal_title(agent_id: str) -> str:
+    """The proposal modal's border title, naming the agent ``agent_id`` that proposed."""
+    return f"Proposed checks · {agent_id}"
 
 
 def proposal_text(event: ChecksProposed) -> str:

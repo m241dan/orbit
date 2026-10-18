@@ -5,11 +5,13 @@ from orbit.protocol import (
     Usage,
 )
 from orbit.tui.view import (
+    NEW_TASK_LABEL,
     TASK_EDITOR_HINT,
     active_task,
     edit_refusal,
     follow_top,
     join_prompt,
+    session_usage_subtitle,
     split_prompt,
     task_editor_title,
     task_list_title,
@@ -190,3 +192,20 @@ def test_edit_refusal_allows_a_pending_coder_task_and_a_draft() -> None:
     for status in ("pending", "draft"):
         state = TaskState(id="1", task=TaskSpec(prompt="go"), status=status)
         assert edit_refusal(state) is None
+
+
+def test_new_task_row_is_labelled() -> None:
+    assert NEW_TASK_LABEL == "+ new task"
+
+
+def test_session_usage_subtitle_is_empty_for_nothing_spent() -> None:
+    assert session_usage_subtitle(Usage()) == ""
+
+
+def test_session_usage_subtitle_shows_what_was_spent() -> None:
+    usage = Usage(input_tokens=1_500, cost_usd=0.3)
+    assert session_usage_subtitle(usage) == "session: 1.5k tok · $0.30"
+
+
+def test_session_usage_subtitle_shows_a_cost_without_tokens() -> None:
+    assert session_usage_subtitle(Usage(cost_usd=2.5)) == "session: 0 tok · $2.50"

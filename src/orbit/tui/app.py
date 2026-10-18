@@ -84,7 +84,13 @@ from orbit.tui.tabs import ConversationTabs
 from orbit.tui.tasks import ReasonScreen, TaskEditorScreen, TaskList
 from orbit.tui.transcript import Transcript
 from orbit.tui.view import (
+    CONFIGURE_MESSAGE,
+    CONFIGURE_TITLE,
+    CONFIGURE_YES,
     PLANNER_BUSY,
+    RESET_MESSAGE,
+    RESET_TITLE,
+    RESET_YES,
     TOOL_ACCESS_OPTIONS,
     coalesce,
     decision_entry,
@@ -94,12 +100,6 @@ from orbit.tui.view import (
     tool_access_labels,
 )
 from orbit.tui.widgets import (
-    CONFIGURE_MESSAGE,
-    CONFIGURE_TITLE,
-    CONFIGURE_YES,
-    RESET_MESSAGE,
-    RESET_TITLE,
-    RESET_YES,
     ChatPrompt,
     ConfirmScreen,
     KeyFooter,

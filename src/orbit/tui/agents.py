@@ -8,10 +8,8 @@ from textual.message import Message
 from textual.widgets.option_list import Option
 
 from orbit.protocol import Event, ReviewStatus
-from orbit.tui.view import AgentRow, agent_line, review_line, track_agents
+from orbit.tui.view import NO_AGENTS_LABEL, AgentRow, agent_line, review_line, track_agents
 from orbit.tui.widgets import ListPane
-
-EMPTY_LABEL = "No agents running"
 
 
 class AgentsPane(ListPane):
@@ -76,4 +74,4 @@ class AgentsPane(ListPane):
         rows = [
             (row.agent_id, agent_line(row, self._numbers.get(row.task_id))) for row in self.rows
         ]
-        self.show_rows(rows, None if rows else Option(EMPTY_LABEL, disabled=True))
+        self.show_rows(rows, None if rows else Option(NO_AGENTS_LABEL, disabled=True))

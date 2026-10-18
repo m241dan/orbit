@@ -9,10 +9,8 @@ from textual.app import ComposeResult
 from textual.widgets import Static
 
 from orbit.protocol import StepState, UsageChanged
-from orbit.tui.view import spinner_frame, step_lines, usage_lines
+from orbit.tui.view import NO_STEPS_TEXT, spinner_frame, step_lines, usage_lines
 from orbit.tui.widgets import SidePanel, Ticker
-
-NO_STEPS_TEXT = "No verification steps"
 
 
 class VerificationPanel(SidePanel):

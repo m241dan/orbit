@@ -1319,6 +1319,29 @@ async def test_a_turn_after_opening_a_session_adds_to_its_total() -> None:
         assert task_list.border_subtitle == "session: 0 tok · $2.50"
 
 
+async def test_a_turn_that_spent_nothing_shows_no_total() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        free = TurnFinished(turn_id="a", reason="completed", usage=Usage())
+        await feed(session, pilot, free)
+        assert not app.query_one(TaskList).border_subtitle
+
+
+async def test_counting_and_resetting_to_the_same_total_show_the_same() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test():
+        task_list = app.query_one(TaskList)
+        total = Usage(input_tokens=1_000, cost_usd=0.84)
+        task_list.count(total)
+        counted = task_list.border_subtitle
+        task_list.reset_usage(total)
+        assert task_list.border_subtitle == counted == "session: 1k tok · $0.84"
+        task_list.reset_usage(Usage())
+        assert not task_list.border_subtitle
+
+
 async def test_opening_a_new_session_clears_the_total() -> None:
     session = FakeSession()
     app = OrbitApp(session)

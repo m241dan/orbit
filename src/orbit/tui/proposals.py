@@ -11,10 +11,13 @@ from textual.screen import ModalScreen
 from textual.widgets import Input, Static
 
 from orbit.protocol import ChecksProposed, DecideProposal, ProposalAction
-from orbit.tui.view import proposal_text
-
-KEYS_HINT = "a accept · r revise · x end"
-FEEDBACK_HINT = "enter send · esc back"
+from orbit.tui.view import (
+    FEEDBACK_HINT,
+    FEEDBACK_PLACEHOLDER,
+    PROPOSAL_KEYS_HINT,
+    proposal_text,
+    proposal_title,
+)
 
 
 class ProposalScreen(ModalScreen[DecideProposal | None]):
@@ -51,10 +54,10 @@ class ProposalScreen(ModalScreen[DecideProposal | None]):
 
     def compose(self) -> ComposeResult:
         with Vertical() as box:
-            box.border_title = f"Proposed checks · {self.proposal.agent_id}"
-            box.border_subtitle = KEYS_HINT
+            box.border_title = proposal_title(self.proposal.agent_id)
+            box.border_subtitle = PROPOSAL_KEYS_HINT
             yield Static(Text(proposal_text(self.proposal)), id="proposal-body")
-            feedback = Input(placeholder="What should change?", id="proposal-feedback")
+            feedback = Input(placeholder=FEEDBACK_PLACEHOLDER, id="proposal-feedback")
             feedback.display = False
             yield feedback
 
@@ -78,7 +81,7 @@ class ProposalScreen(ModalScreen[DecideProposal | None]):
     def _typing(self, on: bool) -> None:
         feedback = self.query_one(Input)
         feedback.display = on
-        self.query_one(Vertical).border_subtitle = FEEDBACK_HINT if on else KEYS_HINT
+        self.query_one(Vertical).border_subtitle = FEEDBACK_HINT if on else PROPOSAL_KEYS_HINT
         if on:
             feedback.focus()
         else:

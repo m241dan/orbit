@@ -10,6 +10,8 @@ from orbit.tui.view.common import STEP_ICONS
 
 # The verification panel
 
+NO_STEPS_TEXT = "No verification steps"
+
 
 def step_lines(steps: Sequence[StepState], frame: str, elapsed: int, title: str = "") -> list[str]:
     """One line per step, under the ``title`` heading if there is one. The running one shows

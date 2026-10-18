@@ -13,6 +13,8 @@ from orbit.protocol import (
     ReviewStatus,
 )
 
+NO_AGENTS_LABEL = "No agents running"
+
 
 @dataclass(frozen=True)
 class AgentRow:

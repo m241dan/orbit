@@ -29,7 +29,8 @@ from orbit.protocol import (
 )
 from orbit.tui import OrbitApp
 from orbit.tui.tasks import TaskList
-from orbit.tui.widgets import CONFIGURE_MESSAGE, CONFIGURE_TITLE, ConfirmScreen, PickerScreen
+from orbit.tui.view import CONFIGURE_MESSAGE, CONFIGURE_TITLE
+from orbit.tui.widgets import ConfirmScreen, PickerScreen
 from tests.agent_fakes import (
     STEP,
     Call,

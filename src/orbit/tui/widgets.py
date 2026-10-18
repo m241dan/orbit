@@ -20,7 +20,7 @@ from textual.widgets._footer import FooterKey
 from textual.widgets.option_list import Option
 
 from orbit.protocol import Settings
-from orbit.tui.view import SPINNER_FPS, prompt_title, settings_summary
+from orbit.tui.view import SPINNER_FPS, confirm_hint, prompt_title, settings_summary
 
 if TYPE_CHECKING:
     _WidgetMixin = Widget
@@ -467,18 +467,6 @@ class PickerScreen(ModalScreen[int | None]):
         self.dismiss(None)
 
 
-CONFIGURE_TITLE = "Set up checks?"
-CONFIGURE_MESSAGE = "A configurator task will go to the front of the task list and run now."
-CONFIGURE_YES = "set up"
-
-RESET_TITLE = "Reset the planner?"
-RESET_MESSAGE = (
-    "The planner's conversation ends, and the next prompt starts a fresh one with its role"
-    " read again from .orbit/config.toml. Draft tasks stay."
-)
-RESET_YES = "reset"
-
-
 class ConfirmScreen(ModalScreen[bool]):
     """Asks ``title`` with ``message``; dismisses with True on ``y``, False on ``n`` or escape.
 
@@ -512,7 +500,7 @@ class ConfirmScreen(ModalScreen[bool]):
     def compose(self) -> ComposeResult:
         body = Static(Text(self.message), id="confirm-message")
         body.border_title = self.title_text
-        body.border_subtitle = f"y {self.yes} · n/esc cancel"
+        body.border_subtitle = confirm_hint(self.yes)
         yield body
 
     def action_answer(self, confirmed: bool) -> None:

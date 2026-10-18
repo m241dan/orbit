@@ -12,6 +12,7 @@ from orbit.tui.view.detail_views import ERROR
 
 TASK_EDITOR_HINT = "j/k move · J/K scroll · i type · enter choose · ctrl+s save · esc cancel"
 REASON_HINT = "j/k scroll · y copy · esc close"
+NEW_TASK_LABEL = "+ new task"
 
 
 def task_numbers(tasks: Sequence[TaskState]) -> list[str]:
@@ -120,6 +121,12 @@ def _trim_body(body: str) -> str:
 def usage_label(usage: Usage) -> str:
     """Tokens and cost, shortly: ``1.2M tok · $0.84``."""
     return f"{token_text(usage.tokens)} tok · ${usage.cost_usd:.2f}"
+
+
+def session_usage_subtitle(usage: Usage) -> str:
+    """The task list's border subtitle: what the session has spent, ``usage``; empty when it
+    has spent nothing."""
+    return "" if usage == Usage() else f"session: {usage_label(usage)}"
 
 
 def active_task(tasks: Sequence[TaskState]) -> int | None:
