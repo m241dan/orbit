@@ -51,7 +51,7 @@ files = ["src", "tests"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-ra -n auto"
+addopts = "-ra -n auto --dist worksteal"
 asyncio_mode = "auto"
 
 [tool.coverage.run]
