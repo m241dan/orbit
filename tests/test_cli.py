@@ -31,7 +31,7 @@ from orbit.agent.domain.reviews import ReviewLimits
 from orbit.agent.domain.sessions import default_name
 from orbit.cli import app
 from orbit.protocol import Notice, SessionsListed, Settings, ThreadedSession
-from tests.agent_fakes import greeted, payloads, queued, store_of
+from tests.agent_fakes import greeted, payloads, queued, startup_of, store_of
 
 runner = CliRunner()
 
@@ -529,9 +529,9 @@ def test_chat_checks_the_steps_at_startup(
     assert runner.invoke(app, ["chat", "--no-verify"]).exit_code == 0
 
     checked, unverified = launched
-    assert checked._startup is not None
+    assert startup_of(checked) is not None
     # Without verification, there's nothing to check.
-    assert unverified._startup is None
+    assert startup_of(unverified) is None
 
 
 @pytest.fixture

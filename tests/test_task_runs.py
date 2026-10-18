@@ -65,12 +65,15 @@ from tests.agent_fakes import (
     ScriptedLauncher,
     Steps,
     board,
+    board_of,
+    desk_of,
     payloads,
     queued,
     refused,
     run,
     send,
     session_for,
+    tasks_of,
     verified,
 )
 
@@ -492,7 +495,7 @@ async def test_usage_arriving_after_the_task_was_removed_is_saved_in_what_the_se
     store = FakeStore()
     session, _, launcher = session_for(store=store)
     await send(session, AddTask(task=TaskSpec(prompt="a")))
-    tasks = session._board
+    tasks = board_of(session)
 
     async def claims_done_then_removed(call: Call) -> TurnEndReason:
         reason = await claims_done(call)
@@ -502,8 +505,9 @@ async def test_usage_arriving_after_the_task_was_removed_is_saved_in_what_the_se
 
     launcher.scripts = [claims_done_then_removed]
     launcher.usages = [(Usage(input_tokens=10),)]
-    assert session._desk is not None
-    await asyncio.wait_for(AgentRun("1", session._tasks, None, session._desk).run(None, "."), 5)
+    desk = desk_of(session)
+    assert desk is not None
+    await asyncio.wait_for(AgentRun("1", tasks_of(session), None, desk).run(None, "."), 5)
     assert store.last.spent == Usage(input_tokens=10)
     await session.close()
 
@@ -540,11 +544,11 @@ async def test_a_failure_saving_a_change_the_board_made_is_refused_as_internal(
     async def broken(contents: object) -> None:
         raise ValueError("saving tripped")
 
-    monkeypatch.setattr(session._keeper, "save", broken)
+    monkeypatch.setattr(session.saved_session, "save", broken)
     queued(session)
     await send(session, RemoveTask(task_id="1"))
     events = queued(session)
-    assert session._board.tasks == ()  # Refused partway, so the change stands.
+    assert board_of(session).tasks == ()  # Refused partway, so the change stands.
     assert not [e for e in events if isinstance(e, ErrorOccurred | CommandAccepted)]
     refused = [e for e in events if isinstance(e, CommandRefused)]
     assert [(e.code, e.message) for e in refused] == [

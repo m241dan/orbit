@@ -8,6 +8,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from orbit.agent import Agents, AgentSession, Verification, VerificationStep
+from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.ports import (
     AgentLaunch,
     CallHandler,
@@ -18,7 +19,10 @@ from orbit.agent.application.ports import (
     UsageSource,
 )
 from orbit.agent.application.review_lane import ReviewLane
+from orbit.agent.application.startup_check import StartupCheck
+from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.agent_task import Limits
+from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.checks import Setup
 from orbit.agent.domain.roles import REVIEW_ROLES, built_in_roles
 from orbit.agent.domain.sessions import SessionRecord, Unreadable
@@ -616,6 +620,26 @@ def lane_of(session: AgentSession) -> ReviewLane:
     """The session's review lane, which it must have."""
     assert session._lane is not None
     return session._lane
+
+
+def tasks_of(session: AgentSession) -> Tasks:
+    """The session's tasks, which save and publish the board as it changes."""
+    return session._tasks
+
+
+def board_of(session: AgentSession) -> TaskBoard:
+    """The session's task board."""
+    return session._board
+
+
+def desk_of(session: AgentSession) -> AgentDesk | None:
+    """The session's agent desk, if it runs agents."""
+    return session._desk
+
+
+def startup_of(session: AgentSession) -> StartupCheck | None:
+    """The check the session runs at startup, if any."""
+    return session._startup
 
 
 def planner_turn(session: AgentSession) -> "asyncio.Task[object] | None":

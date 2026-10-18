@@ -43,6 +43,7 @@ from tests.agent_fakes import (
     Steps,
     Stop,
     board,
+    board_of,
     events_until,
     lane_of,
     of_type,
@@ -648,10 +649,10 @@ async def test_a_review_can_suggest_after_its_first_suggestion_landed() -> None:
         await call("get_task")
         replies.append(await call("suggest_task", title="Add tests", prompt="Please."))
         suggested.set()
-        first = sessions[0]._board.get("4")
+        first = board_of(sessions[0]).get("4")
         while first.status != "completed":
             await asyncio.sleep(0.01)
-            first = sessions[0]._board.get("4")
+            first = board_of(sessions[0]).get("4")
         await asyncio.sleep(0.1)  # Let the work lane tell the review lane it landed.
         replies.append(await call("suggest_task", title="Rename x", prompt="Please."))
         await call("complete_task", summary="Reviewed")
