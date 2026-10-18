@@ -58,6 +58,9 @@ WorkCommand = (
     | DecideProposal
 )
 
+QueuedWork = RunTasks | FireTrigger
+"""The work commands that start work, which a read-only orbit queues rather than runs."""
+
 
 @dataclass(frozen=True)
 class CommandParts:
@@ -65,7 +68,7 @@ class CommandParts:
     into, its ``tasks``, its planner ``seat``, the work lane's ``turns``, its review ``lane``,
     if any, the ``proposals`` waiting for the user, the ``desk`` running its agents and the
     ``startup`` check, if any; ``save`` saves the session and ``reviews_changed`` saves its
-    review state."""
+    review state; ``read_only`` says another orbit owns the repository."""
 
     settings: SessionSettings
     events: EventSink
@@ -78,16 +81,31 @@ class CommandParts:
     startup: StartupCheck | None
     save: Callable[[], Awaitable[None]]
     reviews_changed: Callable[[], Awaitable[None]]
+    read_only: bool = False
 
 
 class WorkCommands:
-    """Handles the work commands on the session held in ``parts``."""
+    """Handles the work commands on the session held in ``parts``; while it's read-only, those
+    that start work are queued, in order, rather than run."""
 
     def __init__(self, parts: CommandParts) -> None:
         self._parts = parts
+        self._queued: list[QueuedWork] = []
+
+    @property
+    def queued(self) -> tuple[QueuedWork, ...]:
+        """The commands queued while read-only, oldest first."""
+        return tuple(self._queued)
 
     async def handle(self, command: WorkCommand, command_id: str) -> None:
-        """Handle ``command``, sent as ``command_id``."""
+        """Handle ``command``, sent as ``command_id``, or queue it if it starts work while
+        read-only."""
+        if self._parts.read_only and isinstance(command, QueuedWork):
+            self._queued.append(command)
+        else:
+            await self._dispatch(command, command_id)
+
+    async def _dispatch(self, command: WorkCommand, command_id: str) -> None:
         match command:
             case SendMessage() | CancelTurn() | UpdateSettings():
                 await self._handle_prompts(command, command_id)

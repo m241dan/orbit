@@ -5,8 +5,8 @@ import logging
 import os
 import secrets
 import signal
-from collections.abc import Callable
-from contextlib import AbstractContextManager, nullcontext
+from collections.abc import Callable, Iterator
+from contextlib import AbstractContextManager, contextmanager, nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated
@@ -39,6 +39,8 @@ from orbit.agent import (
     TokenFile,
     UsageApi,
     Verification,
+    WorkspaceLock,
+    WorkspaceOwner,
     git_top_level,
     import_session_files,
     imported_note,
@@ -207,7 +209,8 @@ _SERVE_FLAGS = ("model", "tools", "verify", "worktree", "review", "usage", "prof
 class _Backend:
     """What the backend flags ask for: the planner's ``model``, new tasks' ``tools``, and
     whether to ``verify``, run tasks in a ``worktree``, ``review`` landed work and show the
-    ``usage`` limits; a ``new`` session, perhaps with a ``name``."""
+    ``usage`` limits; a ``new`` session, perhaps with a ``name``; and the ``owner`` of the
+    repository, if another orbit owns it, making this one read-only."""
 
     model: str | None
     tools: ToolAccess | None
@@ -217,6 +220,7 @@ class _Backend:
     usage: bool
     new: bool
     name: str | None
+    owner: WorkspaceOwner | None = None
 
     @property
     def fresh(self) -> bool:
@@ -274,10 +278,30 @@ def chat(
     # directory, so move into the workspace before anything reads the filesystem.
     profile = profile.expanduser().resolve() if profile else None
     os.chdir(root)
-    backend = _Backend(model, tools, verify, worktree, review, usage, new, name)
-    build, store = _backend(backend, root, state, user_config, pick_session=not backend.fresh)
-    session = ThreadedSession(build, _thread_context(profile))
-    _launch_with(OrbitApp(session), profile, store)
+    with _repository_lock(root) as (_, owner):
+        backend = _Backend(model, tools, verify, worktree, review, usage, new, name, owner)
+        build, store = _backend(backend, root, state, user_config, pick_session=not backend.fresh)
+        session = ThreadedSession(build, _thread_context(profile))
+        _launch_with(OrbitApp(session), profile, store)
+
+
+@contextmanager
+def _repository_lock(root: Path) -> Iterator[tuple[WorkspaceLock, WorkspaceOwner | None]]:
+    """Hold the workspace lock on the repository at ``root`` while the block runs, if no other
+    orbit holds it; yields the lock and the owner, if another orbit is.
+
+    Exits with status 2 if the lock can't be made.
+    """
+    lock = WorkspaceLock(orbit_dir(str(root)))
+    try:
+        owner = lock.take()
+    except OSError as exc:
+        typer.echo(f"Couldn't lock the repository with {lock.path}: {exc}", err=True)
+        raise typer.Exit(2) from None
+    try:
+        yield lock, owner
+    finally:
+        lock.close()
 
 
 @dataclass(frozen=True)
@@ -420,6 +444,7 @@ def _backend(
             startup_notes=notes,
             storage=storage,
             fallback=FallbackFiles(state, store.workspace_id, orbit_dir(str(root))),
+            owner=backend.owner,
         )
 
     return build, store
@@ -464,8 +489,9 @@ def serve(
 
     It opens the workspace's most recently active session (or a new one with --new or
     --name), and its work goes on with no frontend connected. Frontends show the token in
-    the token file in your config directory. The first ctrl+c stops it, cancelling the work
-    in progress; a second exits at once.
+    the token file in your config directory. The first orbit on a repository owns it; while
+    another does, this one is read-only, queueing the work it's asked to run. The first ctrl+c
+    stops it, cancelling the work in progress; a second exits at once.
     """
     profile = profile.expanduser().resolve() if profile else None
     state = resolve_state_dir(state, os.environ)
@@ -475,17 +501,40 @@ def serve(
     settings = _server_settings(user_config, host, port)
     token_file = TokenFile(user_config)
     token = _token(token_file)
-    backend = _Backend(model, tools, verify, worktree, review, usage, new, name)
-    build, store = _backend(backend, root, state, user_config, pick_session=False)
-    logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
-    parts = _ServeParts(
-        build,
-        not backend.fresh,
-        settings,
-        token,
-        RunFile(state, store.workspace_id),
-        f"Serving {root} at {{url}}; frontends show the token in {token_file.path}.",
-    )
+    with _repository_lock(root) as (lock, owner):
+        backend = _Backend(model, tools, verify, worktree, review, usage, new, name, owner)
+        build, store = _backend(backend, root, state, user_config, pick_session=False)
+        logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
+        parts = _ServeParts(
+            build,
+            not backend.fresh,
+            settings,
+            token,
+            RunFile(state, store.workspace_id),
+            _banner(root, token_file, owner),
+            lock,
+        )
+        _serve_until_stopped(parts, profile, user_config, store)
+    typer.echo("orbit serve stopped.")
+
+
+def _banner(root: Path, token_file: TokenFile, owner: WorkspaceOwner | None) -> str:
+    """The line ``orbit serve`` prints once listening, serving the repository at ``root`` as its
+    owner, or read-only while another orbit, ``owner``, owns it, saying where ``token_file``
+    is, with ``{url}`` in it for the server's URL."""
+    standing = "as its owner" if owner is None else f"read-only, as {owner.described} owns it"
+    return f"Serving {root} at {{url}} {standing}; frontends show the token in {token_file.path}."
+
+
+def _serve_until_stopped(
+    parts: "_ServeParts", profile: Path | None, user_config: Path, store: SqliteStore
+) -> None:
+    """Serve as ``parts`` say, profiled into ``profile`` if given, until stopped, then close
+    ``store``.
+
+    Exits with status 2 if the server can't listen, naming the user config in
+    ``user_config`` that sets its port.
+    """
     try:
         asyncio.run(_served(parts, profile))
     except ListenFailed as failed:
@@ -498,7 +547,6 @@ def serve(
         raise typer.Exit(2) from None
     finally:
         asyncio.run(store.close())
-    typer.echo("orbit serve stopped.")
 
 
 def _server_settings(config_dir: Path, host: str | None, port: int | None) -> ServerSettings:
@@ -540,8 +588,9 @@ def _token(token_file: TokenFile) -> str:
 class _ServeParts:
     """What ``orbit serve`` serves: the session ``build`` makes, with the most recently active
     saved one opened if ``latest``, on the server ``settings`` say, to frontends showing
-    ``token``, saying where it is in ``run_file`` while it does, and the ``banner`` it prints
-    once listening, with ``{url}`` in it for the server's URL."""
+    ``token``, saying where it is in ``run_file`` while it does, the ``banner`` it prints
+    once listening, with ``{url}`` in it for the server's URL, and the workspace ``lock``,
+    which names the server's URL while it's held."""
 
     build: Callable[[], AgentSession]
     latest: bool
@@ -549,6 +598,7 @@ class _ServeParts:
     token: str
     run_file: RunFile
     banner: str
+    lock: WorkspaceLock
 
 
 async def _served(parts: _ServeParts, profile: Path | None) -> None:
@@ -579,6 +629,7 @@ async def _until_stopped(
     _on_signals(stopping)
     try:
         parts.run_file.write(url, os.getpid())
+        parts.lock.announce(url)
         typer.echo(parts.banner.format(url=url))
         await stopping.wait()
     finally:

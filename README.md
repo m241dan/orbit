@@ -534,7 +534,7 @@ your checkout out of its way, it doesn't sandbox it.
 | Home | Where | What |
 |---|---|---|
 | The repository | your checkout | your code, which agents change only through commits orbit lands |
-| `.git/orbit` | the repository's git directory | the coder's worktree, review snapshots and what earlier runs left there |
+| `.git/orbit` | the repository's git directory | the coder's worktree, review snapshots, what earlier runs left there and `workspace.lock`, which says which orbit owns the repository (`.orbit/workspace.lock` outside git; see [Owning the repository](#owning-the-repository)) |
 | The store | the state directory | `orbit.db`, the saved sessions, their event logs and the super review count of every repository, `locks/`, and `fallback/` for events a failed write left unsaved (see [Storage failures](#storage-failures)) |
 | Config files | `.orbit/config.toml` in the repository | the verification steps, setup, roles and limits, committed with your code |
 | User config | `config.toml` in the config directory | your own settings for every repository, such as `[storage]` and `[server]` |
@@ -847,7 +847,8 @@ frontend connected. It takes `-C` and the backend flags `chat` has (`--model`, `
 
 It opens the repository's most recently active saved session that no other orbit has open, or a
 new one when there's none; `--new` or `--name` start a new one. Once listening it prints one line
-with the repository, its URL and the token file, then one line as each frontend connects (with the
+with the repository, its URL, whether it owns the repository or is read-only (naming the owner)
+and the token file, then one line as each frontend connects (with the
 name its `Hello` gives and its address) and disconnects, and one as it stops; warnings and errors
 go to stderr. While it runs, `run/<workspace id>.json` in the state directory, readable by you
 alone, holds its URL and process id; it's removed as it stops.
@@ -910,6 +911,23 @@ account on the same machine are found this way; for any other, give `--connect` 
 `--local` skips the search and always runs in-process, taking the backend flags; it can't go with
 `--connect`.
 
+### Owning the repository
+
+The first orbit to reach a repository, an `orbit serve` or an `orbit chat` running in-process,
+owns it and runs its work; two orbits never both run work on one repository. It holds an
+exclusive lock on `.git/orbit/workspace.lock` (`.orbit/workspace.lock` outside git), which names
+its process id and, for `orbit serve`, its URL. The system lets go of the lock when the owner's
+process ends, even in a crash, so the next orbit to start owns the repository. A lock that can't
+be made stops orbit with status 2, naming the file. A chat connected to an `orbit serve` takes no
+lock of its own: the server does.
+
+Any other orbit started on the repository meanwhile is read-only. It opens with a note naming the
+owner, such as "Read-only: an orbit chat, pid 4242 owns this repository. Tasks you run are queued
+until this orbit owns it.", and the prompt's title carries a "read-only" mark. `orbit serve`'s
+first line says so too. Running tasks (`ctrl+r`) and the triggers (`ctrl+g`, `ctrl+e`) are
+accepted and queued, in order, but nothing runs: no task, review or startup check. The planner,
+the sessions, drafts and settings work as usual. The queue is dropped when the orbit exits.
+
 ## Development
 
 Write tests first. Coverage is held at 100% (`fail_under` in `pyproject.toml`); only
@@ -957,7 +975,8 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     `SessionStore` port's adapter (`SqliteStore`): saved sessions and each repository's super
     review count in `orbit.db` in the state directory `resolve_state_dir` picks, with
     `session_locks`' lock files while an orbit has a session open; `session_import` imports the
-    session files older orbits saved where `session_files`' `legacy_dir` says.
+    session files older orbits saved where `session_files`' `legacy_dir` says. `WorkspaceLock`
+    (in `workspace_lock`) is the lock the orbit owning a repository holds.
     `ControlPlaneServer` (in `control_plane`) is the server adapter: it serves `AgentSession`
     over a WebSocket (starlette on uvicorn, through `embedded_server`'s `EmbeddedServer`, which
     leaves signals to the program), one `SessionConnection` per frontend that shows the token,
@@ -992,7 +1011,8 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     session between saved ones: it lists, opens, renames and deletes them through the keeper,
     opens another or a new one in place of the one open, and holds what the session's agents have
     spent; `WorkCommands` (in `work_commands`) handles the other commands, the prompts, tasks,
-    board and agents' work, refusing those that name no such agent, lane or trigger;
+    board and agents' work, refusing those that name no such agent, lane or trigger, and
+    queueing those that start work while the session is read-only;
     `ReviewCount` (in `review_count`) keeps the repository's super review count apart from
     any one session; `SessionSettings` (in `settings`) holds the open session's settings, at
     first those given at startup (a session opened brings its saved ones, but for the pinned
@@ -1013,7 +1033,7 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     `agents`: agent ids and tokens), `roles` (built-in roles, given their instructions, and the
     tasks orbit queues in them), `config` (`OrbitConfig`: the limits, roles, verification steps
     and setup a project file sets over the built-in defaults) and `config_errors` (`ConfigError`,
-    and what's wrong with an invalid file or proposal), `server` (`ServerSettings`, the user config's `[server]`, and which hosts are loopback), `checks` (the verification steps, the
+    and what's wrong with an invalid file or proposal), `server` (`ServerSettings`, the user config's `[server]`, and which hosts are loopback), `ownership` (`WorkspaceOwner`, who a workspace lock names, and the read-only note), `checks` (the verification steps, the
     setup step that makes a fresh worktree ready, and the checks a configurator proposes), the
     `Catalog` (in `catalog`: the workspace and its sessions, the agents' roles, the triggers and
     the lanes), `ReviewPlanner` (in `reviews`: when to review, batches, rounds and caps), commit

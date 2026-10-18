@@ -25,6 +25,7 @@ from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.checks import ChecksProposal, Setup
 from orbit.agent.domain.config import OrbitConfig
 from orbit.agent.domain.config_errors import ConfigError
+from orbit.agent.domain.ownership import WorkspaceOwner
 from orbit.agent.domain.roles import Role
 from orbit.agent.domain.server import ServerSettings, is_loopback
 from orbit.agent.domain.storage import StorageSettings
@@ -51,6 +52,7 @@ from orbit.agent.external.user_config import (
     resolve_config_dir,
 )
 from orbit.agent.external.workspace import workspace_state
+from orbit.agent.external.workspace_lock import WorkspaceLock
 
 __all__ = [
     "MODEL_ALIASES",
@@ -89,6 +91,8 @@ __all__ = [
     "Verification",
     "VerificationStep",
     "Workspace",
+    "WorkspaceLock",
+    "WorkspaceOwner",
     "git_top_level",
     "import_session_files",
     "imported_note",

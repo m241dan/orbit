@@ -56,10 +56,14 @@ def agent_entry(role: str) -> AgentEntry:
 
 
 def catalog(
-    directory: str | None, sessions: tuple[SessionSummary, ...], roles: Iterable[str]
+    directory: str | None,
+    sessions: tuple[SessionSummary, ...],
+    roles: Iterable[str],
+    *,
+    read_only: bool = False,
 ) -> Catalog:
     """The catalog of the repository in the ``directory`` named so, if any, holding
-    ``sessions``, with agents in ``roles``."""
+    ``sessions``, with agents in ``roles``, for an orbit that's ``read_only`` if so."""
     label = directory or NO_WORKSPACE_LABEL
     entry = WorkspaceEntry(id=DEFAULT_WORKSPACE, label=label, sessions=sessions)
     return Catalog(
@@ -67,4 +71,5 @@ def catalog(
         agents=tuple(agent_entry(role) for role in roles),
         triggers=TRIGGERS,
         lanes=LANES,
+        read_only=read_only,
     )

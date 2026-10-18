@@ -737,6 +737,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         self._feed.replace((envelope.payload for envelope in snapshot.transcript), snapshot.agents)
         self._pager.follow(snapshot)
         self._open_session(snapshot.session)
+        self._prompt.show_read_only(snapshot.read_only)
         if snapshot.storage_halt is None:
             self._halt.lifted()
         else:

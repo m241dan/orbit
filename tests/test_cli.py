@@ -4,6 +4,7 @@ import os
 import pstats
 import sqlite3
 import subprocess
+import sys
 import threading
 from collections.abc import Callable, Coroutine, Iterator
 from contextlib import closing, contextmanager
@@ -32,14 +33,18 @@ from orbit.agent import (
     UsageApi,
     Verification,
     VerificationStep,
+    WorkspaceLock,
+    WorkspaceOwner,
     run_step,
     workspace_state,
 )
 from orbit.agent.application.ports import UsageSource
+from orbit.agent.domain.ownership import read_only_note
 from orbit.agent.domain.reviews import ReviewLimits
 from orbit.agent.domain.sessions import SessionRecord, Unreadable, default_name, record_json
 from orbit.cli import app
 from orbit.protocol import (
+    Catalog,
     EventEnvelope,
     Notice,
     SessionsListed,
@@ -48,7 +53,7 @@ from orbit.protocol import (
     ThreadedSession,
     encode,
 )
-from tests.agent_fakes import greeted, queued, startup_of, store_of
+from tests.agent_fakes import greeted, queued, sole, startup_of, store_of
 
 runner = CliRunner()
 
@@ -304,7 +309,8 @@ def test_chat_keeps_sessions_in_the_store_in_the_state_directory(
     [session] = launched
     assert store_in(session)._state_dir == state
     assert (state / "orbit.db").exists()
-    assert not (tmp_path / ".orbit").exists()
+    # Only the workspace lock is kept in the workspace outside git.
+    assert [p.name for p in (tmp_path / ".orbit").iterdir()] == ["workspace.lock"]
     assert store_threads() == []  # The store was closed once the app ended.
 
 
@@ -1187,3 +1193,92 @@ def test_db_backup_while_another_orbit_has_the_database_open(state: Path, tmp_pa
 
     assert asyncio.run(backed_up_while_open()) == 0
     assert backed_up_ids(Path("out.db")) == ["abc"]
+
+
+@dataclass(frozen=True)
+class Standing:
+    """Whether a chat's session, once greeted, was read-only by its ``catalog`` and its
+    ``snapshot``, and its ``notices``."""
+
+    catalog: bool
+    snapshot: bool
+    notices: list[str]
+
+
+@pytest.fixture
+def standings(launched: list[AgentSession]) -> list[Standing]:
+    """How each chat's session stood once greeted, while its app ran."""
+    seen: list[Standing] = []
+
+    async def greet_it(session: AgentSession) -> None:
+        await greeted(session)
+        events = queued(session)
+        notices = [e.message for e in events if isinstance(e, Notice)]
+        catalog, snapshot = sole(events, Catalog), sole(events, Snapshot)
+        seen.append(Standing(catalog.read_only, snapshot.read_only, notices))
+
+    FakeApp.during = greet_it
+    return seen
+
+
+def test_a_chat_on_a_repository_another_orbit_owns_is_read_only_naming_it(
+    standings: list[Standing], tmp_path: Path
+) -> None:
+    owner = WorkspaceLock(tmp_path / ".orbit")
+    owner.take()
+    try:
+        assert runner.invoke(app, ["chat", "-C", str(tmp_path)]).exit_code == 0
+    finally:
+        owner.close()
+
+    [standing] = standings
+    assert standing.catalog and standing.snapshot
+    assert read_only_note(WorkspaceOwner(pid=os.getpid())) in standing.notices
+
+
+def test_a_chat_owns_a_repository_no_other_orbit_holds_until_it_ends(
+    launched: list[AgentSession], tmp_path: Path
+) -> None:
+    refused: list[WorkspaceOwner | None] = []
+
+    async def try_to_take(session: AgentSession) -> None:
+        refused.append(WorkspaceLock(tmp_path / ".orbit").take())
+
+    FakeApp.during = try_to_take
+    assert runner.invoke(app, ["chat", "-C", str(tmp_path)]).exit_code == 0
+
+    [session] = launched
+    assert not session.read_only
+    assert refused == [WorkspaceOwner(pid=os.getpid())]
+    after = WorkspaceLock(tmp_path / ".orbit")
+    assert after.take() is None
+    after.close()
+
+
+def test_a_chat_owns_a_repository_whose_owners_process_ended(
+    standings: list[Standing], tmp_path: Path
+) -> None:
+    script = (
+        "import sys; from pathlib import Path;"
+        " from orbit.agent import WorkspaceLock;"
+        " assert WorkspaceLock(Path(sys.argv[1])).take() is None"
+    )
+    subprocess.run([sys.executable, "-c", script, str(tmp_path / ".orbit")], check=True)
+    assert runner.invoke(app, ["chat", "-C", str(tmp_path)]).exit_code == 0
+
+    [standing] = standings
+    assert not standing.catalog and not standing.snapshot
+    assert not any(note.startswith("Read-only") for note in standing.notices)
+
+
+def test_a_repository_that_cant_be_locked_stops_chat(
+    launched: list[AgentSession], tmp_path: Path
+) -> None:
+    (tmp_path / ".orbit").write_text("a file, not orbit's directory")
+    result = runner.invoke(app, ["chat", "-C", str(tmp_path)])
+
+    assert result.exit_code == 2
+    assert f"Couldn't lock the repository with {tmp_path / '.orbit' / 'workspace.lock'}" in (
+        result.output
+    )
+    assert launched == []

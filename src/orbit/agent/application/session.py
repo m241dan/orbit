@@ -46,11 +46,17 @@ from orbit.agent.application.switcher import (
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.application.usage_monitor import UsageMonitor
 from orbit.agent.application.verifier import Verification, Verifier
-from orbit.agent.application.work_commands import CommandParts, WorkCommand, WorkCommands
+from orbit.agent.application.work_commands import (
+    CommandParts,
+    QueuedWork,
+    WorkCommand,
+    WorkCommands,
+)
 from orbit.agent.application.work_lane import WorkLane
 from orbit.agent.application.work_turns import WorkParts, WorkTurns
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.catalog import catalog
+from orbit.agent.domain.ownership import WorkspaceOwner, read_only_note
 from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.reviews import ReviewPlanner
 from orbit.agent.domain.storage import StorageSettings
@@ -162,6 +168,11 @@ class AgentSession:
     ``fallback`` instead. ``ResumeStorage`` retries the writes; once they work, the events
     parked are logged, a ``LogGap`` is logged for each span of those lost, and the halt is
     lifted.
+
+    With an ``owner``, another orbit owns the repository and this one is read-only: its
+    ``Catalog`` and ``Snapshot`` say so, a notice naming the owner comes first among the
+    startup notes, ``RunTasks`` and ``FireTrigger`` are accepted and queued rather than run, and
+    no work starts by itself: neither the startup check nor reviews run.
     """
 
     def __init__(
@@ -183,7 +194,9 @@ class AgentSession:
         startup_notes: Sequence[str] = (),
         storage: StorageSettings = _DEFAULT_STORAGE,
         fallback: Fallback | None = None,
+        owner: WorkspaceOwner | None = None,
     ) -> None:
+        self._read_only = owner is not None
         self._settings = SessionSettings(settings or Settings(), pinned, model_choices)
         self._pick_session = pick_session
         self._storage = storage
@@ -206,13 +219,14 @@ class AgentSession:
         self._verifier = _verifier(verification, self._tasks, self._events, agents)
         self._desk = AgentDesk(agents, self._publish_agents) if agents else None
         self._workspace = workspace
-        self._startup_notes = tuple(startup_notes)
+        owner_notes = () if owner is None else (read_only_note(owner),)
+        self._startup_notes = (*owner_notes, *startup_notes)
         self._closing = False
         self._started = False
         self._lane = self._review_lane()
         hooks = SeatHooks(self._save, self._keeper.use, self._step_names)
         self._seat = PlannerSeat(self._desk, self._tasks, self._events, hooks)
-        self._startup = self._startup_check(verification, check_at_startup)
+        self._startup = self._startup_check(verification, check_at_startup and not self._read_only)
         self._work = self._work_lane()
         self._turns = self._work_turns()
         self._usage = _usage_monitor(usage, self._events)
@@ -278,6 +292,7 @@ class AgentSession:
             self._startup,
             self._save,
             self._reviews_changed,
+            self._read_only,
         )
         return WorkCommands(parts)
 
@@ -359,6 +374,16 @@ class AgentSession:
     @property
     def verification(self) -> Verification | None:
         return self._verifier.verification if self._verifier else None
+
+    @property
+    def read_only(self) -> bool:
+        """Whether another orbit owns the repository, so the work asked for is queued."""
+        return self._read_only
+
+    @property
+    def queued_work(self) -> tuple[QueuedWork, ...]:
+        """The commands that start work, queued while read-only, oldest first."""
+        return self._commands.queued
 
     def connect(self) -> SessionConnection:
         """A new connection to this session, with its own handshake and stream."""
@@ -449,6 +474,7 @@ class AgentSession:
         planner = ReviewPlanner(desk.agents.review_limits)
         lane = ReviewLane(desk, self._tasks, planner, lambda: self._turns.wake())
         lane.changed = self._reviews_changed
+        lane.read_only = self._read_only
         desk.suggest = lane.suggest
         return lane
 
@@ -585,12 +611,14 @@ class AgentSession:
             agents=self._running_agents(),
             transcript=transcript,
             storage_halt=self._halt.message,
+            read_only=self._read_only,
         )
 
     def _catalog(self, sessions: tuple[SessionSummary, ...]) -> Catalog:
         """What exists: the workspace holding ``sessions``, and the agents' roles, if any."""
         roles = self._desk.agents.roles if self._desk else ()
-        return catalog(_workspace_label(self._workspace), sessions, roles)
+        label = _workspace_label(self._workspace)
+        return catalog(label, sessions, roles, read_only=self._read_only)
 
     def _steps_shown(self) -> tuple[tuple[StepState, ...], str]:
         """The verification steps the panel shows, and their title: the startup check's while

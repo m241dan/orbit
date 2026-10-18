@@ -18,6 +18,7 @@ from websockets.exceptions import ConnectionClosed
 from websockets.sync.client import ClientConnection, connect
 
 from orbit import cli
+from orbit.agent import WorkspaceLock, WorkspaceOwner
 from orbit.cli import app
 from orbit.protocol import (
     PROTOCOL_VERSION,
@@ -153,11 +154,50 @@ def test_serve_welcomes_a_frontend_with_the_token_until_stopped(
     token = config_dir / "token"
     assert stat.S_IMODE(token.stat().st_mode) == 0o600
     lines = output.splitlines()
-    assert lines[0] == f"Serving {project} at {url}; frontends show the token in {token}."
+    assert lines[0] == (
+        f"Serving {project} at {url} as its owner; frontends show the token in {token}."
+    )
     assert lines[1].startswith("orbit-tests connected from 127.0.0.1:")
     assert lines[2].startswith("orbit-tests disconnected from 127.0.0.1:")
     assert lines[3:] == ["orbit serve stopped."]
     assert token.read_text().strip() not in output
+
+
+def test_serve_names_its_url_in_the_workspace_lock_while_it_owns_the_repository(
+    project: Path, state: Path, config_dir: Path
+) -> None:
+    owners: list[WorkspaceOwner] = []
+
+    def reads_the_lock(websocket: ClientConnection) -> list[Event]:
+        owners.append(WorkspaceLock(project / ".orbit").owner())
+        return []
+
+    frontend = Frontend(state, config_dir, reads_the_lock)
+    served(frontend, "--port", "0")
+    assert owners == [WorkspaceOwner(pid=os.getpid(), url=str(frontend.run_file["url"]))]
+    after = WorkspaceLock(project / ".orbit")
+    assert after.take() is None
+    after.close()
+
+
+def test_serve_on_a_repository_another_orbit_owns_is_read_only_naming_it(
+    project: Path, state: Path, config_dir: Path
+) -> None:
+    owner = WorkspaceLock(project / ".orbit")
+    owner.take()
+    try:
+        frontend = Frontend(state, config_dir)
+        output = served(frontend, "--port", "0")
+    finally:
+        owner.close()
+
+    [snapshot] = [e for e in frontend.events if isinstance(e, Snapshot)]
+    assert snapshot.read_only
+    url, token = frontend.run_file["url"], config_dir / "token"
+    assert output.splitlines()[0] == (
+        f"Serving {project} at {url} read-only, as an orbit chat, pid {os.getpid()} owns it;"
+        f" frontends show the token in {token}."
+    )
 
 
 def test_serve_takes_its_port_from_the_config_file(state: Path, config_dir: Path) -> None:

@@ -6,6 +6,7 @@ from orbit.protocol import (
     WORK_LANE,
     AgentStarted,
     AssistantMessage,
+    BusyChanged,
     ChecksProposed,
     CommandAccepted,
     CommandRefused,
@@ -88,6 +89,19 @@ async def test_a_snapshot_shows_its_tasks_busy_planner_agents_and_steps() -> Non
         panel = app.query_one(VerificationPanel)
         assert (panel.steps, panel.title) == (SNAPSHOT.steps, "Startup check")
         assert str(app.query_one(Transcript).border_title) == "Conversation — auth rework"
+
+
+async def test_a_read_only_snapshot_marks_the_prompt_until_one_that_isnt() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, SNAPSHOT.model_copy(update={"read_only": True}))
+        prompt = app.query_one(ChatPrompt)
+        assert prompt.border_title == "Prompt · planner · busy · read-only"
+        await feed_events(session, pilot, BusyChanged(busy=False, lane=PLANNER_LANE))
+        assert prompt.border_title == "Prompt · planner · read-only"
+        await feed_events(session, pilot, SNAPSHOT)
+        assert prompt.border_title == "Prompt · planner · busy"
 
 
 async def test_a_snapshot_replaces_the_agents_and_the_transcript() -> None:

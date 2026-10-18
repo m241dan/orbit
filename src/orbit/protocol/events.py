@@ -391,7 +391,8 @@ class Snapshot(_Message):
     waiting for a decision, the ``agents`` running, the ``transcript``: the session's
     last logged events, at most 500, oldest first, in the envelopes they were sent in, and,
     while the session is halted because storage failed, ``storage_halt``: why, and how to
-    resume.
+    resume; ``read_only`` says another orbit owns the repository, so the work this one is
+    asked to run waits.
     """
 
     type: Literal["snapshot"] = "snapshot"
@@ -407,6 +408,7 @@ class Snapshot(_Message):
     agents: tuple[RunningAgent, ...]
     transcript: tuple["EventEnvelope", ...] = ()
     storage_halt: str | None = None
+    read_only: bool = False
 
 
 class HistoryPage(_Message):
@@ -458,13 +460,15 @@ class TriggerEntry(_Message):
 
 class Catalog(_Message):
     """What exists: the ``workspaces`` and their sessions, the ``agents``' roles, the
-    ``triggers`` and the ``lanes``; sent after ``Welcome`` and whenever the sessions change."""
+    ``triggers`` and the ``lanes``, and whether this orbit is ``read_only``, as another owns
+    the repository; sent after ``Welcome`` and whenever the sessions change."""
 
     type: Literal["catalog"] = "catalog"
     workspaces: tuple[WorkspaceEntry, ...]
     agents: tuple[AgentEntry, ...]
     triggers: tuple[TriggerEntry, ...]
     lanes: tuple[str, ...]
+    read_only: bool = False
 
 
 Event = Annotated[

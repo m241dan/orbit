@@ -363,6 +363,11 @@ def test_the_prompt_title_names_the_planner_and_notes_when_it_is_busy() -> None:
     assert prompt_title(True) == "Prompt · planner · busy"
 
 
+def test_the_prompt_title_marks_a_read_only_orbit() -> None:
+    assert prompt_title(False, read_only=True) == "Prompt · planner · read-only"
+    assert prompt_title(True, read_only=True) == "Prompt · planner · busy · read-only"
+
+
 def test_the_conversation_title_names_the_tab_shown_after_all() -> None:
     assert conversation_title(None, False) == "Conversation"
     assert conversation_title("coder", False) == "Conversation · coder"

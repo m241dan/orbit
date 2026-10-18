@@ -27,6 +27,7 @@ from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.checks import Setup
+from orbit.agent.domain.ownership import WorkspaceOwner
 from orbit.agent.domain.replay import LogBounds
 from orbit.agent.domain.roles import REVIEW_ROLES, built_in_roles
 from orbit.agent.domain.sessions import SessionRecord, Unreadable
@@ -535,12 +536,14 @@ def session_for(
     usage: UsageSource | None = None,
     store: SessionStore | None = None,
     fallback: Fallback | None = None,
+    owner: WorkspaceOwner | None = None,
     **options: Any,
 ) -> tuple[AgentSession, FakeHost, ScriptedLauncher]:
     """A session whose tasks run through agents playing ``scripts``, one per launch, and
     whose reviews run through agents playing ``reviewers``, with usage from ``usage``. It's
     saved in ``store``, if given, as ``session-1``, on a :class:`Ticks` clock, its unsaved
-    events going to ``fallback``, if given.
+    events going to ``fallback``, if given, and read-only if another ``owner`` owns the
+    repository.
 
     ``options`` go to :class:`Agents`, such as ``limits``, ``tree`` or ``roles`` (:data:`ROLES`
     unless given).
@@ -559,6 +562,7 @@ def session_for(
         clock=Ticks(),
         new_id=lambda: "session-1",
         fallback=fallback,
+        owner=owner,
     )
     return session, host, launcher
 
@@ -682,6 +686,12 @@ async def events_until(
     except TimeoutError:
         raise AssertionError(f"no event matched {done!r} within {timeout}s") from None
     return events
+
+
+def sole[E: Event](events: list[Event], kind: type[E]) -> E:
+    """The one event of type ``kind`` in ``events``."""
+    [found] = [event for event in events if isinstance(event, kind)]
+    return found
 
 
 def board(events: list[Event]) -> tuple[TaskState, ...]:

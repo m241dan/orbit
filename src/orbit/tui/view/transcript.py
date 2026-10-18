@@ -136,9 +136,15 @@ PLANNER_BUSY = "Planner is busy"
 """The note when the user sends a prompt while the planner is still answering."""
 
 
-def prompt_title(busy: bool) -> str:
-    """The prompt box's title, naming the planner it talks to and whether it's ``busy``."""
-    return " · ".join(["Prompt", PLANNER, *(("busy",) if busy else ())])
+READ_ONLY_MARK = "read-only"
+"""The prompt box's mark while another orbit owns the repository."""
+
+
+def prompt_title(busy: bool, read_only: bool = False) -> str:
+    """The prompt box's title, naming the planner it talks to, whether it's ``busy`` and
+    whether the orbit is ``read_only``."""
+    marks = (*(("busy",) if busy else ()), *((READ_ONLY_MARK,) if read_only else ()))
+    return " · ".join(["Prompt", PLANNER, *marks])
 
 
 def speaker_label(kind: EntryKind, current: str | None, previous: str | None) -> str | None:

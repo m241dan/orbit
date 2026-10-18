@@ -306,7 +306,7 @@
       "type": "object"
     },
     "Catalog": {
-      "description": "What exists: the ``workspaces`` and their sessions, the ``agents``' roles, the\n``triggers`` and the ``lanes``; sent after ``Welcome`` and whenever the sessions change.",
+      "description": "What exists: the ``workspaces`` and their sessions, the ``agents``' roles, the\n``triggers`` and the ``lanes``, and whether this orbit is ``read_only``, as another owns\nthe repository; sent after ``Welcome`` and whenever the sessions change.",
       "properties": {
         "agents": {
           "items": {
@@ -321,6 +321,11 @@
           },
           "title": "Lanes",
           "type": "array"
+        },
+        "read_only": {
+          "default": false,
+          "title": "Read Only",
+          "type": "boolean"
         },
         "triggers": {
           "items": {
@@ -1758,7 +1763,7 @@
       "type": "object"
     },
     "Snapshot": {
-      "description": "The open session as it stands, sent after ``Welcome`` and after every switch; its\nenvelope's ``seq`` is the point it's current to.\n\nIt holds the ``session``'s summary, its ``settings`` and ``model_choices``, whether each\nlane is ``busy``, its ``tasks``, the verification ``steps`` and the ``steps_title`` they\nshow under, the ``review`` status (none when reviews are off), the checks ``proposals``\nwaiting for a decision, the ``agents`` running, the ``transcript``: the session's\nlast logged events, at most 500, oldest first, in the envelopes they were sent in, and,\nwhile the session is halted because storage failed, ``storage_halt``: why, and how to\nresume.",
+      "description": "The open session as it stands, sent after ``Welcome`` and after every switch; its\nenvelope's ``seq`` is the point it's current to.\n\nIt holds the ``session``'s summary, its ``settings`` and ``model_choices``, whether each\nlane is ``busy``, its ``tasks``, the verification ``steps`` and the ``steps_title`` they\nshow under, the ``review`` status (none when reviews are off), the checks ``proposals``\nwaiting for a decision, the ``agents`` running, the ``transcript``: the session's\nlast logged events, at most 500, oldest first, in the envelopes they were sent in, and,\nwhile the session is halted because storage failed, ``storage_halt``: why, and how to\nresume; ``read_only`` says another orbit owns the repository, so the work this one is\nasked to run waits.",
       "properties": {
         "agents": {
           "items": {
@@ -1787,6 +1792,11 @@
           },
           "title": "Proposals",
           "type": "array"
+        },
+        "read_only": {
+          "default": false,
+          "title": "Read Only",
+          "type": "boolean"
         },
         "review": {
           "anyOf": [

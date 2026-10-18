@@ -257,6 +257,7 @@ EVENTS: tuple[EventEnvelope, ...] = (
             ),
             transcript=(event(AssistantMessage(turn_id="turn-1", text="Done.")),),
             storage_halt="Orbit stopped this session: saving the event log failed.",
+            read_only=True,
         )
     ),
     event(
@@ -272,6 +273,7 @@ EVENTS: tuple[EventEnvelope, ...] = (
             agents=(AgentEntry(name=PLANNER, label="Planner", conversational=True),),
             triggers=(TriggerEntry(name="super-review", label="Super review", manual=True),),
             lanes=("work", PLANNER_LANE),
+            read_only=True,
         )
     ),
     event(Welcome(command_id="c1", server_version="0.1.0")),

@@ -59,6 +59,7 @@ class ReviewLane:
         self.planner = planner
         self._wake_work = wake_work
         self.changed: Changed = unchanged
+        self.read_only = False  # Another orbit owns the repository: run no reviews.
         self._publish = desk.publish
         self._jobs: dict[str, ReviewJob] = {}  # Review task id -> what it reviews.
         self._batches: dict[str, str] = {}  # Review task id -> the batch it suggests into.
@@ -170,8 +171,9 @@ class ReviewLane:
             self._current[1].cancel()
 
     def kick(self) -> None:
-        """Run the reviews waiting, if they aren't being run already."""
-        if not self._background.running:
+        """Run the reviews waiting, if they aren't being run already, unless this orbit is
+        read-only."""
+        if not self.read_only and not self._background.running:
             self._background.start(self._run_reviews())
 
     async def close(self) -> None:

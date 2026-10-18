@@ -69,14 +69,16 @@ and the backend's `server_version`. `Welcome` is Hello's outcome: it takes the p
 `CommandAccepted`. What follows comes in this order:
 
 1. `Catalog`: what exists, namely the workspaces with their sessions, the agents' roles, the
-   triggers and the lanes.
+   triggers and the lanes, and `read_only`, true when another orbit owns the repository (see
+   [Read-only orbits](#read-only-orbits)).
 2. The latest `UsageChanged`, if usage was fetched yet.
 3. `Snapshot`: the open session as it stands, with its settings, busy lanes, tasks,
    verification steps, review status, checks proposals waiting for a decision, running
    agents and its `transcript`: the session's last 500 logged events, oldest first, in the
    envelopes they were sent in, their `seq`s included (none without a store), and, while the
    session is halted because a write to the store failed, its `storage_halt`: the explanation
-   the halting `ErrorOccurred` carried (see `storage_failed` under [Codes](#codes)). A `Hello`
+   the halting `ErrorOccurred` carried (see `storage_failed` under [Codes](#codes)), and
+   `read_only`, as the Catalog has it. A `Hello`
    whose `since` orbit can catch up from gets the open session's events after it here
    instead, in their original envelopes (see
    [Sequencing and reconnecting](#sequencing-and-reconnecting)).
@@ -94,6 +96,15 @@ Switching sessions works the way joining does: opening, starting or picking a se
 A frontend replaces the conversation it shows with every Snapshot's transcript, so joining
 shows where the session left off and a switch shows the session switched to.
 `SessionsListed` otherwise only answers `ListSessions`.
+
+## Read-only orbits
+
+The first orbit to reach a repository, an `orbit serve` or an `orbit chat` running in-process,
+owns it, and runs its work. Any other orbit on it is read-only: its `Catalog` and `Snapshot` have
+`read_only` true, and a `Notice` after the Snapshot names the owner. A read-only orbit accepts
+`RunTasks` and `FireTrigger` with `CommandAccepted` and queues them, in order, rather than running
+them, and starts no work by itself, such as reviews or the startup check; the planner, sessions,
+drafts and settings work as usual. The queue is dropped when the orbit exits.
 
 ## The user's messages and decisions
 

@@ -168,12 +168,20 @@ class ChatPrompt(ModalTextArea):
 
     def __init__(self, *, placeholder: str = "", id: str | None = None) -> None:
         super().__init__(soft_wrap=True, show_line_numbers=False, placeholder=placeholder, id=id)
+        self._busy = False
+        self._read_only = False
 
     def on_mount(self) -> None:
         self.show_busy(False)
 
     def show_busy(self, busy: bool) -> None:
-        self.border_title = prompt_title(busy)
+        self._busy = busy
+        self.border_title = prompt_title(busy, self._read_only)
+
+    def show_read_only(self, read_only: bool) -> None:
+        """Mark the prompt while the orbit is ``read_only``."""
+        self._read_only = read_only
+        self.border_title = prompt_title(self._busy, read_only)
 
     def show_settings(self, settings: Settings) -> None:
         self.border_subtitle = settings_summary(settings)
