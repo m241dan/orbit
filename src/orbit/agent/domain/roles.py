@@ -87,9 +87,19 @@ class Role(_Config):
         return PROPOSE_CHECKS in self.tools
 
     @property
+    def timeout_seconds(self) -> float | None:
+        """How long an agent in this role may take, in seconds; none for no limit."""
+        return None if self.timeout_minutes is None else self.timeout_minutes * 60
+
+    @property
     def settings(self) -> Settings:
         """The settings of a task orbit queues in this role."""
         return Settings(model=self.model, tool_access=self.tool_access)
+
+
+def out_of_time(who: str, minutes: float) -> str:
+    """The error saying ``who`` ran out of their role's ``minutes``."""
+    return f"{who} ran out of time ({minutes:g} minutes)."
 
 
 def role_task(role_name: str, role: Role, prompt: str) -> TaskSpec:

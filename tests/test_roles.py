@@ -5,6 +5,7 @@ from orbit.agent.domain.roles import (
     ORBIT_TOOLS,
     Role,
     built_in_roles,
+    out_of_time,
     role_task,
     suggested_task,
     task_suggestion,
@@ -65,6 +66,18 @@ def test_a_roles_settings_are_its_model_and_tool_access() -> None:
     role = Role(instructions="Do it.", model="opus", tool_access="full")
     assert role.settings == Settings(model="opus", tool_access="full")
     assert BUILT_IN_ROLES["reviewer"].settings == Settings()
+
+
+@pytest.mark.parametrize(("minutes", "seconds"), [(2, 120), (0.5, 30), (None, None)])
+def test_a_roles_timeout_in_seconds_is_its_minutes_or_no_limit(
+    minutes: float | None, seconds: float | None
+) -> None:
+    assert Role(instructions="Do it.", timeout_minutes=minutes).timeout_seconds == seconds
+
+
+@pytest.mark.parametrize(("minutes", "shown"), [(2, "2"), (2.0, "2"), (0.5, "0.5")])
+def test_out_of_time_names_who_and_their_minutes(minutes: float, shown: str) -> None:
+    assert out_of_time("agent-3", minutes) == f"agent-3 ran out of time ({shown} minutes)."
 
 
 def test_a_role_task_runs_in_the_role_with_its_settings() -> None:

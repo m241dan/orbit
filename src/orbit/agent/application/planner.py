@@ -19,6 +19,7 @@ from orbit.agent.domain.agents import Agent
 from orbit.agent.domain.roles import (
     PROPOSE_TASK,
     REPORT_PROGRESS,
+    out_of_time,
     suggested_task,
     task_suggestion,
 )
@@ -43,19 +44,14 @@ from orbit.protocol import (
 RESUME_FAILED_NOTE = "Couldn't resume the planner's conversation; starting fresh."
 
 
-def _seconds(minutes: float | None) -> float | None:
-    """``minutes`` in seconds; none for no limit."""
-    return None if minutes is None else minutes * 60
-
-
 def _timed_out(
     exc: TimeoutError, deadline: asyncio.Timeout, minutes: float | None
 ) -> tuple[str, str]:
     """The error code and message for a turn that raised ``exc``: the planner ran out of its
     ``minutes`` only if ``deadline`` expired, as the turn can raise a TimeoutError of its own."""
-    if not deadline.expired():
+    if minutes is None or not deadline.expired():
         return AGENT_FAILED, str(exc)
-    return TIMED_OUT, f"The planner ran out of time ({minutes:g} minutes)."
+    return TIMED_OUT, out_of_time("The planner", minutes)
 
 
 class PlannerChat:
@@ -111,15 +107,17 @@ class PlannerChat:
         """
         turn_id = uuid.uuid4().hex
         finished: TurnEndReason | None = None  # How it ended, once its TurnFinished is out.
-        minutes = self._desk.agents.roles[PLANNER].timeout_minutes  # Read again on a reset.
+        role = self._desk.agents.roles[PLANNER]  # Read again on a reset.
         try:
-            async with asyncio.timeout(_seconds(minutes)) as deadline:
+            async with asyncio.timeout(role.timeout_seconds) as deadline:
                 async for event in self.run_turn(turn_id, text, settings):
                     finished = await self._publish(event, finished)
         except asyncio.CancelledError:
             return await self._end(turn_id, finished, "cancelled")
         except TimeoutError as exc:
-            return await self._fail(turn_id, finished, *_timed_out(exc, deadline, minutes))
+            return await self._fail(
+                turn_id, finished, *_timed_out(exc, deadline, role.timeout_minutes)
+            )
         except Exception as exc:
             return await self._fail(turn_id, finished, AGENT_FAILED, str(exc))
         return finished or "completed"

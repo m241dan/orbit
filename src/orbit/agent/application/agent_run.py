@@ -35,6 +35,7 @@ from orbit.agent.domain.roles import (
     RUN_CHECK,
     SUGGEST_TASK,
     Role,
+    out_of_time,
     task_suggestion,
 )
 from orbit.agent.domain.verification import VerificationStep, check_reply, failure_reason
@@ -242,12 +243,13 @@ class AgentRun:
         """Serve the agent until it's done, or its role's time runs out."""
         minutes = self.role.timeout_minutes
         try:
-            async with asyncio.timeout(None if minutes is None else minutes * 60) as deadline:
+            async with asyncio.timeout(self.role.timeout_seconds) as deadline:
                 await self._serve(before)
         except TimeoutError:
-            if not deadline.expired():  # Raised while serving, not the role's time running out.
+            # Raised while serving, not the role's time running out.
+            if minutes is None or not deadline.expired():
                 raise
-            message = f"{self.agent.id} ran out of time ({minutes:g} minutes)."
+            message = out_of_time(self.agent.id, minutes)
             await self._publish(
                 ErrorOccurred(agent_id=self.agent.id, code=TIMED_OUT, message=message)
             )
