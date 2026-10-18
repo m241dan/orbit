@@ -91,3 +91,39 @@ def test_module_writes_the_schema_to_the_given_path(
 
     assert json.loads(path.read_text()) == protocol_schema()
     assert path.read_text().endswith("}\n")
+
+
+def payload_refs(envelope: str) -> list[str]:
+    """The ``$defs`` names the ``envelope`` definition's payload may be."""
+    payload = committed()["$defs"][envelope]["properties"]["payload"]
+    return [option["$ref"].removeprefix("#/$defs/") for option in payload["oneOf"]]
+
+
+@pytest.mark.parametrize("envelope", ["CommandEnvelope", "EventEnvelope"])
+def test_every_message_requires_its_type(envelope: str) -> None:
+    defs = committed()["$defs"]
+    refs = payload_refs(envelope)
+
+    assert refs
+    assert all("type" in defs[name]["required"] for name in refs)
+
+
+def test_type_is_required_after_the_other_required_fields() -> None:
+    assert committed()["$defs"]["AcceptTask"]["required"] == ["task_id", "type"]
+
+
+def test_nested_models_do_not_require_a_type() -> None:
+    assert "required" not in committed()["$defs"]["Settings"]
+
+
+def test_payload_without_its_type_fails_validation() -> None:
+    payload = next(
+        example["payload"]
+        for example in map(encoded, range(len(EXAMPLES)))
+        if example["payload"]["type"] == "cancel_turn"
+    )
+    del payload["type"]
+    schema = {"$defs": committed()["$defs"], "$ref": "#/$defs/CancelTurn"}
+
+    with pytest.raises(ValidationError, match="'type' is a required property"):
+        Draft202012Validator(schema).validate(payload)

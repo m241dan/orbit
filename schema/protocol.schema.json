@@ -15,7 +15,8 @@
         }
       },
       "required": [
-        "task_id"
+        "task_id",
+        "type"
       ],
       "title": "AcceptTask",
       "type": "object"
@@ -34,7 +35,8 @@
         }
       },
       "required": [
-        "task"
+        "task",
+        "type"
       ],
       "title": "AddTask",
       "type": "object"
@@ -88,7 +90,8 @@
       },
       "required": [
         "agent_id",
-        "reason"
+        "reason",
+        "type"
       ],
       "title": "AgentExited",
       "type": "object"
@@ -123,7 +126,8 @@
       "required": [
         "agent_id",
         "request_id",
-        "text"
+        "text",
+        "type"
       ],
       "title": "AgentReply",
       "type": "object"
@@ -159,7 +163,8 @@
         "agent_id",
         "request_id",
         "tool",
-        "arguments"
+        "arguments",
+        "type"
       ],
       "title": "AgentRequest",
       "type": "object"
@@ -189,7 +194,8 @@
       "required": [
         "agent_id",
         "role",
-        "task_id"
+        "task_id",
+        "type"
       ],
       "title": "AgentStarted",
       "type": "object"
@@ -225,7 +231,8 @@
       },
       "required": [
         "turn_id",
-        "text"
+        "text",
+        "type"
       ],
       "title": "AssistantMessage",
       "type": "object"
@@ -250,7 +257,8 @@
         }
       },
       "required": [
-        "busy"
+        "busy",
+        "type"
       ],
       "title": "BusyChanged",
       "type": "object"
@@ -270,7 +278,8 @@
         }
       },
       "required": [
-        "agent_id"
+        "agent_id",
+        "type"
       ],
       "title": "CancelAgent",
       "type": "object"
@@ -290,6 +299,9 @@
           "type": "string"
         }
       },
+      "required": [
+        "type"
+      ],
       "title": "CancelTurn",
       "type": "object"
     },
@@ -335,7 +347,8 @@
         "workspaces",
         "agents",
         "triggers",
-        "lanes"
+        "lanes",
+        "type"
       ],
       "title": "Catalog",
       "type": "object"
@@ -379,7 +392,8 @@
       "required": [
         "agent_id",
         "task_id",
-        "steps"
+        "steps",
+        "type"
       ],
       "title": "ChecksProposed",
       "type": "object"
@@ -399,7 +413,8 @@
         }
       },
       "required": [
-        "command_id"
+        "command_id",
+        "type"
       ],
       "title": "CommandAccepted",
       "type": "object"
@@ -568,7 +583,8 @@
       "required": [
         "command_id",
         "code",
-        "message"
+        "message",
+        "type"
       ],
       "title": "CommandRefused",
       "type": "object"
@@ -588,7 +604,8 @@
         }
       },
       "required": [
-        "agent"
+        "agent",
+        "type"
       ],
       "title": "ConversationReset",
       "type": "object"
@@ -623,7 +640,8 @@
       },
       "required": [
         "task_id",
-        "action"
+        "action",
+        "type"
       ],
       "title": "DecideProposal",
       "type": "object"
@@ -643,7 +661,8 @@
         }
       },
       "required": [
-        "session_id"
+        "session_id",
+        "type"
       ],
       "title": "DeleteSession",
       "type": "object"
@@ -667,7 +686,8 @@
       },
       "required": [
         "task_id",
-        "task"
+        "task",
+        "type"
       ],
       "title": "EditTask",
       "type": "object"
@@ -716,7 +736,8 @@
       },
       "required": [
         "code",
-        "message"
+        "message",
+        "type"
       ],
       "title": "ErrorOccurred",
       "type": "object"
@@ -944,7 +965,8 @@
         }
       },
       "required": [
-        "trigger"
+        "trigger",
+        "type"
       ],
       "title": "FireTrigger",
       "type": "object"
@@ -981,7 +1003,8 @@
       },
       "required": [
         "client",
-        "protocol_version"
+        "protocol_version",
+        "type"
       ],
       "title": "Hello",
       "type": "object"
@@ -996,6 +1019,9 @@
           "type": "string"
         }
       },
+      "required": [
+        "type"
+      ],
       "title": "ListSessions",
       "type": "object"
     },
@@ -1021,6 +1047,9 @@
           "type": "string"
         }
       },
+      "required": [
+        "type"
+      ],
       "title": "NewSession",
       "type": "object"
     },
@@ -1039,7 +1068,8 @@
         }
       },
       "required": [
-        "message"
+        "message",
+        "type"
       ],
       "title": "Notice",
       "type": "object"
@@ -1078,7 +1108,8 @@
         }
       },
       "required": [
-        "session_id"
+        "session_id",
+        "type"
       ],
       "title": "OpenSession",
       "type": "object"
@@ -1108,7 +1139,8 @@
       "required": [
         "agent_id",
         "task_id",
-        "note"
+        "note",
+        "type"
       ],
       "title": "ProgressNoted",
       "type": "object"
@@ -1175,7 +1207,8 @@
         }
       },
       "required": [
-        "task_id"
+        "task_id",
+        "type"
       ],
       "title": "RemoveTask",
       "type": "object"
@@ -1200,7 +1233,8 @@
       },
       "required": [
         "session_id",
-        "name"
+        "name",
+        "type"
       ],
       "title": "RenameSession",
       "type": "object"
@@ -1221,7 +1255,8 @@
         }
       },
       "required": [
-        "agent"
+        "agent",
+        "type"
       ],
       "title": "ResetConversation",
       "type": "object"
@@ -1246,7 +1281,8 @@
       },
       "required": [
         "paused",
-        "open_batches"
+        "open_batches",
+        "type"
       ],
       "title": "ReviewStatus",
       "type": "object"
@@ -1261,6 +1297,9 @@
           "type": "string"
         }
       },
+      "required": [
+        "type"
+      ],
       "title": "RunTasks",
       "type": "object"
     },
@@ -1318,7 +1357,8 @@
       },
       "required": [
         "agent",
-        "text"
+        "text",
+        "type"
       ],
       "title": "SendMessage",
       "type": "object"
@@ -1438,7 +1478,8 @@
       },
       "required": [
         "sessions",
-        "reason"
+        "reason",
+        "type"
       ],
       "title": "SessionsListed",
       "type": "object"
@@ -1494,7 +1535,8 @@
         }
       },
       "required": [
-        "settings"
+        "settings",
+        "type"
       ],
       "title": "SettingsChanged",
       "type": "object"
@@ -1581,7 +1623,8 @@
         "steps",
         "review",
         "proposals",
-        "agents"
+        "agents",
+        "type"
       ],
       "title": "Snapshot",
       "type": "object"
@@ -1611,7 +1654,8 @@
         }
       },
       "required": [
-        "passed"
+        "passed",
+        "type"
       ],
       "title": "StartupChecked",
       "type": "object"
@@ -1668,7 +1712,8 @@
       "required": [
         "agent_id",
         "task_id",
-        "reason"
+        "reason",
+        "type"
       ],
       "title": "TaskGaveUp",
       "type": "object"
@@ -1710,7 +1755,8 @@
       },
       "required": [
         "task_id",
-        "result"
+        "result",
+        "type"
       ],
       "title": "TaskMerged",
       "type": "object"
@@ -1758,7 +1804,8 @@
         }
       },
       "required": [
-        "task_id"
+        "task_id",
+        "type"
       ],
       "title": "TaskStarted",
       "type": "object"
@@ -1884,7 +1931,8 @@
         }
       },
       "required": [
-        "tasks"
+        "tasks",
+        "type"
       ],
       "title": "TasksChanged",
       "type": "object"
@@ -1930,7 +1978,8 @@
       "required": [
         "turn_id",
         "call_id",
-        "output"
+        "output",
+        "type"
       ],
       "title": "ToolCallFinished",
       "type": "object"
@@ -1977,7 +2026,8 @@
         "turn_id",
         "call_id",
         "name",
-        "arguments"
+        "arguments",
+        "type"
       ],
       "title": "ToolCallStarted",
       "type": "object"
@@ -2055,7 +2105,8 @@
       },
       "required": [
         "turn_id",
-        "reason"
+        "reason",
+        "type"
       ],
       "title": "TurnFinished",
       "type": "object"
@@ -2086,7 +2137,8 @@
         }
       },
       "required": [
-        "turn_id"
+        "turn_id",
+        "type"
       ],
       "title": "TurnStarted",
       "type": "object"
@@ -2105,7 +2157,8 @@
         }
       },
       "required": [
-        "settings"
+        "settings",
+        "type"
       ],
       "title": "UpdateSettings",
       "type": "object"
@@ -2205,6 +2258,9 @@
           "type": "string"
         }
       },
+      "required": [
+        "type"
+      ],
       "title": "UsageChanged",
       "type": "object"
     },
@@ -2265,7 +2321,8 @@
         }
       },
       "required": [
-        "steps"
+        "steps",
+        "type"
       ],
       "title": "VerificationChanged",
       "type": "object"
@@ -2295,7 +2352,8 @@
       "required": [
         "task_id",
         "step",
-        "passed"
+        "passed",
+        "type"
       ],
       "title": "VerificationFinished",
       "type": "object"
@@ -2326,7 +2384,8 @@
       },
       "required": [
         "task_id",
-        "reason"
+        "reason",
+        "type"
       ],
       "title": "VerificationSkipped",
       "type": "object"
@@ -2351,7 +2410,8 @@
       },
       "required": [
         "task_id",
-        "step"
+        "step",
+        "type"
       ],
       "title": "VerificationStarted",
       "type": "object"
@@ -2376,7 +2436,8 @@
       },
       "required": [
         "command_id",
-        "server_version"
+        "server_version",
+        "type"
       ],
       "title": "Welcome",
       "type": "object"
