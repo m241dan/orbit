@@ -1,5 +1,5 @@
 """When the work lane runs: on the user's asking, after a review queues work unless the user
-held it, and first for a configurator."""
+held it or the session halted, and first for a configurator."""
 
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -24,8 +24,9 @@ TASKS_RUNNING_MESSAGE = "Tasks are already running."
 @dataclass(frozen=True)
 class WorkParts:
     """What decides when the work lane runs: the ``work`` lane and review ``lane``, if any, the
-    ``tasks`` they run, the ``verifier`` and agents' ``desk``, if any, and ``post``, which
-    publishes events without blocking."""
+    ``tasks`` they run, the ``verifier`` and agents' ``desk``, if any, ``post``, which
+    publishes events without blocking, and ``halted``, which tells whether the session is
+    halted."""
 
     work: WorkLane | None
     lane: ReviewLane | None
@@ -33,6 +34,7 @@ class WorkParts:
     verifier: Verifier | None
     desk: AgentDesk | None
     post: Callable[[Event], None]
+    halted: Callable[[], bool]
 
 
 class WorkTurns:
@@ -40,7 +42,7 @@ class WorkTurns:
 
     The user's :meth:`run_tasks` starts a run, refused while one runs; :meth:`hold` cancels it
     and keeps :meth:`wake`, a review's request, from starting another until the user asks
-    again.
+    again. While the session is halted, :meth:`wake` starts nothing either.
     """
 
     def __init__(self, parts: WorkParts) -> None:
@@ -86,21 +88,28 @@ class WorkTurns:
             self._parts.work.stopped_by_user()
 
     async def wake(self) -> None:
-        """Run the work a review queued, unless something runs or the user cancelled."""
+        """Run the work a review queued, unless something runs, the user cancelled or the
+        session is halted."""
         await self._start(asked=False)
 
     async def close(self) -> None:
         """Cancel the run, if any, and wait for it to end."""
         await self._turns.close()
 
+    @property
+    def _waits(self) -> bool:
+        """Whether work not asked for waits: held, already running or halted."""
+        return self._held or self.running or self._parts.halted()
+
     async def _start(self, *, asked: bool) -> None:
         """Start the work lane's turn if there is work. The user ``asked`` lifts a hold, and a
-        run already running refuses them; otherwise a hold or a running run keeps it waiting."""
+        run already running refuses them; otherwise a hold, a running run or a halt keeps it
+        waiting."""
         work = self._parts.work
         assert work is not None  # Work needs agents.
         if asked:
             self._held = False
-        elif self._held or self.running:
+        elif self._waits:
             return
         if work.next_work() is not None:
             await self._turns.start(work.run())

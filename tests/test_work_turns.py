@@ -1,7 +1,7 @@
 """When the work lane runs: the user's runs, a review's wake, a hold, and the configurator."""
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 
 import pytest
@@ -25,6 +25,8 @@ from orbit.protocol import (
     BUSY,
     CONFIGURATOR,
     NOT_CONFIGURED,
+    WORK_LANE,
+    BusyChanged,
     Event,
     Notice,
     Settings,
@@ -52,6 +54,13 @@ class StopsCounted(WorkLane):
 
 
 @dataclass
+class Halt:
+    """Whether the session is halted, as a test sets it."""
+
+    on: bool = False
+
+
+@dataclass
 class Lane:
     """Work turns over a ``work`` lane and a board, with the events they posted."""
 
@@ -59,13 +68,20 @@ class Lane:
     work: StopsCounted
     tasks: Tasks
     posted: list[Event]
+    halt: Halt
 
     def roles(self) -> list[str]:
         return [state.task.role for state in self.tasks.board.tasks]
 
 
-def lane_parts(tasks: Tasks, posted: list[Event], verifying: bool) -> WorkParts:
-    """The parts of work turns whose agents all hang, verified if ``verifying``."""
+def lane_parts(
+    tasks: Tasks,
+    posted: list[Event],
+    verifying: bool,
+    halted: Callable[[], bool] = lambda: False,
+) -> WorkParts:
+    """The parts of work turns whose agents all hang, verified if ``verifying``, in a session
+    halted while ``halted`` holds."""
 
     async def publish(event: Event) -> None:
         posted.append(event)
@@ -76,17 +92,18 @@ def lane_parts(tasks: Tasks, posted: list[Event], verifying: bool) -> WorkParts:
     desk = AgentDesk(agents, publish)
     verifier = Verifier(verified(Steps()), tasks, publish) if verifying else None
     work = StopsCounted(desk, tasks, verifier, None)
-    return WorkParts(work, None, tasks, verifier, desk, posted.append)
+    return WorkParts(work, None, tasks, verifier, desk, posted.append, halted)
 
 
 @pytest.fixture
 async def lane() -> AsyncIterator[Lane]:
     posted: list[Event] = []
+    halt = Halt()
     tasks = Tasks(TaskBoard(), lambda _: asyncio.sleep(0))
-    parts = lane_parts(tasks, posted, verifying=True)
+    parts = lane_parts(tasks, posted, verifying=True, halted=lambda: halt.on)
     turns = WorkTurns(parts)
     assert isinstance(parts.work, StopsCounted)
-    yield Lane(turns, parts.work, tasks, posted)
+    yield Lane(turns, parts.work, tasks, posted, halt)
     await turns.close()
     assert parts.desk is not None
     await parts.desk.stop()
@@ -140,6 +157,24 @@ async def test_a_wake_while_running_leaves_the_run_alone(lane: Lane) -> None:
     await add(lane)
     await lane.turns.wake()
     assert lane.turns.running
+
+
+async def test_a_wake_while_halted_starts_no_work(lane: Lane) -> None:
+    await add(lane)
+    lane.halt.on = True
+    await lane.turns.wake()
+    assert not lane.turns.running
+    assert BusyChanged(busy=True, lane=WORK_LANE) not in lane.posted
+
+
+async def test_a_wake_once_the_halt_lifts_starts_waiting_work(lane: Lane) -> None:
+    await add(lane)
+    lane.halt.on = True
+    await lane.turns.wake()
+    lane.halt.on = False
+    await lane.turns.wake()
+    assert lane.turns.running
+    assert BusyChanged(busy=True, lane=WORK_LANE) in lane.posted
 
 
 async def test_a_hold_cancels_the_run(lane: Lane) -> None:
@@ -231,7 +266,7 @@ async def test_without_verification_configuring_is_refused() -> None:
 
 async def test_without_agents_runs_and_configuring_are_refused() -> None:
     tasks = Tasks(TaskBoard(), lambda _: asyncio.sleep(0))
-    turns = WorkTurns(WorkParts(None, None, tasks, None, None, lambda _: None))
+    turns = WorkTurns(WorkParts(None, None, tasks, None, None, lambda _: None, lambda: False))
     for attempt in (turns.run_tasks, turns.configure_checks):
         with pytest.raises(Refused) as refused:
             await attempt()

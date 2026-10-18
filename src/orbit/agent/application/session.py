@@ -343,6 +343,7 @@ class AgentSession:
             self._verifier,
             self._desk,
             self._events.put_nowait,
+            lambda: self._halt.halted,
         )
         return WorkTurns(parts)
 
@@ -587,12 +588,13 @@ class AgentSession:
         await self._seat.stop_turn()
 
     async def _stop_work(self) -> None:
-        """Cancel the work lane's and the planner's turns, the reviews and the startup check,
-        as the session halts, and wait for them to end."""
-        await self._stop_turns()
+        """Cancel the reviews and the startup check, then the work lane's and the planner's
+        turns, as the session halts, and wait for them to end; nothing that could wake the work
+        lane runs once its turn is cancelled."""
         for part in (self._lane, self._startup):
             if part is not None:
                 await part.close()
+        await self._stop_turns()
 
     def _deliver(self, envelope: EventEnvelope) -> None:
         """Pass ``envelope``, just published, to the connections it's for."""

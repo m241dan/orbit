@@ -67,7 +67,7 @@ def commands_for(recorded: Recorded) -> tuple[WorkCommands, Tasks]:
     events: EventSink = recorded
     tasks = Tasks(TaskBoard(), recorded.put)
     seat = PlannerSeat(None, tasks, events, SeatHooks(recorded.save, lambda: None, tuple))
-    turns = WorkTurns(WorkParts(None, None, tasks, None, None, recorded.put_nowait))
+    turns = WorkTurns(WorkParts(None, None, tasks, None, None, recorded.put_nowait, lambda: False))
     parts = CommandParts(
         SessionSettings(Settings()),
         events,

@@ -69,9 +69,11 @@ from tests.agent_fakes import (
     send,
     session_for,
     startup_of,
+    tasks_of,
 )
 from tests.test_log_writer import GatedLog, payloads_of
 from tests.test_planner_lane import gated_planner
+from tests.test_review_lane import claims_done
 from tests.test_sqlite_store import fill_up
 from tests.test_startup_check import checked
 
@@ -346,6 +348,39 @@ async def test_halting_cancels_the_startup_check() -> None:
     await session.close()
 
     assert steps.results == [True]  # The step never finished.
+
+
+async def test_a_review_ending_while_halted_starts_no_work_on_its_fixes() -> None:
+    store, sessions = GatedLog(), list[AgentSession]()
+
+    async def suggests_then_halts(call: Call) -> TurnEndReason:
+        await call("get_task")
+        await call("suggest_task", title="Add tests", prompt="Please add tests.")
+        await call("complete_task", summary="Reviewed")
+        sessions[0]._halt.fail(FailedWrite.EVENT_LOG, RuntimeError("disk full"))
+        return "completed"
+
+    session, _, launcher = session_for(
+        claims_done,
+        claims_done,
+        reviewers=(suggests_then_halts,),
+        tree=FakeTree(),
+        review=True,
+        store=store,
+    )
+    sessions.append(session)
+    await send(session, AddTask(task=TASK))
+    await send(session, RunTasks())
+    board = tasks_of(session).board
+    while not any(t.task.role == "reviewer" and t.status == "completed" for t in board.tasks):
+        await asyncio.sleep(0.01)  # The halt waits on the append in flight meanwhile.
+    await asyncio.sleep(0.05)
+    store.gate.set()
+    await halt_error(session)
+    await session.close()
+
+    coders = [la for la in launcher.launches if la.agent.role == "coder"]
+    assert len(coders) == 1  # The user's task, but none for the fix.
 
 
 # The halt itself
