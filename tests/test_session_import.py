@@ -99,6 +99,38 @@ async def test_an_unreadable_file_is_listed_unreadable_with_its_text_kept(
         assert row.fetchone() == ("bad", "", "not json")
 
 
+async def test_a_file_whose_record_has_another_id_is_imported_under_the_files_name(
+    store: SqliteStore, legacy: Path
+) -> None:
+    (legacy / "sessions" / "copy.json").write_text(record_json(record("one", name="Copy")))
+    assert await import_session_files(store, legacy) == 4
+    assert await ids(store) == ["bad", "copy", "one", "two"]
+    copy = await store.load("copy")
+    assert isinstance(copy, SessionRecord) and copy.name == "Copy"
+    one = await store.load("one")
+    assert isinstance(one, SessionRecord) and one.name == "Oct 17 14:30"
+
+
+async def test_a_record_whose_id_isnt_a_file_name_can_still_be_listed_and_loaded(
+    store: SqliteStore, legacy: Path
+) -> None:
+    (legacy / "sessions" / "x.json").write_text(record_json(record("../x")))
+    assert await import_session_files(store, legacy) == 4
+    assert await ids(store) == ["bad", "one", "two", "x"]
+    assert isinstance(await store.load("x"), SessionRecord)
+
+
+async def test_a_file_that_isnt_utf_8_is_listed_unreadable(
+    store: SqliteStore, legacy: Path
+) -> None:
+    text = record_json(record("latin", name="Caf\u00e9"))
+    (legacy / "sessions" / "latin.json").write_bytes(text.encode("latin-1"))
+    assert await import_session_files(store, legacy) == 4
+    latin = next(stored for stored in await store.sessions() if stored.id == "latin")
+    assert isinstance(latin.record, Unreadable)
+    assert isinstance(await store.load("latin"), Unreadable)
+
+
 async def test_without_a_sessions_folder_nothing_is_done(
     store: SqliteStore, tmp_path: Path
 ) -> None:

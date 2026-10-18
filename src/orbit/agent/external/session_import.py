@@ -22,6 +22,8 @@ from orbit.agent.external.sqlite_store import SessionRow, SqliteStore
 
 IMPORTED = f"{SESSIONS}.imported"
 REVIEWS_IMPORTED = f"{REVIEWS}.imported"
+# Never JSON, so a session file that isn't UTF-8 can't be read from the store either.
+NOT_UTF_8 = "This session file isn't UTF-8:\n"
 
 
 class ImportBlocked(Exception):
@@ -78,13 +80,24 @@ def _read(legacy_dir: Path) -> _Legacy:
 
 
 def _row(path: Path) -> SessionRow:
-    """The row of the session saved in ``path``; an unreadable one goes by the file's name, with
+    """The row of the session saved in ``path``, which goes by the file's name, as the old files
+    were listed, whatever id its record gives; an unreadable one is named by the file too, with
     its text kept so it lists as unreadable."""
-    text = path.read_text(encoding="utf-8", errors="replace")
+    text = _text(path)
     record = parse_record(text)
     if isinstance(record, Unreadable):
         return SessionRow(path.stem, path.stem, "", text)
-    return SessionRow(record.id, record.name, record.last_active.isoformat(), text)
+    return SessionRow(path.stem, record.name, record.last_active.isoformat(), text)
+
+
+def _text(path: Path) -> str:
+    """The text saved in ``path``; one that isn't UTF-8 is decoded with replacement characters
+    behind ``NOT_UTF_8``, so that it stays unreadable as it was."""
+    data = path.read_bytes()
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError:
+        return NOT_UTF_8 + data.decode("utf-8", errors="replace")
 
 
 def _review_count(path: Path) -> int | None:
