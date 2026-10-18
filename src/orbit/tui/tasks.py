@@ -34,10 +34,16 @@ from orbit.tui.view import (
     task_label,
     task_list_title,
     task_numbers,
-    tool_access_labels,
     usage_label,
 )
-from orbit.tui.widgets import ListPane, PickerScreen, PromptBox, PromptInput, Ticker
+from orbit.tui.widgets import (
+    ListPane,
+    PickerScreen,
+    PromptBox,
+    PromptInput,
+    Ticker,
+    mark_selected,
+)
 
 NEW_TASK_LABEL = "+ new task"
 
@@ -253,8 +259,9 @@ class TaskEditorScreen(ModalScreen[TaskSpec | None]):
     The title is the prompt's first line and the prompt box its body, joined on save by
     ``join_prompt``. Works like the main screen: j/k select a field, J/K scroll the prompt box
     from any field, i types in the title or prompt (escape stops; enter stops in the title and
-    adds a line in the prompt), enter on model or tools opens a picker, ctrl+s saves and escape
-    discards.
+    adds a line in the prompt), enter on model or tools opens its picker, ctrl+s saves and
+    escape discards. The pickers are the app's model and tool access ``pickers``, built once
+    so they open instantly.
     """
 
     AUTO_FOCUS = None
@@ -280,13 +287,20 @@ class TaskEditorScreen(ModalScreen[TaskSpec | None]):
         Binding("escape", "cancel", "Cancel"),
     ]
 
-    def __init__(self, task: TaskSpec | None, settings: Settings, models: Sequence[str]) -> None:
+    def __init__(
+        self,
+        task: TaskSpec | None,
+        settings: Settings,
+        models: Sequence[str],
+        pickers: tuple[PickerScreen, PickerScreen],
+    ) -> None:
         super().__init__()
         self.title_text = task_editor_title(new=task is None)
         self._prompt = "" if task is None else task.prompt
         self._settings = settings if task is None else task.settings
         self._role = TaskSpec.model_fields["role"].default if task is None else task.role
         self._models = list(models)
+        self._model_picker, self._tool_picker = pickers
         self._field = 0
 
     def compose(self) -> ComposeResult:
@@ -328,18 +342,15 @@ class TaskEditorScreen(ModalScreen[TaskSpec | None]):
             self._choose_tools()
 
     def _choose_model(self) -> None:
-        models, labels = model_options(self._models)
-        picker = PickerScreen("Model", labels)
+        models, _ = model_options(self._models)
         current = self._settings.model
         index = models.index(current) if current in models else None
-        self._pick(picker, index, lambda i: self._update(model=models[i]))
+        self._pick(self._model_picker, index, lambda i: self._update(model=models[i]))
 
     def _choose_tools(self) -> None:
         index = TOOL_ACCESS_OPTIONS.index(self._settings.tool_access)
         self._pick(
-            PickerScreen("Tool access", tool_access_labels()),
-            index,
-            lambda i: self._update(tool_access=TOOL_ACCESS_OPTIONS[i]),
+            self._tool_picker, index, lambda i: self._update(tool_access=TOOL_ACCESS_OPTIONS[i])
         )
 
     def action_save(self) -> None:
@@ -359,9 +370,9 @@ class TaskEditorScreen(ModalScreen[TaskSpec | None]):
 
     def _select(self, field: int) -> None:
         """Select field ``field``, scrolling it into view when the editor doesn't all fit."""
-        self.query_one(f"#{FIELDS[self._field]}").remove_class("selected")
+        mark_selected(self.query_one(f"#{FIELDS[self._field]}"), False)
         selected = self.query_one(f"#{FIELDS[field]}")
-        selected.add_class("selected")
+        mark_selected(selected, True)
         selected.scroll_visible()
         self._field = field
 

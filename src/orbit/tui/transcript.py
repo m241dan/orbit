@@ -71,7 +71,6 @@ class TranscriptLog(ListPane):
         scrollbar-gutter: stable;
     }
     TranscriptLog:focus { border: none; background-tint: $foreground 0%; }
-    TranscriptLog.-shown { display: block; }
     TranscriptLog .transcript--user { color: $text-accent; text-style: bold; }
     TranscriptLog .transcript--prompt { background: $foreground 5%; }
     TranscriptLog .transcript--tool { color: $text-muted; }
@@ -116,7 +115,15 @@ class TranscriptLog(ListPane):
         self._calls: dict[int, ToolCall] = {}  # The calls still running, by their entry.
         self._thinking_hidden = thinking_hidden
         self.inspecting = False  # Whether the detail pane shows the cursor's entry.
+        self.display = shown
         self.set_class(shown, "-shown")
+
+    def show(self, shown: bool) -> None:
+        """Display the log if ``shown``, marked by the ``-shown`` class, or hide it."""
+        # Displayed directly rather than by the class, as a class change restyles all the
+        # log's component classes.
+        self.display = shown
+        self.set_class(shown, "-shown", update=False)
 
     @property
     def entries(self) -> tuple[Entry, ...]:
@@ -590,10 +597,9 @@ class Transcript(Vertical):
         self._retitle()
         self.working.show_tab(key)
         log = self._log(key)
-        # A log's class change restyles all its component classes, so only on a real switch.
         if log is not before:
-            before.remove_class("-shown")
-            log.add_class("-shown")
+            before.show(False)
+            log.show(True)
         # Laid out once shown, which is when its end is known.
         self.call_after_refresh(log.show_place)
 

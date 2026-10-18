@@ -93,6 +93,7 @@ from orbit.tui.widgets import (
     ConfirmScreen,
     KeyFooter,
     PickerScreen,
+    mark_selected,
 )
 
 # Window reached from each window by h/j/k/l; missing means an edge.
@@ -384,6 +385,7 @@ class OrbitApp(App[None], inherit_bindings=False):
             None if current is None else current.task,
             self._settings or Settings(),
             self._model_choices,
+            (self._model_picker, self._tool_picker),
         )
         self.push_screen(editor, saved)
 
@@ -393,8 +395,8 @@ class OrbitApp(App[None], inherit_bindings=False):
             await self._session.send(RunTasks())
 
     def _select(self, window_id: str) -> None:
-        self.query_one(f"#{self._selected}").remove_class("selected")
-        self.query_one(f"#{window_id}").add_class("selected")
+        mark_selected(self.query_one(f"#{self._selected}"), False)
+        mark_selected(self.query_one(f"#{window_id}"), True)
         self._selected = window_id
 
     @on(Tabs.TabActivated, "#conversation-tabs")

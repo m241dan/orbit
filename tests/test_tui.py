@@ -637,6 +637,19 @@ async def test_border_highlight_follows_selection() -> None:
         assert tasks.styles.border_top == before
 
 
+async def test_the_conversations_border_follows_selection_and_its_logs_keep_theirs() -> None:
+    app = OrbitApp(FakeSession())
+    async with app.run_test() as pilot:
+        transcript = app.query_one(Transcript)
+        log = transcript.shown
+        before, log_border = transcript.styles.border_top, log.styles.border_top
+        await pilot.press("k")
+        assert transcript.styles.border_top != before
+        assert log.styles.border_top == log_border
+        await pilot.press("j")
+        assert transcript.styles.border_top == before
+
+
 async def test_enter_does_nothing_on_a_window_without_a_list() -> None:
     app = OrbitApp(FakeSession())
     async with app.run_test() as pilot:

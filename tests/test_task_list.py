@@ -491,6 +491,31 @@ async def test_editor_model_picker_highlights_nothing_for_custom_model() -> None
         assert editor_fields(app)[2] == "claude-custom-1"
 
 
+async def test_editor_opens_the_apps_pickers_built_once() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await show_settings(session, pilot, Settings())
+        await open_task_list(pilot)
+        await pilot.press("enter", "j", "j", "enter")
+        assert app.screen is app.get_screen("pick-model")
+        await pilot.press("escape", "j", "enter")
+        assert app.screen is app.get_screen("pick-tool-access")
+
+
+async def test_editor_border_follows_the_selected_field() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await open_task_list(pilot)
+        await pilot.press("enter")
+        title, model = editor(app).query_one("#task-title"), editor(app).query_one("#task-model")
+        selected_border, unselected_border = title.styles.border_top, model.styles.border_top
+        await pilot.press("j", "j")
+        assert title.styles.border_top == unselected_border
+        assert model.styles.border_top == selected_border != unselected_border
+
+
 async def test_enter_on_existing_task_edits_it() -> None:
     session = FakeSession()
     app = OrbitApp(session)
