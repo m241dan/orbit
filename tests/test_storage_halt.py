@@ -70,7 +70,7 @@ from tests.agent_fakes import (
     session_for,
     startup_of,
 )
-from tests.test_log_writer import payloads_of
+from tests.test_log_writer import GatedLog, payloads_of
 from tests.test_planner_lane import gated_planner
 from tests.test_sqlite_store import fill_up
 from tests.test_startup_check import checked
@@ -275,6 +275,25 @@ async def test_a_failed_session_record_save_halts_the_session_the_same_way() -> 
     await session.close()
     assert store.saved == []
     assert any(halted(envelope) for envelope in fallback.files["session-1"])
+
+
+async def test_a_halt_during_an_append_that_then_fails_counts_its_events_unsaved() -> None:
+    store, fallback = GatedLog(), FakeFallback()
+    session, _, _ = session_for(store=store, fallback=fallback)
+    await greet(session)
+    await publish(session, Notice(message="blocked"))
+    await store.waiting.wait()
+    store.failure = "Couldn't save the session: disk full"
+    await send(session, AddTask(task=TASK))
+    await asyncio.sleep(0.01)
+    store.append_failure = "disk full"
+    store.gate.set()
+    error = await halt_error(session)
+    await session.close()
+
+    [blocked] = [e for e in fallback.files["session-1"] if e.payload == Notice(message="blocked")]
+    first, last = seq_span_in(error.message)
+    assert first <= blocked.seq <= last
 
 
 async def test_a_snapshot_taken_while_halted_carries_the_explanation() -> None:

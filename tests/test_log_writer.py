@@ -203,13 +203,48 @@ async def test_stopping_sends_what_queued_and_what_follows_to_the_fallback() -> 
     writer.add("a", notice(1))
     await log.waiting.wait()
     writer.add("a", notice(2))
-    stopped = await writer.stop("a")
+    stopping = asyncio.create_task(writer.stop("a"))
+    await asyncio.sleep(0.01)
     writer.add("a", notice(3))
     log.gate.set()
+    stopped = await stopping
     await writer.close()
 
-    assert stopped == ([notice(2)], FakeFallback.path("a"))
+    assert stopped == ([notice(2), notice(3)], FakeFallback.path("a"))
     assert log.logged == [notice(1)] and fallback.files == {"a": [notice(2), notice(3)]}
+
+
+async def test_stopping_waits_for_the_append_in_flight_and_diverts_it_when_it_fails() -> None:
+    log, fallback = GatedLog(), FakeFallback()
+    writer = LogWriter(log, Published(), overflow=Overflow(fallback))
+    writer.add("a", notice(1))
+    await log.waiting.wait()
+    writer.add("a", notice(2))
+    stopping = asyncio.create_task(writer.stop("a"))
+    await asyncio.sleep(0.01)
+    assert not stopping.done()
+    log.append_failure = "disk full"
+    log.gate.set()
+
+    assert await stopping == ([notice(1), notice(2)], FakeFallback.path("a"))
+    await writer.close()
+    assert log.logged == [] and fallback.files == {"a": [notice(1), notice(2)]}
+
+
+async def test_stopping_during_an_append_leaves_the_batchs_other_sessions_unwritten() -> None:
+    log, fallback = GatedLog(), FakeFallback()
+    writer = LogWriter(log, Published(), log_bytes=1000, overflow=Overflow(fallback))
+    writer.add("a", notice(1))
+    writer.add("b", notice(2, "b"))
+    await log.waiting.wait()
+    stopping = asyncio.create_task(writer.stop("a"))
+    await asyncio.sleep(0.01)
+    log.gate.set()
+
+    assert await stopping == ([notice(2, "b")], FakeFallback.path("a"))
+    await writer.close()
+    assert log.appends == [("a", [notice(1)])] and log.trims == []
+    assert fallback.files == {"a": [], "b": [notice(2, "b")]}
 
 
 async def test_stopping_with_nothing_queued_makes_the_sessions_fallback_file() -> None:
