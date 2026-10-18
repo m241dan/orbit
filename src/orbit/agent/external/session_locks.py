@@ -94,7 +94,7 @@ class SessionLocks:
     def __init__(self, directory: Path) -> None:
         self._directory = directory
         self._held: dict[str, int] = {}
-        # Guards _held and _closed between close() and a _take running in a worker thread.
+        # Guards _held and _closed between close() and a _take or _remove in a worker thread.
         self._guard = threading.Lock()
         self._closed = False
 
@@ -186,9 +186,10 @@ class SessionLocks:
         try:
             lock.parent.mkdir(parents=True, exist_ok=True)
             with locked_dir(lock.parent, fcntl.LOCK_EX):
-                fd = self._held.pop(session_id, None)
-                if fd is not None:
-                    os.close(fd)
+                with self._guard:
+                    fd = self._held.pop(session_id, None)
+                    if fd is not None:
+                        os.close(fd)
                 lock.unlink(missing_ok=True)
         except OSError as error:
             raise RuntimeError(f"Couldn't {action} the session {lock}: {error}") from error
