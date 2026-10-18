@@ -56,17 +56,31 @@ _NO_OVERFLOW = Overflow()
 
 
 def _with_pending(
-    bounds: LogBounds, session_id: str, pending: Sequence[tuple[str, EventEnvelope]]
+    bounds: LogBounds,
+    session_id: str,
+    since: int,
+    pending: Sequence[tuple[str, EventEnvelope]],
 ) -> LogBounds:
-    """``bounds`` of the log of the session ``session_id`` moved to take in the envelopes
-    ``pending``, each with its session's id, as though they were logged."""
+    """``bounds`` of the log of the session ``session_id``, for a frontend that saw the events up
+    to ``since``, moved to take in the envelopes ``pending``, each with its session's id, as
+    though they were logged."""
     own = [envelope.seq for session, envelope in pending if session == session_id]
     others = [envelope.seq for session, envelope in pending if session != session_id]
-    first = [] if bounds.first_seq is None else [bounds.first_seq]
     return LogBounds(
-        first_seq=min([*first, *own], default=None),
+        first_seq=min([*_listed(bounds.first_seq), *own], default=None),
         others_seq=max([bounds.others_seq, *others]),
+        own_seq=max([*_listed(bounds.own_seq), *_up_to(own, since)], default=None),
     )
+
+
+def _listed(seq: int | None) -> list[int]:
+    """``seq`` alone, or nothing when it's ``None``."""
+    return [] if seq is None else [seq]
+
+
+def _up_to(seqs: Sequence[int], since: int) -> list[int]:
+    """Those of ``seqs`` at or before ``since``."""
+    return [seq for seq in seqs if seq <= since]
 
 
 class LogWriter:
@@ -159,15 +173,16 @@ class LogWriter:
         found = _in_order([*logged, *pending, *self._unwritten(session_id)])
         return [envelope for envelope in found if envelope.seq > after_seq]
 
-    async def bounds(self, session_id: str) -> LogBounds | None:
-        """Where the log of the session ``session_id`` stands in its workspace's, counting the
-        events still to be written as logged; ``None`` when the log can't be read."""
+    async def bounds(self, session_id: str, since: int) -> LogBounds | None:
+        """Where the log of the session ``session_id`` stands in its workspace's, for a frontend
+        that saw the events up to ``since``, counting the events still to be written as logged;
+        ``None`` when the log can't be read."""
         # Read on both sides of the log's read, as recent does.
         pending = self._pending()
-        logged = await self._log.bounds(session_id)
+        logged = await self._log.bounds(session_id, since)
         if logged is None:
             return None
-        return _with_pending(logged, session_id, [*pending, *self._pending()])
+        return _with_pending(logged, session_id, since, [*pending, *self._pending()])
 
     async def trimmed(self, session_id: str) -> bool:
         """Whether events of the session ``session_id`` were trimmed from the log; ``False``

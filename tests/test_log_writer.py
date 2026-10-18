@@ -245,7 +245,7 @@ async def test_envelopes_sent_to_the_fallback_are_still_read_back() -> None:
 
     assert await writer.recent("a", 10) == [notice(1), notice(2)]
     assert await writer.after("a", 0) == [notice(1), notice(2)]
-    bounds = await writer.bounds("b")
+    bounds = await writer.bounds("b", 2)
     assert bounds is not None and bounds.others_seq == 2
     await writer.close()
 
@@ -506,9 +506,11 @@ async def test_bounds_count_the_events_still_queued_as_logged() -> None:
     writer.add("b", notice(6, "b"))
     writer.add("c", notice(7, "c"))
 
-    assert await writer.bounds("a") == LogBounds(first_seq=3, others_seq=7)
-    assert await writer.bounds("c") == LogBounds(first_seq=7, others_seq=6)
-    assert await writer.bounds("d") == LogBounds(first_seq=None, others_seq=7)
+    assert await writer.bounds("a", 7) == LogBounds(first_seq=3, others_seq=7, own_seq=5)
+    assert await writer.bounds("a", 4) == LogBounds(first_seq=3, others_seq=7, own_seq=3)
+    assert await writer.bounds("c", 7) == LogBounds(first_seq=7, others_seq=6, own_seq=7)
+    assert await writer.bounds("c", 6) == LogBounds(first_seq=7, others_seq=6, own_seq=None)
+    assert await writer.bounds("d", 7) == LogBounds(first_seq=None, others_seq=7, own_seq=None)
     log.gate.set()
     await writer.close()
 
@@ -556,7 +558,7 @@ class Unreadable(FakeStore):
     async def after(self, session_id: str, after_seq: int) -> list[EventEnvelope] | None:
         return None
 
-    async def bounds(self, session_id: str) -> LogBounds | None:
+    async def bounds(self, session_id: str, since: int) -> LogBounds | None:
         return None
 
 
@@ -565,7 +567,7 @@ async def test_reads_after_a_seq_of_a_log_that_cant_be_read_are_none() -> None:
     writer.add("a", notice(1))
 
     assert await writer.after("a", 0) is None
-    assert await writer.bounds("a") is None
+    assert await writer.bounds("a", 1) is None
     await writer.close()
 
 
@@ -1037,12 +1039,20 @@ async def hello_since(store: SqliteStore, since: int) -> list[EventEnvelope]:
     return delivered(session)
 
 
+async def trimmed_log(store: SqliteStore) -> int:
+    """The ``seq`` of the oldest event kept of a log of ``session-1`` written to ``store`` and
+    trimmed."""
+    await store.forget("session-1")
+    await store.append("session-1", [big(seq, "session-1") for seq in range(1, 211)])
+    await store.trim("session-1", 1024 * 1024, 1024 * 1024 * 9 // 10)
+    return (await store.recent("session-1", 1000))[0].seq
+
+
 async def test_a_frontend_that_saw_only_trimmed_events_gets_a_fresh_snapshot(
     sqlite: SqliteStore,
 ) -> None:
-    await sqlite.append("session-1", [big(seq, "session-1") for seq in range(1, 211)])
-    await sqlite.trim("session-1", 1024 * 1024, 1024 * 1024 * 9 // 10)
-    first = (await sqlite.recent("session-1", 1000))[0].seq
-
+    first = await trimmed_log(sqlite)
     assert snapshots(await hello_since(sqlite, first - 2))
+
+    first = await trimmed_log(sqlite)  # The session before forgot its log.
     assert not snapshots(await hello_since(sqlite, first - 1))

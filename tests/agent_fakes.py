@@ -395,11 +395,15 @@ class FakeStore:
         await asyncio.sleep(0)  # Reading takes a while.
         return [e for e in self.logged if e.session == session_id and e.seq > after_seq]
 
-    async def bounds(self, session_id: str) -> LogBounds | None:
+    async def bounds(self, session_id: str, since: int) -> LogBounds | None:
         await asyncio.sleep(0)  # Reading takes a while.
         own = [e.seq for e in self.logged if e.session == session_id]
-        others = [e.seq for e in self.logged if e.session != session_id]
-        return LogBounds(first_seq=min(own, default=None), others_seq=max(others, default=0))
+        others = {e.seq for e in self.logged} - set(own)
+        return LogBounds(
+            first_seq=min(own, default=None),
+            others_seq=max(others, default=0),
+            own_seq=max((seq for seq in own if seq <= since), default=None),
+        )
 
     async def trim(self, session_id: str, limit: int, target: int) -> None:
         self.trims.append((session_id, limit, target))

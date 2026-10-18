@@ -529,10 +529,12 @@ class SqliteStore:
             return None
         return _decoded(texts)
 
-    async def bounds(self, session_id: str) -> LogBounds | None:
+    async def bounds(self, session_id: str, since: int) -> LogBounds | None:
+        """Where the log of the session ``session_id`` stands in its workspace's, for a frontend
+        that saw the events up to ``since``; ``None`` when that can't be read."""
         check_session_id(session_id)
         try:
-            return await self._call(self._bounds, session_id)
+            return await self._call(self._bounds, session_id, since)
         except sqlite3.Error:
             return None
 
@@ -824,7 +826,9 @@ class SqliteStore:
         ).fetchone()
         return row is not None and row[0] > 0
 
-    def _bounds(self, session_id: str) -> LogBounds:
+    def _bounds(self, session_id: str, since: int) -> LogBounds:
+        """The bounds of the session ``session_id``'s log in the workspace's, for a frontend that
+        saw the events up to ``since``."""
         # Once every event kept is trimmed, the oldest that could be kept is after the last cut.
         (first,) = self._db.execute(
             """SELECT coalesce(
@@ -838,7 +842,17 @@ class SqliteStore:
             "SELECT max(seq) FROM events WHERE workspace_id = ? AND session_id != ?",
             (self._workspace, session_id),
         ).fetchone()
-        return LogBounds(first_seq=first, others_seq=int(others or 0))
+        # The last event trimmed was the session's too.
+        (own,) = self._db.execute(
+            """SELECT max(seq) FROM (
+                SELECT seq FROM events WHERE workspace_id = ?1 AND session_id = ?2 AND seq <= ?3
+                UNION ALL SELECT trimmed_seq FROM logs
+                    WHERE workspace_id = ?1 AND session_id = ?2
+                    AND trimmed_seq > 0 AND trimmed_seq <= ?3
+            )""",
+            (self._workspace, session_id, since),
+        ).fetchone()
+        return LogBounds(first_seq=first, others_seq=int(others or 0), own_seq=own)
 
     def _forget(self, session_id: str) -> None:
         with self._transaction():

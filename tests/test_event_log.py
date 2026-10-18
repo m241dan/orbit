@@ -353,26 +353,27 @@ async def test_events_after_a_seq_that_cant_be_read_are_none(
     assert await store.after("abc", 0) is None
 
 
-async def test_bounds_are_the_sessions_oldest_seq_and_the_highest_of_its_workspaces_others(
+async def test_bounds_are_the_sessions_oldest_seq_the_highest_of_its_workspaces_others_and_its_own(
     open_store: Opener, tmp_path: Path, workspace: Path
 ) -> None:
     other_workspace = tmp_path / "other"
     other_workspace.mkdir()
     store, other = await open_store(workspace), await open_store(other_workspace)
-    assert await store.bounds("abc") == LogBounds(first_seq=None, others_seq=0)
+    assert await store.bounds("abc", 9) == LogBounds(first_seq=None, others_seq=0, own_seq=None)
     await store.append("abc", [notice(seq) for seq in (3, 4, 7)])
     await store.append("def", [notice(5, "def")])
-    await other.append("ghi", [notice(9, "ghi")])
+    await other.append("ghi", [notice(6, "ghi"), notice(9, "ghi")])
 
-    assert await store.bounds("abc") == LogBounds(first_seq=3, others_seq=5)
-    assert await store.bounds("def") == LogBounds(first_seq=5, others_seq=7)
+    assert await store.bounds("abc", 6) == LogBounds(first_seq=3, others_seq=5, own_seq=4)
+    assert await store.bounds("abc", 2) == LogBounds(first_seq=3, others_seq=5, own_seq=None)
+    assert await store.bounds("def", 9) == LogBounds(first_seq=5, others_seq=7, own_seq=5)
 
 
 async def test_bounds_that_cant_be_read_are_none(open_store: Opener, workspace: Path) -> None:
     store = await open_store(workspace)
     await store.close()
 
-    assert await store.bounds("abc") is None
+    assert await store.bounds("abc", 0) is None
 
 
 @pytest.mark.parametrize("read", ["after", "bounds"])
@@ -381,7 +382,7 @@ async def test_reading_after_a_seq_under_an_id_that_isnt_a_plain_file_name_is_re
 ) -> None:
     store = await open_store(workspace)
     with pytest.raises(ValueError, match="Not a session id"):
-        await (store.after("../abc", 0) if read == "after" else store.bounds("../abc"))
+        await (store.after("../abc", 0) if read == "after" else store.bounds("../abc", 0))
 
 
 # Trimming
@@ -487,7 +488,12 @@ async def test_the_oldest_page_after_trimming_has_nothing_more(
     first = (await store.recent("abc", 1000))[0].seq
 
     assert await store.before("abc", first + 1, 500) == ([big(first)], False)
-    assert await store.bounds("abc") == LogBounds(first_seq=first, others_seq=0)
+    assert await store.bounds("abc", first) == LogBounds(
+        first_seq=first, others_seq=0, own_seq=first
+    )
+    assert await store.bounds("abc", first - 1) == LogBounds(
+        first_seq=first, others_seq=0, own_seq=first - 1
+    )
 
 
 async def test_a_log_trimmed_whole_is_bounded_after_its_last_trimmed_event(
@@ -498,7 +504,8 @@ async def test_a_log_trimmed_whole_is_bounded_after_its_last_trimmed_event(
     await store.trim("abc", 1, 1)
 
     assert await store.recent("abc", 10) == []
-    assert await store.bounds("abc") == LogBounds(first_seq=3, others_seq=0)
+    assert await store.bounds("abc", 2) == LogBounds(first_seq=3, others_seq=0, own_seq=2)
+    assert await store.bounds("abc", 1) == LogBounds(first_seq=3, others_seq=0, own_seq=None)
 
 
 async def test_deleting_a_session_forgets_its_trimmed_log(

@@ -123,7 +123,7 @@ class Outbox:
         """Whether a frontend that saw the events up to ``since``, with ``last`` the last one
         stamped, catches up on those of the session ``session_id`` after it alone."""
         assert self._writer is not None, "There's no log."
-        bounds = await self._writer.bounds(session_id)
+        bounds = await self._writer.bounds(session_id, since)
         return bounds is not None and can_replay(since, last, bounds)
 
     def forget(self, session_id: str) -> None:

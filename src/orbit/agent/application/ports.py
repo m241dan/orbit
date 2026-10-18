@@ -312,9 +312,9 @@ class EventLog(Protocol):
         ``None`` when they can't be read."""
         ...
 
-    async def bounds(self, session_id: str) -> LogBounds | None:
-        """Where the log of the session ``session_id`` stands in its workspace's; ``None`` when
-        that can't be read."""
+    async def bounds(self, session_id: str, since: int) -> LogBounds | None:
+        """Where the log of the session ``session_id`` stands in its workspace's, for a frontend
+        that saw the events up to ``since``; ``None`` when that can't be read."""
         ...
 
     async def trim(self, session_id: str, limit: int, target: int) -> None:

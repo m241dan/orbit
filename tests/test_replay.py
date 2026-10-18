@@ -25,11 +25,10 @@ OPEN = "session-1"
 @pytest.mark.parametrize(
     ("since", "bounds"),
     [
-        (15, LogBounds(first_seq=10, others_seq=0)),
-        (9, LogBounds(first_seq=10, others_seq=0)),
-        (20, LogBounds(first_seq=10, others_seq=0)),
-        (15, LogBounds(first_seq=10, others_seq=15)),
-        (15, LogBounds(first_seq=None, others_seq=3)),
+        (15, LogBounds(first_seq=10, others_seq=0, own_seq=15)),
+        (20, LogBounds(first_seq=10, others_seq=0, own_seq=20)),
+        (15, LogBounds(first_seq=10, others_seq=5, own_seq=12)),
+        (15, LogBounds(first_seq=4, others_seq=13, own_seq=14)),
     ],
 )
 def test_a_frontend_catches_up_on_the_open_sessions_events_alone(
@@ -41,9 +40,12 @@ def test_a_frontend_catches_up_on_the_open_sessions_events_alone(
 @pytest.mark.parametrize(
     ("since", "bounds"),
     [
-        (15, LogBounds(first_seq=10, others_seq=18)),  # Another session's came after it.
-        (8, LogBounds(first_seq=10, others_seq=0)),  # Older than what's kept.
-        (21, LogBounds(first_seq=10, others_seq=0)),  # Ahead of the last stamped.
+        (15, LogBounds(first_seq=10, others_seq=18, own_seq=15)),  # Another's came after it.
+        (8, LogBounds(first_seq=10, others_seq=0, own_seq=7)),  # Older than what's kept.
+        (21, LogBounds(first_seq=10, others_seq=0, own_seq=20)),  # Ahead of the last stamped.
+        (15, LogBounds(first_seq=None, others_seq=15, own_seq=None)),  # It saw none of its own.
+        (15, LogBounds(first_seq=16, others_seq=0, own_seq=None)),  # Its first came after it.
+        (15, LogBounds(first_seq=1, others_seq=15, own_seq=5)),  # Another's came after its own.
     ],
 )
 def test_a_frontend_cant_catch_up_otherwise(since: int, bounds: LogBounds) -> None:
@@ -97,16 +99,17 @@ async def test_events_still_to_be_written_are_caught_up_on_once() -> None:
     await session._events.put(Notice(message="a"))
     await store.waiting.wait()  # 1 is being written.
     await session._events.put(Notice(message="b"))
+    await session._events.put(Notice(message="c"))
     delivered(session)  # Sent before the frontend went away.
-    hello = Hello(client="orbit-tests", protocol_version=PROTOCOL_VERSION, since=0)
+    hello = Hello(client="orbit-tests", protocol_version=PROTOCOL_VERSION, since=1)
     await frontend(session).send(CommandEnvelope(command_id=HELLO_ID, payload=hello))
     store.gate.set()
     await session.close()
 
     replayed = [e for e in delivered(session) if isinstance(e.payload, Notice)]
     assert [(e.seq, e.payload) for e in replayed] == [
-        (1, Notice(message="a")),
         (2, Notice(message="b")),
+        (3, Notice(message="c")),
     ]
 
 
@@ -115,8 +118,17 @@ async def test_events_still_to_be_written_are_caught_up_on_once() -> None:
     [
         [notice(seq) for seq in range(10, 18)] + [notice(18, "other")],
         [notice(seq) for seq in range(17, 21)],
+        [notice(seq, "other") for seq in range(1, 16)],
+        [notice(seq) for seq in range(1, 6)] + [notice(seq, "other") for seq in range(6, 16)],
+        [notice(seq) for seq in range(16, 21)],
     ],
-    ids=["another session came after it", "older than what's kept"],
+    ids=[
+        "another session came after it",
+        "older than what's kept",
+        "the open session is new",
+        "the open session's came before another's",
+        "the open session's came after it",
+    ],
 )
 async def test_a_frontend_that_cant_catch_up_gets_a_snapshot(logged: list[EventEnvelope]) -> None:
     sent = await reconnected(store_with(*logged), 15)
@@ -148,5 +160,7 @@ class Unreadable(FakeStore):
 
 
 async def test_a_frontend_whose_missed_events_cant_be_read_gets_a_snapshot() -> None:
-    sent = await reconnected(Unreadable(), 0)
+    store = Unreadable()
+    store.logged = [notice(1)]
+    sent = await reconnected(store, 1)
     assert kinds(sent[:3]) == [Welcome, Catalog, Snapshot]
