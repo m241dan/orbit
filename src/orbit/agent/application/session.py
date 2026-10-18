@@ -239,7 +239,7 @@ class AgentSession:
     def _handshake_parts(self) -> HandshakeParts:
         """What the handshake publishes after ``Welcome``, and starts once it has."""
         return HandshakeParts(
-            self._switcher.publish_catalog,
+            self._switcher.catalog,
             self._latest_usage,
             self._snapshot,
             self._load_review_count,

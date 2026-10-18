@@ -22,6 +22,7 @@ from orbit.protocol import (
     PROTOCOL_VERSION,
     Catalog,
     CommandRefused,
+    ErrorOccurred,
     Event,
     Hello,
     Notice,
@@ -59,6 +60,7 @@ class Parts:
         self.notes: list[str] = []
         self.closing = False
         self.cancel_at: str | None = None  # The part that's cancelled when it's asked.
+        self.fail_at: str | None = None  # The part that fails when it's asked.
 
     async def put(self, item: Event) -> None:
         self.log.append(item)
@@ -70,10 +72,12 @@ class Parts:
         self.log.append(name)
         if name == self.cancel_at:
             raise asyncio.CancelledError
+        if name == self.fail_at:
+            raise RuntimeError(f"no {name}")
 
-    async def catalog(self) -> None:
+    async def catalog(self) -> Catalog:
         await self._part("catalog")
-        self.log.append(CATALOG)
+        return CATALOG
 
     async def load_review_count(self) -> None:
         await self._part("review count")
@@ -159,8 +163,8 @@ async def test_a_good_hello_publishes_everything_in_order_and_starts_the_backgro
     handshake = parts.handshake(workspace="/work", picking=True)
     await handshake.hello(hello(), "hi")
     assert parts.log == [
-        welcome(),
         "catalog",
+        welcome(),
         CATALOG,
         USAGE,
         SNAPSHOT,
@@ -180,8 +184,8 @@ async def test_a_bare_hello_publishes_only_welcome_the_catalog_and_the_snapshot(
     parts = Parts()
     await parts.handshake().hello(hello(), "hi")
     assert parts.log == [
-        welcome(),
         "catalog",
+        welcome(),
         CATALOG,
         SNAPSHOT,
         "review count",
@@ -196,10 +200,31 @@ async def test_the_background_starts_once_even_when_cancelled_after_welcome() ->
     handshake = parts.handshake()
     with pytest.raises(asyncio.CancelledError):
         await handshake.hello(hello(), "hi")
-    assert parts.log[0] == welcome()
+    assert parts.log[1] == welcome()
     assert parts.log.count("start") == 1
     assert "leftovers" not in parts.log
     assert handshake.welcomed
+
+
+async def test_a_failure_after_welcome_is_an_internal_error_and_the_background_starts() -> None:
+    parts = Parts()
+    parts.fail_at = "leftovers"
+    handshake = parts.handshake(picking=True)
+    await handshake.hello(hello(), "hi")
+    message = "Orbit failed to finish greeting the frontend: no leftovers"
+    assert parts.log[-2:] == [ErrorOccurred(code=INTERNAL, message=message), "start"]
+    assert "list" not in parts.log
+    assert handshake.welcomed
+
+
+async def test_a_catalog_that_fails_fails_hello_with_no_welcome_and_no_background() -> None:
+    parts = Parts()
+    parts.fail_at = "catalog"
+    handshake = parts.handshake()
+    with pytest.raises(RuntimeError, match="no catalog"):
+        await handshake.hello(hello(), "hi")
+    assert parts.log == ["catalog"]
+    assert not handshake.welcomed
 
 
 async def test_a_closing_session_does_not_start_the_background() -> None:

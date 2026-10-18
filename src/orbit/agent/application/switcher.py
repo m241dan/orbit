@@ -118,9 +118,13 @@ class SessionSwitcher:
         summaries = await self._keeper.summaries()
         await self._events.put(SessionsListed(sessions=summaries, reason=reason))
 
+    async def catalog(self) -> Catalog:
+        """The catalog, holding the sessions as they are now."""
+        return self._parts.catalog(await self._sessions())
+
     async def publish_catalog(self) -> None:
         """Publish the catalog, holding the sessions as they are now."""
-        await self._events.put(self._parts.catalog(await self._sessions()))
+        await self._events.put(await self.catalog())
 
     async def _sessions(self) -> tuple[SessionSummary, ...]:
         """The saved sessions, as the list of sessions shows them, after the one open here if

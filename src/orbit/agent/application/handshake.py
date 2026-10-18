@@ -9,9 +9,12 @@ from orbit.agent.application.outbox import EventSink
 from orbit.agent.domain.refusals import Refused
 from orbit.protocol import (
     INCOMPATIBLE,
+    INTERNAL,
     INVALID,
     PROTOCOL_VERSION,
+    Catalog,
     CommandRefused,
+    ErrorOccurred,
     Event,
     Hello,
     Notice,
@@ -32,14 +35,14 @@ def ends_stream(event: Event) -> bool:
 
 @dataclass(frozen=True)
 class HandshakeParts:
-    """What a handshake publishes after ``Welcome``: the ``catalog``, which it publishes, the
+    """What a handshake publishes after ``Welcome``: the ``catalog``, which it fetches first, the
     ``latest_usage``, if any was fetched, the ``snapshot`` of the session, the one-off notices
     (the ``workspace``, if any, whether there are ``no_steps`` and the ``leftovers`` of earlier
     runs) and the saved sessions to pick from, which ``list_sessions`` publishes, if any. It
     also ``load_review_count``\\s first, and then has the background ``start``, unless the
     session is ``closing``."""
 
-    catalog: Callable[[], Awaitable[None]]
+    catalog: Callable[[], Awaitable[Catalog]]
     latest_usage: Callable[[], UsageChanged | None]
     snapshot: Callable[[], Snapshot]
     load_review_count: Callable[[], Awaitable[None]]
@@ -82,7 +85,9 @@ class Handshake:
     async def hello(self, hello: Hello, command_id: str) -> None:
         """Welcome the frontend that sent ``hello`` as ``command_id``, then publish the catalog,
         the latest usage, if any, a snapshot, the one-off notices and, if asked to, the saved
-        sessions to pick from; refused for a second Hello, or another protocol version."""
+        sessions to pick from; refused for a second Hello, or another protocol version, and
+        failing, with no Welcome, if the catalog can't be had. A failure after Welcome is
+        published as an ``internal`` error instead."""
         if self._welcomed:
             raise Refused(INVALID, HELLO_AGAIN_MESSAGE)
         if hello.protocol_version != PROTOCOL_VERSION:
@@ -92,20 +97,24 @@ class Handshake:
                 f"this orbit speaks version {PROTOCOL_VERSION}."
             )
             raise Refused(INCOMPATIBLE, message)
+        catalog = await self._parts.catalog()  # Before Welcome, so its failure refuses Hello.
         self._welcomed = True
-        await self._welcome(command_id)
+        await self._events.put(Welcome(command_id=command_id, server_version=__version__))
         try:
+            await self._publish(catalog)
             await self._announce()
+        except Exception as exc:  # Hello has its outcome, Welcome; this mustn't be a second.
+            message = f"Orbit failed to finish greeting the frontend: {exc}"
+            await self._events.put(ErrorOccurred(code=INTERNAL, message=message))
         finally:  # A sender cancelled meanwhile mustn't keep the background from starting.
             if not self._parts.closing():
                 self._parts.start()
 
-    async def _welcome(self, command_id: str) -> None:
-        """Answer Hello ``command_id`` with ``Welcome``, then the catalog, the latest usage, if
-        any was fetched, and a snapshot of the session."""
+    async def _publish(self, catalog: Catalog) -> None:
+        """Publish ``catalog``, the latest usage, if any was fetched, and a snapshot of the
+        session."""
         parts = self._parts
-        await self._events.put(Welcome(command_id=command_id, server_version=__version__))
-        await parts.catalog()
+        await self._events.put(catalog)
         latest = parts.latest_usage()
         if latest is not None:
             await self._events.put(latest)
