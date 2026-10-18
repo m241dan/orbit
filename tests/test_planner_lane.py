@@ -6,6 +6,7 @@ from orbit.agent.application.ports import Reply
 from orbit.protocol import (
     BUSY,
     PLANNER,
+    TIMED_OUT,
     UNKNOWN,
     AddTask,
     AgentStarted,
@@ -22,7 +23,7 @@ from orbit.protocol import (
     TurnFinished,
     TurnStarted,
 )
-from tests.agent_fakes import Call, Script, board, events_until, refused, send, session_for
+from tests.agent_fakes import ROLES, Call, Script, board, events_until, refused, send, session_for
 from tests.test_task_runs import claims_done
 
 PLANNER_IDLE = BusyChanged(busy=False, lane="planner")
@@ -207,3 +208,30 @@ async def test_the_planner_calling_an_unknown_tool_is_refused() -> None:
     await send(session, SendMessage(agent=PLANNER, text="Plan."))
     await events_until(session, lambda e: e == PLANNER_IDLE)
     assert replies == [Reply("Orbit has no tool 'no_such_tool'.", is_error=True)]
+
+
+async def hangs(call: Call) -> TurnEndReason:
+    await asyncio.Event().wait()
+    raise AssertionError("unreachable")
+
+
+def finishes(events: list[Event]) -> list[TurnEndReason]:
+    return [e.reason for e in events if isinstance(e, TurnFinished)]
+
+
+async def test_a_planner_turn_that_runs_out_of_time_frees_the_planners_lane() -> None:
+    planner = ROLES[PLANNER].model_copy(update={"timeout_minutes": 0.0001})
+    session, _, launcher = session_for(roles={**ROLES, PLANNER: planner})
+    launcher.planner_turns = [chats, hangs, chats]
+    await send(session, SendMessage(agent=PLANNER, text="Plan."))
+    await events_until(session, lambda e: e == PLANNER_IDLE)
+    await send(session, SendMessage(agent=PLANNER, text="More."))
+    events = await events_until(session, lambda e: e == PLANNER_IDLE)
+    assert [e.code for e in events if isinstance(e, ErrorOccurred)] == [TIMED_OUT]
+    assert finishes(events) == ["error"]
+
+    await send(session, SendMessage(agent=PLANNER, text="Again."))
+    events = await events_until(session, lambda e: e == PLANNER_IDLE)
+    assert finishes(events) == ["completed"] and errors(events) == []
+    conversation = "conversation-agent-1"
+    assert launcher.resumed == [None, conversation, conversation]

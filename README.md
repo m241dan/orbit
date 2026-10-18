@@ -532,7 +532,8 @@ The planner answers in a lane of its own, so you can plan while tasks run (and p
 while it answers). While the planner answers, its tab shows `●` and the prompt's title reads
 `Prompt · planner · busy`; you can still type in the prompt, but `enter` only says `Planner is
 busy` and keeps your text, to send with `enter` once the planner is free. `ctrl+x` stops only the
-planner's turn and leaves the task run going; `ctrl+s` stops the task run, whichever tab is shown. The
+planner's turn and leaves the task run going, as does `[roles.planner] timeout_minutes`, if set,
+once a turn runs that long (the turn ends in error); `ctrl+s` stops the task run, whichever tab is shown. The
 task list beside it fills with
 drafts as the planner proposes them; when it says something while you're on another tab, the
 planner tab gets a `*`.
@@ -608,7 +609,9 @@ role's instructions with `instructions` in `.orbit/config.toml`.
 
 An agent calling a tool its role doesn't have gets an error reply (the CLI only allows its role's
 tools, too, and orbit's others are disallowed so the agent doesn't see them); an agent still
-working when its role's time runs out is stopped and the task fails.
+working when its role's time runs out is stopped and the task fails. The planner's limit applies to
+each of its turns: one that runs out of time is stopped and ends in error, and the next prompt
+carries on the conversation.
 
 A project can change these, orbit's limits, its verification steps (see
 [Verification steps](#verification-steps)) and its worktree setup (see

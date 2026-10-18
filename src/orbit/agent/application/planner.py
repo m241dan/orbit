@@ -28,6 +28,7 @@ from orbit.protocol import (
     CODER,
     PLAN_TASK,
     PLANNER,
+    TIMED_OUT,
     AgentExited,
     AgentStarted,
     ErrorOccurred,
@@ -40,6 +41,11 @@ from orbit.protocol import (
 )
 
 RESUME_FAILED_NOTE = "Couldn't resume the planner's conversation; starting fresh."
+
+
+def _seconds(minutes: float | None) -> float | None:
+    """``minutes`` in seconds; none for no limit."""
+    return None if minutes is None else minutes * 60
 
 
 class PlannerChat:
@@ -89,30 +95,41 @@ class PlannerChat:
         """Run a turn of the planner's on ``text``, publishing its events; returns how it ended.
 
         A turn cancelled before its TurnFinished is out ends as cancelled rather than raising,
-        and one that fails then ends in error. Once its TurnFinished is out, a cancelled or
-        failed turn returns that TurnFinished's reason without publishing another; a failure is
-        still reported with ErrorOccurred.
+        and one that fails or runs out of the planner role's time then ends in error. Once its
+        TurnFinished is out, a cancelled or failed turn returns that TurnFinished's reason
+        without publishing another; a failure is still reported with ErrorOccurred.
         """
         turn_id = uuid.uuid4().hex
         finished: TurnEndReason | None = None  # How it ended, once its TurnFinished is out.
+        minutes = self._desk.agents.roles[PLANNER].timeout_minutes  # Read again on a reset.
         try:
-            async for event in self.run_turn(turn_id, text, settings):
-                await self._desk.publish(event)
-                if isinstance(event, TurnFinished):
-                    finished = event.reason
+            async with asyncio.timeout(_seconds(minutes)):
+                async for event in self.run_turn(turn_id, text, settings):
+                    finished = await self._publish(event, finished)
         except asyncio.CancelledError:
             return await self._end(turn_id, finished, "cancelled")
+        except TimeoutError:
+            message = f"The planner ran out of time ({minutes:g} minutes)."
+            return await self._fail(turn_id, finished, TIMED_OUT, message)
         except Exception as exc:
-            await self._desk.publish(
-                ErrorOccurred(
-                    turn_id=turn_id,
-                    agent_id=self.agent_id,
-                    code=AGENT_FAILED,
-                    message=str(exc),
-                )
-            )
-            return await self._end(turn_id, finished, "error")
+            return await self._fail(turn_id, finished, AGENT_FAILED, str(exc))
         return finished or "completed"
+
+    async def _publish(self, event: Event, finished: TurnEndReason | None) -> TurnEndReason | None:
+        """Publish ``event``; returns how the turn ended, once its TurnFinished is out, given
+        ``finished`` before it."""
+        await self._desk.publish(event)
+        return event.reason if isinstance(event, TurnFinished) else finished
+
+    async def _fail(
+        self, turn_id: str, finished: TurnEndReason | None, code: str, message: str
+    ) -> TurnEndReason:
+        """Report turn ``turn_id`` failing with ``code`` and ``message``, and end it in error
+        unless ``finished`` says how it already ended."""
+        await self._desk.publish(
+            ErrorOccurred(turn_id=turn_id, agent_id=self.agent_id, code=code, message=message)
+        )
+        return await self._end(turn_id, finished, "error")
 
     async def _end(
         self, turn_id: str, finished: TurnEndReason | None, reason: TurnEndReason

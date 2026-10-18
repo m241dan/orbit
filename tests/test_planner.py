@@ -1,6 +1,7 @@
 """Planning in conversation: prompts go to the planner, whose proposals become draft tasks."""
 
 import asyncio
+from collections.abc import Mapping
 
 import pytest
 
@@ -10,6 +11,7 @@ from orbit.agent.application.planner import RESUME_FAILED_NOTE, PlannerChat
 from orbit.agent.application.ports import Reply, ResumeFailed
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.board import TaskBoard
+from orbit.agent.domain.roles import Role
 from orbit.agent.domain.verification import steps_note
 from orbit.protocol import (
     AGENT_FAILED,
@@ -18,6 +20,7 @@ from orbit.protocol import (
     NOT_CONFIGURED,
     PLAN_TASK,
     PLANNER,
+    TIMED_OUT,
     UNKNOWN,
     AcceptTask,
     AddTask,
@@ -260,10 +263,10 @@ async def test_the_planner_uses_the_default_model_when_neither_names_one() -> No
 
 
 def steps_chat(
-    *turns: Script, published: list[Event] | None = None
+    *turns: Script, published: list[Event] | None = None, roles: Mapping[str, Role] = ROLES
 ) -> tuple[PlannerChat, ScriptedLauncher, list[tuple[str, ...]]]:
-    """A planner chat playing ``turns``, whose steps are the last in the list it returns; what
-    it publishes goes to ``published``."""
+    """A planner chat playing ``turns`` with ``roles``, whose steps are the last in the list it
+    returns; what it publishes goes to ``published``."""
     host = FakeHost()
     launcher = ScriptedLauncher(host)
     launcher.planner_turns = list(turns)
@@ -272,7 +275,7 @@ def steps_chat(
     async def publish(event: Event) -> None:
         sink.append(event)
 
-    desk = AgentDesk(Agents(host, launcher, lambda: "token-1", ROLES), publish)
+    desk = AgentDesk(Agents(host, launcher, lambda: "token-1", roles), publish)
     steps: list[tuple[str, ...]] = [("Ruff lint",)]
     return PlannerChat(desk, Tasks(TaskBoard(), publish), lambda: steps[-1]), launcher, steps
 
@@ -501,3 +504,51 @@ async def test_a_cancelled_first_turn_still_falls_back_if_the_saved_one_is_gone(
         await first
     await turn(chat, launcher, "Again.")
     assert launcher.resumed == ["saved-1", "saved-1", None]
+
+
+def timed_planner(minutes: float | None) -> dict[str, Role]:
+    """The roles, with the planner's turns limited to ``minutes``."""
+    return {**ROLES, PLANNER: ROLES[PLANNER].model_copy(update={"timeout_minutes": minutes})}
+
+
+async def test_a_planner_turn_that_runs_out_of_time_ends_in_error() -> None:
+    published: list[Event] = []
+    chat, _, _ = steps_chat(hangs, published=published, roles=timed_planner(0.0001))
+    assert await chat.answer("Plan.", Settings()) == "error"
+    turn_id = turn_id_of(published)
+    message = "The planner ran out of time (0.0001 minutes)."
+    assert [e for e in published if isinstance(e, ErrorOccurred)] == [
+        ErrorOccurred(turn_id=turn_id, agent_id="agent-1", code=TIMED_OUT, message=message)
+    ]
+    assert finished_turns(published) == [
+        TurnFinished(turn_id=turn_id, agent_id="agent-1", reason="error")
+    ]
+
+
+async def test_the_next_prompt_resumes_the_conversation_after_a_turn_ran_out_of_time() -> None:
+    chat, launcher, _ = steps_chat(chats, hangs, chats, roles=timed_planner(0.0001))
+    await chat.answer("Plan.", Settings())
+    assert await chat.answer("More.", Settings()) == "error"
+    assert await chat.answer("Again.", Settings()) == "completed"
+    conversation = "conversation-agent-1"
+    assert launcher.resumed == [None, conversation, conversation]
+    assert chat.conversation_id == conversation
+
+
+async def test_a_turn_finished_before_its_time_runs_out_keeps_its_reason() -> None:
+    published: list[Event] = []
+    chat, launcher, _ = steps_chat(chats, published=published, roles=timed_planner(0.0001))
+    launcher.planner_afters.append(blocks)
+    assert await chat.answer("Plan.", Settings()) == "completed"
+    assert finished_turns(published) == [
+        TurnFinished(turn_id=turn_id_of(published), agent_id="agent-1", reason="completed")
+    ]
+    assert [e.code for e in published if isinstance(e, ErrorOccurred)] == [TIMED_OUT]
+
+
+async def test_the_planners_time_limit_is_read_when_each_turn_starts() -> None:
+    roles = timed_planner(None)
+    chat, _, _ = steps_chat(chats, hangs, roles=roles)
+    assert await chat.answer("Plan.", Settings()) == "completed"
+    roles[PLANNER] = timed_planner(0.0001)[PLANNER]  # As a reset reads it again.
+    assert await chat.answer("More.", Settings()) == "error"
