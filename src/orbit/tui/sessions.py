@@ -10,7 +10,14 @@ from textual.containers import Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Input, OptionList
 
-from orbit.protocol import DeleteSession, NewSession, OpenSession, RenameSession, SessionSummary
+from orbit.protocol import (
+    DeleteSession,
+    NewSession,
+    OpenSession,
+    RenameSession,
+    SessionsListed,
+    SessionSummary,
+)
 from orbit.tui.view import (
     DELETE_TITLE,
     DELETE_YES,
@@ -188,3 +195,45 @@ class SessionsScreen(ModalScreen[SessionChoice | None]):
     def _hint(self, *, naming: bool, renaming: SessionSummary | None = None) -> str:
         """The keys shown: the name box's while ``naming``, or the list's."""
         return sessions_hint(startup=self.startup, naming=naming, renaming=renaming is not None)
+
+
+Chosen = Callable[[SessionChoice | None], Awaitable[None]]
+Push = Callable[[SessionsScreen, Chosen], object]
+Send = Callable[[SessionChoice | SessionChange], Awaitable[object]]
+"""Sends a session command to the backend; whatever it returns is ignored."""
+
+
+class SessionsHost:
+    """Shows the sessions listed, with ``push``, refreshing the list while it's shown;
+    ``send`` takes the user's choice and their changes to saved sessions."""
+
+    def __init__(self, push: Push, send: Send) -> None:
+        self._push = push
+        self._send = send
+        self.shown: SessionsScreen | None = None  # The list of sessions shown, if any.
+        # Whether the user pressed ctrl+p, after which no list opens as the startup list.
+        self._asked = False
+
+    def asked(self) -> None:
+        """Note the user asked for the sessions, so none opens as the startup list."""
+        self._asked = True
+
+    def show(self, listed: SessionsListed) -> None:
+        """Let the user pick one of the sessions ``listed`` or start a new one; at startup, before
+        any ctrl+p, escape quits. Listed while the list is shown, they replace those it shows;
+        refreshed after a rename or delete once the list was closed, they're ignored."""
+        if self.shown is not None:
+            self.shown.show(listed.sessions)
+            return
+        if listed.reason == "refreshed":
+            return
+
+        async def chosen(choice: SessionChoice | None) -> None:
+            self.shown = None
+            # Refusals come back as errors, shown like any other.
+            if choice is not None:
+                await self._send(choice)
+
+        startup = listed.reason == "startup" and not self._asked
+        self.shown = SessionsScreen(listed.sessions, self._send, startup=startup)
+        self._push(self.shown, chosen)

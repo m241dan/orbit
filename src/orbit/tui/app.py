@@ -86,7 +86,7 @@ from orbit.tui.conversation import ConversationFeed
 from orbit.tui.detail import DetailPane
 from orbit.tui.panels import UsagePanel, VerificationPanel
 from orbit.tui.proposals import ProposalHost
-from orbit.tui.sessions import SessionChoice, SessionsScreen
+from orbit.tui.sessions import SessionsHost
 from orbit.tui.tabs import ConversationTabs
 from orbit.tui.tasks import ReasonScreen, TaskEditorScreen, TaskList
 from orbit.tui.transcript import Transcript
@@ -220,9 +220,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         self._settings: Settings | None = None
         self._model_choices: tuple[str, ...] = ()
         self._proposals = ProposalHost(self.push_screen, self._decide)
-        self._sessions: SessionsScreen | None = None  # The list of sessions shown, if any.
-        # Whether the user pressed ctrl+p, after which no list opens as the startup list.
-        self._asked_sessions = False
+        self._sessions = SessionsHost(self.push_screen, self._send)
         self._message_id: str | None = None  # The command id of the last message sent.
         # The actions of the keys whose trigger the last catalog lacks, which are hidden.
         self._missing_triggers: frozenset[str] = frozenset()
@@ -476,7 +474,7 @@ class OrbitApp(App[None], inherit_bindings=False):
 
     async def action_list_sessions(self) -> None:
         """Ask for the saved sessions, which show in a modal once they're listed."""
-        self._asked_sessions = True
+        self._sessions.asked()
         await self._send(ListSessions())
 
     def _name_current(self, listed: SessionsListed) -> None:
@@ -485,26 +483,6 @@ class OrbitApp(App[None], inherit_bindings=False):
         current = [summary for summary in listed.sessions if summary.current]
         if current:
             self._transcript.show_session(current[0].name)
-
-    def _show_sessions(self, listed: SessionsListed) -> None:
-        """Let the user pick one of the sessions ``listed`` or start a new one; at startup, before
-        any ctrl+p, escape quits. Listed while the list is shown, they replace those it shows;
-        refreshed after a rename or delete once the list was closed, they're ignored."""
-        if self._sessions is not None:
-            self._sessions.show(listed.sessions)
-            return
-        if listed.reason == "refreshed":
-            return
-
-        async def chosen(choice: SessionChoice | None) -> None:
-            self._sessions = None
-            # Refusals come back as errors, shown like any other.
-            if choice is not None:
-                await self._send(choice)
-
-        startup = listed.reason == "startup" and not self._asked_sessions
-        self._sessions = SessionsScreen(listed.sessions, self._send, startup=startup)
-        self.push_screen(self._sessions, chosen)
 
     async def action_cancel_turn(self) -> None:
         # The planner has its own lane, stopped with ctrl+x; ctrl+s stops the task run.
@@ -625,7 +603,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         conversation's title follows the open session's name."""
         if isinstance(event, SessionsListed):
             self._name_current(event)
-            self._show_sessions(event)
+            self._sessions.show(event)
         elif isinstance(event, Snapshot):
             self._render_snapshot(event)
         elif isinstance(event, Catalog):
