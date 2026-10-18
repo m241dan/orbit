@@ -175,18 +175,32 @@ class SessionKeeper:
     async def save(self, contents: Callable[[], Contents]) -> None:
         """Save the session, holding what ``contents`` says it does as it's saved, if it's used
         and changed since it was last saved."""
+        error = await self._save(contents, retrying=False)
+        if error is not None:
+            self._halt.fail(FailedWrite.SESSION_RECORD, error)
+
+    async def retry(self, contents: Callable[[], Contents]) -> RuntimeError | None:
+        """Save the session as :meth:`save` does, though it's halted, as resuming does; returns
+        the error when the save fails."""
+        return await self._save(contents, retrying=True)
+
+    async def _save(self, contents: Callable[[], Contents], retrying: bool) -> RuntimeError | None:
+        """Save the session as :meth:`save` does, halted or not if ``retrying``; returns the
+        error when the save fails."""
         if self._store is None:
-            return
+            return None
         async with self._saving:
             contents_now = contents()
-            if self._due(contents_now) and await self._lock(self._store):
-                await self._write(self._store, contents_now)
+            if self._due(contents_now, retrying) and await self._lock(self._store):
+                return await self._write(self._store, contents_now)
+        return None
 
-    def _due(self, contents: Contents) -> bool:
-        """Whether ``contents`` are to be saved: the session is open, not halted, used (as it
-        is once it has a task) and holds something it didn't when it was last saved."""
+    def _due(self, contents: Contents, retrying: bool) -> bool:
+        """Whether ``contents`` are to be saved: the session is open, not halted unless
+        ``retrying``, used (as it is once it has a task) and holds something it didn't when it
+        was last saved."""
         self.used = self.used or bool(contents.tasks)
-        open_now = not self._closed and not self._halt.halted
+        open_now = not self._closed and (retrying or not self._halt.halted)
         return open_now and self.used and contents != self._saved
 
     async def _lock(self, store: SessionStore) -> bool:
@@ -205,8 +219,9 @@ class SessionKeeper:
             await self._publish(ErrorOccurred(code=LOCKED, message=message))
         return acquired
 
-    async def _write(self, store: SessionStore, contents: Contents) -> None:
-        """Save ``contents`` as the session in ``store``, now its last active time."""
+    async def _write(self, store: SessionStore, contents: Contents) -> RuntimeError | None:
+        """Save ``contents`` as the session in ``store``, now its last active time; returns the
+        error when it fails."""
         record = SessionRecord(
             id=self.id,
             name=self.name,
@@ -220,9 +235,9 @@ class SessionKeeper:
         )
         error = await outcome(store.save(record))
         if isinstance(error, RuntimeError):
-            self._halt.fail(FailedWrite.SESSION_RECORD, error)
-        else:
-            self._saved = contents
+            return error
+        self._saved = contents
+        return None
 
     async def summaries(self) -> tuple[SessionSummary, ...]:
         """The saved sessions, the most recently active first, the one open here marked

@@ -14,6 +14,7 @@ from orbit.protocol import (
     EventEnvelope,
     History,
     HistoryPage,
+    LogGap,
     Notice,
     SessionSummary,
     Settings,
@@ -207,6 +208,22 @@ async def test_a_snapshot_hides_the_removed_events_line() -> None:
         assert trimmed_shown(app)
         await feed_events(session, pilot, snapshot(*logged(601, *notices("x"))))
         assert not trimmed_shown(app)
+
+
+async def test_a_gap_in_the_log_shows_where_events_werent_saved() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        gaps = (LogGap(first_seq=4, last_seq=6), LogGap(first_seq=9, last_seq=9))
+        await feed_events(session, pilot, snapshot(*logged(10, Notice(message="c"), gaps[1])))
+        await at_the_top(pilot, 2)
+        await pilot.press("k")
+        await feed_events(session, pilot, page(*logged(7, gaps[0])))
+        assert texts(app) == [
+            "⚠ Events 4–6 weren't saved",
+            shown("c"),
+            "⚠ Events 9–9 weren't saved",
+        ]
 
 
 async def test_a_request_that_fails_to_send_can_be_made_again() -> None:

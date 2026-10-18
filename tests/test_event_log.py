@@ -110,8 +110,13 @@ async def test_an_append_that_fails_part_way_is_rolled_back_whole(
 ) -> None:
     store = await open_store(workspace)
     await store.append("abc", [notice(2)])
+    with database(state) as connection:
+        connection.execute(
+            """CREATE TRIGGER no_fourth BEFORE INSERT ON events WHEN NEW.seq = 4
+            BEGIN SELECT RAISE(ABORT, 'no'); END"""
+        )
     with pytest.raises(RuntimeError, match=r"save the events of the session abc to .*orbit\.db"):
-        await store.append("abc", [notice(1), notice(2), notice(3)])
+        await store.append("abc", [notice(1), notice(3), notice(4)])
     assert [seq for _, seq, *_ in logged(state)] == [2]
     assert store.max_seq() == 2
 
@@ -385,6 +390,21 @@ async def test_appends_keep_each_sessions_log_size(
     assert stored_sizes(state) == {
         session: (size, 0) for session, size in sizes_of_events(state).items()
     }
+
+
+async def test_events_already_stored_are_skipped_and_counted_once(
+    open_store: Opener, state: Path, workspace: Path
+) -> None:
+    store = await open_store(workspace)
+    await store.append("abc", [notice(1), notice(2)])
+    await store.append("abc", [notice(2, message="again"), notice(3)])
+
+    assert [(seq, decode_event(text)) for _, seq, _, text, _ in logged(state)] == [
+        (1, notice(1)),
+        (2, notice(2)),
+        (3, notice(3)),
+    ]
+    assert stored_sizes(state) == {"abc": (sizes_of_events(state)["abc"], 0)}
 
 
 async def test_a_log_over_the_limit_keeps_its_newest_events_under_the_target(

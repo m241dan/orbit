@@ -8,6 +8,7 @@ from orbit.agent.application.failures import ReportedOnce, outcome
 from orbit.agent.application.ports import EventLog, Fallback, Publish
 from orbit.agent.domain.replay import LogBounds
 from orbit.agent.domain.storage import trim_target
+from orbit.agent.domain.storage_halt import SeqSpan, lost_spans
 from orbit.protocol import EventEnvelope
 
 
@@ -78,7 +79,7 @@ class LogWriter:
     A failed append, or :meth:`stop`, stops the appending: the envelopes not appended, and every
     one added from then on, go to the ``overflow``'s fallback instead (nowhere without one), and
     a failed append is told to its ``failed``. Those envelopes are still read back as still to
-    be written."""
+    be written, until :meth:`resume` appends them and appending carries on."""
 
     def __init__(
         self, log: EventLog, publish: Publish, log_bytes: int = 0, overflow: Overflow = _NO_OVERFLOW
@@ -92,6 +93,8 @@ class LogWriter:
         self._writing: Queued = []  # Taken from the queue to write.
         self._diverted: Queued = []  # Sent to the fallback, as the log can't take them.
         self._places: dict[str, str | None] = {}  # Each session's fallback file, if written.
+        self._parked: set[int] = set()  # The seqs written to a fallback file.
+        self._lost: set[int] = set()  # The seqs no fallback file could take.
         self._diverting = asyncio.Lock()  # One fallback write at a time, so lines stay whole.
         self._stopped = False  # An append failed, or the writer was stopped: nothing appends.
         self._ready = asyncio.Event()  # Set while envelopes are queued, or once closing.
@@ -179,6 +182,46 @@ class LogWriter:
                 self._places[session_id] = await self._to_fallback(session_id, [])
         return _in_order([envelope for _, envelope in self._diverted]), self._places[session_id]
 
+    async def resume(self) -> list[SeqSpan] | RuntimeError:
+        """Append to the log again, once stopped: the envelopes the fallback took, then those
+        queued, in ``seq`` order, one append per session. Once that works, the fallback files are
+        removed and appending carries on; returns the spans of the envelopes no fallback took,
+        which are lost. Returns the error when an append fails, and stays stopped."""
+        if not self._stopped:
+            return []
+        async with self._diverting:
+            queued, self._queued = self._queued, []
+            parked = [(s, e) for s, e in self._diverted if e.seq in self._parked]
+            error = await self._append_whole([*parked, *queued])
+            if error is not None:
+                self._queued[:0] = queued  # Still stopped, so they go to the fallback.
+                self._ready.set()
+                return error
+            seqs = [envelope.seq for _, envelope in [*self._diverted, *queued]]
+            spans = lost_spans(self._lost, seqs)
+            await self._settle()
+        return spans
+
+    async def _append_whole(self, queued: Queued) -> RuntimeError | None:
+        """Append ``queued`` to the log by ``seq``, one append per session; returns the error
+        of the first that fails."""
+        for session_id, envelopes in _by_session(queued).items():
+            error = await outcome(self._log.append(session_id, _in_order(envelopes)))
+            if isinstance(error, RuntimeError):
+                return error
+        return None
+
+    async def _settle(self) -> None:
+        """Forget the envelopes the fallback took or lost, removing its files, and append
+        again."""
+        if self._fallback is not None:
+            for session_id in self._places:
+                await self._fallback.remove(session_id)
+        settled = self._parked | self._lost
+        self._diverted = [(s, e) for s, e in self._diverted if e.seq not in settled]
+        self._places, self._parked, self._lost = {}, set(), set()
+        self._stopped = False
+
     async def close(self) -> None:
         """Write what's queued, then stop the writer; cancelled, it stops at once, an append in
         progress written whole or not at all."""
@@ -219,11 +262,25 @@ class LogWriter:
                 await self._trims.attempt(self._log.trim(session_id, limit, trim_target(limit)))
 
     async def _divert(self, queued: Queued) -> None:
-        """Send ``queued`` to the fallback, each session's to its own file."""
+        """Send ``queued`` to the fallback, each session's to its own file, noting which it
+        took; queue them to append instead if the writer resumed meanwhile."""
         self._diverted += queued
         async with self._diverting:
+            if not self._stopped:
+                self._requeue(queued)
+                return
             for session_id, envelopes in _by_session(queued).items():
-                self._places[session_id] = await self._to_fallback(session_id, envelopes)
+                place = await self._to_fallback(session_id, envelopes)
+                self._places[session_id] = place
+                taken = self._lost if place is None else self._parked
+                taken.update(envelope.seq for envelope in envelopes)
+
+    def _requeue(self, queued: Queued) -> None:
+        """Queue ``queued``, on their way to the fallback, to be appended after all."""
+        seqs = {envelope.seq for _, envelope in queued}
+        self._diverted = [(s, e) for s, e in self._diverted if e.seq not in seqs]
+        self._queued[:0] = queued
+        self._ready.set()
 
     async def _to_fallback(self, session_id: str, envelopes: Sequence[EventEnvelope]) -> str | None:
         """Add ``envelopes`` to the fallback file of the session ``session_id``; returns its

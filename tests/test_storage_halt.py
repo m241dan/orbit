@@ -13,7 +13,12 @@ import pytest
 from orbit.agent import AgentSession
 from orbit.agent.application.outbox import Outbox
 from orbit.agent.application.ports import StorageFailed
-from orbit.agent.application.storage_halt import UNKNOWN_DATABASE, StorageHalt, fault_of
+from orbit.agent.application.storage_halt import (
+    UNKNOWN_DATABASE,
+    HaltHooks,
+    StorageHalt,
+    fault_of,
+)
 from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.storage_halt import (
     NEITHER_PLACE,
@@ -30,10 +35,16 @@ from orbit.protocol import (
     STORAGE_FAILED,
     AddTask,
     BusyChanged,
+    CommandAccepted,
+    CommandRefused,
     ErrorOccurred,
     Event,
     EventEnvelope,
+    History,
+    HistoryPage,
+    LogGap,
     Notice,
+    ResumeStorage,
     RunTasks,
     SendMessage,
     TaskSpec,
@@ -41,6 +52,7 @@ from orbit.protocol import (
     decode_event,
 )
 from tests.agent_fakes import (
+    COMMAND_ID,
     Call,
     FakeFallback,
     FakeStore,
@@ -57,6 +69,7 @@ from tests.agent_fakes import (
     session_for,
     startup_of,
 )
+from tests.test_log_writer import payloads_of
 from tests.test_planner_lane import gated_planner
 from tests.test_sqlite_store import fill_up
 from tests.test_startup_check import checked
@@ -373,7 +386,162 @@ async def test_once_closed_a_failure_only_marks_the_session_halted() -> None:
     assert halt.halted and published == []
 
 
-async def test_an_outbox_without_a_log_diverts_nothing() -> None:
+async def test_an_outbox_without_a_log_diverts_and_loses_nothing() -> None:
     outbox = Outbox(lambda: "a")
 
     assert await outbox.stop_log("a") == ([], None)
+    assert await outbox.resume_log() == []
+
+
+# Resuming
+
+
+async def outcome_of(
+    session: AgentSession, command: ResumeStorage | RunTasks | History
+) -> list[EventEnvelope]:
+    """The envelopes the session sends once ``command`` is sent, up to its outcome."""
+    await send(session, command)
+    sent: list[EventEnvelope] = []
+
+    async def collect() -> None:
+        async for envelope in session.events():
+            sent.append(envelope)
+            payload = envelope.payload
+            if isinstance(payload, CommandAccepted | CommandRefused) and (
+                payload.command_id == COMMAND_ID
+            ):
+                return
+
+    await asyncio.wait_for(collect(), 5)
+    return sent
+
+
+ACCEPTED = CommandAccepted(command_id=COMMAND_ID)
+
+
+async def halted_session(store: FakeStore, fallback: FakeFallback) -> AgentSession:
+    """A session over ``store`` halted by its failing appends, with three notices published
+    first."""
+    store.append_failure = "disk full"
+    session, _, _ = session_for(store=store, fallback=fallback)
+    for n in range(3):
+        await publish(session, Notice(message=f"n{n}"))
+    await halt_error(session)
+    return session
+
+
+async def test_resuming_once_writing_works_logs_the_parked_events_and_lifts_the_halt() -> None:
+    store, fallback = FakeStore(), FakeFallback()
+    session = await halted_session(store, fallback)
+    parked = list(fallback.files["session-1"])
+    store.append_failure = None
+
+    assert (await outcome_of(session, ResumeStorage()))[-1].payload == ACCEPTED
+    assert store.logged[: len(parked)] == sorted(parked, key=lambda envelope: envelope.seq)
+    assert any(halted(envelope) for envelope in store.logged)
+    assert fallback.files == {}
+    assert (await session._snapshot()).storage_halt is None
+    assert (await outcome_of(session, RunTasks()))[-1].payload == ACCEPTED
+    await session.close()
+    assert [envelope.seq for envelope in store.logged] == sorted(
+        {envelope.seq for envelope in store.logged}
+    )
+
+
+async def test_resuming_logs_a_gap_for_events_that_reached_no_fallback() -> None:
+    store, fallback = FakeStore(), FakeFallback()
+    fallback.broken = True
+    session = await halted_session(store, fallback)
+    store.append_failure = None
+    lost = [envelope.seq for envelope in await session._events.transcript("session-1")]
+
+    [gap] = payloads_of(LogGap, await outcome_of(session, ResumeStorage()))
+    assert gap == LogGap(first_seq=lost[0], last_seq=lost[-1])
+    page = await outcome_of(session, History(session="session-1", before_seq=1000))
+    [history] = payloads_of(HistoryPage, page)
+    assert gap in payloads_of(LogGap, history.events)
+    await session.close()
+    assert gap in payloads_of(LogGap, store.logged)
+
+
+async def test_resuming_while_writing_still_fails_is_refused_and_the_session_stays_halted() -> None:
+    store, fallback = FakeStore(), FakeFallback()
+    session = await halted_session(store, fallback)
+    store.append_failure = "still full"
+
+    refusal = (await outcome_of(session, ResumeStorage()))[-1].payload
+    assert isinstance(refusal, CommandRefused) and refusal.code == STORAGE_FAILED
+    assert "still full" in refusal.message
+    assert (await session._snapshot()).storage_halt == refusal.message
+    assert (await outcome_of(session, RunTasks()))[-1].payload == refused(
+        STORAGE_FAILED, refusal.message
+    )
+    await session.close()
+
+
+async def test_resuming_while_the_session_record_still_fails_names_it() -> None:
+    store = FakeStore()
+    store.failure = "record still full"
+    session, _, _ = session_for(store=store, fallback=FakeFallback())
+    await send(session, AddTask(task=TASK))
+    await halt_error(session)
+
+    refusal = (await outcome_of(session, ResumeStorage()))[-1].payload
+    assert isinstance(refusal, CommandRefused) and refusal.code == STORAGE_FAILED
+    assert "saving the session record" in refusal.message
+    store.failure = None
+    assert (await outcome_of(session, ResumeStorage()))[-1].payload == ACCEPTED
+    assert [record.tasks[0].task for record in store.saved] == [TASK]
+    await session.close()
+
+
+async def test_resuming_while_the_review_count_still_fails_names_it() -> None:
+    store = FakeStore()
+    store.count_failure = "count still full"
+    session, _, _ = session_for(store=store, fallback=FakeFallback())
+    await session._review_count.save(3)
+    await halt_error(session)
+
+    refusal = (await outcome_of(session, ResumeStorage()))[-1].payload
+    assert isinstance(refusal, CommandRefused) and "saving the review count" in refusal.message
+    await session.close()
+
+
+async def test_resuming_a_session_that_isnt_halted_is_accepted_and_does_nothing() -> None:
+    store = FakeStore()
+    session, _, _ = session_for(store=store, fallback=FakeFallback())
+
+    assert (await outcome_of(session, ResumeStorage()))[-1].payload == ACCEPTED
+    await session.close()
+
+
+async def test_resuming_while_the_halt_is_still_under_way_is_refused() -> None:
+    halt = StorageHalt(lambda event: asyncio.sleep(0))
+    halt.fail(FailedWrite.EVENT_LOG, RuntimeError("full"))
+
+    with pytest.raises(Refused) as refusal:
+        await halt.resume()
+    assert str(refusal.value) == halting_message(FailedWrite.EVENT_LOG)
+    await halt.close()
+
+
+async def test_a_resumed_halt_halts_again_on_the_next_failure() -> None:
+    published: list[Event] = []
+
+    async def record(event: Event) -> None:
+        published.append(event)
+
+    halt = StorageHalt(record, HaltHooks())
+    halt.fail(FailedWrite.EVENT_LOG, RuntimeError("first"))
+    while halt.message == halting_message(FailedWrite.EVENT_LOG):
+        await asyncio.sleep(0)
+    await asyncio.sleep(0.01)
+    await halt.resume()
+    assert not halt.halted
+    halt.fail(FailedWrite.EVENT_LOG, RuntimeError("second"))
+    while halt.message == halting_message(FailedWrite.EVENT_LOG):
+        await asyncio.sleep(0)
+    await halt.close()
+
+    errors = [event.message for event in published if isinstance(event, ErrorOccurred)]
+    assert ["second" in message for message in errors] == [False, True]

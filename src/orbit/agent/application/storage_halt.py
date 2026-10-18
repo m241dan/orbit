@@ -1,6 +1,7 @@
 """Halting the session when a write to the store fails, so no work goes unrecorded."""
 
 from collections.abc import Awaitable, Callable, Sequence
+from dataclasses import dataclass
 from typing import Protocol
 
 from orbit.agent.application.lanes import Background
@@ -22,6 +23,13 @@ UNKNOWN_DATABASE = "the store's database"
 Divert = Callable[[], Awaitable[tuple[Sequence[EventEnvelope], str | None]]]
 """Stops appending events to the log, sending them to the fallback instead; returns those sent
 there so far and the open session's fallback file, or ``None`` when none could be written."""
+
+Failure = tuple[FailedWrite, RuntimeError]
+"""A write to the store that failed, and its error."""
+
+Retry = Callable[[], Awaitable[Failure | None]]
+"""Retries the writes to the store a halt stopped, appending to the log again once they work;
+returns the write that failed and its error, if one did."""
 
 
 class Halting(Protocol):
@@ -45,6 +53,23 @@ async def _no_work() -> None:
     pass
 
 
+async def _nothing_to_retry() -> Failure | None:
+    return None
+
+
+@dataclass(frozen=True)
+class HaltHooks:
+    """What a halt does: ``divert`` sends the events not yet logged to the fallback,
+    ``stop_work`` cancels the work running, and ``retry`` retries the writes as it resumes."""
+
+    divert: Divert = _nothing_diverted
+    stop_work: Callable[[], Awaitable[None]] = _no_work
+    retry: Retry = _nothing_to_retry
+
+
+_NO_HOOKS = HaltHooks()
+
+
 def fault_of(write: FailedWrite, error: RuntimeError) -> StorageFault:
     """The fault of ``write`` failing with ``error``: as the store described it, or not
     recognised when it didn't."""
@@ -55,21 +80,19 @@ def fault_of(write: FailedWrite, error: RuntimeError) -> StorageFault:
 
 class StorageHalt:
     """The session's halt, once a write to the store fails: the events not yet logged go to the
-    fallback through ``divert``, an ``ErrorOccurred`` explaining the halt is published with
-    ``publish``, and ``stop_work`` cancels the work running, all in the background. From the
-    first failure on, the session is :attr:`halted`; later failures change nothing."""
+    fallback through the ``hooks``' ``divert``, an ``ErrorOccurred`` explaining the halt is
+    published with ``publish``, and their ``stop_work`` cancels the work running, all in the
+    background. From the first failure on, the session is :attr:`halted`; later failures change
+    nothing, until :meth:`resume` lifts the halt."""
 
-    def __init__(
-        self,
-        publish: Publish,
-        divert: Divert = _nothing_diverted,
-        stop_work: Callable[[], Awaitable[None]] = _no_work,
-    ) -> None:
+    def __init__(self, publish: Publish, hooks: HaltHooks = _NO_HOOKS) -> None:
         self._publish = publish
-        self._divert = divert
-        self._stop_work = stop_work
+        self._divert = hooks.divert
+        self._stop_work = hooks.stop_work
+        self._retry = hooks.retry
         self._fault: StorageFault | None = None
         self._explanation: str | None = None
+        self._halting = False  # The halt is under way in the background.
         self._background = Background("storage halt", publish)
         self._closed = False
 
@@ -82,9 +105,11 @@ class StorageHalt:
     def message(self) -> str | None:
         """Why the session halted, and how to resume: a short note until the explanation is
         made; none while storage works."""
-        if self._fault is None:
-            return None
-        return self._explanation or halting_message(self._fault.write)
+        return None if self._fault is None else self._message(self._fault)
+
+    def _message(self, fault: StorageFault) -> str:
+        """Why the session halted on ``fault``: a short note until the explanation is made."""
+        return self._explanation or halting_message(fault.write)
 
     def fail(self, write: FailedWrite, error: RuntimeError) -> None:
         """Halt the session because ``write`` failed with ``error``, unless it's halted already;
@@ -93,12 +118,27 @@ class StorageHalt:
             return
         self._fault = fault_of(write, error)
         if not self._closed:
+            self._halting = True
             self._background.start(self._halt(self._fault))
 
     def check(self) -> None:
         """Refuse a command, raising :class:`Refused`, while the session is halted."""
         if self.message is not None:
             raise Refused(STORAGE_FAILED, self.message)
+
+    async def resume(self) -> None:
+        """Retry the writes that failed and lift the halt once they work; does nothing while
+        the session isn't halted. While halting is under way, or a write still fails, raises
+        :class:`Refused`, the halt kept, explained afresh for the write that failed now."""
+        if self._fault is None:
+            return
+        if self._halting:
+            raise Refused(STORAGE_FAILED, self._message(self._fault))
+        failure = await self._retry()
+        if failure is not None:
+            fault = fault_of(*failure)
+            raise Refused(STORAGE_FAILED, await self._explain(fault))
+        self._fault, self._explanation = None, None
 
     async def close(self) -> None:
         """Stop halting, if it's under way; a failure from now on only marks the session
@@ -107,8 +147,18 @@ class StorageHalt:
         await self._background.close()
 
     async def _halt(self, fault: StorageFault) -> None:
+        try:
+            explanation = await self._explain(fault)
+            await self._publish(ErrorOccurred(code=STORAGE_FAILED, message=explanation))
+            await self._stop_work()
+        finally:
+            self._halting = False
+
+    async def _explain(self, fault: StorageFault) -> str:
+        """Make ``fault`` the halt's, with the events not logged sent to the fallback; returns
+        the explanation, as the halt now gives it."""
+        self._fault = fault
         unsaved, written_to = await self._divert()
         span = seq_span(envelope.seq for envelope in unsaved)
         self._explanation = storage_halt_explanation(fault, span, written_to)
-        await self._publish(ErrorOccurred(code=STORAGE_FAILED, message=self._explanation))
-        await self._stop_work()
+        return self._explanation

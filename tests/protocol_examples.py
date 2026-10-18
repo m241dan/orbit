@@ -36,6 +36,7 @@ from orbit.protocol import (
     History,
     HistoryPage,
     ListSessions,
+    LogGap,
     NewSession,
     Notice,
     OpenRequest,
@@ -46,6 +47,7 @@ from orbit.protocol import (
     RemoveTask,
     RenameSession,
     ResetConversation,
+    ResumeStorage,
     ReviewStatus,
     RunningAgent,
     RunTasks,
@@ -170,6 +172,7 @@ COMMANDS: tuple[CommandEnvelope, ...] = (
     command(DeleteSession(session_id="s1")),
     command(ResetConversation(agent=PLANNER)),
     command(History(session="s1", before_seq=101, limit=50)),
+    command(ResumeStorage()),
 )
 
 EVENTS: tuple[EventEnvelope, ...] = (
@@ -224,6 +227,7 @@ EVENTS: tuple[EventEnvelope, ...] = (
     ),
     event(SessionsListed(sessions=(SUMMARY,), reason="refreshed")),
     event(ConversationReset(agent=PLANNER)),
+    event(LogGap(first_seq=1204, last_seq=1210)),
     event(
         Snapshot(
             session=SUMMARY,

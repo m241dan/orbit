@@ -71,6 +71,7 @@ def test_an_outbox_reads_events_only_in_their_envelopes() -> None:
         "missed",
         "resend",
         "stop_log",
+        "resume_log",
         "close",
     }
 

@@ -48,6 +48,7 @@ from orbit.protocol import (
     Hello,
     HistoryPage,
     ListSessions,
+    LogGap,
     Notice,
     ProgressNoted,
     RemoveTask,
@@ -560,6 +561,7 @@ class OrbitApp(App[None], inherit_bindings=False):
                 | ProgressNoted()
                 | Notice()
                 | StartupChecked()
+                | LogGap()
             ):
                 self._feed.render(event)
             case SessionsListed() | ConversationReset() | Snapshot() | Catalog() | HistoryPage():

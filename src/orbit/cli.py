@@ -22,6 +22,7 @@ from orbit.agent import (
     ImportBlocked,
     McpHost,
     OrbitConfig,
+    RecoveryFailed,
     Role,
     SqliteStore,
     StorageSettings,
@@ -34,6 +35,8 @@ from orbit.agent import (
     in_git_work_tree,
     read_config,
     read_storage,
+    recover_parked,
+    recovered_note,
     resolve_config_dir,
     resolve_state_dir,
     run_step,
@@ -238,30 +241,43 @@ def _storage(config_dir: Path) -> StorageSettings:
 
 def _open_store(state: Path, root: Path) -> tuple[SqliteStore, list[str]]:
     """The store in the ``state`` directory for the workspace at ``root``, with the sessions an
-    older orbit saved as files imported, and the notes on what was imported.
+    older orbit saved as files and the events an earlier run parked in fallback files imported,
+    and the notes on what was imported.
 
-    Exits with status 2 if the store can't be opened or the old sessions can't be imported.
+    Exits with status 2 if the store can't be opened, the old sessions can't be imported or a
+    fallback file can't be recovered.
     """
     try:
         return asyncio.run(_opened_store(state, root))
-    except (StoreError, ImportBlocked) as exc:
+    except (StoreError, ImportBlocked, RecoveryFailed) as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(2) from None
 
 
 async def _opened_store(state: Path, root: Path) -> tuple[SqliteStore, list[str]]:
-    """The store in ``state`` for ``root``, with the old session files imported, and the notes
-    on what was imported; the store is closed if the import fails."""
+    """The store in ``state`` for ``root``, with the old session files and the fallback files
+    imported, and the notes on what was imported; the store is closed if an import fails."""
     store = await SqliteStore.open(state, str(root))
-    legacy = state_dir(str(root))
     try:
-        imported = await import_session_files(store, legacy)
+        return store, await _imported(store, state, root)
     except BaseException:
         await store.close()
         raise
-    if imported is None:
-        return store, []
-    return store, [imported_note(imported, _shown(legacy, root))]
+
+
+async def _imported(store: SqliteStore, state: Path, root: Path) -> list[str]:
+    """Import into ``store`` the old session files of the workspace at ``root``, then its
+    fallback files, in ``state`` and in the repository; returns the notes on what was
+    imported."""
+    legacy = state_dir(str(root))
+    imported = await import_session_files(store, legacy)
+    notes = [] if imported is None else [imported_note(imported, _shown(legacy, root))]
+    recovered = await recover_parked(FallbackFiles(state, store.workspace_id, legacy), store)
+    return notes + [
+        recovered_note(file.count, str(_shown(Path(file.path), root)))
+        for file in recovered
+        if file.count
+    ]
 
 
 def _shown(path: Path, root: Path) -> Path:

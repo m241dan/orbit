@@ -46,6 +46,40 @@ async def test_a_review_count_that_cannot_be_saved_halts_and_nothing_more_is_sav
     assert store.counts == []
 
 
+async def test_retrying_saves_the_count_last_asked_for_though_halted() -> None:
+    store = FakeStore()
+    store.count_failure = "full"
+    _, count, halt = both_for(store)
+    await count.save(1)
+    await count.save(2)
+    store.count_failure = None
+
+    assert await count.retry() is None
+    assert await count.retry() is None
+    assert store.counts == [2] and len(halt.failures) == 1
+
+
+async def test_a_count_retry_that_fails_returns_the_error() -> None:
+    store = FakeStore()
+    store.count_failure = "full"
+    _, count, halt = both_for(store)
+    await count.save(1)
+
+    error = await count.retry()
+    assert isinstance(error, RuntimeError) and str(error) == "full"
+    assert len(halt.failures) == 1
+
+
+async def test_a_count_never_asked_for_or_without_a_store_isnt_retried() -> None:
+    store = FakeStore()
+    _, count, _ = both_for(store)
+    _, without, _ = both_for(None)
+    await without.save(1)
+
+    assert await count.retry() is None and await without.retry() is None
+    assert store.counts == []
+
+
 async def test_a_failing_session_save_stops_the_count_being_saved_too() -> None:
     store = FakeStore()
     keeper, count, halt = both_for(store)

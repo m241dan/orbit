@@ -240,6 +240,36 @@ async def test_a_failing_save_halts_the_session_and_nothing_more_is_saved() -> N
     assert store.saved == []
 
 
+async def test_retrying_saves_the_session_as_it_is_now_though_halted() -> None:
+    store = FakeStore()
+    store.failure = "disk full"
+    keeper, halt = halting_keeper(store)
+    await save(keeper, WITH_TASK)
+    store.failure = None
+
+    assert await keeper.retry(lambda: EMPTY) is None
+    assert store.last.tasks == EMPTY.tasks and len(halt.failures) == 1
+    assert await keeper.retry(lambda: EMPTY) is None
+    assert len(store.saved) == 1  # Unchanged since, so not saved again.
+
+
+async def test_a_retry_that_fails_returns_the_error_without_telling_the_halt() -> None:
+    store = FakeStore()
+    store.failure = "disk full"
+    keeper, halt = halting_keeper(store)
+    await save(keeper, WITH_TASK)
+
+    error = await keeper.retry(lambda: WITH_TASK)
+    assert isinstance(error, RuntimeError) and str(error) == "disk full"
+    assert len(halt.failures) == 1
+
+
+async def test_without_a_store_a_retry_saves_nothing() -> None:
+    keeper = SessionKeeper(None, Published(), FakeHalt())
+
+    assert await keeper.retry(lambda: WITH_TASK) is None
+
+
 async def test_saves_that_work_tell_the_halt_nothing() -> None:
     store = FakeStore()
     keeper, halt = halting_keeper(store)

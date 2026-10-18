@@ -12,6 +12,7 @@ from orbit.protocol import (
     AssistantMessage,
     CommandRefused,
     ErrorOccurred,
+    LogGap,
     Notice,
     ProgressNoted,
     TaskGaveUp,
@@ -42,6 +43,7 @@ from orbit.tui.view.transcript import (
     entry_prefix,
     error_entry,
     exchange_entry,
+    gap_entry,
     gutter,
     hanging_indent,
     note_entry,
@@ -187,6 +189,13 @@ def test_merges_and_notices_become_transcript_entries() -> None:
     blocked = TaskMerged(task_id="1", result="blocked", detail="a.txt has local changes")
     assert note_entry(blocked) == ("⚠ Not merged (blocked): a.txt has local changes", "verify")
     assert note_entry(Notice(message="2 stashes")) == ("📌 2 stashes", "verify")
+
+
+def test_a_gap_in_the_log_says_which_events_werent_saved() -> None:
+    gap = LogGap(first_seq=1204, last_seq=1210)
+
+    assert gap_entry(gap) == ("⚠ Events 1204–1210 weren't saved", "error")
+    assert activity_entry(gap) == gap_entry(gap)
 
 
 def test_activity_entries_cover_agents_exchanges_and_notices() -> None:

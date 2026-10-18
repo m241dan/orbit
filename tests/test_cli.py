@@ -39,7 +39,15 @@ from orbit.agent.application.ports import UsageSource
 from orbit.agent.domain.reviews import ReviewLimits
 from orbit.agent.domain.sessions import SessionRecord, Unreadable, default_name, record_json
 from orbit.cli import app
-from orbit.protocol import Notice, SessionsListed, Settings, ThreadedSession
+from orbit.protocol import (
+    EventEnvelope,
+    Notice,
+    SessionsListed,
+    Settings,
+    Snapshot,
+    ThreadedSession,
+    encode,
+)
 from tests.agent_fakes import greeted, queued, startup_of, store_of
 
 runner = CliRunner()
@@ -416,6 +424,126 @@ def test_chat_without_old_session_files_has_no_import_note(
 
     [greeting] = greetings
     assert greeting.notices == [f"Workspace: {tmp_path.resolve()}"]
+
+
+def parked_notice(seq: int) -> EventEnvelope:
+    return EventEnvelope(seq=seq, session="s1", payload=Notice(message=f"parked {seq}"))
+
+
+async def workspace_id_of(state: Path, workspace: Path) -> str:
+    store = await SqliteStore.open(state, str(workspace))
+    try:
+        return store.workspace_id
+    finally:
+        await store.close()
+
+
+async def logged_in(state: Path, workspace: Path) -> list[EventEnvelope]:
+    """The session ``s1``'s events in the store in ``state`` for ``workspace``."""
+    store = await SqliteStore.open(state, str(workspace))
+    try:
+        return await store.recent("s1", 100)
+    finally:
+        await store.close()
+
+
+def park(state: Path, workspace: Path, *seqs: int) -> Path:
+    """A fallback file of the session ``s1`` in ``state`` holding notices numbered ``seqs``."""
+    workspace_id = asyncio.run(workspace_id_of(state, workspace.resolve()))
+    path = state / "fallback" / f"{workspace_id}-s1.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("".join(f"{encode(parked_notice(seq))}\n" for seq in seqs))
+    return path
+
+
+@dataclass(frozen=True)
+class Order:
+    """Where the Snapshot and each notice came in what a chat's session published first."""
+
+    snapshot: int
+    notices: dict[str, int]
+
+
+@pytest.fixture
+def orders(launched: list[AgentSession]) -> list[Order]:
+    """Where the Snapshot and the notices come in what each chat's session publishes first."""
+    seen: list[Order] = []
+
+    async def greet_it(session: AgentSession) -> None:
+        await greeted(session)
+        events = queued(session)
+        snapshot = next(n for n, event in enumerate(events) if isinstance(event, Snapshot))
+        notices = {e.message: n for n, e in enumerate(events) if isinstance(e, Notice)}
+        seen.append(Order(snapshot, notices))
+
+    FakeApp.during = greet_it
+    return seen
+
+
+def test_chat_recovers_parked_events_and_notes_it_after_the_snapshot(
+    orders: list[Order], state: Path, tmp_path: Path
+) -> None:
+    path = park(state, tmp_path, 2, 1)
+    assert runner.invoke(app, ["chat", "-C", str(tmp_path)]).exit_code == 0
+
+    assert asyncio.run(logged_in(state, tmp_path.resolve())) == [parked_notice(1), parked_notice(2)]
+    assert not path.exists()
+    [order] = orders
+    shown = path.relative_to(tmp_path)  # The state directory is in the workspace here.
+    note = f"Recovered 2 events from {shown} into the session's log."
+    assert order.notices[note] > order.snapshot
+
+
+def test_a_parked_file_in_the_workspace_is_recovered_and_named_within_it(
+    greetings: list[Greeted], state: Path, tmp_path: Path
+) -> None:
+    path = tmp_path / ".orbit" / "fallback" / "s1.jsonl"
+    path.parent.mkdir(parents=True)
+    path.write_text(f"{encode(parked_notice(1))}\n")
+    assert runner.invoke(app, ["chat", "-C", str(tmp_path)]).exit_code == 0
+
+    assert asyncio.run(logged_in(state, tmp_path.resolve())) == [parked_notice(1)]
+    [greeting] = greetings
+    assert greeting.notices[-1] == (
+        "Recovered 1 event from .orbit/fallback/s1.jsonl into the session's log."
+    )
+
+
+def test_events_recovered_twice_are_stored_once(
+    greetings: list[Greeted], state: Path, tmp_path: Path
+) -> None:
+    park(state, tmp_path, 1, 2)
+    assert runner.invoke(app, ["chat", "-C", str(tmp_path)]).exit_code == 0
+    park(state, tmp_path, 2, 3)
+    assert runner.invoke(app, ["chat", "-C", str(tmp_path)]).exit_code == 0
+
+    logged = asyncio.run(logged_in(state, tmp_path.resolve()))
+    assert logged == [parked_notice(1), parked_notice(2), parked_notice(3)]
+
+
+def test_an_empty_parked_file_is_removed_without_a_note(
+    greetings: list[Greeted], state: Path, tmp_path: Path
+) -> None:
+    path = park(state, tmp_path)
+    assert runner.invoke(app, ["chat", "-C", str(tmp_path), "--no-verify"]).exit_code == 0
+
+    assert not path.exists()
+    [greeting] = greetings
+    assert greeting.notices == [f"Workspace: {tmp_path.resolve()}"]
+
+
+def test_a_parked_file_that_cant_be_read_stops_chat_naming_it(
+    launched: list[AgentSession], state: Path, tmp_path: Path
+) -> None:
+    path = park(state, tmp_path, 1)
+    path.write_text("not an envelope\n")
+    result = runner.invoke(app, ["chat", "-C", str(tmp_path)])
+
+    assert result.exit_code == 2
+    assert f"Couldn't recover the events parked in {path}: Not JSON" in result.stderr
+    assert launched == []
+    assert store_threads() == []
+    assert path.exists()
 
 
 def test_a_database_newer_than_orbit_stops_chat(

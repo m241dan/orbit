@@ -10,6 +10,7 @@ from orbit.protocol import (
     AssistantMessage,
     CommandRefused,
     ErrorOccurred,
+    LogGap,
     Notice,
     ProgressNoted,
     StartupChecked,
@@ -234,6 +235,11 @@ def startup_entry(event: StartupChecked) -> tuple[str, EntryKind]:
     )
 
 
+def gap_entry(event: LogGap) -> tuple[str, EntryKind]:
+    """The events lost when storage failed, as a transcript entry."""
+    return f"⚠ Events {event.first_seq}–{event.last_seq} weren't saved", "error"
+
+
 def note_entry(event: TaskMerged | Notice | StartupChecked) -> tuple[str, EntryKind]:
     """What came of merging a task's work, a notice, or the startup check, as a transcript
     entry."""
@@ -250,9 +256,11 @@ def note_entry(event: TaskMerged | Notice | StartupChecked) -> tuple[str, EntryK
             assert_never(event)
 
 
-AgentNote = AgentStarted | TaskGaveUp | AgentReply | ProgressNoted | Notice | StartupChecked
-"""Events shown as a single transcript entry each: agents' activity, notices and the startup
-check's result."""
+AgentNote = (
+    AgentStarted | TaskGaveUp | AgentReply | ProgressNoted | Notice | StartupChecked | LogGap
+)
+"""Events shown as a single transcript entry each: agents' activity, notices, the startup
+check's result and events lost when storage failed."""
 
 
 def activity_entry(event: AgentNote) -> tuple[str, EntryKind]:
@@ -260,6 +268,8 @@ def activity_entry(event: AgentNote) -> tuple[str, EntryKind]:
         return agent_entry(event)
     if isinstance(event, AgentReply | ProgressNoted):
         return exchange_entry(event)
+    if isinstance(event, LogGap):
+        return gap_entry(event)
     return note_entry(event)
 
 

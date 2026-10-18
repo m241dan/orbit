@@ -397,6 +397,15 @@ class HistoryPage(_Message):
     trimmed: bool = False
 
 
+class LogGap(_Message):
+    """The session's events ``first_seq`` to ``last_seq`` were lost: a write to the store failed
+    and they reached neither the log nor a fallback file."""
+
+    type: Literal["log_gap"] = "log_gap"
+    first_seq: int
+    last_seq: int
+
+
 class WorkspaceEntry(_Message):
     """Workspace ``id``, shown as ``label``, and its ``sessions`` as the list of sessions shows
     them."""
@@ -463,6 +472,7 @@ Event = Annotated[
     | UsageChanged
     | SessionsListed
     | ConversationReset
+    | LogGap
     | Snapshot
     | HistoryPage
     | Catalog

@@ -446,6 +446,7 @@
               "remove_task": "#/$defs/RemoveTask",
               "rename_session": "#/$defs/RenameSession",
               "reset_conversation": "#/$defs/ResetConversation",
+              "resume_storage": "#/$defs/ResumeStorage",
               "run_tasks": "#/$defs/RunTasks",
               "send_message": "#/$defs/SendMessage",
               "update_settings": "#/$defs/UpdateSettings"
@@ -509,6 +510,9 @@
             },
             {
               "$ref": "#/$defs/History"
+            },
+            {
+              "$ref": "#/$defs/ResumeStorage"
             }
           ],
           "title": "Payload"
@@ -765,6 +769,7 @@
               "conversation_reset": "#/$defs/ConversationReset",
               "error_occurred": "#/$defs/ErrorOccurred",
               "history_page": "#/$defs/HistoryPage",
+              "log_gap": "#/$defs/LogGap",
               "notice": "#/$defs/Notice",
               "progress_noted": "#/$defs/ProgressNoted",
               "review_status": "#/$defs/ReviewStatus",
@@ -873,6 +878,9 @@
             },
             {
               "$ref": "#/$defs/ConversationReset"
+            },
+            {
+              "$ref": "#/$defs/LogGap"
             },
             {
               "$ref": "#/$defs/Snapshot"
@@ -1104,6 +1112,32 @@
         "type"
       ],
       "title": "ListSessions",
+      "type": "object"
+    },
+    "LogGap": {
+      "description": "The session's events ``first_seq`` to ``last_seq`` were lost: a write to the store failed\nand they reached neither the log nor a fallback file.",
+      "properties": {
+        "first_seq": {
+          "title": "First Seq",
+          "type": "integer"
+        },
+        "last_seq": {
+          "title": "Last Seq",
+          "type": "integer"
+        },
+        "type": {
+          "const": "log_gap",
+          "default": "log_gap",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "first_seq",
+        "last_seq",
+        "type"
+      ],
+      "title": "LogGap",
       "type": "object"
     },
     "NewSession": {
@@ -1340,6 +1374,22 @@
         "type"
       ],
       "title": "ResetConversation",
+      "type": "object"
+    },
+    "ResumeStorage": {
+      "description": "Retry the writes to the store that halted the session, and lift the halt once they work,\nlogging what was parked in the fallback file; refused with ``storage_failed`` while they\nstill fail. Does nothing while the session isn't halted.",
+      "properties": {
+        "type": {
+          "const": "resume_storage",
+          "default": "resume_storage",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "ResumeStorage",
       "type": "object"
     },
     "ReviewStatus": {

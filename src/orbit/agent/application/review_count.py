@@ -17,6 +17,7 @@ class ReviewCount:
         self._store = store
         self._halt = halt
         self._count: int | None = None  # The count the store holds.
+        self._wanted: int | None = None  # The count last asked to be saved.
         self._saving = asyncio.Lock()  # Saves one at a time, so the newest is written last.
 
     async def load(self) -> int | None:
@@ -31,11 +32,28 @@ class ReviewCount:
         changed."""
         if self._store is None:
             return
+        self._wanted = count
         async with self._saving:
-            if count == self._count or self._halt.halted:
+            if self._halt.halted:
                 return
-            error = await outcome(self._store.save_review_count(count))
-            if isinstance(error, RuntimeError):
+            error = await self._write(self._store, count)
+            if error is not None:
                 self._halt.fail(FailedWrite.REVIEW_COUNT, error)
-            else:
-                self._count = count
+
+    async def retry(self) -> RuntimeError | None:
+        """Save the count last asked to be saved, if it changed, though the session is halted,
+        as resuming does; returns the error when the save fails."""
+        if self._store is None or self._wanted is None:
+            return None
+        async with self._saving:
+            return await self._write(self._store, self._wanted)
+
+    async def _write(self, store: SessionStore, count: int) -> RuntimeError | None:
+        """Save ``count`` in ``store``, if it changed; returns the error when it fails."""
+        if count == self._count:
+            return None
+        error = await outcome(store.save_review_count(count))
+        if isinstance(error, RuntimeError):
+            return error
+        self._count = count
+        return None

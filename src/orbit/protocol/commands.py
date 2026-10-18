@@ -176,6 +176,14 @@ class History(_Message):
     limit: int = Field(default=200, ge=1, le=500)
 
 
+class ResumeStorage(_Message):
+    """Retry the writes to the store that halted the session, and lift the halt once they work,
+    logging what was parked in the fallback file; refused with ``storage_failed`` while they
+    still fail. Does nothing while the session isn't halted."""
+
+    type: Literal["resume_storage"] = "resume_storage"
+
+
 Command = Annotated[
     Hello
     | SendMessage
@@ -195,7 +203,8 @@ Command = Annotated[
     | RenameSession
     | DeleteSession
     | ResetConversation
-    | History,
+    | History
+    | ResumeStorage,
     Field(discriminator="type"),
 ]
 

@@ -9,11 +9,14 @@ A session's file is ``fallback/<workspace id>-<session id>.jsonl`` in the state 
 import asyncio
 import os
 from collections.abc import Sequence
+from contextlib import suppress
 from pathlib import Path
 
-from orbit.protocol import EventEnvelope, encode
+from orbit.agent.application.ports import ParkedFile
+from orbit.protocol import EventEnvelope, ProtocolError, decode_event, encode
 
 FALLBACK = "fallback"
+SUFFIX = ".jsonl"
 
 
 def _append(path: Path, lines: str) -> None:
@@ -26,10 +29,30 @@ def _append(path: Path, lines: str) -> None:
         file.write(lines)
 
 
+def _read(path: Path) -> list[EventEnvelope]:
+    """The envelopes in the file at ``path``, one per line, but for those of types this orbit
+    doesn't know; raises ``RuntimeError`` when it can't be read or a line isn't an envelope."""
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+        decoded = [decode_event(line) for line in lines if line.strip()]
+    except (OSError, UnicodeDecodeError, ProtocolError) as error:
+        raise RuntimeError(str(error)) from error
+    return [envelope for envelope in decoded if envelope is not None]
+
+
+def _delete(path: Path) -> None:
+    """Delete the file at ``path``; raises ``RuntimeError`` when it can't."""
+    try:
+        path.unlink(missing_ok=True)
+    except OSError as error:
+        raise RuntimeError(str(error)) from error
+
+
 class FallbackFiles:
     """The fallback files of the workspace ``workspace_id``, in ``state_dir`` or else in
     ``repository_dir``, the repository's orbit directory. A session's events go on to the file
-    they last went to while it can be written."""
+    they last went to while it can be written. The files earlier runs left are found to be
+    imported."""
 
     def __init__(self, state_dir: Path, workspace_id: str, repository_dir: Path) -> None:
         self._state_dir = state_dir
@@ -40,8 +63,8 @@ class FallbackFiles:
     def places(self, session_id: str) -> list[Path]:
         """Where the session ``session_id``'s fallback file goes, the first that works."""
         return [
-            self._state_dir / FALLBACK / f"{self._workspace_id}-{session_id}.jsonl",
-            self._repository_dir / FALLBACK / f"{session_id}.jsonl",
+            self._state_dir / FALLBACK / f"{self._workspace_id}-{session_id}{SUFFIX}",
+            self._repository_dir / FALLBACK / f"{session_id}{SUFFIX}",
         ]
 
     async def write(self, session_id: str, envelopes: Sequence[EventEnvelope]) -> str | None:
@@ -63,3 +86,33 @@ class FallbackFiles:
             self._used[session_id] = place
             return str(place)
         return None
+
+    async def remove(self, session_id: str) -> None:
+        await asyncio.to_thread(self._remove, session_id)
+
+    def _remove(self, session_id: str) -> None:
+        """Delete the session ``session_id``'s files, those that can be."""
+        self._used.pop(session_id, None)
+        for place in self.places(session_id):
+            with suppress(OSError):  # Left to be imported again, its events skipped as stored.
+                place.unlink(missing_ok=True)
+
+    async def parked(self) -> list[ParkedFile]:
+        return await asyncio.to_thread(self._parked)
+
+    def _parked(self) -> list[ParkedFile]:
+        """This workspace's files in the state directory, then the repository's, each by
+        path."""
+        prefix = f"{self._workspace_id}-"
+        state = sorted((self._state_dir / FALLBACK).glob(f"{prefix}*{SUFFIX}"))
+        repository = sorted((self._repository_dir / FALLBACK).glob(f"*{SUFFIX}"))
+        return [
+            *(ParkedFile(str(path), path.stem.removeprefix(prefix)) for path in state),
+            *(ParkedFile(str(path), path.stem) for path in repository),
+        ]
+
+    async def read(self, file: ParkedFile) -> list[EventEnvelope]:
+        return await asyncio.to_thread(_read, Path(file.path))
+
+    async def delete(self, file: ParkedFile) -> None:
+        await asyncio.to_thread(_delete, Path(file.path))

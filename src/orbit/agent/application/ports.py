@@ -230,6 +230,38 @@ class Fallback(Protocol):
         when no place could be written."""
         ...
 
+    async def remove(self, session_id: str) -> None:
+        """Delete the session ``session_id``'s fallback files, wherever they are; one that can't
+        be deleted is left, to be imported again at the next start, its events skipped as
+        stored."""
+        ...
+
+
+@dataclass(frozen=True)
+class ParkedFile:
+    """A fallback file an earlier run left: its ``path``, holding events of the session
+    ``session_id``."""
+
+    path: str
+    session_id: str
+
+
+class ParkedEvents(Protocol):
+    """The fallback files of this workspace, in every place they go."""
+
+    async def parked(self) -> list[ParkedFile]:
+        """Every fallback file of this workspace, by path."""
+        ...
+
+    async def read(self, file: ParkedFile) -> list[EventEnvelope]:
+        """The envelopes in ``file``, in the order written, but for those of types this orbit
+        doesn't know; raises ``RuntimeError`` when it can't be read or holds something else."""
+        ...
+
+    async def delete(self, file: ParkedFile) -> None:
+        """Delete ``file``; raises ``RuntimeError`` when it can't."""
+        ...
+
 
 class EventLog(Protocol):
     """Where sessions' events are kept, each session's in ``seq`` order."""
@@ -240,8 +272,8 @@ class EventLog(Protocol):
 
     async def append(self, session_id: str, envelopes: Sequence[EventEnvelope]) -> None:
         """Add ``envelopes``, events of the session ``session_id``, to its log, all of them or
-        none; raises ``RuntimeError``, a :class:`StorageFailed` when the database failed, when
-        it can't."""
+        none, skipping those whose ``seq`` it holds already; raises ``RuntimeError``, a
+        :class:`StorageFailed` when the database failed, when it can't."""
         ...
 
     async def recent(self, session_id: str, limit: int) -> list[EventEnvelope]:

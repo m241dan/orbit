@@ -667,19 +667,27 @@ class SqliteStore:
         return [(str(session_id), str(text)) for session_id, text in rows]
 
     def _append(self, session_id: str, envelopes: Sequence[EventEnvelope]) -> None:
+        """Add ``envelopes`` to the session ``session_id``'s log, but for those whose ``seq`` it
+        holds already, as when parked events are imported again."""
         rows = [_event_row(self._workspace, session_id, envelope) for envelope in envelopes]
         with self._transaction():
-            self._db.executemany(
-                """INSERT INTO events (workspace_id, session_id, seq, type, json, size)
-                VALUES (?, ?, ?, ?, ?, ?)""",
-                rows,
-            )
+            added = sum(row[5] for row in rows if self._insert_event(row))
             self._db.execute(
                 """INSERT INTO logs (workspace_id, session_id, size) VALUES (?, ?, ?)
                 ON CONFLICT (workspace_id, session_id) DO UPDATE SET size = size + excluded.size""",
-                (self._workspace, session_id, sum(row[5] for row in rows)),
+                (self._workspace, session_id, added),
             )
         self._max_seq = max([self._max_seq, *(envelope.seq for envelope in envelopes)])
+
+    def _insert_event(self, row: EventRow) -> bool:
+        """Add ``row`` to the ``events`` table unless its ``seq`` is there; returns whether it
+        was added."""
+        cursor = self._db.execute(
+            """INSERT INTO events (workspace_id, session_id, seq, type, json, size)
+            VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING""",
+            row,
+        )
+        return cursor.rowcount > 0
 
     def _recent(self, session_id: str, limit: int) -> list[str]:
         """The JSON of the session ``session_id``'s last ``limit`` events, latest first."""

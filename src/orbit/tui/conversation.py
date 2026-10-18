@@ -15,6 +15,7 @@ from orbit.protocol import (
     ConversationReset,
     ErrorOccurred,
     Event,
+    LogGap,
     Notice,
     ProgressNoted,
     StartupChecked,
@@ -123,6 +124,7 @@ class ConversationFeed:
                 | ProgressNoted()
                 | Notice()
                 | StartupChecked()
+                | LogGap()
             ):
                 self._render_activity(event)
             case _:

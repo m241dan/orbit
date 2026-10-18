@@ -246,6 +246,95 @@ async def test_envelopes_sent_to_the_fallback_are_still_read_back() -> None:
     await writer.close()
 
 
+async def test_resuming_appends_the_parked_events_then_those_queued_and_removes_the_file() -> None:
+    log, fallback = FakeStore(), FakeFallback()
+    log.append_failure = "disk full"
+    writer = LogWriter(log, Published(), overflow=Overflow(fallback))
+    writer.add("a", notice(2))
+    writer.add("a", notice(1))
+    await asyncio.sleep(0.01)
+    log.append_failure = None
+    writer.add("a", notice(3))
+
+    assert await writer.resume() == []
+    assert log.appends == [("a", [notice(1), notice(2), notice(3)])]
+    assert fallback.files == {}
+    writer.add("a", notice(4))
+    await writer.close()
+    assert log.logged == [notice(1), notice(2), notice(3), notice(4)]
+
+
+async def test_resuming_reports_the_spans_of_events_that_reached_no_fallback() -> None:
+    log, fallback = FakeStore(), FakeFallback()
+    writer = LogWriter(log, Published(), overflow=Overflow(fallback))
+    await writer.stop("a")
+    fallback.broken = True
+    for seq in (1, 2):
+        writer.add("a", notice(seq))
+    await asyncio.sleep(0.01)
+    fallback.broken = False
+    writer.add("a", notice(3))
+    await asyncio.sleep(0.01)
+    writer.add("a", notice(4))
+
+    assert await writer.resume() == [(1, 2)]
+    assert log.logged == [notice(3), notice(4)]
+    assert await writer.recent("a", 10) == [notice(3), notice(4)]
+    await writer.close()
+
+
+async def test_without_a_fallback_resuming_reports_every_diverted_event_lost() -> None:
+    log = FakeStore()
+    writer = LogWriter(log, Published())
+    writer.add("a", notice(1))
+    await writer.stop("a")
+
+    assert await writer.resume() == [(1, 1)]
+    assert log.logged == []
+    await writer.close()
+
+
+async def test_resuming_while_the_log_still_fails_keeps_diverting() -> None:
+    log, fallback = FakeStore(), FakeFallback()
+    log.append_failure = "still full"
+    writer = LogWriter(log, Published(), overflow=Overflow(fallback))
+    writer.add("a", notice(1))
+    await asyncio.sleep(0.01)
+    writer.add("a", notice(2))
+
+    error = await writer.resume()
+    assert isinstance(error, RuntimeError) and str(error) == "still full"
+    writer.add("a", notice(3))
+    await writer.close()
+    assert fallback.files == {"a": [notice(1), notice(2), notice(3)]}
+    assert await writer.stop("a") == ([notice(1), notice(2), notice(3)], FakeFallback.path("a"))
+
+
+async def test_resuming_a_writer_that_never_stopped_does_nothing() -> None:
+    log = FakeStore()
+    writer = LogWriter(log, Published())
+
+    assert await writer.resume() == []
+    assert log.appends == []
+
+
+async def test_events_on_their_way_to_the_fallback_as_it_resumes_are_appended_instead() -> None:
+    log, fallback = GatedLog(), FakeFallback()
+    writer = LogWriter(log, Published(), overflow=Overflow(fallback))
+    await writer.stop("a")
+    writer.add("a", notice(1))
+    await asyncio.sleep(0.01)
+    resuming = asyncio.create_task(writer.resume())
+    await log.waiting.wait()
+    writer.add("a", notice(2))
+    await asyncio.sleep(0.01)
+    log.gate.set()
+
+    assert await resuming == []
+    await writer.close()
+    assert log.logged == [notice(1), notice(2)] and fallback.files == {}
+
+
 async def test_a_failing_trim_is_reported_once_and_later_events_are_still_written() -> None:
     log, published = FailingTrims(), Published()
     writer = LogWriter(log, published, log_bytes=1000)

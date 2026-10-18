@@ -1,6 +1,6 @@
 """Why a session halted when a write to the store failed, and what the user can do about it."""
 
-from collections.abc import Iterable
+from collections.abc import Collection, Iterable
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -102,3 +102,25 @@ def storage_halt_explanation(
             RESUME,
         )
     )
+
+
+def lost_spans(lost: Collection[int], seqs: Iterable[int]) -> list[SeqSpan]:
+    """The runs of ``lost`` ``seq``s among ``seqs``, the events' ``seq``s, lost or not: each the
+    first and last ``seq`` of lost events with no kept event between them, oldest first."""
+    spans: list[SeqSpan] = []
+    run: list[int] = []
+    for seq in sorted({*seqs, *lost}):
+        if seq in lost:
+            run.append(seq)
+        elif run:
+            spans.append((run[0], run[-1]))
+            run = []
+    if run:
+        spans.append((run[0], run[-1]))
+    return spans
+
+
+def recovered_note(count: int, path: str) -> str:
+    """The note that ``count`` events parked in the fallback file at ``path`` were recovered."""
+    events = "event" if count == 1 else "events"
+    return f"Recovered {count} {events} from {path} into the session's log."

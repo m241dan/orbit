@@ -33,7 +33,7 @@ from orbit.agent.application.review_count import ReviewCount
 from orbit.agent.application.review_lane import ReviewLane
 from orbit.agent.application.settings import SessionSettings
 from orbit.agent.application.startup_check import StartupCheck
-from orbit.agent.application.storage_halt import StorageHalt
+from orbit.agent.application.storage_halt import Failure, HaltHooks, StorageHalt
 from orbit.agent.application.switcher import (
     SessionCommand,
     SessionSwitcher,
@@ -68,6 +68,8 @@ from orbit.protocol import (
     EventEnvelope,
     Hello,
     History,
+    LogGap,
+    ResumeStorage,
     RunningAgent,
     SessionSummary,
     Settings,
@@ -149,8 +151,11 @@ class AgentSession:
 
     When a write to the store fails, the session halts: the agents running, the planner's turn,
     the reviews and the startup check are cancelled, an ``ErrorOccurred`` coded
-    ``storage_failed`` explains why, and every command but ``Hello`` is refused so. Nothing is
-    written to the store from then on: the events not logged go to the ``fallback`` instead.
+    ``storage_failed`` explains why, and every command but ``Hello`` and ``ResumeStorage`` is
+    refused so. Nothing is written to the store from then on: the events not logged go to the
+    ``fallback`` instead. ``ResumeStorage`` retries the writes; once they work, the events
+    parked are logged, a ``LogGap`` is logged for each span of those lost, and the halt is
+    lifted.
     """
 
     def __init__(
@@ -176,11 +181,10 @@ class AgentSession:
         self._settings = SessionSettings(settings or Settings(), pinned, model_choices)
         self._pick_session = pick_session
         self._storage = storage
-        self._halt = StorageHalt(
-            lambda event: self._events.put(event),
-            lambda: self._events.stop_log(self._keeper.id),
-            self._stop_work,
+        halt_hooks = HaltHooks(
+            lambda: self._events.stop_log(self._keeper.id), self._stop_work, self._retry_storage
         )
+        self._halt = StorageHalt(lambda event: self._events.put(event), halt_hooks)
         overflow = Overflow(fallback, self._log_failed)
         self._events = Outbox(lambda: self._keeper.id, store, storage, overflow)
         new_sessions = NewSessions(clock, new_id)
@@ -207,6 +211,31 @@ class AgentSession:
         self._commands = self._work_commands()
         self._handshake = Handshake(self._handshake_parts(), self._events)
         self._history = SessionHistory(self._keeper, self._events)
+
+    async def _retry_storage(self) -> Failure | None:
+        """Retry the writes to the store a halt stopped: the session record as it is now and
+        the review count, then appending to the event log, which logs a ``LogGap`` for each
+        span of events lost; returns the write that failed and its error, if one did."""
+        return await self._retry_saves() or await self._resume_log()
+
+    async def _retry_saves(self) -> Failure | None:
+        """Save the session record as it is now, then the review count, though halted; returns
+        the one that failed and its error, if one did."""
+        record = await self._keeper.retry(self._switcher.contents)
+        if record is not None:
+            return FailedWrite.SESSION_RECORD, record
+        count = await self._review_count.retry()
+        return None if count is None else (FailedWrite.REVIEW_COUNT, count)
+
+    async def _resume_log(self) -> Failure | None:
+        """Append to the event log again, publishing a ``LogGap`` for each span of events that
+        reached neither it nor a fallback file; returns the error, if appending failed."""
+        resumed = await self._events.resume_log()
+        if isinstance(resumed, RuntimeError):
+            return FailedWrite.EVENT_LOG, resumed
+        for first, last in resumed:
+            await self._events.put(LogGap(first_seq=first, last_seq=last))
+        return None
 
     def _log_failed(self, error: RuntimeError) -> None:
         """Halt the session, as appending to its event log failed with ``error``."""
@@ -325,7 +354,8 @@ class AgentSession:
 
     async def send(self, envelope: CommandEnvelope) -> None:
         """Handle the command in ``envelope``, then publish its outcome: ``CommandRefused`` if
-        it was refused, as it is but for ``Hello`` while the session is halted, or as
+        it was refused, as it is but for ``Hello`` and ``ResumeStorage`` while the session is
+        halted, or as
         ``internal`` if handling it failed, else ``CommandAccepted``, or ``Welcome`` for a
         ``Hello``. Only cancellation escapes, with no outcome. After an incompatible ``Hello``,
         nothing is handled."""
@@ -339,8 +369,7 @@ class AgentSession:
                 await self._handshake.hello(command, command_id)
                 return
             self._handshake.admit()
-            self._halt.check()
-            await self._handle(command)
+            await self._admitted(command)
         except Refused as refusal:
             refused = CommandRefused(command_id=command_id, code=refusal.code, message=str(refusal))
             await self._events.put(refused)
@@ -362,6 +391,17 @@ class AgentSession:
         if session is not None and session != open_id:
             message = f"Session {session!r} isn't open; the open session is {open_id}."
             raise Refused(WRONG_SESSION, message)
+
+    async def _admitted(
+        self, command: SessionCommand | WorkCommand | History | ResumeStorage
+    ) -> None:
+        """Handle ``command``, sent once the handshake is done: refused while the session is
+        halted, but for ``ResumeStorage``, which resumes it."""
+        if isinstance(command, ResumeStorage):
+            await self._halt.resume()
+            return
+        self._halt.check()
+        await self._handle(command)
 
     async def _handle(self, command: SessionCommand | WorkCommand | History) -> None:
         if isinstance(command, History):

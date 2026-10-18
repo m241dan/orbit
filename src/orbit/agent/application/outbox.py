@@ -8,6 +8,7 @@ from orbit.agent.application.log_writer import LogWriter, Overflow
 from orbit.agent.application.ports import EventLog
 from orbit.agent.domain.replay import can_replay
 from orbit.agent.domain.storage import StorageSettings, cut_fields
+from orbit.agent.domain.storage_halt import SeqSpan
 from orbit.protocol import CONNECTION_EVENTS, SESSIONLESS_EVENTS, Event, EventEnvelope
 
 TRANSCRIPT_LENGTH = 500
@@ -41,7 +42,7 @@ class Outbox:
     written have their text fields cut and each session's log is trimmed as the ``storage``
     settings say; those read from :meth:`envelope` are whole. A failed append is told to the
     ``overflow``'s ``failed``; from then on, or once :meth:`stop_log` is called, the envelopes
-    go to its fallback instead (nowhere without one)."""
+    go to its fallback instead (nowhere without one), until :meth:`resume_log` works."""
 
     def __init__(
         self,
@@ -123,6 +124,14 @@ class Outbox:
         if self._writer is None:
             return [], None
         return await self._writer.stop(session_id)
+
+    async def resume_log(self) -> list[SeqSpan] | RuntimeError:
+        """Write to the log again, once stopped, starting with the envelopes the fallback took
+        and those queued; returns the spans of the envelopes lost, which reached neither, or the
+        error when the log still fails. Nothing is lost without a log."""
+        if self._writer is None:
+            return []
+        return await self._writer.resume()
 
     async def close(self) -> None:
         """Write the envelopes still queued for the log, if there is one, and stop writing."""

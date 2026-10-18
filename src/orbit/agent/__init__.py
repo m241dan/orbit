@@ -18,6 +18,7 @@ from orbit.agent.application.ports import (
     StoredSession,
     Workspace,
 )
+from orbit.agent.application.recovery import RecoveryFailed, recover_parked
 from orbit.agent.application.session import AgentSession
 from orbit.agent.application.verifier import Verification
 from orbit.agent.domain.agent_task import Limits
@@ -26,6 +27,7 @@ from orbit.agent.domain.config import OrbitConfig
 from orbit.agent.domain.config_errors import ConfigError
 from orbit.agent.domain.roles import Role
 from orbit.agent.domain.storage import StorageSettings
+from orbit.agent.domain.storage_halt import recovered_note
 from orbit.agent.domain.verification import VerificationStep
 from orbit.agent.external.checks import run_step
 from orbit.agent.external.claude_cli import MODEL_ALIASES, ClaudeCliRunner
@@ -57,6 +59,7 @@ __all__ = [
     "OrbitConfig",
     "ProposalDecision",
     "ProposalReview",
+    "RecoveryFailed",
     "Role",
     "SessionStore",
     "Setup",
@@ -75,6 +78,8 @@ __all__ = [
     "in_git_work_tree",
     "read_config",
     "read_storage",
+    "recover_parked",
+    "recovered_note",
     "resolve_config_dir",
     "resolve_state_dir",
     "run_step",

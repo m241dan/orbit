@@ -240,7 +240,8 @@ class FakeHalt:
 
 class FakeFallback:
     """Fallback files kept in memory: each session's envelopes in ``files``, its file named by
-    :meth:`path`; while ``broken``, nothing can be written."""
+    :meth:`path`; while ``broken``, nothing can be written. A file removed is gone from
+    ``files``."""
 
     def __init__(self) -> None:
         self.files: dict[str, list[EventEnvelope]] = {}
@@ -256,6 +257,9 @@ class FakeFallback:
         await asyncio.sleep(0)  # Writing takes a while.
         self.files.setdefault(session_id, []).extend(envelopes)
         return self.path(session_id)
+
+    async def remove(self, session_id: str) -> None:
+        self.files.pop(session_id, None)
 
 
 class FakeStore:
@@ -360,7 +364,8 @@ class FakeStore:
             raise RuntimeError(self.append_failure)
         await asyncio.sleep(0)  # Writing takes a while.
         self.appends.append((session_id, list(envelopes)))
-        self.logged += envelopes
+        stored = {envelope.seq for envelope in self.logged}
+        self.logged += [envelope for envelope in envelopes if envelope.seq not in stored]
 
     async def recent(self, session_id: str, limit: int) -> list[EventEnvelope]:
         await asyncio.sleep(0)  # Reading takes a while.

@@ -9,6 +9,8 @@ from orbit.agent.domain.storage_halt import (
     StorageErrorKind,
     StorageFault,
     halting_message,
+    lost_spans,
+    recovered_note,
     seq_span,
     storage_halt_explanation,
 )
@@ -105,3 +107,22 @@ def test_the_halting_message_names_the_failed_write() -> None:
     assert halting_message(FailedWrite.REVIEW_COUNT) == (
         "Saving the review count failed, so orbit is stopping the session."
     )
+
+
+def test_lost_events_with_none_kept_between_them_are_one_span() -> None:
+    assert lost_spans({50, 51, 52, 55}, [49, 50, 51, 52, 53, 55, 56]) == [(50, 52), (55, 55)]
+
+
+def test_a_span_of_lost_events_may_end_with_the_last_event() -> None:
+    assert lost_spans({3, 4}, [1, 2]) == [(3, 4)]
+
+
+def test_with_nothing_lost_there_are_no_spans() -> None:
+    assert lost_spans(set(), [1, 2]) == []
+
+
+def test_the_recovered_note_names_the_file_and_counts_the_events() -> None:
+    assert recovered_note(37, "/state/fallback/w1-s1.jsonl") == (
+        "Recovered 37 events from /state/fallback/w1-s1.jsonl into the session's log."
+    )
+    assert recovered_note(1, "f.jsonl") == "Recovered 1 event from f.jsonl into the session's log."

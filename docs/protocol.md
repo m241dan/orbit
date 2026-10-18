@@ -107,6 +107,21 @@ with `unknown`; without a store, the page is empty and `more` is false. The TUI 
 page before the oldest event it shows when the cursor moves up past the top of the
 conversation, one request at a time.
 
+## Resuming storage
+
+While the session is halted because a write to the store failed (see `storage_failed` under
+[Codes](#codes)), `ResumeStorage()` retries the writes that failed: the session record as it is
+now, the review count and appending to the event log. When they work, the events parked in the
+fallback file and those still queued are appended in `seq` order, skipping any the log holds
+already, the fallback file is deleted, the halt is lifted (commands are accepted again, and
+later Snapshots' `storage_halt` is null) and the command is answered with `CommandAccepted`. For
+each run of events that reached neither the log nor a fallback file, the backend publishes and
+logs a `LogGap(first_seq, last_seq)` before that outcome, naming the first and last `seq` lost;
+the Snapshot's transcript and `HistoryPage`s hold it in its place, like any logged event. While
+a write still fails, `ResumeStorage` is refused with `storage_failed`, its message the
+explanation made afresh for the failure now, and the session stays halted. While the session
+isn't halted, `ResumeStorage` is accepted and does nothing.
+
 ## Command outcomes
 
 The backend answers every command with exactly one outcome, `CommandAccepted` or
@@ -203,7 +218,7 @@ Refusals, in `CommandRefused`:
 | `locked` | Another orbit holds what the command acts on, such as a session. |
 | `wrong_session` | The command is for a session that isn't open. |
 | `incompatible` | A `Hello` named a protocol version this orbit doesn't speak; nothing more is sent on that stream. |
-| `storage_failed` | The session is halted because a write to the store failed; the message is the halt's explanation. Every command but `Hello` is refused so until storage is resumed. |
+| `storage_failed` | The session is halted because a write to the store failed; the message is the halt's explanation. Every command but `Hello` and `ResumeStorage` is refused so until storage is resumed; `ResumeStorage` is refused so while the writes still fail (see [Resuming storage](#resuming-storage)). |
 
 Errors, in `ErrorOccurred`:
 

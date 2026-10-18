@@ -593,7 +593,7 @@ state directory, replace `orbit.db` with the backup, and start orbit again.
 When a write to the store fails, whether the event log, the session record or the super review
 count, orbit halts the session instead of carrying on with work it can't record: the running
 agents, the planner's turn, the reviews and the startup check are cancelled, and every command
-but quitting is refused with `storage_failed` and the same explanation. Nothing more is written
+but quitting and "Try again" is refused with `storage_failed` and the same explanation. Nothing more is written
 to `orbit.db` until storage is resumed.
 
 The explanation, shown in the conversation as an error, says which write failed, the database
@@ -610,6 +610,23 @@ fallback file, one JSON envelope per line, readable by you alone:
 `fallback/<workspace id>-<session id>.jsonl` in the state directory, or, if that can't be
 written, `.git/orbit/fallback/<session id>.jsonl` in the repository (`.orbit/fallback/` outside
 git). The explanation names the file, or says that neither place could be written.
+
+Once the cause is fixed, "Try again" retries the writes that failed: the session record as it is
+now, the super review count and the event log. When they work, the events in the fallback file
+and those still waiting are appended to the log in `seq` order in one go, skipping any it already
+holds, the fallback file is deleted and the halt is lifted: commands are accepted again and work
+can carry on. Events that reached neither the log nor a fallback file are recorded as a gap, which
+the conversation, and paging back through it, shows in their place as a line such as "Events
+1204–1210 weren't saved". If a write still fails, the session stays halted and the explanation
+is given again for the failure now.
+
+Restarting orbit recovers the events too. On every start, once the database is open, orbit
+imports each of the repository's fallback files, from both places, into the log the same way,
+skipping events already stored, deletes it, and says in the conversation how many events it
+recovered from which file, as in "Recovered 37 events from .git/orbit/fallback/<session
+id>.jsonl into the session's log." A fallback file that can't be read or imported stops orbit
+before the app starts, with status 2 and a message naming the file and the error, leaving the
+file as it was.
 
 ### Planning with the planner
 
