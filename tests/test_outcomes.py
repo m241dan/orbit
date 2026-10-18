@@ -342,13 +342,13 @@ async def test_a_cancelled_handler_is_cancelled_with_no_outcome() -> None:
 
 
 @pytest.mark.parametrize("trigger", [entry.name for entry in TRIGGERS])
-async def test_every_catalogued_trigger_is_answered_by_fire_trigger(trigger: str) -> None:
+async def test_every_catalogued_trigger_is_run_by_fire_trigger(trigger: str) -> None:
     session = AgentSession()
-    await send_as(session, "c1", FireTrigger(trigger=trigger))
-    events = await outcome(session)
+    refused = await refusal(session, "c1", FireTrigger(trigger=trigger))
     await session.close()
 
-    assert not (isinstance(events[-1], CommandRefused) and events[-1].code == UNKNOWN)
+    # With no agents every trigger's run refuses; one without a run would be INTERNAL.
+    assert refused.code == NOT_CONFIGURED
 
 
 @pytest.mark.parametrize("lane", LANES)
