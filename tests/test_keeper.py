@@ -438,3 +438,68 @@ async def test_a_rename_or_delete_while_the_sessions_cannot_be_listed_does_nothi
     await keeper.delete_saved("other")
     assert published.errors == [LISTING_FAILED, LISTING_FAILED]
     assert store.last.name == "other" and store.locked == set()
+
+
+def forgetting_keeper(store: FakeStore) -> tuple[SessionKeeper, list[str]]:
+    """A keeper over ``store``, making ``session-1`` then ``session-2`` and so on, and the
+    sessions whose logged events it has removed."""
+    forgotten: list[str] = []
+    ids = iter(f"session-{n}" for n in range(1, 100))
+    new_sessions = NewSessions(Ticks(), lambda: next(ids), forgotten.append)
+    return SessionKeeper(store, Published(), FakeHalt(), new_sessions), forgotten
+
+
+def no_commit() -> None:
+    pass
+
+
+async def test_an_unused_session_closed_has_its_logged_events_removed() -> None:
+    keeper, forgotten = forgetting_keeper(FakeStore())
+    await keeper.close()
+    assert forgotten == ["session-1"]
+
+
+async def test_a_saved_session_closed_keeps_its_logged_events() -> None:
+    keeper, forgotten = forgetting_keeper(FakeStore())
+    await save(keeper, WITH_TASK)
+    await keeper.close()
+    assert forgotten == []
+
+
+async def test_an_unused_session_left_has_its_logged_events_removed() -> None:
+    keeper, forgotten = forgetting_keeper(FakeStore())
+    left = await keeper.renew(None, no_commit)
+    await keeper.leave(left, discard=False)
+    assert left == Left(None) and forgotten == ["session-1"]
+
+
+async def test_a_saved_session_left_keeps_its_logged_events() -> None:
+    keeper, forgotten = forgetting_keeper(FakeStore())
+    await save(keeper, WITH_TASK)
+    await keeper.leave(await keeper.renew(None, no_commit), discard=False)
+    assert forgotten == []
+
+
+async def test_a_session_discarded_has_its_logged_events_removed_after_its_deletion() -> None:
+    store = FakeStore()
+    keeper, forgotten = forgetting_keeper(store)
+    await save(keeper, WITH_TASK)
+    await keeper.leave(await keeper.renew(None, no_commit), discard=True)
+    assert store.deleted == ["session-1"] and forgotten == ["session-1"]
+
+
+async def test_a_saved_session_deleted_has_its_logged_events_removed() -> None:
+    store = FakeStore()
+    store.saved = [SessionRecord(id="other", name="other", created=START, last_active=START)]
+    keeper, forgotten = forgetting_keeper(store)
+    await keeper.delete_saved("other")
+    assert store.deleted == ["other"] and forgotten == ["other"]
+
+
+async def test_a_session_that_cannot_be_deleted_keeps_its_logged_events() -> None:
+    store = FakeStore()
+    store.saved = [SessionRecord(id="other", name="other", created=START, last_active=START)]
+    store.delete_failure = "Couldn't delete the session: read-only"
+    keeper, forgotten = forgetting_keeper(store)
+    await keeper.delete_saved("other")
+    assert forgotten == []

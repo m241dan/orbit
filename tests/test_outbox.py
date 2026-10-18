@@ -69,6 +69,7 @@ def test_an_outbox_reads_events_only_in_their_envelopes() -> None:
         "transcript",
         "history",
         "missed",
+        "forget",
         "resend",
         "stop_log",
         "resume_log",

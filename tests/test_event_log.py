@@ -520,3 +520,34 @@ async def test_trimming_under_an_id_that_isnt_a_plain_file_name_is_refused(
     store = await open_store(workspace)
     with pytest.raises(ValueError, match="Not a session id"):
         await (store.trim("../abc", 1, 1) if call == "trim" else store.trimmed("../abc"))
+
+
+async def test_forgetting_a_session_deletes_its_events_and_log_alone(
+    open_store: Opener, state: Path, workspace: Path
+) -> None:
+    store = await open_store(workspace)
+    await store.save(record())
+    await store.append("abc", [big(1), big(2)])
+    await store.append("def", [notice(3, "def")])
+    await store.trim("abc", 1, 1)
+    await store.forget("abc")
+
+    assert [session for session, *_ in logged(state)] == ["def"]
+    assert list(stored_sizes(state)) == ["def"] and not await store.trimmed("abc")
+    assert [s.id for s in await store.sessions()] == ["abc"]
+
+
+async def test_a_forget_that_fails_is_refused(open_store: Opener, workspace: Path) -> None:
+    store = await open_store(workspace)
+    await store.close()
+
+    with pytest.raises(RuntimeError, match=r"Couldn't delete the events of the session abc from "):
+        await store.forget("abc")
+
+
+async def test_forgetting_under_an_id_that_isnt_a_plain_file_name_is_refused(
+    open_store: Opener, workspace: Path
+) -> None:
+    store = await open_store(workspace)
+    with pytest.raises(ValueError, match="Not a session id"):
+        await store.forget("../abc")

@@ -49,6 +49,9 @@ Clock = Callable[[], datetime]
 IdMaker = Callable[[], str]
 """Makes a fresh, unique id."""
 
+Forget = Callable[[str], None]
+"""Has the logged events of the session whose id it's given deleted."""
+
 Commit = Callable[[], None]
 """Switches what the session holds, unless that's refused now: then raises :class:`Refused`."""
 
@@ -106,12 +109,18 @@ def new_session_id() -> str:
     return uuid.uuid4().hex
 
 
+def _kept(session_id: str) -> None:
+    pass
+
+
 @dataclass(frozen=True)
 class NewSessions:
-    """How sessions are made: ``clock`` tells the time, and ``new_id`` makes each one's id."""
+    """How sessions are made and let go of: ``clock`` tells the time, ``new_id`` makes each
+    one's id, and ``forget`` deletes the logged events of one let go of unsaved, or deleted."""
 
     clock: Clock = local_now
     new_id: IdMaker = new_session_id
+    forget: Forget = _kept
 
 
 _NEW_SESSIONS = NewSessions()
@@ -136,7 +145,7 @@ class SessionKeeper:
 
     It's ``used`` once it has a task or :meth:`use` is called, and only then saved, locked in
     the store from its first save until :meth:`close`, or until another session is opened in
-    its place.
+    its place. A session closed or left unsaved, or deleted, has its logged events forgotten.
 
     A failing save halts the session through ``halt``, and nothing is saved while it's halted.
     """
@@ -153,6 +162,7 @@ class SessionKeeper:
         self._halt = halt
         self._clock = new_sessions.clock
         self._new_id = new_sessions.new_id
+        self._forget = new_sessions.forget
         self.id = self._new_id()
         self.created = self._clock()
         self.name = default_name(self.created)
@@ -281,12 +291,15 @@ class SessionKeeper:
             await self._delete(self._store, session_id)
 
     async def _delete(self, store: SessionStore, session_id: str) -> None:
-        """Delete the session ``session_id`` from ``store``, whose lock this orbit took to;
-        reports it, letting go of the lock, if it can't be deleted."""
+        """Delete the session ``session_id`` from ``store``, whose lock this orbit took to, and
+        then its events still to be logged; reports it, letting go of the lock, if it can't be
+        deleted."""
         error = await outcome(store.delete(session_id))
         if isinstance(error, RuntimeError):
             await self._release(store, session_id)
             await self._publish(ErrorOccurred(code=SAVE_FAILED, message=str(error)))
+            return
+        self._forget(session_id)
 
     async def open(self, session_id: str, load: Load) -> Opened | None:
         """Make the saved session ``session_id`` the one open here, locked, if ``load`` switches
@@ -399,19 +412,25 @@ class SessionKeeper:
         return True
 
     def _become(self, session_id: str, name: str, created: datetime) -> Left:
-        """Be the session ``session_id``, unused and unsaved so far; returns the one left."""
+        """Be the session ``session_id``, unused and unsaved so far; returns the one left, whose
+        logged events are forgotten if it was never saved."""
         left = Left(self.id if self._locked else None)
+        if left.id is None:
+            self._forget(self.id)
         self.id, self.name, self.created = session_id, name, created
         self.used, self._saved, self._locked = False, None, None
         return left
 
     async def close(self) -> None:
-        """Stop saving, and let go of the session's lock if it was taken; reports it if the lock
-        can't be let go of."""
+        """Stop saving, and let go of the session's lock if it was taken, else forget its logged
+        events; reports it if the lock can't be let go of."""
         async with self._saving:
             self._closed = True
-            if self._store is not None and self._locked:
-                await self._release(self._store, self.id)
+            if not self._locked:
+                self._forget(self.id)
+                return
+            assert self._store is not None  # Only a store holds locks.
+            await self._release(self._store, self.id)
 
     async def _release(self, store: SessionStore, session_id: str) -> None:
         """Let go of the session ``session_id``'s lock in ``store``; reports it if it can't be

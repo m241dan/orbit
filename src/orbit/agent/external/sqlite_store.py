@@ -527,6 +527,14 @@ class SqliteStore:
         except sqlite3.Error:
             return False
 
+    async def forget(self, session_id: str) -> None:
+        check_session_id(session_id)
+        try:
+            await self._call(self._forget, session_id)
+        except sqlite3.Error as error:
+            message = f"Couldn't delete the events of the session {session_id} from"
+            raise RuntimeError(f"{message} {self._database}: {error}") from error
+
     async def acquire(self, session_id: str) -> bool:
         """Lock the session ``session_id`` for this orbit; returns ``False`` when another
         running orbit has it locked.
@@ -803,16 +811,25 @@ class SqliteStore:
         ).fetchone()
         return LogBounds(first_seq=first, others_seq=int(others or 0))
 
+    def _forget(self, session_id: str) -> None:
+        with self._transaction():
+            self._forget_log(session_id)
+
+    def _forget_log(self, session_id: str) -> None:
+        """Delete the session ``session_id``'s events and its row in ``logs``, within a
+        transaction."""
+        self._db.execute(
+            "DELETE FROM events WHERE workspace_id = ? AND session_id = ?",
+            (self._workspace, session_id),
+        )
+        self._db.execute(
+            "DELETE FROM logs WHERE workspace_id = ? AND session_id = ?",
+            (self._workspace, session_id),
+        )
+
     def _delete(self, session_id: str) -> None:
         with self._transaction():
-            self._db.execute(
-                "DELETE FROM events WHERE workspace_id = ? AND session_id = ?",
-                (self._workspace, session_id),
-            )
-            self._db.execute(
-                "DELETE FROM logs WHERE workspace_id = ? AND session_id = ?",
-                (self._workspace, session_id),
-            )
+            self._forget_log(session_id)
             self._db.execute(
                 "DELETE FROM sessions WHERE workspace_id = ? AND id = ?",
                 (self._workspace, session_id),

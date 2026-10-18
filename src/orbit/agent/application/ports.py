@@ -309,6 +309,11 @@ class EventLog(Protocol):
         when that can't be read."""
         ...
 
+    async def forget(self, session_id: str) -> None:
+        """Delete the events of the session ``session_id`` from its log, and its log with them;
+        raises ``RuntimeError`` when it can't."""
+        ...
+
 
 class SessionStore(EventLog, Protocol):
     """Where saved sessions are kept, each locked while an orbit has it open, with their events'

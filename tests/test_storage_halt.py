@@ -461,7 +461,7 @@ async def test_resuming_logs_a_gap_for_events_that_reached_no_fallback() -> None
     [history] = payloads_of(HistoryPage, page)
     assert gap in payloads_of(LogGap, history.events)
     await session.close()
-    assert gap in payloads_of(LogGap, store.logged)
+    assert gap in payloads_of(LogGap, [e for _, appended in store.appends for e in appended])
 
 
 async def test_resuming_while_writing_still_fails_is_refused_and_the_session_stays_halted() -> None:

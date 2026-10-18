@@ -187,7 +187,7 @@ class AgentSession:
         self._halt = StorageHalt(lambda event: self._events.put(event), halt_hooks)
         overflow = Overflow(fallback, self._log_failed)
         self._events = Outbox(lambda: self._keeper.id, store, storage, overflow)
-        new_sessions = NewSessions(clock, new_id)
+        new_sessions = NewSessions(clock, new_id, self._events.forget)
         self._keeper = SessionKeeper(store, self._events.put, self._halt, new_sessions)
         self._keeper.rename(name)
         self._review_count = ReviewCount(store, self._halt, self._events.put)

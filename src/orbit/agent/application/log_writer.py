@@ -74,7 +74,8 @@ class LogWriter:
     added: whatever has queued since its last write goes in one append per session. After each
     append, unless ``log_bytes`` is 0, a session's log over it is trimmed to under
     :func:`trim_target` of it; a failed trim is reported with ``publish`` once, until one works
-    again. Adding never waits for the log.
+    again. :meth:`forget` has a session's events deleted from the log once those added before it
+    are written, a failed one reported so too. Adding never waits for the log.
 
     A failed append, or :meth:`stop`, stops the appending: the envelopes not appended, and every
     one added from then on, go to the ``overflow``'s fallback instead (nowhere without one), and
@@ -89,7 +90,9 @@ class LogWriter:
         self._fallback = overflow.fallback
         self._failed = overflow.failed
         self._trims = ReportedOnce(publish)
+        self._forgets = ReportedOnce(publish)
         self._queued: Queued = []
+        self._forgetting: list[str] = []  # The sessions whose events to delete, once written.
         self._writing: Queued = []  # Taken from the queue to write.
         self._diverted: Queued = []  # Sent to the fallback, as the log can't take them.
         self._places: dict[str, str | None] = {}  # Each session's fallback file, if written.
@@ -108,6 +111,18 @@ class LogWriter:
         if self._closed:
             return
         self._queued.append((session_id, envelope))
+        self._wake()
+
+    def forget(self, session_id: str) -> None:
+        """Have the events of the session ``session_id`` deleted from the log once those added
+        so far are written; once the writer is closed, nothing more is deleted."""
+        if self._closed:
+            return
+        self._forgetting.append(session_id)
+        self._wake()
+
+    def _wake(self) -> None:
+        """Have the writer write what's queued, starting it if it isn't yet."""
         self._ready.set()
         if self._task is None:
             self._task = asyncio.create_task(self._run())
@@ -235,15 +250,23 @@ class LogWriter:
 
     async def _run(self) -> None:
         """Write what's queued as it queues, until closing leaves nothing queued."""
-        while not self._closing or self._queued:
+        while not self._closing or self._queued or self._forgetting:
             await self._ready.wait()
             self._ready.clear()
-            self._writing, self._queued = self._queued, []
-            if self._stopped:
-                await self._divert(self._writing)
-            else:
-                await self._append(self._writing)
-            self._writing = []
+            await self._write()
+
+    async def _write(self) -> None:
+        """Write what's queued, then delete the events of the sessions to forget, whose events
+        added before that are written by then."""
+        self._writing, self._queued = self._queued, []
+        forgetting, self._forgetting = self._forgetting, []
+        if self._stopped:
+            await self._divert(self._writing)
+        else:
+            await self._append(self._writing)
+        self._writing = []
+        for session_id in forgetting:
+            await self._forgets.attempt(self._log.forget(session_id))
 
     async def _append(self, queued: Queued) -> None:
         """Append ``queued`` to the log, one append per session, trimming each session's log

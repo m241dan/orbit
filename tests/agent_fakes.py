@@ -278,7 +278,8 @@ class FakeStore:
     The events appended are ``logged``, each append's in ``appends``, with ``seq`` the highest
     logged before; ``append_failure``, while set, is the error every append raises. Each trim
     asked for is in ``trims``, as the session's id, the limit and the target, and the sessions
-    in ``trimmed_logs`` have had events trimmed.
+    in ``trimmed_logs`` have had events trimmed. Each session whose events were forgotten is in
+    ``forgotten``; ``forget_failure``, while set, is the error forgetting raises.
     """
 
     def __init__(self, count: int = 0) -> None:
@@ -307,6 +308,8 @@ class FakeStore:
         self.append_failure: str | None = None
         self.trims: list[tuple[str, int, int]] = []
         self.trimmed_logs: set[str] = set()
+        self.forgotten: list[str] = []
+        self.forget_failure: str | None = None
 
     @property
     def last(self) -> SessionRecord:
@@ -395,6 +398,12 @@ class FakeStore:
 
     async def trimmed(self, session_id: str) -> bool:
         return session_id in self.trimmed_logs
+
+    async def forget(self, session_id: str) -> None:
+        if self.forget_failure is not None:
+            raise RuntimeError(self.forget_failure)
+        self.forgotten.append(session_id)
+        self.logged = [envelope for envelope in self.logged if envelope.session != session_id]
 
     async def review_count(self) -> int:
         if self.count_load_failure is not None:
@@ -708,6 +717,12 @@ async def greeted(session: Session) -> None:
 def nothing_queued(session: AgentSession) -> bool:
     """Whether the session has no events queued to publish."""
     return session._events._queue.empty()
+
+
+async def save_used(session: AgentSession) -> None:
+    """Mark ``session`` used and save it, so its logged events outlast its closing."""
+    session._keeper.use()
+    await session._save()
 
 
 async def publish(session: AgentSession, event: Event) -> None:

@@ -41,13 +41,16 @@ from tests.agent_fakes import (
     FakeFallback,
     FakeStore,
     Ticks,
+    agent_exited,
+    events_until,
     greet,
     publish,
     refused,
+    save_used,
     send,
 )
 from tests.test_event_log import big
-from tests.test_session_switch import opened, saved, store_with
+from tests.test_session_switch import failing_startup, opened, saved, store_with, switching
 from tests.test_sqlite_store import database
 
 
@@ -347,6 +350,56 @@ async def test_a_failing_trim_is_reported_once_and_later_events_are_still_writte
     assert log.logged == [notice(1), notice(2)]
 
 
+async def test_forgetting_a_session_deletes_its_events_after_those_being_written() -> None:
+    log = GatedLog()
+    writer = LogWriter(log, Published())
+    writer.add("a", notice(1))
+    await log.waiting.wait()
+    writer.forget("a")
+    writer.add("b", notice(2, "b"))
+    closing = asyncio.create_task(writer.close())
+    log.gate.set()
+    await closing
+
+    assert log.forgotten == ["a"]
+    assert log.logged == [notice(2, "b")]
+
+
+async def test_forgetting_a_session_deletes_its_events_still_queued() -> None:
+    log = FakeStore()
+    writer = LogWriter(log, Published())
+    writer.add("a", notice(1))
+    writer.forget("a")
+    await writer.close()
+
+    assert log.appends == [("a", [notice(1)])]
+    assert log.logged == []
+
+
+async def test_a_failing_forget_is_reported_once_and_later_events_are_still_written() -> None:
+    log, published = FakeStore(), Published()
+    log.forget_failure = "read-only"
+    writer = LogWriter(log, published)
+    writer.forget("a")
+    await asyncio.sleep(0.01)
+    writer.forget("b")
+    writer.add("c", notice(1, "c"))
+    await writer.close()
+
+    assert published.events == [ErrorOccurred(code=SAVE_FAILED, message="read-only")]
+    assert log.logged == [notice(1, "c")]
+
+
+async def test_a_writer_closed_forgets_nothing() -> None:
+    log = FakeStore()
+    writer = LogWriter(log, Published())
+    await writer.close()
+    writer.forget("a")
+    await asyncio.sleep(0.01)
+
+    assert log.forgotten == []
+
+
 async def test_a_writer_closed_writes_nothing_more() -> None:
     log = FakeStore()
     writer = LogWriter(log, Published())
@@ -557,6 +610,73 @@ async def test_a_sessions_events_are_logged_but_for_those_answering_one_connecti
     ]
 
 
+async def test_a_session_closed_unused_leaves_no_events_behind(
+    sqlite: SqliteStore, tmp_path: Path
+) -> None:
+    session = stored_session(sqlite)
+    await greet(session)
+    await publish(session, Notice(message="Workspace: project"))
+    await session.close()
+
+    assert read_log(tmp_path / "state") == []
+
+
+async def test_a_session_used_after_its_startup_notices_keeps_them(
+    sqlite: SqliteStore, tmp_path: Path
+) -> None:
+    session = stored_session(sqlite)
+    await publish(session, Notice(message="Workspace: project"))
+    await send(session, AddTask(task=TaskSpec(prompt="Add a flag.")))
+    await session.close()
+
+    stored = read_log(tmp_path / "state")
+    assert stored == kept(delivered(session))
+    assert Notice(message="Workspace: project") in [e.payload for e in stored if e is not None]
+
+
+def gated_with_auth(queued: bool) -> GatedLog:
+    """A gated log holding the saved session ``auth``, its gate open unless events are to stay
+    ``queued`` until it's opened."""
+    store = GatedLog()
+    store.saved = [saved("auth")]
+    if not queued:
+        store.gate.set()
+    return store
+
+
+async def pick_auth(session: AgentSession, store: GatedLog) -> None:
+    """Pick the saved session ``auth`` in ``session``, then open ``store``'s gate and close."""
+    await opened(session, OpenSession(session_id="auth"))
+    store.gate.set()
+    await session.close()
+
+
+@pytest.mark.parametrize("queued", [False, True])
+async def test_picking_a_session_leaves_no_events_of_the_unsaved_one_left(queued: bool) -> None:
+    store = gated_with_auth(queued)
+    session, _ = switching(store, pick_session=True)
+    await publish(session, Notice(message="Workspace: project"))
+    await store.waiting.wait()
+    await pick_auth(session, store)
+
+    assert store.appends and [e for e in store.logged if e.session == "session-1"] == []
+    assert store.forgotten == ["session-1"]
+
+
+@pytest.mark.parametrize("queued", [False, True])
+async def test_picking_a_session_leaves_no_events_of_the_saved_one_discarded(
+    queued: bool,
+) -> None:
+    store = gated_with_auth(queued)
+    session = failing_startup(store)
+    await events_until(session, agent_exited("startup-check"))
+    await store.waiting.wait()
+    await pick_auth(session, store)
+
+    assert store.deleted == ["session-1"]
+    assert store.appends and [e for e in store.logged if e.session == "session-1"] == []
+
+
 async def test_a_session_counts_on_from_the_highest_seq_logged() -> None:
     store = FakeStore()
     store.seq = 41
@@ -570,6 +690,7 @@ async def test_a_session_counts_on_from_the_highest_seq_logged() -> None:
 async def test_events_published_at_once_are_written_in_few_appends_and_all_arrive() -> None:
     store = FakeStore()
     session = stored_session(store)
+    await save_used(session)
     for n in range(50):
         session._events.put_nowait(Notice(message=f"n{n}"))
     await session.close()
@@ -583,6 +704,7 @@ async def test_events_published_at_once_are_written_in_few_appends_and_all_arriv
 async def test_closing_writes_the_events_still_queued() -> None:
     store = FakeStore()
     session = stored_session(store)
+    await save_used(session)
     await publish(session, Notice(message="last"))
     await session.close()
 
@@ -779,6 +901,7 @@ async def test_history_without_a_store_is_an_empty_last_page() -> None:
 async def test_history_pages_are_never_logged() -> None:
     store = FakeStore()
     session = stored_session(store)
+    await save_used(session)
 
     await history(session, History(session="session-1", before_seq=10))
     await session.close()
@@ -824,6 +947,7 @@ async def test_a_session_log_over_its_limit_is_trimmed_after_the_next_batch(
     await sqlite.append("session-1", [big(seq, "session-1") for seq in range(1, 211)])
     await sqlite.append("other", [big(seq, "other") for seq in range(211, 421)])
     session = trimming_session(sqlite, 1)
+    await save_used(session)
     await publish(session, Notice(message="hi"))
     await session.close()
 
@@ -839,6 +963,7 @@ async def test_with_no_limit_a_session_log_is_never_trimmed(
 ) -> None:
     await sqlite.append("session-1", [big(seq, "session-1") for seq in range(1, 211)])
     session = trimming_session(sqlite, 0)
+    await save_used(session)
     await publish(session, Notice(message="hi"))
     await session.close()
 
@@ -849,6 +974,7 @@ async def test_with_no_limit_a_session_log_is_never_trimmed(
 async def test_after_trimming_the_oldest_page_is_marked_trimmed(sqlite: SqliteStore) -> None:
     await sqlite.append("session-1", [big(seq, "session-1") for seq in range(1, 211)])
     writing = trimming_session(sqlite, 1)
+    await save_used(writing)
     await publish(writing, Notice(message="hi"))
     await writing.close()
     first = (await sqlite.recent("session-1", 1000))[0].seq

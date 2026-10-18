@@ -38,7 +38,8 @@ class Outbox:
     With a ``log``, each envelope of a session is also written to it in the background, but for
     the events answering one connection; :meth:`transcript` reads a session's latest back,
     :meth:`history` those before them, :meth:`missed` those after a ``seq``, for
-    :meth:`resend` to queue again, and :meth:`close` writes those still queued. The copies
+    :meth:`resend` to queue again, :meth:`forget` deletes a session's after those queued, and
+    :meth:`close` writes those still queued. The copies
     written have their text fields cut and each session's log is trimmed as the ``storage``
     settings say; those read from :meth:`envelope` are whole. A failed append is told to the
     ``overflow``'s ``failed``; from then on, or once :meth:`stop_log` is called, the envelopes
@@ -112,6 +113,12 @@ class Outbox:
         assert self._writer is not None, "There's no log."
         bounds = await self._writer.bounds(session_id)
         return bounds is not None and can_replay(since, last, bounds)
+
+    def forget(self, session_id: str) -> None:
+        """Have the events of the session ``session_id`` deleted from the log, if there is one,
+        once those queued for it are written."""
+        if self._writer is not None:
+            self._writer.forget(session_id)
 
     def resend(self, envelope: EventEnvelope) -> None:
         """Queue ``envelope``, stamped and logged already, as it is."""

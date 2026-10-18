@@ -88,7 +88,7 @@ async def test_a_reconnecting_frontend_gets_what_it_missed_in_place_of_a_snapsho
     assert sent[2:7] == notices(16, 21)
     assert sent[7].payload == Notice(message="Workspace: /work")
     assert Snapshot not in kinds(sent)
-    assert store.logged == [*notices(10, 21), *sent[7:]]  # Logged once, as they were sent.
+    assert [e for _, appended in store.appends for e in appended] == sent[7:]  # Logged once.
 
 
 async def test_events_still_to_be_written_are_caught_up_on_once() -> None:
