@@ -17,7 +17,8 @@ from orbit.protocol import (
 )
 from orbit.tui import OrbitApp
 from orbit.tui.detail import DetailPane
-from orbit.tui.transcript import Transcript, TranscriptLog
+from orbit.tui.transcript import Transcript
+from orbit.tui.transcript_log import TranscriptLog
 from orbit.tui.view import DETAIL_COVER_BELOW, DETAIL_HEIGHT, NO_DETAILS, WAITING
 from orbit.tui.widgets import ChatPrompt, ConfirmScreen
 from orbit.tui.working import WorkingRow

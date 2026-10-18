@@ -60,7 +60,8 @@ from orbit.tui.app import event_batches
 from orbit.tui.panels import VerificationPanel
 from orbit.tui.tabs import ConversationTabs
 from orbit.tui.tasks import TaskList
-from orbit.tui.transcript import Transcript, TranscriptLog
+from orbit.tui.transcript import Transcript
+from orbit.tui.transcript_log import TranscriptLog
 from orbit.tui.view import EntryKind, coalesce, spinner_frame
 from orbit.tui.widgets import ChatPrompt, PickerScreen, SidePanel
 
