@@ -9,6 +9,7 @@ from typing import Any, Protocol
 from orbit.agent.domain.agents import Agent
 from orbit.agent.domain.checks import ChecksProposal, Setup
 from orbit.agent.domain.config_errors import ConfigError
+from orbit.agent.domain.ownership import WorkspaceOwner
 from orbit.agent.domain.replay import LogBounds
 from orbit.agent.domain.roles import Role
 from orbit.agent.domain.sessions import SessionRecord, Unreadable
@@ -37,6 +38,19 @@ UsageSource = Callable[[], Awaitable[UsageFetch]]
 Workspace = Callable[[str], Awaitable[object]]
 """A fingerprint of the working tree in a directory, equal before and after a task that
 changed no files; ``None`` when it can't be told."""
+
+
+class RepositoryLock(Protocol):
+    """The lock the orbit owning a repository holds."""
+
+    def take(self) -> WorkspaceOwner | None:
+        """Take the lock; returns its owner when another orbit holds it instead. Raises
+        ``OSError`` when it can't be taken for another reason."""
+        ...
+
+    def close(self) -> None:
+        """Let go of the lock, if this holds it."""
+        ...
 
 
 @dataclass(frozen=True)

@@ -32,6 +32,7 @@ from orbit.protocol import (
     CancelTurn,
     DecideProposal,
     EditTask,
+    ErrorOccurred,
     FireTrigger,
     MessageSent,
     ProposalDecided,
@@ -90,6 +91,7 @@ class WorkCommands:
 
     def __init__(self, parts: CommandParts) -> None:
         self._parts = parts
+        self._read_only = parts.read_only
         self._queued: list[QueuedWork] = []
 
     @property
@@ -100,10 +102,22 @@ class WorkCommands:
     async def handle(self, command: WorkCommand, command_id: str) -> None:
         """Handle ``command``, sent as ``command_id``, or queue it if it starts work while
         read-only."""
-        if self._parts.read_only and isinstance(command, QueuedWork):
+        if self._read_only and isinstance(command, QueuedWork):
             self._queued.append(command)
         else:
             await self._dispatch(command, command_id)
+
+    async def own(self, command_id: str) -> None:
+        """Stop queueing, as this orbit owns the repository now, and run the commands queued,
+        in order, for ``command_id``; one refused now is reported as an error."""
+        self._read_only = False
+        queued, self._queued = self._queued, []
+        for command in queued:
+            try:
+                await self._dispatch(command, command_id)
+            except Refused as refusal:
+                error = ErrorOccurred(code=refusal.code, message=refusal.message)
+                await self._parts.events.put(error)
 
     async def _dispatch(self, command: WorkCommand, command_id: str) -> None:
         match command:

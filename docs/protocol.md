@@ -106,6 +106,16 @@ owns it, and runs its work. Any other orbit on it is read-only: its `Catalog` an
 them, and starts no work by itself, such as reviews or the startup check; the planner, sessions,
 drafts and settings work as usual. The queue is dropped when the orbit exits.
 
+A read-only orbit tries the repository's lock every 5 seconds from its first `Welcome`. Once the
+owner has gone, it takes the lock, holds it and publishes `OwnershipOffered()`, logged in the
+open session, once until it's answered. `TakeOwnership(take)` answers it: with `take` true this
+orbit owns the repository from then on, publishing `OwnershipTaken()` and a `Notice` ("This orbit
+now owns the repository; queued work is running."), then running the work queued, in order, a
+command refused now reported as an `ErrorOccurred` with the refusal's code; later `Catalog`s and
+`Snapshot`s have `read_only` false. With `take` false it lets the lock go, so another orbit can
+take it, stays read-only and offers the repository again the next time it finds it free.
+`TakeOwnership` is refused with `invalid` when no offer is open, as it always is for an owner.
+
 ## The user's messages and decisions
 
 When the backend accepts a `SendMessage`, it publishes `MessageSent(command_id, agent, text)`
@@ -272,7 +282,7 @@ Refusals, in `CommandRefused`:
 | `not_configured` | What the command needs isn't set up, such as agents or verification. |
 | `unknown` | The command names something there's none of, such as a task, a lane or a workspace. |
 | `busy` | What the command acts on is running, so it can't be done now. |
-| `invalid` | The command can't be done as given, such as a command before `Hello` or input to a trigger that takes none. |
+| `invalid` | The command can't be done as given, such as a command before `Hello`, input to a trigger that takes none or `TakeOwnership` with no offer open. |
 | `locked` | Another orbit holds what the command acts on, such as a session. |
 | `wrong_session` | The command is for a session that isn't open. |
 | `incompatible` | A `Hello` named a protocol version this orbit doesn't speak; nothing more is sent on that stream. |

@@ -25,6 +25,7 @@ class WorkspaceLock:
     def __init__(self, directory: Path) -> None:
         self.path = directory / LOCK_FILE
         self._fd: int | None = None
+        self._url: str | None = None
 
     @property
     def held(self) -> bool:
@@ -41,7 +42,7 @@ class WorkspaceLock:
         fd = os.open(self.path, os.O_RDWR | os.O_CREAT, 0o644)
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            _write(fd, WorkspaceOwner(pid=os.getpid()))
+            _write(fd, WorkspaceOwner(pid=os.getpid(), url=self._url))
         except BlockingIOError:
             os.close(fd)
             return self.owner()
@@ -52,8 +53,9 @@ class WorkspaceLock:
         return None
 
     def announce(self, url: str) -> None:
-        """Say the owner is the ``orbit serve`` listening at ``url``, if this holds the lock;
-        raises ``OSError`` when it can't be written."""
+        """Say the owner is the ``orbit serve`` listening at ``url``, if this holds the lock,
+        and once it takes it later; raises ``OSError`` when it can't be written."""
+        self._url = url
         if self._fd is not None:
             _write(self._fd, WorkspaceOwner(pid=os.getpid(), url=url))
 

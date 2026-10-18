@@ -11,7 +11,16 @@ RESET_MESSAGE = (
 )
 RESET_YES = "reset"
 
+TAKE_OVER_TITLE = "The repository is free"
+TAKE_OVER_MESSAGE = (
+    "The orbit that owned this repository has gone. Take over to run the work queued here and"
+    " what you run from now on; stay read-only to leave it for another orbit."
+)
+TAKE_OVER_YES = "take over"
+TAKE_OVER_NO = "stay read-only"
 
-def confirm_hint(yes: str) -> str:
-    """The keys a confirmation shows, with ``yes`` naming what y does."""
-    return f"y {yes} · n/esc cancel"
+
+def confirm_hint(yes: str, no: str = "cancel") -> str:
+    """The keys a confirmation shows, with ``yes`` naming what y does and ``no`` what n and
+    escape do."""
+    return f"y {yes} · n/esc {no}"

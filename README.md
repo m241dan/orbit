@@ -928,6 +928,13 @@ first line says so too. Running tasks (`ctrl+r`) and the triggers (`ctrl+g`, `ct
 accepted and queued, in order, but nothing runs: no task, review or startup check. The planner,
 the sessions, drafts and settings work as usual. The queue is dropped when the orbit exits.
 
+A read-only orbit tries the lock every 5 seconds. Once the owner has gone, it takes the lock and
+asks, once, in a modal: "The repository is free". `y` takes it over: the orbit owns the
+repository from then on, the "read-only" mark goes, a note says "This orbit now owns the
+repository; queued work is running." and the work queued runs, in order. `n` or `esc` stays
+read-only: the orbit lets the lock go again, so another orbit can take it, and asks again the
+next time the repository is free. An orbit that owns the repository never asks.
+
 ## Development
 
 Write tests first. Coverage is held at 100% (`fail_under` in `pyproject.toml`); only
@@ -1012,7 +1019,9 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     opens another or a new one in place of the one open, and holds what the session's agents have
     spent; `WorkCommands` (in `work_commands`) handles the other commands, the prompts, tasks,
     board and agents' work, refusing those that name no such agent, lane or trigger, and
-    queueing those that start work while the session is read-only;
+    queueing those that start work while the session is read-only; `Takeover` (in `takeover`)
+    tries a read-only session's workspace lock, through the `RepositoryLock` port, until the
+    repository is free, and holds the offer of it until the user answers;
     `ReviewCount` (in `review_count`) keeps the repository's super review count apart from
     any one session; `SessionSettings` (in `settings`) holds the open session's settings, at
     first those given at startup (a session opened brings its saved ones, but for the pinned

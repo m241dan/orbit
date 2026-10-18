@@ -295,8 +295,8 @@ class PickerScreen(ModalScreen[int | None]):
 class ConfirmScreen(ModalScreen[bool]):
     """Asks ``title`` with ``message``; dismisses with True on ``y``, False on ``n`` or escape.
 
-    ``yes`` names what ``y`` does in the keys shown. Enter doesn't answer, so a stray
-    keypress can't confirm.
+    ``yes`` names what ``y`` does in the keys shown, and ``no`` what ``n`` and escape do.
+    Enter doesn't answer, so a stray keypress can't confirm.
     """
 
     AUTO_FOCUS = None
@@ -316,16 +316,17 @@ class ConfirmScreen(ModalScreen[bool]):
         Binding("escape", "answer(False)", show=False),
     ]
 
-    def __init__(self, title: str, message: str, yes: str = "confirm") -> None:
+    def __init__(self, title: str, message: str, yes: str = "confirm", no: str = "cancel") -> None:
         super().__init__()
         self.title_text = title
         self.message = message
         self.yes = yes
+        self.no = no
 
     def compose(self) -> ComposeResult:
         body = Static(Text(self.message), id="confirm-message")
         body.border_title = self.title_text
-        body.border_subtitle = confirm_hint(self.yes)
+        body.border_subtitle = confirm_hint(self.yes, self.no)
         yield body
 
     def action_answer(self, confirmed: bool) -> None:

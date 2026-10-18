@@ -184,6 +184,16 @@ class ResumeStorage(_Message):
     type: Literal["resume_storage"] = "resume_storage"
 
 
+class TakeOwnership(_Message):
+    """Answer ``OwnershipOffered``: with ``take``, this read-only orbit owns the repository from
+    now on and runs the work it queued; else it lets the repository go again, stays read-only
+    and offers it once more when it's next free. Refused with ``invalid`` when no offer is
+    open."""
+
+    type: Literal["take_ownership"] = "take_ownership"
+    take: bool
+
+
 Command = Annotated[
     Hello
     | SendMessage
@@ -204,7 +214,8 @@ Command = Annotated[
     | DeleteSession
     | ResetConversation
     | History
-    | ResumeStorage,
+    | ResumeStorage
+    | TakeOwnership,
     Field(discriminator="type"),
 ]
 

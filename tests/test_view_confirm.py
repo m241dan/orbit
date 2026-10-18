@@ -5,12 +5,24 @@ from orbit.tui.view.confirm import (
     RESET_MESSAGE,
     RESET_TITLE,
     RESET_YES,
+    TAKE_OVER_NO,
+    TAKE_OVER_TITLE,
+    TAKE_OVER_YES,
     confirm_hint,
 )
 
 
 def test_confirm_hint_names_what_y_does() -> None:
     assert confirm_hint("reset") == "y reset · n/esc cancel"
+
+
+def test_confirm_hint_names_what_n_does_when_it_isnt_cancelling() -> None:
+    assert confirm_hint("take over", "stay read-only") == "y take over · n/esc stay read-only"
+
+
+def test_the_take_over_offer_asks_to_take_over_or_stay_read_only() -> None:
+    assert TAKE_OVER_TITLE == "The repository is free"
+    assert (TAKE_OVER_YES, TAKE_OVER_NO) == ("take over", "stay read-only")
 
 
 def test_configure_confirmation_asks_to_set_up_checks() -> None:

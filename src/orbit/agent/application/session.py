@@ -31,7 +31,13 @@ from orbit.agent.application.keeper import (
 from orbit.agent.application.log_writer import Overflow
 from orbit.agent.application.outbox import EventSink, Outbox
 from orbit.agent.application.planner_seat import PlannerSeat, SeatHooks
-from orbit.agent.application.ports import Fallback, ProposalReview, SessionStore, UsageSource
+from orbit.agent.application.ports import (
+    Fallback,
+    ProposalReview,
+    RepositoryLock,
+    SessionStore,
+    UsageSource,
+)
 from orbit.agent.application.proposals import FrontendReview
 from orbit.agent.application.review_count import ReviewCount
 from orbit.agent.application.review_lane import ReviewLane
@@ -43,6 +49,7 @@ from orbit.agent.application.switcher import (
     SessionSwitcher,
     SwitchParts,
 )
+from orbit.agent.application.takeover import RETRY_SECONDS, Takeover
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.application.usage_monitor import UsageMonitor
 from orbit.agent.application.verifier import Verification, Verifier
@@ -79,13 +86,16 @@ from orbit.protocol import (
     Hello,
     History,
     LogGap,
+    Notice,
     OpenSession,
+    OwnershipTaken,
     ResumeStorage,
     RunningAgent,
     SessionSummary,
     Settings,
     Snapshot,
     StepState,
+    TakeOwnership,
     TaskSpec,
     TurnFinished,
     UsageChanged,
@@ -123,6 +133,9 @@ def _workspace_label(workspace: str | None) -> str | None:
 
 
 _DEFAULT_STORAGE = StorageSettings()
+
+OWNED_NOTE = "This orbit now owns the repository; queued work is running."
+"""The notice once a read-only orbit takes the repository over."""
 
 
 class AgentSession:
@@ -172,7 +185,11 @@ class AgentSession:
     With an ``owner``, another orbit owns the repository and this one is read-only: its
     ``Catalog`` and ``Snapshot`` say so, a notice naming the owner comes first among the
     startup notes, ``RunTasks`` and ``FireTrigger`` are accepted and queued rather than run, and
-    no work starts by itself: neither the startup check nor reviews run.
+    no work starts by itself: neither the startup check nor reviews run. Given the repository's
+    ``lock``, it's tried every ``lock_retry`` seconds from the first ``Welcome``; once it's
+    free, it's held and offered with ``OwnershipOffered``. ``TakeOwnership`` answers: taking it
+    publishes ``OwnershipTaken`` and a notice, then runs the work queued, in order; declining it
+    lets the lock go and tries it again later.
     """
 
     def __init__(
@@ -195,8 +212,12 @@ class AgentSession:
         storage: StorageSettings = _DEFAULT_STORAGE,
         fallback: Fallback | None = None,
         owner: WorkspaceOwner | None = None,
+        lock: RepositoryLock | None = None,
+        lock_retry: float = RETRY_SECONDS,
     ) -> None:
         self._read_only = owner is not None
+        waiting_on = lock if self._read_only else None
+        self._takeover = Takeover(waiting_on, lambda event: self._events.put(event), lock_retry)
         self._settings = SessionSettings(settings or Settings(), pinned, model_choices)
         self._pick_session = pick_session
         self._storage = storage
@@ -441,7 +462,9 @@ class AgentSession:
             raise Refused(WRONG_SESSION, message)
 
     async def _admitted(
-        self, command: SessionCommand | WorkCommand | History | ResumeStorage, command_id: str
+        self,
+        command: SessionCommand | WorkCommand | History | ResumeStorage | TakeOwnership,
+        command_id: str,
     ) -> None:
         """Handle ``command``, sent as ``command_id`` once the handshake is done: refused while
         the session is halted, but for ``ResumeStorage``, which resumes it."""
@@ -452,15 +475,30 @@ class AgentSession:
         await self._handle(command, command_id)
 
     async def _handle(
-        self, command: SessionCommand | WorkCommand | History, command_id: str
+        self, command: SessionCommand | WorkCommand | History | TakeOwnership, command_id: str
     ) -> None:
         if isinstance(command, History):
             await self._events.put(await self._history.page(command))
+        elif isinstance(command, TakeOwnership):
+            await self._take_ownership(command, command_id)
         elif isinstance(command, SessionCommand):
             await self._switcher.handle(command)
         else:
             self._switcher.stay()
             await self._commands.handle(command, command_id)
+
+    async def _take_ownership(self, command: TakeOwnership, command_id: str) -> None:
+        """Answer the offer of the repository: own it, if ``command`` takes it, and run the work
+        queued for ``command_id``; refused when no offer is open."""
+        self._takeover.answer(command.take)
+        if not command.take:
+            return
+        self._read_only = False
+        if self._lane is not None:
+            self._lane.read_only = False
+        await self._events.put(OwnershipTaken())
+        await self._events.put(Notice(message=OWNED_NOTE))
+        await self._commands.own(command_id)
 
     def _agent_on(self, task_id: str) -> str:
         """The agent working on task ``task_id``; only asked while one is."""
@@ -508,11 +546,12 @@ class AgentSession:
         return self._verifier.step_names if self._verifier else ()
 
     async def close(self) -> None:
-        """Stop a storage halt under way, cancel the work in progress, which stops its agent,
-        then stop the startup check, the usage monitor, the review lane, the planner, the
-        agents' host, the saving of the session, releasing its lock, and the writing of its
-        events to the store, then end every connection's stream, in that order. Each is stopped
-        even if one before it fails; the first failure is raised after."""
+        """Stop a storage halt under way and the tries of the repository's lock, cancel the
+        work in progress, which stops its agent, then stop the startup check, the usage
+        monitor, the review lane, the planner, the agents' host, the saving of the session,
+        releasing its lock, and the writing of its events to the store, then end every
+        connection's stream, in that order. Each is stopped even if one before it fails; the
+        first failure is raised after."""
         self._closing = True
         failure: Exception | None = None
         for stop in self._stops():
@@ -528,6 +567,7 @@ class AgentSession:
         parts = (self._startup, self._usage, self._lane, self._seat)
         stops: list[Callable[[], Awaitable[None]]] = [
             self._halt.close,
+            self._takeover.close,
             self._stop_turns,
             self._seat.close_retired,
         ]
@@ -560,11 +600,12 @@ class AgentSession:
         self._connections.deliver(envelope)
 
     def _start_background(self) -> None:
-        """Start the startup check and the usage monitor, if there are any, unless they were
-        started for an earlier connection."""
+        """Start the startup check and the usage monitor, if there are any, and the tries of
+        the repository's lock, unless they were started for an earlier connection."""
         if self._started:
             return
         self._started = True
+        self._takeover.start()
         if self._startup is not None:
             self._startup.start()
         if self._usage is not None:

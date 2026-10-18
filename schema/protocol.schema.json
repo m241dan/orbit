@@ -454,6 +454,7 @@
               "resume_storage": "#/$defs/ResumeStorage",
               "run_tasks": "#/$defs/RunTasks",
               "send_message": "#/$defs/SendMessage",
+              "take_ownership": "#/$defs/TakeOwnership",
               "update_settings": "#/$defs/UpdateSettings"
             },
             "propertyName": "type"
@@ -518,6 +519,9 @@
             },
             {
               "$ref": "#/$defs/ResumeStorage"
+            },
+            {
+              "$ref": "#/$defs/TakeOwnership"
             }
           ],
           "title": "Payload"
@@ -777,6 +781,8 @@
               "log_gap": "#/$defs/LogGap",
               "message_sent": "#/$defs/MessageSent",
               "notice": "#/$defs/Notice",
+              "ownership_offered": "#/$defs/OwnershipOffered",
+              "ownership_taken": "#/$defs/OwnershipTaken",
               "progress_noted": "#/$defs/ProgressNoted",
               "proposal_decided": "#/$defs/ProposalDecided",
               "review_status": "#/$defs/ReviewStatus",
@@ -894,6 +900,12 @@
             },
             {
               "$ref": "#/$defs/LogGap"
+            },
+            {
+              "$ref": "#/$defs/OwnershipOffered"
+            },
+            {
+              "$ref": "#/$defs/OwnershipTaken"
             },
             {
               "$ref": "#/$defs/Snapshot"
@@ -1271,6 +1283,38 @@
         "type"
       ],
       "title": "OpenSession",
+      "type": "object"
+    },
+    "OwnershipOffered": {
+      "description": "The repository this read-only orbit waits on is free, and this orbit holds it until the\nuser answers with ``TakeOwnership``; sent once for each time it's found free.",
+      "properties": {
+        "type": {
+          "const": "ownership_offered",
+          "default": "ownership_offered",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "OwnershipOffered",
+      "type": "object"
+    },
+    "OwnershipTaken": {
+      "description": "This orbit owns the repository now, so it's no longer read-only and runs its work.",
+      "properties": {
+        "type": {
+          "const": "ownership_taken",
+          "default": "ownership_taken",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "OwnershipTaken",
       "type": "object"
     },
     "ProgressNoted": {
@@ -1931,6 +1975,27 @@
         "name"
       ],
       "title": "StepState",
+      "type": "object"
+    },
+    "TakeOwnership": {
+      "description": "Answer ``OwnershipOffered``: with ``take``, this read-only orbit owns the repository from\nnow on and runs the work it queued; else it lets the repository go again, stays read-only\nand offers it once more when it's next free. Refused with ``invalid`` when no offer is\nopen.",
+      "properties": {
+        "take": {
+          "title": "Take",
+          "type": "boolean"
+        },
+        "type": {
+          "const": "take_ownership",
+          "default": "take_ownership",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "take",
+        "type"
+      ],
+      "title": "TakeOwnership",
       "type": "object"
     },
     "TaskGaveUp": {

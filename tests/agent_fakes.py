@@ -17,6 +17,7 @@ from orbit.agent.application.ports import (
     Fallback,
     Merge,
     Reply,
+    RepositoryLock,
     SessionStore,
     StoredSession,
     UsageSource,
@@ -537,13 +538,14 @@ def session_for(
     store: SessionStore | None = None,
     fallback: Fallback | None = None,
     owner: WorkspaceOwner | None = None,
+    lock: RepositoryLock | None = None,
     **options: Any,
 ) -> tuple[AgentSession, FakeHost, ScriptedLauncher]:
     """A session whose tasks run through agents playing ``scripts``, one per launch, and
     whose reviews run through agents playing ``reviewers``, with usage from ``usage``. It's
     saved in ``store``, if given, as ``session-1``, on a :class:`Ticks` clock, its unsaved
     events going to ``fallback``, if given, and read-only if another ``owner`` owns the
-    repository.
+    repository, trying its ``lock``, if given, every :data:`LOCK_RETRY` seconds.
 
     ``options`` go to :class:`Agents`, such as ``limits``, ``tree`` or ``roles`` (:data:`ROLES`
     unless given).
@@ -563,9 +565,14 @@ def session_for(
         new_id=lambda: "session-1",
         fallback=fallback,
         owner=owner,
+        lock=lock,
+        lock_retry=LOCK_RETRY,
     )
     return session, host, launcher
 
+
+LOCK_RETRY = 0.01
+"""How often a test's read-only session tries the repository's lock, in seconds."""
 
 COMMAND_ID = "command"
 """The id :func:`send` sends every command under."""

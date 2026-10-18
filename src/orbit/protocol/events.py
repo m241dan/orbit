@@ -432,6 +432,19 @@ class LogGap(_Message):
     last_seq: int
 
 
+class OwnershipOffered(_Message):
+    """The repository this read-only orbit waits on is free, and this orbit holds it until the
+    user answers with ``TakeOwnership``; sent once for each time it's found free."""
+
+    type: Literal["ownership_offered"] = "ownership_offered"
+
+
+class OwnershipTaken(_Message):
+    """This orbit owns the repository now, so it's no longer read-only and runs its work."""
+
+    type: Literal["ownership_taken"] = "ownership_taken"
+
+
 class WorkspaceEntry(_Message):
     """Workspace ``id``, shown as ``label``, and its ``sessions`` as the list of sessions shows
     them."""
@@ -503,6 +516,8 @@ Event = Annotated[
     | MessageSent
     | ConversationReset
     | LogGap
+    | OwnershipOffered
+    | OwnershipTaken
     | Snapshot
     | HistoryPage
     | Catalog

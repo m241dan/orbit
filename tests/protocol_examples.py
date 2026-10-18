@@ -42,6 +42,8 @@ from orbit.protocol import (
     Notice,
     OpenRequest,
     OpenSession,
+    OwnershipOffered,
+    OwnershipTaken,
     ProgressNoted,
     ProposalDecided,
     ProposedSetup,
@@ -61,6 +63,7 @@ from orbit.protocol import (
     Snapshot,
     StartupChecked,
     StepState,
+    TakeOwnership,
     TaskGaveUp,
     TaskMerged,
     TasksChanged,
@@ -175,6 +178,7 @@ COMMANDS: tuple[CommandEnvelope, ...] = (
     command(ResetConversation(agent=PLANNER)),
     command(History(session="s1", before_seq=101, limit=50)),
     command(ResumeStorage()),
+    command(TakeOwnership(take=True)),
 )
 
 EVENTS: tuple[EventEnvelope, ...] = (
@@ -236,6 +240,8 @@ EVENTS: tuple[EventEnvelope, ...] = (
     event(MessageSent(command_id="c1", agent=PLANNER, text="hello")),
     event(ConversationReset(agent=PLANNER)),
     event(LogGap(first_seq=1204, last_seq=1210)),
+    event(OwnershipOffered()),
+    event(OwnershipTaken()),
     event(
         Snapshot(
             session=SUMMARY,

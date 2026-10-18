@@ -48,6 +48,17 @@ def test_announcing_without_the_lock_leaves_the_owners_file_alone(tmp_path: Path
     first.close()
 
 
+def test_an_orbit_serve_taking_the_lock_later_names_its_url(tmp_path: Path) -> None:
+    first, second = WorkspaceLock(tmp_path), WorkspaceLock(tmp_path)
+    first.take()
+    second.take()
+    second.announce(URL)
+    first.close()
+    assert second.take() is None
+    assert first.owner() == WorkspaceOwner(pid=os.getpid(), url=URL)
+    second.close()
+
+
 def test_a_lock_let_go_of_can_be_taken_again(tmp_path: Path) -> None:
     first, second = WorkspaceLock(tmp_path), WorkspaceLock(tmp_path)
     first.take()

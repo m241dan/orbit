@@ -56,6 +56,8 @@ from orbit.protocol import (
     MessageSent,
     NotConnected,
     Notice,
+    OwnershipOffered,
+    OwnershipTaken,
     ProgressNoted,
     ProposalDecided,
     RemoveTask,
@@ -71,6 +73,7 @@ from orbit.protocol import (
     SettingsChanged,
     Snapshot,
     StartupChecked,
+    TakeOwnership,
     TaskGaveUp,
     TaskMerged,
     TasksChanged,
@@ -113,6 +116,10 @@ from orbit.tui.view.confirm import (
     RESET_MESSAGE,
     RESET_TITLE,
     RESET_YES,
+    TAKE_OVER_MESSAGE,
+    TAKE_OVER_NO,
+    TAKE_OVER_TITLE,
+    TAKE_OVER_YES,
 )
 from orbit.tui.view.events import coalesce
 from orbit.tui.view.proposals import decision_entry
@@ -641,7 +648,15 @@ class OrbitApp(App[None], inherit_bindings=False):
                 | LogGap()
             ):
                 self._feed.render(event)
-            case SessionsListed() | ConversationReset() | Snapshot() | Catalog() | HistoryPage():
+            case (
+                SessionsListed()
+                | ConversationReset()
+                | Snapshot()
+                | Catalog()
+                | HistoryPage()
+                | OwnershipOffered()
+                | OwnershipTaken()
+            ):
                 self._render_session(event)
             case (
                 CommandAccepted() | CommandRefused() | Welcome() | MessageSent() | ProposalDecided()
@@ -650,6 +665,19 @@ class OrbitApp(App[None], inherit_bindings=False):
             case _:
                 assert_never(event)
         self._follow_halt(event)
+
+    def _render_ownership(self, event: OwnershipOffered | OwnershipTaken) -> None:
+        """Ask whether to take over the repository offered, sending the answer, or clear the
+        read-only mark once this orbit owns it."""
+        if isinstance(event, OwnershipTaken):
+            self._prompt.show_read_only(False)
+            return
+
+        async def answered(take: bool | None) -> None:
+            await self._send(TakeOwnership(take=bool(take)))
+
+        offer = ConfirmScreen(TAKE_OVER_TITLE, TAKE_OVER_MESSAGE, TAKE_OVER_YES, TAKE_OVER_NO)
+        self.push_screen(offer, answered)
 
     def _follow_halt(self, event: Event) -> None:
         """Show the halt a storage error or a command refused for it reports, or lift it
@@ -682,11 +710,19 @@ class OrbitApp(App[None], inherit_bindings=False):
         line.display = status is not None
 
     def _render_session(
-        self, event: SessionsListed | ConversationReset | Snapshot | Catalog | HistoryPage
+        self,
+        event: SessionsListed
+        | ConversationReset
+        | Snapshot
+        | Catalog
+        | HistoryPage
+        | OwnershipOffered
+        | OwnershipTaken,
     ) -> None:
         """Show the sessions listed, rule off the planner's conversation where it was reset,
-        show a snapshot of the session open or a page of its history, or label the trigger
-        keys from a catalog. The conversation's title follows the open session's name."""
+        show a snapshot of the session open or a page of its history, label the trigger keys
+        from a catalog, or follow the session's hold on the repository. The conversation's
+        title follows the open session's name."""
         if isinstance(event, SessionsListed):
             self._name_current(event)
             self._sessions.show(event)
@@ -696,6 +732,8 @@ class OrbitApp(App[None], inherit_bindings=False):
             self._label_triggers(trigger_key_labels(event.triggers))
         elif isinstance(event, HistoryPage):
             self._pager.show(event)
+        elif isinstance(event, OwnershipOffered | OwnershipTaken):
+            self._render_ownership(event)
         else:
             self._feed.append(*planner_reset_entry(), PLANNER)
 

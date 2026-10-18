@@ -210,7 +210,8 @@ class _Backend:
     """What the backend flags ask for: the planner's ``model``, new tasks' ``tools``, and
     whether to ``verify``, run tasks in a ``worktree``, ``review`` landed work and show the
     ``usage`` limits; a ``new`` session, perhaps with a ``name``; and the ``owner`` of the
-    repository, if another orbit owns it, making this one read-only."""
+    repository, if another orbit owns it, making this one read-only, with the workspace
+    ``lock`` it tries until it's free."""
 
     model: str | None
     tools: ToolAccess | None
@@ -221,6 +222,7 @@ class _Backend:
     new: bool
     name: str | None
     owner: WorkspaceOwner | None = None
+    lock: WorkspaceLock | None = None
 
     @property
     def fresh(self) -> bool:
@@ -278,8 +280,8 @@ def chat(
     # directory, so move into the workspace before anything reads the filesystem.
     profile = profile.expanduser().resolve() if profile else None
     os.chdir(root)
-    with _repository_lock(root) as (_, owner):
-        backend = _Backend(model, tools, verify, worktree, review, usage, new, name, owner)
+    with _repository_lock(root) as (lock, owner):
+        backend = _Backend(model, tools, verify, worktree, review, usage, new, name, owner, lock)
         build, store = _backend(backend, root, state, user_config, pick_session=not backend.fresh)
         session = ThreadedSession(build, _thread_context(profile))
         _launch_with(OrbitApp(session), profile, store)
@@ -445,6 +447,7 @@ def _backend(
             storage=storage,
             fallback=FallbackFiles(state, store.workspace_id, orbit_dir(str(root))),
             owner=backend.owner,
+            lock=backend.lock,
         )
 
     return build, store
@@ -502,7 +505,7 @@ def serve(
     token_file = TokenFile(user_config)
     token = _token(token_file)
     with _repository_lock(root) as (lock, owner):
-        backend = _Backend(model, tools, verify, worktree, review, usage, new, name, owner)
+        backend = _Backend(model, tools, verify, worktree, review, usage, new, name, owner, lock)
         build, store = _backend(backend, root, state, user_config, pick_session=False)
         logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
         parts = _ServeParts(
