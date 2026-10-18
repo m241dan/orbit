@@ -12,6 +12,7 @@ from orbit.protocol import (
     AGENT_FAILED,
     INTERNAL,
     PLANNER,
+    PROTOCOL_VERSION,
     STARTUP_TASK,
     TIMED_OUT,
     AgentExited,
@@ -27,6 +28,7 @@ from orbit.protocol import (
     ErrorOccurred,
     Event,
     EventEnvelope,
+    Hello,
     Notice,
     SendMessage,
     Settings,
@@ -47,6 +49,7 @@ from orbit.protocol import (
     VerificationFinished,
     VerificationSkipped,
     VerificationStarted,
+    Welcome,
 )
 from orbit.tui import OrbitApp
 from orbit.tui.agents import AgentsPane
@@ -61,15 +64,20 @@ from orbit.tui.widgets import ChatPrompt, PickerScreen, SidePanel
 
 class FakeSession:
     """Stands in for the backend: records commands, and the envelopes they came in, and
-    replays scripted events in envelopes; an exception queued fails the stream."""
+    replays scripted events in envelopes; an exception queued fails the stream. ``sent`` has
+    every envelope; ``envelopes`` and ``commands`` leave out the Hello opening the stream."""
 
     def __init__(self) -> None:
+        self.sent: list[CommandEnvelope] = []
         self.envelopes: list[CommandEnvelope] = []
         self.commands: list[Command] = []
         self.queue: asyncio.Queue[Event | Exception] = asyncio.Queue()
         self.closed = False
 
     async def send(self, envelope: CommandEnvelope) -> None:
+        self.sent.append(envelope)
+        if isinstance(envelope.payload, Hello):
+            return
         self.envelopes.append(envelope)
         self.commands.append(envelope.payload)
 
@@ -92,6 +100,29 @@ async def test_quitting_closes_the_session() -> None:
     async with app.run_test() as pilot:
         await pilot.press("ctrl+c")
     assert session.closed
+
+
+async def test_the_first_command_is_a_hello_from_the_tui() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await pilot.press("i", *"hi", "enter")
+
+    first, second = session.sent
+    assert isinstance(first.payload, Hello)
+    assert first.payload.client.startswith("orbit-tui ")
+    assert first.payload.protocol_version == PROTOCOL_VERSION == 1
+    assert first.payload.since is None
+    assert second.payload == SendMessage(agent=PLANNER, text="hi")
+
+
+async def test_a_welcome_shows_nothing() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        before = entries(app)
+        await feed_events(session, pilot, Welcome(command_id="hello", server_version="1.0"))
+        assert entries(app) == before
 
 
 async def test_submit_sends_command_and_renders_events() -> None:

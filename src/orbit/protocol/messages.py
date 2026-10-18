@@ -32,6 +32,9 @@ class Settings(_Message):
 
 # Commands: frontend -> backend
 
+PROTOCOL_VERSION = 1
+"""The protocol's major version, which a ``Hello`` must name to be welcomed."""
+
 WORK_LANE = "work"
 PLANNER_LANE = "planner"
 """The lanes' names: task runs in the work lane, the planner's turns in its own."""
@@ -53,6 +56,17 @@ BUILT_IN_ROLE_NAMES = (PLANNER, CODER, REVIEWER, SUPER_REVIEWER, CONFIGURATOR)
 
 BusyLane = str
 """Where work runs, by name: task runs in ``work``; the planner's turns in ``planner``."""
+
+
+class Hello(_Message):
+    """Open the stream as ``client``, speaking ``protocol_version`` of the protocol; it must
+    come before any other command. ``since`` is the last ``seq`` the client saw, if any; it's
+    accepted and ignored for now. Answered with ``Welcome``, or refused."""
+
+    type: Literal["hello"] = "hello"
+    client: str
+    protocol_version: int
+    since: int | None = None
 
 
 class SendMessage(_Message):
@@ -208,7 +222,8 @@ class ResetConversation(_Message):
 
 
 Command = Annotated[
-    SendMessage
+    Hello
+    | SendMessage
     | CancelTurn
     | UpdateSettings
     | AddTask
@@ -506,6 +521,15 @@ class CommandAccepted(_Message):
     command_id: str
 
 
+class Welcome(_Message):
+    """``Hello`` ``command_id`` was received, in place of its ``CommandAccepted``: the backend,
+    orbit ``server_version``, publishes its events from here on."""
+
+    type: Literal["welcome"] = "welcome"
+    command_id: str
+    server_version: str
+
+
 NOT_CONFIGURED = "not_configured"
 """A refusal's code: what the command needs isn't set up, such as agents or verification."""
 
@@ -524,6 +548,10 @@ LOCKED = "locked"
 
 WRONG_SESSION = "wrong_session"
 """A refusal's code: the command is for a session that isn't open."""
+
+INCOMPATIBLE = "incompatible"
+"""A refusal's code: a ``Hello`` named a protocol version this orbit doesn't speak; nothing more
+is sent on that stream."""
 
 AGENT_FAILED = "agent_failed"
 """An error's code: an agent's run or turn failed, or it exited without doing its task."""
@@ -766,6 +794,7 @@ Event = Annotated[
     | SessionsListed
     | SessionOpened
     | ConversationReset
+    | Welcome
     | CommandAccepted
     | CommandRefused,
     Field(discriminator="type"),

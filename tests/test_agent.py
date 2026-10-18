@@ -100,7 +100,7 @@ async def test_a_prompt_starts_a_turn_of_the_planner() -> None:
         "turn_finished",
         "busy_changed",
     ]
-    assert events[0] == BusyChanged(busy=True, lane="planner")
+    assert turns(events)[0] == BusyChanged(busy=True, lane="planner")
     assert any(isinstance(e, TurnFinished) and e.reason == "completed" for e in events)
 
 
@@ -109,11 +109,11 @@ async def test_a_prompt_without_a_planner_is_refused() -> None:
     await send(session, SendMessage(agent=PLANNER, text="hello"))
     stream = payloads(session)
     assert isinstance(await anext(stream), SettingsChanged)
+    assert isinstance(await anext(stream), SessionOpened)
     assert await anext(stream) == PLANNER_IDLE
     assert await anext(stream) == refused(
         NOT_CONFIGURED, "Planning needs agents and a planner role."
     )
-    assert isinstance(await anext(stream), SessionOpened)
     assert nothing_queued(session)
 
 

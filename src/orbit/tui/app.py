@@ -13,11 +13,13 @@ from textual.binding import Binding, BindingType
 from textual.containers import Horizontal, Vertical
 from textual.widgets import OptionList, Tabs
 
+from orbit import __version__
 from orbit.protocol import (
     CONFIGURE_CHECKS,
     INTERNAL,
     PLANNER,
     PLANNER_LANE,
+    PROTOCOL_VERSION,
     SUPER_REVIEW,
     WORK_LANE,
     AcceptTask,
@@ -43,6 +45,7 @@ from orbit.protocol import (
     Event,
     EventEnvelope,
     FireTrigger,
+    Hello,
     ListSessions,
     Notice,
     ProgressNoted,
@@ -73,6 +76,7 @@ from orbit.protocol import (
     VerificationFinished,
     VerificationSkipped,
     VerificationStarted,
+    Welcome,
 )
 from orbit.tui.agents import AgentsPane
 from orbit.tui.conversation import ConversationFeed
@@ -288,10 +292,10 @@ class OrbitApp(App[None], inherit_bindings=False):
         self._feed.append(text, "prompt", PLANNER)
         await self._send(SendMessage(agent=PLANNER, text=text))
 
-    def _render_outcome(self, event: CommandAccepted | CommandRefused) -> None:
+    def _render_outcome(self, event: CommandAccepted | CommandRefused | Welcome) -> None:
         """Show why a command was refused, freeing the planner from a message it refused; an
-        accepted one shows nothing."""
-        if isinstance(event, CommandAccepted):
+        accepted one, or the Welcome answering Hello, shows nothing."""
+        if isinstance(event, CommandAccepted | Welcome):
             return
         if event.command_id == self._message_id:
             self._set_busy(PLANNER_LANE, False)
@@ -560,6 +564,9 @@ class OrbitApp(App[None], inherit_bindings=False):
     async def _consume_events(self) -> None:
         # Closing the batches here, not on garbage collection, stops their reader however this ends.
         async with aclosing(event_batches(self._session.events())) as batches:
+            await self._send(
+                Hello(client=f"orbit-tui {__version__}", protocol_version=PROTOCOL_VERSION)
+            )
             while batch := await self._next_batch(batches):
                 # One repaint for the whole batch.
                 with self.batch_update():
@@ -614,7 +621,7 @@ class OrbitApp(App[None], inherit_bindings=False):
                 self._feed.render(event)
             case SessionsListed() | SessionOpened() | ConversationReset():
                 self._render_session(event)
-            case CommandAccepted() | CommandRefused():
+            case CommandAccepted() | CommandRefused() | Welcome():
                 self._render_outcome(event)
             case _:
                 assert_never(event)

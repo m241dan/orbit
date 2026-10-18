@@ -31,7 +31,7 @@ from orbit.agent.domain.reviews import ReviewLimits
 from orbit.agent.domain.sessions import default_name
 from orbit.cli import app
 from orbit.protocol import Notice, SessionsListed, Settings, ThreadedSession
-from tests.agent_fakes import payloads, queued, store_of
+from tests.agent_fakes import greeted, payloads, queued, store_of
 
 runner = CliRunner()
 
@@ -95,7 +95,13 @@ def restore_cwd(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def notices(session: AgentSession) -> list[str]:
-    return [e.message for e in queued(session) if isinstance(e, Notice)]
+    """The notices ``session`` publishes once greeted, before anything runs."""
+
+    async def noted() -> list[str]:
+        await greeted(session)
+        return [e.message for e in queued(session) if isinstance(e, Notice)]
+
+    return asyncio.run(noted())
 
 
 def lists_sessions_at_startup(session: AgentSession) -> bool:

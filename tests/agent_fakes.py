@@ -25,6 +25,7 @@ from orbit.agent.domain.sessions import SessionRecord, Unreadable
 from orbit.protocol import (
     AGENT_FAILED,
     BUILT_IN_ROLE_NAMES,
+    PROTOCOL_VERSION,
     AddTask,
     AgentExited,
     AgentReply,
@@ -37,6 +38,7 @@ from orbit.protocol import (
     CommandRefused,
     ErrorOccurred,
     Event,
+    Hello,
     RunTasks,
     Session,
     Settings,
@@ -49,6 +51,7 @@ from orbit.protocol import (
     TurnStarted,
     Usage,
     VerificationChanged,
+    Welcome,
 )
 
 ROLES = built_in_roles({name: f"You are orbit's {name}." for name in BUILT_IN_ROLE_NAMES})
@@ -449,15 +452,32 @@ def refused(code: str, message: str) -> CommandRefused:
     return CommandRefused(command_id=COMMAND_ID, code=code, message=message)
 
 
+HELLO_ID = "hello"
+"""The id :func:`greet` sends Hello under."""
+
+HELLO = Hello(client="orbit-tests", protocol_version=PROTOCOL_VERSION)
+"""The Hello :func:`greet` sends."""
+
+
+async def greet(session: Session) -> None:
+    """Open ``session``'s stream with Hello, as a frontend does before anything else."""
+    await session.send(CommandEnvelope(command_id=HELLO_ID, payload=HELLO))
+
+
 async def send(session: Session, command: Command) -> None:
-    """Send ``command`` to ``session``, in an envelope for the open session."""
+    """Send ``command`` to ``session``, in an envelope for the open session, greeting an
+    :class:`AgentSession` first if it hasn't been."""
+    await greeted(session)
     await session.send(CommandEnvelope(command_id=COMMAND_ID, payload=command))
 
 
 async def payloads(session: Session) -> AsyncIterator[Event]:
-    """The events in ``session``'s envelopes."""
+    """The events in ``session``'s envelopes but for its ``Welcome``, greeting an
+    :class:`AgentSession` first if it hasn't been."""
+    await greeted(session)
     async for envelope in session.events():
-        yield envelope.payload
+        if not isinstance(envelope.payload, Welcome):
+            yield envelope.payload
 
 
 async def run(session: AgentSession, *tasks: TaskSpec) -> list[Event]:
@@ -568,6 +588,12 @@ def queued(session: AgentSession) -> list[Event]:
     while not session._events.empty():
         events.append(session._events.get_nowait())
     return events
+
+
+async def greeted(session: Session) -> None:
+    """Greet ``session``, if it's an :class:`AgentSession` that hasn't been."""
+    if isinstance(session, AgentSession) and not session._welcomed:
+        await greet(session)
 
 
 def nothing_queued(session: AgentSession) -> bool:

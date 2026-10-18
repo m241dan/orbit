@@ -9,6 +9,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Collection, Sequ
 from dataclasses import replace
 from typing import assert_never
 
+from orbit import __version__
 from orbit.agent.application.desk import AgentDesk, Agents
 from orbit.agent.application.keeper import (
     Clock,
@@ -48,10 +49,12 @@ from orbit.protocol import (
     CONFIGURATOR,
     CONFIGURE_CHECKS,
     DEFAULT_WORKSPACE,
+    INCOMPATIBLE,
     INVALID,
     NOT_CONFIGURED,
     PLANNER,
     PLANNER_LANE,
+    PROTOCOL_VERSION,
     SUPER_REVIEW,
     UNKNOWN,
     WORK_LANE,
@@ -60,7 +63,6 @@ from orbit.protocol import (
     AddTask,
     CancelAgent,
     CancelTurn,
-    Command,
     CommandAccepted,
     CommandEnvelope,
     CommandRefused,
@@ -69,6 +71,7 @@ from orbit.protocol import (
     Event,
     EventEnvelope,
     FireTrigger,
+    Hello,
     Notice,
     RemoveTask,
     ResetConversation,
@@ -80,12 +83,15 @@ from orbit.protocol import (
     TurnFinished,
     UpdateSettings,
     VerificationChanged,
+    Welcome,
 )
 
 NO_STEPS_NOTE = "No verification steps configured. Press ctrl+e to set them up."
 NO_AGENTS_MESSAGE = "Tasks need agents, and none are set up."
 NO_VERIFY_MESSAGE = "Setting up checks needs verification on; orbit was started with --no-verify."
 CONFIGURING_NOTE = "A configurator task is already queued or running."
+HELLO_FIRST_MESSAGE = "Send Hello first."
+HELLO_AGAIN_MESSAGE = "Hello was already received."
 WorkCommand = (
     SendMessage
     | CancelTurn
@@ -129,6 +135,11 @@ def _reviewed(agents: Agents | None, review: ProposalReview) -> Agents | None:
     return replace(agents, proposal_review=review)
 
 
+def _ends_stream(event: Event) -> bool:
+    """Whether ``event`` is the last of the stream: an incompatible ``Hello``'s refusal."""
+    return isinstance(event, CommandRefused) and event.code == INCOMPATIBLE
+
+
 class AgentSession:
     """Takes commands, runs work in the background and publishes its events.
 
@@ -139,16 +150,21 @@ class AgentSession:
     switches between saved sessions.
 
     With ``check_at_startup``, the ``verification`` steps also run once in the background as
-    the events start, on the base commit; a failure adds a draft task to fix it. With a
-    ``usage`` source, the subscription's usage limits are fetched in the background too.
+    the session welcomes the frontend, on the base commit; a failure adds a draft task to fix
+    it. With a ``usage`` source, the subscription's usage limits are fetched in the background
+    too, from then on.
+
+    Every stream opens with ``Hello``: the session publishes nothing, and refuses every other
+    command, until it's answered with ``Welcome``; what the session had to say before then
+    follows it.
 
     The session open here is saved in ``store``, if there is one, once it's used; ``clock``
     tells the time, ``new_id`` makes its id and ``name`` names it (by the time, if none). The
     user can open another saved session, or a new one, in its place: one opened has its saved
     settings, but for those ``pinned``, by field name, which keep the ``settings`` given here.
-    With ``pick_session``, the saved sessions are listed as the events start, for the user to
+    With ``pick_session``, the saved sessions are listed after ``Welcome``, for the user to
     pick one; until they do, the session open is a new one, and what orbit adds to it carries
-    over into the one picked. Otherwise, the session open is announced as the events start.
+    over into the one picked. Otherwise, the session open is announced after ``Welcome``.
     """
 
     def __init__(
@@ -183,15 +199,17 @@ class AgentSession:
         agents = _reviewed(agents, self._proposals)
         self._verifier = _verifier(verification, self._tasks, self._events, agents)
         self._desk = AgentDesk(agents, self._publish_agents) if agents else None
-        self._announced = False
+        self._welcomed = False
+        self._incompatible = False  # A Hello was refused: nothing more is published.
+        self._opening: list[Event] = []  # Published after Welcome, since nothing comes before.
         self._closing = False
         self._lane = self._review_lane()
         self._held = False  # The user cancelled: don't start work by itself.
         hooks = SeatHooks(self._save, self._keeper.use, self._step_names)
         self._seat = PlannerSeat(self._desk, self._tasks, self._events, hooks)
-        self._events.put_nowait(self._settings_changed())
+        self._opening.append(self._settings_changed())
         if workspace is not None:
-            self._events.put_nowait(Notice(message=f"Workspace: {workspace}"))
+            self._opening.append(Notice(message=f"Workspace: {workspace}"))
         self._announce_steps()
         self._startup = self._startup_check(verification, check_at_startup)
         self._work = self._work_lane()
@@ -234,9 +252,9 @@ class AgentSession:
         """Show the steps that will verify tasks, or note that none will."""
         if self._verifier and self._verifier.step_names:
             steps = self._verifier.progress.steps
-            self._events.put_nowait(VerificationChanged(steps=steps))
+            self._opening.append(VerificationChanged(steps=steps))
         elif self._verifier:
-            self._events.put_nowait(Notice(message=NO_STEPS_NOTE))
+            self._opening.append(Notice(message=NO_STEPS_NOTE))
 
     def _startup_check(
         self, verification: Verification | None, wanted: bool
@@ -283,11 +301,20 @@ class AgentSession:
 
     async def send(self, envelope: CommandEnvelope) -> None:
         """Handle the command in ``envelope``, then publish its outcome: ``CommandRefused`` if
-        it was refused, else ``CommandAccepted``. Other errors escape, with no outcome."""
+        it was refused, else ``CommandAccepted``, or ``Welcome`` for a ``Hello``. Other errors
+        escape, with no outcome. After an incompatible ``Hello``, nothing is handled."""
+        if self._incompatible:
+            return
         command_id = envelope.command_id
         try:
             self._check_addressed(envelope)
-            await self._handle(envelope.payload)
+            command = envelope.payload
+            if isinstance(command, Hello):
+                await self._hello(command, command_id)
+                return
+            if not self._welcomed:
+                raise Refused(INVALID, HELLO_FIRST_MESSAGE)
+            await self._handle(command)
         except Refused as refusal:
             refused = CommandRefused(command_id=command_id, code=refusal.code, message=str(refusal))
             await self._events.put(refused)
@@ -304,7 +331,32 @@ class AgentSession:
             message = f"Session {session!r} isn't open; the open session is {open_id}."
             raise Refused(WRONG_SESSION, message)
 
-    async def _handle(self, command: Command) -> None:
+    async def _hello(self, hello: Hello, command_id: str) -> None:
+        """Welcome the frontend that sent ``hello`` as ``command_id``, then publish what the
+        session had to say before it and announce the session; refused for a second Hello, or
+        another protocol version."""
+        if self._welcomed:
+            raise Refused(INVALID, HELLO_AGAIN_MESSAGE)
+        if hello.protocol_version != PROTOCOL_VERSION:
+            self._incompatible = True
+            message = (
+                f"Protocol version {hello.protocol_version} isn't supported; "
+                f"this orbit speaks version {PROTOCOL_VERSION}."
+            )
+            raise Refused(INCOMPATIBLE, message)
+        self._welcomed = True
+        await self._events.put(Welcome(command_id=command_id, server_version=__version__))
+        for event in self._opening:
+            await self._events.put(event)
+        self._opening.clear()
+        try:
+            await self._load_review_count()
+            await self._announce_session()
+            await self._announce_leftovers()
+        finally:  # A sender cancelled meanwhile mustn't keep the background from starting.
+            self._start_background()
+
+    async def _handle(self, command: SessionCommand | WorkCommand) -> None:
         if isinstance(command, SessionCommand):
             await self._switcher.handle(command)
         else:
@@ -603,18 +655,13 @@ class AgentSession:
         await self._seat.stop_turn()
 
     async def events(self) -> AsyncIterator[EventEnvelope]:
-        if not self._announced:
-            self._announced = True
-            try:
-                await self._load_review_count()
-                await self._announce_session()
-                await self._announce_leftovers()
-            finally:  # A listener cancelled meanwhile mustn't keep the background from starting.
-                self._start_background()
+        """The events the session publishes, ending after an incompatible ``Hello``'s refusal."""
         while True:
             envelope = await self._events.envelope()
             self._nudge_usage(envelope.payload)
             yield envelope
+            if _ends_stream(envelope.payload):
+                return
 
     def _start_background(self) -> None:
         """Start the startup check and the usage monitor, if there are any and the session isn't

@@ -23,7 +23,7 @@ from orbit.protocol import (
     TaskSpec,
     UsageChanged,
 )
-from tests.agent_fakes import FakeStore, Ticks, send
+from tests.agent_fakes import FakeStore, Ticks, greeted, send
 from tests.test_usage_monitor import LIMITS, Source
 
 HELLO = SendMessage(agent=PLANNER, text="hello")
@@ -79,8 +79,10 @@ def saved_session(usage: Source | None = None) -> AgentSession:
 
 
 async def envelopes_until(session: AgentSession, kind: type) -> list[EventEnvelope]:
-    """The session's envelopes up to and including the first holding a ``kind`` event."""
+    """The session's envelopes up to and including the first holding a ``kind`` event, greeting
+    it first if it hasn't been."""
     envelopes: list[EventEnvelope] = []
+    await greeted(session)
 
     async def collect() -> None:
         async for envelope in session.events():
@@ -132,11 +134,10 @@ async def test_an_event_keeps_the_session_it_was_published_in_when_read_after_a_
     session = saved_session()
     await send(session, AddTask(task=TaskSpec(prompt="Add a flag.")))
     await send(session, NewSession(name="other"))
-    envelopes = await envelopes_until(session, SessionOpened)
+    await envelopes_until(session, SessionOpened)  # Session-1's, announced at the Welcome.
     after = await envelopes_until(session, SessionOpened)
     await session.close()
 
-    tasks = [e for e in envelopes if isinstance(e.payload, TasksChanged)]
+    tasks = [e for e in after if isinstance(e.payload, TasksChanged)]
     assert tasks[0].session == "session-1"
     assert after[-1].session == "session-2"
-    assert {e.session for e in after} - {None} == {"session-2"}

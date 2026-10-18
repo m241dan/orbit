@@ -150,7 +150,7 @@ async def test_running_without_agents_is_refused() -> None:
     await send(session, AddTask(task=TaskSpec(prompt="a")))
     await send(session, RunTasks())
     stream = payloads(session)
-    events = [await anext(stream) for _ in range(4)]
+    events = [await anext(stream) for _ in range(5)]
     assert refused(NOT_CONFIGURED, "Tasks need agents, and none are set up.") in events
     assert not any(isinstance(event, ErrorOccurred) for event in events)
 

@@ -37,7 +37,7 @@ from orbit.protocol import (
     TaskSpec,
     TurnEndReason,
 )
-from tests.agent_fakes import Call, FakeStore, events_until, queued, session_for
+from tests.agent_fakes import Call, FakeStore, events_until, greeted, queued, session_for
 from tests.test_configure_key import Configurator, no_steps
 from tests.test_planner import hangs
 
@@ -48,7 +48,9 @@ OUTCOMES = (CommandAccepted, CommandRefused)
 async def send_as(
     session: AgentSession, command_id: str, command: Command, /, **fields: str
 ) -> None:
-    """Send ``command`` to ``session`` as ``command_id``, with the envelope's other ``fields``."""
+    """Send ``command`` to ``session`` as ``command_id``, with the envelope's other ``fields``,
+    greeting it first if it hasn't been."""
+    await greeted(session)
     await session.send(CommandEnvelope(command_id=command_id, payload=command, **fields))
 
 
