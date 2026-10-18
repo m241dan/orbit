@@ -43,6 +43,8 @@ uv run orbit chat --no-usage                   # don't show usage limits
 uv run orbit chat --profile /tmp/orbit-prof    # record what slows orbit down
 uv run orbit chat --state-dir /tmp/orbit-state # keep saved sessions somewhere else
 uv run orbit db backup ~/orbit-backup.db       # back up the saved sessions (--force replaces)
+uv run orbit serve                             # run the control plane on its own, for frontends
+uv run orbit serve --port 0                    # on a port the system chooses
 ```
 
 With orbit installed as a tool, drop the `uv run`.
@@ -533,7 +535,9 @@ your checkout out of its way, it doesn't sandbox it.
 | `.git/orbit` | the repository's git directory | the coder's worktree, review snapshots and what earlier runs left there |
 | The store | the state directory | `orbit.db`, the saved sessions, their event logs and the super review count of every repository, `locks/`, and `fallback/` for events a failed write left unsaved (see [Storage failures](#storage-failures)) |
 | Config files | `.orbit/config.toml` in the repository | the verification steps, setup, roles and limits, committed with your code |
-| User config | `config.toml` in the config directory | your own settings for every repository, such as `[storage]` |
+| User config | `config.toml` in the config directory | your own settings for every repository, such as `[storage]` and `[server]` |
+| The token | `token` in the config directory | what frontends show `orbit serve` to connect (see [Serving the control plane](#serving-the-control-plane)) |
+| Run files | `run/` in the state directory | where each running `orbit serve` listens, by repository |
 | Runtime-owned | `~/.claude` | Claude Code's own: your login, read for usage limits, and the agents' conversations |
 
 The state directory is `--state-dir`, else `$ORBIT_STATE_DIR`, else `$XDG_STATE_HOME/orbit`, else
@@ -825,6 +829,55 @@ affected. The panel is display only.
 
 `--no-usage` turns it off, and orbit then never reads the token.
 
+### Serving the control plane
+
+`orbit serve` runs orbit's backend, the control plane, on its own: it serves the protocol (see
+[docs/protocol.md](docs/protocol.md#transport)) over a WebSocket, and the work goes on with no
+frontend connected. It takes `-C` and the backend flags `chat` has (`--model`, `--tools`,
+`--verify`, `--worktree`, `--review`, `--usage`, `--new`, `--name`, `--profile`, which writes
+`serve.prof` and `serve-blocked.log`), `--state-dir` and `--config-dir`, and:
+
+- `--host`: the address to listen on, by default `127.0.0.1`. For now only loopback is allowed
+  (`127.0.0.1`, `::1`, `localhost`); another host stops it with status 2, as TLS, for listening
+  beyond it, comes in a later release.
+- `--port`: the port, by default 7433; 0 lets the system choose one. A port in use stops it with
+  status 2, naming the port.
+
+It opens the repository's most recently active saved session that no other orbit has open, or a
+new one when there's none; `--new` or `--name` start a new one. Once listening it prints one line
+with the repository, its URL and the token file, then one line as each frontend connects (with the
+name its `Hello` gives and its address) and disconnects, and one as it stops; warnings and errors
+go to stderr. While it runs, `run/<workspace id>.json` in the state directory, readable by you
+alone, holds its URL and process id; it's removed as it stops.
+
+The first `ctrl+c` (or SIGTERM) stops it: it stops accepting frontends, cancels the work in
+progress (stopping the agents and revoking their tokens), writes the event log, closes every
+frontend's connection saying the server is shutting down, and exits. A second `ctrl+c` exits at
+once.
+
+**The token.** A frontend connects by showing the token in `token` in the config directory, sent
+as `Authorization: Bearer <token>`; without it the connection is refused with HTTP 401. `orbit
+serve` makes it on first start, 32 random bytes, in a file readable by you alone, and reuses it
+after; a token file others can read stops it with status 2 and the `chmod 600` that fixes it. The
+token grants full control of the control plane: anyone who has it can run agents in your
+repository with the access you give them. It's never printed or logged; don't share it. To connect
+from another machine, copy it over a trusted channel, such as `scp ~/.config/orbit/token
+other:.config/orbit/token`, and in this release reach the server through an SSH tunnel, such as
+`ssh -L 7433:127.0.0.1:7433 server`, as it listens on loopback alone.
+
+The `[server]` table in your `config.toml` sets where it listens and the largest message either
+way; the flags override it:
+
+```toml
+[server]
+host = "127.0.0.1"   # loopback only, for now
+port = 7433          # 0 lets the system choose
+max_message_mb = 64  # a larger message closes the connection
+```
+
+An unknown key in `[server]`, or a value of the wrong type or out of range, stops `orbit serve`
+with status 2 and a message naming the file and the key.
+
 ## Development
 
 Write tests first. Coverage is held at 100% (`fail_under` in `pyproject.toml`); only
@@ -866,6 +919,12 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     review count in `orbit.db` in the state directory `resolve_state_dir` picks, with
     `session_locks`' lock files while an orbit has a session open; `session_import` imports the
     session files older orbits saved where `session_files`' `legacy_dir` says.
+    `ControlPlaneServer` (in `control_plane`) is the server adapter: it serves `AgentSession`
+    over a WebSocket (starlette on uvicorn, through `embedded_server`'s `EmbeddedServer`, which
+    leaves signals to the program), one `SessionConnection` per frontend that shows the token,
+    turning frames into commands and events into frames; `TokenFile` (in `token_file`) is the
+    token it checks, `RunFile` (in `run_file`) says where it listens, both written through
+    `private_files`, and `user_config` reads `[storage]` and `[server]`.
   - `application`: `AgentSession` (in `session`) implements `Session`: it takes commands, asks
     the domain what follows, drives the ports and publishes events into the `Outbox` (in
     `outbox`), which stamps each with its `seq` and the session it belongs to. `Tasks` (in
@@ -915,7 +974,7 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     `agents`: agent ids and tokens), `roles` (built-in roles, given their instructions, and the
     tasks orbit queues in them), `config` (`OrbitConfig`: the limits, roles, verification steps
     and setup a project file sets over the built-in defaults) and `config_errors` (`ConfigError`,
-    and what's wrong with an invalid file or proposal), `checks` (the verification steps, the
+    and what's wrong with an invalid file or proposal), `server` (`ServerSettings`, the user config's `[server]`, and which hosts are loopback), `checks` (the verification steps, the
     setup step that makes a fresh worktree ready, and the checks a configurator proposes), the
     `Catalog` (in `catalog`: the workspace and its sessions, the agents' roles, the triggers and
     the lanes), `ReviewPlanner` (in `reviews`: when to review, batches, rounds and caps), commit
@@ -948,6 +1007,7 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
 - `orbit.cli`: the composition root, and the only place the two sides are wired together: it
   plugs the external adapters into `AgentSession` and hands that to the TUI. It runs the
   backend on its own thread and event loop through `orbit.protocol.ThreadedSession`, so neither
-  side's work stalls the other.
+  side's work stalls the other. `orbit serve` plugs them in the same way but hands `AgentSession` to
+  `ControlPlaneServer` instead, on the main thread's event loop.
 
 These rules are enforced by `lint-imports` (see `[tool.importlinter]` in `pyproject.toml`).

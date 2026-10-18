@@ -8,7 +8,14 @@ from dataclasses import dataclass
 
 from orbit.agent.application.handshake import Handshake, HandshakeParts
 from orbit.agent.application.outbox import EventSink
-from orbit.protocol import CONNECTION_EVENTS, CommandEnvelope, Event, EventEnvelope, Hello
+from orbit.protocol import (
+    CONNECTION_EVENTS,
+    CommandEnvelope,
+    CommandRefused,
+    Event,
+    EventEnvelope,
+    Hello,
+)
 
 QUEUE_LIMIT = 10_000
 """How many events a connection's stream holds unread before it's closed as too far behind."""
@@ -104,8 +111,7 @@ class SessionConnection:
         once the stream has ended; an incompatible ``Hello``'s refusal ends it."""
         if self._ended:
             return
-        private = isinstance(envelope.payload, Hello) or not self._handshake.welcomed
-        publish = self._publish_here if private else self._parts.events.put
+        publish = self._publisher(private=isinstance(envelope.payload, Hello))
         token = _answering.set(self)
         try:
             await self._parts.answer(envelope, self._handshake, publish)
@@ -113,6 +119,22 @@ class SessionConnection:
             _answering.reset(token)
         if self._handshake.ended:
             self.end()
+
+    async def refuse(self, command_id: str, code: str, message: str) -> None:
+        """Publish ``CommandRefused`` with ``code`` and ``message`` for a command sent as
+        ``command_id`` that couldn't be read, as the outcome of one that could would be; nothing
+        once the stream has ended."""
+        if self._ended:
+            return
+        refused = CommandRefused(command_id=command_id, code=code, message=message)
+        await self._publisher(private=False)(refused)
+
+    def _publisher(self, private: bool) -> Publish:
+        """What publishes a command's outcome: to this connection alone if ``private`` or
+        before one is welcomed, else to every connection."""
+        if private or not self._handshake.welcomed:
+            return self._publish_here
+        return self._parts.events.put
 
     async def _publish_here(self, event: Event) -> None:
         """Stamp ``event`` and queue it for this connection alone."""

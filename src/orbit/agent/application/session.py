@@ -6,6 +6,7 @@ ports to do it, and reports what happened as events.
 """
 
 from collections.abc import Awaitable, Callable, Collection, Sequence
+from contextlib import suppress
 from dataclasses import replace
 from datetime import datetime
 from pathlib import PurePath
@@ -72,6 +73,7 @@ from orbit.protocol import (
     Hello,
     History,
     LogGap,
+    OpenSession,
     ResumeStorage,
     RunningAgent,
     SessionSummary,
@@ -364,6 +366,16 @@ class AgentSession:
             self._greeting, self._events, self._events.stamp, self._connections, self._answer
         )
         return SessionConnection(parts)
+
+    async def open_latest(self) -> None:
+        """Open the most recently active saved session no other orbit has open in place of the
+        new one, if there's one that can be opened, as the user would; the new one stays open
+        if it can't be."""
+        for summary in await self._keeper.summaries():
+            if not summary.locked and summary.unreadable is None:
+                with suppress(Refused):
+                    await self._switcher.handle(OpenSession(session_id=summary.id))
+                return
 
     async def _answer(
         self, envelope: CommandEnvelope, handshake: Handshake, publish: Publish

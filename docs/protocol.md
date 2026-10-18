@@ -4,7 +4,8 @@ A frontend talks to orbit's backend by sending commands and reading events. This
 how that conversation goes. The models in `orbit.protocol` define every message, and the
 generated JSON Schema in `schema/protocol.schema.json` says what each one looks like on the
 wire. The decisions behind all this are recorded in `docs/00002-feature-envelope-and-outcomes.md`,
-`docs/00003-feature-join-handshake.md` and `docs/00004-feature-wire-contract.md`.
+`docs/00003-feature-join-handshake.md`, `docs/00004-feature-wire-contract.md` and, for the
+transport, `docs/00009-feature-serve-and-connect.md`.
 
 ## Envelopes
 
@@ -201,6 +202,36 @@ isn't JSON, isn't an object, or holds an invalid message; its `command_id` is th
 when it could be read. `decode_event` returns `None` for an event type it doesn't know, to be
 skipped, while `decode_command` raises a `ProtocolError` marked `unknown` for a command type it
 doesn't know.
+
+## Transport
+
+`orbit serve` serves the protocol over a WebSocket on loopback, at the URL it prints and writes to
+its run file (`ws://127.0.0.1:7433/` by default). Each WebSocket is a connection of its own, with
+its own handshake and stream: it starts with `Hello` like any other, and what it's sent follows
+the rules above, so every connection gets every event the session publishes, outcomes of other
+connections' commands included, but for the events answering one connection (`Welcome`,
+`Catalog`, `Snapshot`, `HistoryPage`), which reach only it.
+
+- **Authentication** is on the upgrade: the request must carry `Authorization: Bearer <token>`,
+  the token in the token file of the server's config directory. Without it, or with another
+  token, the server answers HTTP 401 and no WebSocket opens.
+- **Frames**: each envelope is one text frame, in the wire format below. A frame that can't be
+  decoded but has a `command_id` is answered with `CommandRefused` coded `unknown` for a command
+  type the server doesn't know, else `invalid`; the connection stays open. One without a
+  readable `command_id`, such as text that isn't JSON, or a binary frame, closes the WebSocket
+  with code 1008 and the decoding error as the reason.
+- **The message limit** is 64 MiB each way by default (`max_message_mb` in `[server]` of the
+  server's `config.toml`). A larger frame from the frontend, or an event too large to send to
+  it, closes the WebSocket with code 1009 and a reason saying how large it was.
+- **Slow clients**: the server holds at most 10,000 events unsent to one connection. One more
+  closes the WebSocket with code 1008 and the reason `too far behind`, and the session and its
+  other connections carry on; the frontend reconnects with `Hello`'s `since` to catch up.
+- **Shutting down**: as the server stops, after cancelling the work in progress, it closes every
+  WebSocket with code 1001 and the reason `orbit serve is shutting down`.
+- A stream that ends otherwise, as an incompatible `Hello`'s does, closes the WebSocket with code
+  1000.
+
+Work doesn't depend on any frontend: queued work goes on to the end with none connected.
 
 ## The schema
 

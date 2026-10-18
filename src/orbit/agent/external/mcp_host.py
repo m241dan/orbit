@@ -25,6 +25,7 @@ from orbit.agent.domain.roles import (
     RUN_CHECK,
     SUGGEST_TASK,
 )
+from orbit.agent.external.embedded_server import EmbeddedServer
 
 INSTRUCTIONS = (
     "Orbit hands out tasks and verifies the work; these tools are how an agent talks to it."
@@ -142,7 +143,7 @@ class McpHost:
         sock.bind(("127.0.0.1", 0))
         port = sock.getsockname()[1]
         app = build_server(handler).streamable_http_app()
-        self._server = uvicorn.Server(uvicorn.Config(app, log_level="warning", lifespan="on"))
+        self._server = EmbeddedServer(uvicorn.Config(app, log_level="warning", lifespan="on"))
         self._serving = asyncio.create_task(self._server.serve(sockets=[sock]))
         while not self._server.started:
             if self._serving.done():

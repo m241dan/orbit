@@ -166,6 +166,44 @@ async def test_a_connection_that_falls_too_far_behind_is_closed_and_the_others_c
     ]
 
 
+async def test_an_unreadable_command_is_refused_to_every_welcomed_connection() -> None:
+    session = AgentSession()
+    first = await welcomed(session, "first")
+    second = await welcomed(session, "second")
+    await taken(first), await taken(second)
+
+    await first.refuse("c1", INVALID, "Not a command")
+
+    refusal = CommandRefused(command_id="c1", code=INVALID, message="Not a command")
+    assert (await taken(first), await taken(second)) == ([refusal], [refusal])
+    await session.close()
+
+
+async def test_an_unreadable_command_before_hello_is_refused_on_that_connection_alone() -> None:
+    session = AgentSession()
+    first = await welcomed(session, "first")
+    await taken(first)
+    second = session.connect()
+
+    await second.refuse("c1", INVALID, "Not a command")
+
+    refusal = CommandRefused(command_id="c1", code=INVALID, message="Not a command")
+    assert (await taken(second), await taken(first)) == ([refusal], [])
+    await session.close()
+
+
+async def test_an_unreadable_command_on_a_closed_connection_is_not_refused() -> None:
+    session = AgentSession()
+    connection = await welcomed(session, "closed")
+    await taken(connection)
+    await connection.close()
+
+    await connection.refuse("c1", INVALID, "Not a command")
+
+    assert await everything(connection) == []
+    await session.close()
+
+
 async def test_closing_one_connection_leaves_the_others_working() -> None:
     session = AgentSession()
     first = await welcomed(session, "first")
