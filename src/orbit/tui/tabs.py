@@ -1,19 +1,21 @@
 """The strip of conversation tabs above the transcript."""
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from textual.widgets import Tab, Tabs
 
-from orbit.protocol import PLANNER, Event
+from orbit.protocol import PLANNER, Event, RunningAgent
 from orbit.tui.view.tabs import (
     ALL_TAB_LABEL,
     PINNED_TABS,
     ConversationTab,
+    follow_running,
     mark_planner_busy,
     mark_tab_read,
     mark_tab_unread,
     reset_tabs,
+    running_roles,
     tab_key,
     tab_labels,
     track_roles,
@@ -77,11 +79,17 @@ class ConversationTabs(Tabs):
         tabs as they are."""
         self.roles = track_roles(self.roles, event)
 
-    def reset(self) -> None:
+    def reset(self, running: Sequence[RunningAgent]) -> None:
         """Close every agent's own tab and forget the agents that ran in the pinned roles,
-        as before any agent ran."""
-        self.roles = {}
+        as before any agent ran, but those ``running`` in one."""
+        self.roles = running_roles(running)
         self._update(reset_tabs(self.tabs))
+
+    def follow(self, running: Sequence[RunningAgent]) -> None:
+        """Make the tabs agree with the agents ``running``: an own tab for each outside the
+        pinned roles, and each pinned tab marked while its role's agents run."""
+        self.roles = {**self.roles, **running_roles(running)}
+        self._update(follow_running(self.tabs, running))
 
     def mark_read(self, agent: str | None) -> None:
         """Clear ``agent``'s unread marker; None (All) has none."""

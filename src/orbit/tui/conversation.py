@@ -1,6 +1,6 @@
 """Turns backend events into the conversation's entries."""
 
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from typing import TypeGuard, assert_never, get_args
 
@@ -18,6 +18,7 @@ from orbit.protocol import (
     LogGap,
     Notice,
     ProgressNoted,
+    RunningAgent,
     StartupChecked,
     TaskGaveUp,
     TaskMerged,
@@ -130,15 +131,18 @@ class ConversationFeed:
             case _:
                 assert_never(event)
 
-    def replace(self, events: Iterable[Event]) -> None:
-        """Show ``events`` in place of the conversation, its agents' tabs and running turns, as
-        they were shown when they happened."""
+    def replace(self, events: Iterable[Event], running: Sequence[RunningAgent]) -> None:
+        """Show ``events`` in place of the conversation and its running turns, as they were
+        shown when they happened, with tabs for the agents ``running``, whose entries go under
+        their pinned roles' tabs even when ``events`` don't hold their start."""
         self.transcript.clear()
-        self.tabs.reset()
+        self.tabs.reset(running)
         self._turns = Turns()
         for event in events:
             self.tabs.track(event)
             self._show_logged(event)
+        # The log may end with agents that never exited, or start after some still running.
+        self.tabs.follow(running)
 
     def prepend(self, events: Iterable[Event]) -> None:
         """Show ``events``, which came before every event shown, above them, as they were

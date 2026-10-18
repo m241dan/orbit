@@ -661,7 +661,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         self._proposals.follow(snapshot.proposals)
         # Its tasks shown first, as the transcript's notes on them read them, and its usage
         # set after, as the transcript's turns count theirs.
-        self._feed.replace(envelope.payload for envelope in snapshot.transcript)
+        self._feed.replace((envelope.payload for envelope in snapshot.transcript), snapshot.agents)
         self._pager.follow(snapshot)
         self._open_session(snapshot.session)
         if snapshot.storage_halt is None:

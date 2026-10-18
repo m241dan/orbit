@@ -1,7 +1,7 @@
 """Conversation tabs."""
 
 from collections import Counter
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from types import MappingProxyType
 from typing import TypeGuard, get_args
@@ -17,6 +17,7 @@ from orbit.protocol import (
     ErrorOccurred,
     Event,
     ProgressNoted,
+    RunningAgent,
     TaskGaveUp,
     TaskState,
     ToolCallFinished,
@@ -80,6 +81,54 @@ def reset_tabs(tabs: tuple[ConversationTab, ...]) -> tuple[ConversationTab, ...]
         for tab in tabs
         if tab.key in ROLE_TABS
     )
+
+
+def running_roles(agents: Iterable[RunningAgent]) -> Mapping[str, str]:
+    """Which pinned role each of the running ``agents`` is in, by agent id, for those in
+    one."""
+    return {agent.agent_id: agent.role for agent in agents if agent.role in ROLE_TABS}
+
+
+def follow_running(
+    tabs: tuple[ConversationTab, ...], agents: Sequence[RunningAgent]
+) -> tuple[ConversationTab, ...]:
+    """``tabs`` agreeing with the ``agents`` running: each pinned tab counting its role's
+    agents (the planner's following its busy lane), then an own tab for each agent outside
+    the pinned roles, keeping those already open as they are."""
+    return (*_count_pinned(tabs, agents), *_own_tabs(tabs, agents))
+
+
+def _count_pinned(
+    tabs: tuple[ConversationTab, ...], agents: Sequence[RunningAgent]
+) -> tuple[ConversationTab, ...]:
+    """``tabs``' pinned tabs, each counting its role's running ``agents`` but the planner's."""
+    counts = Counter(agent.role for agent in agents)
+    pinned = (tab for tab in tabs if tab.key in ROLE_TABS)
+    return tuple(
+        tab if tab.key == PLANNER else replace(tab, running=counts[tab.key]) for tab in pinned
+    )
+
+
+def _own_tabs(
+    tabs: tuple[ConversationTab, ...], agents: Sequence[RunningAgent]
+) -> tuple[ConversationTab, ...]:
+    """The own tabs of the running ``agents`` outside the pinned roles: those open in ``tabs``,
+    then one for each of the rest."""
+    own = _own_roles(agents)
+    kept = tuple(tab for tab in _unpinned(tabs) if tab.key in own)
+    open_keys = {tab.key for tab in kept}
+    added = (ConversationTab(key, role) for key, role in own.items() if key not in open_keys)
+    return (*kept, *added)
+
+
+def _unpinned(tabs: Iterable[ConversationTab]) -> Iterable[ConversationTab]:
+    """``tabs`` but the pinned ones."""
+    return (tab for tab in tabs if tab.key not in ROLE_TABS)
+
+
+def _own_roles(agents: Iterable[RunningAgent]) -> dict[str, str]:
+    """The role of each of the running ``agents`` outside the pinned roles, by agent id."""
+    return {agent.agent_id: agent.role for agent in agents if agent.role not in ROLE_TABS}
 
 
 def track_roles(roles: Mapping[str, str], event: Event) -> Mapping[str, str]:

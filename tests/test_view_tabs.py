@@ -13,6 +13,7 @@ from orbit.protocol import (
     Event,
     Notice,
     ProgressNoted,
+    RunningAgent,
     TaskGaveUp,
     TaskSpec,
     TaskState,
@@ -25,10 +26,12 @@ from orbit.tui.view.tabs import (
     PINNED_TABS,
     ROLE_TABS,
     ConversationTab,
+    follow_running,
     mark_planner_busy,
     mark_tab_read,
     mark_tab_unread,
     reset_tabs,
+    running_roles,
     tab_key,
     tab_labels,
     task_tab_key,
@@ -271,3 +274,37 @@ def test_resetting_tabs_keeps_the_pinned_ones_read_and_idle_but_a_busy_planner()
     tabs = mark_tab_unread(tabs, "coder", None)
 
     assert reset_tabs(tabs) == busy
+
+
+def _running(agent: str, role: str) -> RunningAgent:
+    return RunningAgent(agent_id=agent, role=role, task_id="1")
+
+
+def test_running_agents_in_pinned_roles_are_known_by_role() -> None:
+    agents = (_running("agent-1", "coder"), _running("agent-2", "checker"))
+    assert running_roles(agents) == {"agent-1": "coder"}
+
+
+def test_following_no_running_agents_closes_own_tabs_and_idles_pinned_but_the_planner() -> None:
+    busy = mark_planner_busy(PINNED_TABS, True)
+    tabs = (*busy, ConversationTab("agent-4", "checker", unread=True))
+    tabs = track_tabs(tabs, AgentStarted(agent_id="agent-3", role="coder", task_id="1"))
+    assert follow_running(tabs, ()) == busy
+
+
+def test_following_running_agents_counts_each_pinned_roles_agents() -> None:
+    agents = (_running("a", "reviewer"), _running("b", "reviewer"), _running("p", PLANNER))
+    tabs = follow_running(PINNED_TABS, agents)
+    assert tab_labels(tabs) == ["planner", "coder", "● reviewer", "super-reviewer", "configurator"]
+    assert tabs[2].running == 2
+
+
+def test_following_running_agents_keeps_their_open_tabs_and_opens_the_missing() -> None:
+    kept = ConversationTab("agent-4", "checker", unread=True)
+    tabs = (*PINNED_TABS, ConversationTab("agent-5", "linter"), kept)
+    agents = (_running("agent-6", "linter"), _running("agent-4", "checker"))
+    assert follow_running(tabs, agents) == (
+        *PINNED_TABS,
+        kept,
+        ConversationTab("agent-6", "linter"),
+    )

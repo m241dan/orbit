@@ -38,7 +38,7 @@ from orbit.tui.tasks import TaskList
 from orbit.tui.transcript import Transcript
 from orbit.tui.view.agents import AgentRow
 from orbit.tui.widgets import ChatPrompt
-from tests.test_tui import STRIP, FakeSession, entries, feed_events, opened, tab_strip
+from tests.test_tui import PINNED, STRIP, FakeSession, entries, feed_events, opened, tab_strip
 
 TASKS = (
     TaskState(id="1", task=TaskSpec(prompt="Add a flag."), status="running"),
@@ -156,15 +156,44 @@ async def test_a_snapshot_closes_the_agent_tabs_its_transcript_doesnt_open() -> 
     session = FakeSession()
     app = OrbitApp(session)
     checker = AgentStarted(agent_id="agent-4", role="checker", task_id="1")
+    running = RunningAgent(agent_id="agent-4", role="checker", task_id="1")
     empty = opened(SessionSummary(id="s1", name="auth"))
     async with app.run_test() as pilot:
         await feed_events(session, pilot, checker)
         assert tab_strip(app) == [*STRIP, "checker"]
         await feed_events(session, pilot, empty)
         assert tab_strip(app) == STRIP
-        reopened = empty.model_copy(update={"transcript": logged(checker)})
+        reopened = empty.model_copy(update={"transcript": logged(checker), "agents": (running,)})
         await feed_events(session, pilot, reopened)
         assert tab_strip(app) == [*STRIP, "checker"]
+
+
+async def test_a_snapshots_agents_started_but_not_running_get_no_tab_or_marker() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    checker = AgentStarted(agent_id="agent-4", role="checker", task_id="1")
+    crashed = opened(SessionSummary(id="s1", name="auth")).model_copy(
+        update={"transcript": logged(*CODER_CALL, checker)}
+    )
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, crashed)
+        assert tab_strip(app) == ["All", "planner", "coder *", *PINNED[2:]]
+        assert "Read" in "".join(texts(app, "coder"))
+
+
+async def test_a_running_agent_started_before_the_transcript_gets_its_roles_tab() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    checker = RunningAgent(agent_id="agent-4", role="checker", task_id="2")
+    cut = SNAPSHOT.model_copy(
+        update={"agents": (CODER, checker), "transcript": logged(*CODER_CALL[1:])}
+    )
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, cut)
+        assert tab_strip(app) == ["All", "● planner", "● coder *", *PINNED[2:], "checker"]
+        [call] = [entry for entry in app.query_one(Transcript).entries("coder") if entry.call]
+        assert call.call is not None and call.call.status == "passed"
+        assert texts(app, "agent-3") == []
 
 
 async def test_a_snapshots_transcript_shows_a_reset_and_a_refusal_as_they_were_shown() -> None:
