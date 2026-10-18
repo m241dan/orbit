@@ -7,6 +7,7 @@ from dataclasses import dataclass
 
 from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.lanes import TurnSlot
+from orbit.agent.application.outbox import EventSink
 from orbit.agent.application.planner import PlannerChat
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.config_errors import ConfigError
@@ -20,7 +21,6 @@ from orbit.protocol import (
     BusyChanged,
     ConversationReset,
     ErrorOccurred,
-    Event,
     Notice,
     Settings,
     TurnEndReason,
@@ -50,7 +50,7 @@ class PlannerSeat:
         self,
         desk: AgentDesk | None,
         tasks: Tasks,
-        events: "asyncio.Queue[Event]",
+        events: EventSink,
         hooks: SeatHooks,
     ) -> None:
         self._desk = desk

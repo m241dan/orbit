@@ -587,9 +587,8 @@ def replies(events: list[Event]) -> list[str]:
 def queued(session: AgentSession) -> list[Event]:
     """Take the events the session has queued but not yet published."""
     events: list[Event] = []
-    while not session._events.empty():
-        events.append(session._events.get_nowait())
-        session._events._stamps.popleft()  # Its stamp goes with it.
+    while not session._events._queue.empty():
+        events.append(session._events._queue.get_nowait().payload)
     return events
 
 
@@ -601,7 +600,7 @@ async def greeted(session: Session) -> None:
 
 def nothing_queued(session: AgentSession) -> bool:
     """Whether the session has no events queued to publish."""
-    return session._events.empty()
+    return session._events._queue.empty()
 
 
 async def publish(session: AgentSession, event: Event) -> None:

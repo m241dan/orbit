@@ -1,13 +1,13 @@
 """Switching a session between saved ones: listing, renaming and deleting them, and opening
 another, or a new one, in place of the one open."""
 
-import asyncio
 from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import assert_never
 
 from orbit.agent.application.keeper import Contents, Left, SessionKeeper
+from orbit.agent.application.outbox import EventSink
 from orbit.agent.application.planner_seat import PlannerSeat
 from orbit.agent.application.review_lane import ReviewLane
 from orbit.agent.application.tasks import Tasks
@@ -27,7 +27,6 @@ from orbit.protocol import (
     INVALID,
     Catalog,
     DeleteSession,
-    Event,
     ListingReason,
     ListSessions,
     NewSession,
@@ -97,7 +96,7 @@ class SessionSwitcher:
         self,
         parts: SwitchParts,
         settings: SettingsAccess,
-        events: "asyncio.Queue[Event]",
+        events: EventSink,
         picking: bool = False,
     ) -> None:
         self._parts = parts

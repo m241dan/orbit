@@ -4,7 +4,6 @@ It takes commands from the frontend, asks the domain what follows from them, dri
 ports to do it, and reports what happened as events.
 """
 
-import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable, Collection, Sequence
 from dataclasses import replace
 from datetime import datetime
@@ -21,7 +20,7 @@ from orbit.agent.application.keeper import (
     new_session_id,
 )
 from orbit.agent.application.lanes import TurnSlot
-from orbit.agent.application.outbox import Outbox
+from orbit.agent.application.outbox import EventSink, Outbox
 from orbit.agent.application.planner_seat import PlannerSeat, SeatHooks
 from orbit.agent.application.ports import ProposalReview, SessionStore, UsageSource
 from orbit.agent.application.proposals import FrontendReview
@@ -118,7 +117,7 @@ WorkCommand = (
 def _verifier(
     verification: Verification | None,
     tasks: Tasks,
-    events: "asyncio.Queue[Event]",
+    events: EventSink,
     agents: Agents | None,
 ) -> Verifier | None:
     """What checks ``tasks`` (in the agents' tree, if any); none without
@@ -128,9 +127,7 @@ def _verifier(
     return Verifier(verification, tasks, events.put, agents.tree if agents else None)
 
 
-def _usage_monitor(
-    usage: UsageSource | None, events: "asyncio.Queue[Event]"
-) -> UsageMonitor | None:
+def _usage_monitor(usage: UsageSource | None, events: EventSink) -> UsageMonitor | None:
     """What fetches the usage limits from ``usage`` into ``events``; none without a source."""
     return UsageMonitor(usage, events.put) if usage else None
 

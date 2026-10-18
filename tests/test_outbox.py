@@ -1,0 +1,63 @@
+"""The outbox the session publishes into, stamping each event as it's put in."""
+
+import asyncio
+
+from orbit.agent.application.outbox import Outbox
+from orbit.protocol import EventEnvelope, Notice, SessionsListed
+
+ONE = Notice(message="one")
+TWO = Notice(message="two")
+
+
+class Open:
+    """The session an outbox reads as open, changed by setting ``id``."""
+
+    def __init__(self) -> None:
+        self.id = "a"
+
+    def __call__(self) -> str:
+        return self.id
+
+
+async def test_envelopes_count_from_one_in_put_order() -> None:
+    outbox = Outbox(Open())
+    await outbox.put(ONE)
+    outbox.put_nowait(TWO)
+
+    assert [await outbox.envelope(), await outbox.envelope()] == [
+        EventEnvelope(seq=1, session="a", payload=ONE),
+        EventEnvelope(seq=2, session="a", payload=TWO),
+    ]
+
+
+async def test_an_event_keeps_the_session_open_when_it_was_put() -> None:
+    session = Open()
+    outbox = Outbox(session)
+    await outbox.put(ONE)
+    session.id = "b"
+    await outbox.put(TWO)
+
+    assert (await outbox.envelope()).session == "a"
+    assert (await outbox.envelope()).session == "b"
+
+
+async def test_a_sessionless_event_belongs_to_no_session() -> None:
+    outbox = Outbox(Open())
+    await outbox.put(SessionsListed(sessions=(), reason="asked"))
+
+    assert (await outbox.envelope()).session is None
+
+
+async def test_envelope_waits_for_an_event_to_be_put() -> None:
+    outbox = Outbox(Open())
+    waiting = asyncio.create_task(outbox.envelope())
+    await asyncio.sleep(0)
+    outbox.put_nowait(ONE)
+
+    assert await waiting == EventEnvelope(seq=1, session="a", payload=ONE)
+
+
+def test_an_outbox_reads_events_only_in_their_envelopes() -> None:
+    public = {name for name in dir(Outbox) if not name.startswith("_")}
+
+    assert public == {"put", "put_nowait", "envelope"}
