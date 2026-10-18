@@ -392,6 +392,7 @@ class FakeTree:
         self.ignored.append(set(paths))
 
     async def leftovers(self) -> list[str]:
+        self._fail("leftovers")
         return self.notes
 
     def use_setup(self, setup: Setup | None) -> None:

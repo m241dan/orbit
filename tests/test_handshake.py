@@ -8,6 +8,7 @@ from orbit.agent.application.session import HELLO_AGAIN_MESSAGE, HELLO_FIRST_MES
 from orbit.agent.domain.usage import UsageReport
 from orbit.protocol import (
     INCOMPATIBLE,
+    INTERNAL,
     INVALID,
     PROTOCOL_VERSION,
     UNKNOWN,
@@ -15,8 +16,10 @@ from orbit.protocol import (
     AddTask,
     Catalog,
     Command,
+    CommandAccepted,
     CommandEnvelope,
     CommandRefused,
+    ErrorOccurred,
     Event,
     Hello,
     Notice,
@@ -30,12 +33,14 @@ from tests.agent_fakes import (
     HELLO,
     HELLO_ID,
     STEP,
+    FakeTree,
     Steps,
     board,
     events_until,
     greet,
     nothing_queued,
     of_type,
+    queued,
     send,
     session_for,
 )
@@ -191,3 +196,20 @@ async def test_closing_a_session_never_greeted_stops_cleanly() -> None:
 
     assert (steps.runs, source.calls) == ([], 0)
     assert host.starts == host.stops
+
+
+async def test_a_hello_whose_leftovers_fail_is_welcomed_once_and_reports_an_error() -> None:
+    tree = FakeTree()
+    tree.failures["leftovers"] = RuntimeError("git stash list failed")
+    session, _, _ = session_for(tree=tree)
+    await greet(session)
+    events = queued(session)
+    await send_as(session, "add", AddTask(task=TaskSpec(prompt="Add a flag.")))
+    accepted = await events_until(session, of_type(CommandAccepted))
+    await session.close()
+
+    message = "Orbit failed to finish greeting the frontend: git stash list failed"
+    outcomes = [e for e in events if isinstance(e, Welcome | CommandAccepted | CommandRefused)]
+    assert outcomes == [Welcome(command_id=HELLO_ID, server_version=__version__)]
+    assert ErrorOccurred(code=INTERNAL, message=message) in events
+    assert accepted[-1] == CommandAccepted(command_id="add")
