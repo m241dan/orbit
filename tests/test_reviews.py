@@ -26,7 +26,7 @@ def state(
         id=task_id,
         task=TaskSpec(prompt=prompt),
         status=status,
-        origin=origin,  # type: ignore[arg-type]
+        origin=origin,
         batch=batch,
     )
 

@@ -32,9 +32,13 @@ class Settings(_Message):
 
 # Commands: frontend -> backend
 
+WORK_LANE = "work"
+PLANNER_LANE = "planner"
+"""The lanes' names: task runs in the work lane, the planner's turns in its own."""
 
-BusyLane = Literal["work", "planner"]
-"""Where work runs: task runs in ``work``; the planner's turns in a lane of their own."""
+
+BusyLane = str
+"""Where work runs, by name: task runs in ``work``; the planner's turns in ``planner``."""
 
 
 class SubmitPrompt(_Message):
@@ -51,7 +55,7 @@ class CancelTurn(_Message):
     """Stop the work in ``lane``: the planner's turn, or the task run."""
 
     type: Literal["cancel_turn"] = "cancel_turn"
-    lane: BusyLane = "work"
+    lane: BusyLane = WORK_LANE
 
 
 class UpdateSettings(_Message):
@@ -278,8 +282,9 @@ TaskStatus = Literal[
 ACTIVE_STATUSES: frozenset[TaskStatus] = frozenset({"running", "verifying"})
 """Statuses of a task an agent is working on or orbit is verifying."""
 
-TaskOrigin = Literal["manual", "planner", "review", "super_review"]
-"""Who queued a task: the user, the planner, or a (super) review's suggestions."""
+TaskOrigin = str
+"""Who queued a task: ``manual`` (the user), ``planner``, or a review's suggestions,
+``review`` or ``super_review``."""
 
 
 class TaskState(_Message):
@@ -394,7 +399,7 @@ class BusyChanged(_Message):
 
     type: Literal["busy_changed"] = "busy_changed"
     busy: bool
-    lane: BusyLane = "work"
+    lane: BusyLane = WORK_LANE
 
 
 class TasksChanged(_Message):

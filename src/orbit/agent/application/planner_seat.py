@@ -12,6 +12,7 @@ from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.roles import ConfigError
 from orbit.protocol import (
     PLANNER,
+    PLANNER_LANE,
     BusyChanged,
     ErrorOccurred,
     Event,
@@ -55,7 +56,7 @@ class PlannerSeat:
         self._planner = self._chat()
         self._retired: list[PlannerChat] = []  # Planners of sessions left or reset, still to close.
         self._kept: str | None = None  # The conversation opened, kept to save without a planner.
-        self._turns = TurnSlot("planner", "The planner is already answering.", events.put_nowait)
+        self._turns = TurnSlot(PLANNER_LANE, "The planner is already answering.", events.put_nowait)
 
     @property
     def running(self) -> bool:
@@ -83,7 +84,7 @@ class PlannerSeat:
         if self._planner is None:
             await self._events.put(ErrorOccurred(message=NO_PLANNER_MESSAGE))
             # Frees the prompt of a frontend that marked the lane busy when it sent this.
-            await self._events.put(BusyChanged(busy=False, lane="planner"))
+            await self._events.put(BusyChanged(busy=False, lane=PLANNER_LANE))
         else:
             self._hooks.use()
             await self._hooks.save()

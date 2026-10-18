@@ -116,6 +116,26 @@ async def test_cancelling_the_planner_leaves_the_task_run_running() -> None:
     assert [t.status for t in board(events)] == ["completed"]
 
 
+async def test_cancelling_an_unknown_lane_stops_neither_lane() -> None:
+    task_gate, planner_gate = asyncio.Event(), asyncio.Event()
+    session, _, launcher = session_for(gated_task(task_gate))
+    launcher.planner_turns = [gated_planner(planner_gate)]
+    await session.send(AddTask(task=TaskSpec(prompt="one")))
+    await session.send(RunTasks())
+    await session.send(SubmitPrompt(text="Plan."))
+    await events_until(session, lambda e: isinstance(e, TurnStarted) and e.turn_id != e.agent_id)
+    await session.send(CancelTurn(lane="x"))
+    events = await events_until(session, lambda e: isinstance(e, ErrorOccurred))
+    assert errors(events) == ["No lane 'x'; the lanes are work and planner."]
+
+    planner_gate.set()
+    events = await events_until(session, lambda e: e == PLANNER_IDLE)
+    assert any(isinstance(e, TurnFinished) and e.reason == "completed" for e in events)
+    task_gate.set()
+    events = await events_until(session, lambda e: e == WORK_IDLE)
+    assert [t.status for t in board(events)] == ["completed"]
+
+
 async def test_cancelling_the_planners_agent_stops_only_its_turn() -> None:
     gate = asyncio.Event()
     session, _, launcher = session_for(gated_task(gate))

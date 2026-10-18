@@ -169,9 +169,9 @@ def test_task_state_defaults_to_manual_origin_and_no_attempts() -> None:
     assert (state.origin, state.attempt, state.max_attempts) == ("manual", 0, 0)
 
 
-def test_rejects_unknown_task_origin() -> None:
-    with pytest.raises(ValidationError):
-        TaskState.model_validate({"id": "1", "task": {"prompt": "x"}, "origin": "magic"})
+def test_task_origin_is_any_name() -> None:
+    state = TaskState.model_validate({"id": "1", "task": {"prompt": "x"}, "origin": "magic"})
+    assert state.origin == "magic"
 
 
 def test_task_state_with_origin_attempts_and_gave_up_round_trips() -> None:

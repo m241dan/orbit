@@ -14,6 +14,8 @@ from textual.widgets import OptionList, Tabs
 
 from orbit.protocol import (
     PLANNER,
+    PLANNER_LANE,
+    WORK_LANE,
     AcceptTask,
     AddTask,
     AgentExited,
@@ -209,7 +211,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         # Id of the window h/j/k/l last moved to.
         self._selected = "prompt"
         # Which lanes have work in progress, as last reported (or just requested).
-        self._busy: dict[BusyLane, bool] = {"work": False, "planner": False}
+        self._busy: dict[BusyLane, bool] = {WORK_LANE: False, PLANNER_LANE: False}
         # Last settings reported by the backend; None until the first report.
         self._settings: Settings | None = None
         self._model_choices: tuple[str, ...] = ()
@@ -264,7 +266,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         text = message.text.strip()
         if not text:
             return
-        if self._busy["planner"]:
+        if self._busy[PLANNER_LANE]:
             # Keep the draft for when the planner is free; the user sends it again then.
             self.notify(PLANNER_BUSY, severity="warning")
             return
@@ -272,7 +274,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         prompt = self._prompt
         prompt.action_normal_mode()
         # Busy from now, not from TurnStarted, so a second prompt can't race the turn.
-        self._set_busy("planner", True)
+        self._set_busy(PLANNER_LANE, True)
         self._feed.append(text, "prompt", PLANNER)
         await self._session.send(SubmitPrompt(text=text))
 
@@ -396,7 +398,7 @@ class OrbitApp(App[None], inherit_bindings=False):
 
     async def action_run_tasks(self) -> None:
         """Ask the backend to run the task list, unless something is already running."""
-        if not self._busy["work"]:
+        if not self._busy[WORK_LANE]:
             await self._session.send(RunTasks())
 
     def _select(self, window_id: str) -> None:
@@ -491,10 +493,10 @@ class OrbitApp(App[None], inherit_bindings=False):
 
     async def action_cancel_turn(self) -> None:
         # The planner has its own lane, stopped with ctrl+x; ctrl+s stops the task run.
-        await self._session.send(CancelTurn(lane="work"))
+        await self._session.send(CancelTurn(lane=WORK_LANE))
 
     async def action_stop_planner(self) -> None:
-        await self._session.send(CancelTurn(lane="planner"))
+        await self._session.send(CancelTurn(lane=PLANNER_LANE))
 
     def action_pick_model(self) -> None:
         if self._settings is not None:
@@ -667,6 +669,6 @@ class OrbitApp(App[None], inherit_bindings=False):
 
     def _set_busy(self, lane: BusyLane, busy: bool) -> None:
         self._busy[lane] = busy
-        if lane == "planner":
+        if lane == PLANNER_LANE:
             self._prompt.show_busy(busy)
             self._tabs.set_planner_busy(busy)

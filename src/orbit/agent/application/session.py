@@ -44,6 +44,8 @@ from orbit.protocol import (
     CODER,
     CONFIGURATOR,
     PLANNER,
+    PLANNER_LANE,
+    WORK_LANE,
     AcceptTask,
     AddTask,
     CancelAgent,
@@ -183,7 +185,7 @@ class AgentSession:
         self._startup = self._startup_check(verification, check_at_startup)
         self._work = self._work_lane()
         post = self._events.put_nowait
-        self._work_turns = TurnSlot("work", "Tasks are already running.", post)
+        self._work_turns = TurnSlot(WORK_LANE, "Tasks are already running.", post)
         self._usage = _usage_monitor(usage, self._events)
         self._switcher = self._session_switcher(pick_session)
 
@@ -292,10 +294,8 @@ class AgentSession:
         match command:
             case SubmitPrompt(text=text):
                 await self._seat.submit(text, self._settings)
-            case CancelTurn(lane="planner"):
-                self._seat.cancel()
-            case CancelTurn():
-                self._hold_work()
+            case CancelTurn(lane=lane):
+                await self._cancel_turn(lane)
             case UpdateSettings(settings=settings):
                 self._settings = settings
                 await self._events.put(self._settings_changed())
@@ -388,6 +388,16 @@ class AgentSession:
             return
         if self._work.next_work() is not None:
             await self._work_turns.start(self._work.run())
+
+    async def _cancel_turn(self, lane: str) -> None:
+        """Stop the work in ``lane``, or say there's no such lane."""
+        if lane == WORK_LANE:
+            self._hold_work()
+        elif lane == PLANNER_LANE:
+            self._seat.cancel()
+        else:
+            message = f"No lane {lane!r}; the lanes are {WORK_LANE} and {PLANNER_LANE}."
+            await self._events.put(ErrorOccurred(message=message))
 
     def _hold_work(self) -> None:
         """Cancel the work lane's run, and hold it until the user asks for work again."""
