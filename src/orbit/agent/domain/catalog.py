@@ -30,7 +30,7 @@ ROLE_LABELS = {
 }
 """The built-in roles' labels; a custom role is labelled by its name."""
 
-CONVERSATIONAL_ROLES = frozenset({PLANNER})
+CONVERSATIONAL_ROLES = (PLANNER,)
 """The roles the user can message."""
 
 TRIGGERS = (
@@ -38,6 +38,9 @@ TRIGGERS = (
     TriggerEntry(name=CONFIGURE_CHECKS, label="Set up checks", manual=True),
 )
 """The built-in triggers."""
+
+TRIGGER_NAMES = tuple(trigger.name for trigger in TRIGGERS)
+"""The built-in triggers' names."""
 
 LANES = (WORK_LANE, PLANNER_LANE)
 """The lanes work runs in."""

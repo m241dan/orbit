@@ -50,9 +50,9 @@ from orbit.agent.application.verifier import Verification, Verifier
 from orbit.agent.application.work_lane import WorkLane
 from orbit.agent.domain.agents import Agent
 from orbit.agent.domain.board import TaskBoard
-from orbit.agent.domain.catalog import catalog
+from orbit.agent.domain.catalog import CONVERSATIONAL_ROLES, LANES, TRIGGER_NAMES, catalog
 from orbit.agent.domain.checks import configure_prompt
-from orbit.agent.domain.refusals import Refused
+from orbit.agent.domain.refusals import Refused, unknown
 from orbit.agent.domain.reviews import ReviewPlanner
 from orbit.agent.domain.roles import REVIEW_ROLES, role_task
 from orbit.agent.domain.verification import VerificationStep, startup_fix_prompt
@@ -374,12 +374,9 @@ class AgentSession:
 
     async def _send_message(self, command: SendMessage) -> None:
         """Start a planner turn with the message's text; refused for any other agent."""
-        if command.agent != PLANNER:
-            message = (
-                f"Agent {command.agent!r} can't be messaged; "
-                f"the agents you can message are {PLANNER}."
-            )
-            raise Refused(UNKNOWN, message)
+        if command.agent not in CONVERSATIONAL_ROLES:
+            problem = f"Agent {command.agent!r} can't be messaged"
+            raise unknown(problem, "the agents you can message are", CONVERSATIONAL_ROLES)
         await self._seat.submit(command.text, self._settings.current)
 
     async def _handle_tasks(self, command: AddTask | RunTasks) -> None:
@@ -465,13 +462,12 @@ class AgentSession:
 
     async def _cancel_turn(self, lane: str) -> None:
         """Stop the work in ``lane``, or say there's no such lane."""
+        if lane not in LANES:
+            raise unknown(f"No lane {lane!r}", "the lanes are", LANES)
         if lane == WORK_LANE:
             self._hold_work()
-        elif lane == PLANNER_LANE:
-            self._seat.cancel()
         else:
-            message = f"No lane {lane!r}; the lanes are {WORK_LANE} and {PLANNER_LANE}."
-            raise Refused(UNKNOWN, message)
+            self._seat.cancel()
 
     def _hold_work(self) -> None:
         """Cancel the work lane's run, and hold it until the user asks for work again."""
@@ -497,28 +493,20 @@ class AgentSession:
 
     async def _reset_conversation(self, command: ResetConversation) -> None:
         """Reset the planner's conversation; refused for any other agent."""
-        if command.agent != PLANNER:
-            message = (
-                f"Agent {command.agent!r} has no conversation to reset; "
-                f"the agents with one are {PLANNER}."
-            )
-            raise Refused(UNKNOWN, message)
+        if command.agent not in CONVERSATIONAL_ROLES:
+            problem = f"Agent {command.agent!r} has no conversation to reset"
+            raise unknown(problem, "the agents with one are", CONVERSATIONAL_ROLES)
         await self._seat.reset()
 
     async def _fire_trigger(self, command: FireTrigger) -> None:
         """Run the built-in trigger ``command`` names; refused for any other name, or any input,
         since the built-ins take none."""
-        runs = {SUPER_REVIEW: self._super_review, CONFIGURE_CHECKS: self._configure_checks}
-        run = runs.get(command.trigger)
-        if run is None:
-            message = (
-                f"No trigger {command.trigger!r}; "
-                f"the triggers are {SUPER_REVIEW} and {CONFIGURE_CHECKS}."
-            )
-            raise Refused(UNKNOWN, message)
+        if command.trigger not in TRIGGER_NAMES:
+            raise unknown(f"No trigger {command.trigger!r}", "the triggers are", TRIGGER_NAMES)
         if command.input:
             raise Refused(INVALID, f"The {command.trigger} trigger takes no input.")
-        await run()
+        runs = {SUPER_REVIEW: self._super_review, CONFIGURE_CHECKS: self._configure_checks}
+        await runs[command.trigger]()
 
     async def _decide(self, command: DecideProposal) -> None:
         if not self._proposals.decide(command):

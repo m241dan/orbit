@@ -14,6 +14,7 @@ from orbit.agent.application.planner_seat import (
 )
 from orbit.agent.application.ports import StoredSession
 from orbit.agent.application.session import CONFIGURING_NOTE, NO_AGENTS_MESSAGE
+from orbit.agent.domain.catalog import LANES, TRIGGERS
 from orbit.protocol import (
     BUSY,
     CONFIGURE_CHECKS,
@@ -26,6 +27,7 @@ from orbit.protocol import (
     UNKNOWN,
     WRONG_SESSION,
     AddTask,
+    CancelTurn,
     Command,
     CommandAccepted,
     CommandEnvelope,
@@ -337,3 +339,23 @@ async def test_a_cancelled_handler_is_cancelled_with_no_outcome() -> None:
     await session.close()
 
     assert not any(isinstance(event, OUTCOMES) for event in queue)
+
+
+@pytest.mark.parametrize("trigger", [entry.name for entry in TRIGGERS])
+async def test_every_catalogued_trigger_is_answered_by_fire_trigger(trigger: str) -> None:
+    session = AgentSession()
+    await send_as(session, "c1", FireTrigger(trigger=trigger))
+    events = await outcome(session)
+    await session.close()
+
+    assert not (isinstance(events[-1], CommandRefused) and events[-1].code == UNKNOWN)
+
+
+@pytest.mark.parametrize("lane", LANES)
+async def test_every_catalogued_lane_is_accepted_by_cancel_turn(lane: str) -> None:
+    session = AgentSession()
+    await send_as(session, "c1", CancelTurn(lane=lane))
+    events = await outcome(session)
+    await session.close()
+
+    assert events[-1] == CommandAccepted(command_id="c1")
