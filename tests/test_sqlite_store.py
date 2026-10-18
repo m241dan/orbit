@@ -243,6 +243,56 @@ async def test_a_newer_database_is_refused_naming_both_versions(
     assert store_threads() == []
 
 
+def racing(
+    monkeypatch: pytest.MonkeyPatch, state: Path, meanwhile: Callable[[sqlite3.Connection], object]
+) -> None:
+    """Makes another connection run ``meanwhile`` once the store has read its schema version."""
+    read = sqlite_store._schema_version
+
+    def read_then_race(connection: sqlite3.Connection) -> int:
+        version = read(connection)
+        with database(state) as other:
+            meanwhile(other)
+        return version
+
+    monkeypatch.setattr(sqlite_store, "_schema_version", read_then_race)
+
+
+async def test_a_migration_applied_meanwhile_by_another_orbit_isnt_run_again(
+    monkeypatch: pytest.MonkeyPatch, open_store: Opener, state: Path, workspace: Path
+) -> None:
+    racing(monkeypatch, state, lambda other: sqlite_store._apply(other, 1, state / "orbit.db"))
+    await open_store(workspace)
+    with database(state) as connection:
+        assert connection.execute("SELECT version FROM schema_version").fetchall() == [(1,)]
+
+
+async def test_a_newer_version_written_meanwhile_is_refused(
+    monkeypatch: pytest.MonkeyPatch, open_store: Opener, state: Path, workspace: Path
+) -> None:
+    def newer(other: sqlite3.Connection) -> None:
+        other.execute("INSERT INTO schema_version (version) VALUES (99)")
+
+    racing(monkeypatch, state, newer)
+    with pytest.raises(StoreError, match=r"orbit\.db has schema version 99, newer than .* 1;"):
+        await open_store(workspace)
+    with database(state) as connection:
+        tables = connection.execute("SELECT name FROM sqlite_master WHERE name = 'workspaces'")
+        assert tables.fetchall() == []
+
+
+async def test_stores_opened_at_once_on_a_new_state_directory_both_open(
+    open_store: Opener, state: Path, tmp_path: Path
+) -> None:
+    first, second = tmp_path / "first", tmp_path / "second"
+    first.mkdir()
+    second.mkdir()
+    await asyncio.gather(open_store(first), open_store(second))
+    with database(state) as connection:
+        assert connection.execute("SELECT version FROM schema_version").fetchall() == [(1,)]
+        assert connection.execute("SELECT count(*) FROM workspaces").fetchone() == (2,)
+
+
 async def test_a_file_that_isnt_a_database_is_refused_naming_it(
     open_store: Opener, state: Path, workspace: Path
 ) -> None:

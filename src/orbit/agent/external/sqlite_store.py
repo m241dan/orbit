@@ -99,26 +99,49 @@ def _create_files(database: Path) -> None:
 def _schema_version(connection: sqlite3.Connection) -> int:
     """The version of ``connection``'s schema, 0 for a new database."""
     connection.execute("CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)")
+    return _recorded_version(connection)
+
+
+def _recorded_version(connection: sqlite3.Connection) -> int:
+    """The highest version in ``connection``'s ``schema_version`` table, 0 when it's empty."""
     (version,) = connection.execute("SELECT max(version) FROM schema_version").fetchone()
     return int(version or 0)
 
 
-def _apply(connection: sqlite3.Connection, version: int, database: Path) -> None:
-    """Bring ``connection``'s schema to ``version`` in one transaction, rolled back if it fails.
+def _check_supported(version: int, database: Path) -> None:
+    """Raises :class:`StoreError` naming ``database`` when its schema ``version`` is newer than
+    this orbit's."""
+    latest = len(MIGRATIONS)
+    if version > latest:
+        raise StoreError(
+            f"The database {database} has schema version {version}, newer than this orbit's "
+            f"{latest}; update orbit to use it."
+        )
+
+
+def _apply(connection: sqlite3.Connection, version: int, database: Path) -> int:
+    """Bring ``connection``'s schema to ``version`` in one transaction, rolled back if it fails;
+    returns the schema's version once done.
+
+    Another orbit may have upgraded the schema since it was read, so the version is read again
+    under the write lock and the migration skipped if it's already applied.
 
     Raises :class:`StoreError` naming ``database`` when it fails.
     """
     try:
         connection.execute("BEGIN IMMEDIATE")
-        for statement in MIGRATIONS[version - 1]:
-            connection.execute(statement)
-        connection.execute("INSERT INTO schema_version (version) VALUES (?)", (version,))
+        current = _recorded_version(connection)
+        if current < version:
+            for statement in MIGRATIONS[version - 1]:
+                connection.execute(statement)
+            connection.execute("INSERT INTO schema_version (version) VALUES (?)", (version,))
         connection.execute("COMMIT")
     except sqlite3.Error as error:
         if connection.in_transaction:
             connection.execute("ROLLBACK")
         message = f"Couldn't upgrade the database {database} to schema version {version}: {error}"
         raise StoreError(message) from error
+    return max(current, version)
 
 
 def _migrate(connection: sqlite3.Connection, database: Path) -> None:
@@ -126,14 +149,10 @@ def _migrate(connection: sqlite3.Connection, database: Path) -> None:
 
     Raises :class:`StoreError` when the database is newer than this orbit or a migration fails.
     """
-    version, latest = _schema_version(connection), len(MIGRATIONS)
-    if version > latest:
-        raise StoreError(
-            f"The database {database} has schema version {version}, newer than this orbit's "
-            f"{latest}; update orbit to use it."
-        )
-    for pending in range(version + 1, latest + 1):
-        _apply(connection, pending, database)
+    version = _schema_version(connection)
+    _check_supported(version, database)
+    for pending in range(version + 1, len(MIGRATIONS) + 1):
+        _check_supported(_apply(connection, pending, database), database)
 
 
 def _register(connection: sqlite3.Connection, workspace: str) -> str:
