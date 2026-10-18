@@ -255,7 +255,8 @@ class SessionSwitcher:
     ) -> None:
         """Finish a switch from the session ``left``, deleting it if its tasks carried over:
         close its planner, end the reviews ``stopped`` when it was saved, then save the session
-        opened and publish the catalog and its snapshot, last active at ``last_active``."""
+        opened and publish the catalog and its snapshot, last active at ``last_active``, which
+        alone shows what ending the reviews changed, and then note a review pause."""
         parts = self._parts
         discard, self._picking = self._picking, False
         await self._keeper.leave(left, discard)
@@ -265,6 +266,8 @@ class SessionSwitcher:
         await parts.tasks.changed_elsewhere()
         await self.publish_catalog()
         await self._events.put(parts.snapshot(last_active))
+        if parts.lane is not None:
+            await parts.lane.note_pause()
 
     def summary(self, last_active: datetime | None = None) -> SessionSummary:
         """The session open here, last active at ``last_active``, as the list of sessions

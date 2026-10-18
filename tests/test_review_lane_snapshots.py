@@ -7,11 +7,13 @@ from orbit.agent import AgentSession
 from orbit.agent.domain.reviews import BatchSnapshot, LaneSnapshot, PlannerSnapshot, ReviewJob
 from orbit.agent.domain.sessions import SessionRecord
 from orbit.protocol import (
+    CommandAccepted,
     Event,
     Notice,
     OpenSession,
     ReviewStatus,
     RunTasks,
+    SessionsListed,
     Snapshot,
     TaskOrigin,
     TasksChanged,
@@ -20,7 +22,16 @@ from orbit.protocol import (
     TaskStatus,
     TurnEndReason,
 )
-from tests.agent_fakes import Call, FakeStore, FakeTree, ScriptedLauncher, send, session_for
+from tests.agent_fakes import (
+    Call,
+    FakeStore,
+    FakeTree,
+    ScriptedLauncher,
+    events_until,
+    of_type,
+    send,
+    session_for,
+)
 from tests.test_review_lane import claims_done, start
 from tests.test_session_switch import last_of, messages, opened, saved, store_with, switching
 
@@ -117,6 +128,16 @@ async def reopened(
     return session, launcher, store, events
 
 
+async def switched(
+    tasks: tuple[TaskState, ...], snapshot: LaneSnapshot
+) -> tuple[AgentSession, list[Event]]:
+    """A session that started, then opened the session saved with ``tasks`` and ``snapshot``,
+    and the events from opening it alone."""
+    session, _ = switching(store_with(saved("auth", *tasks, reviews=snapshot)))
+    await events_until(session, of_type(Snapshot))  # The one after the Welcome.
+    return session, await opened(session, OpenSession(session_id="auth"))
+
+
 def statuses(events: list[Event]) -> list[TaskStatus]:
     return [t.status for t in last_of(Snapshot, events).tasks]
 
@@ -124,7 +145,7 @@ def statuses(events: list[Event]) -> list[TaskStatus]:
 async def test_an_interrupted_review_that_suggested_nothing_closes_its_batch() -> None:
     session, _, store, events = await reopened(crashed(), reviewing())
     assert reviews_of(store).planner.batches == {}
-    assert last_of(ReviewStatus, events) == ReviewStatus(paused=False, open_batches=0)
+    assert last_of(Snapshot, events).review == ReviewStatus(paused=False, open_batches=0)
     assert statuses(events) == ["completed", "cancelled"]
     await session.close()
 
@@ -153,9 +174,18 @@ async def test_an_interrupted_reviews_finished_batch_is_queued_for_review_but_no
     session, launcher, store, events = await reopened(crashed("completed"), snapshot)
     await asyncio.sleep(0.05)
     assert launcher.launches == []
-    added = last_of(TasksChanged, events).tasks[-1]
+    added = last_of(Snapshot, events).tasks[-1]
     assert (added.id, added.task.role, added.status) == ("4", "reviewer", "pending")
     assert reviews_of(store).batches == {"2": "batch-1", "4": "batch-2"}
+    await session.close()
+
+
+async def test_an_interrupted_reviews_queued_review_is_published_only_in_the_snapshot() -> None:
+    snapshot = reviewing("3", finished=frozenset({"3"}))
+    session, events = await switched(crashed("completed"), snapshot)
+    before = events[: events.index(last_of(Snapshot, events))]
+    assert not [e for e in before if isinstance(e, TasksChanged | ReviewStatus)]
+    assert last_of(Snapshot, events).review == ReviewStatus(paused=False, open_batches=1)
     await session.close()
 
 
@@ -188,6 +218,21 @@ async def test_each_paused_session_opened_notes_its_pause_once() -> None:
     session, _ = switching(store)
     assert len(pause_notes(await opened(session, OpenSession(session_id="auth")))) == 1
     assert len(pause_notes(await opened(session, OpenSession(session_id="docs")))) == 1
+    await session.close()
+
+
+async def test_opening_a_paused_session_notes_its_pause_after_the_snapshot() -> None:
+    paused = reviewing().model_copy(update={"planner": PlannerSnapshot(paused=True)})
+    session, events = await switched(crashed(), paused)
+    assert [type(e) for e in events] == [
+        Snapshot,
+        Notice,  # The pause.
+        Notice,  # The resumption.
+        Notice,  # The interruption.
+        CommandAccepted,
+        SessionsListed,
+    ]
+    assert pause_notes(events) == [messages(Notice, events)[0]]
     await session.close()
 
 

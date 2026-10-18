@@ -87,14 +87,15 @@ class ReviewLane:
 
     async def end_interrupted(self, interrupted: Collection[str]) -> None:
         """End the reviews in ``interrupted``, which were stopped by a crash, as a cancelled
-        review ends: a review of their batch that's due is queued, for the next run. Then
-        note a pause and publish the review status."""
-        await self._note_pause()
+        review ends: a review of their batch that's due is queued, for the next run. The board
+        and the review status aren't published: the switch's snapshot, which follows, shows
+        them, and :meth:`note_pause` then notes a pause."""
         for task_id in interrupted:
             batch = self._batches.get(task_id)
             if batch is not None and batch in self.planner.open_batches:
-                await self._queue(self.planner.review_ended(batch), run=False)
-        await self._publish_status()
+                await self._queue_quietly(self.planner.review_ended(batch))
+                await self.changed()
+        self._status = self.status
 
     async def landed(self, task_id: str, commit: str) -> None:
         """Task ``task_id`` landed ``commit``."""
@@ -176,9 +177,9 @@ class ReviewLane:
     async def close(self) -> None:
         await self._background.close()
 
-    async def _queue(self, job: ReviewJob | None, run: bool = True) -> None:
-        """Queue ``job``'s review, if there is one, and run it unless ``run`` is false."""
-        await self._note_pause()
+    async def _queue(self, job: ReviewJob | None) -> None:
+        """Queue ``job``'s review, if there is one, and run it."""
+        await self.note_pause()
         diff = None if job is None else await self._diff(job)
         if job is None or diff is None:  # No review is due, or its diff can't be read.
             await self._publish_status()
@@ -187,8 +188,13 @@ class ReviewLane:
         await self._add(job, diff)
         await self._publish_status()
         await self.changed()
-        if run:
-            self.kick()
+        self.kick()
+
+    async def _queue_quietly(self, job: ReviewJob | None) -> None:
+        """Queue ``job``'s review, if there is one, on the board without publishing it."""
+        diff = None if job is None else await self._diff(job)
+        if job is not None and diff is not None:
+            self._adder(job, diff)(self._board)
 
     async def _diff(self, job: ReviewJob) -> str | None:
         """The diff ``job``'s reviewer is shown; none, reported, if git can't show it."""
@@ -202,6 +208,10 @@ class ReviewLane:
 
     async def _add(self, job: ReviewJob, diff: str) -> None:
         """Queue ``job``'s review task, told ``diff``."""
+        await self._tasks.change(self._adder(job, diff))
+
+    def _adder(self, job: ReviewJob, diff: str) -> Callable[[TaskBoard], None]:
+        """The change to the board that queues ``job``'s review task, told ``diff``."""
         batch = self.planner.open_batch(job)
         role = SUPER_REVIEWER if job.whole else REVIEWER
         prompt = review_prompt(job, diff, self.planner.cap(job))
@@ -211,7 +221,7 @@ class ReviewLane:
             task_id = board.add_review(task)
             self._jobs[task_id], self._batches[task_id] = job, batch
 
-        await self._tasks.change(add)
+        return add
 
     @property
     def status(self) -> ReviewStatus:
@@ -224,7 +234,8 @@ class ReviewLane:
             self._status = status
             await self._publish(status)
 
-    async def _note_pause(self) -> None:
+    async def note_pause(self) -> None:
+        """Note that review is paused, unless that was noted since it paused."""
         if self.planner.paused and not self._paused_noted:
             rounds = self.planner.limits.rounds
             message = (
