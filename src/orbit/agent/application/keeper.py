@@ -52,6 +52,9 @@ IdMaker = Callable[[], str]
 Forget = Callable[[str], None]
 """Has the logged events of the session whose id it's given deleted."""
 
+CatchUp = Callable[[], Awaitable[None]]
+"""Has the events published from now on counted on from the highest ``seq`` logged."""
+
 Commit = Callable[[], None]
 """Switches what the session holds, unless that's refused now: then raises :class:`Refused`."""
 
@@ -113,14 +116,21 @@ def _kept(session_id: str) -> None:
     pass
 
 
+async def _counting_on() -> None:
+    pass
+
+
 @dataclass(frozen=True)
 class NewSessions:
     """How sessions are made and let go of: ``clock`` tells the time, ``new_id`` makes each
-    one's id, and ``forget`` deletes the logged events of one let go of unsaved, or deleted."""
+    one's id, ``forget`` deletes the logged events of one let go of unsaved, or deleted, and
+    ``catch_up`` has the events of a saved one opened counted on past those another orbit
+    logged of it."""
 
     clock: Clock = local_now
     new_id: IdMaker = new_session_id
     forget: Forget = _kept
+    catch_up: CatchUp = _counting_on
 
 
 _NEW_SESSIONS = NewSessions()
@@ -163,6 +173,7 @@ class SessionKeeper:
         self._clock = new_sessions.clock
         self._new_id = new_sessions.new_id
         self._forget = new_sessions.forget
+        self._catch_up = new_sessions.catch_up
         self.id = self._new_id()
         self.created = self._clock()
         self.name = default_name(self.created)
@@ -311,6 +322,9 @@ class SessionKeeper:
             if record is None:
                 return None
             assert self._store is not None  # Only saved sessions are locked to open.
+            # Another orbit may have logged the session since this one opened: its events go
+            # on from there, counted on before it's the session open and its events are logged.
+            await self._catch_up()
             try:
                 load(record)
             except Refused:

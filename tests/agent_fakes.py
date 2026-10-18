@@ -363,6 +363,10 @@ class FakeStore:
     def max_seq(self) -> int:
         return max([self.seq, *(envelope.seq for envelope in self.logged)])
 
+    async def latest_seq(self) -> int | None:
+        await asyncio.sleep(0)  # Reading takes a while.
+        return self.max_seq()
+
     async def append(self, session_id: str, envelopes: Sequence[EventEnvelope]) -> None:
         if self.append_failure is not None:
             raise RuntimeError(self.append_failure)

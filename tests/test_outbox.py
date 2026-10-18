@@ -65,6 +65,7 @@ def test_an_outbox_reads_events_only_in_their_envelopes() -> None:
     assert public == {
         "put",
         "put_nowait",
+        "catch_up",
         "envelope",
         "transcript",
         "history",
@@ -85,6 +86,56 @@ async def test_with_a_log_envelopes_count_on_from_its_highest_seq() -> None:
 
     assert await outbox.envelope() == EventEnvelope(seq=42, session="a", payload=ONE)
     await outbox.close()
+
+
+async def test_catching_up_counts_on_from_the_highest_seq_logged_since() -> None:
+    log = FakeStore()
+    outbox = Outbox(Open(), log)
+    log.seq = 50
+    await outbox.catch_up()
+    outbox.put_nowait(ONE)
+
+    assert (await outbox.envelope()).seq == 51
+    await outbox.close()
+
+
+async def test_catching_up_never_counts_down() -> None:
+    log = FakeStore()
+    log.seq = 50
+    outbox = Outbox(Open(), log)
+    log.seq = 10
+    await outbox.catch_up()
+    outbox.put_nowait(ONE)
+
+    assert (await outbox.envelope()).seq == 51
+    await outbox.close()
+
+
+class Unread(FakeStore):
+    """A log whose highest ``seq`` can't be read now."""
+
+    async def latest_seq(self) -> int | None:
+        return None
+
+
+async def test_catching_up_on_a_log_that_cant_be_read_counts_on() -> None:
+    log = Unread()
+    log.seq = 5
+    outbox = Outbox(Open(), log)
+    await outbox.catch_up()
+    outbox.put_nowait(ONE)
+
+    assert (await outbox.envelope()).seq == 6
+    await outbox.close()
+
+
+async def test_catching_up_without_a_log_counts_on() -> None:
+    outbox = Outbox(Open())
+    outbox.put_nowait(ONE)
+    await outbox.catch_up()
+    outbox.put_nowait(TWO)
+
+    assert [(await outbox.envelope()).seq for _ in range(2)] == [1, 2]
 
 
 async def test_the_log_gets_a_sessions_events_but_for_those_answering_one_connection() -> None:

@@ -811,6 +811,43 @@ async def test_a_session_opened_again_after_a_restart_shows_its_earlier_events(
     ]
 
 
+async def opened_after_another_logged_it(tmp_path: Path) -> AgentSession:
+    """A session whose store opened while the log was empty, after another orbit's logged the
+    saved session ``auth`` up to ``seq`` 50, having opened ``auth``, published a notice and
+    closed."""
+    workspace = tmp_path / "project"
+    workspace.mkdir()
+    this, other = [await SqliteStore.open(tmp_path / "state", str(workspace)) for _ in range(2)]
+    await other.save(saved("auth"))
+    await other.append("auth", [notice(seq, "auth") for seq in range(1, 51)])
+    await other.close()
+    session = AgentSession(store=this, clock=Ticks(), new_id=lambda: "session-2")
+    await opened(session, OpenSession(session_id="auth"))
+    await publish(session, Notice(message="later"))
+    await session.close()
+    await this.close()
+    return session
+
+
+def of_auth(envelopes: Sequence[EventEnvelope | None]) -> list[EventEnvelope]:
+    """The envelopes of the session ``auth`` in ``envelopes``."""
+    return [envelope for envelope in envelopes if envelope and envelope.session == "auth"]
+
+
+async def test_a_session_another_orbit_logged_since_this_one_opened_goes_on_above_its_seqs(
+    tmp_path: Path,
+) -> None:
+    session = await opened_after_another_logged_it(tmp_path)
+
+    sent = of_auth(delivered(session))
+    assert sent and min(envelope.seq for envelope in sent) > 50
+    assert payloads_of(ErrorOccurred, sent) == []
+    logged = of_auth(read_log(tmp_path / "state"))
+    assert logged[:50] == [notice(seq, "auth") for seq in range(1, 51)]
+    assert set(kept(sent)) <= set(logged[50:])
+    assert Notice(message="later") in [envelope.payload for envelope in logged[50:]]
+
+
 # Paging through history
 
 

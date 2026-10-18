@@ -503,3 +503,23 @@ async def test_a_session_that_cannot_be_deleted_keeps_its_logged_events() -> Non
     keeper, forgotten = forgetting_keeper(store)
     await keeper.delete_saved("other")
     assert forgotten == []
+
+
+def loads(record: SessionRecord) -> None:
+    pass
+
+
+async def test_opening_a_saved_session_catches_up_on_its_log_once_locked_before_switching() -> None:
+    store = FakeStore()
+    store.saved = [SessionRecord(id="other", name="other", created=START, last_active=START)]
+    caught_up: list[tuple[str, set[str]]] = []
+
+    async def catch_up() -> None:
+        caught_up.append((keeper.id, set(store.locked)))
+
+    keeper = SessionKeeper(
+        store, Published(), FakeHalt(), NewSessions(Ticks(), lambda: "one", catch_up=catch_up)
+    )
+    await keeper.open("other", loads)
+
+    assert caught_up == [("one", {"other"})] and keeper.id == "other"

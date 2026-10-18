@@ -374,7 +374,8 @@ class SqliteStore:
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix=THREAD_PREFIX)
         self._connection: sqlite3.Connection | None = None
         self._closed = False
-        self._max_seq = 0  # The highest seq in the log when it opened, or appended since.
+        # The highest seq in the log when it opened or was last read, or appended since.
+        self._max_seq = 0
         # Both are the workspace's once the store is open.
         self._workspace = ""
         self._lock_dir = state_dir / LOCKS
@@ -460,9 +461,15 @@ class SqliteStore:
         await self._locks.remove(session_id)
 
     def max_seq(self) -> int:
-        """The highest ``seq`` in the log, across workspaces, when the store opened or appended
-        by it since; 0 when there's none."""
+        """The highest ``seq`` in the log, across workspaces, when the store opened or
+        :meth:`latest_seq` last read it, or appended by it since; 0 when there's none."""
         return self._max_seq
+
+    async def latest_seq(self) -> int | None:
+        try:
+            return await self._call(self._latest_seq)
+        except sqlite3.Error:
+            return None
 
     async def append(self, session_id: str, envelopes: Sequence[EventEnvelope]) -> None:
         check_session_id(session_id)
@@ -718,6 +725,11 @@ class SqliteStore:
                 (self._workspace, session_id, added),
             )
         self._max_seq = max([self._max_seq, *(envelope.seq for envelope in envelopes)])
+
+    def _latest_seq(self) -> int:
+        """The highest ``seq`` in the log now, counted in :meth:`max_seq` from then on."""
+        self._max_seq = max(self._max_seq, _max_seq(self._db))
+        return self._max_seq
 
     def _insert_event(self, row: EventRow) -> bool:
         """Add ``row`` to the ``events`` table unless its ``seq`` is there; returns whether it

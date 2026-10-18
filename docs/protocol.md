@@ -31,7 +31,8 @@ An event travels in an `EventEnvelope`:
 
 - `seq`: the event's place in the backend's stream, counted from 1. There's one counter per
   control plane, shared by every session, so one session's events can have gaps between them.
-  With a store, it carries on from the highest `seq` the store's event log holds.
+  With a store, it carries on from the highest `seq` the store's event log holds, and again
+  when a saved session is opened, past any events another orbit logged since.
 - `session`: the session the event belongs to. The event's type decides it: the types in
   `SESSIONLESS_EVENTS` (`UsageChanged`, `SessionsListed` and `Catalog`) belong to no session
   and carry `null`, and every other event carries the open session's id. Every event of a

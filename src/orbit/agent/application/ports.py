@@ -270,6 +270,11 @@ class EventLog(Protocol):
         """The highest ``seq`` logged; 0 when nothing is."""
         ...
 
+    async def latest_seq(self) -> int | None:
+        """The highest ``seq`` logged now, by this orbit or another; 0 when nothing is, and
+        ``None`` when it can't be read."""
+        ...
+
     async def append(self, session_id: str, envelopes: Sequence[EventEnvelope]) -> None:
         """Add ``envelopes``, events of the session ``session_id``, to its log, all of them or
         none, skipping those whose ``seq`` it holds already; raises ``RuntimeError``, a

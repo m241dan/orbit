@@ -91,6 +91,35 @@ async def test_the_highest_seq_is_read_at_open_from_every_workspace_and_counts_a
     assert store.max_seq() == 45
 
 
+async def test_the_latest_seq_is_read_again_counting_what_another_orbit_logged_since(
+    open_store: Opener, workspace: Path
+) -> None:
+    store, other = await open_store(workspace), await open_store(workspace)
+    await other.append("abc", [notice(50)])
+    assert store.max_seq() == 0
+
+    assert await store.latest_seq() == 50
+    assert store.max_seq() == 50
+
+
+async def test_the_latest_seq_never_counts_down_from_the_highest_appended(
+    open_store: Opener, state: Path, workspace: Path
+) -> None:
+    store = await open_store(workspace)
+    await store.append("abc", [notice(7)])
+    with database(state) as connection:
+        connection.execute("DELETE FROM events")
+
+    assert await store.latest_seq() == 7
+
+
+async def test_a_latest_seq_that_cant_be_read_is_none(open_store: Opener, workspace: Path) -> None:
+    store = await open_store(workspace)
+    await store.close()
+
+    assert await store.latest_seq() is None
+
+
 async def test_deleting_a_session_deletes_its_events_and_no_others(
     open_store: Opener, state: Path, tmp_path: Path, workspace: Path
 ) -> None:

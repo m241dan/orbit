@@ -36,11 +36,11 @@ class Outbox:
     envelope, so no event can be read without its stamp.
 
     With a ``log``, each envelope of a session is also written to it in the background, but for
-    the events answering one connection; :meth:`transcript` reads a session's latest back,
-    :meth:`history` those before them, :meth:`missed` those after a ``seq``, for
-    :meth:`resend` to queue again, :meth:`forget` deletes a session's after those queued, and
-    :meth:`close` writes those still queued. The copies
-    written have their text fields cut and each session's log is trimmed as the ``storage``
+    the events answering one connection; :meth:`catch_up` counts on from its highest ``seq``
+    now, :meth:`transcript` reads a session's latest back, :meth:`history` those before them,
+    :meth:`missed` those after a ``seq``, for :meth:`resend` to queue again, :meth:`forget`
+    deletes a session's after those queued, and :meth:`close` writes those still queued. The
+    copies written have their text fields cut and each session's log is trimmed as the ``storage``
     settings say; those read from :meth:`envelope` are whole. A failed append is told to the
     ``overflow``'s ``failed``; from then on, or once :meth:`stop_log` is called, the envelopes
     go to its fallback instead (nowhere without one), until :meth:`resume_log` works."""
@@ -56,6 +56,7 @@ class Outbox:
         self._cut_bytes = storage.tool_output_bytes
         # The last event's place in the stream, counted across sessions.
         self._seq = log.max_seq() if log else 0
+        self._event_log = log
         self._queue: asyncio.Queue[EventEnvelope] = asyncio.Queue()
         log_bytes = storage.session_log_bytes
         self._writer = LogWriter(log, self.put, log_bytes, overflow) if log else None
@@ -72,6 +73,13 @@ class Outbox:
     async def put(self, item: Event) -> None:
         """Stamp ``item`` and queue it."""
         self.put_nowait(item)  # Unbounded, so never full: stamped and queued at once.
+
+    async def catch_up(self) -> None:
+        """Count on from the highest ``seq`` in the log now, if there is one and it's higher, as
+        another orbit may have logged events since this one opened; the count never goes
+        down."""
+        latest = await self._event_log.latest_seq() if self._event_log else None
+        self._seq = max(self._seq, latest or 0)
 
     async def envelope(self) -> EventEnvelope:
         """The next event, in the envelope it was stamped with when published."""
