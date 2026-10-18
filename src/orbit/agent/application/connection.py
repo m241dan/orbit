@@ -35,16 +35,24 @@ class ConnectionDropped(Exception):
 
 
 class Connections:
-    """The connections open to one session, among which its events are routed."""
+    """The connections open to one session, among which its events are routed;
+    ``viewers_changed`` is called whenever one may have joined or left its viewers."""
 
-    def __init__(self) -> None:
+    def __init__(self, viewers_changed: Callable[[], None]) -> None:
         self._open: set[SessionConnection] = set()
+        self.viewers_changed = viewers_changed
 
     def add(self, connection: "SessionConnection") -> None:
         self._open.add(connection)
 
     def discard(self, connection: "SessionConnection") -> None:
         self._open.discard(connection)
+
+    def viewers(self, *, joining: bool = False) -> int:
+        """How many connections view the session: those greeted, and, if ``joining``, the one
+        whose ``Hello`` is being answered."""
+        asker = _answering.get() if joining else None
+        return sum(1 for c in self._open if c.greeted or c is asker)
 
     def deliver(self, envelope: EventEnvelope) -> None:
         """Pass ``envelope`` to the connection whose command it answers, if it's one of the
@@ -100,6 +108,11 @@ class SessionConnection:
         parts.connections.add(self)
 
     @property
+    def greeted(self) -> bool:
+        """Whether this connection's ``Hello`` was welcomed and all that follows it published."""
+        return self._handshake.greeted
+
+    @property
     def listening(self) -> bool:
         """Whether the session's events reach this connection: once it's being welcomed, until
         its stream ends."""
@@ -119,6 +132,8 @@ class SessionConnection:
             _answering.reset(token)
         if self._handshake.ended:
             self.end()
+        elif isinstance(envelope.payload, Hello):
+            self._parts.connections.viewers_changed()
 
     async def refuse(self, command_id: str, code: str, message: str) -> None:
         """Publish ``CommandRefused`` with ``code`` and ``message`` for a command sent as
@@ -171,6 +186,7 @@ class SessionConnection:
         """End this connection and its stream; the session and its other connections carry
         on."""
         self._finish(immediate=True)
+        self._parts.connections.viewers_changed()
 
     def _finish(self, immediate: bool) -> None:
         """End the stream, at once if ``immediate``, and leave the session's connections."""

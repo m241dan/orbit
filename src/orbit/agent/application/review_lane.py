@@ -79,6 +79,10 @@ class ReviewLane:
         """Whether reviews are being run."""
         return self._background.running
 
+    def on_stopped(self, stopped: Callable[[], None]) -> None:
+        """Have ``stopped`` called whenever the reviews stop running."""
+        self._background.ended = stopped
+
     def load(self, snapshot: LaneSnapshot) -> None:
         """Replace the lane's state with ``snapshot``'s; :meth:`end_interrupted` follows."""
         self.planner.restore(snapshot.planner)

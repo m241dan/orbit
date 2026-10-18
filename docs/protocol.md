@@ -35,8 +35,8 @@ An event travels in an `EventEnvelope`:
   With a store, it carries on from the highest `seq` the store's event log holds, and again
   when a saved session is opened, past any events another orbit logged since.
 - `session`: the session the event belongs to. The event's type decides it: the types in
-  `SESSIONLESS_EVENTS` (`UsageChanged`, `SessionsListed` and `Catalog`) belong to no session
-  and carry `null`, and every other event carries the open session's id. Every event of a
+  `SESSIONLESS_EVENTS` (`UsageChanged`, `SessionsListed`, `Catalog` and `SessionStateChanged`)
+  belong to no session, carry `null` and are never logged, and every other event carries the open session's id. Every event of a
   session is kept in the store's event log but for `CONNECTION_EVENTS` (`Welcome`, `Catalog`,
   `Snapshot` and `HistoryPage`), which answer one connection.
 - `workspace`, `traceparent` and `tracestate`, as on commands.
@@ -70,7 +70,9 @@ and the backend's `server_version`. `Welcome` is Hello's outcome: it takes the p
 
 1. `Catalog`: what exists, namely the workspaces with their sessions, the agents' roles, the
    triggers and the lanes, and `read_only`, true when another orbit owns the repository (see
-   [Read-only orbits](#read-only-orbits)).
+   [Read-only orbits](#read-only-orbits)). Each session carries its state (see
+   [Session state](#session-state)), the joining frontend counted among the open session's
+   viewers.
 2. The latest `UsageChanged`, if usage was fetched yet.
 3. `Snapshot`: the open session as it stands, with its settings, busy lanes, tasks,
    verification steps, review status, checks proposals waiting for a decision, running
@@ -96,6 +98,24 @@ Switching sessions works the way joining does: opening, starting or picking a se
 A frontend replaces the conversation it shows with every Snapshot's transcript, so joining
 shows where the session left off and a switch shows the session switched to.
 `SessionsListed` otherwise only answers `ListSessions`.
+
+## Session state
+
+Each session in a `Catalog` carries its state as it is when the Catalog is sent:
+
+- `active`: whether it's the workspace's open session, the one that runs work.
+- `state`: `running` while a task run, a review, a planner turn or the startup check is in
+  progress, otherwise `idle`.
+- `viewers`: how many welcomed connections view it. Every welcomed connection views the open
+  session, so the others have none.
+
+Whenever one of them changes for a session, every welcomed connection gets
+`SessionStateChanged(session, active, state, viewers)` with the new values: a task run, review,
+planner turn or startup check starting or ending, a connection joining or closing, and another
+session opened, which sends one for the session left (inactive, idle, no viewers) and one for the
+session opened. A connection joins once everything that follows its `Welcome` is sent, so the
+change counting it comes after those. The event belongs to no session and isn't logged, and the
+Catalog isn't re-sent for it.
 
 ## Read-only orbits
 

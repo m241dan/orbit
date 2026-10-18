@@ -69,6 +69,7 @@ from orbit.protocol import (
     SendMessage,
     Session,
     SessionsListed,
+    SessionStateChanged,
     SessionSummary,
     Settings,
     SettingsChanged,
@@ -635,6 +636,7 @@ class OrbitApp(App[None], inherit_bindings=False):
                 | ReviewStatus()
                 | ChecksProposed()
                 | UsageChanged()
+                | SessionStateChanged()
             ):
                 self._render_state(event)
             case (
@@ -801,9 +803,11 @@ class OrbitApp(App[None], inherit_bindings=False):
         | VerificationChanged
         | ReviewStatus
         | ChecksProposed
-        | UsageChanged,
+        | UsageChanged
+        | SessionStateChanged,
     ) -> None:
-        """Show a snapshot of backend state, or a decision it waits for."""
+        """Show a snapshot of backend state, or a decision it waits for; a session's state isn't
+        shown yet."""
         match event:
             case SettingsChanged(settings=settings, model_choices=choices):
                 self._show_settings(settings, choices)
@@ -811,10 +815,8 @@ class OrbitApp(App[None], inherit_bindings=False):
                 self._set_busy(lane, busy)
             case TasksChanged(tasks=tasks):
                 self._show_tasks(tasks)
-            case VerificationChanged() | ReviewStatus() | ChecksProposed() | UsageChanged():
-                self._show_progress(event)
             case _:
-                assert_never(event)
+                self._show_progress(event)
 
     def _follow_agents(self, event: Event) -> None:
         self._agents.track(event)
@@ -827,17 +829,22 @@ class OrbitApp(App[None], inherit_bindings=False):
         self._agents.number_tasks(self._task_list.numbers_by_id)
 
     def _show_progress(
-        self, event: VerificationChanged | ReviewStatus | ChecksProposed | UsageChanged
+        self,
+        event: VerificationChanged
+        | ReviewStatus
+        | ChecksProposed
+        | UsageChanged
+        | SessionStateChanged,
     ) -> None:
         """Show the verification steps' progress, whether review is paused, proposed steps, or
-        usage limits."""
+        usage limits; a session's state isn't shown until the session picker shows it."""
         if isinstance(event, VerificationChanged):
             self._verification.show(event.steps, event.title)
         elif isinstance(event, ReviewStatus):
             self._agents.show_review(event)
         elif isinstance(event, ChecksProposed):
             self._proposals.show(event)
-        else:
+        elif isinstance(event, UsageChanged):
             self._usage.show(event)
 
     async def _decide(self, proposal: ChecksProposed, decision: DecideProposal) -> None:

@@ -24,14 +24,20 @@ def crash_report(lane: str, exc: BaseException) -> ErrorOccurred:
     return ErrorOccurred(code=INTERNAL, message=message)
 
 
+def _unwatched() -> None:
+    """Note an end no one watches."""
+
+
 class Background:
     """Runs one piece of work at a time in the background for lane ``name``. A failure that
-    escapes the work is reported once with ``publish``, as it happens, and never raised."""
+    escapes the work is reported once with ``publish``, as it happens, and never raised;
+    :attr:`ended` is called once the work has stopped."""
 
     def __init__(self, name: str, publish: Publish) -> None:
         self._name = name
         self._publish = publish
         self._task: asyncio.Task[None] | None = None
+        self.ended: Callable[[], None] = _unwatched
 
     @property
     def running(self) -> bool:
@@ -45,6 +51,7 @@ class Background:
         self._task = asyncio.create_task(self._guarded(work))
         # Work cancelled before it starts is closed, not left never awaited.
         self._task.add_done_callback(lambda _: work.close())
+        self._task.add_done_callback(lambda _: self.ended())
 
     def cancel(self) -> None:
         if self._task is not None:
@@ -90,10 +97,11 @@ class TurnSlot:
         if self.running:
             work.close()
             raise Refused(BUSY, self._refusal)
-        self._post(BusyChanged(busy=True, lane=self._lane))
         self._turn = asyncio.create_task(work)
         # A callback, so it also runs if the work is cancelled before it starts.
         self._turn.add_done_callback(self._ended)
+        # Posted once the turn is running, so what it reaches sees the lane busy.
+        self._post(BusyChanged(busy=True, lane=self._lane))
 
     def cancel(self) -> bool:
         """Cancel the turn if it still runs; returns whether it did."""

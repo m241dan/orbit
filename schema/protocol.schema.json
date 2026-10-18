@@ -786,6 +786,7 @@
               "progress_noted": "#/$defs/ProgressNoted",
               "proposal_decided": "#/$defs/ProposalDecided",
               "review_status": "#/$defs/ReviewStatus",
+              "session_state_changed": "#/$defs/SessionStateChanged",
               "sessions_listed": "#/$defs/SessionsListed",
               "settings_changed": "#/$defs/SettingsChanged",
               "snapshot": "#/$defs/Snapshot",
@@ -906,6 +907,9 @@
             },
             {
               "$ref": "#/$defs/OwnershipTaken"
+            },
+            {
+              "$ref": "#/$defs/SessionStateChanged"
             },
             {
               "$ref": "#/$defs/Snapshot"
@@ -1628,9 +1632,55 @@
       "title": "SendMessage",
       "type": "object"
     },
-    "SessionSummary": {
-      "description": "A saved session as the list of sessions shows it: how many of its tasks stand at each\nstatus in ``counts``, and what they cost together in ``usage``. ``current`` marks the\nsession open here, ``locked`` one open in another orbit, and ``unreadable`` says why a\nsession can't be opened, if it can't.",
+    "SessionStateChanged": {
+      "description": "Session ``session`` is now ``active`` (the workspace's open session) or not, in\n``state``, with ``viewers`` connections viewing it; sent to every connection whenever one of\nthem changes, and never logged.",
       "properties": {
+        "active": {
+          "title": "Active",
+          "type": "boolean"
+        },
+        "session": {
+          "title": "Session",
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "running",
+            "idle"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "type": {
+          "const": "session_state_changed",
+          "default": "session_state_changed",
+          "title": "Type",
+          "type": "string"
+        },
+        "viewers": {
+          "minimum": 0,
+          "title": "Viewers",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "session",
+        "active",
+        "state",
+        "viewers",
+        "type"
+      ],
+      "title": "SessionStateChanged",
+      "type": "object"
+    },
+    "SessionSummary": {
+      "description": "A saved session as the list of sessions shows it: how many of its tasks stand at each\nstatus in ``counts``, and what they cost together in ``usage``. ``current`` marks the\nsession open here, ``locked`` one open in another orbit, and ``unreadable`` says why a\nsession can't be opened, if it can't. In a ``Catalog``, ``active`` marks the workspace's\nopen session, ``state`` says whether it's running, and ``viewers`` counts the connections\nviewing it.",
+      "properties": {
+        "active": {
+          "default": false,
+          "title": "Active",
+          "type": "boolean"
+        },
         "counts": {
           "additionalProperties": {
             "type": "integer"
@@ -1683,6 +1733,15 @@
           "title": "Name",
           "type": "string"
         },
+        "state": {
+          "default": "idle",
+          "enum": [
+            "running",
+            "idle"
+          ],
+          "title": "State",
+          "type": "string"
+        },
         "unreadable": {
           "anyOf": [
             {
@@ -1706,6 +1765,12 @@
             "output_tokens": 0,
             "turns": 0
           }
+        },
+        "viewers": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Viewers",
+          "type": "integer"
         }
       },
       "required": [

@@ -57,6 +57,7 @@ from orbit.protocol import (
     RunTasks,
     SendMessage,
     SessionsListed,
+    SessionStateChanged,
     SessionSummary,
     Settings,
     SettingsChanged,
@@ -122,6 +123,9 @@ SUMMARY = SessionSummary(
     current=True,
     locked=True,
     unreadable="corrupt",
+    active=True,
+    state="running",
+    viewers=2,
 )
 STEP = StepState(name="Unit tests", status="failed")
 REVIEW = ReviewStatus(paused=True, open_batches=2)
@@ -242,6 +246,7 @@ EVENTS: tuple[EventEnvelope, ...] = (
     event(LogGap(first_seq=1204, last_seq=1210)),
     event(OwnershipOffered()),
     event(OwnershipTaken()),
+    event(SessionStateChanged(session="s1", active=True, state="running", viewers=2)),
     event(
         Snapshot(
             session=SUMMARY,

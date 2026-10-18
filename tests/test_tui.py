@@ -33,6 +33,7 @@ from orbit.protocol import (
     Notice,
     RunTasks,
     SendMessage,
+    SessionStateChanged,
     SessionSummary,
     Settings,
     SettingsChanged,
@@ -135,6 +136,16 @@ async def test_a_welcome_shows_nothing() -> None:
     async with app.run_test() as pilot:
         before = entries(app)
         await feed_events(session, pilot, Welcome(command_id="hello", server_version="1.0"))
+        assert entries(app) == before
+
+
+async def test_a_session_state_change_shows_nothing() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        before = entries(app)
+        change = SessionStateChanged(session="s1", active=True, state="running", viewers=2)
+        await feed_events(session, pilot, change)
         assert entries(app) == before
 
 

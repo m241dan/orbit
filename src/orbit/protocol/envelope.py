@@ -12,6 +12,7 @@ from orbit.protocol.events import (
     Event,
     HistoryPage,
     SessionsListed,
+    SessionStateChanged,
     Snapshot,
     UsageChanged,
     Welcome,
@@ -21,7 +22,12 @@ from orbit.protocol.models import WireTolerant
 DEFAULT_WORKSPACE = "default"
 """The one workspace's id, until there are workspaces."""
 
-SESSIONLESS_EVENTS: tuple[type[Event], ...] = (UsageChanged, SessionsListed, Catalog)
+SESSIONLESS_EVENTS: tuple[type[Event], ...] = (
+    UsageChanged,
+    SessionsListed,
+    Catalog,
+    SessionStateChanged,
+)
 """The event types that belong to no session: their envelopes carry ``session=None``."""
 
 CONNECTION_EVENTS: tuple[type[Event], ...] = (Welcome, Catalog, Snapshot, HistoryPage)

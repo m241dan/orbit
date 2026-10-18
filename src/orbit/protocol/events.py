@@ -12,6 +12,7 @@ from orbit.protocol.commands import ProposalAction
 from orbit.protocol.models import (
     ProposedSetup,
     ProposedStep,
+    SessionState,
     SessionSummary,
     Settings,
     StepState,
@@ -445,6 +446,18 @@ class OwnershipTaken(_Message):
     type: Literal["ownership_taken"] = "ownership_taken"
 
 
+class SessionStateChanged(_Message):
+    """Session ``session`` is now ``active`` (the workspace's open session) or not, in
+    ``state``, with ``viewers`` connections viewing it; sent to every connection whenever one of
+    them changes, and never logged."""
+
+    type: Literal["session_state_changed"] = "session_state_changed"
+    session: str
+    active: bool
+    state: SessionState
+    viewers: int = Field(ge=0)
+
+
 class WorkspaceEntry(_Message):
     """Workspace ``id``, shown as ``label``, and its ``sessions`` as the list of sessions shows
     them."""
@@ -518,6 +531,7 @@ Event = Annotated[
     | LogGap
     | OwnershipOffered
     | OwnershipTaken
+    | SessionStateChanged
     | Snapshot
     | HistoryPage
     | Catalog

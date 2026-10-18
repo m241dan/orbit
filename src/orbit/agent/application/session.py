@@ -41,6 +41,7 @@ from orbit.agent.application.ports import (
 from orbit.agent.application.proposals import FrontendReview
 from orbit.agent.application.review_count import ReviewCount
 from orbit.agent.application.review_lane import ReviewLane
+from orbit.agent.application.session_state import SessionStates, StateParts
 from orbit.agent.application.settings import SessionSettings
 from orbit.agent.application.startup_check import StartupCheck
 from orbit.agent.application.storage_halt import Failure, HaltHooks, StorageHalt
@@ -162,7 +163,9 @@ class AgentSession:
     one-off notices: the workspace, no verification steps, the ``startup_notes``, work left by
     earlier runs. Every switch of session ends with a ``Catalog`` and a ``Snapshot`` too, and a
     rename or delete sends a ``Catalog``; each reaches only the connection whose command it
-    answers.
+    answers. Every connection gets a ``SessionStateChanged`` whenever whether the open session
+    runs work, or how many connections view it, changes: a connection views it once its
+    greeting is sent, until it closes.
 
     The session open here is saved in ``store``, if there is one, once it's used, and its
     events are kept in the store's log, ``seq`` counting on from the highest there, with their
@@ -226,7 +229,7 @@ class AgentSession:
         )
         self._halt = StorageHalt(lambda event: self._events.put(event), halt_hooks)
         overflow = Overflow(fallback, self._log_failed)
-        self._connections = Connections()
+        self._connections = Connections(lambda: self._states.check())
         self._events = Outbox(lambda: self._keeper.id, store, storage, overflow)
         self._events.deliver = self._deliver
         new_sessions = NewSessions(clock, new_id, self._events.forget, self._events.catch_up)
@@ -255,6 +258,8 @@ class AgentSession:
         self._commands = self._work_commands()
         self._greeting = self._handshake_parts()
         self._history = SessionHistory(self._keeper, self._events)
+        self._states = self._session_states()
+        self._watch_background()
 
     async def _retry_storage(self) -> Failure | None:
         """Retry the writes to the store a halt stopped: the session record as it is now and
@@ -284,6 +289,20 @@ class AgentSession:
     def _log_failed(self, error: RuntimeError) -> None:
         """Halt the session, as appending to its event log failed with ``error``."""
         self._halt.fail(FailedWrite.EVENT_LOG, error)
+
+    def _session_states(self) -> SessionStates:
+        """What publishes the open session's state as it changes."""
+        parts = StateParts(
+            lambda: self._keeper.id, self._running, self._connections, self._events.put_nowait
+        )
+        return SessionStates(parts)
+
+    def _watch_background(self) -> None:
+        """Have the open session's state checked whenever the reviews or the startup check stop,
+        as nothing is published then."""
+        for part in (self._lane, self._startup):
+            if part is not None:
+                part.on_stopped(self._states.check)
 
     def _session_switcher(self, picking: bool) -> SessionSwitcher:
         """What switches this session between saved ones, still ``picking`` one if so."""
@@ -597,9 +616,16 @@ class AgentSession:
         await self._stop_turns()
 
     def _deliver(self, envelope: EventEnvelope) -> None:
-        """Pass ``envelope``, just published, to the connections it's for."""
+        """Pass ``envelope``, just published, to the connections it's for, then publish the open
+        session's state if that changed."""
         self._nudge_usage(envelope.payload)
         self._connections.deliver(envelope)
+        self._states.check()
+
+    def _running(self) -> bool:
+        """Whether a task run, a review, a planner turn or the startup check is in progress."""
+        background = (part for part in (self._lane, self._startup) if part is not None)
+        return self._turns.running or self._seat.running or any(p.running for p in background)
 
     def _start_background(self) -> None:
         """Start the startup check and the usage monitor, if there are any, and the tries of
@@ -658,10 +684,12 @@ class AgentSession:
         )
 
     def _catalog(self, sessions: tuple[SessionSummary, ...]) -> Catalog:
-        """What exists: the workspace holding ``sessions``, and the agents' roles, if any."""
+        """What exists: the workspace holding ``sessions``, the open one's state as a connection
+        joining would see it, and the agents' roles, if any."""
         roles = self._desk.agents.roles if self._desk else ()
         label = _workspace_label(self._workspace)
-        return catalog(label, sessions, roles, read_only=self._read_only)
+        live = self._states.current(joining=True)
+        return catalog(label, sessions, roles, read_only=self._read_only, live=live)
 
     def _steps_shown(self) -> tuple[tuple[StepState, ...], str]:
         """The verification steps the panel shows, and their title: the startup check's while

@@ -138,11 +138,18 @@ class TaskState(_Message):
     reason_detail: str = ""
 
 
+SessionState = Literal["running", "idle"]
+"""Whether a session is ``running`` a task run, a review, a planner turn or the startup check,
+or ``idle``, running none."""
+
+
 class SessionSummary(_Message):
     """A saved session as the list of sessions shows it: how many of its tasks stand at each
     status in ``counts``, and what they cost together in ``usage``. ``current`` marks the
     session open here, ``locked`` one open in another orbit, and ``unreadable`` says why a
-    session can't be opened, if it can't."""
+    session can't be opened, if it can't. In a ``Catalog``, ``active`` marks the workspace's
+    open session, ``state`` says whether it's running, and ``viewers`` counts the connections
+    viewing it."""
 
     id: str
     name: str
@@ -152,6 +159,9 @@ class SessionSummary(_Message):
     current: bool = False
     locked: bool = False
     unreadable: str | None = None
+    active: bool = False
+    state: SessionState = "idle"
+    viewers: int = Field(default=0, ge=0)
 
 
 StepStatus = Literal["pending", "running", "passed", "failed", "cancelled", "skipped"]

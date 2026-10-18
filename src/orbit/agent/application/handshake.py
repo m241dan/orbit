@@ -71,12 +71,18 @@ class Handshake:
         self._resend = resend
         self._listening = False
         self._welcomed = False
+        self._greeted = False
         self._incompatible = False  # A Hello was refused: nothing more is published.
 
     @property
     def welcomed(self) -> bool:
         """Whether a ``Hello`` was welcomed."""
         return self._welcomed
+
+    @property
+    def greeted(self) -> bool:
+        """Whether a ``Hello`` was welcomed and the steps after ``Welcome`` have run."""
+        return self._greeted
 
     @property
     def listening(self) -> bool:
@@ -118,6 +124,7 @@ class Handshake:
             for step in self._steps(catalog, missed):
                 await self._attempt(step)
         finally:  # A sender cancelled meanwhile mustn't keep the background from starting.
+            self._greeted = True
             if not self._parts.closing():
                 self._parts.start()
 

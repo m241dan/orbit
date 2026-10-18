@@ -24,6 +24,7 @@ from orbit.protocol import (
     Hello,
     Notice,
     RunTasks,
+    SessionStateChanged,
     Snapshot,
     TasksChanged,
     TaskSpec,
@@ -81,10 +82,14 @@ async def test_nothing_is_published_before_hello() -> None:
     await session.close()
 
 
-async def test_hello_is_welcomed_then_a_catalog_a_snapshot_and_the_workspace_note() -> None:
-    session = AgentSession(workspace="/work", verification=Verification((STEP,), Steps()))
+async def test_hello_is_welcomed_then_a_catalog_a_snapshot_the_workspace_note_and_a_viewer() -> (
+    None
+):
+    session = AgentSession(
+        workspace="/work", verification=Verification((STEP,), Steps()), new_id=lambda: "s1"
+    )
     await greet(session)
-    events = await published(session, 4)
+    events = await published(session, 5)
     await session.close()
 
     assert events[0] == Welcome(command_id=HELLO_ID, server_version=__version__)
@@ -92,6 +97,7 @@ async def test_hello_is_welcomed_then_a_catalog_a_snapshot_and_the_workspace_not
     assert isinstance(events[2], Snapshot)
     assert [step.name for step in events[2].steps] == [STEP.name]
     assert events[3] == Notice(message="Workspace: /work")
+    assert events[4] == SessionStateChanged(session="s1", active=True, state="idle", viewers=1)
     assert nothing_queued(session)
 
 
@@ -150,7 +156,7 @@ async def test_a_misaddressed_hello_is_refused_unwelcomed_and_a_proper_one_is_we
     refusals = await published(session, 2)
     quiet = await silent(session)
     await greet(session)
-    events = await published(session, 4)
+    events = await published(session, 5)
     await session.close()
 
     assert refusals == [
@@ -159,7 +165,8 @@ async def test_a_misaddressed_hello_is_refused_unwelcomed_and_a_proper_one_is_we
     ]
     assert quiet
     assert events[0] == Welcome(command_id=HELLO_ID, server_version=__version__)
-    assert [type(event) for event in events[1:]] == [Catalog, Snapshot, Notice]
+    kinds = [type(event) for event in events[1:]]
+    assert kinds == [Catalog, Snapshot, Notice, SessionStateChanged]
     assert nothing_queued(session)
 
 
@@ -167,7 +174,7 @@ async def test_a_second_hello_is_refused_as_invalid() -> None:
     session = AgentSession()
     await greet(session)
     await send_as(session, "again", HELLO)
-    events = await published(session, 4)
+    events = await published(session, 5)
     await session.close()
 
     assert events[-1] == CommandRefused(

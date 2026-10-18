@@ -57,9 +57,9 @@ async def published(session: AgentSession, count: int) -> list[Event]:
 
 async def after(session: AgentSession, command: Command, count: int) -> list[Event]:
     """The first ``count`` events ``session`` publishes for ``command``, once greeted and
-    past its Welcome, Catalog, Snapshot and workspace note."""
+    past its Welcome, Catalog, Snapshot, workspace note and the change counting its viewer."""
     await greet(session)
-    await published(session, 4)
+    await published(session, 5)
     await frontend(session).send(CommandEnvelope(command_id="c", payload=command))
     return await published(session, count)
 
@@ -81,7 +81,8 @@ async def test_the_catalog_after_welcome_lists_the_workspace_agents_triggers_and
     assert isinstance(snapshot, Snapshot)
     [workspace] = catalog.workspaces
     assert (workspace.id, workspace.label) == (DEFAULT_WORKSPACE, "proj")
-    assert workspace.sessions == (snapshot.session,)
+    viewed = snapshot.session.model_copy(update={"active": True, "viewers": 1})
+    assert workspace.sessions == (viewed,)
     assert [(a.label, a.conversational) for a in catalog.agents] == [
         ("Planner", True),
         ("Coder", False),

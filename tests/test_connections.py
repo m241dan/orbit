@@ -26,6 +26,7 @@ from orbit.protocol import (
     History,
     HistoryPage,
     Notice,
+    SessionStateChanged,
     Settings,
     Snapshot,
     TasksChanged,
@@ -82,6 +83,16 @@ def welcomes(events: list[Event]) -> list[Welcome]:
 def kinds(events: list[Event]) -> list[type[Event]]:
     """The types of the catalogs and snapshots among ``events``, in order."""
     return [type(e) for e in events if isinstance(e, Catalog | Snapshot)]
+
+
+def notices(events: list[Event]) -> list[Notice]:
+    """The notices among ``events``."""
+    return [e for e in events if isinstance(e, Notice)]
+
+
+def viewer_counts(events: list[Event]) -> list[int]:
+    """The viewers each session state change among ``events`` counts."""
+    return [e.viewers for e in events if isinstance(e, SessionStateChanged)]
 
 
 def welcome(command_id: str) -> Welcome:
@@ -161,9 +172,10 @@ async def test_a_connection_that_falls_too_far_behind_is_closed_and_the_others_c
     await publish(session, Notice(message="after"))
     await session.close()
     await reader
-    assert read == [Notice(message=str(n)) for n in range(QUEUE_LIMIT + 1)] + [
+    assert notices(read) == [Notice(message=str(n)) for n in range(QUEUE_LIMIT + 1)] + [
         Notice(message="after")
     ]
+    assert viewer_counts(read) == [1]
 
 
 async def test_an_unreadable_command_is_refused_to_every_welcomed_connection() -> None:
@@ -215,7 +227,9 @@ async def test_closing_one_connection_leaves_the_others_working() -> None:
     await say(second, "add", AddTask(task=TASK))
 
     assert await everything(first) == []
-    assert [type(e) for e in await taken(second)] == [TasksChanged, CommandAccepted]
+    left, *answered = await taken(second)
+    assert isinstance(left, SessionStateChanged) and left.viewers == 1
+    assert [type(e) for e in answered] == [TasksChanged, CommandAccepted]
     await session.close()
 
 

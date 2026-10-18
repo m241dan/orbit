@@ -54,6 +54,7 @@ from orbit.protocol import (
     Hello,
     RunTasks,
     Session,
+    SessionStateChanged,
     Settings,
     SettingsChanged,
     Snapshot,
@@ -611,11 +612,11 @@ async def send(session: Session | AgentSession, command: Command) -> None:
 
 
 async def payloads(session: Session | AgentSession) -> AsyncIterator[Event]:
-    """The events in ``session``'s envelopes but for its ``Welcome`` and its catalogs, greeting
-    an :class:`AgentSession` first if it hasn't been."""
+    """The events in ``session``'s envelopes but for its ``Welcome``, its catalogs and its
+    sessions' state changes, greeting an :class:`AgentSession` first if it hasn't been."""
     await greeted(session)
     async for envelope in frontend(session).events():
-        if not isinstance(envelope.payload, Welcome | Catalog):
+        if not isinstance(envelope.payload, Welcome | Catalog | SessionStateChanged):
             yield envelope.payload
 
 

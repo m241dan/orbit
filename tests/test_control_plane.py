@@ -38,6 +38,7 @@ from orbit.protocol import (
     Event,
     Hello,
     RunTasks,
+    SessionStateChanged,
     Snapshot,
     TasksChanged,
     TaskSpec,
@@ -175,7 +176,8 @@ async def test_every_frontend_sees_a_change_one_of_them_makes() -> None:
         await say(first, "add", AddTask(task=TASK))
         for websocket in (first, second):
             events = await until(websocket, CommandAccepted)
-            assert [type(e) for e in events] == [TasksChanged, CommandAccepted]
+            changes = [type(e) for e in events if not isinstance(e, SessionStateChanged)]
+            assert changes == [TasksChanged, CommandAccepted]
 
 
 async def test_a_command_of_an_unknown_type_is_refused_as_unknown() -> None:
@@ -183,7 +185,7 @@ async def test_a_command_of_an_unknown_type_is_refused_as_unknown() -> None:
         await hello(websocket)
         await until(websocket, Snapshot)
         await websocket.send('{"command_id":"c1","payload":{"type":"nope"}}')
-        [refusal] = await until(websocket, CommandRefused)
+        *_, refusal = await until(websocket, CommandRefused)
         assert isinstance(refusal, CommandRefused)
         assert (refusal.command_id, refusal.code) == ("c1", UNKNOWN)
 

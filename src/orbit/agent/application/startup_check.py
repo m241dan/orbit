@@ -72,6 +72,10 @@ class StartupCheck:
     def running(self) -> bool:
         return self._background.running
 
+    def on_stopped(self, stopped: Callable[[], None]) -> None:
+        """Have ``stopped`` called once the check stops running."""
+        self._background.ended = stopped
+
     @property
     def agent(self) -> RunningAgent | None:
         """The check as a running agent, between publishing its start and its exit."""

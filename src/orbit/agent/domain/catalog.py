@@ -16,6 +16,7 @@ from orbit.protocol import (
     WORK_LANE,
     AgentEntry,
     Catalog,
+    SessionStateChanged,
     SessionSummary,
     TriggerEntry,
     WorkspaceEntry,
@@ -55,17 +56,28 @@ def agent_entry(role: str) -> AgentEntry:
     return AgentEntry(name=role, label=label, conversational=role in CONVERSATIONAL_ROLES)
 
 
+def with_state(summary: SessionSummary, live: SessionStateChanged | None) -> SessionSummary:
+    """``summary``, with the state ``live`` gives it if it's that session's."""
+    if live is None or live.session != summary.id:
+        return summary
+    state = {"active": live.active, "state": live.state, "viewers": live.viewers}
+    return summary.model_copy(update=state)
+
+
 def catalog(
     directory: str | None,
     sessions: tuple[SessionSummary, ...],
     roles: Iterable[str],
     *,
     read_only: bool = False,
+    live: SessionStateChanged | None = None,
 ) -> Catalog:
     """The catalog of the repository in the ``directory`` named so, if any, holding
-    ``sessions``, with agents in ``roles``, for an orbit that's ``read_only`` if so."""
+    ``sessions``, the one ``live`` is about in that state, with agents in ``roles``, for an
+    orbit that's ``read_only`` if so."""
     label = directory or NO_WORKSPACE_LABEL
-    entry = WorkspaceEntry(id=DEFAULT_WORKSPACE, label=label, sessions=sessions)
+    shown = tuple(with_state(summary, live) for summary in sessions)
+    entry = WorkspaceEntry(id=DEFAULT_WORKSPACE, label=label, sessions=shown)
     return Catalog(
         workspaces=(entry,),
         agents=tuple(agent_entry(role) for role in roles),

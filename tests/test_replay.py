@@ -11,6 +11,7 @@ from orbit.protocol import (
     EventEnvelope,
     Hello,
     Notice,
+    SessionStateChanged,
     Snapshot,
     Welcome,
 )
@@ -90,7 +91,8 @@ async def test_a_reconnecting_frontend_gets_what_it_missed_in_place_of_a_snapsho
     assert sent[2:7] == notices(16, 21)
     assert sent[7].payload == Notice(message="Workspace: /work")
     assert Snapshot not in kinds(sent)
-    assert [e for _, appended in store.appends for e in appended] == sent[7:]  # Logged once.
+    assert isinstance(sent[-1].payload, SessionStateChanged)  # Counting the frontend, unlogged.
+    assert [e for _, appended in store.appends for e in appended] == sent[7:-1]  # Logged once.
 
 
 async def test_events_still_to_be_written_are_caught_up_on_once() -> None:

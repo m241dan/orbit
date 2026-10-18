@@ -34,6 +34,7 @@ from orbit.protocol import (
     Event,
     Notice,
     SendMessage,
+    SessionStateChanged,
     Settings,
     SettingsChanged,
     Snapshot,
@@ -59,6 +60,7 @@ from tests.agent_fakes import (
     nothing_queued,
     payloads,
     planner_turn,
+    queued,
     refused,
     send,
     session_for,
@@ -102,6 +104,11 @@ async def test_a_prompt_starts_a_turn_of_the_planner() -> None:
     ]
     assert turns(events)[0] == BusyChanged(busy=True, lane="planner")
     assert any(isinstance(e, TurnFinished) and e.reason == "completed" for e in events)
+
+
+def only_state_queued(session: AgentSession) -> bool:
+    """Whether the session has nothing but changes of its state queued for its frontend."""
+    return all(isinstance(event, SessionStateChanged) for event in queued(session))
 
 
 async def test_a_prompt_without_a_planner_is_refused() -> None:
@@ -149,7 +156,7 @@ async def test_session_snapshots_its_initial_settings() -> None:
     snapshot = await anext(payloads(session))
     assert isinstance(snapshot, Snapshot)
     assert (snapshot.settings, snapshot.model_choices) == (settings, ("opus", "sonnet"))
-    assert nothing_queued(session)
+    assert only_state_queued(session)
 
 
 async def test_the_planner_takes_the_model_from_updated_settings() -> None:
@@ -232,7 +239,7 @@ async def test_session_snapshots_its_verification_steps() -> None:
     snapshot = await anext(payloads(session))
     assert isinstance(snapshot, Snapshot)
     assert snapshot.steps == (StepState(name="always fails"),)
-    assert nothing_queued(session)
+    assert only_state_queued(session)
 
 
 async def test_verification_without_steps_notes_that_nothing_is_verified() -> None:
@@ -242,7 +249,7 @@ async def test_verification_without_steps_notes_that_nothing_is_verified() -> No
     snapshot = await anext(stream)
     assert isinstance(snapshot, Snapshot) and snapshot.steps == ()
     assert await anext(stream) == Notice(message=NO_STEPS_NOTE)
-    assert nothing_queued(session)
+    assert only_state_queued(session)
 
 
 async def test_session_notes_its_workspace_at_startup() -> None:
@@ -250,7 +257,7 @@ async def test_session_notes_its_workspace_at_startup() -> None:
     stream = payloads(session)
     assert isinstance(await anext(stream), Snapshot)
     assert await anext(stream) == Notice(message="Workspace: /code/project")
-    assert nothing_queued(session)
+    assert only_state_queued(session)
 
 
 async def test_planner_turns_are_not_verified() -> None:
@@ -261,7 +268,7 @@ async def test_planner_turns_are_not_verified() -> None:
 
     assert not any(isinstance(e, VerificationChanged | VerificationFinished) for e in events[1:])
     await asyncio.sleep(0.01)
-    assert nothing_queued(session)
+    assert only_state_queued(session)
 
 
 async def no_usage() -> UsageFetch:

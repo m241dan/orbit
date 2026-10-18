@@ -38,6 +38,7 @@ from orbit.protocol import (
     Notice,
     RemoveTask,
     RunTasks,
+    SessionStateChanged,
     Settings,
     Snapshot,
     StepState,
@@ -145,7 +146,8 @@ async def test_running_does_nothing_when_nothing_is_runnable() -> None:
     await anext(stream)  # The snapshot.
     await send(session, RunTasks())
     await asyncio.sleep(0.01)
-    assert queued(session) == [ACCEPTED]
+    counted = SessionStateChanged(session="session-1", active=True, state="idle", viewers=1)
+    assert queued(session) == [counted, ACCEPTED]
     assert launcher.launches == []
 
 

@@ -45,6 +45,22 @@ async def test_start_runs_the_work_in_the_background() -> None:
     assert not lane.running and events.empty()
 
 
+async def test_ended_is_called_once_the_work_has_stopped() -> None:
+    lane, _ = background()
+    work = Work()
+    seen: list[bool] = []
+    lane.ended = lambda: seen.append(lane.running)
+    lane.start(work("first"))
+    await work.started.wait()
+    assert seen == []
+
+    work.gate.set()
+    await lane.close()
+    await asyncio.sleep(0)
+
+    assert seen == [False]
+
+
 async def test_start_while_running_drops_the_new_work() -> None:
     lane, _ = background()
     work = Work()
@@ -134,6 +150,18 @@ async def test_a_turn_shows_the_lane_busy_until_it_ends() -> None:
     await ended(turns.turn)
 
     assert not turns.running and posted == [BUSY, IDLE]
+
+
+async def test_the_lane_is_running_when_its_busy_is_posted() -> None:
+    seen: list[bool] = []
+    turns = TurnSlot("planner", "Busy already.", lambda _: seen.append(turns.running))
+    work = Work()
+
+    await turns.start(work("first"))
+    work.gate.set()
+    await ended(turns.turn)
+
+    assert seen == [True, False]
 
 
 async def test_a_turn_while_one_runs_is_refused_and_closed() -> None:
