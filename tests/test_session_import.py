@@ -4,7 +4,7 @@ import fcntl
 import os
 import sqlite3
 from collections.abc import AsyncIterator, Iterator
-from contextlib import closing, contextmanager
+from contextlib import AbstractContextManager, closing, contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -17,7 +17,7 @@ from orbit.agent.domain.sessions import (
     record_json,
     review_count_json,
 )
-from orbit.agent.external import sqlite_store
+from orbit.agent.external import session_import, sqlite_store
 from orbit.agent.external.session_import import imported_note
 from orbit.agent.external.sqlite_store import SqliteStore
 
@@ -69,6 +69,29 @@ def read_only(directory: Path) -> Iterator[None]:
         yield
     finally:
         directory.chmod(0o700)
+
+
+def failing_rename(monkeypatch: pytest.MonkeyPatch, name: str) -> None:
+    """Make renaming a path called ``name`` fail, as a file the user can't move would."""
+    rename = Path.rename
+
+    def renaming(self: Path, target: Path) -> Path:
+        if self.name == name:
+            raise PermissionError(f"Permission denied: {self}")
+        return rename(self, target)
+
+    monkeypatch.setattr(Path, "rename", renaming)
+
+
+def failing_commit(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make the import's commit fail once the old files are renamed, as a full disk would."""
+    retired = session_import._retired
+
+    def failing(legacy_dir: Path) -> AbstractContextManager[None]:
+        with retired(legacy_dir):
+            raise sqlite3.OperationalError("disk I/O error")
+
+    monkeypatch.setattr(session_import, "_retired", failing)
 
 
 async def ids(store: SqliteStore) -> list[str]:
@@ -195,15 +218,86 @@ async def test_a_folder_that_cant_be_renamed_blocks_the_import(
 
 
 async def test_a_review_count_that_cant_be_renamed_puts_the_folder_back(
-    store: SqliteStore, legacy: Path
+    monkeypatch: pytest.MonkeyPatch, store: SqliteStore, legacy: Path
 ) -> None:
-    (legacy / "reviews.json.imported" / "in-the-way").mkdir(parents=True)
+    failing_rename(monkeypatch, "reviews.json")
     with pytest.raises(ImportBlocked, match=r"Couldn't rename .*legacy/reviews\.json to"):
         await import_session_files(store, legacy)
     assert await ids(store) == []
     assert await store.review_count() == 0
     assert (legacy / "sessions").is_dir()
     assert not (legacy / "sessions.imported").exists()
+
+
+async def test_earlier_imported_files_are_kept_and_the_new_ones_get_fresh_names(
+    store: SqliteStore, legacy: Path
+) -> None:
+    (legacy / "sessions.imported").mkdir()
+    (legacy / "sessions.imported" / "old.json").write_text("earlier")
+    (legacy / "reviews.json.imported").write_text("earlier")
+    assert await import_session_files(store, legacy) == 3
+    assert [path.name for path in (legacy / "sessions.imported").iterdir()] == ["old.json"]
+    assert (legacy / "reviews.json.imported").read_text() == "earlier"
+    assert (legacy / "sessions.imported.2" / "one.json").exists()
+    assert (legacy / "reviews.json.imported.2").read_text() == review_count_json(3)
+    assert not (legacy / "sessions").exists()
+    assert not (legacy / "reviews.json").exists()
+
+
+async def test_after_importing_beside_earlier_imported_files_another_import_does_nothing(
+    store: SqliteStore, legacy: Path
+) -> None:
+    (legacy / "sessions.imported").mkdir()
+    (legacy / "reviews.json.imported").write_text("earlier")
+    await import_session_files(store, legacy)
+    assert await import_session_files(store, legacy) is None
+    assert sorted(path.name for path in legacy.iterdir()) == [
+        "reviews.json.imported",
+        "reviews.json.imported.2",
+        "sessions.imported",
+        "sessions.imported.2",
+    ]
+
+
+async def test_an_empty_earlier_imported_folder_or_a_dangling_link_is_not_replaced(
+    store: SqliteStore, legacy: Path
+) -> None:
+    (legacy / "sessions.imported").mkdir()
+    (legacy / "sessions.imported.2").symlink_to(legacy / "nowhere")
+    assert await import_session_files(store, legacy) == 3
+    assert (legacy / "sessions.imported").is_dir()
+    assert (legacy / "sessions.imported.2").is_symlink()
+    assert (legacy / "sessions.imported.3" / "one.json").exists()
+
+
+async def test_a_failing_commit_puts_the_folder_and_review_count_back(
+    monkeypatch: pytest.MonkeyPatch, store: SqliteStore, legacy: Path
+) -> None:
+    failing_commit(monkeypatch)
+    with pytest.raises(ImportBlocked, match=r"sessions in .*legacy/sessions: disk I/O error"):
+        await import_session_files(store, legacy)
+    assert await ids(store) == []
+    assert await store.review_count() == 0
+    assert (legacy / "sessions" / "one.json").exists()
+    assert (legacy / "reviews.json").exists()
+    assert not (legacy / "sessions.imported").exists()
+    assert not (legacy / "reviews.json.imported").exists()
+
+
+async def test_a_file_that_cant_be_renamed_back_blocks_the_import_naming_both(
+    monkeypatch: pytest.MonkeyPatch, store: SqliteStore, legacy: Path
+) -> None:
+    failing_commit(monkeypatch)
+    failing_rename(monkeypatch, "reviews.json.imported")
+    with pytest.raises(
+        ImportBlocked,
+        match=r"rename .*legacy/reviews\.json\.imported back to .*legacy/reviews\.json",
+    ) as blocked:
+        await import_session_files(store, legacy)
+    assert isinstance(blocked.value.__cause__, sqlite3.OperationalError)
+    assert await ids(store) == []
+    assert (legacy / "sessions" / "one.json").exists()
+    assert (legacy / "reviews.json.imported").exists()
 
 
 async def test_a_file_that_cant_be_read_blocks_the_import(store: SqliteStore, legacy: Path) -> None:

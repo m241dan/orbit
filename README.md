@@ -532,7 +532,8 @@ Older orbits saved sessions as JSON files in `.git/orbit/sessions` (`.orbit/sess
 git repository), with the super review count in `reviews.json`. The first time orbit starts on such
 a repository it imports them into the store, in one go, keeping sessions it can't read as they are
 and never overwriting one the store already has; then it renames the folder `sessions.imported`
-(and the count `reviews.json.imported`) and says so in the conversation. Nothing is deleted. If
+(and the count `reviews.json.imported`), or `.2`, `.3` and so on after that name if an earlier
+import left one there, and says so in the conversation. Nothing is deleted or replaced. If
 another orbit still has one of the old sessions open, or the files can't be read or renamed,
 orbit stops before the app starts, with status 2 and a message naming the path and the cause,
 having imported nothing; fix that and start orbit again. Likewise a database that can't be opened,

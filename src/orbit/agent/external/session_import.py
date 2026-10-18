@@ -2,12 +2,14 @@
 
 The old ``sessions`` folder and ``reviews.json`` are read, then copied into the store in one
 transaction that commits only once the folder is renamed to ``sessions.imported`` (and
-``reviews.json`` to ``reviews.json.imported``), so they're imported once; when anything fails the
-files are renamed back and nothing is imported, ready for another try. Old files are never
-deleted, and rows the store already has are never overwritten.
+``reviews.json`` to ``reviews.json.imported``), or to ``.2``, ``.3`` and so on after that name
+when an earlier import left one there, so they're imported once; when anything fails the files
+are renamed back and nothing is imported, ready for another try. Old files are never deleted or
+replaced, and rows the store already has are never overwritten.
 """
 
 import asyncio
+import os
 import sqlite3
 from collections.abc import Iterator
 from contextlib import ExitStack, contextmanager
@@ -130,17 +132,28 @@ def _retired(legacy_dir: Path) -> Iterator[None]:
                 f"Can't import the sessions in {sessions}: an orbit still has a session there "
                 "open. Close it and try again."
             )
-        stack.enter_context(_moved(sessions, legacy_dir / IMPORTED))
+        stack.enter_context(_moved(sessions, _free(legacy_dir / IMPORTED)))
         if (legacy_dir / REVIEWS).exists():
-            stack.enter_context(_moved(legacy_dir / REVIEWS, legacy_dir / REVIEWS_IMPORTED))
+            stack.enter_context(_moved(legacy_dir / REVIEWS, _free(legacy_dir / REVIEWS_IMPORTED)))
         yield
+
+
+def _free(path: Path) -> Path:
+    """``path``, or the first of ``path.2``, ``path.3`` and so on that nothing is at, not even a
+    broken link, so that renaming to it replaces nothing."""
+    free, number = path, 1
+    while os.path.lexists(free):
+        number += 1
+        free = path.with_name(f"{path.name}.{number}")
+    return free
 
 
 @contextmanager
 def _moved(source: Path, target: Path) -> Iterator[None]:
     """Rename ``source`` to ``target``, and back if what this holds fails.
 
-    Raises :class:`ImportBlocked` naming both when it can't be renamed.
+    Raises :class:`ImportBlocked` naming both when it can't be renamed, or renamed back, the
+    latter chained to what failed.
     """
     try:
         source.rename(target)
@@ -148,6 +161,9 @@ def _moved(source: Path, target: Path) -> Iterator[None]:
         raise ImportBlocked(f"Couldn't rename {source} to {target}: {error}") from error
     try:
         yield
-    except BaseException:
-        target.rename(source)
+    except BaseException as error:
+        try:
+            target.rename(source)
+        except OSError as undo:
+            raise ImportBlocked(f"Couldn't rename {target} back to {source}: {undo}") from error
         raise
