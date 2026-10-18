@@ -16,7 +16,16 @@ from orbit.agent.application.keeper import (
 from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.reviews import LaneSnapshot, PlannerSnapshot
 from orbit.agent.domain.sessions import SessionRecord
-from orbit.protocol import BUSY, ErrorOccurred, Event, Settings, TaskSpec, TaskState, Usage
+from orbit.protocol import (
+    BUSY,
+    SAVE_FAILED,
+    ErrorOccurred,
+    Event,
+    Settings,
+    TaskSpec,
+    TaskState,
+    Usage,
+)
 from tests.agent_fakes import START, FakeStore, Ticks
 
 TASK = TaskState(id="1", task=TaskSpec(prompt="Add a flag."))
@@ -40,6 +49,10 @@ class Published:
     @property
     def errors(self) -> list[str]:
         return [e.message for e in self.events if isinstance(e, ErrorOccurred)]
+
+    @property
+    def codes(self) -> list[str]:
+        return [e.code for e in self.events if isinstance(e, ErrorOccurred)]
 
 
 def keeper_for(store: FakeStore | None) -> tuple[SessionKeeper, Published]:
@@ -202,6 +215,7 @@ async def test_a_lock_that_cannot_be_taken_is_reported() -> None:
     assert published.errors == [
         "Couldn't lock the session x.lock: disk full; the session won't be saved."
     ]
+    assert published.codes == [SAVE_FAILED]
     assert store.saved == []
 
 
@@ -255,6 +269,7 @@ async def test_a_lock_that_cannot_be_released_on_close_is_reported() -> None:
     await save(keeper, WITH_TASK)
     await keeper.close()
     assert published.errors == [UNLOCKABLE]
+    assert published.codes == [SAVE_FAILED]
     await save(keeper, EMPTY)
     assert len(store.saved) == 1
 
@@ -271,6 +286,7 @@ async def test_a_lock_that_cannot_be_released_on_leaving_is_reported() -> None:
     keeper, published = keeper_for(unreleasable_store_with("old"))
     await keeper.leave(Left("old"), discard=False)
     assert published.errors == [UNLOCKABLE]
+    assert published.codes == [SAVE_FAILED]
 
 
 def refuses(record: SessionRecord) -> None:
@@ -283,6 +299,7 @@ async def test_a_lock_that_cannot_be_released_after_a_refused_open_is_reported()
     with pytest.raises(Refused):
         await keeper.open("other", refuses)
     assert published.errors == [UNLOCKABLE]
+    assert published.codes == [SAVE_FAILED]
     assert keeper.id == "session-1"
 
 
@@ -310,6 +327,7 @@ async def test_a_failed_delete_whose_lock_cannot_be_released_reports_both() -> N
     keeper, published = keeper_for(store)
     await keeper.delete_saved("other")
     assert published.errors == [UNLOCKABLE, "Couldn't delete the session: read-only"]
+    assert published.codes == [SAVE_FAILED, SAVE_FAILED]
 
 
 async def test_a_session_that_cannot_be_deleted_on_leaving_lets_go_of_its_lock() -> None:
@@ -320,6 +338,7 @@ async def test_a_session_that_cannot_be_deleted_on_leaving_lets_go_of_its_lock()
     keeper, published = keeper_for(store)
     await keeper.leave(Left("old"), discard=True)
     assert published.errors == ["Couldn't delete the session: read-only"]
+    assert published.codes == [SAVE_FAILED]
     assert store.released == ["old"] and store.locked == set()
 
 
@@ -329,6 +348,7 @@ async def test_a_session_that_cannot_be_deleted_or_let_go_of_on_leaving_reports_
     keeper, published = keeper_for(store)
     await keeper.leave(Left("old"), discard=True)
     assert published.errors == [UNLOCKABLE, "Couldn't delete the session: read-only"]
+    assert published.codes == [SAVE_FAILED, SAVE_FAILED]
 
 
 async def test_a_session_unreadable_once_locked_is_not_opened_and_lets_go_of_its_lock() -> None:

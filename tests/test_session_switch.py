@@ -15,6 +15,7 @@ from orbit.protocol import (
     INVALID,
     LOCKED,
     PLANNER,
+    SAVE_FAILED,
     UNKNOWN,
     AddTask,
     AgentExited,
@@ -117,6 +118,10 @@ def last_of[E](kind: type[E], events: list[Event]) -> E:
 
 def messages(kind: type[Notice] | type[ErrorOccurred], events: list[Event]) -> list[str]:
     return [e.message for e in events if isinstance(e, kind)]
+
+
+def errors(events: list[Event]) -> list[tuple[str, str]]:
+    return [(e.code, e.message) for e in events if isinstance(e, ErrorOccurred)]
 
 
 async def opened(session: AgentSession, command: OpenSession | NewSession) -> list[Event]:
@@ -422,7 +427,7 @@ async def test_a_store_that_cant_lock_the_session_leaves_the_open_one_as_it_was(
     await send(session, OpenSession(session_id="auth"))
     await send(session, ListSessions())
     events = await events_until(session, of_type(SessionsListed))
-    assert messages(ErrorOccurred, events) == ["Couldn't lock the session: disk full"]
+    assert errors(events) == [(SAVE_FAILED, "Couldn't lock the session: disk full")]
     assert session.saved_session.id == "session-1"
     assert [t.task for t in board(events)] == [TASK]  # Its last board is the one it had.
     await session.close()
@@ -707,7 +712,7 @@ async def test_a_session_that_cant_be_deleted_as_its_tasks_carry_over_is_reporte
     session = failing_startup(store)
     await events_until(session, agent_exited("startup-check"))
     events = await opened(session, NewSession())
-    assert messages(ErrorOccurred, events) == ["Couldn't delete the session: read-only"]
+    assert errors(events) == [(SAVE_FAILED, "Couldn't delete the session: read-only")]
     assert store.released == ["session-1"]
     await session.close()
 
@@ -731,7 +736,7 @@ async def test_a_switch_whose_old_lock_cant_be_released_still_opens_the_session(
     store.release_failure = "Couldn't unlock the session: read-only"
     events = await opened(session, OpenSession(session_id="auth"))
     assert last_of(Snapshot, events).session.id == "auth"
-    assert messages(ErrorOccurred, events) == ["Couldn't unlock the session: read-only"]
+    assert errors(events) == [(SAVE_FAILED, "Couldn't unlock the session: read-only")]
     await session.close()
 
 
