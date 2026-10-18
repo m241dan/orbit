@@ -32,6 +32,7 @@ from orbit.agent.external.config_file import read_config, write_checks
 from orbit.agent.external.git_tree import GitCoderTree, git_top_level, in_git_work_tree
 from orbit.agent.external.mcp_host import McpHost
 from orbit.agent.external.session_files import SessionFiles, state_dir
+from orbit.agent.external.session_import import ImportBlocked, import_session_files
 from orbit.agent.external.sqlite_store import SqliteStore, StoreError
 from orbit.agent.external.usage_api import UsageApi
 from orbit.agent.external.workspace import workspace_state
@@ -46,6 +47,7 @@ __all__ = [
     "ConfigError",
     "ConfigWriter",
     "GitCoderTree",
+    "ImportBlocked",
     "Limits",
     "McpHost",
     "OrbitConfig",
@@ -64,6 +66,7 @@ __all__ = [
     "VerificationStep",
     "Workspace",
     "git_top_level",
+    "import_session_files",
     "in_git_work_tree",
     "read_config",
     "run_step",

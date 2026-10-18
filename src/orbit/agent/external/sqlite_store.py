@@ -13,8 +13,10 @@ import asyncio
 import os
 import sqlite3
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import AbstractContextManager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Self
 
@@ -55,6 +57,17 @@ MIGRATIONS: tuple[tuple[str, ...], ...] = (
 
 class StoreError(Exception):
     """The store can't be opened, for the reason in the message, which names the file."""
+
+
+@dataclass(frozen=True)
+class SessionRow:
+    """A session's row: its ``id``, ``name`` and ``last_active`` time (empty when unknown), and
+    its ``record``'s text."""
+
+    id: str
+    name: str
+    last_active: str
+    record: str
 
 
 def _create_files(database: Path) -> None:
@@ -243,6 +256,20 @@ class SqliteStore:
             message = f"Couldn't save the review count to {self._database}: {error}"
             raise RuntimeError(message) from error
 
+    async def insert_new(
+        self,
+        rows: Sequence[SessionRow],
+        review_count: int | None,
+        committing: Callable[[], AbstractContextManager[None]],
+    ) -> int:
+        """Save the session ``rows`` whose ids aren't saved yet and, unless one is, the
+        ``review_count`` (if any), in one transaction committed inside ``committing()`` and rolled
+        back if anything fails; returns how many sessions it saved.
+
+        Raises ``sqlite3.Error`` when the database fails, and whatever ``committing`` raises.
+        """
+        return await self._call(self._insert_new, rows, review_count, committing)
+
     async def _call[*A, T](self, function: Callable[[*A], T], *args: *A) -> T:
         """What ``function(*args)`` returns, run on the database's thread."""
         return await asyncio.wrap_future(self._executor.submit(function, *args))
@@ -277,6 +304,39 @@ class SqliteStore:
                 record_json(record),
             ),
         )
+
+    def _insert_new(
+        self,
+        rows: Sequence[SessionRow],
+        review_count: int | None,
+        committing: Callable[[], AbstractContextManager[None]],
+    ) -> int:
+        try:
+            self._db.execute("BEGIN IMMEDIATE")
+            saved = sum(self._insert_row(row) for row in rows)
+            if review_count is not None:
+                self._db.execute(
+                    """INSERT INTO reviews (workspace_id, since_super) VALUES (?, ?)
+                    ON CONFLICT (workspace_id) DO NOTHING""",
+                    (self._workspace, review_count),
+                )
+            with committing():
+                self._db.execute("COMMIT")
+        except BaseException:
+            if self._db.in_transaction:
+                self._db.execute("ROLLBACK")
+            raise
+        return saved
+
+    def _insert_row(self, row: SessionRow) -> int:
+        """Save ``row`` unless its id is saved; returns how many rows it saved."""
+        cursor = self._db.execute(
+            """INSERT INTO sessions (workspace_id, id, name, last_active, record)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT (workspace_id, id) DO NOTHING""",
+            (self._workspace, row.id, row.name, row.last_active, row.record),
+        )
+        return cursor.rowcount
 
     def _load(self, session_id: str) -> str | None:
         row = self._db.execute(
