@@ -42,6 +42,8 @@ from orbit.protocol import PLANNER, Settings, ThreadedSession, ToolAccess
 from orbit.tui import OrbitApp
 
 app = typer.Typer(help="Orbit command-line tool.", no_args_is_help=True)
+db = typer.Typer(help="Look after orbit's database of saved sessions.", no_args_is_help=True)
+app.add_typer(db, name="db")
 
 
 def _workspace(path: Path) -> Path:
@@ -307,3 +309,31 @@ async def _run_profiled(tui: OrbitApp, directory: Path) -> None:
 def version() -> None:
     """Show the installed version."""
     typer.echo(__version__)
+
+
+@db.command()
+def backup(
+    path: Annotated[Path, typer.Argument(help="The file to write the backup to.")],
+    force: Annotated[bool, typer.Option("--force", help="Replace PATH if it exists.")] = False,
+    state: StateDirOption = None,
+) -> None:
+    """Back up the database of saved sessions to PATH, safely even while orbit runs."""
+    target = path.expanduser().absolute()
+    if target.exists() and not force:
+        typer.echo(f"{target} already exists; pass --force to replace it.", err=True)
+        raise typer.Exit(2)
+    try:
+        asyncio.run(_backed_up(resolve_state_dir(state, os.environ), target))
+    except StoreError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(2) from None
+    typer.echo(f"Backed up orbit's database to {target}.")
+
+
+async def _backed_up(state: Path, target: Path) -> None:
+    """Back up the database in ``state`` to ``target``, registering and importing nothing."""
+    store = await SqliteStore.open_for_backup(state)
+    try:
+        await store.backup(target)
+    finally:
+        await store.close()

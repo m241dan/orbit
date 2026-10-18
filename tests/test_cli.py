@@ -805,3 +805,94 @@ def test_chat_runs_the_app_unprofiled_by_default(
     assert len(launched) == 1
     assert FakeApp.profiling == []
     assert not FakeApp.profile_dir.exists()
+
+
+# Backups
+
+
+async def saved_sessions(state: Path, workspace: Path, *ids: str) -> None:
+    """Save sessions with ``ids`` for ``workspace`` in the store in ``state``."""
+    store = await SqliteStore.open(state, str(workspace))
+    try:
+        for session_id in ids:
+            await store.save(SessionRecord(id=session_id, name="x", created=WHEN, last_active=WHEN))
+    finally:
+        await store.close()
+
+
+def backed_up_ids(path: Path) -> list[str]:
+    with closing(sqlite3.connect(path)) as connection:
+        rows = connection.execute("SELECT id FROM sessions ORDER BY id").fetchall()
+    return [str(session_id) for (session_id,) in rows]
+
+
+def test_db_backup_copies_the_database_for_the_owner_alone(state: Path, tmp_path: Path) -> None:
+    asyncio.run(saved_sessions(state, tmp_path, "first", "second"))
+    result = runner.invoke(app, ["db", "backup", "out.db"])
+
+    assert result.exit_code == 0
+    target = Path("out.db").absolute()
+    assert str(target) in result.stdout
+    assert target.stat().st_mode & 0o777 == 0o600
+    assert backed_up_ids(target) == ["first", "second"]
+
+
+def test_db_backup_takes_the_state_directory_option(tmp_path: Path) -> None:
+    elsewhere = tmp_path / "elsewhere"
+    asyncio.run(saved_sessions(elsewhere, tmp_path, "abc"))
+    result = runner.invoke(app, ["db", "backup", "out.db", "--state-dir", str(elsewhere)])
+
+    assert result.exit_code == 0
+    assert backed_up_ids(Path("out.db")) == ["abc"]
+
+
+def test_db_backup_refuses_an_existing_file(state: Path, tmp_path: Path) -> None:
+    asyncio.run(saved_sessions(state, tmp_path, "abc"))
+    Path("out.db").write_text("mine")
+    result = runner.invoke(app, ["db", "backup", "out.db"])
+
+    assert result.exit_code == 2
+    assert "already exists" in result.stderr
+    assert "--force" in result.stderr
+    assert Path("out.db").read_text() == "mine"
+
+
+def test_db_backup_force_replaces_an_existing_file(state: Path, tmp_path: Path) -> None:
+    asyncio.run(saved_sessions(state, tmp_path, "abc"))
+    Path("out.db").write_text("mine")
+    result = runner.invoke(app, ["db", "backup", "out.db", "--force"])
+
+    assert result.exit_code == 0
+    assert backed_up_ids(Path("out.db")) == ["abc"]
+
+
+def test_db_backup_without_a_database_has_nothing_to_back_up(state: Path) -> None:
+    result = runner.invoke(app, ["db", "backup", "out.db"])
+
+    assert result.exit_code == 2
+    assert "nothing to back up" in result.stderr
+    assert not (state / "orbit.db").exists()
+    assert not Path("out.db").exists()
+
+
+def test_db_backup_that_fails_stops_with_the_reason(state: Path, tmp_path: Path) -> None:
+    asyncio.run(saved_sessions(state, tmp_path, "abc"))
+    result = runner.invoke(app, ["db", "backup", "missing/out.db"])
+
+    assert result.exit_code == 2
+    assert "Couldn't back up the database" in result.stderr
+    assert store_threads() == []
+
+
+def test_db_backup_while_another_orbit_has_the_database_open(state: Path, tmp_path: Path) -> None:
+    async def backed_up_while_open() -> int:
+        store = await SqliteStore.open(state, str(tmp_path))
+        try:
+            await store.save(SAVED)
+            result = await asyncio.to_thread(runner.invoke, app, ["db", "backup", "out.db"])
+            return result.exit_code
+        finally:
+            await store.close()
+
+    assert asyncio.run(backed_up_while_open()) == 0
+    assert backed_up_ids(Path("out.db")) == ["abc"]

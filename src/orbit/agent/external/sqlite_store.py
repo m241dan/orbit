@@ -15,7 +15,7 @@ import sqlite3
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import AbstractContextManager
+from contextlib import AbstractContextManager, closing
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Self
@@ -71,7 +71,8 @@ def resolve_state_dir(flag: Path | None, environ: Mapping[str, str]) -> Path:
 
 
 class StoreError(Exception):
-    """The store can't be opened, for the reason in the message, which names the file."""
+    """The store can't be opened or backed up, for the reason in the message, which names the
+    file."""
 
 
 @dataclass(frozen=True)
@@ -176,6 +177,29 @@ def _open(database: Path, workspace: str) -> tuple[sqlite3.Connection, str]:
         raise
 
 
+def _open_existing(database: Path) -> sqlite3.Connection:
+    """A connection to ``database`` as it stands, creating, upgrading and registering nothing.
+
+    Raises :class:`StoreError` naming ``database`` when it isn't there or can't be opened.
+    """
+    if not database.exists():
+        raise StoreError(f"There's no database {database}, so nothing to back up.")
+    uri = f"{database.absolute().as_uri()}?mode=rw"
+    try:
+        return sqlite3.connect(uri, uri=True, timeout=BUSY_TIMEOUT, isolation_level=None)
+    except sqlite3.Error as error:
+        raise StoreError(f"Couldn't open the database {database}: {error}") from error
+
+
+def _create_target(target: Path) -> None:
+    """Make ``target`` an empty file, owner read-write, whether or not it was there."""
+    descriptor = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        os.fchmod(descriptor, 0o600)
+    finally:
+        os.close(descriptor)
+
+
 class SqliteStore:
     """Saved sessions and the review count of one workspace, in the state directory's database.
 
@@ -206,6 +230,22 @@ class SqliteStore:
         store = cls(Path(state_dir))
         try:
             await store._call(store._connect, workspace)
+        except BaseException:
+            await store.close()
+            raise
+        return store
+
+    @classmethod
+    async def open_for_backup(cls, state_dir: Path | str) -> Self:
+        """The store in ``state_dir`` with its database opened as it stands, only to
+        :meth:`backup` it: nothing is created, upgraded or registered.
+
+        Raises :class:`StoreError`, naming the file, when the database isn't there or can't be
+        opened.
+        """
+        store = cls(Path(state_dir))
+        try:
+            await store._call(store._connect_existing)
         except BaseException:
             await store.close()
             raise
@@ -285,6 +325,14 @@ class SqliteStore:
         """
         return await self._call(self._insert_new, rows, review_count, committing)
 
+    async def backup(self, target: Path) -> None:
+        """Copy the database to ``target``, owner read-write, replacing any file there, with
+        SQLite's online backup, which is safe while another orbit uses the database.
+
+        Raises :class:`StoreError`, naming both files, when the copy fails.
+        """
+        await self._call(self._backup, target)
+
     async def _call[*A, T](self, function: Callable[[*A], T], *args: *A) -> T:
         """What ``function(*args)`` returns, run on the database's thread."""
         return await asyncio.wrap_future(self._executor.submit(function, *args))
@@ -299,6 +347,18 @@ class SqliteStore:
         self._connection, self._workspace = _open(self._database, workspace)
         self._lock_dir = self._state_dir / LOCKS / self._workspace
         self._locks = SessionLocks(self._lock_dir)
+
+    def _connect_existing(self) -> None:
+        self._connection = _open_existing(self._database)
+
+    def _backup(self, target: Path) -> None:
+        try:
+            _create_target(target)
+            with closing(sqlite3.connect(target)) as copy:
+                self._db.backup(copy)
+        except (OSError, sqlite3.Error) as error:
+            message = f"Couldn't back up the database {self._database} to {target}: {error}"
+            raise StoreError(message) from error
 
     def _disconnect(self) -> None:
         if self._connection is not None:

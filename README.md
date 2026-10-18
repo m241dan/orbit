@@ -42,6 +42,7 @@ uv run orbit chat --no-worktree                # tasks edit the current checkout
 uv run orbit chat --no-usage                   # don't show usage limits
 uv run orbit chat --profile /tmp/orbit-prof    # record what slows orbit down
 uv run orbit chat --state-dir /tmp/orbit-state # keep saved sessions somewhere else
+uv run orbit db backup ~/orbit-backup.db       # back up the saved sessions (--force replaces)
 ```
 
 With orbit installed as a tool, drop the `uv run`.
@@ -539,6 +540,13 @@ or whose schema is newer than this orbit, stops it with a message naming the fil
 
 `orbit.db` can be read with `sqlite3`, but its schema isn't an API, and writing to it while orbit
 may use it isn't supported.
+
+`orbit db backup PATH` backs the database up to `PATH`, readable by you alone, with SQLite's
+online backup, so it's safe while orbit runs. It takes `--state-dir` as `chat` does, refuses (status
+2) when `PATH` exists unless given `--force`, and when the state directory has no `orbit.db` says
+there's nothing to back up. Copying `orbit.db` yourself while orbit runs isn't safe: the copy can
+miss writes still in its `-wal` file, or catch one half done. To restore, stop every orbit using the
+state directory, replace `orbit.db` with the backup, and start orbit again.
 
 ### Planning with the planner
 

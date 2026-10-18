@@ -346,3 +346,87 @@ async def test_a_cancelled_call_leaves_the_store_usable(
         connection.execute("ROLLBACK")
     await store.save(record("second"))
     assert [entry.id for entry in await store.sessions()] == ["first", "second"]
+
+
+# Backups
+
+
+async def backed_up(state: Path, target: Path) -> None:
+    """Back up the database in ``state`` to ``target``, opened for a backup alone."""
+    store = await SqliteStore.open_for_backup(state)
+    try:
+        await store.backup(target)
+    finally:
+        await store.close()
+
+
+async def test_a_backup_holds_the_sessions_and_is_the_owners_alone(
+    open_store: Opener, state: Path, workspace: Path, tmp_path: Path
+) -> None:
+    store = await open_store(workspace)
+    await store.save(record("first"))
+    await store.save(record("second"))
+    await backed_up(state, tmp_path / "copy.db")
+    assert (tmp_path / "copy.db").stat().st_mode & 0o777 == 0o600
+    with closing(sqlite3.connect(tmp_path / "copy.db")) as connection:
+        rows = connection.execute("SELECT id FROM sessions ORDER BY id").fetchall()
+    assert rows == [("first",), ("second",)]
+
+
+async def test_a_backup_includes_what_another_open_store_has_written(
+    open_store: Opener, state: Path, workspace: Path, tmp_path: Path
+) -> None:
+    store = await open_store(workspace)
+    await store.save(record())
+    await backed_up(state, tmp_path / "copy.db")
+    await store.save(record("later"))
+    with closing(sqlite3.connect(tmp_path / "copy.db")) as connection:
+        assert connection.execute("SELECT id FROM sessions").fetchall() == [("abc",)]
+
+
+async def test_a_backup_replaces_an_existing_file_and_makes_it_the_owners_alone(
+    open_store: Opener, state: Path, workspace: Path, tmp_path: Path
+) -> None:
+    await (await open_store(workspace)).save(record())
+    target = tmp_path / "copy.db"
+    target.write_text("old")
+    target.chmod(0o644)
+    await backed_up(state, target)
+    assert target.stat().st_mode & 0o777 == 0o600
+    with closing(sqlite3.connect(target)) as connection:
+        assert connection.execute("SELECT id FROM sessions").fetchall() == [("abc",)]
+
+
+async def test_opening_for_a_backup_registers_no_workspace(
+    open_store: Opener, state: Path, workspace: Path, tmp_path: Path
+) -> None:
+    await open_store(workspace)
+    with database(state) as connection:
+        connection.execute("DELETE FROM workspaces")
+    await backed_up(state, tmp_path / "copy.db")
+    with database(state) as connection:
+        assert connection.execute("SELECT count(*) FROM workspaces").fetchone() == (0,)
+
+
+async def test_opening_a_missing_database_for_a_backup_is_refused_creating_nothing(
+    state: Path,
+) -> None:
+    with pytest.raises(StoreError, match=r"no database .*orbit\.db, so nothing to back up"):
+        await SqliteStore.open_for_backup(state)
+    assert not state.exists()
+    assert store_threads() == []
+
+
+async def test_a_database_that_cant_be_opened_for_a_backup_is_refused(state: Path) -> None:
+    (state / "orbit.db").mkdir(parents=True)
+    with pytest.raises(StoreError, match=r"Couldn't open the database .*orbit\.db: "):
+        await SqliteStore.open_for_backup(state)
+
+
+async def test_a_backup_that_cant_be_written_is_refused_naming_the_target(
+    open_store: Opener, state: Path, workspace: Path, tmp_path: Path
+) -> None:
+    await open_store(workspace)
+    target = tmp_path / "missing" / "copy.db"
+    with pytest.raises(StoreError, match=r"Couldn't back up the database .* to .*copy\.db: "):
+        await backed_up(state, target)
