@@ -1,4 +1,4 @@
-"""A transcript entry and the rich renderables that draw it: markdown with left headings,
+"""The rich renderables that draw a transcript entry: markdown with left headings,
 a hanging indent and the gutter beside it."""
 
 from dataclasses import dataclass
@@ -10,22 +10,7 @@ from rich.segment import Segment
 from rich.style import Style
 from rich.text import Text
 
-from orbit.tui.view import EntryKind, ToolCall, hanging_indent
-
-
-@dataclass(frozen=True)
-class Entry:
-    """A transcript entry: its ``text``, the ``kind`` it's styled as, the ``agent`` it's by,
-    if any, and the ``speaker`` it's spoken by (see :func:`speaker`). An agent's message thinking
-    out loud keeps the ``turn`` it's from, and is drawn dim, until it's found to be the turn's
-    final answer. A tool call's entry keeps the ``call``, which its text shows in a line."""
-
-    text: str
-    kind: EntryKind
-    agent: str | None = None
-    turn: str | None = None
-    call: ToolCall | None = None
-    speaker: str | None = None
+from orbit.tui.view import EntryKind, hanging_indent
 
 
 class LeftHeading(Heading):

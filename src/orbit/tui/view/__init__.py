@@ -52,6 +52,15 @@ from orbit.tui.view.detail_views import (
 from orbit.tui.view.diff_numbers import diff_numbers, edited_snippet, numbered_diff
 from orbit.tui.view.diffs import EDIT_SEPARATOR, FileDiff, diff_change, file_diff, line_diff
 from orbit.tui.view.events import SUPERSEDED_UNLESS, coalesce
+from orbit.tui.view.log import (
+    Entry,
+    after_rows,
+    latest_rule,
+    nearest_row,
+    shown,
+    shown_rows,
+    thinking_places,
+)
 from orbit.tui.view.panels import (
     NO_STEPS_TEXT,
     STALE_STYLE,
@@ -321,6 +330,7 @@ __all__ = [
     "ArgumentExtractor",
     "ConversationTab",
     "DrawnRule",
+    "Entry",
     "EntryKind",
     "ExitRule",
     "ExitedAgent",
@@ -338,6 +348,7 @@ __all__ = [
     "WorkingView",
     "active_task",
     "activity_entry",
+    "after_rows",
     "agent_entry",
     "agent_exited",
     "agent_labelled",
@@ -379,6 +390,7 @@ __all__ = [
     "gutter",
     "hanging_indent",
     "join_prompt",
+    "latest_rule",
     "line_count",
     "line_diff",
     "local_time",
@@ -388,6 +400,7 @@ __all__ = [
     "model_choices",
     "model_label",
     "model_options",
+    "nearest_row",
     "note_entry",
     "numbered_diff",
     "orbit_request_line",
@@ -408,6 +421,8 @@ __all__ = [
     "session_usage_subtitle",
     "sessions_hint",
     "settings_summary",
+    "shown",
+    "shown_rows",
     "shows_markdown",
     "speaker",
     "speaker_label",
@@ -427,6 +442,7 @@ __all__ = [
     "task_started_entry",
     "task_tab_key",
     "text_lines",
+    "thinking_places",
     "token_text",
     "tool_access_choices",
     "tool_access_labels",

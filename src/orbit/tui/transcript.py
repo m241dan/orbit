@@ -20,10 +20,12 @@ from textual.widgets import OptionList
 
 from orbit.protocol import AgentReply, AgentRequest, Event, ToolCallFinished, ToolCallStarted
 from orbit.tui.detail import DetailPane
-from orbit.tui.entries import Entry, GutteredEntry, markdown_body
+from orbit.tui.entries import GutteredEntry, markdown_body
 from orbit.tui.view import (
+    Entry,
     EntryKind,
     ToolCall,
+    after_rows,
     banded,
     collapsible,
     conversation_title,
@@ -33,10 +35,15 @@ from orbit.tui.view import (
     entry_label,
     finishes,
     gutter,
+    latest_rule,
+    nearest_row,
     ruled,
+    shown,
+    shown_rows,
     shows_markdown,
     speaker_label,
     starts_collapsed,
+    thinking_places,
     tool_call_entry,
     tool_call_finished,
     tool_call_started,
@@ -171,7 +178,7 @@ class TranscriptLog(ListPane):
         holds a cursor."""
         self._entries.append(entry)
         self._collapsed.append(starts_collapsed(entry.kind, entry.text))
-        if self._shows(entry):
+        if shown(entry, self._thinking_hidden):
             self._show_after(len(self._entries) - 1)
 
     def _show_after(self, index: int) -> None:
@@ -185,12 +192,9 @@ class TranscriptLog(ListPane):
     def replace_rule(self, agent: str, text: str, kind: EntryKind) -> None:
         """Make ``agent``'s latest rule read ``text`` as a ``kind`` entry, redrawn where it
         is; a log without one is left as it is."""
-        rules = [
-            i for i, entry in enumerate(self._entries) if entry.agent == agent and ruled(entry.kind)
-        ]
-        if not rules:
+        index = latest_rule(self._entries, agent)
+        if index is None:
             return
-        index = rules[-1]
         self._entries[index] = replace(self._entries[index], text=text, kind=kind)
         self._redraw(self._rows.index(index))  # Rules are never hidden.
 
@@ -256,7 +260,7 @@ class TranscriptLog(ListPane):
         """Draw at full brightness the messages ``agent`` thought out loud in ``turn`` at
         ``places`` among them, redrawing only those, or showing them if thinking is hidden; a log
         without them is left as it is."""
-        thinking = self._thinking(agent, turn)
+        thinking = thinking_places(self._entries, agent, turn)
         promoted = [thinking[place] for place in places if place < len(thinking)]
         for index in promoted:
             self._entries[index] = replace(self._entries[index], turn=None)
@@ -269,15 +273,11 @@ class TranscriptLog(ListPane):
         if not self._thinking_hidden:
             for index in promoted:  # Every entry is shown, each at its own option.
                 self._redraw(index)
-        elif self._after_rows(promoted):
+        elif after_rows(self._rows, promoted):
             for index in sorted(promoted):
                 self._show_after(index)
         else:
             self._show_rows()
-
-    def _after_rows(self, indexes: list[int]) -> bool:
-        """Whether every entry at ``indexes`` comes after the last entry shown."""
-        return not self._rows or all(index > self._rows[-1] for index in indexes)
 
     def hide_thinking(self, hidden: bool) -> None:
         """Leave out agents' dim messages if ``hidden``, or show them again, the cursor moving
@@ -285,31 +285,15 @@ class TranscriptLog(ListPane):
         self._thinking_hidden = hidden
         self._show_rows()
 
-    def _shows(self, entry: Entry) -> bool:
-        return not (self._thinking_hidden and entry.turn is not None)
-
     def _show_rows(self) -> None:
         """Rebuild the options from the entries shown, keeping the cursor's place."""
         held = None if self.highlighted is None else self._rows[self.highlighted]
-        self._rows = [i for i, entry in enumerate(self._entries) if self._shows(entry)]
+        self._rows = shown_rows(self._entries, self._thinking_hidden)
         self._marked = None  # Its option is about to go.
         self.clear_options()
         self.add_options([self._prompt(row) for row in range(len(self._rows))])
-        self.highlighted = None if held is None else self._nearest_row(held)
+        self.highlighted = None if held is None else nearest_row(self._rows, held)
         self.call_after_refresh(self.show_place)
-
-    def _nearest_row(self, index: int) -> int | None:
-        """The option of the entry at ``index``, or of the nearest shown entry before it, else
-        after it; None when none is shown."""
-        before = [row for row, shown in enumerate(self._rows) if shown <= index]
-        if before:
-            return before[-1]
-        return 0 if self._rows else None
-
-    def _thinking(self, agent: str | None, turn: str) -> list[int]:
-        """Where the messages ``agent`` is thinking out loud in ``turn`` are, in order."""
-        entries = self._entries
-        return [i for i, entry in enumerate(entries) if (entry.agent, entry.turn) == (agent, turn)]
 
     def collapsed(self, row: int) -> bool:
         """Whether the entry at option ``row`` is collapsed."""

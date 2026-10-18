@@ -26,13 +26,13 @@ from orbit.protocol import (
     VerificationSkipped,
     VerificationStarted,
 )
-from orbit.tui.entries import Entry
 from orbit.tui.panels import VerificationPanel
 from orbit.tui.tabs import ConversationTabs
 from orbit.tui.tasks import TaskList
 from orbit.tui.transcript import Transcript
 from orbit.tui.view import (
     AgentNote,
+    Entry,
     EntryKind,
     TaskProgress,
     Turns,

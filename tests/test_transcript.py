@@ -31,7 +31,7 @@ from orbit.protocol import (
     Usage,
 )
 from orbit.tui import OrbitApp
-from orbit.tui.entries import Entry, GutteredEntry, HangingIndent, entry_markdown
+from orbit.tui.entries import GutteredEntry, HangingIndent, entry_markdown
 from orbit.tui.transcript import Transcript, TranscriptLog
 from orbit.tui.view import (
     GUTTER_BAR,
@@ -40,6 +40,7 @@ from orbit.tui.view import (
     PROMPT_MARKER,
     REPLY_LIMIT,
     SPINNER_FPS,
+    Entry,
     EntryKind,
 )
 from orbit.tui.widgets import ChatPrompt
