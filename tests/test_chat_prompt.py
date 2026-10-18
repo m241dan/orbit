@@ -27,13 +27,16 @@ def rows(prompt: ChatPrompt) -> int:
     return prompt.region.height - 2
 
 
-async def delete_back_to(pilot: Pilot[None], prompt: ChatPrompt, end: Location) -> None:
-    """Cuts the prompt's text back to ``end`` directly, then deletes one more character by
-    pressing backspace, as the user would."""
+async def delete_back_to(pilot: Pilot[None], prompt: ChatPrompt, end: Location) -> int:
+    """The prompt's rows after cutting its text back to ``end`` directly, before deleting one
+    more character by pressing backspace, as the user would."""
     prompt.delete(end, prompt.document.end)
     prompt.move_cursor(end)
+    await pilot.pause()
+    cut = rows(prompt)
     await pilot.press("backspace")
     await pilot.pause()
+    return cut
 
 
 async def test_starts_one_row_high_in_normal_mode() -> None:
@@ -126,8 +129,8 @@ async def test_shrinks_as_wrapped_text_is_deleted() -> None:
         prompt.insert("word " * 50)
         await pilot.pause()
         assert rows(prompt) == 8
-        await delete_back_to(pilot, prompt, (0, 51))
-        assert 1 < rows(prompt) < 8
+        assert await delete_back_to(pilot, prompt, (0, 71)) == 3
+        assert rows(prompt) == 2
         await delete_back_to(pilot, prompt, (0, 6))
         assert prompt.text == "word "
         assert rows(prompt) == 1
