@@ -530,7 +530,7 @@ your checkout out of its way, it doesn't sandbox it.
 |---|---|---|
 | The repository | your checkout | your code, which agents change only through commits orbit lands |
 | `.git/orbit` | the repository's git directory | the coder's worktree, review snapshots and what earlier runs left there |
-| The store | the state directory | `orbit.db`, the saved sessions and super review count of every repository, and `locks/` |
+| The store | the state directory | `orbit.db`, the saved sessions, their event logs and the super review count of every repository, `locks/`, and `fallback/` for events a failed write left unsaved (see [Storage failures](#storage-failures)) |
 | Config files | `.orbit/config.toml` in the repository | the verification steps, setup, roles and limits, committed with your code |
 | User config | `config.toml` in the config directory | your own settings for every repository, such as `[storage]` |
 | Runtime-owned | `~/.claude` | Claude Code's own: your login, read for usage limits, and the agents' conversations |
@@ -578,12 +578,38 @@ naming the file and the key; other tables are ignored, for later orbits' setting
 `orbit.db` can be read with `sqlite3`, but its schema isn't an API, and writing to it while orbit
 may use it isn't supported.
 
+If a write to the store fails (a full disk, say), the session stops rather than carry on
+unrecorded; see [Storage failures](#storage-failures).
+
 `orbit db backup PATH` backs the database up to `PATH`, readable by you alone, with SQLite's
 online backup, so it's safe while orbit runs. It takes `--state-dir` as `chat` does, refuses (status
 2) when `PATH` exists unless given `--force`, and when the state directory has no `orbit.db` says
 there's nothing to back up. Copying `orbit.db` yourself while orbit runs isn't safe: the copy can
 miss writes still in its `-wal` file, or catch one half done. To restore, stop every orbit using the
 state directory, replace `orbit.db` with the backup, and start orbit again.
+
+### Storage failures
+
+When a write to the store fails, whether the event log, the session record or the super review
+count, orbit halts the session instead of carrying on with work it can't record: the running
+agents, the planner's turn, the reviews and the startup check are cancelled, and every command
+but quitting is refused with `storage_failed` and the same explanation. Nothing more is written
+to `orbit.db` until storage is resumed.
+
+The explanation, shown in the conversation as an error, says which write failed, the database
+and the error SQLite reported, what orbit makes of it and what to do: a full disk needs free
+space; a read-only database or a permission error means checking the owner and mode of the state
+directory; a database locked beyond the busy timeout means another process holds it; a missing
+file means the state directory was moved or removed. An error orbit doesn't recognise is said to
+be one. It also gives the `seq`s of the events that weren't saved and where they went, says that
+what was saved is intact up to the last saved event, and that "Try again" or restarting orbit
+resumes.
+
+The events that weren't saved, and every event after them while the session is halted, go to a
+fallback file, one JSON envelope per line, readable by you alone:
+`fallback/<workspace id>-<session id>.jsonl` in the state directory, or, if that can't be
+written, `.git/orbit/fallback/<session id>.jsonl` in the repository (`.orbit/fallback/` outside
+git). The explanation names the file, or says that neither place could be written.
 
 ### Planning with the planner
 

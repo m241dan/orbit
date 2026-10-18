@@ -10,8 +10,9 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime
 
-from orbit.agent.application.failures import ReportedOnce, outcome
+from orbit.agent.application.failures import outcome
 from orbit.agent.application.ports import Publish, SessionStore
+from orbit.agent.application.storage_halt import Halting
 from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.reviews import LaneSnapshot
 from orbit.agent.domain.sessions import (
@@ -29,6 +30,7 @@ from orbit.agent.domain.sessions import (
     stored_summary,
     tasks_summary,
 )
+from orbit.agent.domain.storage_halt import FailedWrite
 from orbit.protocol import (
     INVALID,
     LOCKED,
@@ -105,6 +107,17 @@ def new_session_id() -> str:
 
 
 @dataclass(frozen=True)
+class NewSessions:
+    """How sessions are made: ``clock`` tells the time, and ``new_id`` makes each one's id."""
+
+    clock: Clock = local_now
+    new_id: IdMaker = new_session_id
+
+
+_NEW_SESSIONS = NewSessions()
+
+
+@dataclass(frozen=True)
 class Contents:
     """What a saved session holds of the work: the ``settings`` its planner and new tasks use,
     the planner's Claude conversation, its ``tasks``, its ``reviews``' state, if any, and what
@@ -119,34 +132,34 @@ class Contents:
 
 class SessionKeeper:
     """The open session, saved in ``store`` (if there is one); problems are reported with
-    ``publish``. ``clock`` tells the time, and ``new_id`` makes the session's id.
+    ``publish``. ``new_sessions`` tells the time and makes the session's id.
 
     It's ``used`` once it has a task or :meth:`use` is called, and only then saved, locked in
     the store from its first save until :meth:`close`, or until another session is opened in
     its place.
 
-    A failing save is reported once, until a save works again, or another session is opened.
+    A failing save halts the session through ``halt``, and nothing is saved while it's halted.
     """
 
     def __init__(
         self,
         store: SessionStore | None,
         publish: Publish,
-        clock: Clock = local_now,
-        new_id: IdMaker = new_session_id,
+        halt: Halting,
+        new_sessions: NewSessions = _NEW_SESSIONS,
     ) -> None:
         self._store = store
         self._publish = publish
-        self._clock = clock
-        self._new_id = new_id
-        self.id = new_id()
-        self.created = clock()
+        self._halt = halt
+        self._clock = new_sessions.clock
+        self._new_id = new_sessions.new_id
+        self.id = self._new_id()
+        self.created = self._clock()
         self.name = default_name(self.created)
         self.used = False
         self._saved: Contents | None = None  # What the last save wrote.
         self._locked: bool | None = None  # Whether the lock was taken; None until tried.
         self._closed = False
-        self._saves = ReportedOnce(publish)
         self._saving = asyncio.Lock()  # Saves one at a time, so the newest is written last.
 
     def rename(self, name: str | None) -> None:
@@ -170,10 +183,11 @@ class SessionKeeper:
                 await self._write(self._store, contents_now)
 
     def _due(self, contents: Contents) -> bool:
-        """Whether ``contents`` are to be saved: the session is open, used (as it is once it
-        has a task) and holds something it didn't when it was last saved."""
+        """Whether ``contents`` are to be saved: the session is open, not halted, used (as it
+        is once it has a task) and holds something it didn't when it was last saved."""
         self.used = self.used or bool(contents.tasks)
-        return not self._closed and self.used and contents != self._saved
+        open_now = not self._closed and not self._halt.halted
+        return open_now and self.used and contents != self._saved
 
     async def _lock(self, store: SessionStore) -> bool:
         """Lock the session in ``store`` on its first save; returns whether it's locked."""
@@ -204,7 +218,10 @@ class SessionKeeper:
             reviews=contents.reviews,
             spent=contents.spent,
         )
-        if await self._saves.attempt(store.save(record)):
+        error = await outcome(store.save(record))
+        if isinstance(error, RuntimeError):
+            self._halt.fail(FailedWrite.SESSION_RECORD, error)
+        else:
             self._saved = contents
 
     async def summaries(self) -> tuple[SessionSummary, ...]:
@@ -358,7 +375,6 @@ class SessionKeeper:
         left = Left(self.id if self._locked else None)
         self.id, self.name, self.created = session_id, name, created
         self.used, self._saved, self._locked = False, None, None
-        self._saves.forget()
         return left
 
     async def close(self) -> None:

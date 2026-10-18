@@ -3,6 +3,7 @@
 import asyncio
 
 from orbit.agent.application.outbox import Outbox
+from orbit.agent.domain.storage import StorageSettings
 from orbit.protocol import EventEnvelope, Notice, SessionsListed, ToolCallFinished, Welcome
 from tests.agent_fakes import FakeStore
 
@@ -69,6 +70,7 @@ def test_an_outbox_reads_events_only_in_their_envelopes() -> None:
         "history",
         "missed",
         "resend",
+        "stop_log",
         "close",
     }
 
@@ -104,7 +106,7 @@ async def test_closing_an_outbox_without_a_log_does_nothing() -> None:
 
 async def test_the_logged_copy_has_its_long_fields_cut_while_the_live_one_is_whole() -> None:
     log = FakeStore()
-    outbox = Outbox(Open(), log, cut_bytes=1024)
+    outbox = Outbox(Open(), log, StorageSettings(tool_output_kb=1, session_log_mb=0))
     output = "a" * 2500 + "b" * 2500
     outbox.put_nowait(ToolCallFinished(turn_id="t", call_id="c", output=output))
     await outbox.close()

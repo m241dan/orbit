@@ -16,6 +16,7 @@ from orbit.protocol import (
     NOT_CONFIGURED,
     REFUSAL_CODES,
     SAVE_FAILED,
+    STORAGE_FAILED,
     TIMED_OUT,
     UNKNOWN,
     WRONG_SESSION,
@@ -59,7 +60,7 @@ def codes_doc(refusals: list[str], errors: list[str]) -> str:
     )
 
 
-def test_refusal_codes_are_the_seven_refusals() -> None:
+def test_refusal_codes_are_the_eight_refusals() -> None:
     assert set(REFUSAL_CODES) == {
         NOT_CONFIGURED,
         UNKNOWN,
@@ -68,24 +69,26 @@ def test_refusal_codes_are_the_seven_refusals() -> None:
         LOCKED,
         WRONG_SESSION,
         INCOMPATIBLE,
+        STORAGE_FAILED,
     }
-    assert len(REFUSAL_CODES) == 7
+    assert len(REFUSAL_CODES) == 8
 
 
-def test_error_codes_are_the_six_errors() -> None:
+def test_error_codes_are_the_seven_errors() -> None:
     assert set(ERROR_CODES) == {
         AGENT_FAILED,
         TIMED_OUT,
         GIT_FAILED,
         SAVE_FAILED,
+        STORAGE_FAILED,
         CHECKS_EXHAUSTED,
         INTERNAL,
     }
-    assert len(ERROR_CODES) == 6
+    assert len(ERROR_CODES) == 7
 
 
-def test_refusal_and_error_codes_do_not_overlap() -> None:
-    assert not set(REFUSAL_CODES) & set(ERROR_CODES)
+def test_refusal_and_error_codes_share_only_storage_failed() -> None:
+    assert set(REFUSAL_CODES) & set(ERROR_CODES) == {STORAGE_FAILED}
 
 
 def test_code_tables_with_every_code_have_no_problems() -> None:

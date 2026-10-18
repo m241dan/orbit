@@ -7,13 +7,14 @@ from pathlib import Path
 import pytest
 
 from orbit.agent import AgentSession
-from orbit.agent.application.log_writer import LogWriter
+from orbit.agent.application.log_writer import LogWriter, Overflow
 from orbit.agent.domain.replay import LogBounds
 from orbit.agent.domain.storage import StorageSettings
 from orbit.agent.external.sqlite_store import SqliteStore
 from orbit.protocol import (
     PROTOCOL_VERSION,
     SAVE_FAILED,
+    STORAGE_FAILED,
     UNKNOWN,
     AddTask,
     Catalog,
@@ -35,7 +36,16 @@ from orbit.protocol import (
     Welcome,
     decode_event,
 )
-from tests.agent_fakes import COMMAND_ID, FakeStore, Ticks, greet, publish, refused, send
+from tests.agent_fakes import (
+    COMMAND_ID,
+    FakeFallback,
+    FakeStore,
+    Ticks,
+    greet,
+    publish,
+    refused,
+    send,
+)
 from tests.test_event_log import big
 from tests.test_session_switch import opened, saved, store_with
 from tests.test_sqlite_store import database
@@ -53,6 +63,26 @@ class Published:
 
     async def __call__(self, event: Event) -> None:
         self.events.append(event)
+
+
+class FailsFor(FakeStore):
+    """A log whose appends of the session ``failing`` fail."""
+
+    def __init__(self, failing: str) -> None:
+        super().__init__()
+        self.failing = failing
+
+    async def append(self, session_id: str, envelopes: Sequence[EventEnvelope]) -> None:
+        if session_id == self.failing:
+            raise RuntimeError("disk full")
+        await super().append(session_id, envelopes)
+
+
+class FailingTrims(FakeStore):
+    """A log whose trims fail."""
+
+    async def trim(self, session_id: str, limit: int, target: int) -> None:
+        raise RuntimeError("trim failed")
 
 
 class GatedLog(FakeStore):
@@ -124,20 +154,108 @@ async def test_events_added_while_an_append_runs_are_written_after_it() -> None:
     assert log.appends == [("a", [notice(1)]), ("a", [notice(2)])]
 
 
-async def test_a_failing_log_is_reported_once_and_later_events_are_still_written() -> None:
-    log, published = FakeStore(), Published()
+async def test_a_failed_append_stops_the_appending_and_is_told_once() -> None:
+    log, failures = FakeStore(), list[str]()
     log.append_failure = "disk full"
-    writer = LogWriter(log, published)
+    writer = LogWriter(
+        log, Published(), overflow=Overflow(failed=lambda error: failures.append(str(error)))
+    )
     writer.add("a", notice(1))
     await asyncio.sleep(0.01)
-    writer.add("a", notice(2))
-    await asyncio.sleep(0.01)
     log.append_failure = None
+    writer.add("a", notice(2))
+    await writer.close()
+
+    assert failures == ["disk full"]
+    assert log.logged == []
+
+
+async def test_after_a_failed_append_the_envelopes_go_to_the_fallback() -> None:
+    log, fallback = FakeStore(), FakeFallback()
+    log.append_failure = "disk full"
+    writer = LogWriter(log, Published(), overflow=Overflow(fallback))
+    writer.add("a", notice(1))
+    writer.add("b", notice(2, "b"))
+    await asyncio.sleep(0.01)
     writer.add("a", notice(3))
     await writer.close()
 
-    assert published.events == [ErrorOccurred(code=SAVE_FAILED, message="disk full")]
-    assert log.logged == [notice(3)]
+    assert fallback.files == {"a": [notice(1), notice(3)], "b": [notice(2, "b")]}
+
+
+async def test_a_session_appended_before_the_failing_one_stays_logged() -> None:
+    log, fallback = FailsFor("b"), FakeFallback()
+    writer = LogWriter(log, Published(), overflow=Overflow(fallback))
+    writer.add("a", notice(1))
+    writer.add("b", notice(2, "b"))
+    await writer.close()
+
+    assert log.logged == [notice(1)] and fallback.files == {"b": [notice(2, "b")]}
+
+
+async def test_stopping_sends_what_queued_and_what_follows_to_the_fallback() -> None:
+    log, fallback = GatedLog(), FakeFallback()
+    writer = LogWriter(log, Published(), overflow=Overflow(fallback))
+    writer.add("a", notice(1))
+    await log.waiting.wait()
+    writer.add("a", notice(2))
+    stopped = await writer.stop("a")
+    writer.add("a", notice(3))
+    log.gate.set()
+    await writer.close()
+
+    assert stopped == ([notice(2)], FakeFallback.path("a"))
+    assert log.logged == [notice(1)] and fallback.files == {"a": [notice(2), notice(3)]}
+
+
+async def test_stopping_with_nothing_queued_makes_the_sessions_fallback_file() -> None:
+    fallback = FakeFallback()
+    writer = LogWriter(FakeStore(), Published(), overflow=Overflow(fallback))
+
+    assert await writer.stop("a") == ([], FakeFallback.path("a"))
+    assert fallback.files == {"a": []}
+
+
+async def test_stopping_says_when_the_fallback_cannot_be_written() -> None:
+    fallback = FakeFallback()
+    fallback.broken = True
+    writer = LogWriter(FakeStore(), Published(), overflow=Overflow(fallback))
+    writer.add("a", notice(1))
+
+    assert await writer.stop("a") == ([notice(1)], None)
+
+
+async def test_without_a_fallback_stopping_writes_nowhere() -> None:
+    writer = LogWriter(FakeStore(), Published())
+    writer.add("a", notice(1))
+
+    assert await writer.stop("a") == ([notice(1)], None)
+
+
+async def test_envelopes_sent_to_the_fallback_are_still_read_back() -> None:
+    log = FakeStore()
+    log.logged = [notice(1)]
+    writer = LogWriter(log, Published(), overflow=Overflow(FakeFallback()))
+    writer.add("a", notice(2))
+    await writer.stop("a")
+
+    assert await writer.recent("a", 10) == [notice(1), notice(2)]
+    assert await writer.after("a", 0) == [notice(1), notice(2)]
+    bounds = await writer.bounds("b")
+    assert bounds is not None and bounds.others_seq == 2
+    await writer.close()
+
+
+async def test_a_failing_trim_is_reported_once_and_later_events_are_still_written() -> None:
+    log, published = FailingTrims(), Published()
+    writer = LogWriter(log, published, log_bytes=1000)
+    writer.add("a", notice(1))
+    await asyncio.sleep(0.01)
+    writer.add("a", notice(2))
+    await writer.close()
+
+    assert published.events == [ErrorOccurred(code=SAVE_FAILED, message="trim failed")]
+    assert log.logged == [notice(1), notice(2)]
 
 
 async def test_a_writer_closed_writes_nothing_more() -> None:
@@ -382,7 +500,7 @@ async def test_closing_writes_the_events_still_queued() -> None:
     assert [envelope.payload for envelope in store.logged] == [Notice(message="last")]
 
 
-async def test_a_failing_log_is_reported_once_and_the_frontend_gets_every_event() -> None:
+async def test_a_failing_log_halts_the_session_and_the_frontend_gets_every_event() -> None:
     store = FakeStore()
     store.append_failure = "disk full"
     session = stored_session(store)
@@ -393,9 +511,8 @@ async def test_a_failing_log_is_reported_once_and_the_frontend_gets_every_event(
 
     sent = delivered(session)
     assert payloads_of(Notice, sent) == [Notice(message=f"n{n}") for n in range(3)]
-    assert payloads_of(ErrorOccurred, sent) == [
-        ErrorOccurred(code=SAVE_FAILED, message="disk full")
-    ]
+    [error] = payloads_of(ErrorOccurred, sent)
+    assert error.code == STORAGE_FAILED and "disk full" in error.message
 
 
 # The transcript in the Snapshot

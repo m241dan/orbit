@@ -12,6 +12,7 @@ from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.ports import (
     AgentLaunch,
     CallHandler,
+    Fallback,
     Merge,
     Reply,
     SessionStore,
@@ -27,6 +28,7 @@ from orbit.agent.domain.checks import Setup
 from orbit.agent.domain.replay import LogBounds
 from orbit.agent.domain.roles import REVIEW_ROLES, built_in_roles
 from orbit.agent.domain.sessions import SessionRecord, Unreadable
+from orbit.agent.domain.storage_halt import FailedWrite
 from orbit.protocol import (
     AGENT_FAILED,
     BUILT_IN_ROLE_NAMES,
@@ -219,6 +221,41 @@ class Ticks:
     def __call__(self) -> datetime:
         self.reads += 1
         return START + timedelta(minutes=self.reads - 1)
+
+
+class FakeHalt:
+    """Records the store's failures it's told of, each as the write and the error's text; halted
+    from the first."""
+
+    def __init__(self) -> None:
+        self.failures: list[tuple[FailedWrite, str]] = []
+
+    @property
+    def halted(self) -> bool:
+        return bool(self.failures)
+
+    def fail(self, write: FailedWrite, error: RuntimeError) -> None:
+        self.failures.append((write, str(error)))
+
+
+class FakeFallback:
+    """Fallback files kept in memory: each session's envelopes in ``files``, its file named by
+    :meth:`path`; while ``broken``, nothing can be written."""
+
+    def __init__(self) -> None:
+        self.files: dict[str, list[EventEnvelope]] = {}
+        self.broken = False
+
+    @staticmethod
+    def path(session_id: str) -> str:
+        return f"/state/fallback/w1-{session_id}.jsonl"
+
+    async def write(self, session_id: str, envelopes: Sequence[EventEnvelope]) -> str | None:
+        if self.broken:
+            return None
+        await asyncio.sleep(0)  # Writing takes a while.
+        self.files.setdefault(session_id, []).extend(envelopes)
+        return self.path(session_id)
 
 
 class FakeStore:
@@ -474,11 +511,13 @@ def session_for(
     check_at_startup: bool = False,
     usage: UsageSource | None = None,
     store: SessionStore | None = None,
+    fallback: Fallback | None = None,
     **options: Any,
 ) -> tuple[AgentSession, FakeHost, ScriptedLauncher]:
     """A session whose tasks run through agents playing ``scripts``, one per launch, and
     whose reviews run through agents playing ``reviewers``, with usage from ``usage``. It's
-    saved in ``store``, if given, as ``session-1``, on a :class:`Ticks` clock.
+    saved in ``store``, if given, as ``session-1``, on a :class:`Ticks` clock, its unsaved
+    events going to ``fallback``, if given.
 
     ``options`` go to :class:`Agents`, such as ``limits``, ``tree`` or ``roles`` (:data:`ROLES`
     unless given).
@@ -496,6 +535,7 @@ def session_for(
         store=store,
         clock=Ticks(),
         new_id=lambda: "session-1",
+        fallback=fallback,
     )
     return session, host, launcher
 

@@ -9,6 +9,7 @@ import pytest
 from orbit.agent.application.keeper import (
     Contents,
     Left,
+    NewSessions,
     SessionKeeper,
     local_now,
     new_session_id,
@@ -16,6 +17,7 @@ from orbit.agent.application.keeper import (
 from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.reviews import LaneSnapshot, PlannerSnapshot
 from orbit.agent.domain.sessions import SessionRecord
+from orbit.agent.domain.storage_halt import FailedWrite
 from orbit.protocol import (
     BUSY,
     SAVE_FAILED,
@@ -26,7 +28,7 @@ from orbit.protocol import (
     TaskState,
     Usage,
 )
-from tests.agent_fakes import START, FakeStore, Ticks
+from tests.agent_fakes import START, FakeHalt, FakeStore, Ticks
 
 TASK = TaskState(id="1", task=TaskSpec(prompt="Add a flag."))
 EMPTY = Contents(
@@ -57,7 +59,15 @@ class Published:
 
 def keeper_for(store: FakeStore | None) -> tuple[SessionKeeper, Published]:
     published = Published()
-    return SessionKeeper(store, published, Ticks(), lambda: "session-1"), published
+    return SessionKeeper(
+        store, published, FakeHalt(), NewSessions(Ticks(), lambda: "session-1")
+    ), published
+
+
+def halting_keeper(store: FakeStore) -> tuple[SessionKeeper, FakeHalt]:
+    """A keeper over ``store``, and the halt its failing saves are told to."""
+    halt = FakeHalt()
+    return SessionKeeper(store, Published(), halt, NewSessions(Ticks(), lambda: "session-1")), halt
 
 
 async def save(keeper: SessionKeeper, contents: Contents) -> None:
@@ -219,28 +229,23 @@ async def test_a_lock_that_cannot_be_taken_is_reported() -> None:
     assert store.saved == []
 
 
-async def test_a_failing_save_is_reported_once_and_tried_again_at_the_next_change() -> None:
+async def test_a_failing_save_halts_the_session_and_nothing_more_is_saved() -> None:
     store = FakeStore()
     store.failure = "Couldn't save the session: disk full"
-    keeper, published = keeper_for(store)
+    keeper, halt = halting_keeper(store)
     await save(keeper, WITH_TASK)
-    await save(keeper, EMPTY)
-    assert published.errors == ["Couldn't save the session: disk full"]
     store.failure = None
     await save(keeper, EMPTY)
-    assert [r.tasks for r in store.saved] == [()]
+    assert halt.failures == [(FailedWrite.SESSION_RECORD, "Couldn't save the session: disk full")]
+    assert store.saved == []
 
 
-async def test_a_save_failing_again_after_one_worked_is_reported_again() -> None:
+async def test_saves_that_work_tell_the_halt_nothing() -> None:
     store = FakeStore()
-    keeper, published = keeper_for(store)
-    store.failure = "full"
+    keeper, halt = halting_keeper(store)
     await save(keeper, WITH_TASK)
-    store.failure = None
-    await save(keeper, WITH_TASK)
-    store.failure = "full again"
     await save(keeper, EMPTY)
-    assert published.errors == ["full", "full again"]
+    assert halt.failures == [] and len(store.saved) == 2
 
 
 async def test_without_a_store_nothing_is_saved() -> None:
@@ -249,17 +254,6 @@ async def test_without_a_store_nothing_is_saved() -> None:
     await save(keeper, WITH_TASK)
     await keeper.close()
     assert published.events == []
-
-
-async def test_a_failing_session_save_is_reported_again_in_a_new_session() -> None:
-    store = FakeStore()
-    keeper, published = keeper_for(store)
-    store.failure = "full"
-    await save(keeper, WITH_TASK)
-    await keeper.renew("next", lambda: None)
-    store.failure = "still full"
-    await save(keeper, WITH_TASK)
-    assert published.errors == ["full", "still full"]
 
 
 async def test_a_lock_that_cannot_be_released_on_close_is_reported() -> None:

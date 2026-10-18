@@ -22,10 +22,6 @@ class ReportedOnce:
         self._publish = publish
         self._failing = False  # A save failed, and was reported, since the last that worked.
 
-    def forget(self) -> None:
-        """Report the next failure, as though the last save worked."""
-        self._failing = False
-
     async def attempt(self, saving: Awaitable[None]) -> bool:
         """Await ``saving``; returns whether it worked. A failure is reported unless one was
         since the last save that worked, and work carries on."""

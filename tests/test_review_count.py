@@ -2,24 +2,25 @@
 
 import asyncio
 
-from orbit.agent.application.keeper import SessionKeeper
+from orbit.agent.application.keeper import NewSessions, SessionKeeper
 from orbit.agent.application.review_count import ReviewCount
-from tests.agent_fakes import FakeStore, Ticks
+from orbit.agent.domain.storage_halt import FailedWrite
+from tests.agent_fakes import FakeHalt, FakeStore, Ticks
 from tests.test_keeper import EMPTY, WITH_TASK, Published, save
 
 
-def both_for(store: FakeStore | None) -> tuple[SessionKeeper, ReviewCount, Published]:
-    """A keeper and a review count over ``store``, publishing to the same place."""
-    published = Published()
-    keeper = SessionKeeper(store, published, Ticks(), lambda: "session-1")
-    return keeper, ReviewCount(store, published), published
+def both_for(store: FakeStore | None) -> tuple[SessionKeeper, ReviewCount, FakeHalt]:
+    """A keeper and a review count over ``store``, telling the same halt of their failures."""
+    halt = FakeHalt()
+    keeper = SessionKeeper(store, Published(), halt, NewSessions(Ticks(), lambda: "session-1"))
+    return keeper, ReviewCount(store, halt), halt
 
 
 async def test_without_a_store_the_count_is_neither_read_nor_saved() -> None:
-    _, count, published = both_for(None)
+    _, count, halt = both_for(None)
     await count.save(3)
     assert await count.load() is None
-    assert published.events == []
+    assert halt.failures == []
 
 
 async def test_the_review_count_is_read_and_saved_when_it_changes() -> None:
@@ -32,68 +33,38 @@ async def test_the_review_count_is_read_and_saved_when_it_changes() -> None:
     assert store.counts == [5]
 
 
-async def test_a_review_count_that_cannot_be_saved_is_reported_and_tried_again() -> None:
+async def test_a_review_count_that_cannot_be_saved_halts_and_nothing_more_is_saved() -> None:
     store = FakeStore()
     store.count_failure = "Couldn't save the review count: disk full"
-    _, count, published = both_for(store)
+    _, count, halt = both_for(store)
     await count.save(1)
     store.count_failure = None
-    await count.save(1)
-    assert published.errors == ["Couldn't save the review count: disk full"]
-    assert store.counts == [1]
+    await count.save(2)
+    assert halt.failures == [
+        (FailedWrite.REVIEW_COUNT, "Couldn't save the review count: disk full")
+    ]
+    assert store.counts == []
 
 
-async def test_a_failing_session_save_is_reported_once_though_count_saves_work() -> None:
+async def test_a_failing_session_save_stops_the_count_being_saved_too() -> None:
     store = FakeStore()
-    keeper, count, published = both_for(store)
+    keeper, count, halt = both_for(store)
     store.failure = "full"
     await save(keeper, WITH_TASK)
     await count.save(1)
     await save(keeper, EMPTY)
-    assert published.errors == ["full"]
-    assert store.counts == [1]
+    assert halt.failures == [(FailedWrite.SESSION_RECORD, "full")]
+    assert store.counts == []
 
 
-async def test_a_failing_session_save_is_reported_once_across_review_lane_changes() -> None:
+async def test_a_failing_count_save_stops_the_session_being_saved_too() -> None:
     store = FakeStore()
-    keeper, count, published = both_for(store)
-    store.failure = "Couldn't save the session: sessions/ unwritable"
-    for saved, contents in enumerate((WITH_TASK, EMPTY, WITH_TASK, EMPTY), start=1):
-        await count.save(saved)
-        await save(keeper, contents)
-    assert published.errors == ["Couldn't save the session: sessions/ unwritable"]
-    assert store.counts == [1, 2, 3, 4] and store.saved == []
-
-
-async def test_session_and_count_save_failures_are_each_reported() -> None:
-    store = FakeStore()
-    keeper, count, published = both_for(store)
-    store.failure = "A"
-    await save(keeper, WITH_TASK)
-    store.count_failure = "B"
-    await count.save(1)
-    assert published.errors == ["A", "B"]
-
-
-async def test_a_failing_count_save_is_reported_once_though_session_saves_work() -> None:
-    store = FakeStore()
-    keeper, count, published = both_for(store)
+    keeper, count, halt = both_for(store)
     store.count_failure = "full"
     await count.save(1)
     await save(keeper, WITH_TASK)
-    await count.save(2)
-    assert published.errors == ["full"]
-    assert len(store.saved) == 1
-
-
-async def test_a_failing_count_save_is_reported_once_across_new_sessions() -> None:
-    store = FakeStore()
-    keeper, count, published = both_for(store)
-    store.count_failure = "full"
-    await count.save(1)
-    await keeper.renew("next", lambda: None)
-    await count.save(2)
-    assert published.errors == ["full"]
+    assert halt.failures == [(FailedWrite.REVIEW_COUNT, "full")]
+    assert store.saved == []
 
 
 async def test_count_saves_at_once_are_written_in_turn_the_newest_last() -> None:

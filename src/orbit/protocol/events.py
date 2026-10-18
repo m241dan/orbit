@@ -364,8 +364,10 @@ class Snapshot(_Message):
     It holds the ``session``'s summary, its ``settings`` and ``model_choices``, whether each
     lane is ``busy``, its ``tasks``, the verification ``steps`` and the ``steps_title`` they
     show under, the ``review`` status (none when reviews are off), the checks ``proposals``
-    waiting for a decision, the ``agents`` running, and the ``transcript``: the session's
-    last logged events, at most 500, oldest first, in the envelopes they were sent in.
+    waiting for a decision, the ``agents`` running, the ``transcript``: the session's
+    last logged events, at most 500, oldest first, in the envelopes they were sent in, and,
+    while the session is halted because storage failed, ``storage_halt``: why, and how to
+    resume.
     """
 
     type: Literal["snapshot"] = "snapshot"
@@ -380,6 +382,7 @@ class Snapshot(_Message):
     proposals: tuple[ChecksProposed, ...]
     agents: tuple[RunningAgent, ...]
     transcript: tuple["EventEnvelope", ...] = ()
+    storage_halt: str | None = None
 
 
 class HistoryPage(_Message):

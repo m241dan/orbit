@@ -35,6 +35,10 @@ GIT_FAILED = "git_failed"
 SAVE_FAILED = "save_failed"
 """An error's code: saving the session failed."""
 
+STORAGE_FAILED = "storage_failed"
+"""A refusal's and an error's code: a write to the store failed, so the session halted; the
+message explains the failure and how to resume."""
+
 CHECKS_EXHAUSTED = "checks_exhausted"
 """An error's code: a check still failed after every fix attempt."""
 
@@ -42,10 +46,27 @@ INTERNAL = "internal"
 """An error's code: orbit itself failed unexpectedly; also a refusal's code when orbit failed
 handling the command."""
 
-REFUSAL_CODES = (NOT_CONFIGURED, UNKNOWN, BUSY, INVALID, LOCKED, WRONG_SESSION, INCOMPATIBLE)
+REFUSAL_CODES = (
+    NOT_CONFIGURED,
+    UNKNOWN,
+    BUSY,
+    INVALID,
+    LOCKED,
+    WRONG_SESSION,
+    INCOMPATIBLE,
+    STORAGE_FAILED,
+)
 """The codes a ``CommandRefused`` carries, as described in ``docs/protocol.md``; it may also
 carry ``INTERNAL`` when orbit failed handling the command."""
 
-ERROR_CODES = (AGENT_FAILED, TIMED_OUT, GIT_FAILED, SAVE_FAILED, CHECKS_EXHAUSTED, INTERNAL)
+ERROR_CODES = (
+    AGENT_FAILED,
+    TIMED_OUT,
+    GIT_FAILED,
+    SAVE_FAILED,
+    STORAGE_FAILED,
+    CHECKS_EXHAUSTED,
+    INTERNAL,
+)
 """The codes an ``ErrorOccurred`` carries, besides a refusal code where it fits, as described
 in ``docs/protocol.md``."""

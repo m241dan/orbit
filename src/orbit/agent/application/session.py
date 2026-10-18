@@ -19,18 +19,21 @@ from orbit.agent.application.history import SessionHistory
 from orbit.agent.application.keeper import (
     Clock,
     IdMaker,
+    NewSessions,
     SessionKeeper,
     local_now,
     new_session_id,
 )
+from orbit.agent.application.log_writer import Overflow
 from orbit.agent.application.outbox import EventSink, Outbox
 from orbit.agent.application.planner_seat import PlannerSeat, SeatHooks
-from orbit.agent.application.ports import ProposalReview, SessionStore, UsageSource
+from orbit.agent.application.ports import Fallback, ProposalReview, SessionStore, UsageSource
 from orbit.agent.application.proposals import FrontendReview
 from orbit.agent.application.review_count import ReviewCount
 from orbit.agent.application.review_lane import ReviewLane
 from orbit.agent.application.settings import SessionSettings
 from orbit.agent.application.startup_check import StartupCheck
+from orbit.agent.application.storage_halt import StorageHalt
 from orbit.agent.application.switcher import (
     SessionCommand,
     SessionSwitcher,
@@ -47,6 +50,7 @@ from orbit.agent.domain.catalog import catalog
 from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.reviews import ReviewPlanner
 from orbit.agent.domain.storage import StorageSettings
+from orbit.agent.domain.storage_halt import FailedWrite
 from orbit.agent.domain.verification import VerificationStep, startup_fix_prompt
 from orbit.protocol import (
     CODER,
@@ -142,6 +146,11 @@ class AgentSession:
     With ``pick_session``, the saved sessions are listed after ``Welcome``, for the user to
     pick one; until they do, the session open is a new one, and what orbit adds to it carries
     over into the one picked; they're listed after the notices.
+
+    When a write to the store fails, the session halts: the agents running, the planner's turn,
+    the reviews and the startup check are cancelled, an ``ErrorOccurred`` coded
+    ``storage_failed`` explains why, and every command but ``Hello`` is refused so. Nothing is
+    written to the store from then on: the events not logged go to the ``fallback`` instead.
     """
 
     def __init__(
@@ -162,16 +171,22 @@ class AgentSession:
         name: str | None = None,
         startup_notes: Sequence[str] = (),
         storage: StorageSettings = _DEFAULT_STORAGE,
+        fallback: Fallback | None = None,
     ) -> None:
         self._settings = SessionSettings(settings or Settings(), pinned, model_choices)
         self._pick_session = pick_session
         self._storage = storage
-        self._events = Outbox(
-            lambda: self._keeper.id, store, storage.tool_output_bytes, storage.session_log_bytes
+        self._halt = StorageHalt(
+            lambda event: self._events.put(event),
+            lambda: self._events.stop_log(self._keeper.id),
+            self._stop_work,
         )
-        self._keeper = SessionKeeper(store, self._events.put, clock, new_id)
+        overflow = Overflow(fallback, self._log_failed)
+        self._events = Outbox(lambda: self._keeper.id, store, storage, overflow)
+        new_sessions = NewSessions(clock, new_id)
+        self._keeper = SessionKeeper(store, self._events.put, self._halt, new_sessions)
         self._keeper.rename(name)
-        self._review_count = ReviewCount(store, self._events.put)
+        self._review_count = ReviewCount(store, self._halt)
         self._tasks = Tasks(TaskBoard(), self._events.put, self._save)
         self._board = self._tasks.board
         self._proposals = FrontendReview(self._events.put, self._agent_on)
@@ -192,6 +207,10 @@ class AgentSession:
         self._commands = self._work_commands()
         self._handshake = Handshake(self._handshake_parts(), self._events)
         self._history = SessionHistory(self._keeper, self._events)
+
+    def _log_failed(self, error: RuntimeError) -> None:
+        """Halt the session, as appending to its event log failed with ``error``."""
+        self._halt.fail(FailedWrite.EVENT_LOG, error)
 
     def _session_switcher(self, picking: bool) -> SessionSwitcher:
         """What switches this session between saved ones, still ``picking`` one if so."""
@@ -306,9 +325,10 @@ class AgentSession:
 
     async def send(self, envelope: CommandEnvelope) -> None:
         """Handle the command in ``envelope``, then publish its outcome: ``CommandRefused`` if
-        it was refused, or as ``internal`` if handling it failed, else ``CommandAccepted``, or
-        ``Welcome`` for a ``Hello``. Only cancellation escapes, with no outcome. After an
-        incompatible ``Hello``, nothing is handled."""
+        it was refused, as it is but for ``Hello`` while the session is halted, or as
+        ``internal`` if handling it failed, else ``CommandAccepted``, or ``Welcome`` for a
+        ``Hello``. Only cancellation escapes, with no outcome. After an incompatible ``Hello``,
+        nothing is handled."""
         if self._handshake.ended:
             return
         command_id = envelope.command_id
@@ -319,6 +339,7 @@ class AgentSession:
                 await self._handshake.hello(command, command_id)
                 return
             self._handshake.admit()
+            self._halt.check()
             await self._handle(command)
         except Refused as refusal:
             refused = CommandRefused(command_id=command_id, code=refusal.code, message=str(refusal))
@@ -396,10 +417,11 @@ class AgentSession:
         return self._verifier.step_names if self._verifier else ()
 
     async def close(self) -> None:
-        """Cancel the work in progress, which stops its agent, then stop the startup check, the
-        usage monitor, the review lane, the planner, the agents' host, the saving of the
-        session, releasing its lock, and the writing of its events to the store, in that order.
-        Each is stopped even if one before it fails; the first failure is raised after."""
+        """Stop a storage halt under way, cancel the work in progress, which stops its agent,
+        then stop the startup check, the usage monitor, the review lane, the planner, the
+        agents' host, the saving of the session, releasing its lock, and the writing of its
+        events to the store, in that order. Each is stopped even if one before it fails; the
+        first failure is raised after."""
         self._closing = True
         failure: Exception | None = None
         for stop in self._stops():
@@ -413,7 +435,11 @@ class AgentSession:
     def _stops(self) -> list[Callable[[], Awaitable[None]]]:
         """What :meth:`close` awaits, in order."""
         parts = (self._startup, self._usage, self._lane, self._seat)
-        stops: list[Callable[[], Awaitable[None]]] = [self._stop_turns, self._seat.close_retired]
+        stops: list[Callable[[], Awaitable[None]]] = [
+            self._halt.close,
+            self._stop_turns,
+            self._seat.close_retired,
+        ]
         stops += [part.close for part in parts if part is not None]
         if self._desk is not None:
             stops.append(self._desk.stop)
@@ -424,6 +450,14 @@ class AgentSession:
         """Cancel the work lane's and the planner's turns, and wait for them to end."""
         await self._turns.close()
         await self._seat.stop_turn()
+
+    async def _stop_work(self) -> None:
+        """Cancel the work lane's and the planner's turns, the reviews and the startup check,
+        as the session halts, and wait for them to end."""
+        await self._stop_turns()
+        for part in (self._lane, self._startup):
+            if part is not None:
+                await part.close()
 
     async def events(self) -> AsyncIterator[EventEnvelope]:
         """The events the session publishes, ending after an incompatible ``Hello``'s refusal."""
@@ -481,6 +515,7 @@ class AgentSession:
             proposals=self._proposals.waiting,
             agents=self._running_agents(),
             transcript=transcript,
+            storage_halt=self._halt.message,
         )
 
     def _catalog(self, sessions: tuple[SessionSummary, ...]) -> Catalog:

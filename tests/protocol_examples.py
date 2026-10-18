@@ -244,6 +244,7 @@ EVENTS: tuple[EventEnvelope, ...] = (
                 ),
             ),
             transcript=(event(AssistantMessage(turn_id="turn-1", text="Done.")),),
+            storage_halt="Orbit stopped this session: saving the event log failed.",
         )
     ),
     event(

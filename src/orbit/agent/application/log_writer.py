@@ -1,10 +1,11 @@
 """The writer that keeps sessions' events in their log, behind their delivery."""
 
 import asyncio
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 
-from orbit.agent.application.failures import ReportedOnce
-from orbit.agent.application.ports import EventLog, Publish
+from orbit.agent.application.failures import ReportedOnce, outcome
+from orbit.agent.application.ports import EventLog, Fallback, Publish
 from orbit.agent.domain.replay import LogBounds
 from orbit.agent.domain.storage import trim_target
 from orbit.protocol import EventEnvelope
@@ -30,6 +31,29 @@ def _by_session(queued: Sequence[tuple[str, EventEnvelope]]) -> dict[str, list[E
     return sessions
 
 
+Queued = list[tuple[str, EventEnvelope]]
+"""Envelopes, each with its session's id."""
+
+Failed = Callable[[RuntimeError], None]
+"""Told that an append failed with the error given."""
+
+
+def _ignored(error: RuntimeError) -> None:
+    pass
+
+
+@dataclass(frozen=True)
+class Overflow:
+    """Where envelopes go once the log can't take them: the ``fallback``, if any; ``failed``
+    is told of the append that failed."""
+
+    fallback: Fallback | None = None
+    failed: Failed = _ignored
+
+
+_NO_OVERFLOW = Overflow()
+
+
 def _with_pending(
     bounds: LogBounds, session_id: str, pending: Sequence[tuple[str, EventEnvelope]]
 ) -> LogBounds:
@@ -46,17 +70,30 @@ def _with_pending(
 
 class LogWriter:
     """Writes the envelopes added here to ``log`` in a task of its own, in the order they were
-    added: whatever has queued since its last write goes in one append per session. A failed
-    append is reported with ``publish`` once, until one works again, and later envelopes are
-    still written. After each append, unless ``log_bytes`` is 0, a session's log over it is
-    trimmed to under :func:`trim_target` of it. Adding never waits for the log."""
+    added: whatever has queued since its last write goes in one append per session. After each
+    append, unless ``log_bytes`` is 0, a session's log over it is trimmed to under
+    :func:`trim_target` of it; a failed trim is reported with ``publish`` once, until one works
+    again. Adding never waits for the log.
 
-    def __init__(self, log: EventLog, publish: Publish, log_bytes: int = 0) -> None:
+    A failed append, or :meth:`stop`, stops the appending: the envelopes not appended, and every
+    one added from then on, go to the ``overflow``'s fallback instead (nowhere without one), and
+    a failed append is told to its ``failed``. Those envelopes are still read back as still to
+    be written."""
+
+    def __init__(
+        self, log: EventLog, publish: Publish, log_bytes: int = 0, overflow: Overflow = _NO_OVERFLOW
+    ) -> None:
         self._log = log
         self._log_bytes = log_bytes
-        self._appends = ReportedOnce(publish)
-        self._queued: list[tuple[str, EventEnvelope]] = []
-        self._writing: list[tuple[str, EventEnvelope]] = []  # Taken from the queue to write.
+        self._fallback = overflow.fallback
+        self._failed = overflow.failed
+        self._trims = ReportedOnce(publish)
+        self._queued: Queued = []
+        self._writing: Queued = []  # Taken from the queue to write.
+        self._diverted: Queued = []  # Sent to the fallback, as the log can't take them.
+        self._places: dict[str, str | None] = {}  # Each session's fallback file, if written.
+        self._diverting = asyncio.Lock()  # One fallback write at a time, so lines stay whole.
+        self._stopped = False  # An append failed, or the writer was stopped: nothing appends.
         self._ready = asyncio.Event()  # Set while envelopes are queued, or once closing.
         self._task: asyncio.Task[None] | None = None
         self._closing = False
@@ -108,11 +145,11 @@ class LogWriter:
         """Where the log of the session ``session_id`` stands in its workspace's, counting the
         events still to be written as logged; ``None`` when the log can't be read."""
         # Read on both sides of the log's read, as recent does.
-        pending = [*self._writing, *self._queued]
+        pending = self._pending()
         logged = await self._log.bounds(session_id)
         if logged is None:
             return None
-        return _with_pending(logged, session_id, [*pending, *self._writing, *self._queued])
+        return _with_pending(logged, session_id, [*pending, *self._pending()])
 
     async def trimmed(self, session_id: str) -> bool:
         """Whether events of the session ``session_id`` were trimmed from the log; ``False``
@@ -120,9 +157,27 @@ class LogWriter:
         return await self._log.trimmed(session_id)
 
     def _unwritten(self, session_id: str) -> list[EventEnvelope]:
-        """The envelopes of the session ``session_id`` being written or queued, in order."""
-        pending = [*self._writing, *self._queued]
-        return [envelope for session, envelope in pending if session == session_id]
+        """The envelopes of the session ``session_id`` not in the log: being written, queued
+        or sent to the fallback."""
+        return [envelope for session, envelope in self._pending() if session == session_id]
+
+    def _pending(self) -> Queued:
+        """The envelopes not in the log, each with its session's id: those sent to the
+        fallback, being written and queued."""
+        return [*self._diverted, *self._writing, *self._queued]
+
+    async def stop(self, session_id: str) -> tuple[list[EventEnvelope], str | None]:
+        """Stop appending to the log: the envelopes queued, and every one added from now on, go
+        to the fallback instead. Returns every envelope sent there so far, by ``seq``, and the
+        fallback file of the session ``session_id``, made now if need be; ``None`` when it
+        couldn't be written."""
+        self._stopped = True
+        queued, self._queued = self._queued, []
+        await self._divert(queued)
+        if session_id not in self._places:
+            async with self._diverting:
+                self._places[session_id] = await self._to_fallback(session_id, [])
+        return _in_order([envelope for _, envelope in self._diverted]), self._places[session_id]
 
     async def close(self) -> None:
         """Write what's queued, then stop the writer; cancelled, it stops at once, an append in
@@ -141,13 +196,38 @@ class LogWriter:
             await self._ready.wait()
             self._ready.clear()
             self._writing, self._queued = self._queued, []
-            for session_id, envelopes in _by_session(self._writing).items():
-                await self._appends.attempt(self._write(session_id, envelopes))
+            if self._stopped:
+                await self._divert(self._writing)
+            else:
+                await self._append(self._writing)
             self._writing = []
 
-    async def _write(self, session_id: str, envelopes: Sequence[EventEnvelope]) -> None:
-        """Append ``envelopes`` to the log of the session ``session_id``, then trim it if it's
-        over the limit; raises ``RuntimeError`` when either fails."""
-        await self._log.append(session_id, envelopes)
-        if self._log_bytes:
-            await self._log.trim(session_id, self._log_bytes, trim_target(self._log_bytes))
+    async def _append(self, queued: Queued) -> None:
+        """Append ``queued`` to the log, one append per session, trimming each session's log
+        after it if it's over the limit; on a failed append, stop appending and send what
+        wasn't appended to the fallback."""
+        sessions = list(_by_session(queued).items())
+        for done, (session_id, envelopes) in enumerate(sessions):
+            error = await outcome(self._log.append(session_id, envelopes))
+            if isinstance(error, RuntimeError):
+                self._stopped = True
+                await self._divert([(s, e) for s, rest in sessions[done:] for e in rest])
+                self._failed(error)
+                return
+            if self._log_bytes:
+                limit = self._log_bytes
+                await self._trims.attempt(self._log.trim(session_id, limit, trim_target(limit)))
+
+    async def _divert(self, queued: Queued) -> None:
+        """Send ``queued`` to the fallback, each session's to its own file."""
+        self._diverted += queued
+        async with self._diverting:
+            for session_id, envelopes in _by_session(queued).items():
+                self._places[session_id] = await self._to_fallback(session_id, envelopes)
+
+    async def _to_fallback(self, session_id: str, envelopes: Sequence[EventEnvelope]) -> str | None:
+        """Add ``envelopes`` to the fallback file of the session ``session_id``; returns its
+        path, or ``None`` when it can't be written, or there's no fallback."""
+        if self._fallback is None:
+            return None
+        return await self._fallback.write(session_id, envelopes)

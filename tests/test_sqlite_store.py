@@ -1,6 +1,7 @@
 """The SQLite store: its database, workspaces, migrations, failures and its thread."""
 
 import asyncio
+import errno
 import sqlite3
 import subprocess
 import threading
@@ -11,16 +12,19 @@ from pathlib import Path
 
 import pytest
 
-from orbit.agent.application.ports import SessionStore, StoredSession
+from orbit.agent.application.ports import SessionStore, StorageFailed, StoredSession
 from orbit.agent.domain.sessions import SessionRecord, Unreadable
+from orbit.agent.domain.storage_halt import StorageErrorKind
 from orbit.agent.external import sqlite_store
 from orbit.agent.external.sqlite_store import (
     MIGRATIONS,
     THREAD_PREFIX,
     SqliteStore,
     StoreError,
+    error_kind,
     resolve_state_dir,
 )
+from orbit.protocol import EventEnvelope, Notice
 
 WHEN = datetime(2026, 10, 17, 14, 30, tzinfo=UTC)
 
@@ -549,3 +553,104 @@ async def test_a_backup_that_cant_be_written_is_refused_naming_the_target(
     target = tmp_path / "missing" / "copy.db"
     with pytest.raises(StoreError, match=r"Couldn't back up the database .* to .*copy\.db: "):
         await backed_up(state, target)
+
+
+# Failed writes, described for the storage halt
+
+
+async def fill_up(store: SqliteStore) -> None:
+    """Have ``store``'s database refuse to grow, as a full disk does."""
+
+    def cap() -> None:
+        (pages,) = store._db.execute("PRAGMA page_count").fetchone()
+        store._db.execute(f"PRAGMA max_page_count = {pages}")
+
+    await store._call(cap)
+
+
+async def test_a_full_database_fails_its_writes_as_disk_full(
+    open_store: Opener, state: Path, workspace: Path
+) -> None:
+    store = await open_store(workspace)
+    await fill_up(store)
+    big = SessionRecord(id="abc", name="x" * 100_000, created=WHEN, last_active=WHEN)
+    for write in (store.save(big), store.append("abc", [big_notice()])):
+        with pytest.raises(StorageFailed) as failed:
+            await write
+        assert (failed.value.database, failed.value.error, failed.value.kind) == (
+            str(state / "orbit.db"),
+            "database or disk is full",
+            StorageErrorKind.DISK_FULL,
+        )
+
+
+async def test_a_failed_review_count_save_says_what_the_database_reported(
+    open_store: Opener, state: Path, workspace: Path
+) -> None:
+    store = await open_store(workspace)
+    with database(state) as connection:
+        connection.execute("DROP TABLE reviews")
+    with pytest.raises(StorageFailed) as failed:
+        await store.save_review_count(1)
+    assert (failed.value.error, failed.value.kind) == (
+        "no such table: reviews",
+        StorageErrorKind.UNKNOWN,
+    )
+
+
+def big_notice() -> EventEnvelope:
+    return EventEnvelope(seq=1, session="abc", payload=Notice(message="x" * 100_000))
+
+
+async def test_the_store_knows_its_workspaces_id(open_store: Opener, workspace: Path) -> None:
+    store = await open_store(workspace)
+    assert len(store.workspace_id) == 32
+
+
+def sqlite_error(code: int | None) -> sqlite3.Error:
+    error = sqlite3.OperationalError("failed")
+    if code is not None:
+        error.sqlite_errorcode = code
+    return error
+
+
+@pytest.mark.parametrize(
+    ("code", "kind"),
+    [
+        (sqlite3.SQLITE_FULL, StorageErrorKind.DISK_FULL),
+        (sqlite3.SQLITE_READONLY, StorageErrorKind.READ_ONLY),
+        (sqlite3.SQLITE_PERM, StorageErrorKind.READ_ONLY),
+        (sqlite3.SQLITE_IOERR_WRITE, StorageErrorKind.UNKNOWN),
+        (sqlite3.SQLITE_BUSY, StorageErrorKind.LOCKED),
+        (sqlite3.SQLITE_LOCKED, StorageErrorKind.LOCKED),
+        (sqlite3.SQLITE_CANTOPEN, StorageErrorKind.MISSING),
+        (sqlite3.SQLITE_READONLY_DBMOVED, StorageErrorKind.MISSING),
+        (sqlite3.SQLITE_READONLY_ROLLBACK, StorageErrorKind.READ_ONLY),
+        (sqlite3.SQLITE_CORRUPT, StorageErrorKind.UNKNOWN),
+        (None, StorageErrorKind.UNKNOWN),
+    ],
+)
+def test_sqlite_errors_are_told_apart_by_their_result_code(
+    code: int | None, kind: StorageErrorKind
+) -> None:
+    assert error_kind(sqlite_error(code)) == kind
+
+
+@pytest.mark.parametrize(
+    ("number", "kind"),
+    [
+        (errno.ENOSPC, StorageErrorKind.DISK_FULL),
+        (errno.EDQUOT, StorageErrorKind.DISK_FULL),
+        (errno.EROFS, StorageErrorKind.READ_ONLY),
+        (errno.EACCES, StorageErrorKind.READ_ONLY),
+        (errno.EPERM, StorageErrorKind.READ_ONLY),
+        (errno.ENOENT, StorageErrorKind.MISSING),
+        (errno.EIO, StorageErrorKind.UNKNOWN),
+    ],
+)
+def test_os_errors_are_told_apart_by_their_errno(number: int, kind: StorageErrorKind) -> None:
+    assert error_kind(OSError(number, "failed")) == kind
+
+
+def test_an_os_error_without_an_errno_is_not_recognised() -> None:
+    assert error_kind(OSError("failed")) == StorageErrorKind.UNKNOWN

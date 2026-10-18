@@ -30,6 +30,7 @@ from orbit.agent.domain.verification import VerificationStep
 from orbit.agent.external.checks import run_step
 from orbit.agent.external.claude_cli import MODEL_ALIASES, ClaudeCliRunner
 from orbit.agent.external.config_file import read_config, write_checks
+from orbit.agent.external.fallback_files import FallbackFiles
 from orbit.agent.external.git_tree import GitCoderTree, git_top_level, in_git_work_tree
 from orbit.agent.external.mcp_host import McpHost
 from orbit.agent.external.session_files import state_dir
@@ -48,6 +49,7 @@ __all__ = [
     "ClaudeCliRunner",
     "ConfigError",
     "ConfigWriter",
+    "FallbackFiles",
     "GitCoderTree",
     "ImportBlocked",
     "Limits",

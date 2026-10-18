@@ -4,14 +4,20 @@ import asyncio
 from collections.abc import Callable
 from typing import Protocol
 
-from orbit.agent.application.log_writer import LogWriter
+from orbit.agent.application.log_writer import LogWriter, Overflow
 from orbit.agent.application.ports import EventLog
 from orbit.agent.domain.replay import can_replay
-from orbit.agent.domain.storage import cut_fields
+from orbit.agent.domain.storage import StorageSettings, cut_fields
 from orbit.protocol import CONNECTION_EVENTS, SESSIONLESS_EVENTS, Event, EventEnvelope
 
 TRANSCRIPT_LENGTH = 500
 """How many of a session's latest events its transcript holds."""
+
+
+_WHOLE = StorageSettings(tool_output_kb=0, session_log_mb=0)
+"""Storage settings that cut nothing and trim nothing."""
+
+_NO_OVERFLOW = Overflow()
 
 
 class EventSink(Protocol):
@@ -32,23 +38,25 @@ class Outbox:
     the events answering one connection; :meth:`transcript` reads a session's latest back,
     :meth:`history` those before them, :meth:`missed` those after a ``seq``, for
     :meth:`resend` to queue again, and :meth:`close` writes those still queued. The copies
-    written have their text fields over ``cut_bytes`` cut, unless it's 0, and each session's
-    log is trimmed once over ``log_bytes``, unless it's 0; those read from :meth:`envelope` are
-    whole."""
+    written have their text fields cut and each session's log is trimmed as the ``storage``
+    settings say; those read from :meth:`envelope` are whole. A failed append is told to the
+    ``overflow``'s ``failed``; from then on, or once :meth:`stop_log` is called, the envelopes
+    go to its fallback instead (nowhere without one)."""
 
     def __init__(
         self,
         open_session: Callable[[], str],
         log: EventLog | None = None,
-        cut_bytes: int = 0,
-        log_bytes: int = 0,
+        storage: StorageSettings = _WHOLE,
+        overflow: Overflow = _NO_OVERFLOW,
     ) -> None:
         self._open = open_session
-        self._cut_bytes = cut_bytes
+        self._cut_bytes = storage.tool_output_bytes
         # The last event's place in the stream, counted across sessions.
         self._seq = log.max_seq() if log else 0
         self._queue: asyncio.Queue[EventEnvelope] = asyncio.Queue()
-        self._writer = LogWriter(log, self.put, log_bytes) if log else None
+        log_bytes = storage.session_log_bytes
+        self._writer = LogWriter(log, self.put, log_bytes, overflow) if log else None
 
     def put_nowait(self, item: Event) -> None:
         """Stamp ``item`` and queue it."""
@@ -107,6 +115,14 @@ class Outbox:
     def resend(self, envelope: EventEnvelope) -> None:
         """Queue ``envelope``, stamped and logged already, as it is."""
         self._queue.put_nowait(envelope)
+
+    async def stop_log(self, session_id: str) -> tuple[list[EventEnvelope], str | None]:
+        """Stop writing to the log, sending the envelopes to the fallback instead; returns
+        those sent there so far, by ``seq``, and the fallback file of the session
+        ``session_id``, or ``None`` when it couldn't be written or there's no log."""
+        if self._writer is None:
+            return [], None
+        return await self._writer.stop(session_id)
 
     async def close(self) -> None:
         """Write the envelopes still queued for the log, if there is one, and stop writing."""

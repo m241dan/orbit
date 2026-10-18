@@ -17,6 +17,7 @@ from orbit.agent import (
     AgentSession,
     ClaudeCliRunner,
     ConfigError,
+    FallbackFiles,
     GitCoderTree,
     ImportBlocked,
     McpHost,
@@ -204,6 +205,7 @@ def chat(
             name=name,
             startup_notes=notes,
             storage=storage,
+            fallback=FallbackFiles(state, store.workspace_id, state_dir(str(root))),
         ),
         _thread_context(profile),
     )

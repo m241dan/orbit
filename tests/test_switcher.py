@@ -6,7 +6,7 @@ from itertools import count
 
 import pytest
 
-from orbit.agent.application.keeper import SessionKeeper
+from orbit.agent.application.keeper import NewSessions, SessionKeeper
 from orbit.agent.application.planner_seat import PlannerSeat, SeatHooks
 from orbit.agent.application.settings import SessionSettings
 from orbit.agent.application.switcher import (
@@ -34,7 +34,7 @@ from orbit.protocol import (
     TaskSpec,
     Usage,
 )
-from tests.agent_fakes import FakeStore, Ticks
+from tests.agent_fakes import FakeHalt, FakeStore, Ticks
 
 EARLIER = datetime(2026, 10, 15, 9, 0, tzinfo=UTC)
 REVIEWS = LaneSnapshot(planner=PlannerSnapshot(paused=True))
@@ -84,7 +84,7 @@ def switcher_for(
     """A switcher of a session without agents saved in ``store``, its settings ``held``."""
     events: asyncio.Queue[Event] = asyncio.Queue()
     ids = (f"session-{n}" for n in count(1))
-    keeper = SessionKeeper(store, events.put, Ticks(), lambda: next(ids))
+    keeper = SessionKeeper(store, events.put, FakeHalt(), NewSessions(Ticks(), lambda: next(ids)))
     tasks = Tasks(TaskBoard(), events.put)
     seat = PlannerSeat(None, tasks, events, SeatHooks(nothing, keeper.use, tuple))
     parts = SwitchParts(

@@ -13,6 +13,7 @@ directory, so that a crash leaves no stale lock behind.
 """
 
 import asyncio
+import errno
 import os
 import sqlite3
 import time
@@ -24,9 +25,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Self
 
-from orbit.agent.application.ports import StoredSession
+from orbit.agent.application.ports import StorageFailed, StoredSession
 from orbit.agent.domain.replay import LogBounds
 from orbit.agent.domain.sessions import SessionRecord, Unreadable, parse_record, record_json
+from orbit.agent.domain.storage_halt import StorageErrorKind
 from orbit.agent.external.git_tree import workspace_fingerprint
 from orbit.agent.external.session_locks import SessionLocks, check_session_id
 from orbit.protocol import EventEnvelope, decode_event, encode
@@ -84,6 +86,40 @@ MIGRATIONS: tuple[tuple[str, ...], ...] = (
         SELECT workspace_id, session_id, sum(size) FROM events GROUP BY workspace_id, session_id""",
     ),
 )
+
+
+_SQLITE_KINDS = {
+    sqlite3.SQLITE_FULL: StorageErrorKind.DISK_FULL,
+    sqlite3.SQLITE_READONLY: StorageErrorKind.READ_ONLY,
+    sqlite3.SQLITE_PERM: StorageErrorKind.READ_ONLY,
+    sqlite3.SQLITE_BUSY: StorageErrorKind.LOCKED,
+    sqlite3.SQLITE_LOCKED: StorageErrorKind.LOCKED,
+    sqlite3.SQLITE_CANTOPEN: StorageErrorKind.MISSING,
+}
+"""What orbit makes of SQLite's primary result codes."""
+
+_EXTENDED_KINDS = {sqlite3.SQLITE_READONLY_DBMOVED: StorageErrorKind.MISSING}
+"""What orbit makes of the extended result codes that mean more than their primary code."""
+
+_ERRNO_KINDS = {
+    errno.ENOSPC: StorageErrorKind.DISK_FULL,
+    errno.EDQUOT: StorageErrorKind.DISK_FULL,
+    errno.EROFS: StorageErrorKind.READ_ONLY,
+    errno.EACCES: StorageErrorKind.READ_ONLY,
+    errno.EPERM: StorageErrorKind.READ_ONLY,
+    errno.ENOENT: StorageErrorKind.MISSING,
+}
+"""What orbit makes of the operating system's errors."""
+
+
+def error_kind(error: sqlite3.Error | OSError) -> StorageErrorKind:
+    """What orbit makes of ``error``, by its SQLite result code or its ``errno``."""
+    if isinstance(error, OSError):
+        return _ERRNO_KINDS.get(error.errno or 0, StorageErrorKind.UNKNOWN)
+    code = getattr(error, "sqlite_errorcode", None)  # Unset on errors SQLite didn't raise.
+    if not isinstance(code, int):
+        return StorageErrorKind.UNKNOWN
+    return _EXTENDED_KINDS.get(code) or _SQLITE_KINDS.get(code & 0xFF, StorageErrorKind.UNKNOWN)
 
 
 def resolve_state_dir(flag: Path | None, environ: Mapping[str, str]) -> Path:
@@ -352,6 +388,11 @@ class SqliteStore:
             raise
         return store
 
+    @property
+    def workspace_id(self) -> str:
+        """The id of the store's workspace; empty until the store is open."""
+        return self._workspace
+
     async def close(self) -> None:
         """Let go of this store's locks, and close the database once the calls in flight are
         done, leaving no thread running; once closed, it stays closed."""
@@ -367,7 +408,7 @@ class SqliteStore:
             await self._call(self._save, record)
         except sqlite3.Error as error:
             message = f"Couldn't save the session {record.id} to {self._database}: {error}"
-            raise RuntimeError(message) from error
+            raise self._failed(message, error) from error
 
     async def load(self, session_id: str) -> SessionRecord | Unreadable:
         check_session_id(session_id)
@@ -404,7 +445,7 @@ class SqliteStore:
             await self._call(self._append, session_id, envelopes)
         except sqlite3.Error as error:
             message = f"Couldn't save the events of the session {session_id} to {self._database}"
-            raise RuntimeError(f"{message}: {error}") from error
+            raise self._failed(f"{message}: {error}", error) from error
 
     async def recent(self, session_id: str, limit: int) -> list[EventEnvelope]:
         """The last ``limit`` events logged of the session ``session_id``, oldest first, but for
@@ -483,7 +524,7 @@ class SqliteStore:
             await self._call(self._save_review_count, count)
         except sqlite3.Error as error:
             message = f"Couldn't save the review count to {self._database}: {error}"
-            raise RuntimeError(message) from error
+            raise self._failed(message, error) from error
 
     async def insert_new(
         self,
@@ -507,6 +548,10 @@ class SqliteStore:
         Raises :class:`StoreError`, naming both files, when the copy fails.
         """
         await self._call(self._backup, target)
+
+    def _failed(self, message: str, error: sqlite3.Error) -> StorageFailed:
+        """The failure, saying ``message``, of a write to the database that raised ``error``."""
+        return StorageFailed(message, str(self._database), str(error), error_kind(error))
 
     async def _call[*A, T](self, function: Callable[[*A], T], *args: *A) -> T:
         """What ``function(*args)`` returns, run on the database's thread.

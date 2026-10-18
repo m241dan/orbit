@@ -12,6 +12,7 @@ from orbit.agent.domain.config_errors import ConfigError
 from orbit.agent.domain.replay import LogBounds
 from orbit.agent.domain.roles import Role
 from orbit.agent.domain.sessions import SessionRecord, Unreadable
+from orbit.agent.domain.storage_halt import StorageErrorKind
 from orbit.agent.domain.usage import UsageFetch
 from orbit.agent.domain.verification import VerificationStep
 from orbit.protocol import Event, EventEnvelope, MergeResult, ProposalAction, Settings
@@ -209,6 +210,27 @@ class StoredSession:
     locked: bool
 
 
+class StorageFailed(RuntimeError):
+    """A write to the store failed, as ``message`` says: ``database`` is its file, ``error`` the
+    error as the database reported it, and ``kind`` what orbit makes of that."""
+
+    def __init__(self, message: str, database: str, error: str, kind: StorageErrorKind) -> None:
+        super().__init__(message)
+        self.database = database
+        self.error = error
+        self.kind = kind
+
+
+class Fallback(Protocol):
+    """Where a session's events go when the store can't take them."""
+
+    async def write(self, session_id: str, envelopes: Sequence[EventEnvelope]) -> str | None:
+        """Add ``envelopes``, events of the session ``session_id``, to its fallback file, made
+        owner-only in the first place that can be written; returns the file's path, or ``None``
+        when no place could be written."""
+        ...
+
+
 class EventLog(Protocol):
     """Where sessions' events are kept, each session's in ``seq`` order."""
 
@@ -218,7 +240,8 @@ class EventLog(Protocol):
 
     async def append(self, session_id: str, envelopes: Sequence[EventEnvelope]) -> None:
         """Add ``envelopes``, events of the session ``session_id``, to its log, all of them or
-        none; raises ``RuntimeError`` when it can't."""
+        none; raises ``RuntimeError``, a :class:`StorageFailed` when the database failed, when
+        it can't."""
         ...
 
     async def recent(self, session_id: str, limit: int) -> list[EventEnvelope]:
@@ -260,8 +283,8 @@ class SessionStore(EventLog, Protocol):
     log and the repository's count of commits since the last super review."""
 
     async def save(self, record: SessionRecord) -> None:
-        """Save ``record``, replacing the one saved with its id; raises ``RuntimeError`` when
-        it can't."""
+        """Save ``record``, replacing the one saved with its id; raises ``RuntimeError``, a
+        :class:`StorageFailed` when the database failed, when it can't."""
         ...
 
     async def load(self, session_id: str) -> SessionRecord | Unreadable:
@@ -293,6 +316,6 @@ class SessionStore(EventLog, Protocol):
         ...
 
     async def save_review_count(self, count: int) -> None:
-        """Save ``count`` as the commits since the last super review; raises ``RuntimeError``
-        when it can't."""
+        """Save ``count`` as the commits since the last super review; raises ``RuntimeError``,
+        a :class:`StorageFailed` when the database failed, when it can't."""
         ...

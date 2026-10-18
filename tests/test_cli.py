@@ -21,6 +21,7 @@ from orbit.agent import (
     AgentSession,
     ClaudeCliRunner,
     ConfigError,
+    FallbackFiles,
     GitCoderTree,
     Limits,
     McpHost,
@@ -293,6 +294,22 @@ def test_chat_keeps_sessions_in_the_store_in_the_state_directory(
     assert (state / "orbit.db").exists()
     assert not (tmp_path / ".orbit").exists()
     assert store_threads() == []  # The store was closed once the app ended.
+
+
+def test_chat_parks_unsaved_events_in_the_state_directory_else_the_workspace(
+    launched: list[AgentSession], state: Path, tmp_path: Path
+) -> None:
+    assert runner.invoke(app, ["chat", "-C", str(tmp_path)]).exit_code == 0
+
+    [session] = launched
+    writer = session._events._writer
+    assert writer is not None and isinstance(writer._fallback, FallbackFiles)
+    workspace_id = store_in(session).workspace_id
+    assert workspace_id
+    assert writer._fallback.places("s1") == [
+        state / "fallback" / f"{workspace_id}-s1.jsonl",
+        tmp_path.resolve() / ".orbit" / "fallback" / "s1.jsonl",
+    ]
 
 
 def test_the_state_directory_option_wins_over_the_environment(

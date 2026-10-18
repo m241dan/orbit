@@ -6,7 +6,7 @@ from orbit.agent import Verification, VerificationStep
 from orbit.agent.domain.reviews import ReviewLimits
 from orbit.protocol import (
     PLANNER,
-    SAVE_FAILED,
+    STORAGE_FAILED,
     AddTask,
     EditTask,
     ErrorOccurred,
@@ -133,17 +133,16 @@ async def test_a_settings_change_is_saved_once_the_session_is_used() -> None:
     await session.close()
 
 
-async def test_a_save_that_fails_is_reported_once_and_work_carries_on() -> None:
+async def test_a_save_that_fails_halts_the_session_and_nothing_more_is_saved() -> None:
     store = FakeStore()
     store.failure = "Couldn't save the session: disk full"
     session, _, _ = session_for(store=store)
     await send(session, AddTask(task=TASK))
+    events = await events_until(session, of_type(ErrorOccurred))
+    assert [e.code for e in events if isinstance(e, ErrorOccurred)] == [STORAGE_FAILED]
+    assert "Couldn't save the session: disk full" in errors(events)[0]
+    store.failure = None
     await send(session, AddTask(task=TaskSpec(prompt="Another.")))
-    events = await events_until(
-        session, lambda e: isinstance(e, TasksChanged) and len(e.tasks) == 2
-    )
-    assert errors(events) == ["Couldn't save the session: disk full"]
-    assert {e.code for e in events if isinstance(e, ErrorOccurred)} == {SAVE_FAILED}
     assert store.saved == []
     await session.close()
 

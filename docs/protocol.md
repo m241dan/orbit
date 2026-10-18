@@ -72,7 +72,9 @@ and the backend's `server_version`. `Welcome` is Hello's outcome: it takes the p
 3. `Snapshot`: the open session as it stands, with its settings, busy lanes, tasks,
    verification steps, review status, checks proposals waiting for a decision, running
    agents and its `transcript`: the session's last 500 logged events, oldest first, in the
-   envelopes they were sent in, their `seq`s included (none without a store). A `Hello`
+   envelopes they were sent in, their `seq`s included (none without a store), and, while the
+   session is halted because a write to the store failed, its `storage_halt`: the explanation
+   the halting `ErrorOccurred` carried (see `storage_failed` under [Codes](#codes)). A `Hello`
    whose `since` orbit can catch up from gets the open session's events after it here
    instead, in their original envelopes (see
    [Sequencing and reconnecting](#sequencing-and-reconnecting)).
@@ -201,6 +203,7 @@ Refusals, in `CommandRefused`:
 | `locked` | Another orbit holds what the command acts on, such as a session. |
 | `wrong_session` | The command is for a session that isn't open. |
 | `incompatible` | A `Hello` named a protocol version this orbit doesn't speak; nothing more is sent on that stream. |
+| `storage_failed` | The session is halted because a write to the store failed; the message is the halt's explanation. Every command but `Hello` is refused so until storage is resumed. |
 
 Errors, in `ErrorOccurred`:
 
@@ -210,5 +213,6 @@ Errors, in `ErrorOccurred`:
 | `timed_out` | An agent ran out of time. |
 | `git_failed` | A git command or a worktree failed. |
 | `save_failed` | Saving the session failed. |
+| `storage_failed` | A write to the store (the event log, the session record or the review count) failed, so the session halted: its agents, the planner's turn and reviews are cancelled. The message explains which write failed, the database and its error, the likely cause and its fix, the unsaved events' `seq`s and the fallback file they were written to, and how to resume. |
 | `checks_exhausted` | A check still failed after every fix attempt. |
 | `internal` | Orbit itself failed unexpectedly. |

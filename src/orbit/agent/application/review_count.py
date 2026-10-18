@@ -3,17 +3,19 @@ session."""
 
 import asyncio
 
-from orbit.agent.application.failures import ReportedOnce
-from orbit.agent.application.ports import Publish, SessionStore
+from orbit.agent.application.failures import outcome
+from orbit.agent.application.ports import SessionStore
+from orbit.agent.application.storage_halt import Halting
+from orbit.agent.domain.storage_halt import FailedWrite
 
 
 class ReviewCount:
     """The repository's super review count, saved in ``store`` (if there is one); a failing save
-    is reported with ``publish`` once, until a save works again."""
+    halts the session through ``halt``, and nothing is saved while it's halted."""
 
-    def __init__(self, store: SessionStore | None, publish: Publish) -> None:
+    def __init__(self, store: SessionStore | None, halt: Halting) -> None:
         self._store = store
-        self._saves = ReportedOnce(publish)
+        self._halt = halt
         self._count: int | None = None  # The count the store holds.
         self._saving = asyncio.Lock()  # Saves one at a time, so the newest is written last.
 
@@ -30,7 +32,10 @@ class ReviewCount:
         if self._store is None:
             return
         async with self._saving:
-            if count != self._count and await self._saves.attempt(
-                self._store.save_review_count(count)
-            ):
+            if count == self._count or self._halt.halted:
+                return
+            error = await outcome(self._store.save_review_count(count))
+            if isinstance(error, RuntimeError):
+                self._halt.fail(FailedWrite.REVIEW_COUNT, error)
+            else:
                 self._count = count
