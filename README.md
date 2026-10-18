@@ -773,7 +773,8 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
   widgets (`transcript`, `conversation` for the `ConversationFeed`, which turns events into the
   transcript's entries, `entries` for an entry and the renderables that draw it, `tabs`,
   `tasks`, `agents`, `panels`, `detail` for the detail pane, `working` for the working row,
-  `proposals`, the proposal modal, `sessions`, the modal listing the sessions, and `widgets` for
+  `proposals`, the proposal modal and the `ProposalHost` that shows each waiting proposal once
+  and closes it when it's withdrawn, `sessions`, the modal listing the sessions, and `widgets` for
   the building blocks they share) lay it out, and `app` is the Textual app that holds them.
 - `orbit.cli`: the composition root, and the only place the two sides are wired together: it
   plugs the external adapters into `AgentSession` and hands that to the TUI. It runs the

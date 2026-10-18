@@ -85,7 +85,7 @@ from orbit.tui.agents import AgentsPane
 from orbit.tui.conversation import ConversationFeed
 from orbit.tui.detail import DetailPane
 from orbit.tui.panels import UsagePanel, VerificationPanel
-from orbit.tui.proposals import ProposalScreen
+from orbit.tui.proposals import ProposalHost
 from orbit.tui.sessions import SessionChoice, SessionsScreen
 from orbit.tui.tabs import ConversationTabs
 from orbit.tui.tasks import ReasonScreen, TaskEditorScreen, TaskList
@@ -219,7 +219,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         # Last settings reported by the backend; None until the first report.
         self._settings: Settings | None = None
         self._model_choices: tuple[str, ...] = ()
-        self._proposal: ProposalScreen | None = None  # The proposal being shown, if any.
+        self._proposals = ProposalHost(self.push_screen, self._decide)
         self._sessions: SessionsScreen | None = None  # The list of sessions shown, if any.
         # Whether the user pressed ctrl+p, after which no list opens as the startup list.
         self._asked_sessions = False
@@ -665,7 +665,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         self._show_tasks(snapshot.tasks)
         self._verification.show(snapshot.steps, snapshot.steps_title)
         self._agents.show_review(snapshot.review)
-        self._follow_proposals(snapshot.proposals)
+        self._proposals.follow(snapshot.proposals)
         self._open_session(snapshot.session)
 
     def _render_state(
@@ -695,7 +695,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         self._agents.track(event)
         self._tabs.track(event)
         self._transcript.track(event, self._tabs.roles)
-        self._withdraw_proposal(event)
+        self._proposals.withdraw(event)
 
     def _show_tasks(self, tasks: tuple[TaskState, ...]) -> None:
         self._task_list.show(tasks)
@@ -711,41 +711,14 @@ class OrbitApp(App[None], inherit_bindings=False):
         elif isinstance(event, ReviewStatus):
             self._agents.show_review(event)
         elif isinstance(event, ChecksProposed):
-            self._show_proposal(event)
+            self._proposals.show(event)
         else:
             self._usage.show(event)
 
-    def _show_proposal(self, event: ChecksProposed) -> None:
-        """Ask the user about ``event``'s proposal, unless it's the one shown; their decision
-        goes to the backend."""
-        if self._proposal is not None and self._proposal.proposal == event:
-            return  # A snapshot showed it before its event arrived.
-        screen = self._proposal = ProposalScreen(event)
-
-        async def decided(decision: DecideProposal | None) -> None:
-            if self._proposal is screen:  # Not one shown since.
-                self._proposal = None
-            if decision is not None:
-                self._feed.append(*decision_entry(event.agent_id, decision), event.agent_id)
-                await self._send(decision)
-
-        self.push_screen(screen, decided)
-
-    def _follow_proposals(self, proposals: tuple[ChecksProposed, ...]) -> None:
-        """Close the proposal shown unless it's among ``proposals``, still waiting; then, with
-        none shown, show the first of them."""
-        screen = self._proposal
-        if screen is not None and screen.proposal not in proposals:
-            screen.dismiss(None)
-            screen = self._proposal = None
-        if screen is None and proposals:
-            self._show_proposal(proposals[0])
-
-    def _withdraw_proposal(self, event: Event) -> None:
-        """Close the proposal shown, if ``event`` is its agent exiting."""
-        screen = self._proposal
-        if isinstance(event, AgentExited) and screen and screen.proposal.agent_id == event.agent_id:
-            screen.dismiss(None)
+    async def _decide(self, proposal: ChecksProposed, decision: DecideProposal) -> None:
+        """Note the user's ``decision`` on ``proposal`` in the conversation and send it."""
+        self._feed.append(*decision_entry(proposal.agent_id, decision), proposal.agent_id)
+        await self._send(decision)
 
     def _show_settings(self, settings: Settings, choices: tuple[str, ...]) -> None:
         if choices != self._model_choices:
