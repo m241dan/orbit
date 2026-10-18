@@ -604,7 +604,9 @@ in ``docs/protocol.md``."""
 
 class CommandRefused(_Message):
     """Command ``command_id`` was refused, for the reason ``code`` names (one of the refusal
-    codes, such as :data:`UNKNOWN`), and ``message`` says why; it changed nothing."""
+    codes, such as :data:`UNKNOWN`), and ``message`` says why; it changed nothing, unless the
+    code is :data:`INTERNAL`, which means orbit failed partway through handling it, so it may
+    have changed something."""
 
     type: Literal["command_refused"] = "command_refused"
     command_id: str

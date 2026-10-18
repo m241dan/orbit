@@ -561,6 +561,18 @@ class OrbitApp(App[None], inherit_bindings=False):
         await self._send(UpdateSettings(settings=settings))
 
     async def _send(self, command: Command) -> None:
+        """Send ``command`` to the open session; a failure to send it is shown, freeing the
+        planner from a message, as a refusal does."""
+        try:
+            await self._deliver(command)
+        except Exception as exc:
+            if isinstance(command, SendMessage):
+                self._set_busy(PLANNER_LANE, False)
+            self._render_event(
+                ErrorOccurred(code=INTERNAL, message=f"Couldn't send the command: {exc}")
+            )
+
+    async def _deliver(self, command: Command) -> None:
         """Send ``command`` to the open session in the default workspace, under a fresh id,
         remembered for a message."""
         command_id = uuid4().hex
@@ -583,7 +595,7 @@ class OrbitApp(App[None], inherit_bindings=False):
     async def _hello(self) -> bool:
         """Whether the Hello opening the session was sent; a failure to send it is shown."""
         try:
-            await self._send(
+            await self._deliver(
                 Hello(client=f"orbit-tui {__version__}", protocol_version=PROTOCOL_VERSION)
             )
         except Exception as exc:

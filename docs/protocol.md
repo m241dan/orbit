@@ -86,7 +86,8 @@ published, such as a `TasksChanged`, so when a frontend sees it, it has seen wha
 did.
 
 `CommandRefused` says why in `code`, one of the refusal codes below, and `message`, for people.
-A refused command changed nothing.
+A refused command changed nothing, except one refused as `internal`: orbit failed partway
+through handling it, so it may have changed something.
 
 `ErrorOccurred` reports an error no command caused, such as an agent failing during a task
 run, with `code`, one of the error codes below or a refusal code where it fits, and `message`.

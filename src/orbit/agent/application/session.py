@@ -52,6 +52,7 @@ from orbit.protocol import (
     CONFIGURE_CHECKS,
     DEFAULT_WORKSPACE,
     INCOMPATIBLE,
+    INTERNAL,
     INVALID,
     NOT_CONFIGURED,
     PLANNER,
@@ -302,8 +303,9 @@ class AgentSession:
 
     async def send(self, envelope: CommandEnvelope) -> None:
         """Handle the command in ``envelope``, then publish its outcome: ``CommandRefused`` if
-        it was refused, else ``CommandAccepted``, or ``Welcome`` for a ``Hello``. Other errors
-        escape, with no outcome. After an incompatible ``Hello``, nothing is handled."""
+        it was refused, or as ``internal`` if handling it failed, else ``CommandAccepted``, or
+        ``Welcome`` for a ``Hello``. Only cancellation escapes, with no outcome. After an
+        incompatible ``Hello``, nothing is handled."""
         if self._incompatible:
             return
         command_id = envelope.command_id
@@ -319,6 +321,12 @@ class AgentSession:
         except Refused as refusal:
             refused = CommandRefused(command_id=command_id, code=refusal.code, message=str(refusal))
             await self._events.put(refused)
+            return
+        except Exception as exc:  # A bug in one handler mustn't leave its command unanswered.
+            message = f"Orbit failed to handle {type(envelope.payload).__name__}: {exc}"
+            await self._events.put(
+                CommandRefused(command_id=command_id, code=INTERNAL, message=message)
+            )
             return
         await self._events.put(CommandAccepted(command_id=command_id))
 

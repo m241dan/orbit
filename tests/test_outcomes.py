@@ -3,6 +3,8 @@ code and a message, in place of any other answer."""
 
 import asyncio
 
+import pytest
+
 from orbit.agent import AgentSession
 from orbit.agent.application.planner_seat import (
     NO_PLANNER_MESSAGE,
@@ -13,6 +15,7 @@ from orbit.agent.application.session import CONFIGURING_NOTE, NO_AGENTS_MESSAGE
 from orbit.protocol import (
     BUSY,
     CONFIGURE_CHECKS,
+    INTERNAL,
     INVALID,
     LOCKED,
     NOT_CONFIGURED,
@@ -28,6 +31,7 @@ from orbit.protocol import (
     ErrorOccurred,
     Event,
     FireTrigger,
+    ListSessions,
     Notice,
     RemoveTask,
     ResetConversation,
@@ -249,3 +253,33 @@ async def test_a_save_that_cannot_take_its_lock_is_an_error_not_a_refusal() -> N
     assert ErrorOccurred(code=LOCKED, message=message) in events
     assert events[-1] == CommandAccepted(command_id="c14")
     assert not any(isinstance(event, OUTCOMES) for event in queued(session))
+
+
+async def test_a_handler_that_fails_is_refused_as_internal_and_the_session_goes_on() -> None:
+    store = FakeStore()
+    session = AgentSession(store=store, new_id=lambda: "session-1")
+    await greeted(session)
+    store.list_failure = RuntimeError("the disk is gone")
+    refused = await refusal(session, "c15", ListSessions())
+    store.list_failure = None
+    await send_as(session, "c16", AddTask(task=TASK))
+    events = await outcome(session)
+    await session.close()
+
+    message = "Orbit failed to handle ListSessions: the disk is gone"
+    assert (refused.code, refused.message) == (INTERNAL, message)
+    assert events[-1] == CommandAccepted(command_id="c16")
+
+
+async def test_a_cancelled_handler_is_cancelled_with_no_outcome() -> None:
+    store = FakeStore()
+    session = AgentSession(store=store, new_id=lambda: "session-1")
+    await greeted(session)
+    store.list_failure = asyncio.CancelledError()
+    with pytest.raises(asyncio.CancelledError):
+        await send_as(session, "c17", ListSessions())
+    store.list_failure = None
+    queue = queued(session)
+    await session.close()
+
+    assert not any(isinstance(event, OUTCOMES) for event in queue)

@@ -544,7 +544,7 @@
       "type": "object"
     },
     "CommandRefused": {
-      "description": "Command ``command_id`` was refused, for the reason ``code`` names (one of the refusal\ncodes, such as :data:`UNKNOWN`), and ``message`` says why; it changed nothing.",
+      "description": "Command ``command_id`` was refused, for the reason ``code`` names (one of the refusal\ncodes, such as :data:`UNKNOWN`), and ``message`` says why; it changed nothing, unless the\ncode is :data:`INTERNAL`, which means orbit failed partway through handling it, so it may\nhave changed something.",
       "properties": {
         "code": {
           "title": "Code",

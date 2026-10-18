@@ -30,6 +30,7 @@ from orbit.protocol import (
     AgentExited,
     BusyChanged,
     CancelTurn,
+    CommandAccepted,
     CommandRefused,
     EditTask,
     ErrorOccurred,
@@ -530,7 +531,7 @@ async def test_a_failure_saving_usage_is_reported_not_taken_for_a_removed_task()
     assert ErrorOccurred(agent_id="agent-1", code=AGENT_FAILED, message="saving tripped") in events
 
 
-async def test_a_failure_saving_a_change_the_board_made_is_not_reported_as_refused(
+async def test_a_failure_saving_a_change_the_board_made_is_refused_as_internal(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     session, _, _ = session_for()
@@ -540,10 +541,15 @@ async def test_a_failure_saving_a_change_the_board_made_is_not_reported_as_refus
         raise ValueError("saving tripped")
 
     monkeypatch.setattr(session._keeper, "save", broken)
-    with pytest.raises(ValueError, match="saving tripped"):
-        await send(session, RemoveTask(task_id="1"))
-    assert session._board.tasks == ()
-    assert not [e for e in queued(session) if isinstance(e, ErrorOccurred)]
+    queued(session)
+    await send(session, RemoveTask(task_id="1"))
+    events = queued(session)
+    assert session._board.tasks == ()  # Refused partway, so the change stands.
+    assert not [e for e in events if isinstance(e, ErrorOccurred | CommandAccepted)]
+    refused = [e for e in events if isinstance(e, CommandRefused)]
+    assert [(e.code, e.message) for e in refused] == [
+        (INTERNAL, "Orbit failed to handle RemoveTask: saving tripped")
+    ]
     await session.close()
 
 

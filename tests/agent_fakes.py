@@ -225,8 +225,8 @@ class FakeStore:
     ``elsewhere`` are locked by another orbit, those in ``broken`` are unreadable for the reason
     given, and ``delete_failure``, if set, is the error deleting one raises, and
     ``release_failure`` the error letting go of a lock raises, and ``load_failure`` the error
-    loading one raises. ``on_acquire``, if set, is awaited
-    as a lock is taken.
+    loading one raises, and ``list_failure`` the error listing them raises. ``on_acquire``, if
+    set, is awaited as a lock is taken.
     """
 
     def __init__(self, count: int = 0) -> None:
@@ -246,6 +246,7 @@ class FakeStore:
         self.delete_failure: str | None = None
         self.release_failure: str | None = None
         self.load_failure: str | None = None
+        self.list_failure: BaseException | None = None
         self.on_acquire: Callable[[], Awaitable[None]] | None = None
 
     @property
@@ -267,6 +268,8 @@ class FakeStore:
         return found[-1] if found else Unreadable("it doesn't exist")
 
     async def sessions(self) -> list[StoredSession]:
+        if self.list_failure is not None:
+            raise self.list_failure
         latest: dict[str, SessionRecord | Unreadable] = {r.id: r for r in self.saved}
         latest |= {i: Unreadable(reason) for i, reason in self.broken.items()}
         return [StoredSession(i, r, i in self.elsewhere) for i, r in sorted(latest.items())]

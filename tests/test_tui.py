@@ -68,7 +68,7 @@ class FakeSession:
     """Stands in for the backend: records commands, and the envelopes they came in, and
     replays scripted events in envelopes; an exception queued fails the stream. ``sent`` has
     every envelope; ``envelopes`` and ``commands`` leave out the Hello opening the stream, which
-    raises ``hello_error`` when one is set."""
+    raises ``hello_error`` when one is set, as every other command raises ``send_error``."""
 
     def __init__(self) -> None:
         self.sent: list[CommandEnvelope] = []
@@ -77,6 +77,7 @@ class FakeSession:
         self.queue: asyncio.Queue[Event | Exception] = asyncio.Queue()
         self.closed = False
         self.hello_error: Exception | None = None
+        self.send_error: Exception | None = None
 
     async def send(self, envelope: CommandEnvelope) -> None:
         self.sent.append(envelope)
@@ -86,6 +87,8 @@ class FakeSession:
             return
         self.envelopes.append(envelope)
         self.commands.append(envelope.payload)
+        if self.send_error is not None:
+            raise self.send_error
 
     async def events(self) -> AsyncIterator[EventEnvelope]:
         seq = 0
@@ -222,6 +225,33 @@ async def test_a_failed_hello_shows_an_error_line() -> None:
         await pilot.pause()
         assert app.is_running
         assert shown(app)[-1] == "The backend failed to start the session: no git"
+
+
+async def test_a_message_that_fails_to_send_shows_why_and_frees_the_prompt() -> None:
+    session = FakeSession()
+    session.send_error = RuntimeError("the backend is gone")
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        prompt = app.query_one("#prompt", ChatPrompt)
+        await pilot.press("i", *"hi", "enter")
+        await pilot.pause()
+        assert app.is_running
+        assert entries(app)[-1] == ("Couldn't send the command: the backend is gone", "error")
+        assert prompt.border_title == "Prompt · planner"
+
+
+async def test_another_command_that_fails_to_send_leaves_the_planner_busy() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        prompt = app.query_one("#prompt", ChatPrompt)
+        await pilot.press("i", *"hi", "enter")
+        session.send_error = RuntimeError("the backend is gone")
+        await pilot.press("ctrl+x")
+        await pilot.pause()
+        assert app.is_running
+        assert entries(app)[-1] == ("Couldn't send the command: the backend is gone", "error")
+        assert prompt.border_title == "Prompt · planner · busy"
 
 
 async def test_the_prompt_takes_typing_while_the_planner_is_busy() -> None:
