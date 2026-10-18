@@ -229,6 +229,35 @@ async def test_a_broken_database_fails_each_call_as_the_port_says(
         await store.save_review_count(1)
 
 
+async def test_a_closed_store_fails_each_call_as_the_port_says(
+    open_store: Opener, state: Path, workspace: Path
+) -> None:
+    store = await open_store(workspace)
+    await store.save(record())
+    await store.close()
+    with pytest.raises(RuntimeError, match=r"Couldn't save the session abc to .*orbit\.db"):
+        await store.save(record())
+    assert await store.load("abc") == Unreadable(
+        f"it can't be read from {state / 'orbit.db'}: the store is closed"
+    )
+    assert await store.sessions() == []
+    with pytest.raises(RuntimeError, match=r"Couldn't delete the session abc from .*orbit\.db"):
+        await store.delete("abc")
+    assert await store.review_count() == 0
+    with pytest.raises(RuntimeError, match=r"Couldn't save the review count to .*orbit\.db"):
+        await store.save_review_count(1)
+
+
+async def test_acquiring_after_closing_raises_and_takes_no_lock(
+    open_store: Opener, workspace: Path
+) -> None:
+    store, other = await open_store(workspace), await open_store(workspace)
+    await store.close()
+    with pytest.raises(RuntimeError, match="closed"):
+        await store.acquire("abc")
+    assert await other.acquire("abc")
+
+
 # Failures at open
 
 

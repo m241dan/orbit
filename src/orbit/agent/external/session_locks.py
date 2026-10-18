@@ -10,6 +10,7 @@ another orbit opening it and locking it.
 import asyncio
 import fcntl
 import os
+import threading
 from collections.abc import Iterator
 from contextlib import contextmanager, suppress
 from enum import Enum, auto
@@ -93,11 +94,14 @@ class SessionLocks:
     def __init__(self, directory: Path) -> None:
         self._directory = directory
         self._held: dict[str, int] = {}
+        # Guards _held and _closed between close() and a _take running in a worker thread.
+        self._guard = threading.Lock()
+        self._closed = False
 
     async def acquire(self, session_id: str) -> bool:
         """Lock the session ``session_id``; returns ``False`` when another orbit holds its lock.
 
-        Raises ``RuntimeError`` when the lock can't be taken.
+        Raises ``RuntimeError`` when the lock can't be taken, as after :meth:`close`.
         """
         taking = asyncio.ensure_future(asyncio.to_thread(self._acquire, session_id))
         try:
@@ -134,10 +138,13 @@ class SessionLocks:
         return session_id not in self._held and _lock_held(self.path(session_id))
 
     def close(self) -> None:
-        """Let go of every lock this holds, leaving their files for another orbit to take."""
-        for fd in self._held.values():
-            os.close(fd)
-        self._held.clear()
+        """Let go of every lock this holds, leaving their files for another orbit to take, and take
+        no more."""
+        with self._guard:
+            self._closed = True
+            for fd in self._held.values():
+                os.close(fd)
+            self._held.clear()
 
     def path(self, session_id: str) -> Path:
         """The lock file of the session ``session_id``.
@@ -157,14 +164,20 @@ class SessionLocks:
 
     def _take(self, session_id: str, lock: Path) -> _Taken:
         """Take the session ``session_id``'s ``lock`` unless another orbit holds it; returns
-        whether this took it, already held it, or was refused."""
-        if session_id in self._held:
-            return _Taken.OURS
-        fd = _lock_file(lock)
-        if fd is None:
-            return _Taken.REFUSED
-        self._held[session_id] = fd
-        return _Taken.CREATED
+        whether this took it, already held it, or was refused.
+
+        Raises ``RuntimeError`` once this is closed.
+        """
+        with self._guard:
+            if self._closed:
+                raise RuntimeError(f"Couldn't lock the session {lock}: the locks are closed")
+            if session_id in self._held:
+                return _Taken.OURS
+            fd = _lock_file(lock)
+            if fd is None:
+                return _Taken.REFUSED
+            self._held[session_id] = fd
+            return _Taken.CREATED
 
     def _remove(self, session_id: str, action: str) -> None:
         """Let go of the session ``session_id``'s lock if this holds it, and remove its file;

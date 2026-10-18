@@ -312,6 +312,11 @@ class SqliteStore:
         await self._locks.remove(session_id)
 
     async def acquire(self, session_id: str) -> bool:
+        """Lock the session ``session_id`` for this orbit; returns ``False`` when another
+        running orbit has it locked.
+
+        Raises ``RuntimeError`` when the lock can't be taken, as once the store is closed.
+        """
         return await self._locks.acquire(session_id)
 
     async def release(self, session_id: str) -> None:
@@ -353,7 +358,13 @@ class SqliteStore:
         await self._call(self._backup, target)
 
     async def _call[*A, T](self, function: Callable[[*A], T], *args: *A) -> T:
-        """What ``function(*args)`` returns, run on the database's thread."""
+        """What ``function(*args)`` returns, run on the database's thread.
+
+        Raises ``sqlite3.ProgrammingError`` once the store is closed, so that callers answer as
+        for any database that can't be used.
+        """
+        if self._closed:
+            raise sqlite3.ProgrammingError("the store is closed")
         return await asyncio.wrap_future(self._executor.submit(function, *args))
 
     @property

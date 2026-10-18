@@ -186,3 +186,23 @@ async def test_a_cancelled_acquire_of_a_lock_we_hold_keeps_it(tmp_path: Path) ->
     with pytest.raises(asyncio.CancelledError):
         await acquiring
     assert not await locks_in(tmp_path).acquire("abc")
+
+
+async def test_acquiring_after_closing_raises_and_takes_no_lock(tmp_path: Path) -> None:
+    locks = locks_in(tmp_path)
+    locks.close()
+    with pytest.raises(RuntimeError, match=r"Couldn't lock the session .*abc\.lock: the locks"):
+        await locks.acquire("abc")
+    assert await locks_in(tmp_path).acquire("abc")
+
+
+async def test_a_lock_being_taken_when_closed_is_free_once_both_finish(tmp_path: Path) -> None:
+    locks = locks_in(tmp_path)
+    sessions(tmp_path).mkdir(parents=True)
+    with directory_held(sessions(tmp_path)):  # Holds the acquire mid-flight.
+        acquiring = asyncio.create_task(locks.acquire("abc"))
+        await asyncio.sleep(0.05)
+        locks.close()
+    with pytest.raises(RuntimeError, match="closed"):
+        await acquiring
+    assert await locks_in(tmp_path).acquire("abc")
