@@ -78,6 +78,7 @@ from orbit.tui.view import (
     TOOL_ACCESS_OPTIONS,
     coalesce,
     decision_entry,
+    edit_refusal,
     model_options,
     planner_reset_entry,
     tool_access_labels,
@@ -371,6 +372,10 @@ class OrbitApp(App[None], inherit_bindings=False):
     def _edit_task(self, event: OptionList.OptionSelected) -> None:
         tasks = self._task_list.tasks
         current = tasks[event.option_index] if event.option_index < len(tasks) else None
+        refusal = None if current is None else edit_refusal(current)
+        if refusal is not None:
+            self.notify(refusal, severity="warning")
+            return
 
         # The list changes when the backend reports the new task list.
         async def saved(result: TaskSpec | None) -> None:

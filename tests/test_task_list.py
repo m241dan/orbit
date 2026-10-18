@@ -1,3 +1,4 @@
+import pytest
 from rich.cells import cell_len
 from textual import events
 from textual.containers import VerticalScroll
@@ -549,14 +550,46 @@ async def test_enter_on_existing_task_edits_it() -> None:
 async def test_editing_a_task_keeps_its_role() -> None:
     session = FakeSession()
     app = OrbitApp(session)
-    reviewer = TaskSpec(prompt="check it", role="reviewer")
+    writer = TaskSpec(prompt="write it", role="writer")
     async with app.run_test() as pilot:
         await show_settings(session, pilot, Settings())
-        await feed(session, pilot, TasksChanged(tasks=(TaskState(id="1", task=reviewer),)))
+        await feed(session, pilot, TasksChanged(tasks=(TaskState(id="1", task=writer),)))
         await open_task_list(pilot)
         await pilot.press("enter", "i", "!", "escape", "ctrl+s")
-        edited = TaskSpec(prompt="check it!", role="reviewer")
+        edited = TaskSpec(prompt="write it!", role="writer")
         assert session.commands == [EditTask(task_id="1", task=edited)]
+
+
+async def press_enter_on_the_task(
+    monkeypatch: pytest.MonkeyPatch, state: TaskState
+) -> list[tuple[str, object]]:
+    """The notes shown by enter on the only task, ``state``, which opens no editor."""
+    session = FakeSession()
+    app = OrbitApp(session)
+    notes: list[tuple[str, object]] = []
+    monkeypatch.setattr(app, "notify", lambda text, **kw: notes.append((text, kw["severity"])))
+    async with app.run_test() as pilot:
+        await show_settings(session, pilot, Settings())
+        await feed(session, pilot, TasksChanged(tasks=(state,)))
+        await open_task_list(pilot)
+        await pilot.press("enter")
+        assert len(app.screen_stack) == 1
+        assert session.commands == []
+    return notes
+
+
+async def test_enter_on_a_running_task_says_it_cant_be_edited(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = TaskState(id="3", task=TaskSpec(prompt="go"), status="running")
+    notes = await press_enter_on_the_task(monkeypatch, state)
+    assert notes == [("Task '3' can't be edited while it runs.", "warning")]
+
+
+async def test_enter_on_a_review_says_it_cant_be_edited(monkeypatch: pytest.MonkeyPatch) -> None:
+    state = TaskState(id="1", task=TaskSpec(prompt="check it", role="reviewer"))
+    notes = await press_enter_on_the_task(monkeypatch, state)
+    assert notes == [("Reviews can't be edited; remove it instead.", "warning")]
 
 
 async def test_ctrl_r_asks_the_backend_to_run_unless_busy() -> None:

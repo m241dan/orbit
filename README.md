@@ -142,7 +142,8 @@ shows; **Prompt**, the rest of it, in a box that scrolls; **Model** and **Tools*
 field, `J`/`K` scroll the prompt box one line at a time (whichever field is selected), `i` types in
 the title or prompt (`esc` stops; `enter` stops in the title and adds a line in the prompt),
 `enter` on model or tools opens a picker, `ctrl+s` saves (from anywhere, even while typing) and
-`esc` discards. A task needs a title; the prompt may be empty.
+`esc` discards. A task needs a title; the prompt may be empty. `enter` on a running or verifying
+task, or on a review orbit queued, only shows why it can't be edited.
 
 The task list belongs to the open session, which orbit saves as you go (see [Sessions](#sessions)).
 It keeps the topmost running or verifying task in view, scrolling just enough to show it with the

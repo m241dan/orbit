@@ -7,6 +7,7 @@ from orbit.protocol import (
 from orbit.tui.view import (
     TASK_EDITOR_HINT,
     active_task,
+    edit_refusal,
     follow_top,
     join_prompt,
     split_prompt,
@@ -171,3 +172,21 @@ def test_a_three_line_row_above_the_active_row_shifts_where_it_follows_to() -> N
     # Above the view: it comes in with the whole three-line row above it.
     assert follow_top(rows, 2, 7, 6) == 2
     assert follow_top(rows, 2, 7, 4) == 5
+
+
+def test_edit_refusal_says_a_running_or_verifying_task_cant_be_edited() -> None:
+    for status in ("running", "verifying"):
+        state = TaskState(id="3", task=TaskSpec(prompt="go"), status=status)
+        assert edit_refusal(state) == "Task '3' can't be edited while it runs."
+
+
+def test_edit_refusal_says_reviews_cant_be_edited() -> None:
+    for role in ("reviewer", "super-reviewer"):
+        state = TaskState(id="1", task=TaskSpec(prompt="check", role=role))
+        assert edit_refusal(state) == "Reviews can't be edited; remove it instead."
+
+
+def test_edit_refusal_allows_a_pending_coder_task_and_a_draft() -> None:
+    for status in ("pending", "draft"):
+        state = TaskState(id="1", task=TaskSpec(prompt="go"), status=status)
+        assert edit_refusal(state) is None
