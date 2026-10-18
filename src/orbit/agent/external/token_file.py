@@ -49,6 +49,11 @@ class TokenFile:
             raise TokenError(f"The token file {self.path} is empty; delete it to make a new one.")
         return token
 
+    def rotate(self) -> None:
+        """Replace the token in the file with a new one, made with random bytes, whole or not at
+        all; raises :class:`TokenError` if it can't be written."""
+        self._made()
+
     def _made(self) -> str:
         """A new token, written to the file; raises :class:`TokenError` if it can't be."""
         token = secrets.token_urlsafe(TOKEN_BYTES)

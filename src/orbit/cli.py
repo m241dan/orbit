@@ -68,6 +68,9 @@ from orbit.tui import OrbitApp
 app = typer.Typer(help="Orbit command-line tool.", no_args_is_help=True)
 db = typer.Typer(help="Look after orbit's database of saved sessions.", no_args_is_help=True)
 app.add_typer(db, name="db")
+token = typer.Typer(help="Look after the token frontends show orbit serve.", no_args_is_help=True)
+app.add_typer(token, name="token")
+logger = logging.getLogger(__name__)
 
 
 def _workspace(path: Path) -> Path:
@@ -503,7 +506,7 @@ def serve(
     os.chdir(root)
     settings = _server_settings(user_config, host, port)
     token_file = TokenFile(user_config)
-    token = _token(token_file)
+    _token(token_file)
     with _repository_lock(root) as (lock, owner):
         backend = _Backend(model, tools, verify, worktree, review, usage, new, name, owner, lock)
         build, store = _backend(backend, root, state, user_config, pick_session=False)
@@ -512,7 +515,7 @@ def serve(
             build,
             not backend.fresh,
             settings,
-            token,
+            _current_token(token_file),
             RunFile(state, store.workspace_id),
             _banner(root, token_file, owner),
             lock,
@@ -587,18 +590,32 @@ def _token(token_file: TokenFile) -> str:
         raise typer.Exit(2) from None
 
 
+def _current_token(token_file: TokenFile) -> Callable[[], str]:
+    """What gives the token in ``token_file`` as it is now, empty with a warning if it can't be
+    used, so that it admits no one."""
+
+    def current() -> str:
+        try:
+            return token_file.token()
+        except TokenError as exc:
+            logger.warning("%s", exc)
+            return ""
+
+    return current
+
+
 @dataclass(frozen=True)
 class _ServeParts:
     """What ``orbit serve`` serves: the session ``build`` makes, with the most recently active
-    saved one opened if ``latest``, on the server ``settings`` say, to frontends showing
-    ``token``, saying where it is in ``run_file`` while it does, the ``banner`` it prints
-    once listening, with ``{url}`` in it for the server's URL, and the workspace ``lock``,
-    which names the server's URL while it's held."""
+    saved one opened if ``latest``, on the server ``settings`` say, to frontends showing the
+    token ``token`` gives as they connect, saying where it is in ``run_file`` while it does,
+    the ``banner`` it prints once listening, with ``{url}`` in it for the server's URL, and the
+    workspace ``lock``, which names the server's URL while it's held."""
 
     build: Callable[[], AgentSession]
     latest: bool
     settings: ServerSettings
-    token: str
+    token: Callable[[], str]
     run_file: RunFile
     banner: str
     lock: WorkspaceLock
@@ -834,3 +851,19 @@ async def _backed_up(state: Path, target: Path) -> None:
         await store.backup(target)
     finally:
         await store.close()
+
+
+@token.command()
+def rotate(config_dir: ConfigDirOption = None) -> None:
+    """Replace the token in your config directory with a new one; frontends connecting need
+    the new token at once, while those connected stay until orbit serve restarts."""
+    token_file = TokenFile(resolve_config_dir(config_dir, os.environ))
+    try:
+        token_file.rotate()
+    except TokenError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(2) from None
+    typer.echo(
+        f"Rotated the token in {token_file.path}; frontends connecting need the new token,"
+        " while those connected stay until orbit serve restarts."
+    )

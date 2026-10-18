@@ -14,11 +14,11 @@ from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner
-from websockets.exceptions import ConnectionClosed
+from websockets.exceptions import ConnectionClosed, InvalidStatus
 from websockets.sync.client import ClientConnection, connect
 
 from orbit import cli
-from orbit.agent import WorkspaceLock, WorkspaceOwner
+from orbit.agent import TokenFile, WorkspaceLock, WorkspaceOwner
 from orbit.cli import app
 from orbit.protocol import (
     PROTOCOL_VERSION,
@@ -266,6 +266,32 @@ def test_serve_refuses_an_invalid_server_setting(config_dir: Path) -> None:
     result = runner.invoke(app, ["serve", *QUIET])
     assert result.exit_code == 2
     assert f"{path}: server.port: " in result.output
+
+
+def test_a_rotated_token_admits_new_frontends_at_once_and_keeps_open_ones(
+    state: Path, config_dir: Path
+) -> None:
+    statuses: list[int] = []
+    frontend = Frontend(state, config_dir)
+
+    def rotates(websocket: ClientConnection) -> list[Event]:
+        old = (config_dir / "token").read_text().strip()
+        TokenFile(config_dir).rotate()
+        new = (config_dir / "token").read_text().strip()
+        url = str(frontend.run_file["url"])
+        with pytest.raises(InvalidStatus) as refused:
+            connect(url, additional_headers={"Authorization": f"Bearer {old}"})
+        statuses.append(refused.value.response.status_code)
+        with connect(url, additional_headers={"Authorization": f"Bearer {new}"}) as other:
+            say(other, "hello", Hello(client="orbit-tests", protocol_version=PROTOCOL_VERSION))
+            until(other, Snapshot)
+        return adds_a_task(websocket)
+
+    frontend.work = rotates
+    served(frontend, "--port", "0")
+
+    assert statuses == [401]
+    assert isinstance(frontend.events[-1], CommandAccepted)
 
 
 def test_serve_refuses_a_token_file_others_can_read(config_dir: Path) -> None:

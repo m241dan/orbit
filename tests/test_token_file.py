@@ -69,6 +69,42 @@ def test_a_token_that_cant_be_written_is_refused(
         TokenFile(tmp_path).token()
 
 
+def test_rotating_replaces_the_token_owner_only(tmp_path: Path) -> None:
+    tokens = TokenFile(tmp_path)
+    old = tokens.token()
+    tokens.rotate()
+    new = tokens.token()
+    assert new != old and len(new) >= 43
+    assert (tmp_path / "token").read_text() == new + "\n"
+    assert mode(tmp_path / "token") == 0o600
+
+
+def test_rotating_makes_a_token_where_there_was_none(tmp_path: Path) -> None:
+    config = tmp_path / "config"
+    TokenFile(config).rotate()
+    assert len(TokenFile(config).token()) >= 43
+    assert (mode(config / "token"), mode(config)) == (0o600, 0o700)
+
+
+def test_rotating_replaces_a_token_file_others_could_read(tmp_path: Path) -> None:
+    path = tmp_path / "token"
+    path.write_text("secret\n")
+    path.chmod(0o644)
+    TokenFile(tmp_path).rotate()
+    assert mode(path) == 0o600 and path.read_text() != "secret\n"
+
+
+def test_a_rotation_that_cant_be_written_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def unwritable(path: Path, text: str) -> None:
+        raise PermissionError("read-only")
+
+    monkeypatch.setattr("orbit.agent.external.token_file.write_private", unwritable)
+    with pytest.raises(TokenError, match=r"Can't write the token file .*: read-only"):
+        TokenFile(tmp_path).rotate()
+
+
 def test_a_private_file_that_cant_replace_its_target_leaves_no_temporary_file(
     tmp_path: Path,
 ) -> None:

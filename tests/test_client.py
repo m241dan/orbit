@@ -285,7 +285,7 @@ async def test_the_backoff_doubles_up_to_its_most_and_jitters() -> None:
 
 async def test_it_talks_to_the_control_plane_server() -> None:
     served = AgentSession()
-    server = ControlPlaneServer(served, TOKEN, ServerSettings(port=0), lambda line: None)
+    server = ControlPlaneServer(served, lambda: TOKEN, ServerSettings(port=0), lambda line: None)
     url = await server.start()
     session, _ = client(url)
     events = session.events()

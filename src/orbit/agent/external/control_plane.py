@@ -4,7 +4,8 @@ frontend that shows the token.
 Each WebSocket that's let in gets a connection of its own to the session: its text frames are
 decoded into commands and sent on it, and its events are encoded into text frames. A frontend
 that sends no ``Authorization: Bearer`` with the token is turned away with HTTP 401 before the
-WebSocket opens.
+WebSocket opens. The token is read afresh for each frontend, so a new one admits frontends at
+once, while those already let in stay.
 """
 
 import asyncio
@@ -207,14 +208,15 @@ class _Conversation:
 
 
 class ControlPlaneServer:
-    """Serves ``session`` to every frontend that shows ``token``, on the host and port in
-    ``settings``, until stopped; ``say`` tells the user as frontends connect and disconnect."""
+    """Serves ``session`` to every frontend that shows the token ``token`` returns as it
+    connects, on the host and port in ``settings``, until stopped; ``say`` tells the user as
+    frontends connect and disconnect. An empty token admits no one."""
 
     def __init__(
-        self, session: Connectable, token: str, settings: ServerSettings, say: Say
+        self, session: Connectable, token: Callable[[], str], settings: ServerSettings, say: Say
     ) -> None:
         self._session = session
-        self._token = token.encode()
+        self._token = token
         self._settings = settings
         self._say = say
         self._open: set[_Conversation] = set()
@@ -279,8 +281,9 @@ class ControlPlaneServer:
         return (GOING_AWAY, SHUTTING_DOWN) if self._stopping else (NORMAL, "")
 
     def _authorized(self, websocket: WebSocket) -> bool:
-        """Whether ``websocket`` showed the token."""
-        return hmac.compare_digest(bearer_token(websocket.headers).encode(), self._token)
+        """Whether ``websocket`` showed the token as it is now."""
+        token = self._token().encode()
+        return bool(token) and hmac.compare_digest(bearer_token(websocket.headers).encode(), token)
 
     async def _websocket(self, websocket: WebSocket) -> None:
         """Serve the frontend at ``websocket``, if it showed the token, until it's closed."""

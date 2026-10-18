@@ -47,6 +47,7 @@ uv run orbit serve                             # run the control plane on its ow
 uv run orbit serve --port 0                    # on a port the system chooses
 uv run orbit chat --connect ws://127.0.0.1:7433/  # show the session orbit serve runs
 uv run orbit chat --local                      # run in-process even with orbit serve running
+uv run orbit token rotate                      # replace the token frontends show orbit serve
 ```
 
 With orbit installed as a tool, drop the `uv run`.
@@ -868,6 +869,13 @@ from another machine, copy it over a trusted channel, such as `scp ~/.config/orb
 other:.config/orbit/token`, and in this release reach the server through an SSH tunnel, such as
 `ssh -L 7433:127.0.0.1:7433 server`, as it listens on loopback alone.
 
+`orbit token rotate [--config-dir PATH]` replaces the token with a new one, written whole or not at
+all and readable by you alone, and says so, naming the file but never the token. A running `orbit
+serve` reads the token for each frontend that connects, so the new one takes effect at once:
+frontends connecting with the old token are refused with HTTP 401, while those already connected
+stay connected. If a token leaks, rotate it, then restart `orbit serve` to drop every connection
+made with it. Copy the new token to your other machines as before, over a trusted channel.
+
 The `[server]` table in your `config.toml` sets where it listens and the largest message either
 way; the flags override it:
 
@@ -988,7 +996,7 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     over a WebSocket (starlette on uvicorn, through `embedded_server`'s `EmbeddedServer`, which
     leaves signals to the program), one `SessionConnection` per frontend that shows the token,
     turning frames into commands and events into frames; `TokenFile` (in `token_file`) is the
-    token it checks, `RunFile` (in `run_file`) says where it listens, both written through
+    token it checks, read afresh for each frontend, and rotates it, `RunFile` (in `run_file`) says where it listens, both written through
     `private_files`, and `user_config` reads `[storage]` and `[server]`.
   - `application`: `AgentSession` (in `session`) implements `Session`: it takes commands, asks
     the domain what follows, drives the ports and publishes events into the `Outbox` (in

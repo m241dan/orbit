@@ -71,7 +71,7 @@ async def serving(
 ) -> AsyncIterator[str]:
     """The URL of a server of ``session`` (a new one if none), stopped and closed after."""
     served = session or AgentSession()
-    server = ControlPlaneServer(served, TOKEN, settings, lines or Lines())
+    server = ControlPlaneServer(served, lambda: TOKEN, settings, lines or Lines())
     url = await server.start()
     try:
         yield url
@@ -129,6 +129,42 @@ async def test_a_frontend_without_the_token_is_turned_away(token: str | None) ->
             async with frontend(url, token):
                 pass
         assert refused.value.response.status_code == 401
+
+
+async def test_a_new_token_admits_new_frontends_at_once_and_keeps_open_ones() -> None:
+    tokens = [TOKEN]
+    served = AgentSession()
+    server = ControlPlaneServer(served, lambda: tokens[-1], LOOPBACK, Lines())
+    url = await server.start()
+    try:
+        async with frontend(url) as before:
+            await hello(before)
+            await until(before, Snapshot)
+            tokens.append("the-new-token")
+            with pytest.raises(InvalidStatus) as refused:
+                async with frontend(url, TOKEN):
+                    pass
+            assert refused.value.response.status_code == 401
+            async with frontend(url, "the-new-token") as after:
+                await hello(after)
+                await until(after, Snapshot)
+            await say(before, "add", AddTask(task=TASK))
+            await until(before, CommandAccepted)
+    finally:
+        await server.stop(served.close)
+
+
+async def test_an_empty_token_admits_no_frontend() -> None:
+    served = AgentSession()
+    server = ControlPlaneServer(served, lambda: "", LOOPBACK, Lines())
+    url = await server.start()
+    try:
+        with pytest.raises(InvalidStatus) as refused:
+            async with connect(url):
+                pass
+        assert refused.value.response.status_code == 401
+    finally:
+        await server.stop(served.close)
 
 
 async def test_every_frontend_sees_a_change_one_of_them_makes() -> None:
@@ -216,7 +252,7 @@ async def test_a_frontend_too_far_behind_is_closed_saying_so(
 
 async def test_shutting_down_closes_every_websocket_saying_so() -> None:
     session = AgentSession()
-    server = ControlPlaneServer(session, TOKEN, LOOPBACK, Lines())
+    server = ControlPlaneServer(session, lambda: TOKEN, LOOPBACK, Lines())
     url = await server.start()
     async with frontend(url) as greeted, frontend(url) as silent:
         await hello(greeted)
@@ -270,7 +306,9 @@ async def test_queued_work_runs_to_the_end_with_no_frontend_connected() -> None:
 async def test_a_port_in_use_cant_be_listened_on() -> None:
     async with serving() as url:
         port = int(url.split(":")[2].rstrip("/"))
-        server = ControlPlaneServer(AgentSession(), TOKEN, ServerSettings(port=port), Lines())
+        server = ControlPlaneServer(
+            AgentSession(), lambda: TOKEN, ServerSettings(port=port), Lines()
+        )
         with pytest.raises(ListenFailed, match=f"Can't listen on 127.0.0.1:{port}: ") as failed:
             await server.start()
         assert failed.value.port == port
@@ -281,7 +319,7 @@ async def test_a_server_that_fails_to_start_is_reported(monkeypatch: pytest.Monk
         raise OSError("no sockets for you")
 
     monkeypatch.setattr("uvicorn.Server.serve", broken)
-    server = ControlPlaneServer(AgentSession(), TOKEN, LOOPBACK, Lines())
+    server = ControlPlaneServer(AgentSession(), lambda: TOKEN, LOOPBACK, Lines())
     with pytest.raises(RuntimeError, match="failed to start") as raised:
         await server.start()
     assert isinstance(raised.value.__cause__, OSError)
@@ -289,7 +327,7 @@ async def test_a_server_that_fails_to_start_is_reported(monkeypatch: pytest.Monk
 
 async def test_stopping_a_server_that_never_started_is_harmless() -> None:
     session = AgentSession()
-    await ControlPlaneServer(session, TOKEN, LOOPBACK, Lines()).stop(session.close)
+    await ControlPlaneServer(session, lambda: TOKEN, LOOPBACK, Lines()).stop(session.close)
     await session.close()
 
 
