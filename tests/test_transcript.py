@@ -1998,3 +1998,22 @@ def test_markdown_takes_the_entrys_style_as_its_base() -> None:
     style = Style(color="red")
     lines = console.render_lines(entry_markdown("plain", style), console.options)
     assert lines[0][0].style is not None and lines[0][0].style.color == style.color
+
+
+async def test_a_running_tool_call_ticking_on_a_hidden_tab_is_measured_once_shown() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test(size=(120, 30)) as pilot:
+        transcript = still(app)
+        await feed_events(session, pilot, started("agent-1"), said("agent-1", LONG))
+        await pilot.press("tab", "tab")  # coder: its log is built and shown
+        coder = transcript.shown
+        await pilot.press("tab", "tab", "tab", "tab")  # All: coder's log is hidden
+        await feed_events(session, pilot, call("agent-1", "c1", path=LONG))
+        transcript.clock = lambda: 1 / SPINNER_FPS
+        transcript.tick()
+        await pilot.press("tab", "tab")  # coder again
+        await pilot.pause()
+        shown = coder.row_lines()
+        coder._line_cache.clear()
+        assert shown == coder.row_lines()

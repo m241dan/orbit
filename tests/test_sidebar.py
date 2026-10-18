@@ -1,9 +1,12 @@
 import pytest
+from rich.text import Text
+from textual.widgets.option_list import Option
 
 from orbit.protocol import TasksChanged
 from orbit.tui import OrbitApp
 from orbit.tui.tasks import TaskList
 from orbit.tui.transcript import Transcript
+from orbit.tui.view import SPINNER_FPS, spinner_frame
 from orbit.tui.widgets import ChatPrompt
 from tests.test_tui import FakeSession, feed_events, selected, task
 
@@ -107,3 +110,45 @@ async def test_the_sidebar_keeps_updating_while_hidden() -> None:
         await feed_events(session, pilot, TasksChanged(tasks=(task("t1"),)))
         await pilot.press("ctrl+b")
         assert [state.id for state in app.query_one(TaskList).tasks] == ["t1"]
+
+
+async def test_a_running_task_ticking_while_the_sidebar_is_hidden_shows_its_spinner_after() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        tasks = app.query_one(TaskList)
+        tasks.clock = lambda: 0.0
+        running = task("t1").model_copy(update={"status": "running"})
+        await feed_events(session, pilot, TasksChanged(tasks=(running,)))
+        await pilot.press("ctrl+b")
+        await pilot.pause()
+        tasks.clock = lambda: 1 / SPINNER_FPS
+        tasks.tick()
+        await pilot.press("ctrl+b")
+        await pilot.pause()
+        frame = spinner_frame(1 / SPINNER_FPS)
+        assert frame != spinner_frame(0.0)
+        assert tasks.render_line(0).text.strip().startswith(f"1. {frame} ")
+
+
+def reason_line(option: Option) -> str:
+    """The last line of a task row: its reason."""
+    prompt = option.prompt
+    assert isinstance(prompt, Text)
+    return prompt.plain.splitlines()[-1]
+
+
+async def test_a_reason_changed_while_the_sidebar_is_hidden_is_cut_to_the_shown_width() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await pilot.press("ctrl+b")
+        await pilot.pause()
+        failed = task("t1").model_copy(update={"status": "error", "reason": "Tests failed " * 20})
+        await feed_events(session, pilot, TasksChanged(tasks=(failed,)))
+        await pilot.press("ctrl+b")
+        await pilot.pause()
+        tasks = app.query_one(TaskList)
+        line = reason_line(tasks.get_option_at_index(0))
+        assert line.endswith("…")
+        assert len(line) == tasks.content_region.width - tasks.styles.scrollbar_size_vertical

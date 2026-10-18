@@ -110,6 +110,11 @@ class TaskList(ListPane):
     def on_resize(self) -> None:
         # Reasons are cut to the list's width, so a new width relabels their rows. OptionList
         # re-measures its rows in its own resize handler, which runs after this one.
+        self.fit()
+
+    def fit(self) -> None:
+        """Relabel the rows at the list's width and follow the active task, as on a resize;
+        for a list shown again, which Textual doesn't resize when its size is unchanged."""
         self._redraw()
         self.call_after_refresh(self._follow)
 

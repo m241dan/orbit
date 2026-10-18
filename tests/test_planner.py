@@ -527,9 +527,13 @@ async def test_a_planner_turn_that_runs_out_of_time_ends_in_error() -> None:
 
 
 async def test_the_next_prompt_resumes_the_conversation_after_a_turn_ran_out_of_time() -> None:
-    chat, launcher, _ = steps_chat(chats, hangs, chats, roles=timed_planner(0.0001))
+    # Only the hanging turn is timed, so the others can't run out of time on a slow machine.
+    roles = dict(ROLES)
+    chat, launcher, _ = steps_chat(chats, hangs, chats, roles=roles)
     await chat.answer("Plan.", Settings())
+    roles.update(timed_planner(0.0001))
     assert await chat.answer("More.", Settings()) == "error"
+    roles.update(ROLES)
     assert await chat.answer("Again.", Settings()) == "completed"
     conversation = "conversation-agent-1"
     assert launcher.resumed == [None, conversation, conversation]

@@ -219,3 +219,17 @@ async def test_rows_shown_without_a_highlight_highlight_nothing() -> None:
         pane.show_rows([("b", "b"), ("a", "a")])
         await pilot.pause()
         assert pane.highlighted is None
+
+
+async def test_a_prompt_replaced_while_hidden_is_measured_once_shown() -> None:
+    app = ListApp("one", "two", "three")
+    async with app.run_test() as pilot:
+        pane = app.query_one(ListPane)
+        assert line_map(pane) == [0, 1, 2]
+        pane.display = False
+        await pilot.pause()
+        pane.replace_prompt(1, "a\nb\nc")
+        pane.display = True
+        await pilot.pause()
+        assert line_map(pane) == [0, 1, 1, 1, 2]
+        assert [pane.render_line(y).text.strip() for y in range(1, 4)] == ["a", "b", "c"]

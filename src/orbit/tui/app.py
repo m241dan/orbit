@@ -341,7 +341,9 @@ class OrbitApp(App[None], inherit_bindings=False):
         leaves a sidebar window for the conversation."""
         side = self._side
         side.display = not side.display
-        if not side.display and self._selected in SIDEBAR_WINDOWS:
+        if side.display:  # Hidden, the task list had no width to cut its reasons to.
+            self.call_after_refresh(self._task_list.fit)
+        elif self._selected in SIDEBAR_WINDOWS:
             self.set_focus(None)
             self._select("transcript")
 
