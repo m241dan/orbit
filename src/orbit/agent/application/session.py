@@ -29,7 +29,6 @@ from orbit.agent.application.keeper import (
     local_now,
     new_session_id,
 )
-from orbit.agent.application.lanes import TurnSlot
 from orbit.agent.application.outbox import EventSink, Outbox
 from orbit.agent.application.planner_seat import PlannerSeat, SeatHooks
 from orbit.agent.application.ports import ProposalReview, SessionStore, UsageSource
@@ -48,17 +47,25 @@ from orbit.agent.application.tasks import Tasks
 from orbit.agent.application.usage_monitor import UsageMonitor
 from orbit.agent.application.verifier import Verification, Verifier
 from orbit.agent.application.work_lane import WorkLane
+from orbit.agent.application.work_turns import (
+    CONFIGURING_NOTE as CONFIGURING_NOTE,
+)
+from orbit.agent.application.work_turns import (
+    NO_AGENTS_MESSAGE as NO_AGENTS_MESSAGE,
+)
+from orbit.agent.application.work_turns import (
+    NO_VERIFY_MESSAGE as NO_VERIFY_MESSAGE,
+)
+from orbit.agent.application.work_turns import WorkParts, WorkTurns
 from orbit.agent.domain.agents import Agent
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.catalog import CONVERSATIONAL_ROLES, LANES, TRIGGER_NAMES, catalog
-from orbit.agent.domain.checks import configure_prompt
 from orbit.agent.domain.refusals import Refused, unknown
 from orbit.agent.domain.reviews import ReviewPlanner
-from orbit.agent.domain.roles import REVIEW_ROLES, role_task
+from orbit.agent.domain.roles import REVIEW_ROLES
 from orbit.agent.domain.verification import VerificationStep, startup_fix_prompt
 from orbit.protocol import (
     CODER,
-    CONFIGURATOR,
     CONFIGURE_CHECKS,
     DEFAULT_WORKSPACE,
     INTERNAL,
@@ -84,7 +91,6 @@ from orbit.protocol import (
     EventEnvelope,
     FireTrigger,
     Hello,
-    Notice,
     RemoveTask,
     ResetConversation,
     RunningAgent,
@@ -100,9 +106,6 @@ from orbit.protocol import (
     UsageChanged,
 )
 
-NO_AGENTS_MESSAGE = "Tasks need agents, and none are set up."
-NO_VERIFY_MESSAGE = "Setting up checks needs verification on; orbit was started with --no-verify."
-CONFIGURING_NOTE = "A configurator task is already queued or running."
 WorkCommand = (
     SendMessage
     | CancelTurn
@@ -155,8 +158,9 @@ class AgentSession:
     The session owns the task board and reports it whole on every change. It starts two
     lanes: the planner's, whose turns answer prompts, and the work lane's, which runs the
     tasks. ``PlannerSeat`` holds the planner and its turns; ``WorkLane`` holds the rules of a
-    task run: verification and fixes; ``ReviewLane`` runs the reviews; ``SessionSwitcher``
-    switches between saved sessions; ``Handshake`` opens every stream.
+    task run: verification and fixes; ``WorkTurns`` decides when it runs; ``ReviewLane`` runs
+    the reviews; ``SessionSwitcher`` switches between saved sessions; ``Handshake`` opens every
+    stream.
 
     With ``check_at_startup``, the ``verification`` steps also run once in the background as
     the session welcomes the frontend, on the base commit; a failure adds a draft task to fix
@@ -211,13 +215,11 @@ class AgentSession:
         self._workspace = workspace
         self._closing = False
         self._lane = self._review_lane()
-        self._held = False  # The user cancelled: don't start work by itself.
         hooks = SeatHooks(self._save, self._keeper.use, self._step_names)
         self._seat = PlannerSeat(self._desk, self._tasks, self._events, hooks)
         self._startup = self._startup_check(verification, check_at_startup)
         self._work = self._work_lane()
-        post = self._events.put_nowait
-        self._work_turns = TurnSlot(WORK_LANE, "Tasks are already running.", post)
+        self._turns = self._work_turns()
         self._usage = _usage_monitor(usage, self._events)
         self._switcher = self._session_switcher(pick_session)
         self._handshake = Handshake(self._handshake_parts(), self._events)
@@ -230,7 +232,7 @@ class AgentSession:
             self._seat,
             self._lane,
             self._work,
-            lambda: self._work_turns.running,
+            lambda: self._turns.running,
             self._snapshot,
             self._catalog,
         )
@@ -250,6 +252,18 @@ class AgentSession:
             self._start_background,
             lambda: self._closing,
         )
+
+    def _work_turns(self) -> WorkTurns:
+        """What decides when the work lane runs."""
+        parts = WorkParts(
+            self._work,
+            self._lane,
+            self._tasks,
+            self._verifier,
+            self._desk,
+            self._events.put_nowait,
+        )
+        return WorkTurns(parts)
 
     def _work_lane(self) -> WorkLane | None:
         if self._desk is None:
@@ -384,34 +398,9 @@ class AgentSession:
             case AddTask(task=task):
                 await self._tasks.change(lambda board: board.add(task))
             case RunTasks():
-                await self._run_tasks_if_possible()
+                await self._turns.run_tasks()
             case _:
                 assert_never(command)
-
-    async def _configure_checks(self) -> None:
-        """Queue a configurator first and run it, unless work is running already (then it goes
-        next); refused without verification or while one is queued or running."""
-        if self._desk is None or self._work is None:
-            raise Refused(NOT_CONFIGURED, NO_AGENTS_MESSAGE)
-        if self._verifier is None:
-            raise Refused(NOT_CONFIGURED, NO_VERIFY_MESSAGE)
-        if self._configuring():
-            await self._events.put(Notice(message=CONFIGURING_NOTE))
-            return
-        task = self._configurator_task(self._desk.agents)
-        await self._tasks.change(lambda board: board.add_first(task))
-        if not self._work_turns.running:
-            await self._start_work(asked=True)
-
-    def _configuring(self) -> bool:
-        """Whether a configurator task is queued or running."""
-        return self._board.has_waiting(CONFIGURATOR)
-
-    def _configurator_task(self, agents: Agents) -> TaskSpec:
-        """A configurator's task, told the steps and setup configured now."""
-        steps = self.verification.steps if self.verification else ()
-        prompt = configure_prompt(steps, agents.tree.setup if agents.tree else None)
-        return role_task(CONFIGURATOR, agents.roles[CONFIGURATOR], prompt)
 
     async def _handle_board(self, command: EditTask | AcceptTask | RemoveTask) -> None:
         match command:
@@ -442,39 +431,14 @@ class AgentSession:
             assert state is not None  # The board removed it, so it was there.
             await self._lane.removed(task_id, state)
 
-    async def _run_tasks_if_possible(self) -> None:
-        if self._work is None:
-            raise Refused(NOT_CONFIGURED, NO_AGENTS_MESSAGE)
-        if self._lane is not None:
-            self._lane.kick()
-        await self._start_work(asked=True)
-
-    async def _start_work(self, *, asked: bool) -> None:
-        """Start the work lane's turn if there is work. The user ``asked`` lifts a hold, and a
-        run already running refuses them; otherwise a hold or a running run keeps it waiting."""
-        assert self._work is not None  # Work needs agents.
-        if asked:
-            self._held = False
-        elif self._held or self._work_turns.running:
-            return
-        if self._work.next_work() is not None:
-            await self._work_turns.start(self._work.run())
-
     async def _cancel_turn(self, lane: str) -> None:
         """Stop the work in ``lane``, or say there's no such lane."""
         if lane not in LANES:
             raise unknown(f"No lane {lane!r}", "the lanes are", LANES)
         if lane == WORK_LANE:
-            self._hold_work()
+            self._turns.hold()
         else:
             self._seat.cancel()
-
-    def _hold_work(self) -> None:
-        """Cancel the work lane's run, and hold it until the user asks for work again."""
-        self._held = True
-        if self._work_turns.cancel():
-            assert self._work is not None  # Only the work lane takes work turns.
-            self._work.stopped_by_user()
 
     async def _handle_agents(
         self, command: FireTrigger | CancelAgent | DecideProposal | ResetConversation
@@ -505,7 +469,7 @@ class AgentSession:
             raise unknown(f"No trigger {command.trigger!r}", "the triggers are", TRIGGER_NAMES)
         if command.input:
             raise Refused(INVALID, f"The {command.trigger} trigger takes no input.")
-        runs = {SUPER_REVIEW: self._super_review, CONFIGURE_CHECKS: self._configure_checks}
+        runs = {SUPER_REVIEW: self._super_review, CONFIGURE_CHECKS: self._turns.configure_checks}
         await runs[command.trigger]()
 
     async def _decide(self, command: DecideProposal) -> None:
@@ -535,7 +499,7 @@ class AgentSession:
         elif agent.role == PLANNER:
             self._seat.cancel()
         else:
-            self._hold_work()
+            self._turns.hold()
 
     def _cancel_startup(self, agent_id: str) -> bool:
         """Cancel the startup check if it's agent ``agent_id`` and still running; returns
@@ -552,16 +516,12 @@ class AgentSession:
             raise Refused(NOT_CONFIGURED, message)
         await self._lane.super_review()
 
-    async def _wake_work(self) -> None:
-        """Run the work a review queued, unless something runs or the user cancelled."""
-        await self._start_work(asked=False)
-
     def _review_lane(self) -> ReviewLane | None:
         desk = self._desk
         if desk is None or not desk.agents.review or desk.agents.tree is None:
             return None
         planner = ReviewPlanner(desk.agents.review_limits)
-        lane = ReviewLane(desk, self._tasks, planner, self._wake_work)
+        lane = ReviewLane(desk, self._tasks, planner, lambda: self._turns.wake())
         lane.changed = self._reviews_changed
         desk.suggest = lane.suggest
         return lane
@@ -622,7 +582,7 @@ class AgentSession:
 
     async def _stop_turns(self) -> None:
         """Cancel the work lane's and the planner's turns, and wait for them to end."""
-        await self._work_turns.close()
+        await self._turns.close()
         await self._seat.stop_turn()
 
     async def events(self) -> AsyncIterator[EventEnvelope]:
@@ -670,7 +630,7 @@ class AgentSession:
             session=self._switcher.summary(last_active),
             settings=self._settings.current,
             model_choices=self._settings.model_choices,
-            busy={WORK_LANE: self._work_turns.running, PLANNER_LANE: self._seat.running},
+            busy={WORK_LANE: self._turns.running, PLANNER_LANE: self._seat.running},
             tasks=self._board.tasks,
             steps=steps,
             steps_title=title,
