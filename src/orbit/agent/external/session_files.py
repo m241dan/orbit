@@ -5,20 +5,12 @@ when orbit works in the user's checkout; outside one, in ``.orbit/sessions`` in 
 Files are replaced atomically, so a crash leaves the old version or the new one, and orbit never
 overwrites or deletes a file it can't read unless asked to delete that session. Nothing is pruned.
 
-A session's lock is an exclusive ``flock`` on its ``.lock`` file, held open until the orbit lets
-go of it; the kernel drops it when the orbit's process ends, so a lock file nobody holds is free to
-take. The file names the holder's process only for whoever reads it. Taking, letting go of and
-checking locks happen under a lock on the sessions directory, so a lock file is never removed
-between another orbit opening it and locking it.
+A session's lock is a :class:`SessionLocks` lock file beside its JSON file.
 """
 
 import asyncio
-import fcntl
 import os
 import tempfile
-from collections.abc import Iterator
-from contextlib import contextmanager, suppress
-from enum import Enum, auto
 from pathlib import Path
 
 from orbit.agent.application.ports import StoredSession
@@ -31,6 +23,7 @@ from orbit.agent.domain.sessions import (
     review_count_json,
 )
 from orbit.agent.external.git_tree import ORBIT_DIR, git_common_dir
+from orbit.agent.external.session_locks import SessionLocks, session_file
 
 SESSIONS = "sessions"
 REVIEWS = "reviews.json"
@@ -87,58 +80,6 @@ def _read_record(path: Path) -> SessionRecord | Unreadable:
     return parse_record(text)
 
 
-@contextmanager
-def _locked_dir(directory: Path, operation: int) -> Iterator[None]:
-    """Hold a lock of ``operation`` (``LOCK_EX`` or ``LOCK_SH``) on ``directory`` itself, so that
-    orbits take, let go of and check the session locks in it one at a time."""
-    fd = os.open(directory, os.O_RDONLY)
-    try:
-        fcntl.flock(fd, operation)
-        yield
-    finally:
-        os.close(fd)
-
-
-def _lock_file(lock: Path) -> int | None:
-    """A descriptor holding an exclusive lock on the file ``lock``, created if need be, with this
-    process's id written in it; none when another open file holds the lock."""
-    fd = os.open(lock, os.O_RDWR | os.O_CREAT, 0o644)
-    try:
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        os.ftruncate(fd, 0)
-        os.write(fd, str(os.getpid()).encode())
-    except BlockingIOError:
-        os.close(fd)
-        return None
-    except BaseException:
-        os.close(fd)
-        raise
-    return fd
-
-
-def _lock_held(lock: Path) -> bool:
-    """Whether an open file holds the lock on the file ``lock``."""
-    try:
-        fd = os.open(lock, os.O_RDONLY)
-    except OSError:
-        return False
-    try:
-        fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
-    except BlockingIOError:
-        return True
-    finally:
-        os.close(fd)
-    return False
-
-
-class _Taken(Enum):
-    """What came of trying to take a session's lock."""
-
-    CREATED = auto()
-    OURS = auto()
-    REFUSED = auto()
-
-
 class SessionFiles:
     """Saved sessions in ``directory``'s ``sessions`` directory, with the review count beside it.
 
@@ -149,7 +90,7 @@ class SessionFiles:
     def __init__(self, directory: Path | str) -> None:
         self._sessions = Path(directory) / SESSIONS
         self._reviews = Path(directory) / REVIEWS
-        self._held: dict[str, int] = {}
+        self._locks = SessionLocks(self._sessions)
 
     async def save(self, record: SessionRecord) -> None:
         path = self._file(record.id, ".json")
@@ -170,24 +111,13 @@ class SessionFiles:
             await asyncio.to_thread(path.unlink, missing_ok=True)
         except OSError as error:
             raise RuntimeError(f"Couldn't delete the session {path}: {error}") from error
-        await asyncio.to_thread(self._remove_lock, session_id, "delete")
+        await self._locks.remove(session_id)
 
     async def acquire(self, session_id: str) -> bool:
-        taking = asyncio.ensure_future(asyncio.to_thread(self._acquire, session_id))
-        try:
-            return await asyncio.shield(taking) is not _Taken.REFUSED
-        except asyncio.CancelledError:
-            # The thread carries on; once it's done, let go of any lock it created (but not one
-            # we already held). A lock that can't be let go of mustn't lose the cancellation.
-            await asyncio.wait([taking])
-            if taking.exception() is None and taking.result() is _Taken.CREATED:
-                with suppress(RuntimeError):
-                    await self.release(session_id)
-            raise
+        return await self._locks.acquire(session_id)
 
     async def release(self, session_id: str) -> None:
-        if session_id in self._held:
-            await asyncio.to_thread(self._remove_lock, session_id, "unlock")
+        await self._locks.release(session_id)
 
     async def review_count(self) -> int:
         return await asyncio.to_thread(self._read_review_count)
@@ -204,60 +134,22 @@ class SessionFiles:
 
         Raises ``ValueError`` for an id that isn't a plain file name.
         """
-        if not session_id or Path(session_id).name != session_id:
-            raise ValueError(f"Not a session id: {session_id!r}")
-        return self._sessions / f"{session_id}{suffix}"
+        return session_file(self._sessions, session_id, suffix)
 
     def _list(self) -> list[StoredSession]:
         if not self._sessions.is_dir():
             return []
         # Like a missing directory, one that can't be opened or locked has no sessions to list.
         try:
-            with _locked_dir(self._sessions, fcntl.LOCK_SH):
+            with self._locks.checking():
                 return [
-                    StoredSession(path.stem, _read_record(path), self._held_elsewhere(path.stem))
+                    StoredSession(
+                        path.stem, _read_record(path), self._locks.held_elsewhere(path.stem)
+                    )
                     for path in sorted(self._sessions.glob("*.json"))
                 ]
         except OSError:
             return []
-
-    def _held_elsewhere(self, session_id: str) -> bool:
-        """Whether another orbit holds the session ``session_id``'s lock."""
-        return session_id not in self._held and _lock_held(self._file(session_id, ".lock"))
-
-    def _acquire(self, session_id: str) -> _Taken:
-        lock = self._file(session_id, ".lock")
-        try:
-            lock.parent.mkdir(parents=True, exist_ok=True)
-            with _locked_dir(lock.parent, fcntl.LOCK_EX):
-                return self._take(session_id, lock)
-        except OSError as error:
-            raise RuntimeError(f"Couldn't lock the session {lock}: {error}") from error
-
-    def _take(self, session_id: str, lock: Path) -> _Taken:
-        """Take the session ``session_id``'s ``lock`` unless another orbit holds it; returns
-        whether this took it, already held it, or was refused."""
-        if session_id in self._held:
-            return _Taken.OURS
-        fd = _lock_file(lock)
-        if fd is None:
-            return _Taken.REFUSED
-        self._held[session_id] = fd
-        return _Taken.CREATED
-
-    def _remove_lock(self, session_id: str, action: str) -> None:
-        """Let go of the session ``session_id``'s lock if this holds it, and remove its file;
-        errors say what failed to ``action`` it."""
-        lock = self._file(session_id, ".lock")
-        try:
-            lock.parent.mkdir(parents=True, exist_ok=True)
-            with _locked_dir(lock.parent, fcntl.LOCK_EX):
-                fd = self._held.pop(session_id, None)
-                if fd is not None:
-                    os.close(fd)
-                lock.unlink(missing_ok=True)
-        except OSError as error:
-            raise RuntimeError(f"Couldn't {action} the session {lock}: {error}") from error
 
     def _read_review_count(self) -> int:
         try:

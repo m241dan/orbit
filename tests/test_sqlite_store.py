@@ -1,0 +1,312 @@
+"""The SQLite store: its database, workspaces, migrations, failures and its thread."""
+
+import asyncio
+import sqlite3
+import subprocess
+import threading
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
+from contextlib import closing, contextmanager
+from datetime import UTC, datetime
+from pathlib import Path
+
+import pytest
+
+from orbit.agent.application.ports import SessionStore, StoredSession
+from orbit.agent.domain.sessions import SessionRecord, Unreadable
+from orbit.agent.external import sqlite_store
+from orbit.agent.external.sqlite_store import MIGRATIONS, THREAD_PREFIX, SqliteStore, StoreError
+
+WHEN = datetime(2026, 10, 17, 14, 30, tzinfo=UTC)
+
+type Opener = Callable[[Path], Awaitable[SqliteStore]]
+
+
+def record(session_id: str = "abc") -> SessionRecord:
+    return SessionRecord(id=session_id, name="Oct 17 14:30", created=WHEN, last_active=WHEN)
+
+
+def git(cwd: Path, *args: str) -> str:
+    result = subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True)
+    return result.stdout.strip()
+
+
+@pytest.fixture
+def state(tmp_path: Path) -> Path:
+    return tmp_path / "state" / "orbit"
+
+
+@pytest.fixture
+def workspace(tmp_path: Path) -> Path:
+    path = tmp_path / "project"
+    path.mkdir()
+    return path
+
+
+@pytest.fixture
+async def open_store(state: Path) -> AsyncIterator[Opener]:
+    """Opens a store in ``state`` for a workspace, closing it after the test."""
+    opened: list[SqliteStore] = []
+
+    async def open_at(workspace: Path) -> SqliteStore:
+        opened.append(await SqliteStore.open(state, str(workspace)))
+        return opened[-1]
+
+    yield open_at
+    for store in opened:
+        await store.close()
+
+
+@contextmanager
+def database(state: Path) -> Iterator[sqlite3.Connection]:
+    """Another connection to the store's database, in autocommit mode."""
+    with closing(sqlite3.connect(state / "orbit.db", isolation_level=None)) as connection:
+        yield connection
+
+
+def store_threads() -> list[threading.Thread]:
+    return [thread for thread in threading.enumerate() if thread.name.startswith(THREAD_PREFIX)]
+
+
+async def test_the_sqlite_store_is_a_session_store(open_store: Opener, workspace: Path) -> None:
+    store: SessionStore = await open_store(workspace)
+    assert store is not None
+
+
+# The database
+
+
+async def test_the_state_directory_and_database_are_the_owners_alone_in_wal_mode(
+    open_store: Opener, state: Path, workspace: Path
+) -> None:
+    await open_store(workspace)
+    assert state.stat().st_mode & 0o777 == 0o700
+    assert (state / "orbit.db").stat().st_mode & 0o777 == 0o600
+    with database(state) as connection:
+        assert connection.execute("PRAGMA journal_mode").fetchone() == ("wal",)
+
+
+async def test_sessions_and_the_review_count_survive_closing(
+    open_store: Opener, workspace: Path
+) -> None:
+    store = await open_store(workspace)
+    await store.save(record())
+    await store.save_review_count(2)
+    await store.close()
+    reopened = await open_store(workspace)
+    assert await reopened.load("abc") == record()
+    assert await reopened.review_count() == 2
+
+
+async def test_each_workspace_has_its_own_sessions_and_review_count(
+    open_store: Opener, tmp_path: Path, workspace: Path
+) -> None:
+    other_workspace = tmp_path / "other"
+    other_workspace.mkdir()
+    store, other = await open_store(workspace), await open_store(other_workspace)
+    await store.save(record("mine"))
+    await other.save(record("theirs"))
+    await store.save_review_count(3)
+    assert [entry.id for entry in await store.sessions()] == ["mine"]
+    assert [entry.id for entry in await other.sessions()] == ["theirs"]
+    assert isinstance(await other.load("mine"), Unreadable)
+    assert await other.review_count() == 0
+    assert await store.acquire("same") and await other.acquire("same")
+
+
+async def test_a_workspace_is_registered_once_by_path_and_its_fingerprint_kept_current(
+    open_store: Opener, state: Path, workspace: Path
+) -> None:
+    await (await open_store(workspace)).close()
+    git(workspace, "init", "-q", "-b", "main")
+    git(workspace, "-c", "user.name=T", "-c", "user.email=t@e", "commit", "-q", "--allow-empty",
+        "-m", "x")  # fmt: skip
+    await open_store(workspace / ".")
+    with database(state) as connection:
+        rows = connection.execute("SELECT path, fingerprint, name FROM workspaces").fetchall()
+    assert rows == [(str(workspace), f"{git(workspace, 'rev-parse', 'HEAD')} ", "project")]
+
+
+async def test_a_record_that_isnt_json_is_unreadable_but_still_listed(
+    open_store: Opener, state: Path, workspace: Path
+) -> None:
+    store = await open_store(workspace)
+    await store.save(record("b"))
+    with database(state) as connection:
+        connection.execute("UPDATE sessions SET record = '{oops'")
+    loaded = await store.load("b")
+    assert isinstance(loaded, Unreadable)
+    assert loaded.reason.startswith("it isn't JSON")
+    assert await store.sessions() == [StoredSession("b", loaded, locked=False)]
+
+
+async def test_a_missing_session_isnt_saved(open_store: Opener, workspace: Path) -> None:
+    assert await (await open_store(workspace)).load("abc") == Unreadable("it isn't saved")
+
+
+# Locks
+
+
+async def test_locks_live_in_the_workspaces_directory_under_the_state_directory(
+    open_store: Opener, state: Path, workspace: Path
+) -> None:
+    await (await open_store(workspace)).acquire("abc")
+    assert [path.name for path in (state / "locks").glob("*/*")] == ["abc.lock"]
+
+
+async def test_closing_lets_go_of_the_stores_locks(open_store: Opener, workspace: Path) -> None:
+    store, other = await open_store(workspace), await open_store(workspace)
+    assert await store.acquire("abc")
+    assert not await other.acquire("abc")
+    await store.close()
+    assert await other.acquire("abc")
+
+
+async def test_sessions_whose_locks_cant_be_checked_arent_listed(
+    open_store: Opener, state: Path, workspace: Path
+) -> None:
+    store = await open_store(workspace)
+    await store.save(record())
+    (state / "locks").write_text("in the way")
+    assert await store.sessions() == []
+
+
+# Failures in use
+
+
+async def test_a_broken_database_fails_each_call_as_the_port_says(
+    open_store: Opener, state: Path, workspace: Path
+) -> None:
+    store = await open_store(workspace)
+    with database(state) as connection:
+        connection.execute("DROP TABLE sessions")
+        connection.execute("DROP TABLE reviews")
+    with pytest.raises(RuntimeError, match=r"Couldn't save the session abc to .*orbit\.db"):
+        await store.save(record())
+    loaded = await store.load("abc")
+    assert isinstance(loaded, Unreadable)
+    assert loaded.reason.startswith("it can't be read from ")
+    assert await store.sessions() == []
+    with pytest.raises(RuntimeError, match=r"Couldn't delete the session abc from .*orbit\.db"):
+        await store.delete("abc")
+    assert await store.review_count() == 0
+    with pytest.raises(RuntimeError, match=r"Couldn't save the review count to .*orbit\.db"):
+        await store.save_review_count(1)
+
+
+# Failures at open
+
+
+async def test_a_newer_database_is_refused_naming_both_versions(
+    open_store: Opener, state: Path, workspace: Path
+) -> None:
+    await (await open_store(workspace)).close()
+    with database(state) as connection:
+        connection.execute("INSERT INTO schema_version (version) VALUES (99)")
+    with pytest.raises(StoreError, match=r"orbit\.db has schema version 99, newer than .* 1;"):
+        await open_store(workspace)
+    assert store_threads() == []
+
+
+async def test_a_file_that_isnt_a_database_is_refused_naming_it(
+    open_store: Opener, state: Path, workspace: Path
+) -> None:
+    state.mkdir(parents=True)
+    (state / "orbit.db").write_bytes(b"not a database at all, " * 100)
+    with pytest.raises(StoreError, match=r"Couldn't open the database .*orbit\.db: "):
+        await open_store(workspace)
+
+
+async def test_a_database_that_cant_be_created_is_refused(
+    open_store: Opener, state: Path, workspace: Path
+) -> None:
+    state.parent.mkdir(parents=True)
+    state.write_text("in the way")
+    with pytest.raises(StoreError, match=r"Couldn't create the database .*orbit\.db: "):
+        await open_store(workspace)
+
+
+async def test_a_database_that_cant_be_connected_to_is_refused(
+    monkeypatch: pytest.MonkeyPatch, open_store: Opener, workspace: Path
+) -> None:
+    def refused(*args: object, **kwargs: object) -> sqlite3.Connection:
+        raise sqlite3.OperationalError("unable to open database file")
+
+    monkeypatch.setattr(sqlite3, "connect", refused)
+    with pytest.raises(StoreError, match=r"Couldn't open the database .*: unable to open"):
+        await open_store(workspace)
+
+
+async def test_a_failed_migration_is_rolled_back_and_refused(
+    monkeypatch: pytest.MonkeyPatch, open_store: Opener, state: Path, workspace: Path
+) -> None:
+    await (await open_store(workspace)).close()
+    broken = (*MIGRATIONS, ("CREATE TABLE extra (x)", "NOT SQL"))
+    monkeypatch.setattr(sqlite_store, "MIGRATIONS", broken)
+    with pytest.raises(StoreError, match=r"upgrade the database .*orbit\.db to schema version 2"):
+        await open_store(workspace)
+    with database(state) as connection:
+        assert connection.execute("SELECT max(version) FROM schema_version").fetchone() == (1,)
+        tables = connection.execute("SELECT name FROM sqlite_master WHERE name = 'extra'")
+        assert tables.fetchall() == []
+
+
+async def test_a_migration_that_cant_start_is_refused(
+    monkeypatch: pytest.MonkeyPatch, open_store: Opener, state: Path, workspace: Path
+) -> None:
+    state.mkdir(parents=True)
+    with database(state) as connection:
+        connection.execute("PRAGMA journal_mode = WAL")
+        connection.execute("CREATE TABLE schema_version (version INTEGER NOT NULL)")
+        connection.execute("BEGIN IMMEDIATE")  # Another writer holds the database.
+        monkeypatch.setattr(sqlite_store, "BUSY_TIMEOUT", 0.05)
+        with pytest.raises(StoreError, match=r"to schema version 1: database is locked"):
+            await open_store(workspace)
+
+
+async def test_a_store_that_fails_to_open_closes_its_connection(
+    monkeypatch: pytest.MonkeyPatch, open_store: Opener, workspace: Path
+) -> None:
+    def fail(path: str) -> str:
+        raise RuntimeError("git broke")
+
+    monkeypatch.setattr(sqlite_store, "workspace_fingerprint", fail)
+    with pytest.raises(RuntimeError, match="git broke"):
+        await open_store(workspace)
+    assert store_threads() == []
+
+
+# The database's thread
+
+
+async def test_closing_while_a_call_is_in_flight_finishes_it_and_leaves_no_thread(
+    open_store: Opener, state: Path, workspace: Path
+) -> None:
+    store = await open_store(workspace)
+    with database(state) as connection:
+        connection.execute("BEGIN IMMEDIATE")  # Holds the save mid-flight.
+        saving = asyncio.create_task(store.save(record()))
+        await asyncio.sleep(0.05)
+        closing_store = asyncio.create_task(store.close())
+        await asyncio.sleep(0.05)
+        assert not closing_store.done()
+        connection.execute("ROLLBACK")
+        await closing_store
+        await saving
+    assert store_threads() == []
+    assert await (await open_store(workspace)).load("abc") == record()
+
+
+async def test_a_cancelled_call_leaves_the_store_usable(
+    open_store: Opener, state: Path, workspace: Path
+) -> None:
+    store = await open_store(workspace)
+    with database(state) as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        saving = asyncio.create_task(store.save(record("first")))
+        await asyncio.sleep(0.05)
+        saving.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await saving
+        connection.execute("ROLLBACK")
+    await store.save(record("second"))
+    assert [entry.id for entry in await store.sessions()] == ["first", "second"]

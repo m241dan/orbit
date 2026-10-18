@@ -120,14 +120,6 @@ async def test_a_file_that_isnt_text_is_unreadable(tmp_path: Path) -> None:
     assert loaded.reason.startswith("it can't be read: ")
 
 
-@pytest.mark.parametrize("session_id", ["", "a/b", "../abc", "."])
-async def test_an_id_that_isnt_a_plain_file_name_is_refused(
-    tmp_path: Path, session_id: str
-) -> None:
-    with pytest.raises(ValueError, match="Not a session id"):
-        await store(tmp_path).load(session_id)
-
-
 # Listing and deleting
 
 
@@ -196,13 +188,6 @@ async def test_deleting_removes_the_session_and_its_lock(tmp_path: Path) -> None
     assert list(sessions(tmp_path).iterdir()) == []
 
 
-async def test_deleting_a_session_lets_go_of_its_lock(tmp_path: Path) -> None:
-    files = store(tmp_path)
-    await files.acquire("abc")
-    await files.delete("abc")
-    assert await store(tmp_path).acquire("abc")
-
-
 async def test_deleting_works_on_unreadable_and_missing_sessions(tmp_path: Path) -> None:
     sessions(tmp_path).mkdir(parents=True)
     (sessions(tmp_path) / "bad.json").write_text("{oops")
@@ -253,23 +238,11 @@ async def test_acquiring_writes_a_lock_with_our_process_id(tmp_path: Path) -> No
     assert [path.name for path in sessions(tmp_path).iterdir()] == ["abc.lock"]
 
 
-async def test_acquiring_a_lock_we_hold_succeeds(tmp_path: Path) -> None:
-    files = store(tmp_path)
-    await files.acquire("abc")
-    assert await files.acquire("abc")
-
-
 async def test_acquiring_a_lock_another_orbit_holds_is_refused(tmp_path: Path) -> None:
     other = store(tmp_path)
     await other.acquire("abc")
     assert not await store(tmp_path).acquire("abc")
     assert (sessions(tmp_path) / "abc.lock").exists()
-
-
-async def test_two_orbits_acquiring_at_once_cant_both_win(tmp_path: Path) -> None:
-    orbits = [store(tmp_path) for _ in range(8)]
-    won = await asyncio.gather(*(files.acquire("abc") for files in orbits))
-    assert won.count(True) == 1
 
 
 @pytest.mark.parametrize("content", ["3000", "garbage", ""])
@@ -405,10 +378,6 @@ async def test_a_cancelled_acquire_of_a_lock_we_hold_keeps_it(tmp_path: Path) ->
 
 
 # The super review count
-
-
-async def test_without_a_saved_review_count_it_is_zero(tmp_path: Path) -> None:
-    assert await store(tmp_path).review_count() == 0
 
 
 async def test_the_review_count_saves_and_loads_back(tmp_path: Path) -> None:

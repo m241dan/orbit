@@ -17,6 +17,7 @@ from orbit.agent.external.git_tree import (
     git_common_dir,
     git_top_level,
     in_git_work_tree,
+    workspace_fingerprint,
 )
 
 
@@ -840,3 +841,25 @@ async def test_a_setup_swapped_in_runs_at_the_next_prepare(repo: Path) -> None:
     tree.use_setup(None)
     await tree.prepare(keep=False)
     assert runs.read_text() == "x"
+
+
+def test_a_repositorys_fingerprint_is_its_root_commit(repo: Path) -> None:
+    root = git(repo, "rev-parse", "HEAD")
+    commit_file(repo, "b.txt", "two\n", "more")
+    assert workspace_fingerprint(str(repo)) == f"{root} "
+
+
+def test_a_repositorys_fingerprint_includes_its_origin(repo: Path) -> None:
+    git(repo, "remote", "add", "origin", "https://example.com/repo.git")
+    root = git(repo, "rev-parse", "HEAD")
+    assert workspace_fingerprint(str(repo)) == f"{root} https://example.com/repo.git"
+
+
+def test_there_is_no_fingerprint_outside_git_or_before_the_first_commit(
+    tmp_path: Path, outside: Path
+) -> None:
+    fresh = tmp_path / "fresh"
+    fresh.mkdir()
+    git(fresh, "init", "-q")
+    assert workspace_fingerprint(str(outside)) is None
+    assert workspace_fingerprint(str(fresh)) is None

@@ -57,6 +57,17 @@ def git_common_dir(path: str) -> str | None:
     return _git_query(path, "rev-parse", "--path-format=absolute", "--git-common-dir")
 
 
+def workspace_fingerprint(path: str) -> str | None:
+    """What identifies the repository ``path`` is in wherever it's moved: its root commits'
+    hashes and its ``origin`` remote's URL (empty without one), joined by spaces; none outside a
+    repository, before its first commit or without git."""
+    roots = _git_query(path, "rev-list", "--max-parents=0", "HEAD")
+    if not roots:
+        return None
+    origin = _git_query(path, "remote", "get-url", "origin") or ""
+    return " ".join([*sorted(roots.split()), origin])
+
+
 async def _run(command: Sequence[str], cwd: Path) -> tuple[bool, str]:
     """Run ``command`` in ``cwd``; returns whether it succeeded and its combined output.
 
