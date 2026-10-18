@@ -14,10 +14,10 @@ from orbit.protocol import (
     PLANNER,
     PLANNER_LANE,
     BusyChanged,
+    ConversationReset,
     ErrorOccurred,
     Event,
     Notice,
-    PlannerReset,
     Settings,
     TurnEndReason,
 )
@@ -129,7 +129,7 @@ class PlannerSeat:
             await self._reread_role(self._desk)
             self.replace(None)
             await self.close_retired()
-            await self._events.put(PlannerReset())
+            await self._events.put(ConversationReset(agent=PLANNER))
             await self._hooks.save()
 
     async def _reread_role(self, desk: AgentDesk) -> None:

@@ -17,16 +17,16 @@ from orbit.protocol import (
     BusyChanged,
     CancelAgent,
     CancelTurn,
+    ConversationReset,
     EditTask,
     ErrorOccurred,
     FireTrigger,
     ListSessions,
     NewSession,
     OpenSession,
-    PlannerReset,
     ProgressNoted,
     RemoveTask,
-    ResetPlanner,
+    ResetConversation,
     ReviewStatus,
     RunTasks,
     SendMessage,
@@ -123,9 +123,16 @@ def test_session_commands_and_events_round_trip() -> None:
         assert event_adapter.validate_json(event.model_dump_json()) == event
 
 
-def test_planner_reset_command_and_event_round_trip() -> None:
-    assert command_adapter.validate_json(ResetPlanner().model_dump_json()) == ResetPlanner()
-    assert event_adapter.validate_json(PlannerReset().model_dump_json()) == PlannerReset()
+def test_reset_conversation_command_and_event_round_trip() -> None:
+    command = ResetConversation(agent=PLANNER)
+    event = ConversationReset(agent=PLANNER)
+    assert command_adapter.validate_json(command.model_dump_json()) == command
+    assert event_adapter.validate_json(event.model_dump_json()) == event
+
+
+def test_reset_conversation_needs_an_agent() -> None:
+    with pytest.raises(ValidationError):
+        ResetConversation(agent="")
 
 
 def test_rejects_empty_task_prompt() -> None:

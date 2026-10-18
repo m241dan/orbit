@@ -30,6 +30,7 @@ from orbit.protocol import (
     CancelAgent,
     CancelTurn,
     ChecksProposed,
+    ConversationReset,
     DecideProposal,
     EditTask,
     ErrorOccurred,
@@ -37,10 +38,9 @@ from orbit.protocol import (
     FireTrigger,
     ListSessions,
     Notice,
-    PlannerReset,
     ProgressNoted,
     RemoveTask,
-    ResetPlanner,
+    ResetConversation,
     ReviewStatus,
     RunTasks,
     SendMessage,
@@ -456,7 +456,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         async def answered(confirmed: bool | None) -> None:
             # The backend refuses while the planner answers, or notes there's nothing to reset.
             if confirmed:
-                await self._session.send(ResetPlanner())
+                await self._session.send(ResetConversation(agent=PLANNER))
 
         self.push_screen(ConfirmScreen(RESET_TITLE, RESET_MESSAGE, RESET_YES), answered)
 
@@ -575,12 +575,12 @@ class OrbitApp(App[None], inherit_bindings=False):
                 | StartupChecked()
             ):
                 self._feed.render(event)
-            case SessionsListed() | SessionOpened() | PlannerReset():
+            case SessionsListed() | SessionOpened() | ConversationReset():
                 self._render_session(event)
             case _:
                 assert_never(event)
 
-    def _render_session(self, event: SessionsListed | SessionOpened | PlannerReset) -> None:
+    def _render_session(self, event: SessionsListed | SessionOpened | ConversationReset) -> None:
         """Show the sessions listed, rule off the planner's conversation where it was reset, or
         take the task list out of list mode, let it follow again and start its total from the
         spend of a session opened, whose contents come in their own events. The conversation's

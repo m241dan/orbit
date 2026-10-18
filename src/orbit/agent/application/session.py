@@ -60,7 +60,7 @@ from orbit.protocol import (
     FireTrigger,
     Notice,
     RemoveTask,
-    ResetPlanner,
+    ResetConversation,
     RunTasks,
     SendMessage,
     Settings,
@@ -79,7 +79,7 @@ WorkCommand = (
     SendMessage
     | CancelTurn
     | UpdateSettings
-    | ResetPlanner
+    | ResetConversation
     | AddTask
     | RunTasks
     | EditTask
@@ -285,7 +285,7 @@ class AgentSession:
                 await self._handle_tasks(command)
             case EditTask() | AcceptTask() | RemoveTask():
                 await self._handle_board(command)
-            case FireTrigger() | CancelAgent() | DecideProposal() | ResetPlanner():
+            case FireTrigger() | CancelAgent() | DecideProposal() | ResetConversation():
                 await self._handle_agents(command)
             case _:
                 assert_never(command)
@@ -416,7 +416,7 @@ class AgentSession:
             self._work.stopped_by_user()
 
     async def _handle_agents(
-        self, command: FireTrigger | CancelAgent | DecideProposal | ResetPlanner
+        self, command: FireTrigger | CancelAgent | DecideProposal | ResetConversation
     ) -> None:
         match command:
             case CancelAgent(agent_id=agent_id):
@@ -425,10 +425,21 @@ class AgentSession:
                 await self._decide(command)
             case FireTrigger():
                 await self._fire_trigger(command)
-            case ResetPlanner():
-                await self._seat.reset()
+            case ResetConversation():
+                await self._reset_conversation(command)
             case _:
                 assert_never(command)
+
+    async def _reset_conversation(self, command: ResetConversation) -> None:
+        """Reset the planner's conversation; refused for any other agent."""
+        if command.agent != PLANNER:
+            message = (
+                f"Agent {command.agent!r} has no conversation to reset; "
+                f"the agents with one are {PLANNER}."
+            )
+            await self._events.put(ErrorOccurred(message=message))
+            return
+        await self._seat.reset()
 
     async def _fire_trigger(self, command: FireTrigger) -> None:
         """Run the built-in trigger ``command`` names; refused for any other name, or any input,

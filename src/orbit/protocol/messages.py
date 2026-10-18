@@ -189,11 +189,12 @@ class DeleteSession(_Message):
     session_id: str
 
 
-class ResetPlanner(_Message):
-    """End the planner's conversation, so the next prompt starts a fresh one, and re-read its
-    role from the project's config. Refused while the planner answers."""
+class ResetConversation(_Message):
+    """End the conversation of the agent ``agent``, so its next message starts a fresh one, and
+    re-read its role from the project's config. Refused while the agent answers."""
 
-    type: Literal["reset_planner"] = "reset_planner"
+    type: Literal["reset_conversation"] = "reset_conversation"
+    agent: str = Field(min_length=1)
 
 
 Command = Annotated[
@@ -213,7 +214,7 @@ Command = Annotated[
     | NewSession
     | RenameSession
     | DeleteSession
-    | ResetPlanner,
+    | ResetConversation,
     Field(discriminator="type"),
 ]
 
@@ -652,11 +653,12 @@ class SessionOpened(_Message):
     session: SessionSummary
 
 
-class PlannerReset(_Message):
-    """The planner's conversation ended at the user's ``ResetPlanner``; the next prompt starts
-    a fresh one."""
+class ConversationReset(_Message):
+    """The conversation of the agent ``agent`` ended at the user's ``ResetConversation``; its
+    next message starts a fresh one."""
 
-    type: Literal["planner_reset"] = "planner_reset"
+    type: Literal["conversation_reset"] = "conversation_reset"
+    agent: str
 
 
 Event = Annotated[
@@ -688,7 +690,7 @@ Event = Annotated[
     | UsageChanged
     | SessionsListed
     | SessionOpened
-    | PlannerReset,
+    | ConversationReset,
     Field(discriminator="type"),
 ]
 

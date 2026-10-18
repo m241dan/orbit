@@ -18,12 +18,13 @@ from orbit.agent.application.ports import PlannerRoleReader
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.board import TaskBoard
 from orbit.protocol import (
+    PLANNER,
     AgentExited,
     BusyChanged,
+    ConversationReset,
     ErrorOccurred,
     Event,
     Notice,
-    PlannerReset,
     Settings,
     TurnFinished,
 )
@@ -169,7 +170,7 @@ async def test_a_reset_ends_the_conversation_and_saves() -> None:
     await answered(seated_)
     seated_.calls.clear()
     await seated_.seat.reset()
-    assert seated_.published() == [EXITED, PlannerReset()]
+    assert seated_.published() == [EXITED, ConversationReset(agent=PLANNER)]
     assert seated_.calls == ["save"]
     assert seated_.seat.conversation_id is None
 
@@ -203,7 +204,7 @@ async def test_a_reset_with_an_invalid_config_keeps_the_role_and_says_why() -> N
     assert seated_.published() == [
         ErrorOccurred(message=f"{ROLE_KEPT}: bad tools"),
         EXITED,
-        PlannerReset(),
+        ConversationReset(agent=PLANNER),
     ]
 
 

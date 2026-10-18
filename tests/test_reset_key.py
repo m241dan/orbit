@@ -3,7 +3,7 @@
 import pytest
 from textual.widgets import Static
 
-from orbit.protocol import PLANNER, AgentStarted, PlannerReset, ResetPlanner
+from orbit.protocol import PLANNER, AgentStarted, ConversationReset, ResetConversation
 from orbit.tui import OrbitApp
 from orbit.tui.transcript import Transcript
 from orbit.tui.view import EntryKind, planner_reset_entry
@@ -19,7 +19,7 @@ async def test_ctrl_n_asks_then_resets_the_planner() -> None:
         assert session.commands == []
         assert isinstance(app.screen, ConfirmScreen)
         await pilot.press("y")
-        assert session.commands == [ResetPlanner()]
+        assert session.commands == [ResetConversation(agent=PLANNER)]
         assert not isinstance(app.screen, ConfirmScreen)
 
 
@@ -61,7 +61,7 @@ async def test_a_reset_draws_a_rule_under_the_planner_tab_and_all() -> None:
     app = OrbitApp(session)
     async with app.run_test() as pilot:
         await session.queue.put(AgentStarted(agent_id="agent-1", role=PLANNER, task_id="plan"))
-        await session.queue.put(PlannerReset())
+        await session.queue.put(ConversationReset(agent=PLANNER))
         rule: tuple[str, EntryKind] = ("planner reset", "rule")
         while rule not in entries(app):
             await pilot.pause()

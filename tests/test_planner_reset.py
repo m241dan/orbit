@@ -16,12 +16,12 @@ from orbit.protocol import (
     AddTask,
     AgentExited,
     CancelTurn,
+    ConversationReset,
     ErrorOccurred,
     Event,
     Notice,
     OpenSession,
-    PlannerReset,
-    ResetPlanner,
+    ResetConversation,
     SendMessage,
     TasksChanged,
     TaskSpec,
@@ -47,13 +47,13 @@ NEW_ROLE = ROLES["planner"].model_copy(
 
 async def reset(session: AgentSession) -> list[Event]:
     """The events from asking to reset the planner until it's reset."""
-    await session.send(ResetPlanner())
-    return await events_until(session, of_type(PlannerReset))
+    await session.send(ResetConversation(agent=PLANNER))
+    return await events_until(session, of_type(ConversationReset))
 
 
 async def refusal(session: AgentSession) -> Event:
     """What asking to reset the planner is answered with, when it's refused."""
-    await session.send(ResetPlanner())
+    await session.send(ResetConversation(agent=PLANNER))
     answered = Stop("refused", lambda e: isinstance(e, ErrorOccurred | Notice))
     return (await events_until(session, answered))[-1]
 
@@ -144,7 +144,7 @@ async def test_a_reset_is_refused_while_the_planner_answers() -> None:
     assert await refusal(session) == ErrorOccurred(message=PLANNER_BUSY_RESET)
     await session.send(CancelTurn(lane="planner"))
     events = await events_until(session, idle("planner"))
-    assert not any(isinstance(e, PlannerReset | AgentExited) for e in events)
+    assert not any(isinstance(e, ConversationReset | AgentExited) for e in events)
     await session.close()
 
 
@@ -179,4 +179,20 @@ async def test_resetting_a_restored_conversation_starts_the_next_prompt_afresh()
     await plan(session, "Plan.")
     assert launcher.resumed == [None]
     assert launcher.launches[-1].prompt == f"{steps_note(())}\n\nPlan."
+    await session.close()
+
+
+async def test_only_the_planners_conversation_can_be_reset() -> None:
+    store = FakeStore()
+    session, _, launcher = session_for(store=store)
+    launcher.planner_turns = [chats]
+    await plan(session, "Plan.")
+    for agent in ("coder", "nobody"):
+        await session.send(ResetConversation(agent=agent))
+        events = await events_until(session, of_type(ErrorOccurred))
+        message = f"Agent {agent!r} has no conversation to reset; the agents with one are planner."
+        assert events[-1] == ErrorOccurred(message=message)
+        assert not any(isinstance(e, ConversationReset | AgentExited) for e in events)
+    await asyncio.sleep(0.01)  # Saving takes a while.
+    assert store.last.planner_conversation == "conversation-agent-1"
     await session.close()
