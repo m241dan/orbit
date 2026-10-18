@@ -212,9 +212,26 @@ async def test_a_failure_after_welcome_is_an_internal_error_and_the_background_s
     handshake = parts.handshake(picking=True)
     await handshake.hello(hello(), "hi")
     message = "Orbit failed to finish greeting the frontend: no leftovers"
-    assert parts.log[-2:] == [ErrorOccurred(code=INTERNAL, message=message), "start"]
-    assert "list" not in parts.log
+    error = ErrorOccurred(code=INTERNAL, message=message)
+    assert parts.log[-4:] == [error, "list", LISTED, "start"]
     assert handshake.welcomed
+
+
+async def test_a_review_count_that_fails_still_publishes_the_steps_after_it() -> None:
+    parts = Parts()
+    parts.fail_at, parts.no_steps, parts.notes = "review count", True, ["left over"]
+    await parts.handshake(picking=True).hello(hello(), "hi")
+    message = "Orbit failed to finish greeting the frontend: no review count"
+    assert parts.log[4:] == [
+        "review count",
+        ErrorOccurred(code=INTERNAL, message=message),
+        Notice(message=NO_STEPS_NOTE),
+        "leftovers",
+        Notice(message="left over"),
+        "list",
+        LISTED,
+        "start",
+    ]
 
 
 async def test_a_catalog_that_fails_fails_hello_with_no_welcome_and_no_background() -> None:

@@ -86,8 +86,8 @@ class Handshake:
         """Welcome the frontend that sent ``hello`` as ``command_id``, then publish the catalog,
         the latest usage, if any, a snapshot, the one-off notices and, if asked to, the saved
         sessions to pick from; refused for a second Hello, or another protocol version, and
-        failing, with no Welcome, if the catalog can't be had. A failure after Welcome is
-        published as an ``internal`` error instead."""
+        failing, with no Welcome, if the catalog can't be had. A step that fails after Welcome
+        is published as an ``internal`` error instead, and the steps after it still run."""
         if self._welcomed:
             raise Refused(INVALID, HELLO_AGAIN_MESSAGE)
         if hello.protocol_version != PROTOCOL_VERSION:
@@ -101,11 +101,8 @@ class Handshake:
         self._welcomed = True
         await self._events.put(Welcome(command_id=command_id, server_version=__version__))
         try:
-            await self._publish(catalog)
-            await self._announce()
-        except Exception as exc:  # Hello has its outcome, Welcome; this mustn't be a second.
-            message = f"Orbit failed to finish greeting the frontend: {exc}"
-            await self._events.put(ErrorOccurred(code=INTERNAL, message=message))
+            for step in self._steps(catalog):
+                await self._attempt(step)
         finally:  # A sender cancelled meanwhile mustn't keep the background from starting.
             if not self._parts.closing():
                 self._parts.start()
@@ -120,17 +117,37 @@ class Handshake:
             await self._events.put(latest)
         await self._events.put(parts.snapshot())
 
-    async def _announce(self) -> None:
-        """Load the review count, then publish the one-off notices and the saved sessions to
-        pick from, if asked to."""
+    def _steps(self, catalog: Catalog) -> list[Callable[[], Awaitable[None]]]:
+        """The steps after Welcome, in order: publishing ``catalog`` and the session, loading the
+        review count, the one-off notices and, if asked to, the saved sessions to pick from."""
         parts = self._parts
-        await parts.load_review_count()
+        steps = [
+            lambda: self._publish(catalog),
+            parts.load_review_count,
+            self._publish_notes,
+            self._publish_leftovers,
+        ]
+        if parts.list_sessions is not None:
+            steps.append(parts.list_sessions)
+        return steps
+
+    async def _attempt(self, step: Callable[[], Awaitable[None]]) -> None:
+        """Run ``step``, publishing its failure as an ``internal`` error."""
+        try:
+            await step()
+        except Exception as exc:  # Hello has its outcome, Welcome; this mustn't be a second.
+            message = f"Orbit failed to finish greeting the frontend: {exc}"
+            await self._events.put(ErrorOccurred(code=INTERNAL, message=message))
+
+    async def _publish_notes(self) -> None:
+        """Publish the workspace, if any, and that no steps verify tasks, if none do."""
         for note in self._notes():
             await self._events.put(Notice(message=note))
-        for note in await parts.leftovers():
+
+    async def _publish_leftovers(self) -> None:
+        """Publish the leftovers of earlier runs."""
+        for note in await self._parts.leftovers():
             await self._events.put(Notice(message=note))
-        if parts.list_sessions is not None:
-            await parts.list_sessions()
 
     def _notes(self) -> list[str]:
         """The workspace, if any, and that no steps verify tasks, if none do."""

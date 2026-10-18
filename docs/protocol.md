@@ -90,8 +90,9 @@ place of `CommandAccepted`). The outcome comes after the events the command's ha
 published, such as a `TasksChanged`, so when a frontend sees it, it has seen what the command
 did. `Hello` is the exception: `Welcome` comes first, and the handshake's events follow it, so a
 frontend that has seen `Welcome` hasn't yet seen the `Snapshot`. If orbit fails to gather the
-catalog, `Hello` is refused as `internal` with no `Welcome`; a failure after `Welcome` is reported
-as an `ErrorOccurred` with code `internal`, not as a second outcome.
+catalog, `Hello` is refused as `internal` with no `Welcome`; a step that fails after `Welcome` is
+reported as an `ErrorOccurred` with code `internal`, not as a second outcome, and the handshake's
+remaining events still follow it.
 
 `CommandRefused` says why in `code`, one of the refusal codes below, and `message`, for people.
 A refused command changed nothing, except one refused as `internal`: orbit failed partway
