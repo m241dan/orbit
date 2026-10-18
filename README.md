@@ -588,7 +588,9 @@ unrecorded; see [Storage failures](#storage-failures).
 `orbit db backup PATH` backs the database up to `PATH`, readable by you alone, with SQLite's
 online backup, so it's safe while orbit runs. It takes `--state-dir` as `chat` does, refuses (status
 2) when `PATH` exists unless given `--force`, and when the state directory has no `orbit.db` says
-there's nothing to back up. Copying `orbit.db` yourself while orbit runs isn't safe: the copy can
+there's nothing to back up. It refuses, even with `--force`, to write over `orbit.db` itself or its
+`-wal` and `-shm` files, by any path. The copy goes to a temporary file beside `PATH` that replaces
+it only once whole, so a backup that fails leaves `PATH` as it was. Copying `orbit.db` yourself while orbit runs isn't safe: the copy can
 miss writes still in its `-wal` file, or catch one half done. To restore, stop every orbit using the
 state directory, replace `orbit.db` with the backup, and start orbit again.
 

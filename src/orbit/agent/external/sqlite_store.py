@@ -16,6 +16,7 @@ import asyncio
 import errno
 import os
 import sqlite3
+import tempfile
 import time
 import uuid
 from collections.abc import Callable, Iterator, Mapping, Sequence
@@ -34,6 +35,7 @@ from orbit.agent.external.session_locks import SessionLocks, check_session_id
 from orbit.protocol import EventEnvelope, decode_event, encode
 
 DATABASE = "orbit.db"
+WAL_FILES = ("-wal", "-shm")  # The endings of the files SQLite keeps beside the database.
 LOCKS = "locks"
 BUSY_TIMEOUT = 5.0
 RETRY_DELAY = 0.01
@@ -326,13 +328,35 @@ def _open_existing(database: Path) -> sqlite3.Connection:
         raise StoreError(f"Couldn't open the database {database}: {error}") from error
 
 
-def _create_target(target: Path) -> None:
-    """Make ``target`` an empty file, owner read-write, whether or not it was there."""
-    descriptor = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+def _is_database_file(target: Path, database: Path) -> bool:
+    """Whether ``target`` is ``database`` or its ``-wal`` or ``-shm`` file, by any path."""
+    files = (database, *(database.with_name(database.name + end) for end in WAL_FILES))
+    return any(_same_file(target, path) for path in files)
+
+
+def _same_file(target: Path, path: Path) -> bool:
+    """Whether ``target`` and ``path`` resolve to one path, or exist as one file."""
+    if target.resolve() == path.resolve():
+        return True
+    return target.exists() and path.exists() and os.path.samefile(target, path)
+
+
+def _copy_to(source: sqlite3.Connection, target: Path) -> None:
+    """Back ``source`` up to ``target``, owner read-write, through a temporary file beside it
+    that replaces ``target`` only once the copy is whole, and is removed if it fails."""
+    descriptor, name = tempfile.mkstemp(prefix=f".{target.name}.", dir=target.parent)
+    temporary = Path(name)
     try:
-        os.fchmod(descriptor, 0o600)
-    finally:
-        os.close(descriptor)
+        try:
+            os.fchmod(descriptor, 0o600)
+        finally:
+            os.close(descriptor)
+        with closing(sqlite3.connect(temporary)) as copy:
+            source.backup(copy)
+        os.replace(temporary, target)
+    except BaseException:
+        temporary.unlink(missing_ok=True)
+        raise
 
 
 class SqliteStore:
@@ -542,10 +566,12 @@ class SqliteStore:
         return await self._call(self._insert_new, reading, committing)
 
     async def backup(self, target: Path) -> None:
-        """Copy the database to ``target``, owner read-write, replacing any file there, with
-        SQLite's online backup, which is safe while another orbit uses the database.
+        """Copy the database to ``target``, owner read-write, replacing any file there only once
+        the copy is whole, with SQLite's online backup, which is safe while another orbit uses
+        the database.
 
-        Raises :class:`StoreError`, naming both files, when the copy fails.
+        Raises :class:`StoreError`, naming both files, when ``target`` is the database or one of
+        its files, or when the copy fails, leaving ``target`` as it was.
         """
         await self._call(self._backup, target)
 
@@ -591,10 +617,14 @@ class SqliteStore:
         self._connection = _open_existing(self._database)
 
     def _backup(self, target: Path) -> None:
+        if _is_database_file(target, self._database):
+            message = (
+                f"Won't back up the database {self._database} onto itself: {target} is the"
+                " database or one of its files."
+            )
+            raise StoreError(message)
         try:
-            _create_target(target)
-            with closing(sqlite3.connect(target)) as copy:
-                self._db.backup(copy)
+            _copy_to(self._db, target)
         except (OSError, sqlite3.Error) as error:
             message = f"Couldn't back up the database {self._database} to {target}: {error}"
             raise StoreError(message) from error

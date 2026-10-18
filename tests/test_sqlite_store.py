@@ -555,6 +555,97 @@ async def test_a_backup_that_cant_be_written_is_refused_naming_the_target(
         await backed_up(state, target)
 
 
+def stored_ids(state: Path) -> list[str]:
+    with database(state) as connection:
+        rows = connection.execute("SELECT id FROM sessions ORDER BY id").fetchall()
+    return [str(session_id) for (session_id,) in rows]
+
+
+@pytest.mark.parametrize("name", ["orbit.db", "orbit.db-wal", "orbit.db-shm"])
+async def test_a_backup_onto_the_database_or_its_files_is_refused(
+    open_store: Opener, state: Path, workspace: Path, name: str
+) -> None:
+    await (await open_store(workspace)).save(record())
+    with pytest.raises(
+        StoreError, match=r"Won't back up the database .*orbit\.db onto itself: .*orbit\.db"
+    ):
+        await backed_up(state, state / name)
+    assert stored_ids(state) == ["abc"]
+
+
+async def test_a_backup_onto_a_link_to_the_database_is_refused(
+    open_store: Opener, state: Path, workspace: Path, tmp_path: Path
+) -> None:
+    await (await open_store(workspace)).save(record())
+    link = tmp_path / "link.db"
+    link.symlink_to(state / "orbit.db")
+    with pytest.raises(StoreError, match="Won't back up the database"):
+        await backed_up(state, link)
+    assert stored_ids(state) == ["abc"]
+
+
+async def test_a_backup_onto_a_hard_link_to_the_database_is_refused(
+    open_store: Opener, state: Path, workspace: Path, tmp_path: Path
+) -> None:
+    await (await open_store(workspace)).save(record())
+    link = tmp_path / "link.db"
+    link.hardlink_to(state / "orbit.db")
+    with pytest.raises(StoreError, match="Won't back up the database"):
+        await backed_up(state, link)
+    assert stored_ids(state) == ["abc"]
+
+
+class FailingBackup(sqlite3.Connection):
+    """A connection whose backups copy everything and then fail, as an I/O error would."""
+
+    def backup(self, target: sqlite3.Connection, **kwargs: object) -> None:
+        super().backup(target)
+        raise sqlite3.OperationalError("disk I/O error")
+
+
+def failing_backups(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Have stores opened for a backup fail their backups."""
+
+    def open_existing(database: Path) -> sqlite3.Connection:
+        return sqlite3.connect(database, factory=FailingBackup, check_same_thread=False)
+
+    monkeypatch.setattr(sqlite_store, "_open_existing", open_existing)
+
+
+async def test_a_failed_backup_keeps_the_file_it_would_have_replaced(
+    monkeypatch: pytest.MonkeyPatch,
+    open_store: Opener,
+    state: Path,
+    workspace: Path,
+    tmp_path: Path,
+) -> None:
+    await (await open_store(workspace)).save(record())
+    target = tmp_path / "copies" / "copy.db"
+    target.parent.mkdir()
+    target.write_text("old")
+    failing_backups(monkeypatch)
+    with pytest.raises(StoreError, match=r"Couldn't back up the database .* to .*copy\.db: disk"):
+        await backed_up(state, target)
+    assert target.read_text() == "old"
+    assert list(target.parent.iterdir()) == [target]
+
+
+async def test_a_failed_backup_leaves_no_file_behind(
+    monkeypatch: pytest.MonkeyPatch,
+    open_store: Opener,
+    state: Path,
+    workspace: Path,
+    tmp_path: Path,
+) -> None:
+    await (await open_store(workspace)).save(record())
+    copies = tmp_path / "copies"
+    copies.mkdir()
+    failing_backups(monkeypatch)
+    with pytest.raises(StoreError, match="Couldn't back up the database"):
+        await backed_up(state, copies / "copy.db")
+    assert list(copies.iterdir()) == []
+
+
 # Failed writes, described for the storage halt
 
 

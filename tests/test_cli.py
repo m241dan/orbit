@@ -1142,6 +1142,39 @@ def test_db_backup_that_fails_stops_with_the_reason(state: Path, tmp_path: Path)
     assert store_threads() == []
 
 
+@pytest.mark.parametrize("link", [False, True])
+def test_db_backup_refuses_to_overwrite_the_database(
+    state: Path, tmp_path: Path, link: bool
+) -> None:
+    asyncio.run(saved_sessions(state, tmp_path, "abc"))
+    target = state / "orbit.db"
+    if link:
+        target = tmp_path / "link.db"
+        target.symlink_to(state / "orbit.db")
+    result = runner.invoke(app, ["db", "backup", str(target), "--force"])
+
+    assert result.exit_code == 2
+    assert "onto itself" in result.stderr
+    assert backed_up_ids(state / "orbit.db") == ["abc"]
+
+
+def test_db_backup_that_fails_keeps_the_file_it_would_have_replaced(
+    monkeypatch: pytest.MonkeyPatch, state: Path, tmp_path: Path
+) -> None:
+    asyncio.run(saved_sessions(state, tmp_path, "abc"))
+    Path("out.db").write_text("mine")
+    monkeypatch.setattr("orbit.agent.external.sqlite_store._copy_to", failing_copy)
+    result = runner.invoke(app, ["db", "backup", "out.db", "--force"])
+
+    assert result.exit_code == 2
+    assert "Couldn't back up the database" in result.stderr
+    assert Path("out.db").read_text() == "mine"
+
+
+def failing_copy(source: sqlite3.Connection, target: Path) -> None:
+    raise sqlite3.OperationalError("disk I/O error")
+
+
 def test_db_backup_while_another_orbit_has_the_database_open(state: Path, tmp_path: Path) -> None:
     async def backed_up_while_open() -> int:
         store = await SqliteStore.open(state, str(tmp_path))
