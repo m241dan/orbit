@@ -3,9 +3,9 @@
 import pytest
 
 from orbit.protocol import AgentExited, AgentExitReason, TurnEndReason, TurnFinished, Usage
-from orbit.tui.view import (
+from orbit.tui.view.common import EntryKind
+from orbit.tui.view.rules import (
     DrawnRule,
-    EntryKind,
     ExitRule,
     duration_text,
     exit_rule,

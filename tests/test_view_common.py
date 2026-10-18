@@ -5,12 +5,7 @@ import pytest
 from orbit.protocol import (
     TaskStatus,
 )
-from orbit.tui.view import (
-    STATUS_ICONS,
-    counted,
-    text_lines,
-    token_text,
-)
+from orbit.tui.view.common import STATUS_ICONS, counted, text_lines, token_text
 
 
 def test_every_task_status_has_an_icon_except_running_which_spins() -> None:

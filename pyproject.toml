@@ -146,4 +146,4 @@ type = "forbidden"
 source_modules = ["orbit.tui.view"]
 # Every other module in the frontend is a widget; the view's own modules may import each other.
 forbidden_modules = ["textual", "orbit.tui.*"]
-ignore_imports = ["orbit.tui.view.** -> orbit.tui.view.**", "orbit.tui.view -> orbit.tui.view.*"]
+ignore_imports = ["orbit.tui.view.** -> orbit.tui.view.**"]

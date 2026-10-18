@@ -13,15 +13,11 @@ from textual.containers import Vertical
 from orbit.protocol import AgentReply, AgentRequest, Event, ToolCallFinished, ToolCallStarted
 from orbit.tui.detail import DetailPane
 from orbit.tui.transcript_log import TranscriptLog
-from orbit.tui.view import (
-    Entry,
-    EntryKind,
-    conversation_title,
-    copied_note,
-    detail_copy,
-    detail_covers,
-    tool_call_started,
-)
+from orbit.tui.view.common import EntryKind
+from orbit.tui.view.detail import copied_note, detail_copy, detail_covers
+from orbit.tui.view.log import Entry
+from orbit.tui.view.tool_calls import tool_call_started
+from orbit.tui.view.transcript import conversation_title
 from orbit.tui.widgets import Ticker
 from orbit.tui.working import WorkingRow
 

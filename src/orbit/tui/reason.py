@@ -10,7 +10,8 @@ from textual.screen import ModalScreen
 from textual.widgets import Static
 
 from orbit.protocol import TaskState
-from orbit.tui.view import REASON_HINT, copied_note, reason_text, reason_title
+from orbit.tui.view.detail import copied_note
+from orbit.tui.view.tasks import REASON_HINT, reason_text, reason_title
 
 
 class ReasonScreen(ModalScreen[None]):

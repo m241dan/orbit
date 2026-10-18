@@ -1,6 +1,7 @@
 """An edit's diff is numbered by where its new lines are found in the edited file."""
 
-from orbit.tui.view import EDIT_SEPARATOR, diff_numbers, edited_snippet, line_diff, numbered_diff
+from orbit.tui.view.diff_numbers import diff_numbers, edited_snippet, numbered_diff
+from orbit.tui.view.diffs import EDIT_SEPARATOR, line_diff
 
 HEADER = (
     "The file /src/a.py has been updated. Here's the result of running `cat -n` on a snippet "

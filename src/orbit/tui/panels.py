@@ -9,7 +9,8 @@ from textual.app import ComposeResult
 from textual.widgets import Static
 
 from orbit.protocol import StepState, UsageChanged
-from orbit.tui.view import NO_STEPS_TEXT, spinner_frame, step_lines, usage_lines
+from orbit.tui.view.common import spinner_frame
+from orbit.tui.view.panels import NO_STEPS_TEXT, step_lines, usage_lines
 from orbit.tui.widgets import SidePanel, Ticker
 
 

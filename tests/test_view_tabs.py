@@ -20,7 +20,7 @@ from orbit.protocol import (
     ToolCallStarted,
     TurnFinished,
 )
-from orbit.tui.view import (
+from orbit.tui.view.tabs import (
     ALL_TAB_LABEL,
     PINNED_TABS,
     ROLE_TABS,

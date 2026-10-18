@@ -1,7 +1,7 @@
 from textual.app import App, ComposeResult
 from textual.widgets import Static
 
-from orbit.tui.view import SPINNER_FPS
+from orbit.tui.view.common import SPINNER_FPS
 from orbit.tui.widgets import Ticker
 
 

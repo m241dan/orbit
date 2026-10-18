@@ -31,7 +31,8 @@ from orbit.tui.sessions import SessionsScreen
 from orbit.tui.task_editor import TaskEditorScreen
 from orbit.tui.tasks import TaskList
 from orbit.tui.transcript import Transcript
-from orbit.tui.view import spinner_frame, task_label, task_numbers, usage_label
+from orbit.tui.view.common import spinner_frame
+from orbit.tui.view.tasks import task_label, task_numbers, usage_label
 from orbit.tui.widgets import ChatPrompt
 from tests.test_tui import FakeSession, opened, selected, show_settings
 

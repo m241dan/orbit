@@ -6,7 +6,9 @@ from textual.widgets import Static
 from orbit.protocol import PLANNER, AgentStarted, ConversationReset, ResetConversation
 from orbit.tui import OrbitApp
 from orbit.tui.transcript import Transcript
-from orbit.tui.view import RESET_MESSAGE, RESET_TITLE, EntryKind, planner_reset_entry
+from orbit.tui.view.common import EntryKind
+from orbit.tui.view.confirm import RESET_MESSAGE, RESET_TITLE
+from orbit.tui.view.rules import planner_reset_entry
 from orbit.tui.widgets import ConfirmScreen, PickerScreen
 from tests.test_tui import FakeSession, entries
 

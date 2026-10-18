@@ -4,7 +4,8 @@ from orbit.protocol import (
     TaskStatus,
     Usage,
 )
-from orbit.tui.view import (
+from orbit.tui.view.rules import usage_text
+from orbit.tui.view.tasks import (
     NEW_TASK_LABEL,
     TASK_EDITOR_HINT,
     active_task,
@@ -17,7 +18,6 @@ from orbit.tui.view import (
     task_list_title,
     task_numbers,
     usage_label,
-    usage_text,
 )
 
 

@@ -19,14 +19,19 @@ from orbit.protocol import (
     ToolCallFinished,
     ToolCallStarted,
 )
-from orbit.tui.view import (
+from orbit.tui.view.common import SPINNER_FPS
+from orbit.tui.view.tool_calls import (
+    REPLY_LIMIT,
+    ToolCall,
+    tool_call_finished,
+    tool_call_started,
+    tool_call_unfinished,
+)
+from orbit.tui.view.transcript import (
     GUTTER_BAR,
     GUTTER_MARKER,
     PROMPT_LINES_SHOWN,
     PROMPT_MARKER,
-    REPLY_LIMIT,
-    SPINNER_FPS,
-    ToolCall,
     activity_entry,
     agent_entry,
     agent_labelled,
@@ -48,9 +53,6 @@ from orbit.tui.view import (
     speaker_label,
     starts_collapsed,
     tool_call_entry,
-    tool_call_finished,
-    tool_call_started,
-    tool_call_unfinished,
 )
 
 

@@ -5,12 +5,7 @@ from orbit.protocol import (
     UsageChanged,
     UsageLimit,
 )
-from orbit.tui.view import (
-    NO_STEPS_TEXT,
-    reset_label,
-    step_lines,
-    usage_lines,
-)
+from orbit.tui.view.panels import NO_STEPS_TEXT, reset_label, step_lines, usage_lines
 
 
 def test_step_lines_time_only_the_running_step() -> None:

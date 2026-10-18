@@ -7,7 +7,7 @@ from rich.text import Text
 from textual.widgets import Static
 
 from orbit.protocol import Event
-from orbit.tui.view import Working, WorkingView, track_working, working_lines
+from orbit.tui.view.working import Working, WorkingView, track_working, working_lines
 
 
 class WorkingRow(Static):

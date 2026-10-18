@@ -1,7 +1,7 @@
 from orbit.protocol import (
     Settings,
 )
-from orbit.tui.view import (
+from orbit.tui.view.settings import (
     model_choices,
     model_options,
     settings_summary,

@@ -12,7 +12,8 @@ from orbit.protocol import (
 )
 from orbit.tui import OrbitApp
 from orbit.tui.panels import VerificationPanel
-from orbit.tui.view import spinner_frame, step_lines
+from orbit.tui.view.common import spinner_frame
+from orbit.tui.view.panels import step_lines
 from tests.test_task_list import feed
 from tests.test_tui import FakeSession, entries
 

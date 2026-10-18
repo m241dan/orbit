@@ -19,9 +19,7 @@ from orbit.protocol import (
     VerificationSkipped,
     VerificationStarted,
 )
-from orbit.tui.view import (
-    coalesce,
-)
+from orbit.tui.view.events import coalesce
 
 
 def tasks_changed(*task_ids: str) -> TasksChanged:

@@ -11,7 +11,7 @@ from orbit.protocol import (
     TurnFinished,
     TurnStarted,
 )
-from orbit.tui.view import (
+from orbit.tui.view.working import (
     RunningCall,
     Working,
     WorkingAgent,

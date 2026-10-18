@@ -11,15 +11,9 @@ from textual.screen import ModalScreen
 from textual.widgets import Input, Static
 
 from orbit.protocol import Settings, TaskSpec
-from orbit.tui.view import (
-    TASK_EDITOR_HINT,
-    join_prompt,
-    model_choices,
-    model_label,
-    split_prompt,
-    task_editor_title,
-    tool_access_choices,
-)
+from orbit.tui.view.common import model_label
+from orbit.tui.view.settings import model_choices, tool_access_choices
+from orbit.tui.view.tasks import TASK_EDITOR_HINT, join_prompt, split_prompt, task_editor_title
 from orbit.tui.widgets import PickerScreen, PromptBox, PromptInput, mark_selected
 
 

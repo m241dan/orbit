@@ -62,7 +62,8 @@ from orbit.tui.tabs import ConversationTabs
 from orbit.tui.tasks import TaskList
 from orbit.tui.transcript import Transcript
 from orbit.tui.transcript_log import TranscriptLog
-from orbit.tui.view import EntryKind, coalesce, spinner_frame
+from orbit.tui.view.common import EntryKind, spinner_frame
+from orbit.tui.view.events import coalesce
 from orbit.tui.widgets import ChatPrompt, PickerScreen, SidePanel
 
 

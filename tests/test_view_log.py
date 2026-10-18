@@ -1,6 +1,6 @@
 """A log's rows: which entries are shown, the cursor's nearest row, thinking and rules."""
 
-from orbit.tui.view import (
+from orbit.tui.view.log import (
     Entry,
     after_rows,
     latest_rule,

@@ -3,7 +3,7 @@ from typing import Any
 import pytest
 
 from orbit.protocol import AgentReply, AgentRequest, ToolCallFinished, ToolCallStarted
-from orbit.tui.view import (
+from orbit.tui.view.tool_calls import (
     ToolCall,
     finishes,
     line_count,

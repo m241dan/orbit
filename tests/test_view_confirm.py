@@ -1,4 +1,4 @@
-from orbit.tui.view import (
+from orbit.tui.view.confirm import (
     CONFIGURE_MESSAGE,
     CONFIGURE_TITLE,
     CONFIGURE_YES,

@@ -92,26 +92,27 @@ from orbit.tui.tabs import ConversationTabs
 from orbit.tui.task_editor import TaskEditorScreen
 from orbit.tui.tasks import TaskList
 from orbit.tui.transcript import Transcript
-from orbit.tui.view import (
+from orbit.tui.view.confirm import (
     CONFIGURE_MESSAGE,
     CONFIGURE_TITLE,
     CONFIGURE_YES,
-    PLANNER_BUSY,
     RESET_MESSAGE,
     RESET_TITLE,
     RESET_YES,
-    SIDEBAR_WINDOWS,
-    coalesce,
-    decision_entry,
-    edit_refusal,
+)
+from orbit.tui.view.events import coalesce
+from orbit.tui.view.proposals import decision_entry
+from orbit.tui.view.rules import planner_reset_entry
+from orbit.tui.view.settings import (
     model_choices,
     model_options,
-    neighbors,
-    planner_reset_entry,
     tool_access_choices,
     tool_access_labels,
-    trigger_key_labels,
 )
+from orbit.tui.view.tasks import edit_refusal
+from orbit.tui.view.transcript import PLANNER_BUSY
+from orbit.tui.view.triggers import trigger_key_labels
+from orbit.tui.view.windows import SIDEBAR_WINDOWS, neighbors
 from orbit.tui.widgets import (
     ChatPrompt,
     ConfirmScreen,

@@ -18,7 +18,7 @@ from orbit.protocol import (
     SessionsListed,
     SessionSummary,
 )
-from orbit.tui.view import (
+from orbit.tui.view.sessions import (
     DELETE_TITLE,
     DELETE_YES,
     NAME_PLACEHOLDER,

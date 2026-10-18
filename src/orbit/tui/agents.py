@@ -9,7 +9,7 @@ from textual.widgets.option_list import Option
 
 from orbit.protocol import Event, ReviewStatus
 from orbit.tui.list_pane import ListPane
-from orbit.tui.view import NO_AGENTS_LABEL, AgentRow, agent_line, review_line, track_agents
+from orbit.tui.view.agents import NO_AGENTS_LABEL, AgentRow, agent_line, review_line, track_agents
 
 
 class AgentsPane(ListPane):

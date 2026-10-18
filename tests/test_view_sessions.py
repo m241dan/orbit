@@ -1,7 +1,7 @@
 from datetime import UTC, datetime, timedelta, timezone
 
 from orbit.protocol import SessionSummary, Usage
-from orbit.tui.view import (
+from orbit.tui.view.sessions import (
     LIST_HINT,
     NAME_HINT,
     RENAME_HINT,

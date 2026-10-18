@@ -12,12 +12,12 @@ from textual.widgets.option_list import Option
 
 from orbit.protocol import TaskState, Usage
 from orbit.tui.list_pane import ListPane
-from orbit.tui.view import (
+from orbit.tui.view.common import spinner_frame
+from orbit.tui.view.tasks import (
     NEW_TASK_LABEL,
     active_task,
     follow_top,
     session_usage_subtitle,
-    spinner_frame,
     task_label,
     task_list_title,
     task_numbers,

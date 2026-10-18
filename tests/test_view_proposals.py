@@ -1,4 +1,4 @@
-from orbit.tui.view import (
+from orbit.tui.view.proposals import (
     FEEDBACK_HINT,
     FEEDBACK_PLACEHOLDER,
     PROPOSAL_KEYS_HINT,

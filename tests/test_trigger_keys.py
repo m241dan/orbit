@@ -11,7 +11,7 @@ from orbit.protocol import (
     TriggerEntry,
 )
 from orbit.tui import OrbitApp
-from orbit.tui.view import TRIGGER_KEYS, trigger_key_labels
+from orbit.tui.view.triggers import TRIGGER_KEYS, trigger_key_labels
 from orbit.tui.widgets import ConfirmScreen
 from tests.test_tui import FakeSession, feed_events
 

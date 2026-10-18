@@ -4,14 +4,8 @@ from typing import Any
 
 import pytest
 
-from orbit.tui.view import (
-    EDIT_SEPARATOR,
-    FileDiff,
-    diff_change,
-    file_diff,
-    line_diff,
-    tool_result_summary,
-)
+from orbit.tui.view.diffs import EDIT_SEPARATOR, FileDiff, diff_change, file_diff, line_diff
+from orbit.tui.view.tool_calls import tool_result_summary
 
 
 def test_unchanged_lines_are_kept_around_the_removed_then_added_ones() -> None:

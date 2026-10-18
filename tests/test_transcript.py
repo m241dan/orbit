@@ -31,15 +31,10 @@ from orbit.tui import OrbitApp
 from orbit.tui.entries import GutteredEntry, HangingIndent, entry_markdown
 from orbit.tui.transcript import Transcript
 from orbit.tui.transcript_log import TranscriptLog
-from orbit.tui.view import (
-    GUTTER_BAR,
-    GUTTER_MARKER,
-    PROMPT_MARKER,
-    REPLY_LIMIT,
-    SPINNER_FPS,
-    Entry,
-    EntryKind,
-)
+from orbit.tui.view.common import SPINNER_FPS, EntryKind
+from orbit.tui.view.log import Entry
+from orbit.tui.view.tool_calls import REPLY_LIMIT
+from orbit.tui.view.transcript import GUTTER_BAR, GUTTER_MARKER, PROMPT_MARKER
 from orbit.tui.widgets import ChatPrompt
 from tests.test_tui import STRIP, FakeSession, feed_events, said, started, tab_strip
 

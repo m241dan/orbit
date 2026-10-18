@@ -11,14 +11,9 @@ from textual.app import App, ComposeResult
 
 from orbit.tui.entries import GutteredEntry
 from orbit.tui.transcript_log import TranscriptLog
-from orbit.tui.view import (
-    GUTTER_BAR,
-    GUTTER_MARKER,
-    PROMPT_LINES_SHOWN,
-    PROMPT_MARKER,
-    Entry,
-    EntryKind,
-)
+from orbit.tui.view.common import EntryKind
+from orbit.tui.view.log import Entry
+from orbit.tui.view.transcript import GUTTER_BAR, GUTTER_MARKER, PROMPT_LINES_SHOWN, PROMPT_MARKER
 from tests.test_transcript import (
     LONG,
     entry,

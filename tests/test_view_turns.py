@@ -8,8 +8,8 @@ from orbit.protocol import (
     TurnFinished,
     TurnStarted,
 )
-from orbit.tui.view import (
-    DrawnRule,
+from orbit.tui.view.rules import DrawnRule
+from orbit.tui.view.turns import (
     ExitedAgent,
     FinishedTurn,
     Turns,

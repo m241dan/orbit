@@ -6,7 +6,7 @@ from orbit.protocol import TasksChanged
 from orbit.tui import OrbitApp
 from orbit.tui.tasks import TaskList
 from orbit.tui.transcript import Transcript
-from orbit.tui.view import SPINNER_FPS, spinner_frame
+from orbit.tui.view.common import SPINNER_FPS, spinner_frame
 from orbit.tui.widgets import ChatPrompt
 from tests.test_tui import FakeSession, feed_events, selected, task
 

@@ -18,28 +18,27 @@ from orbit.protocol import AgentReply, ToolCallFinished
 from orbit.tui.detail import DetailPane
 from orbit.tui.entries import GutteredEntry, markdown_body
 from orbit.tui.list_pane import ListPane
-from orbit.tui.view import (
+from orbit.tui.view.common import EntryKind
+from orbit.tui.view.log import (
     Entry,
-    EntryKind,
-    ToolCall,
     after_rows,
+    latest_rule,
+    nearest_row,
+    shown,
+    shown_rows,
+    thinking_places,
+)
+from orbit.tui.view.tool_calls import ToolCall, finishes, tool_call_finished, tool_call_unfinished
+from orbit.tui.view.transcript import (
     banded,
     collapsible,
     entry_label,
-    finishes,
     gutter,
-    latest_rule,
-    nearest_row,
     ruled,
-    shown,
-    shown_rows,
     shows_markdown,
     speaker_label,
     starts_collapsed,
-    thinking_places,
     tool_call_entry,
-    tool_call_finished,
-    tool_call_unfinished,
 )
 
 

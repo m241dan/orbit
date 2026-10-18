@@ -3,17 +3,16 @@
 from rich.console import Group
 from rich.text import Text
 
-from orbit.tui.view import (
+from orbit.tui.view.detail import (
     DETAIL_COVER_BELOW,
     DETAIL_LINE_LIMIT,
-    ToolCall,
-    ToolCallStatus,
     capped_with,
     copied_note,
     detail_copy,
     detail_covers,
     detail_title,
 )
+from orbit.tui.view.tool_calls import ToolCall, ToolCallStatus
 
 
 def read_call(status: ToolCallStatus = "passed", output: str = "one\ntwo") -> ToolCall:

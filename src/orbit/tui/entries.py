@@ -10,7 +10,8 @@ from rich.segment import Segment
 from rich.style import Style
 from rich.text import Text
 
-from orbit.tui.view import EntryKind, hanging_indent
+from orbit.tui.view.common import EntryKind
+from orbit.tui.view.transcript import hanging_indent
 
 
 class LeftHeading(Heading):

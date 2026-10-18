@@ -30,24 +30,24 @@ from orbit.tui.panels import VerificationPanel
 from orbit.tui.tabs import ConversationTabs
 from orbit.tui.tasks import TaskList
 from orbit.tui.transcript import Transcript
-from orbit.tui.view import (
+from orbit.tui.view.common import EntryKind
+from orbit.tui.view.log import Entry
+from orbit.tui.view.progress import TaskProgress, task_note
+from orbit.tui.view.rules import exit_rule, turn_rule_entry
+from orbit.tui.view.transcript import (
     AgentNote,
-    Entry,
-    EntryKind,
-    TaskProgress,
-    Turns,
     activity_entry,
-    agent_exited,
-    agent_started,
     error_agent,
     error_entry,
-    exit_rule,
     output_entry,
     speaker,
-    task_note,
+)
+from orbit.tui.view.turns import (
+    Turns,
+    agent_exited,
+    agent_started,
     turn_finished,
     turn_output,
-    turn_rule_entry,
     turn_started,
 )
 

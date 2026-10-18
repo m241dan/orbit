@@ -6,7 +6,7 @@ from typing import Any
 from textual.widgets import Tab, Tabs
 
 from orbit.protocol import PLANNER, Event
-from orbit.tui.view import (
+from orbit.tui.view.tabs import (
     ALL_TAB_LABEL,
     PINNED_TABS,
     ConversationTab,

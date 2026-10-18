@@ -8,7 +8,7 @@ from orbit.protocol import (
     VerificationSkipped,
     VerificationStarted,
 )
-from orbit.tui.view import (
+from orbit.tui.view.progress import (
     task_note,
     task_started_entry,
     verification_finished_entry,

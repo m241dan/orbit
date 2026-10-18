@@ -15,7 +15,10 @@ from textual.widget import Widget
 from textual.widgets import Input, OptionList, Static, TextArea
 
 from orbit.protocol import Settings
-from orbit.tui.view import SPINNER_FPS, confirm_hint, prompt_title, settings_summary
+from orbit.tui.view.common import SPINNER_FPS
+from orbit.tui.view.confirm import confirm_hint
+from orbit.tui.view.settings import settings_summary
+from orbit.tui.view.transcript import prompt_title
 
 if TYPE_CHECKING:
     _WidgetMixin = Widget

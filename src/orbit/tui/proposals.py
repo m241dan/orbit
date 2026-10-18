@@ -12,7 +12,7 @@ from textual.screen import ModalScreen
 from textual.widgets import Input, Static
 
 from orbit.protocol import AgentExited, ChecksProposed, DecideProposal, Event, ProposalAction
-from orbit.tui.view import (
+from orbit.tui.view.proposals import (
     FEEDBACK_HINT,
     FEEDBACK_PLACEHOLDER,
     PROPOSAL_KEYS_HINT,

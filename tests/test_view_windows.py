@@ -1,6 +1,6 @@
 import pytest
 
-from orbit.tui.view import NEIGHBORS, SIDEBAR_WINDOWS, neighbors
+from orbit.tui.view.windows import NEIGHBORS, SIDEBAR_WINDOWS, neighbors
 
 
 @pytest.mark.parametrize(

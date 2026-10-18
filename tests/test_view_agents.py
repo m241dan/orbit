@@ -11,13 +11,7 @@ from orbit.protocol import (
     Settings,
     Snapshot,
 )
-from orbit.tui.view import (
-    NO_AGENTS_LABEL,
-    AgentRow,
-    agent_line,
-    review_line,
-    track_agents,
-)
+from orbit.tui.view.agents import NO_AGENTS_LABEL, AgentRow, agent_line, review_line, track_agents
 
 
 def test_agents_are_tracked_from_their_events() -> None:

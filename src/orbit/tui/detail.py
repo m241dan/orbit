@@ -10,7 +10,9 @@ from textual.message import Message
 from textual.reactive import reactive
 from textual.widgets import Static
 
-from orbit.tui.view import DETAIL_HEIGHT, ToolCall, detail_body, detail_title
+from orbit.tui.view.detail import DETAIL_HEIGHT, detail_title
+from orbit.tui.view.detail_views import detail_body
+from orbit.tui.view.tool_calls import ToolCall
 from orbit.tui.widgets import ModalFocus
 
 

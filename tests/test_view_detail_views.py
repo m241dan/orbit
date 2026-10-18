@@ -8,18 +8,9 @@ from rich.console import Console, RenderableType
 from rich.segment import Segment
 from rich.text import Text
 
-from orbit.tui.view import (
-    DETAIL_LINE_LIMIT,
-    EMPTY_DIFF,
-    NO_DETAILS,
-    WAITING,
-    ToolCall,
-    ToolCallStatus,
-    detail_body,
-    diff_text,
-    pretty_json,
-    read_output,
-)
+from orbit.tui.view.detail import DETAIL_LINE_LIMIT, EMPTY_DIFF, NO_DETAILS, WAITING
+from orbit.tui.view.detail_views import detail_body, diff_text, pretty_json, read_output
+from orbit.tui.view.tool_calls import ToolCall, ToolCallStatus
 
 RULE = "─" * 60
 READ_OUTPUT = (
