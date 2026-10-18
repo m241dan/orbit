@@ -7,6 +7,7 @@ from typing import Protocol
 from orbit.agent.application.log_writer import LogWriter
 from orbit.agent.application.ports import EventLog
 from orbit.agent.domain.replay import can_replay
+from orbit.agent.domain.storage import cut_fields
 from orbit.protocol import CONNECTION_EVENTS, SESSIONLESS_EVENTS, Event, EventEnvelope
 
 TRANSCRIPT_LENGTH = 500
@@ -30,10 +31,15 @@ class Outbox:
     With a ``log``, each envelope of a session is also written to it in the background, but for
     the events answering one connection; :meth:`transcript` reads a session's latest back,
     :meth:`history` those before them, :meth:`missed` those after a ``seq``, for
-    :meth:`resend` to queue again, and :meth:`close` writes those still queued."""
+    :meth:`resend` to queue again, and :meth:`close` writes those still queued. The copies
+    written have their text fields over ``cut_bytes`` cut, unless it's 0; those read from
+    :meth:`envelope` are whole."""
 
-    def __init__(self, open_session: Callable[[], str], log: EventLog | None = None) -> None:
+    def __init__(
+        self, open_session: Callable[[], str], log: EventLog | None = None, cut_bytes: int = 0
+    ) -> None:
         self._open = open_session
+        self._cut_bytes = cut_bytes
         # The last event's place in the stream, counted across sessions.
         self._seq = log.max_seq() if log else 0
         self._queue: asyncio.Queue[EventEnvelope] = asyncio.Queue()
@@ -102,6 +108,7 @@ class Outbox:
 
     def _log(self, session_id: str, envelope: EventEnvelope) -> None:
         """Have ``envelope``, of the session ``session_id``, written to the log, if there is one
-        and it's kept there."""
+        and it's kept there, with its long text fields cut."""
         if self._writer is not None and not isinstance(envelope.payload, CONNECTION_EVENTS):
-            self._writer.add(session_id, envelope)
+            payload = cut_fields(envelope.payload, self._cut_bytes)
+            self._writer.add(session_id, envelope.model_copy(update={"payload": payload}))

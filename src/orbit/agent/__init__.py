@@ -25,6 +25,7 @@ from orbit.agent.domain.checks import ChecksProposal, Setup
 from orbit.agent.domain.config import OrbitConfig
 from orbit.agent.domain.config_errors import ConfigError
 from orbit.agent.domain.roles import Role
+from orbit.agent.domain.storage import StorageSettings
 from orbit.agent.domain.verification import VerificationStep
 from orbit.agent.external.checks import run_step
 from orbit.agent.external.claude_cli import MODEL_ALIASES, ClaudeCliRunner
@@ -35,6 +36,7 @@ from orbit.agent.external.session_files import state_dir
 from orbit.agent.external.session_import import ImportBlocked, import_session_files, imported_note
 from orbit.agent.external.sqlite_store import SqliteStore, StoreError, resolve_state_dir
 from orbit.agent.external.usage_api import UsageApi
+from orbit.agent.external.user_config import read_storage, resolve_config_dir
 from orbit.agent.external.workspace import workspace_state
 
 __all__ = [
@@ -58,6 +60,7 @@ __all__ = [
     "Setup",
     "SqliteStore",
     "StepRunner",
+    "StorageSettings",
     "StoreError",
     "StoredSession",
     "UsageApi",
@@ -69,6 +72,8 @@ __all__ = [
     "imported_note",
     "in_git_work_tree",
     "read_config",
+    "read_storage",
+    "resolve_config_dir",
     "resolve_state_dir",
     "run_step",
     "state_dir",

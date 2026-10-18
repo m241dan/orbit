@@ -23,6 +23,7 @@ from orbit.agent import (
     OrbitConfig,
     Role,
     SqliteStore,
+    StorageSettings,
     StoreError,
     UsageApi,
     Verification,
@@ -31,6 +32,8 @@ from orbit.agent import (
     imported_note,
     in_git_work_tree,
     read_config,
+    read_storage,
+    resolve_config_dir,
     resolve_state_dir,
     run_step,
     state_dir,
@@ -63,6 +66,15 @@ def _workspace(path: Path) -> Path:
 
 
 # Options declared apart, so chat stays short.
+WorkspaceOption = Annotated[
+    Path,
+    typer.Option(
+        "-C",
+        "--workspace",
+        help="The project to work on (default: the current directory). Inside a git"
+        " repository, its top level.",
+    ),
+]
 NewOption = Annotated[
     bool,
     typer.Option(
@@ -89,18 +101,20 @@ StateDirOption = Annotated[
     ),
 ]
 
+ConfigDirOption = Annotated[
+    Path | None,
+    typer.Option(
+        "--config-dir",
+        help="The directory of your own config.toml, whose [storage] sets what orbit keeps of"
+        " sessions (default: $ORBIT_CONFIG_DIR, else $XDG_CONFIG_HOME/orbit, else"
+        " ~/.config/orbit).",
+    ),
+]
+
 
 @app.command()
 def chat(
-    workspace: Annotated[
-        Path,
-        typer.Option(
-            "-C",
-            "--workspace",
-            help="The project to work on (default: the current directory). Inside a git"
-            " repository, its top level.",
-        ),
-    ] = Path("."),
+    workspace: WorkspaceOption = Path("."),
     model: Annotated[
         str | None,
         typer.Option(
@@ -146,6 +160,7 @@ def chat(
     name: NameOption = None,
     profile: ProfileOption = None,
     state: StateDirOption = None,
+    config_dir: ConfigDirOption = None,
 ) -> None:
     """Start an interactive agent session.
 
@@ -164,9 +179,11 @@ def chat(
     # directory, so move into the workspace before anything reads the filesystem.
     profile = profile.expanduser().resolve() if profile else None
     state = resolve_state_dir(state, os.environ)
+    user_config = resolve_config_dir(config_dir, os.environ)
     root = _workspace(workspace)
     os.chdir(root)
     config = _config()
+    storage = _storage(user_config)
     verification = _verification(config) if verify else None
     agents = _agents(config, worktree=worktree, review=review)
     settings, pinned = _settings(model, tools)
@@ -186,6 +203,7 @@ def chat(
             pick_session=not new and name is None,
             name=name,
             startup_notes=notes,
+            storage=storage,
         ),
         _thread_context(profile),
     )
@@ -199,6 +217,18 @@ def _config() -> OrbitConfig:
     """
     try:
         return read_config()
+    except ConfigError as exc:
+        typer.echo(f"Invalid orbit configuration: {exc}", err=True)
+        raise typer.Exit(2) from None
+
+
+def _storage(config_dir: Path) -> StorageSettings:
+    """The storage settings in the user config in ``config_dir``.
+
+    Exits with status 2 if the file is invalid.
+    """
+    try:
+        return read_storage(config_dir)
     except ConfigError as exc:
         typer.echo(f"Invalid orbit configuration: {exc}", err=True)
         raise typer.Exit(2) from None

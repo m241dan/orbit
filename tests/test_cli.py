@@ -27,6 +27,7 @@ from orbit.agent import (
     Role,
     Setup,
     SqliteStore,
+    StorageSettings,
     UsageApi,
     Verification,
     VerificationStep,
@@ -122,6 +123,14 @@ def state(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     """The state directory chat keeps its store in, unless told otherwise."""
     path = tmp_path / "state"
     monkeypatch.setenv("ORBIT_STATE_DIR", str(path))
+    return path
+
+
+@pytest.fixture(autouse=True)
+def config_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    """The config directory chat reads the user's config from, unless told otherwise."""
+    path = tmp_path / "config"
+    monkeypatch.setenv("ORBIT_CONFIG_DIR", str(path))
     return path
 
 
@@ -295,6 +304,63 @@ def test_the_state_directory_option_wins_over_the_environment(
     [session] = launched
     assert store_in(session)._state_dir == tmp_path / "elsewhere"
     assert (tmp_path / "elsewhere" / "orbit.db").exists()
+
+
+def test_without_a_user_config_chat_keeps_the_default_storage_settings(
+    launched: list[AgentSession],
+) -> None:
+    assert runner.invoke(app, ["chat"]).exit_code == 0
+
+    [session] = launched
+    assert session._storage == StorageSettings()
+
+
+def test_chat_reads_the_storage_settings_in_the_config_directory(
+    launched: list[AgentSession], config_dir: Path
+) -> None:
+    config_dir.mkdir()
+    (config_dir / "config.toml").write_text("[storage]\ntool_output_kb = 1\n\n[server]\n")
+    assert runner.invoke(app, ["chat"]).exit_code == 0
+
+    [session] = launched
+    assert session._storage == StorageSettings(tool_output_kb=1)
+    assert session._events._cut_bytes == 1024
+
+
+def test_the_config_directory_option_wins_over_the_environment(
+    launched: list[AgentSession], tmp_path: Path
+) -> None:
+    (tmp_path / "start" / "mine").mkdir()
+    (tmp_path / "start" / "mine" / "config.toml").write_text("[storage]\nsession_log_mb = 5\n")
+    workspace = tmp_path / "project"
+    workspace.mkdir()
+    # A relative directory is taken from where orbit started, not the workspace.
+    result = runner.invoke(app, ["chat", "--config-dir", "mine", "-C", str(workspace)])
+
+    assert result.exit_code == 0
+    [session] = launched
+    assert session._storage == StorageSettings(session_log_mb=5)
+
+
+@pytest.mark.parametrize(
+    ("line", "key"),
+    [
+        ("tool_output = 3", "storage.tool_output"),
+        ("tool_output_kb = -1", "storage.tool_output_kb"),
+        ('tool_output_kb = "64"', "storage.tool_output_kb"),
+    ],
+)
+def test_an_invalid_storage_setting_stops_chat_naming_the_file_and_the_key(
+    launched: list[AgentSession], config_dir: Path, line: str, key: str
+) -> None:
+    config_dir.mkdir()
+    path = config_dir / "config.toml"
+    path.write_text(f"[storage]\n{line}\n")
+    result = runner.invoke(app, ["chat"])
+
+    assert result.exit_code == 2
+    assert f"Invalid orbit configuration: {path}: {key}: " in result.stderr
+    assert launched == []
 
 
 def test_chat_imports_an_older_orbits_session_files(

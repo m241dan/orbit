@@ -46,6 +46,7 @@ from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.catalog import catalog
 from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.reviews import ReviewPlanner
+from orbit.agent.domain.storage import StorageSettings
 from orbit.agent.domain.verification import VerificationStep, startup_fix_prompt
 from orbit.protocol import (
     CODER,
@@ -104,6 +105,9 @@ def _workspace_label(workspace: str | None) -> str | None:
     return PurePath(workspace).name if workspace else None
 
 
+_DEFAULT_STORAGE = StorageSettings()
+
+
 class AgentSession:
     """Takes commands, runs work in the background and publishes its events.
 
@@ -130,7 +134,8 @@ class AgentSession:
     ``Catalog``.
 
     The session open here is saved in ``store``, if there is one, once it's used, and its
-    events are kept in the store's log, ``seq`` counting on from the highest there; ``clock``
+    events are kept in the store's log, ``seq`` counting on from the highest there, with their
+    text fields cut as the ``storage`` settings say; ``clock``
     tells the time, ``new_id`` makes its id and ``name`` names it (by the time, if none). The
     user can open another saved session, or a new one, in its place: one opened has its saved
     settings, but for those ``pinned``, by field name, which keep the ``settings`` given here.
@@ -156,10 +161,12 @@ class AgentSession:
         pick_session: bool = False,
         name: str | None = None,
         startup_notes: Sequence[str] = (),
+        storage: StorageSettings = _DEFAULT_STORAGE,
     ) -> None:
         self._settings = SessionSettings(settings or Settings(), pinned, model_choices)
         self._pick_session = pick_session
-        self._events = Outbox(lambda: self._keeper.id, store)
+        self._storage = storage  # session_log_mb bounds the log once it's trimmed.
+        self._events = Outbox(lambda: self._keeper.id, store, storage.tool_output_bytes)
         self._keeper = SessionKeeper(store, self._events.put, clock, new_id)
         self._keeper.rename(name)
         self._review_count = ReviewCount(store, self._events.put)

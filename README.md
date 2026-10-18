@@ -530,6 +530,7 @@ your checkout out of its way, it doesn't sandbox it.
 | `.git/orbit` | the repository's git directory | the coder's worktree, review snapshots and what earlier runs left there |
 | The store | the state directory | `orbit.db`, the saved sessions and super review count of every repository, and `locks/` |
 | Config files | `.orbit/config.toml` in the repository | the verification steps, setup, roles and limits, committed with your code |
+| User config | `config.toml` in the config directory | your own settings for every repository, such as `[storage]` |
 | Runtime-owned | `~/.claude` | Claude Code's own: your login, read for usage limits, and the agents' conversations |
 
 The state directory is `--state-dir`, else `$ORBIT_STATE_DIR`, else `$XDG_STATE_HOME/orbit`, else
@@ -548,6 +549,23 @@ another orbit still has one of the old sessions open, or the files can't be read
 orbit stops before the app starts, with status 2 and a message naming the path and the cause,
 having imported nothing; fix that and start orbit again. Likewise a database that can't be opened,
 or whose schema is newer than this orbit, stops it with a message naming the file and the versions.
+
+The config directory is `--config-dir`, else `$ORBIT_CONFIG_DIR`, else `$XDG_CONFIG_HOME/orbit`,
+else `~/.config/orbit`. Its `config.toml` is optional; its `[storage]` table sets how much of each
+session the store keeps:
+
+```toml
+[storage]
+tool_output_kb = 64   # the longest text field a stored event keeps whole
+session_log_mb = 200  # the most of a session's event log to keep
+```
+
+Both values are the defaults, and 0 means unlimited. A stored event's text fields (tool outputs and
+arguments, the planner's and agents' messages) longer than `tool_output_kb` keep their first and
+last half of it, around a marker such as `… 182 KB cut by orbit's tool_output_kb …`; what the
+conversation shows live is never cut, only what's kept for later. An unknown key in `[storage]`,
+or a value that isn't a whole number of 0 or more, stops `orbit chat` with status 2 and a message
+naming the file and the key; other tables are ignored, for later orbits' settings.
 
 `orbit.db` can be read with `sqlite3`, but its schema isn't an API, and writing to it while orbit
 may use it isn't supported.

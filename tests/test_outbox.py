@@ -3,7 +3,7 @@
 import asyncio
 
 from orbit.agent.application.outbox import Outbox
-from orbit.protocol import EventEnvelope, Notice, SessionsListed, Welcome
+from orbit.protocol import EventEnvelope, Notice, SessionsListed, ToolCallFinished, Welcome
 from tests.agent_fakes import FakeStore
 
 ONE = Notice(message="one")
@@ -100,3 +100,31 @@ async def test_closing_an_outbox_without_a_log_does_nothing() -> None:
     await outbox.close()
 
     assert await outbox.envelope() == EventEnvelope(seq=1, session="a", payload=ONE)
+
+
+async def test_the_logged_copy_has_its_long_fields_cut_while_the_live_one_is_whole() -> None:
+    log = FakeStore()
+    outbox = Outbox(Open(), log, cut_bytes=1024)
+    output = "a" * 2500 + "b" * 2500
+    outbox.put_nowait(ToolCallFinished(turn_id="t", call_id="c", output=output))
+    await outbox.close()
+
+    live = (await outbox.envelope()).payload
+    [logged] = log.logged
+    assert isinstance(live, ToolCallFinished) and live.output == output
+    assert logged.seq == 1
+    assert logged.payload == ToolCallFinished(
+        turn_id="t",
+        call_id="c",
+        output="a" * 512 + "\n… 4 KB cut by orbit's tool_output_kb …\n" + "b" * 512,
+    )
+
+
+async def test_by_default_the_logged_copy_is_whole() -> None:
+    log = FakeStore()
+    outbox = Outbox(Open(), log)
+    event = ToolCallFinished(turn_id="t", call_id="c", output="x" * 100_000)
+    outbox.put_nowait(event)
+    await outbox.close()
+
+    assert log.logged == [EventEnvelope(seq=1, session="a", payload=event)]
