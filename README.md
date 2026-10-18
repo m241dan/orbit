@@ -795,7 +795,8 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
   sessions, `windows` for the window h/j/k/l reaches from each window, `triggers` for the keys
   that fire triggers and their footer labels, `confirm` for the confirmations asked before a
   key's action, and `settings` and `common` for what they share); the widgets (`transcript`,
-  `transcript_log` for one tab's log, `conversation` for the `ConversationFeed`, which turns
+  `transcript_log` for one tab's log, `event_stream` for batching the backend's events so a
+  flood still lets the screen repaint, `conversation` for the `ConversationFeed`, which turns
   events into the transcript's entries, `entries` for an entry and the renderables that draw
   it, `tabs`, `tasks`, `task_editor` for the task editor modal, `reason` for the modal saying
   why a task ended, `agents`, `panels`,

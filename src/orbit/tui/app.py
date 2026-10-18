@@ -1,9 +1,8 @@
 """Textual frontend. Talks to the backend only through a protocol Session."""
 
-import asyncio
 import time
-from collections.abc import AsyncGenerator, AsyncIterator, Callable
-from contextlib import aclosing, suppress
+from collections.abc import AsyncIterator, Callable
+from contextlib import aclosing
 from dataclasses import replace
 from typing import ClassVar, assert_never
 from uuid import uuid4
@@ -45,7 +44,6 @@ from orbit.protocol import (
     EditTask,
     ErrorOccurred,
     Event,
-    EventEnvelope,
     FireTrigger,
     Hello,
     ListSessions,
@@ -84,6 +82,7 @@ from orbit.protocol import (
 from orbit.tui.agents import AgentsPane
 from orbit.tui.conversation import ConversationFeed
 from orbit.tui.detail import DetailPane
+from orbit.tui.event_stream import event_batches
 from orbit.tui.footer import KeyFooter
 from orbit.tui.panels import UsagePanel, VerificationPanel
 from orbit.tui.proposals import ProposalHost
@@ -119,48 +118,6 @@ from orbit.tui.widgets import (
     PickerScreen,
     mark_selected,
 )
-
-# Most events rendered in one go, so a flood still lets the screen repaint now and then.
-BATCH_LIMIT = 500
-
-
-async def event_batches(
-    events: AsyncIterator[EventEnvelope], limit: int = BATCH_LIMIT
-) -> AsyncGenerator[list[Event]]:
-    """Batches of the events in ``events``' envelopes: each the next event and those already
-    waiting behind it, up to ``limit``. Ends when ``events`` do, raising what reading them
-    raised."""
-    queue: asyncio.Queue[Event | None] = asyncio.Queue()
-
-    async def read() -> None:
-        try:
-            async for envelope in events:
-                queue.put_nowait(envelope.payload)
-        finally:
-            queue.put_nowait(None)  # The end.
-
-    reader = asyncio.create_task(read())
-    try:
-        while batch := await _next_batch(queue, limit):
-            yield batch
-    finally:
-        reader.cancel()
-        with suppress(asyncio.CancelledError):
-            await reader
-
-
-async def _next_batch(queue: asyncio.Queue[Event | None], limit: int) -> list[Event]:
-    """The next event in ``queue`` and those waiting behind it, up to ``limit``; none at the
-    end, which stays queued for the next call."""
-    batch: list[Event] = []
-    event = await queue.get()
-    while event is not None:
-        batch.append(event)
-        if len(batch) == limit or queue.empty():
-            return batch
-        event = queue.get_nowait()
-    queue.put_nowait(None)
-    return batch
 
 
 # Not inheriting App's bindings drops its ctrl+q quit and ctrl+c "how to quit" hint.
@@ -457,22 +414,27 @@ class OrbitApp(App[None], inherit_bindings=False):
     def action_configure_checks(self) -> None:
         """Ask first, so a stray ctrl+e doesn't queue a configurator."""
 
-        async def answered(confirmed: bool | None) -> None:
-            # The backend queues it first and runs it, or says one is already on its way.
-            if confirmed:
-                await self._send(FireTrigger(trigger=CONFIGURE_CHECKS))
-
-        self.push_screen(ConfirmScreen(CONFIGURE_TITLE, CONFIGURE_MESSAGE, CONFIGURE_YES), answered)
+        # The backend queues it first and runs it, or says one is already on its way.
+        self._confirm_then_send(
+            CONFIGURE_TITLE, CONFIGURE_MESSAGE, CONFIGURE_YES, FireTrigger(trigger=CONFIGURE_CHECKS)
+        )
 
     def action_reset_planner(self) -> None:
         """Ask first, so a stray ctrl+n doesn't end the planner's conversation."""
 
-        async def answered(confirmed: bool | None) -> None:
-            # The backend refuses while the planner answers, or notes there's nothing to reset.
-            if confirmed:
-                await self._send(ResetConversation(agent=PLANNER))
+        # The backend refuses while the planner answers, or notes there's nothing to reset.
+        self._confirm_then_send(
+            RESET_TITLE, RESET_MESSAGE, RESET_YES, ResetConversation(agent=PLANNER)
+        )
 
-        self.push_screen(ConfirmScreen(RESET_TITLE, RESET_MESSAGE, RESET_YES), answered)
+    def _confirm_then_send(self, title: str, message: str, yes: str, command: Command) -> None:
+        """Ask ``title`` and ``message``, sending ``command`` if the user answers ``yes``."""
+
+        async def answered(confirmed: bool | None) -> None:
+            if confirmed:
+                await self._send(command)
+
+        self.push_screen(ConfirmScreen(title, message, yes), answered)
 
     async def action_list_sessions(self) -> None:
         """Ask for the saved sessions, which show in a modal once they're listed."""
