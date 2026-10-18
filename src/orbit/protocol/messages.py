@@ -7,11 +7,34 @@ across a process boundary without changes.
 
 from typing import Annotated, Any, Literal
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, TypeAdapter
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    Field,
+    TypeAdapter,
+    ValidationInfo,
+    model_validator,
+)
 
 
-class _Message(BaseModel):
+class WireTolerant(BaseModel):
+    """A model that refuses fields it doesn't declare, except when validated with the ``wire``
+    context set, as decoding does: then it drops them, so a newer peer's additions don't
+    break it."""
+
     model_config = ConfigDict(frozen=True, extra="forbid")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_unknown_on_wire(cls, data: Any, info: ValidationInfo) -> Any:
+        if not isinstance(data, dict) or not (info.context or {}).get("wire"):
+            return data
+        return {name: value for name, value in data.items() if name in cls.model_fields}
+
+
+class _Message(WireTolerant):
+    pass
 
 
 ToolAccess = Literal["off", "restricted", "full"]

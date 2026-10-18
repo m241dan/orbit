@@ -122,6 +122,7 @@ from orbit.protocol.messages import (
 )
 from orbit.protocol.session import Session
 from orbit.protocol.threaded import ThreadedSession
+from orbit.protocol.wire import ProtocolError, decode_command, decode_event, encode
 
 __all__ = [
     "ACTIVE_STATUSES",
@@ -196,6 +197,7 @@ __all__ = [
     "ProposalAction",
     "ProposedSetup",
     "ProposedStep",
+    "ProtocolError",
     "RemoveTask",
     "RenameSession",
     "ResetConversation",
@@ -241,5 +243,8 @@ __all__ = [
     "Welcome",
     "WorkspaceEntry",
     "command_adapter",
+    "decode_command",
+    "decode_event",
+    "encode",
     "event_adapter",
 ]
