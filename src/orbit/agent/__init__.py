@@ -35,7 +35,7 @@ from orbit.agent.external.config_file import read_config, write_checks
 from orbit.agent.external.fallback_files import FallbackFiles
 from orbit.agent.external.git_tree import GitCoderTree, git_top_level, in_git_work_tree
 from orbit.agent.external.mcp_host import McpHost
-from orbit.agent.external.session_files import state_dir
+from orbit.agent.external.session_files import legacy_dir
 from orbit.agent.external.session_import import ImportBlocked, import_session_files, imported_note
 from orbit.agent.external.sqlite_store import SqliteStore, StoreError, resolve_state_dir
 from orbit.agent.external.usage_api import UsageApi
@@ -76,6 +76,7 @@ __all__ = [
     "import_session_files",
     "imported_note",
     "in_git_work_tree",
+    "legacy_dir",
     "read_config",
     "read_storage",
     "recover_parked",
@@ -83,7 +84,6 @@ __all__ = [
     "resolve_config_dir",
     "resolve_state_dir",
     "run_step",
-    "state_dir",
     "workspace_state",
     "write_checks",
 ]

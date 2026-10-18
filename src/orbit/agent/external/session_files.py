@@ -13,7 +13,7 @@ SESSIONS = "sessions"
 REVIEWS = "reviews.json"
 
 
-def state_dir(workspace: str) -> Path:
+def legacy_dir(workspace: str) -> Path:
     """The directory an older orbit kept saved sessions in for ``workspace``: ``orbit`` in the
     repository's shared git directory, or ``.orbit`` in ``workspace`` outside a repository (or
     without git)."""

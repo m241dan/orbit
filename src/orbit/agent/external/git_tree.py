@@ -25,8 +25,8 @@ STASH_MESSAGE = "orbit: unverified work"
 IGNORE_HEADER = "# Created by orbit's verification checks:"
 # Snapshot directories in ``.git/orbit``: ``snapshot-…`` now, ``review-…`` from older versions.
 SNAPSHOT_PREFIXES = ("snapshot-", "review-")
-# Orbit's directory in the repository's shared git directory: saved sessions, the review count,
-# the coder's worktree and snapshots all live in it.
+# Orbit's directory in the repository's shared git directory: the coder's worktree, review
+# snapshots and leftovers live in it, and older orbits' session files until they are imported.
 ORBIT_DIR = "orbit"
 
 

@@ -33,6 +33,7 @@ from orbit.agent import (
     import_session_files,
     imported_note,
     in_git_work_tree,
+    legacy_dir,
     read_config,
     read_storage,
     recover_parked,
@@ -40,7 +41,6 @@ from orbit.agent import (
     resolve_config_dir,
     resolve_state_dir,
     run_step,
-    state_dir,
     workspace_state,
     write_checks,
 )
@@ -208,7 +208,7 @@ def chat(
             name=name,
             startup_notes=notes,
             storage=storage,
-            fallback=FallbackFiles(state, store.workspace_id, state_dir(str(root))),
+            fallback=FallbackFiles(state, store.workspace_id, legacy_dir(str(root))),
         ),
         _thread_context(profile),
     )
@@ -269,7 +269,7 @@ async def _imported(store: SqliteStore, state: Path, root: Path) -> list[str]:
     """Import into ``store`` the old session files of the workspace at ``root``, then its
     fallback files, in ``state`` and in the repository; returns the notes on what was
     imported."""
-    legacy = state_dir(str(root))
+    legacy = legacy_dir(str(root))
     imported = await import_session_files(store, legacy)
     notes = [] if imported is None else [imported_note(imported, _shown(legacy, root))]
     recovered = await recover_parked(FallbackFiles(state, store.workspace_id, legacy), store)

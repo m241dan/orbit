@@ -861,7 +861,7 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     `SessionStore` port's adapter (`SqliteStore`): saved sessions and each repository's super
     review count in `orbit.db` in the state directory `resolve_state_dir` picks, with
     `session_locks`' lock files while an orbit has a session open; `session_import` imports the
-    session files older orbits saved where `session_files`' `state_dir` says.
+    session files older orbits saved where `session_files`' `legacy_dir` says.
   - `application`: `AgentSession` (in `session`) implements `Session`: it takes commands, asks
     the domain what follows, drives the ports and publishes events into the `Outbox` (in
     `outbox`), which stamps each with its `seq` and the session it belongs to. `Tasks` (in
