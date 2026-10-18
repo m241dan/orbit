@@ -16,6 +16,7 @@ from textual.widgets import Input, Static
 from textual.widgets.option_list import Option
 
 from orbit.protocol import Settings, TaskSpec, TaskState, Usage
+from orbit.tui.list_pane import ListPane
 from orbit.tui.view import (
     NEW_TASK_LABEL,
     REASON_HINT,
@@ -38,7 +39,6 @@ from orbit.tui.view import (
     tool_access_choices,
 )
 from orbit.tui.widgets import (
-    ListPane,
     PickerScreen,
     PromptBox,
     PromptInput,

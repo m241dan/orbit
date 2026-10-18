@@ -3,7 +3,7 @@ from textual.app import App, ComposeResult
 from textual.visual import VisualType
 from textual.widgets.option_list import Option
 
-from orbit.tui.widgets import ListPane
+from orbit.tui.list_pane import ListPane
 
 
 class ListApp(App[None]):

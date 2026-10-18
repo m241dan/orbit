@@ -7,7 +7,7 @@ from textual.widget import Widget
 from textual.widgets import Label
 from textual.widgets._footer import FooterKey
 
-from orbit.tui.widgets import KeyFooter
+from orbit.tui.footer import KeyFooter
 
 
 class Plain(Widget, can_focus=True):

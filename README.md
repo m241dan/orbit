@@ -775,8 +775,9 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
   `tasks`, `agents`, `panels`, `detail` for the detail pane, `working` for the working row,
   `proposals`, the proposal modal and the `ProposalHost` that shows each waiting proposal once
   and closes it when it's withdrawn, `sessions`, the modal listing the sessions and the
-  `SessionsHost` that shows it and refreshes it while it's open, and `widgets` for the building
-  blocks they share) lay it out, and `app` is the Textual app that holds them.
+  `SessionsHost` that shows it and refreshes it while it's open, `list_pane` for the list
+  pane the lists share, `footer` for the key footer, and `widgets` for the building blocks they
+  share) lay it out, and `app` is the Textual app that holds them.
 - `orbit.cli`: the composition root, and the only place the two sides are wired together: it
   plugs the external adapters into `AgentSession` and hands that to the TUI. It runs the
   backend on its own thread and event loop through `orbit.protocol.ThreadedSession`, so neither

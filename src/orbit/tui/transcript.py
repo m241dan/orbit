@@ -21,6 +21,7 @@ from textual.widgets import OptionList
 from orbit.protocol import AgentReply, AgentRequest, Event, ToolCallFinished, ToolCallStarted
 from orbit.tui.detail import DetailPane
 from orbit.tui.entries import GutteredEntry, markdown_body
+from orbit.tui.list_pane import ListPane
 from orbit.tui.view import (
     Entry,
     EntryKind,
@@ -49,7 +50,7 @@ from orbit.tui.view import (
     tool_call_started,
     tool_call_unfinished,
 )
-from orbit.tui.widgets import ListPane, Ticker
+from orbit.tui.widgets import Ticker
 from orbit.tui.working import WorkingRow
 
 

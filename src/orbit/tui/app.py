@@ -84,6 +84,7 @@ from orbit.protocol import (
 from orbit.tui.agents import AgentsPane
 from orbit.tui.conversation import ConversationFeed
 from orbit.tui.detail import DetailPane
+from orbit.tui.footer import KeyFooter
 from orbit.tui.panels import UsagePanel, VerificationPanel
 from orbit.tui.proposals import ProposalHost
 from orbit.tui.sessions import SessionsHost
@@ -113,7 +114,6 @@ from orbit.tui.view import (
 from orbit.tui.widgets import (
     ChatPrompt,
     ConfirmScreen,
-    KeyFooter,
     PickerScreen,
     mark_selected,
 )
