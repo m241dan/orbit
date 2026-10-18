@@ -11,6 +11,7 @@ from orbit.protocol import (
     INVALID,
     PROTOCOL_VERSION,
     AddTask,
+    Catalog,
     Command,
     CommandEnvelope,
     CommandRefused,
@@ -69,16 +70,17 @@ async def test_nothing_is_published_before_hello() -> None:
     await session.close()
 
 
-async def test_hello_is_welcomed_then_a_snapshot_with_the_steps_and_the_workspace_note() -> None:
+async def test_hello_is_welcomed_then_a_catalog_a_snapshot_and_the_workspace_note() -> None:
     session = AgentSession(workspace="/work", verification=Verification((STEP,), Steps()))
     await greet(session)
-    events = await published(session, 3)
+    events = await published(session, 4)
     await session.close()
 
     assert events[0] == Welcome(command_id=HELLO_ID, server_version=__version__)
-    assert isinstance(events[1], Snapshot)
-    assert [step.name for step in events[1].steps] == [STEP.name]
-    assert events[2] == Notice(message="Workspace: /work")
+    assert isinstance(events[1], Catalog)
+    assert isinstance(events[2], Snapshot)
+    assert [step.name for step in events[2].steps] == [STEP.name]
+    assert events[3] == Notice(message="Workspace: /work")
     assert nothing_queued(session)
 
 
@@ -103,7 +105,7 @@ async def test_a_second_hello_is_refused_as_invalid() -> None:
     session = AgentSession()
     await greet(session)
     await send_as(session, "again", HELLO)
-    events = await published(session, 3)
+    events = await published(session, 4)
     await session.close()
 
     assert events[-1] == CommandRefused(

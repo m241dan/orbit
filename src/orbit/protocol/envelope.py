@@ -6,12 +6,12 @@ An envelope's own fields come first, then ``payload``: the command or event, wit
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from orbit.protocol.messages import Command, Event, SessionsListed, UsageChanged
+from orbit.protocol.messages import Catalog, Command, Event, SessionsListed, UsageChanged
 
 DEFAULT_WORKSPACE = "default"
 """The one workspace's id, until there are workspaces."""
 
-SESSIONLESS_EVENTS: tuple[type[Event], ...] = (UsageChanged, SessionsListed)
+SESSIONLESS_EVENTS: tuple[type[Event], ...] = (UsageChanged, SessionsListed, Catalog)
 """The event types that belong to no session: their envelopes carry ``session=None``."""
 
 

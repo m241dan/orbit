@@ -14,6 +14,7 @@ from orbit.protocol import (
     WORK_LANE,
     AddTask,
     AgentReply,
+    Catalog,
     ChecksProposed,
     DecideProposal,
     Event,
@@ -63,10 +64,11 @@ async def opening(session: AgentSession, count: int) -> list[Event]:
 async def test_welcome_is_followed_by_a_snapshot_of_the_open_session() -> None:
     session, _, _ = session_for(verification=verified(Steps()))
     put_on_board(session, *TASKS)
-    welcome, snapshot = await opening(session, 2)
+    welcome, catalog, snapshot = await opening(session, 3)
     await session.close()
 
     assert isinstance(welcome, Welcome)
+    assert isinstance(catalog, Catalog)
     assert isinstance(snapshot, Snapshot)
     assert [t.task for t in snapshot.tasks] == list(TASKS)
     assert snapshot.steps == (StepState(name=STEP.name),)
@@ -79,7 +81,7 @@ async def test_welcome_is_followed_by_a_snapshot_of_the_open_session() -> None:
 
 async def test_a_session_without_verification_or_agents_snapshots_none() -> None:
     session = AgentSession(settings=Settings(model="opus"), model_choices=("opus", "sonnet"))
-    _, snapshot = await opening(session, 2)
+    *_, snapshot = await opening(session, 3)
     await session.close()
 
     assert isinstance(snapshot, Snapshot)
@@ -92,28 +94,29 @@ async def test_a_session_without_verification_or_agents_snapshots_none() -> None
 
 async def test_with_reviews_on_the_snapshot_has_the_review_status() -> None:
     session, _, _ = session_for(tree=FakeTree(), review=True)
-    _, snapshot = await opening(session, 2)
+    *_, snapshot = await opening(session, 3)
     await session.close()
 
     assert isinstance(snapshot, Snapshot)
     assert snapshot.review == ReviewStatus(paused=False, open_batches=0)
 
 
-async def test_usage_fetched_before_hello_comes_right_before_the_snapshot() -> None:
+async def test_usage_fetched_before_hello_comes_after_the_catalog_before_the_snapshot() -> None:
     session, _, _ = session_for(usage=Source(UsageReport(LIMITS)))
     await fetch_usage_unseen(session)
+    events = await opening(session, 4)
+    await session.close()
+
+    kinds = [type(e).__name__ for e in events]
+    assert kinds == ["Welcome", "Catalog", "UsageChanged", "Snapshot"]
+
+
+async def test_with_no_usage_fetched_the_catalog_is_followed_by_the_snapshot() -> None:
+    session, _, _ = session_for(usage=Source(UsageReport(LIMITS)))
     events = await opening(session, 3)
     await session.close()
 
-    assert [type(e).__name__ for e in events] == ["Welcome", "UsageChanged", "Snapshot"]
-
-
-async def test_with_no_usage_fetched_welcome_is_followed_by_the_snapshot() -> None:
-    session, _, _ = session_for(usage=Source(UsageReport(LIMITS)))
-    events = await opening(session, 2)
-    await session.close()
-
-    assert [type(e).__name__ for e in events] == ["Welcome", "Snapshot"]
+    assert [type(e).__name__ for e in events] == ["Welcome", "Catalog", "Snapshot"]
 
 
 async def proposal_waiting(session: AgentSession) -> ChecksProposed:

@@ -21,9 +21,13 @@ from orbit.agent.domain.reviews import LaneSnapshot, PlannerSnapshot
 from orbit.agent.domain.sessions import SessionRecord
 from orbit.protocol import (
     BUSY,
+    Catalog,
+    DeleteSession,
     Event,
     NewSession,
     OpenSession,
+    RenameSession,
+    SessionsListed,
     SessionSummary,
     Settings,
     Snapshot,
@@ -38,12 +42,14 @@ REVIEWS = LaneSnapshot(planner=PlannerSnapshot(paused=True))
 
 class Held:
     """A session's settings and whether its tasks run, as the switcher sees them, and when
-    the sessions it was asked to snapshot were last active."""
+    the sessions it was asked to snapshot were last active, and the sessions each catalog it
+    was asked for holds."""
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self.running = False
         self.snapshots: list[datetime | None] = []
+        self.catalogs: list[tuple[SessionSummary, ...]] = []
 
     def snapshot(self, last_active: datetime | None) -> Snapshot:
         self.snapshots.append(last_active)
@@ -58,6 +64,10 @@ class Held:
             proposals=(),
             agents=(),
         )
+
+    def catalog(self, sessions: tuple[SessionSummary, ...]) -> Catalog:
+        self.catalogs.append(sessions)
+        return Catalog(workspaces=(), agents=(), triggers=(), lanes=())
 
     def set(self, settings: Settings) -> None:
         self.settings = settings
@@ -76,7 +86,9 @@ def switcher_for(
     keeper = SessionKeeper(store, events.put, Ticks(), lambda: next(ids))
     tasks = Tasks(TaskBoard(), events.put)
     seat = PlannerSeat(None, tasks, events, SeatHooks(nothing, keeper.use, tuple))
-    parts = SwitchParts(keeper, tasks, seat, None, None, lambda: held.running, held.snapshot)
+    parts = SwitchParts(
+        keeper, tasks, seat, None, None, lambda: held.running, held.snapshot, held.catalog
+    )
     access = SettingsAccess(lambda: held.settings, held.set, held.settings, pinned)
     return SessionSwitcher(parts, access, events, picking), events, tasks
 
@@ -103,13 +115,60 @@ async def test_switching_is_refused_while_tasks_run() -> None:
     assert drained(events) == []
 
 
-async def test_a_switch_publishes_only_a_snapshot() -> None:
+async def test_a_switch_publishes_only_a_catalog_then_a_snapshot() -> None:
     held = Held(Settings())
     switcher, events, _ = switcher_for(FakeStore(), held)
     await switcher.handle(NewSession(name="other"))
     kinds = [type(e) for e in drained(events)]
-    assert kinds == [Snapshot]
+    assert kinds == [Catalog, Snapshot]
     assert held.snapshots == [None]
+
+
+async def test_the_catalog_after_a_new_session_lists_it_before_the_saved_ones() -> None:
+    store = FakeStore()
+    store.saved = [saved()]
+    held = Held(Settings())
+    switcher, _, _ = switcher_for(store, held)
+    await switcher.handle(NewSession(name="other"))
+    [sessions] = held.catalogs
+    assert [(s.name, s.current) for s in sessions] == [("other", True), ("auth", False)]
+
+
+async def test_the_catalog_after_opening_a_session_lists_it_as_saved() -> None:
+    store = FakeStore()
+    store.saved = [saved()]
+    held = Held(Settings())
+    switcher, _, _ = switcher_for(store, held)
+    await switcher.handle(OpenSession(session_id="auth"))
+    [sessions] = held.catalogs
+    assert [(s.name, s.current, s.last_active) for s in sessions] == [("auth", True, EARLIER)]
+
+
+async def test_an_accepted_rename_publishes_a_catalog_then_lists_the_sessions() -> None:
+    held = Held(Settings())
+    switcher, events, _ = switcher_for(FakeStore(), held)
+    await switcher.handle(RenameSession(session_id="session-1", name="auth"))
+    assert [type(e) for e in drained(events)] == [Catalog, SessionsListed]
+    assert [s.name for s in held.catalogs[0]] == ["auth"]
+
+
+async def test_an_accepted_delete_publishes_a_catalog_without_the_session() -> None:
+    store = FakeStore()
+    store.saved = [saved()]
+    held = Held(Settings())
+    switcher, events, _ = switcher_for(store, held)
+    await switcher.handle(DeleteSession(session_id="auth"))
+    assert [type(e) for e in drained(events)] == [Catalog, SessionsListed]
+    assert [s.id for s in held.catalogs[0]] == ["session-1"]
+
+
+async def test_a_refused_rename_publishes_no_catalog() -> None:
+    held = Held(Settings())
+    switcher, events, _ = switcher_for(FakeStore(), held)
+    with pytest.raises(Refused):
+        await switcher.handle(RenameSession(session_id="session-1", name=" "))
+    assert [type(e) for e in drained(events)] == [SessionsListed]
+    assert held.catalogs == []
 
 
 async def test_an_opened_sessions_snapshot_is_as_it_was_last_active() -> None:

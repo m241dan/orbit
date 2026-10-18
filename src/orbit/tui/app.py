@@ -4,6 +4,7 @@ import asyncio
 import time
 from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from contextlib import aclosing, suppress
+from dataclasses import replace
 from typing import ClassVar, assert_never
 from uuid import uuid4
 
@@ -33,6 +34,7 @@ from orbit.protocol import (
     BusyLane,
     CancelAgent,
     CancelTurn,
+    Catalog,
     ChecksProposed,
     Command,
     CommandAccepted,
@@ -103,6 +105,7 @@ from orbit.tui.view import (
     model_options,
     planner_reset_entry,
     tool_access_labels,
+    trigger_key_labels,
 )
 from orbit.tui.widgets import (
     ChatPrompt,
@@ -234,6 +237,8 @@ class OrbitApp(App[None], inherit_bindings=False):
         # Whether the user pressed ctrl+p, after which no list opens as the startup list.
         self._asked_sessions = False
         self._message_id: str | None = None  # The command id of the last message sent.
+        # The actions of the keys whose trigger the last catalog lacks, which are hidden.
+        self._missing_triggers: frozenset[str] = frozenset()
         self.clock: Callable[[], float] = time.monotonic
         # Pickers are built once and installed so they open instantly.
         self._model_picker = PickerScreen("Model", model_options(())[1])
@@ -328,6 +333,8 @@ class OrbitApp(App[None], inherit_bindings=False):
             "list_sessions": self._on_main_screen,
             "toggle_sidebar": lambda: self._on_main_screen() and self.focused is not self._prompt,
         }
+        if action in self._missing_triggers:
+            return False
         condition = conditions.get(action)
         return condition is None or condition()
 
@@ -620,24 +627,42 @@ class OrbitApp(App[None], inherit_bindings=False):
                 | StartupChecked()
             ):
                 self._feed.render(event)
-            case SessionsListed() | ConversationReset() | Snapshot():
+            case SessionsListed() | ConversationReset() | Snapshot() | Catalog():
                 self._render_session(event)
             case CommandAccepted() | CommandRefused() | Welcome():
                 self._render_outcome(event)
             case _:
                 assert_never(event)
 
-    def _render_session(self, event: SessionsListed | ConversationReset | Snapshot) -> None:
+    def _render_session(
+        self, event: SessionsListed | ConversationReset | Snapshot | Catalog
+    ) -> None:
         """Show the sessions listed, rule off the planner's conversation where it was reset,
-        or show a snapshot of the session open. The conversation's title follows the open
-        session's name."""
+        show a snapshot of the session open, or label the trigger keys from a catalog. The
+        conversation's title follows the open session's name."""
         if isinstance(event, SessionsListed):
             self._name_current(event)
             self._show_sessions(event)
         elif isinstance(event, Snapshot):
             self._render_snapshot(event)
+        elif isinstance(event, Catalog):
+            self._label_triggers(trigger_key_labels(event.triggers))
         else:
             self._feed.append(*planner_reset_entry(), PLANNER)
+
+    def _label_triggers(self, labels: dict[str, str | None]) -> None:
+        """Label each trigger's key in the footer with its label in ``labels``, hiding those
+        with none."""
+        bindings = self._bindings.key_to_bindings
+        missing: set[str] = set()
+        for key, label in labels.items():
+            binding = bindings[key][0]
+            if label is None:
+                missing.add(binding.action)
+            else:
+                bindings[key] = [replace(binding, description=label)]
+        self._missing_triggers = frozenset(missing)
+        self.refresh_bindings()
 
     def _open_session(self, session: SessionSummary) -> None:
         """Title the conversation with ``session``'s name, take the task list out of list

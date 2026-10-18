@@ -25,6 +25,7 @@ from orbit.agent.domain.sessions import (
 from orbit.protocol import (
     BUSY,
     INVALID,
+    Catalog,
     DeleteSession,
     Event,
     ListingReason,
@@ -59,8 +60,9 @@ def _stopped(saved: Sequence[TaskState], now: Sequence[TaskState]) -> list[str]:
 class SwitchParts:
     """What a switch replaces the contents of: the ``keeper`` saving the session, its ``tasks``,
     its planner ``seat``, its review ``lane`` and ``work`` lane, if any, and whether
-    ``tasks_running`` now; and the ``snapshot`` of the session open, last active then, that
-    follows a switch."""
+    ``tasks_running`` now; the ``snapshot`` of the session open, last active then, that
+    follows a switch; and the ``catalog`` holding the sessions given, sent whenever they
+    change."""
 
     keeper: SessionKeeper
     tasks: Tasks
@@ -69,6 +71,7 @@ class SwitchParts:
     work: WorkLane | None
     tasks_running: Callable[[], bool]
     snapshot: Callable[[datetime | None], Snapshot]
+    catalog: Callable[[tuple[SessionSummary, ...]], Catalog]
 
 
 @dataclass(frozen=True)
@@ -128,6 +131,18 @@ class SessionSwitcher:
         summaries = await self._keeper.summaries()
         await self._events.put(SessionsListed(sessions=summaries, reason=reason))
 
+    async def publish_catalog(self) -> None:
+        """Publish the catalog, holding the sessions as they are now."""
+        await self._events.put(self._parts.catalog(await self._sessions()))
+
+    async def _sessions(self) -> tuple[SessionSummary, ...]:
+        """The saved sessions, as the list of sessions shows them, after the one open here if
+        it isn't saved."""
+        saved = await self._keeper.summaries()
+        if any(summary.current for summary in saved):
+            return saved
+        return (self.summary(), *saved)
+
     def contents(self) -> Contents:
         """What the session holds now, to save, with what it was opened with in place of the
         reviews it has no lane to hold."""
@@ -145,8 +160,8 @@ class SessionSwitcher:
         await self._keeper.save(self.contents)
 
     async def _change_saved(self, command: RenameSession | DeleteSession) -> None:
-        """Rename or delete a session, then list the sessions as they are after, refused or
-        not."""
+        """Rename or delete a session and publish the catalog, then list the sessions as they
+        are after, refused or not."""
         try:
             match command:
                 case RenameSession(session_id=session_id, name=name):
@@ -155,6 +170,7 @@ class SessionSwitcher:
                     await self._keeper.delete_saved(session_id)
                 case _:
                     assert_never(command)
+            await self.publish_catalog()
         finally:
             await self.list_sessions("refreshed")
 
@@ -255,7 +271,7 @@ class SessionSwitcher:
     ) -> None:
         """Finish a switch from the session ``left``, deleting it if its tasks carried over:
         close its planner, end the reviews ``stopped`` when it was saved, then save the session
-        opened and publish its snapshot, last active at ``last_active``."""
+        opened and publish the catalog and its snapshot, last active at ``last_active``."""
         parts = self._parts
         discard, self._picking = self._picking, False
         await self._keeper.leave(left, discard)
@@ -263,6 +279,7 @@ class SessionSwitcher:
         if parts.lane is not None:
             await parts.lane.end_interrupted(stopped)
         await parts.tasks.changed_elsewhere()
+        await self.publish_catalog()
         await self._events.put(parts.snapshot(last_active))
 
     def summary(self, last_active: datetime | None = None) -> SessionSummary:

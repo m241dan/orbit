@@ -793,6 +793,43 @@ class Snapshot(_Message):
     agents: tuple[RunningAgent, ...]
 
 
+class WorkspaceEntry(_Message):
+    """Workspace ``id``, shown as ``label``, and its ``sessions`` as the list of sessions shows
+    them."""
+
+    id: str
+    label: str
+    sessions: tuple[SessionSummary, ...]
+
+
+class AgentEntry(_Message):
+    """An agent role ``name``, shown as ``label``; ``conversational`` if the user can message
+    it."""
+
+    name: str
+    label: str
+    conversational: bool
+
+
+class TriggerEntry(_Message):
+    """A trigger ``name``, shown as ``label``; ``manual`` if the user fires it."""
+
+    name: str
+    label: str
+    manual: bool
+
+
+class Catalog(_Message):
+    """What exists: the ``workspaces`` and their sessions, the ``agents``' roles, the
+    ``triggers`` and the ``lanes``; sent after ``Welcome`` and whenever the sessions change."""
+
+    type: Literal["catalog"] = "catalog"
+    workspaces: tuple[WorkspaceEntry, ...]
+    agents: tuple[AgentEntry, ...]
+    triggers: tuple[TriggerEntry, ...]
+    lanes: tuple[str, ...]
+
+
 Event = Annotated[
     SettingsChanged
     | TurnStarted
@@ -823,6 +860,7 @@ Event = Annotated[
     | SessionsListed
     | ConversationReset
     | Snapshot
+    | Catalog
     | Welcome
     | CommandAccepted
     | CommandRefused,

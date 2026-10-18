@@ -213,6 +213,7 @@ from orbit.tui.view.transcript import (
     startup_entry,
     tool_call_entry,
 )
+from orbit.tui.view.triggers import TRIGGER_KEYS, trigger_key_labels
 from orbit.tui.view.turns import (
     ExitedAgent,
     FinishedTurn,
@@ -308,6 +309,7 @@ __all__ = [
     "TOOL_ACCESS_OPTIONS",
     "TOOL_CALL_SUMMARY_LIMIT",
     "TOOL_VIEWS",
+    "TRIGGER_KEYS",
     "TURN_END_LABELS",
     "USAGE_COLOURS",
     "WAITING",
@@ -436,6 +438,7 @@ __all__ = [
     "track_roles",
     "track_tabs",
     "track_working",
+    "trigger_key_labels",
     "turn_finished",
     "turn_output",
     "turn_rule_entry",

@@ -8,6 +8,7 @@ import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable, Collection, Sequence
 from dataclasses import replace
 from datetime import datetime
+from pathlib import PurePath
 from typing import assert_never
 
 from orbit import __version__
@@ -40,6 +41,7 @@ from orbit.agent.application.verifier import Verification, Verifier
 from orbit.agent.application.work_lane import WorkLane
 from orbit.agent.domain.agents import Agent
 from orbit.agent.domain.board import WAITING, TaskBoard
+from orbit.agent.domain.catalog import catalog
 from orbit.agent.domain.checks import configure_prompt
 from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.reviews import ReviewPlanner
@@ -64,6 +66,7 @@ from orbit.protocol import (
     AddTask,
     CancelAgent,
     CancelTurn,
+    Catalog,
     CommandAccepted,
     CommandEnvelope,
     CommandRefused,
@@ -79,6 +82,7 @@ from orbit.protocol import (
     RunningAgent,
     RunTasks,
     SendMessage,
+    SessionSummary,
     Settings,
     SettingsChanged,
     Snapshot,
@@ -138,6 +142,11 @@ def _reviewed(agents: Agents | None, review: ProposalReview) -> Agents | None:
     return replace(agents, proposal_review=review)
 
 
+def _workspace_label(workspace: str | None) -> str | None:
+    """The name of the directory of the repository at ``workspace``; none without one."""
+    return PurePath(workspace).name if workspace else None
+
+
 def _ends_stream(event: Event) -> bool:
     """Whether ``event`` is the last of the stream: an incompatible ``Hello``'s refusal."""
     return isinstance(event, CommandRefused) and event.code == INCOMPATIBLE
@@ -158,10 +167,11 @@ class AgentSession:
     too, from then on.
 
     Every stream opens with ``Hello``: the session publishes nothing, and refuses every other
-    command, until it's answered with ``Welcome``. A ``Snapshot`` of the session open follows
-    it, after the latest usage if any was fetched, then the one-off notices: the workspace, no
-    verification steps, work left by earlier runs; every switch of session ends with a
-    ``Snapshot`` too.
+    command, until it's answered with ``Welcome``. A ``Catalog`` of what exists follows it, then
+    the latest usage if any was fetched, a ``Snapshot`` of the session open and the one-off
+    notices: the workspace, no verification steps, work left by earlier runs. Every switch of
+    session ends with a ``Catalog`` and a ``Snapshot`` too, and a rename or delete sends a
+    ``Catalog``.
 
     The session open here is saved in ``store``, if there is one, once it's used; ``clock``
     tells the time, ``new_id`` makes its id and ``name`` names it (by the time, if none). The
@@ -229,6 +239,7 @@ class AgentSession:
             self._work,
             lambda: self._work_turns.running,
             self._snapshot,
+            self._catalog,
         )
         access = SettingsAccess(
             lambda: self._settings,
@@ -325,9 +336,9 @@ class AgentSession:
             raise Refused(WRONG_SESSION, message)
 
     async def _hello(self, hello: Hello, command_id: str) -> None:
-        """Welcome the frontend that sent ``hello`` as ``command_id``, then publish the latest
-        usage, if any, a snapshot, the one-off notices and, if asked to, the saved sessions to
-        pick from; refused for a second Hello, or another protocol version."""
+        """Welcome the frontend that sent ``hello`` as ``command_id``, then publish the catalog,
+        the latest usage, if any, a snapshot, the one-off notices and, if asked to, the saved
+        sessions to pick from; refused for a second Hello, or another protocol version."""
         if self._welcomed:
             raise Refused(INVALID, HELLO_AGAIN_MESSAGE)
         if hello.protocol_version != PROTOCOL_VERSION:
@@ -348,9 +359,10 @@ class AgentSession:
             self._start_background()
 
     async def _welcome(self, command_id: str) -> None:
-        """Answer Hello ``command_id`` with ``Welcome``, then the latest usage, if any was
-        fetched, and a snapshot of the session."""
+        """Answer Hello ``command_id`` with ``Welcome``, then the catalog, the latest usage, if
+        any was fetched, and a snapshot of the session."""
         await self._events.put(Welcome(command_id=command_id, server_version=__version__))
+        await self._switcher.publish_catalog()
         if self._usage is not None and self._usage.latest is not None:
             await self._events.put(self._usage.latest)
         await self._events.put(self._snapshot())
@@ -710,6 +722,11 @@ class AgentSession:
             proposals=self._proposals.waiting,
             agents=self._running_agents(),
         )
+
+    def _catalog(self, sessions: tuple[SessionSummary, ...]) -> Catalog:
+        """What exists: the workspace holding ``sessions``, and the agents' roles, if any."""
+        roles = self._desk.agents.roles if self._desk else ()
+        return catalog(_workspace_label(self._workspace), sessions, roles)
 
     def _steps_shown(self) -> tuple[tuple[StepState, ...], str]:
         """The verification steps the panel shows, and their title: the startup check's while
