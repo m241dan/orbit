@@ -9,6 +9,7 @@ from orbit.protocol import (
     WORK_LANE,
     AgentStarted,
     AssistantMessage,
+    CommandRefused,
     ConversationReset,
     Event,
     EventEnvelope,
@@ -239,6 +240,54 @@ async def test_a_request_that_fails_to_send_can_be_made_again() -> None:
         session.send_error = None
         await pilot.press("k")
         assert len(histories(session)) == 2 and loading(app)
+
+
+def history_id(session: FakeSession) -> str:
+    """The command id of the last ``History`` sent."""
+    return [e.command_id for e in session.envelopes if isinstance(e.payload, History)][-1]
+
+
+def refusal(command_id: str) -> CommandRefused:
+    return CommandRefused(command_id=command_id, code="internal", message="Couldn't read.")
+
+
+async def test_a_refused_request_stops_loading_and_can_be_made_again() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, snapshot(*logged(501, *notices("c"))))
+        await at_the_top(pilot, 1)
+        await pilot.press("k")
+        await feed_events(session, pilot, refusal(history_id(session)))
+        assert not loading(app) and "Couldn't read." in texts(app)
+        await pilot.press("k")
+        assert histories(session) == [History(session="s1", before_seq=501)] * 2
+        assert loading(app)
+
+
+async def test_a_refusal_of_another_command_leaves_the_page_loading() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, snapshot(*logged(501, *notices("c"))))
+        await at_the_top(pilot, 1)
+        await pilot.press("k")
+        await feed_events(session, pilot, refusal("other"))
+        assert loading(app)
+        await pilot.press("k")
+        assert len(histories(session)) == 1
+
+
+async def test_a_page_arriving_after_its_request_was_refused_is_ignored() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, snapshot(*logged(501, *notices("c"))))
+        await at_the_top(pilot, 1)
+        await pilot.press("k")
+        await feed_events(session, pilot, refusal(history_id(session)))
+        await feed_events(session, pilot, page(*logged(1, *notices("a"))))
+        assert shown("a") not in texts(app) and not loading(app)
 
 
 EARLIER = (

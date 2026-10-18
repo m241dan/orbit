@@ -48,6 +48,7 @@ from orbit.protocol import (
     Event,
     FireTrigger,
     Hello,
+    History,
     HistoryPage,
     Link,
     LinkState,
@@ -215,6 +216,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         self._echoes: set[str] = set()
         self._halt = StorageHaltHost(self.push_screen, self._resume_storage, self._show_halt)
         self._resume_id: str | None = None  # The command id of the last ResumeStorage sent.
+        self._history_id: str | None = None  # The command id of the last History sent.
         self._link_host = LinkHost(self.push_screen, self.exit, self._show_link, self.set_timer)
         # The actions of the keys whose trigger the last catalog lacks, which are hidden.
         self._missing_triggers: frozenset[str] = frozenset()
@@ -308,13 +310,16 @@ class OrbitApp(App[None], inherit_bindings=False):
             self._feed.render(event)
 
     def _render_outcome(self, event: CommandAccepted | CommandRefused | Welcome) -> None:
-        """Show why a command was refused, freeing the planner from a message it refused; an
-        accepted one, or the Welcome answering Hello, shows nothing."""
+        """Show why a command was refused, freeing the planner from a message it refused and the
+        pager from the History it refused; an accepted one, or the Welcome answering Hello,
+        shows nothing."""
         self._echoes.discard(event.command_id)
         if isinstance(event, CommandAccepted | Welcome):
             return
         if event.command_id == self._message_id:
             self._set_busy(PLANNER_LANE, False)
+        elif event.command_id == self._history_id:
+            self._pager.refused()
         self._feed.render(event)
 
     # Window navigation only applies at the top level, when no window is active.
@@ -544,21 +549,28 @@ class OrbitApp(App[None], inherit_bindings=False):
 
     async def _send(self, command: Command, failure: str = "Couldn't send the command") -> bool:
         """Whether ``command`` was sent to the open session in the default workspace, under a
-        fresh id remembered for a message, and for a message or decision, whose echo isn't
-        shown; a failure to send it is shown as :meth:`_unsent` does."""
+        fresh id remembered as :meth:`_remember` does; a failure to send it is shown as
+        :meth:`_unsent` does."""
         command_id = uuid4().hex
-        if isinstance(command, SendMessage):
-            self._message_id = command_id
-        elif isinstance(command, ResumeStorage):
-            self._resume_id = command_id
-        if isinstance(command, SendMessage | DecideProposal):
-            self._echoes.add(command_id)
+        self._remember(command, command_id)
         try:
             await self._session.send(CommandEnvelope(command_id=command_id, payload=command))
         except Exception as exc:
             self._unsent(command, command_id, exc, failure)
             return False
         return True
+
+    def _remember(self, command: Command, command_id: str) -> None:
+        """Remember ``command_id`` for a message, a ResumeStorage or a History, and for a
+        message or decision, whose echo isn't shown."""
+        if isinstance(command, SendMessage):
+            self._message_id = command_id
+        elif isinstance(command, ResumeStorage):
+            self._resume_id = command_id
+        elif isinstance(command, History):
+            self._history_id = command_id
+        if isinstance(command, SendMessage | DecideProposal):
+            self._echoes.add(command_id)
 
     def _unsent(self, command: Command, command_id: str, exc: Exception, failure: str) -> None:
         """Show that ``command``, as ``command_id``, wasn't sent for ``exc``: refused while not

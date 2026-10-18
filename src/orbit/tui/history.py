@@ -41,6 +41,11 @@ class HistoryPager:
         if not await self._send(request):
             self._show_loading(False)
 
+    def refused(self) -> None:
+        """Stop waiting for the page asked for, which the backend refused, so it can be asked
+        for again."""
+        self._show_loading(False)
+
     def show(self, page: HistoryPage) -> None:
         """Show ``page`` above the conversation, if it's the page asked for."""
         paging = page_arrived(self._paging, page)
