@@ -4,6 +4,7 @@ import pytest
 
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.board import TaskBoard
+from orbit.agent.domain.refusals import Refused
 from orbit.protocol import Event, TasksChanged, TaskSpec
 
 
@@ -80,7 +81,7 @@ async def test_change_refused_by_the_board_publishes_nothing() -> None:
     published: list[Event] = []
     tasks = tasks_on(published)
 
-    with pytest.raises(ValueError):
+    with pytest.raises(Refused):
         await tasks.change(lambda board: board.remove("missing"))
 
     assert published == []
@@ -97,21 +98,39 @@ def adds(board: TaskBoard) -> None:
     board.add(TaskSpec(prompt="a"))
 
 
-async def ignored(error: ValueError) -> None:
+async def ignored(error: Refused) -> None:
     """Ignores the board refusing a change."""
 
 
 async def test_change_refused_by_the_board_is_handed_to_refused_with_nothing_published() -> None:
     published: list[Event] = []
     tasks = tasks_on(published)
-    errors: list[ValueError] = []
+    errors: list[Refused] = []
 
-    async def refused(error: ValueError) -> str:
+    async def refused(error: Refused) -> str:
         errors.append(error)
         return "refused"
 
     assert await tasks.change(removes_missing, refused) == "refused"
     assert len(errors) == 1
+    assert published == []
+
+
+async def test_a_value_error_that_is_not_a_refusal_escapes_refused() -> None:
+    published: list[Event] = []
+    tasks = tasks_on(published)
+    errors: list[Refused] = []
+
+    async def refused(error: Refused) -> None:
+        errors.append(error)
+
+    def breaks(board: TaskBoard) -> None:
+        raise ValueError("a bug in the change")
+
+    with pytest.raises(ValueError, match="a bug in the change"):
+        await tasks.change(breaks, refused)
+
+    assert errors == []
     assert published == []
 
 

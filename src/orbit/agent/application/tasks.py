@@ -5,6 +5,7 @@ from collections.abc import Awaitable, Callable
 
 from orbit.agent.application.ports import Publish
 from orbit.agent.domain.board import TaskBoard
+from orbit.agent.domain.refusals import Refused
 from orbit.protocol import TasksChanged, TaskStatus
 
 Changed = Callable[[], Awaitable[None]]
@@ -31,15 +32,15 @@ class Tasks:
     async def change[T](
         self,
         change: Callable[[TaskBoard], T],
-        refused: Callable[[ValueError], Awaitable[T]] | None = None,
+        refused: Callable[[Refused], Awaitable[T]] | None = None,
     ) -> T:
         """Apply ``change`` to the board and publish it; returns what ``change`` returned. If the
-        board refuses it with a ``ValueError``, nothing is published and that error escapes, or
-        is handed to ``refused``, whose result is returned. Errors from publishing always
-        escape."""
+        board refuses it with :class:`Refused`, nothing is published and that refusal escapes,
+        or is handed to ``refused``, whose result is returned. Other errors, such as those from
+        publishing, always escape."""
         try:
             result = change(self._board)
-        except ValueError as exc:
+        except Refused as exc:
             if refused is None:
                 raise
             return await refused(exc)

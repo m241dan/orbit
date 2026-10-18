@@ -26,6 +26,7 @@ from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.checks import ChecksProposal, parse_proposal
 from orbit.agent.domain.config_errors import ConfigError
 from orbit.agent.domain.endings import Ending, bug, error, run_ending, unaccepted
+from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.roles import (
     COMPLETE_TASK,
     GET_TASK,
@@ -296,7 +297,7 @@ class AgentRun:
             lambda board: board.add_usage(self._task_id, usage), refused=self._uncounted
         )
 
-    async def _uncounted(self, error: ValueError) -> None:
+    async def _uncounted(self, error: Refused) -> None:
         """Act on a turn's usage the board refused for a removed task: what the session spent
         still changed."""
         await self._tasks.changed_elsewhere()
