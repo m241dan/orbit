@@ -8,9 +8,8 @@ import pytest
 
 from orbit.protocol import (
     PLANNER,
-    Command,
-    ErrorOccurred,
-    Event,
+    CommandEnvelope,
+    EventEnvelope,
     Notice,
     SendMessage,
     Session,
@@ -18,15 +17,29 @@ from orbit.protocol import (
 )
 
 
+def command(text: str) -> CommandEnvelope:
+    """A message to the planner saying ``text``, in an envelope."""
+    return CommandEnvelope(command_id=text, payload=SendMessage(agent=PLANNER, text=text))
+
+
+def notice(seq: int, message: str) -> EventEnvelope:
+    """A notice saying ``message``, in an envelope at ``seq``."""
+    return EventEnvelope(seq=seq, payload=Notice(message=message))
+
+
 class FakeSession:
     """An inner session that records the thread each call ran on."""
 
     def __init__(
-        self, events: list[Event] | None = None, *, crash: bool = False, endless: bool = False
+        self,
+        events: list[EventEnvelope] | None = None,
+        *,
+        crash: bool = False,
+        endless: bool = False,
     ) -> None:
         self.calls: list[tuple[str, str]] = []
         self.thread = threading.current_thread()
-        self.sent: list[Command] = []
+        self.sent: list[CommandEnvelope] = []
         self.closes = 0
         self.send_delay = 0.0
         self.send_error: Exception | None = None
@@ -42,21 +55,21 @@ class FakeSession:
     def _record(self, call: str) -> None:
         self.calls.append((call, threading.current_thread().name))
 
-    async def send(self, command: Command) -> None:
+    async def send(self, envelope: CommandEnvelope) -> None:
         self._record("send")
         time.sleep(self.send_delay)  # Blocks the backend's loop, as heavy backend work would.
         if self.send_error is not None:
             raise self.send_error
-        self.sent.append(command)
+        self.sent.append(envelope)
 
-    async def events(self) -> AsyncIterator[Event]:
+    async def events(self) -> AsyncIterator[EventEnvelope]:
         self._record("events")
         try:
             for event in self._events:
                 yield event
             if self.hold is not None:
                 self.hold.wait()
-                yield Notice(message="after the hold")
+                yield notice(len(self._events) + 1, "after the hold")
             if self._crash:
                 raise RuntimeError("the queue broke")
             if self._endless:
@@ -78,12 +91,14 @@ class EchoSession:
     echoes each command sent to it as a notice."""
 
     def __init__(self) -> None:
-        self._queue: asyncio.Queue[Event] = asyncio.Queue()
+        self._queue: asyncio.Queue[EventEnvelope] = asyncio.Queue()
+        self._seq = 0
 
-    async def send(self, command: Command) -> None:
-        await self._queue.put(Notice(message=str(command)))
+    async def send(self, envelope: CommandEnvelope) -> None:
+        self._seq += 1
+        await self._queue.put(notice(self._seq, envelope.command_id))
 
-    async def events(self) -> AsyncIterator[Event]:
+    async def events(self) -> AsyncIterator[EventEnvelope]:
         while True:
             yield await self._queue.get()
 
@@ -106,16 +121,16 @@ def threaded(inner: FakeSession | None = None) -> tuple[ThreadedSession, list[Fa
     return ThreadedSession(make), built
 
 
-async def collect(session: Session) -> list[Event]:
+async def collect(session: Session) -> list[EventEnvelope]:
     return [event async for event in session.events()]
 
 
 async def test_commands_and_events_cross_threads_in_order() -> None:
-    notices: list[Event] = [Notice(message=str(n)) for n in range(20)]
+    notices = [notice(n, str(n)) for n in range(1, 21)]
     session, built = threaded(FakeSession(notices))
-    commands = [SendMessage(agent=PLANNER, text=str(n)) for n in range(20)]
-    for command in commands:
-        await session.send(command)
+    commands = [command(str(n)) for n in range(20)]
+    for envelope in commands:
+        await session.send(envelope)
 
     assert await collect(session) == notices
     await session.close()
@@ -125,7 +140,7 @@ async def test_commands_and_events_cross_threads_in_order() -> None:
 
 async def test_the_inner_session_is_built_and_driven_on_the_backend_thread() -> None:
     session, built = threaded()
-    await session.send(SendMessage(agent=PLANNER, text="hi"))
+    await session.send(command("hi"))
     await collect(session)
     await session.close()
 
@@ -141,19 +156,18 @@ async def test_an_error_from_the_inner_send_re_raises_in_the_caller() -> None:
     session, _ = threaded(inner)
 
     with pytest.raises(ValueError, match="bad command"):
-        await session.send(SendMessage(agent=PLANNER, text="hi"))
+        await session.send(command("hi"))
     await session.close()
 
 
-async def test_a_crashing_inner_event_stream_gives_an_error() -> None:
-    session, _ = threaded(FakeSession([Notice(message="first")], crash=True))
+async def test_a_crashing_inner_event_stream_raises_after_the_events_before_it() -> None:
+    session, _ = threaded(FakeSession([notice(1, "first")], crash=True))
+    events = session.events()
 
-    first, error = await collect(session)
+    assert await anext(events) == notice(1, "first")
+    with pytest.raises(RuntimeError, match="the queue broke"):
+        await anext(events)
     await session.close()
-
-    assert first == Notice(message="first")
-    assert isinstance(error, ErrorOccurred)
-    assert "the queue broke" in error.message
 
 
 async def test_close_closes_the_inner_session_and_joins_the_thread() -> None:
@@ -186,9 +200,9 @@ async def test_close_before_start_builds_nothing() -> None:
 
 
 async def test_close_ends_an_endless_event_stream() -> None:
-    session, _ = threaded(FakeSession([Notice(message="one")], endless=True))
+    session, _ = threaded(FakeSession([notice(1, "one")], endless=True))
     events = session.events()
-    assert await anext(events) == Notice(message="one")
+    assert await anext(events) == notice(1, "one")
     await session.close()
 
     with pytest.raises(StopAsyncIteration):
@@ -253,7 +267,7 @@ async def test_a_blocked_backend_does_not_stop_the_callers_loop() -> None:
             ticks += 1
 
     ticker = asyncio.create_task(tick())
-    await session.send(SendMessage(agent=PLANNER, text="slow"))
+    await session.send(command("slow"))
     ticker.cancel()
     await session.close()
 
@@ -261,10 +275,10 @@ async def test_a_blocked_backend_does_not_stop_the_callers_loop() -> None:
 
 
 async def test_abandoning_events_stops_its_pump_before_close() -> None:
-    inner = FakeSession([Notice(message="one")], endless=True)
+    inner = FakeSession([notice(1, "one")], endless=True)
     session, _ = threaded(inner)
     events = session.events()
-    assert await anext(events) == Notice(message="one")
+    assert await anext(events) == notice(1, "one")
     await events.aclose()
 
     assert await asyncio.to_thread(inner.stream_closed.wait, 5)
@@ -275,30 +289,29 @@ async def test_abandoning_events_stops_its_pump_before_close() -> None:
 async def test_events_after_an_abandoned_iterator_receive_every_event() -> None:
     session = ThreadedSession(EchoSession)
     first = session.events()
-    await session.send(SendMessage(agent=PLANNER, text="first"))
-    assert await anext(first) == Notice(message=str(SendMessage(agent=PLANNER, text="first")))
+    await session.send(command("first"))
+    assert await anext(first) == notice(1, "first")
     await first.aclose()
 
     second = session.events()
-    commands = [SendMessage(agent=PLANNER, text=str(n)) for n in range(10)]
-    for command in commands:
-        await session.send(command)
-    received = [await asyncio.wait_for(anext(second), 5) for _ in commands]
+    for n in range(10):
+        await session.send(command(str(n)))
+    received = [await asyncio.wait_for(anext(second), 5) for _ in range(10)]
     await session.close()
 
-    assert received == [Notice(message=str(command)) for command in commands]
+    assert received == [notice(n + 2, str(n)) for n in range(10)]
 
 
 async def test_a_pump_whose_callers_loop_has_closed_ends_quietly() -> None:
-    inner = FakeSession([Notice(message="one")])
+    inner = FakeSession([notice(1, "one")])
     inner.hold = threading.Event()
     session, _ = threaded(inner)
 
-    async def take_one() -> Event:
+    async def take_one() -> EventEnvelope:
         return await anext(session.events())
 
     # The backend's loop is held after "one" until the caller's loop has closed.
-    assert await asyncio.to_thread(asyncio.run, take_one()) == Notice(message="one")
+    assert await asyncio.to_thread(asyncio.run, take_one()) == notice(1, "one")
     inner.hold.set()
     await session.close()
 

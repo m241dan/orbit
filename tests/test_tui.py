@@ -18,8 +18,10 @@ from orbit.protocol import (
     BusyChanged,
     CancelTurn,
     Command,
+    CommandEnvelope,
     ErrorOccurred,
     Event,
+    EventEnvelope,
     Notice,
     SendMessage,
     Settings,
@@ -53,19 +55,27 @@ from orbit.tui.widgets import ChatPrompt, PickerScreen, SidePanel
 
 
 class FakeSession:
-    """Stands in for the backend: records commands, replays scripted events."""
+    """Stands in for the backend: records commands, and the envelopes they came in, and
+    replays scripted events in envelopes; an exception queued fails the stream."""
 
     def __init__(self) -> None:
+        self.envelopes: list[CommandEnvelope] = []
         self.commands: list[Command] = []
-        self.queue: asyncio.Queue[Event] = asyncio.Queue()
+        self.queue: asyncio.Queue[Event | Exception] = asyncio.Queue()
         self.closed = False
 
-    async def send(self, command: Command) -> None:
-        self.commands.append(command)
+    async def send(self, envelope: CommandEnvelope) -> None:
+        self.envelopes.append(envelope)
+        self.commands.append(envelope.payload)
 
-    async def events(self) -> AsyncIterator[Event]:
+    async def events(self) -> AsyncIterator[EventEnvelope]:
+        seq = 0
         while True:
-            yield await self.queue.get()
+            event = await self.queue.get()
+            if isinstance(event, Exception):
+                raise event
+            seq += 1
+            yield EventEnvelope(seq=seq, payload=event)
 
     async def close(self) -> None:
         self.closed = True
@@ -104,6 +114,32 @@ async def test_submit_sends_command_and_renders_events() -> None:
         await session.queue.put(BusyChanged(busy=False, lane="planner"))
         await pilot.pause()
         assert prompt.border_title == "Prompt · planner"
+
+
+async def test_each_command_goes_in_an_envelope_with_a_fresh_id() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await pilot.press("i", *"hi", "enter", "ctrl+x")
+
+    first, second = session.envelopes
+    assert first.payload == SendMessage(agent=PLANNER, text="hi")
+    assert second.payload == CancelTurn(lane="planner")
+    for envelope in (first, second):
+        assert len(envelope.command_id) == 32
+        int(envelope.command_id, 16)  # Hex.
+        assert (envelope.workspace, envelope.session) == ("default", None)
+    assert first.command_id != second.command_id
+
+
+async def test_a_failed_event_stream_shows_an_error_line() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, Notice(message="before"))
+        await session.queue.put(RuntimeError("the queue broke"))
+        await pilot.pause()
+        assert shown(app)[-1] == "The backend's event stream failed: the queue broke"
 
 
 async def test_the_prompt_takes_typing_while_the_planner_is_busy() -> None:
@@ -1414,12 +1450,12 @@ async def test_notes_on_no_listed_pinned_task_stay_under_all() -> None:
         ]
 
 
-async def finite(*events: Event) -> AsyncIterator[Event]:
-    for event in events:
-        yield event
+async def finite(*events: Event) -> AsyncIterator[EventEnvelope]:
+    for seq, event in enumerate(events, 1):
+        yield EventEnvelope(seq=seq, payload=event)
 
 
-async def collect_batches(events: AsyncIterator[Event], limit: int) -> list[list[Event]]:
+async def collect_batches(events: AsyncIterator[EventEnvelope], limit: int) -> list[list[Event]]:
     return [batch async for batch in event_batches(events, limit)]
 
 
@@ -1434,8 +1470,8 @@ async def test_event_batches_ends_with_the_events() -> None:
 
 
 async def test_event_batches_raises_what_reading_the_events_raises() -> None:
-    async def failing() -> AsyncIterator[Event]:
-        yield Notice(message="before")
+    async def failing() -> AsyncIterator[EventEnvelope]:
+        yield EventEnvelope(seq=1, payload=Notice(message="before"))
         raise RuntimeError("lost")
 
     with pytest.raises(RuntimeError, match="lost"):
@@ -1467,7 +1503,7 @@ async def test_a_failed_render_cancels_the_event_reader(
     # Holding the batches keeps garbage collection from closing them, as it would by chance.
     held: list[AsyncGenerator[list[Event]]] = []
 
-    def holding(events: AsyncIterator[Event]) -> AsyncGenerator[list[Event]]:
+    def holding(events: AsyncIterator[EventEnvelope]) -> AsyncGenerator[list[Event]]:
         held.append(event_batches(events))
         return held[-1]
 

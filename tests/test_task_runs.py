@@ -56,8 +56,10 @@ from tests.agent_fakes import (
     Steps,
     board,
     nothing_queued,
+    payloads,
     queued,
     run,
+    send,
     session_for,
     verified,
 )
@@ -83,7 +85,7 @@ async def keeps_claiming(call: Call) -> TurnEndReason:
 async def idle(session: AgentSession) -> list[Event]:
     """The session's events until it next goes idle."""
     events: list[Event] = []
-    async for event in session.events():
+    async for event in payloads(session):
         events.append(event)
         if event == BusyChanged(busy=False):
             return events
@@ -119,17 +121,17 @@ async def test_running_again_runs_only_tasks_that_did_not_finish() -> None:
     events = await asyncio.wait_for(run(session, TaskSpec(prompt="a"), TaskSpec(prompt="b")), 5)
     assert statuses(events) == ["completed", "error"]
 
-    await session.send(RunTasks())
+    await send(session, RunTasks())
     assert statuses(await asyncio.wait_for(idle(session), 5)) == ["completed", "completed"]
     assert [launch.agent.task_id for launch in launcher.launches] == ["1", "2", "2"]
 
 
 async def test_running_does_nothing_when_nothing_is_runnable() -> None:
     session, _, launcher = session_for()
-    stream = session.events()
+    stream = payloads(session)
     await anext(stream)  # Settings.
     await anext(stream)  # The session opened.
-    await session.send(RunTasks())
+    await send(session, RunTasks())
     await asyncio.sleep(0.01)
     assert nothing_queued(session)
     assert launcher.launches == []
@@ -137,9 +139,9 @@ async def test_running_does_nothing_when_nothing_is_runnable() -> None:
 
 async def test_running_without_agents_is_refused() -> None:
     session = AgentSession()
-    await session.send(AddTask(task=TaskSpec(prompt="a")))
-    await session.send(RunTasks())
-    stream = session.events()
+    await send(session, AddTask(task=TaskSpec(prompt="a")))
+    await send(session, RunTasks())
+    stream = payloads(session)
     events = [await anext(stream) for _ in range(3)]
     assert ErrorOccurred(message="Tasks need agents, and none are set up.") in events
 
@@ -171,12 +173,12 @@ async def test_running_is_refused_while_a_run_runs() -> None:
         return "completed"
 
     session, _, launcher = session_for(waits, claims_done)
-    await session.send(AddTask(task=TaskSpec(prompt="a")))
-    await session.send(AddTask(task=TaskSpec(prompt="b")))
-    await session.send(RunTasks())
-    await session.send(RunTasks())
+    await send(session, AddTask(task=TaskSpec(prompt="a")))
+    await send(session, AddTask(task=TaskSpec(prompt="b")))
+    await send(session, RunTasks())
+    await send(session, RunTasks())
     events: list[Event] = []
-    async for event in session.events():
+    async for event in payloads(session):
         events.append(event)
         if isinstance(event, ErrorOccurred):
             break
@@ -198,11 +200,11 @@ async def test_tasks_added_during_a_run_join_it_and_running_ones_cannot_be_edite
         return "completed"
 
     session, _, launcher = session_for(waits, claims_done)
-    await session.send(AddTask(task=TaskSpec(prompt="one")))
-    await session.send(RunTasks())
+    await send(session, AddTask(task=TaskSpec(prompt="one")))
+    await send(session, RunTasks())
     await asyncio.wait_for(started.wait(), 5)
-    await session.send(EditTask(task_id="1", task=TaskSpec(prompt="changed")))
-    await session.send(AddTask(task=TaskSpec(prompt="two")))
+    await send(session, EditTask(task_id="1", task=TaskSpec(prompt="changed")))
+    await send(session, AddTask(task=TaskSpec(prompt="two")))
     proceed.set()
     events = await asyncio.wait_for(idle(session), 5)
 
@@ -213,8 +215,8 @@ async def test_tasks_added_during_a_run_join_it_and_running_ones_cannot_be_edite
 
 async def test_verification_progress_is_reported_step_by_step() -> None:
     session, _, _ = session_for(claims_done, verification=verified(Steps(True)))
-    await session.send(AddTask(task=TaskSpec(prompt="one")))
-    await session.send(RunTasks())
+    await send(session, AddTask(task=TaskSpec(prompt="one")))
+    await send(session, RunTasks())
     events = await asyncio.wait_for(idle(session), 5)
 
     def steps(status: str) -> VerificationChanged:
@@ -293,7 +295,7 @@ async def test_a_fix_completes_after_the_task_it_fixed_is_removed() -> None:
 
     async def removes_what_it_fixes(call: Call) -> TurnEndReason:
         await call("get_task")
-        await sessions[0].send(RemoveTask(task_id="1"))
+        await send(sessions[0], RemoveTask(task_id="1"))
         await call("complete_task", summary="fixed")
         return "completed"
 
@@ -372,14 +374,14 @@ async def test_the_fix_cap_survives_a_cancelled_and_restarted_run() -> None:
         verification=verified(Steps(False, False, False, False), fallback_fixes=1),
         limits=Limits(max_attempts=1),
     )
-    await session.send(AddTask(task=TaskSpec(prompt="a")))
-    await session.send(RunTasks())
+    await send(session, AddTask(task=TaskSpec(prompt="a")))
+    await send(session, RunTasks())
     await asyncio.wait_for(fetched.wait(), 5)  # The fix is running.
-    await session.send(CancelTurn())
+    await send(session, CancelTurn())
     first = await asyncio.wait_for(idle(session), 5)
     assert statuses(first) == ["unverified", "cancelled"]
 
-    await session.send(RunTasks())
+    await send(session, RunTasks())
     second = await asyncio.wait_for(idle(session), 5)
 
     assert len(launcher.launches) == 3
@@ -475,7 +477,7 @@ async def test_usage_arriving_after_the_task_was_removed_is_saved_in_what_the_se
 ):
     store = FakeStore()
     session, _, launcher = session_for(store=store)
-    await session.send(AddTask(task=TaskSpec(prompt="a")))
+    await send(session, AddTask(task=TaskSpec(prompt="a")))
     tasks = session._board
 
     async def claims_done_then_removed(call: Call) -> TurnEndReason:
@@ -519,14 +521,14 @@ async def test_a_failure_saving_a_change_the_board_made_is_not_reported_as_refus
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     session, _, _ = session_for()
-    await session.send(AddTask(task=TaskSpec(prompt="a")))
+    await send(session, AddTask(task=TaskSpec(prompt="a")))
 
     async def broken(contents: object) -> None:
         raise ValueError("saving tripped")
 
     monkeypatch.setattr(session._keeper, "save", broken)
     with pytest.raises(ValueError, match="saving tripped"):
-        await session.send(RemoveTask(task_id="1"))
+        await send(session, RemoveTask(task_id="1"))
     assert session._board.tasks == ()
     assert not [e for e in queued(session) if isinstance(e, ErrorOccurred)]
     await session.close()
@@ -579,8 +581,8 @@ async def test_a_task_cancelled_as_the_session_closes_is_just_cancelled() -> Non
         raise AssertionError("unreachable")
 
     session, _, _ = session_for(works_forever)
-    await session.send(AddTask(task=TaskSpec(prompt="a")))
-    await session.send(RunTasks())
+    await send(session, AddTask(task=TaskSpec(prompt="a")))
+    await send(session, RunTasks())
     await asyncio.wait_for(working.wait(), 5)
     await session.close()
     [task] = board(queued(session))
@@ -589,9 +591,9 @@ async def test_a_task_cancelled_as_the_session_closes_is_just_cancelled() -> Non
 
 async def test_cancelling_a_run_before_it_starts_is_no_error() -> None:
     session, _, launcher = session_for(claims_done)
-    await session.send(AddTask(task=TaskSpec(prompt="a")))
-    await session.send(RunTasks())
-    await session.send(CancelTurn())  # The run's task hasn't had a chance to start yet.
+    await send(session, AddTask(task=TaskSpec(prompt="a")))
+    await send(session, RunTasks())
+    await send(session, CancelTurn())  # The run's task hasn't had a chance to start yet.
     events = await asyncio.wait_for(idle(session), 5)
     assert not any(isinstance(e, ErrorOccurred) for e in events)
     assert statuses(events) == ["pending"] and launcher.launches == []

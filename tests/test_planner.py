@@ -42,6 +42,8 @@ from tests.agent_fakes import (
     board,
     events_until,
     idle,
+    payloads,
+    send,
     session_for,
 )
 
@@ -62,7 +64,7 @@ async def chats(call: Call) -> TurnEndReason:
 
 
 async def plan(session: AgentSession, text: str) -> list[Event]:
-    await session.send(SendMessage(agent=PLANNER, text=text))
+    await send(session, SendMessage(agent=PLANNER, text=text))
     return await until_idle(session)
 
 
@@ -115,8 +117,8 @@ async def test_the_first_turn_says_which_agent_is_the_planner() -> None:
 
 
 async def refused_planning(session: AgentSession) -> list[Event]:
-    await session.send(SendMessage(agent=PLANNER, text="Plan."))
-    stream = session.events()
+    await send(session, SendMessage(agent=PLANNER, text="Plan."))
+    stream = payloads(session)
     return [await anext(stream), await anext(stream), await anext(stream)]
 
 
@@ -143,9 +145,9 @@ async def test_accepted_drafts_run_and_dropped_ones_go() -> None:
     session, _, launcher = session_for(done)
     launcher.planner_turns = [proposes_two]
     await plan(session, "Plan it.")
-    await session.send(AcceptTask(task_id="1"))
-    await session.send(RemoveTask(task_id="2"))
-    await session.send(RunTasks())
+    await send(session, AcceptTask(task_id="1"))
+    await send(session, RemoveTask(task_id="2"))
+    await send(session, RunTasks())
     events = await until_idle(session)
     assert [(t.id, t.status) for t in board(events)] == [("1", "completed")]
 
@@ -160,14 +162,14 @@ async def test_draft_and_removal_mistakes_are_reported() -> None:
         raise AssertionError("unreachable")
 
     session, _, _ = session_for(waits)
-    await session.send(AddTask(task=TaskSpec(prompt="one")))
-    await session.send(AcceptTask(task_id="1"))
-    await session.send(RunTasks())
+    await send(session, AddTask(task=TaskSpec(prompt="one")))
+    await send(session, AcceptTask(task_id="1"))
+    await send(session, RunTasks())
     await asyncio.wait_for(gate_open.wait(), 5)
-    await session.send(RemoveTask(task_id="1"))
-    await session.send(AcceptTask(task_id="9"))
+    await send(session, RemoveTask(task_id="1"))
+    await send(session, AcceptTask(task_id="9"))
     errors: list[str] = []
-    async for event in session.events():
+    async for event in payloads(session):
         if isinstance(event, ErrorOccurred):
             errors.append(event.message)
         if len(errors) == 3:
@@ -214,7 +216,7 @@ async def test_closing_ends_the_planners_access() -> None:
     reply = await host.call("token-1", "propose_task", title="x", prompt="y")
     assert reply.is_error
     exited = AgentExited(agent_id="agent-1", reason="finished")
-    assert await asyncio.wait_for(anext(session.events()), 5) == exited
+    assert await asyncio.wait_for(anext(payloads(session)), 5) == exited
 
 
 async def planner_model(role_model: str | None, picked: str | None) -> str | None:

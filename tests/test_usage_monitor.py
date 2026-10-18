@@ -11,7 +11,7 @@ from orbit.agent.application import usage_monitor
 from orbit.agent.application.usage_monitor import UsageMonitor
 from orbit.agent.domain.usage import UsageFetch, UsageRateLimited, UsageReport, UsageUnavailable
 from orbit.protocol import Event, TurnFinished, UsageChanged, UsageLimit
-from tests.agent_fakes import publish
+from tests.agent_fakes import payloads, publish
 
 NOW = datetime(2026, 10, 16, 12, 0, tzinfo=UTC)
 LIMITS = (UsageLimit(label="Session", percent=52.0),)
@@ -236,20 +236,20 @@ def always_due(monkeypatch: pytest.MonkeyPatch) -> None:
 async def test_a_session_without_a_usage_source_sends_no_usage() -> None:
     session = AgentSession()
     await publish(session, TurnFinished(turn_id="t", agent_id="agent-1", reason="completed"))
-    assert await quiet_of_usage(session.events())
+    assert await quiet_of_usage(payloads(session))
     await session.close()
 
 
 async def test_a_session_with_a_usage_source_publishes_its_usage() -> None:
     session = AgentSession(usage=Source(UsageReport(LIMITS)))
-    assert await usage_events(session.events(), 1) == [UsageChanged(limits=LIMITS)]
+    assert await usage_events(payloads(session), 1) == [UsageChanged(limits=LIMITS)]
     await session.close()
 
 
 @pytest.mark.usefixtures("always_due")
 async def test_an_agents_finished_turn_nudges_the_usage_monitor() -> None:
     session = AgentSession(usage=Source(UsageReport(LIMITS), UsageReport(LATER)))
-    stream = session.events()
+    stream = payloads(session)
     await usage_events(stream, 1)
     await publish(session, TurnFinished(turn_id="t", agent_id="agent-1", reason="completed"))
     assert await usage_events(stream, 1) == [UsageChanged(limits=LATER)]
@@ -259,7 +259,7 @@ async def test_an_agents_finished_turn_nudges_the_usage_monitor() -> None:
 @pytest.mark.usefixtures("always_due")
 async def test_a_turn_finished_without_an_agent_does_not_nudge() -> None:
     session = AgentSession(usage=Source(UsageReport(LIMITS), UsageReport(LATER)))
-    stream = session.events()
+    stream = payloads(session)
     await usage_events(stream, 1)
     await publish(session, TurnFinished(turn_id="t", reason="completed"))
     assert await quiet_of_usage(stream)

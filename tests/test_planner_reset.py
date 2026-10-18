@@ -35,6 +35,7 @@ from tests.agent_fakes import (
     events_until,
     idle,
     of_type,
+    send,
     session_for,
 )
 from tests.test_planner import chats, hangs, plan, proposes_two, steps_chat
@@ -47,13 +48,13 @@ NEW_ROLE = ROLES["planner"].model_copy(
 
 async def reset(session: AgentSession) -> list[Event]:
     """The events from asking to reset the planner until it's reset."""
-    await session.send(ResetConversation(agent=PLANNER))
+    await send(session, ResetConversation(agent=PLANNER))
     return await events_until(session, of_type(ConversationReset))
 
 
 async def refusal(session: AgentSession) -> Event:
     """What asking to reset the planner is answered with, when it's refused."""
-    await session.send(ResetConversation(agent=PLANNER))
+    await send(session, ResetConversation(agent=PLANNER))
     answered = Stop("refused", lambda e: isinstance(e, ErrorOccurred | Notice))
     return (await events_until(session, answered))[-1]
 
@@ -103,7 +104,7 @@ async def test_draft_tasks_stay_after_a_reset() -> None:
     launcher.planner_turns = [proposes_two]
     drafts = board(await plan(session, "Plan."))
     await reset(session)
-    await session.send(AddTask(task=TaskSpec(prompt="One more.")))
+    await send(session, AddTask(task=TaskSpec(prompt="One more.")))
     after = board(await events_until(session, of_type(TasksChanged)))
     assert after[:-1] == drafts
     await session.close()
@@ -138,11 +139,11 @@ async def test_an_invalid_config_keeps_the_planners_role_but_still_resets() -> N
 async def test_a_reset_is_refused_while_the_planner_answers() -> None:
     session, _, launcher = session_for()
     launcher.planner_turns = [hangs]
-    await session.send(SendMessage(agent=PLANNER, text="Plan."))
+    await send(session, SendMessage(agent=PLANNER, text="Plan."))
     while not launcher.launches:
         await asyncio.sleep(0)
     assert await refusal(session) == ErrorOccurred(message=PLANNER_BUSY_RESET)
-    await session.send(CancelTurn(lane="planner"))
+    await send(session, CancelTurn(lane="planner"))
     events = await events_until(session, idle("planner"))
     assert not any(isinstance(e, ConversationReset | AgentExited) for e in events)
     await session.close()
@@ -188,7 +189,7 @@ async def test_only_the_planners_conversation_can_be_reset() -> None:
     launcher.planner_turns = [chats]
     await plan(session, "Plan.")
     for agent in ("coder", "nobody"):
-        await session.send(ResetConversation(agent=agent))
+        await send(session, ResetConversation(agent=agent))
         events = await events_until(session, of_type(ErrorOccurred))
         message = f"Agent {agent!r} has no conversation to reset; the agents with one are planner."
         assert events[-1] == ErrorOccurred(message=message)

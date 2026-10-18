@@ -35,7 +35,18 @@ from orbit.protocol import (
     VerificationChanged,
     VerificationSkipped,
 )
-from tests.agent_fakes import STEP, Call, FakeTree, Script, Steps, board, session_for, verified
+from tests.agent_fakes import (
+    STEP,
+    Call,
+    FakeTree,
+    Script,
+    Steps,
+    board,
+    payloads,
+    send,
+    session_for,
+    verified,
+)
 from tests.test_proposals import CONFIGURE, LINT, SETUP, TESTS, Review, proposes
 
 CHECKS = ChecksProposal(
@@ -68,10 +79,10 @@ async def claims_done(call: Call) -> TurnEndReason:
 async def everything(session: AgentSession, *tasks: TaskSpec) -> list[Event]:
     """Queue ``tasks`` and run them; every event until the session goes idle."""
     for task in tasks:
-        await session.send(AddTask(task=task))
-    await session.send(RunTasks())
+        await send(session, AddTask(task=task))
+    await send(session, RunTasks())
     events: list[Event] = []
-    async for event in session.events():
+    async for event in payloads(session):
         events.append(event)
         if event == BusyChanged(busy=False):
             return events

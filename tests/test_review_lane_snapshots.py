@@ -19,7 +19,7 @@ from orbit.protocol import (
     TaskStatus,
     TurnEndReason,
 )
-from tests.agent_fakes import Call, FakeStore, FakeTree, ScriptedLauncher, session_for
+from tests.agent_fakes import Call, FakeStore, FakeTree, ScriptedLauncher, send, session_for
 from tests.test_review_lane import claims_done, start
 from tests.test_session_switch import last_of, messages, opened, saved, store_with, switching
 
@@ -130,7 +130,7 @@ async def test_an_interrupted_review_that_suggested_nothing_closes_its_batch() -
 
 async def test_an_interrupted_review_whose_batch_closed_is_not_run_again() -> None:
     session, launcher, store, _ = await reopened(crashed(), reviewing())
-    await session.send(RunTasks())
+    await send(session, RunTasks())
     await asyncio.sleep(0.05)
     assert launcher.launches == []
     assert [t.status for t in store.last.tasks] == ["completed", "cancelled"]

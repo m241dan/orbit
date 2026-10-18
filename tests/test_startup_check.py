@@ -31,7 +31,9 @@ from tests.agent_fakes import (
     agent_exited,
     board,
     events_until,
+    payloads,
     run,
+    send,
     session_for,
 )
 
@@ -59,7 +61,7 @@ async def until_checked(session: AgentSession) -> list[Event]:
 async def quiet(session: AgentSession) -> list[Event]:
     """The events published as the events start, and for a moment after."""
     events: list[Event] = []
-    stream: AsyncIterator[Event] = session.events()
+    stream: AsyncIterator[Event] = payloads(session)
     try:
         while True:
             events.append(await asyncio.wait_for(anext(stream), 0.05))
@@ -164,10 +166,10 @@ async def test_cancelling_its_agent_stops_it() -> None:
     tree = FakeTree()
     session, _, _ = session_for(verification=checked(steps), tree=tree, check_at_startup=True)
     events: list[Event] = []
-    async for event in session.events():
+    async for event in payloads(session):
         events.append(event)
         if event == titled("running", "pending"):
-            await session.send(CancelAgent(agent_id="startup-check"))
+            await send(session, CancelAgent(agent_id="startup-check"))
         if isinstance(event, AgentExited):
             break
 
@@ -179,8 +181,8 @@ async def test_cancelling_its_agent_stops_it() -> None:
     assert tree.dropped == [SNAPSHOT]
     assert not [e for e in events if isinstance(e, StartupChecked)]
     # Once it's over, there's no agent by that name to cancel.
-    await session.send(CancelAgent(agent_id="startup-check"))
-    assert await anext(session.events()) == ErrorOccurred(
+    await send(session, CancelAgent(agent_id="startup-check"))
+    assert await anext(payloads(session)) == ErrorOccurred(
         message="No running agent 'startup-check'."
     )
     await session.close()
@@ -193,10 +195,10 @@ async def test_cancelling_it_while_setting_up_leaves_the_steps_pending() -> None
     tree.setup = Setup(command=("uv", "sync"))
     session, _, _ = session_for(verification=checked(steps), tree=tree, check_at_startup=True)
     events: list[Event] = []
-    async for event in session.events():
+    async for event in payloads(session):
         events.append(event)
         if event == titled("pending", "pending"):
-            await session.send(CancelAgent(agent_id="startup-check"))
+            await send(session, CancelAgent(agent_id="startup-check"))
         if isinstance(event, AgentExited):
             break
 
@@ -212,7 +214,7 @@ async def test_closing_the_session_stops_it() -> None:
     steps = Steps(True)
     steps.gate = asyncio.Event()
     session, _, _ = session_for(verification=checked(steps), check_at_startup=True)
-    async for event in session.events():
+    async for event in payloads(session):
         if event == titled("running", "pending"):
             break
     await session.close()
@@ -285,9 +287,9 @@ async def test_a_crash_is_reported_and_closing_still_stops_the_host(
     monkeypatch.setattr(session_module, "startup_fix_prompt", broken)
     session, host, launcher = session_for(verification=checked(Steps(False)), check_at_startup=True)
     launcher.planner_turns.append(says_nothing)
-    await session.send(SendMessage(agent=PLANNER, text="Hello."))  # Starts the host.
+    await send(session, SendMessage(agent=PLANNER, text="Hello."))  # Starts the host.
     events: list[Event] = []
-    async for event in session.events():
+    async for event in payloads(session):
         events.append(event)
         if isinstance(event, ErrorOccurred):
             break

@@ -30,6 +30,7 @@ from tests.agent_fakes import (
     Steps,
     board,
     ended_unverified,
+    payloads,
     run,
     session_for,
     verified,
@@ -172,11 +173,11 @@ async def test_a_tree_that_cannot_be_prepared_fails_the_task() -> None:
 async def test_leftovers_from_earlier_runs_are_announced_once_at_the_start() -> None:
     tree = FakeTree(leftovers=("2 commits on orbit/coder not yet merged into main.",))
     session, _, _ = session_for(tree=tree)
-    stream = session.events()
+    stream = payloads(session)
     first = [await anext(stream) for _ in range(3)]
     assert Notice(message="2 commits on orbit/coder not yet merged into main.") in first
     # A second listener isn't told again.
-    waiting = asyncio.ensure_future(anext(session.events()))
+    waiting = asyncio.ensure_future(anext(payloads(session)))
     await asyncio.sleep(0.01)
     assert not waiting.done()
     waiting.cancel()
@@ -226,13 +227,13 @@ async def test_a_listener_cancelled_while_leftovers_are_found_still_starts_the_b
     session, _, _ = session_for(
         verification=verified(steps), tree=tree, check_at_startup=True, usage=no_usage
     )
-    first = asyncio.ensure_future(anext(session.events()))
+    first = asyncio.ensure_future(anext(payloads(session)))
     await tree.asked.wait()
     first.cancel()
     await asyncio.gather(first, return_exceptions=True)
     tree.found.set()
     seen: list[Event] = []
-    listening = asyncio.ensure_future(listen(session.events(), seen))
+    listening = asyncio.ensure_future(listen(payloads(session), seen))
     await asyncio.sleep(0.01)
     listening.cancel()
     await asyncio.gather(listening, return_exceptions=True)
@@ -251,7 +252,7 @@ async def test_a_listener_cancelled_after_close_doesnt_start_the_background(
     session, _, _ = session_for(
         verification=verified(Steps(True)), tree=tree, check_at_startup=True, usage=no_usage
     )
-    first = asyncio.ensure_future(anext(session.events()))
+    first = asyncio.ensure_future(anext(payloads(session)))
     await tree.asked.wait()
     await session.close()
     first.cancel()
@@ -269,7 +270,7 @@ async def test_listening_first_after_close_doesnt_start_the_background(
         verification=verified(Steps(True)), check_at_startup=True, usage=no_usage
     )
     await session.close()
-    listening = asyncio.ensure_future(listen(session.events(), []))
+    listening = asyncio.ensure_future(listen(payloads(session), []))
     await asyncio.sleep(0.01)
     listening.cancel()
     await asyncio.gather(listening, return_exceptions=True)

@@ -28,7 +28,17 @@ from orbit.protocol import (
     TaskSpec,
     TurnEndReason,
 )
-from tests.agent_fakes import Call, FakeTree, Steps, board, run, session_for, verified
+from tests.agent_fakes import (
+    Call,
+    FakeTree,
+    Steps,
+    board,
+    payloads,
+    run,
+    send,
+    session_for,
+    verified,
+)
 
 LINT = {"name": "Lint", "command": ["ruff", "check"]}
 TESTS = {"name": "Tests", "command": ["pytest"]}
@@ -242,7 +252,7 @@ async def test_a_task_cancelled_while_its_proposal_runs_answers_the_agent() -> N
     running = asyncio.create_task(run(session, CONFIGURE))
     while not steps.runs:
         await asyncio.sleep(0.01)
-    await session.send(CancelTurn())
+    await send(session, CancelTurn())
     events = await asyncio.wait_for(running, 5)
     assert status(events) == "cancelled"
 
@@ -285,13 +295,13 @@ Decide = Callable[[ChecksProposed], Command]
 async def decided(session: AgentSession, decide: Decide) -> list[Event]:
     """Run a configurator task, answering each proposal it shows with ``decide``; returns the
     events until the session goes idle."""
-    await session.send(AddTask(task=CONFIGURE))
-    await session.send(RunTasks())
+    await send(session, AddTask(task=CONFIGURE))
+    await send(session, RunTasks())
     events: list[Event] = []
-    async for event in session.events():
+    async for event in payloads(session):
         events.append(event)
         if isinstance(event, ChecksProposed):
-            await session.send(decide(event))
+            await send(session, decide(event))
         if event == BusyChanged(busy=False):
             return events
     raise AssertionError("unreachable")
@@ -343,10 +353,10 @@ async def test_the_frontend_can_ask_for_changes_or_end_it() -> None:
 
 async def test_deciding_when_no_proposal_waits_is_an_error() -> None:
     session, _, _ = session_for()
-    await session.send(DecideProposal(task_id="nope", action="accept"))
+    await send(session, DecideProposal(task_id="nope", action="accept"))
 
     async def first_error() -> str:
-        async for event in session.events():
+        async for event in payloads(session):
             if isinstance(event, ErrorOccurred):
                 return event.message
         raise AssertionError("unreachable")
@@ -360,7 +370,7 @@ async def test_a_second_decision_on_the_same_proposal_is_an_error() -> None:
 
     def twice(event: ChecksProposed) -> Command:
         accept = DecideProposal(task_id=event.task_id, action="accept")
-        asyncio.get_running_loop().create_task(session.send(accept))
+        asyncio.get_running_loop().create_task(send(session, accept))
         return accept
 
     events = await asyncio.wait_for(decided(session, twice), 5)

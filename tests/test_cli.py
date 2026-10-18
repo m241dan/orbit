@@ -31,7 +31,7 @@ from orbit.agent.domain.reviews import ReviewLimits
 from orbit.agent.domain.sessions import default_name
 from orbit.cli import app
 from orbit.protocol import Notice, SessionsListed, Settings, ThreadedSession
-from tests.agent_fakes import queued, store_of
+from tests.agent_fakes import payloads, queued, store_of
 
 runner = CliRunner()
 
@@ -102,7 +102,7 @@ def lists_sessions_at_startup(session: AgentSession) -> bool:
     """Whether ``session`` lists the saved sessions as its events start."""
 
     async def listed() -> bool:
-        await anext(session.events())  # Its settings; the startup listing is queued by then.
+        await anext(payloads(session))  # Its settings; the startup listing is queued by then.
         return any(isinstance(e, SessionsListed) for e in queued(session))
 
     return asyncio.run(listed())

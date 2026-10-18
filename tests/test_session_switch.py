@@ -56,6 +56,7 @@ from tests.agent_fakes import (
     events_until,
     idle,
     of_type,
+    send,
     session_for,
     verified,
 )
@@ -115,15 +116,15 @@ def messages(kind: type[Notice] | type[ErrorOccurred], events: list[Event]) -> l
 
 async def opened(session: AgentSession, command: OpenSession | NewSession) -> list[Event]:
     """The events from sending ``command`` until its session is opened, and its notes."""
-    await session.send(command)
-    await session.send(ListSessions())  # Marks the end of the notes that follow.
+    await send(session, command)
+    await send(session, ListSessions())  # Marks the end of the notes that follow.
     return await events_until(session, of_type(SessionsListed))
 
 
 async def refused(session: AgentSession, command: OpenSession | NewSession) -> list[str]:
     """The errors sending ``command`` reports, which ends in a refusal."""
-    await session.send(command)
-    await session.send(ListSessions())
+    await send(session, command)
+    await send(session, ListSessions())
     return messages(ErrorOccurred, await events_until(session, of_type(SessionsListed)))
 
 
@@ -145,8 +146,8 @@ async def test_sessions_list_newest_first_marking_the_current_locked_and_unreada
     store.elsewhere.add("taken")
     store.broken["broken"] = "it isn't JSON"
     session, _ = switching(store)
-    await session.send(AddTask(task=TASK))
-    await session.send(ListSessions())
+    await send(session, AddTask(task=TASK))
+    await send(session, ListSessions())
     listed = last_of(SessionsListed, await events_until(session, of_type(SessionsListed)))
 
     assert listed.reason == "asked"
@@ -162,7 +163,7 @@ async def test_sessions_list_newest_first_marking_the_current_locked_and_unreada
 
 async def test_without_a_store_no_sessions_are_listed() -> None:
     session = AgentSession()
-    await session.send(ListSessions())
+    await send(session, ListSessions())
     listed = last_of(SessionsListed, await events_until(session, of_type(SessionsListed)))
     assert listed.sessions == ()
     await session.close()
@@ -210,7 +211,7 @@ async def test_a_session_started_without_a_name_is_announced_by_its_start() -> N
 async def test_a_session_started_with_the_list_isnt_announced() -> None:
     session, _ = switching(FakeStore(), pick_session=True)
     events = await events_until(session, of_type(SessionsListed))
-    await session.send(ListSessions())
+    await send(session, ListSessions())
     events += await events_until(session, of_type(SessionsListed))
     assert not [e for e in events if isinstance(e, SessionOpened)]
     await session.close()
@@ -258,7 +259,7 @@ async def test_an_opened_session_carries_on_its_planners_conversation() -> None:
     session, launcher = switching(store_with(saved("auth", planner_conversation="talk-9")))
     await opened(session, OpenSession(session_id="auth"))
     launcher.planner_turns = [chats]
-    await session.send(SendMessage(agent=PLANNER, text="Where were we?"))
+    await send(session, SendMessage(agent=PLANNER, text="Where were we?"))
     await events_until(session, idle("planner"))
     assert launcher.resumed == ["talk-9"]
     await session.close()
@@ -296,7 +297,7 @@ async def test_a_session_saved_without_reviews_opens_with_none() -> None:
 async def test_opening_another_session_hands_the_lock_over() -> None:
     store = store_with(saved("first"), saved("second"))
     session, _ = switching(store)
-    await session.send(AddTask(task=TASK))
+    await send(session, AddTask(task=TASK))
     await opened(session, OpenSession(session_id="first"))
     assert store.locked == {"first"} and store.released == ["session-1"]
     await opened(session, OpenSession(session_id="second"))
@@ -308,7 +309,7 @@ async def test_opening_another_session_hands_the_lock_over() -> None:
 async def test_opening_the_current_session_does_nothing() -> None:
     store = FakeStore()
     session, _ = switching(store)
-    await session.send(AddTask(task=TASK))
+    await send(session, AddTask(task=TASK))
     assert await refused(session, OpenSession(session_id="session-1")) == []
     assert store.released == [] and store.locked == {"session-1"}
     await session.close()
@@ -388,10 +389,10 @@ async def test_a_session_unreadable_once_locked_is_refused_and_lets_go_of_the_lo
 async def test_a_store_that_cant_lock_the_session_leaves_the_open_one_as_it_was() -> None:
     store = store_with(saved("auth", state("1", "pending")))
     session, _ = switching(store)
-    await session.send(AddTask(task=TASK))
+    await send(session, AddTask(task=TASK))
     store.lock_failure = "Couldn't lock the session: disk full"
-    await session.send(OpenSession(session_id="auth"))
-    await session.send(ListSessions())
+    await send(session, OpenSession(session_id="auth"))
+    await send(session, ListSessions())
     events = await events_until(session, of_type(SessionsListed))
     assert messages(ErrorOccurred, events) == ["Couldn't lock the session: disk full"]
     assert session.saved_session.id == "session-1"
@@ -402,8 +403,8 @@ async def test_a_store_that_cant_lock_the_session_leaves_the_open_one_as_it_was(
 async def test_switching_is_refused_while_tasks_run() -> None:
     store = store_with(saved("auth"))
     session, _ = switching(store, hangs)
-    await session.send(AddTask(task=TASK))
-    await session.send(RunTasks())
+    await send(session, AddTask(task=TASK))
+    await send(session, RunTasks())
     await events_until(session, of_type(AgentStarted))
     assert await refused(session, OpenSession(session_id="auth")) == [TASKS_RUNNING]
     assert await refused(session, NewSession()) == [TASKS_RUNNING]
@@ -417,8 +418,8 @@ async def test_switching_is_refused_while_a_review_runs() -> None:
     session, _, _ = session_for(
         claims_done, reviewers=(hangs,), tree=FakeTree(), review=True, store=store
     )
-    await session.send(AddTask(task=TASK))
-    await session.send(RunTasks())
+    await send(session, AddTask(task=TASK))
+    await send(session, RunTasks())
     reviewing = Stop("reviewer", lambda e: isinstance(e, AgentStarted) and e.role == "reviewer")
     await events_until(session, all_of(reviewing, idle("work")), timeout=10)
     assert await refused(session, OpenSession(session_id="auth")) == [REVIEW_RUNNING]
@@ -428,7 +429,7 @@ async def test_switching_is_refused_while_a_review_runs() -> None:
 async def test_switching_is_refused_while_the_planner_answers() -> None:
     session, launcher = switching(store_with(saved("auth")))
     launcher.planner_turns = [hangs]
-    await session.send(SendMessage(agent=PLANNER, text="Plan it."))
+    await send(session, SendMessage(agent=PLANNER, text="Plan it."))
     await events_until(session, of_type(AgentStarted))
     assert await refused(session, OpenSession(session_id="auth")) == [PLANNER_ANSWERING]
     assert await refused(session, NewSession(name="other")) == [PLANNER_ANSWERING]
@@ -439,11 +440,11 @@ async def test_switching_is_refused_while_the_planner_answers() -> None:
 async def test_work_started_while_a_session_is_locked_to_open_refuses_the_switch() -> None:
     store = store_with(saved("auth"))
     session, _ = switching(store, hangs)
-    await session.send(AddTask(task=TASK))
+    await send(session, AddTask(task=TASK))
 
     async def run() -> None:
         store.on_acquire = None
-        await session.send(RunTasks())
+        await send(session, RunTasks())
 
     store.on_acquire = run
     assert await refused(session, OpenSession(session_id="auth")) == [TASKS_RUNNING]
@@ -454,7 +455,7 @@ async def test_work_started_while_a_session_is_locked_to_open_refuses_the_switch
 async def test_a_new_session_starts_empty_with_its_name() -> None:
     store = FakeStore()
     session, _ = switching(store)
-    await session.send(AddTask(task=TASK))
+    await send(session, AddTask(task=TASK))
     events = await opened(session, NewSession(name="auth rework"))
 
     assert last_of(TasksChanged, events).tasks == ()
@@ -463,7 +464,7 @@ async def test_a_new_session_starts_empty_with_its_name() -> None:
     )
     assert store.released == ["session-1"]
     assert [r.id for r in store.saved] == ["session-1"]  # Not saved until it's used.
-    await session.send(AddTask(task=TASK))
+    await send(session, AddTask(task=TASK))
     assert store.last.id == "session-2" and store.last.name == "auth rework"
     assert store.locked == {"session-2"}
     await session.close()
@@ -480,10 +481,10 @@ async def test_a_new_session_without_a_name_is_named_by_its_start() -> None:
 async def test_a_new_session_has_a_fresh_planner_conversation() -> None:
     session, launcher = switching(store_with(saved("auth")))
     launcher.planner_turns = [chats, chats]
-    await session.send(SendMessage(agent=PLANNER, text="Hello."))
+    await send(session, SendMessage(agent=PLANNER, text="Hello."))
     await events_until(session, idle("planner"))
     events = await opened(session, NewSession())
-    await session.send(SendMessage(agent=PLANNER, text="Hello again."))
+    await send(session, SendMessage(agent=PLANNER, text="Hello again."))
     await events_until(session, idle("planner"))
     assert launcher.resumed == [None, None]
     assert any(isinstance(e, AgentExited) for e in events)
@@ -502,8 +503,8 @@ async def with_a_chain_out_of_fixes(store: FakeStore, *scripts: Script) -> Agent
         reviews=False,
         verification=verified(always_fails, fallback_fixes=1),
     )
-    await session.send(AddTask(task=TASK))
-    await session.send(RunTasks())
+    await send(session, AddTask(task=TASK))
+    await send(session, RunTasks())
     await events_until(session, idle())
     return session
 
@@ -511,8 +512,8 @@ async def with_a_chain_out_of_fixes(store: FakeStore, *scripts: Script) -> Agent
 async def ran(session: AgentSession, *tasks: TaskSpec) -> tuple[TaskState, ...]:
     """The board once ``tasks`` were added and ran."""
     for task in tasks:
-        await session.send(AddTask(task=task))
-    await session.send(RunTasks())
+        await send(session, AddTask(task=task))
+    await send(session, RunTasks())
     return last_of(TasksChanged, await events_until(session, idle())).tasks
 
 
@@ -556,12 +557,14 @@ async def spent_on_a_removed_task(session: AgentSession, launcher: ScriptedLaunc
     launcher.planner_turns = [chats]
     launcher.planner_usages = [Usage(input_tokens=400, cost_usd=0.4, turns=1)]
     launcher.usages = [(Usage(output_tokens=100, cost_usd=1.0, turns=3),)]
-    await session.send(SendMessage(agent=PLANNER, text="Plan it."))
+    await send(session, SendMessage(agent=PLANNER, text="Plan it."))
     events = await events_until(session, idle("planner"))
-    await session.send(AddTask(task=TaskSpec(prompt="Look.", settings=Settings(tool_access="off"))))
-    await session.send(RunTasks())
+    await send(
+        session, AddTask(task=TaskSpec(prompt="Look.", settings=Settings(tool_access="off")))
+    )
+    await send(session, RunTasks())
     events += await events_until(session, idle())
-    await session.send(RemoveTask(task_id="1"))
+    await send(session, RemoveTask(task_id="1"))
     events += await events_until(session, of_type(TasksChanged))
     return spent_live(events)
 
@@ -584,8 +587,10 @@ async def test_an_agents_turn_counts_toward_its_tasks_usage_and_the_saved_spent(
     session, launcher = switching(store, claims_done, reviews=False)
     usage = Usage(output_tokens=100, cost_usd=1.0, turns=3)
     launcher.usages = [(usage,)]
-    await session.send(AddTask(task=TaskSpec(prompt="Look.", settings=Settings(tool_access="off"))))
-    await session.send(RunTasks())
+    await send(
+        session, AddTask(task=TaskSpec(prompt="Look.", settings=Settings(tool_access="off")))
+    )
+    await send(session, RunTasks())
     events = await events_until(session, idle())
     assert last_of(TasksChanged, events).tasks[0].usage == usage
     assert store.last.spent == usage
@@ -612,9 +617,9 @@ async def test_a_planner_turn_cancelled_once_it_finished_ends_once_and_is_saved_
     launcher.planner_turns = [chats]
     launcher.planner_usages = [usage]
     launcher.planner_afters = [hangs_after]
-    await session.send(SendMessage(agent=PLANNER, text="Plan it."))
+    await send(session, SendMessage(agent=PLANNER, text="Plan it."))
     events = await events_until(session, of_type(TurnFinished))
-    await session.send(CancelTurn(lane="planner"))
+    await send(session, CancelTurn(lane="planner"))
     store.gate.set()
     events += await events_until(session, idle("planner"))
     assert [e.usage for e in events if isinstance(e, TurnFinished)] == [usage]
@@ -626,7 +631,7 @@ async def test_the_sessions_list_shows_what_a_session_spent() -> None:
     session, launcher = switching(FakeStore(), claims_done, reviews=False)
     spent = await spent_on_a_removed_task(session, launcher)
     await opened(session, NewSession())
-    await session.send(ListSessions())
+    await send(session, ListSessions())
     listed = last_of(SessionsListed, await events_until(session, of_type(SessionsListed)))
     assert {s.id: s.usage for s in listed.sessions} == {"session-1": spent}
     await session.close()
@@ -683,7 +688,7 @@ async def test_once_the_user_works_in_the_session_its_tasks_stay_with_it() -> No
     store = store_with(saved("auth"))
     session = failing_startup(store)
     await events_until(session, agent_exited("startup-check"))
-    await session.send(AddTask(task=TASK))
+    await send(session, AddTask(task=TASK))
     events = await opened(session, OpenSession(session_id="auth"))
     assert last_of(TasksChanged, events).tasks == ()
     assert store.deleted == [] and store.released == ["session-1"]
@@ -693,7 +698,7 @@ async def test_once_the_user_works_in_the_session_its_tasks_stay_with_it() -> No
 async def test_a_switch_whose_old_lock_cant_be_released_still_opens_the_session() -> None:
     store = store_with(saved("auth"))
     session, _ = switching(store)
-    await session.send(AddTask(task=TASK))
+    await send(session, AddTask(task=TASK))
     await events_until(session, of_type(TasksChanged))
     store.release_failure = "Couldn't unlock the session: read-only"
     events = await opened(session, OpenSession(session_id="auth"))
@@ -718,11 +723,11 @@ async def test_a_session_without_reviews_keeps_the_reviews_of_the_session_it_ope
     store = store_with(saved("auth", reviews=reviews))
     session, _ = switching(store, reviews=False)
     await opened(session, OpenSession(session_id="auth"))
-    await session.send(AddTask(task=TASK))
+    await send(session, AddTask(task=TASK))
     await events_until(session, of_type(TasksChanged))
     assert store.last.id == "auth" and store.last.reviews == reviews
     await opened(session, NewSession())
-    await session.send(AddTask(task=TASK))
+    await send(session, AddTask(task=TASK))
     await events_until(session, of_type(TasksChanged))
     assert store.last.id != "auth" and store.last.reviews is None
     await session.close()
@@ -734,7 +739,7 @@ async def test_a_session_without_a_planner_keeps_the_conversation_of_the_session
     await opened(session, OpenSession(session_id="auth"))
     assert store.last.id == "auth" and store.last.planner_conversation == "conv-1"
     await opened(session, NewSession())
-    await session.send(AddTask(task=TASK))
+    await send(session, AddTask(task=TASK))
     await events_until(session, of_type(TasksChanged))
     assert store.last.id != "auth" and store.last.planner_conversation is None
     await session.close()

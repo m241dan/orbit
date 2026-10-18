@@ -9,7 +9,7 @@ from orbit.protocol import (
     SessionsListed,
     SessionSummary,
 )
-from tests.agent_fakes import FakeStore, events_until, of_type
+from tests.agent_fakes import FakeStore, events_until, of_type, send
 from tests.test_session_switch import EARLIER, TASK, last_of, messages, saved, store_with, switching
 
 Managing = RenameSession | DeleteSession
@@ -17,13 +17,13 @@ Managing = RenameSession | DeleteSession
 
 async def listed_after(session: AgentSession, command: Managing) -> tuple[SessionSummary, ...]:
     """The sessions listed after sending ``command``."""
-    await session.send(command)
+    await send(session, command)
     return last_of(SessionsListed, await events_until(session, of_type(SessionsListed))).sessions
 
 
 async def errors_of(session: AgentSession, command: Managing) -> list[str]:
     """The errors sending ``command`` reports before the sessions are listed again."""
-    await session.send(command)
+    await send(session, command)
     return messages(ErrorOccurred, await events_until(session, of_type(SessionsListed)))
 
 
@@ -34,7 +34,7 @@ def names(sessions: tuple[SessionSummary, ...]) -> dict[str, str]:
 async def test_the_sessions_listed_after_a_rename_or_delete_are_refreshed() -> None:
     session, _ = switching(store_with(saved("old"), saved("gone")))
     for command in (RenameSession(session_id="old", name="new"), DeleteSession(session_id="gone")):
-        await session.send(command)
+        await send(session, command)
         listed = last_of(SessionsListed, await events_until(session, of_type(SessionsListed)))
         assert listed.reason == "refreshed"
     await session.close()
@@ -54,7 +54,7 @@ async def test_a_saved_session_is_renamed_under_its_lock() -> None:
 async def test_the_open_session_is_renamed_and_saved_at_once() -> None:
     store = FakeStore()
     session, _ = switching(store)
-    await session.send(AddTask(task=TASK))
+    await send(session, AddTask(task=TASK))
     listed = await listed_after(session, RenameSession(session_id="session-1", name="flags"))
 
     assert names(listed) == {"session-1": "flags"}
@@ -180,7 +180,7 @@ async def test_an_unreadable_session_can_be_deleted() -> None:
     store = FakeStore()
     store.broken["bad"] = "it isn't JSON"
     session, _ = switching(store)
-    await session.send(DeleteSession(session_id="bad"))
+    await send(session, DeleteSession(session_id="bad"))
     await events_until(session, of_type(SessionsListed))
 
     assert store.deleted == ["bad"]
@@ -190,7 +190,7 @@ async def test_an_unreadable_session_can_be_deleted() -> None:
 async def test_deleting_the_open_session_is_refused() -> None:
     store = FakeStore()
     session, _ = switching(store)
-    await session.send(AddTask(task=TASK))
+    await send(session, AddTask(task=TASK))
     errors = await errors_of(session, DeleteSession(session_id="session-1"))
 
     assert errors == ["Can't delete the open session."]

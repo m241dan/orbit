@@ -3,7 +3,7 @@
 import pytest
 
 from orbit.protocol import PLANNER, BusyChanged, SendMessage, SettingsChanged, TurnEndReason
-from tests.agent_fakes import Call, agent_exited, events_until, idle, session_for
+from tests.agent_fakes import Call, agent_exited, events_until, idle, send, session_for
 
 
 async def chats(call: Call) -> TurnEndReason:
@@ -19,7 +19,7 @@ async def test_events_until_fails_naming_the_event_when_it_never_comes() -> None
 async def test_events_until_stops_at_the_first_done_event_leaving_out_skipped_ones() -> None:
     session, _, launcher = session_for()
     launcher.planner_turns = [chats]
-    await session.send(SendMessage(agent=PLANNER, text="hello"))
+    await send(session, SendMessage(agent=PLANNER, text="hello"))
     events = await events_until(session, idle("planner"), skip=(SettingsChanged,))
 
     assert events[-1] == BusyChanged(busy=False, lane="planner")

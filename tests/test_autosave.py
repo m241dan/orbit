@@ -30,6 +30,7 @@ from tests.agent_fakes import (
     idle,
     lane_of,
     of_type,
+    send,
     session_for,
 )
 from tests.test_review_lane import claims_done, settle, start, suggests
@@ -54,7 +55,7 @@ async def test_a_session_nobody_used_leaves_nothing_saved() -> None:
     store = FakeStore()
     session, _, _ = session_for(store=store)
     await events_until(session, of_type(SettingsChanged))
-    await session.send(UpdateSettings(settings=Settings(model="opus")))
+    await send(session, UpdateSettings(settings=Settings(model="opus")))
     await session.close()
     assert store.saved == [] and store.locked == set() and store.released == []
 
@@ -62,7 +63,7 @@ async def test_a_session_nobody_used_leaves_nothing_saved() -> None:
 async def test_adding_a_task_saves_the_session_locked_until_it_closes() -> None:
     store = FakeStore()
     session, _, _ = session_for(store=store)
-    await session.send(AddTask(task=TASK))
+    await send(session, AddTask(task=TASK))
 
     record = store.last
     assert (record.id, record.name, record.created) == ("session-1", "Oct 17 14:30", START)
@@ -76,8 +77,8 @@ async def test_adding_a_task_saves_the_session_locked_until_it_closes() -> None:
 async def test_each_board_change_is_saved_with_a_later_last_active() -> None:
     store = FakeStore()
     session, _, _ = session_for(store=store)
-    await session.send(AddTask(task=TASK))
-    await session.send(EditTask(task_id="1", task=TaskSpec(prompt="Add two flags.")))
+    await send(session, AddTask(task=TASK))
+    await send(session, EditTask(task_id="1", task=TaskSpec(prompt="Add two flags.")))
 
     first, second = store.saved
     assert [t.task.prompt for t in second.tasks] == ["Add two flags."]
@@ -89,7 +90,7 @@ async def test_a_prompt_saves_the_session_then_its_planners_conversation() -> No
     store = FakeStore()
     session, _, launcher = session_for(store=store)
     launcher.planner_turns = [chats]
-    await session.send(SendMessage(agent=PLANNER, text="hello"))
+    await send(session, SendMessage(agent=PLANNER, text="hello"))
     assert [(r.tasks, r.planner_conversation) for r in store.saved] == [((), None)]
 
     await events_until(session, idle("planner"))
@@ -101,7 +102,7 @@ async def test_a_planners_draft_saves_the_session() -> None:
     store = FakeStore()
     session, _, launcher = session_for(store=store)
     launcher.planner_turns = [proposes]
-    await session.send(SendMessage(agent=PLANNER, text="Plan a flag."))
+    await send(session, SendMessage(agent=PLANNER, text="Plan a flag."))
     await events_until(session, idle("planner"))
     assert any(t.status == "draft" for t in store.last.tasks)
     await session.close()
@@ -125,8 +126,8 @@ async def test_the_startup_checks_fix_draft_saves_the_session() -> None:
 async def test_a_settings_change_is_saved_once_the_session_is_used() -> None:
     store = FakeStore()
     session, _, _ = session_for(store=store)
-    await session.send(AddTask(task=TASK))
-    await session.send(UpdateSettings(settings=Settings(model="opus", tool_access="full")))
+    await send(session, AddTask(task=TASK))
+    await send(session, UpdateSettings(settings=Settings(model="opus", tool_access="full")))
     assert store.last.settings == Settings(model="opus", tool_access="full")
     await session.close()
 
@@ -135,8 +136,8 @@ async def test_a_save_that_fails_is_reported_once_and_work_carries_on() -> None:
     store = FakeStore()
     store.failure = "Couldn't save the session: disk full"
     session, _, _ = session_for(store=store)
-    await session.send(AddTask(task=TASK))
-    await session.send(AddTask(task=TaskSpec(prompt="Another.")))
+    await send(session, AddTask(task=TASK))
+    await send(session, AddTask(task=TaskSpec(prompt="Another.")))
     events = await events_until(
         session, lambda e: isinstance(e, TasksChanged) and len(e.tasks) == 2
     )
@@ -169,7 +170,7 @@ async def test_the_review_state_and_the_repositorys_super_count_are_saved() -> N
 async def test_without_reviews_the_saved_super_count_is_left_alone() -> None:
     store = FakeStore(count=3)
     session, _, _ = session_for(store=store)
-    await session.send(AddTask(task=TASK))
+    await send(session, AddTask(task=TASK))
     await events_until(session, of_type(SettingsChanged))
     await session.close()
     assert store.counts == [] and store.last.reviews is None

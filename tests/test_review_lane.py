@@ -39,7 +39,9 @@ from tests.agent_fakes import (
     board,
     events_until,
     lane_of,
+    payloads,
     queued,
+    send,
     session_for,
     verified,
 )
@@ -76,7 +78,7 @@ async def settle(
     events = [] if events is None else events
 
     async def pump() -> None:
-        async for event in session.events():
+        async for event in payloads(session):
             events.append(event)
 
     pumping = asyncio.ensure_future(pump())
@@ -139,8 +141,8 @@ def latest_board(events: list[Event]) -> tuple[TaskState, ...]:
 
 async def start(session: AgentSession, *prompts: str) -> None:
     for prompt in prompts or ("Make it faster.",):
-        await session.send(AddTask(task=TaskSpec(prompt=prompt)))
-    await session.send(RunTasks())
+        await send(session, AddTask(task=TaskSpec(prompt=prompt)))
+    await send(session, RunTasks())
 
 
 async def test_landed_work_is_reviewed_and_suggestions_run_and_are_reviewed_in_turn() -> None:
@@ -270,7 +272,7 @@ async def test_after_cancelling_suggestions_wait_to_be_run() -> None:
     await start(session)
     while not any(la.agent.role == "reviewer" for la in launcher.launches):
         await asyncio.sleep(0.01)
-    await session.send(CancelTurn())
+    await send(session, CancelTurn())
     gate.set()
 
     def reviewed(events: list[Event]) -> bool:
@@ -284,7 +286,7 @@ async def test_after_cancelling_suggestions_wait_to_be_run() -> None:
     events = await asyncio.wait_for(settle(session, until=reviewed), 10)
     assert [t.status for t in board(events)] == ["completed", "completed", "pending"]
 
-    await session.send(RunTasks())
+    await send(session, RunTasks())
     events = await asyncio.wait_for(settle(session, events), 10)
     assert [t.status for t in board(events)][-1] == "completed"
 
@@ -316,8 +318,8 @@ async def test_a_review_the_user_queued_works_in_place_and_cannot_suggest() -> N
     session, _, _ = session_for(
         reviewers=(suggests("Add tests", replies=replies),), tree=FakeTree(), review=True
     )
-    await session.send(AddTask(task=TaskSpec(prompt="Review the parser", role="reviewer")))
-    await session.send(RunTasks())
+    await send(session, AddTask(task=TaskSpec(prompt="Review the parser", role="reviewer")))
+    await send(session, RunTasks())
     events = await asyncio.wait_for(settle(session), 10)
     assert replies[0].is_error and "suggest" in replies[0].text
     assert [t.status for t in board(events)] == ["completed"]
@@ -443,7 +445,7 @@ async def test_a_super_review_can_be_asked_for_before_any_task_ran() -> None:
     # The coder's tree doesn't exist yet, so its head can't be read; the base's commit can.
     tree = FakeTree()
     session, _, _ = session_for(reviewers=(suggests(),), tree=tree, review=True)
-    await session.send(FireTrigger(trigger=SUPER_REVIEW))
+    await send(session, FireTrigger(trigger=SUPER_REVIEW))
     events = await asyncio.wait_for(settle(session), 10)
     assert [t.task.role for t in board(events)] == ["super-reviewer"]
     assert tree.snapshots == [tree.base] and tree.prepared == []
@@ -454,7 +456,7 @@ async def test_a_super_review_is_skipped_when_the_base_commit_cannot_be_read() -
     tree = FakeTree()
     tree.failures["base_commit"] = RuntimeError("git rev-parse failed: unknown revision")
     session, _, _ = session_for(reviewers=(suggests(),), tree=tree, review=True)
-    await session.send(FireTrigger(trigger=SUPER_REVIEW))
+    await send(session, FireTrigger(trigger=SUPER_REVIEW))
     events = await asyncio.wait_for(settle(session, until=_errored), 10)
     assert "unknown revision" in " ".join(_error_messages(events))
     assert "super-reviewer" not in _roles_seen(events)
@@ -464,7 +466,7 @@ async def test_a_super_review_is_skipped_when_the_base_commit_cannot_be_read() -
 async def test_a_super_review_given_input_is_refused_and_none_starts() -> None:
     tree = FakeTree()
     session, _, _ = session_for(reviewers=(suggests(),), tree=tree, review=True)
-    await session.send(FireTrigger(trigger=SUPER_REVIEW, input={"x": "1"}))
+    await send(session, FireTrigger(trigger=SUPER_REVIEW, input={"x": "1"}))
     events = await asyncio.wait_for(settle(session, until=_errored), 10)
     assert _error_messages(events) == ["The super-review trigger takes no input."]
     assert "super-reviewer" not in _roles_seen(events)
@@ -473,8 +475,8 @@ async def test_a_super_review_given_input_is_refused_and_none_starts() -> None:
 
 async def test_without_reviews_a_super_review_is_refused() -> None:
     session, _, _ = session_for(tree=FakeTree())
-    await session.send(FireTrigger(trigger=SUPER_REVIEW))
-    stream = session.events()
+    await send(session, FireTrigger(trigger=SUPER_REVIEW))
+    stream = payloads(session)
     events = [await anext(stream), await anext(stream)]
     assert any(isinstance(e, ErrorOccurred) and "Super reviews" in e.message for e in events)
 
@@ -513,7 +515,7 @@ async def test_cancelling_a_reviewer_stops_its_review_and_the_lane_carries_on() 
     collecting = asyncio.ensure_future(settle(session, events))
     await asyncio.wait_for(reviewing.wait(), 10)
     [reviewer] = reviewers_of(launcher)
-    await session.send(CancelAgent(agent_id=reviewer))
+    await send(session, CancelAgent(agent_id=reviewer))
     await asyncio.wait_for(collecting, 10)
     assert statuses_of(events, "reviewer") == ["cancelled", "completed"]
     stopped = next(t for t in board(events) if t.task.role == "reviewer")
@@ -565,9 +567,9 @@ async def test_a_cancelled_reviewer_that_suggested_is_not_run_again() -> None:
     await start(session)
     await asyncio.wait_for(suggested.wait(), 10)
     [reviewer] = reviewers_of(launcher)
-    await session.send(CancelAgent(agent_id=reviewer))
+    await send(session, CancelAgent(agent_id=reviewer))
     await events_until(session, task_is("2", "cancelled"))
-    await session.send(RunTasks())
+    await send(session, RunTasks())
     await asyncio.sleep(0.05)
     release.set()
     events = await asyncio.wait_for(settle(session), 10)
@@ -592,7 +594,7 @@ async def test_cancelling_the_coder_is_like_escape() -> None:
     session, _, _ = session_for(endless)
     await start(session, "one", "two")
     await asyncio.wait_for(working.wait(), 5)
-    await session.send(CancelAgent(agent_id="agent-1"))
+    await send(session, CancelAgent(agent_id="agent-1"))
     events = await asyncio.wait_for(
         settle(session, until=lambda ev: [t.status for t in board(ev)] == ["cancelled", "pending"]),
         10,
@@ -605,8 +607,8 @@ async def test_cancelling_the_coder_is_like_escape() -> None:
 
 async def test_cancelling_an_unknown_agent_is_reported() -> None:
     session, _, _ = session_for()
-    await session.send(CancelAgent(agent_id="agent-7"))
-    stream = session.events()
+    await send(session, CancelAgent(agent_id="agent-7"))
+    stream = payloads(session)
     events = [await anext(stream), await anext(stream)]
     assert ErrorOccurred(message="No running agent 'agent-7'.") in events
 
@@ -724,7 +726,7 @@ async def test_a_suggestion_removed_from_its_batch_leaves_the_rest_reviewed() ->
         await call("get_task")
         await call("suggest_task", title="Add tests", prompt="Please.")
         await call("suggest_task", title="Rename x", prompt="Please.")
-        await sessions[0].send(RemoveTask(task_id="4"))
+        await send(sessions[0], RemoveTask(task_id="4"))
         await call("complete_task", summary="Reviewed")
         return "completed"
 
@@ -765,7 +767,7 @@ async def test_a_queued_review_that_is_removed_leaves_no_batch_open() -> None:
     collecting = asyncio.ensure_future(settle(session, events))
     while [t.task.role for t in latest_board(events)].count("reviewer") < 2:
         await asyncio.sleep(0.01)
-    await session.send(RemoveTask(task_id="4"))
+    await send(session, RemoveTask(task_id="4"))
     gate.set()
     await asyncio.wait_for(collecting, 10)
     assert [(t.id, t.task.role) for t in board(events)] == [
@@ -781,8 +783,8 @@ async def test_a_finished_review_can_be_removed_but_not_edited() -> None:
     session, _, _ = session_for(claims_done, reviewers=(suggests(),), tree=FakeTree(), review=True)
     await start(session)
     events = await asyncio.wait_for(settle(session), 10)
-    await session.send(EditTask(task_id="2", task=TaskSpec(prompt="Again", role="reviewer")))
-    await session.send(RemoveTask(task_id="2"))
+    await send(session, EditTask(task_id="2", task=TaskSpec(prompt="Again", role="reviewer")))
+    await send(session, RemoveTask(task_id="2"))
     events = await asyncio.wait_for(settle(session, events), 10)
     assert ErrorOccurred(message="Reviews can't be edited; remove it instead.") in events
     assert [(t.id, t.status) for t in board(events)] == [("1", "completed")]
@@ -791,8 +793,8 @@ async def test_a_finished_review_can_be_removed_but_not_edited() -> None:
 
 async def edit_a_user_review(session: AgentSession) -> list[Event]:
     """The events after adding a reviewer task to ``session`` and editing its prompt."""
-    await session.send(AddTask(task=TaskSpec(prompt="Review the parser", role="reviewer")))
-    await session.send(EditTask(task_id="1", task=TaskSpec(prompt="Again", role="reviewer")))
+    await send(session, AddTask(task=TaskSpec(prompt="Review the parser", role="reviewer")))
+    await send(session, EditTask(task_id="1", task=TaskSpec(prompt="Again", role="reviewer")))
     events = queued(session)
     await session.close()
     return events
@@ -822,7 +824,7 @@ async def test_a_task_edited_back_to_pending_is_reviewed_with_its_batch() -> Non
 
     async def reopens_task_3(call: Call) -> TurnEndReason:
         await call("get_task")
-        await sessions[0].send(EditTask(task_id="3", task=TaskSpec(prompt="Add tests, again.")))
+        await send(sessions[0], EditTask(task_id="3", task=TaskSpec(prompt="Add tests, again.")))
         await call("complete_task", summary="Did it")
         return "completed"
 
@@ -839,7 +841,7 @@ async def test_a_task_edited_back_to_pending_is_reviewed_with_its_batch() -> Non
     await start(session)
     events = await asyncio.wait_for(settle(session, until=lambda e: len(board(e)) == 4), 10)
     assert [t.status for t in board(events)][2:] == ["pending", "completed"]
-    await session.send(RunTasks())
+    await send(session, RunTasks())
     events = await asyncio.wait_for(settle(session, events), 10)
     assert [(t.id, t.task.role, t.status) for t in board(events)] == [
         ("1", "coder", "completed"),

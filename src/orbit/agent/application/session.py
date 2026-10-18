@@ -46,17 +46,19 @@ from orbit.protocol import (
     CONFIGURE_CHECKS,
     PLANNER,
     PLANNER_LANE,
+    SESSIONLESS_EVENTS,
     SUPER_REVIEW,
     WORK_LANE,
     AcceptTask,
     AddTask,
     CancelAgent,
     CancelTurn,
-    Command,
+    CommandEnvelope,
     DecideProposal,
     EditTask,
     ErrorOccurred,
     Event,
+    EventEnvelope,
     FireTrigger,
     Notice,
     RemoveTask,
@@ -163,6 +165,7 @@ class AgentSession:
         self._pick_session = pick_session
         self._model_choices = tuple(model_choices)
         self._events: asyncio.Queue[Event] = asyncio.Queue()
+        self._seq = 0  # The last event's place in the stream, counted across sessions.
         self._keeper = SessionKeeper(store, self._events.put, clock, new_id)
         self._keeper.rename(name)
         self._review_count = ReviewCount(store, self._events.put)
@@ -270,7 +273,8 @@ class AgentSession:
     def verification(self) -> Verification | None:
         return self._verifier.verification if self._verifier else None
 
-    async def send(self, command: Command) -> None:
+    async def send(self, envelope: CommandEnvelope) -> None:
+        command = envelope.payload
         if isinstance(command, SessionCommand):
             await self._switcher.handle(command)
         else:
@@ -592,7 +596,7 @@ class AgentSession:
         await self._work_turns.close()
         await self._seat.stop_turn()
 
-    async def events(self) -> AsyncIterator[Event]:
+    async def events(self) -> AsyncIterator[EventEnvelope]:
         if not self._announced:
             self._announced = True
             try:
@@ -604,7 +608,14 @@ class AgentSession:
         while True:
             event = await self._events.get()
             self._nudge_usage(event)
-            yield event
+            yield self._enveloped(event)
+
+    def _enveloped(self, event: Event) -> EventEnvelope:
+        """``event`` in its envelope: the next ``seq``, and the open session, unless the event
+        belongs to none."""
+        self._seq += 1
+        session = None if isinstance(event, SESSIONLESS_EVENTS) else self._keeper.id
+        return EventEnvelope(seq=self._seq, session=session, payload=event)
 
     def _start_background(self) -> None:
         """Start the startup check and the usage monitor, if there are any and the session isn't

@@ -1,5 +1,11 @@
 """Shared contract between the frontend and the backend."""
 
+from orbit.protocol.envelope import (
+    DEFAULT_WORKSPACE,
+    SESSIONLESS_EVENTS,
+    CommandEnvelope,
+    EventEnvelope,
+)
 from orbit.protocol.messages import (
     ACTIVE_STATUSES,
     BUILT_IN_ROLE_NAMES,
@@ -95,10 +101,12 @@ __all__ = [
     "CODER",
     "CONFIGURATOR",
     "CONFIGURE_CHECKS",
+    "DEFAULT_WORKSPACE",
     "PLANNER",
     "PLANNER_LANE",
     "PLAN_TASK",
     "REVIEWER",
+    "SESSIONLESS_EVENTS",
     "STARTUP_TASK",
     "SUPER_REVIEW",
     "SUPER_REVIEWER",
@@ -117,12 +125,14 @@ __all__ = [
     "CancelTurn",
     "ChecksProposed",
     "Command",
+    "CommandEnvelope",
     "ConversationReset",
     "DecideProposal",
     "DeleteSession",
     "EditTask",
     "ErrorOccurred",
     "Event",
+    "EventEnvelope",
     "FireTrigger",
     "ListSessions",
     "ListingReason",

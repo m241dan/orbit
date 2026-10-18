@@ -7,11 +7,15 @@ from contextlib import AbstractContextManager, nullcontext, suppress
 from dataclasses import dataclass
 from typing import Any
 
-from orbit.protocol.messages import Command, ErrorOccurred, Event
+from orbit.protocol.envelope import CommandEnvelope, EventEnvelope
 from orbit.protocol.session import Session
 
-_Deliver = Callable[[Event | None], None]
-"""Hands an event, or ``None`` for the end of the stream, to the caller's loop."""
+_Item = EventEnvelope | Exception | None
+"""What a pump hands over: an event, the failure that ended the stream, or ``None`` for its
+end."""
+
+_Deliver = Callable[[_Item], None]
+"""Hands an item of the stream to the caller's loop."""
 
 
 @dataclass(frozen=True)
@@ -49,25 +53,29 @@ class ThreadedSession:
         """Start the backend thread, if it isn't running, and wait for the inner session."""
         self._running()
 
-    async def send(self, command: Command) -> None:
+    async def send(self, envelope: CommandEnvelope) -> None:
         backend = self._running()
-        await self._on_backend(backend, backend.session.send(command))
+        await self._on_backend(backend, backend.session.send(envelope))
 
-    async def events(self) -> AsyncGenerator[Event]:
+    async def events(self) -> AsyncGenerator[EventEnvelope]:
+        """The inner session's events; if its stream fails, that failure is raised after the
+        events before it."""
         backend = self._running()
         loop = asyncio.get_running_loop()
-        queue: asyncio.Queue[Event | None] = asyncio.Queue()
+        queue: asyncio.Queue[_Item] = asyncio.Queue()
 
         pump: list[asyncio.Task[None]] = []  # Touched only on the backend's loop.
 
-        def deliver(event: Event | None) -> None:
+        def deliver(item: _Item) -> None:
             with suppress(RuntimeError):  # The caller's loop has closed: nobody is listening.
-                loop.call_soon_threadsafe(queue.put_nowait, event)
+                loop.call_soon_threadsafe(queue.put_nowait, item)
 
         backend.loop.call_soon_threadsafe(self._start_pump, backend.session, deliver, pump)
         try:
-            while (event := await queue.get()) is not None:
-                yield event
+            while (item := await queue.get()) is not None:
+                if isinstance(item, Exception):
+                    raise item
+                yield item
         finally:
             _cancel_on(backend.loop, pump)
 
@@ -152,11 +160,11 @@ def _cancel_all(tasks: list[asyncio.Task[None]]) -> None:
 
 async def _pump(session: Session, deliver: _Deliver) -> None:
     """Pass each of ``session``'s events to ``deliver``, then the end of the stream; if the
-    stream fails, an error saying so comes first."""
+    stream fails, its failure comes first."""
     try:
         async for event in session.events():
             deliver(event)
     except Exception as exc:
-        deliver(ErrorOccurred(message=f"The backend's event stream failed: {exc}"))
+        deliver(exc)
     finally:
         deliver(None)

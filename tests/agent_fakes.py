@@ -29,9 +29,12 @@ from orbit.protocol import (
     AssistantMessage,
     BusyChanged,
     BusyLane,
+    Command,
+    CommandEnvelope,
     ErrorOccurred,
     Event,
     RunTasks,
+    Session,
     Settings,
     SettingsChanged,
     TasksChanged,
@@ -427,11 +430,22 @@ def session_for(
     return session, host, launcher
 
 
+async def send(session: Session, command: Command) -> None:
+    """Send ``command`` to ``session``, in an envelope for the open session."""
+    await session.send(CommandEnvelope(command_id="command", payload=command))
+
+
+async def payloads(session: Session) -> AsyncIterator[Event]:
+    """The events in ``session``'s envelopes."""
+    async for envelope in session.events():
+        yield envelope.payload
+
+
 async def run(session: AgentSession, *tasks: TaskSpec) -> list[Event]:
     """Queue ``tasks``, run them, and return the events until the session goes idle."""
     for task in tasks or (TaskSpec(prompt="Add a flag.", settings=Settings(model="opus")),):
-        await session.send(AddTask(task=task))
-    await session.send(RunTasks())
+        await send(session, AddTask(task=task))
+    await send(session, RunTasks())
     return await events_until(session, idle(), skip=(SettingsChanged, VerificationChanged))
 
 
@@ -493,7 +507,7 @@ async def events_until(
     events: list[Event] = []
 
     async def collect() -> None:
-        async for event in session.events():
+        async for event in payloads(session):
             if isinstance(event, skip):
                 continue
             events.append(event)

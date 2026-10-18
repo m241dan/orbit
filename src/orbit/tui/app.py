@@ -5,6 +5,7 @@ import time
 from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from contextlib import aclosing, suppress
 from typing import ClassVar, assert_never
+from uuid import uuid4
 
 from textual import on, work
 from textual.app import App, ComposeResult
@@ -30,11 +31,14 @@ from orbit.protocol import (
     CancelAgent,
     CancelTurn,
     ChecksProposed,
+    Command,
+    CommandEnvelope,
     ConversationReset,
     DecideProposal,
     EditTask,
     ErrorOccurred,
     Event,
+    EventEnvelope,
     FireTrigger,
     ListSessions,
     Notice,
@@ -121,16 +125,17 @@ BATCH_LIMIT = 500
 
 
 async def event_batches(
-    events: AsyncIterator[Event], limit: int = BATCH_LIMIT
+    events: AsyncIterator[EventEnvelope], limit: int = BATCH_LIMIT
 ) -> AsyncGenerator[list[Event]]:
-    """Batches of ``events``: each the next event and those already waiting behind it, up to
-    ``limit``. Ends when ``events`` do, raising what reading them raised."""
+    """Batches of the events in ``events``' envelopes: each the next event and those already
+    waiting behind it, up to ``limit``. Ends when ``events`` do, raising what reading them
+    raised."""
     queue: asyncio.Queue[Event | None] = asyncio.Queue()
 
     async def read() -> None:
         try:
-            async for event in events:
-                queue.put_nowait(event)
+            async for envelope in events:
+                queue.put_nowait(envelope.payload)
         finally:
             queue.put_nowait(None)  # The end.
 
@@ -277,7 +282,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         # Busy from now, not from TurnStarted, so a second prompt can't race the turn.
         self._set_busy(PLANNER_LANE, True)
         self._feed.append(text, "prompt", PLANNER)
-        await self._session.send(SendMessage(agent=PLANNER, text=text))
+        await self._send(SendMessage(agent=PLANNER, text=text))
 
     # Window navigation only applies at the top level, when no window is active.
 
@@ -385,9 +390,9 @@ class OrbitApp(App[None], inherit_bindings=False):
             if result is None:
                 return
             if current is None:
-                await self._session.send(AddTask(task=result))
+                await self._send(AddTask(task=result))
             else:
-                await self._session.send(EditTask(task_id=current.id, task=result))
+                await self._send(EditTask(task_id=current.id, task=result))
 
         editor = TaskEditorScreen(
             None if current is None else current.task,
@@ -400,7 +405,7 @@ class OrbitApp(App[None], inherit_bindings=False):
     async def action_run_tasks(self) -> None:
         """Ask the backend to run the task list, unless something is already running."""
         if not self._busy[WORK_LANE]:
-            await self._session.send(RunTasks())
+            await self._send(RunTasks())
 
     def _select(self, window_id: str) -> None:
         mark_selected(self.query_one(f"#{self._selected}"), False)
@@ -418,7 +423,7 @@ class OrbitApp(App[None], inherit_bindings=False):
 
     @on(AgentsPane.Cancel)
     async def _cancel_agent(self, message: AgentsPane.Cancel) -> None:
-        await self._session.send(CancelAgent(agent_id=message.agent_id))
+        await self._send(CancelAgent(agent_id=message.agent_id))
 
     def action_toggle_planner(self) -> None:
         """Show the planner tab, or go back to the tab shown before it."""
@@ -426,11 +431,11 @@ class OrbitApp(App[None], inherit_bindings=False):
 
     @on(TaskList.Accept)
     async def _accept_task(self, message: TaskList.Accept) -> None:
-        await self._session.send(AcceptTask(task_id=message.task_id))
+        await self._send(AcceptTask(task_id=message.task_id))
 
     @on(TaskList.Remove)
     async def _remove_task(self, message: TaskList.Remove) -> None:
-        await self._session.send(RemoveTask(task_id=message.task_id))
+        await self._send(RemoveTask(task_id=message.task_id))
 
     @on(TaskList.ShowReason)
     def _show_reason(self, message: TaskList.ShowReason) -> None:
@@ -438,7 +443,7 @@ class OrbitApp(App[None], inherit_bindings=False):
 
     async def action_super_review(self) -> None:
         # Reviews have their own lane, so this works while tasks run.
-        await self._session.send(FireTrigger(trigger=SUPER_REVIEW))
+        await self._send(FireTrigger(trigger=SUPER_REVIEW))
 
     def action_configure_checks(self) -> None:
         """Ask first, so a stray ctrl+e doesn't queue a configurator."""
@@ -446,7 +451,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         async def answered(confirmed: bool | None) -> None:
             # The backend queues it first and runs it, or says one is already on its way.
             if confirmed:
-                await self._session.send(FireTrigger(trigger=CONFIGURE_CHECKS))
+                await self._send(FireTrigger(trigger=CONFIGURE_CHECKS))
 
         self.push_screen(ConfirmScreen(CONFIGURE_TITLE, CONFIGURE_MESSAGE, CONFIGURE_YES), answered)
 
@@ -456,14 +461,14 @@ class OrbitApp(App[None], inherit_bindings=False):
         async def answered(confirmed: bool | None) -> None:
             # The backend refuses while the planner answers, or notes there's nothing to reset.
             if confirmed:
-                await self._session.send(ResetConversation(agent=PLANNER))
+                await self._send(ResetConversation(agent=PLANNER))
 
         self.push_screen(ConfirmScreen(RESET_TITLE, RESET_MESSAGE, RESET_YES), answered)
 
     async def action_list_sessions(self) -> None:
         """Ask for the saved sessions, which show in a modal once they're listed."""
         self._asked_sessions = True
-        await self._session.send(ListSessions())
+        await self._send(ListSessions())
 
     def _name_current(self, listed: SessionsListed) -> None:
         """Title the conversation with the name of the open session among those ``listed``,
@@ -486,18 +491,18 @@ class OrbitApp(App[None], inherit_bindings=False):
             self._sessions = None
             # Refusals come back as errors, shown like any other.
             if choice is not None:
-                await self._session.send(choice)
+                await self._send(choice)
 
         startup = listed.reason == "startup" and not self._asked_sessions
-        self._sessions = SessionsScreen(listed.sessions, self._session.send, startup=startup)
+        self._sessions = SessionsScreen(listed.sessions, self._send, startup=startup)
         self.push_screen(self._sessions, chosen)
 
     async def action_cancel_turn(self) -> None:
         # The planner has its own lane, stopped with ctrl+x; ctrl+s stops the task run.
-        await self._session.send(CancelTurn(lane=WORK_LANE))
+        await self._send(CancelTurn(lane=WORK_LANE))
 
     async def action_stop_planner(self) -> None:
-        await self._session.send(CancelTurn(lane=PLANNER_LANE))
+        await self._send(CancelTurn(lane=PLANNER_LANE))
 
     def action_pick_model(self) -> None:
         if self._settings is not None:
@@ -528,17 +533,30 @@ class OrbitApp(App[None], inherit_bindings=False):
 
     async def _request_settings(self, settings: Settings) -> None:
         # The display updates when the backend confirms with SettingsChanged.
-        await self._session.send(UpdateSettings(settings=settings))
+        await self._send(UpdateSettings(settings=settings))
+
+    async def _send(self, command: Command) -> None:
+        """Send ``command`` to the open session in the default workspace, under a fresh id."""
+        await self._session.send(CommandEnvelope(command_id=uuid4().hex, payload=command))
 
     @work(exclusive=True, group="events")
     async def _consume_events(self) -> None:
         # Closing the batches here, not on garbage collection, stops their reader however this ends.
         async with aclosing(event_batches(self._session.events())) as batches:
-            async for batch in batches:
+            while batch := await self._next_batch(batches):
                 # One repaint for the whole batch.
                 with self.batch_update():
                     for event in coalesce(batch):
                         self._render_event(event)
+
+    async def _next_batch(self, batches: AsyncIterator[list[Event]]) -> list[Event]:
+        """The next of ``batches``; none once they end, or once reading them fails, which is
+        shown."""
+        try:
+            return await anext(batches, [])
+        except Exception as exc:
+            self._render_event(ErrorOccurred(message=f"The backend's event stream failed: {exc}"))
+            return []
 
     def _render_event(self, event: Event) -> None:
         self._follow_agents(event)
@@ -652,7 +670,7 @@ class OrbitApp(App[None], inherit_bindings=False):
             self._proposal = None
             if decision is not None:
                 self._feed.append(*decision_entry(event.agent_id, decision), event.agent_id)
-                await self._session.send(decision)
+                await self._send(decision)
 
         self.push_screen(screen, decided)
 

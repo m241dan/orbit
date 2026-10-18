@@ -34,6 +34,8 @@ from tests.agent_fakes import (
     board,
     events_until,
     idle,
+    payloads,
+    send,
     session_for,
     verified,
 )
@@ -99,8 +101,8 @@ async def test_it_queues_a_configurator_first_and_runs_it_straight_away() -> Non
     session, _, launcher = session_for(
         configurator, claims_done, verification=verified(Steps(True)), tree=tree
     )
-    await session.send(AddTask(task=CODE))
-    await session.send(FireTrigger(trigger=CONFIGURE_CHECKS))
+    await send(session, AddTask(task=CODE))
+    await send(session, FireTrigger(trigger=CONFIGURE_CHECKS))
     events = await until_idle(session)
     tasks = board(events)
     assert [t.task.role for t in tasks] == ["configurator", "coder"]
@@ -115,7 +117,7 @@ async def test_it_queues_a_configurator_first_and_runs_it_straight_away() -> Non
 async def test_with_nothing_configured_the_prompt_says_so() -> None:
     configurator = Configurator()
     session, _, _ = session_for(configurator, verification=no_steps())
-    await session.send(FireTrigger(trigger=CONFIGURE_CHECKS))
+    await send(session, FireTrigger(trigger=CONFIGURE_CHECKS))
     events = await until_idle(session)
     assert board(events)[0].task.prompt == configure_prompt((), None)
     assert "Nothing is configured yet." in configurator.tasks[0]
@@ -123,8 +125,8 @@ async def test_with_nothing_configured_the_prompt_says_so() -> None:
 
 async def test_a_second_request_is_refused_while_one_is_queued_or_running() -> None:
     session, _, _ = session_for(Configurator(), verification=no_steps())
-    await session.send(FireTrigger(trigger=CONFIGURE_CHECKS))
-    await session.send(FireTrigger(trigger=CONFIGURE_CHECKS))
+    await send(session, FireTrigger(trigger=CONFIGURE_CHECKS))
+    await send(session, FireTrigger(trigger=CONFIGURE_CHECKS))
     events = await until_idle(session)
     assert Notice(message=CONFIGURING_NOTE) in events
     assert CONFIGURING_NOTE == "A configurator task is already queued or running."
@@ -133,9 +135,9 @@ async def test_a_second_request_is_refused_while_one_is_queued_or_running() -> N
 
 async def test_it_can_be_asked_for_again_to_reconfigure() -> None:
     session, _, launcher = session_for(Configurator(), Configurator(), verification=no_steps())
-    await session.send(FireTrigger(trigger=CONFIGURE_CHECKS))
+    await send(session, FireTrigger(trigger=CONFIGURE_CHECKS))
     await until_idle(session)
-    await session.send(FireTrigger(trigger=CONFIGURE_CHECKS))
+    await send(session, FireTrigger(trigger=CONFIGURE_CHECKS))
     events = await until_idle(session)
     assert [t.task.role for t in board(events)] == ["configurator", "configurator"]
     assert len(launcher.launches) == 2
@@ -146,16 +148,16 @@ async def test_while_tasks_run_it_goes_next() -> None:
 
     async def asks_to_configure(call: Call) -> TurnEndReason:
         assert session is not None
-        await session.send(FireTrigger(trigger=CONFIGURE_CHECKS))
+        await send(session, FireTrigger(trigger=CONFIGURE_CHECKS))
         return await claims_done(call)
 
     configurator = Configurator()
     session, _, launcher = session_for(
         asks_to_configure, configurator, claims_done, verification=no_steps()
     )
-    await session.send(AddTask(task=CODE))
-    await session.send(AddTask(task=CODE))
-    await session.send(RunTasks())
+    await send(session, AddTask(task=CODE))
+    await send(session, AddTask(task=CODE))
+    await send(session, RunTasks())
     events = await until_idle(session)
     assert [launch.agent.role for launch in launcher.launches] == ["coder", "configurator", "coder"]
     assert [t.task.role for t in board(events)] == ["configurator", "coder", "coder"]
@@ -175,12 +177,12 @@ async def test_after_ctrl_s_holds_the_work_it_still_runs_straight_away() -> None
     session, _, launcher = session_for(
         waits_forever, configurator, claims_done, verification=no_steps()
     )
-    await session.send(AddTask(task=CODE))
-    await session.send(RunTasks())
+    await send(session, AddTask(task=CODE))
+    await send(session, RunTasks())
     await asyncio.wait_for(fetched.wait(), 5)
-    await session.send(CancelTurn())
+    await send(session, CancelTurn())
     await until_idle(session)
-    await session.send(FireTrigger(trigger=CONFIGURE_CHECKS))
+    await send(session, FireTrigger(trigger=CONFIGURE_CHECKS))
     events = await until_idle(session)
     assert [launch.agent.role for launch in launcher.launches] == ["coder", "configurator", "coder"]
     assert len(configurator.tasks) == 1
@@ -189,8 +191,8 @@ async def test_after_ctrl_s_holds_the_work_it_still_runs_straight_away() -> None
 
 async def test_without_agents_it_is_refused() -> None:
     session = AgentSession()
-    await session.send(FireTrigger(trigger=CONFIGURE_CHECKS))
-    async for event in session.events():
+    await send(session, FireTrigger(trigger=CONFIGURE_CHECKS))
+    async for event in payloads(session):
         if isinstance(event, ErrorOccurred):
             assert event.message == "Tasks need agents, and none are set up."
             return
@@ -198,9 +200,9 @@ async def test_without_agents_it_is_refused() -> None:
 
 async def test_without_verification_it_is_refused_and_nothing_starts() -> None:
     session, _, launcher = session_for(Configurator())
-    await session.send(FireTrigger(trigger=CONFIGURE_CHECKS))
+    await send(session, FireTrigger(trigger=CONFIGURE_CHECKS))
     events: list[Event] = []
-    async for event in session.events():
+    async for event in payloads(session):
         events.append(event)
         if isinstance(event, ErrorOccurred):
             break
@@ -215,7 +217,7 @@ async def test_without_verification_it_is_refused_and_nothing_starts() -> None:
 async def until_error(session: AgentSession) -> list[Event]:
     """Events up to and including the first error."""
     events: list[Event] = []
-    async for event in session.events():
+    async for event in payloads(session):
         events.append(event)
         if isinstance(event, ErrorOccurred):
             break
@@ -224,7 +226,7 @@ async def until_error(session: AgentSession) -> list[Event]:
 
 async def test_given_input_it_is_refused_and_nothing_is_queued() -> None:
     session, _, launcher = session_for(Configurator(), verification=no_steps())
-    await session.send(FireTrigger(trigger=CONFIGURE_CHECKS, input={"x": "1"}))
+    await send(session, FireTrigger(trigger=CONFIGURE_CHECKS, input={"x": "1"}))
     events = await until_error(session)
     assert events[-1] == ErrorOccurred(message="The configure-checks trigger takes no input.")
     assert not any(isinstance(e, TasksChanged) and e.tasks for e in events)
@@ -233,8 +235,8 @@ async def test_given_input_it_is_refused_and_nothing_is_queued() -> None:
 
 async def test_an_unknown_trigger_is_refused_naming_the_triggers() -> None:
     session, _, launcher = session_for(Configurator(), verification=no_steps())
-    await session.send(AddTask(task=CODE))
-    await session.send(FireTrigger(trigger="nope"))
+    await send(session, AddTask(task=CODE))
+    await send(session, FireTrigger(trigger="nope"))
     events = await until_error(session)
     message = "No trigger 'nope'; the triggers are super-review and configure-checks."
     assert events[-1] == ErrorOccurred(message=message)

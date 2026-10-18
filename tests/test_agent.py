@@ -53,7 +53,9 @@ from tests.agent_fakes import (
     events_until,
     idle,
     nothing_queued,
+    payloads,
     planner_turn,
+    send,
     session_for,
 )
 
@@ -82,7 +84,7 @@ def turns(events: list[Event]) -> list[Event]:
 async def test_a_prompt_starts_a_turn_of_the_planner() -> None:
     session, _, launcher = session_for()
     launcher.planner_turns = [chats]
-    await session.send(SendMessage(agent=PLANNER, text="hello"))
+    await send(session, SendMessage(agent=PLANNER, text="hello"))
     events = await collect_run(session)
 
     [launch] = launcher.launches  # The planner's launcher was asked to converse.
@@ -99,8 +101,8 @@ async def test_a_prompt_starts_a_turn_of_the_planner() -> None:
 
 async def test_a_prompt_without_a_planner_is_refused() -> None:
     session = AgentSession()
-    await session.send(SendMessage(agent=PLANNER, text="hello"))
-    stream = session.events()
+    await send(session, SendMessage(agent=PLANNER, text="hello"))
+    stream = payloads(session)
     assert isinstance(await anext(stream), SettingsChanged)
     assert await anext(stream) == ErrorOccurred(message="Planning needs agents and a planner role.")
     assert await anext(stream) == PLANNER_IDLE
@@ -111,7 +113,7 @@ async def test_a_prompt_without_a_planner_is_refused() -> None:
 async def test_session_reports_the_planners_errors() -> None:
     session, _, launcher = session_for()
     launcher.planner_turns = [fails]
-    await session.send(SendMessage(agent=PLANNER, text="hello"))
+    await send(session, SendMessage(agent=PLANNER, text="hello"))
     events = turns(await collect_run(session))
 
     started = events[1]
@@ -128,8 +130,8 @@ async def test_session_reports_the_planners_errors() -> None:
 async def test_cancel_without_a_turn_is_a_noop() -> None:
     session, _, launcher = session_for()
     launcher.planner_turns = [chats]
-    await session.send(CancelTurn(lane="planner"))
-    await session.send(SendMessage(agent=PLANNER, text="hello"))
+    await send(session, CancelTurn(lane="planner"))
+    await send(session, SendMessage(agent=PLANNER, text="hello"))
     events = await collect_run(session)
     assert any(isinstance(e, TurnFinished) and e.reason == "completed" for e in events)
 
@@ -138,7 +140,7 @@ async def test_session_announces_initial_settings() -> None:
     settings = Settings(model="opus", tool_access="off")
     session = AgentSession(settings, model_choices=("opus", "sonnet"))
     assert session.settings == settings
-    assert await anext(session.events()) == SettingsChanged(
+    assert await anext(payloads(session)) == SettingsChanged(
         settings=settings, model_choices=("opus", "sonnet")
     )
 
@@ -146,15 +148,15 @@ async def test_session_announces_initial_settings() -> None:
 async def test_the_planner_takes_the_model_from_updated_settings() -> None:
     session, _, launcher = session_for()
     launcher.planner_turns = [chats, chats]
-    stream = session.events()
+    stream = payloads(session)
     assert await anext(stream) == SettingsChanged(settings=Settings())
 
-    await session.send(SendMessage(agent=PLANNER, text="one"))
+    await send(session, SendMessage(agent=PLANNER, text="one"))
     await collect_run(session)
     new = Settings(model="opus", tool_access="full")
-    await session.send(UpdateSettings(settings=new))
+    await send(session, UpdateSettings(settings=new))
     assert await anext(stream) == SettingsChanged(settings=new)
-    await session.send(SendMessage(agent=PLANNER, text="two"))
+    await send(session, SendMessage(agent=PLANNER, text="two"))
     await collect_run(session)
 
     assert [launch.settings.model for launch in launcher.launches] == [None, "opus"]
@@ -165,26 +167,26 @@ async def test_the_planner_takes_the_model_from_updated_settings() -> None:
 
 async def test_add_and_edit_tasks_publish_the_board() -> None:
     session = AgentSession()
-    stream = session.events()
+    stream = payloads(session)
     assert isinstance(await anext(stream), SettingsChanged)
     assert isinstance(await anext(stream), SessionOpened)
 
-    await session.send(AddTask(task=TaskSpec(prompt="one")))
+    await send(session, AddTask(task=TaskSpec(prompt="one")))
     [added] = (await anext(stream)).tasks  # type: ignore[union-attr]
     assert added == TaskState(id=added.id, task=TaskSpec(prompt="one"))
 
     edited = TaskSpec(prompt="one!", settings=Settings(tool_access="off"))
-    await session.send(EditTask(task_id=added.id, task=edited))
+    await send(session, EditTask(task_id=added.id, task=edited))
     assert await anext(stream) == TasksChanged(tasks=(TaskState(id=added.id, task=edited),))
 
-    await session.send(EditTask(task_id="nope", task=edited))
+    await send(session, EditTask(task_id="nope", task=edited))
     assert await anext(stream) == ErrorOccurred(message="No task with id 'nope'.")
 
 
 async def test_a_turn_started_as_the_last_ends_is_not_reported_idle() -> None:
     session, _, launcher = session_for()
     launcher.planner_turns = [chats, chats]
-    await session.send(SendMessage(agent=PLANNER, text="one"))
+    await send(session, SendMessage(agent=PLANNER, text="one"))
     # The race sits between the task ending and its done-callback reporting idle, which no
     # event marks: TurnFinished comes before the end, BusyChanged after the callback.
     turn = planner_turn(session)
@@ -192,7 +194,7 @@ async def test_a_turn_started_as_the_last_ends_is_not_reported_idle() -> None:
     while not turn.done():
         await asyncio.sleep(0)
     # The first turn is done but hasn't reported idle yet when the second starts.
-    await session.send(SendMessage(agent=PLANNER, text="two"))
+    await send(session, SendMessage(agent=PLANNER, text="two"))
     events = await collect_run(session)
     assert [e for e in events if isinstance(e, BusyChanged)] == [
         BusyChanged(busy=True, lane="planner"),
@@ -219,7 +221,7 @@ FAILING_STEP = VerificationStep(
 async def test_session_announces_verification_steps() -> None:
     session = AgentSession(verification=verified((FAILING_STEP,)))
     assert session.verification == verified((FAILING_STEP,))
-    stream = session.events()
+    stream = payloads(session)
     assert isinstance(await anext(stream), SettingsChanged)
     assert await anext(stream) == VerificationChanged(steps=(StepState(name="always fails"),))
 
@@ -227,7 +229,7 @@ async def test_session_announces_verification_steps() -> None:
 async def test_verification_without_steps_notes_that_nothing_is_verified() -> None:
     session = AgentSession(verification=verified(()))
     assert session.verification == verified(())
-    stream = session.events()
+    stream = payloads(session)
     assert isinstance(await anext(stream), SettingsChanged)
     # No steps to announce, just the note.
     assert await anext(stream) == Notice(message=NO_STEPS_NOTE)
@@ -237,7 +239,7 @@ async def test_verification_without_steps_notes_that_nothing_is_verified() -> No
 
 async def test_session_notes_its_workspace_at_startup() -> None:
     session = AgentSession(workspace="/code/project")
-    stream = session.events()
+    stream = payloads(session)
     assert isinstance(await anext(stream), SettingsChanged)
     assert await anext(stream) == Notice(message="Workspace: /code/project")
     assert isinstance(await anext(stream), SessionOpened)
@@ -247,7 +249,7 @@ async def test_session_notes_its_workspace_at_startup() -> None:
 async def test_planner_turns_are_not_verified() -> None:
     session, _, launcher = session_for(verification=verified((FAILING_STEP,)))
     launcher.planner_turns = [chats]
-    await session.send(SendMessage(agent=PLANNER, text="hello"))
+    await send(session, SendMessage(agent=PLANNER, text="hello"))
     events = await collect_run(session)
 
     assert not any(isinstance(e, VerificationChanged | VerificationFinished) for e in events[1:])

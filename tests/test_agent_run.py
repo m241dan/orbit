@@ -50,9 +50,11 @@ from tests.agent_fakes import (
     Steps,
     board,
     ended_unverified,
+    payloads,
     queued,
     replies,
     run,
+    send,
     session_for,
     verified,
 )
@@ -391,13 +393,13 @@ async def test_cancelling_during_verification_stops_the_agent_and_the_run() -> N
 
     session, _, launcher = session_for(waits, claims_done, verification=verified(steps))
     for prompt in ("one", "two"):
-        await session.send(AddTask(task=TaskSpec(prompt=prompt)))
-    await session.send(RunTasks())
+        await send(session, AddTask(task=TaskSpec(prompt=prompt)))
+    await send(session, RunTasks())
     while not steps.runs:
         await asyncio.sleep(0)
-    await session.send(CancelTurn())
+    await send(session, CancelTurn())
     events: list[Event] = []
-    async for event in session.events():
+    async for event in payloads(session):
         events.append(event)
         if event == BusyChanged(busy=False):
             break
@@ -438,12 +440,12 @@ async def test_cancelling_a_working_agent_without_verification() -> None:
         raise AssertionError("unreachable")
 
     session, _, _ = session_for(works_forever)
-    await session.send(AddTask(task=TaskSpec(prompt="one")))
-    await session.send(RunTasks())
+    await send(session, AddTask(task=TaskSpec(prompt="one")))
+    await send(session, RunTasks())
     await asyncio.wait_for(fetched.wait(), 5)
-    await session.send(CancelTurn())
+    await send(session, CancelTurn())
     events: list[Event] = []
-    async for event in session.events():
+    async for event in payloads(session):
         events.append(event)
         if event == BusyChanged(busy=False):
             break
@@ -510,8 +512,8 @@ async def test_closing_stops_the_running_agent_and_the_host() -> None:
         raise AssertionError("unreachable")
 
     session, host, _ = session_for(works_forever)
-    await session.send(AddTask(task=TaskSpec(prompt="one")))
-    await session.send(RunTasks())
+    await send(session, AddTask(task=TaskSpec(prompt="one")))
+    await send(session, RunTasks())
     await asyncio.wait_for(fetched.wait(), 5)
     await asyncio.wait_for(session.close(), 5)
     await session.close()  # Closing twice is harmless.
