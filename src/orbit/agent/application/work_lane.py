@@ -21,6 +21,7 @@ from orbit.agent.domain.endings import BUG, CANCELLED, STOPPED_BY_YOU
 from orbit.agent.domain.roles import REVIEW_ROLES, ChecksProposal
 from orbit.agent.domain.verification import FallbackFixes, failure_reason, fix_prompt
 from orbit.protocol import (
+    CHECKS_EXHAUSTED,
     ErrorOccurred,
     TaskSpec,
     TaskStarted,
@@ -180,7 +181,7 @@ class WorkLane:
         limit = verifier.verification.fallback_fixes
         if self._fallbacks.exhausted(task_id, step.name, limit):
             message = f"Verification step {step.name!r} still fails after {limit} fix attempts."
-            await self._publish(ErrorOccurred(message=message))
+            await self._publish(ErrorOccurred(code=CHECKS_EXHAUSTED, message=message))
             return
         settings = self._board.get(task_id).task.settings
         fix = TaskSpec(prompt=fix_prompt(step, output), settings=settings)

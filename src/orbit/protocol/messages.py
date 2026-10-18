@@ -473,9 +473,13 @@ class VerificationFinished(_Message):
 
 
 class ErrorOccurred(_Message):
+    """An error with no command behind it, of the kind ``code`` names (one of the error codes,
+    such as :data:`AGENT_FAILED`, or a refusal code where it fits), and ``message`` says what."""
+
     type: Literal["error_occurred"] = "error_occurred"
     turn_id: str | None = None
     agent_id: str | None = None
+    code: str
     message: str
 
 
@@ -504,6 +508,24 @@ LOCKED = "locked"
 
 WRONG_SESSION = "wrong_session"
 """A refusal's code: the command is for a session that isn't open."""
+
+AGENT_FAILED = "agent_failed"
+"""An error's code: an agent's run or turn failed, or it exited without doing its task."""
+
+TIMED_OUT = "timed_out"
+"""An error's code: an agent ran out of time."""
+
+GIT_FAILED = "git_failed"
+"""An error's code: a git command or a worktree failed."""
+
+SAVE_FAILED = "save_failed"
+"""An error's code: saving the session failed."""
+
+CHECKS_EXHAUSTED = "checks_exhausted"
+"""An error's code: a check still failed after every fix attempt."""
+
+INTERNAL = "internal"
+"""An error's code: orbit itself failed unexpectedly."""
 
 
 class CommandRefused(_Message):

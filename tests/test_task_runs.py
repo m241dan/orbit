@@ -21,7 +21,10 @@ from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.board import WAITING, TaskBoard
 from orbit.agent.domain.endings import BUG, CANCELLED
 from orbit.protocol import (
+    AGENT_FAILED,
     BUSY,
+    GIT_FAILED,
+    INTERNAL,
     NOT_CONFIGURED,
     AddTask,
     AgentExited,
@@ -523,7 +526,7 @@ async def test_a_failure_saving_usage_is_reported_not_taken_for_a_removed_task()
     run = AgentRun(task_id, Tasks(tasks, publish, changed), None, desk)
     await asyncio.wait_for(run.run(None, "."), 5)
     assert tasks.get(task_id).usage == Usage(input_tokens=10)
-    assert ErrorOccurred(agent_id="agent-1", message="saving tripped") in events
+    assert ErrorOccurred(agent_id="agent-1", code=AGENT_FAILED, message="saving tripped") in events
 
 
 async def test_a_failure_saving_a_change_the_board_made_is_not_reported_as_refused(
@@ -549,7 +552,7 @@ async def test_an_unexpected_error_in_the_work_lane_is_reported() -> None:
     session, _, launcher = session_for(claims_done, claims_done, tree=tree, review=True)
     events = await asyncio.wait_for(run(session, TaskSpec(prompt="a"), TaskSpec(prompt="b")), 5)
     message = "The work lane stopped on an unexpected error: ValueError('the lane tripped')"
-    assert ErrorOccurred(message=message) in events
+    assert ErrorOccurred(code=INTERNAL, message=message) in events
     assert len(launcher.launches) == 1
 
 
@@ -559,7 +562,7 @@ async def test_a_task_whose_lane_crashes_ends_in_error() -> None:
     session, _, launcher = session_for(claims_done, tree=tree)
     events = await asyncio.wait_for(run(session, TaskSpec(prompt="a")), 5)
     message = "The work lane stopped on an unexpected error: ValueError('boom')"
-    assert ErrorOccurred(message=message) in events
+    assert ErrorOccurred(code=INTERNAL, message=message) in events
     assert launcher.launches == []
     [task] = board(events)
     assert (task.status, task.reason, task.reason_detail) == ("error", BUG, "boom")
@@ -571,7 +574,7 @@ async def test_a_task_whose_tree_cant_be_readied_ends_in_error_saying_why() -> N
     tree.failures["prepare"] = RuntimeError(message)
     session, _, _ = session_for(claims_done, tree=tree)
     events = await asyncio.wait_for(run(session, TaskSpec(prompt="a")), 5)
-    assert ErrorOccurred(message=message) in events
+    assert ErrorOccurred(code=GIT_FAILED, message=message) in events
     [task] = board(events)
     assert (task.status, task.reason, task.reason_detail) == (
         "error",

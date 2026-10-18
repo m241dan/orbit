@@ -9,6 +9,8 @@ from orbit.agent import AgentSession, Setup, Verification, VerificationStep
 from orbit.agent.application import session as session_module
 from orbit.agent.application.startup_check import CANCELLED_NOTE, StartupCheck
 from orbit.protocol import (
+    GIT_FAILED,
+    INTERNAL,
     PLANNER,
     UNKNOWN,
     AgentExited,
@@ -245,7 +247,10 @@ async def test_a_snapshot_git_cannot_make_is_reported() -> None:
     events = await until_checked(session)
 
     assert events[-2:] == [
-        ErrorOccurred(message="The startup check couldn't run: git worktree failed: no commits"),
+        ErrorOccurred(
+            code=GIT_FAILED,
+            message="The startup check couldn't run: git worktree failed: no commits",
+        ),
         AgentExited(agent_id="startup-check", reason="crashed"),
     ]
     assert steps.runs == []
@@ -302,7 +307,8 @@ async def test_a_crash_is_reported_and_closing_still_stops_the_host(
             break
 
     assert events[-1] == ErrorOccurred(
-        message="The startup check lane stopped on an unexpected error: ValueError('bug')"
+        code=INTERNAL,
+        message="The startup check lane stopped on an unexpected error: ValueError('bug')",
     )
     assert AgentExited(agent_id="startup-check", reason="killed") in events
     await session.close()

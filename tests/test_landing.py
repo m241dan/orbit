@@ -13,6 +13,7 @@ from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.usage import UsageFetch, UsageUnavailable
 from orbit.agent.domain.verification import failure_report
 from orbit.protocol import (
+    GIT_FAILED,
     ErrorOccurred,
     Event,
     MergeResult,
@@ -167,7 +168,10 @@ async def test_a_tree_that_cannot_be_prepared_fails_the_task() -> None:
     events = await asyncio.wait_for(run(session, TaskSpec(prompt="a"), TaskSpec(prompt="b")), 5)
     assert launcher.launches == []
     assert statuses(events) == ["error", "error"]
-    assert ErrorOccurred(message="Setting up the coder's tree failed: no network") in events
+    assert (
+        ErrorOccurred(code=GIT_FAILED, message="Setting up the coder's tree failed: no network")
+        in events
+    )
 
 
 async def test_leftovers_from_earlier_runs_are_announced_once_at_the_start() -> None:

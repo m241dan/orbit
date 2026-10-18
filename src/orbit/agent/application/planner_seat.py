@@ -13,6 +13,7 @@ from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.roles import ConfigError
 from orbit.protocol import (
     BUSY,
+    INVALID,
     NOT_CONFIGURED,
     PLANNER,
     PLANNER_LANE,
@@ -142,7 +143,7 @@ class PlannerSeat:
             return
         role = read()
         if isinstance(role, ConfigError):
-            await self._events.put(ErrorOccurred(message=f"{ROLE_KEPT}: {role}"))
+            await self._events.put(ErrorOccurred(code=INVALID, message=f"{ROLE_KEPT}: {role}"))
         else:
             desk.use_role(PLANNER, role)
 

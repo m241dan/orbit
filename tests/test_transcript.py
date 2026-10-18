@@ -11,6 +11,7 @@ from textual.app import App, ComposeResult
 from textual.pilot import Pilot
 
 from orbit.protocol import (
+    AGENT_FAILED,
     PLAN_TASK,
     PLANNER,
     AgentExited,
@@ -1515,7 +1516,7 @@ async def test_a_turn_whose_error_was_shown_still_ends_in_an_error_rule() -> Non
         await feed_events(
             session,
             pilot,
-            ErrorOccurred(agent_id="agent-3", message="boom"),
+            ErrorOccurred(agent_id="agent-3", code=AGENT_FAILED, message="boom"),
             turn_ended("agent-3", reason="error"),
         )
         entries = app.query_one(Transcript).entries(None)

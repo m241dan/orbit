@@ -5,6 +5,7 @@ from pydantic import ValidationError
 
 from orbit.protocol import (
     CONFIGURE_CHECKS,
+    INTERNAL,
     PLANNER,
     SUPER_REVIEW,
     AcceptTask,
@@ -234,7 +235,7 @@ def test_turn_events_name_their_agent_when_one_runs_them() -> None:
         ToolCallStarted(turn_id="t", call_id="c", name="Read", arguments={}, agent_id="agent-1"),
         ToolCallFinished(turn_id="t", call_id="c", output="", agent_id="agent-1"),
         TurnFinished(turn_id="t", reason="completed", agent_id="agent-1"),
-        ErrorOccurred(turn_id="t", message="boom", agent_id="agent-1"),
+        ErrorOccurred(turn_id="t", code=INTERNAL, message="boom", agent_id="agent-1"),
     )
     for event in events:
         assert event_adapter.validate_json(event.model_dump_json()) == event
@@ -353,3 +354,8 @@ def test_usage_changed_json_rejects_a_zoneless_time() -> None:
     payload = '{"type": "usage_changed", "retry_at": "2026-10-16T15:40:00"}'
     with pytest.raises(ValidationError):
         event_adapter.validate_json(payload)
+
+
+def test_an_error_needs_a_code() -> None:
+    with pytest.raises(ValidationError):
+        ErrorOccurred.model_validate({"message": "boom"})

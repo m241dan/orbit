@@ -12,6 +12,7 @@ from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.verification import steps_note
 from orbit.protocol import (
+    AGENT_FAILED,
     BUSY,
     INVALID,
     NOT_CONFIGURED,
@@ -375,7 +376,7 @@ async def test_answering_a_failed_turn_publishes_the_error_and_returns_error() -
     turn_id = turn_id_of(published)
     message = "Could not start 'claude'."
     assert published[-2:] == [
-        ErrorOccurred(turn_id=turn_id, agent_id="agent-1", message=message),
+        ErrorOccurred(turn_id=turn_id, agent_id="agent-1", code=AGENT_FAILED, message=message),
         TurnFinished(turn_id=turn_id, agent_id="agent-1", reason="error"),
     ]
 
@@ -415,7 +416,7 @@ async def test_a_turn_failing_after_it_finished_reports_the_error_but_no_second_
     message = "Could not save the session."
     assert published[-2:] == [
         TurnFinished(turn_id=turn_id, agent_id="agent-1", reason="completed"),
-        ErrorOccurred(turn_id=turn_id, agent_id="agent-1", message=message),
+        ErrorOccurred(turn_id=turn_id, agent_id="agent-1", code=AGENT_FAILED, message=message),
     ]
 
 

@@ -10,6 +10,8 @@ from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.endings import BUG, CANCELLED, REVIEW_STOPPED_BY_YOU, STOPPED_BY_YOU
 from orbit.agent.domain.reviews import ReviewLimits
 from orbit.protocol import (
+    GIT_FAILED,
+    INTERNAL,
     INVALID,
     NOT_CONFIGURED,
     SUPER_REVIEW,
@@ -472,7 +474,8 @@ async def test_a_super_review_is_skipped_when_the_base_commit_cannot_be_read() -
     session, _, _ = session_for(reviewers=(suggests(),), tree=tree, review=True)
     await send(session, FireTrigger(trigger=SUPER_REVIEW))
     events = await asyncio.wait_for(settle(session, until=_errored), 10)
-    assert "unknown revision" in " ".join(_error_messages(events))
+    message = "Super review skipped: git rev-parse failed: unknown revision"
+    assert ErrorOccurred(code=GIT_FAILED, message=message) in events
     assert "super-reviewer" not in _roles_seen(events)
     assert tree.snapshots == []
 
@@ -692,7 +695,7 @@ async def test_a_snapshot_that_fails_errors_the_review_and_the_next_review_still
     assert statuses_of(events, "reviewer") == ["error", "completed"]
     assert statuses_of(events, "coder") == ["completed", "completed"]
     message = "git worktree add failed: no space left"
-    assert ErrorOccurred(message=message) in events
+    assert ErrorOccurred(code=GIT_FAILED, message=message) in events
     errored = next(t for t in board(events) if t.status == "error")
     assert (errored.reason, errored.reason_detail) == (f"Error: {message}", message)
     assert [e for e in events if isinstance(e, ReviewStatus)][-1].open_batches == 0
@@ -712,7 +715,10 @@ async def test_a_diff_that_cannot_be_shown_skips_the_review_and_the_run_goes_on(
         ("coder", "completed"),
         ("reviewer", "completed"),
     ]
-    assert ErrorOccurred(message="Review skipped: git show failed: bad object c1") in events
+    assert (
+        ErrorOccurred(code=GIT_FAILED, message="Review skipped: git show failed: bad object c1")
+        in events
+    )
     assert "diff of c2" in board(events)[2].task.prompt
 
 
@@ -723,7 +729,7 @@ async def test_an_unexpected_error_in_the_review_lane_is_reported() -> None:
     await start(session)
     events = await asyncio.wait_for(settle(session), 10)
     message = "The review lane stopped on an unexpected error: ValueError('the lane tripped')"
-    assert ErrorOccurred(message=message) in events
+    assert ErrorOccurred(code=INTERNAL, message=message) in events
     [review] = [t for t in board(events) if t.task.role == "reviewer"]
     assert (review.status, review.reason, review.reason_detail) == (
         "error",

@@ -14,6 +14,7 @@ from orbit.protocol import (
     BUSY,
     CONFIGURE_CHECKS,
     INVALID,
+    LOCKED,
     NOT_CONFIGURED,
     PLANNER,
     SUPER_REVIEW,
@@ -243,6 +244,6 @@ async def test_a_save_that_cannot_take_its_lock_is_an_error_not_a_refusal() -> N
     await session.close()
 
     message = "Another orbit has the session session-1 open, so it won't be saved."
-    assert ErrorOccurred(message=message) in events
+    assert ErrorOccurred(code=LOCKED, message=message) in events
     assert events[-1] == CommandAccepted(command_id="c14")
     assert not any(isinstance(event, OUTCOMES) for event in queued(session))

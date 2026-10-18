@@ -33,6 +33,10 @@ from orbit.agent.domain.roles import (
 )
 from orbit.agent.domain.verification import VerificationStep, check_reply, failure_reason
 from orbit.protocol import (
+    AGENT_FAILED,
+    GIT_FAILED,
+    NOT_CONFIGURED,
+    TIMED_OUT,
     AgentExited,
     AgentExitReason,
     AgentStarted,
@@ -98,7 +102,7 @@ async def see_to_end(
 async def tree_failed(publish: Publish, exc: RuntimeError) -> Outcome:
     """A task's ending in error because git or its tree failed with ``exc``, published with
     ``publish``."""
-    await publish(ErrorOccurred(message=str(exc)))
+    await publish(ErrorOccurred(code=GIT_FAILED, message=str(exc)))
     return ended("error", error(str(exc)))
 
 
@@ -182,7 +186,7 @@ class AgentRun:
         task = self._work.task
         if self._role is None:
             message = f"No role named {task.role!r}."
-            await self._publish(ErrorOccurred(message=message))
+            await self._publish(ErrorOccurred(code=NOT_CONFIGURED, message=message))
             return ended("error", error(message))
         self._root = root
         self._agent = self._desk.open(self, task.role, self._task_id)
@@ -236,7 +240,9 @@ class AgentRun:
                 await self._serve(before)
         except TimeoutError:
             message = f"{self.agent.id} ran out of time ({minutes:g} minutes)."
-            await self._publish(ErrorOccurred(agent_id=self.agent.id, message=message))
+            await self._publish(
+                ErrorOccurred(agent_id=self.agent.id, code=TIMED_OUT, message=message)
+            )
 
     async def handle(self, tool: str, arguments: dict[str, Any]) -> Reply:
         return await dispatch(self._work.task.role, self.role, self._tools, tool, arguments)
@@ -252,7 +258,9 @@ class AgentRun:
             reason = "killed"
             raise
         except Exception as exc:
-            await self._publish(ErrorOccurred(agent_id=self.agent.id, message=str(exc)))
+            await self._publish(
+                ErrorOccurred(agent_id=self.agent.id, code=AGENT_FAILED, message=str(exc))
+            )
         finally:
             await self._publish(AgentExited(agent_id=self.agent.id, reason=reason))
             self._inbox.put_nowait("exited")
@@ -319,7 +327,9 @@ class AgentRun:
     async def _exited(self, before: object) -> None:
         if not self._work.exited():
             message = f"{self.agent.id} exited without calling get_task."
-            await self._publish(ErrorOccurred(agent_id=self.agent.id, message=message))
+            await self._publish(
+                ErrorOccurred(agent_id=self.agent.id, code=AGENT_FAILED, message=message)
+            )
         elif await self._unchanged_since_failure():
             assert self._verifier is not None and self._failure is not None
             await self._verifier.skip_unchanged(self._task_id)

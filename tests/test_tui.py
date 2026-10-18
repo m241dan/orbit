@@ -9,8 +9,11 @@ from textual.widgets import Footer, OptionList, Tab
 from textual.worker import WorkerFailed
 
 from orbit.protocol import (
+    AGENT_FAILED,
+    INTERNAL,
     PLANNER,
     STARTUP_TASK,
+    TIMED_OUT,
     AgentExited,
     AgentReply,
     AgentStarted,
@@ -274,7 +277,7 @@ async def test_renders_tool_calls_errors_and_cancellation() -> None:
             ToolCallStarted(turn_id="t", call_id="c1", name="upper", arguments={"text": "hi"}),
             ToolCallFinished(turn_id="t", call_id="c1", output="HI"),
             ToolCallFinished(turn_id="t", call_id="c2", output="KeyError", is_error=True),
-            ErrorOccurred(message="boom"),
+            ErrorOccurred(code=INTERNAL, message="boom"),
             TurnFinished(turn_id="t", reason="cancelled"),
         ]
         for event in events:
@@ -985,9 +988,9 @@ async def test_concurrent_reviewers_share_the_reviewer_tab() -> None:
             started("agent-1", "reviewer"),
             started("agent-2", "reviewer"),
             started("agent-3", "super-reviewer"),
-            ErrorOccurred(agent_id="agent-1", message="boom"),
+            ErrorOccurred(agent_id="agent-1", code=AGENT_FAILED, message="boom"),
             TurnFinished(turn_id="t", agent_id="agent-2", reason="cancelled"),
-            ErrorOccurred(message="lost"),
+            ErrorOccurred(code=TIMED_OUT, message="lost"),
         )
         assert tab_strip(app) == [
             "All",
@@ -1238,7 +1241,7 @@ async def test_planner_turn_rules_and_errors_show_under_planner_and_all() -> Non
             session,
             pilot,
             TurnFinished(turn_id="t", agent_id="agent-1", reason="cancelled"),
-            ErrorOccurred(agent_id="agent-1", message="boom"),
+            ErrorOccurred(agent_id="agent-1", code=AGENT_FAILED, message="boom"),
         )
         assert tab_strip(app) == ["All", "planner *", "● coder", *PINNED[2:]]
         assert shown(app) == ["▶ agent-2 (coder) started"]

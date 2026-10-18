@@ -22,6 +22,7 @@ from orbit.agent.application.usage_monitor import UsageMonitor
 from orbit.agent.domain.usage import UsageFetch, UsageUnavailable
 from orbit.agent.domain.verification import MAX_FALLBACK_FIXES
 from orbit.protocol import (
+    AGENT_FAILED,
     NOT_CONFIGURED,
     PLANNER,
     UNKNOWN,
@@ -127,7 +128,7 @@ async def test_session_reports_the_planners_errors() -> None:
     turn_id = started.turn_id
     assert started.agent_id == "agent-1"  # The planner's, from its AgentStarted.
     assert events[2:] == [
-        ErrorOccurred(turn_id=turn_id, agent_id="agent-1", message="boom"),
+        ErrorOccurred(turn_id=turn_id, agent_id="agent-1", code=AGENT_FAILED, message="boom"),
         TurnFinished(turn_id=turn_id, agent_id="agent-1", reason="error"),
         PLANNER_IDLE,
     ]

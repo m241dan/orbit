@@ -19,6 +19,7 @@ from orbit.agent.domain.agents import Agent
 from orbit.agent.domain.roles import suggested_task, task_suggestion
 from orbit.agent.domain.verification import steps_note
 from orbit.protocol import (
+    AGENT_FAILED,
     CODER,
     PLAN_TASK,
     PLANNER,
@@ -98,7 +99,12 @@ class PlannerChat:
             return await self._end(turn_id, finished, "cancelled")
         except Exception as exc:
             await self._desk.publish(
-                ErrorOccurred(turn_id=turn_id, agent_id=self.agent_id, message=str(exc))
+                ErrorOccurred(
+                    turn_id=turn_id,
+                    agent_id=self.agent_id,
+                    code=AGENT_FAILED,
+                    message=str(exc),
+                )
             )
             return await self._end(turn_id, finished, "error")
         return finished or "completed"

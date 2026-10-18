@@ -20,6 +20,7 @@ from orbit.agent.application.ports import AgentLaunch, ResumeFailed
 from orbit.agent.domain.agents import Agent
 from orbit.agent.domain.roles import ORBIT_TOOLS
 from orbit.protocol import (
+    AGENT_FAILED,
     AssistantMessage,
     ErrorOccurred,
     Event,
@@ -168,7 +169,11 @@ def _result_events(turn_id: str, message: dict[str, Any]) -> list[Event]:
         return [TurnFinished(turn_id=turn_id, reason="max_steps", usage=usage)]
     if message.get("is_error"):
         return [
-            ErrorOccurred(turn_id=turn_id, message=message.get("result") or message["subtype"]),
+            ErrorOccurred(
+                turn_id=turn_id,
+                code=AGENT_FAILED,
+                message=message.get("result") or message["subtype"],
+            ),
             TurnFinished(turn_id=turn_id, reason="error", usage=usage),
         ]
     return [TurnFinished(turn_id=turn_id, reason="completed", usage=usage)]

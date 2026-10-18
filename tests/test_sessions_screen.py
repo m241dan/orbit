@@ -8,6 +8,7 @@ from textual.widgets import Input, OptionList
 
 from orbit.agent import AgentSession
 from orbit.protocol import (
+    BUSY,
     DeleteSession,
     ErrorOccurred,
     ListSessions,
@@ -300,7 +301,7 @@ async def test_a_refusal_shows_as_an_error_once_the_modal_closed() -> None:
     async with app.run_test() as pilot:
         await feed_events(session, pilot, LISTED)
         await pilot.press("j", "j", "enter")
-        await feed_events(session, pilot, ErrorOccurred(message="Tasks are running."))
+        await feed_events(session, pilot, ErrorOccurred(code=BUSY, message="Tasks are running."))
 
         assert not isinstance(app.screen, SessionsScreen)
         assert entries(app) == [("Tasks are running.", "error")]

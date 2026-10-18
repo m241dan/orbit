@@ -24,6 +24,7 @@ from orbit.agent.domain.reviews import (
 from orbit.agent.domain.roles import REVIEW_ROLES, role_task, suggested_task
 from orbit.protocol import (
     CODER,
+    GIT_FAILED,
     REVIEWER,
     SUPER_REVIEWER,
     ErrorOccurred,
@@ -106,7 +107,9 @@ class ReviewLane:
         try:
             commit = await self._tree.base_commit()
         except RuntimeError as exc:  # Git failed; the review is skipped rather than the run.
-            await self._publish(ErrorOccurred(message=f"Super review skipped: {exc}"))
+            await self._publish(
+                ErrorOccurred(code=GIT_FAILED, message=f"Super review skipped: {exc}")
+            )
             return
         await self._queue(self.planner.super_review(commit))
 
@@ -192,7 +195,7 @@ class ReviewLane:
         try:
             return await self._tree.show(job.commits)
         except RuntimeError as exc:  # Git failed; the review is skipped rather than the run.
-            await self._publish(ErrorOccurred(message=f"Review skipped: {exc}"))
+            await self._publish(ErrorOccurred(code=GIT_FAILED, message=f"Review skipped: {exc}"))
             return None
 
     async def _add(self, job: ReviewJob, diff: str) -> None:

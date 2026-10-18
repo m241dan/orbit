@@ -3,7 +3,7 @@
 from collections.abc import Awaitable
 
 from orbit.agent.application.ports import Publish
-from orbit.protocol import ErrorOccurred
+from orbit.protocol import SAVE_FAILED, ErrorOccurred
 
 
 async def outcome[T](call: Awaitable[T]) -> T | RuntimeError:
@@ -35,5 +35,5 @@ class ReportedOnce:
             return True
         if not self._failing:
             self._failing = True
-            await self._publish(ErrorOccurred(message=str(error)))
+            await self._publish(ErrorOccurred(code=SAVE_FAILED, message=str(error)))
         return False

@@ -22,6 +22,7 @@ from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.roles import REVIEW_ROLES, Setup, built_in_roles
 from orbit.agent.domain.sessions import SessionRecord, Unreadable
 from orbit.protocol import (
+    AGENT_FAILED,
     BUILT_IN_ROLE_NAMES,
     AddTask,
     AgentExited,
@@ -138,7 +139,9 @@ class ScriptedLauncher:
 
         reason = await script(call)
         if self.turn_errors:
-            yield ErrorOccurred(turn_id=agent.id, message=self.turn_errors.pop(0))
+            yield ErrorOccurred(
+                turn_id=agent.id, code=AGENT_FAILED, message=self.turn_errors.pop(0)
+            )
         for usage in self.usages.pop(0) if self.usages else (None,):
             yield TurnFinished(turn_id=agent.id, reason=reason, agent_id=agent.id, usage=usage)
 

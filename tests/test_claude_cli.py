@@ -13,6 +13,7 @@ from orbit.agent.domain.agents import Agent
 from orbit.agent.domain.roles import ORBIT_TOOLS
 from orbit.agent.external.claude_cli import AGENT_RULES, TOOL_TIMEOUT_MS, translate
 from orbit.protocol import (
+    AGENT_FAILED,
     AssistantMessage,
     ErrorOccurred,
     Event,
@@ -135,14 +136,14 @@ def test_translate_ignores_plain_user_text() -> None:
         (
             {"type": "result", "subtype": "success", "is_error": True, "result": "Bad key"},
             [
-                ErrorOccurred(turn_id="t", message="Bad key"),
+                ErrorOccurred(turn_id="t", code=AGENT_FAILED, message="Bad key"),
                 TurnFinished(turn_id="t", reason="error"),
             ],
         ),
         (
             {"type": "result", "subtype": "error_during_execution", "is_error": True},
             [
-                ErrorOccurred(turn_id="t", message="error_during_execution"),
+                ErrorOccurred(turn_id="t", code=AGENT_FAILED, message="error_during_execution"),
                 TurnFinished(turn_id="t", reason="error"),
             ],
         ),

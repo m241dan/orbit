@@ -27,7 +27,14 @@ from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.agents import Agent, AgentRegistry
 from orbit.agent.domain.reviews import ReviewLimits
 from orbit.agent.domain.roles import ORBIT_TOOLS, Role
-from orbit.protocol import AgentReply, AgentRequest, ErrorOccurred, ProgressNoted, Settings
+from orbit.protocol import (
+    INTERNAL,
+    AgentReply,
+    AgentRequest,
+    ErrorOccurred,
+    ProgressNoted,
+    Settings,
+)
 
 # The refusal of a call from an agent that isn't running.
 UNKNOWN_AGENT = Reply("Unknown or expired agent token.", is_error=True)
@@ -202,5 +209,5 @@ class AgentDesk:
             return await run.handle(tool, arguments)
         except Exception as exc:
             message = f"Orbit failed to handle {tool}: {exc}"
-            await self.publish(ErrorOccurred(agent_id=agent.id, message=message))
+            await self.publish(ErrorOccurred(agent_id=agent.id, code=INTERNAL, message=message))
             return Reply(message, is_error=True)

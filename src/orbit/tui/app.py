@@ -15,6 +15,7 @@ from textual.widgets import OptionList, Tabs
 
 from orbit.protocol import (
     CONFIGURE_CHECKS,
+    INTERNAL,
     PLANNER,
     PLANNER_LANE,
     SUPER_REVIEW,
@@ -571,7 +572,9 @@ class OrbitApp(App[None], inherit_bindings=False):
         try:
             return await anext(batches, [])
         except Exception as exc:
-            self._render_event(ErrorOccurred(message=f"The backend's event stream failed: {exc}"))
+            self._render_event(
+                ErrorOccurred(code=INTERNAL, message=f"The backend's event stream failed: {exc}")
+            )
             return []
 
     def _render_event(self, event: Event) -> None:

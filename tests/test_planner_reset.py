@@ -13,6 +13,7 @@ from orbit.agent.application.planner_seat import (
 from orbit.agent.domain.verification import steps_note
 from orbit.protocol import (
     BUSY,
+    INVALID,
     NOT_CONFIGURED,
     PLANNER,
     UNKNOWN,
@@ -134,7 +135,7 @@ async def test_an_invalid_config_keeps_the_planners_role_but_still_resets() -> N
     await plan(session, "Plan.")
     events = await reset(session)
     message = f"{ROLE_KEPT}: .orbit/config.toml: roles.planner.tools: unknown tools ['fly']"
-    assert ErrorOccurred(message=message) in events
+    assert ErrorOccurred(code=INVALID, message=message) in events
     await plan(session, "Plan again.")
     fresh = launcher.launches[-1]
     assert (fresh.agent.id, fresh.tools) == ("agent-2", ROLES["planner"].tools)

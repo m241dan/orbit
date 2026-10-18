@@ -1,5 +1,11 @@
+import pytest
+
 from orbit.protocol import (
+    AGENT_FAILED,
+    INTERNAL,
+    NOT_CONFIGURED,
     PLANNER,
+    TIMED_OUT,
     AgentReply,
     AgentRequest,
     AgentStarted,
@@ -324,11 +330,16 @@ def test_only_rule_kinds_are_ruled() -> None:
 
 
 def test_an_error_is_labelled_with_its_agent() -> None:
-    assert error_entry(ErrorOccurred(agent_id="agent-1", message="boom")) == (
+    assert error_entry(ErrorOccurred(agent_id="agent-1", code=INTERNAL, message="boom")) == (
         "agent-1: boom",
         "error",
     )
-    assert error_entry(ErrorOccurred(message="boom")) == ("boom", "error")
+    assert error_entry(ErrorOccurred(code=AGENT_FAILED, message="boom")) == ("boom", "error")
+
+
+@pytest.mark.parametrize("code", [AGENT_FAILED, TIMED_OUT, INTERNAL, NOT_CONFIGURED])
+def test_an_error_reads_the_same_whatever_its_code(code: str) -> None:
+    assert error_entry(ErrorOccurred(code=code, message="boom")) == ("boom", "error")
 
 
 def test_a_refused_command_reads_as_an_unlabelled_error() -> None:

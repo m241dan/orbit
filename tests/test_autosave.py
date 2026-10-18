@@ -6,6 +6,7 @@ from orbit.agent import Verification, VerificationStep
 from orbit.agent.domain.reviews import ReviewLimits
 from orbit.protocol import (
     PLANNER,
+    SAVE_FAILED,
     AddTask,
     EditTask,
     ErrorOccurred,
@@ -142,6 +143,7 @@ async def test_a_save_that_fails_is_reported_once_and_work_carries_on() -> None:
         session, lambda e: isinstance(e, TasksChanged) and len(e.tasks) == 2
     )
     assert errors(events) == ["Couldn't save the session: disk full"]
+    assert {e.code for e in events if isinstance(e, ErrorOccurred)} == {SAVE_FAILED}
     assert store.saved == []
     await session.close()
 

@@ -32,6 +32,7 @@ from orbit.agent.domain.sessions import (
 from orbit.protocol import (
     INVALID,
     LOCKED,
+    SAVE_FAILED,
     UNKNOWN,
     ErrorOccurred,
     SessionSummary,
@@ -187,7 +188,7 @@ class SessionKeeper:
             return False
         if not acquired:
             message = f"Another orbit has the session {self.id} open, so it won't be saved."
-            await self._publish(ErrorOccurred(message=message))
+            await self._publish(ErrorOccurred(code=LOCKED, message=message))
         return acquired
 
     async def _write(self, store: SessionStore, contents: Contents) -> None:
@@ -253,7 +254,7 @@ class SessionKeeper:
         error = await outcome(store.delete(session_id))
         if isinstance(error, RuntimeError):
             await self._release(store, session_id)
-            await self._publish(ErrorOccurred(message=str(error)))
+            await self._publish(ErrorOccurred(code=SAVE_FAILED, message=str(error)))
 
     async def open(self, session_id: str, load: Load) -> Opened | None:
         """Make the saved session ``session_id`` the one open here, locked, if ``load`` switches
@@ -378,6 +379,6 @@ class SessionKeeper:
         after the store's message."""
         result = await outcome(call)
         if isinstance(result, RuntimeError):
-            await self._publish(ErrorOccurred(message=f"{result}{suffix}"))
+            await self._publish(ErrorOccurred(code=SAVE_FAILED, message=f"{result}{suffix}"))
             return None
         return result

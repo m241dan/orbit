@@ -22,6 +22,7 @@ from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.refusals import Refused
 from orbit.protocol import (
     BUSY,
+    INVALID,
     NOT_CONFIGURED,
     PLANNER,
     AgentExited,
@@ -210,7 +211,7 @@ async def test_a_reset_with_an_invalid_config_keeps_the_role_and_says_why() -> N
     await answered(seated_)
     await seated_.seat.reset()
     assert seated_.published() == [
-        ErrorOccurred(message=f"{ROLE_KEPT}: bad tools"),
+        ErrorOccurred(code=INVALID, message=f"{ROLE_KEPT}: bad tools"),
         EXITED,
         ConversationReset(agent=PLANNER),
     ]

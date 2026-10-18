@@ -6,6 +6,7 @@ from textual.pilot import Pilot
 
 from orbit.agent import AgentSession
 from orbit.protocol import (
+    NOT_CONFIGURED,
     SUPER_REVIEW,
     AcceptTask,
     AddTask,
@@ -715,7 +716,9 @@ async def test_a_refused_planner_prompt_frees_the_prompt() -> None:
         prompt = app.query_one(ChatPrompt)
         await pilot.press("ctrl+t", "i", *"plan", "enter")
         assert prompt.border_title == "Prompt · planner · busy"
-        refused = ErrorOccurred(message="Planning needs agents and a planner role.")
+        refused = ErrorOccurred(
+            code=NOT_CONFIGURED, message="Planning needs agents and a planner role."
+        )
         await feed(session, pilot, refused, BusyChanged(busy=False, lane="planner"))
         assert prompt.border_title == "Prompt · planner"
 

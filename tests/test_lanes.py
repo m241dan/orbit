@@ -10,7 +10,7 @@ import pytest
 from orbit.agent.application.lanes import Background, TurnSlot
 from orbit.agent.domain.refusals import Refused
 from orbit.protocol import BUSY as BUSY_CODE
-from orbit.protocol import BusyChanged, ErrorOccurred, Event
+from orbit.protocol import INTERNAL, BusyChanged, ErrorOccurred, Event
 
 
 class Work:
@@ -100,7 +100,7 @@ async def test_a_crash_is_reported_once_and_close_does_not_raise_it() -> None:
     await lane.close()
 
     assert report == ErrorOccurred(
-        message="The test lane stopped on an unexpected error: ValueError('boom')"
+        code=INTERNAL, message="The test lane stopped on an unexpected error: ValueError('boom')"
     )
     assert events.empty()
 
@@ -163,7 +163,7 @@ async def test_a_crash_is_reported_once_before_the_lane_frees() -> None:
     await turns.close()
 
     report = ErrorOccurred(
-        message="The planner lane stopped on an unexpected error: ValueError('boom')"
+        code=INTERNAL, message="The planner lane stopped on an unexpected error: ValueError('boom')"
     )
     assert posted == [BUSY, report, IDLE]
 

@@ -2,6 +2,7 @@ from collections.abc import Mapping
 from dataclasses import replace
 
 from orbit.protocol import (
+    INTERNAL,
     PLANNER,
     AgentExited,
     AgentReply,
@@ -69,7 +70,7 @@ def test_output_from_a_background_agent_marks_its_tab_unread() -> None:
         AgentReply(agent_id="agent-2", request_id="r", text="ok"),
         ProgressNoted(agent_id="agent-2", task_id="1", note="n"),
         TaskGaveUp(agent_id="agent-2", task_id="1", reason="r"),
-        ErrorOccurred(agent_id="agent-2", message="boom"),
+        ErrorOccurred(agent_id="agent-2", code=INTERNAL, message="boom"),
         TurnFinished(turn_id="t", agent_id="agent-2", reason="cancelled"),
     ]
     for event in outputs:

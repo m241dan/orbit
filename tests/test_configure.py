@@ -21,6 +21,7 @@ from orbit.agent.domain.roles import ChecksProposal, Setup
 from orbit.agent.domain.verification import VerificationStep
 from orbit.agent.external.config_file import CONFIG_PATH
 from orbit.protocol import (
+    GIT_FAILED,
     AddTask,
     BusyChanged,
     ErrorOccurred,
@@ -156,7 +157,7 @@ async def test_checks_that_cant_be_saved_end_the_task_in_error_and_change_nothin
     session = accepting(claims_done, steps=steps, tree=tree, write_config=unsaveable)
     events = await asyncio.wait_for(everything(session, CONFIGURE, CODE), 5)
     message = "Couldn't save the checks to .orbit/config.toml: read-only"
-    assert ErrorOccurred(message=message) in events
+    assert ErrorOccurred(code=GIT_FAILED, message=message) in events
     assert [t.status for t in board(events)] == ["error", "completed"]
     assert steps.runs == ["setup", "Lint", "Tests", STEP.name]
     assert tree.setups == []

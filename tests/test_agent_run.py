@@ -18,6 +18,10 @@ from orbit.agent.domain.endings import BUG, STOPPED_BY_YOU
 from orbit.agent.domain.roles import ChecksProposal
 from orbit.agent.domain.verification import failure_report
 from orbit.protocol import (
+    AGENT_FAILED,
+    CHECKS_EXHAUSTED,
+    GIT_FAILED,
+    INTERNAL,
     AddTask,
     AgentExited,
     AgentReply,
@@ -183,7 +187,8 @@ async def test_fallbacks_stop_after_the_chain_runs_out_of_fixes() -> None:
     assert len(launcher.launches) == 2
     assert [t.status for t in board(events)] == ["unverified", "unverified"]
     assert [t.reason for t in board(events)] == ["Unit tests failed", "Unit tests failed"]
-    assert any(isinstance(e, ErrorOccurred) and "fix attempts" in e.message for e in events)
+    codes = {e.code for e in events if isinstance(e, ErrorOccurred) and "fix attempts" in e.message}
+    assert codes == {CHECKS_EXHAUSTED}
 
 
 async def test_an_agent_that_exits_without_claiming_done_is_verified() -> None:
@@ -209,7 +214,7 @@ async def test_an_agent_that_never_asks_for_its_task_errors() -> None:
 
     assert steps.runs == []
     message = "agent-1 exited without calling get_task."
-    assert ErrorOccurred(agent_id="agent-1", message=message) in events
+    assert ErrorOccurred(agent_id="agent-1", code=AGENT_FAILED, message=message) in events
     [task] = board(events)
     assert (task.status, task.reason, task.reason_detail) == ("error", f"Error: {message}", message)
 
@@ -241,7 +246,9 @@ async def test_a_crashing_agent_is_reported_and_its_work_still_verified() -> Non
     session, _, _ = session_for(crashes, verification=verified(Steps(True)))
     events = await asyncio.wait_for(run(session), 5)
 
-    error = ErrorOccurred(agent_id="agent-1", message="claude exited with status 1")
+    error = ErrorOccurred(
+        agent_id="agent-1", code=AGENT_FAILED, message="claude exited with status 1"
+    )
     assert error in events
     assert AgentExited(agent_id="agent-1", reason="crashed") in events
     assert [t.status for t in board(events)] == ["completed"]
@@ -749,7 +756,7 @@ async def test_a_run_cancelled_while_the_host_starts_closes_its_agent_unannounce
     await desk.stop()
 
 
-GIT_FAILED = RuntimeError("git status failed")
+GIT_STATUS_FAILED = RuntimeError("git status failed")
 
 
 class BreakingWorkspace(FakeWorkspace):
@@ -757,12 +764,12 @@ class BreakingWorkspace(FakeWorkspace):
 
     async def __call__(self, root: str) -> object:
         if not self.states:
-            raise GIT_FAILED
+            raise GIT_STATUS_FAILED
         return await super().__call__(root)
 
 
 async def breaking_step(step: VerificationStep, root: str) -> tuple[bool, str]:
-    raise GIT_FAILED
+    raise GIT_STATUS_FAILED
 
 
 async def held_reply(tool: str, events: list[Event], **options: Any) -> Reply:
@@ -824,7 +831,7 @@ async def test_a_call_orbit_fails_to_handle_is_answered_and_reported() -> None:
     events = await asyncio.wait_for(run(session), 5)
     message = "Orbit failed to handle run_check: git status failed"
     assert answers == [Reply(message, is_error=True)]
-    assert ErrorOccurred(agent_id="agent-1", message=message) in events
+    assert ErrorOccurred(agent_id="agent-1", code=INTERNAL, message=message) in events
     [answer] = [e for e in events if isinstance(e, AgentReply) and e.is_error]
     assert answer.text == message
 
@@ -887,7 +894,7 @@ async def test_tree_failed_publishes_the_error_and_ends_in_it() -> None:
 
     outcome = await tree_failed(publish, RuntimeError("git broke"))
 
-    assert published == [ErrorOccurred(message="git broke")]
+    assert published == [ErrorOccurred(code=GIT_FAILED, message="git broke")]
     assert (outcome.status, outcome.reason, outcome.detail) == (
         "error",
         "Error: git broke",

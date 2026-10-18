@@ -15,6 +15,7 @@ from orbit.agent.application.verifier import Failure, Verification, first_failur
 from orbit.agent.domain.roles import setup_step
 from orbit.agent.domain.verification import StepProgress, VerificationStep, trim_output
 from orbit.protocol import (
+    GIT_FAILED,
     STARTUP_TASK,
     AgentExited,
     AgentExitReason,
@@ -90,7 +91,8 @@ class StartupCheck:
             await self._publish(Notice(message=CANCELLED_NOTE))
             raise
         except RuntimeError as exc:  # Git couldn't make the snapshot.
-            await self._publish(ErrorOccurred(message=f"The startup check couldn't run: {exc}"))
+            message = f"The startup check couldn't run: {exc}"
+            await self._publish(ErrorOccurred(code=GIT_FAILED, message=message))
             return "crashed"
         await self._report(failure)
         return "finished"
