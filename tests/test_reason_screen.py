@@ -6,7 +6,7 @@ from textual.pilot import Pilot
 
 from orbit.protocol import TasksChanged, TaskSpec, TaskState, TaskStatus
 from orbit.tui import OrbitApp
-from orbit.tui.tasks import ReasonScreen
+from orbit.tui.reason import ReasonScreen
 from orbit.tui.view import REASON_HINT, reason_text, reason_title
 from tests.test_task_list import feed, open_task_list
 from tests.test_tui import FakeSession

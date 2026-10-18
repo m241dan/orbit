@@ -797,7 +797,8 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
   key's action, and `settings` and `common` for what they share); the widgets (`transcript`,
   `transcript_log` for one tab's log, `conversation` for the `ConversationFeed`, which turns
   events into the transcript's entries, `entries` for an entry and the renderables that draw
-  it, `tabs`, `tasks`, `agents`, `panels`,
+  it, `tabs`, `tasks`, `task_editor` for the task editor modal, `reason` for the modal saying
+  why a task ended, `agents`, `panels`,
   `detail` for the detail pane, `working` for the working row, `proposals`, the proposal modal
   and the `ProposalHost` that shows each waiting proposal once and closes it when it's withdrawn,
   `sessions`, the modal listing the sessions and the `SessionsHost` that shows it and refreshes

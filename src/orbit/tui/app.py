@@ -87,9 +87,11 @@ from orbit.tui.detail import DetailPane
 from orbit.tui.footer import KeyFooter
 from orbit.tui.panels import UsagePanel, VerificationPanel
 from orbit.tui.proposals import ProposalHost
+from orbit.tui.reason import ReasonScreen
 from orbit.tui.sessions import SessionsHost
 from orbit.tui.tabs import ConversationTabs
-from orbit.tui.tasks import ReasonScreen, TaskEditorScreen, TaskList
+from orbit.tui.task_editor import TaskEditorScreen
+from orbit.tui.tasks import TaskList
 from orbit.tui.transcript import Transcript
 from orbit.tui.view import (
     CONFIGURE_MESSAGE,
