@@ -208,3 +208,36 @@ async def test_grouped_keys_are_shown_under_their_group() -> None:
         await focus(pilot, "saving")
 
         assert descriptions(app) == ["Save", "Quit", "Danger"]
+
+
+def assert_in_one_row(app: FooterApp) -> None:
+    """Assert the footer's keys sit on its row, each shown, in the order of the DOM."""
+    footer = app.query_one(KeyFooter)
+    shown = keys(app)
+    assert all(key.region.y == footer.region.y for key in shown)
+    assert all(key.region.width > 0 for key in shown)
+    xs = [key.region.x for key in shown]
+    assert xs == sorted(set(xs))
+
+
+async def assert_in_one_row_after(first: str, then: str, shown: list[str]) -> None:
+    """Assert the footer shows ``shown`` in one row, in order, once focus moves from
+    ``first`` to ``then``."""
+    app = QuietApp()
+    async with app.run_test() as pilot:
+        await focus(pilot, first)
+        await focus(pilot, then)
+        assert descriptions(app) == shown
+        assert_in_one_row(app)
+
+
+async def test_a_key_that_comes_is_laid_out_in_the_footers_row_in_order() -> None:
+    await assert_in_one_row_after("first", "saving", ["Save", "Quit", "Danger"])
+
+
+async def test_keys_left_when_one_goes_are_laid_out_in_the_footers_row_in_order() -> None:
+    await assert_in_one_row_after("saving", "first", ["Quit", "Danger"])
+
+
+async def test_keys_that_change_order_are_laid_out_in_the_footers_row_in_order() -> None:
+    await assert_in_one_row_after("paging", "backwards", ["Previous", "Next", "Quit", "Danger"])
