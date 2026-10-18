@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from pydantic import BaseModel, ConfigDict
 
 from orbit.agent.domain.board import WAITING
-from orbit.protocol import TaskState
+from orbit.protocol import MANUAL_ORIGIN, PLANNER_ORIGIN, TaskState
 
 # Characters of diff quoted in a review task; a reviewer can read files for more.
 DIFF_LIMIT = 30000
@@ -219,7 +219,7 @@ class ReviewPlanner:
     def landed(self, state: TaskState, commit: str) -> ReviewJob | None:
         """Task ``state`` landed ``commit``; returns the review that's due, if any."""
         if state.batch is None:
-            if state.origin not in ("manual", "planner"):
+            if state.origin not in (MANUAL_ORIGIN, PLANNER_ORIGIN):
                 return None
             self.paused = False
             return ReviewJob(commits=(commit,), round=0, batch=None)

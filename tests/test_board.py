@@ -7,6 +7,9 @@ from orbit.protocol import (
     ACTIVE_STATUSES,
     BUSY,
     INVALID,
+    PLANNER_ORIGIN,
+    REVIEW_ORIGIN,
+    SUPER_REVIEW_ORIGIN,
     UNKNOWN,
     Settings,
     TaskSpec,
@@ -215,7 +218,7 @@ def test_next_runnable_can_be_limited_to_roles_or_exclude_them() -> None:
 def test_reviews_orbit_queues_are_marked_as_from_review() -> None:
     board = TaskBoard()
     review = board.add_review(TaskSpec(prompt="Review commit abc", role="reviewer"))
-    assert board.get(review).origin == "review"
+    assert board.get(review).origin == REVIEW_ORIGIN
 
 
 def test_tasks_given_up_on_are_not_run_again() -> None:
@@ -228,10 +231,18 @@ def test_tasks_given_up_on_are_not_run_again() -> None:
 def test_fixes_inherit_the_origin_batch_and_round_of_what_they_fix() -> None:
     board = TaskBoard()
     suggestion = board.add_suggestion(TaskSpec(prompt="tidy"), batch="batch-1", round=2)
-    assert board.get(suggestion).origin == "review"
+    assert board.get(suggestion).origin == REVIEW_ORIGIN
     fix = board.add(FIX, fixes=suggestion)
     state = board.get(fix)
     assert (state.origin, state.batch, state.round) == ("review", "batch-1", 2)
+
+
+def test_suggestions_take_the_origin_they_are_given() -> None:
+    board = TaskBoard()
+    suggestion = board.add_suggestion(
+        TaskSpec(prompt="tidy"), batch="batch-1", round=0, origin=SUPER_REVIEW_ORIGIN
+    )
+    assert board.get(suggestion).origin == SUPER_REVIEW_ORIGIN
 
 
 def test_suggestions_join_the_end_of_the_queue() -> None:
@@ -255,7 +266,7 @@ def test_editing_a_suggestion_keeps_where_it_came_from() -> None:
 def test_drafts_wait_until_accepted() -> None:
     board = TaskBoard()
     draft = board.add_draft(TaskSpec(prompt="plan step"))
-    assert (board.get(draft).status, board.get(draft).origin) == ("draft", "planner")
+    assert (board.get(draft).status, board.get(draft).origin) == ("draft", PLANNER_ORIGIN)
     assert board.next_runnable() is None
     board.accept(draft)
     assert board.get(draft).status == "pending"

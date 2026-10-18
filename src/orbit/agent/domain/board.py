@@ -10,6 +10,8 @@ from orbit.protocol import (
     ACTIVE_STATUSES,
     BUSY,
     INVALID,
+    PLANNER_ORIGIN,
+    REVIEW_ORIGIN,
     UNKNOWN,
     TaskOrigin,
     TaskSpec,
@@ -82,7 +84,7 @@ class TaskBoard:
         return state.id
 
     def add_suggestion(
-        self, task: TaskSpec, batch: str, round: int, origin: TaskOrigin = "review"
+        self, task: TaskSpec, batch: str, round: int, origin: TaskOrigin = REVIEW_ORIGIN
     ) -> str:
         """Add ``task``, suggested by the review behind ``batch``, at the end; returns its id."""
         state = self._new(task, origin=origin, batch=batch, round=round)
@@ -167,7 +169,7 @@ class TaskBoard:
 
     def add_draft(self, task: TaskSpec) -> str:
         """Add ``task``, which the planner proposed, at the end as a draft; returns its id."""
-        state = self._new(task, status="draft", origin="planner")
+        state = self._new(task, status="draft", origin=PLANNER_ORIGIN)
         self._tasks.append(state)
         return state.id
 
@@ -201,7 +203,7 @@ class TaskBoard:
 
     def add_review(self, task: TaskSpec) -> str:
         """Add a review orbit queued itself, at the end; returns its id."""
-        state = self._new(task, origin="review")
+        state = self._new(task, origin=REVIEW_ORIGIN)
         self._tasks.append(state)
         return state.id
 

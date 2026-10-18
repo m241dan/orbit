@@ -6,8 +6,12 @@ from pydantic import ValidationError
 from orbit.protocol import (
     CONFIGURE_CHECKS,
     INTERNAL,
+    MANUAL_ORIGIN,
     PLANNER,
+    PLANNER_ORIGIN,
+    REVIEW_ORIGIN,
     SUPER_REVIEW,
+    SUPER_REVIEW_ORIGIN,
     AcceptTask,
     AddTask,
     AgentExited,
@@ -257,6 +261,16 @@ def test_fire_trigger_round_trips_with_input_defaulting_to_empty() -> None:
     parsed = command_adapter.validate_json('{"type": "fire_trigger", "trigger": "t"}')
     assert parsed == FireTrigger(trigger="t", input={})
     assert SUPER_REVIEW == "super-review" and CONFIGURE_CHECKS == "configure-checks"
+
+
+def test_task_origins_keep_the_names_saved_sessions_use() -> None:
+    assert (MANUAL_ORIGIN, PLANNER_ORIGIN, REVIEW_ORIGIN, SUPER_REVIEW_ORIGIN) == (
+        "manual",
+        "planner",
+        "review",
+        "super_review",
+    )
+    assert TaskState(id="1", task=TaskSpec(prompt="p")).origin == MANUAL_ORIGIN
 
 
 def test_fire_trigger_needs_a_trigger_name() -> None:

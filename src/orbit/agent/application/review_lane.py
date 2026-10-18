@@ -25,7 +25,9 @@ from orbit.agent.domain.roles import REVIEW_ROLES, role_task, suggested_task
 from orbit.protocol import (
     CODER,
     GIT_FAILED,
+    REVIEW_ORIGIN,
     REVIEWER,
+    SUPER_REVIEW_ORIGIN,
     SUPER_REVIEWER,
     ErrorOccurred,
     Notice,
@@ -147,7 +149,7 @@ class ReviewLane:
         if refusal is not None:
             return Reply(refusal, is_error=True)
         task = suggested_task(self._desk.agents.roles[CODER], title, prompt)
-        origin: TaskOrigin = "super_review" if self._jobs[task_id].whole else "review"
+        origin: TaskOrigin = SUPER_REVIEW_ORIGIN if self._jobs[task_id].whole else REVIEW_ORIGIN
 
         def add(board: TaskBoard) -> str:
             new_id = board.add_suggestion(task, batch, self.planner.round_of(batch), origin)
