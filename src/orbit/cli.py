@@ -18,15 +18,20 @@ from orbit.agent import (
     ClaudeCliRunner,
     ConfigError,
     GitCoderTree,
+    ImportBlocked,
     McpHost,
     OrbitConfig,
     Role,
-    SessionFiles,
+    SqliteStore,
+    StoreError,
     UsageApi,
     Verification,
     git_top_level,
+    import_session_files,
+    imported_note,
     in_git_work_tree,
     read_config,
+    resolve_state_dir,
     run_step,
     state_dir,
     workspace_state,
@@ -70,6 +75,15 @@ ProfileOption = Annotated[
     typer.Option(
         help="Write a profile of each thread, and a log of every time the UI or backend was"
         " blocked for over 50 ms, to this directory.",
+    ),
+]
+
+StateDirOption = Annotated[
+    Path | None,
+    typer.Option(
+        "--state-dir",
+        help="The directory orbit keeps its database of saved sessions, and their locks, in"
+        " (default: $ORBIT_STATE_DIR, else $XDG_STATE_HOME/orbit, else ~/.local/state/orbit).",
     ),
 ]
 
@@ -129,6 +143,7 @@ def chat(
     new: NewOption = False,
     name: NameOption = None,
     profile: ProfileOption = None,
+    state: StateDirOption = None,
 ) -> None:
     """Start an interactive agent session.
 
@@ -146,17 +161,15 @@ def chat(
     # adapters are plugged into its ports. Every adapter works relative to the current
     # directory, so move into the workspace before anything reads the filesystem.
     profile = profile.expanduser().resolve() if profile else None
+    state = resolve_state_dir(state, os.environ)
     root = _workspace(workspace)
     os.chdir(root)
-    try:
-        config = read_config()
-    except ConfigError as exc:
-        typer.echo(f"Invalid orbit configuration: {exc}", err=True)
-        raise typer.Exit(2) from None
+    config = _config()
     verification = _verification(config) if verify else None
     agents = _agents(config, worktree=worktree, review=review)
     settings, pinned = _settings(model, tools)
     usage_source = UsageApi() if usage else None
+    store, notes = _open_store(state, root)
     session = ThreadedSession(
         lambda: AgentSession(
             settings,
@@ -166,14 +179,60 @@ def chat(
             workspace=str(root),
             check_at_startup=True,
             usage=usage_source,
-            store=SessionFiles(state_dir(str(root))),
+            store=store,
             pinned=pinned,
             pick_session=not new and name is None,
             name=name,
+            startup_notes=notes,
         ),
         _thread_context(profile),
     )
-    _launch(OrbitApp(session), profile)
+    _launch_with(OrbitApp(session), profile, store)
+
+
+def _config() -> OrbitConfig:
+    """The project file's configuration.
+
+    Exits with status 2 if the file is invalid.
+    """
+    try:
+        return read_config()
+    except ConfigError as exc:
+        typer.echo(f"Invalid orbit configuration: {exc}", err=True)
+        raise typer.Exit(2) from None
+
+
+def _open_store(state: Path, root: Path) -> tuple[SqliteStore, list[str]]:
+    """The store in the ``state`` directory for the workspace at ``root``, with the sessions an
+    older orbit saved as files imported, and the notes on what was imported.
+
+    Exits with status 2 if the store can't be opened or the old sessions can't be imported.
+    """
+    try:
+        return asyncio.run(_opened_store(state, root))
+    except (StoreError, ImportBlocked) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(2) from None
+
+
+async def _opened_store(state: Path, root: Path) -> tuple[SqliteStore, list[str]]:
+    """The store in ``state`` for ``root``, with the old session files imported, and the notes
+    on what was imported; the store is closed if the import fails."""
+    store = await SqliteStore.open(state, str(root))
+    legacy = state_dir(str(root))
+    try:
+        imported = await import_session_files(store, legacy)
+    except BaseException:
+        await store.close()
+        raise
+    if imported is None:
+        return store, []
+    return store, [imported_note(imported, _shown(legacy, root))]
+
+
+def _shown(path: Path, root: Path) -> Path:
+    """``path`` as shown to the user: relative to the workspace at ``root``, if it's inside."""
+    return path.relative_to(root) if path.is_relative_to(root) else path
 
 
 def _verification(config: OrbitConfig) -> Verification:
@@ -220,6 +279,14 @@ def _planner_role() -> Role | ConfigError:
         return read_config().roles[PLANNER]
     except ConfigError as exc:
         return exc
+
+
+def _launch_with(tui: OrbitApp, profile: Path | None, store: SqliteStore) -> None:
+    """Run ``tui`` as :func:`_launch` does, then close ``store``."""
+    try:
+        _launch(tui, profile)
+    finally:  # The app has closed its session, so nothing uses the store any more.
+        asyncio.run(store.close())
 
 
 def _launch(tui: OrbitApp, profile: Path | None) -> None:

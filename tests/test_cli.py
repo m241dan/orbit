@@ -1,7 +1,14 @@
 import asyncio
+import fcntl
+import os
 import pstats
+import sqlite3
 import subprocess
 import threading
+from collections.abc import Callable, Coroutine, Iterator
+from contextlib import closing, contextmanager
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -18,8 +25,8 @@ from orbit.agent import (
     Limits,
     McpHost,
     Role,
-    SessionFiles,
     Setup,
+    SqliteStore,
     UsageApi,
     Verification,
     VerificationStep,
@@ -28,10 +35,10 @@ from orbit.agent import (
 )
 from orbit.agent.application.ports import UsageSource
 from orbit.agent.domain.reviews import ReviewLimits
-from orbit.agent.domain.sessions import default_name
+from orbit.agent.domain.sessions import SessionRecord, Unreadable, default_name, record_json
 from orbit.cli import app
 from orbit.protocol import Notice, SessionsListed, Settings, ThreadedSession
-from tests.agent_fakes import greeted, payloads, queued, startup_of, store_of
+from tests.agent_fakes import greeted, queued, startup_of, store_of
 
 runner = CliRunner()
 
@@ -52,6 +59,8 @@ class FakeApp:
     # The files in profile_dir while each app ran async.
     profile_dir: ClassVar[Path] = Path()
     profiling: ClassVar[list[list[str]]] = []
+    # What each app does with the backend session while it runs, if anything.
+    during: ClassVar[Callable[[AgentSession], Coroutine[Any, Any, None]] | None] = None
 
     def __init__(self, session: ThreadedSession) -> None:
         self.session = session
@@ -66,7 +75,15 @@ class FakeApp:
         self.session.start()
         if FakeApp.profile_dir.exists():
             FakeApp.profiling.append(sorted(p.name for p in FakeApp.profile_dir.iterdir()))
+        if FakeApp.during is not None:
+            await self._on_backend(FakeApp.during(FakeApp.launched[-1]))
         await self.session.close()
+
+    async def _on_backend(self, work: Coroutine[Any, Any, None]) -> None:
+        """Run ``work`` on the backend's loop, where its session lives, and wait for it."""
+        backend = self.session._backend
+        assert backend is not None
+        await asyncio.wrap_future(asyncio.run_coroutine_threadsafe(work, backend.loop))
 
 
 @pytest.fixture
@@ -85,50 +102,72 @@ def launched(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> list[AgentSessi
     FakeApp.usage_sources = []
     FakeApp.profile_dir = tmp_path / "profile"
     FakeApp.profiling = []
+    FakeApp.during = None
     return FakeApp.launched
 
 
 @pytest.fixture(autouse=True)
-def restore_cwd(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Chat changes into its workspace; put the working directory back afterwards."""
+def restore_cwd(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Chat changes into its workspace; put the working directory back afterwards. Each test
+    starts in an empty directory, so chat never imports the sessions of the repository the tests
+    run in."""
     monkeypatch.chdir(Path.cwd())
+    start = tmp_path / "start"
+    start.mkdir()
+    monkeypatch.chdir(start)
 
 
-def notices(session: AgentSession) -> list[str]:
-    """The notices ``session`` publishes once greeted, before anything runs."""
+@pytest.fixture(autouse=True)
+def state(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    """The state directory chat keeps its store in, unless told otherwise."""
+    path = tmp_path / "state"
+    monkeypatch.setenv("ORBIT_STATE_DIR", str(path))
+    return path
 
-    async def noted() -> list[str]:
+
+@dataclass(frozen=True)
+class Greeted:
+    """What a chat's session publishes once greeted, before anything runs: its ``notices``, and
+    whether it ``listed`` the saved sessions."""
+
+    notices: list[str]
+    listed: bool
+
+
+@pytest.fixture
+def greetings(launched: list[AgentSession]) -> list[Greeted]:
+    """What each chat's session publishes once greeted, while its app runs."""
+    seen: list[Greeted] = []
+
+    async def greet_it(session: AgentSession) -> None:
         await greeted(session)
-        return [e.message for e in queued(session) if isinstance(e, Notice)]
+        events = queued(session)
+        notices = [e.message for e in events if isinstance(e, Notice)]
+        seen.append(Greeted(notices, any(isinstance(e, SessionsListed) for e in events)))
 
-    return asyncio.run(noted())
-
-
-def lists_sessions_at_startup(session: AgentSession) -> bool:
-    """Whether ``session`` lists the saved sessions as its events start."""
-
-    async def listed() -> bool:
-        await anext(payloads(session))  # Its settings; the startup listing is queued by then.
-        return any(isinstance(e, SessionsListed) for e in queued(session))
-
-    return asyncio.run(listed())
+    FakeApp.during = greet_it
+    return seen
 
 
 def test_chat_works_in_the_current_directory_by_default(
-    launched: list[AgentSession], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    greetings: list[Greeted], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.chdir(tmp_path)
     result = runner.invoke(app, ["chat"])
 
     assert result.exit_code == 0
     assert Path.cwd() == tmp_path.resolve()
-    [session] = launched
-    assert f"Workspace: {tmp_path.resolve()}" in notices(session)
+    [greeting] = greetings
+    assert f"Workspace: {tmp_path.resolve()}" in greeting.notices
 
 
 @pytest.mark.parametrize("flag", ["-C", "--workspace"])
 def test_chat_works_in_the_workspace_it_is_given(
-    launched: list[AgentSession], monkeypatch: pytest.MonkeyPatch, tmp_path: Path, flag: str
+    launched: list[AgentSession],
+    greetings: list[Greeted],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    flag: str,
 ) -> None:
     project = tmp_path / "project"
     (project / ".orbit").mkdir(parents=True)
@@ -141,14 +180,15 @@ def test_chat_works_in_the_workspace_it_is_given(
     assert result.exit_code == 0
     assert Path.cwd() == project.resolve()
     [session] = launched
+    [greeting] = greetings
     # The project's own configuration is read, from the workspace.
     assert session.agents is not None
     assert session.agents.limits == Limits(max_attempts=3, max_checks=4)
-    assert f"Workspace: {project.resolve()}" in notices(session)
+    assert f"Workspace: {project.resolve()}" in greeting.notices
 
 
 def test_a_workspace_inside_a_git_repository_is_its_top_level(
-    launched: list[AgentSession], tmp_path: Path
+    launched: list[AgentSession], greetings: list[Greeted], tmp_path: Path
 ) -> None:
     repo = tmp_path / "repo"
     sub = repo / "src" / "pkg"
@@ -159,9 +199,10 @@ def test_a_workspace_inside_a_git_repository_is_its_top_level(
     assert result.exit_code == 0
     assert Path.cwd() == repo.resolve()
     [session] = launched
+    [greeting] = greetings
     assert session.agents is not None
     assert isinstance(session.agents.tree, GitCoderTree)
-    assert f"Workspace: {repo.resolve()}" in notices(session)
+    assert f"Workspace: {repo.resolve()}" in greeting.notices
 
 
 def test_a_workspace_outside_git_is_used_as_given(
@@ -177,30 +218,197 @@ def test_a_workspace_outside_git_is_used_as_given(
     assert session.agents is not None and session.agents.tree is None
 
 
-def test_chat_saves_sessions_in_the_git_directory_inside_a_repository(
-    launched: list[AgentSession], tmp_path: Path
-) -> None:
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
-    assert runner.invoke(app, ["chat", "-C", str(repo)]).exit_code == 0
+def git(cwd: Path, *args: str) -> None:
+    subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True)
 
-    [session] = launched
+
+@pytest.fixture
+def repo(tmp_path: Path) -> Path:
+    """A git repository with a commit."""
+    path = tmp_path / "repo"
+    path.mkdir()
+    git(path, "init", "-q", "-b", "main")
+    git(
+        path,
+        "-c",
+        "user.name=T",
+        "-c",
+        "user.email=t@e",
+        "commit",
+        "-q",
+        "--allow-empty",
+        "-m",
+        "x",
+    )
+    return path
+
+
+WHEN = datetime(2026, 10, 17, 14, 30, tzinfo=UTC)
+SAVED = SessionRecord(id="abc", name="auth rework", created=WHEN, last_active=WHEN)
+
+
+def legacy_sessions(directory: Path) -> Path:
+    """An older orbit's sessions folder in ``directory``, holding ``SAVED``."""
+    sessions = directory / "sessions"
+    sessions.mkdir(parents=True)
+    (sessions / "abc.json").write_text(record_json(SAVED))
+    return sessions
+
+
+def store_in(session: AgentSession) -> SqliteStore:
     store = store_of(session)
-    assert isinstance(store, SessionFiles)
-    assert store._sessions == repo.resolve() / ".git" / "orbit" / "sessions"
+    assert isinstance(store, SqliteStore)
+    return store
 
 
-def test_chat_saves_sessions_in_the_workspace_outside_git(
-    launched: list[AgentSession], tmp_path: Path
+def store_threads() -> list[str]:
+    return [t.name for t in threading.enumerate() if t.name.startswith("orbit-sqlite")]
+
+
+async def stored_ids(state: Path, workspace: Path) -> list[str]:
+    """The ids of the sessions saved in ``state`` for ``workspace``."""
+    store = await SqliteStore.open(state, str(workspace))
+    try:
+        return [stored.id for stored in await store.sessions()]
+    finally:
+        await store.close()
+
+
+def test_chat_keeps_sessions_in_the_store_in_the_state_directory(
+    launched: list[AgentSession], state: Path, tmp_path: Path
 ) -> None:
     assert runner.invoke(app, ["chat", "-C", str(tmp_path)]).exit_code == 0
 
     [session] = launched
-    store = store_of(session)
-    assert isinstance(store, SessionFiles)
-    assert store._sessions == tmp_path.resolve() / ".orbit" / "sessions"
-    assert not (tmp_path / ".orbit").exists()  # Nothing was used, so nothing was saved.
+    assert store_in(session)._state_dir == state
+    assert (state / "orbit.db").exists()
+    assert not (tmp_path / ".orbit").exists()
+    assert store_threads() == []  # The store was closed once the app ended.
+
+
+def test_the_state_directory_option_wins_over_the_environment(
+    launched: list[AgentSession], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    assert runner.invoke(app, ["chat", "--state-dir", "elsewhere"]).exit_code == 0
+
+    [session] = launched
+    assert store_in(session)._state_dir == tmp_path / "elsewhere"
+    assert (tmp_path / "elsewhere" / "orbit.db").exists()
+
+
+def test_chat_imports_an_older_orbits_session_files(
+    greetings: list[Greeted], repo: Path, state: Path
+) -> None:
+    legacy_sessions(repo / ".git" / "orbit")
+    assert runner.invoke(app, ["chat", "-C", str(repo)]).exit_code == 0
+
+    assert asyncio.run(stored_ids(state, repo)) == ["abc"]
+    assert (repo / ".git" / "orbit" / "sessions.imported" / "abc.json").exists()
+    assert not (repo / ".git" / "orbit" / "sessions").exists()
+    [greeting] = greetings
+    assert greeting.notices[-1:] == [
+        "Imported 1 saved session from .git/orbit/sessions; the old folder is now"
+        " sessions.imported."
+    ]
+
+
+def test_the_import_note_names_a_folder_outside_the_workspace_in_full(
+    launched: list[AgentSession], greetings: list[Greeted], repo: Path, tmp_path: Path
+) -> None:
+    linked = tmp_path / "linked"
+    git(repo, "worktree", "add", "-q", str(linked))
+    legacy_sessions(repo / ".git" / "orbit")
+    assert runner.invoke(app, ["chat", "-C", str(linked), "--no-worktree"]).exit_code == 0
+
+    [greeting] = greetings
+    sessions = repo.resolve() / ".git" / "orbit" / "sessions"
+    assert f"Imported 1 saved session from {sessions}; " in greeting.notices[-1]
+
+
+def test_chat_without_old_session_files_has_no_import_note(
+    greetings: list[Greeted], tmp_path: Path
+) -> None:
+    assert runner.invoke(app, ["chat", "-C", str(tmp_path), "--no-verify"]).exit_code == 0
+
+    [greeting] = greetings
+    assert greeting.notices == [f"Workspace: {tmp_path.resolve()}"]
+
+
+def test_a_database_newer_than_orbit_stops_chat(
+    launched: list[AgentSession], state: Path, tmp_path: Path
+) -> None:
+    state.mkdir()
+    with closing(sqlite3.connect(state / "orbit.db", isolation_level=None)) as connection:
+        connection.execute("CREATE TABLE schema_version (version INTEGER NOT NULL)")
+        connection.execute("INSERT INTO schema_version (version) VALUES (99)")
+    result = runner.invoke(app, ["chat", "-C", str(tmp_path)])
+
+    assert result.exit_code == 2
+    assert "has schema version 99, newer than this orbit's 1" in result.output
+    assert launched == []
+    assert store_threads() == []
+
+
+@contextmanager
+def held(lock: Path) -> Iterator[None]:
+    """Hold ``lock`` as another orbit would."""
+    fd = os.open(lock, os.O_RDWR | os.O_CREAT)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        os.close(fd)
+
+
+def test_old_sessions_another_orbit_has_open_stop_chat(
+    launched: list[AgentSession], state: Path, tmp_path: Path
+) -> None:
+    sessions = legacy_sessions(tmp_path / ".orbit")
+    with held(sessions / "abc.lock"):
+        result = runner.invoke(app, ["chat", "-C", str(tmp_path)])
+
+    assert result.exit_code == 2
+    assert "an orbit still has a session there open" in result.output
+    assert launched == []
+    assert store_threads() == []
+    assert (sessions / "abc.json").exists()
+    assert asyncio.run(stored_ids(state, tmp_path)) == []
+
+
+def test_two_orbits_with_one_state_directory_cant_open_one_session_at_once(
+    launched: list[AgentSession], state: Path, tmp_path: Path
+) -> None:
+    taken: list[bool] = []
+
+    async def open_twice(session: AgentSession) -> None:
+        taken.append(await store_in(session).acquire("abc"))
+        other = await SqliteStore.open(state, str(tmp_path.resolve()))
+        try:
+            taken.append(await other.acquire("abc"))
+        finally:
+            await other.close()
+
+    FakeApp.during = open_twice
+    assert runner.invoke(app, ["chat", "-C", str(tmp_path)]).exit_code == 0
+    assert taken == [True, False]
+
+
+def test_a_session_saved_opens_again_after_a_restart(
+    launched: list[AgentSession], tmp_path: Path
+) -> None:
+    loaded: list[SessionRecord | Unreadable] = []
+
+    async def save(session: AgentSession) -> None:
+        await store_in(session).save(SAVED)
+
+    async def load(session: AgentSession) -> None:
+        loaded.append(await store_in(session).load("abc"))
+
+    for during in (save, load):
+        FakeApp.during = during
+        assert runner.invoke(app, ["chat", "-C", str(tmp_path)]).exit_code == 0
+    assert loaded == [SAVED]
 
 
 def test_a_missing_workspace_stops_chat(launched: list[AgentSession], tmp_path: Path) -> None:
@@ -245,34 +453,42 @@ def test_chat_runs_tui_against_claude_cli(launched: list[AgentSession]) -> None:
 
 
 def test_chat_has_the_user_pick_a_session_at_startup(
-    launched: list[AgentSession], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    greetings: list[Greeted], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.chdir(tmp_path)
     assert runner.invoke(app, ["chat"]).exit_code == 0
 
-    [session] = launched
-    assert lists_sessions_at_startup(session)
+    [greeting] = greetings
+    assert greeting.listed
 
 
 def test_chat_new_starts_a_new_session_named_for_the_time(
-    launched: list[AgentSession], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    launched: list[AgentSession],
+    greetings: list[Greeted],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     monkeypatch.chdir(tmp_path)
     assert runner.invoke(app, ["chat", "--new"]).exit_code == 0
 
     [session] = launched
-    assert not lists_sessions_at_startup(session)
+    [greeting] = greetings
+    assert not greeting.listed
     assert session.saved_session.name == default_name(session.saved_session.created)
 
 
 def test_chat_name_starts_a_new_session_with_that_name(
-    launched: list[AgentSession], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    launched: list[AgentSession],
+    greetings: list[Greeted],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     monkeypatch.chdir(tmp_path)
     assert runner.invoke(app, ["chat", "--name", "auth rework"]).exit_code == 0
 
     [session] = launched
-    assert not lists_sessions_at_startup(session)
+    [greeting] = greetings
+    assert not greeting.listed
     assert session.saved_session.name == "auth rework"
 
 

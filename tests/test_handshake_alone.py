@@ -101,6 +101,7 @@ class Parts:
             self.load_review_count,
             workspace,
             lambda: self.no_steps,
+            (),
             self.leftovers,
             self.list_sessions if picking else None,
             self.start,

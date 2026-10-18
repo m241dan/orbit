@@ -1,4 +1,4 @@
-"""What every session store does, run against each adapter: session files and SQLite."""
+"""What every session store does, run against the SQLite adapter."""
 
 import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -9,7 +9,6 @@ import pytest
 
 from orbit.agent.application.ports import SessionStore, StoredSession
 from orbit.agent.domain.sessions import SessionRecord, Unreadable
-from orbit.agent.external.session_files import SessionFiles
 from orbit.agent.external.sqlite_store import SqliteStore
 
 WHEN = datetime(2026, 10, 17, 14, 30, tzinfo=UTC)
@@ -21,21 +20,18 @@ def record(session_id: str = "abc", name: str = "Oct 17 14:30") -> SessionRecord
     return SessionRecord(id=session_id, name=name, created=WHEN, last_active=WHEN)
 
 
-@pytest.fixture(params=["files", "sqlite"])
-async def open_store(request: pytest.FixtureRequest, tmp_path: Path) -> AsyncIterator[Opener]:
+@pytest.fixture
+async def open_store(tmp_path: Path) -> AsyncIterator[Opener]:
     """Opens another orbit's store on the same saved sessions each time it's called."""
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     opened: list[SqliteStore] = []
 
-    async def open_files() -> SessionStore:
-        return SessionFiles(tmp_path / "files")
-
     async def open_sqlite() -> SessionStore:
         opened.append(await SqliteStore.open(tmp_path / "state", str(workspace)))
         return opened[-1]
 
-    yield open_files if request.param == "files" else open_sqlite
+    yield open_sqlite
     for store in opened:
         await store.close()
 

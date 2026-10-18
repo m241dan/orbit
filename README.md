@@ -41,6 +41,7 @@ uv run orbit chat --no-review                  # don't review landed work
 uv run orbit chat --no-worktree                # tasks edit the current checkout; nothing is committed
 uv run orbit chat --no-usage                   # don't show usage limits
 uv run orbit chat --profile /tmp/orbit-prof    # record what slows orbit down
+uv run orbit chat --state-dir /tmp/orbit-state # keep saved sessions somewhere else
 ```
 
 With orbit installed as a tool, drop the `uv run`.
@@ -86,15 +87,15 @@ renames the highlighted session and `x` deletes it (see [Sessions](#sessions)).
 A session is what orbit is working on: its task list, its review batches and rounds (see
 [Reviews](#reviews)), the planner's conversation, the planner's model and new tasks' tool access,
 and its name and when it was created and last active. The count of commits towards the next super
-review isn't a session's: it belongs to the repository, kept in `reviews.json` beside the sessions,
-and carries on across sessions and restarts.
+review isn't a session's: it belongs to the repository, kept in the store beside its sessions, and
+carries on across sessions and restarts.
 
-Orbit saves the open session after every change to `.git/orbit/sessions/` (`.orbit/sessions/`
-outside a git repository; inside one, even with `--no-worktree`), one JSON file per session. Each
-save replaces the file atomically, so a crash or `ctrl+c` leaves the last save whole. A new session
-is saved once you add a task or prompt the planner; quitting before that leaves nothing behind.
-Sessions are kept until you delete them: orbit never prunes them, and never overwrites a file it
-can't read. The design, and what is deliberately left for later, is in
+Orbit saves the open session after every change to its store, a SQLite database in the state
+directory (see [Where orbit keeps things](#where-orbit-keeps-things)), where each repository has
+its own sessions. Each save is one transaction, so a crash or `ctrl+c` leaves the last save whole.
+A new session is saved once you add a task or prompt the planner; quitting before that leaves
+nothing behind. Sessions are kept until you delete them: orbit never prunes them, and never
+overwrites a saved session it can't read. The design, and what is deliberately left for later, is in
 [docs/sessions.md](docs/sessions.md).
 
 At startup orbit lists the saved sessions to pick from: `+ new session` first, then the sessions,
@@ -117,15 +118,16 @@ review, one is queued for the next run. The planner carries on its saved convers
 access come back, unless `--model` or `--tools` was given, which hold for this run.
 
 Each session is locked while an orbit has it open: in another orbit's list it shows `open in
-another orbit`, dimmed, and can't be opened. The lock is an OS lock on a `.lock` file beside the
-session's, held while the orbit runs; when its process ends (orbit crashed, say) the lock goes with
-it, and the next orbit to open the session takes it. A session file that can't be read shows `unreadable:`
-and the reason, and can't be opened either.
+another orbit`, dimmed, and can't be opened. The lock is an OS lock on a `.lock` file in the state
+directory's `locks/` folder, held while the orbit runs; when its process ends (orbit crashed, say) the lock goes with
+it, and the next orbit to open the session takes it. Two orbits share these locks when they use the
+same state directory. A saved session that can't be read shows `unreadable:` and the reason, and
+can't be opened either.
 
 In the list, `r` renames the highlighted session, the open one included: it asks for the new name,
 starting from the old one; `enter` saves it (an empty name keeps the old one) and `esc` goes back.
 Names needn't be unique. `x` deletes the highlighted session after a `y`/`n` confirm (`esc` is no):
-its file goes, with any stale lock, while Claude's own conversation files stay. The open session
+it leaves the store, with any stale lock, while Claude's own conversation files stay. The open session
 can't be deleted, and a session open in another orbit can be neither renamed nor deleted; an
 unreadable one can be deleted but not renamed. The list refreshes after either. On `+ new session`,
 `r` and `x` do nothing.
@@ -475,7 +477,8 @@ a restart. Agents can't change their checks any other way: orbit reads the file 
 
 Inside a git repository, agents don't touch your checkout. They work in orbit's own worktree,
 `.git/orbit/coder` on the branch `orbit/coder` (inside `.git`, so your checkout never sees it), and
-the verification steps run there too. Before each task the worktree catches up with the branch you
+the verification steps run there too. That worktree and the reviews' snapshot worktrees are all
+orbit keeps under `.git/orbit`; saved sessions live in the store. Before each task the worktree catches up with the branch you
 had checked out when orbit started (the **base**), and the project's setup command runs in it: once
 when the worktree is first prepared, and again whenever a file it watches changes. Set it in
 `.orbit/config.toml` (without a `[setup]` table, nothing runs):
@@ -507,6 +510,35 @@ directory and nothing is committed.
 
 With `full` tool access an agent can still run commands outside its worktree; the worktree keeps
 your checkout out of its way, it doesn't sandbox it.
+
+### Where orbit keeps things
+
+| Home | Where | What |
+|---|---|---|
+| The repository | your checkout | your code, which agents change only through commits orbit lands |
+| `.git/orbit` | the repository's git directory | the coder's worktree, review snapshots and what earlier runs left there |
+| The store | the state directory | `orbit.db`, the saved sessions and super review count of every repository, and `locks/` |
+| Config files | `.orbit/config.toml` in the repository | the verification steps, setup, roles and limits, committed with your code |
+| Runtime-owned | `~/.claude` | Claude Code's own: your login, read for usage limits, and the agents' conversations |
+
+The state directory is `--state-dir`, else `$ORBIT_STATE_DIR`, else `$XDG_STATE_HOME/orbit`, else
+`~/.local/state/orbit`. Orbit creates it readable by you alone, and `orbit.db` likewise. One
+database serves every repository you run orbit in, each with its own sessions, found by the
+repository's path. Session locks are lock files in `locks/` there, so two orbits on one repository
+keep out of each other's sessions only when they share the state directory.
+
+Older orbits saved sessions as JSON files in `.git/orbit/sessions` (`.orbit/sessions` outside a
+git repository), with the super review count in `reviews.json`. The first time orbit starts on such
+a repository it imports them into the store, in one go, keeping sessions it can't read as they are
+and never overwriting one the store already has; then it renames the folder `sessions.imported`
+(and the count `reviews.json.imported`) and says so in the conversation. Nothing is deleted. If
+another orbit still has one of the old sessions open, or the files can't be read or renamed,
+orbit stops before the app starts, with status 2 and a message naming the path and the cause,
+having imported nothing; fix that and start orbit again. Likewise a database that can't be opened,
+or whose schema is newer than this orbit, stops it with a message naming the file and the versions.
+
+`orbit.db` can be read with `sqlite3`, but its schema isn't an API, and writing to it while orbit
+may use it isn't supported.
 
 ### Planning with the planner
 
@@ -724,9 +756,11 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     `instructions/*.md`; `checks` runs a verification step as a process (`run_step`);
     `processes` runs a program to completion without leaving it behind; `workspace`
     fingerprints the git working tree; `usage_api` fetches the Claude subscription's usage
-    limits (`UsageApi`) with the token in `~/.claude/.credentials.json`; `session_files` keeps
-    saved sessions (`SessionFiles`), one JSON file each with a lock file while an orbit has it
-    open, and the repository's super review count, in the directory `state_dir` picks.
+    limits (`UsageApi`) with the token in `~/.claude/.credentials.json`; `sqlite_store` is the
+    `SessionStore` port's adapter (`SqliteStore`): saved sessions and each repository's super
+    review count in `orbit.db` in the state directory `resolve_state_dir` picks, with
+    `session_locks`' lock files while an orbit has a session open; `session_import` imports the
+    session files older orbits saved where `session_files`' `state_dir` says.
   - `application`: `AgentSession` (in `session`) implements `Session`: it takes commands, asks
     the domain what follows, drives the ports and publishes events into the `Outbox` (in
     `outbox`), which stamps each with its `seq` and the session it belongs to. `Tasks` (in

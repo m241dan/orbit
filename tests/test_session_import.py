@@ -18,6 +18,7 @@ from orbit.agent.domain.sessions import (
     review_count_json,
 )
 from orbit.agent.external import sqlite_store
+from orbit.agent.external.session_import import imported_note
 from orbit.agent.external.sqlite_store import SqliteStore
 
 WHEN = datetime(2026, 10, 17, 14, 30, tzinfo=UTC)
@@ -213,3 +214,14 @@ async def test_a_database_that_fails_blocks_the_import(
     finally:
         await store.close()
     assert (legacy / "sessions").is_dir()
+
+
+def test_the_import_note_says_how_many_sessions_came_from_where() -> None:
+    assert imported_note(3, Path(".git/orbit")) == (
+        "Imported 3 saved sessions from .git/orbit/sessions; the old folder is now "
+        "sessions.imported."
+    )
+
+
+def test_the_import_note_counts_one_session_as_one() -> None:
+    assert imported_note(1, Path(".orbit")).startswith("Imported 1 saved session from ")

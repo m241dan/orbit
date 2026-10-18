@@ -37,10 +37,10 @@ def ends_stream(event: Event) -> bool:
 class HandshakeParts:
     """What a handshake publishes after ``Welcome``: the ``catalog``, which it fetches first, the
     ``latest_usage``, if any was fetched, the ``snapshot`` of the session, the one-off notices
-    (the ``workspace``, if any, whether there are ``no_steps`` and the ``leftovers`` of earlier
-    runs) and the saved sessions to pick from, which ``list_sessions`` publishes, if any. It
-    also ``load_review_count``\\s first, and then has the background ``start``, unless the
-    session is ``closing``."""
+    (the ``workspace``, if any, whether there are ``no_steps``, the ``startup_notes`` and the
+    ``leftovers`` of earlier runs) and the saved sessions to pick from, which ``list_sessions``
+    publishes, if any. It also ``load_review_count``\\s first, and then has the background
+    ``start``, unless the session is ``closing``."""
 
     catalog: Callable[[], Awaitable[Catalog]]
     latest_usage: Callable[[], UsageChanged | None]
@@ -48,6 +48,7 @@ class HandshakeParts:
     load_review_count: Callable[[], Awaitable[None]]
     workspace: str | None
     no_steps: Callable[[], bool]
+    startup_notes: Sequence[str]
     leftovers: Callable[[], Awaitable[Sequence[str]]]
     list_sessions: Callable[[], Awaitable[None]] | None
     start: Callable[[], None]
@@ -140,7 +141,8 @@ class Handshake:
             await self._events.put(ErrorOccurred(code=INTERNAL, message=message))
 
     async def _publish_notes(self) -> None:
-        """Publish the workspace, if any, and that no steps verify tasks, if none do."""
+        """Publish the workspace, if any, that no steps verify tasks, if none do, and the startup
+        notes."""
         for note in self._notes():
             await self._events.put(Notice(message=note))
 
@@ -150,9 +152,9 @@ class Handshake:
             await self._events.put(Notice(message=note))
 
     def _notes(self) -> list[str]:
-        """The workspace, if any, and that no steps verify tasks, if none do."""
+        """The workspace, if any, that no steps verify tasks, if none do, and the startup notes."""
         workspace = self._parts.workspace
         notes = [f"Workspace: {workspace}"] if workspace is not None else []
         if self._parts.no_steps():
             notes.append(NO_STEPS_NOTE)
-        return notes
+        return [*notes, *self._parts.startup_notes]

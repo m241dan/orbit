@@ -31,9 +31,9 @@ from orbit.agent.external.claude_cli import MODEL_ALIASES, ClaudeCliRunner
 from orbit.agent.external.config_file import read_config, write_checks
 from orbit.agent.external.git_tree import GitCoderTree, git_top_level, in_git_work_tree
 from orbit.agent.external.mcp_host import McpHost
-from orbit.agent.external.session_files import SessionFiles, state_dir
-from orbit.agent.external.session_import import ImportBlocked, import_session_files
-from orbit.agent.external.sqlite_store import SqliteStore, StoreError
+from orbit.agent.external.session_files import state_dir
+from orbit.agent.external.session_import import ImportBlocked, import_session_files, imported_note
+from orbit.agent.external.sqlite_store import SqliteStore, StoreError, resolve_state_dir
 from orbit.agent.external.usage_api import UsageApi
 from orbit.agent.external.workspace import workspace_state
 
@@ -54,7 +54,6 @@ __all__ = [
     "ProposalDecision",
     "ProposalReview",
     "Role",
-    "SessionFiles",
     "SessionStore",
     "Setup",
     "SqliteStore",
@@ -67,8 +66,10 @@ __all__ = [
     "Workspace",
     "git_top_level",
     "import_session_files",
+    "imported_note",
     "in_git_work_tree",
     "read_config",
+    "resolve_state_dir",
     "run_step",
     "state_dir",
     "workspace_state",

@@ -94,6 +94,20 @@ async def test_hello_is_welcomed_then_a_catalog_a_snapshot_and_the_workspace_not
     assert nothing_queued(session)
 
 
+async def test_the_startup_notes_follow_the_workspace_note() -> None:
+    notes = ("Imported 2 saved sessions.", "Something else.")
+    session = AgentSession(workspace="/work", startup_notes=notes)
+    await greet(session)
+    events = await published(session, 6)
+    await session.close()
+
+    assert events[3:] == [
+        Notice(message="Workspace: /work"),
+        Notice(message="Imported 2 saved sessions."),
+        Notice(message="Something else."),
+    ]
+
+
 async def test_a_command_before_hello_is_refused_as_invalid_and_changes_nothing() -> None:
     session, _, launcher = session_for()
     await send_as(session, "add", AddTask(task=TaskSpec(prompt="Add a flag.")))

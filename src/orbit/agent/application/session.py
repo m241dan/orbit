@@ -120,7 +120,8 @@ class AgentSession:
     Every stream opens with ``Hello``: the session publishes nothing, and refuses every other
     command, until it's answered with ``Welcome``. A ``Catalog`` of what exists follows it, then
     the latest usage if any was fetched, a ``Snapshot`` of the session open and the one-off
-    notices: the workspace, no verification steps, work left by earlier runs. Every switch of
+    notices: the workspace, no verification steps, the ``startup_notes``, work left by earlier
+    runs. Every switch of
     session ends with a ``Catalog`` and a ``Snapshot`` too, and a rename or delete sends a
     ``Catalog``.
 
@@ -149,6 +150,7 @@ class AgentSession:
         pinned: Collection[str] = (),
         pick_session: bool = False,
         name: str | None = None,
+        startup_notes: Sequence[str] = (),
     ) -> None:
         self._settings = SessionSettings(settings or Settings(), pinned, model_choices)
         self._pick_session = pick_session
@@ -163,6 +165,7 @@ class AgentSession:
         self._verifier = _verifier(verification, self._tasks, self._events, agents)
         self._desk = AgentDesk(agents, self._publish_agents) if agents else None
         self._workspace = workspace
+        self._startup_notes = tuple(startup_notes)
         self._closing = False
         self._lane = self._review_lane()
         hooks = SeatHooks(self._save, self._keeper.use, self._step_names)
@@ -215,6 +218,7 @@ class AgentSession:
             self._load_review_count,
             self._workspace,
             self._no_steps,
+            self._startup_notes,
             self._leftovers,
             self._list_at_startup if self._pick_session else None,
             self._start_background,

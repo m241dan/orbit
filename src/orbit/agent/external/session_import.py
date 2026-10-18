@@ -29,6 +29,14 @@ class ImportBlocked(Exception):
     path."""
 
 
+def imported_note(count: int, legacy_dir: Path) -> str:
+    """The note that ``count`` saved sessions were imported from ``legacy_dir``'s sessions
+    folder, which is now renamed."""
+    noun = "session" if count == 1 else "sessions"
+    sessions = legacy_dir / SESSIONS
+    return f"Imported {count} saved {noun} from {sessions}; the old folder is now {IMPORTED}."
+
+
 @dataclass(frozen=True)
 class _Legacy:
     """What an older orbit saved: its sessions' ``rows`` and its ``review_count``, if any."""

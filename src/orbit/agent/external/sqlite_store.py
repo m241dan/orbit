@@ -13,7 +13,7 @@ import asyncio
 import os
 import sqlite3
 import uuid
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
@@ -29,6 +29,7 @@ DATABASE = "orbit.db"
 LOCKS = "locks"
 BUSY_TIMEOUT = 5.0
 THREAD_PREFIX = "orbit-sqlite"
+STATE_DIR_VARIABLE = "ORBIT_STATE_DIR"
 
 # Each migration's statements, in order; migration ``n`` (from 1) brings the schema to version n.
 MIGRATIONS: tuple[tuple[str, ...], ...] = (
@@ -53,6 +54,20 @@ MIGRATIONS: tuple[tuple[str, ...], ...] = (
         )""",
     ),
 )
+
+
+def resolve_state_dir(flag: Path | None, environ: Mapping[str, str]) -> Path:
+    """The state directory, expanded and absolute: ``flag``, if given, else ``ORBIT_STATE_DIR``
+    in ``environ``, else ``orbit`` in its ``XDG_STATE_HOME``, else ``~/.local/state/orbit``."""
+    if flag is not None:
+        chosen = flag
+    elif environ.get(STATE_DIR_VARIABLE):
+        chosen = Path(environ[STATE_DIR_VARIABLE])
+    elif environ.get("XDG_STATE_HOME"):
+        chosen = Path(environ["XDG_STATE_HOME"]) / "orbit"
+    else:
+        chosen = Path("~/.local/state/orbit")
+    return chosen.expanduser().absolute()
 
 
 class StoreError(Exception):
