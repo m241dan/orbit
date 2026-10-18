@@ -22,6 +22,7 @@ from orbit.agent.application.usage_monitor import UsageMonitor
 from orbit.agent.domain.usage import UsageFetch, UsageUnavailable
 from orbit.agent.domain.verification import MAX_FALLBACK_FIXES
 from orbit.protocol import (
+    PLANNER,
     AddTask,
     BusyChanged,
     CancelTurn,
@@ -29,11 +30,11 @@ from orbit.protocol import (
     ErrorOccurred,
     Event,
     Notice,
+    SendMessage,
     SessionOpened,
     Settings,
     SettingsChanged,
     StepState,
-    SubmitPrompt,
     TasksChanged,
     TaskSpec,
     TaskState,
@@ -81,7 +82,7 @@ def turns(events: list[Event]) -> list[Event]:
 async def test_a_prompt_starts_a_turn_of_the_planner() -> None:
     session, _, launcher = session_for()
     launcher.planner_turns = [chats]
-    await session.send(SubmitPrompt(text="hello"))
+    await session.send(SendMessage(agent=PLANNER, text="hello"))
     events = await collect_run(session)
 
     [launch] = launcher.launches  # The planner's launcher was asked to converse.
@@ -98,7 +99,7 @@ async def test_a_prompt_starts_a_turn_of_the_planner() -> None:
 
 async def test_a_prompt_without_a_planner_is_refused() -> None:
     session = AgentSession()
-    await session.send(SubmitPrompt(text="hello"))
+    await session.send(SendMessage(agent=PLANNER, text="hello"))
     stream = session.events()
     assert isinstance(await anext(stream), SettingsChanged)
     assert await anext(stream) == ErrorOccurred(message="Planning needs agents and a planner role.")
@@ -110,7 +111,7 @@ async def test_a_prompt_without_a_planner_is_refused() -> None:
 async def test_session_reports_the_planners_errors() -> None:
     session, _, launcher = session_for()
     launcher.planner_turns = [fails]
-    await session.send(SubmitPrompt(text="hello"))
+    await session.send(SendMessage(agent=PLANNER, text="hello"))
     events = turns(await collect_run(session))
 
     started = events[1]
@@ -128,7 +129,7 @@ async def test_cancel_without_a_turn_is_a_noop() -> None:
     session, _, launcher = session_for()
     launcher.planner_turns = [chats]
     await session.send(CancelTurn(lane="planner"))
-    await session.send(SubmitPrompt(text="hello"))
+    await session.send(SendMessage(agent=PLANNER, text="hello"))
     events = await collect_run(session)
     assert any(isinstance(e, TurnFinished) and e.reason == "completed" for e in events)
 
@@ -148,12 +149,12 @@ async def test_the_planner_takes_the_model_from_updated_settings() -> None:
     stream = session.events()
     assert await anext(stream) == SettingsChanged(settings=Settings())
 
-    await session.send(SubmitPrompt(text="one"))
+    await session.send(SendMessage(agent=PLANNER, text="one"))
     await collect_run(session)
     new = Settings(model="opus", tool_access="full")
     await session.send(UpdateSettings(settings=new))
     assert await anext(stream) == SettingsChanged(settings=new)
-    await session.send(SubmitPrompt(text="two"))
+    await session.send(SendMessage(agent=PLANNER, text="two"))
     await collect_run(session)
 
     assert [launch.settings.model for launch in launcher.launches] == [None, "opus"]
@@ -183,7 +184,7 @@ async def test_add_and_edit_tasks_publish_the_board() -> None:
 async def test_a_turn_started_as_the_last_ends_is_not_reported_idle() -> None:
     session, _, launcher = session_for()
     launcher.planner_turns = [chats, chats]
-    await session.send(SubmitPrompt(text="one"))
+    await session.send(SendMessage(agent=PLANNER, text="one"))
     # The race sits between the task ending and its done-callback reporting idle, which no
     # event marks: TurnFinished comes before the end, BusyChanged after the callback.
     turn = planner_turn(session)
@@ -191,7 +192,7 @@ async def test_a_turn_started_as_the_last_ends_is_not_reported_idle() -> None:
     while not turn.done():
         await asyncio.sleep(0)
     # The first turn is done but hasn't reported idle yet when the second starts.
-    await session.send(SubmitPrompt(text="two"))
+    await session.send(SendMessage(agent=PLANNER, text="two"))
     events = await collect_run(session)
     assert [e for e in events if isinstance(e, BusyChanged)] == [
         BusyChanged(busy=True, lane="planner"),
@@ -246,7 +247,7 @@ async def test_session_notes_its_workspace_at_startup() -> None:
 async def test_planner_turns_are_not_verified() -> None:
     session, _, launcher = session_for(verification=verified((FAILING_STEP,)))
     launcher.planner_turns = [chats]
-    await session.send(SubmitPrompt(text="hello"))
+    await session.send(SendMessage(agent=PLANNER, text="hello"))
     events = await collect_run(session)
 
     assert not any(isinstance(e, VerificationChanged | VerificationFinished) for e in events[1:])

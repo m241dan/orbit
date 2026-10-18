@@ -4,6 +4,7 @@ import asyncio
 
 from orbit.agent.application.ports import Reply
 from orbit.protocol import (
+    PLANNER,
     AddTask,
     AgentStarted,
     BusyChanged,
@@ -12,7 +13,7 @@ from orbit.protocol import (
     ErrorOccurred,
     Event,
     RunTasks,
-    SubmitPrompt,
+    SendMessage,
     TaskSpec,
     TurnEndReason,
     TurnFinished,
@@ -57,7 +58,7 @@ async def test_the_planner_answers_while_a_task_runs() -> None:
     launcher.planner_turns = [chats]
     await session.send(AddTask(task=TaskSpec(prompt="one")))
     await session.send(RunTasks())
-    await session.send(SubmitPrompt(text="Plan."))
+    await session.send(SendMessage(agent=PLANNER, text="Plan."))
     events = await events_until(session, lambda e: e == PLANNER_IDLE)
     assert BusyChanged(busy=True) in events
     assert BusyChanged(busy=True, lane="planner") in events
@@ -73,7 +74,7 @@ async def test_tasks_run_while_the_planner_answers() -> None:
     gate = asyncio.Event()
     session, _, launcher = session_for(claims_done)
     launcher.planner_turns = [gated_planner(gate)]
-    await session.send(SubmitPrompt(text="Plan."))
+    await session.send(SendMessage(agent=PLANNER, text="Plan."))
     await session.send(AddTask(task=TaskSpec(prompt="one")))
     await session.send(RunTasks())
     events = await events_until(session, lambda e: e == WORK_IDLE)
@@ -88,13 +89,26 @@ async def test_the_planner_takes_one_prompt_at_a_time() -> None:
     gate = asyncio.Event()
     session, _, launcher = session_for()
     launcher.planner_turns = [gated_planner(gate)]
-    await session.send(SubmitPrompt(text="Plan."))
-    await session.send(SubmitPrompt(text="More."))
+    await session.send(SendMessage(agent=PLANNER, text="Plan."))
+    await session.send(SendMessage(agent=PLANNER, text="More."))
     events = await events_until(session, lambda e: isinstance(e, ErrorOccurred))
     assert errors(events) == ["The planner is already answering."]
     gate.set()
     await events_until(session, lambda e: e == PLANNER_IDLE)
     assert len(launcher.launches) == 1
+
+
+async def test_only_the_planner_can_be_messaged() -> None:
+    session, _, launcher = session_for()
+    launcher.planner_turns = [chats]
+    for agent in ("coder", "nobody"):
+        await session.send(SendMessage(agent=agent, text="hi"))
+        events = await events_until(session, lambda e: isinstance(e, ErrorOccurred))
+        assert errors(events) == [
+            f"Agent {agent!r} can't be messaged; the agents you can message are planner."
+        ]
+        assert BusyChanged(busy=True, lane="planner") not in events
+    assert launcher.launches == []
 
 
 async def test_cancelling_the_planner_leaves_the_task_run_running() -> None:
@@ -103,7 +117,7 @@ async def test_cancelling_the_planner_leaves_the_task_run_running() -> None:
     launcher.planner_turns = [gated_planner(planner_gate)]
     await session.send(AddTask(task=TaskSpec(prompt="one")))
     await session.send(RunTasks())
-    await session.send(SubmitPrompt(text="Plan."))
+    await session.send(SendMessage(agent=PLANNER, text="Plan."))
     await events_until(session, lambda e: isinstance(e, TurnStarted) and e.turn_id != e.agent_id)
     await session.send(CancelTurn(lane="planner"))
     events = await events_until(session, lambda e: e == PLANNER_IDLE)
@@ -122,7 +136,7 @@ async def test_cancelling_an_unknown_lane_stops_neither_lane() -> None:
     launcher.planner_turns = [gated_planner(planner_gate)]
     await session.send(AddTask(task=TaskSpec(prompt="one")))
     await session.send(RunTasks())
-    await session.send(SubmitPrompt(text="Plan."))
+    await session.send(SendMessage(agent=PLANNER, text="Plan."))
     await events_until(session, lambda e: isinstance(e, TurnStarted) and e.turn_id != e.agent_id)
     await session.send(CancelTurn(lane="x"))
     events = await events_until(session, lambda e: isinstance(e, ErrorOccurred))
@@ -140,7 +154,7 @@ async def test_cancelling_the_planners_agent_stops_only_its_turn() -> None:
     gate = asyncio.Event()
     session, _, launcher = session_for(gated_task(gate))
     launcher.planner_turns = [gated_planner(asyncio.Event())]
-    await session.send(SubmitPrompt(text="Plan."))
+    await session.send(SendMessage(agent=PLANNER, text="Plan."))
     started = await events_until(session, lambda e: isinstance(e, TurnStarted))
     planner = next(e.agent_id for e in started if isinstance(e, TurnStarted))
     assert planner is not None
@@ -157,7 +171,7 @@ async def test_cancelling_the_planners_agent_stops_only_its_turn() -> None:
 async def test_a_cancelled_planner_turn_ends_as_the_planners() -> None:
     session, _, launcher = session_for()
     launcher.planner_turns = [gated_planner(asyncio.Event())]
-    await session.send(SubmitPrompt(text="Plan."))
+    await session.send(SendMessage(agent=PLANNER, text="Plan."))
     opened, turn = (await events_until(session, lambda e: isinstance(e, TurnStarted)))[-2:]
     assert isinstance(opened, AgentStarted) and isinstance(turn, TurnStarted)
     await session.send(CancelTurn(lane="planner"))
@@ -169,7 +183,7 @@ async def test_a_cancelled_planner_turn_ends_as_the_planners() -> None:
 async def test_closing_stops_the_planners_turn() -> None:
     session, _, launcher = session_for()
     launcher.planner_turns = [gated_planner(asyncio.Event())]
-    await session.send(SubmitPrompt(text="Plan."))
+    await session.send(SendMessage(agent=PLANNER, text="Plan."))
     await events_until(session, lambda e: isinstance(e, TurnStarted))
     await session.close()
     events = await events_until(session, lambda e: e == PLANNER_IDLE)
@@ -185,6 +199,6 @@ async def test_the_planner_calling_an_unknown_tool_is_refused() -> None:
 
     session, _, launcher = session_for()
     launcher.planner_turns = [calls_unknown]
-    await session.send(SubmitPrompt(text="Plan."))
+    await session.send(SendMessage(agent=PLANNER, text="Plan."))
     await events_until(session, lambda e: e == PLANNER_IDLE)
     assert replies == [Reply("Orbit has no tool 'no_such_tool'.", is_error=True)]

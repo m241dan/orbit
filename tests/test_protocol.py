@@ -5,6 +5,7 @@ from pydantic import ValidationError
 
 from orbit.protocol import (
     CONFIGURE_CHECKS,
+    PLANNER,
     SUPER_REVIEW,
     AcceptTask,
     AddTask,
@@ -28,6 +29,7 @@ from orbit.protocol import (
     ResetPlanner,
     ReviewStatus,
     RunTasks,
+    SendMessage,
     SessionOpened,
     SessionsListed,
     SessionSummary,
@@ -35,7 +37,6 @@ from orbit.protocol import (
     SettingsChanged,
     StartupChecked,
     StepState,
-    SubmitPrompt,
     TaskGaveUp,
     TasksChanged,
     TaskSpec,
@@ -64,18 +65,27 @@ def test_event_json_round_trip() -> None:
 
 
 def test_command_dispatches_on_type() -> None:
-    command = command_adapter.validate_json('{"type": "submit_prompt", "text": "hi"}')
-    assert command == SubmitPrompt(text="hi")
+    command = command_adapter.validate_json(
+        '{"type": "send_message", "agent": "planner", "text": "hi"}'
+    )
+    assert command == SendMessage(agent=PLANNER, text="hi")
 
 
 def test_rejects_unknown_fields() -> None:
     with pytest.raises(ValidationError):
-        command_adapter.validate_python({"type": "submit_prompt", "text": "hi", "extra": 1})
+        command_adapter.validate_python(
+            {"type": "send_message", "agent": "planner", "text": "hi", "extra": 1}
+        )
 
 
 def test_rejects_empty_prompt() -> None:
     with pytest.raises(ValidationError):
-        SubmitPrompt(text="")
+        SendMessage(agent=PLANNER, text="")
+
+
+def test_rejects_message_to_no_agent() -> None:
+    with pytest.raises(ValidationError):
+        SendMessage(agent="", text="hi")
 
 
 def test_settings_default_to_claude_default_model_and_restricted_tools() -> None:
@@ -250,7 +260,7 @@ def test_planning_and_draft_messages_round_trip() -> None:
     for command in (
         AcceptTask(task_id="3"),
         RemoveTask(task_id="3"),
-        SubmitPrompt(text="plan"),
+        SendMessage(agent=PLANNER, text="plan"),
         CancelTurn(lane="planner"),
     ):
         assert command_adapter.validate_json(command.model_dump_json()) == command
@@ -259,7 +269,7 @@ def test_planning_and_draft_messages_round_trip() -> None:
     assert BusyChanged(busy=True).lane == "work"
     assert CancelTurn().lane == "work"
     with pytest.raises(ValidationError):
-        SubmitPrompt(text="hi", to="conversation")  # type: ignore[call-arg]
+        SendMessage(agent=PLANNER, text="hi", to="conversation")  # type: ignore[call-arg]
     draft = TaskState(id="1", task=TaskSpec(prompt="x"), status="draft", origin="planner")
     assert TaskState.model_validate(draft.model_dump()) == draft
 

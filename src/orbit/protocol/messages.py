@@ -45,13 +45,11 @@ BusyLane = str
 """Where work runs, by name: task runs in ``work``; the planner's turns in ``planner``."""
 
 
-class SubmitPrompt(_Message):
-    """Ask the planner to start a turn with the given user input.
+class SendMessage(_Message):
+    """Send ``text`` to the conversational agent ``agent``, which answers in its own lane."""
 
-    The planner answers in its own lane, so it works while tasks run.
-    """
-
-    type: Literal["submit_prompt"] = "submit_prompt"
+    type: Literal["send_message"] = "send_message"
+    agent: str = Field(min_length=1)
     text: str = Field(min_length=1)
 
 
@@ -199,7 +197,7 @@ class ResetPlanner(_Message):
 
 
 Command = Annotated[
-    SubmitPrompt
+    SendMessage
     | CancelTurn
     | UpdateSettings
     | AddTask

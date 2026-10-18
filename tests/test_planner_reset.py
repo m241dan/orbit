@@ -12,6 +12,7 @@ from orbit.agent.application.planner_seat import (
 )
 from orbit.agent.domain.verification import steps_note
 from orbit.protocol import (
+    PLANNER,
     AddTask,
     AgentExited,
     CancelTurn,
@@ -21,7 +22,7 @@ from orbit.protocol import (
     OpenSession,
     PlannerReset,
     ResetPlanner,
-    SubmitPrompt,
+    SendMessage,
     TasksChanged,
     TaskSpec,
 )
@@ -137,7 +138,7 @@ async def test_an_invalid_config_keeps_the_planners_role_but_still_resets() -> N
 async def test_a_reset_is_refused_while_the_planner_answers() -> None:
     session, _, launcher = session_for()
     launcher.planner_turns = [hangs]
-    await session.send(SubmitPrompt(text="Plan."))
+    await session.send(SendMessage(agent=PLANNER, text="Plan."))
     while not launcher.launches:
         await asyncio.sleep(0)
     assert await refusal(session) == ErrorOccurred(message=PLANNER_BUSY_RESET)

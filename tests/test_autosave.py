@@ -5,13 +5,14 @@ import asyncio
 from orbit.agent import Verification, VerificationStep
 from orbit.agent.domain.reviews import ReviewLimits
 from orbit.protocol import (
+    PLANNER,
     AddTask,
     EditTask,
     ErrorOccurred,
     Event,
+    SendMessage,
     Settings,
     SettingsChanged,
-    SubmitPrompt,
     TasksChanged,
     TaskSpec,
     TurnEndReason,
@@ -88,7 +89,7 @@ async def test_a_prompt_saves_the_session_then_its_planners_conversation() -> No
     store = FakeStore()
     session, _, launcher = session_for(store=store)
     launcher.planner_turns = [chats]
-    await session.send(SubmitPrompt(text="hello"))
+    await session.send(SendMessage(agent=PLANNER, text="hello"))
     assert [(r.tasks, r.planner_conversation) for r in store.saved] == [((), None)]
 
     await events_until(session, idle("planner"))
@@ -100,7 +101,7 @@ async def test_a_planners_draft_saves_the_session() -> None:
     store = FakeStore()
     session, _, launcher = session_for(store=store)
     launcher.planner_turns = [proposes]
-    await session.send(SubmitPrompt(text="Plan a flag."))
+    await session.send(SendMessage(agent=PLANNER, text="Plan a flag."))
     await events_until(session, idle("planner"))
     assert any(t.status == "draft" for t in store.last.tasks)
     await session.close()

@@ -11,6 +11,7 @@ from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.reviews import LaneSnapshot, PlannerSnapshot
 from orbit.agent.domain.sessions import SessionRecord
 from orbit.protocol import (
+    PLANNER,
     AddTask,
     AgentExited,
     AgentStarted,
@@ -24,12 +25,12 @@ from orbit.protocol import (
     RemoveTask,
     ReviewStatus,
     RunTasks,
+    SendMessage,
     SessionOpened,
     SessionsListed,
     SessionSummary,
     Settings,
     SettingsChanged,
-    SubmitPrompt,
     TasksChanged,
     TaskSpec,
     TaskState,
@@ -257,7 +258,7 @@ async def test_an_opened_session_carries_on_its_planners_conversation() -> None:
     session, launcher = switching(store_with(saved("auth", planner_conversation="talk-9")))
     await opened(session, OpenSession(session_id="auth"))
     launcher.planner_turns = [chats]
-    await session.send(SubmitPrompt(text="Where were we?"))
+    await session.send(SendMessage(agent=PLANNER, text="Where were we?"))
     await events_until(session, idle("planner"))
     assert launcher.resumed == ["talk-9"]
     await session.close()
@@ -427,7 +428,7 @@ async def test_switching_is_refused_while_a_review_runs() -> None:
 async def test_switching_is_refused_while_the_planner_answers() -> None:
     session, launcher = switching(store_with(saved("auth")))
     launcher.planner_turns = [hangs]
-    await session.send(SubmitPrompt(text="Plan it."))
+    await session.send(SendMessage(agent=PLANNER, text="Plan it."))
     await events_until(session, of_type(AgentStarted))
     assert await refused(session, OpenSession(session_id="auth")) == [PLANNER_ANSWERING]
     assert await refused(session, NewSession(name="other")) == [PLANNER_ANSWERING]
@@ -479,10 +480,10 @@ async def test_a_new_session_without_a_name_is_named_by_its_start() -> None:
 async def test_a_new_session_has_a_fresh_planner_conversation() -> None:
     session, launcher = switching(store_with(saved("auth")))
     launcher.planner_turns = [chats, chats]
-    await session.send(SubmitPrompt(text="Hello."))
+    await session.send(SendMessage(agent=PLANNER, text="Hello."))
     await events_until(session, idle("planner"))
     events = await opened(session, NewSession())
-    await session.send(SubmitPrompt(text="Hello again."))
+    await session.send(SendMessage(agent=PLANNER, text="Hello again."))
     await events_until(session, idle("planner"))
     assert launcher.resumed == [None, None]
     assert any(isinstance(e, AgentExited) for e in events)
@@ -555,7 +556,7 @@ async def spent_on_a_removed_task(session: AgentSession, launcher: ScriptedLaunc
     launcher.planner_turns = [chats]
     launcher.planner_usages = [Usage(input_tokens=400, cost_usd=0.4, turns=1)]
     launcher.usages = [(Usage(output_tokens=100, cost_usd=1.0, turns=3),)]
-    await session.send(SubmitPrompt(text="Plan it."))
+    await session.send(SendMessage(agent=PLANNER, text="Plan it."))
     events = await events_until(session, idle("planner"))
     await session.send(AddTask(task=TaskSpec(prompt="Look.", settings=Settings(tool_access="off"))))
     await session.send(RunTasks())
@@ -611,7 +612,7 @@ async def test_a_planner_turn_cancelled_once_it_finished_ends_once_and_is_saved_
     launcher.planner_turns = [chats]
     launcher.planner_usages = [usage]
     launcher.planner_afters = [hangs_after]
-    await session.send(SubmitPrompt(text="Plan it."))
+    await session.send(SendMessage(agent=PLANNER, text="Plan it."))
     events = await events_until(session, of_type(TurnFinished))
     await session.send(CancelTurn(lane="planner"))
     store.gate.set()

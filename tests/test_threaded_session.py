@@ -7,12 +7,13 @@ from contextlib import contextmanager
 import pytest
 
 from orbit.protocol import (
+    PLANNER,
     Command,
     ErrorOccurred,
     Event,
     Notice,
+    SendMessage,
     Session,
-    SubmitPrompt,
     ThreadedSession,
 )
 
@@ -112,7 +113,7 @@ async def collect(session: Session) -> list[Event]:
 async def test_commands_and_events_cross_threads_in_order() -> None:
     notices: list[Event] = [Notice(message=str(n)) for n in range(20)]
     session, built = threaded(FakeSession(notices))
-    commands = [SubmitPrompt(text=str(n)) for n in range(20)]
+    commands = [SendMessage(agent=PLANNER, text=str(n)) for n in range(20)]
     for command in commands:
         await session.send(command)
 
@@ -124,7 +125,7 @@ async def test_commands_and_events_cross_threads_in_order() -> None:
 
 async def test_the_inner_session_is_built_and_driven_on_the_backend_thread() -> None:
     session, built = threaded()
-    await session.send(SubmitPrompt(text="hi"))
+    await session.send(SendMessage(agent=PLANNER, text="hi"))
     await collect(session)
     await session.close()
 
@@ -140,7 +141,7 @@ async def test_an_error_from_the_inner_send_re_raises_in_the_caller() -> None:
     session, _ = threaded(inner)
 
     with pytest.raises(ValueError, match="bad command"):
-        await session.send(SubmitPrompt(text="hi"))
+        await session.send(SendMessage(agent=PLANNER, text="hi"))
     await session.close()
 
 
@@ -252,7 +253,7 @@ async def test_a_blocked_backend_does_not_stop_the_callers_loop() -> None:
             ticks += 1
 
     ticker = asyncio.create_task(tick())
-    await session.send(SubmitPrompt(text="slow"))
+    await session.send(SendMessage(agent=PLANNER, text="slow"))
     ticker.cancel()
     await session.close()
 
@@ -274,12 +275,12 @@ async def test_abandoning_events_stops_its_pump_before_close() -> None:
 async def test_events_after_an_abandoned_iterator_receive_every_event() -> None:
     session = ThreadedSession(EchoSession)
     first = session.events()
-    await session.send(SubmitPrompt(text="first"))
-    assert await anext(first) == Notice(message=str(SubmitPrompt(text="first")))
+    await session.send(SendMessage(agent=PLANNER, text="first"))
+    assert await anext(first) == Notice(message=str(SendMessage(agent=PLANNER, text="first")))
     await first.aclose()
 
     second = session.events()
-    commands = [SubmitPrompt(text=str(n)) for n in range(10)]
+    commands = [SendMessage(agent=PLANNER, text=str(n)) for n in range(10)]
     for command in commands:
         await session.send(command)
     received = [await asyncio.wait_for(anext(second), 5) for _ in commands]

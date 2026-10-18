@@ -9,6 +9,7 @@ from textual.widgets import Footer, OptionList, Tab
 from textual.worker import WorkerFailed
 
 from orbit.protocol import (
+    PLANNER,
     STARTUP_TASK,
     AgentExited,
     AgentReply,
@@ -20,10 +21,10 @@ from orbit.protocol import (
     ErrorOccurred,
     Event,
     Notice,
+    SendMessage,
     Settings,
     SettingsChanged,
     StepState,
-    SubmitPrompt,
     TaskMerged,
     TasksChanged,
     TaskSpec,
@@ -85,7 +86,7 @@ async def test_submit_sends_command_and_renders_events() -> None:
     async with app.run_test() as pilot:
         prompt = app.query_one("#prompt", ChatPrompt)
         await pilot.press("i", *"hi", "enter")
-        assert session.commands == [SubmitPrompt(text="hi")]
+        assert session.commands == [SendMessage(agent=PLANNER, text="hi")]
         # Busy from now, not from the backend's notice, so a second prompt can't race it.
         assert prompt.border_title == "Prompt · planner · busy"
 
@@ -145,7 +146,7 @@ async def test_enter_sends_the_kept_draft_once_the_planner_is_free() -> None:
         assert session.commands == []
         # Still in insert mode, so enter alone sends it.
         await pilot.press("enter")
-        assert session.commands == [SubmitPrompt(text="hi")]
+        assert session.commands == [SendMessage(agent=PLANNER, text="hi")]
         assert prompt.text == ""
 
 
@@ -154,7 +155,7 @@ async def test_a_rapid_second_enter_sends_nothing() -> None:
     app = OrbitApp(session)
     async with app.run_test() as pilot:
         await pilot.press("i", *"a", "enter", "i", *"b", "enter")
-        assert session.commands == [SubmitPrompt(text="a")]
+        assert session.commands == [SendMessage(agent=PLANNER, text="a")]
         assert app.query_one(ChatPrompt).text == "b"
 
 
@@ -192,7 +193,7 @@ async def test_a_pasted_multi_line_prompt_is_sent_whole_and_the_box_shrinks() ->
         assert prompt.region.height == 5  # three rows, the last empty, inside a border
         await pilot.press("enter")
         await pilot.pause()
-        assert session.commands == [SubmitPrompt(text="first\nsecond")]
+        assert session.commands == [SendMessage(agent=PLANNER, text="first\nsecond")]
         assert prompt.text == ""
         assert prompt.region.height == 3
 
@@ -1199,10 +1200,10 @@ async def test_prompt_talks_to_the_planner_ctrl_s_stops_the_run_and_ctrl_x_the_p
         await feed_events(session, pilot, BusyChanged(busy=False, lane="planner"))
         await pilot.press("i", *"hi", "enter", "ctrl+s", "ctrl+x")
         assert session.commands == [
-            SubmitPrompt(text="plan"),
+            SendMessage(agent=PLANNER, text="plan"),
             CancelTurn(lane="work"),
             CancelTurn(lane="planner"),
-            SubmitPrompt(text="hi"),
+            SendMessage(agent=PLANNER, text="hi"),
             CancelTurn(lane="work"),
             CancelTurn(lane="planner"),
         ]

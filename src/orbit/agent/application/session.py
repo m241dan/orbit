@@ -62,9 +62,9 @@ from orbit.protocol import (
     RemoveTask,
     ResetPlanner,
     RunTasks,
+    SendMessage,
     Settings,
     SettingsChanged,
-    SubmitPrompt,
     TaskSpec,
     TurnFinished,
     UpdateSettings,
@@ -76,7 +76,7 @@ NO_AGENTS_MESSAGE = "Tasks need agents, and none are set up."
 NO_VERIFY_MESSAGE = "Setting up checks needs verification on; orbit was started with --no-verify."
 CONFIGURING_NOTE = "A configurator task is already queued or running."
 WorkCommand = (
-    SubmitPrompt
+    SendMessage
     | CancelTurn
     | UpdateSettings
     | ResetPlanner
@@ -279,7 +279,7 @@ class AgentSession:
 
     async def _handle_work(self, command: WorkCommand) -> None:
         match command:
-            case SubmitPrompt() | CancelTurn() | UpdateSettings():
+            case SendMessage() | CancelTurn() | UpdateSettings():
                 await self._handle_prompts(command)
             case AddTask() | RunTasks():
                 await self._handle_tasks(command)
@@ -290,10 +290,10 @@ class AgentSession:
             case _:
                 assert_never(command)
 
-    async def _handle_prompts(self, command: SubmitPrompt | CancelTurn | UpdateSettings) -> None:
+    async def _handle_prompts(self, command: SendMessage | CancelTurn | UpdateSettings) -> None:
         match command:
-            case SubmitPrompt(text=text):
-                await self._seat.submit(text, self._settings)
+            case SendMessage():
+                await self._send_message(command)
             case CancelTurn(lane=lane):
                 await self._cancel_turn(lane)
             case UpdateSettings(settings=settings):
@@ -302,6 +302,17 @@ class AgentSession:
                 await self._save()
             case _:
                 assert_never(command)
+
+    async def _send_message(self, command: SendMessage) -> None:
+        """Start a planner turn with the message's text; refused for any other agent."""
+        if command.agent != PLANNER:
+            message = (
+                f"Agent {command.agent!r} can't be messaged; "
+                f"the agents you can message are {PLANNER}."
+            )
+            await self._events.put(ErrorOccurred(message=message))
+            return
+        await self._seat.submit(command.text, self._settings)
 
     async def _handle_tasks(self, command: AddTask | RunTasks) -> None:
         match command:

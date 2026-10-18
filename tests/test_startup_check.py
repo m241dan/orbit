@@ -9,15 +9,16 @@ from orbit.agent import AgentSession, Setup, Verification, VerificationStep
 from orbit.agent.application import session as session_module
 from orbit.agent.application.startup_check import CANCELLED_NOTE, StartupCheck
 from orbit.protocol import (
+    PLANNER,
     AgentExited,
     AgentStarted,
     CancelAgent,
     ErrorOccurred,
     Event,
     Notice,
+    SendMessage,
     StartupChecked,
     StepState,
-    SubmitPrompt,
     TaskStarted,
     TurnEndReason,
     VerificationChanged,
@@ -284,7 +285,7 @@ async def test_a_crash_is_reported_and_closing_still_stops_the_host(
     monkeypatch.setattr(session_module, "startup_fix_prompt", broken)
     session, host, launcher = session_for(verification=checked(Steps(False)), check_at_startup=True)
     launcher.planner_turns.append(says_nothing)
-    await session.send(SubmitPrompt(text="Hello."))  # Starts the host.
+    await session.send(SendMessage(agent=PLANNER, text="Hello."))  # Starts the host.
     events: list[Event] = []
     async for event in session.events():
         events.append(event)

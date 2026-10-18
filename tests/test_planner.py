@@ -13,6 +13,7 @@ from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.verification import steps_note
 from orbit.protocol import (
     PLAN_TASK,
+    PLANNER,
     AcceptTask,
     AddTask,
     AgentExited,
@@ -24,8 +25,8 @@ from orbit.protocol import (
     ProgressNoted,
     RemoveTask,
     RunTasks,
+    SendMessage,
     Settings,
-    SubmitPrompt,
     TasksChanged,
     TaskSpec,
     TurnEndReason,
@@ -61,7 +62,7 @@ async def chats(call: Call) -> TurnEndReason:
 
 
 async def plan(session: AgentSession, text: str) -> list[Event]:
-    await session.send(SubmitPrompt(text=text))
+    await session.send(SendMessage(agent=PLANNER, text=text))
     return await until_idle(session)
 
 
@@ -114,7 +115,7 @@ async def test_the_first_turn_says_which_agent_is_the_planner() -> None:
 
 
 async def refused_planning(session: AgentSession) -> list[Event]:
-    await session.send(SubmitPrompt(text="Plan."))
+    await session.send(SendMessage(agent=PLANNER, text="Plan."))
     stream = session.events()
     return [await anext(stream), await anext(stream), await anext(stream)]
 

@@ -43,13 +43,13 @@ from orbit.protocol import (
     ResetPlanner,
     ReviewStatus,
     RunTasks,
+    SendMessage,
     Session,
     SessionOpened,
     SessionsListed,
     Settings,
     SettingsChanged,
     StartupChecked,
-    SubmitPrompt,
     TaskGaveUp,
     TaskMerged,
     TasksChanged,
@@ -277,7 +277,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         # Busy from now, not from TurnStarted, so a second prompt can't race the turn.
         self._set_busy(PLANNER_LANE, True)
         self._feed.append(text, "prompt", PLANNER)
-        await self._session.send(SubmitPrompt(text=text))
+        await self._session.send(SendMessage(agent=PLANNER, text=text))
 
     # Window navigation only applies at the top level, when no window is active.
 
