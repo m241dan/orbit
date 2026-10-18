@@ -384,7 +384,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         editor = TaskEditorScreen(
             None if current is None else current.task,
             self._settings or Settings(),
-            self._model_choices,
+            lambda: self._model_choices,
             (self._model_picker, self._tool_picker),
         )
         self.push_screen(editor, saved)

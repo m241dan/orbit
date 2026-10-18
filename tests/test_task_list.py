@@ -19,6 +19,7 @@ from orbit.protocol import (
     SessionsListed,
     SessionSummary,
     Settings,
+    SettingsChanged,
     TasksChanged,
     TaskSpec,
     TaskStarted,
@@ -489,6 +490,20 @@ async def test_editor_model_picker_highlights_nothing_for_custom_model() -> None
         assert picker(app)[2] is None
         await pilot.press("escape")
         assert editor_fields(app)[2] == "claude-custom-1"
+
+
+async def test_editor_model_picker_uses_choices_that_arrive_while_open() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await open_task_list(pilot)
+        await pilot.press("enter", "i")
+        await pilot.press(*"Add a widget", "escape")
+        choices = ("opus", "sonnet", "haiku")
+        await feed(session, pilot, SettingsChanged(settings=Settings(), model_choices=choices))
+        await pilot.press("j", "j", "enter", "j", "j", "j", "enter", "ctrl+s")
+        task = TaskSpec(prompt="Add a widget", settings=Settings(model="haiku"))
+        assert session.commands == [AddTask(task=task)]
 
 
 async def test_editor_opens_the_apps_pickers_built_once() -> None:

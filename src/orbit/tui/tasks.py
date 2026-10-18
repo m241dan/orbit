@@ -261,7 +261,8 @@ class TaskEditorScreen(ModalScreen[TaskSpec | None]):
     from any field, i types in the title or prompt (escape stops; enter stops in the title and
     adds a line in the prompt), enter on model or tools opens its picker, ctrl+s saves and
     escape discards. The pickers are the app's model and tool access ``pickers``, built once
-    so they open instantly.
+    so they open instantly; ``models`` returns the app's current model choices, which the
+    model picker's labels follow.
     """
 
     AUTO_FOCUS = None
@@ -291,7 +292,7 @@ class TaskEditorScreen(ModalScreen[TaskSpec | None]):
         self,
         task: TaskSpec | None,
         settings: Settings,
-        models: Sequence[str],
+        models: Callable[[], Sequence[str]],
         pickers: tuple[PickerScreen, PickerScreen],
     ) -> None:
         super().__init__()
@@ -299,7 +300,7 @@ class TaskEditorScreen(ModalScreen[TaskSpec | None]):
         self._prompt = "" if task is None else task.prompt
         self._settings = settings if task is None else task.settings
         self._role = TaskSpec.model_fields["role"].default if task is None else task.role
-        self._models = list(models)
+        self._models = models
         self._model_picker, self._tool_picker = pickers
         self._field = 0
 
@@ -342,7 +343,7 @@ class TaskEditorScreen(ModalScreen[TaskSpec | None]):
             self._choose_tools()
 
     def _choose_model(self) -> None:
-        models, _ = model_options(self._models)
+        models, _ = model_options(self._models())
         current = self._settings.model
         index = models.index(current) if current in models else None
         self._pick(self._model_picker, index, lambda i: self._update(model=models[i]))
