@@ -1,0 +1,2423 @@
+{
+  "$defs": {
+    "AcceptTask": {
+      "description": "Make draft task ``task_id`` (one the planner proposed) a real task, to be run.",
+      "properties": {
+        "task_id": {
+          "title": "Task Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "accept_task",
+          "default": "accept_task",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "task_id"
+      ],
+      "title": "AcceptTask",
+      "type": "object"
+    },
+    "AddTask": {
+      "description": "Append ``task`` to the backend's task list.",
+      "properties": {
+        "task": {
+          "$ref": "#/$defs/TaskSpec"
+        },
+        "type": {
+          "const": "add_task",
+          "default": "add_task",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "task"
+      ],
+      "title": "AddTask",
+      "type": "object"
+    },
+    "AgentEntry": {
+      "description": "An agent role ``name``, shown as ``label``; ``conversational`` if the user can message\nit.",
+      "properties": {
+        "conversational": {
+          "title": "Conversational",
+          "type": "boolean"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "label",
+        "conversational"
+      ],
+      "title": "AgentEntry",
+      "type": "object"
+    },
+    "AgentExited": {
+      "description": "Agent ``agent_id``'s process ended.",
+      "properties": {
+        "agent_id": {
+          "title": "Agent Id",
+          "type": "string"
+        },
+        "reason": {
+          "enum": [
+            "finished",
+            "crashed",
+            "killed"
+          ],
+          "title": "Reason",
+          "type": "string"
+        },
+        "type": {
+          "const": "agent_exited",
+          "default": "agent_exited",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "agent_id",
+        "reason"
+      ],
+      "title": "AgentExited",
+      "type": "object"
+    },
+    "AgentReply": {
+      "description": "Orbit's answer to request ``request_id``.",
+      "properties": {
+        "agent_id": {
+          "title": "Agent Id",
+          "type": "string"
+        },
+        "is_error": {
+          "default": false,
+          "title": "Is Error",
+          "type": "boolean"
+        },
+        "request_id": {
+          "title": "Request Id",
+          "type": "string"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "type": {
+          "const": "agent_reply",
+          "default": "agent_reply",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "agent_id",
+        "request_id",
+        "text"
+      ],
+      "title": "AgentReply",
+      "type": "object"
+    },
+    "AgentRequest": {
+      "description": "Agent ``agent_id`` called one of orbit's tools; an ``AgentReply`` with the same\n``request_id`` follows.",
+      "properties": {
+        "agent_id": {
+          "title": "Agent Id",
+          "type": "string"
+        },
+        "arguments": {
+          "additionalProperties": true,
+          "title": "Arguments",
+          "type": "object"
+        },
+        "request_id": {
+          "title": "Request Id",
+          "type": "string"
+        },
+        "tool": {
+          "title": "Tool",
+          "type": "string"
+        },
+        "type": {
+          "const": "agent_request",
+          "default": "agent_request",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "agent_id",
+        "request_id",
+        "tool",
+        "arguments"
+      ],
+      "title": "AgentRequest",
+      "type": "object"
+    },
+    "AgentStarted": {
+      "description": "Agent ``agent_id`` was started in the ``role`` to work on task ``task_id``.",
+      "properties": {
+        "agent_id": {
+          "title": "Agent Id",
+          "type": "string"
+        },
+        "role": {
+          "title": "Role",
+          "type": "string"
+        },
+        "task_id": {
+          "title": "Task Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "agent_started",
+          "default": "agent_started",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "agent_id",
+        "role",
+        "task_id"
+      ],
+      "title": "AgentStarted",
+      "type": "object"
+    },
+    "AssistantMessage": {
+      "properties": {
+        "agent_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agent Id"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "turn_id": {
+          "title": "Turn Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "assistant_message",
+          "default": "assistant_message",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "turn_id",
+        "text"
+      ],
+      "title": "AssistantMessage",
+      "type": "object"
+    },
+    "BusyChanged": {
+      "description": "Whether ``lane`` has work in progress; new work for that lane is rejected while busy.",
+      "properties": {
+        "busy": {
+          "title": "Busy",
+          "type": "boolean"
+        },
+        "lane": {
+          "default": "work",
+          "title": "Lane",
+          "type": "string"
+        },
+        "type": {
+          "const": "busy_changed",
+          "default": "busy_changed",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "busy"
+      ],
+      "title": "BusyChanged",
+      "type": "object"
+    },
+    "CancelAgent": {
+      "description": "Stop agent ``agent_id``'s work: a review on its own, or the run (or planner turn) it's in.",
+      "properties": {
+        "agent_id": {
+          "title": "Agent Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "cancel_agent",
+          "default": "cancel_agent",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "agent_id"
+      ],
+      "title": "CancelAgent",
+      "type": "object"
+    },
+    "CancelTurn": {
+      "description": "Stop the work in ``lane``: the planner's turn, or the task run.",
+      "properties": {
+        "lane": {
+          "default": "work",
+          "title": "Lane",
+          "type": "string"
+        },
+        "type": {
+          "const": "cancel_turn",
+          "default": "cancel_turn",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "title": "CancelTurn",
+      "type": "object"
+    },
+    "Catalog": {
+      "description": "What exists: the ``workspaces`` and their sessions, the ``agents``' roles, the\n``triggers`` and the ``lanes``; sent after ``Welcome`` and whenever the sessions change.",
+      "properties": {
+        "agents": {
+          "items": {
+            "$ref": "#/$defs/AgentEntry"
+          },
+          "title": "Agents",
+          "type": "array"
+        },
+        "lanes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Lanes",
+          "type": "array"
+        },
+        "triggers": {
+          "items": {
+            "$ref": "#/$defs/TriggerEntry"
+          },
+          "title": "Triggers",
+          "type": "array"
+        },
+        "type": {
+          "const": "catalog",
+          "default": "catalog",
+          "title": "Type",
+          "type": "string"
+        },
+        "workspaces": {
+          "items": {
+            "$ref": "#/$defs/WorkspaceEntry"
+          },
+          "title": "Workspaces",
+          "type": "array"
+        }
+      },
+      "required": [
+        "workspaces",
+        "agents",
+        "triggers",
+        "lanes"
+      ],
+      "title": "Catalog",
+      "type": "object"
+    },
+    "ChecksProposed": {
+      "description": "Agent ``agent_id`` proposed these checks for task ``task_id``, and they all passed on\nthe current code; the user decides on them with ``DecideProposal``.",
+      "properties": {
+        "agent_id": {
+          "title": "Agent Id",
+          "type": "string"
+        },
+        "setup": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProposedSetup"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "steps": {
+          "items": {
+            "$ref": "#/$defs/ProposedStep"
+          },
+          "title": "Steps",
+          "type": "array"
+        },
+        "task_id": {
+          "title": "Task Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "checks_proposed",
+          "default": "checks_proposed",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "agent_id",
+        "task_id",
+        "steps"
+      ],
+      "title": "ChecksProposed",
+      "type": "object"
+    },
+    "CommandAccepted": {
+      "description": "Command ``command_id`` was handled; the events its handling published came before.",
+      "properties": {
+        "command_id": {
+          "title": "Command Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "command_accepted",
+          "default": "command_accepted",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "command_id"
+      ],
+      "title": "CommandAccepted",
+      "type": "object"
+    },
+    "CommandEnvelope": {
+      "description": "A command, ``payload``, with the ``command_id`` its sender chose for it, and the\n``session`` it's for: ``None`` means the open session.",
+      "properties": {
+        "command_id": {
+          "minLength": 1,
+          "title": "Command Id",
+          "type": "string"
+        },
+        "payload": {
+          "discriminator": {
+            "mapping": {
+              "accept_task": "#/$defs/AcceptTask",
+              "add_task": "#/$defs/AddTask",
+              "cancel_agent": "#/$defs/CancelAgent",
+              "cancel_turn": "#/$defs/CancelTurn",
+              "decide_proposal": "#/$defs/DecideProposal",
+              "delete_session": "#/$defs/DeleteSession",
+              "edit_task": "#/$defs/EditTask",
+              "fire_trigger": "#/$defs/FireTrigger",
+              "hello": "#/$defs/Hello",
+              "list_sessions": "#/$defs/ListSessions",
+              "new_session": "#/$defs/NewSession",
+              "open_session": "#/$defs/OpenSession",
+              "remove_task": "#/$defs/RemoveTask",
+              "rename_session": "#/$defs/RenameSession",
+              "reset_conversation": "#/$defs/ResetConversation",
+              "run_tasks": "#/$defs/RunTasks",
+              "send_message": "#/$defs/SendMessage",
+              "update_settings": "#/$defs/UpdateSettings"
+            },
+            "propertyName": "type"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Hello"
+            },
+            {
+              "$ref": "#/$defs/SendMessage"
+            },
+            {
+              "$ref": "#/$defs/CancelTurn"
+            },
+            {
+              "$ref": "#/$defs/UpdateSettings"
+            },
+            {
+              "$ref": "#/$defs/AddTask"
+            },
+            {
+              "$ref": "#/$defs/EditTask"
+            },
+            {
+              "$ref": "#/$defs/RunTasks"
+            },
+            {
+              "$ref": "#/$defs/FireTrigger"
+            },
+            {
+              "$ref": "#/$defs/AcceptTask"
+            },
+            {
+              "$ref": "#/$defs/RemoveTask"
+            },
+            {
+              "$ref": "#/$defs/CancelAgent"
+            },
+            {
+              "$ref": "#/$defs/DecideProposal"
+            },
+            {
+              "$ref": "#/$defs/ListSessions"
+            },
+            {
+              "$ref": "#/$defs/OpenSession"
+            },
+            {
+              "$ref": "#/$defs/NewSession"
+            },
+            {
+              "$ref": "#/$defs/RenameSession"
+            },
+            {
+              "$ref": "#/$defs/DeleteSession"
+            },
+            {
+              "$ref": "#/$defs/ResetConversation"
+            }
+          ],
+          "title": "Payload"
+        },
+        "session": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Session"
+        },
+        "traceparent": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Traceparent"
+        },
+        "tracestate": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tracestate"
+        },
+        "workspace": {
+          "default": "default",
+          "title": "Workspace",
+          "type": "string"
+        }
+      },
+      "required": [
+        "command_id",
+        "payload"
+      ],
+      "title": "CommandEnvelope",
+      "type": "object"
+    },
+    "CommandRefused": {
+      "description": "Command ``command_id`` was refused, for the reason ``code`` names (one of the refusal\ncodes, such as :data:`UNKNOWN`), and ``message`` says why; it changed nothing.",
+      "properties": {
+        "code": {
+          "title": "Code",
+          "type": "string"
+        },
+        "command_id": {
+          "title": "Command Id",
+          "type": "string"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "type": {
+          "const": "command_refused",
+          "default": "command_refused",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "command_id",
+        "code",
+        "message"
+      ],
+      "title": "CommandRefused",
+      "type": "object"
+    },
+    "ConversationReset": {
+      "description": "The conversation of the agent ``agent`` ended at the user's ``ResetConversation``; its\nnext message starts a fresh one.",
+      "properties": {
+        "agent": {
+          "title": "Agent",
+          "type": "string"
+        },
+        "type": {
+          "const": "conversation_reset",
+          "default": "conversation_reset",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "agent"
+      ],
+      "title": "ConversationReset",
+      "type": "object"
+    },
+    "DecideProposal": {
+      "description": "The user's decision on the checks proposed for task ``task_id``; ``feedback`` says what\nto change when the ``action`` is ``revise``.",
+      "properties": {
+        "action": {
+          "enum": [
+            "accept",
+            "revise",
+            "end"
+          ],
+          "title": "Action",
+          "type": "string"
+        },
+        "feedback": {
+          "default": "",
+          "title": "Feedback",
+          "type": "string"
+        },
+        "task_id": {
+          "title": "Task Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "decide_proposal",
+          "default": "decide_proposal",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "task_id",
+        "action"
+      ],
+      "title": "DecideProposal",
+      "type": "object"
+    },
+    "DeleteSession": {
+      "description": "Delete the saved session ``session_id``; refused for the open session, or one open in\nanother orbit. The sessions are listed again after.",
+      "properties": {
+        "session_id": {
+          "title": "Session Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "delete_session",
+          "default": "delete_session",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id"
+      ],
+      "title": "DeleteSession",
+      "type": "object"
+    },
+    "EditTask": {
+      "description": "Replace task ``task_id`` with ``task`` and make it pending again.\n\nRejected while that task runs.",
+      "properties": {
+        "task": {
+          "$ref": "#/$defs/TaskSpec"
+        },
+        "task_id": {
+          "title": "Task Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "edit_task",
+          "default": "edit_task",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "task_id",
+        "task"
+      ],
+      "title": "EditTask",
+      "type": "object"
+    },
+    "ErrorOccurred": {
+      "description": "An error with no command behind it, of the kind ``code`` names (one of the error codes,\nsuch as :data:`AGENT_FAILED`, or a refusal code where it fits), and ``message`` says what.",
+      "properties": {
+        "agent_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agent Id"
+        },
+        "code": {
+          "title": "Code",
+          "type": "string"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "turn_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Turn Id"
+        },
+        "type": {
+          "const": "error_occurred",
+          "default": "error_occurred",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "title": "ErrorOccurred",
+      "type": "object"
+    },
+    "EventEnvelope": {
+      "description": "An event, ``payload``, with its place ``seq`` in the backend's stream, counted from 1,\nand the ``session`` it belongs to, if any.",
+      "properties": {
+        "payload": {
+          "discriminator": {
+            "mapping": {
+              "agent_exited": "#/$defs/AgentExited",
+              "agent_reply": "#/$defs/AgentReply",
+              "agent_request": "#/$defs/AgentRequest",
+              "agent_started": "#/$defs/AgentStarted",
+              "assistant_message": "#/$defs/AssistantMessage",
+              "busy_changed": "#/$defs/BusyChanged",
+              "catalog": "#/$defs/Catalog",
+              "checks_proposed": "#/$defs/ChecksProposed",
+              "command_accepted": "#/$defs/CommandAccepted",
+              "command_refused": "#/$defs/CommandRefused",
+              "conversation_reset": "#/$defs/ConversationReset",
+              "error_occurred": "#/$defs/ErrorOccurred",
+              "notice": "#/$defs/Notice",
+              "progress_noted": "#/$defs/ProgressNoted",
+              "review_status": "#/$defs/ReviewStatus",
+              "sessions_listed": "#/$defs/SessionsListed",
+              "settings_changed": "#/$defs/SettingsChanged",
+              "snapshot": "#/$defs/Snapshot",
+              "startup_checked": "#/$defs/StartupChecked",
+              "task_gave_up": "#/$defs/TaskGaveUp",
+              "task_merged": "#/$defs/TaskMerged",
+              "task_started": "#/$defs/TaskStarted",
+              "tasks_changed": "#/$defs/TasksChanged",
+              "tool_call_finished": "#/$defs/ToolCallFinished",
+              "tool_call_started": "#/$defs/ToolCallStarted",
+              "turn_finished": "#/$defs/TurnFinished",
+              "turn_started": "#/$defs/TurnStarted",
+              "usage_changed": "#/$defs/UsageChanged",
+              "verification_changed": "#/$defs/VerificationChanged",
+              "verification_finished": "#/$defs/VerificationFinished",
+              "verification_skipped": "#/$defs/VerificationSkipped",
+              "verification_started": "#/$defs/VerificationStarted",
+              "welcome": "#/$defs/Welcome"
+            },
+            "propertyName": "type"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/SettingsChanged"
+            },
+            {
+              "$ref": "#/$defs/TurnStarted"
+            },
+            {
+              "$ref": "#/$defs/AssistantMessage"
+            },
+            {
+              "$ref": "#/$defs/ToolCallStarted"
+            },
+            {
+              "$ref": "#/$defs/ToolCallFinished"
+            },
+            {
+              "$ref": "#/$defs/TurnFinished"
+            },
+            {
+              "$ref": "#/$defs/BusyChanged"
+            },
+            {
+              "$ref": "#/$defs/TasksChanged"
+            },
+            {
+              "$ref": "#/$defs/TaskStarted"
+            },
+            {
+              "$ref": "#/$defs/VerificationChanged"
+            },
+            {
+              "$ref": "#/$defs/StartupChecked"
+            },
+            {
+              "$ref": "#/$defs/VerificationStarted"
+            },
+            {
+              "$ref": "#/$defs/VerificationSkipped"
+            },
+            {
+              "$ref": "#/$defs/VerificationFinished"
+            },
+            {
+              "$ref": "#/$defs/ErrorOccurred"
+            },
+            {
+              "$ref": "#/$defs/AgentStarted"
+            },
+            {
+              "$ref": "#/$defs/AgentRequest"
+            },
+            {
+              "$ref": "#/$defs/AgentReply"
+            },
+            {
+              "$ref": "#/$defs/ProgressNoted"
+            },
+            {
+              "$ref": "#/$defs/TaskGaveUp"
+            },
+            {
+              "$ref": "#/$defs/AgentExited"
+            },
+            {
+              "$ref": "#/$defs/TaskMerged"
+            },
+            {
+              "$ref": "#/$defs/Notice"
+            },
+            {
+              "$ref": "#/$defs/ReviewStatus"
+            },
+            {
+              "$ref": "#/$defs/ChecksProposed"
+            },
+            {
+              "$ref": "#/$defs/UsageChanged"
+            },
+            {
+              "$ref": "#/$defs/SessionsListed"
+            },
+            {
+              "$ref": "#/$defs/ConversationReset"
+            },
+            {
+              "$ref": "#/$defs/Snapshot"
+            },
+            {
+              "$ref": "#/$defs/Catalog"
+            },
+            {
+              "$ref": "#/$defs/Welcome"
+            },
+            {
+              "$ref": "#/$defs/CommandAccepted"
+            },
+            {
+              "$ref": "#/$defs/CommandRefused"
+            }
+          ],
+          "title": "Payload"
+        },
+        "seq": {
+          "minimum": 1,
+          "title": "Seq",
+          "type": "integer"
+        },
+        "session": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Session"
+        },
+        "traceparent": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Traceparent"
+        },
+        "tracestate": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tracestate"
+        },
+        "workspace": {
+          "default": "default",
+          "title": "Workspace",
+          "type": "string"
+        }
+      },
+      "required": [
+        "seq",
+        "payload"
+      ],
+      "title": "EventEnvelope",
+      "type": "object"
+    },
+    "FireTrigger": {
+      "description": "Fire the manual trigger named ``trigger`` with ``input`` as its template values.",
+      "properties": {
+        "input": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "title": "Input",
+          "type": "object"
+        },
+        "trigger": {
+          "minLength": 1,
+          "title": "Trigger",
+          "type": "string"
+        },
+        "type": {
+          "const": "fire_trigger",
+          "default": "fire_trigger",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "trigger"
+      ],
+      "title": "FireTrigger",
+      "type": "object"
+    },
+    "Hello": {
+      "description": "Open the stream as ``client``, speaking ``protocol_version`` of the protocol; it must\ncome before any other command. ``since`` is the last ``seq`` the client saw, if any; it's\naccepted and ignored for now. Answered with ``Welcome``, or refused.",
+      "properties": {
+        "client": {
+          "title": "Client",
+          "type": "string"
+        },
+        "protocol_version": {
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "since": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Since"
+        },
+        "type": {
+          "const": "hello",
+          "default": "hello",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "client",
+        "protocol_version"
+      ],
+      "title": "Hello",
+      "type": "object"
+    },
+    "ListSessions": {
+      "description": "Ask for the saved sessions, answered with ``SessionsListed``.",
+      "properties": {
+        "type": {
+          "const": "list_sessions",
+          "default": "list_sessions",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "title": "ListSessions",
+      "type": "object"
+    },
+    "NewSession": {
+      "description": "Switch to a new, empty session ``name``d so, or by the time it started if ``name`` is\nnone; refused as ``OpenSession`` is.",
+      "properties": {
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name"
+        },
+        "type": {
+          "const": "new_session",
+          "default": "new_session",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "title": "NewSession",
+      "type": "object"
+    },
+    "Notice": {
+      "description": "Something worth the user's attention that isn't an error.",
+      "properties": {
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "type": {
+          "const": "notice",
+          "default": "notice",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "message"
+      ],
+      "title": "Notice",
+      "type": "object"
+    },
+    "OpenRequest": {
+      "description": "A call ``request_id`` to orbit's ``tool`` that an agent made and orbit hasn't answered.",
+      "properties": {
+        "request_id": {
+          "title": "Request Id",
+          "type": "string"
+        },
+        "tool": {
+          "title": "Tool",
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "tool"
+      ],
+      "title": "OpenRequest",
+      "type": "object"
+    },
+    "OpenSession": {
+      "description": "Switch to saved session ``session_id``: its tasks, review state, planner conversation and\nsettings replace the open session's, and nothing runs until asked. Refused while tasks, a\nreview or the planner run.",
+      "properties": {
+        "session_id": {
+          "title": "Session Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "open_session",
+          "default": "open_session",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id"
+      ],
+      "title": "OpenSession",
+      "type": "object"
+    },
+    "ProgressNoted": {
+      "description": "A short status note an agent reported while working on task ``task_id``.",
+      "properties": {
+        "agent_id": {
+          "title": "Agent Id",
+          "type": "string"
+        },
+        "note": {
+          "title": "Note",
+          "type": "string"
+        },
+        "task_id": {
+          "title": "Task Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "progress_noted",
+          "default": "progress_noted",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "agent_id",
+        "task_id",
+        "note"
+      ],
+      "title": "ProgressNoted",
+      "type": "object"
+    },
+    "ProposedSetup": {
+      "description": "The setup an agent proposed: its ``command``, and the files whose changes rerun it.",
+      "properties": {
+        "command": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Command",
+          "type": "array"
+        },
+        "watch": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Watch",
+          "type": "array"
+        }
+      },
+      "required": [
+        "command"
+      ],
+      "title": "ProposedSetup",
+      "type": "object"
+    },
+    "ProposedStep": {
+      "description": "A verification step an agent proposed: its ``name`` and ``command``.",
+      "properties": {
+        "command": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Command",
+          "type": "array"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "command"
+      ],
+      "title": "ProposedStep",
+      "type": "object"
+    },
+    "RemoveTask": {
+      "description": "Take task ``task_id`` off the list; rejected while it runs.",
+      "properties": {
+        "task_id": {
+          "title": "Task Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "remove_task",
+          "default": "remove_task",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "task_id"
+      ],
+      "title": "RemoveTask",
+      "type": "object"
+    },
+    "RenameSession": {
+      "description": "Name the session ``session_id`` ``name``; refused for an empty name, or a session that's\nunreadable or open in another orbit. The sessions are listed again after.",
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "session_id": {
+          "title": "Session Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "rename_session",
+          "default": "rename_session",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "name"
+      ],
+      "title": "RenameSession",
+      "type": "object"
+    },
+    "ResetConversation": {
+      "description": "End the conversation of the agent ``agent``, so its next message starts a fresh one, and\nre-read its role from the project's config. Refused while the agent answers.",
+      "properties": {
+        "agent": {
+          "minLength": 1,
+          "title": "Agent",
+          "type": "string"
+        },
+        "type": {
+          "const": "reset_conversation",
+          "default": "reset_conversation",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "agent"
+      ],
+      "title": "ResetConversation",
+      "type": "object"
+    },
+    "ReviewStatus": {
+      "description": "Whether review is paused, and how many review batches are still open; sent on changes.",
+      "properties": {
+        "open_batches": {
+          "title": "Open Batches",
+          "type": "integer"
+        },
+        "paused": {
+          "title": "Paused",
+          "type": "boolean"
+        },
+        "type": {
+          "const": "review_status",
+          "default": "review_status",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "paused",
+        "open_batches"
+      ],
+      "title": "ReviewStatus",
+      "type": "object"
+    },
+    "RunTasks": {
+      "description": "Run the task list: every task that hasn't finished, in order, each in a new context.\n\nTasks added while it runs join in. Rejected while a run is in progress (the planner's\nturns don't count); ``CancelTurn`` stops the task in progress and the run.",
+      "properties": {
+        "type": {
+          "const": "run_tasks",
+          "default": "run_tasks",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "title": "RunTasks",
+      "type": "object"
+    },
+    "RunningAgent": {
+      "description": "Agent ``agent_id``, running in the ``role`` on task ``task_id``, with its\n``open_requests``, oldest first.",
+      "properties": {
+        "agent_id": {
+          "title": "Agent Id",
+          "type": "string"
+        },
+        "open_requests": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/OpenRequest"
+          },
+          "title": "Open Requests",
+          "type": "array"
+        },
+        "role": {
+          "title": "Role",
+          "type": "string"
+        },
+        "task_id": {
+          "title": "Task Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "agent_id",
+        "role",
+        "task_id"
+      ],
+      "title": "RunningAgent",
+      "type": "object"
+    },
+    "SendMessage": {
+      "description": "Send ``text`` to the conversational agent ``agent``, which answers in its own lane.",
+      "properties": {
+        "agent": {
+          "minLength": 1,
+          "title": "Agent",
+          "type": "string"
+        },
+        "text": {
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        },
+        "type": {
+          "const": "send_message",
+          "default": "send_message",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "agent",
+        "text"
+      ],
+      "title": "SendMessage",
+      "type": "object"
+    },
+    "SessionSummary": {
+      "description": "A saved session as the list of sessions shows it: how many of its tasks stand at each\nstatus in ``counts``, and what they cost together in ``usage``. ``current`` marks the\nsession open here, ``locked`` one open in another orbit, and ``unreadable`` says why a\nsession can't be opened, if it can't.",
+      "properties": {
+        "counts": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "default": {},
+          "propertyNames": {
+            "enum": [
+              "draft",
+              "pending",
+              "running",
+              "verifying",
+              "completed",
+              "unverified",
+              "gave_up",
+              "cancelled",
+              "error"
+            ]
+          },
+          "title": "Counts",
+          "type": "object"
+        },
+        "current": {
+          "default": false,
+          "title": "Current",
+          "type": "boolean"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "last_active": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Last Active"
+        },
+        "locked": {
+          "default": false,
+          "title": "Locked",
+          "type": "boolean"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "unreadable": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Unreadable"
+        },
+        "usage": {
+          "$ref": "#/$defs/Usage",
+          "default": {
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 0,
+            "cost_usd": 0.0,
+            "duration_ms": 0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "turns": 0
+          }
+        }
+      },
+      "required": [
+        "id",
+        "name"
+      ],
+      "title": "SessionSummary",
+      "type": "object"
+    },
+    "SessionsListed": {
+      "description": "The saved sessions, the most recently active first; those that can't be read come last.\n\nThe ``reason`` says what the listing answers.",
+      "properties": {
+        "reason": {
+          "enum": [
+            "startup",
+            "asked",
+            "refreshed"
+          ],
+          "title": "Reason",
+          "type": "string"
+        },
+        "sessions": {
+          "items": {
+            "$ref": "#/$defs/SessionSummary"
+          },
+          "title": "Sessions",
+          "type": "array"
+        },
+        "type": {
+          "const": "sessions_listed",
+          "default": "sessions_listed",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessions",
+        "reason"
+      ],
+      "title": "SessionsListed",
+      "type": "object"
+    },
+    "Settings": {
+      "description": "Per-session agent configuration. ``model=None`` means the backend's default.",
+      "properties": {
+        "model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model"
+        },
+        "tool_access": {
+          "default": "restricted",
+          "enum": [
+            "off",
+            "restricted",
+            "full"
+          ],
+          "title": "Tool Access",
+          "type": "string"
+        }
+      },
+      "title": "Settings",
+      "type": "object"
+    },
+    "SettingsChanged": {
+      "description": "Current settings, sent on connect and after every change.",
+      "properties": {
+        "model_choices": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Model Choices",
+          "type": "array"
+        },
+        "settings": {
+          "$ref": "#/$defs/Settings"
+        },
+        "type": {
+          "const": "settings_changed",
+          "default": "settings_changed",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "settings"
+      ],
+      "title": "SettingsChanged",
+      "type": "object"
+    },
+    "Snapshot": {
+      "description": "The open session as it stands, sent after ``Welcome`` and after every switch; its\nenvelope's ``seq`` is the point it's current to.\n\nIt holds the ``session``'s summary, its ``settings`` and ``model_choices``, whether each\nlane is ``busy``, its ``tasks``, the verification ``steps`` and the ``steps_title`` they\nshow under, the ``review`` status (none when reviews are off), the checks ``proposals``\nwaiting for a decision, and the ``agents`` running.",
+      "properties": {
+        "agents": {
+          "items": {
+            "$ref": "#/$defs/RunningAgent"
+          },
+          "title": "Agents",
+          "type": "array"
+        },
+        "busy": {
+          "additionalProperties": {
+            "type": "boolean"
+          },
+          "title": "Busy",
+          "type": "object"
+        },
+        "model_choices": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Model Choices",
+          "type": "array"
+        },
+        "proposals": {
+          "items": {
+            "$ref": "#/$defs/ChecksProposed"
+          },
+          "title": "Proposals",
+          "type": "array"
+        },
+        "review": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ReviewStatus"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "session": {
+          "$ref": "#/$defs/SessionSummary"
+        },
+        "settings": {
+          "$ref": "#/$defs/Settings"
+        },
+        "steps": {
+          "items": {
+            "$ref": "#/$defs/StepState"
+          },
+          "title": "Steps",
+          "type": "array"
+        },
+        "steps_title": {
+          "default": "",
+          "title": "Steps Title",
+          "type": "string"
+        },
+        "tasks": {
+          "items": {
+            "$ref": "#/$defs/TaskState"
+          },
+          "title": "Tasks",
+          "type": "array"
+        },
+        "type": {
+          "const": "snapshot",
+          "default": "snapshot",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "session",
+        "settings",
+        "model_choices",
+        "busy",
+        "tasks",
+        "steps",
+        "review",
+        "proposals",
+        "agents"
+      ],
+      "title": "Snapshot",
+      "type": "object"
+    },
+    "StartupChecked": {
+      "description": "The verification steps ran once on the base commit at startup. Unless they all\n``passed``, ``step`` failed with ``output`` (its end), and a draft task to fix it was added.",
+      "properties": {
+        "output": {
+          "default": "",
+          "title": "Output",
+          "type": "string"
+        },
+        "passed": {
+          "title": "Passed",
+          "type": "boolean"
+        },
+        "step": {
+          "default": "",
+          "title": "Step",
+          "type": "string"
+        },
+        "type": {
+          "const": "startup_checked",
+          "default": "startup_checked",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "passed"
+      ],
+      "title": "StartupChecked",
+      "type": "object"
+    },
+    "StepState": {
+      "description": "One verification step and how it fared after the current task.",
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "status": {
+          "default": "pending",
+          "enum": [
+            "pending",
+            "running",
+            "passed",
+            "failed",
+            "cancelled",
+            "skipped"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "StepState",
+      "type": "object"
+    },
+    "TaskGaveUp": {
+      "description": "The agent working on task ``task_id`` reported it can't do it, and why.",
+      "properties": {
+        "agent_id": {
+          "title": "Agent Id",
+          "type": "string"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        },
+        "task_id": {
+          "title": "Task Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "task_gave_up",
+          "default": "task_gave_up",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "agent_id",
+        "task_id",
+        "reason"
+      ],
+      "title": "TaskGaveUp",
+      "type": "object"
+    },
+    "TaskMerged": {
+      "description": "Task ``task_id``'s work was committed as ``commit``, and this came of merging it;\n``detail`` says why when it wasn't merged.",
+      "properties": {
+        "commit": {
+          "default": "",
+          "title": "Commit",
+          "type": "string"
+        },
+        "detail": {
+          "default": "",
+          "title": "Detail",
+          "type": "string"
+        },
+        "result": {
+          "enum": [
+            "merged",
+            "rebased",
+            "conflict",
+            "blocked",
+            "detached"
+          ],
+          "title": "Result",
+          "type": "string"
+        },
+        "task_id": {
+          "title": "Task Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "task_merged",
+          "default": "task_merged",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "task_id",
+        "result"
+      ],
+      "title": "TaskMerged",
+      "type": "object"
+    },
+    "TaskSpec": {
+      "description": "One queued prompt, run in its own fresh context with its own settings.\n\n``role`` names the kind of agent that takes it, such as ``coder`` or ``reviewer``.",
+      "properties": {
+        "prompt": {
+          "minLength": 1,
+          "title": "Prompt",
+          "type": "string"
+        },
+        "role": {
+          "default": "coder",
+          "minLength": 1,
+          "title": "Role",
+          "type": "string"
+        },
+        "settings": {
+          "$ref": "#/$defs/Settings",
+          "default": {
+            "model": null,
+            "tool_access": "restricted"
+          }
+        }
+      },
+      "required": [
+        "prompt"
+      ],
+      "title": "TaskSpec",
+      "type": "object"
+    },
+    "TaskStarted": {
+      "description": "Task ``task_id`` begins; its turn's events follow.",
+      "properties": {
+        "task_id": {
+          "title": "Task Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "task_started",
+          "default": "task_started",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "task_id"
+      ],
+      "title": "TaskStarted",
+      "type": "object"
+    },
+    "TaskState": {
+      "description": "One entry of the task list. ``id`` stays the same while the list changes around it.\n\n``fixes`` is the id of the task this one was added to fix, if any; it comes right\nafter that task. ``attempt`` counts the fixes asked of the agent working on it, out\nof ``max_attempts``; both are 0 until verification first fails. A task a review\nsuggested belongs to that review's ``batch``, at review ``round`` (0 otherwise).\n``usage`` adds up what every turn run for the task cost. A task that ended badly says why\nin ``reason``, one line such as ``Unit tests failed``, with the full text in\n``reason_detail``; both are empty otherwise.",
+      "properties": {
+        "attempt": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Attempt",
+          "type": "integer"
+        },
+        "batch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Batch"
+        },
+        "fixes": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fixes"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "max_attempts": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Max Attempts",
+          "type": "integer"
+        },
+        "origin": {
+          "default": "manual",
+          "title": "Origin",
+          "type": "string"
+        },
+        "reason": {
+          "default": "",
+          "title": "Reason",
+          "type": "string"
+        },
+        "reason_detail": {
+          "default": "",
+          "title": "Reason Detail",
+          "type": "string"
+        },
+        "round": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Round",
+          "type": "integer"
+        },
+        "status": {
+          "default": "pending",
+          "enum": [
+            "draft",
+            "pending",
+            "running",
+            "verifying",
+            "completed",
+            "unverified",
+            "gave_up",
+            "cancelled",
+            "error"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "task": {
+          "$ref": "#/$defs/TaskSpec"
+        },
+        "usage": {
+          "$ref": "#/$defs/Usage",
+          "default": {
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 0,
+            "cost_usd": 0.0,
+            "duration_ms": 0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "turns": 0
+          }
+        }
+      },
+      "required": [
+        "id",
+        "task"
+      ],
+      "title": "TaskState",
+      "type": "object"
+    },
+    "TasksChanged": {
+      "description": "The whole task list, sent after every change to it.",
+      "properties": {
+        "tasks": {
+          "items": {
+            "$ref": "#/$defs/TaskState"
+          },
+          "title": "Tasks",
+          "type": "array"
+        },
+        "type": {
+          "const": "tasks_changed",
+          "default": "tasks_changed",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "tasks"
+      ],
+      "title": "TasksChanged",
+      "type": "object"
+    },
+    "ToolCallFinished": {
+      "properties": {
+        "agent_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agent Id"
+        },
+        "call_id": {
+          "title": "Call Id",
+          "type": "string"
+        },
+        "is_error": {
+          "default": false,
+          "title": "Is Error",
+          "type": "boolean"
+        },
+        "output": {
+          "title": "Output",
+          "type": "string"
+        },
+        "turn_id": {
+          "title": "Turn Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "tool_call_finished",
+          "default": "tool_call_finished",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "turn_id",
+        "call_id",
+        "output"
+      ],
+      "title": "ToolCallFinished",
+      "type": "object"
+    },
+    "ToolCallStarted": {
+      "properties": {
+        "agent_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agent Id"
+        },
+        "arguments": {
+          "additionalProperties": true,
+          "title": "Arguments",
+          "type": "object"
+        },
+        "call_id": {
+          "title": "Call Id",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "turn_id": {
+          "title": "Turn Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "tool_call_started",
+          "default": "tool_call_started",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "turn_id",
+        "call_id",
+        "name",
+        "arguments"
+      ],
+      "title": "ToolCallStarted",
+      "type": "object"
+    },
+    "TriggerEntry": {
+      "description": "A trigger ``name``, shown as ``label``; ``manual`` if the user fires it.",
+      "properties": {
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "manual": {
+          "title": "Manual",
+          "type": "boolean"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "label",
+        "manual"
+      ],
+      "title": "TriggerEntry",
+      "type": "object"
+    },
+    "TurnFinished": {
+      "description": "The turn ended for ``reason``; ``usage`` says what it cost, when the runner knows.",
+      "properties": {
+        "agent_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agent Id"
+        },
+        "reason": {
+          "enum": [
+            "completed",
+            "cancelled",
+            "max_steps",
+            "error"
+          ],
+          "title": "Reason",
+          "type": "string"
+        },
+        "turn_id": {
+          "title": "Turn Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "turn_finished",
+          "default": "turn_finished",
+          "title": "Type",
+          "type": "string"
+        },
+        "usage": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Usage"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "turn_id",
+        "reason"
+      ],
+      "title": "TurnFinished",
+      "type": "object"
+    },
+    "TurnStarted": {
+      "properties": {
+        "agent_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agent Id"
+        },
+        "turn_id": {
+          "title": "Turn Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "turn_started",
+          "default": "turn_started",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "turn_id"
+      ],
+      "title": "TurnStarted",
+      "type": "object"
+    },
+    "UpdateSettings": {
+      "description": "Replace the session settings; they apply from the next turn.",
+      "properties": {
+        "settings": {
+          "$ref": "#/$defs/Settings"
+        },
+        "type": {
+          "const": "update_settings",
+          "default": "update_settings",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "settings"
+      ],
+      "title": "UpdateSettings",
+      "type": "object"
+    },
+    "Usage": {
+      "description": "What turns cost: tokens of each kind, dollars, model round trips and time taken.\n\nUsages add up, so a task's total is the sum of its turns'.",
+      "properties": {
+        "cache_creation_input_tokens": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Cache Creation Input Tokens",
+          "type": "integer"
+        },
+        "cache_read_input_tokens": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Cache Read Input Tokens",
+          "type": "integer"
+        },
+        "cost_usd": {
+          "default": 0.0,
+          "minimum": 0,
+          "title": "Cost Usd",
+          "type": "number"
+        },
+        "duration_ms": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Duration Ms",
+          "type": "integer"
+        },
+        "input_tokens": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Input Tokens",
+          "type": "integer"
+        },
+        "output_tokens": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Output Tokens",
+          "type": "integer"
+        },
+        "turns": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Turns",
+          "type": "integer"
+        }
+      },
+      "title": "Usage",
+      "type": "object"
+    },
+    "UsageChanged": {
+      "description": "The subscription's usage limits, sent after every fetch.\n\nUnless the ``status`` is ``ok``, ``limits`` are the last good ones; ``detail`` says why\nusage is unavailable, and ``retry_at`` when a rate-limited fetch is tried again.",
+      "properties": {
+        "detail": {
+          "default": "",
+          "title": "Detail",
+          "type": "string"
+        },
+        "limits": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/UsageLimit"
+          },
+          "title": "Limits",
+          "type": "array"
+        },
+        "retry_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Retry At"
+        },
+        "status": {
+          "default": "ok",
+          "enum": [
+            "ok",
+            "rate_limited",
+            "unavailable"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "type": {
+          "const": "usage_changed",
+          "default": "usage_changed",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "title": "UsageChanged",
+      "type": "object"
+    },
+    "UsageLimit": {
+      "description": "How much of a subscription usage window, such as ``Session`` or ``Week``, is used, and\nwhen it resets (timezone-aware), if known.",
+      "properties": {
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "percent": {
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Percent",
+          "type": "number"
+        },
+        "resets_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resets At"
+        }
+      },
+      "required": [
+        "label",
+        "percent"
+      ],
+      "title": "UsageLimit",
+      "type": "object"
+    },
+    "VerificationChanged": {
+      "description": "The verification steps and their progress, sent on connect and after every change.\n\nNot sent when no steps are configured. ``title`` names what the steps are checking when\nit isn't the current task, such as the startup check; the panel shows it as a heading.",
+      "properties": {
+        "steps": {
+          "items": {
+            "$ref": "#/$defs/StepState"
+          },
+          "title": "Steps",
+          "type": "array"
+        },
+        "title": {
+          "default": "",
+          "title": "Title",
+          "type": "string"
+        },
+        "type": {
+          "const": "verification_changed",
+          "default": "verification_changed",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "steps"
+      ],
+      "title": "VerificationChanged",
+      "type": "object"
+    },
+    "VerificationFinished": {
+      "description": "Step ``step`` (an index into the steps) finished checking task ``task_id``.",
+      "properties": {
+        "passed": {
+          "title": "Passed",
+          "type": "boolean"
+        },
+        "step": {
+          "title": "Step",
+          "type": "integer"
+        },
+        "task_id": {
+          "title": "Task Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "verification_finished",
+          "default": "verification_finished",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "task_id",
+        "step",
+        "passed"
+      ],
+      "title": "VerificationFinished",
+      "type": "object"
+    },
+    "VerificationSkipped": {
+      "description": "Task ``task_id`` completed but has nothing to verify, so no step runs.",
+      "properties": {
+        "reason": {
+          "enum": [
+            "tools_off",
+            "no_changes",
+            "unchanged",
+            "no_steps"
+          ],
+          "title": "Reason",
+          "type": "string"
+        },
+        "task_id": {
+          "title": "Task Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "verification_skipped",
+          "default": "verification_skipped",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "task_id",
+        "reason"
+      ],
+      "title": "VerificationSkipped",
+      "type": "object"
+    },
+    "VerificationStarted": {
+      "description": "Step ``step`` (an index into the steps) begins checking task ``task_id``.",
+      "properties": {
+        "step": {
+          "title": "Step",
+          "type": "integer"
+        },
+        "task_id": {
+          "title": "Task Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "verification_started",
+          "default": "verification_started",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "task_id",
+        "step"
+      ],
+      "title": "VerificationStarted",
+      "type": "object"
+    },
+    "Welcome": {
+      "description": "``Hello`` ``command_id`` was received, in place of its ``CommandAccepted``: the backend,\norbit ``server_version``, publishes its events from here on.",
+      "properties": {
+        "command_id": {
+          "title": "Command Id",
+          "type": "string"
+        },
+        "server_version": {
+          "title": "Server Version",
+          "type": "string"
+        },
+        "type": {
+          "const": "welcome",
+          "default": "welcome",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "command_id",
+        "server_version"
+      ],
+      "title": "Welcome",
+      "type": "object"
+    },
+    "WorkspaceEntry": {
+      "description": "Workspace ``id``, shown as ``label``, and its ``sessions`` as the list of sessions shows\nthem.",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "sessions": {
+          "items": {
+            "$ref": "#/$defs/SessionSummary"
+          },
+          "title": "Sessions",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "sessions"
+      ],
+      "title": "WorkspaceEntry",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/CommandEnvelope"
+    },
+    {
+      "$ref": "#/$defs/EventEnvelope"
+    }
+  ],
+  "title": "Orbit protocol",
+  "x-protocol-version": 1
+}

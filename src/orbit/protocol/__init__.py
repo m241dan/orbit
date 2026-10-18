@@ -120,6 +120,7 @@ from orbit.protocol.messages import (
     command_adapter,
     event_adapter,
 )
+from orbit.protocol.schema import protocol_schema
 from orbit.protocol.session import Session
 from orbit.protocol.threaded import ThreadedSession
 from orbit.protocol.wire import ProtocolError, decode_command, decode_event, encode
@@ -247,4 +248,5 @@ __all__ = [
     "decode_event",
     "encode",
     "event_adapter",
+    "protocol_schema",
 ]

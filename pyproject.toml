@@ -26,6 +26,7 @@ build-backend = "uv_build"
 [dependency-groups]
 dev = [
     "import-linter>=2.15",
+    "jsonschema>=4.26.0",
     "lizard>=1.24.1",
     "mypy>=2.4.0",
     "pre-commit>=4.6.2",
@@ -34,6 +35,7 @@ dev = [
     "pytest-cov>=7.1.0",
     "pytest-xdist>=3.8.0",
     "ruff>=0.17.0",
+    "types-jsonschema>=4.26.0.20261006",
 ]
 
 [tool.ruff]
@@ -118,8 +120,9 @@ name = "Domain does no I/O"
 type = "forbidden"
 source_modules = ["orbit.agent.domain"]
 forbidden_modules = ["asyncio", "subprocess", "os", "pathlib", "json", "uuid", "time"]
-# The domain uses the protocol's messages; the threaded session it also exports is the CLI's.
-ignore_imports = ["orbit.protocol -> orbit.protocol.threaded"]
+# The domain uses the protocol's messages; the threaded session it also exports is the CLI's,
+# and the schema writer a developer's.
+ignore_imports = ["orbit.protocol -> orbit.protocol.threaded", "orbit.protocol -> orbit.protocol.schema"]
 
 # MCP, the web server it runs on and the HTTP client are details of the external adapters.
 # The CLI wires the adapters up, so it reaches them indirectly.
