@@ -85,6 +85,34 @@ async def test_enter_opens_the_highlighted_session() -> None:
         assert not isinstance(app.screen, SessionsScreen)
 
 
+async def test_opening_a_session_that_fails_to_send_shows_why() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, LISTED)
+        session.send_error = RuntimeError("the backend is gone")
+        await pilot.press("j", "j", "enter")
+        await pilot.pause()
+
+        assert app.is_running
+        assert session.commands == [OpenSession(session_id="old")]
+        assert entries(app)[-1] == ("Couldn't send the command: the backend is gone", "error")
+
+
+async def test_deleting_a_session_that_fails_to_send_shows_why() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, LISTED)
+        session.send_error = RuntimeError("the backend is gone")
+        await pilot.press("j", "j", "x", "y")
+        await pilot.pause()
+
+        assert app.is_running
+        assert session.commands == [DeleteSession(session_id="old")]
+        assert entries(app)[-1] == ("Couldn't send the command: the backend is gone", "error")
+
+
 async def test_choosing_the_current_session_just_closes_the_modal() -> None:
     session = FakeSession()
     app = OrbitApp(session)

@@ -30,6 +30,7 @@ from orbit.protocol import (
     EventEnvelope,
     Hello,
     Notice,
+    RunTasks,
     SendMessage,
     SessionSummary,
     Settings,
@@ -238,6 +239,29 @@ async def test_a_message_that_fails_to_send_shows_why_and_frees_the_prompt() -> 
         assert app.is_running
         assert entries(app)[-1] == ("Couldn't send the command: the backend is gone", "error")
         assert prompt.border_title == "Prompt · planner"
+
+
+async def test_a_message_that_failed_to_send_lets_the_next_enter_send_again() -> None:
+    session = FakeSession()
+    session.send_error = RuntimeError("the backend is gone")
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await pilot.press("i", *"hi", "enter")
+        await pilot.press("i", *"hi", "enter")
+        await pilot.pause()
+        assert session.commands == [SendMessage(agent=PLANNER, text="hi")] * 2
+
+
+async def test_running_tasks_when_the_send_fails_shows_why_and_keeps_running() -> None:
+    session = FakeSession()
+    session.send_error = RuntimeError("the backend is gone")
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await pilot.press("ctrl+r")
+        await pilot.pause()
+        assert app.is_running
+        assert session.commands == [RunTasks()]
+        assert entries(app)[-1] == ("Couldn't send the command: the backend is gone", "error")
 
 
 async def test_another_command_that_fails_to_send_leaves_the_planner_busy() -> None:

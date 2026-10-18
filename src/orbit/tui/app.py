@@ -560,25 +560,21 @@ class OrbitApp(App[None], inherit_bindings=False):
         # The display updates when the backend confirms with SettingsChanged.
         await self._send(UpdateSettings(settings=settings))
 
-    async def _send(self, command: Command) -> None:
-        """Send ``command`` to the open session; a failure to send it is shown, freeing the
-        planner from a message, as a refusal does."""
-        try:
-            await self._deliver(command)
-        except Exception as exc:
-            if isinstance(command, SendMessage):
-                self._set_busy(PLANNER_LANE, False)
-            self._render_event(
-                ErrorOccurred(code=INTERNAL, message=f"Couldn't send the command: {exc}")
-            )
-
-    async def _deliver(self, command: Command) -> None:
-        """Send ``command`` to the open session in the default workspace, under a fresh id,
-        remembered for a message."""
+    async def _send(self, command: Command, failure: str = "Couldn't send the command") -> bool:
+        """Whether ``command`` was sent to the open session in the default workspace, under a
+        fresh id remembered for a message; a failure to send it is shown after ``failure``,
+        freeing the planner from a message, as a refusal does."""
         command_id = uuid4().hex
         if isinstance(command, SendMessage):
             self._message_id = command_id
-        await self._session.send(CommandEnvelope(command_id=command_id, payload=command))
+        try:
+            await self._session.send(CommandEnvelope(command_id=command_id, payload=command))
+        except Exception as exc:
+            if isinstance(command, SendMessage):
+                self._set_busy(PLANNER_LANE, False)
+            self._render_event(ErrorOccurred(code=INTERNAL, message=f"{failure}: {exc}"))
+            return False
+        return True
 
     @work(exclusive=True, group="events")
     async def _consume_events(self) -> None:
@@ -594,18 +590,10 @@ class OrbitApp(App[None], inherit_bindings=False):
 
     async def _hello(self) -> bool:
         """Whether the Hello opening the session was sent; a failure to send it is shown."""
-        try:
-            await self._deliver(
-                Hello(client=f"orbit-tui {__version__}", protocol_version=PROTOCOL_VERSION)
-            )
-        except Exception as exc:
-            self._render_event(
-                ErrorOccurred(
-                    code=INTERNAL, message=f"The backend failed to start the session: {exc}"
-                )
-            )
-            return False
-        return True
+        return await self._send(
+            Hello(client=f"orbit-tui {__version__}", protocol_version=PROTOCOL_VERSION),
+            "The backend failed to start the session",
+        )
 
     async def _next_batch(self, batches: AsyncIterator[list[Event]]) -> list[Event]:
         """The next of ``batches``; none once they end, or once reading them fails, which is

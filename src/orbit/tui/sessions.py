@@ -31,8 +31,9 @@ SessionChoice = OpenSession | NewSession
 SessionChange = RenameSession | DeleteSession
 """A change to a saved session, made while the list stays open."""
 
-Manage = Callable[[SessionChange], Awaitable[None]]
-"""Sends a change to a saved session to the backend, which lists the sessions again after."""
+Manage = Callable[[SessionChange], Awaitable[object]]
+"""Sends a change to a saved session to the backend, which lists the sessions again after;
+whatever it returns is ignored."""
 
 
 class SessionsScreen(ModalScreen[SessionChoice | None]):
