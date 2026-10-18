@@ -9,7 +9,7 @@ from orbit.agent.application.ports import ProposalDecision
 from orbit.agent.application.proposal_trial import ProposalTrial, Verdict
 from orbit.agent.application.verifier import Failure
 from orbit.agent.domain.agent_task import AgentTask, Limits
-from orbit.agent.domain.roles import ChecksProposal, Setup
+from orbit.agent.domain.checks import ChecksProposal, Setup
 from orbit.agent.domain.verification import VerificationStep
 from orbit.protocol import TaskSpec
 

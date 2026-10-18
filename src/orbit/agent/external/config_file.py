@@ -7,7 +7,9 @@ import tomlkit
 from tomlkit.exceptions import TOMLKitError
 from tomlkit.items import AoT, Table
 
-from orbit.agent.domain.roles import ChecksProposal, ConfigError, OrbitConfig, load_config
+from orbit.agent.domain.checks import ChecksProposal
+from orbit.agent.domain.config import OrbitConfig, load_config
+from orbit.agent.domain.config_errors import ConfigError
 from orbit.agent.external.built_in_roles import read_built_in_roles
 
 CONFIG_PATH = ".orbit/config.toml"

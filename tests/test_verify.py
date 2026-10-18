@@ -3,7 +3,7 @@ import sys
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.application.verifier import Verification, Verifier, first_failure
 from orbit.agent.domain.board import TaskBoard
-from orbit.agent.domain.roles import Setup, setup_step
+from orbit.agent.domain.checks import Setup, setup_step
 from orbit.agent.domain.verification import (
     CUT,
     HEAD_LIMIT,

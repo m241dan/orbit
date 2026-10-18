@@ -1,5 +1,5 @@
-"""Roles agents work in, orbit's limits, its verification steps and worktree setup: built-in
-defaults a project file can change.
+"""Roles agents work in: built-in defaults a project file can change, and the tasks orbit
+queues in them.
 
 The built-in roles' instructions aren't kept here: whoever builds the roles passes them in.
 
@@ -8,15 +8,12 @@ claims of being done are verified, and how long it may take. Its model and tool 
 defaults for tasks orbit queues in that role; a task the user queues keeps its own settings.
 """
 
-import shlex
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from orbit.agent.domain.agent_task import Limits
-from orbit.agent.domain.reviews import ReviewLimits
-from orbit.agent.domain.verification import MAX_FALLBACK_FIXES, VerificationStep
+from orbit.agent.domain.config_errors import ConfigError
 from orbit.protocol import (
     BUILT_IN_ROLE_NAMES,
     CODER,
@@ -43,10 +40,6 @@ ORBIT_TOOLS = (
 
 REVIEW_ROLES = frozenset({REVIEWER, SUPER_REVIEWER})
 """The roles that review work rather than do it."""
-
-
-class ConfigError(ValueError):
-    """The configuration is invalid; the message says where and why, on one line per problem."""
 
 
 class _Config(BaseModel):
@@ -137,163 +130,3 @@ def built_in_roles(instructions: Mapping[str, str]) -> dict[str, Role]:
         name: Role(instructions=instructions[name], **_BUILT_IN_FIELDS[name])
         for name in BUILT_IN_ROLE_NAMES
     }
-
-
-class VerificationConfig(_Config):
-    """The steps that verify a task, run in order; with none, nothing is verified."""
-
-    steps: tuple[VerificationStep, ...] = ()
-
-    @field_validator("steps")
-    @classmethod
-    def _complete_steps(cls, steps: tuple[VerificationStep, ...]) -> tuple[VerificationStep, ...]:
-        numbers: dict[str, int] = {}
-        for number, step in enumerate(steps, start=1):
-            if not step.name.strip():
-                raise ValueError(f"step {number} has no name")
-            if not step.command:
-                raise ValueError(f"step {number} has no command")
-            if not step.command[0].strip():
-                raise ValueError(f"step {number} has no program")
-            if step.name in numbers:
-                raise ValueError(f"step {number} has the same name as step {numbers[step.name]}")
-            numbers[step.name] = number
-        return steps
-
-
-class Setup(_Config):
-    """What makes a fresh worktree ready to work in: ``command`` runs there when it's first
-    prepared, and again whenever a file in ``watch`` (paths relative to the tree) changes."""
-
-    command: tuple[str, ...] = Field(min_length=1)
-    watch: tuple[str, ...] = ()
-
-    @field_validator("watch")
-    @classmethod
-    def _relative_paths(cls, watch: tuple[str, ...]) -> tuple[str, ...]:
-        for path in watch:
-            if not path or path.startswith("/") or ".." in path.split("/"):
-                raise ValueError(f"{path!r} isn't a relative path inside the project")
-        return watch
-
-
-def setup_step(setup: Setup) -> VerificationStep:
-    """``setup``'s command, as a step run before the others."""
-    return VerificationStep("setup", setup.command)
-
-
-class ChecksProposal(VerificationConfig):
-    """Verification steps, at least one, and a setup, as an agent proposes them."""
-
-    steps: tuple[VerificationStep, ...] = Field(min_length=1)
-    setup: Setup | None = None
-
-
-def describe_checks(steps: Sequence[VerificationStep], setup: Setup | None) -> str:
-    """``steps``, one per line, then ``setup``; each part only if there is one."""
-    parts = []
-    if steps:
-        lines = [f"- {step.name}: {shlex.join(step.command)}" for step in steps]
-        parts.append("Steps:\n" + "\n".join(lines))
-    if setup is not None:
-        line = f"Setup: {shlex.join(setup.command)}"
-        if setup.watch:
-            line += f" (again when {', '.join(setup.watch)} changes)"
-        parts.append(line)
-    return "\n\n".join(parts)
-
-
-def configure_prompt(steps: Sequence[VerificationStep], setup: Setup | None) -> str:
-    """The task for a configurator asked for from the frontend, told what's configured now."""
-    prompt = (
-        "Set up this project's verification steps: work out the checks it uses and propose"
-        " them with propose_checks."
-    )
-    current = describe_checks(steps, setup)
-    if not current:
-        return prompt + " Nothing is configured yet."
-    return prompt + " Configured now (build on these):\n\n" + current
-
-
-def parse_proposal(data: dict[str, Any]) -> ChecksProposal:
-    """The proposal ``data`` (an agent's arguments) describes; raises :class:`ConfigError` if
-    it's invalid."""
-    try:
-        return ChecksProposal.model_validate(data)
-    except ValidationError as exc:
-        raise ConfigError(_describe(exc)) from None
-
-
-_LIMITS = Limits()
-_REVIEW_LIMITS = ReviewLimits()
-
-
-class OrbitConfig(_Config):
-    """Orbit's limits and roles.
-
-    ``fix_attempts``: in-session fixes, asked of the same agent before its task falls back.
-    ``max_checks``: verification steps an agent may run itself before claiming done.
-    ``fallback_fixes``: fresh-agent fix tasks one task's chain may queue for each failing step.
-    ``review_rounds``: rounds of review-suggested work after which review pauses.
-    ``super_review_every``: commits between super reviews.
-    ``review_suggestions`` / ``super_review_suggestions``: tasks one review may suggest.
-    ``verification``: how tasks are verified.
-    ``setup``: how the coder's worktree is set up; ``None`` sets nothing up.
-    """
-
-    fix_attempts: int = Field(default=_LIMITS.max_attempts, ge=1)
-    max_checks: int = Field(default=_LIMITS.max_checks, ge=1)
-    fallback_fixes: int = Field(default=MAX_FALLBACK_FIXES, ge=1)
-    review_rounds: int = Field(default=_REVIEW_LIMITS.rounds, ge=1)
-    super_review_every: int = Field(default=_REVIEW_LIMITS.super_every, ge=1)
-    review_suggestions: int = Field(default=_REVIEW_LIMITS.suggestions, ge=1)
-    super_review_suggestions: int = Field(default=_REVIEW_LIMITS.super_suggestions, ge=1)
-    roles: dict[str, Role]
-    verification: VerificationConfig = VerificationConfig()
-    setup: Setup | None = None
-
-    @property
-    def limits(self) -> Limits:
-        return Limits(max_attempts=self.fix_attempts, max_checks=self.max_checks)
-
-    @property
-    def review_limits(self) -> ReviewLimits:
-        return ReviewLimits(
-            rounds=self.review_rounds,
-            suggestions=self.review_suggestions,
-            super_every=self.super_review_every,
-            super_suggestions=self.super_review_suggestions,
-        )
-
-
-def load_config(data: dict[str, Any], built_in: Mapping[str, Role]) -> OrbitConfig:
-    """The configuration ``data`` (a project file's contents) describes over the defaults, whose
-    roles are ``built_in``.
-
-    A role it names that's built in keeps the fields it doesn't set; any other role is new.
-    Raises :class:`ConfigError` if it's invalid.
-    """
-    data = dict(data)
-    roles = data.get("roles", {})
-    if isinstance(roles, dict):
-        data["roles"] = _with_built_in_roles(roles, built_in)
-    try:
-        return OrbitConfig.model_validate(data)
-    except ValidationError as exc:
-        raise ConfigError(_describe(exc)) from None
-
-
-def _with_built_in_roles(roles: dict[str, Any], built_in: Mapping[str, Role]) -> dict[str, Any]:
-    merged: dict[str, Any] = {name: role.model_dump() for name, role in built_in.items()}
-    for name, fields in roles.items():
-        base = merged.get(name, {})
-        merged[name] = {**base, **fields} if isinstance(fields, dict) else fields
-    return merged
-
-
-def _describe(error: ValidationError) -> str:
-    problems = []
-    for problem in error.errors():
-        where = ".".join(str(part) for part in problem["loc"])
-        problems.append(f"{where}: {problem['msg']}")
-    return "\n".join(problems)

@@ -17,7 +17,7 @@ from collections.abc import Collection, Sequence
 from pathlib import Path
 
 from orbit.agent.application.ports import Merge
-from orbit.agent.domain.roles import Setup
+from orbit.agent.domain.checks import Setup
 from orbit.agent.external.processes import run_process
 
 BRANCH = "orbit/coder"

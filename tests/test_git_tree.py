@@ -10,7 +10,7 @@ from typing import Any
 
 import pytest
 
-from orbit.agent.domain.roles import Setup
+from orbit.agent.domain.checks import Setup
 from orbit.agent.external import git_tree
 from orbit.agent.external.git_tree import (
     GitCoderTree,

@@ -23,14 +23,10 @@ from orbit.agent.application.verifier import Failure, Verifier, first_failure
 from orbit.agent.domain.agent_task import FINISHED, AgentTask, Phase
 from orbit.agent.domain.agents import Agent, bootstrap_prompt
 from orbit.agent.domain.board import TaskBoard
+from orbit.agent.domain.checks import ChecksProposal, parse_proposal
+from orbit.agent.domain.config_errors import ConfigError
 from orbit.agent.domain.endings import Ending, bug, error, run_ending, unaccepted
-from orbit.agent.domain.roles import (
-    ChecksProposal,
-    ConfigError,
-    Role,
-    parse_proposal,
-    task_suggestion,
-)
+from orbit.agent.domain.roles import Role, task_suggestion
 from orbit.agent.domain.verification import VerificationStep, check_reply, failure_reason
 from orbit.protocol import (
     AGENT_FAILED,

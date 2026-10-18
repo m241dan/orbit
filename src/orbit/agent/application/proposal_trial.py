@@ -8,7 +8,7 @@ from typing import Any
 from orbit.agent.application.ports import ProposalDecision
 from orbit.agent.application.verifier import Failure
 from orbit.agent.domain.agent_task import AgentTask
-from orbit.agent.domain.roles import ChecksProposal, setup_step
+from orbit.agent.domain.checks import ChecksProposal, setup_step
 from orbit.agent.domain.verification import VerificationStep
 
 RunSteps = Callable[[Sequence[VerificationStep]], Awaitable[Failure | None]]

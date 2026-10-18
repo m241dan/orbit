@@ -2,7 +2,7 @@
 
 from collections.abc import Sequence
 
-from orbit.agent.domain.roles import ChecksProposal, describe_checks
+from orbit.agent.domain.checks import ChecksProposal, describe_checks
 from orbit.protocol import TaskSpec
 
 # Git's conventional limit for a subject line, and how much of the task to quote below it.

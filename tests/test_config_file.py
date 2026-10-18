@@ -3,7 +3,9 @@ from pathlib import Path
 
 import pytest
 
-from orbit.agent.domain.roles import ChecksProposal, ConfigError, OrbitConfig, Setup
+from orbit.agent.domain.checks import ChecksProposal, Setup
+from orbit.agent.domain.config import OrbitConfig
+from orbit.agent.domain.config_errors import ConfigError
 from orbit.agent.domain.verification import VerificationStep
 from orbit.agent.external.built_in_roles import read_built_in_roles
 from orbit.agent.external.config_file import CONFIG_PATH, read_config, write_checks

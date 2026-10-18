@@ -1,5 +1,5 @@
+from orbit.agent.domain.checks import ChecksProposal, Setup
 from orbit.agent.domain.commits import commit_message, configure_message
-from orbit.agent.domain.roles import ChecksProposal, Setup
 from orbit.agent.domain.verification import VerificationStep, fix_prompt
 from orbit.protocol import TaskSpec
 

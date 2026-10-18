@@ -7,8 +7,8 @@ from typing import Any
 from orbit.agent.application.ports import ProposalDecision
 from orbit.agent.application.session import AgentSession
 from orbit.agent.domain.agent_task import Limits
+from orbit.agent.domain.checks import ChecksProposal, Setup
 from orbit.agent.domain.endings import ENDED_AT_PROPOSAL, NO_PROPOSAL
-from orbit.agent.domain.roles import ChecksProposal, Setup
 from orbit.agent.domain.verification import VerificationStep, failure_report
 from orbit.protocol import (
     UNKNOWN,

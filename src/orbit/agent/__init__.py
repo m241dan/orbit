@@ -20,7 +20,10 @@ from orbit.agent.application.ports import (
 from orbit.agent.application.session import NO_STEPS_NOTE, AgentSession
 from orbit.agent.application.verifier import Verification
 from orbit.agent.domain.agent_task import Limits
-from orbit.agent.domain.roles import ChecksProposal, ConfigError, OrbitConfig, Role, Setup
+from orbit.agent.domain.checks import ChecksProposal, Setup
+from orbit.agent.domain.config import OrbitConfig
+from orbit.agent.domain.config_errors import ConfigError
+from orbit.agent.domain.roles import Role
 from orbit.agent.domain.verification import VerificationStep
 from orbit.agent.external.checks import run_step
 from orbit.agent.external.claude_cli import MODEL_ALIASES, ClaudeCliRunner

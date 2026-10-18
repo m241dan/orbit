@@ -14,8 +14,8 @@ from orbit.agent.application.tasks import Tasks
 from orbit.agent.application.verifier import Verifier
 from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.board import TaskBoard
+from orbit.agent.domain.checks import ChecksProposal
 from orbit.agent.domain.endings import BUG, STOPPED_BY_YOU
-from orbit.agent.domain.roles import ChecksProposal
 from orbit.agent.domain.verification import failure_report
 from orbit.protocol import (
     AGENT_FAILED,

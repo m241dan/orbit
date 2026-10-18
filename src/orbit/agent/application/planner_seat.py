@@ -9,8 +9,8 @@ from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.lanes import TurnSlot
 from orbit.agent.application.planner import PlannerChat
 from orbit.agent.application.tasks import Tasks
+from orbit.agent.domain.config_errors import ConfigError
 from orbit.agent.domain.refusals import Refused
-from orbit.agent.domain.roles import ConfigError
 from orbit.protocol import (
     BUSY,
     INVALID,

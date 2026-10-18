@@ -16,9 +16,10 @@ from orbit.agent.application.startup_check import StartupCheck
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.application.verifier import Failure, Verifier
 from orbit.agent.domain.board import TaskBoard
+from orbit.agent.domain.checks import ChecksProposal
 from orbit.agent.domain.commits import commit_message, configure_message
 from orbit.agent.domain.endings import BUG, CANCELLED, STOPPED_BY_YOU
-from orbit.agent.domain.roles import REVIEW_ROLES, ChecksProposal
+from orbit.agent.domain.roles import REVIEW_ROLES
 from orbit.agent.domain.verification import FallbackFixes, failure_reason, fix_prompt
 from orbit.protocol import (
     CHECKS_EXHAUSTED,

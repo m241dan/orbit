@@ -16,8 +16,8 @@ from orbit.agent import (
     write_checks,
 )
 from orbit.agent.application.ports import Merge, ProposalDecision
+from orbit.agent.domain.checks import ChecksProposal, Setup
 from orbit.agent.domain.commits import configure_message
-from orbit.agent.domain.roles import ChecksProposal, Setup
 from orbit.agent.domain.verification import VerificationStep
 from orbit.agent.external.config_file import CONFIG_PATH
 from orbit.protocol import (

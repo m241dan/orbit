@@ -12,7 +12,7 @@ from collections.abc import Awaitable, Callable
 from orbit.agent.application.lanes import Background
 from orbit.agent.application.ports import CoderTree, Publish
 from orbit.agent.application.verifier import Failure, Verification, first_failure
-from orbit.agent.domain.roles import setup_step
+from orbit.agent.domain.checks import setup_step
 from orbit.agent.domain.verification import StepProgress, VerificationStep, trim_output
 from orbit.protocol import (
     GIT_FAILED,

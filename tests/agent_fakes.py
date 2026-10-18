@@ -19,7 +19,8 @@ from orbit.agent.application.ports import (
 )
 from orbit.agent.application.review_lane import ReviewLane
 from orbit.agent.domain.agent_task import Limits
-from orbit.agent.domain.roles import REVIEW_ROLES, Setup, built_in_roles
+from orbit.agent.domain.checks import Setup
+from orbit.agent.domain.roles import REVIEW_ROLES, built_in_roles
 from orbit.agent.domain.sessions import SessionRecord, Unreadable
 from orbit.protocol import (
     AGENT_FAILED,

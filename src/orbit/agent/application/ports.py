@@ -7,7 +7,9 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 from orbit.agent.domain.agents import Agent
-from orbit.agent.domain.roles import ChecksProposal, ConfigError, Role, Setup
+from orbit.agent.domain.checks import ChecksProposal, Setup
+from orbit.agent.domain.config_errors import ConfigError
+from orbit.agent.domain.roles import Role
 from orbit.agent.domain.sessions import SessionRecord, Unreadable
 from orbit.agent.domain.usage import UsageFetch
 from orbit.agent.domain.verification import VerificationStep
