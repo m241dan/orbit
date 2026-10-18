@@ -572,14 +572,28 @@ class OrbitApp(App[None], inherit_bindings=False):
     async def _consume_events(self) -> None:
         # Closing the batches here, not on garbage collection, stops their reader however this ends.
         async with aclosing(event_batches(self._session.events())) as batches:
-            await self._send(
-                Hello(client=f"orbit-tui {__version__}", protocol_version=PROTOCOL_VERSION)
-            )
+            if not await self._hello():
+                return
             while batch := await self._next_batch(batches):
                 # One repaint for the whole batch.
                 with self.batch_update():
                     for event in coalesce(batch):
                         self._render_event(event)
+
+    async def _hello(self) -> bool:
+        """Whether the Hello opening the session was sent; a failure to send it is shown."""
+        try:
+            await self._send(
+                Hello(client=f"orbit-tui {__version__}", protocol_version=PROTOCOL_VERSION)
+            )
+        except Exception as exc:
+            self._render_event(
+                ErrorOccurred(
+                    code=INTERNAL, message=f"The backend failed to start the session: {exc}"
+                )
+            )
+            return False
+        return True
 
     async def _next_batch(self, batches: AsyncIterator[list[Event]]) -> list[Event]:
         """The next of ``batches``; none once they end, or once reading them fails, which is

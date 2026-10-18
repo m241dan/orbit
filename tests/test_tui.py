@@ -67,7 +67,8 @@ from orbit.tui.widgets import ChatPrompt, PickerScreen, SidePanel
 class FakeSession:
     """Stands in for the backend: records commands, and the envelopes they came in, and
     replays scripted events in envelopes; an exception queued fails the stream. ``sent`` has
-    every envelope; ``envelopes`` and ``commands`` leave out the Hello opening the stream."""
+    every envelope; ``envelopes`` and ``commands`` leave out the Hello opening the stream, which
+    raises ``hello_error`` when one is set."""
 
     def __init__(self) -> None:
         self.sent: list[CommandEnvelope] = []
@@ -75,10 +76,13 @@ class FakeSession:
         self.commands: list[Command] = []
         self.queue: asyncio.Queue[Event | Exception] = asyncio.Queue()
         self.closed = False
+        self.hello_error: Exception | None = None
 
     async def send(self, envelope: CommandEnvelope) -> None:
         self.sent.append(envelope)
         if isinstance(envelope.payload, Hello):
+            if self.hello_error is not None:
+                raise self.hello_error
             return
         self.envelopes.append(envelope)
         self.commands.append(envelope.payload)
@@ -208,6 +212,16 @@ async def test_a_failed_event_stream_shows_an_error_line() -> None:
         await session.queue.put(RuntimeError("the queue broke"))
         await pilot.pause()
         assert shown(app)[-1] == "The backend's event stream failed: the queue broke"
+
+
+async def test_a_failed_hello_shows_an_error_line() -> None:
+    session = FakeSession()
+    session.hello_error = RuntimeError("no git")
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        assert app.is_running
+        assert shown(app)[-1] == "The backend failed to start the session: no git"
 
 
 async def test_the_prompt_takes_typing_while_the_planner_is_busy() -> None:
