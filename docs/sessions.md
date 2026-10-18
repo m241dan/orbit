@@ -20,31 +20,33 @@ A session is one JSON record (`SessionRecord`, in `orbit.agent.domain.sessions`)
 
 It doesn't hold the conversation window's transcript: a reopened session starts with an empty
 window and a note that it was resumed (see Deferred). Nor does it hold the count of commits towards
-the next super review, which belongs to the repository and is kept in `reviews.json` beside the
-sessions, or anything from `.orbit/config.toml`, which is read at startup as before.
+the next super review, which belongs to the repository and is kept in the store's `reviews` table,
+one row per workspace, or anything from `.orbit/config.toml`, which is read at startup as before.
 
 ## Design
 
-- **Where.** `SessionFiles` keeps them in `.git/orbit/sessions/`, in the repository's shared git
-  directory, so every worktree of the repository sees the same sessions and the checkout never
-  does; outside a git repository, in `.orbit/sessions/` in the workspace. One `<id>.json` per
-  session.
-- **Writes.** A save writes a temporary file beside the record, syncs it, renames it over the
-  record and syncs the directory, so a crash leaves the old record or the new one, never half of
-  either. Saves run one at a time, the newest last, and only when something changed.
+- **Where.** `SqliteStore` keeps them in `orbit.db` in the state directory: `--state-dir`, else
+  `$ORBIT_STATE_DIR`, else `$XDG_STATE_HOME/orbit`, else `~/.local/state/orbit`. One database
+  serves every repository, with each session keyed by its workspace, so the checkout never sees
+  them. Sessions an older orbit saved as files are imported once, at startup (see README's
+  [Where orbit keeps things](../README.md#where-orbit-keeps-things)).
+- **Writes.** Each save is one SQLite transaction, so a crash leaves the old record or the new one,
+  never half of either. One connection serves the database, in WAL mode, owned by a single thread
+  that runs every call. Saves run one at a time, the newest last, and only when something changed.
 - **When.** A session is saved after every change, but only once it's used: once it has a task
   or you prompt the planner. Starting orbit and quitting leaves nothing behind.
 - **Format.** Each record carries a format version. Older versions are upgraded as they're read
   (version 2 added what the session spent, version 3 dropped the review planner's rounds, and
-  version 4 added why each task ended badly); a newer one, or a file that isn't valid JSON or doesn't fit the
-  record, is unreadable. Unreadable files are listed with the reason, can be deleted, and are
-  never opened, renamed or overwritten.
+  version 4 added why each task ended badly); a newer one, or a record that isn't valid JSON or doesn't fit the
+  record, is unreadable. Records are kept as raw JSON text in their `sessions` row, so an
+  unreadable one stays as it was: it is listed with the reason, can be deleted, and is never
+  opened, renamed or overwritten.
 - **Lifetime.** Sessions are kept until you delete one; nothing is pruned. Deleting removes the
   record and its lock, not Claude's own conversation files.
-- **Locks.** An orbit locks a session from its first save until it closes or switches away, by
-  creating `<id>.lock` naming its process, atomically, so two orbits can't both take it. Another
-  orbit lists the session as open elsewhere and won't open, rename or delete it. A lock whose
-  process has ended, or that names no process, is stale and is taken over. Renaming or deleting a
+- **Locks.** An orbit locks a session from its first save until it closes or switches away, with
+  an exclusive `flock` on `<state dir>/locks/<workspace id>/<session id>.lock`, so two orbits can't
+  both take it. Another orbit lists the session as open elsewhere and won't open, rename or delete
+  it. The kernel drops the lock when its process ends, so a crash leaves no stale lock. Renaming or deleting a
   session that isn't open takes its lock for as long as that takes.
 - **Switching.** The startup list and `ctrl+p` open a saved session or start a new one. Switching
   is refused while tasks run, a review runs or the planner answers, so nothing is running when the
@@ -57,11 +59,11 @@ sessions, or anything from `.orbit/config.toml`, which is read at startup as bef
 - **Settings.** A session's saved model and tool access come back when it opens, except those
   given on the command line with `--model` or `--tools`, which hold for the whole run.
 - **Layers.** The domain module holds the rules (the record and its format, summaries, when a
-  session may be opened, renamed or deleted, crash recovery, stale locks) without I/O. The
-  application's `SessionKeeper` decides when to save and drives switches through the
-  `SessionStore` port, and `SessionFiles` in `external` is the file adapter. The TUI's
-  `orbit.tui.view.sessions` holds the list's presentation rules, and `orbit.tui.sessions` the
-  modal.
+  session may be opened, renamed or deleted, crash recovery) without I/O. The application's
+  `SessionKeeper` decides when to save and drives switches through the `SessionStore` port, and
+  `SqliteStore` in `external` is the adapter, with `session_locks` for the locks; `session_files`
+  only says where an older orbit's files live, for the import. The TUI's `orbit.tui.view.sessions`
+  holds the list's presentation rules, and `orbit.tui.sessions` the modal.
 
 ## Deferred (to do later)
 
@@ -74,5 +76,3 @@ sessions, or anything from `.orbit/config.toml`, which is read at startup as bef
   on a repository shares the coder's worktree, `.git/orbit/coder`, and its branch `orbit/coder`, so
   two orbits running tasks at the same time, even in different sessions, would work in the same
   tree. Making that safe needs a lock on the worktree, or a worktree per orbit.
-- **Process id reuse.** A lock is judged live by whether its process id is running, so a stale
-  lock whose id has been reused by an unrelated process looks live until that process ends.
