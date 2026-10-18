@@ -584,13 +584,16 @@ class Transcript(Vertical):
         if self.shown.has_focus:
             self.screen.set_focus(None)
         self.close_detail()
-        self.shown.remove_class("-shown")
+        before = self.shown
         self.only = key
         self._label = None if key is None else label
         self._retitle()
         self.working.show_tab(key)
         log = self._log(key)
-        log.add_class("-shown")
+        # A log's class change restyles all its component classes, so only on a real switch.
+        if log is not before:
+            before.remove_class("-shown")
+            log.add_class("-shown")
         # Laid out once shown, which is when its end is known.
         self.call_after_refresh(log.show_place)
 

@@ -336,6 +336,22 @@ async def test_a_tab_shows_only_its_entries_and_all_shows_every_one() -> None:
         assert len(labels(app)) == 4
 
 
+async def test_showing_the_shown_tab_again_keeps_its_log_shown_and_retitles_it() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test(size=(120, 30)) as pilot:
+        await feed_events(session, pilot, started("agent-1"), said("agent-1", "coding"))
+        transcript = app.query_one(Transcript)
+        transcript.show_only("coder", "coder")
+        log = visible_log(app)
+
+        transcript.show_only("coder", "● coder")
+        await pilot.pause()
+
+        assert list(app.query("Transcript > TranscriptLog.-shown")) == [log]
+        assert transcript.border_title == "Conversation · ● coder"
+
+
 async def test_output_for_a_tab_not_shown_is_there_when_it_is() -> None:
     session = FakeSession()
     app = OrbitApp(session)

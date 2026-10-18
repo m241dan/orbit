@@ -14,7 +14,7 @@ from textual.screen import ModalScreen
 from textual.timer import Timer
 from textual.visual import VisualType
 from textual.widget import Widget
-from textual.widgets import Input, OptionList, Static, TextArea
+from textual.widgets import Footer, Input, OptionList, Static, TextArea
 from textual.widgets.option_list import Option
 
 from orbit.protocol import Settings
@@ -167,6 +167,25 @@ class ListPane(ModalFocus, OptionList):
             line_cache.heights.pop(later, None)
             line_cache.index_to_line.pop(later, None)
         self._update_lines()
+
+
+class KeyFooter(Footer):
+    """Footer that rebuilds its keys only when they change: Textual's rebuilds them on every
+    focus change, remounting and restyling each key."""
+
+    # The keys last shown, with the footer's style; None before the first.
+    _shown: tuple[list[tuple[Binding, bool, str]], bool, bool] | None = None
+
+    async def recompose(self) -> None:
+        shown = (
+            [active[1:] for active in self.screen.active_bindings.values()],
+            self.compact,
+            self.show_command_palette,
+        )
+        if shown == self._shown:
+            return
+        self._shown = shown
+        await super().recompose()
 
 
 class SidePanel(VerticalScroll):

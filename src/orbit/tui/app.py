@@ -10,7 +10,7 @@ from textual import on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding, BindingType
 from textual.containers import Horizontal, Vertical
-from textual.widgets import Footer, OptionList, Tabs
+from textual.widgets import OptionList, Tabs
 
 from orbit.protocol import (
     PLANNER,
@@ -91,6 +91,7 @@ from orbit.tui.widgets import (
     RESET_YES,
     ChatPrompt,
     ConfirmScreen,
+    KeyFooter,
     PickerScreen,
 )
 
@@ -232,7 +233,7 @@ class OrbitApp(App[None], inherit_bindings=False):
                 yield VerificationPanel(id="verification-steps")
                 yield UsagePanel(id="usage")
                 yield AgentsPane(id="agents")
-        yield Footer()
+        yield KeyFooter()
 
     async def on_unmount(self) -> None:
         await self._session.close()
