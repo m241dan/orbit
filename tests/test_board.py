@@ -434,3 +434,24 @@ def test_an_appended_task_keeps_its_state_under_the_next_id() -> None:
     draft = TaskState(id="1", task=FIX, status="draft", origin="planner")
     assert board.append(draft) == "5"
     assert board.tasks[-1] == draft.model_copy(update={"id": "5"})
+
+
+@pytest.mark.parametrize("status", ["pending", "running"])
+def test_a_pending_or_running_task_in_a_role_is_waiting(status: TaskStatus) -> None:
+    board = TaskBoard()
+    task_id = board.add(TaskSpec(prompt="configure", role="configurator"))
+    board.set_status(task_id, status)
+    assert board.has_waiting("configurator")
+
+
+def test_a_finished_task_or_a_draft_is_not_waiting() -> None:
+    board = TaskBoard()
+    board.finish(board.add(TaskSpec(prompt="done", role="configurator")), "completed")
+    board.add_draft(TaskSpec(prompt="draft", role="configurator"))
+    assert not board.has_waiting("configurator")
+
+
+def test_a_waiting_task_in_another_role_does_not_count() -> None:
+    board = TaskBoard()
+    board.add(ONE)
+    assert not board.has_waiting("configurator")

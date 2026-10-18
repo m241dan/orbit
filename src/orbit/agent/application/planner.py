@@ -16,7 +16,12 @@ from orbit.agent.application.desk import AgentDesk, Tool, dispatch, report_progr
 from orbit.agent.application.ports import Reply, ResumeFailed
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.agents import Agent
-from orbit.agent.domain.roles import suggested_task, task_suggestion
+from orbit.agent.domain.roles import (
+    PROPOSE_TASK,
+    REPORT_PROGRESS,
+    suggested_task,
+    task_suggestion,
+)
 from orbit.agent.domain.verification import steps_note
 from orbit.protocol import (
     AGENT_FAILED,
@@ -52,8 +57,8 @@ class PlannerChat:
         self._told: tuple[str, ...] | None = None  # The steps the planner last heard about.
         self._saved: str | None = None  # The saved conversation, until a turn resumes it.
         self._tools: dict[str, Tool] = {
-            "propose_task": self._propose_task,
-            "report_progress": self._report_progress,
+            PROPOSE_TASK: self._propose_task,
+            REPORT_PROGRESS: self._report_progress,
         }
 
     @property

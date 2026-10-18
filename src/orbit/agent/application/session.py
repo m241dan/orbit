@@ -39,7 +39,7 @@ from orbit.agent.application.usage_monitor import UsageMonitor
 from orbit.agent.application.verifier import Verification, Verifier
 from orbit.agent.application.work_lane import WorkLane
 from orbit.agent.domain.agents import Agent
-from orbit.agent.domain.board import WAITING, TaskBoard
+from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.catalog import catalog
 from orbit.agent.domain.checks import configure_prompt
 from orbit.agent.domain.refusals import Refused
@@ -441,7 +441,7 @@ class AgentSession:
 
     def _configuring(self) -> bool:
         """Whether a configurator task is queued or running."""
-        return any(t.task.role == CONFIGURATOR and t.status in WAITING for t in self._board.tasks)
+        return self._board.has_waiting(CONFIGURATOR)
 
     def _configurator_task(self, agents: Agents) -> TaskSpec:
         """A configurator's task, told the steps and setup configured now."""

@@ -26,15 +26,24 @@ from orbit.protocol import (
     ToolAccess,
 )
 
+GET_TASK = "get_task"
+COMPLETE_TASK = "complete_task"
+RUN_CHECK = "run_check"
+REPORT_PROGRESS = "report_progress"
+GIVE_UP = "give_up"
+SUGGEST_TASK = "suggest_task"
+PROPOSE_TASK = "propose_task"
+PROPOSE_CHECKS = "propose_checks"
+
 ORBIT_TOOLS = (
-    "get_task",
-    "complete_task",
-    "run_check",
-    "report_progress",
-    "give_up",
-    "suggest_task",
-    "propose_task",
-    "propose_checks",
+    GET_TASK,
+    COMPLETE_TASK,
+    RUN_CHECK,
+    REPORT_PROGRESS,
+    GIVE_UP,
+    SUGGEST_TASK,
+    PROPOSE_TASK,
+    PROPOSE_CHECKS,
 )
 """Every tool orbit's MCP server offers agents."""
 
@@ -50,7 +59,7 @@ class Role(_Config):
     instructions: str = Field(min_length=1)
     model: str | None = None
     tool_access: ToolAccess = "restricted"
-    tools: tuple[str, ...] = ("get_task", "complete_task", "report_progress", "give_up")
+    tools: tuple[str, ...] = (GET_TASK, COMPLETE_TASK, REPORT_PROGRESS, GIVE_UP)
     verify: bool = True
     timeout_minutes: float | None = Field(default=None, gt=0)
 
@@ -60,11 +69,22 @@ class Role(_Config):
         unknown = [tool for tool in tools if tool not in ORBIT_TOOLS]
         if unknown:
             raise ValueError(f"unknown tools {unknown}; orbit's tools are {list(ORBIT_TOOLS)}")
-        if "get_task" not in tools and "propose_task" not in tools:
+        if GET_TASK not in tools and PROPOSE_TASK not in tools:
             raise ValueError(
                 "an agent needs get_task to fetch its task, or propose_task to plan in conversation"
             )
         return tools
+
+    @property
+    def runs_checks(self) -> bool:
+        """Whether an agent in this role can run verification steps itself."""
+        return RUN_CHECK in self.tools
+
+    @property
+    def proposes_checks(self) -> bool:
+        """Whether an agent in this role proposes verification steps rather than being
+        verified."""
+        return PROPOSE_CHECKS in self.tools
 
     @property
     def settings(self) -> Settings:
@@ -95,23 +115,23 @@ def task_suggestion(arguments: Mapping[str, Any]) -> tuple[str, str] | str:
 _BUILT_IN_FIELDS: dict[str, dict[str, Any]] = {
     CODER: {
         "tool_access": "full",
-        "tools": ("get_task", "complete_task", "run_check", "report_progress", "give_up"),
+        "tools": (GET_TASK, COMPLETE_TASK, RUN_CHECK, REPORT_PROGRESS, GIVE_UP),
     },
     REVIEWER: {
-        "tools": ("get_task", "complete_task", "report_progress", "give_up", "suggest_task"),
+        "tools": (GET_TASK, COMPLETE_TASK, REPORT_PROGRESS, GIVE_UP, SUGGEST_TASK),
         "verify": False,
     },
     SUPER_REVIEWER: {
         "model": "opus",
-        "tools": ("get_task", "complete_task", "report_progress", "give_up", "suggest_task"),
+        "tools": (GET_TASK, COMPLETE_TASK, REPORT_PROGRESS, GIVE_UP, SUGGEST_TASK),
         "verify": False,
     },
     PLANNER: {
-        "tools": ("propose_task", "report_progress"),
+        "tools": (PROPOSE_TASK, REPORT_PROGRESS),
         "verify": False,
     },
     CONFIGURATOR: {
-        "tools": ("get_task", "propose_checks", "report_progress", "give_up"),
+        "tools": (GET_TASK, PROPOSE_CHECKS, REPORT_PROGRESS, GIVE_UP),
         "verify": False,
     },
 }

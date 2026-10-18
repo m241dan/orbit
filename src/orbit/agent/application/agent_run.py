@@ -26,7 +26,17 @@ from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.checks import ChecksProposal, parse_proposal
 from orbit.agent.domain.config_errors import ConfigError
 from orbit.agent.domain.endings import Ending, bug, error, run_ending, unaccepted
-from orbit.agent.domain.roles import Role, task_suggestion
+from orbit.agent.domain.roles import (
+    COMPLETE_TASK,
+    GET_TASK,
+    GIVE_UP,
+    PROPOSE_CHECKS,
+    REPORT_PROGRESS,
+    RUN_CHECK,
+    SUGGEST_TASK,
+    Role,
+    task_suggestion,
+)
 from orbit.agent.domain.verification import VerificationStep, check_reply, failure_reason
 from orbit.protocol import (
     AGENT_FAILED,
@@ -157,13 +167,13 @@ class AgentRun:
         self._agent: Agent | None = None
         self._root = "."
         self._tools: dict[str, Tool] = {
-            "get_task": self._get_task,
-            "complete_task": self._complete_task,
-            "run_check": self._run_check,
-            "report_progress": self._report_progress,
-            "give_up": self._give_up,
-            "suggest_task": self._suggest_task,
-            "propose_checks": self._propose_checks,
+            GET_TASK: self._get_task,
+            COMPLETE_TASK: self._complete_task,
+            RUN_CHECK: self._run_check,
+            REPORT_PROGRESS: self._report_progress,
+            GIVE_UP: self._give_up,
+            SUGGEST_TASK: self._suggest_task,
+            PROPOSE_CHECKS: self._propose_checks,
         }
 
     @property
@@ -330,7 +340,7 @@ class AgentRun:
             assert self._verifier is not None and self._failure is not None
             await self._verifier.skip_unchanged(self._task_id)
             self._work.failed(*self._failure)  # The agent is gone, so this falls back.
-        elif "propose_checks" in self.role.tools:
+        elif self.role.proposes_checks:
             self._work.unproposed()  # Its work is a proposal, and none was accepted.
         else:
             await self._verify(before, None)
@@ -359,7 +369,7 @@ class AgentRun:
             return await self._verifier.check(self._task_id, before, self._root)
 
     async def _failed(self, failure: Failure) -> str:
-        reply = self._work.failed(*failure, can_check="run_check" in self.role.tools)
+        reply = self._work.failed(*failure, can_check=self.role.runs_checks)
         self._failure = failure
         if self._work.phase == "working":
             assert self._verifier is not None  # Only verification fails.
@@ -403,7 +413,7 @@ class AgentRun:
         steps: list[str] = []
         if self._verifier is not None and self.role.verify:
             steps = [step.name for step in self._verifier.verification.steps]
-        return Reply(self._work.get_task(steps, "run_check" in self.role.tools))
+        return Reply(self._work.get_task(steps, self.role.runs_checks))
 
     async def _complete_task(self, arguments: dict[str, Any]) -> Reply:
         claim = self._work.claim_done(str(arguments.get("summary", "")))

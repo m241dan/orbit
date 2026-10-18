@@ -167,6 +167,10 @@ class TaskBoard:
                 return state.id
         return None
 
+    def has_waiting(self, role: str) -> bool:
+        """Whether a task in ``role`` is still to run, or running."""
+        return any(state.task.role == role and state.status in WAITING for state in self._tasks)
+
     def add_draft(self, task: TaskSpec) -> str:
         """Add ``task``, which the planner proposed, at the end as a draft; returns its id."""
         state = self._new(task, status="draft", origin=PLANNER_ORIGIN)

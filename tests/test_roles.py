@@ -107,3 +107,39 @@ def test_a_task_suggestion_without_a_title_is_refused() -> None:
 
 def test_a_task_suggestion_without_a_prompt_has_an_empty_one() -> None:
     assert task_suggestion({"title": "Tidy"}) == ("Tidy", "")
+
+
+def test_orbit_tools_are_the_eight_in_order() -> None:
+    assert ORBIT_TOOLS == (
+        "get_task",
+        "complete_task",
+        "run_check",
+        "report_progress",
+        "give_up",
+        "suggest_task",
+        "propose_task",
+        "propose_checks",
+    )
+
+
+@pytest.mark.parametrize(
+    ("tools", "runs", "proposes"),
+    [
+        (("get_task",), False, False),
+        (("get_task", "run_check"), True, False),
+        (("get_task", "propose_checks"), False, True),
+    ],
+)
+def test_a_roles_capabilities_follow_its_tools(
+    tools: tuple[str, ...], runs: bool, proposes: bool
+) -> None:
+    role = Role(instructions="Work.", tools=tools)
+    assert role.runs_checks is runs
+    assert role.proposes_checks is proposes
+
+
+@pytest.mark.parametrize("name", BUILT_IN_ROLE_NAMES)
+def test_each_built_in_roles_capabilities_follow_its_tools(name: str) -> None:
+    role = BUILT_IN_ROLES[name]
+    assert role.runs_checks is ("run_check" in role.tools)
+    assert role.proposes_checks is ("propose_checks" in role.tools)
