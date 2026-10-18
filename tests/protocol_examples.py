@@ -240,6 +240,7 @@ EVENTS: tuple[EventEnvelope, ...] = (
                     open_requests=(OpenRequest(request_id="r1", tool="complete_task"),),
                 ),
             ),
+            transcript=(event(AssistantMessage(turn_id="turn-1", text="Done.")),),
         )
     ),
     event(

@@ -45,3 +45,8 @@ class EventEnvelope(_Envelope):
     seq: int = Field(ge=1)
     session: str | None = None
     payload: Event
+
+
+# The Snapshot's transcript holds envelopes, so it's complete once they're defined.
+Snapshot.model_rebuild()
+EventEnvelope.model_rebuild()

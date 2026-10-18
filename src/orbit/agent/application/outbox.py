@@ -8,6 +8,9 @@ from orbit.agent.application.log_writer import LogWriter
 from orbit.agent.application.ports import EventLog
 from orbit.protocol import CONNECTION_EVENTS, SESSIONLESS_EVENTS, Event, EventEnvelope
 
+TRANSCRIPT_LENGTH = 500
+"""How many of a session's latest events its transcript holds."""
+
 
 class EventSink(Protocol):
     """What the session's parts publish their events into."""
@@ -24,7 +27,8 @@ class Outbox:
     envelope, so no event can be read without its stamp.
 
     With a ``log``, each envelope of a session is also written to it in the background, but for
-    the events answering one connection; :meth:`close` writes those still queued."""
+    the events answering one connection; :meth:`transcript` reads a session's latest back, and
+    :meth:`close` writes those still queued."""
 
     def __init__(self, open_session: Callable[[], str], log: EventLog | None = None) -> None:
         self._open = open_session
@@ -49,6 +53,13 @@ class Outbox:
     async def envelope(self) -> EventEnvelope:
         """The next event, in the envelope it was stamped with when published."""
         return await self._queue.get()
+
+    async def transcript(self, session_id: str) -> tuple[EventEnvelope, ...]:
+        """The last :data:`TRANSCRIPT_LENGTH` events of the session ``session_id``, oldest
+        first, logged or still to be; none without a log."""
+        if self._writer is None:
+            return ()
+        return tuple(await self._writer.recent(session_id, TRANSCRIPT_LENGTH))
 
     async def close(self) -> None:
         """Write the envelopes still queued for the log, if there is one, and stop writing."""

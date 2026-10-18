@@ -145,6 +145,18 @@ class Transcript(Vertical):
         for tab in {None, key}:
             self._log(tab).append(entry)
 
+    def clear(self) -> None:
+        """Drop every entry, under All and every tab, closing the detail pane."""
+        self.close_detail()
+        shown = self.shown
+        for key, log in list(self._logs.items()):
+            if log is shown:
+                log.clear()
+            else:
+                del self._logs[key]
+                log.remove()
+        self._keep_ticking()
+
     def replace_rule(self, text: str, kind: EntryKind, key: str | None, agent: str) -> None:
         """Make ``agent``'s latest rule read ``text`` as a ``kind`` entry, under All and, if
         ``key`` names a tab, under that tab."""

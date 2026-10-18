@@ -18,6 +18,7 @@ from orbit.protocol import (
     Event,
     EventEnvelope,
     Notice,
+    OpenSession,
     SessionsListed,
     Snapshot,
     TasksChanged,
@@ -27,6 +28,7 @@ from orbit.protocol import (
     decode_event,
 )
 from tests.agent_fakes import FakeStore, Ticks, greet, publish, send
+from tests.test_session_switch import opened, saved, store_with
 from tests.test_sqlite_store import database
 
 
@@ -158,6 +160,34 @@ async def test_a_cancelled_close_stops_the_writer_at_once() -> None:
     assert asyncio.all_tasks() == {asyncio.current_task()}
 
 
+async def test_recent_events_are_the_logged_ones_then_those_still_queued() -> None:
+    log = GatedLog()
+    log.logged = [notice(1), notice(2, "b")]
+    writer = LogWriter(log, Published())
+    writer.add("a", notice(3))
+    await log.waiting.wait()  # 3 is being written.
+    writer.add("b", notice(4, "b"))
+    writer.add("a", notice(5))
+
+    assert await writer.recent("a", 10) == [notice(1), notice(3), notice(5)]
+    assert await writer.recent("a", 2) == [notice(3), notice(5)]
+    log.gate.set()
+    await writer.close()
+
+
+async def test_recent_events_written_while_the_log_is_read_are_there_once() -> None:
+    log = FakeStore()
+    writer = LogWriter(log, Published())
+    writer.add("a", notice(1))
+    reading = asyncio.create_task(writer.recent("a", 10))
+    await asyncio.sleep(0)  # The writer writes 1 while the log is read.
+    writer.add("a", notice(2))
+
+    assert await reading == [notice(1), notice(2)]
+    await writer.close()
+    assert log.logged == [notice(1), notice(2)]
+
+
 # What the session logs
 
 
@@ -236,4 +266,89 @@ async def test_a_failing_log_is_reported_once_and_the_frontend_gets_every_event(
     assert payloads_of(Notice, sent) == [Notice(message=f"n{n}") for n in range(3)]
     assert payloads_of(ErrorOccurred, sent) == [
         ErrorOccurred(code=SAVE_FAILED, message="disk full")
+    ]
+
+
+# The transcript in the Snapshot
+
+
+def snapshots(sent: Sequence[EventEnvelope]) -> list[Snapshot]:
+    return payloads_of(Snapshot, sent)
+
+
+async def test_a_snapshot_holds_the_sessions_last_500_logged_events_oldest_first() -> None:
+    store = FakeStore()
+    store.logged = [notice(seq, "session-1") for seq in range(1, 601)]
+    store.logged.insert(300, notice(1000, "other"))
+    session = stored_session(store)
+    await greet(session)
+    await session.close()
+
+    [snapshot] = snapshots(delivered(session))
+    assert snapshot.transcript == tuple(notice(seq, "session-1") for seq in range(101, 601))
+
+
+async def test_events_still_queued_end_a_snapshots_transcript_once() -> None:
+    store = GatedLog()
+    store.logged = [notice(1, "session-1")]
+    session = stored_session(store)
+    await publish(session, Notice(message="being written"))
+    await store.waiting.wait()
+    await publish(session, Notice(message="queued"))
+    await greet(session)
+    store.gate.set()
+    await session.close()
+
+    [snapshot] = snapshots(delivered(session))
+    assert [envelope.payload for envelope in snapshot.transcript] == [
+        Notice(message="n1"),
+        Notice(message="being written"),
+        Notice(message="queued"),
+    ]
+    assert [envelope.seq for envelope in snapshot.transcript] == [1, 2, 3]
+
+
+async def test_a_snapshot_without_a_store_has_no_transcript() -> None:
+    session = AgentSession(clock=Ticks())
+    await publish(session, Notice(message="hi"))
+    await greet(session)
+    await session.close()
+
+    [snapshot] = snapshots(delivered(session))
+    assert snapshot.transcript == ()
+
+
+async def test_a_switch_snapshots_the_transcript_of_the_session_opened() -> None:
+    store = store_with(saved("auth"))
+    store.logged = [notice(1, "auth"), notice(2, "session-1")]
+    session = stored_session(store)
+    events = await opened(session, OpenSession(session_id="auth"))
+    await session.close()
+
+    [_, switched] = [event for event in events if isinstance(event, Snapshot)]
+    assert switched.transcript == (notice(1, "auth"),)
+
+
+async def test_a_session_opened_again_after_a_restart_shows_its_earlier_events(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "project"
+    workspace.mkdir()
+    store = await SqliteStore.open(tmp_path / "state", str(workspace))
+    first = stored_session(store)
+    await send(first, AddTask(task=TaskSpec(prompt="Add a flag.")))
+    await first.close()
+    await store.close()
+
+    store = await SqliteStore.open(tmp_path / "state", str(workspace))
+    again = AgentSession(store=store, clock=Ticks(), new_id=lambda: "session-2")
+    events = await opened(again, OpenSession(session_id="session-1"))
+    await again.close()
+    await store.close()
+
+    [_, reopened] = [event for event in events if isinstance(event, Snapshot)]
+    assert reopened.transcript == tuple(kept(delivered(first)))
+    assert [type(envelope.payload) for envelope in reopened.transcript] == [
+        TasksChanged,
+        CommandAccepted,
     ]

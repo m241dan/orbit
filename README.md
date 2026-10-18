@@ -99,6 +99,11 @@ nothing behind. Sessions are kept until you delete them: orbit never prunes them
 overwrites a saved session it can't read. The design, and what is deliberately left for later, is in
 [docs/sessions.md](docs/sessions.md).
 
+Every event of a session's conversation is kept in the store too, as its event log. The
+conversation shows where the session left off: at startup, its last 500 events, the planner's
+turns and the agents' runs under their tabs as they were shown live, and the conversation
+carries on from there.
+
 At startup orbit lists the saved sessions to pick from: `+ new session` first, then the sessions,
 the most recently active first. Each row shows the session's name, when it was last active (local
 time), how many of its tasks stand at each status, by the task list's icons (`3 ✅ 2 ⏳ 1 📝`), and
@@ -110,7 +115,8 @@ a step that failed the startup check, carries over into the session you pick. `-
 and starts a new session, and `--name NAME` starts one named `NAME`.
 
 `ctrl+p` shows the same list later, to switch sessions; there `esc` closes it and keeps the open
-session, as does picking the open session. Switching is refused, with an error saying what to stop,
+session, as does picking the open session. Switching shows the switched-to session's conversation
+in place of the one you left. Switching is refused, with an error saying what to stop,
 while tasks run, a review runs or the planner answers. Opening a session never starts work by
 itself: its pending tasks wait for `ctrl+r`. A task that was running or being verified when the
 session was last saved (orbit crashed, say) comes back cancelled, and orbit says how many were

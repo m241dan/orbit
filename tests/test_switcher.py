@@ -55,7 +55,7 @@ class Held:
     def settings(self) -> Settings:
         return self.owned.current
 
-    def snapshot(self, last_active: datetime | None) -> Snapshot:
+    async def snapshot(self, last_active: datetime | None) -> Snapshot:
         self.snapshots.append(last_active)
         return Snapshot(
             session=SessionSummary(id="snapshot", name="snapshot"),

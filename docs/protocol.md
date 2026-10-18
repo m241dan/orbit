@@ -70,8 +70,9 @@ and the backend's `server_version`. `Welcome` is Hello's outcome: it takes the p
    triggers and the lanes.
 2. The latest `UsageChanged`, if usage was fetched yet.
 3. `Snapshot`: the open session as it stands, with its settings, busy lanes, tasks,
-   verification steps, review status, checks proposals waiting for a decision and running
-   agents.
+   verification steps, review status, checks proposals waiting for a decision, running
+   agents and its `transcript`: the session's last 500 logged events, oldest first, in the
+   envelopes they were sent in, their `seq`s included (none without a store).
 4. One-off notices, such as the workspace note, a missing verification setup, leftover work or
    notes on a resumed session.
 5. When orbit starts with the session picker, `SessionsListed` with `reason="startup"`, for the
@@ -83,6 +84,8 @@ as current.
 
 Switching sessions works the way joining does: opening, starting or picking a session sends a
 `Catalog` and then a `Snapshot` of the session now open. A rename or delete sends a `Catalog`.
+A frontend replaces the conversation it shows with every Snapshot's transcript, so joining
+shows where the session left off and a switch shows the session switched to.
 `SessionsListed` otherwise only answers `ListSessions`.
 
 ## Command outcomes

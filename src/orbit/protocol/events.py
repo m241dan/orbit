@@ -4,7 +4,7 @@ They're a discriminated union on ``type``, so they can be serialized to JSON and
 process boundary without changes.
 """
 
-from typing import Annotated, Any, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 from pydantic import AwareDatetime, Field, TypeAdapter
 
@@ -20,6 +20,9 @@ from orbit.protocol.models import (
     _Message,
 )
 from orbit.protocol.names import WORK_LANE, BusyLane
+
+if TYPE_CHECKING:  # Envelopes carry events, so the Snapshot's are resolved in envelope.py.
+    from orbit.protocol.envelope import EventEnvelope
 
 TurnEndReason = Literal["completed", "cancelled", "max_steps", "error"]
 
@@ -361,7 +364,8 @@ class Snapshot(_Message):
     It holds the ``session``'s summary, its ``settings`` and ``model_choices``, whether each
     lane is ``busy``, its ``tasks``, the verification ``steps`` and the ``steps_title`` they
     show under, the ``review`` status (none when reviews are off), the checks ``proposals``
-    waiting for a decision, and the ``agents`` running.
+    waiting for a decision, the ``agents`` running, and the ``transcript``: the session's
+    last logged events, at most 500, oldest first, in the envelopes they were sent in.
     """
 
     type: Literal["snapshot"] = "snapshot"
@@ -375,6 +379,7 @@ class Snapshot(_Message):
     review: ReviewStatus | None
     proposals: tuple[ChecksProposed, ...]
     agents: tuple[RunningAgent, ...]
+    transcript: tuple["EventEnvelope", ...] = ()
 
 
 class WorkspaceEntry(_Message):

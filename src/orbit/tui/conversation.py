@@ -1,17 +1,20 @@
 """Turns backend events into the conversation's entries."""
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
-from typing import assert_never
+from typing import TypeGuard, assert_never, get_args
 
 from orbit.protocol import (
+    PLANNER,
     AgentExited,
     AgentReply,
     AgentRequest,
     AgentStarted,
     AssistantMessage,
     CommandRefused,
+    ConversationReset,
     ErrorOccurred,
+    Event,
     Notice,
     ProgressNoted,
     StartupChecked,
@@ -33,7 +36,7 @@ from orbit.tui.transcript import Transcript
 from orbit.tui.view.common import EntryKind
 from orbit.tui.view.log import Entry
 from orbit.tui.view.progress import TaskProgress, task_note
-from orbit.tui.view.rules import exit_rule, turn_rule_entry
+from orbit.tui.view.rules import exit_rule, planner_reset_entry, turn_rule_entry
 from orbit.tui.view.transcript import (
     AgentNote,
     activity_entry,
@@ -65,6 +68,14 @@ refused commands, shown as errors."""
 
 FeedEvent = ConversationEvent | TaskProgress | AgentNote | AgentRequest | AgentExited
 """Events the conversation shows as entries."""
+
+_FEED_EVENTS: tuple[type[FeedEvent], ...] = get_args(FeedEvent)
+"""The classes in ``FeedEvent``, for ``isinstance``."""
+
+
+def _is_feed_event(event: Event) -> TypeGuard[FeedEvent]:
+    """Whether the conversation shows ``event`` as entries."""
+    return isinstance(event, _FEED_EVENTS)
 
 
 @dataclass(eq=False)
@@ -114,6 +125,19 @@ class ConversationFeed:
                 self._render_activity(event)
             case _:
                 assert_never(event)
+
+    def replace(self, events: Iterable[Event]) -> None:
+        """Show ``events`` in place of the conversation, its agents' tabs and running turns, as
+        they were shown when they happened."""
+        self.transcript.clear()
+        self.tabs.reset()
+        self._turns = Turns()
+        for event in events:
+            self.tabs.track(event)
+            if isinstance(event, ConversationReset):
+                self.append(*planner_reset_entry(), PLANNER)
+            elif _is_feed_event(event):
+                self.render(event)
 
     def append(self, text: str, kind: EntryKind, agent: str | None = None) -> None:
         """Add an entry of ``text`` by ``agent``, if any, under its tab and All."""

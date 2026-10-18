@@ -72,6 +72,16 @@ PINNED_TABS = tuple(ConversationTab(role, role) for role in ROLE_TABS)
 """The built-in roles' tabs, there from the start and never removed."""
 
 
+def reset_tabs(tabs: tuple[ConversationTab, ...]) -> tuple[ConversationTab, ...]:
+    """``tabs``' pinned tabs alone, as before any agent ran: none unread, and none at work but
+    the planner's, which follows its busy lane."""
+    return tuple(
+        replace(tab, unread=False, running=tab.running if tab.key == PLANNER else 0)
+        for tab in tabs
+        if tab.key in ROLE_TABS
+    )
+
+
 def track_roles(roles: Mapping[str, str], event: Event) -> Mapping[str, str]:
     """Which pinned role each agent started in, by agent id, after ``event``."""
     if isinstance(event, AgentStarted) and event.role in ROLE_TABS:

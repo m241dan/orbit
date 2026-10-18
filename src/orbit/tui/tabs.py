@@ -13,6 +13,7 @@ from orbit.tui.view.tabs import (
     mark_planner_busy,
     mark_tab_read,
     mark_tab_unread,
+    reset_tabs,
     tab_key,
     tab_labels,
     track_roles,
@@ -70,6 +71,12 @@ class ConversationTabs(Tabs):
         agent exits, and mark a tab not being shown when one of its agents has new output."""
         self.roles = track_roles(self.roles, event)
         self._update(track_tabs(self.tabs, event, self.agent_of(self.active), self.roles))
+
+    def reset(self) -> None:
+        """Close every agent's own tab and forget the agents that ran in the pinned roles,
+        as before any agent ran."""
+        self.roles = {}
+        self._update(reset_tabs(self.tabs))
 
     def mark_read(self, agent: str | None) -> None:
         """Clear ``agent``'s unread marker; None (All) has none."""

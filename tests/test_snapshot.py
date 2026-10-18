@@ -152,9 +152,9 @@ def proposing() -> AgentSession:
 async def test_a_waiting_proposal_is_in_the_snapshot_until_decided() -> None:
     session = proposing()
     proposal = await proposal_waiting(session)
-    waiting = snapshot_of(session).proposals
+    waiting = (await snapshot_of(session)).proposals
     await send(session, DecideProposal(task_id=proposal.task_id, action="accept"))
-    decided = snapshot_of(session).proposals
+    decided = (await snapshot_of(session)).proposals
     await session.close()
 
     assert waiting == (proposal,)
@@ -164,10 +164,10 @@ async def test_a_waiting_proposal_is_in_the_snapshot_until_decided() -> None:
 async def test_an_unanswered_call_is_an_open_request_of_its_agent_until_replied_to() -> None:
     session = proposing()
     proposal = await proposal_waiting(session)
-    [waiting] = snapshot_of(session).agents
+    [waiting] = (await snapshot_of(session)).agents
     await send(session, DecideProposal(task_id=proposal.task_id, action="accept"))
     await events_until(session, of_type(AgentReply))
-    agents = snapshot_of(session).agents
+    agents = (await snapshot_of(session)).agents
     await session.close()
 
     [request] = waiting.open_requests
@@ -196,7 +196,7 @@ async def test_while_the_startup_check_runs_it_is_a_running_agent_with_the_panel
     await greet(session)
     while not steps.runs:
         await asyncio.sleep(0)
-    snapshot = snapshot_of(session)
+    snapshot = await snapshot_of(session)
     steps.gate.set()
     await session.close()
 

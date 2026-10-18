@@ -220,6 +220,11 @@ class EventLog(Protocol):
         none; raises ``RuntimeError`` when it can't."""
         ...
 
+    async def recent(self, session_id: str, limit: int) -> list[EventEnvelope]:
+        """The last ``limit`` events logged of the session ``session_id``, oldest first; none
+        when they can't be read."""
+        ...
+
 
 class SessionStore(EventLog, Protocol):
     """Where saved sessions are kept, each locked while an orbit has it open, with their events'

@@ -600,8 +600,8 @@ class OrbitApp(App[None], inherit_bindings=False):
         self._task_list.reset_usage(session.usage)
 
     def _render_snapshot(self, snapshot: Snapshot) -> None:
-        """Replace the state shown, but for the transcript, with ``snapshot``'s, and open the
-        session it holds; the agents pane follows it as it follows every event."""
+        """Replace the state shown with ``snapshot``'s, the conversation with its transcript's,
+        and open the session it holds; the agents pane follows it as it follows every event."""
         self._show_settings(snapshot.settings, snapshot.model_choices)
         for lane, busy in snapshot.busy.items():
             self._set_busy(lane, busy)
@@ -609,6 +609,9 @@ class OrbitApp(App[None], inherit_bindings=False):
         self._verification.show(snapshot.steps, snapshot.steps_title)
         self._agents.show_review(snapshot.review)
         self._proposals.follow(snapshot.proposals)
+        # Its tasks shown first, as the transcript's notes on them read them, and its usage
+        # set after, as the transcript's turns count theirs.
+        self._feed.replace(envelope.payload for envelope in snapshot.transcript)
         self._open_session(snapshot.session)
 
     def _render_state(

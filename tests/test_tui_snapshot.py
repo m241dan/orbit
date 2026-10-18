@@ -1,11 +1,18 @@
 """The TUI replacing what it shows with a snapshot of the open session."""
 
 from orbit.protocol import (
+    PLANNER,
     PLANNER_LANE,
     WORK_LANE,
     AgentStarted,
+    AssistantMessage,
     ChecksProposed,
+    CommandAccepted,
+    CommandRefused,
+    ConversationReset,
     DecideProposal,
+    Event,
+    EventEnvelope,
     Notice,
     OpenRequest,
     ProposedStep,
@@ -17,6 +24,10 @@ from orbit.protocol import (
     StepState,
     TaskSpec,
     TaskState,
+    ToolCallFinished,
+    ToolCallStarted,
+    TurnFinished,
+    TurnStarted,
     Usage,
 )
 from orbit.tui import OrbitApp
@@ -27,7 +38,7 @@ from orbit.tui.tasks import TaskList
 from orbit.tui.transcript import Transcript
 from orbit.tui.view.agents import AgentRow
 from orbit.tui.widgets import ChatPrompt
-from tests.test_tui import FakeSession, entries, feed_events
+from tests.test_tui import STRIP, FakeSession, entries, feed_events, opened, tab_strip
 
 TASKS = (
     TaskState(id="1", task=TaskSpec(prompt="Add a flag."), status="running"),
@@ -77,16 +88,95 @@ async def test_a_snapshot_shows_its_tasks_busy_planner_agents_and_steps() -> Non
         assert str(app.query_one(Transcript).border_title) == "Conversation — auth rework"
 
 
-async def test_a_snapshot_replaces_the_agents_and_keeps_the_transcript() -> None:
+async def test_a_snapshot_replaces_the_agents_and_the_transcript() -> None:
     session = FakeSession()
     app = OrbitApp(session)
     async with app.run_test() as pilot:
         started = AgentStarted(agent_id="agent-1", role="planner", task_id="plan")
         await feed_events(session, pilot, started, Notice(message="Workspace: /work"))
-        before = entries(app)
         await feed_events(session, pilot, SNAPSHOT.model_copy(update={"agents": ()}))
         assert app.query_one(AgentsPane).rows == ()
-        assert entries(app) == before
+        assert entries(app) == []
+        assert app.query_one(Transcript).entries(PLANNER) == ()
+
+
+def logged(*events: Event) -> tuple[EventEnvelope, ...]:
+    """``events`` as a snapshot's transcript, numbered from 1."""
+    return tuple(
+        EventEnvelope(seq=seq, session="s1", payload=event)
+        for seq, event in enumerate(events, start=1)
+    )
+
+
+PLANNER_TURN = (
+    TurnStarted(turn_id="p1", agent_id=PLANNER),
+    AssistantMessage(turn_id="p1", agent_id=PLANNER, text="Two tasks, then."),
+    TurnFinished(turn_id="p1", agent_id=PLANNER, reason="completed"),
+)
+CODER_CALL = (
+    AgentStarted(agent_id="agent-3", role="coder", task_id="1"),
+    ToolCallStarted(turn_id="c1", agent_id="agent-3", call_id="x", name="Read", arguments={}),
+    ToolCallFinished(turn_id="c1", agent_id="agent-3", call_id="x", output="text"),
+)
+
+
+def texts(app: OrbitApp, key: str | None) -> list[str]:
+    """The texts of the entries under the tab keyed ``key``."""
+    return [entry.text for entry in app.query_one(Transcript).entries(key)]
+
+
+async def test_a_snapshots_transcript_shows_its_turns_and_tool_calls_in_their_tabs() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    tail = SNAPSHOT.model_copy(update={"transcript": logged(*PLANNER_TURN, *CODER_CALL)})
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, tail)
+        assert "Two tasks, then." in texts(app, PLANNER)
+        [call] = [entry for entry in app.query_one(Transcript).entries("coder") if entry.call]
+        assert call.call is not None and call.call.status == "passed"
+        assert texts(app, None)[0] == "Two tasks, then."
+
+
+async def test_a_later_snapshot_of_another_session_replaces_the_transcript() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    tail = SNAPSHOT.model_copy(update={"transcript": logged(*PLANNER_TURN, *CODER_CALL)})
+    other = opened(SessionSummary(id="s2", name="docs"))
+    note = Notice(message="Notes on docs.")
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, tail)
+        await feed_events(session, pilot, other.model_copy(update={"transcript": logged(note)}))
+        assert texts(app, None) == ["📌 Notes on docs."]
+        assert texts(app, PLANNER) == []
+        assert texts(app, "coder") == []
+        assert str(app.query_one(Transcript).border_title) == "Conversation — docs"
+
+
+async def test_a_snapshot_closes_the_agent_tabs_its_transcript_doesnt_open() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    checker = AgentStarted(agent_id="agent-4", role="checker", task_id="1")
+    empty = opened(SessionSummary(id="s1", name="auth"))
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, checker)
+        assert tab_strip(app) == [*STRIP, "checker"]
+        await feed_events(session, pilot, empty)
+        assert tab_strip(app) == STRIP
+        reopened = empty.model_copy(update={"transcript": logged(checker)})
+        await feed_events(session, pilot, reopened)
+        assert tab_strip(app) == [*STRIP, "checker"]
+
+
+async def test_a_snapshots_transcript_shows_a_reset_and_a_refusal_as_they_were_shown() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    refused = CommandRefused(command_id="c", code="busy", message="Task 1 is running.")
+    tail = logged(ConversationReset(agent=PLANNER), refused, CommandAccepted(command_id="d"))
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, ConversationReset(agent=PLANNER), refused)
+        live = entries(app)
+        await feed_events(session, pilot, SNAPSHOT.model_copy(update={"transcript": tail}))
+        assert entries(app) == live
 
 
 async def test_a_snapshot_with_a_waiting_proposal_shows_it() -> None:

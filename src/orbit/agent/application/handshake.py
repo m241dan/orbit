@@ -44,7 +44,7 @@ class HandshakeParts:
 
     catalog: Callable[[], Awaitable[Catalog]]
     latest_usage: Callable[[], UsageChanged | None]
-    snapshot: Callable[[], Snapshot]
+    snapshot: Callable[[], Awaitable[Snapshot]]
     load_review_count: Callable[[], Awaitable[None]]
     workspace: str | None
     no_steps: Callable[[], bool]
@@ -116,7 +116,7 @@ class Handshake:
         latest = parts.latest_usage()
         if latest is not None:
             await self._events.put(latest)
-        await self._events.put(parts.snapshot())
+        await self._events.put(await parts.snapshot())
 
     def _steps(self, catalog: Catalog) -> list[Callable[[], Awaitable[None]]]:
         """The steps after Welcome, in order: publishing ``catalog`` and the session, loading the

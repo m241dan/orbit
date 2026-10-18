@@ -320,6 +320,10 @@ class FakeStore:
         self.appends.append((session_id, list(envelopes)))
         self.logged += envelopes
 
+    async def recent(self, session_id: str, limit: int) -> list[EventEnvelope]:
+        await asyncio.sleep(0)  # Reading takes a while.
+        return [envelope for envelope in self.logged if envelope.session == session_id][-limit:]
+
     async def review_count(self) -> int:
         return self.count
 
@@ -670,9 +674,9 @@ def store_of(session: AgentSession) -> SessionStore | None:
     return session.saved_session._store
 
 
-def snapshot_of(session: AgentSession) -> Snapshot:
+async def snapshot_of(session: AgentSession) -> Snapshot:
     """The snapshot of the session as it stands now."""
-    return session._snapshot()
+    return await session._snapshot()
 
 
 def put_on_board(session: AgentSession, *tasks: TaskSpec) -> None:

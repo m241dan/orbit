@@ -1,7 +1,7 @@
 """Switching a session between saved ones: listing, renaming and deleting them, and opening
 another, or a new one, in place of the one open."""
 
-from collections.abc import Callable, Collection, Sequence
+from collections.abc import Awaitable, Callable, Collection, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import assert_never
@@ -68,7 +68,7 @@ class SwitchParts:
     lane: ReviewLane | None
     work: WorkLane | None
     tasks_running: Callable[[], bool]
-    snapshot: Callable[[datetime | None], Snapshot]
+    snapshot: Callable[[datetime | None], Awaitable[Snapshot]]
     catalog: Callable[[tuple[SessionSummary, ...]], Catalog]
 
 
@@ -269,7 +269,7 @@ class SessionSwitcher:
             await parts.lane.end_interrupted(stopped)
         await parts.tasks.changed_elsewhere()
         await self.publish_catalog()
-        await self._events.put(parts.snapshot(last_active))
+        await self._events.put(await parts.snapshot(last_active))
         if parts.lane is not None:
             await parts.lane.note_pause()
 

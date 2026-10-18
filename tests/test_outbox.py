@@ -61,7 +61,7 @@ async def test_envelope_waits_for_an_event_to_be_put() -> None:
 def test_an_outbox_reads_events_only_in_their_envelopes() -> None:
     public = {name for name in dir(Outbox) if not name.startswith("_")}
 
-    assert public == {"put", "put_nowait", "envelope", "close"}
+    assert public == {"put", "put_nowait", "envelope", "transcript", "close"}
 
 
 async def test_with_a_log_envelopes_count_on_from_its_highest_seq() -> None:

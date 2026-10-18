@@ -178,3 +178,52 @@ async def test_an_append_that_cant_start_is_refused(
             await store.append("abc", [notice(1)])
         connection.execute("ROLLBACK")
     assert logged(state) == []
+
+
+# Reading the latest back
+
+
+async def test_recent_events_are_a_sessions_last_ones_oldest_first(
+    open_store: Opener, tmp_path: Path, workspace: Path
+) -> None:
+    other_workspace = tmp_path / "other"
+    other_workspace.mkdir()
+    store, other = await open_store(workspace), await open_store(other_workspace)
+    await store.append("abc", [notice(seq) for seq in (1, 2, 4, 5)])
+    await store.append("def", [notice(3, "def")])
+    await other.append("abc", [notice(6)])
+
+    assert await store.recent("abc", 3) == [notice(2), notice(4), notice(5)]
+    assert await store.recent("abc", 10) == [notice(seq) for seq in (1, 2, 4, 5)]
+    assert await store.recent("ghi", 10) == []
+
+
+async def test_recent_events_of_types_this_orbit_doesnt_know_are_left_out(
+    open_store: Opener, state: Path, workspace: Path
+) -> None:
+    store = await open_store(workspace)
+    await store.append("abc", [notice(1), notice(2)])
+    with database(state) as connection:
+        connection.execute(
+            "UPDATE events SET json = replace(json, '\"notice\"', '\"later\"') WHERE seq = 1"
+        )
+
+    assert await store.recent("abc", 10) == [notice(2)]
+
+
+async def test_recent_events_that_cant_be_read_are_none(
+    open_store: Opener, workspace: Path
+) -> None:
+    store = await open_store(workspace)
+    await store.append("abc", [notice(1)])
+    await store.close()
+
+    assert await store.recent("abc", 10) == []
+
+
+async def test_recent_events_under_an_id_that_isnt_a_plain_file_name_are_refused(
+    open_store: Opener, workspace: Path
+) -> None:
+    store = await open_store(workspace)
+    with pytest.raises(ValueError, match="Not a session id"):
+        await store.recent("../abc", 10)

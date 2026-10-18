@@ -445,8 +445,11 @@ class AgentSession:
         tree = self._desk.agents.tree if self._desk else None
         return await tree.leftovers() if tree else []
 
-    def _snapshot(self, last_active: datetime | None = None) -> Snapshot:
-        """The session open here, last active at ``last_active``, as it stands now."""
+    async def _snapshot(self, last_active: datetime | None = None) -> Snapshot:
+        """The session open here, last active at ``last_active``, as it stands now, with its
+        latest events."""
+        transcript = await self._events.transcript(self._keeper.id)
+        # Read after the transcript, so the state is as it stands once that's read.
         steps, title = self._steps_shown()
         return Snapshot(
             session=self._switcher.summary(last_active),
@@ -459,6 +462,7 @@ class AgentSession:
             review=self._lane.status if self._lane else None,
             proposals=self._proposals.waiting,
             agents=self._running_agents(),
+            transcript=transcript,
         )
 
     def _catalog(self, sessions: tuple[SessionSummary, ...]) -> Catalog:

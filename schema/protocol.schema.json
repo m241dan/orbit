@@ -1542,7 +1542,7 @@
       "type": "object"
     },
     "Snapshot": {
-      "description": "The open session as it stands, sent after ``Welcome`` and after every switch; its\nenvelope's ``seq`` is the point it's current to.\n\nIt holds the ``session``'s summary, its ``settings`` and ``model_choices``, whether each\nlane is ``busy``, its ``tasks``, the verification ``steps`` and the ``steps_title`` they\nshow under, the ``review`` status (none when reviews are off), the checks ``proposals``\nwaiting for a decision, and the ``agents`` running.",
+      "description": "The open session as it stands, sent after ``Welcome`` and after every switch; its\nenvelope's ``seq`` is the point it's current to.\n\nIt holds the ``session``'s summary, its ``settings`` and ``model_choices``, whether each\nlane is ``busy``, its ``tasks``, the verification ``steps`` and the ``steps_title`` they\nshow under, the ``review`` status (none when reviews are off), the checks ``proposals``\nwaiting for a decision, the ``agents`` running, and the ``transcript``: the session's\nlast logged events, at most 500, oldest first, in the envelopes they were sent in.",
       "properties": {
         "agents": {
           "items": {
@@ -1605,6 +1605,14 @@
             "$ref": "#/$defs/TaskState"
           },
           "title": "Tasks",
+          "type": "array"
+        },
+        "transcript": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/EventEnvelope"
+          },
+          "title": "Transcript",
           "type": "array"
         },
         "type": {

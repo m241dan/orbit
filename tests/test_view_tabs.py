@@ -28,6 +28,7 @@ from orbit.tui.view.tabs import (
     mark_planner_busy,
     mark_tab_read,
     mark_tab_unread,
+    reset_tabs,
     tab_key,
     tab_labels,
     task_tab_key,
@@ -261,3 +262,12 @@ def test_marking_a_tab_unread_skips_the_shown_tab_and_all() -> None:
     )
     assert mark_tab_unread(PINNED_TABS, "coder", active="coder") == PINNED_TABS
     assert mark_tab_unread(PINNED_TABS, None, active=None) == PINNED_TABS
+
+
+def test_resetting_tabs_keeps_the_pinned_ones_read_and_idle_but_a_busy_planner() -> None:
+    busy = mark_planner_busy(PINNED_TABS, True)
+    tabs = (*busy, ConversationTab("agent-4", "checker"))
+    tabs = track_tabs(tabs, AgentStarted(agent_id="agent-3", role="coder", task_id="1"))
+    tabs = mark_tab_unread(tabs, "coder", None)
+
+    assert reset_tabs(tabs) == busy

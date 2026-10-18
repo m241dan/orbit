@@ -24,7 +24,7 @@ from orbit.agent.application.ports import StoredSession
 from orbit.agent.domain.sessions import SessionRecord, Unreadable, parse_record, record_json
 from orbit.agent.external.git_tree import workspace_fingerprint
 from orbit.agent.external.session_locks import SessionLocks, check_session_id
-from orbit.protocol import EventEnvelope, encode
+from orbit.protocol import EventEnvelope, decode_event, encode
 
 DATABASE = "orbit.db"
 LOCKS = "locks"
@@ -363,6 +363,17 @@ class SqliteStore:
             message = f"Couldn't save the events of the session {session_id} to {self._database}"
             raise RuntimeError(f"{message}: {error}") from error
 
+    async def recent(self, session_id: str, limit: int) -> list[EventEnvelope]:
+        """The last ``limit`` events logged of the session ``session_id``, oldest first, but for
+        those of types this orbit doesn't know; none when they can't be read."""
+        check_session_id(session_id)
+        try:
+            texts = await self._call(self._recent, session_id, limit)
+        except sqlite3.Error:
+            return []
+        decoded = [decode_event(text) for text in reversed(texts)]
+        return [envelope for envelope in decoded if envelope is not None]
+
     async def acquire(self, session_id: str) -> bool:
         """Lock the session ``session_id`` for this orbit; returns ``False`` when another
         running orbit has it locked.
@@ -532,6 +543,15 @@ class SqliteStore:
                 rows,
             )
         self._max_seq = max([self._max_seq, *(envelope.seq for envelope in envelopes)])
+
+    def _recent(self, session_id: str, limit: int) -> list[str]:
+        """The JSON of the session ``session_id``'s last ``limit`` events, latest first."""
+        rows = self._db.execute(
+            """SELECT json FROM events WHERE workspace_id = ? AND session_id = ?
+            ORDER BY seq DESC LIMIT ?""",
+            (self._workspace, session_id, limit),
+        )
+        return [str(text) for (text,) in rows]
 
     def _delete(self, session_id: str) -> None:
         with self._transaction():

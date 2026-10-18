@@ -8,6 +8,13 @@ from orbit.agent.application.ports import EventLog, Publish
 from orbit.protocol import EventEnvelope
 
 
+def _latest(envelopes: Sequence[EventEnvelope], limit: int) -> list[EventEnvelope]:
+    """The last ``limit`` of ``envelopes`` by ``seq``, oldest first, each ``seq`` once."""
+    by_seq = {envelope.seq: envelope for envelope in envelopes}
+    ordered = [by_seq[seq] for seq in sorted(by_seq)]
+    return ordered[max(0, len(ordered) - limit) :]
+
+
 def _by_session(queued: Sequence[tuple[str, EventEnvelope]]) -> dict[str, list[EventEnvelope]]:
     """The envelopes ``queued``, each with its session's id, grouped by session in the order
     they were queued."""
@@ -27,6 +34,7 @@ class LogWriter:
         self._log = log
         self._appends = ReportedOnce(publish)
         self._queued: list[tuple[str, EventEnvelope]] = []
+        self._writing: list[tuple[str, EventEnvelope]] = []  # Taken from the queue to write.
         self._ready = asyncio.Event()  # Set while envelopes are queued, or once closing.
         self._task: asyncio.Task[None] | None = None
         self._closing = False
@@ -41,6 +49,20 @@ class LogWriter:
         self._ready.set()
         if self._task is None:
             self._task = asyncio.create_task(self._run())
+
+    async def recent(self, session_id: str, limit: int) -> list[EventEnvelope]:
+        """The last ``limit`` events of the session ``session_id``, oldest first: those in the
+        log, and after them those still to be written, each once."""
+        # Read on both sides of the log's read: an event written meanwhile is in the log, or
+        # was still to be written before it, and one added meanwhile is still to be written.
+        before = self._unwritten(session_id)
+        logged = await self._log.recent(session_id, limit)
+        return _latest([*logged, *before, *self._unwritten(session_id)], limit)
+
+    def _unwritten(self, session_id: str) -> list[EventEnvelope]:
+        """The envelopes of the session ``session_id`` being written or queued, in order."""
+        pending = [*self._writing, *self._queued]
+        return [envelope for session, envelope in pending if session == session_id]
 
     async def close(self) -> None:
         """Write what's queued, then stop the writer; cancelled, it stops at once, an append in
@@ -58,6 +80,7 @@ class LogWriter:
         while not self._closing or self._queued:
             await self._ready.wait()
             self._ready.clear()
-            queued, self._queued = self._queued, []
-            for session_id, envelopes in _by_session(queued).items():
+            self._writing, self._queued = self._queued, []
+            for session_id, envelopes in _by_session(self._writing).items():
                 await self._appends.attempt(self._log.append(session_id, envelopes))
+            self._writing = []

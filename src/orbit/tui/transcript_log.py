@@ -170,6 +170,15 @@ class TranscriptLog(ListPane):
         if shown(entry, self._thinking_hidden):
             self._show_after(len(self._entries) - 1)
 
+    def clear(self) -> None:
+        """Drop every entry."""
+        self._entries.clear()
+        self._collapsed.clear()
+        self._rows.clear()
+        self._marked = None
+        self._calls.clear()
+        self.clear_options()
+
     def _show_after(self, index: int) -> None:
         """Add the entry at ``index``, which comes after every entry shown, as the last option,
         the view pinned to it unless the list is active or holds a cursor."""

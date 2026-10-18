@@ -90,6 +90,9 @@ class Parts:
         await self._part("list")
         self.log.append(LISTED)
 
+    async def snapshot(self) -> Snapshot:
+        return SNAPSHOT
+
     def start(self) -> None:
         self.log.append("start")
 
@@ -97,7 +100,7 @@ class Parts:
         parts = HandshakeParts(
             self.catalog,
             lambda: self.latest,
-            lambda: SNAPSHOT,
+            self.snapshot,
             self.load_review_count,
             workspace,
             lambda: self.no_steps,
