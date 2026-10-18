@@ -18,7 +18,9 @@ from orbit.protocol import (
     BusyChanged,
     CancelTurn,
     Command,
+    CommandAccepted,
     CommandEnvelope,
+    CommandRefused,
     ErrorOccurred,
     Event,
     EventEnvelope,
@@ -130,6 +132,36 @@ async def test_each_command_goes_in_an_envelope_with_a_fresh_id() -> None:
         int(envelope.command_id, 16)  # Hex.
         assert (envelope.workspace, envelope.session) == ("default", None)
     assert first.command_id != second.command_id
+
+
+async def test_a_refused_message_shows_why_and_frees_the_prompt() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        prompt = app.query_one("#prompt", ChatPrompt)
+        await pilot.press("i", *"hi", "enter")
+        [sent] = session.envelopes
+        await feed_events(session, pilot, CommandAccepted(command_id="other"))
+        assert prompt.border_title == "Prompt · planner · busy"
+        refused = CommandRefused(command_id=sent.command_id, code="unknown", message="Not now.")
+        await feed_events(session, pilot, refused)
+        assert entries(app)[-1] == ("Not now.", "error")
+        assert prompt.border_title == "Prompt · planner"
+        await pilot.press("i", *"again", "enter")
+    assert session.commands[-1] == SendMessage(agent=PLANNER, text="again")
+
+
+async def test_a_refusal_of_another_command_leaves_the_planner_busy() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        prompt = app.query_one("#prompt", ChatPrompt)
+        await pilot.press("i", *"hi", "enter", "ctrl+x")
+        cancel = session.envelopes[-1]
+        refused = CommandRefused(command_id=cancel.command_id, code="unknown", message="No.")
+        await feed_events(session, pilot, refused)
+        assert entries(app)[-1] == ("No.", "error")
+        assert prompt.border_title == "Prompt · planner · busy"
 
 
 async def test_a_failed_event_stream_shows_an_error_line() -> None:

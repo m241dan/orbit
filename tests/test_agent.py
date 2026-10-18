@@ -23,6 +23,7 @@ from orbit.agent.domain.usage import UsageFetch, UsageUnavailable
 from orbit.agent.domain.verification import MAX_FALLBACK_FIXES
 from orbit.protocol import (
     PLANNER,
+    UNKNOWN,
     AddTask,
     BusyChanged,
     CancelTurn,
@@ -46,6 +47,7 @@ from orbit.protocol import (
     VerificationFinished,
 )
 from tests.agent_fakes import (
+    ACCEPTED,
     STEP,
     Call,
     FakeTree,
@@ -55,6 +57,7 @@ from tests.agent_fakes import (
     nothing_queued,
     payloads,
     planner_turn,
+    refused,
     send,
     session_for,
 )
@@ -106,6 +109,7 @@ async def test_a_prompt_without_a_planner_is_refused() -> None:
     assert isinstance(await anext(stream), SettingsChanged)
     assert await anext(stream) == ErrorOccurred(message="Planning needs agents and a planner role.")
     assert await anext(stream) == PLANNER_IDLE
+    assert await anext(stream) == ACCEPTED
     assert isinstance(await anext(stream), SessionOpened)
     assert nothing_queued(session)
 
@@ -174,13 +178,15 @@ async def test_add_and_edit_tasks_publish_the_board() -> None:
     await send(session, AddTask(task=TaskSpec(prompt="one")))
     [added] = (await anext(stream)).tasks  # type: ignore[union-attr]
     assert added == TaskState(id=added.id, task=TaskSpec(prompt="one"))
+    assert await anext(stream) == ACCEPTED
 
     edited = TaskSpec(prompt="one!", settings=Settings(tool_access="off"))
     await send(session, EditTask(task_id=added.id, task=edited))
     assert await anext(stream) == TasksChanged(tasks=(TaskState(id=added.id, task=edited),))
+    assert await anext(stream) == ACCEPTED
 
     await send(session, EditTask(task_id="nope", task=edited))
-    assert await anext(stream) == ErrorOccurred(message="No task with id 'nope'.")
+    assert await anext(stream) == refused(UNKNOWN, "No task with id 'nope'.")
 
 
 async def test_a_turn_started_as_the_last_ends_is_not_reported_idle() -> None:

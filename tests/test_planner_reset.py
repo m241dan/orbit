@@ -13,9 +13,11 @@ from orbit.agent.application.planner_seat import (
 from orbit.agent.domain.verification import steps_note
 from orbit.protocol import (
     PLANNER,
+    UNKNOWN,
     AddTask,
     AgentExited,
     CancelTurn,
+    CommandRefused,
     ConversationReset,
     ErrorOccurred,
     Event,
@@ -35,6 +37,7 @@ from tests.agent_fakes import (
     events_until,
     idle,
     of_type,
+    refused,
     send,
     session_for,
 )
@@ -190,9 +193,9 @@ async def test_only_the_planners_conversation_can_be_reset() -> None:
     await plan(session, "Plan.")
     for agent in ("coder", "nobody"):
         await send(session, ResetConversation(agent=agent))
-        events = await events_until(session, of_type(ErrorOccurred))
+        events = await events_until(session, of_type(CommandRefused))
         message = f"Agent {agent!r} has no conversation to reset; the agents with one are planner."
-        assert events[-1] == ErrorOccurred(message=message)
+        assert events[-1] == refused(UNKNOWN, message)
         assert not any(isinstance(e, ConversationReset | AgentExited) for e in events)
     await asyncio.sleep(0.01)  # Saving takes a while.
     assert store.last.planner_conversation == "conversation-agent-1"

@@ -8,6 +8,7 @@ from orbit.protocol import (
     AgentReply,
     AgentStarted,
     AssistantMessage,
+    CommandRefused,
     ErrorOccurred,
     Notice,
     ProgressNoted,
@@ -271,9 +272,14 @@ def ruled(kind: EntryKind) -> bool:
     return kind in RULE_KINDS
 
 
-def error_entry(event: ErrorOccurred) -> tuple[str, EntryKind]:
+def error_entry(event: ErrorOccurred | CommandRefused) -> tuple[str, EntryKind]:
     """``event``'s error message, labelled with its agent."""
-    return agent_labelled((event.message, "error"), event.agent_id)
+    return agent_labelled((event.message, "error"), error_agent(event))
+
+
+def error_agent(event: ErrorOccurred | CommandRefused) -> str | None:
+    """The agent whose error ``event`` is, if any; a refused command is no agent's."""
+    return event.agent_id if isinstance(event, ErrorOccurred) else None
 
 
 def agent_labelled(entry: tuple[str, EntryKind], agent: str | None) -> tuple[str, EntryKind]:

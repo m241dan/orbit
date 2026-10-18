@@ -10,6 +10,7 @@ from orbit.agent.application import session as session_module
 from orbit.agent.application.startup_check import CANCELLED_NOTE, StartupCheck
 from orbit.protocol import (
     PLANNER,
+    UNKNOWN,
     AgentExited,
     AgentStarted,
     CancelAgent,
@@ -24,6 +25,7 @@ from orbit.protocol import (
     VerificationChanged,
 )
 from tests.agent_fakes import (
+    ACCEPTED,
     STEP,
     Call,
     FakeTree,
@@ -32,6 +34,7 @@ from tests.agent_fakes import (
     board,
     events_until,
     payloads,
+    refused,
     run,
     send,
     session_for,
@@ -160,6 +163,11 @@ async def test_it_is_skipped_without_verification_or_steps_or_when_not_asked() -
         await session.close()
 
 
+def but_accepted(events: list[Event]) -> list[Event]:
+    """``events`` without the outcomes of commands accepted."""
+    return [event for event in events if event != ACCEPTED]
+
+
 async def test_cancelling_its_agent_stops_it() -> None:
     steps = Steps(True)
     steps.gate = asyncio.Event()
@@ -173,7 +181,8 @@ async def test_cancelling_its_agent_stops_it() -> None:
         if isinstance(event, AgentExited):
             break
 
-    assert events[-3:] == [
+    assert ACCEPTED in events
+    assert but_accepted(events)[-3:] == [
         titled("cancelled", "pending"),
         Notice(message=CANCELLED_NOTE),
         AgentExited(agent_id="startup-check", reason="killed"),
@@ -182,9 +191,7 @@ async def test_cancelling_its_agent_stops_it() -> None:
     assert not [e for e in events if isinstance(e, StartupChecked)]
     # Once it's over, there's no agent by that name to cancel.
     await send(session, CancelAgent(agent_id="startup-check"))
-    assert await anext(payloads(session)) == ErrorOccurred(
-        message="No running agent 'startup-check'."
-    )
+    assert await anext(payloads(session)) == refused(UNKNOWN, "No running agent 'startup-check'.")
     await session.close()
 
 
@@ -202,7 +209,7 @@ async def test_cancelling_it_while_setting_up_leaves_the_steps_pending() -> None
         if isinstance(event, AgentExited):
             break
 
-    assert events[-3:] == [
+    assert but_accepted(events)[-3:] == [
         titled("pending", "pending"),
         Notice(message=CANCELLED_NOTE),
         AgentExited(agent_id="startup-check", reason="killed"),

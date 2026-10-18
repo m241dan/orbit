@@ -11,6 +11,7 @@ from orbit.agent.domain.endings import ENDED_AT_PROPOSAL, NO_PROPOSAL
 from orbit.agent.domain.roles import ChecksProposal, Setup
 from orbit.agent.domain.verification import VerificationStep, failure_report
 from orbit.protocol import (
+    UNKNOWN,
     AddTask,
     AgentExited,
     AgentReply,
@@ -18,6 +19,7 @@ from orbit.protocol import (
     CancelTurn,
     ChecksProposed,
     Command,
+    CommandRefused,
     DecideProposal,
     ErrorOccurred,
     Event,
@@ -33,7 +35,10 @@ from tests.agent_fakes import (
     FakeTree,
     Steps,
     board,
+    events_until,
+    of_type,
     payloads,
+    refused,
     run,
     send,
     session_for,
@@ -355,13 +360,8 @@ async def test_deciding_when_no_proposal_waits_is_an_error() -> None:
     session, _, _ = session_for()
     await send(session, DecideProposal(task_id="nope", action="accept"))
 
-    async def first_error() -> str:
-        async for event in payloads(session):
-            if isinstance(event, ErrorOccurred):
-                return event.message
-        raise AssertionError("unreachable")
-
-    assert await asyncio.wait_for(first_error(), 5) == "No proposal is waiting for task 'nope'."
+    events = await events_until(session, of_type(CommandRefused))
+    assert events[-1] == refused(UNKNOWN, "No proposal is waiting for task 'nope'.")
 
 
 async def test_a_second_decision_on_the_same_proposal_is_an_error() -> None:
@@ -375,8 +375,9 @@ async def test_a_second_decision_on_the_same_proposal_is_an_error() -> None:
 
     events = await asyncio.wait_for(decided(session, twice), 5)
     [task] = board(events)
-    errors = [e.message for e in events if isinstance(e, ErrorOccurred)]
-    assert errors == [f"No proposal is waiting for task {task.id!r}."]
+    refusals = [e for e in events if isinstance(e, CommandRefused)]
+    assert refusals == [refused(UNKNOWN, f"No proposal is waiting for task {task.id!r}.")]
+    assert not any(isinstance(e, ErrorOccurred) for e in events)
     assert task.status == "completed"
 
 

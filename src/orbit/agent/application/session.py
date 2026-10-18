@@ -37,6 +37,7 @@ from orbit.agent.application.verifier import Verification, Verifier
 from orbit.agent.application.work_lane import WorkLane
 from orbit.agent.domain.agents import Agent
 from orbit.agent.domain.board import WAITING, TaskBoard
+from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.reviews import ReviewPlanner
 from orbit.agent.domain.roles import REVIEW_ROLES, configure_prompt, role_task
 from orbit.agent.domain.verification import VerificationStep, startup_fix_prompt
@@ -44,19 +45,26 @@ from orbit.protocol import (
     CODER,
     CONFIGURATOR,
     CONFIGURE_CHECKS,
+    DEFAULT_WORKSPACE,
+    INVALID,
+    NOT_CONFIGURED,
     PLANNER,
     PLANNER_LANE,
     SESSIONLESS_EVENTS,
     SUPER_REVIEW,
+    UNKNOWN,
     WORK_LANE,
+    WRONG_SESSION,
     AcceptTask,
     AddTask,
     CancelAgent,
     CancelTurn,
+    Command,
+    CommandAccepted,
     CommandEnvelope,
+    CommandRefused,
     DecideProposal,
     EditTask,
-    ErrorOccurred,
     Event,
     EventEnvelope,
     FireTrigger,
@@ -274,7 +282,29 @@ class AgentSession:
         return self._verifier.verification if self._verifier else None
 
     async def send(self, envelope: CommandEnvelope) -> None:
-        command = envelope.payload
+        """Handle the command in ``envelope``, then publish its outcome: ``CommandRefused`` if
+        it was refused, else ``CommandAccepted``. Other errors escape, with no outcome."""
+        command_id = envelope.command_id
+        try:
+            self._check_addressed(envelope)
+            await self._handle(envelope.payload)
+        except Refused as refusal:
+            refused = CommandRefused(command_id=command_id, code=refusal.code, message=str(refusal))
+            await self._events.put(refused)
+            return
+        await self._events.put(CommandAccepted(command_id=command_id))
+
+    def _check_addressed(self, envelope: CommandEnvelope) -> None:
+        """Refuse ``envelope`` unless it's for this workspace and the open session, if any."""
+        if envelope.workspace != DEFAULT_WORKSPACE:
+            message = f"No workspace {envelope.workspace!r}; the workspace is {DEFAULT_WORKSPACE}."
+            raise Refused(UNKNOWN, message)
+        session, open_id = envelope.session, self._keeper.id
+        if session is not None and session != open_id:
+            message = f"Session {session!r} isn't open; the open session is {open_id}."
+            raise Refused(WRONG_SESSION, message)
+
+    async def _handle(self, command: Command) -> None:
         if isinstance(command, SessionCommand):
             await self._switcher.handle(command)
         else:
@@ -314,8 +344,7 @@ class AgentSession:
                 f"Agent {command.agent!r} can't be messaged; "
                 f"the agents you can message are {PLANNER}."
             )
-            await self._events.put(ErrorOccurred(message=message))
-            return
+            raise Refused(UNKNOWN, message)
         await self._seat.submit(command.text, self._settings)
 
     async def _handle_tasks(self, command: AddTask | RunTasks) -> None:
@@ -331,11 +360,9 @@ class AgentSession:
         """Queue a configurator first and run it, unless work is running already (then it goes
         next); refused without verification or while one is queued or running."""
         if self._desk is None or self._work is None:
-            await self._events.put(ErrorOccurred(message=NO_AGENTS_MESSAGE))
-            return
+            raise Refused(NOT_CONFIGURED, NO_AGENTS_MESSAGE)
         if self._verifier is None:
-            await self._events.put(ErrorOccurred(message=NO_VERIFY_MESSAGE))
-            return
+            raise Refused(NOT_CONFIGURED, NO_VERIFY_MESSAGE)
         if self._configuring():
             await self._events.put(Notice(message=CONFIGURING_NOTE))
             return
@@ -359,7 +386,7 @@ class AgentSession:
             case EditTask(task_id=task_id, task=task):
                 await self._edit(task_id, task)
             case AcceptTask(task_id=task_id):
-                await self._change(lambda board: board.accept(task_id))
+                await self._tasks.change(lambda board: board.accept(task_id))
             case RemoveTask(task_id=task_id):
                 await self._remove(task_id)
             case _:
@@ -369,24 +396,23 @@ class AgentSession:
         """Edit a task, unless it's a review orbit queued: its batch is spent, so it couldn't
         run again. An edited task in a review batch has to finish again before the batch does."""
         if self._lane is not None and self._lane.queued_by_orbit(task_id):
-            message = "Reviews can't be edited; remove it instead."
-            await self._events.put(ErrorOccurred(message=message))
-            return
-        if await self._change(lambda board: board.edit(task_id, task)) and self._lane is not None:
+            raise Refused(INVALID, "Reviews can't be edited; remove it instead.")
+        await self._tasks.change(lambda board: board.edit(task_id, task))
+        if self._lane is not None:
             self._lane.edited(task_id)
             await self._reviews_changed()
 
     async def _remove(self, task_id: str) -> None:
         """Remove a task, and take it out of its review batch, if any."""
         state = self._board.find(task_id)
-        if await self._change(lambda board: board.remove(task_id)) and self._lane is not None:
+        await self._tasks.change(lambda board: board.remove(task_id))
+        if self._lane is not None:
             assert state is not None  # The board removed it, so it was there.
             await self._lane.removed(task_id, state)
 
     async def _run_tasks_if_possible(self) -> None:
         if self._work is None:
-            await self._events.put(ErrorOccurred(message=NO_AGENTS_MESSAGE))
-            return
+            raise Refused(NOT_CONFIGURED, NO_AGENTS_MESSAGE)
         if self._lane is not None:
             self._lane.kick()
         await self._start_work(asked=True)
@@ -410,7 +436,7 @@ class AgentSession:
             self._seat.cancel()
         else:
             message = f"No lane {lane!r}; the lanes are {WORK_LANE} and {PLANNER_LANE}."
-            await self._events.put(ErrorOccurred(message=message))
+            raise Refused(UNKNOWN, message)
 
     def _hold_work(self) -> None:
         """Cancel the work lane's run, and hold it until the user asks for work again."""
@@ -441,8 +467,7 @@ class AgentSession:
                 f"Agent {command.agent!r} has no conversation to reset; "
                 f"the agents with one are {PLANNER}."
             )
-            await self._events.put(ErrorOccurred(message=message))
-            return
+            raise Refused(UNKNOWN, message)
         await self._seat.reset()
 
     async def _fire_trigger(self, command: FireTrigger) -> None:
@@ -455,17 +480,15 @@ class AgentSession:
                 f"No trigger {command.trigger!r}; "
                 f"the triggers are {SUPER_REVIEW} and {CONFIGURE_CHECKS}."
             )
-        elif command.input:
-            message = f"The {command.trigger} trigger takes no input."
-        else:
-            await run()
-            return
-        await self._events.put(ErrorOccurred(message=message))
+            raise Refused(UNKNOWN, message)
+        if command.input:
+            raise Refused(INVALID, f"The {command.trigger} trigger takes no input.")
+        await run()
 
     async def _decide(self, command: DecideProposal) -> None:
         if not self._proposals.decide(command):
             message = f"No proposal is waiting for task {command.task_id!r}."
-            await self._events.put(ErrorOccurred(message=message))
+            raise Refused(UNKNOWN, message)
 
     def _agent_on(self, task_id: str) -> str:
         """The agent working on task ``task_id``; only asked while one is."""
@@ -479,9 +502,8 @@ class AgentSession:
             return
         agent = self._desk.find(agent_id) if self._desk else None
         if agent is None:
-            await self._events.put(ErrorOccurred(message=f"No running agent {agent_id!r}."))
-        else:
-            self._cancel_work_of(agent)
+            raise Refused(UNKNOWN, f"No running agent {agent_id!r}.")
+        self._cancel_work_of(agent)
 
     def _cancel_work_of(self, agent: Agent) -> None:
         """Stop a reviewer's review, or the planner's turn, on its own; else the work lane's."""
@@ -504,9 +526,8 @@ class AgentSession:
     async def _super_review(self) -> None:
         if self._lane is None:
             message = "Super reviews need reviews turned on, inside a git repository."
-            await self._events.put(ErrorOccurred(message=message))
-        else:
-            await self._lane.super_review()
+            raise Refused(NOT_CONFIGURED, message)
+        await self._lane.super_review()
 
     async def _wake_work(self) -> None:
         """Run the work a review queued, unless something runs or the user cancelled."""
@@ -546,21 +567,6 @@ class AgentSession:
         if isinstance(event, TurnFinished) and event.usage is not None:
             self._switcher.spent += event.usage
         await self._events.put(event)
-
-    async def _change(self, change: Callable[[TaskBoard], None]) -> bool:
-        """Make ``change`` to the board, publishing it, or report why the change was refused;
-        returns whether it was changed. Errors from publishing or saving the change escape."""
-
-        def made(board: TaskBoard) -> bool:
-            change(board)
-            return True
-
-        return await self._tasks.change(made, refused=self._refused)
-
-    async def _refused(self, error: ValueError) -> bool:
-        """Report why the board refused a change; returns that nothing was changed."""
-        await self._events.put(ErrorOccurred(message=str(error)))
-        return False
 
     def _step_names(self) -> tuple[str, ...]:
         """The names of the steps verifying tasks now; none without verification."""

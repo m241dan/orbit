@@ -10,6 +10,7 @@ from orbit.protocol import (
     AgentRequest,
     AgentStarted,
     AssistantMessage,
+    CommandRefused,
     ErrorOccurred,
     Notice,
     ProgressNoted,
@@ -38,6 +39,7 @@ from orbit.tui.view import (
     activity_entry,
     agent_exited,
     agent_started,
+    error_agent,
     error_entry,
     exit_rule,
     output_entry,
@@ -53,11 +55,13 @@ ConversationEvent = (
     TurnStarted
     | TurnFinished
     | ErrorOccurred
+    | CommandRefused
     | AssistantMessage
     | ToolCallStarted
     | ToolCallFinished
 )
-"""Events of an agent's turns: their start and end, errors, messages and tool calls."""
+"""Events of an agent's turns: their start and end, errors, messages and tool calls; and
+refused commands, shown as errors."""
 
 FeedEvent = ConversationEvent | TaskProgress | AgentNote | AgentRequest | AgentExited
 """Events the conversation shows as entries."""
@@ -83,6 +87,7 @@ class ConversationFeed:
                 TurnStarted()
                 | TurnFinished()
                 | ErrorOccurred()
+                | CommandRefused()
                 | AssistantMessage()
                 | ToolCallStarted()
                 | ToolCallFinished()
@@ -122,8 +127,8 @@ class ConversationFeed:
                 self._turn_started(event)
             case TurnFinished():
                 self._turn_finished(event)
-            case ErrorOccurred():
-                self.append(*error_entry(event), event.agent_id)
+            case ErrorOccurred() | CommandRefused():
+                self.append(*error_entry(event), error_agent(event))
             case AssistantMessage() | ToolCallStarted() | ToolCallFinished():
                 self._output(event)
             case _:

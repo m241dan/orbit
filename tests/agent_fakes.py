@@ -30,7 +30,9 @@ from orbit.protocol import (
     BusyChanged,
     BusyLane,
     Command,
+    CommandAccepted,
     CommandEnvelope,
+    CommandRefused,
     ErrorOccurred,
     Event,
     RunTasks,
@@ -430,9 +432,22 @@ def session_for(
     return session, host, launcher
 
 
+COMMAND_ID = "command"
+"""The id :func:`send` sends every command under."""
+
+ACCEPTED = CommandAccepted(command_id=COMMAND_ID)
+"""The outcome of a command :func:`send` sent that was accepted."""
+
+
+def refused(code: str, message: str) -> CommandRefused:
+    """The outcome of a command :func:`send` sent that was refused, for ``code``, with
+    ``message``."""
+    return CommandRefused(command_id=COMMAND_ID, code=code, message=message)
+
+
 async def send(session: Session, command: Command) -> None:
     """Send ``command`` to ``session``, in an envelope for the open session."""
-    await session.send(CommandEnvelope(command_id="command", payload=command))
+    await session.send(CommandEnvelope(command_id=COMMAND_ID, payload=command))
 
 
 async def payloads(session: Session) -> AsyncIterator[Event]:

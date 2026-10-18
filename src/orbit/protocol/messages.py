@@ -479,6 +479,43 @@ class ErrorOccurred(_Message):
     message: str
 
 
+class CommandAccepted(_Message):
+    """Command ``command_id`` was handled; the events its handling published came before."""
+
+    type: Literal["command_accepted"] = "command_accepted"
+    command_id: str
+
+
+NOT_CONFIGURED = "not_configured"
+"""A refusal's code: what the command needs isn't set up, such as agents or verification."""
+
+UNKNOWN = "unknown"
+"""A refusal's code: the command names something there's none of, such as a task or a lane."""
+
+BUSY = "busy"
+"""A refusal's code: what the command acts on is running, so it can't be done now."""
+
+INVALID = "invalid"
+"""A refusal's code: the command can't be done as given, such as input to a trigger that takes
+none."""
+
+LOCKED = "locked"
+"""A refusal's code: another orbit holds what the command acts on."""
+
+WRONG_SESSION = "wrong_session"
+"""A refusal's code: the command is for a session that isn't open."""
+
+
+class CommandRefused(_Message):
+    """Command ``command_id`` was refused, for the reason ``code`` names (one of the refusal
+    codes, such as :data:`UNKNOWN`), and ``message`` says why; it changed nothing."""
+
+    type: Literal["command_refused"] = "command_refused"
+    command_id: str
+    code: str
+    message: str
+
+
 MergeResult = Literal["merged", "rebased", "conflict", "blocked", "detached"]
 """What came of merging a task's commit into the base branch.
 
@@ -690,7 +727,9 @@ Event = Annotated[
     | UsageChanged
     | SessionsListed
     | SessionOpened
-    | ConversationReset,
+    | ConversationReset
+    | CommandAccepted
+    | CommandRefused,
     Field(discriminator="type"),
 ]
 

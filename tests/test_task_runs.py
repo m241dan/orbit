@@ -21,6 +21,8 @@ from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.board import WAITING, TaskBoard
 from orbit.agent.domain.endings import BUG, CANCELLED
 from orbit.protocol import (
+    BUSY,
+    NOT_CONFIGURED,
     AddTask,
     AgentExited,
     BusyChanged,
@@ -46,6 +48,7 @@ from orbit.protocol import (
     VerificationStarted,
 )
 from tests.agent_fakes import (
+    ACCEPTED,
     ROLES,
     Call,
     FakeHost,
@@ -55,9 +58,9 @@ from tests.agent_fakes import (
     ScriptedLauncher,
     Steps,
     board,
-    nothing_queued,
     payloads,
     queued,
+    refused,
     run,
     send,
     session_for,
@@ -133,7 +136,7 @@ async def test_running_does_nothing_when_nothing_is_runnable() -> None:
     await anext(stream)  # The session opened.
     await send(session, RunTasks())
     await asyncio.sleep(0.01)
-    assert nothing_queued(session)
+    assert queued(session) == [ACCEPTED]
     assert launcher.launches == []
 
 
@@ -142,8 +145,9 @@ async def test_running_without_agents_is_refused() -> None:
     await send(session, AddTask(task=TaskSpec(prompt="a")))
     await send(session, RunTasks())
     stream = payloads(session)
-    events = [await anext(stream) for _ in range(3)]
-    assert ErrorOccurred(message="Tasks need agents, and none are set up.") in events
+    events = [await anext(stream) for _ in range(4)]
+    assert refused(NOT_CONFIGURED, "Tasks need agents, and none are set up.") in events
+    assert not any(isinstance(event, ErrorOccurred) for event in events)
 
 
 async def test_a_failed_task_does_not_stop_the_next() -> None:
@@ -208,7 +212,7 @@ async def test_tasks_added_during_a_run_join_it_and_running_ones_cannot_be_edite
     proceed.set()
     events = await asyncio.wait_for(idle(session), 5)
 
-    assert ErrorOccurred(message="Task '1' can't be edited while it runs.") in events
+    assert refused(BUSY, "Task '1' can't be edited while it runs.") in events
     assert [launch.agent.task_id for launch in launcher.launches] == ["1", "2"]
     assert statuses(events) == ["completed", "completed"]
 

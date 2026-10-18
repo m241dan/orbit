@@ -32,7 +32,9 @@ from orbit.protocol import (
     CancelTurn,
     ChecksProposed,
     Command,
+    CommandAccepted,
     CommandEnvelope,
+    CommandRefused,
     ConversationReset,
     DecideProposal,
     EditTask,
@@ -225,6 +227,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         self._sessions: SessionsScreen | None = None  # The list of sessions shown, if any.
         # Whether the user pressed ctrl+p, after which no list opens as the startup list.
         self._asked_sessions = False
+        self._message_id: str | None = None  # The command id of the last message sent.
         self.clock: Callable[[], float] = time.monotonic
         # Pickers are built once and installed so they open instantly.
         self._model_picker = PickerScreen("Model", model_options(())[1])
@@ -283,6 +286,15 @@ class OrbitApp(App[None], inherit_bindings=False):
         self._set_busy(PLANNER_LANE, True)
         self._feed.append(text, "prompt", PLANNER)
         await self._send(SendMessage(agent=PLANNER, text=text))
+
+    def _render_outcome(self, event: CommandAccepted | CommandRefused) -> None:
+        """Show why a command was refused, freeing the planner from a message it refused; an
+        accepted one shows nothing."""
+        if isinstance(event, CommandAccepted):
+            return
+        if event.command_id == self._message_id:
+            self._set_busy(PLANNER_LANE, False)
+        self._feed.render(event)
 
     # Window navigation only applies at the top level, when no window is active.
 
@@ -536,8 +548,12 @@ class OrbitApp(App[None], inherit_bindings=False):
         await self._send(UpdateSettings(settings=settings))
 
     async def _send(self, command: Command) -> None:
-        """Send ``command`` to the open session in the default workspace, under a fresh id."""
-        await self._session.send(CommandEnvelope(command_id=uuid4().hex, payload=command))
+        """Send ``command`` to the open session in the default workspace, under a fresh id,
+        remembered for a message."""
+        command_id = uuid4().hex
+        if isinstance(command, SendMessage):
+            self._message_id = command_id
+        await self._session.send(CommandEnvelope(command_id=command_id, payload=command))
 
     @work(exclusive=True, group="events")
     async def _consume_events(self) -> None:
@@ -595,6 +611,8 @@ class OrbitApp(App[None], inherit_bindings=False):
                 self._feed.render(event)
             case SessionsListed() | SessionOpened() | ConversationReset():
                 self._render_session(event)
+            case CommandAccepted() | CommandRefused():
+                self._render_outcome(event)
             case _:
                 assert_never(event)
 

@@ -5,11 +5,13 @@ import asyncio
 from orbit.agent.application.ports import Reply
 from orbit.protocol import (
     PLANNER,
+    UNKNOWN,
     AddTask,
     AgentStarted,
     BusyChanged,
     CancelAgent,
     CancelTurn,
+    CommandRefused,
     ErrorOccurred,
     Event,
     RunTasks,
@@ -19,7 +21,7 @@ from orbit.protocol import (
     TurnFinished,
     TurnStarted,
 )
-from tests.agent_fakes import Call, Script, board, events_until, send, session_for
+from tests.agent_fakes import Call, Script, board, events_until, refused, send, session_for
 from tests.test_task_runs import claims_done
 
 PLANNER_IDLE = BusyChanged(busy=False, lane="planner")
@@ -103,10 +105,10 @@ async def test_only_the_planner_can_be_messaged() -> None:
     launcher.planner_turns = [chats]
     for agent in ("coder", "nobody"):
         await send(session, SendMessage(agent=agent, text="hi"))
-        events = await events_until(session, lambda e: isinstance(e, ErrorOccurred))
-        assert errors(events) == [
-            f"Agent {agent!r} can't be messaged; the agents you can message are planner."
-        ]
+        events = await events_until(session, lambda e: isinstance(e, CommandRefused))
+        message = f"Agent {agent!r} can't be messaged; the agents you can message are planner."
+        assert events[-1] == refused(UNKNOWN, message)
+        assert errors(events) == []
         assert BusyChanged(busy=True, lane="planner") not in events
     assert launcher.launches == []
 
@@ -139,8 +141,9 @@ async def test_cancelling_an_unknown_lane_stops_neither_lane() -> None:
     await send(session, SendMessage(agent=PLANNER, text="Plan."))
     await events_until(session, lambda e: isinstance(e, TurnStarted) and e.turn_id != e.agent_id)
     await send(session, CancelTurn(lane="x"))
-    events = await events_until(session, lambda e: isinstance(e, ErrorOccurred))
-    assert errors(events) == ["No lane 'x'; the lanes are work and planner."]
+    events = await events_until(session, lambda e: isinstance(e, CommandRefused))
+    assert events[-1] == refused(UNKNOWN, "No lane 'x'; the lanes are work and planner.")
+    assert errors(events) == []
 
     planner_gate.set()
     events = await events_until(session, lambda e: e == PLANNER_IDLE)

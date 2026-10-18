@@ -11,8 +11,12 @@ from orbit.agent.domain.roles import Setup, configure_prompt
 from orbit.agent.domain.verification import VerificationStep
 from orbit.protocol import (
     CONFIGURE_CHECKS,
+    INVALID,
+    NOT_CONFIGURED,
+    UNKNOWN,
     AddTask,
     CancelTurn,
+    CommandRefused,
     ErrorOccurred,
     Event,
     FireTrigger,
@@ -34,7 +38,8 @@ from tests.agent_fakes import (
     board,
     events_until,
     idle,
-    payloads,
+    of_type,
+    refused,
     send,
     session_for,
     verified,
@@ -192,21 +197,15 @@ async def test_after_ctrl_s_holds_the_work_it_still_runs_straight_away() -> None
 async def test_without_agents_it_is_refused() -> None:
     session = AgentSession()
     await send(session, FireTrigger(trigger=CONFIGURE_CHECKS))
-    async for event in payloads(session):
-        if isinstance(event, ErrorOccurred):
-            assert event.message == "Tasks need agents, and none are set up."
-            return
+    events = await until_refused(session)
+    assert events[-1] == refused(NOT_CONFIGURED, "Tasks need agents, and none are set up.")
 
 
 async def test_without_verification_it_is_refused_and_nothing_starts() -> None:
     session, _, launcher = session_for(Configurator())
     await send(session, FireTrigger(trigger=CONFIGURE_CHECKS))
-    events: list[Event] = []
-    async for event in payloads(session):
-        events.append(event)
-        if isinstance(event, ErrorOccurred):
-            break
-    assert events[-1] == ErrorOccurred(message=NO_VERIFY_MESSAGE)
+    events = await until_refused(session)
+    assert events[-1] == refused(NOT_CONFIGURED, NO_VERIFY_MESSAGE)
     assert NO_VERIFY_MESSAGE == (
         "Setting up checks needs verification on; orbit was started with --no-verify."
     )
@@ -214,21 +213,18 @@ async def test_without_verification_it_is_refused_and_nothing_starts() -> None:
     assert launcher.launches == []
 
 
-async def until_error(session: AgentSession) -> list[Event]:
-    """Events up to and including the first error."""
-    events: list[Event] = []
-    async for event in payloads(session):
-        events.append(event)
-        if isinstance(event, ErrorOccurred):
-            break
+async def until_refused(session: AgentSession) -> list[Event]:
+    """Events up to and including the first refusal; none of them an error."""
+    events = await events_until(session, of_type(CommandRefused))
+    assert not any(isinstance(e, ErrorOccurred) for e in events)
     return events
 
 
 async def test_given_input_it_is_refused_and_nothing_is_queued() -> None:
     session, _, launcher = session_for(Configurator(), verification=no_steps())
     await send(session, FireTrigger(trigger=CONFIGURE_CHECKS, input={"x": "1"}))
-    events = await until_error(session)
-    assert events[-1] == ErrorOccurred(message="The configure-checks trigger takes no input.")
+    events = await until_refused(session)
+    assert events[-1] == refused(INVALID, "The configure-checks trigger takes no input.")
     assert not any(isinstance(e, TasksChanged) and e.tasks for e in events)
     assert launcher.launches == []
 
@@ -237,9 +233,9 @@ async def test_an_unknown_trigger_is_refused_naming_the_triggers() -> None:
     session, _, launcher = session_for(Configurator(), verification=no_steps())
     await send(session, AddTask(task=CODE))
     await send(session, FireTrigger(trigger="nope"))
-    events = await until_error(session)
+    events = await until_refused(session)
     message = "No trigger 'nope'; the triggers are super-review and configure-checks."
-    assert events[-1] == ErrorOccurred(message=message)
+    assert events[-1] == refused(UNKNOWN, message)
     assert [len(e.tasks) for e in events if isinstance(e, TasksChanged)][-1] == 1
     assert launcher.launches == []
 

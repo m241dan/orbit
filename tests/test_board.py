@@ -2,7 +2,18 @@ import pytest
 
 from orbit.agent.domain.board import SETTLED, WAITING, TaskBoard, interrupted
 from orbit.agent.domain.endings import INTERRUPTED
-from orbit.protocol import ACTIVE_STATUSES, Settings, TaskSpec, TaskState, TaskStatus, Usage
+from orbit.agent.domain.refusals import Refused
+from orbit.protocol import (
+    ACTIVE_STATUSES,
+    BUSY,
+    INVALID,
+    UNKNOWN,
+    Settings,
+    TaskSpec,
+    TaskState,
+    TaskStatus,
+    Usage,
+)
 
 ONE = TaskSpec(prompt="one")
 TWO = TaskSpec(prompt="two", settings=Settings(model="opus"))
@@ -52,12 +63,14 @@ def test_edit_replaces_the_task_and_resets_it_to_pending() -> None:
 def test_edit_rejects_unknown_and_running_tasks() -> None:
     board = TaskBoard()
     first = board.add(ONE)
-    with pytest.raises(ValueError, match="No task with id 'nope'"):
+    with pytest.raises(Refused, match="No task with id 'nope'") as unknown:
         board.edit("nope", TWO)
+    assert unknown.value.code == UNKNOWN
     for status in ("running", "verifying"):
         board.set_status(first, status)
-        with pytest.raises(ValueError, match="can't be edited while it runs"):
+        with pytest.raises(Refused, match="can't be edited while it runs") as running:
             board.edit(first, TWO)
+        assert running.value.code == BUSY
     assert board.get(first).task == ONE
 
 
@@ -252,8 +265,9 @@ def test_drafts_wait_until_accepted() -> None:
 def test_only_drafts_can_be_accepted() -> None:
     board = TaskBoard()
     task_id = board.add(ONE)
-    with pytest.raises(ValueError, match="isn't a draft"):
+    with pytest.raises(Refused, match="isn't a draft") as refused:
         board.accept(task_id)
+    assert refused.value.code == INVALID
 
 
 def test_tasks_can_be_removed_unless_they_run() -> None:
@@ -262,8 +276,11 @@ def test_tasks_can_be_removed_unless_they_run() -> None:
     board.remove(first)
     assert [t.id for t in board.tasks] == [second]
     board.set_status(second, "running")
-    with pytest.raises(ValueError, match="while it runs"):
+    with pytest.raises(ValueError, match="while it runs") as refused:
         board.remove(second)
+    assert isinstance(refused.value, Refused)
+    assert refused.value.code == BUSY
+    assert str(refused.value) == refused.value.message == "Task '2' can't be removed while it runs."
 
 
 def test_removing_a_task_makes_its_fixes_top_level_where_they_were() -> None:

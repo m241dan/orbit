@@ -5,8 +5,12 @@ from collections.abc import Collection, Sequence
 from typing import Any
 
 from orbit.agent.domain.endings import INTERRUPTED
+from orbit.agent.domain.refusals import Refused
 from orbit.protocol import (
     ACTIVE_STATUSES,
+    BUSY,
+    INVALID,
+    UNKNOWN,
     TaskOrigin,
     TaskSpec,
     TaskState,
@@ -87,10 +91,10 @@ class TaskBoard:
 
     def edit(self, task_id: str, task: TaskSpec) -> None:
         """Replace a task and make it pending again, without a reason for how it last ended.
-        Raises ``ValueError`` if it can't be."""
+        Raises ``Refused`` if it can't be."""
         current = self.get(task_id)
         if current.status in ACTIVE_STATUSES:
-            raise ValueError(f"Task {task_id!r} can't be edited while it runs.")
+            raise Refused(BUSY, f"Task {task_id!r} can't be edited while it runs.")
         fresh = {"task": task, "status": "pending", "attempt": 0, "max_attempts": 0} | _NO_REASON
         self._tasks[self.position(task_id)] = current.model_copy(update=fresh)
 
@@ -98,10 +102,11 @@ class TaskBoard:
         return self._tasks[self.position(task_id)]
 
     def position(self, task_id: str) -> int:
+        """Where task ``task_id`` is in run order. Raises ``Refused`` if there's no such task."""
         for index, state in enumerate(self._tasks):
             if state.id == task_id:
                 return index
-        raise ValueError(f"No task with id {task_id!r}.")
+        raise Refused(UNKNOWN, f"No task with id {task_id!r}.")
 
     def set_status(self, task_id: str, status: TaskStatus) -> None:
         """Set task ``task_id``'s ``status``; one running again loses its last reason."""
@@ -167,20 +172,20 @@ class TaskBoard:
         return state.id
 
     def accept(self, task_id: str) -> None:
-        """Make draft ``task_id`` pending. Raises ``ValueError`` if it isn't a draft."""
+        """Make draft ``task_id`` pending. Raises ``Refused`` if it isn't a draft."""
         if self.get(task_id).status != "draft":
-            raise ValueError(f"Task {task_id!r} isn't a draft.")
+            raise Refused(INVALID, f"Task {task_id!r} isn't a draft.")
         self.set_status(task_id, "pending")
 
     def remove(self, task_id: str) -> None:
-        """Take ``task_id`` off the list. Raises ``ValueError`` if it can't be.
+        """Take ``task_id`` off the list. Raises ``Refused`` if it can't be.
 
         Its fixes take its place in the chain: they fix what it fixed, or become top-level
         tasks if it was one.
         """
         removed = self.get(task_id)
         if removed.status in ACTIVE_STATUSES:
-            raise ValueError(f"Task {task_id!r} can't be removed while it runs.")
+            raise Refused(BUSY, f"Task {task_id!r} can't be removed while it runs.")
         del self._tasks[self.position(task_id)]
         self._tasks = [
             state.model_copy(update={"fixes": removed.fixes}) if state.fixes == task_id else state

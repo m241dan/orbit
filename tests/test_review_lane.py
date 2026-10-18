@@ -10,11 +10,15 @@ from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.endings import BUG, CANCELLED, REVIEW_STOPPED_BY_YOU, STOPPED_BY_YOU
 from orbit.agent.domain.reviews import ReviewLimits
 from orbit.protocol import (
+    INVALID,
+    NOT_CONFIGURED,
     SUPER_REVIEW,
+    UNKNOWN,
     AddTask,
     AgentExited,
     CancelAgent,
     CancelTurn,
+    CommandRefused,
     EditTask,
     ErrorOccurred,
     Event,
@@ -39,8 +43,10 @@ from tests.agent_fakes import (
     board,
     events_until,
     lane_of,
+    of_type,
     payloads,
     queued,
+    refused,
     send,
     session_for,
     verified,
@@ -104,6 +110,14 @@ def _finished(events: list[Event]) -> bool:
 
 def _errored(events: list[Event]) -> bool:
     return bool(_error_messages(events))
+
+
+def _refused(events: list[Event]) -> bool:
+    return bool(_refusals(events))
+
+
+def _refusals(events: list[Event]) -> list[CommandRefused]:
+    return [e for e in events if isinstance(e, CommandRefused)]
 
 
 def _error_messages(events: list[Event]) -> list[str]:
@@ -467,8 +481,9 @@ async def test_a_super_review_given_input_is_refused_and_none_starts() -> None:
     tree = FakeTree()
     session, _, _ = session_for(reviewers=(suggests(),), tree=tree, review=True)
     await send(session, FireTrigger(trigger=SUPER_REVIEW, input={"x": "1"}))
-    events = await asyncio.wait_for(settle(session, until=_errored), 10)
-    assert _error_messages(events) == ["The super-review trigger takes no input."]
+    events = await asyncio.wait_for(settle(session, until=_refused), 10)
+    assert _refusals(events) == [refused(INVALID, "The super-review trigger takes no input.")]
+    assert not _error_messages(events)
     assert "super-reviewer" not in _roles_seen(events)
     assert tree.snapshots == []
 
@@ -476,9 +491,9 @@ async def test_a_super_review_given_input_is_refused_and_none_starts() -> None:
 async def test_without_reviews_a_super_review_is_refused() -> None:
     session, _, _ = session_for(tree=FakeTree())
     await send(session, FireTrigger(trigger=SUPER_REVIEW))
-    stream = payloads(session)
-    events = [await anext(stream), await anext(stream)]
-    assert any(isinstance(e, ErrorOccurred) and "Super reviews" in e.message for e in events)
+    events = await events_until(session, of_type(CommandRefused))
+    message = "Super reviews need reviews turned on, inside a git repository."
+    assert events[-1] == refused(NOT_CONFIGURED, message)
 
 
 async def test_review_status_follows_batches_and_the_pause() -> None:
@@ -608,9 +623,8 @@ async def test_cancelling_the_coder_is_like_escape() -> None:
 async def test_cancelling_an_unknown_agent_is_reported() -> None:
     session, _, _ = session_for()
     await send(session, CancelAgent(agent_id="agent-7"))
-    stream = payloads(session)
-    events = [await anext(stream), await anext(stream)]
-    assert ErrorOccurred(message="No running agent 'agent-7'.") in events
+    events = await events_until(session, of_type(CommandRefused))
+    assert events[-1] == refused(UNKNOWN, "No running agent 'agent-7'.")
 
 
 async def test_cancelling_a_review_that_is_not_running_does_nothing() -> None:
@@ -786,7 +800,7 @@ async def test_a_finished_review_can_be_removed_but_not_edited() -> None:
     await send(session, EditTask(task_id="2", task=TaskSpec(prompt="Again", role="reviewer")))
     await send(session, RemoveTask(task_id="2"))
     events = await asyncio.wait_for(settle(session, events), 10)
-    assert ErrorOccurred(message="Reviews can't be edited; remove it instead.") in events
+    assert refused(INVALID, "Reviews can't be edited; remove it instead.") in events
     assert [(t.id, t.status) for t in board(events)] == [("1", "completed")]
     assert [e for e in events if isinstance(e, ReviewStatus)][-1].open_batches == 0
 

@@ -4,6 +4,7 @@ from orbit.protocol import (
     AgentRequest,
     AgentStarted,
     AssistantMessage,
+    CommandRefused,
     ErrorOccurred,
     Notice,
     ProgressNoted,
@@ -328,6 +329,11 @@ def test_an_error_is_labelled_with_its_agent() -> None:
         "error",
     )
     assert error_entry(ErrorOccurred(message="boom")) == ("boom", "error")
+
+
+def test_a_refused_command_reads_as_an_unlabelled_error() -> None:
+    refused = CommandRefused(command_id="c1", code="unknown", message="No lane 'x'.")
+    assert error_entry(refused) == ("No lane 'x'.", "error")
 
 
 def test_the_prompt_title_names_the_planner_and_notes_when_it_is_busy() -> None:

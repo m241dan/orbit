@@ -12,13 +12,17 @@ from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.verification import steps_note
 from orbit.protocol import (
+    BUSY,
+    INVALID,
     PLAN_TASK,
     PLANNER,
+    UNKNOWN,
     AcceptTask,
     AddTask,
     AgentExited,
     AgentStarted,
     BusyChanged,
+    CommandRefused,
     ErrorOccurred,
     Event,
     Notice,
@@ -43,6 +47,7 @@ from tests.agent_fakes import (
     events_until,
     idle,
     payloads,
+    refused,
     send,
     session_for,
 )
@@ -168,16 +173,17 @@ async def test_draft_and_removal_mistakes_are_reported() -> None:
     await asyncio.wait_for(gate_open.wait(), 5)
     await send(session, RemoveTask(task_id="1"))
     await send(session, AcceptTask(task_id="9"))
-    errors: list[str] = []
+    refusals: list[CommandRefused] = []
     async for event in payloads(session):
-        if isinstance(event, ErrorOccurred):
-            errors.append(event.message)
-        if len(errors) == 3:
+        assert not isinstance(event, ErrorOccurred)
+        if isinstance(event, CommandRefused):
+            refusals.append(event)
+        if len(refusals) == 3:
             break
-    assert errors == [
-        "Task '1' isn't a draft.",
-        "Task '1' can't be removed while it runs.",
-        "No task with id '9'.",
+    assert refusals == [
+        refused(INVALID, "Task '1' isn't a draft."),
+        refused(BUSY, "Task '1' can't be removed while it runs."),
+        refused(UNKNOWN, "No task with id '9'."),
     ]
     await session.close()
 
