@@ -94,7 +94,8 @@ catalog, `Hello` is refused as `internal` with no `Welcome`; a step that fails a
 reported as an `ErrorOccurred` with code `internal`, not as a second outcome, and the handshake's
 remaining events still follow it.
 
-`CommandRefused` says why in `code`, one of the refusal codes below, and `message`, for people.
+`CommandRefused` says why in `code`, one of the refusal codes below or `internal` when orbit failed
+handling the command, and `message`, for people.
 A refused command changed nothing, except one refused as `internal`: orbit failed partway
 through handling it, so it may have changed something.
 

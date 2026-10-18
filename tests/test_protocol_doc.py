@@ -124,3 +124,10 @@ def test_a_codes_section_without_two_tables_is_a_problem() -> None:
 def test_protocol_doc_tables_list_every_code() -> None:
     problems = code_table_problems(PROTOCOL_DOC.read_text())
     assert not problems, f"docs/protocol.md's code tables are wrong: {'; '.join(problems)}"
+
+
+def test_protocol_doc_says_a_refusal_may_carry_internal() -> None:
+    section = PROTOCOL_DOC.read_text().split("\n## Command outcomes\n", 1)[1].split("\n## ", 1)[0]
+    refused = re.search(r"`CommandRefused` says why in `code`,[^.]*\.", section)
+    assert refused is not None
+    assert f"`{INTERNAL}`" in refused.group()

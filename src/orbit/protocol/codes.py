@@ -39,10 +39,12 @@ CHECKS_EXHAUSTED = "checks_exhausted"
 """An error's code: a check still failed after every fix attempt."""
 
 INTERNAL = "internal"
-"""An error's code: orbit itself failed unexpectedly."""
+"""An error's code: orbit itself failed unexpectedly; also a refusal's code when orbit failed
+handling the command."""
 
 REFUSAL_CODES = (NOT_CONFIGURED, UNKNOWN, BUSY, INVALID, LOCKED, WRONG_SESSION, INCOMPATIBLE)
-"""The codes a ``CommandRefused`` carries, as described in ``docs/protocol.md``."""
+"""The codes a ``CommandRefused`` carries, as described in ``docs/protocol.md``; it may also
+carry ``INTERNAL`` when orbit failed handling the command."""
 
 ERROR_CODES = (AGENT_FAILED, TIMED_OUT, GIT_FAILED, SAVE_FAILED, CHECKS_EXHAUSTED, INTERNAL)
 """The codes an ``ErrorOccurred`` carries, besides a refusal code where it fits, as described
