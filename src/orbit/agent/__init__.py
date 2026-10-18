@@ -8,6 +8,7 @@ Layered, outermost first; each layer may import only the ones below it:
 """
 
 from orbit.agent.application.desk import Agents
+from orbit.agent.application.handshake import NO_STEPS_NOTE
 from orbit.agent.application.ports import (
     ConfigWriter,
     ProposalDecision,
@@ -17,7 +18,7 @@ from orbit.agent.application.ports import (
     StoredSession,
     Workspace,
 )
-from orbit.agent.application.session import NO_STEPS_NOTE, AgentSession
+from orbit.agent.application.session import AgentSession
 from orbit.agent.application.verifier import Verification
 from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.checks import ChecksProposal, Setup

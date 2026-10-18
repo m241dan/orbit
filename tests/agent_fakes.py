@@ -597,7 +597,7 @@ def queued(session: AgentSession) -> list[Event]:
 
 async def greeted(session: Session) -> None:
     """Greet ``session``, if it's an :class:`AgentSession` that hasn't been."""
-    if isinstance(session, AgentSession) and not session._welcomed:
+    if isinstance(session, AgentSession) and not session._handshake.welcomed:
         await greet(session)
 
 

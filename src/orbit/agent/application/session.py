@@ -10,8 +10,18 @@ from datetime import datetime
 from pathlib import PurePath
 from typing import assert_never
 
-from orbit import __version__
 from orbit.agent.application.desk import AgentDesk, Agents
+from orbit.agent.application.handshake import (
+    HELLO_AGAIN_MESSAGE as HELLO_AGAIN_MESSAGE,
+)
+from orbit.agent.application.handshake import (
+    HELLO_FIRST_MESSAGE as HELLO_FIRST_MESSAGE,
+)
+from orbit.agent.application.handshake import (
+    Handshake,
+    HandshakeParts,
+    ends_stream,
+)
 from orbit.agent.application.keeper import (
     Clock,
     IdMaker,
@@ -51,13 +61,11 @@ from orbit.protocol import (
     CONFIGURATOR,
     CONFIGURE_CHECKS,
     DEFAULT_WORKSPACE,
-    INCOMPATIBLE,
     INTERNAL,
     INVALID,
     NOT_CONFIGURED,
     PLANNER,
     PLANNER_LANE,
-    PROTOCOL_VERSION,
     SUPER_REVIEW,
     UNKNOWN,
     WORK_LANE,
@@ -89,15 +97,12 @@ from orbit.protocol import (
     TaskSpec,
     TurnFinished,
     UpdateSettings,
-    Welcome,
+    UsageChanged,
 )
 
-NO_STEPS_NOTE = "No verification steps configured. Press ctrl+e to set them up."
 NO_AGENTS_MESSAGE = "Tasks need agents, and none are set up."
 NO_VERIFY_MESSAGE = "Setting up checks needs verification on; orbit was started with --no-verify."
 CONFIGURING_NOTE = "A configurator task is already queued or running."
-HELLO_FIRST_MESSAGE = "Send Hello first."
-HELLO_AGAIN_MESSAGE = "Hello was already received."
 WorkCommand = (
     SendMessage
     | CancelTurn
@@ -144,11 +149,6 @@ def _workspace_label(workspace: str | None) -> str | None:
     return PurePath(workspace).name if workspace else None
 
 
-def _ends_stream(event: Event) -> bool:
-    """Whether ``event`` is the last of the stream: an incompatible ``Hello``'s refusal."""
-    return isinstance(event, CommandRefused) and event.code == INCOMPATIBLE
-
-
 class AgentSession:
     """Takes commands, runs work in the background and publishes its events.
 
@@ -156,7 +156,7 @@ class AgentSession:
     lanes: the planner's, whose turns answer prompts, and the work lane's, which runs the
     tasks. ``PlannerSeat`` holds the planner and its turns; ``WorkLane`` holds the rules of a
     task run: verification and fixes; ``ReviewLane`` runs the reviews; ``SessionSwitcher``
-    switches between saved sessions.
+    switches between saved sessions; ``Handshake`` opens every stream.
 
     With ``check_at_startup``, the ``verification`` steps also run once in the background as
     the session welcomes the frontend, on the base commit; a failure adds a draft task to fix
@@ -208,8 +208,6 @@ class AgentSession:
         agents = _reviewed(agents, self._proposals)
         self._verifier = _verifier(verification, self._tasks, self._events, agents)
         self._desk = AgentDesk(agents, self._publish_agents) if agents else None
-        self._welcomed = False
-        self._incompatible = False  # A Hello was refused: nothing more is published.
         self._workspace = workspace
         self._closing = False
         self._lane = self._review_lane()
@@ -222,6 +220,7 @@ class AgentSession:
         self._work_turns = TurnSlot(WORK_LANE, "Tasks are already running.", post)
         self._usage = _usage_monitor(usage, self._events)
         self._switcher = self._session_switcher(pick_session)
+        self._handshake = Handshake(self._handshake_parts(), self._events)
 
     def _session_switcher(self, picking: bool) -> SessionSwitcher:
         """What switches this session between saved ones, still ``picking`` one if so."""
@@ -236,6 +235,21 @@ class AgentSession:
             self._catalog,
         )
         return SessionSwitcher(parts, self._settings, self._events, picking)
+
+    def _handshake_parts(self) -> HandshakeParts:
+        """What the handshake publishes after ``Welcome``, and starts once it has."""
+        return HandshakeParts(
+            self._switcher.publish_catalog,
+            self._latest_usage,
+            self._snapshot,
+            self._load_review_count,
+            self._workspace,
+            self._no_steps,
+            self._leftovers,
+            self._list_at_startup if self._pick_session else None,
+            self._start_background,
+            lambda: self._closing,
+        )
 
     def _work_lane(self) -> WorkLane | None:
         if self._desk is None:
@@ -292,17 +306,16 @@ class AgentSession:
         it was refused, or as ``internal`` if handling it failed, else ``CommandAccepted``, or
         ``Welcome`` for a ``Hello``. Only cancellation escapes, with no outcome. After an
         incompatible ``Hello``, nothing is handled."""
-        if self._incompatible:
+        if self._handshake.ended:
             return
         command_id = envelope.command_id
         try:
             self._check_addressed(envelope)
             command = envelope.payload
             if isinstance(command, Hello):
-                await self._hello(command, command_id)
+                await self._handshake.hello(command, command_id)
                 return
-            if not self._welcomed:
-                raise Refused(INVALID, HELLO_FIRST_MESSAGE)
+            self._handshake.admit()
             await self._handle(command)
         except Refused as refusal:
             refused = CommandRefused(command_id=command_id, code=refusal.code, message=str(refusal))
@@ -325,38 +338,6 @@ class AgentSession:
         if session is not None and session != open_id:
             message = f"Session {session!r} isn't open; the open session is {open_id}."
             raise Refused(WRONG_SESSION, message)
-
-    async def _hello(self, hello: Hello, command_id: str) -> None:
-        """Welcome the frontend that sent ``hello`` as ``command_id``, then publish the catalog,
-        the latest usage, if any, a snapshot, the one-off notices and, if asked to, the saved
-        sessions to pick from; refused for a second Hello, or another protocol version."""
-        if self._welcomed:
-            raise Refused(INVALID, HELLO_AGAIN_MESSAGE)
-        if hello.protocol_version != PROTOCOL_VERSION:
-            self._incompatible = True
-            message = (
-                f"Protocol version {hello.protocol_version} isn't supported; "
-                f"this orbit speaks version {PROTOCOL_VERSION}."
-            )
-            raise Refused(INCOMPATIBLE, message)
-        self._welcomed = True
-        await self._welcome(command_id)
-        try:
-            await self._load_review_count()
-            await self._announce_notices()
-            await self._announce_leftovers()
-            await self._list_at_startup()
-        finally:  # A sender cancelled meanwhile mustn't keep the background from starting.
-            self._start_background()
-
-    async def _welcome(self, command_id: str) -> None:
-        """Answer Hello ``command_id`` with ``Welcome``, then the catalog, the latest usage, if
-        any was fetched, and a snapshot of the session."""
-        await self._events.put(Welcome(command_id=command_id, server_version=__version__))
-        await self._switcher.publish_catalog()
-        if self._usage is not None and self._usage.latest is not None:
-            await self._events.put(self._usage.latest)
-        await self._events.put(self._snapshot())
 
     async def _handle(self, command: SessionCommand | WorkCommand) -> None:
         if isinstance(command, SessionCommand):
@@ -662,14 +643,11 @@ class AgentSession:
             envelope = await self._events.envelope()
             self._nudge_usage(envelope.payload)
             yield envelope
-            if _ends_stream(envelope.payload):
+            if ends_stream(envelope.payload):
                 return
 
     def _start_background(self) -> None:
-        """Start the startup check and the usage monitor, if there are any and the session isn't
-        closing."""
-        if self._closing:
-            return
+        """Start the startup check and the usage monitor, if there are any."""
         if self._startup is not None:
             self._startup.start()
         if self._usage is not None:
@@ -680,23 +658,22 @@ class AgentSession:
         if self._usage is not None and isinstance(event, TurnFinished) and event.agent_id:
             self._usage.nudge()
 
-    async def _announce_notices(self) -> None:
-        """Tell the user the workspace, if any, and that no steps verify tasks, if none do."""
-        if self._workspace is not None:
-            await self._events.put(Notice(message=f"Workspace: {self._workspace}"))
-        if self._verifier and not self._verifier.step_names:
-            await self._events.put(Notice(message=NO_STEPS_NOTE))
+    def _latest_usage(self) -> UsageChanged | None:
+        """The usage limits fetched last; none without a usage monitor, or before a fetch."""
+        return self._usage.latest if self._usage else None
+
+    def _no_steps(self) -> bool:
+        """Whether verification is on with no steps to verify tasks."""
+        return self._verifier is not None and not self._verifier.step_names
 
     async def _list_at_startup(self) -> None:
-        """List the saved sessions to pick from, if asked to."""
-        if self._pick_session:
-            await self._switcher.list_sessions("startup")
+        """List the saved sessions for the user to pick one."""
+        await self._switcher.list_sessions("startup")
 
-    async def _announce_leftovers(self) -> None:
-        """Tell the user about work earlier runs left in the coder's tree."""
+    async def _leftovers(self) -> list[str]:
+        """Notes on the work earlier runs left in the coder's tree."""
         tree = self._desk.agents.tree if self._desk else None
-        for note in await tree.leftovers() if tree else []:
-            await self._events.put(Notice(message=note))
+        return await tree.leftovers() if tree else []
 
     def _snapshot(self, last_active: datetime | None = None) -> Snapshot:
         """The session open here, last active at ``last_active``, as it stands now."""

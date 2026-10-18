@@ -746,7 +746,10 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     session: it holds the current `PlannerChat` and its turns, starts, cancels and resets them,
     and closes the planners a switch or reset retired once that's done; `SessionKeeper` (in
     `keeper`) is the open session: it saves it after every change once it's used, and lists,
-    opens, renames, deletes and switches saved sessions through the store. `ports` defines what
+    opens, renames, deletes and switches saved sessions through the store; `Handshake` (in
+    `handshake`) opens every stream: it refuses commands until `Hello`, answers it with `Welcome`
+    and publishes what the frontend needs to show the session, then starts the background work.
+    `ports` defines what
     it needs from outside (`AgentHost`, `AgentLauncher`, `CoderTree`, `StepRunner`, `Workspace`,
     `ProposalReview`, `UsageSource`, `ConfigWriter`, `SessionStore`).
   - `domain`: the rules, with no I/O: the `TaskBoard` (task order, statuses, fix chains)
