@@ -72,6 +72,24 @@ class Connections:
         viewers = (c for c in self._open if c.greeted and c is not asker)
         return sum(1 for c in viewers if self._viewed_by(c) == session_id)
 
+    def others_attached(self, session_id: str) -> list["SessionConnection"]:
+        """The greeted connections attached to the session ``session_id``, but for the one whose
+        command is being answered."""
+        asker = _answering.get()
+        others = (c for c in self._open if c.greeted and c is not asker)
+        return [c for c in others if c.attached_id == session_id]
+
+    def activate(self, left: SessionRef | None) -> None:
+        """Have the connection whose command is being answered, if any, view the open session,
+        whichever that is, and, given the session ``left``, the others viewing the open session
+        keep viewing that one once another is open in its place."""
+        asker = _answering.get()
+        for connection in tuple(self._open):
+            if connection is asker:
+                connection.attach(None)
+            elif left is not None and self.viewing(connection) is None:
+                connection.attach(left)
+
     def _viewed_by(self, connection: "SessionConnection") -> str:
         """The id of the session ``connection`` views."""
         viewing = self.viewing(connection)
@@ -148,6 +166,11 @@ class SessionConnection:
     def viewing(self) -> SessionRef | None:
         """The session this connection views, if it isn't the open one."""
         return self._parts.connections.viewing(self)
+
+    @property
+    def attached_id(self) -> str | None:
+        """The id of the session this connection was attached to, if any."""
+        return None if self.attached is None else self.attached.id
 
     def attach(self, session: SessionRef | None) -> None:
         """View ``session`` from now on, or the open session, whichever that is, if it's

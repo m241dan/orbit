@@ -9,11 +9,11 @@ from textual.widgets import Input, OptionList
 from orbit.agent import AgentSession
 from orbit.protocol import (
     BUSY,
+    ActivateSession,
     DeleteSession,
     ErrorOccurred,
     ListSessions,
     NewSession,
-    OpenSession,
     RenameSession,
     SessionsListed,
     SessionSummary,
@@ -82,7 +82,7 @@ async def test_enter_opens_the_highlighted_session() -> None:
         await feed_events(session, pilot, LISTED)
         await pilot.press("j", "j", "k", "down", "enter")
 
-        assert session.commands == [OpenSession(session_id="old")]
+        assert session.commands == [ActivateSession(session="old")]
         assert not isinstance(app.screen, SessionsScreen)
 
 
@@ -96,7 +96,7 @@ async def test_opening_a_session_that_fails_to_send_shows_why() -> None:
         await pilot.pause()
 
         assert app.is_running
-        assert session.commands == [OpenSession(session_id="old")]
+        assert session.commands == [ActivateSession(session="old")]
         assert entries(app)[-1] == ("Couldn't send the command: the backend is gone", "error")
 
 
@@ -207,7 +207,7 @@ async def test_ctrl_p_lists_the_sessions_in_the_modal() -> None:
         assert isinstance(screen, SessionsScreen)
         assert not screen.startup
         await pilot.press("j", "j", "enter")
-        assert session.commands == [ListSessions(), OpenSession(session_id="old")]
+        assert session.commands == [ListSessions(), ActivateSession(session="old")]
 
 
 async def test_escape_mid_session_keeps_the_current_session() -> None:
@@ -483,7 +483,7 @@ async def test_sessions_listed_again_refresh_the_list_shown_in_place() -> None:
         ]
         assert screen.query_one(OptionList).highlighted == 2  # Kept within the list.
         await pilot.press("enter")
-        assert session.commands == [OpenSession(session_id="old")]
+        assert session.commands == [ActivateSession(session="old")]
 
 
 async def test_renaming_and_deleting_through_the_backend_refresh_the_list() -> None:
@@ -542,7 +542,10 @@ async def test_a_late_listing_after_the_picker_closed_opens_no_picker() -> None:
         await pilot.press("j", "j", "j", "x", "k", "enter")
         await feed_events(session, pilot, REFRESHED)
 
-        assert session.commands == [DeleteSession(session_id="busy"), OpenSession(session_id="old")]
+        assert session.commands == [
+            DeleteSession(session_id="busy"),
+            ActivateSession(session="old"),
+        ]
         assert not any(isinstance(s, SessionsScreen) for s in app.screen_stack)
         assert app.is_running
 

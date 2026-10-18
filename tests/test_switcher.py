@@ -10,6 +10,8 @@ from orbit.agent.application.keeper import NewSessions, SessionKeeper
 from orbit.agent.application.planner_seat import PlannerSeat, SeatHooks
 from orbit.agent.application.settings import SessionSettings
 from orbit.agent.application.switcher import (
+    OPEN_RETIRED,
+    STARTUP_CHECKING,
     TASKS_RUNNING,
     SessionSwitcher,
     SwitchParts,
@@ -21,6 +23,8 @@ from orbit.agent.domain.reviews import LaneSnapshot, PlannerSnapshot
 from orbit.agent.domain.sessions import SessionRecord
 from orbit.protocol import (
     BUSY,
+    INVALID,
+    ActivateSession,
     Catalog,
     DeleteSession,
     Event,
@@ -48,6 +52,8 @@ class Held:
     def __init__(self, settings: Settings) -> None:
         self.owned = SessionSettings(settings)
         self.running = False
+        self.checking = False
+        self.switches: list[bool] = []
         self.snapshots: list[datetime | None] = []
         self.catalogs: list[tuple[SessionSummary, ...]] = []
 
@@ -88,7 +94,16 @@ def switcher_for(
     tasks = Tasks(TaskBoard(), events.put)
     seat = PlannerSeat(None, tasks, events, SeatHooks(nothing, keeper.use, tuple))
     parts = SwitchParts(
-        keeper, tasks, seat, None, None, lambda: held.running, held.snapshot, held.catalog
+        keeper,
+        tasks,
+        seat,
+        None,
+        None,
+        lambda: held.running,
+        lambda: held.checking,
+        held.snapshot,
+        held.catalog,
+        held.switches.append,
     )
     held.owned = SessionSettings(held.owned.given, pinned)
     return SessionSwitcher(parts, held.owned, events, picking), events, tasks
@@ -116,6 +131,57 @@ async def test_switching_is_refused_while_tasks_run() -> None:
     assert drained(events) == []
 
 
+async def test_switching_is_refused_while_the_startup_check_runs() -> None:
+    held = Held(Settings())
+    held.checking = True
+    switcher, _, _ = switcher_for(FakeStore(), held)
+    with pytest.raises(Refused) as refused:
+        await switcher.handle(NewSession(name="other"))
+    assert (refused.value.code, str(refused.value)) == (BUSY, STARTUP_CHECKING)
+    assert held.switches == []
+
+
+async def test_open_session_is_refused_as_retired() -> None:
+    switcher, events, _ = switcher_for(FakeStore(), Held(Settings()))
+    with pytest.raises(Refused) as refused:
+        await switcher.handle(OpenSession(session_id="auth"))
+    assert (refused.value.code, str(refused.value)) == (INVALID, OPEN_RETIRED)
+    assert drained(events) == []
+
+
+async def test_activating_the_open_session_does_nothing() -> None:
+    held = Held(Settings())
+    switcher, events, _ = switcher_for(FakeStore(), held)
+    await switcher.handle(ActivateSession(session="session-1"))
+    assert drained(events) == []
+    assert held.switches == []
+
+
+async def test_a_switch_says_a_session_left_unsaved_isnt_kept() -> None:
+    held = Held(Settings())
+    switcher, _, _ = switcher_for(FakeStore(), held)
+    await switcher.handle(NewSession(name="other"))
+    assert held.switches == [False]
+
+
+async def test_a_switch_says_a_saved_session_left_is_kept() -> None:
+    held = Held(Settings())
+    switcher, _, tasks = switcher_for(FakeStore(), held)
+    await tasks.change(lambda board: board.add(TaskSpec(prompt="Add a flag.")))
+    await switcher.save()
+    await switcher.handle(NewSession(name="other"))
+    assert held.switches == [True]
+
+
+async def test_a_switch_while_picking_says_the_session_left_isnt_kept() -> None:
+    held = Held(Settings())
+    switcher, _, tasks = switcher_for(FakeStore(), held, picking=True)
+    await tasks.change(lambda board: board.add(TaskSpec(prompt="Add a flag.")))
+    await switcher.save()
+    await switcher.handle(NewSession(name="other"))
+    assert held.switches == [False]
+
+
 async def test_a_switch_publishes_only_a_catalog_then_a_snapshot() -> None:
     held = Held(Settings())
     switcher, events, _ = switcher_for(FakeStore(), held)
@@ -140,7 +206,7 @@ async def test_the_catalog_after_opening_a_session_lists_it_as_saved() -> None:
     store.saved = [saved()]
     held = Held(Settings())
     switcher, _, _ = switcher_for(store, held)
-    await switcher.handle(OpenSession(session_id="auth"))
+    await switcher.handle(ActivateSession(session="auth"))
     [sessions] = held.catalogs
     assert [(s.name, s.current, s.last_active) for s in sessions] == [("auth", True, EARLIER)]
 
@@ -177,7 +243,7 @@ async def test_an_opened_sessions_snapshot_is_as_it_was_last_active() -> None:
     store.saved = [saved()]
     held = Held(Settings())
     switcher, _, _ = switcher_for(store, held)
-    await switcher.handle(OpenSession(session_id="auth"))
+    await switcher.handle(ActivateSession(session="auth"))
     assert held.snapshots == [EARLIER]
 
 
@@ -194,7 +260,7 @@ async def test_an_opened_sessions_summary_has_what_it_spent() -> None:
     store = FakeStore()
     store.saved = [saved(spent=Usage(cost_usd=1.5))]
     switcher, _, _ = switcher_for(store, Held(Settings()))
-    await switcher.handle(OpenSession(session_id="auth"))
+    await switcher.handle(ActivateSession(session="auth"))
     summary = switcher.summary(EARLIER)
     assert (summary.id, summary.last_active) == ("auth", EARLIER)
     assert summary.usage == Usage(cost_usd=1.5)
@@ -214,7 +280,7 @@ async def test_an_opened_session_keeps_the_pinned_settings_as_given() -> None:
     store.saved = [saved(settings=Settings(model="sonnet", tool_access="full"))]
     held = Held(Settings(model="opus", tool_access="restricted"))
     switcher, _, _ = switcher_for(store, held, pinned=("model",))
-    await switcher.handle(OpenSession(session_id="auth"))
+    await switcher.handle(ActivateSession(session="auth"))
     assert held.settings == Settings(model="opus", tool_access="full")
 
 
@@ -222,7 +288,7 @@ async def test_without_a_review_lane_the_opened_reviews_are_saved_back() -> None
     store = FakeStore()
     store.saved = [saved(reviews=REVIEWS, spent=Usage(cost_usd=1.5))]
     switcher, _, _ = switcher_for(store, Held(Settings()))
-    await switcher.handle(OpenSession(session_id="auth"))
+    await switcher.handle(ActivateSession(session="auth"))
     contents = switcher.contents()
     assert contents.reviews == REVIEWS and contents.spent == Usage(cost_usd=1.5)
 
@@ -232,7 +298,7 @@ async def test_tasks_added_before_a_session_is_picked_carry_over() -> None:
     store.saved = [saved()]
     switcher, _, tasks = switcher_for(store, Held(Settings()), picking=True)
     await tasks.change(lambda board: board.add(TaskSpec(prompt="Fix it.")))
-    await switcher.handle(OpenSession(session_id="auth"))
+    await switcher.handle(ActivateSession(session="auth"))
     assert [t.task.prompt for t in tasks.board.tasks] == ["Fix it."]
 
 
@@ -242,7 +308,7 @@ async def test_once_the_user_stays_added_tasks_dont_carry_over() -> None:
     switcher, _, tasks = switcher_for(store, Held(Settings()), picking=True)
     await tasks.change(lambda board: board.add(TaskSpec(prompt="Fix it.")))
     switcher.stay()
-    await switcher.handle(OpenSession(session_id="auth"))
+    await switcher.handle(ActivateSession(session="auth"))
     assert tasks.board.tasks == ()
 
 

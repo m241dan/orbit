@@ -99,8 +99,9 @@ and the backend's `server_version`. `Welcome` is Hello's outcome: it takes the p
 as current. `Hello` attaches the connection to the workspace's open session (see
 [Attaching](#attaching)).
 
-Switching sessions works the way joining does: opening, starting or picking a session sends a
-`Catalog` and then a `Snapshot` of the session now open. A rename or delete sends a `Catalog`.
+Switching sessions works the way joining does: activating, starting or picking a session sends
+a `Catalog` and then a `Snapshot` of the session now open (see [Activation](#activation)). A
+rename or delete sends a `Catalog`.
 A frontend replaces the conversation it shows with every Snapshot's transcript, so joining
 shows where the session left off and a switch shows the session switched to.
 `SessionsListed` otherwise only answers `ListSessions`.
@@ -108,7 +109,7 @@ shows where the session left off and a switch shows the session switched to.
 ## Attaching
 
 A connection views one session at a time: from its `Hello`, the workspace's open session,
-whichever that is, following it when another session is opened in its place. `Attach(session)`
+whichever that is, until another session is activated in its place. `Attach(session)`
 points it at the session `session` instead, and is answered with that session's `Snapshot`,
 then `CommandAccepted`; one for a session there's none of is refused with `unknown`, and one for
 a saved session that can't be read with `invalid`. From then on the connection gets the events
@@ -126,8 +127,8 @@ Attaching to a saved session that isn't the open one gives a read-only view. Its
 comes from the session's saved record and its last logged events: `active` false, its saved
 settings and tasks, its `transcript`, nothing busy or running, no steps, review or proposals,
 and `open_session` naming the open session. Nothing runs in a viewed session, and it publishes
-no events while it isn't the open one. On a view, `History`, `RenameSession`, `DeleteSession`
-and `Attach` work as usual; every other command is refused with `not_active`, its message
+no events while it isn't the open one. On a view, `History`, `RenameSession`, `DeleteSession`,
+`Attach`, `ActivateSession` and `NewSession` work as usual; every other command is refused with `not_active`, its message
 naming the viewed session and the open one, such as `Session 'old work' isn't the active
 session; 'today' is. Activate it to work in it.` The answers to a viewing connection's
 commands reach it alone.
@@ -138,6 +139,30 @@ frontend views it.`
 
 A reconnecting `orbit.client.WebSocketSession` that was viewing a session other than the open
 one sends its last `Attach` again after its `Hello`, so it views that session again.
+
+## Activation
+
+`ActivateSession(session)` makes the saved session `session` the workspace's open one, the one
+that runs work: its tasks, review state, planner conversation and settings replace the open
+session's, what was running when it was saved is marked interrupted, and nothing runs until
+asked. It's refused with `busy` unless the open session is idle, its message naming what runs,
+such as `Can't switch: tasks are running. Press ctrl+s to stop them.`; with `unknown`,
+`invalid` or `locked` for a session there's none of, one that can't be read, or one another
+orbit has open. Activating the open session attaches to it, as `Attach` does.
+
+The activating connection then views the session activated, live, and gets its `Catalog` and
+`Snapshot`, then `CommandAccepted`. Every other connection keeps viewing what it viewed: those
+that viewed the session left keep it as a read-only view and get a fresh `Snapshot` of it, with
+`active` false and `open_session` naming the session activated, and those attached to the
+session activated get its `Snapshot`, now live. A session left that was never saved has nothing
+to view, so its viewers view the session activated instead. `SessionStateChanged` follows for
+both sessions (see [Session state](#session-state)).
+
+`NewSession(name)` creates a session, `name`d so or by the time it started, and activates it in
+the same way, under the same rule; the creating connection views it.
+
+`OpenSession` is retired: it's refused with `invalid`, its message pointing to `Attach`, to view a
+session, and `ActivateSession`, to make it the active one.
 
 ## Session state
 
@@ -153,8 +178,8 @@ Whenever one of them changes for a session, every welcomed connection gets
 `SessionStateChanged(session, active, state, viewers)` with the new values: a task run, review,
 planner turn or startup check starting or ending, a connection joining, closing or attaching to
 another session, which sends one for the session it left and one for the session it views, and
-another session opened, which sends one for the session left (inactive, idle, no viewers unless
-connections attached to it) and one for the session opened. A connection joins once everything that follows its `Welcome` is sent, so the
+another session activated, which sends one for the session left (inactive, idle, no viewers unless
+connections attached to it) and one for the session activated. A connection joins once everything that follows its `Welcome` is sent, so the
 change counting it comes after those. The event belongs to no session and isn't logged, and the
 Catalog isn't re-sent for it.
 
@@ -263,6 +288,16 @@ sessions), when the open session has no event at or before `since` newer than ev
 session's (the frontend's state is of another session, as when a new orbit opens a new or other
 session), when `since` is older than what's kept, when it's ahead of the last event orbit
 stamped, or when orbit keeps no event log.
+
+## Deprecated
+
+These messages are deprecated, listed in `DEPRECATED_MESSAGES` in `orbit.protocol`, and will be
+removed at the next major `PROTOCOL_VERSION`; a test fails if that version is above 1 while any
+of them is still in the protocol:
+
+- `OpenSession`: refused with `invalid`; use `Attach` and `ActivateSession`.
+- `ListSessions` and `SessionsListed`: still work; the `Catalog` and `SessionStateChanged` say
+  the same.
 
 ## Compatibility
 

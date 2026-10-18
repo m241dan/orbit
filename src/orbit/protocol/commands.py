@@ -133,17 +133,27 @@ class Attach(_Message):
 
 
 class OpenSession(_Message):
-    """Switch to saved session ``session_id``: its tasks, review state, planner conversation and
-    settings replace the open session's, and nothing runs until asked. Refused while tasks, a
-    review or the planner run."""
+    """Retired, and always refused with ``invalid``: ``Attach`` views a session, and
+    ``ActivateSession`` makes it the open one. Deprecated, to be removed at the next major
+    ``PROTOCOL_VERSION``."""
 
     type: Literal["open_session"] = "open_session"
     session_id: str
 
 
+class ActivateSession(_Message):
+    """Make the saved session ``session`` the workspace's open one: its tasks, review state,
+    planner conversation and settings replace the open session's, and nothing runs until asked.
+    The connection views it, live; the others keep viewing what they viewed, the session left a
+    read-only view. Refused with ``busy`` unless the open session is idle."""
+
+    type: Literal["activate_session"] = "activate_session"
+    session: str
+
+
 class NewSession(_Message):
-    """Switch to a new, empty session ``name``d so, or by the time it started if ``name`` is
-    none; refused as ``OpenSession`` is."""
+    """Make a new, empty session ``name``d so, or by the time it started if ``name`` is none, the
+    open one, as ``ActivateSession`` does a saved one, and refused as it is."""
 
     type: Literal["new_session"] = "new_session"
     name: str | None = None
@@ -219,6 +229,7 @@ Command = Annotated[
     | ListSessions
     | Attach
     | OpenSession
+    | ActivateSession
     | NewSession
     | RenameSession
     | DeleteSession

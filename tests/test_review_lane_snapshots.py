@@ -7,10 +7,10 @@ from orbit.agent import AgentSession
 from orbit.agent.domain.reviews import BatchSnapshot, LaneSnapshot, PlannerSnapshot, ReviewJob
 from orbit.agent.domain.sessions import SessionRecord
 from orbit.protocol import (
+    ActivateSession,
     CommandAccepted,
     Event,
     Notice,
-    OpenSession,
     ReviewStatus,
     RunTasks,
     SessionsListed,
@@ -76,7 +76,7 @@ async def test_an_opened_session_has_the_reviews_it_was_saved_with() -> None:
     assert snapshot.batches == {"2": "batch-1"}
     store = store_with(record)
     session, launcher = switching(store)
-    events = await opened(session, OpenSession(session_id="auth"))
+    events = await opened(session, ActivateSession(session="auth"))
 
     # The running review was interrupted, so its batch no longer fills.
     batch = snapshot.planner.batches["batch-1"].model_copy(update={"filling": False})
@@ -124,7 +124,7 @@ async def reopened(
     the events from opening it."""
     store = store_with(saved("auth", *tasks, reviews=snapshot))
     session, launcher = switching(store)
-    events = await opened(session, OpenSession(session_id="auth"))
+    events = await opened(session, ActivateSession(session="auth"))
     return session, launcher, store, events
 
 
@@ -135,7 +135,7 @@ async def switched(
     and the events from opening it alone."""
     session, _ = switching(store_with(saved("auth", *tasks, reviews=snapshot)))
     await events_until(session, of_type(Snapshot))  # The one after the Welcome.
-    return session, await opened(session, OpenSession(session_id="auth"))
+    return session, await opened(session, ActivateSession(session="auth"))
 
 
 def statuses(events: list[Event]) -> list[TaskStatus]:
@@ -216,8 +216,8 @@ async def test_each_paused_session_opened_notes_its_pause_once() -> None:
     first = saved("auth", *crashed()[:1], reviews=paused)
     store = store_with(first, first.model_copy(update={"id": "docs", "name": "docs"}))
     session, _ = switching(store)
-    assert len(pause_notes(await opened(session, OpenSession(session_id="auth")))) == 1
-    assert len(pause_notes(await opened(session, OpenSession(session_id="docs")))) == 1
+    assert len(pause_notes(await opened(session, ActivateSession(session="auth")))) == 1
+    assert len(pause_notes(await opened(session, ActivateSession(session="docs")))) == 1
     await session.close()
 
 

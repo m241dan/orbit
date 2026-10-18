@@ -21,6 +21,27 @@
       "title": "AcceptTask",
       "type": "object"
     },
+    "ActivateSession": {
+      "description": "Make the saved session ``session`` the workspace's open one: its tasks, review state,\nplanner conversation and settings replace the open session's, and nothing runs until asked.\nThe connection views it, live; the others keep viewing what they viewed, the session left a\nread-only view. Refused with ``busy`` unless the open session is idle.",
+      "properties": {
+        "session": {
+          "title": "Session",
+          "type": "string"
+        },
+        "type": {
+          "const": "activate_session",
+          "default": "activate_session",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "session",
+        "type"
+      ],
+      "title": "ActivateSession",
+      "type": "object"
+    },
     "AddTask": {
       "description": "Append ``task`` to the backend's task list.",
       "properties": {
@@ -457,6 +478,7 @@
           "discriminator": {
             "mapping": {
               "accept_task": "#/$defs/AcceptTask",
+              "activate_session": "#/$defs/ActivateSession",
               "add_task": "#/$defs/AddTask",
               "attach": "#/$defs/Attach",
               "cancel_agent": "#/$defs/CancelAgent",
@@ -526,6 +548,9 @@
             },
             {
               "$ref": "#/$defs/OpenSession"
+            },
+            {
+              "$ref": "#/$defs/ActivateSession"
             },
             {
               "$ref": "#/$defs/NewSession"
@@ -1226,7 +1251,7 @@
       "type": "object"
     },
     "NewSession": {
-      "description": "Switch to a new, empty session ``name``d so, or by the time it started if ``name`` is\nnone; refused as ``OpenSession`` is.",
+      "description": "Make a new, empty session ``name``d so, or by the time it started if ``name`` is none, the\nopen one, as ``ActivateSession`` does a saved one, and refused as it is.",
       "properties": {
         "name": {
           "anyOf": [
@@ -1294,7 +1319,7 @@
       "type": "object"
     },
     "OpenSession": {
-      "description": "Switch to saved session ``session_id``: its tasks, review state, planner conversation and\nsettings replace the open session's, and nothing runs until asked. Refused while tasks, a\nreview or the planner run.",
+      "description": "Retired, and always refused with ``invalid``: ``Attach`` views a session, and\n``ActivateSession`` makes it the open one. Deprecated, to be removed at the next major\n``PROTOCOL_VERSION``.",
       "properties": {
         "session_id": {
           "title": "Session Id",

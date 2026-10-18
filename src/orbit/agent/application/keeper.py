@@ -191,6 +191,11 @@ class SessionKeeper:
         self.name = (name or "").strip() or self.name
         self._saved = None
 
+    @property
+    def kept(self) -> bool:
+        """Whether the session is saved, its lock held, so it stays saved once left."""
+        return bool(self._locked)
+
     def use(self) -> None:
         """Mark the session used, so it's saved from now on."""
         self.used = True

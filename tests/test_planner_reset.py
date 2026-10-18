@@ -17,6 +17,7 @@ from orbit.protocol import (
     NOT_CONFIGURED,
     PLANNER,
     UNKNOWN,
+    ActivateSession,
     AddTask,
     AgentExited,
     CancelTurn,
@@ -25,7 +26,6 @@ from orbit.protocol import (
     ErrorOccurred,
     Event,
     Notice,
-    OpenSession,
     ResetConversation,
     SendMessage,
     TasksChanged,
@@ -177,7 +177,7 @@ async def test_a_restored_conversation_can_be_reset_before_its_first_prompt() ->
 async def test_resetting_a_restored_conversation_starts_the_next_prompt_afresh() -> None:
     store = store_with(saved("auth", planner_conversation="conversation-x"))
     session, launcher = switching(store)
-    await opened(session, OpenSession(session_id="auth"))
+    await opened(session, ActivateSession(session="auth"))
     events = await reset(session)
     assert not any(isinstance(e, AgentExited | Notice) for e in events)
     await asyncio.sleep(0.01)  # Saving takes a while.

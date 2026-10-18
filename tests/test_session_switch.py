@@ -17,6 +17,7 @@ from orbit.protocol import (
     PLANNER,
     SAVE_FAILED,
     UNKNOWN,
+    ActivateSession,
     AddTask,
     AgentExited,
     AgentStarted,
@@ -28,7 +29,6 @@ from orbit.protocol import (
     ListSessions,
     NewSession,
     Notice,
-    OpenSession,
     RemoveTask,
     ReviewStatus,
     RunTasks,
@@ -124,7 +124,7 @@ def errors(events: list[Event]) -> list[tuple[str, str]]:
     return [(e.code, e.message) for e in events if isinstance(e, ErrorOccurred)]
 
 
-async def opened(session: AgentSession, command: OpenSession | NewSession) -> list[Event]:
+async def opened(session: AgentSession, command: ActivateSession | NewSession) -> list[Event]:
     """The events from sending ``command`` until its session is opened, and its notes."""
     await send(session, command)
     await send(session, ListSessions())  # Marks the end of the notes that follow.
@@ -132,7 +132,7 @@ async def opened(session: AgentSession, command: OpenSession | NewSession) -> li
 
 
 async def refused(
-    session: AgentSession, command: OpenSession | NewSession
+    session: AgentSession, command: ActivateSession | NewSession
 ) -> list[tuple[str, str]]:
     """The codes and messages ``command`` is refused with, reporting no error."""
     await send(session, command)
@@ -246,7 +246,7 @@ async def test_opening_a_session_restores_its_board_cancelling_what_was_running(
     )
     store = store_with(record)
     session, launcher = switching(store)
-    events = await opened(session, OpenSession(session_id="auth"))
+    events = await opened(session, ActivateSession(session="auth"))
 
     board = last_of(Snapshot, events).tasks
     assert [t.status for t in board] == ["completed", "cancelled", "pending"]
@@ -270,7 +270,7 @@ async def test_opening_a_session_restores_its_board_cancelling_what_was_running(
 async def test_opening_a_session_publishes_its_snapshot_then_the_resumed_notes() -> None:
     session, _ = switching(store_with(saved("auth", state("1", "running"))))
     events = await events_until(session, of_type(Snapshot))  # The one after the Welcome.
-    events = await opened(session, OpenSession(session_id="auth"))
+    events = await opened(session, ActivateSession(session="auth"))
     assert [type(e) for e in events] == [
         Snapshot,
         Notice,
@@ -283,14 +283,14 @@ async def test_opening_a_session_publishes_its_snapshot_then_the_resumed_notes()
 
 async def test_opening_a_session_without_interruptions_only_notes_its_resumption() -> None:
     session, _ = switching(store_with(saved("auth", state("1", "completed"))))
-    events = await opened(session, OpenSession(session_id="auth"))
+    events = await opened(session, ActivateSession(session="auth"))
     assert messages(Notice, events) == ['Resumed "auth" (last active Oct 16 18:02)']
     await session.close()
 
 
 async def test_an_opened_session_carries_on_its_planners_conversation() -> None:
     session, launcher = switching(store_with(saved("auth", planner_conversation="talk-9")))
-    await opened(session, OpenSession(session_id="auth"))
+    await opened(session, ActivateSession(session="auth"))
     launcher.planner_turns = [chats]
     await send(session, SendMessage(agent=PLANNER, text="Where were we?"))
     await events_until(session, idle("planner"))
@@ -301,7 +301,7 @@ async def test_an_opened_session_carries_on_its_planners_conversation() -> None:
 async def test_an_opened_session_has_its_saved_settings() -> None:
     settings = Settings(model="opus", tool_access="full")
     session, _ = switching(store_with(saved("auth", settings=settings)))
-    events = await opened(session, OpenSession(session_id="auth"))
+    events = await opened(session, ActivateSession(session="auth"))
     assert last_of(Snapshot, events).settings == settings
     assert session.settings == settings
     await session.close()
@@ -310,7 +310,7 @@ async def test_an_opened_session_has_its_saved_settings() -> None:
 async def test_settings_given_on_the_command_line_override_the_saved_ones() -> None:
     record = saved("auth", settings=Settings(model="opus", tool_access="full"))
     session, _ = switching(store_with(record), settings=Settings(model="haiku"), pinned=("model",))
-    await opened(session, OpenSession(session_id="auth"))
+    await opened(session, ActivateSession(session="auth"))
     assert session.settings == Settings(model="haiku", tool_access="full")
     await session.close()
 
@@ -319,9 +319,9 @@ async def test_a_session_saved_without_reviews_opens_with_none() -> None:
     paused = LaneSnapshot(planner=PlannerSnapshot(paused=True))
     store = store_with(saved("paused", reviews=paused), saved("auth"))
     session, _ = switching(store)
-    await opened(session, OpenSession(session_id="paused"))
+    await opened(session, ActivateSession(session="paused"))
     assert store.last.reviews == paused
-    events = await opened(session, OpenSession(session_id="auth"))
+    events = await opened(session, ActivateSession(session="auth"))
     assert store.last.reviews == LaneSnapshot(planner=PlannerSnapshot())
     assert last_of(Snapshot, events).review == ReviewStatus(paused=False, open_batches=0)
     await session.close()
@@ -331,9 +331,9 @@ async def test_opening_another_session_hands_the_lock_over() -> None:
     store = store_with(saved("first"), saved("second"))
     session, _ = switching(store)
     await send(session, AddTask(task=TASK))
-    await opened(session, OpenSession(session_id="first"))
+    await opened(session, ActivateSession(session="first"))
     assert store.locked == {"first"} and store.released == ["session-1"]
-    await opened(session, OpenSession(session_id="second"))
+    await opened(session, ActivateSession(session="second"))
     assert store.locked == {"second"} and store.released == ["session-1", "first"]
     await session.close()
     assert store.locked == set()
@@ -343,7 +343,7 @@ async def test_opening_the_current_session_does_nothing() -> None:
     store = FakeStore()
     session, _ = switching(store)
     await send(session, AddTask(task=TASK))
-    assert await refused(session, OpenSession(session_id="session-1")) == []
+    assert await refused(session, ActivateSession(session="session-1")) == []
     assert store.released == [] and store.locked == {"session-1"}
     await session.close()
 
@@ -352,7 +352,7 @@ async def test_a_session_open_in_another_orbit_is_refused() -> None:
     store = store_with(saved("auth", name="auth rework"))
     store.elsewhere.add("auth")
     session, _ = switching(store)
-    errors = await refused(session, OpenSession(session_id="auth"))
+    errors = await refused(session, ActivateSession(session="auth"))
     assert errors == [(LOCKED, "Can't open \"auth rework\": it's open in another orbit.")]
     await session.close()
 
@@ -361,7 +361,7 @@ async def test_a_session_locked_as_it_is_opened_is_refused() -> None:
     store = store_with(saved("auth"))
     store.free = False
     session, _ = switching(store)
-    errors = await refused(session, OpenSession(session_id="auth"))
+    errors = await refused(session, ActivateSession(session="auth"))
     assert errors == [(LOCKED, "Can't open \"auth\": it's open in another orbit.")]
     await session.close()
 
@@ -370,14 +370,14 @@ async def test_an_unreadable_session_is_refused() -> None:
     store = FakeStore()
     store.broken["broken"] = "it isn't JSON"
     session, _ = switching(store)
-    errors = await refused(session, OpenSession(session_id="broken"))
+    errors = await refused(session, ActivateSession(session="broken"))
     assert errors == [(INVALID, "Can't open the session broken: it isn't JSON.")]
     await session.close()
 
 
 async def test_a_missing_session_is_refused() -> None:
     session, _ = switching(FakeStore())
-    errors = await refused(session, OpenSession(session_id="gone"))
+    errors = await refused(session, ActivateSession(session="gone"))
     assert errors == [(UNKNOWN, "There's no saved session 'gone'.")]
     await session.close()
 
@@ -392,7 +392,7 @@ async def test_a_session_saved_again_before_it_is_locked_opens_as_saved_last() -
 
     store.on_acquire = save_newer
     session, _ = switching(store)
-    events = await opened(session, OpenSession(session_id="auth"))
+    events = await opened(session, ActivateSession(session="auth"))
 
     board = last_of(Snapshot, events).tasks
     assert [t.status for t in board] == ["completed", "cancelled"]
@@ -413,7 +413,7 @@ async def test_a_session_unreadable_once_locked_is_refused_and_lets_go_of_the_lo
 
     store.on_acquire = break_it
     session, _ = switching(store)
-    errors = await refused(session, OpenSession(session_id="auth"))
+    errors = await refused(session, ActivateSession(session="auth"))
     assert errors == [(INVALID, "Can't open the session auth: it isn't JSON.")]
     assert store.released == ["auth"] and store.locked == set()
     await session.close()
@@ -424,7 +424,7 @@ async def test_a_store_that_cant_lock_the_session_leaves_the_open_one_as_it_was(
     session, _ = switching(store)
     await send(session, AddTask(task=TASK))
     store.lock_failure = "Couldn't lock the session: disk full"
-    await send(session, OpenSession(session_id="auth"))
+    await send(session, ActivateSession(session="auth"))
     await send(session, ListSessions())
     events = await events_until(session, of_type(SessionsListed))
     assert errors(events) == [(SAVE_FAILED, "Couldn't lock the session: disk full")]
@@ -439,7 +439,7 @@ async def test_switching_is_refused_while_tasks_run() -> None:
     await send(session, AddTask(task=TASK))
     await send(session, RunTasks())
     await events_until(session, of_type(AgentStarted))
-    assert await refused(session, OpenSession(session_id="auth")) == [(BUSY, TASKS_RUNNING)]
+    assert await refused(session, ActivateSession(session="auth")) == [(BUSY, TASKS_RUNNING)]
     assert await refused(session, NewSession()) == [(BUSY, TASKS_RUNNING)]
     assert store.locked == {"session-1"} and store.released == []
     assert session.saved_session.id == "session-1"
@@ -455,7 +455,7 @@ async def test_switching_is_refused_while_a_review_runs() -> None:
     await send(session, RunTasks())
     reviewing = Stop("reviewer", lambda e: isinstance(e, AgentStarted) and e.role == "reviewer")
     await events_until(session, all_of(reviewing, idle("work")), timeout=10)
-    assert await refused(session, OpenSession(session_id="auth")) == [(BUSY, REVIEW_RUNNING)]
+    assert await refused(session, ActivateSession(session="auth")) == [(BUSY, REVIEW_RUNNING)]
     await session.close()
 
 
@@ -464,7 +464,7 @@ async def test_switching_is_refused_while_the_planner_answers() -> None:
     launcher.planner_turns = [hangs]
     await send(session, SendMessage(agent=PLANNER, text="Plan it."))
     await events_until(session, of_type(AgentStarted))
-    assert await refused(session, OpenSession(session_id="auth")) == [(BUSY, PLANNER_ANSWERING)]
+    assert await refused(session, ActivateSession(session="auth")) == [(BUSY, PLANNER_ANSWERING)]
     assert await refused(session, NewSession(name="other")) == [(BUSY, PLANNER_ANSWERING)]
     assert session.saved_session.name != "other"
     await session.close()
@@ -480,7 +480,7 @@ async def test_work_started_while_a_session_is_locked_to_open_refuses_the_switch
         await send(session, RunTasks())
 
     store.on_acquire = run
-    assert await refused(session, OpenSession(session_id="auth")) == [(BUSY, TASKS_RUNNING)]
+    assert await refused(session, ActivateSession(session="auth")) == [(BUSY, TASKS_RUNNING)]
     assert store.locked == {"session-1"} and store.released == ["auth"]
     await session.close()
 
@@ -553,7 +553,7 @@ async def ran(session: AgentSession, *tasks: TaskSpec) -> tuple[TaskState, ...]:
 async def test_a_session_opened_keeps_no_fix_counts_from_the_one_before() -> None:
     store = store_with(saved("auth", state("1", "completed")))
     session = await with_a_chain_out_of_fixes(store, keeps_claiming, keeps_claiming)
-    await opened(session, OpenSession(session_id="auth"))
+    await opened(session, ActivateSession(session="auth"))
     board = await ran(session, TASK)
     assert [(t.id, t.status, t.fixes) for t in board] == [
         ("1", "completed", None),
@@ -609,7 +609,7 @@ async def test_a_reopened_session_has_spent_what_it_showed_live() -> None:
     assert spent == Usage(input_tokens=400, output_tokens=100, cost_usd=1.4, turns=4)
 
     fresh = last_of(Snapshot, await opened(session, NewSession()))
-    reopened = last_of(Snapshot, await opened(session, OpenSession(session_id="session-1")))
+    reopened = last_of(Snapshot, await opened(session, ActivateSession(session="session-1")))
     assert (fresh.session.usage, reopened.session.usage) == (Usage(), spent)
     assert store.last.spent == spent
     await session.close()
@@ -687,7 +687,7 @@ async def test_tasks_orbit_added_before_a_session_was_picked_carry_over_into_it(
     store = store_with(saved("auth", state("4", "completed")))
     session = failing_startup(store)
     await events_until(session, agent_exited("startup-check"))
-    events = await opened(session, OpenSession(session_id="auth"))
+    events = await opened(session, ActivateSession(session="auth"))
 
     board = last_of(Snapshot, events).tasks
     assert [(t.id, t.status) for t in board] == [("4", "completed"), ("5", "draft")]
@@ -722,7 +722,7 @@ async def test_once_the_user_works_in_the_session_its_tasks_stay_with_it() -> No
     session = failing_startup(store)
     await events_until(session, agent_exited("startup-check"))
     await send(session, AddTask(task=TASK))
-    events = await opened(session, OpenSession(session_id="auth"))
+    events = await opened(session, ActivateSession(session="auth"))
     assert last_of(Snapshot, events).tasks == ()
     assert store.deleted == [] and store.released == ["session-1"]
     await session.close()
@@ -734,7 +734,7 @@ async def test_a_switch_whose_old_lock_cant_be_released_still_opens_the_session(
     await send(session, AddTask(task=TASK))
     await events_until(session, of_type(TasksChanged))
     store.release_failure = "Couldn't unlock the session: read-only"
-    events = await opened(session, OpenSession(session_id="auth"))
+    events = await opened(session, ActivateSession(session="auth"))
     assert last_of(Snapshot, events).session.id == "auth"
     assert errors(events) == [(SAVE_FAILED, "Couldn't unlock the session: read-only")]
     await session.close()
@@ -744,7 +744,7 @@ async def test_a_session_without_agents_opens_its_board_and_settings() -> None:
     settings = Settings(model="opus")
     store = store_with(saved("auth", state("1", "pending"), settings=settings))
     session = AgentSession(store=store, clock=Ticks())
-    events = await opened(session, OpenSession(session_id="auth"))
+    events = await opened(session, ActivateSession(session="auth"))
     assert [t.id for t in last_of(Snapshot, events).tasks] == ["1"]
     assert session.settings == settings
     assert last_of(Snapshot, await opened(session, NewSession())).tasks == ()
@@ -755,7 +755,7 @@ async def test_a_session_without_reviews_keeps_the_reviews_of_the_session_it_ope
     reviews = LaneSnapshot(planner=PlannerSnapshot(paused=True))
     store = store_with(saved("auth", reviews=reviews))
     session, _ = switching(store, reviews=False)
-    await opened(session, OpenSession(session_id="auth"))
+    await opened(session, ActivateSession(session="auth"))
     await send(session, AddTask(task=TASK))
     await events_until(session, of_type(TasksChanged))
     assert store.last.id == "auth" and store.last.reviews == reviews
@@ -769,7 +769,7 @@ async def test_a_session_without_reviews_keeps_the_reviews_of_the_session_it_ope
 async def test_a_session_without_a_planner_keeps_the_conversation_of_the_session_it_opens() -> None:
     store = store_with(saved("auth", state("1", "pending"), planner_conversation="conv-1"))
     session = AgentSession(store=store, clock=Ticks())
-    await opened(session, OpenSession(session_id="auth"))
+    await opened(session, ActivateSession(session="auth"))
     assert store.last.id == "auth" and store.last.planner_conversation == "conv-1"
     await opened(session, NewSession())
     await send(session, AddTask(task=TASK))

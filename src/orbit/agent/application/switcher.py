@@ -1,4 +1,4 @@
-"""Switching a session between saved ones: listing, renaming and deleting them, and opening
+"""Switching a session between saved ones: listing, renaming and deleting them, and activating
 another, or a new one, in place of the one open."""
 
 from collections.abc import Awaitable, Callable, Collection, Sequence
@@ -25,6 +25,7 @@ from orbit.agent.domain.sessions import (
 from orbit.protocol import (
     BUSY,
     INVALID,
+    ActivateSession,
     Catalog,
     DeleteSession,
     ListingReason,
@@ -43,10 +44,19 @@ from orbit.protocol import (
 TASKS_RUNNING = "Can't switch: tasks are running. Press ctrl+s to stop them."
 REVIEW_RUNNING = "Can't switch: a review is running. Press c on it in the agents pane to stop it."
 PLANNER_ANSWERING = "Can't switch: the planner is answering. Press ctrl+x to stop it."
+STARTUP_CHECKING = (
+    "Can't switch: the startup check is running. Press c on it in the agents pane to stop it."
+)
+OPEN_RETIRED = (
+    "OpenSession is retired: send Attach to view a session, or ActivateSession to make it the "
+    "active one."
+)
 NO_REVIEWS = LaneSnapshot(planner=PlannerSnapshot())
 """The review state of a session that has had none."""
 
-SessionCommand = ListSessions | OpenSession | NewSession | RenameSession | DeleteSession
+SessionCommand = (
+    ListSessions | OpenSession | ActivateSession | NewSession | RenameSession | DeleteSession
+)
 
 
 def _stopped(saved: Sequence[TaskState], now: Sequence[TaskState]) -> list[str]:
@@ -58,9 +68,10 @@ def _stopped(saved: Sequence[TaskState], now: Sequence[TaskState]) -> list[str]:
 class SwitchParts:
     """What a switch replaces the contents of: the ``keeper`` saving the session, its ``tasks``,
     its planner ``seat``, its review ``lane`` and ``work`` lane, if any, and whether
-    ``tasks_running`` now; the ``snapshot`` of the session open, last active then, that
-    follows a switch; and the ``catalog`` holding the sessions given, sent whenever they
-    change."""
+    ``tasks_running`` now or the startup check is ``checking``; the ``snapshot`` of the session
+    open, last active then, that follows a switch; the ``catalog`` holding the sessions given,
+    sent whenever they change; and ``switching``, called as a switch is no longer refused, just
+    before the session open is another, with whether the session left stays saved."""
 
     keeper: SessionKeeper
     tasks: Tasks
@@ -68,8 +79,10 @@ class SwitchParts:
     lane: ReviewLane | None
     work: WorkLane | None
     tasks_running: Callable[[], bool]
+    checking: Callable[[], bool]
     snapshot: Callable[[datetime | None], Awaitable[Snapshot]]
     catalog: Callable[[tuple[SessionSummary, ...]], Catalog]
+    switching: Callable[[bool], None]
 
 
 class SessionSwitcher:
@@ -104,14 +117,21 @@ class SessionSwitcher:
         match command:
             case ListSessions():
                 await self.list_sessions("asked")
-            case OpenSession(session_id=session_id):
-                await self._open_session(session_id)
-            case NewSession(name=name):
-                await self._new_session(name)
+            case OpenSession():
+                raise Refused(INVALID, OPEN_RETIRED)
+            case ActivateSession() | NewSession():
+                await self._activate(command)
             case RenameSession() | DeleteSession():
                 await self._change_saved(command)
             case _:
                 assert_never(command)
+
+    async def _activate(self, command: ActivateSession | NewSession) -> None:
+        """Make the saved session ``command`` names, or a new one, the one open here."""
+        if isinstance(command, ActivateSession):
+            await self._open_session(command.session)
+        else:
+            await self._new_session(command.name)
 
     async def list_sessions(self, reason: ListingReason) -> None:
         """Publish the saved sessions, listed for ``reason``."""
@@ -208,6 +228,8 @@ class SessionSwitcher:
             refusal = REVIEW_RUNNING
         elif self._parts.seat.running:
             refusal = PLANNER_ANSWERING
+        elif self._parts.checking():
+            refusal = STARTUP_CHECKING
         else:
             return
         raise Refused(BUSY, refusal)
@@ -215,6 +237,7 @@ class SessionSwitcher:
     def _load(self, record: SessionRecord) -> None:
         """Hold what ``record`` does, its tasks as interrupted; refused while anything runs."""
         self._may_switch()
+        self._leaving()
         tasks = interrupted(record.tasks)[0]
         self.spent = record.spent
         self._settings.resume(record.settings)
@@ -224,8 +247,14 @@ class SessionSwitcher:
         """Hold what a new session does, keeping the settings and having spent nothing; refused
         while anything runs."""
         self._may_switch()
+        self._leaving()
         self.spent = Usage()
         self._hold((), None, None)
+
+    def _leaving(self) -> None:
+        """Say a switch is under way, with whether the session left stays saved: it does once
+        it's saved, unless no session was picked yet, as then it's deleted."""
+        self._parts.switching(self._keeper.kept and not self._picking)
 
     def _hold(
         self,

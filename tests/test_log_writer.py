@@ -16,6 +16,7 @@ from orbit.protocol import (
     SAVE_FAILED,
     STORAGE_FAILED,
     UNKNOWN,
+    ActivateSession,
     AddTask,
     Catalog,
     CommandAccepted,
@@ -27,7 +28,6 @@ from orbit.protocol import (
     History,
     HistoryPage,
     Notice,
-    OpenSession,
     SessionsListed,
     Snapshot,
     TasksChanged,
@@ -685,7 +685,7 @@ def gated_with_auth(queued: bool) -> GatedLog:
 
 async def pick_auth(session: AgentSession, store: GatedLog) -> None:
     """Pick the saved session ``auth`` in ``session``, then open ``store``'s gate and close."""
-    await opened(session, OpenSession(session_id="auth"))
+    await opened(session, ActivateSession(session="auth"))
     store.gate.set()
     await session.close()
 
@@ -819,7 +819,7 @@ async def test_a_switch_snapshots_the_transcript_of_the_session_opened() -> None
     store = store_with(saved("auth"))
     store.logged = [notice(1, "auth"), notice(2, "session-1")]
     session = stored_session(store)
-    events = await opened(session, OpenSession(session_id="auth"))
+    events = await opened(session, ActivateSession(session="auth"))
     await session.close()
 
     [_, switched] = [event for event in events if isinstance(event, Snapshot)]
@@ -839,7 +839,7 @@ async def test_a_session_opened_again_after_a_restart_shows_its_earlier_events(
 
     store = await SqliteStore.open(tmp_path / "state", str(workspace))
     again = AgentSession(store=store, clock=Ticks(), new_id=lambda: "session-2")
-    events = await opened(again, OpenSession(session_id="session-1"))
+    events = await opened(again, ActivateSession(session="session-1"))
     await again.close()
     await store.close()
 
@@ -862,7 +862,7 @@ async def opened_after_another_logged_it(tmp_path: Path) -> AgentSession:
     await other.append("auth", [notice(seq, "auth") for seq in range(1, 51)])
     await other.close()
     session = AgentSession(store=this, clock=Ticks(), new_id=lambda: "session-2")
-    await opened(session, OpenSession(session_id="auth"))
+    await opened(session, ActivateSession(session="auth"))
     await publish(session, Notice(message="later"))
     await session.close()
     await this.close()

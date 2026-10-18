@@ -126,7 +126,9 @@ and starts a new session, and `--name NAME` starts one named `NAME`.
 `ctrl+p` shows the same list later, to switch sessions; there `esc` closes it and keeps the open
 session, as does picking the open session. Switching shows the switched-to session's conversation
 in place of the one you left. Switching is refused, with an error saying what to stop,
-while tasks run, a review runs or the planner answers. Opening a session never starts work by
+while tasks run, a review runs, the planner answers or the startup check runs. Picking a session
+makes it the active one for everyone connected; any other frontend that was viewing the session you
+left keeps it, read-only. Opening a session never starts work by
 itself: its pending tasks wait for `ctrl+r`. A task that was running or being verified when the
 session was last saved (orbit crashed, say) comes back cancelled, and orbit says how many were
 interrupted. An interrupted review ends as a cancelled one does: if its batch is then due a

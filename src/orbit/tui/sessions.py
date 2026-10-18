@@ -11,9 +11,9 @@ from textual.screen import ModalScreen
 from textual.widgets import Input, OptionList
 
 from orbit.protocol import (
+    ActivateSession,
     DeleteSession,
     NewSession,
-    OpenSession,
     RenameSession,
     SessionsListed,
     SessionSummary,
@@ -32,8 +32,8 @@ from orbit.tui.view.sessions import (
 )
 from orbit.tui.widgets import ConfirmScreen
 
-SessionChoice = OpenSession | NewSession
-"""What the user chose: a saved session to open, or a new one to start."""
+SessionChoice = ActivateSession | NewSession
+"""What the user chose: a saved session to activate, or a new one to start."""
 
 SessionChange = RenameSession | DeleteSession
 """A change to a saved session, made while the list stays open."""
@@ -125,7 +125,7 @@ class SessionsScreen(ModalScreen[SessionChoice | None]):
         if summary.current:
             self.dismiss(None)
         elif can_open(summary):
-            self.dismiss(OpenSession(session_id=summary.id))
+            self.dismiss(ActivateSession(session=summary.id))
 
     @on(Input.Submitted, "#session-name")
     async def _named(self, event: Input.Submitted) -> None:

@@ -78,6 +78,7 @@ from orbit.protocol import (
     PLANNER_LANE,
     UNKNOWN,
     WORK_LANE,
+    ActivateSession,
     Attach,
     Catalog,
     CommandAccepted,
@@ -89,8 +90,8 @@ from orbit.protocol import (
     Hello,
     History,
     LogGap,
+    NewSession,
     Notice,
-    OpenSession,
     OwnershipTaken,
     ResumeStorage,
     RunningAgent,
@@ -172,6 +173,8 @@ class AgentSession:
     view whose ``Snapshot`` comes from its record and its log, and where only ``History``,
     ``RenameSession``, ``DeleteSession`` and ``Attach`` work. A connection gets the events of
     the session it views and of none; a session another connection views can't be deleted.
+    ``ActivateSession`` and ``NewSession`` switch the open session for the connection sending
+    them, which views it live; the others viewing the session left keep it as a read-only view.
 
     The session open here is saved in ``store``, if there is one, once it's used, and its
     events are kept in the store's log, ``seq`` counting on from the highest there, with their
@@ -333,8 +336,10 @@ class AgentSession:
             self._lane,
             self._work,
             lambda: self._turns.running,
+            lambda: self._startup is not None and self._startup.running,
             self._snapshot,
             self._catalog,
+            lambda kept: self._views.switching(kept),
         )
         return SessionSwitcher(parts, self._settings, self._events, picking)
 
@@ -460,7 +465,7 @@ class AgentSession:
         for summary in await self._keeper.summaries():
             if not summary.locked and summary.unreadable is None:
                 with suppress(Refused):
-                    await self._switcher.handle(OpenSession(session_id=summary.id))
+                    await self._switcher.handle(ActivateSession(session=summary.id))
                 return
 
     async def _answer(
@@ -518,7 +523,23 @@ class AgentSession:
         if isinstance(command, Attach):
             await self._views.attach(connection, command.session)
             return
+        if isinstance(command, ActivateSession | NewSession):
+            await self._activate(command, connection)
+            return
         await self._handle(command, command_id)
+
+    async def _activate(
+        self, command: ActivateSession | NewSession, connection: SessionConnection
+    ) -> None:
+        """Make the session ``command`` names, or a new one, the open one, viewed live by
+        ``connection``, then give the other connections the snapshots of what they view now:
+        the session left a read-only view. Activating the open session attaches to it."""
+        left = self._keeper.id
+        if isinstance(command, ActivateSession) and command.session == left:
+            await self._views.attach(connection, left)
+            return
+        await self._switcher.handle(command)
+        await self._views.activated(left)
 
     async def _handle(
         self, command: SessionCommand | WorkCommand | History | TakeOwnership, command_id: str

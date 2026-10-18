@@ -10,12 +10,12 @@ from orbit.agent.application.connection import SessionConnection
 from orbit.agent.domain.sessions import SessionRecord
 from orbit.protocol import (
     PLANNER,
+    ActivateSession,
     AddTask,
     Catalog,
     Command,
     CommandEnvelope,
     Event,
-    OpenSession,
     RunTasks,
     SendMessage,
     SessionState,
@@ -218,7 +218,7 @@ async def test_opening_another_session_publishes_both_sessions_states() -> None:
     connection = await joined(session, "first")
     await taken(connection)
 
-    await say(connection, "open", OpenSession(session_id="earlier"))
+    await say(connection, "open", ActivateSession(session="earlier"))
     events = await taken(connection)
     await session.close()
 

@@ -21,6 +21,7 @@ from orbit.protocol.codes import (
 )
 from orbit.protocol.commands import (
     AcceptTask,
+    ActivateSession,
     AddTask,
     Attach,
     CancelAgent,
@@ -46,6 +47,7 @@ from orbit.protocol.commands import (
     UpdateSettings,
     command_adapter,
 )
+from orbit.protocol.deprecated import DEPRECATED_MESSAGES
 from orbit.protocol.envelope import (
     CONNECTION_EVENTS,
     DEFAULT_WORKSPACE,
@@ -172,6 +174,7 @@ __all__ = [
     "CONFIGURE_CHECKS",
     "CONNECTION_EVENTS",
     "DEFAULT_WORKSPACE",
+    "DEPRECATED_MESSAGES",
     "ERROR_CODES",
     "GIT_FAILED",
     "INCOMPATIBLE",
@@ -202,6 +205,7 @@ __all__ = [
     "WORK_LANE",
     "WRONG_SESSION",
     "AcceptTask",
+    "ActivateSession",
     "AddTask",
     "AgentEntry",
     "AgentExitReason",

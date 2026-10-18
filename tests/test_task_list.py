@@ -8,11 +8,11 @@ from orbit.protocol import (
     NOT_CONFIGURED,
     SUPER_REVIEW,
     AcceptTask,
+    ActivateSession,
     BusyChanged,
     ErrorOccurred,
     Event,
     FireTrigger,
-    OpenSession,
     RemoveTask,
     RunTasks,
     SessionsListed,
@@ -883,7 +883,7 @@ async def test_switching_session_through_ctrl_p_while_the_list_is_active_leaves_
         await feed(session, pilot, SessionsListed(sessions=(other,), reason="asked"))
         await pilot.press("j", "enter")
         await feed(session, pilot, opened(other), many(30, running=25))
-        assert session.commands[-1] == OpenSession(session_id="old")
+        assert session.commands[-1] == ActivateSession(session="old")
         assert not isinstance(app.screen, SessionsScreen)
         assert app.focused is None
         assert task_list.following
