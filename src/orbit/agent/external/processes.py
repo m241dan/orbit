@@ -1,6 +1,7 @@
 """Running a program to completion, and never leaving it behind."""
 
 import asyncio
+import os
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
@@ -34,3 +35,12 @@ async def run_process(
             await process.wait()
     assert process.returncode is not None
     return process.returncode, output
+
+
+def process_alive(pid: int) -> bool:
+    """Whether the process ``pid`` is running as this user."""
+    try:
+        os.kill(pid, 0)
+    except (OSError, OverflowError):  # Gone, another user's, or no process id at all.
+        return False
+    return True

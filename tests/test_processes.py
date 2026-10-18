@@ -1,11 +1,12 @@
 import asyncio
 import os
+import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 
-from orbit.agent.external.processes import run_process
+from orbit.agent.external.processes import process_alive, run_process
 
 
 async def test_returns_exit_status_and_combined_output(tmp_path: Path) -> None:
@@ -57,3 +58,25 @@ async def test_cancelling_kills_the_child(tmp_path: Path) -> None:
     assert task.cancelled()
     with pytest.raises(ProcessLookupError):  # Killed and reaped: the pid is gone.
         os.kill(pid, 0)
+
+
+def test_this_process_is_alive() -> None:
+    assert process_alive(os.getpid())
+
+
+def test_a_process_that_has_exited_is_not_alive() -> None:
+    process = subprocess.Popen([sys.executable, "-c", ""])
+    process.wait()
+    assert not process_alive(process.pid)
+
+
+def test_another_users_process_is_not_taken_as_alive(monkeypatch: pytest.MonkeyPatch) -> None:
+    def refused(pid: int, signal: int) -> None:
+        raise PermissionError(pid)
+
+    monkeypatch.setattr(os, "kill", refused)
+    assert not process_alive(1)
+
+
+def test_a_process_id_too_large_for_one_is_not_alive() -> None:
+    assert not process_alive(2**64)

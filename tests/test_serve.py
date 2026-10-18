@@ -184,6 +184,20 @@ def test_serve_opens_the_most_recently_active_session_unless_told_to_start_anew(
     assert snapshot.tasks == ()
 
 
+def test_a_chat_discovers_the_control_plane_serving_its_workspace(
+    project: Path, state: Path, config_dir: Path
+) -> None:
+    found: list[str | None] = []
+
+    def discovers(websocket: ClientConnection) -> list[Event]:
+        found.append(cli.discover_control_plane(state, project, config_dir / "token"))
+        return []
+
+    frontend = Frontend(state, config_dir, discovers)
+    served(frontend, "--port", "0")
+    assert found == [frontend.run_file["url"]]
+
+
 def test_serve_can_profile_itself(state: Path, config_dir: Path, tmp_path: Path) -> None:
     served(Frontend(state, config_dir), "--port", "0", "--profile", str(tmp_path / "profile"))
     names = sorted(p.name for p in (tmp_path / "profile").iterdir())

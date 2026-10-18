@@ -328,6 +328,23 @@ def _open_existing(database: Path) -> sqlite3.Connection:
         raise StoreError(f"Couldn't open the database {database}: {error}") from error
 
 
+def find_workspace_id(state_dir: Path, workspace: str) -> str | None:
+    """The id of the workspace at ``workspace`` in the database in ``state_dir``, creating,
+    upgrading and registering nothing; ``None`` if it isn't registered or the database can't be
+    read."""
+    database = state_dir / DATABASE
+    if not database.exists():
+        return None
+    path = str(Path(workspace).resolve())
+    uri = f"{database.absolute().as_uri()}?mode=ro"
+    try:
+        with closing(sqlite3.connect(uri, uri=True, timeout=BUSY_TIMEOUT)) as connection:
+            row = connection.execute("SELECT id FROM workspaces WHERE path = ?", (path,)).fetchone()
+    except sqlite3.Error:
+        return None
+    return None if row is None else str(row[0])
+
+
 def _is_database_file(target: Path, database: Path) -> bool:
     """Whether ``target`` is ``database`` or its ``-wal`` or ``-shm`` file, by any path."""
     files = (database, *(database.with_name(database.name + end) for end in WAL_FILES))

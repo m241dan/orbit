@@ -22,6 +22,7 @@ from orbit.agent.external.sqlite_store import (
     SqliteStore,
     StoreError,
     error_kind,
+    find_workspace_id,
     resolve_state_dir,
 )
 from orbit.protocol import EventEnvelope, Notice
@@ -164,6 +165,37 @@ async def test_a_workspace_is_registered_once_by_path_and_its_fingerprint_kept_c
     with database(state) as connection:
         rows = connection.execute("SELECT path, fingerprint, name FROM workspaces").fetchall()
     assert rows == [(str(workspace), f"{git(workspace, 'rev-parse', 'HEAD')} ", "project")]
+
+
+async def test_a_registered_workspaces_id_is_found_by_its_path(
+    open_store: Opener, state: Path, workspace: Path
+) -> None:
+    store = await open_store(workspace)
+    assert find_workspace_id(state, str(workspace / ".")) == store.workspace_id
+
+
+async def test_an_unregistered_workspace_is_found_nowhere_and_left_unregistered(
+    open_store: Opener, state: Path, workspace: Path, tmp_path: Path
+) -> None:
+    await open_store(workspace)
+    assert find_workspace_id(state, str(tmp_path)) is None
+    with database(state) as connection:
+        assert connection.execute("SELECT count(*) FROM workspaces").fetchone() == (1,)
+
+
+def test_without_a_database_no_workspace_is_found_and_none_is_made(
+    state: Path, workspace: Path
+) -> None:
+    assert find_workspace_id(state, str(workspace)) is None
+    assert not state.exists()
+
+
+def test_in_a_database_that_cant_be_read_no_workspace_is_found(
+    state: Path, workspace: Path
+) -> None:
+    state.mkdir(parents=True)
+    (state / "orbit.db").write_text("not a database")
+    assert find_workspace_id(state, str(workspace)) is None
 
 
 async def test_a_record_that_isnt_json_is_unreadable_but_still_listed(

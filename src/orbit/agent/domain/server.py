@@ -1,4 +1,5 @@
-"""Where ``orbit serve`` listens: the user's server settings, and which hosts it may bind."""
+"""Where ``orbit serve`` listens: the user's server settings, which hosts it may bind, and what
+its run file says while it does."""
 
 import ipaddress
 from typing import Any
@@ -43,6 +44,24 @@ def load_server(data: dict[str, Any]) -> ServerSettings:
         return _UserConfig.model_validate(data).server
     except ValidationError as exc:
         raise ConfigError(validation_problems(exc)) from None
+
+
+class RunningServer(BaseModel):
+    """A running ``orbit serve``, as its run file says: the ``url`` it listens at, in the
+    process ``pid``."""
+
+    model_config = ConfigDict(frozen=True, strict=True)
+
+    url: str
+    pid: int = Field(gt=0)
+
+
+def parse_running(text: str) -> RunningServer | None:
+    """The server a run file's JSON ``text`` names; ``None`` when it's unreadable."""
+    try:
+        return RunningServer.model_validate_json(text)
+    except ValidationError:
+        return None
 
 
 def is_loopback(host: str) -> bool:

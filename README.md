@@ -46,6 +46,7 @@ uv run orbit db backup ~/orbit-backup.db       # back up the saved sessions (--f
 uv run orbit serve                             # run the control plane on its own, for frontends
 uv run orbit serve --port 0                    # on a port the system chooses
 uv run orbit chat --connect ws://127.0.0.1:7433/  # show the session orbit serve runs
+uv run orbit chat --local                      # run in-process even with orbit serve running
 ```
 
 With orbit installed as a tool, drop the `uv run`.
@@ -898,6 +899,17 @@ reconnecting going on behind it; either modal closes once it's connected again. 
 refuses shows a message naming the token file, and the chat quits once it's closed, without
 retrying.
 
+**Finding the server.** Without `--connect`, `orbit chat` looks for an `orbit serve` running for
+its repository, from the run file in the state directory, and connects to it as `--connect` does,
+printing nothing extra: the backend flags stop it with status 2, saying they belong on `orbit
+serve` or call for `--local`, and `--new` and `--name` open a new session once connected. A run
+file whose process is gone, or a server that can't be reached, is ignored, and the chat runs
+in-process as usual. A server found is never bypassed: if it refuses the token, or the token file
+can't be read, the chat stops with status 2, naming the token file. Only servers of the same
+account on the same machine are found this way; for any other, give `--connect` its URL.
+`--local` skips the search and always runs in-process, taking the backend flags; it can't go with
+`--connect`.
+
 ## Development
 
 Write tests first. Coverage is held at 100% (`fail_under` in `pyproject.toml`); only
@@ -927,7 +939,8 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
 - `orbit.client`: the frontends' side of a control plane in another process. `WebSocketSession`
   (in `session`) is a `Session` over a WebSocket (the `websockets` library) that reconnects with
   backoff, sends its last `Hello` again with `since`, and reports how the link stands through
-  `orbit.protocol`'s `Link`; `read_token` (in `token`) reads the token it shows. It imports no
+  `orbit.protocol`'s `Link`; `read_token` (in `token`) reads the token it shows, and `accepts`
+  (in `probe`) asks a control plane whether it takes it. It imports no
   orbit package but `orbit.protocol`, and only `orbit.cli` imports it.
 - `orbit.agent`: backend, with no UI imports. Three layers, each importing only the ones below:
   - `external`: adapters that reach outside the backend. `ClaudeCliRunner` launches agents as
@@ -1038,6 +1051,6 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
   side's work stalls the other. `orbit serve` plugs them in the same way but hands `AgentSession` to
   `ControlPlaneServer` instead, on the main thread's event loop. `orbit chat --connect` builds no
   backend: it hands the TUI an `orbit.client.WebSocketSession`, which runs on the TUI's own event
-  loop.
+  loop; neither does a chat that `discover_control_plane` finds a running `orbit serve` for.
 
 These rules are enforced by `lint-imports` (see `[tool.importlinter]` in `pyproject.toml`).

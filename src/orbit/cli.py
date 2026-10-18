@@ -54,10 +54,11 @@ from orbit.agent import (
     resolve_config_dir,
     resolve_state_dir,
     run_step,
+    running_server,
     workspace_state,
     write_checks,
 )
-from orbit.client import TokenUnreadable, WebSocketSession, read_token
+from orbit.client import TokenRejected, TokenUnreadable, WebSocketSession, accepts, read_token
 from orbit.profiling import profiled
 from orbit.protocol import PLANNER, NewSession, Settings, ThreadedSession, ToolAccess
 from orbit.tui import OrbitApp
@@ -186,8 +187,15 @@ TokenFileOption = Annotated[
     Path | None,
     typer.Option(
         "--token-file",
-        help="The file holding the token to show the control plane --connect names (default:"
+        help="The file holding the token to show the control plane connected to (default:"
         " token in the config directory).",
+    ),
+]
+LocalOption = Annotated[
+    bool,
+    typer.Option(
+        "--local",
+        help="Run the control plane here, even when an orbit serve is running for the workspace.",
     ),
 ]
 
@@ -233,11 +241,13 @@ def chat(
     config_dir: ConfigDirOption = None,
     connect: ConnectOption = None,
     token_file: TokenFileOption = None,
+    local: LocalOption = False,
 ) -> None:
     """Start an interactive agent session.
 
     At startup, pick a saved session or start a new one (or start one with --new); ctrl+p
-    switches later. With --connect, show the session a running orbit serve has open instead.
+    switches later. With --connect, or when an orbit serve is running for the workspace
+    (unless --local), show the session it has open instead.
 
     In the app: h/j/k/l move between windows; i jumps to the prompt, which talks to
     the planner, whose proposals wait on the task list as drafts, and ctrl+s stops the run;
@@ -246,19 +256,23 @@ def chat(
     that fetches it from orbit over MCP; verification steps run when it says it's done,
     and failures go back to it to fix.
     """
+    user_config = resolve_config_dir(config_dir, os.environ)
+    token_path = token_file or TokenFile(user_config).path
+    joining = _Joining(ctx, token_path, _opening(new, name))
     if connect is not None:
-        _refuse_serve_flags(ctx)
-        token_path = token_file or TokenFile(resolve_config_dir(config_dir, os.environ)).path
-        opening = NewSession(name=name) if new or name is not None else None
-        _launch(_connected_app(connect, token_path, opening), None)
+        _refuse_local(local)
+        _join(joining, connect, "not orbit chat --connect")
+        return
+    state = resolve_state_dir(state, os.environ)
+    root = _workspace(workspace)
+    found = None if local else _discovered(state, root, token_path)
+    if found is not None:
+        _join(joining, found, f"which serves {root} at {found}; or pass --local to run one here")
         return
     # The only place the backend and frontend meet, and where the backend's external
     # adapters are plugged into its ports. Every adapter works relative to the current
     # directory, so move into the workspace before anything reads the filesystem.
     profile = profile.expanduser().resolve() if profile else None
-    state = resolve_state_dir(state, os.environ)
-    user_config = resolve_config_dir(config_dir, os.environ)
-    root = _workspace(workspace)
     os.chdir(root)
     backend = _Backend(model, tools, verify, worktree, review, usage, new, name)
     build, store = _backend(backend, root, state, user_config, pick_session=not backend.fresh)
@@ -266,13 +280,80 @@ def chat(
     _launch_with(OrbitApp(session), profile, store)
 
 
-def _refuse_serve_flags(ctx: typer.Context) -> None:
-    """Exit with status 2 if any of the flags that configure the control plane were given."""
+@dataclass(frozen=True)
+class _Joining:
+    """How a chat joins a running control plane: with the flags in ``ctx``, showing the token
+    in ``token_file`` and sending ``opening``, if any, once welcomed."""
+
+    ctx: typer.Context
+    token_file: Path
+    opening: NewSession | None
+
+
+def _opening(new: bool, name: str | None) -> NewSession | None:
+    """The new session ``new`` or ``name`` ask a joining chat to open, if any."""
+    return NewSession(name=name) if new or name is not None else None
+
+
+def _refuse_local(local: bool) -> None:
+    """Exit with status 2 if ``local`` was asked for along with --connect."""
+    if local:
+        typer.echo("--local runs the control plane here, so it can't go with --connect.", err=True)
+        raise typer.Exit(2)
+
+
+def _join(joining: _Joining, url: str, where: str) -> None:
+    """Run the TUI over the control plane at ``url``, as ``joining`` says.
+
+    Exits with status 2 if a flag that configures the control plane was given, saying it
+    belongs on orbit serve, ``where`` saying which.
+    """
+    _refuse_serve_flags(joining.ctx, where)
+    _launch(_connected_app(url, joining.token_file, joining.opening), None)
+
+
+def discover_control_plane(state: Path, workspace: Path, token_file: Path) -> str | None:
+    """The URL of the control plane serving the workspace at ``workspace``, as its run file in
+    the ``state`` directory says, if the process it names is alive and it takes the token in
+    ``token_file``; ``None`` if there's none, or it can't be reached.
+
+    Raises :class:`TokenUnreadable` if the token can't be read, and :class:`TokenRejected` if
+    the control plane turns it away.
+    """
+    server = running_server(state, str(workspace))
+    if server is None:
+        return None
+    token = read_token(token_file)
+    return server.url if asyncio.run(accepts(server.url, token)) else None
+
+
+def _discovered(state: Path, workspace: Path, token_file: Path) -> str | None:
+    """What :func:`discover_control_plane` finds; a control plane found is never bypassed.
+
+    Exits with status 2 if the token can't be read, or the control plane turns it away.
+    """
+    try:
+        return discover_control_plane(state, workspace, token_file)
+    except TokenUnreadable as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(2) from None
+    except TokenRejected:
+        typer.echo(
+            f"The control plane serving {workspace} refused the token from {token_file}; give it"
+            " the token orbit serve uses, or pass --local to run one here.",
+            err=True,
+        )
+        raise typer.Exit(2) from None
+
+
+def _refuse_serve_flags(ctx: typer.Context, where: str) -> None:
+    """Exit with status 2 if any of the flags that configure the control plane were given,
+    saying they belong on orbit serve, ``where`` saying which."""
     given = [f"--{name}" for name in _SERVE_FLAGS if _given(ctx, name)]
     if given:
         typer.echo(
             f"{', '.join(given)} configure the control plane, so they belong on orbit serve,"
-            " not orbit chat --connect.",
+            f" {where}.",
             err=True,
         )
         raise typer.Exit(2)
