@@ -24,6 +24,7 @@ from orbit.protocol import (
     ErrorOccurred,
     Event,
     ProposalAction,
+    ProposalDecided,
     ProposedSetup,
     ProposedStep,
     RunTasks,
@@ -31,7 +32,9 @@ from orbit.protocol import (
     TurnEndReason,
 )
 from tests.agent_fakes import (
+    COMMAND_ID,
     Call,
+    FakeStore,
     FakeTree,
     Steps,
     board,
@@ -312,10 +315,16 @@ async def decided(session: AgentSession, decide: Decide) -> list[Event]:
     raise AssertionError("unreachable")
 
 
-def frontend(*arguments: dict[str, Any], replies: list[str], steps: Steps) -> AgentSession:
-    """A session without a review of its own, so its frontend decides on proposals."""
+def frontend(
+    *arguments: dict[str, Any], replies: list[str], steps: Steps, store: FakeStore | None = None
+) -> AgentSession:
+    """A session without a review of its own, so its frontend decides on proposals; it's
+    saved in ``store``, if given."""
     session, _, _ = session_for(
-        proposes(*arguments, replies=replies), verification=verified(steps), tree=FakeTree()
+        proposes(*arguments, replies=replies),
+        verification=verified(steps),
+        tree=FakeTree(),
+        store=store,
     )
     return session
 
@@ -339,10 +348,15 @@ async def test_without_a_review_of_its_own_the_session_has_the_frontend_decide()
     assert status(events) == "completed"
 
 
+def decisions_of(events: list[Event]) -> list[ProposalDecided]:
+    return [e for e in events if isinstance(e, ProposalDecided)]
+
+
 async def test_the_frontend_can_ask_for_changes_or_end_it() -> None:
     replies: list[str] = []
+    store = FakeStore()
     session = frontend(
-        {"steps": [LINT]}, {"steps": [LINT]}, replies=replies, steps=Steps(True, True)
+        {"steps": [LINT]}, {"steps": [LINT]}, replies=replies, steps=Steps(True, True), store=store
     )
     decisions: Iterator[ProposalAction] = iter(("revise", "end"))
 
@@ -354,6 +368,21 @@ async def test_the_frontend_can_ask_for_changes_or_end_it() -> None:
     assert "> Add mypy." in replies[0]
     assert "ended" in replies[1]
     assert status(events) == "cancelled"
+    [task] = board(events)
+    recorded = [
+        ProposalDecided(
+            command_id=COMMAND_ID,
+            agent_id="agent-1",
+            task_id=task.id,
+            action=action,
+            feedback="Add mypy.",
+        )
+        for action in ("revise", "end")
+    ]
+    assert decisions_of(events) == recorded
+    await session.close()
+    logged = [envelope.payload for envelope in store.logged]
+    assert [e for e in logged if isinstance(e, ProposalDecided)] == recorded
 
 
 async def test_deciding_when_no_proposal_waits_is_an_error() -> None:
@@ -377,6 +406,7 @@ async def test_a_second_decision_on_the_same_proposal_is_an_error() -> None:
     [task] = board(events)
     refusals = [e for e in events if isinstance(e, CommandRefused)]
     assert refusals == [refused(UNKNOWN, f"No proposal is waiting for task {task.id!r}.")]
+    assert [decision.action for decision in decisions_of(events)] == ["accept"]
     assert not any(isinstance(e, ErrorOccurred) for e in events)
     assert task.status == "completed"
 

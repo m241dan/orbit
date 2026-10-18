@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 from pydantic import AwareDatetime, Field, TypeAdapter
 
+from orbit.protocol.commands import ProposalAction
 from orbit.protocol.models import (
     ProposedSetup,
     ProposedStep,
@@ -298,6 +299,19 @@ class ChecksProposed(_Message):
     setup: ProposedSetup | None = None
 
 
+class ProposalDecided(_Message):
+    """The user's decision on agent ``agent_id``'s checks proposed for task ``task_id``, sent
+    as command ``command_id``, was recorded: the ``action``, with the ``feedback`` saying what
+    to change when it's ``revise``."""
+
+    type: Literal["proposal_decided"] = "proposal_decided"
+    command_id: str
+    agent_id: str
+    task_id: str
+    action: ProposalAction
+    feedback: str = ""
+
+
 UsageStatus = Literal["ok", "rate_limited", "unavailable"]
 """Whether the latest usage fetch worked, was rate limited, or couldn't be made."""
 
@@ -330,6 +344,16 @@ class SessionsListed(_Message):
     type: Literal["sessions_listed"] = "sessions_listed"
     sessions: tuple[SessionSummary, ...]
     reason: ListingReason
+
+
+class MessageSent(_Message):
+    """The user's message ``text`` to the agent ``agent``, sent as command ``command_id``, was
+    accepted; the agent's turn on it follows."""
+
+    type: Literal["message_sent"] = "message_sent"
+    command_id: str
+    agent: str
+    text: str
 
 
 class ConversationReset(_Message):
@@ -469,8 +493,10 @@ Event = Annotated[
     | Notice
     | ReviewStatus
     | ChecksProposed
+    | ProposalDecided
     | UsageChanged
     | SessionsListed
+    | MessageSent
     | ConversationReset
     | LogGap
     | Snapshot

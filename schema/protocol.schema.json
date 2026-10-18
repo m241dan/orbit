@@ -770,8 +770,10 @@
               "error_occurred": "#/$defs/ErrorOccurred",
               "history_page": "#/$defs/HistoryPage",
               "log_gap": "#/$defs/LogGap",
+              "message_sent": "#/$defs/MessageSent",
               "notice": "#/$defs/Notice",
               "progress_noted": "#/$defs/ProgressNoted",
+              "proposal_decided": "#/$defs/ProposalDecided",
               "review_status": "#/$defs/ReviewStatus",
               "sessions_listed": "#/$defs/SessionsListed",
               "settings_changed": "#/$defs/SettingsChanged",
@@ -871,10 +873,16 @@
               "$ref": "#/$defs/ChecksProposed"
             },
             {
+              "$ref": "#/$defs/ProposalDecided"
+            },
+            {
               "$ref": "#/$defs/UsageChanged"
             },
             {
               "$ref": "#/$defs/SessionsListed"
+            },
+            {
+              "$ref": "#/$defs/MessageSent"
             },
             {
               "$ref": "#/$defs/ConversationReset"
@@ -1140,6 +1148,37 @@
       "title": "LogGap",
       "type": "object"
     },
+    "MessageSent": {
+      "description": "The user's message ``text`` to the agent ``agent``, sent as command ``command_id``, was\naccepted; the agent's turn on it follows.",
+      "properties": {
+        "agent": {
+          "title": "Agent",
+          "type": "string"
+        },
+        "command_id": {
+          "title": "Command Id",
+          "type": "string"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "type": {
+          "const": "message_sent",
+          "default": "message_sent",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "command_id",
+        "agent",
+        "text",
+        "type"
+      ],
+      "title": "MessageSent",
+      "type": "object"
+    },
     "NewSession": {
       "description": "Switch to a new, empty session ``name``d so, or by the time it started if ``name`` is\nnone; refused as ``OpenSession`` is.",
       "properties": {
@@ -1258,6 +1297,52 @@
         "type"
       ],
       "title": "ProgressNoted",
+      "type": "object"
+    },
+    "ProposalDecided": {
+      "description": "The user's decision on agent ``agent_id``'s checks proposed for task ``task_id``, sent\nas command ``command_id``, was recorded: the ``action``, with the ``feedback`` saying what\nto change when it's ``revise``.",
+      "properties": {
+        "action": {
+          "enum": [
+            "accept",
+            "revise",
+            "end"
+          ],
+          "title": "Action",
+          "type": "string"
+        },
+        "agent_id": {
+          "title": "Agent Id",
+          "type": "string"
+        },
+        "command_id": {
+          "title": "Command Id",
+          "type": "string"
+        },
+        "feedback": {
+          "default": "",
+          "title": "Feedback",
+          "type": "string"
+        },
+        "task_id": {
+          "title": "Task Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "proposal_decided",
+          "default": "proposal_decided",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "command_id",
+        "agent_id",
+        "task_id",
+        "action",
+        "type"
+      ],
+      "title": "ProposalDecided",
       "type": "object"
     },
     "ProposedSetup": {

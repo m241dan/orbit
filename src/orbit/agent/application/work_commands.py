@@ -33,6 +33,8 @@ from orbit.protocol import (
     DecideProposal,
     EditTask,
     FireTrigger,
+    MessageSent,
+    ProposalDecided,
     RemoveTask,
     ResetConversation,
     RunTasks,
@@ -84,23 +86,26 @@ class WorkCommands:
     def __init__(self, parts: CommandParts) -> None:
         self._parts = parts
 
-    async def handle(self, command: WorkCommand) -> None:
+    async def handle(self, command: WorkCommand, command_id: str) -> None:
+        """Handle ``command``, sent as ``command_id``."""
         match command:
             case SendMessage() | CancelTurn() | UpdateSettings():
-                await self._handle_prompts(command)
+                await self._handle_prompts(command, command_id)
             case AddTask() | RunTasks():
                 await self._handle_tasks(command)
             case EditTask() | AcceptTask() | RemoveTask():
                 await self._handle_board(command)
             case FireTrigger() | CancelAgent() | DecideProposal() | ResetConversation():
-                await self._handle_agents(command)
+                await self._handle_agents(command, command_id)
             case _:
                 assert_never(command)
 
-    async def _handle_prompts(self, command: SendMessage | CancelTurn | UpdateSettings) -> None:
+    async def _handle_prompts(
+        self, command: SendMessage | CancelTurn | UpdateSettings, command_id: str
+    ) -> None:
         match command:
             case SendMessage():
-                await self._send_message(command)
+                await self._send_message(command, command_id)
             case CancelTurn(lane=lane):
                 await self._cancel_turn(lane)
             case UpdateSettings(settings=settings):
@@ -110,12 +115,17 @@ class WorkCommands:
             case _:
                 assert_never(command)
 
-    async def _send_message(self, command: SendMessage) -> None:
-        """Start a planner turn with the message's text; refused for any other agent."""
+    async def _send_message(self, command: SendMessage, command_id: str) -> None:
+        """Start a planner turn with the message's text, publishing the message once accepted;
+        refused for any other agent."""
         if command.agent not in CONVERSATIONAL_ROLES:
             problem = f"Agent {command.agent!r} can't be messaged"
             raise unknown(problem, "the agents you can message are", CONVERSATIONAL_ROLES)
         await self._parts.seat.submit(command.text, self._parts.settings.current)
+        # Put at once, before the turn just started runs, so the log has it ahead of the answer.
+        self._parts.events.put_nowait(
+            MessageSent(command_id=command_id, agent=command.agent, text=command.text)
+        )
 
     async def _handle_tasks(self, command: AddTask | RunTasks) -> None:
         match command:
@@ -166,13 +176,15 @@ class WorkCommands:
             self._parts.seat.cancel()
 
     async def _handle_agents(
-        self, command: FireTrigger | CancelAgent | DecideProposal | ResetConversation
+        self,
+        command: FireTrigger | CancelAgent | DecideProposal | ResetConversation,
+        command_id: str,
     ) -> None:
         match command:
             case CancelAgent(agent_id=agent_id):
                 await self._cancel_agent(agent_id)
             case DecideProposal():
-                await self._decide(command)
+                await self._decide(command, command_id)
             case FireTrigger():
                 await self._fire_trigger(command)
             case ResetConversation():
@@ -198,10 +210,21 @@ class WorkCommands:
         runs = {SUPER_REVIEW: self._super_review, CONFIGURE_CHECKS: configure}
         await runs[command.trigger]()
 
-    async def _decide(self, command: DecideProposal) -> None:
-        if not self._parts.proposals.decide(command):
+    async def _decide(self, command: DecideProposal, command_id: str) -> None:
+        """Settle the proposal ``command`` decides and publish the decision; refused when none
+        is waiting."""
+        proposal = self._parts.proposals.decide(command)
+        if proposal is None:
             message = f"No proposal is waiting for task {command.task_id!r}."
             raise Refused(UNKNOWN, message)
+        decided = ProposalDecided(
+            command_id=command_id,
+            agent_id=proposal.agent_id,
+            task_id=command.task_id,
+            action=command.action,
+            feedback=command.feedback,
+        )
+        await self._parts.events.put(decided)
 
     async def _cancel_agent(self, agent_id: str) -> None:
         """Stop the startup check, or a reviewer's review, on its own; any other agent's work,

@@ -29,6 +29,7 @@ from orbit.protocol import (
     Event,
     EventEnvelope,
     Hello,
+    MessageSent,
     Notice,
     RunTasks,
     SendMessage,
@@ -162,6 +163,27 @@ async def test_submit_sends_command_and_renders_events() -> None:
         await session.queue.put(BusyChanged(busy=False, lane="planner"))
         await pilot.pause()
         assert prompt.border_title == "Prompt · planner"
+
+
+async def test_a_submitted_prompt_shows_once_when_the_backend_echoes_it() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await pilot.press("i", *"hi", "enter")
+        [sent] = session.envelopes
+        echo = MessageSent(command_id=sent.command_id, agent=PLANNER, text="hi")
+        await feed_events(session, pilot, echo, CommandAccepted(command_id=sent.command_id))
+        assert entries(app) == [("hi", "prompt")]
+        assert [entry.text for entry in app.query_one(Transcript).entries(PLANNER)] == ["hi"]
+
+
+async def test_another_frontends_message_shows_as_a_prompt_to_the_planner() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, MessageSent(command_id="other", agent=PLANNER, text="yo"))
+        assert entries(app) == [("yo", "prompt")]
+        assert [entry.text for entry in app.query_one(Transcript).entries(PLANNER)] == ["yo"]
 
 
 async def test_each_command_goes_in_an_envelope_with_a_fresh_id() -> None:

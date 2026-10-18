@@ -94,6 +94,21 @@ A frontend replaces the conversation it shows with every Snapshot's transcript, 
 shows where the session left off and a switch shows the session switched to.
 `SessionsListed` otherwise only answers `ListSessions`.
 
+## The user's messages and decisions
+
+When the backend accepts a `SendMessage`, it publishes `MessageSent(command_id, agent, text)`
+before the agent's turn on it, and when it records a `DecideProposal`, it publishes
+`ProposalDecided(command_id, agent_id, task_id, action, feedback)`, `agent_id` naming the agent
+that proposed the checks. Both come before the command's `CommandAccepted`, and both are logged,
+so a Snapshot's transcript and `HistoryPage`s hold what the user said along with what was
+answered. A refused message or decision publishes neither.
+
+Each carries the `command_id` of the command it accepts, so a frontend can tell its own from
+another frontend's. The TUI shows its user's prompt and decision as soon as they're sent, and
+skips the echo of a command it sent itself; it shows every other `MessageSent` and
+`ProposalDecided`, live or in a transcript, as it shows its own: the message as a prompt under
+the agent's tab, the decision as orbit's note to the agent that proposed.
+
 ## Paging through history
 
 The Snapshot's transcript holds a session's last 500 events; `History` reads further back.

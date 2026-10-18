@@ -37,11 +37,13 @@ from orbit.protocol import (
     HistoryPage,
     ListSessions,
     LogGap,
+    MessageSent,
     NewSession,
     Notice,
     OpenRequest,
     OpenSession,
     ProgressNoted,
+    ProposalDecided,
     ProposedSetup,
     ProposedStep,
     RemoveTask,
@@ -218,6 +220,11 @@ EVENTS: tuple[EventEnvelope, ...] = (
     event(REVIEW),
     event(PROPOSAL),
     event(
+        ProposalDecided(
+            command_id="c1", agent_id="agent-1", task_id="t1", action="revise", feedback="Add mypy"
+        )
+    ),
+    event(
         UsageChanged(
             limits=(UsageLimit(label="Week", percent=42.5, resets_at=WHEN),),
             status="rate_limited",
@@ -226,6 +233,7 @@ EVENTS: tuple[EventEnvelope, ...] = (
         )
     ),
     event(SessionsListed(sessions=(SUMMARY,), reason="refreshed")),
+    event(MessageSent(command_id="c1", agent=PLANNER, text="hello")),
     event(ConversationReset(agent=PLANNER)),
     event(LogGap(first_seq=1204, last_seq=1210)),
     event(

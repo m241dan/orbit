@@ -46,11 +46,10 @@ class FrontendReview:
             del self._waiting[task_id]
             self._shown.pop(task_id, None)
 
-    def decide(self, command: DecideProposal) -> bool:
-        """Settle the proposal ``command`` decides; whether one was waiting."""
+    def decide(self, command: DecideProposal) -> ChecksProposed | None:
+        """Settle the proposal ``command`` decides, returning it; none when none was waiting."""
         decision = self._waiting.get(command.task_id)
         if decision is None or decision.done():
-            return False
+            return None
         decision.set_result(ProposalDecision(command.action, command.feedback))
-        del self._shown[command.task_id]
-        return True
+        return self._shown.pop(command.task_id)

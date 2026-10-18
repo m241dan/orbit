@@ -2,7 +2,7 @@
 
 import shlex
 
-from orbit.protocol import ChecksProposed, DecideProposal, ProposalAction
+from orbit.protocol import ChecksProposed, DecideProposal, ProposalAction, ProposalDecided
 from orbit.tui.view.common import EntryKind
 
 PROPOSAL_KEYS_HINT = "a accept · r revise · x end"
@@ -33,7 +33,7 @@ def proposal_text(event: ChecksProposed) -> str:
     return "\n".join(lines)
 
 
-def decision_entry(agent: str, decision: DecideProposal) -> tuple[str, EntryKind]:
+def decision_entry(agent: str, decision: DecideProposal | ProposalDecided) -> tuple[str, EntryKind]:
     """The user's ``decision`` on ``agent``'s proposal, as a transcript entry."""
     note = DECISION_NOTES[decision.action]
     if decision.action == "revise":

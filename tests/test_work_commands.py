@@ -16,9 +16,11 @@ from orbit.agent.domain.refusals import Refused
 from orbit.protocol import (
     INVALID,
     NOT_CONFIGURED,
+    PLANNER,
     SUPER_REVIEW,
     UNKNOWN,
     AddTask,
+    BusyChanged,
     CancelAgent,
     CancelTurn,
     DecideProposal,
@@ -33,6 +35,9 @@ from orbit.protocol import (
     TaskSpec,
     UpdateSettings,
 )
+
+COMMAND_ID = "c1"
+"""The id every command is handled under."""
 
 TASK = TaskSpec(prompt="Add a flag.", settings=Settings(model="opus"))
 
@@ -82,7 +87,7 @@ def commands_for(recorded: Recorded) -> tuple[WorkCommands, Tasks]:
 async def refusal(commands: WorkCommands, command: WorkCommand) -> tuple[str, str]:
     """The code and message ``commands`` refuse ``command`` with."""
     with pytest.raises(Refused) as refused:
-        await commands.handle(command)
+        await commands.handle(command, COMMAND_ID)
     return refused.value.code, str(refused.value)
 
 
@@ -90,7 +95,7 @@ async def test_updating_the_settings_publishes_them_then_saves() -> None:
     recorded = Recorded()
     commands, _ = commands_for(recorded)
     settings = Settings(model="haiku")
-    await commands.handle(UpdateSettings(settings=settings))
+    await commands.handle(UpdateSettings(settings=settings), COMMAND_ID)
     assert recorded.effects == [SettingsChanged(settings=settings), "saved"]
 
 
@@ -99,6 +104,14 @@ async def test_only_the_planner_can_be_messaged() -> None:
     code, message = await refusal(commands, SendMessage(text="hi", agent="coder"))
     assert code == UNKNOWN
     assert message.startswith("Agent 'coder' can't be messaged; the agents you can message are")
+
+
+async def test_a_message_without_a_planner_is_refused_and_not_published_as_sent() -> None:
+    recorded = Recorded()
+    commands, _ = commands_for(recorded)
+    code, _ = await refusal(commands, SendMessage(text="hi", agent=PLANNER))
+    assert code == NOT_CONFIGURED
+    assert recorded.effects == [BusyChanged(busy=False, lane="planner")]
 
 
 async def test_cancelling_an_unknown_lane_is_refused() -> None:
@@ -111,19 +124,19 @@ async def test_cancelling_an_unknown_lane_is_refused() -> None:
 async def test_adding_a_task_publishes_the_board() -> None:
     recorded = Recorded()
     commands, tasks = commands_for(recorded)
-    await commands.handle(AddTask(task=TASK))
+    await commands.handle(AddTask(task=TASK), COMMAND_ID)
     assert [task.task for task in tasks.board.tasks] == [TASK]
     assert recorded.effects == [TasksChanged(tasks=tasks.board.tasks)]
 
 
 async def test_editing_then_removing_a_task_changes_the_board() -> None:
     commands, tasks = commands_for(Recorded())
-    await commands.handle(AddTask(task=TASK))
+    await commands.handle(AddTask(task=TASK), COMMAND_ID)
     task_id = tasks.board.tasks[0].id
     edited = TASK.model_copy(update={"prompt": "Add two flags."})
-    await commands.handle(EditTask(task_id=task_id, task=edited))
+    await commands.handle(EditTask(task_id=task_id, task=edited), COMMAND_ID)
     assert [task.task for task in tasks.board.tasks] == [edited]
-    await commands.handle(RemoveTask(task_id=task_id))
+    await commands.handle(RemoveTask(task_id=task_id), COMMAND_ID)
     assert tasks.board.tasks == ()
 
 
@@ -156,6 +169,8 @@ async def test_cancelling_an_agent_not_running_is_refused() -> None:
 
 
 async def test_deciding_on_no_waiting_proposal_is_refused() -> None:
-    commands, _ = commands_for(Recorded())
+    recorded = Recorded()
+    commands, _ = commands_for(recorded)
     code, message = await refusal(commands, DecideProposal(task_id="7", action="accept"))
     assert (code, message) == (UNKNOWN, "No proposal is waiting for task '7'.")
+    assert recorded.effects == []

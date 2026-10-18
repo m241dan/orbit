@@ -50,8 +50,10 @@ from orbit.protocol import (
     HistoryPage,
     ListSessions,
     LogGap,
+    MessageSent,
     Notice,
     ProgressNoted,
+    ProposalDecided,
     RemoveTask,
     ResetConversation,
     ResumeStorage,
@@ -190,6 +192,8 @@ class OrbitApp(App[None], inherit_bindings=False):
         self._proposals = ProposalHost(self.push_screen, self._decide)
         self._sessions = SessionsHost(self.push_screen, self._send)
         self._message_id: str | None = None  # The command id of the last message sent.
+        # The command ids of the messages and decisions sent, shown already, whose echo isn't.
+        self._echoes: set[str] = set()
         self._halt = StorageHaltHost(self.push_screen, self._resume_storage, self._show_halt)
         self._resume_id: str | None = None  # The command id of the last ResumeStorage sent.
         # The actions of the keys whose trigger the last catalog lacks, which are hidden.
@@ -261,9 +265,28 @@ class OrbitApp(App[None], inherit_bindings=False):
         self._feed.append(text, "prompt", PLANNER)
         await self._send(SendMessage(agent=PLANNER, text=text))
 
+    def _render_answer(
+        self, event: CommandAccepted | CommandRefused | Welcome | MessageSent | ProposalDecided
+    ) -> None:
+        """Show what the backend made of a command: its outcome, or the message or decision it
+        accepted."""
+        if isinstance(event, MessageSent | ProposalDecided):
+            self._render_echo(event)
+        else:
+            self._render_outcome(event)
+
+    def _render_echo(self, event: MessageSent | ProposalDecided) -> None:
+        """Show a message or decision a frontend sent, unless it's one this one sent and showed
+        when sending it."""
+        if event.command_id in self._echoes:
+            self._echoes.discard(event.command_id)
+        else:
+            self._feed.render(event)
+
     def _render_outcome(self, event: CommandAccepted | CommandRefused | Welcome) -> None:
         """Show why a command was refused, freeing the planner from a message it refused; an
         accepted one, or the Welcome answering Hello, shows nothing."""
+        self._echoes.discard(event.command_id)
         if isinstance(event, CommandAccepted | Welcome):
             return
         if event.command_id == self._message_id:
@@ -497,16 +520,20 @@ class OrbitApp(App[None], inherit_bindings=False):
 
     async def _send(self, command: Command, failure: str = "Couldn't send the command") -> bool:
         """Whether ``command`` was sent to the open session in the default workspace, under a
-        fresh id remembered for a message; a failure to send it is shown after ``failure``,
-        freeing the planner from a message, as a refusal does."""
+        fresh id remembered for a message, and for a message or decision, whose echo isn't
+        shown; a failure to send it is shown after ``failure``, freeing the planner from a
+        message, as a refusal does."""
         command_id = uuid4().hex
         if isinstance(command, SendMessage):
             self._message_id = command_id
         elif isinstance(command, ResumeStorage):
             self._resume_id = command_id
+        if isinstance(command, SendMessage | DecideProposal):
+            self._echoes.add(command_id)
         try:
             await self._session.send(CommandEnvelope(command_id=command_id, payload=command))
         except Exception as exc:
+            self._echoes.discard(command_id)
             if isinstance(command, SendMessage):
                 self._set_busy(PLANNER_LANE, False)
             self._render_event(ErrorOccurred(code=INTERNAL, message=f"{failure}: {exc}"))
@@ -581,8 +608,10 @@ class OrbitApp(App[None], inherit_bindings=False):
                 self._feed.render(event)
             case SessionsListed() | ConversationReset() | Snapshot() | Catalog() | HistoryPage():
                 self._render_session(event)
-            case CommandAccepted() | CommandRefused() | Welcome():
-                self._render_outcome(event)
+            case (
+                CommandAccepted() | CommandRefused() | Welcome() | MessageSent() | ProposalDecided()
+            ):
+                self._render_answer(event)
             case _:
                 assert_never(event)
         self._follow_halt(event)

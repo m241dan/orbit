@@ -16,8 +16,10 @@ from orbit.protocol import (
     ErrorOccurred,
     Event,
     LogGap,
+    MessageSent,
     Notice,
     ProgressNoted,
+    ProposalDecided,
     RunningAgent,
     StartupChecked,
     TaskGaveUp,
@@ -38,6 +40,7 @@ from orbit.tui.transcript import Transcript
 from orbit.tui.view.common import EntryKind
 from orbit.tui.view.log import Entry
 from orbit.tui.view.progress import TaskProgress, task_note
+from orbit.tui.view.proposals import decision_entry
 from orbit.tui.view.rules import exit_rule, planner_reset_entry, turn_rule_entry
 from orbit.tui.view.transcript import (
     AgentNote,
@@ -68,7 +71,10 @@ ConversationEvent = (
 """Events of an agent's turns: their start and end, errors, messages and tool calls; and
 refused commands, shown as errors."""
 
-FeedEvent = ConversationEvent | TaskProgress | AgentNote | AgentRequest | AgentExited
+UserEvent = MessageSent | ProposalDecided
+"""What the user said: their messages to agents and their decisions on proposals."""
+
+FeedEvent = ConversationEvent | TaskProgress | AgentNote | AgentRequest | AgentExited | UserEvent
 """Events the conversation shows as entries."""
 
 _FEED_EVENTS: tuple[type[FeedEvent], ...] = get_args(FeedEvent)
@@ -128,6 +134,8 @@ class ConversationFeed:
                 | LogGap()
             ):
                 self._render_activity(event)
+            case MessageSent() | ProposalDecided():
+                self._render_user(event)
             case _:
                 assert_never(event)
 
@@ -184,6 +192,14 @@ class ConversationFeed:
                 self._output(event)
             case _:
                 assert_never(event)
+
+    def _render_user(self, event: UserEvent) -> None:
+        """Show the user's message as a prompt to its agent, or their decision on a proposal
+        as orbit's note to the agent that proposed it."""
+        if isinstance(event, MessageSent):
+            self.append(event.text, "prompt", event.agent)
+        else:
+            self.append(*decision_entry(event.agent_id, event), event.agent_id)
 
     def _render_progress(self, event: TaskProgress) -> None:
         """Note a task run's progress in the transcript: under its role's tab, and All,

@@ -13,8 +13,10 @@ from orbit.protocol import (
     DecideProposal,
     Event,
     EventEnvelope,
+    MessageSent,
     Notice,
     OpenRequest,
+    ProposalDecided,
     ProposedStep,
     ReviewStatus,
     RunningAgent,
@@ -135,6 +137,20 @@ async def test_a_snapshots_transcript_shows_its_turns_and_tool_calls_in_their_ta
         [call] = [entry for entry in app.query_one(Transcript).entries("coder") if entry.call]
         assert call.call is not None and call.call.status == "passed"
         assert texts(app, None)[0] == "Two tasks, then."
+
+
+async def test_a_snapshots_transcript_shows_the_users_prompt_and_decision() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    prompt = MessageSent(command_id="m", agent=PLANNER, text="add a login page")
+    decision = ProposalDecided(command_id="d", agent_id="agent-3", task_id="1", action="end")
+    transcript = logged(prompt, *PLANNER_TURN, CODER_CALL[0], decision)
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, SNAPSHOT.model_copy(update={"transcript": transcript}))
+        assert texts(app, PLANNER)[:2] == ["add a login page", "Two tasks, then."]
+        assert texts(app, None)[0] == "add a login page"
+        assert texts(app, None)[-1] == "orbit → agent-3: task ended"
+        assert texts(app, "coder")[-1] == "orbit → agent-3: task ended"
 
 
 async def test_a_later_snapshot_of_another_session_replaces_the_transcript() -> None:

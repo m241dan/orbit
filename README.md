@@ -101,9 +101,9 @@ overwrites a saved session it can't read. The design, and what is deliberately l
 [docs/sessions.md](docs/sessions.md).
 
 Every event of a session's conversation is kept in the store too, as its event log. The
-conversation shows where the session left off: at startup, its last 500 events, the planner's
-turns and the agents' runs under their tabs as they were shown live, and the conversation
-carries on from there. Moving up past its first entry, with the conversation activated, pages
+conversation shows where the session left off: at startup, its last 500 events, your prompts,
+the planner's turns, the agents' runs and your decisions on proposed checks under their tabs as
+they were shown live, and the conversation carries on from there. Moving up past its first entry, with the conversation activated, pages
 back through earlier events to the session's start, or, once its log was trimmed (see
 `session_log_mb` under [Where orbit keeps things](#where-orbit-keeps-things)), to the line
 "Older events were removed (session_log_mb)".

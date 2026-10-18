@@ -369,7 +369,7 @@ class AgentSession:
                 await self._handshake.hello(command, command_id)
                 return
             self._handshake.admit()
-            await self._admitted(command)
+            await self._admitted(command, command_id)
         except Refused as refusal:
             refused = CommandRefused(command_id=command_id, code=refusal.code, message=str(refusal))
             await self._events.put(refused)
@@ -393,24 +393,26 @@ class AgentSession:
             raise Refused(WRONG_SESSION, message)
 
     async def _admitted(
-        self, command: SessionCommand | WorkCommand | History | ResumeStorage
+        self, command: SessionCommand | WorkCommand | History | ResumeStorage, command_id: str
     ) -> None:
-        """Handle ``command``, sent once the handshake is done: refused while the session is
-        halted, but for ``ResumeStorage``, which resumes it."""
+        """Handle ``command``, sent as ``command_id`` once the handshake is done: refused while
+        the session is halted, but for ``ResumeStorage``, which resumes it."""
         if isinstance(command, ResumeStorage):
             await self._halt.resume()
             return
         self._halt.check()
-        await self._handle(command)
+        await self._handle(command, command_id)
 
-    async def _handle(self, command: SessionCommand | WorkCommand | History) -> None:
+    async def _handle(
+        self, command: SessionCommand | WorkCommand | History, command_id: str
+    ) -> None:
         if isinstance(command, History):
             await self._events.put(await self._history.page(command))
         elif isinstance(command, SessionCommand):
             await self._switcher.handle(command)
         else:
             self._switcher.stay()
-            await self._commands.handle(command)
+            await self._commands.handle(command, command_id)
 
     def _agent_on(self, task_id: str) -> str:
         """The agent working on task ``task_id``; only asked while one is."""

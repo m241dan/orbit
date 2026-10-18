@@ -4,7 +4,9 @@ from orbit.protocol import (
     AgentExited,
     AgentStarted,
     ChecksProposed,
+    CommandAccepted,
     DecideProposal,
+    ProposalDecided,
     ProposedSetup,
     ProposedStep,
 )
@@ -74,6 +76,34 @@ async def test_a_accepts_and_notes_it_in_the_conversation() -> None:
         assert not isinstance(app.screen, ProposalScreen)
         assert entries(app)[-1] == "orbit → agent-3: proposal accepted"
         # Under its role's tab, too.
+        assert app.query_one(Transcript).entries("configurator")[-1].text == entries(app)[-1]
+
+
+async def test_a_decision_shows_once_when_the_backend_echoes_it() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed(session, pilot, STARTED, PROPOSAL)
+        await pilot.press("a")
+        await pilot.pause()
+        [sent] = session.envelopes
+        echo = ProposalDecided(
+            command_id=sent.command_id, agent_id="agent-3", task_id="7", action="accept"
+        )
+        await feed(session, pilot, echo, CommandAccepted(command_id=sent.command_id))
+        decisions = [text for text in entries(app) if text.startswith("orbit → agent-3")]
+        assert decisions == ["orbit → agent-3: proposal accepted"]
+
+
+async def test_another_frontends_decision_shows_under_the_agents_tab() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    revise = ProposalDecided(
+        command_id="other", agent_id="agent-3", task_id="7", action="revise", feedback="More."
+    )
+    async with app.run_test() as pilot:
+        await feed(session, pilot, STARTED, revise)
+        assert entries(app)[-1] == "orbit → agent-3: changes asked for: More."
         assert app.query_one(Transcript).entries("configurator")[-1].text == entries(app)[-1]
 
 

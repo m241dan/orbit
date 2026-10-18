@@ -16,6 +16,7 @@ from orbit.protocol import (
     CommandRefused,
     ErrorOccurred,
     Event,
+    MessageSent,
     RunTasks,
     SendMessage,
     TaskSpec,
@@ -23,7 +24,18 @@ from orbit.protocol import (
     TurnFinished,
     TurnStarted,
 )
-from tests.agent_fakes import ROLES, Call, Script, board, events_until, refused, send, session_for
+from tests.agent_fakes import (
+    COMMAND_ID,
+    ROLES,
+    Call,
+    FakeStore,
+    Script,
+    board,
+    events_until,
+    refused,
+    send,
+    session_for,
+)
 from tests.test_task_runs import claims_done
 
 PLANNER_IDLE = BusyChanged(busy=False, lane="planner")
@@ -103,6 +115,36 @@ async def test_the_planner_takes_one_prompt_at_a_time() -> None:
     assert len(launcher.launches) == 1
 
 
+def sent(events: list[Event]) -> list[MessageSent]:
+    return [e for e in events if isinstance(e, MessageSent)]
+
+
+async def test_an_accepted_message_is_published_before_the_planners_turn_and_logged() -> None:
+    store = FakeStore()
+    session, _, launcher = session_for(store=store)
+    launcher.planner_turns = [chats]
+    await send(session, SendMessage(agent=PLANNER, text="Plan."))
+    events = await events_until(session, lambda e: e == PLANNER_IDLE)
+    accepted = MessageSent(command_id=COMMAND_ID, agent=PLANNER, text="Plan.")
+    assert sent(events) == [accepted]
+    turn = next(e for e in events if isinstance(e, TurnStarted))
+    assert events.index(accepted) < events.index(turn)
+    await session.close()
+    assert accepted in [envelope.payload for envelope in store.logged]
+
+
+async def test_a_message_refused_as_busy_is_not_published_as_sent() -> None:
+    gate = asyncio.Event()
+    session, _, launcher = session_for()
+    launcher.planner_turns = [gated_planner(gate)]
+    await send(session, SendMessage(agent=PLANNER, text="Plan."))
+    await send(session, SendMessage(agent=PLANNER, text="More."))
+    events = await events_until(session, lambda e: isinstance(e, CommandRefused))
+    assert [message.text for message in sent(events)] == ["Plan."]
+    gate.set()
+    await events_until(session, lambda e: e == PLANNER_IDLE)
+
+
 async def test_only_the_planner_can_be_messaged() -> None:
     session, _, launcher = session_for()
     launcher.planner_turns = [chats]
@@ -113,6 +155,7 @@ async def test_only_the_planner_can_be_messaged() -> None:
         assert events[-1] == refused(UNKNOWN, message)
         assert errors(events) == []
         assert BusyChanged(busy=True, lane="planner") not in events
+        assert sent(events) == []
     assert launcher.launches == []
 
 
