@@ -14,7 +14,7 @@ from orbit.protocol.envelope import CommandEnvelope, EventEnvelope
 from orbit.protocol.names import PROTOCOL_VERSION
 
 SCHEMA_PATH = Path("schema/protocol.schema.json")
-"""Where the schema is written, relative to the repository root."""
+"""Where the schema is written, relative to the current directory."""
 
 
 def protocol_schema() -> dict[str, Any]:

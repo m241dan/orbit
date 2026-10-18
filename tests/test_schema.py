@@ -93,6 +93,19 @@ def test_module_writes_the_schema_to_the_given_path(
     assert path.read_text().endswith("}\n")
 
 
+def test_module_writes_the_schema_under_the_current_directory_by_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("sys.argv", ["schema"])
+
+    runpy.run_module("orbit.protocol.schema", run_name="__main__")
+
+    path = tmp_path / "schema" / "protocol.schema.json"
+    assert json.loads(path.read_text()) == protocol_schema()
+    assert path.read_text().endswith("}\n")
+
+
 def payload_refs(envelope: str) -> list[str]:
     """The ``$defs`` names the ``envelope`` definition's payload may be."""
     payload = committed()["$defs"][envelope]["properties"]["payload"]
