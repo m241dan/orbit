@@ -77,6 +77,7 @@ In the app:
 | `ctrl+s` | Stop the task run (on any tab) |
 | `ctrl+x` | Stop the planner's turn, leaving the task run going |
 | `ctrl+n` | Reset the planner: after you confirm (`y` to go ahead, `n`/`esc` to cancel), end its conversation so the next prompt starts a fresh one, with its role read again from `.orbit/config.toml` (see [Planning with the planner](#planning-with-the-planner)) |
+| `enter` / `esc` | On a storage halt: try again, or close it (see [Storage failures](#storage-failures)) |
 | `a` / `r` / `x` | On a proposal of checks: accept it, ask for changes (type them, `enter` sends, `esc` goes back), or end the task (see [Setting up verification](#setting-up-verification)) |
 | `ctrl+c` | Quit |
 
@@ -604,6 +605,15 @@ file means the state directory was moved or removed. An error orbit doesn't reco
 be one. It also gives the `seq`s of the events that weren't saved and where they went, says that
 what was saved is intact up to the last saved event, and that "Try again" or restarting orbit
 resumes.
+
+The app shows the halt in a modal titled "Session stopped: storage failed" with the whole
+explanation: `enter` is "Try again", which stays open until the halt lifts, then closes, or shows
+the explanation again if a write still fails; `esc` closes it. While the session is halted, a line
+in red above the prompt says "Session stopped: event log failed; see the transcript" (or "session
+record failed" or "review count failed", whichever write failed), until the halt lifts. Closed,
+the modal opens again, with the refusal's explanation, whenever a command is refused with
+`storage_failed`, such as `ctrl+r`; a session opened while halted opens it too. Quitting while the
+session is halted prints the explanation to the terminal (stderr) once the app has closed.
 
 The events that weren't saved, and every event after them while the session is halted, go to a
 fallback file, one JSON envelope per line, readable by you alone:

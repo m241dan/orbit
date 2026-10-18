@@ -340,11 +340,14 @@ def _launch_with(tui: OrbitApp, profile: Path | None, store: SqliteStore) -> Non
 
 
 def _launch(tui: OrbitApp, profile: Path | None) -> None:
-    """Run ``tui``, profiled into the ``profile`` directory if there is one."""
+    """Run ``tui``, profiled into the ``profile`` directory if there is one, then print why
+    its session is halted, if it is, as the halt's modal no longer shows it."""
     if profile is None:
         tui.run()
     else:
         asyncio.run(_run_profiled(tui, profile))
+    if tui.storage_halt is not None:
+        typer.echo(tui.storage_halt, err=True)
 
 
 async def _run_profiled(tui: OrbitApp, directory: Path) -> None:

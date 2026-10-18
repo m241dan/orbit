@@ -71,9 +71,12 @@ class FakeApp:
     profiling: ClassVar[list[list[str]]] = []
     # What each app does with the backend session while it runs, if anything.
     during: ClassVar[Callable[[AgentSession], Coroutine[Any, Any, None]] | None] = None
+    # Why each app's session is halted as it exits, if it is.
+    halted: ClassVar[str | None] = None
 
     def __init__(self, session: ThreadedSession) -> None:
         self.session = session
+        self.storage_halt = FakeApp.halted
 
     def run(self) -> None:
         asyncio.run(self._open_and_close())
@@ -113,6 +116,7 @@ def launched(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> list[AgentSessi
     FakeApp.profile_dir = tmp_path / "profile"
     FakeApp.profiling = []
     FakeApp.during = None
+    FakeApp.halted = None
     return FakeApp.launched
 
 
@@ -1016,6 +1020,34 @@ def test_chat_runs_the_app_unprofiled_by_default(
     assert len(launched) == 1
     assert FakeApp.profiling == []
     assert not FakeApp.profile_dir.exists()
+
+
+def test_exiting_while_halted_prints_why_to_stderr(
+    launched: list[AgentSession], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    FakeApp.halted = "Orbit stopped this session: saving the event log failed."
+    result = runner.invoke(app, ["chat"])
+
+    assert result.exit_code == 0
+    assert result.stderr == "Orbit stopped this session: saving the event log failed.\n"
+
+
+def test_exiting_while_halted_after_profiling_prints_why_too(
+    launched: list[AgentSession], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    FakeApp.halted = "Halted."
+    result = runner.invoke(app, ["chat", "--profile", "profile"])
+
+    assert result.stderr == "Halted.\n"
+
+
+def test_exiting_unhalted_prints_nothing(
+    launched: list[AgentSession], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    assert runner.invoke(app, ["chat"]).stderr == ""
 
 
 # Backups

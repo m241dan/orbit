@@ -11,7 +11,7 @@ from textual import on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding, BindingType
 from textual.containers import Horizontal, Vertical
-from textual.widgets import OptionList, Tabs
+from textual.widgets import OptionList, Static, Tabs
 
 from orbit import __version__
 from orbit.protocol import (
@@ -20,6 +20,7 @@ from orbit.protocol import (
     PLANNER,
     PLANNER_LANE,
     PROTOCOL_VERSION,
+    STORAGE_FAILED,
     SUPER_REVIEW,
     WORK_LANE,
     AcceptTask,
@@ -53,6 +54,7 @@ from orbit.protocol import (
     ProgressNoted,
     RemoveTask,
     ResetConversation,
+    ResumeStorage,
     ReviewStatus,
     RunTasks,
     SendMessage,
@@ -91,6 +93,7 @@ from orbit.tui.panels import UsagePanel, VerificationPanel
 from orbit.tui.proposals import ProposalHost
 from orbit.tui.reason import ReasonScreen
 from orbit.tui.sessions import SessionsHost
+from orbit.tui.storage_halt import StorageHaltHost
 from orbit.tui.tabs import ConversationTabs
 from orbit.tui.task_editor import TaskEditorScreen
 from orbit.tui.tasks import TaskList
@@ -140,6 +143,7 @@ class OrbitApp(App[None], inherit_bindings=False):
     }
     DetailPane.selected { border: none; border-top: solid $accent; }
     DetailPane:focus { border-top: heavy $accent; }
+    #storage-halt { color: $error; padding: 0 1; display: none; }
     """
     BINDINGS: ClassVar[list[BindingType]] = [
         # Priority, so it beats the prompt's own ctrl+c (copy).
@@ -186,6 +190,8 @@ class OrbitApp(App[None], inherit_bindings=False):
         self._proposals = ProposalHost(self.push_screen, self._decide)
         self._sessions = SessionsHost(self.push_screen, self._send)
         self._message_id: str | None = None  # The command id of the last message sent.
+        self._halt = StorageHaltHost(self.push_screen, self._resume_storage, self._show_halt)
+        self._resume_id: str | None = None  # The command id of the last ResumeStorage sent.
         # The actions of the keys whose trigger the last catalog lacks, which are hidden.
         self._missing_triggers: frozenset[str] = frozenset()
         self.clock: Callable[[], float] = time.monotonic
@@ -198,6 +204,7 @@ class OrbitApp(App[None], inherit_bindings=False):
             with Vertical():
                 yield ConversationTabs(id="conversation-tabs")
                 yield Transcript(id="transcript")
+                yield Static(id="storage-halt")
                 yield ChatPrompt(
                     placeholder="Press i to talk to the planner, esc to stop typing", id="prompt"
                 )
@@ -211,6 +218,11 @@ class OrbitApp(App[None], inherit_bindings=False):
     async def on_unmount(self) -> None:
         await self._session.close()
 
+    @property
+    def storage_halt(self) -> str | None:
+        """Why the session is halted because storage failed; none while it isn't."""
+        return self._halt.explanation
+
     def on_mount(self) -> None:
         # Looked up once: a query walks the DOM, and events arrive many times a second.
         self._transcript = self.query_one(Transcript)
@@ -221,6 +233,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         self._usage = self.query_one(UsagePanel)
         self._agents = self.query_one(AgentsPane)
         self._side = self.query_one("#side")
+        self._halt_status = self.query_one("#storage-halt", Static)
         # Read through, so a clock set later still times the conversation.
         self._feed = ConversationFeed(
             self._transcript, self._tabs, self._task_list, self._verification, lambda: self.clock()
@@ -489,6 +502,8 @@ class OrbitApp(App[None], inherit_bindings=False):
         command_id = uuid4().hex
         if isinstance(command, SendMessage):
             self._message_id = command_id
+        elif isinstance(command, ResumeStorage):
+            self._resume_id = command_id
         try:
             await self._session.send(CommandEnvelope(command_id=command_id, payload=command))
         except Exception as exc:
@@ -570,6 +585,28 @@ class OrbitApp(App[None], inherit_bindings=False):
                 self._render_outcome(event)
             case _:
                 assert_never(event)
+        self._follow_halt(event)
+
+    def _follow_halt(self, event: Event) -> None:
+        """Show the halt a storage error or a command refused for it reports, or lift it
+        once trying again is accepted."""
+        match event:
+            case (
+                ErrorOccurred(code=code, message=message)
+                | CommandRefused(code=code, message=message)
+            ) if code == STORAGE_FAILED:
+                self._halt.halted(message)
+            case CommandAccepted(command_id=command_id) if command_id == self._resume_id:
+                self._halt.lifted()
+
+    async def _resume_storage(self) -> None:
+        await self._send(ResumeStorage())
+
+    def _show_halt(self, status: str | None) -> None:
+        """Show ``status`` by the prompt, or hide the line when there's none."""
+        line = self._halt_status
+        line.update(status or "")
+        line.display = status is not None
 
     def _render_session(
         self, event: SessionsListed | ConversationReset | Snapshot | Catalog | HistoryPage
@@ -627,6 +664,10 @@ class OrbitApp(App[None], inherit_bindings=False):
         self._feed.replace(envelope.payload for envelope in snapshot.transcript)
         self._pager.follow(snapshot)
         self._open_session(snapshot.session)
+        if snapshot.storage_halt is None:
+            self._halt.lifted()
+        else:
+            self._halt.halted(snapshot.storage_halt)
 
     def _render_state(
         self,
