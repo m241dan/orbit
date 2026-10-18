@@ -26,12 +26,12 @@ from orbit.agent.application.ports import ProposalReview, SessionStore, UsageSou
 from orbit.agent.application.proposals import FrontendReview
 from orbit.agent.application.review_count import ReviewCount
 from orbit.agent.application.review_lane import ReviewLane
+from orbit.agent.application.settings import SessionSettings
 from orbit.agent.application.startup_check import AGENT_ID as STARTUP_AGENT
 from orbit.agent.application.startup_check import StartupCheck
 from orbit.agent.application.switcher import (
     SessionCommand,
     SessionSwitcher,
-    SettingsAccess,
     SwitchParts,
 )
 from orbit.agent.application.tasks import Tasks
@@ -84,7 +84,6 @@ from orbit.protocol import (
     SendMessage,
     SessionSummary,
     Settings,
-    SettingsChanged,
     Snapshot,
     StepState,
     TaskSpec,
@@ -197,11 +196,8 @@ class AgentSession:
         pick_session: bool = False,
         name: str | None = None,
     ) -> None:
-        self._settings = settings or Settings()
-        self._given = self._settings
-        self._pinned = tuple(pinned)
+        self._settings = SessionSettings(settings or Settings(), pinned, model_choices)
         self._pick_session = pick_session
-        self._model_choices = tuple(model_choices)
         self._events = Outbox(lambda: self._keeper.id)
         self._keeper = SessionKeeper(store, self._events.put, clock, new_id)
         self._keeper.rename(name)
@@ -239,17 +235,7 @@ class AgentSession:
             self._snapshot,
             self._catalog,
         )
-        access = SettingsAccess(
-            lambda: self._settings,
-            self._set_settings,
-            self._given,
-            self._pinned,
-        )
-        return SessionSwitcher(parts, access, self._events, picking)
-
-    def _set_settings(self, settings: Settings) -> None:
-        """Have the session use ``settings`` from now on."""
-        self._settings = settings
+        return SessionSwitcher(parts, self._settings, self._events, picking)
 
     def _work_lane(self) -> WorkLane | None:
         if self._desk is None:
@@ -277,7 +263,7 @@ class AgentSession:
 
     @property
     def settings(self) -> Settings:
-        return self._settings
+        return self._settings.current
 
     @property
     def saved_session(self) -> SessionKeeper:
@@ -287,11 +273,11 @@ class AgentSession:
     @property
     def pinned(self) -> tuple[str, ...]:
         """The settings, by field name, that a session opened keeps as given here."""
-        return self._pinned
+        return self._settings.pinned
 
     @property
     def model_choices(self) -> tuple[str, ...]:
-        return self._model_choices
+        return self._settings.model_choices
 
     @property
     def agents(self) -> Agents | None:
@@ -399,8 +385,8 @@ class AgentSession:
             case CancelTurn(lane=lane):
                 await self._cancel_turn(lane)
             case UpdateSettings(settings=settings):
-                self._settings = settings
-                await self._events.put(self._settings_changed())
+                self._settings.update(settings)
+                await self._events.put(self._settings.changed())
                 await self._save()
             case _:
                 assert_never(command)
@@ -413,7 +399,7 @@ class AgentSession:
                 f"the agents you can message are {PLANNER}."
             )
             raise Refused(UNKNOWN, message)
-        await self._seat.submit(command.text, self._settings)
+        await self._seat.submit(command.text, self._settings.current)
 
     async def _handle_tasks(self, command: AddTask | RunTasks) -> None:
         match command:
@@ -626,7 +612,7 @@ class AgentSession:
 
     async def _save(self) -> None:
         """Save the session, if it's used, as it is now."""
-        await self._keeper.save(self._switcher.contents)
+        await self._switcher.save()
 
     async def _publish_agents(self, event: Event) -> None:
         """Publish ``event``, from the agents; one that ends a turn adds what the turn cost to
@@ -717,8 +703,8 @@ class AgentSession:
         steps, title = self._steps_shown()
         return Snapshot(
             session=self._switcher.summary(last_active),
-            settings=self._settings,
-            model_choices=self._model_choices,
+            settings=self._settings.current,
+            model_choices=self._settings.model_choices,
             busy={WORK_LANE: self._work_turns.running, PLANNER_LANE: self._seat.running},
             tasks=self._board.tasks,
             steps=steps,
@@ -746,6 +732,3 @@ class AgentSession:
         startup = self._startup.agent if self._startup else None
         agents = self._desk.running if self._desk else ()
         return agents if startup is None else (startup, *agents)
-
-    def _settings_changed(self) -> SettingsChanged:
-        return SettingsChanged(settings=self._settings, model_choices=self._model_choices)

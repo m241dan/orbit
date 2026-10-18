@@ -10,6 +10,7 @@ from orbit.agent.application.keeper import Contents, Left, SessionKeeper
 from orbit.agent.application.outbox import EventSink
 from orbit.agent.application.planner_seat import PlannerSeat
 from orbit.agent.application.review_lane import ReviewLane
+from orbit.agent.application.settings import SessionSettings
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.application.work_lane import WorkLane
 from orbit.agent.domain.board import interrupted
@@ -19,7 +20,6 @@ from orbit.agent.domain.sessions import (
     EMPTY_NAME,
     SessionRecord,
     resumed_notes,
-    resumed_settings,
     session_name,
 )
 from orbit.protocol import (
@@ -35,7 +35,6 @@ from orbit.protocol import (
     RenameSession,
     SessionsListed,
     SessionSummary,
-    Settings,
     Snapshot,
     TaskState,
     Usage,
@@ -73,17 +72,6 @@ class SwitchParts:
     catalog: Callable[[tuple[SessionSummary, ...]], Catalog]
 
 
-@dataclass(frozen=True)
-class SettingsAccess:
-    """The session's settings: to ``get`` and ``set`` them. A session opened has its saved
-    settings, but for those ``pinned``, by field name, which keep the ``given`` ones."""
-
-    get: Callable[[], Settings]
-    set: Callable[[Settings], None]
-    given: Settings
-    pinned: tuple[str, ...]
-
-
 class SessionSwitcher:
     """Switches the session held in ``parts`` with ``settings`` between saved ones, publishing
     into ``events``; it also holds what the session's agents have spent.
@@ -95,7 +83,7 @@ class SessionSwitcher:
     def __init__(
         self,
         parts: SwitchParts,
-        settings: SettingsAccess,
+        settings: SessionSettings,
         events: EventSink,
         picking: bool = False,
     ) -> None:
@@ -147,7 +135,7 @@ class SessionSwitcher:
         reviews it has no lane to hold."""
         lane = self._parts.lane
         return Contents(
-            settings=self._settings.get(),
+            settings=self._settings.current,
             planner_conversation=self._parts.seat.conversation_id,
             tasks=self._parts.tasks.board.tasks,
             reviews=lane.snapshot() if lane else self._kept_reviews,
@@ -223,33 +211,30 @@ class SessionSwitcher:
     def _load(self, record: SessionRecord) -> None:
         """Hold what ``record`` does, its tasks as interrupted; refused while anything runs."""
         self._may_switch()
-        given = self._settings
-        settings = resumed_settings(record.settings, given.given, given.pinned)
         tasks = interrupted(record.tasks)[0]
         self.spent = record.spent
-        self._hold(tasks, settings, record.planner_conversation, record.reviews)
+        self._settings.resume(record.settings)
+        self._hold(tasks, record.planner_conversation, record.reviews)
 
     def _clear(self) -> None:
         """Hold what a new session does, keeping the settings and having spent nothing; refused
         while anything runs."""
         self._may_switch()
         self.spent = Usage()
-        self._hold((), self._settings.get(), None, None)
+        self._hold((), None, None)
 
     def _hold(
         self,
         tasks: tuple[TaskState, ...],
-        settings: Settings,
         conversation: str | None,
         reviews: LaneSnapshot | None,
     ) -> None:
-        """Hold a session's ``tasks``, ``settings``, planner ``conversation`` and ``reviews``,
-        with no fix counts."""
+        """Hold a session's ``tasks``, planner ``conversation`` and ``reviews``, with no fix
+        counts."""
         parts = self._parts
         self._replace_board(tasks)
         if parts.work is not None:
             parts.work.reset()
-        self._settings.set(settings)
         parts.seat.replace(conversation)
         if parts.lane is not None:
             parts.lane.load(reviews or NO_REVIEWS)

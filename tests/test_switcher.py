@@ -8,10 +8,10 @@ import pytest
 
 from orbit.agent.application.keeper import SessionKeeper
 from orbit.agent.application.planner_seat import PlannerSeat, SeatHooks
+from orbit.agent.application.settings import SessionSettings
 from orbit.agent.application.switcher import (
     TASKS_RUNNING,
     SessionSwitcher,
-    SettingsAccess,
     SwitchParts,
 )
 from orbit.agent.application.tasks import Tasks
@@ -46,10 +46,14 @@ class Held:
     was asked for holds."""
 
     def __init__(self, settings: Settings) -> None:
-        self.settings = settings
+        self.owned = SessionSettings(settings)
         self.running = False
         self.snapshots: list[datetime | None] = []
         self.catalogs: list[tuple[SessionSummary, ...]] = []
+
+    @property
+    def settings(self) -> Settings:
+        return self.owned.current
 
     def snapshot(self, last_active: datetime | None) -> Snapshot:
         self.snapshots.append(last_active)
@@ -69,9 +73,6 @@ class Held:
         self.catalogs.append(sessions)
         return Catalog(workspaces=(), agents=(), triggers=(), lanes=())
 
-    def set(self, settings: Settings) -> None:
-        self.settings = settings
-
 
 async def nothing() -> None:
     return None
@@ -89,8 +90,8 @@ def switcher_for(
     parts = SwitchParts(
         keeper, tasks, seat, None, None, lambda: held.running, held.snapshot, held.catalog
     )
-    access = SettingsAccess(lambda: held.settings, held.set, held.settings, pinned)
-    return SessionSwitcher(parts, access, events, picking), events, tasks
+    held.owned = SessionSettings(held.owned.given, pinned)
+    return SessionSwitcher(parts, held.owned, events, picking), events, tasks
 
 
 def drained(events: "asyncio.Queue[Event]") -> list[Event]:
