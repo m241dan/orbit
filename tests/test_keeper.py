@@ -402,3 +402,39 @@ async def test_an_open_whose_reread_fails_is_reported_and_lets_go_of_its_lock() 
     assert published.errors == ["Couldn't read the session: permission denied"]
     assert keeper.id == "session-1"
     assert store.released == ["other"] and store.locked == set()
+
+
+LISTING_FAILED = "Couldn't list the sessions in orbit.db: busy"
+
+
+def unlistable_store_with(session_id: str) -> FakeStore:
+    """A store holding the session ``session_id`` whose sessions can't be listed."""
+    store = FakeStore()
+    store.saved = [SessionRecord(id=session_id, name=session_id, created=START, last_active=START)]
+    store.list_failure = RuntimeError(LISTING_FAILED)
+    return store
+
+
+async def test_sessions_that_cannot_be_listed_are_reported_and_none_are_summarised() -> None:
+    keeper, published = keeper_for(unlistable_store_with("other"))
+    assert await keeper.summaries() == ()
+    assert published.errors == [LISTING_FAILED]
+    assert published.codes == [SAVE_FAILED]
+
+
+async def test_an_open_while_the_sessions_cannot_be_listed_is_reported_not_refused() -> None:
+    store = unlistable_store_with("other")
+    keeper, published = keeper_for(store)
+    loaded: list[SessionRecord] = []
+    assert await keeper.open("other", loaded.append) is None
+    assert published.errors == [LISTING_FAILED]
+    assert loaded == [] and keeper.id == "session-1" and store.locked == set()
+
+
+async def test_a_rename_or_delete_while_the_sessions_cannot_be_listed_does_nothing() -> None:
+    store = unlistable_store_with("other")
+    keeper, published = keeper_for(store)
+    await keeper.rename_saved("other", "Renamed")
+    await keeper.delete_saved("other")
+    assert published.errors == [LISTING_FAILED, LISTING_FAILED]
+    assert store.last.name == "other" and store.locked == set()

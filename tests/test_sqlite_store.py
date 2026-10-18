@@ -201,13 +201,14 @@ async def test_closing_lets_go_of_the_stores_locks(open_store: Opener, workspace
     assert await other.acquire("abc")
 
 
-async def test_sessions_whose_locks_cant_be_checked_arent_listed(
+async def test_sessions_whose_locks_cant_be_checked_fail_to_list(
     open_store: Opener, state: Path, workspace: Path
 ) -> None:
     store = await open_store(workspace)
     await store.save(record())
     (state / "locks").write_text("in the way")
-    assert await store.sessions() == []
+    with pytest.raises(RuntimeError, match=r"Couldn't list the sessions in .*orbit\.db: their"):
+        await store.sessions()
 
 
 # Failures in use
@@ -225,10 +226,12 @@ async def test_a_broken_database_fails_each_call_as_the_port_says(
     loaded = await store.load("abc")
     assert isinstance(loaded, Unreadable)
     assert loaded.reason.startswith("it can't be read from ")
-    assert await store.sessions() == []
+    with pytest.raises(RuntimeError, match=r"Couldn't list the sessions in .*orbit\.db"):
+        await store.sessions()
     with pytest.raises(RuntimeError, match=r"Couldn't delete the session abc from .*orbit\.db"):
         await store.delete("abc")
-    assert await store.review_count() == 0
+    with pytest.raises(RuntimeError, match=r"Couldn't read the review count from .*orbit\.db"):
+        await store.review_count()
     with pytest.raises(RuntimeError, match=r"Couldn't save the review count to .*orbit\.db"):
         await store.save_review_count(1)
 
@@ -244,10 +247,12 @@ async def test_a_closed_store_fails_each_call_as_the_port_says(
     assert await store.load("abc") == Unreadable(
         f"it can't be read from {state / 'orbit.db'}: the store is closed"
     )
-    assert await store.sessions() == []
+    with pytest.raises(RuntimeError, match=r"Couldn't list the sessions in .*orbit\.db"):
+        await store.sessions()
     with pytest.raises(RuntimeError, match=r"Couldn't delete the session abc from .*orbit\.db"):
         await store.delete("abc")
-    assert await store.review_count() == 0
+    with pytest.raises(RuntimeError, match=r"Couldn't read the review count from .*orbit\.db"):
+        await store.review_count()
     with pytest.raises(RuntimeError, match=r"Couldn't save the review count to .*orbit\.db"):
         await store.save_review_count(1)
 

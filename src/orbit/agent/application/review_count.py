@@ -3,29 +3,38 @@ session."""
 
 import asyncio
 
-from orbit.agent.application.failures import outcome
-from orbit.agent.application.ports import SessionStore
+from orbit.agent.application.failures import ReportedOnce, outcome
+from orbit.agent.application.ports import Publish, SessionStore
 from orbit.agent.application.storage_halt import Halting
 from orbit.agent.domain.storage_halt import FailedWrite
 
 
 class ReviewCount:
-    """The repository's super review count, saved in ``store`` (if there is one); a failing save
-    halts the session through ``halt``, and nothing is saved while it's halted."""
+    """The repository's super review count, saved in ``store`` (if there is one); a failing load
+    is reported with ``publish``, and a failing save halts the session through ``halt``.
+    Nothing is saved while it's halted, nor until a load has worked, so a count never read
+    can't replace the one saved."""
 
-    def __init__(self, store: SessionStore | None, halt: Halting) -> None:
+    def __init__(self, store: SessionStore | None, halt: Halting, publish: Publish) -> None:
         self._store = store
         self._halt = halt
-        self._count: int | None = None  # The count the store holds.
+        self._loads = ReportedOnce(publish)
+        self._count: int | None = None  # The count the store holds; none until it's read.
         self._wanted: int | None = None  # The count last asked to be saved.
         self._saving = asyncio.Lock()  # Saves one at a time, so the newest is written last.
 
     async def load(self) -> int | None:
-        """The repository's commits since the last super review; none without a store."""
+        """The repository's commits since the last super review; none without a store, or when
+        it can't be read, the first such failure since a load worked reported."""
         if self._store is None:
             return None
-        self._count = await self._store.review_count()
+        if not await self._loads.attempt(self._read(self._store)):
+            return None
         return self._count
+
+    async def _read(self, store: SessionStore) -> None:
+        """Take the count ``store`` holds as the one saved."""
+        self._count = await store.review_count()
 
     async def save(self, count: int) -> None:
         """Save ``count`` as the repository's commits since the last super review, if it
@@ -49,8 +58,9 @@ class ReviewCount:
             return await self._write(self._store, self._wanted)
 
     async def _write(self, store: SessionStore, count: int) -> RuntimeError | None:
-        """Save ``count`` in ``store``, if it changed; returns the error when it fails."""
-        if count == self._count:
+        """Save ``count`` in ``store``, if it changed and the count saved has been read; returns
+        the error when it fails."""
+        if self._count is None or count == self._count:
             return None
         error = await outcome(store.save_review_count(count))
         if isinstance(error, RuntimeError):

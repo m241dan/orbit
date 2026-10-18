@@ -168,6 +168,26 @@ async def test_the_review_state_and_the_repositorys_super_count_are_saved() -> N
     await session.close()
 
 
+async def test_a_super_count_that_cannot_be_read_is_not_overwritten_by_a_landing() -> None:
+    store = FakeStore(count=7)
+    store.count_load_failure = "Couldn't read the review count from orbit.db: busy"
+    session, _, _ = session_for(
+        claims_done,
+        reviewers=(suggests(), suggests()),
+        tree=FakeTree(),
+        review=True,
+        review_limits=ReviewLimits(super_every=2),
+        store=store,
+    )
+    await start(session)
+    events = await asyncio.wait_for(settle(session), 10)
+
+    assert "super-reviewer" not in [t.task.role for t in board(events)]
+    assert store.counts == [] and store.count == 7
+    assert store.last.reviews is not None and store.last.reviews.jobs
+    await session.close()
+
+
 async def test_without_reviews_the_saved_super_count_is_left_alone() -> None:
     store = FakeStore(count=3)
     session, _, _ = session_for(store=store)

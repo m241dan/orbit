@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from orbit.agent.application.failures import outcome
-from orbit.agent.application.ports import Publish, SessionStore
+from orbit.agent.application.ports import Publish, SessionStore, StoredSession
 from orbit.agent.application.storage_halt import Halting
 from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.reviews import LaneSnapshot
@@ -241,10 +241,10 @@ class SessionKeeper:
 
     async def summaries(self) -> tuple[SessionSummary, ...]:
         """The saved sessions, the most recently active first, the one open here marked
-        current; none without a store."""
-        if self._store is None:
+        current; none without a store, or, reported, when they can't be listed."""
+        stored = await self._stored()
+        if stored is None:
             return ()
-        stored = await self._store.sessions()
         return newest_first(
             stored_summary(s.id, s.record, s.id == self.id, s.locked) for s in stored
         )
@@ -312,7 +312,10 @@ class SessionKeeper:
         taken, read again under the lock if ``action`` needs it so no work saved meanwhile is
         lost; none, reported, on a store problem. A refusal raises :class:`Refused`. Either way,
         any lock taken is let go of."""
-        name, checked = await self._found(session_id, action)
+        found = await self._found(session_id, action)
+        if found is None:
+            return None
+        name, checked = found
         assert self._store is not None  # Only a store holds saved sessions.
         if not await self._claim(self._store, session_id, name, action.verb):
             return None
@@ -326,10 +329,13 @@ class SessionKeeper:
                 await self._release(self._store, session_id)
         return current
 
-    async def _found[T](self, session_id: str, action: _Action[T]) -> tuple[str, T]:
+    async def _found[T](self, session_id: str, action: _Action[T]) -> tuple[str, T] | None:
         """The name of the saved session ``session_id`` and what ``action``'s check makes of it;
-        raises :class:`Refused` if there's no such session or it can't be ``action``ed."""
-        stored = await self._store.sessions() if self._store else []
+        none, reported, if the sessions can't be listed, and raises :class:`Refused` if there's
+        no such session or it can't be ``action``ed."""
+        stored = await self._stored()
+        if stored is None:
+            return None
         found = next((each for each in stored if each.id == session_id), None)
         if found is None:
             raise Refused(UNKNOWN, missing_message(session_id))
@@ -337,6 +343,13 @@ class SessionKeeper:
         if isinstance(checked, Refused):
             raise checked
         return record_name(session_id, found.record), checked
+
+    async def _stored(self) -> list[StoredSession] | None:
+        """The saved sessions, of which there are none without a store; ``None``, reported, if
+        they can't be listed."""
+        if self._store is None:
+            return []
+        return await self._reported(self._store.sessions())
 
     async def _reread[T](
         self, store: SessionStore, session_id: str, action: _Action[T]

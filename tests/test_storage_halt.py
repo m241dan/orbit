@@ -499,6 +499,7 @@ async def test_resuming_while_the_review_count_still_fails_names_it() -> None:
     store = FakeStore()
     store.count_failure = "count still full"
     session, _, _ = session_for(store=store, fallback=FakeFallback())
+    await session._review_count.load()
     await session._review_count.save(3)
     await halt_error(session)
 

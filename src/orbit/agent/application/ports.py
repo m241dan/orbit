@@ -324,8 +324,8 @@ class SessionStore(EventLog, Protocol):
         ...
 
     async def sessions(self) -> list[StoredSession]:
-        """Every saved session, unreadable ones included, by id; none when the sessions can't
-        be listed at all."""
+        """Every saved session, unreadable ones included, by id; none when none is saved. Raises
+        ``RuntimeError`` when the sessions can't be listed."""
         ...
 
     async def delete(self, session_id: str) -> None:
@@ -344,7 +344,8 @@ class SessionStore(EventLog, Protocol):
         ...
 
     async def review_count(self) -> int:
-        """The commits since the last super review; 0 when none is saved or it's unreadable."""
+        """The commits since the last super review; 0 when none is saved. Raises
+        ``RuntimeError`` when the store can't be read."""
         ...
 
     async def save_review_count(self, count: int) -> None:

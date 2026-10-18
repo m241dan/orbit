@@ -445,8 +445,9 @@ class SqliteStore:
     async def sessions(self) -> list[StoredSession]:
         try:
             rows = await self._call(self._rows)
-        except sqlite3.Error:
-            return []
+        except sqlite3.Error as error:
+            message = f"Couldn't list the sessions in {self._database}: {error}"
+            raise RuntimeError(message) from error
         return await asyncio.to_thread(self._listed, rows)
 
     async def delete(self, session_id: str) -> None:
@@ -540,8 +541,9 @@ class SqliteStore:
     async def review_count(self) -> int:
         try:
             return await self._call(self._review_count)
-        except sqlite3.Error:
-            return 0
+        except sqlite3.Error as error:
+            message = f"Couldn't read the review count from {self._database}: {error}"
+            raise RuntimeError(message) from error
 
     async def save_review_count(self, count: int) -> None:
         try:
@@ -830,8 +832,10 @@ class SqliteStore:
         )
 
     def _listed(self, rows: list[tuple[str, str]]) -> list[StoredSession]:
-        """The sessions saved as ``rows``, each marked locked when another orbit holds it; none
-        when the locks can't be checked."""
+        """The sessions saved as ``rows``, each marked locked when another orbit holds it.
+
+        Raises ``RuntimeError`` when the locks can't be checked.
+        """
         try:
             self._lock_dir.mkdir(parents=True, exist_ok=True)
             with self._locks.checking():
@@ -841,5 +845,6 @@ class SqliteStore:
                     )
                     for session_id, text in rows
                 ]
-        except OSError:
-            return []
+        except OSError as error:
+            message = f"Couldn't list the sessions in {self._database}: their locks can't be"
+            raise RuntimeError(f"{message} checked: {error}") from error

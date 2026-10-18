@@ -23,6 +23,7 @@ from orbit.protocol import (
     LOCKED,
     NOT_CONFIGURED,
     PLANNER,
+    SAVE_FAILED,
     SUPER_REVIEW,
     UNKNOWN,
     WRONG_SESSION,
@@ -41,6 +42,7 @@ from orbit.protocol import (
     ResetConversation,
     RunTasks,
     SendMessage,
+    SessionsListed,
     TasksChanged,
     TaskSpec,
     TurnEndReason,
@@ -273,7 +275,7 @@ async def test_a_handler_that_fails_is_refused_as_internal_and_the_session_goes_
     store = FakeStore()
     session = AgentSession(store=store, new_id=lambda: "session-1")
     await greeted(session)
-    store.list_failure = RuntimeError("the disk is gone")
+    store.list_failure = ValueError("the disk is gone")
     refused = await refusal(session, "c15", ListSessions())
     store.list_failure = None
     await send_as(session, "c16", AddTask(task=TASK))
@@ -283,6 +285,21 @@ async def test_a_handler_that_fails_is_refused_as_internal_and_the_session_goes_
     message = "Orbit failed to handle ListSessions: the disk is gone"
     assert (refused.code, refused.message) == (INTERNAL, message)
     assert events[-1] == CommandAccepted(command_id="c16")
+
+
+async def test_sessions_that_cannot_be_listed_are_reported_and_listed_as_none() -> None:
+    store = FakeStore()
+    session = AgentSession(store=store, new_id=lambda: "session-1")
+    await greeted(session)
+    store.list_failure = RuntimeError("Couldn't list the sessions in orbit.db: busy")
+    await send_as(session, "c19", ListSessions())
+    events = await outcome(session)
+    await session.close()
+
+    message = "Couldn't list the sessions in orbit.db: busy"
+    assert ErrorOccurred(code=SAVE_FAILED, message=message) in events
+    assert [e.sessions for e in events if isinstance(e, SessionsListed)] == [()]
+    assert events[-1] == CommandAccepted(command_id="c19")
 
 
 class SecondListFails(FakeStore):
@@ -295,7 +312,7 @@ class SecondListFails(FakeStore):
     async def sessions(self) -> list[StoredSession]:
         self.listings += 1
         if self.listings > 1:
-            raise RuntimeError("the disk is gone")
+            raise ValueError("the disk is gone")
         return await super().sessions()
 
 
@@ -317,7 +334,7 @@ async def test_a_hello_whose_startup_listing_fails_is_welcomed_once_with_an_erro
 
 async def test_a_hello_whose_catalog_fails_is_refused_as_internal_with_no_welcome() -> None:
     store = FakeStore()
-    store.list_failure = RuntimeError("the disk is gone")
+    store.list_failure = ValueError("the disk is gone")
     session = AgentSession(store=store, new_id=lambda: "session-1")
     await greet(session)
     events = queued(session)

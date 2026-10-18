@@ -190,7 +190,7 @@ class AgentSession:
         new_sessions = NewSessions(clock, new_id)
         self._keeper = SessionKeeper(store, self._events.put, self._halt, new_sessions)
         self._keeper.rename(name)
-        self._review_count = ReviewCount(store, self._halt)
+        self._review_count = ReviewCount(store, self._halt, self._events.put)
         self._tasks = Tasks(TaskBoard(), self._events.put, self._save)
         self._board = self._tasks.board
         self._proposals = FrontendReview(self._events.put, self._agent_on)

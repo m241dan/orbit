@@ -74,6 +74,10 @@ async def test_without_sessions_none_are_listed(open_store: Opener) -> None:
     assert await (await open_store()).sessions() == []
 
 
+async def test_without_a_saved_review_count_it_reads_as_zero(open_store: Opener) -> None:
+    assert await (await open_store()).review_count() == 0
+
+
 async def test_listing_gives_the_sessions_by_id_marking_those_another_orbit_holds(
     open_store: Opener,
 ) -> None:

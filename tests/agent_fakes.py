@@ -265,15 +265,15 @@ class FakeFallback:
 class FakeStore:
     """Saved sessions kept in memory, holding the super review ``count``.
 
-    ``failure``, while set, is the error every session save raises, and ``count_failure`` the
-    error every count save raises; ``count_yields`` lists how many times each count save in
-    turn yields before it's written (none once it runs out). ``free`` says whether the lock can
-    be taken, and ``lock_failure``, if set, is the error taking it raises. Sessions in
-    ``elsewhere`` are locked by another orbit, those in ``broken`` are unreadable for the reason
-    given, and ``delete_failure``, if set, is the error deleting one raises, and
-    ``release_failure`` the error letting go of a lock raises, and ``load_failure`` the error
-    loading one raises, and ``list_failure`` the error listing them raises. ``on_acquire``, if
-    set, is awaited as a lock is taken.
+    ``failure``, while set, is the error every session save raises, ``count_failure`` the error
+    every count save raises, and ``count_load_failure`` the error reading the count raises;
+    ``count_yields`` lists how many times each count save in turn yields before it's written
+    (none once it runs out). ``free`` says whether the lock can be taken, and ``lock_failure``,
+    if set, is the error taking it raises. Sessions in ``elsewhere`` are locked by another
+    orbit, those in ``broken`` are unreadable for the reason given, and ``delete_failure``, if
+    set, is the error deleting one raises, and ``release_failure`` the error letting go of a
+    lock raises, and ``load_failure`` the error loading one raises, and ``list_failure`` the
+    error listing them raises. ``on_acquire``, if set, is awaited as a lock is taken.
 
     The events appended are ``logged``, each append's in ``appends``, with ``seq`` the highest
     logged before; ``append_failure``, while set, is the error every append raises. Each trim
@@ -289,6 +289,7 @@ class FakeStore:
         self.counts: list[int] = []  # Each count saved.
         self.failure: str | None = None
         self.count_failure: str | None = None
+        self.count_load_failure: str | None = None
         self.count_yields: list[int] = []
         self.free = True
         self.lock_failure: str | None = None
@@ -396,6 +397,8 @@ class FakeStore:
         return session_id in self.trimmed_logs
 
     async def review_count(self) -> int:
+        if self.count_load_failure is not None:
+            raise RuntimeError(self.count_load_failure)
         return self.count
 
     async def save_review_count(self, count: int) -> None:
