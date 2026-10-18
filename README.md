@@ -727,57 +727,80 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     limits (`UsageApi`) with the token in `~/.claude/.credentials.json`; `session_files` keeps
     saved sessions (`SessionFiles`), one JSON file each with a lock file while an orbit has it
     open, and the repository's super review count, in the directory `state_dir` picks.
-  - `application`: `AgentSession` implements `Session`: it takes commands, asks the domain what
-    follows, drives the ports and publishes events. `Tasks` (in `tasks`) holds the `TaskBoard`,
-    marks tasks running and finished, and is the one place that publishes the board, whole, once
-    its callers have changed it. `WorkLane` is the work lane: it runs the board's tasks one at a
-    time, queues a fix after each failed step and lands work that passes. `AgentRun` sees one
-    task through one agent, and a `ProposalTrial` (in `proposal_trial`) tries the checks a
-    configurator proposes and has the user decide on them; `AgentDesk` (in `desk`) launches
-    agents and routes their calls by token; `Verifier` runs the steps; `Lander` (in `landing`)
-    commits and merges verified work; `ReviewLane` runs reviews beside the work; `StartupCheck`
-    runs the steps once on the base commit as orbit starts; `UsageMonitor` fetches the usage
-    limits on a schedule and after an agent's turn; these three run their work through
-    `Background` (in `lanes`), which reports a crash rather than losing it, and the work lane's
-    and the planner's turns run through a `TurnSlot` each (also in `lanes`), which refuses a
-    second turn and shows the lane busy while one runs; `FrontendReview` is where the user
-    decides on proposed checks; `PlannerChat` is the planner's conversation, running each turn
-    and publishing how it ended; `PlannerSeat` (in `planner_seat`) is the planner's place in the
-    session: it holds the current `PlannerChat` and its turns, starts, cancels and resets them,
-    and closes the planners a switch or reset retired once that's done; `SessionKeeper` (in
-    `keeper`) is the open session: it saves it after every change once it's used, and lists,
-    opens, renames, deletes and switches saved sessions through the store; `Handshake` (in
-    `handshake`) opens every stream: it refuses commands until `Hello`, answers it with `Welcome`
-    and publishes what the frontend needs to show the session, then starts the background work.
-    `ports` defines what
-    it needs from outside (`AgentHost`, `AgentLauncher`, `CoderTree`, `StepRunner`, `Workspace`,
+  - `application`: `AgentSession` (in `session`) implements `Session`: it takes commands, asks
+    the domain what follows, drives the ports and publishes events into the `Outbox` (in
+    `outbox`), which stamps each with its `seq` and the session it belongs to. `Tasks` (in
+    `tasks`) holds the `TaskBoard`, marks tasks running and finished, and is the one place that
+    publishes the board, whole, once its callers have changed it. `WorkLane` (in `work_lane`) is
+    the work lane: it runs the board's tasks one at a time, queues a fix after each failed step
+    and lands work that passes, and `WorkTurns` (in `work_turns`) decides when it runs: when the
+    user asks (`ctrl+r`), when a review queues work unless the user held it, and first for a
+    configurator. `AgentRun` (in `agent_run`) sees one task through one agent, and a
+    `ProposalTrial` (in `proposal_trial`) tries the checks a configurator proposes and has the
+    user decide on them; `AgentDesk` (in `desk`) launches agents and routes their calls by token;
+    `Verifier` (in `verifier`) runs the steps; `Lander` (in `landing`) commits and merges
+    verified work; `ReviewLane` (in `review_lane`) runs reviews beside the work; `StartupCheck`
+    (in `startup_check`) runs the steps once on the base commit as orbit starts; `UsageMonitor`
+    (in `usage_monitor`) fetches the usage limits on a schedule and after an agent's turn; these
+    three run their work through `Background` (in `lanes`), which reports a crash rather than
+    losing it, and the work lane's and the planner's turns run through a `TurnSlot` each (also in
+    `lanes`), which refuses a second turn and shows the lane busy while one runs;
+    `FrontendReview` (in `proposals`) is where the user decides on proposed checks; `PlannerChat`
+    (in `planner`) is the planner's conversation, running each turn and publishing how it ended;
+    `PlannerSeat` (in `planner_seat`) is the planner's place in the session: it holds the current
+    `PlannerChat` and its turns, starts, cancels and resets them, and closes the planners a
+    switch or reset retired once that's done; `SessionKeeper` (in `keeper`) is the open session:
+    it saves it after every change once it's used, and opens, renames and deletes saved sessions
+    through the store, each under its lock; `SessionSwitcher` (in `switcher`) switches the
+    session between saved ones: it lists, opens, renames and deletes them through the keeper,
+    opens another or a new one in place of the one open, and holds what the session's agents have
+    spent; `ReviewCount` (in `review_count`) keeps the repository's super review count apart from
+    any one session; `SessionSettings` (in `settings`) holds the open session's settings, at
+    first those given at startup (a session opened brings its saved ones, but for the pinned
+    ones, which keep the given), and the models they may choose from; `outcome` and
+    `ReportedOnce` (in `failures`) turn a failing call to the store into its error and report a
+    failing save once, until a save works again; `Handshake` (in `handshake`) opens every stream:
+    it refuses commands until `Hello`, answers it with `Welcome` and publishes what the frontend
+    needs to show the session, then starts the background work. `ports` defines what it needs
+    from outside (`AgentHost`, `AgentLauncher`, `CoderTree`, `StepRunner`, `Workspace`,
     `ProposalReview`, `UsageSource`, `ConfigWriter`, `SessionStore`).
-  - `domain`: the rules, with no I/O: the `TaskBoard` (task order, statuses, fix chains)
-    and what a crash leaves of its tasks (`interrupted`),
-    `StepProgress` (each verification step's status, kept by the `Verifier` and the startup
-    check), `AgentTask` (what orbit replies to an agent, and when its work is verified), the
-    `AgentRegistry` (agent ids and tokens), `roles` (built-in roles, given their instructions,
-    orbit's limits, its verification steps and worktree setup), `ReviewPlanner` (when to
-    review, batches, rounds and caps), commit messages, when a task needs verifying, how many
-    fixes to try per step, and the fix prompt. `sessions` holds the rules of saved sessions:
-    the `SessionRecord` and its format (versioned, with upgrades from older ones, or why a file
-    is unreadable), how the list of sessions summarizes and orders them, when one may be
-    opened, renamed or deleted, and the notes and settings a resumed session starts with.
+  - `domain`: the rules, with no I/O: the `TaskBoard` (in `board`: task order, statuses, fix
+    chains) and what a crash leaves of its tasks (`interrupted`), `endings` (why a task ended
+    other than completed: a line for the board and the full text), `refusals` (`Refused`, a
+    command the rules won't carry out, and why), `verification` (`StepProgress`, each
+    verification step's status, kept by the `Verifier` and the startup check; when a task needs
+    verifying, how many fixes to try per step, and the fix prompt), `AgentTask` (in `agent_task`:
+    what orbit replies to an agent, and when its work is verified), the `AgentRegistry` (in
+    `agents`: agent ids and tokens), `roles` (built-in roles, given their instructions, and the
+    tasks orbit queues in them), `config` (`OrbitConfig`: the limits, roles, verification steps
+    and setup a project file sets over the built-in defaults) and `config_errors` (`ConfigError`,
+    and what's wrong with an invalid file or proposal), `checks` (the verification steps, the
+    setup step that makes a fresh worktree ready, and the checks a configurator proposes), the
+    `Catalog` (in `catalog`: the workspace and its sessions, the agents' roles, the triggers and
+    the lanes), `ReviewPlanner` (in `reviews`: when to review, batches, rounds and caps), commit
+    messages (`commits`) and `usage` (parsing the subscription's usage limits, and when to fetch
+    them again). `sessions` holds the rules of saved sessions: the `SessionRecord` and its format
+    (versioned, with upgrades from older ones, or why a file is unreadable), how the list of
+    sessions summarizes and orders them, when one may be opened, renamed or deleted, and the
+    notes and settings a resumed session starts with.
 - `orbit.tui`: frontend. Sends commands and renders events. Imports only `orbit.protocol`.
-  `view` turns state and events into text and doesn't import Textual, with a module per area
-  of the screen (`events`, `transcript`, `tool_calls`, `proposals`, `tasks`, `panels`, `agents`,
+  `view` turns state and events into text and doesn't import Textual, with a module per area of
+  the screen (`events`, `transcript`, `tool_calls`, `proposals`, `tasks`, `panels`, `agents`,
   `tabs`, `detail` and `detail_views` for the detail pane, `diffs` and `diff_numbers` for an
   edit's diff, `progress` for notes on a task's run, `rules` for the rules ending turns and
   agents' runs, `turns` for the conversation's running turns, `working` for the working row,
-  `sessions` for the list of sessions, and `settings` and `common` for what they share); the
-  widgets (`transcript`, `conversation` for the `ConversationFeed`, which turns events into the
-  transcript's entries, `entries` for an entry and the renderables that draw it, `tabs`,
-  `tasks`, `agents`, `panels`, `detail` for the detail pane, `working` for the working row,
-  `proposals`, the proposal modal and the `ProposalHost` that shows each waiting proposal once
-  and closes it when it's withdrawn, `sessions`, the modal listing the sessions and the
-  `SessionsHost` that shows it and refreshes it while it's open, `list_pane` for the list
-  pane the lists share, `footer` for the key footer, and `widgets` for the building blocks they
-  share) lay it out, and `app` is the Textual app that holds them.
+  `log` for which of a tab's transcript entries are shown and where, `sessions` for the list of
+  sessions, `windows` for the window h/j/k/l reaches from each window, `triggers` for the keys
+  that fire triggers and their footer labels, `confirm` for the confirmations asked before a
+  key's action, and `settings` and `common` for what they share); the widgets (`transcript`,
+  `conversation` for the `ConversationFeed`, which turns events into the transcript's entries,
+  `entries` for an entry and the renderables that draw it, `tabs`, `tasks`, `agents`, `panels`,
+  `detail` for the detail pane, `working` for the working row, `proposals`, the proposal modal
+  and the `ProposalHost` that shows each waiting proposal once and closes it when it's withdrawn,
+  `sessions`, the modal listing the sessions and the `SessionsHost` that shows it and refreshes
+  it while it's open, `list_pane` for the list pane the lists share, `footer` for the key footer,
+  and `widgets` for the building blocks they share) lay it out, and `app` is the Textual app that
+  holds them.
 - `orbit.cli`: the composition root, and the only place the two sides are wired together: it
   plugs the external adapters into `AgentSession` and hands that to the TUI. It runs the
   backend on its own thread and event loop through `orbit.protocol.ThreadedSession`, so neither
