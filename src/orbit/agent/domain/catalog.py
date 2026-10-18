@@ -1,7 +1,7 @@
 """The catalog of what exists: the workspace and its sessions, the agents' roles, the triggers
 and the lanes."""
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 
 from orbit.protocol import (
     CODER,
@@ -56,11 +56,12 @@ def agent_entry(role: str) -> AgentEntry:
     return AgentEntry(name=role, label=label, conversational=role in CONVERSATIONAL_ROLES)
 
 
-def with_state(summary: SessionSummary, live: SessionStateChanged | None) -> SessionSummary:
-    """``summary``, with the state ``live`` gives it if it's that session's."""
-    if live is None or live.session != summary.id:
+def with_state(summary: SessionSummary, live: Mapping[str, SessionStateChanged]) -> SessionSummary:
+    """``summary``, with the state ``live`` gives that session, by id, if it gives one."""
+    state_now = live.get(summary.id)
+    if state_now is None:
         return summary
-    state = {"active": live.active, "state": live.state, "viewers": live.viewers}
+    state = {"active": state_now.active, "state": state_now.state, "viewers": state_now.viewers}
     return summary.model_copy(update=state)
 
 
@@ -70,13 +71,14 @@ def catalog(
     roles: Iterable[str],
     *,
     read_only: bool = False,
-    live: SessionStateChanged | None = None,
+    live: Iterable[SessionStateChanged] = (),
 ) -> Catalog:
     """The catalog of the repository in the ``directory`` named so, if any, holding
-    ``sessions``, the one ``live`` is about in that state, with agents in ``roles``, for an
+    ``sessions``, those ``live`` is about in those states, with agents in ``roles``, for an
     orbit that's ``read_only`` if so."""
     label = directory or NO_WORKSPACE_LABEL
-    shown = tuple(with_state(summary, live) for summary in sessions)
+    states = {state.session: state for state in live}
+    shown = tuple(with_state(summary, states) for summary in sessions)
     entry = WorkspaceEntry(id=DEFAULT_WORKSPACE, label=label, sessions=shown)
     return Catalog(
         workspaces=(entry,),

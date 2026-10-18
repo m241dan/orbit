@@ -29,6 +29,7 @@ from orbit.agent.domain.sessions import (
     renamable,
     stored_summary,
     tasks_summary,
+    viewable,
 )
 from orbit.agent.domain.storage_halt import FailedWrite
 from orbit.protocol import (
@@ -84,6 +85,7 @@ def _deletable(
 _OPEN = _Action("open", openable)
 _RENAME = _Action("rename", renamable)
 _DELETE = _Action("delete", _deletable, reread=False)
+_VIEW = _Action("view", viewable, reread=False)
 
 
 @dataclass(frozen=True)
@@ -277,6 +279,13 @@ class SessionKeeper:
         ``last_active`` then, as the list of sessions shows it."""
         summary = tasks_summary(self.id, self.name, tasks, spent)
         return summary.model_copy(update={"current": True, "last_active": last_active})
+
+    async def saved(self, session_id: str) -> SessionRecord | None:
+        """The saved session ``session_id`` as it was saved, to view; none, reported, if the
+        sessions can't be listed. Raises :class:`Refused` if there's no such session or it's
+        unreadable."""
+        found = await self._found(session_id, _VIEW)
+        return None if found is None else found[1]
 
     async def rename_saved(self, session_id: str, name: str) -> None:
         """Name the saved session ``session_id``, not the one open here, ``name``, holding its

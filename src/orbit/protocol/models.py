@@ -164,6 +164,13 @@ class SessionSummary(_Message):
     viewers: int = Field(default=0, ge=0)
 
 
+class SessionRef(_Message):
+    """A session, by its ``id`` and its ``name``."""
+
+    id: str
+    name: str
+
+
 StepStatus = Literal["pending", "running", "passed", "failed", "cancelled", "skipped"]
 
 

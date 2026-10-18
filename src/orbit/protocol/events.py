@@ -12,6 +12,7 @@ from orbit.protocol.commands import ProposalAction
 from orbit.protocol.models import (
     ProposedSetup,
     ProposedStep,
+    SessionRef,
     SessionState,
     SessionSummary,
     Settings,
@@ -383,8 +384,8 @@ class RunningAgent(_Message):
 
 
 class Snapshot(_Message):
-    """The open session as it stands, sent after ``Welcome`` and after every switch; its
-    envelope's ``seq`` is the point it's current to.
+    """The session a connection views as it stands, sent after ``Welcome``, after every switch
+    and in answer to ``Attach``; its envelope's ``seq`` is the point it's current to.
 
     It holds the ``session``'s summary, its ``settings`` and ``model_choices``, whether each
     lane is ``busy``, its ``tasks``, the verification ``steps`` and the ``steps_title`` they
@@ -393,7 +394,10 @@ class Snapshot(_Message):
     last logged events, at most 500, oldest first, in the envelopes they were sent in, and,
     while the session is halted because storage failed, ``storage_halt``: why, and how to
     resume; ``read_only`` says another orbit owns the repository, so the work this one is
-    asked to run waits.
+    asked to run waits. ``active`` says whether the session is the workspace's open one, which
+    runs work; one that isn't is a read-only view, from its saved record and its last logged
+    events. ``open_session`` names the workspace's open session, and ``viewers`` counts the
+    connections viewing this one.
     """
 
     type: Literal["snapshot"] = "snapshot"
@@ -410,6 +414,9 @@ class Snapshot(_Message):
     transcript: tuple["EventEnvelope", ...] = ()
     storage_halt: str | None = None
     read_only: bool = False
+    active: bool = True
+    open_session: SessionRef | None = None
+    viewers: int = Field(default=0, ge=0)
 
 
 class HistoryPage(_Message):

@@ -3,7 +3,8 @@ envelope, the token sent as ``Authorization: Bearer`` on the upgrade.
 
 A lost connection is retried with backoff until the session is closed, and the last ``Hello``
 sent again with ``since`` the last ``seq`` received, so the control plane resends what was
-missed. How the link stands is reported to whoever watches it.
+missed, then, if the connection viewed a session that isn't open, the last ``Attach`` sent, so
+it views that session again. How the link stands is reported to whoever watches it.
 """
 
 import asyncio
@@ -18,6 +19,7 @@ from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import ConnectionClosed, InvalidStatus, WebSocketException
 
 from orbit.protocol import (
+    Attach,
     CommandEnvelope,
     Connected,
     EventEnvelope,
@@ -26,6 +28,7 @@ from orbit.protocol import (
     NotConnected,
     ProtocolError,
     Reconnecting,
+    Snapshot,
     Stopped,
     TokenRefused,
     decode_event,
@@ -89,6 +92,8 @@ class WebSocketSession:
         self._events: asyncio.Queue[EventEnvelope | Exception | None] = asyncio.Queue()
         self._websocket: ClientConnection | None = None  # While connected.
         self._hello: CommandEnvelope | None = None  # The last Hello sent.
+        self._attach: CommandEnvelope | None = None  # The last Attach sent.
+        self._viewing = False  # Whether the last Snapshot received was of a read-only view.
         self._seq: int | None = None  # The last seq received.
         self._watchers: list[Callable[[LinkState], None]] = []
         self.state: LinkState | None = None  # None until the first attempt to connect ends.
@@ -109,6 +114,8 @@ class WebSocketSession:
                 await self._send_now(self._greeting(envelope))
             return
         await self._send_now(envelope)
+        if isinstance(envelope.payload, Attach):
+            self._attach = envelope
 
     def events(self) -> AsyncIterator[EventEnvelope]:
         """The events the control plane sends, across reconnections, until the session closes;
@@ -209,14 +216,23 @@ class WebSocketSession:
             self._websocket = websocket
             try:
                 self._report(Connected(self.url))
-                if self._hello is not None:
-                    with suppress(ConnectionClosed):
-                        await websocket.send(encode(self._greeting(self._hello)))
+                with suppress(ConnectionClosed):
+                    await self._greet(websocket)
                 await self._read(websocket)
             finally:
                 self._websocket = None
         if websocket.close_code == GOING_AWAY:
             self._report(Stopped(self.url))
+
+    async def _greet(self, websocket: ClientConnection) -> None:
+        """Send the last ``Hello`` on ``websocket``, if any, then the last ``Attach``, if the
+        connection lost viewed the session it attached to, as ``Hello`` attaches it to the open
+        one."""
+        if self._hello is None:
+            return
+        await websocket.send(encode(self._greeting(self._hello)))
+        if self._viewing and self._attach is not None:
+            await websocket.send(encode(self._attach))
 
     async def _read(self, websocket: ClientConnection) -> None:
         """Queue the events ``websocket`` brings, skipping those of unknown types, until it
@@ -226,6 +242,8 @@ class WebSocketSession:
                 envelope = decode_event(await websocket.recv(decode=True))
                 if envelope is not None:
                     self._seq = envelope.seq
+                    if isinstance(envelope.payload, Snapshot):
+                        self._viewing = not envelope.payload.active
                     self._events.put_nowait(envelope)
 
     def _lost(self) -> None:

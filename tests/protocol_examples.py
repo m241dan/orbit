@@ -15,6 +15,7 @@ from orbit.protocol import (
     AgentRequest,
     AgentStarted,
     AssistantMessage,
+    Attach,
     BusyChanged,
     CancelAgent,
     CancelTurn,
@@ -56,6 +57,7 @@ from orbit.protocol import (
     RunningAgent,
     RunTasks,
     SendMessage,
+    SessionRef,
     SessionsListed,
     SessionStateChanged,
     SessionSummary,
@@ -175,6 +177,7 @@ COMMANDS: tuple[CommandEnvelope, ...] = (
     command(CancelAgent(agent_id="agent-1")),
     command(DecideProposal(task_id="t1", action="revise", feedback="Add mypy")),
     command(ListSessions()),
+    command(Attach(session="s1")),
     command(OpenSession(session_id="s1")),
     command(NewSession(name="Evening")),
     command(RenameSession(session_id="s1", name="Night")),
@@ -269,6 +272,9 @@ EVENTS: tuple[EventEnvelope, ...] = (
             transcript=(event(AssistantMessage(turn_id="turn-1", text="Done.")),),
             storage_halt="Orbit stopped this session: saving the event log failed.",
             read_only=True,
+            active=False,
+            open_session=SessionRef(id="s2", name="Today"),
+            viewers=2,
         )
     ),
     event(

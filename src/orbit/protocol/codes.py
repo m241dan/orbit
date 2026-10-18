@@ -17,7 +17,11 @@ LOCKED = "locked"
 """A refusal's code: another orbit holds what the command acts on."""
 
 WRONG_SESSION = "wrong_session"
-"""A refusal's code: the command is for a session that isn't open."""
+"""A refusal's code: the command is for a session other than the one its connection views."""
+
+NOT_ACTIVE = "not_active"
+"""A refusal's code: the connection views a session that isn't the workspace's open one, so the
+command, which would change or run something there, can't be done in it."""
 
 INCOMPATIBLE = "incompatible"
 """A refusal's code: a ``Hello`` named a protocol version this orbit doesn't speak; nothing more
@@ -53,6 +57,7 @@ REFUSAL_CODES = (
     INVALID,
     LOCKED,
     WRONG_SESSION,
+    NOT_ACTIVE,
     INCOMPATIBLE,
     STORAGE_FAILED,
 )

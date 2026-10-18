@@ -4,8 +4,9 @@ A frontend talks to orbit's backend by sending commands and reading events. This
 how that conversation goes. The models in `orbit.protocol` define every message, and the
 generated JSON Schema in `schema/protocol.schema.json` says what each one looks like on the
 wire. The decisions behind all this are recorded in `docs/00002-feature-envelope-and-outcomes.md`,
-`docs/00003-feature-join-handshake.md`, `docs/00004-feature-wire-contract.md` and, for the
-transport, `docs/00009-feature-serve-and-connect.md`.
+`docs/00003-feature-join-handshake.md`, `docs/00004-feature-wire-contract.md`, for the
+transport, `docs/00009-feature-serve-and-connect.md` and, for attaching to sessions,
+`docs/00010-feature-attach-and-lifecycle.md`.
 
 ## Envelopes
 
@@ -17,8 +18,9 @@ A command travels in a `CommandEnvelope`:
 - `command_id`: a non-empty string the sender chooses, such as a random hex id. The backend
   doesn't check that it's unique; it copies it into the command's outcome, so the sender can
   match the two.
-- `session`: the session the command is for. It's optional: `null` means the open session. A
-  command naming any other session is refused with `wrong_session`.
+- `session`: the session the command is for. It's optional: `null` means the session the
+  connection views (see [Attaching](#attaching)), the open session unless it attached to
+  another. A command naming any other session is refused with `wrong_session`.
 - `workspace`: the workspace the command is for. There's one workspace for now, `"default"`
   (`DEFAULT_WORKSPACE`); a command naming another is refused with `unknown`.
 - `traceparent` and `tracestate`: W3C trace context. They're optional, aren't checked, and
@@ -36,9 +38,12 @@ An event travels in an `EventEnvelope`:
   when a saved session is opened, past any events another orbit logged since.
 - `session`: the session the event belongs to. The event's type decides it: the types in
   `SESSIONLESS_EVENTS` (`UsageChanged`, `SessionsListed`, `Catalog` and `SessionStateChanged`)
-  belong to no session, carry `null` and are never logged, and every other event carries the open session's id. Every event of a
-  session is kept in the store's event log but for `CONNECTION_EVENTS` (`Welcome`, `Catalog`,
-  `Snapshot` and `HistoryPage`), which answer one connection.
+  belong to no session, carry `null` and are never logged, and every other event carries the
+  open session's id, but for the answers to a connection viewing another session (its
+  `Snapshot`, `CommandAccepted` and `CommandRefused`), which carry that session's id and are
+  never logged. Every event of a session is kept in the store's event log but for
+  `CONNECTION_EVENTS` (`Welcome`, `Catalog`, `Snapshot` and `HistoryPage`), which answer one
+  connection.
 - `workspace`, `traceparent` and `tracestate`, as on commands.
 
 ```json
@@ -58,7 +63,7 @@ Every stream opens with a `Hello` command:
 
 The backend publishes nothing but refusals before `Hello`. Every command, `Hello` included, is
 first checked for its address: one naming another workspace is refused with `unknown`, and one
-naming a session other than the open one with `wrong_session`. Only then is a command other
+naming a session other than the one the connection views with `wrong_session`. Only then is a command other
 than `Hello` sent before it refused with `invalid`. A second `Hello` is refused with `invalid`
 too. A `Hello` naming another major
 version is refused with `incompatible`, its message naming both versions, and nothing more is
@@ -91,13 +96,48 @@ and the backend's `server_version`. `Welcome` is Hello's outcome: it takes the p
 6. Live events, as things happen.
 
 `Welcome` only says the Hello was accepted; it's the `Snapshot` that marks the frontend's state
-as current.
+as current. `Hello` attaches the connection to the workspace's open session (see
+[Attaching](#attaching)).
 
 Switching sessions works the way joining does: opening, starting or picking a session sends a
 `Catalog` and then a `Snapshot` of the session now open. A rename or delete sends a `Catalog`.
 A frontend replaces the conversation it shows with every Snapshot's transcript, so joining
 shows where the session left off and a switch shows the session switched to.
 `SessionsListed` otherwise only answers `ListSessions`.
+
+## Attaching
+
+A connection views one session at a time: from its `Hello`, the workspace's open session,
+whichever that is, following it when another session is opened in its place. `Attach(session)`
+points it at the session `session` instead, and is answered with that session's `Snapshot`,
+then `CommandAccepted`; one for a session there's none of is refused with `unknown`, and one for
+a saved session that can't be read with `invalid`. From then on the connection gets the events
+of the session it views, the events that belong to no session, and the answers to its own
+commands; another session's events don't reach it. `Attach` with the open session's id views
+the open session again, live.
+
+Every `Snapshot` says which session is the workspace's open one, the one that runs work:
+`active` is true for that session, `open_session` gives its `id` and `name`, and `viewers`
+counts the connections viewing the session snapshotted, the one asking included.
+
+### Read-only views
+
+Attaching to a saved session that isn't the open one gives a read-only view. Its `Snapshot`
+comes from the session's saved record and its last logged events: `active` false, its saved
+settings and tasks, its `transcript`, nothing busy or running, no steps, review or proposals,
+and `open_session` naming the open session. Nothing runs in a viewed session, and it publishes
+no events while it isn't the open one. On a view, `History`, `RenameSession`, `DeleteSession`
+and `Attach` work as usual; every other command is refused with `not_active`, its message
+naming the viewed session and the open one, such as `Session 'old work' isn't the active
+session; 'today' is. Activate it to work in it.` The answers to a viewing connection's
+commands reach it alone.
+
+A session another connection views can't be deleted: `DeleteSession` is refused with `busy`,
+its message saying how many connections view it, such as `Can't delete "old work": 1 other
+frontend views it.`
+
+A reconnecting `orbit.client.WebSocketSession` that was viewing a session other than the open
+one sends its last `Attach` again after its `Hello`, so it views that session again.
 
 ## Session state
 
@@ -106,14 +146,15 @@ Each session in a `Catalog` carries its state as it is when the Catalog is sent:
 - `active`: whether it's the workspace's open session, the one that runs work.
 - `state`: `running` while a task run, a review, a planner turn or the startup check is in
   progress, otherwise `idle`.
-- `viewers`: how many welcomed connections view it. Every welcomed connection views the open
-  session, so the others have none.
+- `viewers`: how many welcomed connections view it: the open session's, and, for another
+  session, those attached to it (see [Attaching](#attaching)).
 
 Whenever one of them changes for a session, every welcomed connection gets
 `SessionStateChanged(session, active, state, viewers)` with the new values: a task run, review,
-planner turn or startup check starting or ending, a connection joining or closing, and another
-session opened, which sends one for the session left (inactive, idle, no viewers) and one for the
-session opened. A connection joins once everything that follows its `Welcome` is sent, so the
+planner turn or startup check starting or ending, a connection joining, closing or attaching to
+another session, which sends one for the session it left and one for the session it views, and
+another session opened, which sends one for the session left (inactive, idle, no viewers unless
+connections attached to it) and one for the session opened. A connection joins once everything that follows its `Welcome` is sent, so the
 change counting it comes after those. The event belongs to no session and isn't logged, and the
 Catalog isn't re-sent for it.
 
@@ -253,9 +294,9 @@ doesn't know.
 `orbit serve` serves the protocol over a WebSocket on loopback, at the URL it prints and writes to
 its run file (`ws://127.0.0.1:7433/` by default). Each WebSocket is a connection of its own, with
 its own handshake and stream: it starts with `Hello` like any other, and what it's sent follows
-the rules above, so every connection gets every event the session publishes, outcomes of other
-connections' commands included, but for the events answering one connection (`Welcome`,
-`Catalog`, `Snapshot`, `HistoryPage`), which reach only it.
+the rules above, so every connection gets every event of the session it views and of none,
+outcomes of other connections' commands included, but for the events answering one connection
+(`Welcome`, `Catalog`, `Snapshot`, `HistoryPage`), which reach only it.
 
 - **Authentication** is on the upgrade: the request must carry `Authorization: Bearer <token>`,
   the token in the token file of the server's config directory. Without it, or with another
@@ -308,7 +349,8 @@ Refusals, in `CommandRefused`:
 | `busy` | What the command acts on is running, so it can't be done now. |
 | `invalid` | The command can't be done as given, such as a command before `Hello`, input to a trigger that takes none or `TakeOwnership` with no offer open. |
 | `locked` | Another orbit holds what the command acts on, such as a session. |
-| `wrong_session` | The command is for a session that isn't open. |
+| `wrong_session` | The command is for a session other than the one its connection views. |
+| `not_active` | The connection views a session that isn't the workspace's open one, and the command would change or run something there (see [Read-only views](#read-only-views)). |
 | `incompatible` | A `Hello` named a protocol version this orbit doesn't speak; nothing more is sent on that stream. |
 | `storage_failed` | The session is halted because a write to the store failed; the message is the halt's explanation. Every command but `Hello` and `ResumeStorage` is refused so until storage is resumed; `ResumeStorage` is refused so while the writes still fail (see [Resuming storage](#resuming-storage)). |
 

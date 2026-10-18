@@ -19,6 +19,7 @@ from orbit.client.session import MAX_MESSAGE_BYTES
 from orbit.protocol import (
     NOT_CONNECTED,
     PROTOCOL_VERSION,
+    Attach,
     CommandEnvelope,
     Connected,
     EventEnvelope,
@@ -29,6 +30,8 @@ from orbit.protocol import (
     ProtocolError,
     Reconnecting,
     RunTasks,
+    SessionSummary,
+    Settings,
     Snapshot,
     Stopped,
     TokenRefused,
@@ -44,6 +47,7 @@ HELLO = CommandEnvelope(
     command_id="hello", payload=Hello(client="tests", protocol_version=PROTOCOL_VERSION)
 )
 RUN = CommandEnvelope(command_id="run", payload=RunTasks())
+ATTACH = CommandEnvelope(command_id="attach", payload=Attach(session="earlier"))
 
 
 class FakePlane:
@@ -121,6 +125,46 @@ async def next_event(events: AsyncIterator[EventEnvelope]) -> EventEnvelope:
     return await asyncio.wait_for(anext(events), 5)
 
 
+def snapshot(seq: int, active: bool) -> str:
+    """A Snapshot of the session ``earlier``, the open one if ``active``, else a view."""
+    shown = Snapshot(
+        session=SessionSummary(id="earlier", name="Earlier"),
+        settings=Settings(),
+        model_choices=(),
+        busy={},
+        tasks=(),
+        steps=(),
+        review=None,
+        proposals=(),
+        agents=(),
+        active=active,
+    )
+    return encode(EventEnvelope(seq=seq, session="earlier", payload=shown))
+
+
+async def reconnected_after(*snapshots: str) -> list[CommandEnvelope]:
+    """The commands a client sends on reconnecting, then ``RUN``, once it said Hello, attached
+    to ``earlier`` and received ``snapshots`` before its connection was lost."""
+    async with plane() as (fake, url):
+        session, _ = client(url)
+        events = session.events()
+        await session.send(HELLO)
+        first = await fake.connection()
+        await fake.command()
+        await session.send(ATTACH)
+        await fake.command()
+        for shown in snapshots:
+            await first.send(shown)
+            await next_event(events)
+        await first.close(1011, "Oops")
+        again = [await fake.command()]
+        await session.send(RUN)
+        while again[-1] != RUN:
+            again.append(await fake.command())
+        await session.close()
+        return again
+
+
 async def test_it_connects_showing_the_token_and_greets_with_the_hello() -> None:
     async with plane() as (fake, url):
         session, states = client(url)
@@ -183,6 +227,19 @@ async def test_a_lost_connection_reconnects_asking_for_what_was_missed() -> None
         assert states.seen[-1] == Connected(url)
         assert not any(isinstance(state, Stopped) for state in states.seen)
         await session.close()
+
+
+async def test_a_reconnecting_client_viewing_a_session_attaches_to_it_again() -> None:
+    again = await reconnected_after(snapshot(3, active=False))
+
+    assert [type(c.payload) for c in again] == [Hello, Attach, RunTasks]
+    assert again[1] == ATTACH
+
+
+async def test_a_reconnecting_client_back_on_the_open_session_only_says_hello() -> None:
+    again = await reconnected_after(snapshot(3, active=False), snapshot(4, active=True))
+
+    assert [type(c.payload) for c in again] == [Hello, RunTasks]
 
 
 async def test_a_command_sent_while_disconnected_raises_not_connected() -> None:

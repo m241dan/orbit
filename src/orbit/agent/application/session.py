@@ -18,7 +18,7 @@ from orbit.agent.application.connection import (
     SessionConnection,
 )
 from orbit.agent.application.desk import AgentDesk, Agents
-from orbit.agent.application.handshake import Handshake, HandshakeParts
+from orbit.agent.application.handshake import HandshakeParts
 from orbit.agent.application.history import SessionHistory
 from orbit.agent.application.keeper import (
     Clock,
@@ -54,6 +54,7 @@ from orbit.agent.application.takeover import RETRY_SECONDS, Takeover
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.application.usage_monitor import UsageMonitor
 from orbit.agent.application.verifier import Verification, Verifier
+from orbit.agent.application.views import SessionViews, ViewParts
 from orbit.agent.application.work_commands import (
     CommandParts,
     QueuedWork,
@@ -77,11 +78,12 @@ from orbit.protocol import (
     PLANNER_LANE,
     UNKNOWN,
     WORK_LANE,
-    WRONG_SESSION,
+    Attach,
     Catalog,
     CommandAccepted,
     CommandEnvelope,
     CommandRefused,
+    DeleteSession,
     Event,
     EventEnvelope,
     Hello,
@@ -164,8 +166,12 @@ class AgentSession:
     earlier runs. Every switch of session ends with a ``Catalog`` and a ``Snapshot`` too, and a
     rename or delete sends a ``Catalog``; each reaches only the connection whose command it
     answers. Every connection gets a ``SessionStateChanged`` whenever whether the open session
-    runs work, or how many connections view it, changes: a connection views it once its
-    greeting is sent, until it closes.
+    runs work, or how many connections view a session, changes: a connection views the open
+    session once its greeting is sent, until it closes or ``Attach``\\es to another.
+    ``SessionViews`` attaches connections: to a saved session that isn't open, as a read-only
+    view whose ``Snapshot`` comes from its record and its log, and where only ``History``,
+    ``RenameSession``, ``DeleteSession`` and ``Attach`` work. A connection gets the events of
+    the session it views and of none; a session another connection views can't be deleted.
 
     The session open here is saved in ``store``, if there is one, once it's used, and its
     events are kept in the store's log, ``seq`` counting on from the highest there, with their
@@ -229,7 +235,7 @@ class AgentSession:
         )
         self._halt = StorageHalt(lambda event: self._events.put(event), halt_hooks)
         overflow = Overflow(fallback, self._log_failed)
-        self._connections = Connections(lambda: self._states.check())
+        self._connections = Connections(lambda: self._states.check(), lambda: self._keeper.id)
         self._events = Outbox(lambda: self._keeper.id, store, storage, overflow)
         self._events.deliver = self._deliver
         new_sessions = NewSessions(clock, new_id, self._events.forget, self._events.catch_up)
@@ -259,6 +265,7 @@ class AgentSession:
         self._greeting = self._handshake_parts()
         self._history = SessionHistory(self._keeper, self._events)
         self._states = self._session_states()
+        self._views = self._session_views()
         self._watch_background()
 
     async def _retry_storage(self) -> Failure | None:
@@ -296,6 +303,19 @@ class AgentSession:
             lambda: self._keeper.id, self._running, self._connections, self._events.put_nowait
         )
         return SessionStates(parts)
+
+    def _session_views(self) -> SessionViews:
+        """What attaches connections to sessions."""
+        parts = ViewParts(
+            self._keeper,
+            self._events,
+            self._connections,
+            self._states,
+            self._settings,
+            self._snapshot,
+            lambda: self._read_only,
+        )
+        return SessionViews(parts)
 
     def _watch_background(self) -> None:
         """Have the open session's state checked whenever the reviews or the startup check stop,
@@ -444,22 +464,25 @@ class AgentSession:
                 return
 
     async def _answer(
-        self, envelope: CommandEnvelope, handshake: Handshake, publish: Publish
+        self, envelope: CommandEnvelope, connection: SessionConnection, publish: Publish
     ) -> None:
-        """Handle the command in ``envelope``, from the connection ``handshake`` opens, then
-        ``publish`` its outcome: ``CommandRefused`` if it was refused, as it is but for
-        ``Hello`` and ``ResumeStorage`` while the session is halted, or as ``internal`` if
-        handling it failed, else ``CommandAccepted``, or ``Welcome`` for a ``Hello``. Only
-        cancellation escapes, with no outcome."""
+        """Handle the command in ``envelope``, from ``connection``, then ``publish`` its
+        outcome: ``CommandRefused`` if it was refused, as it is but for ``Hello`` and
+        ``ResumeStorage`` while the session is halted, or but for those a view lets through
+        while the connection views a session that isn't open, or as ``internal`` if handling it
+        failed, else ``CommandAccepted``, or ``Welcome`` for a ``Hello``. Only cancellation
+        escapes, with no outcome."""
         command_id = envelope.command_id
+        handshake = connection.handshake
         try:
-            self._check_addressed(envelope)
+            self._check_addressed(envelope, connection)
             command = envelope.payload
             if isinstance(command, Hello):
                 await handshake.hello(command, command_id)
                 return
             handshake.admit()
-            await self._admitted(command, command_id)
+            self._views.admit(connection, command)
+            await self._admitted(command, command_id, connection)
         except Refused as refusal:
             await publish(
                 CommandRefused(command_id=command_id, code=refusal.code, message=str(refusal))
@@ -471,27 +494,30 @@ class AgentSession:
             return
         await publish(CommandAccepted(command_id=command_id))
 
-    def _check_addressed(self, envelope: CommandEnvelope) -> None:
-        """Refuse ``envelope`` unless it's for this workspace and the open session, if any."""
+    def _check_addressed(self, envelope: CommandEnvelope, connection: SessionConnection) -> None:
+        """Refuse ``envelope`` unless it's for this workspace and the session ``connection``
+        views, if any."""
         if envelope.workspace != DEFAULT_WORKSPACE:
             message = f"No workspace {envelope.workspace!r}; the workspace is {DEFAULT_WORKSPACE}."
             raise Refused(UNKNOWN, message)
-        session, open_id = envelope.session, self._keeper.id
-        if session is not None and session != open_id:
-            message = f"Session {session!r} isn't open; the open session is {open_id}."
-            raise Refused(WRONG_SESSION, message)
+        self._views.check_addressed(connection, envelope.session)
 
     async def _admitted(
         self,
-        command: SessionCommand | WorkCommand | History | ResumeStorage | TakeOwnership,
+        command: SessionCommand | WorkCommand | History | ResumeStorage | TakeOwnership | Attach,
         command_id: str,
+        connection: SessionConnection,
     ) -> None:
-        """Handle ``command``, sent as ``command_id`` once the handshake is done: refused while
-        the session is halted, but for ``ResumeStorage``, which resumes it."""
+        """Handle ``command``, sent as ``command_id`` from ``connection`` once the handshake is
+        done: refused while the session is halted, but for ``ResumeStorage``, which resumes
+        it."""
         if isinstance(command, ResumeStorage):
             await self._halt.resume()
             return
         self._halt.check()
+        if isinstance(command, Attach):
+            await self._views.attach(connection, command.session)
+            return
         await self._handle(command, command_id)
 
     async def _handle(
@@ -499,6 +525,9 @@ class AgentSession:
     ) -> None:
         if isinstance(command, History):
             await self._events.put(await self._history.page(command))
+        elif isinstance(command, DeleteSession):
+            await self._views.check_deletable(command.session_id)
+            await self._switcher.handle(command)
         elif isinstance(command, TakeOwnership):
             await self._take_ownership(command, command_id)
         elif isinstance(command, SessionCommand):
@@ -681,6 +710,8 @@ class AgentSession:
             transcript=transcript,
             storage_halt=self._halt.message,
             read_only=self._read_only,
+            open_session=self._views.open_session(),
+            viewers=self._states.of(self._keeper.id).viewers,
         )
 
     def _catalog(self, sessions: tuple[SessionSummary, ...]) -> Catalog:
@@ -688,7 +719,7 @@ class AgentSession:
         joining would see it, and the agents' roles, if any."""
         roles = self._desk.agents.roles if self._desk else ()
         label = _workspace_label(self._workspace)
-        live = self._states.current(joining=True)
+        live = self._states.current(joining=True).values()
         return catalog(label, sessions, roles, read_only=self._read_only, live=live)
 
     def _steps_shown(self) -> tuple[tuple[StepState, ...], str]:

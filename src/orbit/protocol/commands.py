@@ -123,6 +123,15 @@ class ListSessions(_Message):
     type: Literal["list_sessions"] = "list_sessions"
 
 
+class Attach(_Message):
+    """View the session ``session``: the connection gets its ``Snapshot``, then its events from
+    then on, in place of those of the session it viewed. A session other than the workspace's
+    open one is a read-only view. Refused with ``unknown`` for a session there's none of."""
+
+    type: Literal["attach"] = "attach"
+    session: str
+
+
 class OpenSession(_Message):
     """Switch to saved session ``session_id``: its tasks, review state, planner conversation and
     settings replace the open session's, and nothing runs until asked. Refused while tasks, a
@@ -208,6 +217,7 @@ Command = Annotated[
     | CancelAgent
     | DecideProposal
     | ListSessions
+    | Attach
     | OpenSession
     | NewSession
     | RenameSession

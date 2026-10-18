@@ -13,6 +13,7 @@ from orbit.protocol import (
     INTERNAL,
     INVALID,
     LOCKED,
+    NOT_ACTIVE,
     NOT_CONFIGURED,
     REFUSAL_CODES,
     SAVE_FAILED,
@@ -60,7 +61,7 @@ def codes_doc(refusals: list[str], errors: list[str]) -> str:
     )
 
 
-def test_refusal_codes_are_the_eight_refusals() -> None:
+def test_refusal_codes_are_the_nine_refusals() -> None:
     assert set(REFUSAL_CODES) == {
         NOT_CONFIGURED,
         UNKNOWN,
@@ -68,10 +69,11 @@ def test_refusal_codes_are_the_eight_refusals() -> None:
         INVALID,
         LOCKED,
         WRONG_SESSION,
+        NOT_ACTIVE,
         INCOMPATIBLE,
         STORAGE_FAILED,
     }
-    assert len(REFUSAL_CODES) == 8
+    assert len(REFUSAL_CODES) == 9
 
 
 def test_error_codes_are_the_seven_errors() -> None:

@@ -237,6 +237,27 @@
       "title": "AssistantMessage",
       "type": "object"
     },
+    "Attach": {
+      "description": "View the session ``session``: the connection gets its ``Snapshot``, then its events from\nthen on, in place of those of the session it viewed. A session other than the workspace's\nopen one is a read-only view. Refused with ``unknown`` for a session there's none of.",
+      "properties": {
+        "session": {
+          "title": "Session",
+          "type": "string"
+        },
+        "type": {
+          "const": "attach",
+          "default": "attach",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "session",
+        "type"
+      ],
+      "title": "Attach",
+      "type": "object"
+    },
     "BusyChanged": {
       "description": "Whether ``lane`` has work in progress; new work for that lane is rejected while busy.",
       "properties": {
@@ -437,6 +458,7 @@
             "mapping": {
               "accept_task": "#/$defs/AcceptTask",
               "add_task": "#/$defs/AddTask",
+              "attach": "#/$defs/Attach",
               "cancel_agent": "#/$defs/CancelAgent",
               "cancel_turn": "#/$defs/CancelTurn",
               "decide_proposal": "#/$defs/DecideProposal",
@@ -498,6 +520,9 @@
             },
             {
               "$ref": "#/$defs/ListSessions"
+            },
+            {
+              "$ref": "#/$defs/Attach"
             },
             {
               "$ref": "#/$defs/OpenSession"
@@ -1632,6 +1657,25 @@
       "title": "SendMessage",
       "type": "object"
     },
+    "SessionRef": {
+      "description": "A session, by its ``id`` and its ``name``.",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name"
+      ],
+      "title": "SessionRef",
+      "type": "object"
+    },
     "SessionStateChanged": {
       "description": "Session ``session`` is now ``active`` (the workspace's open session) or not, in\n``state``, with ``viewers`` connections viewing it; sent to every connection whenever one of\nthem changes, and never logged.",
       "properties": {
@@ -1872,8 +1916,13 @@
       "type": "object"
     },
     "Snapshot": {
-      "description": "The open session as it stands, sent after ``Welcome`` and after every switch; its\nenvelope's ``seq`` is the point it's current to.\n\nIt holds the ``session``'s summary, its ``settings`` and ``model_choices``, whether each\nlane is ``busy``, its ``tasks``, the verification ``steps`` and the ``steps_title`` they\nshow under, the ``review`` status (none when reviews are off), the checks ``proposals``\nwaiting for a decision, the ``agents`` running, the ``transcript``: the session's\nlast logged events, at most 500, oldest first, in the envelopes they were sent in, and,\nwhile the session is halted because storage failed, ``storage_halt``: why, and how to\nresume; ``read_only`` says another orbit owns the repository, so the work this one is\nasked to run waits.",
+      "description": "The session a connection views as it stands, sent after ``Welcome``, after every switch\nand in answer to ``Attach``; its envelope's ``seq`` is the point it's current to.\n\nIt holds the ``session``'s summary, its ``settings`` and ``model_choices``, whether each\nlane is ``busy``, its ``tasks``, the verification ``steps`` and the ``steps_title`` they\nshow under, the ``review`` status (none when reviews are off), the checks ``proposals``\nwaiting for a decision, the ``agents`` running, the ``transcript``: the session's\nlast logged events, at most 500, oldest first, in the envelopes they were sent in, and,\nwhile the session is halted because storage failed, ``storage_halt``: why, and how to\nresume; ``read_only`` says another orbit owns the repository, so the work this one is\nasked to run waits. ``active`` says whether the session is the workspace's open one, which\nruns work; one that isn't is a read-only view, from its saved record and its last logged\nevents. ``open_session`` names the workspace's open session, and ``viewers`` counts the\nconnections viewing this one.",
       "properties": {
+        "active": {
+          "default": true,
+          "title": "Active",
+          "type": "boolean"
+        },
         "agents": {
           "items": {
             "$ref": "#/$defs/RunningAgent"
@@ -1894,6 +1943,17 @@
           },
           "title": "Model Choices",
           "type": "array"
+        },
+        "open_session": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "proposals": {
           "items": {
@@ -1967,6 +2027,12 @@
           "default": "snapshot",
           "title": "Type",
           "type": "string"
+        },
+        "viewers": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Viewers",
+          "type": "integer"
         }
       },
       "required": [

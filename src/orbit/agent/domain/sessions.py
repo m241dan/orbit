@@ -17,7 +17,7 @@ from pydantic_core import from_json
 
 from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.reviews import LaneSnapshot
-from orbit.protocol import INVALID, LOCKED, SessionSummary, Settings, TaskState, Usage
+from orbit.protocol import BUSY, INVALID, LOCKED, SessionSummary, Settings, TaskState, Usage
 
 FORMAT_VERSION = 4
 """The version of the record format this orbit writes, and the newest it reads."""
@@ -221,6 +221,14 @@ def renamable(
     return _usable("rename", session_id, record, locked)
 
 
+def viewable(
+    session_id: str, record: SessionRecord | Unreadable, locked: bool
+) -> SessionRecord | Refused:
+    """The record of saved session ``session_id`` to view, or why it can't be viewed: it's
+    unreadable. One another orbit has open, ``locked``, can be viewed as it was saved."""
+    return _usable("view", session_id, record, locked=False)
+
+
 def _usable(
     action: str, session_id: str, record: SessionRecord | Unreadable, locked: bool
 ) -> SessionRecord | Refused:
@@ -241,6 +249,20 @@ def deletion_refusal(
     if locked:
         return Refused(LOCKED, locked_message(record_name(session_id, record), "delete"))
     return None
+
+
+def viewed_refusal(name: str, viewers: int) -> Refused:
+    """Why the session ``name`` can't be deleted while ``viewers`` other frontends view it."""
+    frontends = "1 other frontend views" if viewers == 1 else f"{viewers} other frontends view"
+    return Refused(BUSY, f'Can\'t delete "{name}": {frontends} it.')
+
+
+def not_active_message(viewed: str, open_name: str) -> str:
+    """Why a command that would change or run something can't be done in the session named
+    ``viewed`` while the workspace's open session is the one named ``open_name``."""
+    return (
+        f"Session {viewed!r} isn't the active session; {open_name!r} is. Activate it to work in it."
+    )
 
 
 def record_name(session_id: str, record: SessionRecord | Unreadable) -> str:

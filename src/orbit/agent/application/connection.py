@@ -2,6 +2,7 @@
 stream of the session's events."""
 
 import asyncio
+from collections import Counter
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -15,6 +16,7 @@ from orbit.protocol import (
     Event,
     EventEnvelope,
     Hello,
+    SessionRef,
 )
 
 QUEUE_LIMIT = 10_000
@@ -26,8 +28,8 @@ TOO_FAR_BEHIND = "too far behind"
 Publish = Callable[[Event], Awaitable[None]]
 """Publishes an event."""
 
-Answer = Callable[[CommandEnvelope, Handshake, Publish], Awaitable[None]]
-"""Handles a command from the connection a handshake opened, publishing its outcome."""
+Answer = Callable[[CommandEnvelope, "SessionConnection", Publish], Awaitable[None]]
+"""Handles a command from a connection, publishing its outcome."""
 
 
 class ConnectionDropped(Exception):
@@ -35,12 +37,16 @@ class ConnectionDropped(Exception):
 
 
 class Connections:
-    """The connections open to one session, among which its events are routed;
-    ``viewers_changed`` is called whenever one may have joined or left its viewers."""
+    """The connections open to one session, among which its events are routed, each viewing
+    the session ``open_session`` names or another; ``viewers_changed`` is called whenever one
+    may have joined or left a session's viewers."""
 
-    def __init__(self, viewers_changed: Callable[[], None]) -> None:
+    def __init__(
+        self, viewers_changed: Callable[[], None], open_session: Callable[[], str]
+    ) -> None:
         self._open: set[SessionConnection] = set()
         self.viewers_changed = viewers_changed
+        self._open_session = open_session
 
     def add(self, connection: "SessionConnection") -> None:
         self._open.add(connection)
@@ -48,22 +54,44 @@ class Connections:
     def discard(self, connection: "SessionConnection") -> None:
         self._open.discard(connection)
 
-    def viewers(self, *, joining: bool = False) -> int:
-        """How many connections view the session: those greeted, and, if ``joining``, the one
-        whose ``Hello`` is being answered."""
+    def viewing(self, connection: "SessionConnection") -> SessionRef | None:
+        """The session ``connection`` views, if it isn't the open one."""
+        attached = connection.attached
+        return None if attached is None or attached.id == self._open_session() else attached
+
+    def viewed(self, *, joining: bool = False) -> Counter[str]:
+        """How many connections view each session they view: those greeted, and, if
+        ``joining``, the one whose ``Hello`` is being answered."""
         asker = _answering.get() if joining else None
-        return sum(1 for c in self._open if c.greeted or c is asker)
+        return Counter(self._viewed_by(c) for c in self._open if c.greeted or c is asker)
+
+    def others_viewing(self, session_id: str) -> int:
+        """How many greeted connections view the session ``session_id``, but for the one whose
+        command is being answered."""
+        asker = _answering.get()
+        viewers = (c for c in self._open if c.greeted and c is not asker)
+        return sum(1 for c in viewers if self._viewed_by(c) == session_id)
+
+    def _viewed_by(self, connection: "SessionConnection") -> str:
+        """The id of the session ``connection`` views."""
+        viewing = self.viewing(connection)
+        return self._open_session() if viewing is None else viewing.id
 
     def deliver(self, envelope: EventEnvelope) -> None:
         """Pass ``envelope`` to the connection whose command it answers, if it's one of the
-        ``CONNECTION_EVENTS``, else to every connection that's listening."""
+        ``CONNECTION_EVENTS``, else to every connection that's listening and views the session
+        it belongs to, if it belongs to one."""
         asker = _answering.get()
         if asker is not None and isinstance(envelope.payload, CONNECTION_EVENTS):
             asker.receive(envelope)
             return
         for connection in tuple(self._open):
-            if connection.listening:
+            if connection.listening and self._sees(connection, envelope.session):
                 connection.receive(envelope)
+
+    def _sees(self, connection: "SessionConnection", session: str | None) -> bool:
+        """Whether the events of ``session``, or those of none, reach ``connection``."""
+        return session is None or self._viewed_by(connection) == session
 
     def end(self) -> None:
         """End every connection's stream once what it has queued is read."""
@@ -78,12 +106,13 @@ _answering: ContextVar["SessionConnection | None"] = ContextVar("answering", def
 @dataclass(frozen=True)
 class ConnectionParts:
     """What a connection to a session uses: the ``handshake`` parts, the ``events`` the session
-    publishes into, ``stamp``, which stamps an event without publishing it, the ``connections``
+    publishes into, ``stamp``, which stamps an event without publishing it, as the session it's
+    given if one is, the ``connections``
     open to the session, and ``answer``, which handles a command and publishes its outcome."""
 
     handshake: HandshakeParts
     events: EventSink
-    stamp: Callable[[Event], EventEnvelope]
+    stamp: Callable[[Event, str | None], EventEnvelope]
     connections: Connections
     answer: Answer
 
@@ -92,9 +121,11 @@ class SessionConnection:
     """A frontend's connection to a session, from ``parts``: a ``Session`` with its own
     handshake and its own stream.
 
-    Once it's welcomed, the stream gets every event the session publishes, but for the
-    ``CONNECTION_EVENTS`` answering another connection's command. What answers a ``Hello``,
-    and the outcome of any command before one is welcomed, reaches this connection alone. The
+    Once it's welcomed, the stream gets every event the session publishes of the session it
+    views and of none, but for the ``CONNECTION_EVENTS`` answering another connection's command.
+    It views the open session, whichever that is, until :meth:`attach` attaches it to another.
+    What answers a ``Hello``, and the outcome of any command before one is welcomed, or while it
+    views a session that isn't open, reaches this connection alone. The
     stream holds at most :data:`QUEUE_LIMIT` events unread; one more closes the connection as
     :data:`TOO_FAR_BEHIND`, and the session and its other connections carry on.
     """
@@ -105,7 +136,23 @@ class SessionConnection:
         self._queue: asyncio.Queue[EventEnvelope] = asyncio.Queue(QUEUE_LIMIT)
         self._dropped: ConnectionDropped | None = None
         self._ended = False
+        self.attached: SessionRef | None = None  # None while it views the open session.
         parts.connections.add(self)
+
+    @property
+    def handshake(self) -> Handshake:
+        """The handshake that opens this connection's stream."""
+        return self._handshake
+
+    @property
+    def viewing(self) -> SessionRef | None:
+        """The session this connection views, if it isn't the open one."""
+        return self._parts.connections.viewing(self)
+
+    def attach(self, session: SessionRef | None) -> None:
+        """View ``session`` from now on, or the open session, whichever that is, if it's
+        none."""
+        self.attached = session
 
     @property
     def greeted(self) -> bool:
@@ -127,7 +174,7 @@ class SessionConnection:
         publish = self._publisher(private=isinstance(envelope.payload, Hello))
         token = _answering.set(self)
         try:
-            await self._parts.answer(envelope, self._handshake, publish)
+            await self._parts.answer(envelope, self, publish)
         finally:
             _answering.reset(token)
         if self._handshake.ended:
@@ -145,15 +192,23 @@ class SessionConnection:
         await self._publisher(private=False)(refused)
 
     def _publisher(self, private: bool) -> Publish:
-        """What publishes a command's outcome: to this connection alone if ``private`` or
-        before one is welcomed, else to every connection."""
-        if private or not self._handshake.welcomed:
-            return self._publish_here
-        return self._parts.events.put
+        """What publishes a command's outcome: to this connection alone if ``private``, before
+        one is welcomed or while it views a session that isn't open, else to every connection;
+        which is decided as it's published, as the command may change what it views."""
 
-    async def _publish_here(self, event: Event) -> None:
-        """Stamp ``event`` and queue it for this connection alone."""
-        self.receive(self._parts.stamp(event))
+        async def publish(event: Event) -> None:
+            if private or not self._handshake.welcomed or self.viewing is not None:
+                await self.publish_here(event)
+            else:
+                await self._parts.events.put(event)
+
+        return publish
+
+    async def publish_here(self, event: Event) -> None:
+        """Stamp ``event``, as the session this connection views if it isn't the open one, and
+        queue it for this connection alone."""
+        viewing = self.viewing
+        self.receive(self._parts.stamp(event, None if viewing is None else viewing.id))
 
     def receive(self, envelope: EventEnvelope) -> None:
         """Queue ``envelope`` for the stream, unless it has ended; closes the connection as too
