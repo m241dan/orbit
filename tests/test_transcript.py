@@ -365,6 +365,37 @@ async def test_output_for_a_tab_not_shown_is_there_when_it_is() -> None:
         assert labels(app)[-1] == "second"
 
 
+def displayed_logs(app: OrbitApp) -> list[TranscriptLog]:
+    """The transcript's logs that are displayed."""
+    return [
+        log for log in app.query("Transcript > TranscriptLog").results(TranscriptLog) if log.display
+    ]
+
+
+async def test_switching_tabs_displays_only_the_shown_log() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test(size=(120, 30)) as pilot:
+        await feed_events(session, pilot, started("agent-1"), said("agent-1", "first"))
+        transcript = app.query_one(Transcript)
+        everything = transcript.shown
+        assert displayed_logs(app) == [everything]
+        await pilot.press("tab", "tab")  # coder
+        coder = transcript.shown
+        assert transcript.only == "coder" and coder is not everything
+        assert displayed_logs(app) == [coder]
+        await pilot.press("tab", "tab", "tab", "tab")  # All
+        assert transcript.shown is everything
+        assert displayed_logs(app) == [everything]
+        await pilot.press("tab", "tab")  # coder again
+        assert displayed_logs(app) == [coder]
+
+
+def test_a_log_built_hidden_is_not_displayed() -> None:
+    assert not TranscriptLog().display
+    assert TranscriptLog(shown=True).display
+
+
 async def test_lines_are_wrapped_again_for_a_new_window_size() -> None:
     session = FakeSession()
     app = OrbitApp(session)
