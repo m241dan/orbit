@@ -267,7 +267,7 @@ async def test_a_newer_database_is_refused_naming_both_versions(
     await (await open_store(workspace)).close()
     with database(state) as connection:
         connection.execute("INSERT INTO schema_version (version) VALUES (99)")
-    with pytest.raises(StoreError, match=r"orbit\.db has schema version 99, newer than .* 1;"):
+    with pytest.raises(StoreError, match=r"orbit\.db has schema version 99, newer than .* 2;"):
         await open_store(workspace)
     assert store_threads() == []
 
@@ -293,7 +293,7 @@ async def test_a_migration_applied_meanwhile_by_another_orbit_isnt_run_again(
     racing(monkeypatch, state, lambda other: sqlite_store._apply(other, 1, state / "orbit.db"))
     await open_store(workspace)
     with database(state) as connection:
-        assert connection.execute("SELECT version FROM schema_version").fetchall() == [(1,)]
+        assert connection.execute("SELECT version FROM schema_version").fetchall() == [(1,), (2,)]
 
 
 async def test_a_newer_version_written_meanwhile_is_refused(
@@ -303,7 +303,7 @@ async def test_a_newer_version_written_meanwhile_is_refused(
         other.execute("INSERT INTO schema_version (version) VALUES (99)")
 
     racing(monkeypatch, state, newer)
-    with pytest.raises(StoreError, match=r"orbit\.db has schema version 99, newer than .* 1;"):
+    with pytest.raises(StoreError, match=r"orbit\.db has schema version 99, newer than .* 2;"):
         await open_store(workspace)
     with database(state) as connection:
         tables = connection.execute("SELECT name FROM sqlite_master WHERE name = 'workspaces'")
@@ -318,7 +318,7 @@ async def test_stores_opened_at_once_on_a_new_state_directory_both_open(
     second.mkdir()
     await asyncio.gather(open_store(first), open_store(second))
     with database(state) as connection:
-        assert connection.execute("SELECT version FROM schema_version").fetchall() == [(1,)]
+        assert connection.execute("SELECT version FROM schema_version").fetchall() == [(1,), (2,)]
         assert connection.execute("SELECT count(*) FROM workspaces").fetchone() == (2,)
 
 
@@ -357,10 +357,10 @@ async def test_a_failed_migration_is_rolled_back_and_refused(
     await (await open_store(workspace)).close()
     broken = (*MIGRATIONS, ("CREATE TABLE extra (x)", "NOT SQL"))
     monkeypatch.setattr(sqlite_store, "MIGRATIONS", broken)
-    with pytest.raises(StoreError, match=r"upgrade the database .*orbit\.db to schema version 2"):
+    with pytest.raises(StoreError, match=r"upgrade the database .*orbit\.db to schema version 3"):
         await open_store(workspace)
     with database(state) as connection:
-        assert connection.execute("SELECT max(version) FROM schema_version").fetchone() == (1,)
+        assert connection.execute("SELECT max(version) FROM schema_version").fetchone() == (2,)
         tables = connection.execute("SELECT name FROM sqlite_master WHERE name = 'extra'")
         assert tables.fetchall() == []
 

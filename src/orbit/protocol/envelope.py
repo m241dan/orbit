@@ -7,7 +7,7 @@ An envelope's own fields come first, then ``payload``: the command or event, wit
 from pydantic import Field
 
 from orbit.protocol.commands import Command
-from orbit.protocol.events import Catalog, Event, SessionsListed, UsageChanged
+from orbit.protocol.events import Catalog, Event, SessionsListed, Snapshot, UsageChanged, Welcome
 from orbit.protocol.models import WireTolerant
 
 DEFAULT_WORKSPACE = "default"
@@ -15,6 +15,9 @@ DEFAULT_WORKSPACE = "default"
 
 SESSIONLESS_EVENTS: tuple[type[Event], ...] = (UsageChanged, SessionsListed, Catalog)
 """The event types that belong to no session: their envelopes carry ``session=None``."""
+
+CONNECTION_EVENTS: tuple[type[Event], ...] = (Welcome, Catalog, Snapshot)
+"""The event types that answer one connection, and so are never kept in a session's log."""
 
 
 class _Envelope(WireTolerant):

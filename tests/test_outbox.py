@@ -3,7 +3,8 @@
 import asyncio
 
 from orbit.agent.application.outbox import Outbox
-from orbit.protocol import EventEnvelope, Notice, SessionsListed
+from orbit.protocol import EventEnvelope, Notice, SessionsListed, Welcome
+from tests.agent_fakes import FakeStore
 
 ONE = Notice(message="one")
 TWO = Notice(message="two")
@@ -60,4 +61,33 @@ async def test_envelope_waits_for_an_event_to_be_put() -> None:
 def test_an_outbox_reads_events_only_in_their_envelopes() -> None:
     public = {name for name in dir(Outbox) if not name.startswith("_")}
 
-    assert public == {"put", "put_nowait", "envelope"}
+    assert public == {"put", "put_nowait", "envelope", "close"}
+
+
+async def test_with_a_log_envelopes_count_on_from_its_highest_seq() -> None:
+    log = FakeStore()
+    log.seq = 41
+    outbox = Outbox(Open(), log)
+    outbox.put_nowait(ONE)
+
+    assert await outbox.envelope() == EventEnvelope(seq=42, session="a", payload=ONE)
+    await outbox.close()
+
+
+async def test_the_log_gets_a_sessions_events_but_for_those_answering_one_connection() -> None:
+    log = FakeStore()
+    outbox = Outbox(Open(), log)
+    outbox.put_nowait(Welcome(command_id="hello", server_version="1"))
+    outbox.put_nowait(SessionsListed(sessions=(), reason="asked"))
+    outbox.put_nowait(ONE)
+    await outbox.close()
+
+    assert log.logged == [EventEnvelope(seq=3, session="a", payload=ONE)]
+
+
+async def test_closing_an_outbox_without_a_log_does_nothing() -> None:
+    outbox = Outbox(Open())
+    outbox.put_nowait(ONE)
+    await outbox.close()
+
+    assert await outbox.envelope() == EventEnvelope(seq=1, session="a", payload=ONE)

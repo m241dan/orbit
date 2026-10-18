@@ -41,6 +41,7 @@ from orbit.protocol.commands import (
     command_adapter,
 )
 from orbit.protocol.envelope import (
+    CONNECTION_EVENTS,
     DEFAULT_WORKSPACE,
     SESSIONLESS_EVENTS,
     CommandEnvelope,
@@ -144,6 +145,7 @@ __all__ = [
     "CODER",
     "CONFIGURATOR",
     "CONFIGURE_CHECKS",
+    "CONNECTION_EVENTS",
     "DEFAULT_WORKSPACE",
     "ERROR_CODES",
     "GIT_FAILED",

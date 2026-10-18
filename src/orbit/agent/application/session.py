@@ -125,7 +125,8 @@ class AgentSession:
     session ends with a ``Catalog`` and a ``Snapshot`` too, and a rename or delete sends a
     ``Catalog``.
 
-    The session open here is saved in ``store``, if there is one, once it's used; ``clock``
+    The session open here is saved in ``store``, if there is one, once it's used, and its
+    events are kept in the store's log, ``seq`` counting on from the highest there; ``clock``
     tells the time, ``new_id`` makes its id and ``name`` names it (by the time, if none). The
     user can open another saved session, or a new one, in its place: one opened has its saved
     settings, but for those ``pinned``, by field name, which keep the ``settings`` given here.
@@ -154,7 +155,7 @@ class AgentSession:
     ) -> None:
         self._settings = SessionSettings(settings or Settings(), pinned, model_choices)
         self._pick_session = pick_session
-        self._events = Outbox(lambda: self._keeper.id)
+        self._events = Outbox(lambda: self._keeper.id, store)
         self._keeper = SessionKeeper(store, self._events.put, clock, new_id)
         self._keeper.rename(name)
         self._review_count = ReviewCount(store, self._events.put)
@@ -378,9 +379,9 @@ class AgentSession:
 
     async def close(self) -> None:
         """Cancel the work in progress, which stops its agent, then stop the startup check, the
-        usage monitor, the review lane, the planner, the agents' host and the saving of the
-        session, releasing its lock, in that order. Each is stopped even if one before it fails;
-        the first failure is raised after."""
+        usage monitor, the review lane, the planner, the agents' host, the saving of the
+        session, releasing its lock, and the writing of its events to the store, in that order.
+        Each is stopped even if one before it fails; the first failure is raised after."""
         self._closing = True
         failure: Exception | None = None
         for stop in self._stops():
@@ -398,7 +399,7 @@ class AgentSession:
         stops += [part.close for part in parts if part is not None]
         if self._desk is not None:
             stops.append(self._desk.stop)
-        stops.append(self._keeper.close)
+        stops += [self._keeper.close, self._events.close]
         return stops
 
     async def _stop_turns(self) -> None:

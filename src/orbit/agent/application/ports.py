@@ -13,7 +13,7 @@ from orbit.agent.domain.roles import Role
 from orbit.agent.domain.sessions import SessionRecord, Unreadable
 from orbit.agent.domain.usage import UsageFetch
 from orbit.agent.domain.verification import VerificationStep
-from orbit.protocol import Event, MergeResult, ProposalAction, Settings
+from orbit.protocol import Event, EventEnvelope, MergeResult, ProposalAction, Settings
 
 Publish = Callable[[Event], Awaitable[None]]
 """Publishes an event to the frontend."""
@@ -208,9 +208,22 @@ class StoredSession:
     locked: bool
 
 
-class SessionStore(Protocol):
-    """Where saved sessions are kept, each locked while an orbit has it open, along with the
-    repository's count of commits since the last super review."""
+class EventLog(Protocol):
+    """Where sessions' events are kept, each session's in ``seq`` order."""
+
+    def max_seq(self) -> int:
+        """The highest ``seq`` logged; 0 when nothing is."""
+        ...
+
+    async def append(self, session_id: str, envelopes: Sequence[EventEnvelope]) -> None:
+        """Add ``envelopes``, events of the session ``session_id``, to its log, all of them or
+        none; raises ``RuntimeError`` when it can't."""
+        ...
+
+
+class SessionStore(EventLog, Protocol):
+    """Where saved sessions are kept, each locked while an orbit has it open, with their events'
+    log and the repository's count of commits since the last super review."""
 
     async def save(self, record: SessionRecord) -> None:
         """Save ``record``, replacing the one saved with its id; raises ``RuntimeError`` when
@@ -227,7 +240,7 @@ class SessionStore(Protocol):
         ...
 
     async def delete(self, session_id: str) -> None:
-        """Delete the session ``session_id`` and its lock, readable or not; raises
+        """Delete the session ``session_id``, its events and its lock, readable or not; raises
         ``RuntimeError`` when it can't."""
         ...
 

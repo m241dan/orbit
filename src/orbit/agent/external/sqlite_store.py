@@ -1,4 +1,4 @@
-"""Saved sessions in one SQLite database per user, keyed by workspace.
+"""Saved sessions and their events' log in one SQLite database per user, keyed by workspace.
 
 The database is ``orbit.db`` in the state directory, in WAL mode. One connection serves it, owned
 by a single thread: every database call runs there, a statement or a transaction at a time, so a
@@ -13,9 +13,9 @@ import asyncio
 import os
 import sqlite3
 import uuid
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import AbstractContextManager, closing
+from contextlib import AbstractContextManager, closing, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Self
@@ -24,6 +24,7 @@ from orbit.agent.application.ports import StoredSession
 from orbit.agent.domain.sessions import SessionRecord, Unreadable, parse_record, record_json
 from orbit.agent.external.git_tree import workspace_fingerprint
 from orbit.agent.external.session_locks import SessionLocks, check_session_id
+from orbit.protocol import EventEnvelope, encode
 
 DATABASE = "orbit.db"
 LOCKS = "locks"
@@ -51,6 +52,17 @@ MIGRATIONS: tuple[tuple[str, ...], ...] = (
         """CREATE TABLE reviews (
             workspace_id TEXT PRIMARY KEY REFERENCES workspaces (id),
             since_super INTEGER NOT NULL
+        )""",
+    ),
+    (
+        """CREATE TABLE events (
+            workspace_id TEXT NOT NULL REFERENCES workspaces (id),
+            session_id TEXT NOT NULL,
+            seq INTEGER NOT NULL,
+            type TEXT NOT NULL,
+            json TEXT NOT NULL,
+            size INTEGER NOT NULL,
+            PRIMARY KEY (workspace_id, session_id, seq)
         )""",
     ),
 )
@@ -205,6 +217,22 @@ def _open(database: Path, workspace: str) -> tuple[sqlite3.Connection, str]:
         raise
 
 
+def _max_seq(connection: sqlite3.Connection) -> int:
+    """The highest ``seq`` in ``connection``'s ``events`` table, 0 when it's empty."""
+    (seq,) = connection.execute("SELECT max(seq) FROM events").fetchone()
+    return int(seq or 0)
+
+
+type EventRow = tuple[str, str, int, str, str, int]
+
+
+def _event_row(workspace_id: str, session_id: str, envelope: EventEnvelope) -> EventRow:
+    """``envelope``'s row in the ``events`` table, as an event of the session ``session_id`` in
+    the workspace ``workspace_id``: its JSON as sent, and that JSON's size in bytes."""
+    text = encode(envelope)
+    return (workspace_id, session_id, envelope.seq, envelope.payload.type, text, len(text.encode()))
+
+
 def _open_existing(database: Path) -> sqlite3.Connection:
     """A connection to ``database`` as it stands, creating, upgrading and registering nothing.
 
@@ -229,7 +257,8 @@ def _create_target(target: Path) -> None:
 
 
 class SqliteStore:
-    """Saved sessions and the review count of one workspace, in the state directory's database.
+    """Saved sessions, their events' log and the review count of one workspace, in the state
+    directory's database.
 
     Each stands for one orbit: the session locks it holds are its own, even against another
     ``SqliteStore`` in the same process. Open one with :meth:`open` and :meth:`close` it when
@@ -242,6 +271,7 @@ class SqliteStore:
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix=THREAD_PREFIX)
         self._connection: sqlite3.Connection | None = None
         self._closed = False
+        self._max_seq = 0  # The highest seq in the log when it opened, or appended since.
         # Both are the workspace's once the store is open.
         self._workspace = ""
         self._lock_dir = state_dir / LOCKS
@@ -320,6 +350,19 @@ class SqliteStore:
             raise RuntimeError(message) from error
         await self._locks.remove(session_id)
 
+    def max_seq(self) -> int:
+        """The highest ``seq`` in the log, across workspaces, when the store opened or appended
+        by it since; 0 when there's none."""
+        return self._max_seq
+
+    async def append(self, session_id: str, envelopes: Sequence[EventEnvelope]) -> None:
+        check_session_id(session_id)
+        try:
+            await self._call(self._append, session_id, envelopes)
+        except sqlite3.Error as error:
+            message = f"Couldn't save the events of the session {session_id} to {self._database}"
+            raise RuntimeError(f"{message}: {error}") from error
+
     async def acquire(self, session_id: str) -> bool:
         """Lock the session ``session_id`` for this orbit; returns ``False`` when another
         running orbit has it locked.
@@ -383,8 +426,21 @@ class SqliteStore:
         assert self._connection is not None, "The store isn't open."
         return self._connection
 
+    @contextmanager
+    def _transaction(self) -> Iterator[None]:
+        """A transaction around the block, committed when it ends and rolled back if it fails."""
+        try:
+            self._db.execute("BEGIN IMMEDIATE")
+            yield
+            self._db.execute("COMMIT")
+        except BaseException:
+            if self._db.in_transaction:
+                self._db.execute("ROLLBACK")
+            raise
+
     def _connect(self, workspace: str) -> None:
         self._connection, self._workspace = _open(self._database, workspace)
+        self._max_seq = _max_seq(self._connection)
         self._lock_dir = self._state_dir / LOCKS / self._workspace
         self._locks = SessionLocks(self._lock_dir)
 
@@ -467,11 +523,26 @@ class SqliteStore:
         )
         return [(str(session_id), str(text)) for session_id, text in rows]
 
+    def _append(self, session_id: str, envelopes: Sequence[EventEnvelope]) -> None:
+        rows = [_event_row(self._workspace, session_id, envelope) for envelope in envelopes]
+        with self._transaction():
+            self._db.executemany(
+                """INSERT INTO events (workspace_id, session_id, seq, type, json, size)
+                VALUES (?, ?, ?, ?, ?, ?)""",
+                rows,
+            )
+        self._max_seq = max([self._max_seq, *(envelope.seq for envelope in envelopes)])
+
     def _delete(self, session_id: str) -> None:
-        self._db.execute(
-            "DELETE FROM sessions WHERE workspace_id = ? AND id = ?",
-            (self._workspace, session_id),
-        )
+        with self._transaction():
+            self._db.execute(
+                "DELETE FROM events WHERE workspace_id = ? AND session_id = ?",
+                (self._workspace, session_id),
+            )
+            self._db.execute(
+                "DELETE FROM sessions WHERE workspace_id = ? AND id = ?",
+                (self._workspace, session_id),
+            )
 
     def _review_count(self) -> int:
         row = self._db.execute(

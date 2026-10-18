@@ -43,6 +43,7 @@ from orbit.protocol import (
     CommandRefused,
     ErrorOccurred,
     Event,
+    EventEnvelope,
     Hello,
     RunTasks,
     Session,
@@ -231,6 +232,9 @@ class FakeStore:
     ``release_failure`` the error letting go of a lock raises, and ``load_failure`` the error
     loading one raises, and ``list_failure`` the error listing them raises. ``on_acquire``, if
     set, is awaited as a lock is taken.
+
+    The events appended are ``logged``, each append's in ``appends``, with ``seq`` the highest
+    logged before; ``append_failure``, while set, is the error every append raises.
     """
 
     def __init__(self, count: int = 0) -> None:
@@ -252,6 +256,10 @@ class FakeStore:
         self.load_failure: str | None = None
         self.list_failure: BaseException | None = None
         self.on_acquire: Callable[[], Awaitable[None]] | None = None
+        self.seq = 0
+        self.logged: list[EventEnvelope] = []
+        self.appends: list[tuple[str, list[EventEnvelope]]] = []
+        self.append_failure: str | None = None
 
     @property
     def last(self) -> SessionRecord:
@@ -301,6 +309,16 @@ class FakeStore:
             raise RuntimeError(self.release_failure)
         self.released.append(session_id)
         self.locked.discard(session_id)
+
+    def max_seq(self) -> int:
+        return max([self.seq, *(envelope.seq for envelope in self.logged)])
+
+    async def append(self, session_id: str, envelopes: Sequence[EventEnvelope]) -> None:
+        if self.append_failure is not None:
+            raise RuntimeError(self.append_failure)
+        await asyncio.sleep(0)  # Writing takes a while.
+        self.appends.append((session_id, list(envelopes)))
+        self.logged += envelopes
 
     async def review_count(self) -> int:
         return self.count

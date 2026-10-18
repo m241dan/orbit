@@ -345,7 +345,7 @@ def test_a_database_newer_than_orbit_stops_chat(
     result = runner.invoke(app, ["chat", "-C", str(tmp_path)])
 
     assert result.exit_code == 2
-    assert "has schema version 99, newer than this orbit's 1" in result.output
+    assert "has schema version 99, newer than this orbit's 2" in result.output
     assert launched == []
     assert store_threads() == []
 
