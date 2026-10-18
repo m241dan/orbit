@@ -9,8 +9,9 @@ from typing import Any, get_args
 from pydantic import ValidationError
 from pydantic_core import from_json
 
+from orbit.protocol.commands import Command
 from orbit.protocol.envelope import CommandEnvelope, EventEnvelope
-from orbit.protocol.messages import Command, Event
+from orbit.protocol.events import Event
 
 _WIRE = {"wire": True}
 

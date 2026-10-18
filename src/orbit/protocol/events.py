@@ -1,0 +1,455 @@
+"""Events, which flow from the backend to the frontend.
+
+They're a discriminated union on ``type``, so they can be serialized to JSON and sent across a
+process boundary without changes.
+"""
+
+from typing import Annotated, Any, Literal
+
+from pydantic import AwareDatetime, Field, TypeAdapter
+
+from orbit.protocol.models import (
+    ProposedSetup,
+    ProposedStep,
+    SessionSummary,
+    Settings,
+    StepState,
+    TaskState,
+    Usage,
+    UsageLimit,
+    _Message,
+)
+from orbit.protocol.names import WORK_LANE, BusyLane
+
+TurnEndReason = Literal["completed", "cancelled", "max_steps", "error"]
+
+
+class SettingsChanged(_Message):
+    """Current settings, sent on connect and after every change."""
+
+    type: Literal["settings_changed"] = "settings_changed"
+    settings: Settings
+    model_choices: tuple[str, ...] = ()
+
+
+# Turn events carry ``agent_id`` when an agent runs the turn, and none when orbit ends it itself.
+
+
+class TurnStarted(_Message):
+    type: Literal["turn_started"] = "turn_started"
+    turn_id: str
+    agent_id: str | None = None
+
+
+class AssistantMessage(_Message):
+    type: Literal["assistant_message"] = "assistant_message"
+    turn_id: str
+    agent_id: str | None = None
+    text: str
+
+
+class ToolCallStarted(_Message):
+    type: Literal["tool_call_started"] = "tool_call_started"
+    turn_id: str
+    agent_id: str | None = None
+    call_id: str
+    name: str
+    arguments: dict[str, Any]
+
+
+class ToolCallFinished(_Message):
+    type: Literal["tool_call_finished"] = "tool_call_finished"
+    turn_id: str
+    agent_id: str | None = None
+    call_id: str
+    output: str
+    is_error: bool = False
+
+
+class TurnFinished(_Message):
+    """The turn ended for ``reason``; ``usage`` says what it cost, when the runner knows."""
+
+    type: Literal["turn_finished"] = "turn_finished"
+    turn_id: str
+    agent_id: str | None = None
+    reason: TurnEndReason
+    usage: Usage | None = None
+
+
+class BusyChanged(_Message):
+    """Whether ``lane`` has work in progress; new work for that lane is rejected while busy."""
+
+    type: Literal["busy_changed"] = "busy_changed"
+    busy: bool
+    lane: BusyLane = WORK_LANE
+
+
+class TasksChanged(_Message):
+    """The whole task list, sent after every change to it."""
+
+    type: Literal["tasks_changed"] = "tasks_changed"
+    tasks: tuple[TaskState, ...]
+
+
+class TaskStarted(_Message):
+    """Task ``task_id`` begins; its turn's events follow."""
+
+    type: Literal["task_started"] = "task_started"
+    task_id: str
+
+
+class VerificationChanged(_Message):
+    """The verification steps and their progress, sent on connect and after every change.
+
+    Not sent when no steps are configured. ``title`` names what the steps are checking when
+    it isn't the current task, such as the startup check; the panel shows it as a heading.
+    """
+
+    type: Literal["verification_changed"] = "verification_changed"
+    steps: tuple[StepState, ...]
+    title: str = ""
+
+
+class StartupChecked(_Message):
+    """The verification steps ran once on the base commit at startup. Unless they all
+    ``passed``, ``step`` failed with ``output`` (its end), and a draft task to fix it was added."""
+
+    type: Literal["startup_checked"] = "startup_checked"
+    passed: bool
+    step: str = ""
+    output: str = ""
+
+
+class VerificationStarted(_Message):
+    """Step ``step`` (an index into the steps) begins checking task ``task_id``."""
+
+    type: Literal["verification_started"] = "verification_started"
+    task_id: str
+    step: int
+
+
+SkipReason = Literal["tools_off", "no_changes", "unchanged", "no_steps"]
+"""Why a task wasn't verified: it ran with tools off, it changed no files, its agent stopped
+without changing anything since its last failed verification, or no steps are configured."""
+
+
+class VerificationSkipped(_Message):
+    """Task ``task_id`` completed but has nothing to verify, so no step runs."""
+
+    type: Literal["verification_skipped"] = "verification_skipped"
+    task_id: str
+    reason: SkipReason
+
+
+class VerificationFinished(_Message):
+    """Step ``step`` (an index into the steps) finished checking task ``task_id``."""
+
+    type: Literal["verification_finished"] = "verification_finished"
+    task_id: str
+    step: int
+    passed: bool
+
+
+class ErrorOccurred(_Message):
+    """An error with no command behind it, of the kind ``code`` names (one of the error codes,
+    such as :data:`AGENT_FAILED`, or a refusal code where it fits), and ``message`` says what."""
+
+    type: Literal["error_occurred"] = "error_occurred"
+    turn_id: str | None = None
+    agent_id: str | None = None
+    code: str
+    message: str
+
+
+class CommandAccepted(_Message):
+    """Command ``command_id`` was handled; the events its handling published came before."""
+
+    type: Literal["command_accepted"] = "command_accepted"
+    command_id: str
+
+
+class Welcome(_Message):
+    """``Hello`` ``command_id`` was received, in place of its ``CommandAccepted``: the backend,
+    orbit ``server_version``, publishes its events from here on."""
+
+    type: Literal["welcome"] = "welcome"
+    command_id: str
+    server_version: str
+
+
+class CommandRefused(_Message):
+    """Command ``command_id`` was refused, for the reason ``code`` names (one of the refusal
+    codes, such as :data:`UNKNOWN`), and ``message`` says why; it changed nothing, unless the
+    code is :data:`INTERNAL`, which means orbit failed partway through handling it, so it may
+    have changed something."""
+
+    type: Literal["command_refused"] = "command_refused"
+    command_id: str
+    code: str
+    message: str
+
+
+MergeResult = Literal["merged", "rebased", "conflict", "blocked", "detached"]
+"""What came of merging a task's commit into the base branch.
+
+``merged``: the base now has it. ``rebased``: the base had moved, so it was replayed on top and
+must be verified again. ``conflict``: it couldn't be replayed. ``blocked``: the base's checkout
+has changes in the way. ``detached``: there's no base branch to merge into.
+"""
+
+
+class TaskMerged(_Message):
+    """Task ``task_id``'s work was committed as ``commit``, and this came of merging it;
+    ``detail`` says why when it wasn't merged."""
+
+    type: Literal["task_merged"] = "task_merged"
+    task_id: str
+    result: MergeResult
+    detail: str = ""
+    commit: str = ""
+
+
+class ReviewStatus(_Message):
+    """Whether review is paused, and how many review batches are still open; sent on changes."""
+
+    type: Literal["review_status"] = "review_status"
+    paused: bool
+    open_batches: int
+
+
+class Notice(_Message):
+    """Something worth the user's attention that isn't an error."""
+
+    type: Literal["notice"] = "notice"
+    message: str
+
+
+AgentExitReason = Literal["finished", "crashed", "killed"]
+"""How an agent's process ended: on its own, with a failure, or stopped by orbit."""
+
+
+class AgentStarted(_Message):
+    """Agent ``agent_id`` was started in the ``role`` to work on task ``task_id``."""
+
+    type: Literal["agent_started"] = "agent_started"
+    agent_id: str
+    role: str
+    task_id: str
+
+
+class AgentRequest(_Message):
+    """Agent ``agent_id`` called one of orbit's tools; an ``AgentReply`` with the same
+    ``request_id`` follows."""
+
+    type: Literal["agent_request"] = "agent_request"
+    agent_id: str
+    request_id: str
+    tool: str
+    arguments: dict[str, Any]
+
+
+class AgentReply(_Message):
+    """Orbit's answer to request ``request_id``."""
+
+    type: Literal["agent_reply"] = "agent_reply"
+    agent_id: str
+    request_id: str
+    text: str
+    is_error: bool = False
+
+
+class ProgressNoted(_Message):
+    """A short status note an agent reported while working on task ``task_id``."""
+
+    type: Literal["progress_noted"] = "progress_noted"
+    agent_id: str
+    task_id: str
+    note: str
+
+
+class TaskGaveUp(_Message):
+    """The agent working on task ``task_id`` reported it can't do it, and why."""
+
+    type: Literal["task_gave_up"] = "task_gave_up"
+    agent_id: str
+    task_id: str
+    reason: str
+
+
+class AgentExited(_Message):
+    """Agent ``agent_id``'s process ended."""
+
+    type: Literal["agent_exited"] = "agent_exited"
+    agent_id: str
+    reason: AgentExitReason
+
+
+class ChecksProposed(_Message):
+    """Agent ``agent_id`` proposed these checks for task ``task_id``, and they all passed on
+    the current code; the user decides on them with ``DecideProposal``."""
+
+    type: Literal["checks_proposed"] = "checks_proposed"
+    agent_id: str
+    task_id: str
+    steps: tuple[ProposedStep, ...]
+    setup: ProposedSetup | None = None
+
+
+UsageStatus = Literal["ok", "rate_limited", "unavailable"]
+"""Whether the latest usage fetch worked, was rate limited, or couldn't be made."""
+
+
+class UsageChanged(_Message):
+    """The subscription's usage limits, sent after every fetch.
+
+    Unless the ``status`` is ``ok``, ``limits`` are the last good ones; ``detail`` says why
+    usage is unavailable, and ``retry_at`` when a rate-limited fetch is tried again.
+    """
+
+    type: Literal["usage_changed"] = "usage_changed"
+    limits: tuple[UsageLimit, ...] = ()
+    status: UsageStatus = "ok"
+    detail: str = ""
+    retry_at: AwareDatetime | None = None
+
+
+ListingReason = Literal["startup", "asked", "refreshed"]
+"""Why sessions are listed: for the user to pick one at startup, in answer to
+``ListSessions``, or because a rename or delete changed them."""
+
+
+class SessionsListed(_Message):
+    """The saved sessions, the most recently active first; those that can't be read come last.
+
+    The ``reason`` says what the listing answers.
+    """
+
+    type: Literal["sessions_listed"] = "sessions_listed"
+    sessions: tuple[SessionSummary, ...]
+    reason: ListingReason
+
+
+class ConversationReset(_Message):
+    """The conversation of the agent ``agent`` ended at the user's ``ResetConversation``; its
+    next message starts a fresh one."""
+
+    type: Literal["conversation_reset"] = "conversation_reset"
+    agent: str
+
+
+class OpenRequest(_Message):
+    """A call ``request_id`` to orbit's ``tool`` that an agent made and orbit hasn't answered."""
+
+    request_id: str
+    tool: str
+
+
+class RunningAgent(_Message):
+    """Agent ``agent_id``, running in the ``role`` on task ``task_id``, with its
+    ``open_requests``, oldest first."""
+
+    agent_id: str
+    role: str
+    task_id: str
+    open_requests: tuple[OpenRequest, ...] = ()
+
+
+class Snapshot(_Message):
+    """The open session as it stands, sent after ``Welcome`` and after every switch; its
+    envelope's ``seq`` is the point it's current to.
+
+    It holds the ``session``'s summary, its ``settings`` and ``model_choices``, whether each
+    lane is ``busy``, its ``tasks``, the verification ``steps`` and the ``steps_title`` they
+    show under, the ``review`` status (none when reviews are off), the checks ``proposals``
+    waiting for a decision, and the ``agents`` running.
+    """
+
+    type: Literal["snapshot"] = "snapshot"
+    session: SessionSummary
+    settings: Settings
+    model_choices: tuple[str, ...]
+    busy: dict[BusyLane, bool]
+    tasks: tuple[TaskState, ...]
+    steps: tuple[StepState, ...]
+    steps_title: str = ""
+    review: ReviewStatus | None
+    proposals: tuple[ChecksProposed, ...]
+    agents: tuple[RunningAgent, ...]
+
+
+class WorkspaceEntry(_Message):
+    """Workspace ``id``, shown as ``label``, and its ``sessions`` as the list of sessions shows
+    them."""
+
+    id: str
+    label: str
+    sessions: tuple[SessionSummary, ...]
+
+
+class AgentEntry(_Message):
+    """An agent role ``name``, shown as ``label``; ``conversational`` if the user can message
+    it."""
+
+    name: str
+    label: str
+    conversational: bool
+
+
+class TriggerEntry(_Message):
+    """A trigger ``name``, shown as ``label``; ``manual`` if the user fires it."""
+
+    name: str
+    label: str
+    manual: bool
+
+
+class Catalog(_Message):
+    """What exists: the ``workspaces`` and their sessions, the ``agents``' roles, the
+    ``triggers`` and the ``lanes``; sent after ``Welcome`` and whenever the sessions change."""
+
+    type: Literal["catalog"] = "catalog"
+    workspaces: tuple[WorkspaceEntry, ...]
+    agents: tuple[AgentEntry, ...]
+    triggers: tuple[TriggerEntry, ...]
+    lanes: tuple[str, ...]
+
+
+Event = Annotated[
+    SettingsChanged
+    | TurnStarted
+    | AssistantMessage
+    | ToolCallStarted
+    | ToolCallFinished
+    | TurnFinished
+    | BusyChanged
+    | TasksChanged
+    | TaskStarted
+    | VerificationChanged
+    | StartupChecked
+    | VerificationStarted
+    | VerificationSkipped
+    | VerificationFinished
+    | ErrorOccurred
+    | AgentStarted
+    | AgentRequest
+    | AgentReply
+    | ProgressNoted
+    | TaskGaveUp
+    | AgentExited
+    | TaskMerged
+    | Notice
+    | ReviewStatus
+    | ChecksProposed
+    | UsageChanged
+    | SessionsListed
+    | ConversationReset
+    | Snapshot
+    | Catalog
+    | Welcome
+    | CommandAccepted
+    | CommandRefused,
+    Field(discriminator="type"),
+]
+
+
+event_adapter: TypeAdapter[Event] = TypeAdapter(Event)

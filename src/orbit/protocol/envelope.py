@@ -6,14 +6,9 @@ An envelope's own fields come first, then ``payload``: the command or event, wit
 
 from pydantic import Field
 
-from orbit.protocol.messages import (
-    Catalog,
-    Command,
-    Event,
-    SessionsListed,
-    UsageChanged,
-    WireTolerant,
-)
+from orbit.protocol.commands import Command
+from orbit.protocol.events import Catalog, Event, SessionsListed, UsageChanged
+from orbit.protocol.models import WireTolerant
 
 DEFAULT_WORKSPACE = "default"
 """The one workspace's id, until there are workspaces."""

@@ -11,7 +11,7 @@ from typing import Any
 from pydantic.json_schema import models_json_schema
 
 from orbit.protocol.envelope import CommandEnvelope, EventEnvelope
-from orbit.protocol.messages import PROTOCOL_VERSION
+from orbit.protocol.names import PROTOCOL_VERSION
 
 SCHEMA_PATH = Path("schema/protocol.schema.json")
 """Where the schema is written, relative to the repository root."""

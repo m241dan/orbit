@@ -1,0 +1,187 @@
+"""The state models commands and events share, and the base every message is built on."""
+
+from typing import Any, Literal
+
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationInfo, model_validator
+
+from orbit.protocol.names import CODER, MANUAL_ORIGIN, TaskOrigin
+
+
+class WireTolerant(BaseModel):
+    """A model that refuses fields it doesn't declare, except when validated with the ``wire``
+    context set, as decoding does: then it drops them, so a newer peer's additions don't
+    break it."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_unknown_on_wire(cls, data: Any, info: ValidationInfo) -> Any:
+        if not isinstance(data, dict) or not (info.context or {}).get("wire"):
+            return data
+        return {name: value for name, value in data.items() if name in cls.model_fields}
+
+
+class _Message(WireTolerant):
+    pass
+
+
+ToolAccess = Literal["off", "restricted", "full"]
+"""How much the agent may use tools.
+
+- ``off``: no tools at all.
+- ``restricted``: anything that would need approval is refused; read-only actions still work.
+- ``full``: every tool call is approved automatically.
+"""
+
+
+class Settings(_Message):
+    """Per-session agent configuration. ``model=None`` means the backend's default."""
+
+    model: str | None = None
+    tool_access: ToolAccess = "restricted"
+
+
+class TaskSpec(_Message):
+    """One queued prompt, run in its own fresh context with its own settings.
+
+    ``role`` names the kind of agent that takes it, such as ``coder`` or ``reviewer``.
+    """
+
+    prompt: str = Field(min_length=1)
+    settings: Settings = Settings()
+    role: str = Field(default=CODER, min_length=1)
+
+
+class Usage(_Message):
+    """What turns cost: tokens of each kind, dollars, model round trips and time taken.
+
+    Usages add up, so a task's total is the sum of its turns'.
+    """
+
+    input_tokens: int = Field(default=0, ge=0)
+    output_tokens: int = Field(default=0, ge=0)
+    cache_creation_input_tokens: int = Field(default=0, ge=0)
+    cache_read_input_tokens: int = Field(default=0, ge=0)
+    cost_usd: float = Field(default=0.0, ge=0)
+    turns: int = Field(default=0, ge=0)
+    duration_ms: int = Field(default=0, ge=0)
+
+    @property
+    def tokens(self) -> int:
+        """Every token, of every kind."""
+        return (
+            self.input_tokens
+            + self.output_tokens
+            + self.cache_creation_input_tokens
+            + self.cache_read_input_tokens
+        )
+
+    @property
+    def read_tokens(self) -> int:
+        """The tokens read: the input, with what was cached and what was read from the cache."""
+        return self.input_tokens + self.cache_creation_input_tokens + self.cache_read_input_tokens
+
+    def __add__(self, other: "Usage") -> "Usage":
+        mine, theirs = self.model_dump(), other.model_dump()
+        return Usage(**{name: mine[name] + theirs[name] for name in mine})
+
+
+# State the backend owns and reports whole, so the frontend only renders it.
+
+TaskStatus = Literal[
+    "draft",
+    "pending",
+    "running",
+    "verifying",
+    "completed",
+    "unverified",
+    "gave_up",
+    "cancelled",
+    "error",
+]
+"""Where a task stands.
+
+``verifying``: its turn completed and the verification steps are checking it.
+``unverified``: its turn completed but a verification step failed.
+``gave_up``: the agent reported it couldn't do the task.
+``draft``: the planner proposed it; it waits to be accepted.
+"""
+
+ACTIVE_STATUSES: frozenset[TaskStatus] = frozenset({"running", "verifying"})
+"""Statuses of a task an agent is working on or orbit is verifying."""
+
+
+class TaskState(_Message):
+    """One entry of the task list. ``id`` stays the same while the list changes around it.
+
+    ``fixes`` is the id of the task this one was added to fix, if any; it comes right
+    after that task. ``attempt`` counts the fixes asked of the agent working on it, out
+    of ``max_attempts``; both are 0 until verification first fails. A task a review
+    suggested belongs to that review's ``batch``, at review ``round`` (0 otherwise).
+    ``usage`` adds up what every turn run for the task cost. A task that ended badly says why
+    in ``reason``, one line such as ``Unit tests failed``, with the full text in
+    ``reason_detail``; both are empty otherwise.
+    """
+
+    id: str
+    task: TaskSpec
+    status: TaskStatus = "pending"
+    fixes: str | None = None
+    origin: TaskOrigin = MANUAL_ORIGIN
+    attempt: int = Field(default=0, ge=0)
+    max_attempts: int = Field(default=0, ge=0)
+    batch: str | None = None
+    round: int = Field(default=0, ge=0)
+    usage: Usage = Usage()
+    reason: str = ""
+    reason_detail: str = ""
+
+
+class SessionSummary(_Message):
+    """A saved session as the list of sessions shows it: how many of its tasks stand at each
+    status in ``counts``, and what they cost together in ``usage``. ``current`` marks the
+    session open here, ``locked`` one open in another orbit, and ``unreadable`` says why a
+    session can't be opened, if it can't."""
+
+    id: str
+    name: str
+    last_active: AwareDatetime | None = None
+    counts: dict[TaskStatus, int] = {}
+    usage: Usage = Usage()
+    current: bool = False
+    locked: bool = False
+    unreadable: str | None = None
+
+
+StepStatus = Literal["pending", "running", "passed", "failed", "cancelled", "skipped"]
+
+
+class StepState(_Message):
+    """One verification step and how it fared after the current task."""
+
+    name: str
+    status: StepStatus = "pending"
+
+
+class ProposedStep(_Message):
+    """A verification step an agent proposed: its ``name`` and ``command``."""
+
+    name: str
+    command: tuple[str, ...]
+
+
+class ProposedSetup(_Message):
+    """The setup an agent proposed: its ``command``, and the files whose changes rerun it."""
+
+    command: tuple[str, ...]
+    watch: tuple[str, ...] = ()
+
+
+class UsageLimit(_Message):
+    """How much of a subscription usage window, such as ``Session`` or ``Week``, is used, and
+    when it resets (timezone-aware), if known."""
+
+    label: str
+    percent: float = Field(ge=0, le=100)
+    resets_at: AwareDatetime | None = None
