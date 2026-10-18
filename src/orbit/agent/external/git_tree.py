@@ -11,7 +11,6 @@ import contextlib
 import datetime
 import hashlib
 import shutil
-import subprocess
 import tempfile
 from collections.abc import Collection, Sequence
 from pathlib import Path
@@ -19,53 +18,13 @@ from pathlib import Path
 from orbit.agent.application.ports import Merge
 from orbit.agent.domain.checks import Setup
 from orbit.agent.external.processes import run_process
+from orbit.agent.external.repository import ORBIT_DIR, git_common_dir
 
 BRANCH = "orbit/coder"
 STASH_MESSAGE = "orbit: unverified work"
 IGNORE_HEADER = "# Created by orbit's verification checks:"
 # Snapshot directories in ``.git/orbit``: ``snapshot-…`` now, ``review-…`` from older versions.
 SNAPSHOT_PREFIXES = ("snapshot-", "review-")
-# Orbit's directory in the repository's shared git directory: the coder's worktree, review
-# snapshots and leftovers live in it, and older orbits' session files until they are imported.
-ORBIT_DIR = "orbit"
-
-
-def _git_query(path: str, *args: str) -> str | None:
-    """What ``git args`` prints in ``path``, stripped; ``None`` when it fails or git is missing."""
-    try:
-        result = subprocess.run(
-            ("git", *args), cwd=path, capture_output=True, text=True, check=False
-        )
-    except FileNotFoundError:
-        return None
-    return result.stdout.strip() if result.returncode == 0 else None
-
-
-def in_git_work_tree(path: str) -> bool:
-    """Whether ``path`` is inside a git work tree (and git can be run)."""
-    return _git_query(path, "rev-parse", "--is-inside-work-tree") == "true"
-
-
-def git_top_level(path: str) -> str | None:
-    """The top level of the git work tree ``path`` is in; none outside one (or without git)."""
-    return _git_query(path, "rev-parse", "--show-toplevel")
-
-
-def git_common_dir(path: str) -> str | None:
-    """The git directory the repository ``path`` is in shares among its worktrees; none outside
-    one (or without git)."""
-    return _git_query(path, "rev-parse", "--path-format=absolute", "--git-common-dir")
-
-
-def workspace_fingerprint(path: str) -> str | None:
-    """What identifies the repository ``path`` is in wherever it's moved: its root commits'
-    hashes and its ``origin`` remote's URL (empty without one), joined by spaces; none outside a
-    repository, before its first commit or without git."""
-    roots = _git_query(path, "rev-list", "--max-parents=0", "HEAD")
-    if not roots:
-        return None
-    origin = _git_query(path, "remote", "get-url", "origin") or ""
-    return " ".join([*sorted(roots.split()), origin])
 
 
 async def _run(command: Sequence[str], cwd: Path) -> tuple[bool, str]:

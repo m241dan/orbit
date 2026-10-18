@@ -34,6 +34,7 @@ from orbit.agent import (
     imported_note,
     in_git_work_tree,
     legacy_dir,
+    orbit_dir,
     read_config,
     read_storage,
     recover_parked,
@@ -208,7 +209,7 @@ def chat(
             name=name,
             startup_notes=notes,
             storage=storage,
-            fallback=FallbackFiles(state, store.workspace_id, legacy_dir(str(root))),
+            fallback=FallbackFiles(state, store.workspace_id, orbit_dir(str(root))),
         ),
         _thread_context(profile),
     )
@@ -272,7 +273,9 @@ async def _imported(store: SqliteStore, state: Path, root: Path) -> list[str]:
     legacy = legacy_dir(str(root))
     imported = await import_session_files(store, legacy)
     notes = [] if imported is None else [imported_note(imported, _shown(legacy, root))]
-    recovered = await recover_parked(FallbackFiles(state, store.workspace_id, legacy), store)
+    recovered = await recover_parked(
+        FallbackFiles(state, store.workspace_id, orbit_dir(str(root))), store
+    )
     return notes + [
         recovered_note(file.count, str(_shown(Path(file.path), root)))
         for file in recovered

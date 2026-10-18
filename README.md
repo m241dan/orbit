@@ -854,7 +854,9 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
   - `external`: adapters that reach outside the backend. `ClaudeCliRunner` launches agents as
     `claude -p --output-format stream-json` runs connected to orbit (`run_agent`, and `converse`
     for the planner, which resumes its Claude session turn after turn); `McpHost` is orbit's
-    MCP server; `GitCoderTree` is the coder's worktree and its snapshots; `config_file` reads
+    MCP server; `GitCoderTree` is the coder's worktree and its snapshots; `repository` finds the
+    git repository a workspace is in, fingerprints it, and places orbit's directory in it
+    (`orbit_dir`: `.git/orbit`, or `.orbit` outside git); `config_file` reads
     `.orbit/config.toml`; `built_in_roles` reads the built-in roles' instructions from
     `instructions/*.md`; `checks` runs a verification step as a process (`run_step`);
     `processes` runs a program to completion without leaving it behind; `workspace`

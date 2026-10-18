@@ -7,15 +7,13 @@ workspace.
 
 from pathlib import Path
 
-from orbit.agent.external.git_tree import ORBIT_DIR, git_common_dir
+from orbit.agent.external.repository import orbit_dir
 
 SESSIONS = "sessions"
 REVIEWS = "reviews.json"
 
 
 def legacy_dir(workspace: str) -> Path:
-    """The directory an older orbit kept saved sessions in for ``workspace``: ``orbit`` in the
-    repository's shared git directory, or ``.orbit`` in ``workspace`` outside a repository (or
-    without git)."""
-    common = git_common_dir(workspace)
-    return Path(common) / ORBIT_DIR if common else Path(workspace) / ".orbit"
+    """The directory an older orbit kept saved sessions in for ``workspace``: orbit's directory,
+    ``orbit`` in the repository's shared git directory or ``.orbit`` outside one."""
+    return orbit_dir(workspace)

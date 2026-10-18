@@ -30,7 +30,7 @@ from orbit.agent.application.ports import StorageFailed, StoredSession
 from orbit.agent.domain.replay import LogBounds
 from orbit.agent.domain.sessions import SessionRecord, Unreadable, parse_record, record_json
 from orbit.agent.domain.storage_halt import StorageErrorKind
-from orbit.agent.external.git_tree import workspace_fingerprint
+from orbit.agent.external.repository import workspace_fingerprint
 from orbit.agent.external.session_locks import SessionLocks, check_session_id
 from orbit.protocol import EventEnvelope, decode_event, encode
 
