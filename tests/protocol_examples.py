@@ -33,6 +33,8 @@ from orbit.protocol import (
     EventEnvelope,
     FireTrigger,
     Hello,
+    History,
+    HistoryPage,
     ListSessions,
     NewSession,
     Notice,
@@ -167,6 +169,7 @@ COMMANDS: tuple[CommandEnvelope, ...] = (
     command(RenameSession(session_id="s1", name="Night")),
     command(DeleteSession(session_id="s1")),
     command(ResetConversation(agent=PLANNER)),
+    command(History(session="s1", before_seq=101, limit=50)),
 )
 
 EVENTS: tuple[EventEnvelope, ...] = (
@@ -241,6 +244,13 @@ EVENTS: tuple[EventEnvelope, ...] = (
                 ),
             ),
             transcript=(event(AssistantMessage(turn_id="turn-1", text="Done.")),),
+        )
+    ),
+    event(
+        HistoryPage(
+            session="s1",
+            events=(event(AssistantMessage(turn_id="turn-1", text="Earlier.")),),
+            more=True,
         )
     ),
     event(

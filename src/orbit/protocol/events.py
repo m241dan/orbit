@@ -21,7 +21,7 @@ from orbit.protocol.models import (
 )
 from orbit.protocol.names import WORK_LANE, BusyLane
 
-if TYPE_CHECKING:  # Envelopes carry events, so the Snapshot's are resolved in envelope.py.
+if TYPE_CHECKING:  # Envelopes carry events, so those events hold are resolved in envelope.py.
     from orbit.protocol.envelope import EventEnvelope
 
 TurnEndReason = Literal["completed", "cancelled", "max_steps", "error"]
@@ -382,6 +382,18 @@ class Snapshot(_Message):
     transcript: tuple["EventEnvelope", ...] = ()
 
 
+class HistoryPage(_Message):
+    """The events of the session ``session`` that ``History`` asked for, oldest first, in the
+    envelopes they were sent in; ``more`` says whether older ones remain, and ``trimmed``
+    whether older ones were removed from the log."""
+
+    type: Literal["history_page"] = "history_page"
+    session: str
+    events: tuple["EventEnvelope", ...]
+    more: bool
+    trimmed: bool = False
+
+
 class WorkspaceEntry(_Message):
     """Workspace ``id``, shown as ``label``, and its ``sessions`` as the list of sessions shows
     them."""
@@ -449,6 +461,7 @@ Event = Annotated[
     | SessionsListed
     | ConversationReset
     | Snapshot
+    | HistoryPage
     | Catalog
     | Welcome
     | CommandAccepted

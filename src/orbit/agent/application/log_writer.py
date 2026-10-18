@@ -8,11 +8,15 @@ from orbit.agent.application.ports import EventLog, Publish
 from orbit.protocol import EventEnvelope
 
 
-def _latest(envelopes: Sequence[EventEnvelope], limit: int) -> list[EventEnvelope]:
-    """The last ``limit`` of ``envelopes`` by ``seq``, oldest first, each ``seq`` once."""
+def _in_order(envelopes: Sequence[EventEnvelope]) -> list[EventEnvelope]:
+    """``envelopes`` by ``seq``, oldest first, each ``seq`` once."""
     by_seq = {envelope.seq: envelope for envelope in envelopes}
-    ordered = [by_seq[seq] for seq in sorted(by_seq)]
-    return ordered[max(0, len(ordered) - limit) :]
+    return [by_seq[seq] for seq in sorted(by_seq)]
+
+
+def _latest(envelopes: Sequence[EventEnvelope], limit: int) -> list[EventEnvelope]:
+    """The last ``limit`` of ``envelopes``, which are in order."""
+    return list(envelopes[max(0, len(envelopes) - limit) :])
 
 
 def _by_session(queued: Sequence[tuple[str, EventEnvelope]]) -> dict[str, list[EventEnvelope]]:
@@ -57,7 +61,19 @@ class LogWriter:
         # was still to be written before it, and one added meanwhile is still to be written.
         before = self._unwritten(session_id)
         logged = await self._log.recent(session_id, limit)
-        return _latest([*logged, *before, *self._unwritten(session_id)], limit)
+        return _latest(_in_order([*logged, *before, *self._unwritten(session_id)]), limit)
+
+    async def before(
+        self, session_id: str, before_seq: int, limit: int
+    ) -> tuple[list[EventEnvelope], bool]:
+        """The last ``limit`` events of the session ``session_id`` before ``before_seq``, oldest
+        first, logged or still to be written, each once, and whether earlier ones remain."""
+        # Read on both sides of the log's read, as recent does.
+        pending = self._unwritten(session_id)
+        logged, more = await self._log.before(session_id, before_seq, limit)
+        found = _in_order([*logged, *pending, *self._unwritten(session_id)])
+        earlier = [envelope for envelope in found if envelope.seq < before_seq]
+        return _latest(earlier, limit), more or len(earlier) > limit
 
     def _unwritten(self, session_id: str) -> list[EventEnvelope]:
         """The envelopes of the session ``session_id`` being written or queued, in order."""

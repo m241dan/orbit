@@ -233,6 +233,13 @@ def _event_row(workspace_id: str, session_id: str, envelope: EventEnvelope) -> E
     return (workspace_id, session_id, envelope.seq, envelope.payload.type, text, len(text.encode()))
 
 
+def _decoded(texts: Sequence[str]) -> list[EventEnvelope]:
+    """The events whose JSON ``texts`` holds, latest first, decoded oldest first, but for those
+    of types this orbit doesn't know."""
+    decoded = [decode_event(text) for text in reversed(texts)]
+    return [envelope for envelope in decoded if envelope is not None]
+
+
 def _open_existing(database: Path) -> sqlite3.Connection:
     """A connection to ``database`` as it stands, creating, upgrading and registering nothing.
 
@@ -371,8 +378,20 @@ class SqliteStore:
             texts = await self._call(self._recent, session_id, limit)
         except sqlite3.Error:
             return []
-        decoded = [decode_event(text) for text in reversed(texts)]
-        return [envelope for envelope in decoded if envelope is not None]
+        return _decoded(texts)
+
+    async def before(
+        self, session_id: str, before_seq: int, limit: int
+    ) -> tuple[list[EventEnvelope], bool]:
+        """The last ``limit`` events logged of the session ``session_id`` before ``before_seq``,
+        oldest first, but for those of types this orbit doesn't know, and whether earlier ones
+        remain; none when they can't be read."""
+        check_session_id(session_id)
+        try:
+            texts = await self._call(self._before, session_id, before_seq, limit + 1)
+        except sqlite3.Error:
+            return [], False
+        return _decoded(texts[:limit]), len(texts) > limit
 
     async def acquire(self, session_id: str) -> bool:
         """Lock the session ``session_id`` for this orbit; returns ``False`` when another
@@ -550,6 +569,16 @@ class SqliteStore:
             """SELECT json FROM events WHERE workspace_id = ? AND session_id = ?
             ORDER BY seq DESC LIMIT ?""",
             (self._workspace, session_id, limit),
+        )
+        return [str(text) for (text,) in rows]
+
+    def _before(self, session_id: str, before_seq: int, limit: int) -> list[str]:
+        """The JSON of the session ``session_id``'s last ``limit`` events before ``before_seq``,
+        latest first."""
+        rows = self._db.execute(
+            """SELECT json FROM events WHERE workspace_id = ? AND session_id = ? AND seq < ?
+            ORDER BY seq DESC LIMIT ?""",
+            (self._workspace, session_id, before_seq, limit),
         )
         return [str(text) for (text,) in rows]
 

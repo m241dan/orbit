@@ -46,6 +46,7 @@ from orbit.protocol import (
     Event,
     FireTrigger,
     Hello,
+    HistoryPage,
     ListSessions,
     Notice,
     ProgressNoted,
@@ -84,6 +85,7 @@ from orbit.tui.conversation import ConversationFeed
 from orbit.tui.detail import DetailPane
 from orbit.tui.event_stream import event_batches
 from orbit.tui.footer import KeyFooter
+from orbit.tui.history import HistoryPager
 from orbit.tui.panels import UsagePanel, VerificationPanel
 from orbit.tui.proposals import ProposalHost
 from orbit.tui.reason import ReasonScreen
@@ -92,6 +94,7 @@ from orbit.tui.tabs import ConversationTabs
 from orbit.tui.task_editor import TaskEditorScreen
 from orbit.tui.tasks import TaskList
 from orbit.tui.transcript import Transcript
+from orbit.tui.transcript_log import TranscriptLog
 from orbit.tui.view.confirm import (
     CONFIGURE_MESSAGE,
     CONFIGURE_TITLE,
@@ -221,6 +224,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         self._feed = ConversationFeed(
             self._transcript, self._tabs, self._task_list, self._verification, lambda: self.clock()
         )
+        self._pager = HistoryPager(self._transcript, self._feed, self._send)
         self.query_one(f"#{self._selected}").add_class("selected")
         self.install_screen(self._model_picker, "pick-model")
         self.install_screen(self._tool_picker, "pick-tool-access")
@@ -404,6 +408,11 @@ class OrbitApp(App[None], inherit_bindings=False):
     async def _remove_task(self, message: TaskList.Remove) -> None:
         await self._send(RemoveTask(task_id=message.task_id))
 
+    @on(TranscriptLog.ReachedTop)
+    async def _page_back(self, _: TranscriptLog.ReachedTop) -> None:
+        """Show the page of the session's history before the conversation shown, if any."""
+        await self._pager.earlier()
+
     @on(TaskList.ShowReason)
     def _show_reason(self, message: TaskList.ShowReason) -> None:
         self.push_screen(ReasonScreen(message.state, message.number))
@@ -553,7 +562,7 @@ class OrbitApp(App[None], inherit_bindings=False):
                 | StartupChecked()
             ):
                 self._feed.render(event)
-            case SessionsListed() | ConversationReset() | Snapshot() | Catalog():
+            case SessionsListed() | ConversationReset() | Snapshot() | Catalog() | HistoryPage():
                 self._render_session(event)
             case CommandAccepted() | CommandRefused() | Welcome():
                 self._render_outcome(event)
@@ -561,11 +570,11 @@ class OrbitApp(App[None], inherit_bindings=False):
                 assert_never(event)
 
     def _render_session(
-        self, event: SessionsListed | ConversationReset | Snapshot | Catalog
+        self, event: SessionsListed | ConversationReset | Snapshot | Catalog | HistoryPage
     ) -> None:
         """Show the sessions listed, rule off the planner's conversation where it was reset,
-        show a snapshot of the session open, or label the trigger keys from a catalog. The
-        conversation's title follows the open session's name."""
+        show a snapshot of the session open or a page of its history, or label the trigger
+        keys from a catalog. The conversation's title follows the open session's name."""
         if isinstance(event, SessionsListed):
             self._name_current(event)
             self._sessions.show(event)
@@ -573,6 +582,8 @@ class OrbitApp(App[None], inherit_bindings=False):
             self._render_snapshot(event)
         elif isinstance(event, Catalog):
             self._label_triggers(trigger_key_labels(event.triggers))
+        elif isinstance(event, HistoryPage):
+            self._pager.show(event)
         else:
             self._feed.append(*planner_reset_entry(), PLANNER)
 
@@ -612,6 +623,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         # Its tasks shown first, as the transcript's notes on them read them, and its usage
         # set after, as the transcript's turns count theirs.
         self._feed.replace(envelope.payload for envelope in snapshot.transcript)
+        self._pager.follow(snapshot)
         self._open_session(snapshot.session)
 
     def _render_state(

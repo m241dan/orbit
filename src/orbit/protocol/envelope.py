@@ -7,7 +7,15 @@ An envelope's own fields come first, then ``payload``: the command or event, wit
 from pydantic import Field
 
 from orbit.protocol.commands import Command
-from orbit.protocol.events import Catalog, Event, SessionsListed, Snapshot, UsageChanged, Welcome
+from orbit.protocol.events import (
+    Catalog,
+    Event,
+    HistoryPage,
+    SessionsListed,
+    Snapshot,
+    UsageChanged,
+    Welcome,
+)
 from orbit.protocol.models import WireTolerant
 
 DEFAULT_WORKSPACE = "default"
@@ -16,7 +24,7 @@ DEFAULT_WORKSPACE = "default"
 SESSIONLESS_EVENTS: tuple[type[Event], ...] = (UsageChanged, SessionsListed, Catalog)
 """The event types that belong to no session: their envelopes carry ``session=None``."""
 
-CONNECTION_EVENTS: tuple[type[Event], ...] = (Welcome, Catalog, Snapshot)
+CONNECTION_EVENTS: tuple[type[Event], ...] = (Welcome, Catalog, Snapshot, HistoryPage)
 """The event types that answer one connection, and so are never kept in a session's log."""
 
 
@@ -47,6 +55,8 @@ class EventEnvelope(_Envelope):
     payload: Event
 
 
-# The Snapshot's transcript holds envelopes, so it's complete once they're defined.
+# The Snapshot's transcript and history pages hold envelopes, so they're complete once those
+# are defined.
 Snapshot.model_rebuild()
+HistoryPage.model_rebuild()
 EventEnvelope.model_rebuild()

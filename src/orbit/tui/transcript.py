@@ -9,12 +9,14 @@ from textual import on
 from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
 from textual.containers import Vertical
+from textual.widgets import Static
 
 from orbit.protocol import AgentReply, AgentRequest, Event, ToolCallFinished, ToolCallStarted
 from orbit.tui.detail import DetailPane
 from orbit.tui.transcript_log import TranscriptLog
 from orbit.tui.view.common import EntryKind
 from orbit.tui.view.detail import copied_note, detail_copy, detail_covers
+from orbit.tui.view.history import LOADING_EARLIER
 from orbit.tui.view.log import Entry
 from orbit.tui.view.tool_calls import tool_call_started
 from orbit.tui.view.transcript import conversation_title
@@ -42,6 +44,8 @@ class Transcript(Vertical):
     /* Kept displayed, at no height, so a log in list mode keeps its focus. */
     Transcript.-covered > TranscriptLog { height: 0; }
     Transcript.-covered > WorkingRow { display: none; }
+    Transcript > #loading-earlier { display: none; color: $text-muted; }
+    Transcript > #loading-earlier.-loading { display: block; }
     """
     BINDINGS: ClassVar[list[BindingType]] = [
         # Within the conversation: from its list, or the pane itself, while the pane is open.
@@ -62,6 +66,7 @@ class Transcript(Vertical):
         self._ticker = Ticker(self, self.tick)
 
     def compose(self) -> ComposeResult:
+        yield Static(LOADING_EARLIER, id="loading-earlier")
         yield self._new_log(None, shown=True)
         yield WorkingRow()
         yield DetailPane(id="detail")
@@ -156,6 +161,26 @@ class Transcript(Vertical):
                 del self._logs[key]
                 log.remove()
         self._keep_ticking()
+
+    def prepend(self, add: Callable[[], None]) -> None:
+        """Have the entries ``add`` adds come before every entry, in every log, each log's
+        cursor kept on its entry."""
+        logs = list(self._logs.values())
+        for log in logs:
+            log.begin_earlier()
+        add()
+        for log in logs:
+            log.end_earlier()
+        self._keep_ticking()
+
+    def show_loading(self, loading: bool) -> None:
+        """Show, above the entries, that earlier ones are ``loading``, or stop."""
+        self.query_one("#loading-earlier").set_class(loading, "-loading")
+
+    @property
+    def loading_earlier(self) -> bool:
+        """Whether the conversation shows that earlier entries are loading."""
+        return self.query_one("#loading-earlier").has_class("-loading")
 
     def replace_rule(self, text: str, kind: EntryKind, key: str | None, agent: str) -> None:
         """Make ``agent``'s latest rule read ``text`` as a ``kind`` entry, under All and, if

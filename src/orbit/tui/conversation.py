@@ -90,6 +90,8 @@ class ConversationFeed:
     clock: Callable[[], float]
     # The running turns and agents, timed by ``clock``.
     _turns: Turns = field(default_factory=Turns, init=False)
+    # Whether the events shown came before those shown already.
+    _earlier: bool = field(default=False, init=False)
 
     def render(self, event: FeedEvent) -> None:
         """Show ``event`` in the conversation."""
@@ -134,10 +136,29 @@ class ConversationFeed:
         self._turns = Turns()
         for event in events:
             self.tabs.track(event)
-            if isinstance(event, ConversationReset):
-                self.append(*planner_reset_entry(), PLANNER)
-            elif _is_feed_event(event):
-                self.render(event)
+            self._show_logged(event)
+
+    def prepend(self, events: Iterable[Event]) -> None:
+        """Show ``events``, which came before every event shown, above them, as they were
+        shown when they happened, leaving the tabs, the running turns and the usage counted
+        as they are."""
+        live, self._turns = self._turns, Turns()
+        self._earlier = True
+        self.transcript.prepend(lambda: self._show_earlier(events))
+        self._turns, self._earlier = live, False
+
+    def _show_earlier(self, events: Iterable[Event]) -> None:
+        """Show ``events``, earlier ones, placing their agents in the pinned roles' tabs."""
+        for event in events:
+            self.tabs.learn_roles(event)
+            self._show_logged(event)
+
+    def _show_logged(self, event: Event) -> None:
+        """Show ``event``, read from the session's log, if the conversation shows it."""
+        if isinstance(event, ConversationReset):
+            self.append(*planner_reset_entry(), PLANNER)
+        elif _is_feed_event(event):
+            self.render(event)
 
     def append(self, text: str, kind: EntryKind, agent: str | None = None) -> None:
         """Add an entry of ``text`` by ``agent``, if any, under its tab and All."""
@@ -160,11 +181,12 @@ class ConversationFeed:
 
     def _render_progress(self, event: TaskProgress) -> None:
         """Note a task run's progress in the transcript: under its role's tab, and All,
-        marking that tab unread when it isn't being shown."""
+        marking that tab unread when it isn't being shown, unless it came before what is."""
         state = self.task_list.find(event.task_id)
         number = self.task_list.numbers_by_id.get(event.task_id)
         (text, kind), key = task_note(event, state, number, self.verification.steps)
-        self.tabs.mark_unread(key)
+        if not self._earlier:
+            self.tabs.mark_unread(key)
         self.transcript.add_entry(Entry(text, kind), key)
 
     def _render_activity(self, event: AgentNote | AgentRequest | AgentExited) -> None:
@@ -208,7 +230,7 @@ class ConversationFeed:
         self._turns = turn_started(self._turns, event, self.clock())
 
     def _turn_finished(self, event: TurnFinished) -> None:
-        if event.usage is not None:
+        if event.usage is not None and not self._earlier:
             self.task_list.count(event.usage)
         self.transcript.end_tool_calls(event.agent_id)
         self._turns, finished = turn_finished(self._turns, event, self.clock())

@@ -225,6 +225,13 @@ class EventLog(Protocol):
         when they can't be read."""
         ...
 
+    async def before(
+        self, session_id: str, before_seq: int, limit: int
+    ) -> tuple[list[EventEnvelope], bool]:
+        """The last ``limit`` events logged of the session ``session_id`` before ``before_seq``,
+        oldest first, and whether earlier ones remain; none when they can't be read."""
+        ...
+
 
 class SessionStore(EventLog, Protocol):
     """Where saved sessions are kept, each locked while an orbit has it open, with their events'

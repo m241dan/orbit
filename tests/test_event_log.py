@@ -227,3 +227,52 @@ async def test_recent_events_under_an_id_that_isnt_a_plain_file_name_are_refused
     store = await open_store(workspace)
     with pytest.raises(ValueError, match="Not a session id"):
         await store.recent("../abc", 10)
+
+
+# Reading earlier ones
+
+
+async def test_events_before_a_seq_are_the_latest_before_it_oldest_first_and_whether_more_remain(
+    open_store: Opener, workspace: Path
+) -> None:
+    store = await open_store(workspace)
+    await store.append("abc", [notice(seq) for seq in range(1, 1201)])
+    await store.append("def", [notice(1201, "def")])
+
+    assert await store.before("abc", 1201, 500) == ([notice(s) for s in range(701, 1201)], True)
+    assert await store.before("abc", 701, 500) == ([notice(s) for s in range(201, 701)], True)
+    assert await store.before("abc", 201, 500) == ([notice(s) for s in range(1, 201)], False)
+    assert await store.before("abc", 201, 200) == ([notice(s) for s in range(1, 201)], False)
+    assert await store.before("abc", 1, 500) == ([], False)
+    assert await store.before("ghi", 10, 500) == ([], False)
+
+
+async def test_events_before_a_seq_of_types_this_orbit_doesnt_know_are_left_out(
+    open_store: Opener, state: Path, workspace: Path
+) -> None:
+    store = await open_store(workspace)
+    await store.append("abc", [notice(1), notice(2), notice(3)])
+    with database(state) as connection:
+        connection.execute(
+            "UPDATE events SET json = replace(json, '\"notice\"', '\"later\"') WHERE seq = 2"
+        )
+
+    assert await store.before("abc", 4, 2) == ([notice(3)], True)
+
+
+async def test_events_before_a_seq_that_cant_be_read_are_none(
+    open_store: Opener, workspace: Path
+) -> None:
+    store = await open_store(workspace)
+    await store.append("abc", [notice(1)])
+    await store.close()
+
+    assert await store.before("abc", 10, 10) == ([], False)
+
+
+async def test_events_before_a_seq_under_an_id_that_isnt_a_plain_file_name_are_refused(
+    open_store: Opener, workspace: Path
+) -> None:
+    store = await open_store(workspace)
+    with pytest.raises(ValueError, match="Not a session id"):
+        await store.before("../abc", 10, 10)

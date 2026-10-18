@@ -164,6 +164,17 @@ class ResetConversation(_Message):
     agent: str = Field(min_length=1)
 
 
+class History(_Message):
+    """Ask for the events of the session ``session`` logged before ``before_seq``: the latest
+    ``limit`` of them, at most 500, answered with ``HistoryPage``. Refused for a session that
+    isn't this workspace's."""
+
+    type: Literal["history"] = "history"
+    session: str
+    before_seq: int = Field(ge=1)
+    limit: int = Field(default=200, ge=1, le=500)
+
+
 Command = Annotated[
     Hello
     | SendMessage
@@ -182,7 +193,8 @@ Command = Annotated[
     | NewSession
     | RenameSession
     | DeleteSession
-    | ResetConversation,
+    | ResetConversation
+    | History,
     Field(discriminator="type"),
 ]
 

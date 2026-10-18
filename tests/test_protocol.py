@@ -30,6 +30,7 @@ from orbit.protocol import (
     EditTask,
     ErrorOccurred,
     FireTrigger,
+    History,
     ListSessions,
     NewSession,
     OpenRequest,
@@ -143,6 +144,21 @@ def test_reset_conversation_command_and_event_round_trip() -> None:
 def test_reset_conversation_needs_an_agent() -> None:
     with pytest.raises(ValidationError):
         ResetConversation(agent="")
+
+
+def test_history_asks_for_200_events_unless_given() -> None:
+    assert History(session="s1", before_seq=10).limit == 200
+
+
+@pytest.mark.parametrize("limit", [1, 500])
+def test_history_asks_for_1_to_500_events(limit: int) -> None:
+    assert History(session="s1", before_seq=10, limit=limit).limit == limit
+
+
+@pytest.mark.parametrize("limit", [0, 501])
+def test_history_asking_for_fewer_than_1_or_more_than_500_events_is_invalid(limit: int) -> None:
+    with pytest.raises(ValidationError):
+        History(session="s1", before_seq=10, limit=limit)
 
 
 def test_rejects_empty_task_prompt() -> None:

@@ -35,8 +35,8 @@ An event travels in an `EventEnvelope`:
 - `session`: the session the event belongs to. The event's type decides it: the types in
   `SESSIONLESS_EVENTS` (`UsageChanged`, `SessionsListed` and `Catalog`) belong to no session
   and carry `null`, and every other event carries the open session's id. Every event of a
-  session is kept in the store's event log but for `CONNECTION_EVENTS` (`Welcome`, `Catalog` and
-  `Snapshot`), which answer one connection.
+  session is kept in the store's event log but for `CONNECTION_EVENTS` (`Welcome`, `Catalog`,
+  `Snapshot` and `HistoryPage`), which answer one connection.
 - `workspace`, `traceparent` and `tracestate`, as on commands.
 
 ```json
@@ -87,6 +87,19 @@ Switching sessions works the way joining does: opening, starting or picking a se
 A frontend replaces the conversation it shows with every Snapshot's transcript, so joining
 shows where the session left off and a switch shows the session switched to.
 `SessionsListed` otherwise only answers `ListSessions`.
+
+## Paging through history
+
+The Snapshot's transcript holds a session's last 500 events; `History` reads further back.
+`History(session, before_seq, limit)` asks for the session's logged events before `before_seq`,
+such as the oldest `seq` the frontend shows: the latest `limit` of them, 200 unless given, and
+from 1 to 500. The backend answers with a `HistoryPage` and then `CommandAccepted`. The page
+holds the `session`, its `events`, oldest first, in the envelopes they were sent in, and `more`,
+whether older events remain, to ask for with the oldest `seq` of this page; `trimmed` is false
+until orbit removes old events. A `History` for a session that isn't this workspace's is refused
+with `unknown`; without a store, the page is empty and `more` is false. The TUI asks for the
+page before the oldest event it shows when the cursor moves up past the top of the
+conversation, one request at a time.
 
 ## Command outcomes
 

@@ -60,7 +60,7 @@ In the app:
 |---|---|
 | `h` `j` `k` `l` | Move between windows (the selected one is highlighted); while the conversation's detail pane is open, `j` from the conversation selects the pane, and from the pane `k` goes back, `j` to the prompt and `l` to the task list |
 | `i` | Jump to the prompt, which talks to the planner, and start typing (vim-style insert mode): long text wraps and the box grows up to 8 lines, then scrolls; `enter` sends, pasted text keeps its newlines, `esc` stops typing |
-| `enter` | On the conversation: activate it (`j`/`k` move between entries, `enter` collapses or expands the one marked `▌` in the left gutter, or opens the detail pane on a tool call or request, `J`/`K` scroll the open detail pane, `y` copies its call's whole output, `tab` activates it, `esc` closes the detail pane if it's open, else leaves and holds the marked entry); again, resume at the held entry |
+| `enter` | On the conversation: activate it (`j`/`k` move between entries, `k` on the first loading earlier ones, `enter` collapses or expands the one marked `▌` in the left gutter, or opens the detail pane on a tool call or request, `J`/`K` scroll the open detail pane, `y` copies its call's whole output, `tab` activates it, `esc` closes the detail pane if it's open, else leaves and holds the marked entry); again, resume at the held entry |
 | `enter` | On the conversation's detail pane: activate it (`j`/`k` scroll it, `y` copies its call's whole output, `esc` leaves with the pane still open) |
 | `enter` | On the task list: activate and hold it (`j`/`k` move, `enter` edits a task or adds one on `+ new task`, `a` accepts a draft, `x` removes a task, `f` shows why a task failed or stopped, `esc` leaves, the list still held) |
 | `enter` | On the agents pane: activate it (`j`/`k` move, `c` cancels the highlighted agent's work, `esc` leaves) |
@@ -102,7 +102,8 @@ overwrites a saved session it can't read. The design, and what is deliberately l
 Every event of a session's conversation is kept in the store too, as its event log. The
 conversation shows where the session left off: at startup, its last 500 events, the planner's
 turns and the agents' runs under their tabs as they were shown live, and the conversation
-carries on from there.
+carries on from there. Moving up past its first entry, with the conversation activated, pages
+back through earlier events to the session's start.
 
 At startup orbit lists the saved sessions to pick from: `+ new session` first, then the sessions,
 the most recently active first. Each row shows the session's name, when it was last active (local
@@ -257,6 +258,9 @@ expand the one marked `▌` in the left gutter, and `esc` to leave. Leaving hold
 the mark stays, the conversation stops following new output, and `enter` picks up there again.
 `esc` again with the Conversation window selected lets go, closing the detail pane if it's open, and
 the conversation follows the latest output again. Each tab holds its own spot, kept while you switch tabs.
+`k` on the first entry pages back through the session's history: "Loading earlier messages…" shows
+at the top while orbit reads the events before it from the event log, up to 200 at a time, and they
+appear above, the mark staying on its entry; keep going to page back to the session's start.
 
 Every turn, the planner's and each agent's, ends with a muted rule across the conversation's width,
 under All and the agent's tab: `── done · 1m12s · ↑1.2M ↓8k ──`. It says how the turn ended

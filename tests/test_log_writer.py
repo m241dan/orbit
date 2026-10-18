@@ -11,12 +11,15 @@ from orbit.agent.application.log_writer import LogWriter
 from orbit.agent.external.sqlite_store import SqliteStore
 from orbit.protocol import (
     SAVE_FAILED,
+    UNKNOWN,
     AddTask,
     Catalog,
     CommandAccepted,
     ErrorOccurred,
     Event,
     EventEnvelope,
+    History,
+    HistoryPage,
     Notice,
     OpenSession,
     SessionsListed,
@@ -27,7 +30,7 @@ from orbit.protocol import (
     Welcome,
     decode_event,
 )
-from tests.agent_fakes import FakeStore, Ticks, greet, publish, send
+from tests.agent_fakes import COMMAND_ID, FakeStore, Ticks, greet, publish, refused, send
 from tests.test_session_switch import opened, saved, store_with
 from tests.test_sqlite_store import database
 
@@ -186,6 +189,30 @@ async def test_recent_events_written_while_the_log_is_read_are_there_once() -> N
     assert await reading == [notice(1), notice(2)]
     await writer.close()
     assert log.logged == [notice(1), notice(2)]
+
+
+async def test_events_before_a_seq_are_the_logged_ones_then_those_still_queued() -> None:
+    log = GatedLog()
+    log.logged = [notice(1), notice(2), notice(3, "b")]
+    writer = LogWriter(log, Published())
+    writer.add("a", notice(4))
+    await log.waiting.wait()  # 4 is being written.
+    writer.add("a", notice(5))
+    writer.add("a", notice(6))
+
+    assert await writer.before("a", 6, 10) == ([notice(1), notice(2), notice(4), notice(5)], False)
+    assert await writer.before("a", 6, 2) == ([notice(4), notice(5)], True)
+    assert await writer.before("a", 2, 1) == ([notice(1)], False)
+    log.gate.set()
+    await writer.close()
+
+
+async def test_events_before_a_seq_say_more_remain_when_the_log_holds_more() -> None:
+    log = FakeStore()
+    log.logged = [notice(1), notice(2), notice(3)]
+    writer = LogWriter(log, Published())
+
+    assert await writer.before("a", 3, 1) == ([notice(2)], True)
 
 
 # What the session logs
@@ -352,3 +379,100 @@ async def test_a_session_opened_again_after_a_restart_shows_its_earlier_events(
         TasksChanged,
         CommandAccepted,
     ]
+
+
+# Paging through history
+
+
+async def history(session: AgentSession, command: History) -> list[Event]:
+    """What ``session`` answers ``command`` with: its page and its outcome."""
+    await greet(session)
+    delivered(session)
+    await send(session, command)
+    return [envelope.payload for envelope in delivered(session)]
+
+
+async def test_history_pages_back_from_the_snapshot_to_the_sessions_start(
+    sqlite: SqliteStore,
+) -> None:
+    await sqlite.append("session-1", [notice(seq, "session-1") for seq in range(1, 1201)])
+    session = stored_session(sqlite)
+    await greet(session)
+    [snapshot] = snapshots(delivered(session))
+    oldest = snapshot.transcript[0].seq
+
+    first = await history(session, History(session="session-1", before_seq=oldest, limit=500))
+    second = await history(session, History(session="session-1", before_seq=201, limit=500))
+    await session.close()
+
+    assert oldest == 701
+    assert first == [
+        HistoryPage(
+            session="session-1",
+            events=tuple(notice(seq, "session-1") for seq in range(201, 701)),
+            more=True,
+        ),
+        CommandAccepted(command_id=COMMAND_ID),
+    ]
+    assert second == [
+        HistoryPage(
+            session="session-1",
+            events=tuple(notice(seq, "session-1") for seq in range(1, 201)),
+            more=False,
+        ),
+        CommandAccepted(command_id=COMMAND_ID),
+    ]
+
+
+async def test_history_pages_a_saved_session_other_than_the_one_open() -> None:
+    store = store_with(saved("auth"))
+    store.logged = [notice(1, "auth"), notice(2, "session-1")]
+    session = stored_session(store)
+
+    answer = await history(session, History(session="auth", before_seq=10))
+    await session.close()
+
+    assert answer == [
+        HistoryPage(session="auth", events=(notice(1, "auth"),), more=False),
+        CommandAccepted(command_id=COMMAND_ID),
+    ]
+
+
+async def test_history_of_a_session_that_isnt_this_workspaces_is_refused(
+    sqlite: SqliteStore, tmp_path: Path
+) -> None:
+    other_workspace = tmp_path / "other"
+    other_workspace.mkdir()
+    other = await SqliteStore.open(tmp_path / "state", str(other_workspace))
+    await other.save(saved("elsewhere"))
+    await other.append("elsewhere", [notice(1, "elsewhere")])
+    await other.close()
+    session = stored_session(sqlite)
+
+    answer = await history(session, History(session="elsewhere", before_seq=10))
+    await session.close()
+
+    assert answer == [refused(UNKNOWN, "There's no saved session 'elsewhere'.")]
+
+
+async def test_history_without_a_store_is_an_empty_last_page() -> None:
+    session = AgentSession(clock=Ticks(), new_id=lambda: "session-1")
+    await publish(session, Notice(message="hi"))
+
+    answer = await history(session, History(session="session-1", before_seq=10))
+    await session.close()
+
+    assert answer == [
+        HistoryPage(session="session-1", events=(), more=False),
+        CommandAccepted(command_id=COMMAND_ID),
+    ]
+
+
+async def test_history_pages_are_never_logged() -> None:
+    store = FakeStore()
+    session = stored_session(store)
+
+    await history(session, History(session="session-1", before_seq=10))
+    await session.close()
+
+    assert [type(envelope.payload) for envelope in store.logged] == [CommandAccepted]

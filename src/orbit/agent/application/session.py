@@ -15,6 +15,7 @@ from orbit.agent.application.handshake import (
     HandshakeParts,
     ends_stream,
 )
+from orbit.agent.application.history import SessionHistory
 from orbit.agent.application.keeper import (
     Clock,
     IdMaker,
@@ -61,6 +62,7 @@ from orbit.protocol import (
     Event,
     EventEnvelope,
     Hello,
+    History,
     RunningAgent,
     SessionSummary,
     Settings,
@@ -110,7 +112,8 @@ class AgentSession:
     tasks. ``PlannerSeat`` holds the planner and its turns; ``WorkLane`` holds the rules of a
     task run: verification and fixes; ``WorkTurns`` decides when it runs; ``ReviewLane`` runs
     the reviews; ``SessionSwitcher`` switches between saved sessions; ``WorkCommands`` handles
-    the other commands; ``Handshake`` opens every stream.
+    the other commands; ``SessionHistory`` answers ``History``; ``Handshake`` opens every
+    stream.
 
     With ``check_at_startup``, the ``verification`` steps also run once in the background as
     the session welcomes the frontend, on the base commit; a failure adds a draft task to fix
@@ -178,6 +181,7 @@ class AgentSession:
         self._switcher = self._session_switcher(pick_session)
         self._commands = self._work_commands()
         self._handshake = Handshake(self._handshake_parts(), self._events)
+        self._history = SessionHistory(self._keeper, self._events)
 
     def _session_switcher(self, picking: bool) -> SessionSwitcher:
         """What switches this session between saved ones, still ``picking`` one if so."""
@@ -326,8 +330,10 @@ class AgentSession:
             message = f"Session {session!r} isn't open; the open session is {open_id}."
             raise Refused(WRONG_SESSION, message)
 
-    async def _handle(self, command: SessionCommand | WorkCommand) -> None:
-        if isinstance(command, SessionCommand):
+    async def _handle(self, command: SessionCommand | WorkCommand | History) -> None:
+        if isinstance(command, History):
+            await self._events.put(await self._history.page(command))
+        elif isinstance(command, SessionCommand):
             await self._switcher.handle(command)
         else:
             self._switcher.stay()

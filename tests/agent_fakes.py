@@ -324,6 +324,14 @@ class FakeStore:
         await asyncio.sleep(0)  # Reading takes a while.
         return [envelope for envelope in self.logged if envelope.session == session_id][-limit:]
 
+    async def before(
+        self, session_id: str, before_seq: int, limit: int
+    ) -> tuple[list[EventEnvelope], bool]:
+        await asyncio.sleep(0)  # Reading takes a while.
+        logged = self.logged
+        earlier = [e for e in logged if e.session == session_id and e.seq < before_seq]
+        return earlier[-limit:], len(earlier) > limit
+
     async def review_count(self) -> int:
         return self.count
 

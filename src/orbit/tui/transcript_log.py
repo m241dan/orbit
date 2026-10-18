@@ -41,6 +41,9 @@ from orbit.tui.view.transcript import (
     tool_call_entry,
 )
 
+type _SetAside = tuple[list[Entry], list[bool], dict[int, ToolCall], int | None]
+"""A log's entries, whether each is collapsed, its running calls and its cursor's entry."""
+
 
 class TranscriptLog(ListPane):
     """One tab's entries, each an option: activated, j/k move between them and enter collapses
@@ -50,11 +53,16 @@ class TranscriptLog(ListPane):
     Hiding thinking leaves agents' dim messages out of the options; the entries are all kept,
     and option indexes count only the entries shown. A tool call is one line, updated in place
     as it finishes, its spinner read off ``clock``. Inspecting, enter on a tool call or
-    request asks for its details, which follow the cursor until escape."""
+    request asks for its details, which follow the cursor until escape. Moving up past the
+    first entry asks for earlier ones, which :meth:`begin_earlier` and :meth:`end_earlier` add
+    above it."""
 
     class Inspect(Message):
         """What the detail pane should show may have changed: whether the log is
         :attr:`inspecting`, or its :attr:`detail`."""
+
+    class ReachedTop(Message):
+        """The cursor was moved up past the first entry."""
 
     DEFAULT_CSS = """
     TranscriptLog {
@@ -109,6 +117,7 @@ class TranscriptLog(ListPane):
         self._rows: list[int] = []  # The entry each option shows.
         self._marked: int | None = None  # The option drawn with the marker.
         self._calls: dict[int, ToolCall] = {}  # The calls still running, by their entry.
+        self._later: _SetAside | None = None  # Set aside while earlier entries are added.
         self._thinking_hidden = thinking_hidden
         self.inspecting = False  # Whether the detail pane shows the cursor's entry.
         self.display = shown
@@ -155,6 +164,14 @@ class TranscriptLog(ListPane):
         if self.inspecting and not isinstance(self.screen.focused, DetailPane):
             self.inspect(False)
 
+    def action_cursor_up(self) -> None:
+        """Move the cursor to the entry above; on the first, it stays, asking for earlier
+        ones."""
+        if self.highlighted == 0:
+            self.post_message(self.ReachedTop())
+        else:
+            super().action_cursor_up()
+
     def enter_list_mode(self) -> None:
         """Activate the list, starting at the latest entry when it holds no cursor."""
         if self.highlighted is None and self.option_count:
@@ -178,6 +195,27 @@ class TranscriptLog(ListPane):
         self._marked = None
         self._calls.clear()
         self.clear_options()
+
+    def begin_earlier(self) -> None:
+        """Set the entries aside, so those added until :meth:`end_earlier` come before them."""
+        self._later = (self._entries, self._collapsed, self._calls, self.inspected)
+        self._entries, self._collapsed, self._calls = [], [], {}
+        self._rows, self._marked = [], None
+        self.clear_options()
+
+    def end_earlier(self) -> None:
+        """Put the entries set aside back after those added since, whose calls still running
+        are shown as having no result, the cursor kept on the entry it was on."""
+        assert self._later is not None  # Only ever after begin_earlier.
+        entries, collapsed, calls, held = self._later
+        self._later = None
+        for index, call in list(self._calls.items()):
+            self._set_call(index, tool_call_unfinished(call))
+        offset = len(self._entries)
+        self._entries += entries
+        self._collapsed += collapsed
+        self._calls = {index + offset: call for index, call in calls.items()}
+        self._show_rows_holding(None if held is None else held + offset)
 
     def _show_after(self, index: int) -> None:
         """Add the entry at ``index``, which comes after every entry shown, as the last option,
@@ -285,7 +323,11 @@ class TranscriptLog(ListPane):
 
     def _show_rows(self) -> None:
         """Rebuild the options from the entries shown, keeping the cursor's place."""
-        held = None if self.highlighted is None else self._rows[self.highlighted]
+        self._show_rows_holding(None if self.highlighted is None else self._rows[self.highlighted])
+
+    def _show_rows_holding(self, held: int | None) -> None:
+        """Rebuild the options from the entries shown, the cursor on the entry at ``held``, or
+        the nearest one shown, if given."""
         self._rows = shown_rows(self._entries, self._thinking_hidden)
         self._marked = None  # Its option is about to go.
         self.clear_options()

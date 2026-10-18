@@ -72,6 +72,11 @@ class ConversationTabs(Tabs):
         self.roles = track_roles(self.roles, event)
         self._update(track_tabs(self.tabs, event, self.agent_of(self.active), self.roles))
 
+    def learn_roles(self, event: Event) -> None:
+        """Note the pinned role an agent started in by ``event``, an earlier one, leaving the
+        tabs as they are."""
+        self.roles = track_roles(self.roles, event)
+
     def reset(self) -> None:
         """Close every agent's own tab and forget the agents that ran in the pinned roles,
         as before any agent ran."""

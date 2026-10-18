@@ -439,6 +439,7 @@
               "edit_task": "#/$defs/EditTask",
               "fire_trigger": "#/$defs/FireTrigger",
               "hello": "#/$defs/Hello",
+              "history": "#/$defs/History",
               "list_sessions": "#/$defs/ListSessions",
               "new_session": "#/$defs/NewSession",
               "open_session": "#/$defs/OpenSession",
@@ -505,6 +506,9 @@
             },
             {
               "$ref": "#/$defs/ResetConversation"
+            },
+            {
+              "$ref": "#/$defs/History"
             }
           ],
           "title": "Payload"
@@ -760,6 +764,7 @@
               "command_refused": "#/$defs/CommandRefused",
               "conversation_reset": "#/$defs/ConversationReset",
               "error_occurred": "#/$defs/ErrorOccurred",
+              "history_page": "#/$defs/HistoryPage",
               "notice": "#/$defs/Notice",
               "progress_noted": "#/$defs/ProgressNoted",
               "review_status": "#/$defs/ReviewStatus",
@@ -871,6 +876,9 @@
             },
             {
               "$ref": "#/$defs/Snapshot"
+            },
+            {
+              "$ref": "#/$defs/HistoryPage"
             },
             {
               "$ref": "#/$defs/Catalog"
@@ -1007,6 +1015,79 @@
         "type"
       ],
       "title": "Hello",
+      "type": "object"
+    },
+    "History": {
+      "description": "Ask for the events of the session ``session`` logged before ``before_seq``: the latest\n``limit`` of them, at most 500, answered with ``HistoryPage``. Refused for a session that\nisn't this workspace's.",
+      "properties": {
+        "before_seq": {
+          "minimum": 1,
+          "title": "Before Seq",
+          "type": "integer"
+        },
+        "limit": {
+          "default": 200,
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        },
+        "session": {
+          "title": "Session",
+          "type": "string"
+        },
+        "type": {
+          "const": "history",
+          "default": "history",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "session",
+        "before_seq",
+        "type"
+      ],
+      "title": "History",
+      "type": "object"
+    },
+    "HistoryPage": {
+      "description": "The events of the session ``session`` that ``History`` asked for, oldest first, in the\nenvelopes they were sent in; ``more`` says whether older ones remain, and ``trimmed``\nwhether older ones were removed from the log.",
+      "properties": {
+        "events": {
+          "items": {
+            "$ref": "#/$defs/EventEnvelope"
+          },
+          "title": "Events",
+          "type": "array"
+        },
+        "more": {
+          "title": "More",
+          "type": "boolean"
+        },
+        "session": {
+          "title": "Session",
+          "type": "string"
+        },
+        "trimmed": {
+          "default": false,
+          "title": "Trimmed",
+          "type": "boolean"
+        },
+        "type": {
+          "const": "history_page",
+          "default": "history_page",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "session",
+        "events",
+        "more",
+        "type"
+      ],
+      "title": "HistoryPage",
       "type": "object"
     },
     "ListSessions": {
