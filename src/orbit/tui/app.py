@@ -55,7 +55,6 @@ from orbit.protocol import (
     RunTasks,
     SendMessage,
     Session,
-    SessionOpened,
     SessionsListed,
     SessionSummary,
     Settings,
@@ -621,27 +620,22 @@ class OrbitApp(App[None], inherit_bindings=False):
                 | StartupChecked()
             ):
                 self._feed.render(event)
-            case SessionsListed() | SessionOpened() | ConversationReset() | Snapshot():
+            case SessionsListed() | ConversationReset() | Snapshot():
                 self._render_session(event)
             case CommandAccepted() | CommandRefused() | Welcome():
                 self._render_outcome(event)
             case _:
                 assert_never(event)
 
-    def _render_session(
-        self, event: SessionsListed | SessionOpened | ConversationReset | Snapshot
-    ) -> None:
+    def _render_session(self, event: SessionsListed | ConversationReset | Snapshot) -> None:
         """Show the sessions listed, rule off the planner's conversation where it was reset,
-        show a snapshot of the session open, or take the task list out of list mode, let it
-        follow again and start its total from the spend of a session opened, whose contents
-        come in their own events. The conversation's title follows the open session's name."""
+        or show a snapshot of the session open. The conversation's title follows the open
+        session's name."""
         if isinstance(event, SessionsListed):
             self._name_current(event)
             self._show_sessions(event)
         elif isinstance(event, Snapshot):
             self._render_snapshot(event)
-        elif isinstance(event, SessionOpened):
-            self._open_session(event.session)
         else:
             self._feed.append(*planner_reset_entry(), PLANNER)
 

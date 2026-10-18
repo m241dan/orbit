@@ -86,7 +86,6 @@ from orbit.protocol import (
     TaskSpec,
     TurnFinished,
     UpdateSettings,
-    VerificationChanged,
     Welcome,
 )
 
@@ -160,8 +159,9 @@ class AgentSession:
 
     Every stream opens with ``Hello``: the session publishes nothing, and refuses every other
     command, until it's answered with ``Welcome``. A ``Snapshot`` of the session open follows
-    it, after the latest usage if any was fetched, then what the session had to say before
-    then; every switch of session ends with a ``Snapshot`` too.
+    it, after the latest usage if any was fetched, then the one-off notices: the workspace, no
+    verification steps, work left by earlier runs; every switch of session ends with a
+    ``Snapshot`` too.
 
     The session open here is saved in ``store``, if there is one, once it's used; ``clock``
     tells the time, ``new_id`` makes its id and ``name`` names it (by the time, if none). The
@@ -169,7 +169,7 @@ class AgentSession:
     settings, but for those ``pinned``, by field name, which keep the ``settings`` given here.
     With ``pick_session``, the saved sessions are listed after ``Welcome``, for the user to
     pick one; until they do, the session open is a new one, and what orbit adds to it carries
-    over into the one picked. Otherwise, the session open is announced after ``Welcome``.
+    over into the one picked; they're listed after the notices.
     """
 
     def __init__(
@@ -206,16 +206,12 @@ class AgentSession:
         self._desk = AgentDesk(agents, self._publish_agents) if agents else None
         self._welcomed = False
         self._incompatible = False  # A Hello was refused: nothing more is published.
-        self._opening: list[Event] = []  # Published after Welcome, since nothing comes before.
+        self._workspace = workspace
         self._closing = False
         self._lane = self._review_lane()
         self._held = False  # The user cancelled: don't start work by itself.
         hooks = SeatHooks(self._save, self._keeper.use, self._step_names)
         self._seat = PlannerSeat(self._desk, self._tasks, self._events, hooks)
-        self._opening.append(self._settings_changed())
-        if workspace is not None:
-            self._opening.append(Notice(message=f"Workspace: {workspace}"))
-        self._announce_steps()
         self._startup = self._startup_check(verification, check_at_startup)
         self._work = self._work_lane()
         post = self._events.put_nowait
@@ -237,7 +233,6 @@ class AgentSession:
         access = SettingsAccess(
             lambda: self._settings,
             self._set_settings,
-            self._settings_changed,
             self._given,
             self._pinned,
         )
@@ -253,14 +248,6 @@ class AgentSession:
         lane = WorkLane(self._desk, self._tasks, self._verifier, self._lane)
         lane.startup = self._startup
         return lane
-
-    def _announce_steps(self) -> None:
-        """Show the steps that will verify tasks, or note that none will."""
-        if self._verifier and self._verifier.step_names:
-            steps = self._verifier.progress.steps
-            self._opening.append(VerificationChanged(steps=steps))
-        elif self._verifier:
-            self._opening.append(Notice(message=NO_STEPS_NOTE))
 
     def _startup_check(
         self, verification: Verification | None, wanted: bool
@@ -339,8 +326,8 @@ class AgentSession:
 
     async def _hello(self, hello: Hello, command_id: str) -> None:
         """Welcome the frontend that sent ``hello`` as ``command_id``, then publish the latest
-        usage, if any, and a snapshot, what the session had to say before it, and announce the
-        session; refused for a second Hello, or another protocol version."""
+        usage, if any, a snapshot, the one-off notices and, if asked to, the saved sessions to
+        pick from; refused for a second Hello, or another protocol version."""
         if self._welcomed:
             raise Refused(INVALID, HELLO_AGAIN_MESSAGE)
         if hello.protocol_version != PROTOCOL_VERSION:
@@ -352,13 +339,11 @@ class AgentSession:
             raise Refused(INCOMPATIBLE, message)
         self._welcomed = True
         await self._welcome(command_id)
-        for event in self._opening:
-            await self._events.put(event)
-        self._opening.clear()
         try:
             await self._load_review_count()
-            await self._announce_session()
+            await self._announce_notices()
             await self._announce_leftovers()
+            await self._list_at_startup()
         finally:  # A sender cancelled meanwhile mustn't keep the background from starting.
             self._start_background()
 
@@ -692,12 +677,17 @@ class AgentSession:
         if self._usage is not None and isinstance(event, TurnFinished) and event.agent_id:
             self._usage.nudge()
 
-    async def _announce_session(self) -> None:
-        """List the saved sessions to pick from, if asked to, or else announce the one open."""
+    async def _announce_notices(self) -> None:
+        """Tell the user the workspace, if any, and that no steps verify tasks, if none do."""
+        if self._workspace is not None:
+            await self._events.put(Notice(message=f"Workspace: {self._workspace}"))
+        if self._verifier and not self._verifier.step_names:
+            await self._events.put(Notice(message=NO_STEPS_NOTE))
+
+    async def _list_at_startup(self) -> None:
+        """List the saved sessions to pick from, if asked to."""
         if self._pick_session:
             await self._switcher.list_sessions("startup")
-        else:
-            await self._switcher.announce()
 
     async def _announce_leftovers(self) -> None:
         """Tell the user about work earlier runs left in the coder's tree."""

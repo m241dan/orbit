@@ -139,8 +139,6 @@ async def test_running_does_nothing_when_nothing_is_runnable() -> None:
     session, _, launcher = session_for()
     stream = payloads(session)
     await anext(stream)  # The snapshot.
-    await anext(stream)  # Settings.
-    await anext(stream)  # The session opened.
     await send(session, RunTasks())
     await asyncio.sleep(0.01)
     assert queued(session) == [ACCEPTED]
@@ -152,7 +150,7 @@ async def test_running_without_agents_is_refused() -> None:
     await send(session, AddTask(task=TaskSpec(prompt="a")))
     await send(session, RunTasks())
     stream = payloads(session)
-    events = [await anext(stream) for _ in range(6)]
+    events = [await anext(stream) for _ in range(4)]
     assert refused(NOT_CONFIGURED, "Tasks need agents, and none are set up.") in events
     assert not any(isinstance(event, ErrorOccurred) for event in events)
 

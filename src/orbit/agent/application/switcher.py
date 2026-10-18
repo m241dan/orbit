@@ -33,11 +33,9 @@ from orbit.protocol import (
     Notice,
     OpenSession,
     RenameSession,
-    SessionOpened,
     SessionsListed,
     SessionSummary,
     Settings,
-    SettingsChanged,
     Snapshot,
     TaskState,
     Usage,
@@ -75,13 +73,11 @@ class SwitchParts:
 
 @dataclass(frozen=True)
 class SettingsAccess:
-    """The session's settings: to ``get`` and ``set`` them, and the event saying they
-    ``changed``. A session opened has its saved settings, but for those ``pinned``, by field
-    name, which keep the ``given`` ones."""
+    """The session's settings: to ``get`` and ``set`` them. A session opened has its saved
+    settings, but for those ``pinned``, by field name, which keep the ``given`` ones."""
 
     get: Callable[[], Settings]
     set: Callable[[Settings], None]
-    changed: Callable[[], SettingsChanged]
     given: Settings
     pinned: tuple[str, ...]
 
@@ -247,7 +243,7 @@ class SessionSwitcher:
     def _replace_board(self, tasks: tuple[TaskState, ...]) -> None:
         """Have ``tasks`` on the board, and after them, while no session was picked yet, the
         tasks orbit added."""
-        # Published with the rest of the session opened, in _switched, not half-switched here.
+        # Published in the snapshot of the session opened, in _switched, not half-switched here.
         board = self._parts.tasks.board
         carried = board.tasks if self._picking else ()
         board.restore(tasks)
@@ -258,24 +254,18 @@ class SessionSwitcher:
         self, left: Left, stopped: Collection[str], last_active: datetime | None
     ) -> None:
         """Finish a switch from the session ``left``, deleting it if its tasks carried over:
-        close its planner, end the reviews ``stopped`` when it was saved, and publish what the
-        session opened, last active at ``last_active``, holds, then its snapshot."""
+        close its planner, end the reviews ``stopped`` when it was saved, then save the session
+        opened and publish its snapshot, last active at ``last_active``."""
         parts = self._parts
         discard, self._picking = self._picking, False
         await self._keeper.leave(left, discard)
         await parts.seat.close_retired()
         if parts.lane is not None:
             await parts.lane.end_interrupted(stopped)
-        await parts.tasks.publish()
-        await self._events.put(self._settings.changed())
-        await self.announce(last_active)
+        await parts.tasks.changed_elsewhere()
         await self._events.put(parts.snapshot(last_active))
 
     def summary(self, last_active: datetime | None = None) -> SessionSummary:
         """The session open here, last active at ``last_active``, as the list of sessions
         shows it."""
         return self._keeper.summary(self._parts.tasks.board.tasks, self.spent, last_active)
-
-    async def announce(self, last_active: datetime | None = None) -> None:
-        """Publish the session open here, last active at ``last_active``, as opened."""
-        await self._events.put(SessionOpened(session=self.summary(last_active)))

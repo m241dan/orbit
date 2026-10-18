@@ -745,17 +745,6 @@ class SessionsListed(_Message):
     reason: ListingReason
 
 
-class SessionOpened(_Message):
-    """The ``session`` now open.
-
-    It's sent at the start, unless the sessions are listed to pick one, and after
-    ``OpenSession`` or ``NewSession``.
-    """
-
-    type: Literal["session_opened"] = "session_opened"
-    session: SessionSummary
-
-
 class ConversationReset(_Message):
     """The conversation of the agent ``agent`` ended at the user's ``ResetConversation``; its
     next message starts a fresh one."""
@@ -832,7 +821,6 @@ Event = Annotated[
     | ChecksProposed
     | UsageChanged
     | SessionsListed
-    | SessionOpened
     | ConversationReset
     | Snapshot
     | Welcome

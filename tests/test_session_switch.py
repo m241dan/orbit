@@ -20,6 +20,7 @@ from orbit.protocol import (
     AgentExited,
     AgentStarted,
     CancelTurn,
+    CommandAccepted,
     CommandRefused,
     ErrorOccurred,
     Event,
@@ -31,11 +32,10 @@ from orbit.protocol import (
     ReviewStatus,
     RunTasks,
     SendMessage,
-    SessionOpened,
     SessionsListed,
     SessionSummary,
     Settings,
-    SettingsChanged,
+    Snapshot,
     TasksChanged,
     TaskSpec,
     TaskState,
@@ -198,31 +198,36 @@ def starting(**session: Any) -> AgentSession:
     return AgentSession(agents=agents, store=FakeStore(), clock=Ticks(), **session)
 
 
-async def test_a_session_started_without_the_list_is_announced_before_the_leftovers() -> None:
+async def test_a_session_started_without_the_list_is_snapshot_before_the_leftovers() -> None:
     session = starting(name="auth rework")
     events = await events_until(session, of_type(Notice))
 
-    kinds = [type(e) for e in events]
-    assert kinds.index(SessionOpened) < kinds.index(Notice)
-    opened = last_of(SessionOpened, events).session
+    assert [type(e) for e in events] == [Snapshot, Notice]
+    opened = last_of(Snapshot, events).session
     assert (opened.name, opened.current, opened.counts) == ("auth rework", True, {})
     assert opened.usage == Usage() and opened.last_active is None
     await session.close()
 
 
-async def test_a_session_started_without_a_name_is_announced_by_its_start() -> None:
+async def test_a_session_started_without_a_name_is_named_by_its_start() -> None:
     session = starting()
-    events = await events_until(session, of_type(SessionOpened))
-    assert last_of(SessionOpened, events).session.name == "Oct 17 14:30"
+    events = await events_until(session, of_type(Snapshot))
+    assert last_of(Snapshot, events).session.name == "Oct 17 14:30"
     await session.close()
 
 
-async def test_a_session_started_with_the_list_isnt_announced() -> None:
+async def test_a_session_started_with_the_list_is_snapshot_then_lists_the_sessions() -> None:
     session, _ = switching(FakeStore(), pick_session=True)
     events = await events_until(session, of_type(SessionsListed))
-    await send(session, ListSessions())
-    events += await events_until(session, of_type(SessionsListed))
-    assert not [e for e in events if isinstance(e, SessionOpened)]
+    assert [type(e) for e in events] == [Snapshot, SessionsListed]
+    assert last_of(SessionsListed, events).reason == "startup"
+    await session.close()
+
+
+async def test_a_session_started_with_the_list_lists_it_after_the_leftovers() -> None:
+    session = starting(pick_session=True)
+    events = await events_until(session, of_type(SessionsListed))
+    assert [type(e) for e in events] == [Snapshot, Notice, SessionsListed]
     await session.close()
 
 
@@ -238,13 +243,13 @@ async def test_opening_a_session_restores_its_board_cancelling_what_was_running(
     session, launcher = switching(store)
     events = await opened(session, OpenSession(session_id="auth"))
 
-    board = last_of(TasksChanged, events).tasks
+    board = last_of(Snapshot, events).tasks
     assert [t.status for t in board] == ["completed", "cancelled", "pending"]
     assert messages(Notice, events) == [
         'Resumed "auth rework" (last active Oct 16 18:02)',
         "1 task was interrupted and is cancelled.",
     ]
-    assert last_of(SessionOpened, events).session == SessionSummary(
+    assert last_of(Snapshot, events).session == SessionSummary(
         id="auth",
         name="auth rework",
         last_active=YESTERDAY,
@@ -254,6 +259,20 @@ async def test_opening_a_session_restores_its_board_cancelling_what_was_running(
     assert launcher.launches == []  # Pending tasks wait to be run.
     assert store.locked == {"auth"}
     assert store.last.id == "auth" and store.last.tasks == board
+    await session.close()
+
+
+async def test_opening_a_session_publishes_its_snapshot_then_the_resumed_notes() -> None:
+    session, _ = switching(store_with(saved("auth", state("1", "running"))))
+    events = await events_until(session, of_type(Snapshot))  # The one after the Welcome.
+    events = await opened(session, OpenSession(session_id="auth"))
+    assert [type(e) for e in events] == [
+        Snapshot,
+        Notice,
+        Notice,
+        CommandAccepted,
+        SessionsListed,  # Listed for ListSessions, which marks the end.
+    ]
     await session.close()
 
 
@@ -278,7 +297,7 @@ async def test_an_opened_session_has_its_saved_settings() -> None:
     settings = Settings(model="opus", tool_access="full")
     session, _ = switching(store_with(saved("auth", settings=settings)))
     events = await opened(session, OpenSession(session_id="auth"))
-    assert last_of(SettingsChanged, events).settings == settings
+    assert last_of(Snapshot, events).settings == settings
     assert session.settings == settings
     await session.close()
 
@@ -299,7 +318,7 @@ async def test_a_session_saved_without_reviews_opens_with_none() -> None:
     assert store.last.reviews == paused
     events = await opened(session, OpenSession(session_id="auth"))
     assert store.last.reviews == LaneSnapshot(planner=PlannerSnapshot())
-    assert last_of(ReviewStatus, events) == ReviewStatus(paused=False, open_batches=0)
+    assert last_of(Snapshot, events).review == ReviewStatus(paused=False, open_batches=0)
     await session.close()
 
 
@@ -370,13 +389,13 @@ async def test_a_session_saved_again_before_it_is_locked_opens_as_saved_last() -
     session, _ = switching(store)
     events = await opened(session, OpenSession(session_id="auth"))
 
-    board = last_of(TasksChanged, events).tasks
+    board = last_of(Snapshot, events).tasks
     assert [t.status for t in board] == ["completed", "cancelled"]
     assert messages(Notice, events) == [
         'Resumed "auth" (last active Oct 15 09:00)',
         "1 task was interrupted and is cancelled.",
     ]
-    assert last_of(SessionOpened, events).session.last_active == EARLIER
+    assert last_of(Snapshot, events).session.last_active == EARLIER
     assert store.last.tasks == board
     await session.close()
 
@@ -467,8 +486,8 @@ async def test_a_new_session_starts_empty_with_its_name() -> None:
     await send(session, AddTask(task=TASK))
     events = await opened(session, NewSession(name="auth rework"))
 
-    assert last_of(TasksChanged, events).tasks == ()
-    assert last_of(SessionOpened, events).session == SessionSummary(
+    assert last_of(Snapshot, events).tasks == ()
+    assert last_of(Snapshot, events).session == SessionSummary(
         id="session-2", name="auth rework", current=True
     )
     assert store.released == ["session-1"]
@@ -483,7 +502,7 @@ async def test_a_new_session_without_a_name_is_named_by_its_start() -> None:
     session, _ = switching(FakeStore())
     for name, named in ((None, "Oct 17 14:31"), ("  ", "Oct 17 14:32")):
         events = await opened(session, NewSession(name=name))
-        assert last_of(SessionOpened, events).session.name == named
+        assert last_of(Snapshot, events).session.name == named
     await session.close()
 
 
@@ -584,8 +603,8 @@ async def test_a_reopened_session_has_spent_what_it_showed_live() -> None:
     spent = await spent_on_a_removed_task(session, launcher)
     assert spent == Usage(input_tokens=400, output_tokens=100, cost_usd=1.4, turns=4)
 
-    fresh = last_of(SessionOpened, await opened(session, NewSession()))
-    reopened = last_of(SessionOpened, await opened(session, OpenSession(session_id="session-1")))
+    fresh = last_of(Snapshot, await opened(session, NewSession()))
+    reopened = last_of(Snapshot, await opened(session, OpenSession(session_id="session-1")))
     assert (fresh.session.usage, reopened.session.usage) == (Usage(), spent)
     assert store.last.spent == spent
     await session.close()
@@ -665,7 +684,7 @@ async def test_tasks_orbit_added_before_a_session_was_picked_carry_over_into_it(
     await events_until(session, agent_exited("startup-check"))
     events = await opened(session, OpenSession(session_id="auth"))
 
-    board = last_of(TasksChanged, events).tasks
+    board = last_of(Snapshot, events).tasks
     assert [(t.id, t.status) for t in board] == [("4", "completed"), ("5", "draft")]
     assert store.deleted == ["session-1"]
     assert store.released == []
@@ -677,7 +696,7 @@ async def test_tasks_orbit_added_carry_over_into_a_new_session_picked() -> None:
     session = failing_startup(store)
     await events_until(session, agent_exited("startup-check"))
     events = await opened(session, NewSession(name="fresh"))
-    assert [t.status for t in last_of(TasksChanged, events).tasks] == ["draft"]
+    assert [t.status for t in last_of(Snapshot, events).tasks] == ["draft"]
     assert store.last.id == "session-2" and store.deleted == ["session-1"]
     await session.close()
 
@@ -699,7 +718,7 @@ async def test_once_the_user_works_in_the_session_its_tasks_stay_with_it() -> No
     await events_until(session, agent_exited("startup-check"))
     await send(session, AddTask(task=TASK))
     events = await opened(session, OpenSession(session_id="auth"))
-    assert last_of(TasksChanged, events).tasks == ()
+    assert last_of(Snapshot, events).tasks == ()
     assert store.deleted == [] and store.released == ["session-1"]
     await session.close()
 
@@ -711,7 +730,7 @@ async def test_a_switch_whose_old_lock_cant_be_released_still_opens_the_session(
     await events_until(session, of_type(TasksChanged))
     store.release_failure = "Couldn't unlock the session: read-only"
     events = await opened(session, OpenSession(session_id="auth"))
-    assert last_of(SessionOpened, events).session.id == "auth"
+    assert last_of(Snapshot, events).session.id == "auth"
     assert messages(ErrorOccurred, events) == ["Couldn't unlock the session: read-only"]
     await session.close()
 
@@ -721,9 +740,9 @@ async def test_a_session_without_agents_opens_its_board_and_settings() -> None:
     store = store_with(saved("auth", state("1", "pending"), settings=settings))
     session = AgentSession(store=store, clock=Ticks())
     events = await opened(session, OpenSession(session_id="auth"))
-    assert [t.id for t in last_of(TasksChanged, events).tasks] == ["1"]
+    assert [t.id for t in last_of(Snapshot, events).tasks] == ["1"]
     assert session.settings == settings
-    assert board(await opened(session, NewSession())) == ()
+    assert last_of(Snapshot, await opened(session, NewSession())).tasks == ()
     await session.close()
 
 

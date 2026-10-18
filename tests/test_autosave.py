@@ -13,7 +13,7 @@ from orbit.protocol import (
     Event,
     SendMessage,
     Settings,
-    SettingsChanged,
+    Snapshot,
     TasksChanged,
     TaskSpec,
     TurnEndReason,
@@ -55,7 +55,7 @@ def errors(events: list[Event]) -> list[str]:
 async def test_a_session_nobody_used_leaves_nothing_saved() -> None:
     store = FakeStore()
     session, _, _ = session_for(store=store)
-    await events_until(session, of_type(SettingsChanged))
+    await events_until(session, of_type(Snapshot))
     await send(session, UpdateSettings(settings=Settings(model="opus")))
     await session.close()
     assert store.saved == [] and store.locked == set() and store.released == []
@@ -173,6 +173,6 @@ async def test_without_reviews_the_saved_super_count_is_left_alone() -> None:
     store = FakeStore(count=3)
     session, _, _ = session_for(store=store)
     await send(session, AddTask(task=TASK))
-    await events_until(session, of_type(SettingsChanged))
+    await events_until(session, of_type(TasksChanged))
     await session.close()
     assert store.counts == [] and store.last.reviews is None

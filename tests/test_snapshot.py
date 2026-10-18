@@ -21,7 +21,6 @@ from orbit.protocol import (
     ReviewStatus,
     RunningAgent,
     RunTasks,
-    SessionOpened,
     Settings,
     Snapshot,
     StepState,
@@ -169,15 +168,13 @@ async def test_a_new_session_is_snapshot_empty_after_the_switch() -> None:
     session, _, _ = session_for()
     await send(session, AddTask(task=TASKS[0]))
     await send(session, NewSession(name="other"))
-    events = await events_until(session, of_type(SessionOpened))
-    events += await events_until(session, of_type(Snapshot))
+    await events_until(session, of_type(Snapshot))  # The one after the Welcome.
+    events = await events_until(session, of_type(Snapshot))
     await session.close()
 
-    snapshot = events[-1]
-    assert isinstance(snapshot, Snapshot)
+    snapshot = last_of(Snapshot, events)
     assert snapshot.tasks == ()
-    assert snapshot.session == last_of(SessionOpened, events).session
-    assert snapshot.session.name == "other"
+    assert snapshot.session.name == "other" and snapshot.session.current
 
 
 async def test_while_the_startup_check_runs_it_is_a_running_agent_with_the_panel() -> None:

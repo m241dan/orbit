@@ -15,7 +15,6 @@ from orbit.protocol import (
     NewSession,
     OpenSession,
     RenameSession,
-    SessionOpened,
     SessionsListed,
     SessionSummary,
     Usage,
@@ -26,7 +25,7 @@ from orbit.tui.tasks import TaskList
 from orbit.tui.transcript import Transcript
 from orbit.tui.widgets import ConfirmScreen
 from tests.test_session_switch import saved, store_with
-from tests.test_tui import FakeSession, entries, feed_events
+from tests.test_tui import FakeSession, entries, feed_events, opened
 
 ACTIVE = datetime(2026, 10, 16, 18, 2, tzinfo=UTC)
 OLD = SessionSummary(id="old", name="auth rework", last_active=ACTIVE)
@@ -307,11 +306,11 @@ async def test_a_refusal_shows_as_an_error_once_the_modal_closed() -> None:
         assert entries(app) == [("Tasks are running.", "error")]
 
 
-async def test_a_session_opened_adds_nothing_to_the_transcript() -> None:
+async def test_a_snapshot_of_a_session_opened_adds_nothing_to_the_transcript() -> None:
     session = FakeSession()
     app = OrbitApp(session)
     async with app.run_test() as pilot:
-        await feed_events(session, pilot, SessionOpened(session=OLD))
+        await feed_events(session, pilot, opened(OLD))
         assert entries(app) == []
 
 
@@ -546,7 +545,7 @@ async def test_a_session_opened_names_the_conversation_through_tabs_and_hidden_t
     session = FakeSession()
     app = OrbitApp(session)
     async with app.run_test(size=(120, 30)) as pilot:
-        await feed_events(session, pilot, SessionOpened(session=OLD))
+        await feed_events(session, pilot, opened(OLD))
         assert conversation_title(app) == "Conversation — auth rework"
         await pilot.press("tab", "tab", "t")  # coder
         assert conversation_title(app) == "Conversation · coder · thinking hidden — auth rework"
@@ -557,9 +556,7 @@ async def test_a_refreshed_listing_with_the_list_closed_renames_the_conversation
     app = OrbitApp(session)
     async with app.run_test() as pilot:
         spent = Usage(input_tokens=2_000, cost_usd=2.0)
-        await feed_events(
-            session, pilot, SessionOpened(session=OLD.model_copy(update={"usage": spent}))
-        )
+        await feed_events(session, pilot, opened(OLD.model_copy(update={"usage": spent})))
         renamed = OLD.model_copy(update={"name": "flags", "current": True})
         await feed_events(session, pilot, SessionsListed(sessions=(renamed,), reason="refreshed"))
         assert not isinstance(app.screen, SessionsScreen)
@@ -571,7 +568,7 @@ async def test_a_listing_shown_in_the_list_renames_the_conversation() -> None:
     session = FakeSession()
     app = OrbitApp(session)
     async with app.run_test() as pilot:
-        await feed_events(session, pilot, SessionOpened(session=CURRENT), ASKED)
+        await feed_events(session, pilot, opened(CURRENT), ASKED)
         renamed = CURRENT.model_copy(update={"name": "flags"})
         await feed_events(session, pilot, SessionsListed(sessions=(renamed,), reason="refreshed"))
         assert isinstance(app.screen, SessionsScreen)
@@ -582,6 +579,6 @@ async def test_a_listing_without_a_current_session_keeps_the_conversation_title(
     session = FakeSession()
     app = OrbitApp(session)
     async with app.run_test() as pilot:
-        await feed_events(session, pilot, SessionOpened(session=OLD))
+        await feed_events(session, pilot, opened(OLD))
         await feed_events(session, pilot, SessionsListed(sessions=(OLD,), reason="refreshed"))
         assert conversation_title(app) == "Conversation — auth rework"

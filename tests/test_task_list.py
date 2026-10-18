@@ -18,7 +18,6 @@ from orbit.protocol import (
     OpenSession,
     RemoveTask,
     RunTasks,
-    SessionOpened,
     SessionsListed,
     SessionSummary,
     Settings,
@@ -37,7 +36,7 @@ from orbit.tui.tasks import TaskEditorScreen, TaskList
 from orbit.tui.transcript import Transcript
 from orbit.tui.view import spinner_frame, task_label, task_numbers, usage_label
 from orbit.tui.widgets import ChatPrompt, PickerScreen, PromptBox, PromptInput
-from tests.test_tui import FakeSession, picker, selected, show_settings
+from tests.test_tui import FakeSession, opened, picker, selected, show_settings
 
 
 def rows(app: OrbitApp) -> list[str]:
@@ -1249,8 +1248,8 @@ async def test_opening_a_session_lets_go_of_the_list() -> None:
         await feed(session, pilot, many(30))
         await open_task_list(pilot)
         await pilot.press("escape")
-        opened = SessionOpened(session=SessionSummary(id="s", name="s"))
-        await feed(session, pilot, opened, many(30, running=25))
+        snapshot = opened(SessionSummary(id="s", name="s"))
+        await feed(session, pilot, snapshot, many(30, running=25))
         assert task_list.following
         assert title(task_list) == "Task list"
         assert in_view(task_list, 25)
@@ -1263,8 +1262,8 @@ async def test_opening_a_session_while_the_list_is_active_leaves_list_mode_and_l
         task_list = app.query_one(TaskList)
         await feed(session, pilot, many(30))
         await open_task_list(pilot)
-        opened = SessionOpened(session=SessionSummary(id="s", name="s"))
-        await feed(session, pilot, opened, many(30, running=25))
+        snapshot = opened(SessionSummary(id="s", name="s"))
+        await feed(session, pilot, snapshot, many(30, running=25))
         assert app.focused is None
         assert task_list.following
         assert title(task_list) == "Task list"
@@ -1282,7 +1281,7 @@ async def test_switching_session_through_ctrl_p_while_the_list_is_active_leaves_
         other = SessionSummary(id="old", name="old")
         await feed(session, pilot, SessionsListed(sessions=(other,), reason="asked"))
         await pilot.press("j", "enter")
-        await feed(session, pilot, SessionOpened(session=other), many(30, running=25))
+        await feed(session, pilot, opened(other), many(30, running=25))
         assert session.commands[-1] == OpenSession(session_id="old")
         assert not isinstance(app.screen, SessionsScreen)
         assert app.focused is None
@@ -1299,8 +1298,7 @@ async def test_opening_a_session_replaces_the_total_with_its_saved_spend() -> No
         spent = Usage(input_tokens=1_000, cost_usd=0.84)
         await feed(session, pilot, TurnFinished(turn_id="a", reason="completed", usage=spent))
         saved = Usage(input_tokens=2_000, cost_usd=2.0)
-        opened = SessionOpened(session=SessionSummary(id="b", name="b", usage=saved))
-        await feed(session, pilot, opened)
+        await feed(session, pilot, opened(SessionSummary(id="b", name="b", usage=saved)))
         assert task_list.border_subtitle == "session: 2k tok · $2.00"
 
 
@@ -1313,7 +1311,7 @@ async def test_a_turn_after_opening_a_session_adds_to_its_total() -> None:
             session,
             pilot,
             TurnFinished(turn_id="a", reason="completed", usage=Usage(cost_usd=0.84)),
-            SessionOpened(session=SessionSummary(id="b", name="b", usage=Usage(cost_usd=2.0))),
+            opened(SessionSummary(id="b", name="b", usage=Usage(cost_usd=2.0))),
             TurnFinished(turn_id="b", reason="completed", usage=Usage(cost_usd=0.5)),
         )
         assert task_list.border_subtitle == "session: 0 tok · $2.50"
@@ -1349,6 +1347,6 @@ async def test_opening_a_new_session_clears_the_total() -> None:
         task_list = app.query_one(TaskList)
         spent = Usage(input_tokens=1_000, cost_usd=0.84)
         await feed(session, pilot, TurnFinished(turn_id="a", reason="completed", usage=spent))
-        await feed(session, pilot, SessionOpened(session=SessionSummary(id="n", name="n")))
+        await feed(session, pilot, opened(SessionSummary(id="n", name="n")))
         assert not task_list.border_subtitle
         assert task_list.session_usage == Usage()

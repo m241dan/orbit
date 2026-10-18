@@ -17,8 +17,8 @@ from orbit.protocol import (
     NewSession,
     Notice,
     SendMessage,
-    SessionOpened,
     SessionsListed,
+    Snapshot,
     TasksChanged,
     TaskSpec,
     UsageChanged,
@@ -96,9 +96,9 @@ async def envelopes_until(session: AgentSession, kind: type) -> list[EventEnvelo
 
 async def test_events_are_numbered_from_one_across_a_session_switch() -> None:
     session = saved_session()
-    before = await envelopes_until(session, SessionOpened)
+    before = await envelopes_until(session, Snapshot)
     await send(session, NewSession(name="other"))
-    after = await envelopes_until(session, SessionOpened)
+    after = await envelopes_until(session, Snapshot)
     await session.close()
 
     seqs = [envelope.seq for envelope in before + after]
@@ -109,7 +109,7 @@ async def test_events_are_numbered_from_one_across_a_session_switch() -> None:
 
 async def test_events_carry_the_open_session_unless_they_belong_to_none() -> None:
     session = saved_session()
-    await envelopes_until(session, SessionOpened)
+    await envelopes_until(session, Snapshot)
     await send(session, AddTask(task=TaskSpec(prompt="Add a flag.")))
     tasks = await envelopes_until(session, TasksChanged)
     await send(session, ListSessions())
@@ -134,8 +134,8 @@ async def test_an_event_keeps_the_session_it_was_published_in_when_read_after_a_
     session = saved_session()
     await send(session, AddTask(task=TaskSpec(prompt="Add a flag.")))
     await send(session, NewSession(name="other"))
-    await envelopes_until(session, SessionOpened)  # Session-1's, announced at the Welcome.
-    after = await envelopes_until(session, SessionOpened)
+    await envelopes_until(session, Snapshot)  # Session-1's, sent after the Welcome.
+    after = await envelopes_until(session, Snapshot)
     await session.close()
 
     tasks = [e for e in after if isinstance(e.payload, TasksChanged)]

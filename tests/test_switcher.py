@@ -24,12 +24,9 @@ from orbit.protocol import (
     Event,
     NewSession,
     OpenSession,
-    SessionOpened,
     SessionSummary,
     Settings,
-    SettingsChanged,
     Snapshot,
-    TasksChanged,
     TaskSpec,
     Usage,
 )
@@ -65,9 +62,6 @@ class Held:
     def set(self, settings: Settings) -> None:
         self.settings = settings
 
-    def changed(self) -> SettingsChanged:
-        return SettingsChanged(settings=self.settings)
-
 
 async def nothing() -> None:
     return None
@@ -83,7 +77,7 @@ def switcher_for(
     tasks = Tasks(TaskBoard(), events.put)
     seat = PlannerSeat(None, tasks, events, SeatHooks(nothing, keeper.use, tuple))
     parts = SwitchParts(keeper, tasks, seat, None, None, lambda: held.running, held.snapshot)
-    access = SettingsAccess(lambda: held.settings, held.set, held.changed, held.settings, pinned)
+    access = SettingsAccess(lambda: held.settings, held.set, held.settings, pinned)
     return SessionSwitcher(parts, access, events, picking), events, tasks
 
 
@@ -109,12 +103,12 @@ async def test_switching_is_refused_while_tasks_run() -> None:
     assert drained(events) == []
 
 
-async def test_a_switch_publishes_the_tasks_settings_and_session_then_a_snapshot() -> None:
+async def test_a_switch_publishes_only_a_snapshot() -> None:
     held = Held(Settings())
     switcher, events, _ = switcher_for(FakeStore(), held)
     await switcher.handle(NewSession(name="other"))
     kinds = [type(e) for e in drained(events)]
-    assert kinds == [TasksChanged, SettingsChanged, SessionOpened, Snapshot]
+    assert kinds == [Snapshot]
     assert held.snapshots == [None]
 
 
@@ -127,27 +121,23 @@ async def test_an_opened_sessions_snapshot_is_as_it_was_last_active() -> None:
     assert held.snapshots == [EARLIER]
 
 
-async def test_announcing_publishes_the_session_open_as_current() -> None:
-    switcher, events, tasks = switcher_for(FakeStore(), Held(Settings()))
+async def test_the_summary_is_of_the_session_open_as_current() -> None:
+    switcher, _, tasks = switcher_for(FakeStore(), Held(Settings()))
     await tasks.change(lambda board: board.add(TaskSpec(prompt="Fix it.")))
-    drained(events)
     switcher.spent = Usage(cost_usd=2.0)
-    await switcher.announce()
-    [announced] = drained(events)
-    assert isinstance(announced, SessionOpened)
-    summary = announced.session
+    summary = switcher.summary()
     assert (summary.id, summary.current, summary.last_active) == ("session-1", True, None)
     assert summary.counts == {"pending": 1} and summary.usage == Usage(cost_usd=2.0)
 
 
-async def test_an_opened_session_is_announced_as_it_was_last_active() -> None:
+async def test_an_opened_sessions_summary_has_what_it_spent() -> None:
     store = FakeStore()
     store.saved = [saved(spent=Usage(cost_usd=1.5))]
-    switcher, events, _ = switcher_for(store, Held(Settings()))
+    switcher, _, _ = switcher_for(store, Held(Settings()))
     await switcher.handle(OpenSession(session_id="auth"))
-    switched = [e for e in drained(events) if isinstance(e, SessionOpened)]
-    await switcher.announce(EARLIER)
-    assert switched == drained(events)
+    summary = switcher.summary(EARLIER)
+    assert (summary.id, summary.last_active) == ("auth", EARLIER)
+    assert summary.usage == Usage(cost_usd=1.5)
 
 
 async def test_a_new_session_keeps_the_settings_and_has_spent_nothing() -> None:

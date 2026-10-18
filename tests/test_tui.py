@@ -31,8 +31,10 @@ from orbit.protocol import (
     Hello,
     Notice,
     SendMessage,
+    SessionSummary,
     Settings,
     SettingsChanged,
+    Snapshot,
     StepState,
     TaskMerged,
     TasksChanged,
@@ -833,6 +835,21 @@ async def feed_events(session: FakeSession, pilot: Pilot[None], *events: Event) 
 
 PINNED = ["planner", "coder", "reviewer", "super-reviewer", "configurator"]
 STRIP = ["All", *PINNED]
+
+
+def opened(summary: SessionSummary) -> Snapshot:
+    """A snapshot of ``summary``'s session opened with nothing in it, as a switch sends."""
+    return Snapshot(
+        session=summary,
+        settings=Settings(),
+        model_choices=(),
+        busy={},
+        tasks=(),
+        steps=(),
+        review=None,
+        proposals=(),
+        agents=(),
+    )
 
 
 def tab_strip(app: OrbitApp) -> list[str]:

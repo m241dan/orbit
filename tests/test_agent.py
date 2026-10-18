@@ -34,7 +34,6 @@ from orbit.protocol import (
     Event,
     Notice,
     SendMessage,
-    SessionOpened,
     Settings,
     SettingsChanged,
     Snapshot,
@@ -110,8 +109,6 @@ async def test_a_prompt_without_a_planner_is_refused() -> None:
     await send(session, SendMessage(agent=PLANNER, text="hello"))
     stream = payloads(session)
     assert isinstance(await anext(stream), Snapshot)
-    assert isinstance(await anext(stream), SettingsChanged)
-    assert isinstance(await anext(stream), SessionOpened)
     assert await anext(stream) == PLANNER_IDLE
     assert await anext(stream) == refused(
         NOT_CONFIGURED, "Planning needs agents and a planner role."
@@ -145,15 +142,14 @@ async def test_cancel_without_a_turn_is_a_noop() -> None:
     assert any(isinstance(e, TurnFinished) and e.reason == "completed" for e in events)
 
 
-async def test_session_announces_initial_settings() -> None:
+async def test_session_snapshots_its_initial_settings() -> None:
     settings = Settings(model="opus", tool_access="off")
     session = AgentSession(settings, model_choices=("opus", "sonnet"))
     assert session.settings == settings
-    stream = payloads(session)
-    assert isinstance(await anext(stream), Snapshot)
-    assert await anext(stream) == SettingsChanged(
-        settings=settings, model_choices=("opus", "sonnet")
-    )
+    snapshot = await anext(payloads(session))
+    assert isinstance(snapshot, Snapshot)
+    assert (snapshot.settings, snapshot.model_choices) == (settings, ("opus", "sonnet"))
+    assert nothing_queued(session)
 
 
 async def test_the_planner_takes_the_model_from_updated_settings() -> None:
@@ -161,7 +157,6 @@ async def test_the_planner_takes_the_model_from_updated_settings() -> None:
     launcher.planner_turns = [chats, chats]
     stream = payloads(session)
     assert isinstance(await anext(stream), Snapshot)
-    assert await anext(stream) == SettingsChanged(settings=Settings())
 
     await send(session, SendMessage(agent=PLANNER, text="one"))
     await collect_run(session)
@@ -181,8 +176,6 @@ async def test_add_and_edit_tasks_publish_the_board() -> None:
     session = AgentSession()
     stream = payloads(session)
     assert isinstance(await anext(stream), Snapshot)
-    assert isinstance(await anext(stream), SettingsChanged)
-    assert isinstance(await anext(stream), SessionOpened)
 
     await send(session, AddTask(task=TaskSpec(prompt="one")))
     [added] = (await anext(stream)).tasks  # type: ignore[union-attr]
@@ -233,24 +226,22 @@ FAILING_STEP = VerificationStep(
 )
 
 
-async def test_session_announces_verification_steps() -> None:
+async def test_session_snapshots_its_verification_steps() -> None:
     session = AgentSession(verification=verified((FAILING_STEP,)))
     assert session.verification == verified((FAILING_STEP,))
-    stream = payloads(session)
-    assert isinstance(await anext(stream), Snapshot)
-    assert isinstance(await anext(stream), SettingsChanged)
-    assert await anext(stream) == VerificationChanged(steps=(StepState(name="always fails"),))
+    snapshot = await anext(payloads(session))
+    assert isinstance(snapshot, Snapshot)
+    assert snapshot.steps == (StepState(name="always fails"),)
+    assert nothing_queued(session)
 
 
 async def test_verification_without_steps_notes_that_nothing_is_verified() -> None:
     session = AgentSession(verification=verified(()))
     assert session.verification == verified(())
     stream = payloads(session)
-    assert isinstance(await anext(stream), Snapshot)
-    assert isinstance(await anext(stream), SettingsChanged)
-    # No steps to announce, just the note.
+    snapshot = await anext(stream)
+    assert isinstance(snapshot, Snapshot) and snapshot.steps == ()
     assert await anext(stream) == Notice(message=NO_STEPS_NOTE)
-    assert isinstance(await anext(stream), SessionOpened)
     assert nothing_queued(session)
 
 
@@ -258,9 +249,7 @@ async def test_session_notes_its_workspace_at_startup() -> None:
     session = AgentSession(workspace="/code/project")
     stream = payloads(session)
     assert isinstance(await anext(stream), Snapshot)
-    assert isinstance(await anext(stream), SettingsChanged)
     assert await anext(stream) == Notice(message="Workspace: /code/project")
-    assert isinstance(await anext(stream), SessionOpened)
     assert nothing_queued(session)
 
 

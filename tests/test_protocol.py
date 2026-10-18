@@ -41,7 +41,6 @@ from orbit.protocol import (
     RunningAgent,
     RunTasks,
     SendMessage,
-    SessionOpened,
     SessionsListed,
     SessionSummary,
     Settings,
@@ -131,8 +130,7 @@ def test_session_commands_and_events_round_trip() -> None:
         assert command_adapter.validate_json(command.model_dump_json()) == command
     summary = SessionSummary(id="s1", name="auth", counts={"pending": 2}, current=True)
     listed = SessionsListed(sessions=(summary,), reason="asked")
-    for event in (listed, SessionOpened(session=summary)):
-        assert event_adapter.validate_json(event.model_dump_json()) == event
+    assert event_adapter.validate_json(listed.model_dump_json()) == listed
 
 
 def test_reset_conversation_command_and_event_round_trip() -> None:

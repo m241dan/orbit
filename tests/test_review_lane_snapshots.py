@@ -12,6 +12,7 @@ from orbit.protocol import (
     OpenSession,
     ReviewStatus,
     RunTasks,
+    Snapshot,
     TaskOrigin,
     TasksChanged,
     TaskSpec,
@@ -70,7 +71,7 @@ async def test_an_opened_session_has_the_reviews_it_was_saved_with() -> None:
     batch = snapshot.planner.batches["batch-1"].model_copy(update={"filling": False})
     planner = snapshot.planner.model_copy(update={"batches": {"batch-1": batch}})
     assert reviews_of(store) == snapshot.model_copy(update={"planner": planner})
-    assert last_of(ReviewStatus, events) == ReviewStatus(paused=False, open_batches=1)
+    assert last_of(Snapshot, events).review == ReviewStatus(paused=False, open_batches=1)
     assert launcher.launches == []
     await crashing.close()
     await session.close()
@@ -117,7 +118,7 @@ async def reopened(
 
 
 def statuses(events: list[Event]) -> list[TaskStatus]:
-    return [t.status for t in last_of(TasksChanged, events).tasks]
+    return [t.status for t in last_of(Snapshot, events).tasks]
 
 
 async def test_an_interrupted_review_that_suggested_nothing_closes_its_batch() -> None:
@@ -140,7 +141,7 @@ async def test_an_interrupted_review_whose_batch_closed_is_not_run_again() -> No
 async def test_an_interrupted_reviews_batch_waits_for_its_work_without_running_it() -> None:
     session, launcher, store, events = await reopened(crashed("pending"), reviewing("3"))
     assert reviews_of(store).planner.batches["batch-1"].filling is False
-    assert last_of(ReviewStatus, events) == ReviewStatus(paused=False, open_batches=1)
+    assert last_of(Snapshot, events).review == ReviewStatus(paused=False, open_batches=1)
     await asyncio.sleep(0.05)
     assert launcher.launches == []
     assert statuses(events) == ["completed", "cancelled", "pending"]
@@ -167,10 +168,11 @@ async def test_interrupted_tasks_that_are_not_open_reviews_change_nothing() -> N
     await session.close()
 
 
-async def test_opening_publishes_the_saved_review_status() -> None:
+async def test_opening_snapshots_the_saved_review_status_without_announcing_it() -> None:
     paused = reviewing().model_copy(update={"planner": PlannerSnapshot(paused=True)})
     session, _, store, events = await reopened(crashed()[:1], paused)
-    assert last_of(ReviewStatus, events) == ReviewStatus(paused=True, open_batches=0)
+    assert last_of(Snapshot, events).review == ReviewStatus(paused=True, open_batches=0)
+    assert not [e for e in events if isinstance(e, ReviewStatus)]
     assert reviews_of(store) == paused
     await session.close()
 
