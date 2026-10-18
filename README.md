@@ -754,7 +754,9 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     through the store, each under its lock; `SessionSwitcher` (in `switcher`) switches the
     session between saved ones: it lists, opens, renames and deletes them through the keeper,
     opens another or a new one in place of the one open, and holds what the session's agents have
-    spent; `ReviewCount` (in `review_count`) keeps the repository's super review count apart from
+    spent; `WorkCommands` (in `work_commands`) handles the other commands, the prompts, tasks,
+    board and agents' work, refusing those that name no such agent, lane or trigger;
+    `ReviewCount` (in `review_count`) keeps the repository's super review count apart from
     any one session; `SessionSettings` (in `settings`) holds the open session's settings, at
     first those given at startup (a session opened brings its saved ones, but for the pinned
     ones, which keep the given), and the models they may choose from; `outcome` and

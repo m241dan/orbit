@@ -1,0 +1,239 @@
+"""The work commands: prompts to the planner, tasks and the board, and the agents' work."""
+
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
+from typing import assert_never
+
+from orbit.agent.application.desk import AgentDesk
+from orbit.agent.application.outbox import EventSink
+from orbit.agent.application.planner_seat import PlannerSeat
+from orbit.agent.application.proposals import FrontendReview
+from orbit.agent.application.review_lane import ReviewLane
+from orbit.agent.application.settings import SessionSettings
+from orbit.agent.application.startup_check import AGENT_ID as STARTUP_AGENT
+from orbit.agent.application.startup_check import StartupCheck
+from orbit.agent.application.tasks import Tasks
+from orbit.agent.application.work_turns import WorkTurns
+from orbit.agent.domain.agents import Agent
+from orbit.agent.domain.catalog import CONVERSATIONAL_ROLES, LANES, TRIGGER_NAMES
+from orbit.agent.domain.refusals import Refused, unknown
+from orbit.agent.domain.roles import REVIEW_ROLES
+from orbit.protocol import (
+    CONFIGURE_CHECKS,
+    INVALID,
+    NOT_CONFIGURED,
+    PLANNER,
+    SUPER_REVIEW,
+    UNKNOWN,
+    WORK_LANE,
+    AcceptTask,
+    AddTask,
+    CancelAgent,
+    CancelTurn,
+    DecideProposal,
+    EditTask,
+    FireTrigger,
+    RemoveTask,
+    ResetConversation,
+    RunTasks,
+    SendMessage,
+    TaskSpec,
+    UpdateSettings,
+)
+
+WorkCommand = (
+    SendMessage
+    | CancelTurn
+    | UpdateSettings
+    | ResetConversation
+    | AddTask
+    | RunTasks
+    | EditTask
+    | AcceptTask
+    | RemoveTask
+    | FireTrigger
+    | CancelAgent
+    | DecideProposal
+)
+
+
+@dataclass(frozen=True)
+class CommandParts:
+    """What the work commands act on: the session's ``settings``, the ``events`` it publishes
+    into, its ``tasks``, its planner ``seat``, the work lane's ``turns``, its review ``lane``,
+    if any, the ``proposals`` waiting for the user, the ``desk`` running its agents and the
+    ``startup`` check, if any; ``save`` saves the session and ``reviews_changed`` saves its
+    review state."""
+
+    settings: SessionSettings
+    events: EventSink
+    tasks: Tasks
+    seat: PlannerSeat
+    turns: WorkTurns
+    lane: ReviewLane | None
+    proposals: FrontendReview
+    desk: AgentDesk | None
+    startup: StartupCheck | None
+    save: Callable[[], Awaitable[None]]
+    reviews_changed: Callable[[], Awaitable[None]]
+
+
+class WorkCommands:
+    """Handles the work commands on the session held in ``parts``."""
+
+    def __init__(self, parts: CommandParts) -> None:
+        self._parts = parts
+
+    async def handle(self, command: WorkCommand) -> None:
+        match command:
+            case SendMessage() | CancelTurn() | UpdateSettings():
+                await self._handle_prompts(command)
+            case AddTask() | RunTasks():
+                await self._handle_tasks(command)
+            case EditTask() | AcceptTask() | RemoveTask():
+                await self._handle_board(command)
+            case FireTrigger() | CancelAgent() | DecideProposal() | ResetConversation():
+                await self._handle_agents(command)
+            case _:
+                assert_never(command)
+
+    async def _handle_prompts(self, command: SendMessage | CancelTurn | UpdateSettings) -> None:
+        match command:
+            case SendMessage():
+                await self._send_message(command)
+            case CancelTurn(lane=lane):
+                await self._cancel_turn(lane)
+            case UpdateSettings(settings=settings):
+                self._parts.settings.update(settings)
+                await self._parts.events.put(self._parts.settings.changed())
+                await self._parts.save()
+            case _:
+                assert_never(command)
+
+    async def _send_message(self, command: SendMessage) -> None:
+        """Start a planner turn with the message's text; refused for any other agent."""
+        if command.agent not in CONVERSATIONAL_ROLES:
+            problem = f"Agent {command.agent!r} can't be messaged"
+            raise unknown(problem, "the agents you can message are", CONVERSATIONAL_ROLES)
+        await self._parts.seat.submit(command.text, self._parts.settings.current)
+
+    async def _handle_tasks(self, command: AddTask | RunTasks) -> None:
+        match command:
+            case AddTask(task=task):
+                await self._parts.tasks.change(lambda board: board.add(task))
+            case RunTasks():
+                await self._parts.turns.run_tasks()
+            case _:
+                assert_never(command)
+
+    async def _handle_board(self, command: EditTask | AcceptTask | RemoveTask) -> None:
+        match command:
+            case EditTask(task_id=task_id, task=task):
+                await self._edit(task_id, task)
+            case AcceptTask(task_id=task_id):
+                await self._parts.tasks.change(lambda board: board.accept(task_id))
+            case RemoveTask(task_id=task_id):
+                await self._remove(task_id)
+            case _:
+                assert_never(command)
+
+    async def _edit(self, task_id: str, task: TaskSpec) -> None:
+        """Edit a task, unless it's a review orbit queued: its batch is spent, so it couldn't
+        run again. An edited task in a review batch has to finish again before the batch does."""
+        lane = self._parts.lane
+        if lane is not None and lane.queued_by_orbit(task_id):
+            raise Refused(INVALID, "Reviews can't be edited; remove it instead.")
+        await self._parts.tasks.change(lambda board: board.edit(task_id, task))
+        if lane is not None:
+            lane.edited(task_id)
+            await self._parts.reviews_changed()
+
+    async def _remove(self, task_id: str) -> None:
+        """Remove a task, and take it out of its review batch, if any."""
+        state = self._parts.tasks.board.find(task_id)
+        await self._parts.tasks.change(lambda board: board.remove(task_id))
+        if self._parts.lane is not None:
+            assert state is not None  # The board removed it, so it was there.
+            await self._parts.lane.removed(task_id, state)
+
+    async def _cancel_turn(self, lane: str) -> None:
+        """Stop the work in ``lane``, or say there's no such lane."""
+        if lane not in LANES:
+            raise unknown(f"No lane {lane!r}", "the lanes are", LANES)
+        if lane == WORK_LANE:
+            self._parts.turns.hold()
+        else:
+            self._parts.seat.cancel()
+
+    async def _handle_agents(
+        self, command: FireTrigger | CancelAgent | DecideProposal | ResetConversation
+    ) -> None:
+        match command:
+            case CancelAgent(agent_id=agent_id):
+                await self._cancel_agent(agent_id)
+            case DecideProposal():
+                await self._decide(command)
+            case FireTrigger():
+                await self._fire_trigger(command)
+            case ResetConversation():
+                await self._reset_conversation(command)
+            case _:
+                assert_never(command)
+
+    async def _reset_conversation(self, command: ResetConversation) -> None:
+        """Reset the planner's conversation; refused for any other agent."""
+        if command.agent not in CONVERSATIONAL_ROLES:
+            problem = f"Agent {command.agent!r} has no conversation to reset"
+            raise unknown(problem, "the agents with one are", CONVERSATIONAL_ROLES)
+        await self._parts.seat.reset()
+
+    async def _fire_trigger(self, command: FireTrigger) -> None:
+        """Run the built-in trigger ``command`` names; refused for any other name, or any input,
+        since the built-ins take none."""
+        if command.trigger not in TRIGGER_NAMES:
+            raise unknown(f"No trigger {command.trigger!r}", "the triggers are", TRIGGER_NAMES)
+        if command.input:
+            raise Refused(INVALID, f"The {command.trigger} trigger takes no input.")
+        configure = self._parts.turns.configure_checks
+        runs = {SUPER_REVIEW: self._super_review, CONFIGURE_CHECKS: configure}
+        await runs[command.trigger]()
+
+    async def _decide(self, command: DecideProposal) -> None:
+        if not self._parts.proposals.decide(command):
+            message = f"No proposal is waiting for task {command.task_id!r}."
+            raise Refused(UNKNOWN, message)
+
+    async def _cancel_agent(self, agent_id: str) -> None:
+        """Stop the startup check, or a reviewer's review, on its own; any other agent's work,
+        like ctrl+s."""
+        if self._cancel_startup(agent_id):
+            return
+        desk = self._parts.desk
+        agent = desk.find(agent_id) if desk else None
+        if agent is None:
+            raise Refused(UNKNOWN, f"No running agent {agent_id!r}.")
+        self._cancel_work_of(agent)
+
+    def _cancel_work_of(self, agent: Agent) -> None:
+        """Stop a reviewer's review, or the planner's turn, on its own; else the work lane's."""
+        if agent.role in REVIEW_ROLES and self._parts.lane is not None:
+            self._parts.lane.cancel(agent.task_id)
+        elif agent.role == PLANNER:
+            self._parts.seat.cancel()
+        else:
+            self._parts.turns.hold()
+
+    def _cancel_startup(self, agent_id: str) -> bool:
+        """Cancel the startup check if it's agent ``agent_id`` and still running; returns
+        whether it was."""
+        startup = self._parts.startup
+        if agent_id != STARTUP_AGENT or startup is None or not startup.running:
+            return False
+        startup.cancel()
+        return True
+
+    async def _super_review(self) -> None:
+        if self._parts.lane is None:
+            message = "Super reviews need reviews turned on, inside a git repository."
+            raise Refused(NOT_CONFIGURED, message)
+        await self._parts.lane.super_review()
