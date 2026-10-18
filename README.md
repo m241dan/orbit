@@ -45,6 +45,7 @@ uv run orbit chat --state-dir /tmp/orbit-state # keep saved sessions somewhere e
 uv run orbit db backup ~/orbit-backup.db       # back up the saved sessions (--force replaces)
 uv run orbit serve                             # run the control plane on its own, for frontends
 uv run orbit serve --port 0                    # on a port the system chooses
+uv run orbit chat --connect ws://127.0.0.1:7433/  # show the session orbit serve runs
 ```
 
 With orbit installed as a tool, drop the `uv run`.
@@ -878,6 +879,25 @@ max_message_mb = 64  # a larger message closes the connection
 An unknown key in `[server]`, or a value of the wrong type or out of range, stops `orbit serve`
 with status 2 and a message naming the file and the key.
 
+**Connecting.** `orbit chat --connect <url>` shows the session a running `orbit serve` has open,
+with no picker, rather than running a control plane of its own; it takes `ws://` URLs only in this
+release. It shows the token in `token` in the config directory, or in the file `--token-file
+<path>` names; a token file that can't be read stops it with status 2. The backend flags
+(`--model`, `--tools`, `--verify`, `--worktree`, `--review`, `--usage`, `--profile`) configure
+the control plane, so with `--connect` they stop it with status 2: give them to `orbit serve`.
+`--new` and `--name` open a new session once connected, for every frontend, as ctrl+p does. Any
+number of chats can connect at once, each showing what the others do; quitting one disconnects it
+and leaves the server running.
+
+If the connection is lost, the chat reconnects on its own, waiting half a second at first and
+doubling the wait up to ten seconds, and catches up on what it missed. Meanwhile "Reconnecting to
+<url>…" shows by the prompt, and a command is refused with "Not connected". After two minutes a
+modal, "Lost the control plane at <url>", offers "Keep trying" or "Quit". When the server says
+it's shutting down, "The control plane stopped" opens at once, with "Keep trying" preselected and
+reconnecting going on behind it; either modal closes once it's connected again. A token the server
+refuses shows a message naming the token file, and the chat quits once it's closed, without
+retrying.
+
 ## Development
 
 Write tests first. Coverage is held at 100% (`fail_under` in `pyproject.toml`); only
@@ -900,9 +920,15 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
 ```
 
 - `orbit.protocol`: pydantic models (`Command`s in, `Event`s out), the `Session`
-  interface, and `ThreadedSession`, which runs a session on a thread of its own. It imports no
+  interface, the `Link` a session to a control plane elsewhere reports its state through (in
+  `link`, with `NotConnected`), and `ThreadedSession`, which runs a session on a thread of its own. It imports no
   other orbit package. `docs/protocol.md` describes the protocol, its conversation rules and
   codes, and `schema/protocol.schema.json` is its JSON Schema.
+- `orbit.client`: the frontends' side of a control plane in another process. `WebSocketSession`
+  (in `session`) is a `Session` over a WebSocket (the `websockets` library) that reconnects with
+  backoff, sends its last `Hello` again with `since`, and reports how the link stands through
+  `orbit.protocol`'s `Link`; `read_token` (in `token`) reads the token it shows. It imports no
+  orbit package but `orbit.protocol`, and only `orbit.cli` imports it.
 - `orbit.agent`: backend, with no UI imports. Three layers, each importing only the ones below:
   - `external`: adapters that reach outside the backend. `ClaudeCliRunner` launches agents as
     `claude -p --output-format stream-json` runs connected to orbit (`run_agent`, and `converse`
@@ -992,12 +1018,14 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
   `log` for which of a tab's transcript entries are shown and where, `sessions` for the list of
   sessions, `windows` for the window h/j/k/l reaches from each window, `triggers` for the keys
   that fire triggers and their footer labels, `confirm` for the confirmations asked before a
-  key's action, and `settings` and `common` for what they share); the widgets (`transcript`,
+  key's action, `link` for how the link to a control plane elsewhere is shown, and `settings` and
+  `common` for what they share); the widgets (`transcript`,
   `transcript_log` for one tab's log, `event_stream` for batching the backend's events so a
   flood still lets the screen repaint, `conversation` for the `ConversationFeed`, which turns
   events into the transcript's entries, `entries` for an entry and the renderables that draw
   it, `tabs`, `tasks`, `task_editor` for the task editor modal, `reason` for the modal saying
-  why a task ended, `agents`, `panels`,
+  why a task ended, `link` for the status line and modals showing a lost or stopped control
+  plane, `agents`, `panels`,
   `detail` for the detail pane, `working` for the working row, `proposals`, the proposal modal
   and the `ProposalHost` that shows each waiting proposal once and closes it when it's withdrawn,
   `sessions`, the modal listing the sessions and the `SessionsHost` that shows it and refreshes
@@ -1008,6 +1036,8 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
   plugs the external adapters into `AgentSession` and hands that to the TUI. It runs the
   backend on its own thread and event loop through `orbit.protocol.ThreadedSession`, so neither
   side's work stalls the other. `orbit serve` plugs them in the same way but hands `AgentSession` to
-  `ControlPlaneServer` instead, on the main thread's event loop.
+  `ControlPlaneServer` instead, on the main thread's event loop. `orbit chat --connect` builds no
+  backend: it hands the TUI an `orbit.client.WebSocketSession`, which runs on the TUI's own event
+  loop.
 
 These rules are enforced by `lint-imports` (see `[tool.importlinter]` in `pyproject.toml`).

@@ -108,6 +108,20 @@ type = "forbidden"
 source_modules = ["orbit.agent", "orbit.tui", "orbit.protocol"]
 forbidden_modules = ["orbit.profiling"]
 
+# The frontends' side of a control plane in another process speaks only the protocol, and only
+# the CLI, which builds it, knows it.
+[[tool.importlinter.contracts]]
+name = "The client imports no orbit package but the protocol"
+type = "forbidden"
+source_modules = ["orbit.client"]
+forbidden_modules = ["orbit.agent", "orbit.tui", "orbit.cli", "orbit.profiling", "textual", "rich", "typer"]
+
+[[tool.importlinter.contracts]]
+name = "Only the CLI uses the client"
+type = "forbidden"
+source_modules = ["orbit.agent", "orbit.tui", "orbit.protocol"]
+forbidden_modules = ["orbit.client"]
+
 # Inside the backend: external adapters over the application over the domain. A layer may
 # import the ones below it, never above.
 [[tool.importlinter.contracts]]
@@ -135,6 +149,7 @@ source_modules = [
     "orbit.agent.domain",
     "orbit.protocol",
     "orbit.tui",
+    "orbit.client",
     "orbit.cli",
 ]
 forbidden_modules = ["mcp", "uvicorn", "starlette", "httpx"]

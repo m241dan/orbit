@@ -17,6 +17,7 @@ from orbit import __version__
 from orbit.protocol import (
     CONFIGURE_CHECKS,
     INTERNAL,
+    INVALID,
     PLANNER,
     PLANNER_LANE,
     PROTOCOL_VERSION,
@@ -48,9 +49,12 @@ from orbit.protocol import (
     FireTrigger,
     Hello,
     HistoryPage,
+    Link,
+    LinkState,
     ListSessions,
     LogGap,
     MessageSent,
+    NotConnected,
     Notice,
     ProgressNoted,
     ProposalDecided,
@@ -91,6 +95,7 @@ from orbit.tui.detail import DetailPane
 from orbit.tui.event_stream import event_batches
 from orbit.tui.footer import KeyFooter
 from orbit.tui.history import HistoryPager
+from orbit.tui.link import LinkHost
 from orbit.tui.panels import UsagePanel, VerificationPanel
 from orbit.tui.proposals import ProposalHost
 from orbit.tui.reason import ReasonScreen
@@ -146,6 +151,7 @@ class OrbitApp(App[None], inherit_bindings=False):
     DetailPane.selected { border: none; border-top: solid $accent; }
     DetailPane:focus { border-top: heavy $accent; }
     #storage-halt { color: $error; padding: 0 1; display: none; }
+    #link-status { color: $warning; padding: 0 1; display: none; }
     """
     BINDINGS: ClassVar[list[BindingType]] = [
         # Priority, so it beats the prompt's own ctrl+c (copy).
@@ -179,9 +185,15 @@ class OrbitApp(App[None], inherit_bindings=False):
         Binding("ctrl+b", "toggle_sidebar", "Sidebar"),
     ]
 
-    def __init__(self, session: Session) -> None:
+    def __init__(
+        self, session: Session, link: Link | None = None, opening: Command | None = None
+    ) -> None:
+        """The app over ``session``, showing how its ``link`` to a control plane in another
+        process stands, if it has one, and sending ``opening``, if given, once welcomed."""
         super().__init__()
         self._session = session
+        self._link = link
+        self._opening = opening
         # Id of the window h/j/k/l last moved to.
         self._selected = "prompt"
         # Which lanes have work in progress, as last reported (or just requested).
@@ -196,6 +208,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         self._echoes: set[str] = set()
         self._halt = StorageHaltHost(self.push_screen, self._resume_storage, self._show_halt)
         self._resume_id: str | None = None  # The command id of the last ResumeStorage sent.
+        self._link_host = LinkHost(self.push_screen, self.exit, self._show_link, self.set_timer)
         # The actions of the keys whose trigger the last catalog lacks, which are hidden.
         self._missing_triggers: frozenset[str] = frozenset()
         self.clock: Callable[[], float] = time.monotonic
@@ -209,6 +222,7 @@ class OrbitApp(App[None], inherit_bindings=False):
                 yield ConversationTabs(id="conversation-tabs")
                 yield Transcript(id="transcript")
                 yield Static(id="storage-halt")
+                yield Static(id="link-status")
                 yield ChatPrompt(
                     placeholder="Press i to talk to the planner, esc to stop typing", id="prompt"
                 )
@@ -238,6 +252,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         self._agents = self.query_one(AgentsPane)
         self._side = self.query_one("#side")
         self._halt_status = self.query_one("#storage-halt", Static)
+        self._link_status = self.query_one("#link-status", Static)
         # Read through, so a clock set later still times the conversation.
         self._feed = ConversationFeed(
             self._transcript, self._tabs, self._task_list, self._verification, lambda: self.clock()
@@ -246,6 +261,8 @@ class OrbitApp(App[None], inherit_bindings=False):
         self.query_one(f"#{self._selected}").add_class("selected")
         self.install_screen(self._model_picker, "pick-model")
         self.install_screen(self._tool_picker, "pick-tool-access")
+        if self._link is not None:  # Before the events start, which start the link.
+            self._link.watch(self._follow_link)
         self._consume_events()
 
     @on(ChatPrompt.Submitted, "#prompt")
@@ -521,8 +538,7 @@ class OrbitApp(App[None], inherit_bindings=False):
     async def _send(self, command: Command, failure: str = "Couldn't send the command") -> bool:
         """Whether ``command`` was sent to the open session in the default workspace, under a
         fresh id remembered for a message, and for a message or decision, whose echo isn't
-        shown; a failure to send it is shown after ``failure``, freeing the planner from a
-        message, as a refusal does."""
+        shown; a failure to send it is shown as :meth:`_unsent` does."""
         command_id = uuid4().hex
         if isinstance(command, SendMessage):
             self._message_id = command_id
@@ -533,12 +549,23 @@ class OrbitApp(App[None], inherit_bindings=False):
         try:
             await self._session.send(CommandEnvelope(command_id=command_id, payload=command))
         except Exception as exc:
-            self._echoes.discard(command_id)
-            if isinstance(command, SendMessage):
-                self._set_busy(PLANNER_LANE, False)
-            self._render_event(ErrorOccurred(code=INTERNAL, message=f"{failure}: {exc}"))
+            self._unsent(command, command_id, exc, failure)
             return False
         return True
+
+    def _unsent(self, command: Command, command_id: str, exc: Exception, failure: str) -> None:
+        """Show that ``command``, as ``command_id``, wasn't sent for ``exc``: refused while not
+        connected, else failed, after ``failure``; either frees the planner from a message, as
+        a refusal does."""
+        if isinstance(exc, NotConnected):
+            self._render_event(
+                CommandRefused(command_id=command_id, code=INVALID, message=str(exc))
+            )
+            return
+        self._echoes.discard(command_id)
+        if isinstance(command, SendMessage):
+            self._set_busy(PLANNER_LANE, False)
+        self._render_event(ErrorOccurred(code=INTERNAL, message=f"{failure}: {exc}"))
 
     @work(exclusive=True, group="events")
     async def _consume_events(self) -> None:
@@ -551,6 +578,7 @@ class OrbitApp(App[None], inherit_bindings=False):
                 with self.batch_update():
                     for event in coalesce(batch):
                         self._render_event(event)
+                await self._open_once_welcomed(batch)
 
     async def _hello(self) -> bool:
         """Whether the Hello opening the session was sent; a failure to send it is shown."""
@@ -558,6 +586,13 @@ class OrbitApp(App[None], inherit_bindings=False):
             Hello(client=f"orbit-tui {__version__}", protocol_version=PROTOCOL_VERSION),
             "The backend failed to start the session",
         )
+
+    async def _open_once_welcomed(self, batch: list[Event]) -> None:
+        """Send the command to open with, if there's one still to send and ``batch`` has the
+        Welcome."""
+        if self._opening is not None and any(isinstance(event, Welcome) for event in batch):
+            command, self._opening = self._opening, None
+            await self._send(command)
 
     async def _next_batch(self, batches: AsyncIterator[list[Event]]) -> list[Event]:
         """The next of ``batches``; none once they end, or once reading them fails, which is
@@ -634,6 +669,15 @@ class OrbitApp(App[None], inherit_bindings=False):
     def _show_halt(self, status: str | None) -> None:
         """Show ``status`` by the prompt, or hide the line when there's none."""
         line = self._halt_status
+        line.update(status or "")
+        line.display = status is not None
+
+    def _follow_link(self, state: LinkState) -> None:
+        self._link_host.follow(state, self.clock())
+
+    def _show_link(self, status: str | None) -> None:
+        """Show ``status`` by the prompt, or hide the line when there's none."""
+        line = self._link_status
         line.update(status or "")
         line.display = status is not None
 

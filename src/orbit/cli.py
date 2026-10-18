@@ -57,8 +57,9 @@ from orbit.agent import (
     workspace_state,
     write_checks,
 )
+from orbit.client import TokenUnreadable, WebSocketSession, read_token
 from orbit.profiling import profiled
-from orbit.protocol import PLANNER, Settings, ThreadedSession, ToolAccess
+from orbit.protocol import PLANNER, NewSession, Settings, ThreadedSession, ToolAccess
 from orbit.tui import OrbitApp
 
 app = typer.Typer(help="Orbit command-line tool.", no_args_is_help=True)
@@ -172,6 +173,28 @@ UsageOption = Annotated[
 ]
 
 
+ConnectOption = Annotated[
+    str | None,
+    typer.Option(
+        "--connect",
+        metavar="URL",
+        help="Connect to the control plane orbit serve runs at this ws:// URL rather than run"
+        " one here; the backend flags belong on orbit serve then.",
+    ),
+]
+TokenFileOption = Annotated[
+    Path | None,
+    typer.Option(
+        "--token-file",
+        help="The file holding the token to show the control plane --connect names (default:"
+        " token in the config directory).",
+    ),
+]
+
+# The chat flags that configure the control plane, which a connected chat doesn't run.
+_SERVE_FLAGS = ("model", "tools", "verify", "worktree", "review", "usage", "profile")
+
+
 @dataclass(frozen=True)
 class _Backend:
     """What the backend flags ask for: the planner's ``model``, new tasks' ``tools``, and
@@ -195,6 +218,7 @@ class _Backend:
 
 @app.command()
 def chat(
+    ctx: typer.Context,
     workspace: WorkspaceOption = Path("."),
     model: ModelOption = None,
     tools: ToolsOption = None,
@@ -207,11 +231,13 @@ def chat(
     profile: ProfileOption = None,
     state: StateDirOption = None,
     config_dir: ConfigDirOption = None,
+    connect: ConnectOption = None,
+    token_file: TokenFileOption = None,
 ) -> None:
     """Start an interactive agent session.
 
     At startup, pick a saved session or start a new one (or start one with --new); ctrl+p
-    switches later.
+    switches later. With --connect, show the session a running orbit serve has open instead.
 
     In the app: h/j/k/l move between windows; i jumps to the prompt, which talks to
     the planner, whose proposals wait on the task list as drafts, and ctrl+s stops the run;
@@ -220,6 +246,12 @@ def chat(
     that fetches it from orbit over MCP; verification steps run when it says it's done,
     and failures go back to it to fix.
     """
+    if connect is not None:
+        _refuse_serve_flags(ctx)
+        token_path = token_file or TokenFile(resolve_config_dir(config_dir, os.environ)).path
+        opening = NewSession(name=name) if new or name is not None else None
+        _launch(_connected_app(connect, token_path, opening), None)
+        return
     # The only place the backend and frontend meet, and where the backend's external
     # adapters are plugged into its ports. Every adapter works relative to the current
     # directory, so move into the workspace before anything reads the filesystem.
@@ -232,6 +264,46 @@ def chat(
     build, store = _backend(backend, root, state, user_config, pick_session=not backend.fresh)
     session = ThreadedSession(build, _thread_context(profile))
     _launch_with(OrbitApp(session), profile, store)
+
+
+def _refuse_serve_flags(ctx: typer.Context) -> None:
+    """Exit with status 2 if any of the flags that configure the control plane were given."""
+    given = [f"--{name}" for name in _SERVE_FLAGS if _given(ctx, name)]
+    if given:
+        typer.echo(
+            f"{', '.join(given)} configure the control plane, so they belong on orbit serve,"
+            " not orbit chat --connect.",
+            err=True,
+        )
+        raise typer.Exit(2)
+
+
+def _given(ctx: typer.Context, name: str) -> bool:
+    """Whether the option ``name`` was given, not left at its default."""
+    source = ctx.get_parameter_source(name)  # Typer's own click, so its enum is compared by name.
+    return source is not None and source.name != "DEFAULT"
+
+
+def _connected_app(url: str, token_file: Path, opening: NewSession | None) -> OrbitApp:
+    """The TUI over the control plane at ``url``, shown the token in ``token_file``, sending
+    ``opening``, if any, once welcomed.
+
+    Exits with status 2 if ``url`` isn't a ws:// URL or the token can't be read.
+    """
+    if not url.startswith("ws://"):
+        typer.echo(
+            f"orbit chat --connect takes a ws:// URL, not {url}; wss://, with TLS, comes in a"
+            " later release.",
+            err=True,
+        )
+        raise typer.Exit(2)
+    try:
+        token = read_token(token_file)
+    except TokenUnreadable as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(2) from None
+    client = WebSocketSession(url, token, token_file)
+    return OrbitApp(client, client, opening)
 
 
 def _backend(
