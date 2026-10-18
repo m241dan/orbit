@@ -1,6 +1,7 @@
 """The TUI paging the conversation back through the open session's history."""
 
 from textual.pilot import Pilot
+from textual.widgets import Static
 
 from orbit.protocol import (
     PLANNER,
@@ -66,8 +67,10 @@ def snapshot(*transcript: EventEnvelope, session: str = "s1") -> Snapshot:
     )
 
 
-def page(*events: EventEnvelope, more: bool = False, session: str = "s1") -> HistoryPage:
-    return HistoryPage(session=session, events=events, more=more)
+def page(
+    *events: EventEnvelope, more: bool = False, session: str = "s1", trimmed: bool = False
+) -> HistoryPage:
+    return HistoryPage(session=session, events=events, more=more, trimmed=trimmed)
 
 
 def texts(app: OrbitApp, key: str | None = None) -> list[str]:
@@ -171,6 +174,39 @@ async def test_a_snapshot_forgets_the_page_loading() -> None:
         other = snapshot(*logged(601, *notices("x")), session="s2")
         await feed_events(session, pilot, other, page(*logged(1, *notices("a"))))
         assert texts(app) == [shown("x")] and not loading(app)
+
+
+def trimmed_shown(app: OrbitApp) -> bool:
+    return app.query_one(Transcript).trimmed_earlier
+
+
+async def test_the_last_page_of_a_trimmed_log_shows_older_events_were_removed() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, snapshot(*logged(501, *notices("c"))))
+        await at_the_top(pilot, 1)
+        await pilot.press("k")
+        assert not trimmed_shown(app)
+        await feed_events(session, pilot, page(*logged(400, *notices("b")), trimmed=True))
+        assert trimmed_shown(app) and texts(app) == [shown("b"), shown("c")]
+        marker = app.query_one("#trimmed-earlier", Static)
+        assert str(marker.render()) == "Older events were removed (session_log_mb)"
+        await pilot.press("k", "k")
+        assert len(histories(session)) == 1
+
+
+async def test_a_snapshot_hides_the_removed_events_line() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, snapshot(*logged(501, *notices("c"))))
+        await at_the_top(pilot, 1)
+        await pilot.press("k")
+        await feed_events(session, pilot, page(trimmed=True))
+        assert trimmed_shown(app)
+        await feed_events(session, pilot, snapshot(*logged(601, *notices("x"))))
+        assert not trimmed_shown(app)
 
 
 async def test_a_request_that_fails_to_send_can_be_made_again() -> None:

@@ -235,7 +235,9 @@ class FakeStore:
     set, is awaited as a lock is taken.
 
     The events appended are ``logged``, each append's in ``appends``, with ``seq`` the highest
-    logged before; ``append_failure``, while set, is the error every append raises.
+    logged before; ``append_failure``, while set, is the error every append raises. Each trim
+    asked for is in ``trims``, as the session's id, the limit and the target, and the sessions
+    in ``trimmed_logs`` have had events trimmed.
     """
 
     def __init__(self, count: int = 0) -> None:
@@ -261,6 +263,8 @@ class FakeStore:
         self.logged: list[EventEnvelope] = []
         self.appends: list[tuple[str, list[EventEnvelope]]] = []
         self.append_failure: str | None = None
+        self.trims: list[tuple[str, int, int]] = []
+        self.trimmed_logs: set[str] = set()
 
     @property
     def last(self) -> SessionRecord:
@@ -342,6 +346,12 @@ class FakeStore:
         own = [e.seq for e in self.logged if e.session == session_id]
         others = [e.seq for e in self.logged if e.session != session_id]
         return LogBounds(first_seq=min(own, default=None), others_seq=max(others, default=0))
+
+    async def trim(self, session_id: str, limit: int, target: int) -> None:
+        self.trims.append((session_id, limit, target))
+
+    async def trimmed(self, session_id: str) -> bool:
+        return session_id in self.trimmed_logs
 
     async def review_count(self) -> int:
         return self.count

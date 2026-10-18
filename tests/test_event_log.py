@@ -11,7 +11,7 @@ from orbit.agent.application.ports import EventLog
 from orbit.agent.domain.replay import LogBounds
 from orbit.agent.external import sqlite_store
 from orbit.agent.external.sqlite_store import SqliteStore
-from orbit.protocol import EventEnvelope, Notice, TasksChanged, decode_event
+from orbit.protocol import EventEnvelope, Notice, TasksChanged, decode_event, encode
 from tests.test_sqlite_store import database, record
 
 type Opener = Callable[[Path], Awaitable[SqliteStore]]
@@ -348,3 +348,155 @@ async def test_reading_after_a_seq_under_an_id_that_isnt_a_plain_file_name_is_re
     store = await open_store(workspace)
     with pytest.raises(ValueError, match="Not a session id"):
         await (store.after("../abc", 0) if read == "after" else store.bounds("../abc"))
+
+
+# Trimming
+
+MB = 1024 * 1024
+
+
+def big(seq: int, session: str = "abc") -> EventEnvelope:
+    """An event of the session ``session`` of about 10 KB."""
+    return notice(seq, session, "x" * 10_000)
+
+
+def stored_sizes(state: Path) -> dict[str, tuple[int, int]]:
+    """Each session's log in ``logs``, as its size and the highest seq trimmed, by its id."""
+    with database(state) as connection:
+        rows = connection.execute("SELECT session_id, size, trimmed_seq FROM logs")
+        return {session: (size, trimmed) for session, size, trimmed in rows}
+
+
+def sizes_of_events(state: Path) -> dict[str, int]:
+    """The sum of each session's events' sizes in ``events``, by its id."""
+    with database(state) as connection:
+        rows = connection.execute("SELECT session_id, sum(size) FROM events GROUP BY session_id")
+        return {session: size for session, size in rows}
+
+
+async def test_appends_keep_each_sessions_log_size(
+    open_store: Opener, state: Path, workspace: Path
+) -> None:
+    store = await open_store(workspace)
+    await store.append("abc", [notice(1), notice(2)])
+    await store.append("abc", [notice(3)])
+    await store.append("def", [notice(4, "def")])
+
+    assert stored_sizes(state) == {
+        session: (size, 0) for session, size in sizes_of_events(state).items()
+    }
+
+
+async def test_a_log_over_the_limit_keeps_its_newest_events_under_the_target(
+    open_store: Opener, state: Path, workspace: Path
+) -> None:
+    store = await open_store(workspace)
+    await store.append("abc", [big(seq) for seq in range(1, 211)])  # About 2 MB.
+    await store.trim("abc", MB, MB * 9 // 10)
+
+    kept = [seq for _, seq, *_ in logged(state)]
+    size, trimmed = stored_sizes(state)["abc"]
+    assert size == sizes_of_events(state)["abc"]
+    assert size < MB * 9 // 10
+    assert size + len(encode(big(trimmed)).encode()) >= MB * 9 // 10  # Not one more than needed.
+    assert kept == list(range(trimmed + 1, 211))
+
+
+async def test_trimming_a_log_leaves_other_sessions_as_they_are(
+    open_store: Opener, state: Path, workspace: Path
+) -> None:
+    store = await open_store(workspace)
+    await store.append("abc", [big(seq) for seq in range(1, 211)])
+    await store.append("def", [big(211, "def")])
+    others = logged(state)[-1:]
+    await store.trim("abc", MB, MB * 9 // 10)
+
+    assert logged(state)[-1:] == others
+    assert await store.trimmed("abc")
+    assert not await store.trimmed("def")
+
+
+async def test_a_log_within_the_limit_or_never_written_isnt_trimmed(
+    open_store: Opener, state: Path, workspace: Path
+) -> None:
+    store = await open_store(workspace)
+    await store.append("abc", [big(seq) for seq in range(1, 11)])
+    before = logged(state)
+    await store.trim("abc", sizes_of_events(state)["abc"], 1)
+    await store.trim("def", 1, 1)
+
+    assert logged(state) == before and "def" not in stored_sizes(state)
+    assert not await store.trimmed("abc")
+
+
+async def test_the_oldest_page_after_trimming_has_nothing_more(
+    open_store: Opener, workspace: Path
+) -> None:
+    store = await open_store(workspace)
+    await store.append("abc", [big(seq) for seq in range(1, 211)])
+    await store.trim("abc", MB, MB * 9 // 10)
+    first = (await store.recent("abc", 1000))[0].seq
+
+    assert await store.before("abc", first + 1, 500) == ([big(first)], False)
+    assert await store.bounds("abc") == LogBounds(first_seq=first, others_seq=0)
+
+
+async def test_a_log_trimmed_whole_is_bounded_after_its_last_trimmed_event(
+    open_store: Opener, workspace: Path
+) -> None:
+    store = await open_store(workspace)
+    await store.append("abc", [big(1), big(2)])
+    await store.trim("abc", 1, 1)
+
+    assert await store.recent("abc", 10) == []
+    assert await store.bounds("abc") == LogBounds(first_seq=3, others_seq=0)
+
+
+async def test_deleting_a_session_forgets_its_trimmed_log(
+    open_store: Opener, state: Path, workspace: Path
+) -> None:
+    store = await open_store(workspace)
+    await store.append("abc", [big(1), big(2)])
+    await store.trim("abc", 1, 1)
+    await store.delete("abc")
+
+    assert stored_sizes(state) == {} and not await store.trimmed("abc")
+
+
+async def test_upgrading_counts_the_size_of_the_events_logged_before(
+    monkeypatch: pytest.MonkeyPatch, open_store: Opener, state: Path, workspace: Path
+) -> None:
+    monkeypatch.setattr(sqlite_store, "MIGRATIONS", sqlite_store.MIGRATIONS[:2])
+    await (await open_store(workspace)).close()
+    with database(state) as connection:
+        for session, seq, size in [("abc", 1, 10), ("abc", 2, 20), ("def", 3, 5)]:
+            connection.execute(
+                "INSERT INTO events VALUES ((SELECT id FROM workspaces), ?, ?, 'notice', '{}', ?)",
+                (session, seq, size),
+            )
+    monkeypatch.undo()
+    await open_store(workspace)
+
+    assert stored_sizes(state) == {"abc": (30, 0), "def": (5, 0)}
+
+
+async def test_a_trim_that_fails_is_refused_and_trimmed_reads_false(
+    open_store: Opener, workspace: Path
+) -> None:
+    store = await open_store(workspace)
+    await store.append("abc", [big(1), big(2)])
+    await store.trim("abc", 1, 1)
+    await store.close()
+
+    with pytest.raises(RuntimeError, match=r"Couldn't trim the events of the session abc in "):
+        await store.trim("abc", 1, 1)
+    assert not await store.trimmed("abc")
+
+
+@pytest.mark.parametrize("call", ["trim", "trimmed"])
+async def test_trimming_under_an_id_that_isnt_a_plain_file_name_is_refused(
+    open_store: Opener, workspace: Path, call: str
+) -> None:
+    store = await open_store(workspace)
+    with pytest.raises(ValueError, match="Not a session id"):
+        await (store.trim("../abc", 1, 1) if call == "trim" else store.trimmed("../abc"))

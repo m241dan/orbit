@@ -32,18 +32,23 @@ class Outbox:
     the events answering one connection; :meth:`transcript` reads a session's latest back,
     :meth:`history` those before them, :meth:`missed` those after a ``seq``, for
     :meth:`resend` to queue again, and :meth:`close` writes those still queued. The copies
-    written have their text fields over ``cut_bytes`` cut, unless it's 0; those read from
-    :meth:`envelope` are whole."""
+    written have their text fields over ``cut_bytes`` cut, unless it's 0, and each session's
+    log is trimmed once over ``log_bytes``, unless it's 0; those read from :meth:`envelope` are
+    whole."""
 
     def __init__(
-        self, open_session: Callable[[], str], log: EventLog | None = None, cut_bytes: int = 0
+        self,
+        open_session: Callable[[], str],
+        log: EventLog | None = None,
+        cut_bytes: int = 0,
+        log_bytes: int = 0,
     ) -> None:
         self._open = open_session
         self._cut_bytes = cut_bytes
         # The last event's place in the stream, counted across sessions.
         self._seq = log.max_seq() if log else 0
         self._queue: asyncio.Queue[EventEnvelope] = asyncio.Queue()
-        self._writer = LogWriter(log, self.put) if log else None
+        self._writer = LogWriter(log, self.put, log_bytes) if log else None
 
     def put_nowait(self, item: Event) -> None:
         """Stamp ``item`` and queue it."""
@@ -71,13 +76,15 @@ class Outbox:
 
     async def history(
         self, session_id: str, before_seq: int, limit: int
-    ) -> tuple[tuple[EventEnvelope, ...], bool]:
+    ) -> tuple[tuple[EventEnvelope, ...], bool, bool]:
         """The last ``limit`` events of the session ``session_id`` before ``before_seq``, oldest
-        first, logged or still to be, and whether earlier ones remain; none without a log."""
+        first, logged or still to be, whether earlier ones remain, and, when none do, whether
+        earlier ones were trimmed from the log; none without a log."""
         if self._writer is None:
-            return (), False
+            return (), False, False
         earlier, more = await self._writer.before(session_id, before_seq, limit)
-        return tuple(earlier), more
+        trimmed = not more and await self._writer.trimmed(session_id)
+        return tuple(earlier), more, trimmed
 
     async def missed(self, session_id: str, since: int) -> tuple[EventEnvelope, ...] | None:
         """The events of the session ``session_id`` after ``since`` and up to the last stamped,

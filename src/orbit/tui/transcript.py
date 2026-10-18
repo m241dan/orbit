@@ -16,7 +16,7 @@ from orbit.tui.detail import DetailPane
 from orbit.tui.transcript_log import TranscriptLog
 from orbit.tui.view.common import EntryKind
 from orbit.tui.view.detail import copied_note, detail_copy, detail_covers
-from orbit.tui.view.history import LOADING_EARLIER
+from orbit.tui.view.history import LOADING_EARLIER, TRIMMED_EARLIER
 from orbit.tui.view.log import Entry
 from orbit.tui.view.tool_calls import tool_call_started
 from orbit.tui.view.transcript import conversation_title
@@ -46,6 +46,8 @@ class Transcript(Vertical):
     Transcript.-covered > WorkingRow { display: none; }
     Transcript > #loading-earlier { display: none; color: $text-muted; }
     Transcript > #loading-earlier.-loading { display: block; }
+    Transcript > #trimmed-earlier { display: none; color: $text-muted; }
+    Transcript > #trimmed-earlier.-trimmed { display: block; }
     """
     BINDINGS: ClassVar[list[BindingType]] = [
         # Within the conversation: from its list, or the pane itself, while the pane is open.
@@ -66,6 +68,7 @@ class Transcript(Vertical):
         self._ticker = Ticker(self, self.tick)
 
     def compose(self) -> ComposeResult:
+        yield Static(TRIMMED_EARLIER, id="trimmed-earlier")
         yield Static(LOADING_EARLIER, id="loading-earlier")
         yield self._new_log(None, shown=True)
         yield WorkingRow()
@@ -181,6 +184,15 @@ class Transcript(Vertical):
     def loading_earlier(self) -> bool:
         """Whether the conversation shows that earlier entries are loading."""
         return self.query_one("#loading-earlier").has_class("-loading")
+
+    def show_trimmed(self, trimmed: bool) -> None:
+        """Show, above the entries, that earlier ones were ``trimmed`` from the log, or stop."""
+        self.query_one("#trimmed-earlier").set_class(trimmed, "-trimmed")
+
+    @property
+    def trimmed_earlier(self) -> bool:
+        """Whether the conversation shows that earlier entries were trimmed from the log."""
+        return self.query_one("#trimmed-earlier").has_class("-trimmed")
 
     def replace_rule(self, text: str, kind: EntryKind, key: str | None, agent: str) -> None:
         """Make ``agent``'s latest rule read ``text`` as a ``kind`` entry, under All and, if

@@ -22,6 +22,16 @@ class StorageSettings(BaseModel):
     def tool_output_bytes(self) -> int:
         return self.tool_output_kb * 1024
 
+    @property
+    def session_log_bytes(self) -> int:
+        return self.session_log_mb * 1024 * 1024
+
+
+def trim_target(limit_bytes: int) -> int:
+    """The size, in bytes, a session's log over ``limit_bytes`` is trimmed to be under: 90% of
+    it, so that a log at its limit isn't trimmed again with every event."""
+    return limit_bytes * 9 // 10
+
 
 class _UserConfig(BaseModel):
     """The parts of the user config orbit reads; the rest is left for later orbits."""

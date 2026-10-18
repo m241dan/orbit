@@ -3,7 +3,7 @@
 import pytest
 
 from orbit.agent.domain.config_errors import ConfigError
-from orbit.agent.domain.storage import StorageSettings, cut_fields, load_storage
+from orbit.agent.domain.storage import StorageSettings, cut_fields, load_storage, trim_target
 from orbit.protocol import AssistantMessage, Notice, ToolCallFinished, ToolCallStarted
 
 MARKER = "\n… 4 KB cut by orbit's tool_output_kb …\n"
@@ -24,6 +24,15 @@ def test_storage_is_read_over_the_defaults() -> None:
     settings = load_storage({"storage": {"tool_output_kb": 1}})
     assert settings == StorageSettings(tool_output_kb=1, session_log_mb=200)
     assert settings.tool_output_bytes == 1024
+
+
+def test_the_session_log_limit_is_in_mebibytes() -> None:
+    assert StorageSettings(session_log_mb=3).session_log_bytes == 3 * 1024 * 1024
+
+
+def test_a_log_is_trimmed_to_under_90_percent_of_its_limit() -> None:
+    assert trim_target(1000) == 900
+    assert trim_target(1024 * 1024) == 943_718
 
 
 def test_zero_is_a_valid_setting() -> None:

@@ -11,7 +11,8 @@ from orbit.tui.view.history import Paging, earlier_request, loading, page_arrive
 class HistoryPager:
     """Asks with ``send`` for the page of events before the oldest the conversation shows,
     one page at a time, showing in ``transcript`` that it loads, and has ``feed`` show the page
-    above the conversation once it arrives."""
+    above the conversation once it arrives; ``transcript`` shows too when the last page reaches
+    events trimmed from the log."""
 
     def __init__(
         self,
@@ -29,6 +30,7 @@ class HistoryPager:
         forgetting any page still loading."""
         self._paging = paging_from(snapshot)
         self._transcript.show_loading(False)
+        self._transcript.show_trimmed(False)
 
     async def earlier(self) -> None:
         """Ask for the page before the oldest event shown, unless one loads or none remain."""
@@ -46,6 +48,7 @@ class HistoryPager:
             return
         self._paging = paging
         self._transcript.show_loading(False)
+        self._transcript.show_trimmed(paging.trimmed)
         self._feed.prepend(envelope.payload for envelope in page.events)
 
     def _show_loading(self, waiting: bool) -> None:

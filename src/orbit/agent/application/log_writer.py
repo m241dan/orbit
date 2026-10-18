@@ -6,6 +6,7 @@ from collections.abc import Sequence
 from orbit.agent.application.failures import ReportedOnce
 from orbit.agent.application.ports import EventLog, Publish
 from orbit.agent.domain.replay import LogBounds
+from orbit.agent.domain.storage import trim_target
 from orbit.protocol import EventEnvelope
 
 
@@ -47,10 +48,12 @@ class LogWriter:
     """Writes the envelopes added here to ``log`` in a task of its own, in the order they were
     added: whatever has queued since its last write goes in one append per session. A failed
     append is reported with ``publish`` once, until one works again, and later envelopes are
-    still written. Adding never waits for the log."""
+    still written. After each append, unless ``log_bytes`` is 0, a session's log over it is
+    trimmed to under :func:`trim_target` of it. Adding never waits for the log."""
 
-    def __init__(self, log: EventLog, publish: Publish) -> None:
+    def __init__(self, log: EventLog, publish: Publish, log_bytes: int = 0) -> None:
         self._log = log
+        self._log_bytes = log_bytes
         self._appends = ReportedOnce(publish)
         self._queued: list[tuple[str, EventEnvelope]] = []
         self._writing: list[tuple[str, EventEnvelope]] = []  # Taken from the queue to write.
@@ -111,6 +114,11 @@ class LogWriter:
             return None
         return _with_pending(logged, session_id, [*pending, *self._writing, *self._queued])
 
+    async def trimmed(self, session_id: str) -> bool:
+        """Whether events of the session ``session_id`` were trimmed from the log; ``False``
+        when that can't be read."""
+        return await self._log.trimmed(session_id)
+
     def _unwritten(self, session_id: str) -> list[EventEnvelope]:
         """The envelopes of the session ``session_id`` being written or queued, in order."""
         pending = [*self._writing, *self._queued]
@@ -134,5 +142,12 @@ class LogWriter:
             self._ready.clear()
             self._writing, self._queued = self._queued, []
             for session_id, envelopes in _by_session(self._writing).items():
-                await self._appends.attempt(self._log.append(session_id, envelopes))
+                await self._appends.attempt(self._write(session_id, envelopes))
             self._writing = []
+
+    async def _write(self, session_id: str, envelopes: Sequence[EventEnvelope]) -> None:
+        """Append ``envelopes`` to the log of the session ``session_id``, then trim it if it's
+        over the limit; raises ``RuntimeError`` when either fails."""
+        await self._log.append(session_id, envelopes)
+        if self._log_bytes:
+            await self._log.trim(session_id, self._log_bytes, trim_target(self._log_bytes))

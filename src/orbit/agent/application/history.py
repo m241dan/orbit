@@ -21,8 +21,9 @@ class SessionHistory:
         session_id = command.session
         if not await self._known(session_id):
             raise Refused(UNKNOWN, missing_message(session_id))
-        events, more = await self._events.history(session_id, command.before_seq, command.limit)
-        return HistoryPage(session=session_id, events=events, more=more)
+        page = await self._events.history(session_id, command.before_seq, command.limit)
+        events, more, trimmed = page
+        return HistoryPage(session=session_id, events=events, more=more, trimmed=trimmed)
 
     async def _known(self, session_id: str) -> bool:
         """Whether the session ``session_id`` is the one open or a saved one."""

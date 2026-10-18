@@ -103,7 +103,9 @@ Every event of a session's conversation is kept in the store too, as its event l
 conversation shows where the session left off: at startup, its last 500 events, the planner's
 turns and the agents' runs under their tabs as they were shown live, and the conversation
 carries on from there. Moving up past its first entry, with the conversation activated, pages
-back through earlier events to the session's start.
+back through earlier events to the session's start, or, once its log was trimmed (see
+`session_log_mb` under [Where orbit keeps things](#where-orbit-keeps-things)), to the line
+"Older events were removed (session_log_mb)".
 
 At startup orbit lists the saved sessions to pick from: `+ new session` first, then the sessions,
 the most recently active first. Each row shows the session's name, when it was last active (local
@@ -563,7 +565,13 @@ session_log_mb = 200  # the most of a session's event log to keep
 Both values are the defaults, and 0 means unlimited. A stored event's text fields (tool outputs and
 arguments, the planner's and agents' messages) longer than `tool_output_kb` keep their first and
 last half of it, around a marker such as `… 182 KB cut by orbit's tool_output_kb …`; what the
-conversation shows live is never cut, only what's kept for later. An unknown key in `[storage]`,
+conversation shows live is never cut, only what's kept for later. After each batch of events it
+writes, orbit checks the size of each session it wrote to: a session whose stored events come to
+more than `session_log_mb` has its oldest events deleted until they come to under 90% of it, so
+the newest are kept and it isn't trimmed again with every event. Other sessions are untouched.
+Paging back through a trimmed session ends at the line "Older events were removed
+(session_log_mb)", and a frontend reconnecting from before the removed events gets the session
+afresh. An unknown key in `[storage]`,
 or a value that isn't a whole number of 0 or more, stops `orbit chat` with status 2 and a message
 naming the file and the key; other tables are ignored, for later orbits' settings.
 

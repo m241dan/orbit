@@ -73,3 +73,17 @@ def test_a_page_not_asked_for_or_of_another_session_is_ignored() -> None:
     assert page_arrived(paging, page) is None
     other = HistoryPage(session="s2", events=logged(3, session="s2"), more=True)
     assert page_arrived(loading(paging, True), other) is None
+
+
+def test_the_last_page_says_whether_earlier_events_were_trimmed() -> None:
+    asked = loading(paging_from(snapshot(7, 9)), True)
+    last = HistoryPage(session="s1", events=logged(3, 5), more=False, trimmed=True)
+    assert page_arrived(asked, last) == Paging(session="s1", oldest=3, trimmed=True)
+    empty = HistoryPage(session="s1", events=(), more=False, trimmed=True)
+    assert page_arrived(asked, empty) == Paging(session="s1", oldest=7, trimmed=True)
+
+
+def test_a_page_with_more_before_it_isnt_the_trimmed_end() -> None:
+    asked = loading(paging_from(snapshot(7, 9)), True)
+    page = HistoryPage(session="s1", events=logged(3, 5), more=True, trimmed=True)
+    assert page_arrived(asked, page) == Paging(session="s1", oldest=3, more=True)

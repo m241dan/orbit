@@ -243,6 +243,17 @@ class EventLog(Protocol):
         that can't be read."""
         ...
 
+    async def trim(self, session_id: str, limit: int, target: int) -> None:
+        """When the log of the session ``session_id`` holds more than ``limit`` bytes, delete
+        its oldest events until it holds less than ``target``, noting that it was trimmed;
+        raises ``RuntimeError`` when it can't."""
+        ...
+
+    async def trimmed(self, session_id: str) -> bool:
+        """Whether events of the session ``session_id`` were trimmed from its log; ``False``
+        when that can't be read."""
+        ...
+
 
 class SessionStore(EventLog, Protocol):
     """Where saved sessions are kept, each locked while an orbit has it open, with their events'

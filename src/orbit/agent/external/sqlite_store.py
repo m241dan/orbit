@@ -5,6 +5,9 @@ by a single thread: every database call runs there, a statement or a transaction
 caller that's cancelled while awaiting one never leaves the connection mid-transaction. The schema
 is upgraded at open by forward-only migrations, each in its own transaction.
 
+Each session's log has a row in ``logs`` with the size of its events, kept as they're appended
+and trimmed, and the highest ``seq`` trimmed from it.
+
 Session locks are :class:`SessionLocks` lock files in ``locks/<workspace id>`` in the state
 directory, so that a crash leaves no stale lock behind.
 """
@@ -12,6 +15,7 @@ directory, so that a crash leaves no stale lock behind.
 import asyncio
 import os
 import sqlite3
+import time
 import uuid
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
@@ -30,6 +34,7 @@ from orbit.protocol import EventEnvelope, decode_event, encode
 DATABASE = "orbit.db"
 LOCKS = "locks"
 BUSY_TIMEOUT = 5.0
+RETRY_DELAY = 0.01
 THREAD_PREFIX = "orbit-sqlite"
 STATE_DIR_VARIABLE = "ORBIT_STATE_DIR"
 
@@ -65,6 +70,18 @@ MIGRATIONS: tuple[tuple[str, ...], ...] = (
             size INTEGER NOT NULL,
             PRIMARY KEY (workspace_id, session_id, seq)
         )""",
+    ),
+    (
+        # Each session's log: the bytes of its events kept, and the highest seq trimmed, if any.
+        """CREATE TABLE logs (
+            workspace_id TEXT NOT NULL REFERENCES workspaces (id),
+            session_id TEXT NOT NULL,
+            size INTEGER NOT NULL,
+            trimmed_seq INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (workspace_id, session_id)
+        )""",
+        """INSERT INTO logs (workspace_id, session_id, size)
+        SELECT workspace_id, session_id, sum(size) FROM events GROUP BY workspace_id, session_id""",
     ),
 )
 
@@ -190,10 +207,28 @@ def _register(connection: sqlite3.Connection, workspace: str) -> str:
     return str(workspace_id)
 
 
+def _use_wal(connection: sqlite3.Connection) -> None:
+    """Put ``connection``'s database in WAL mode, trying for up to :data:`BUSY_TIMEOUT` seconds.
+
+    While another connection holds a write lock on a database not yet in WAL mode, such as one
+    switching it at the same time, SQLite refuses the switch at once rather than waiting, so it's
+    tried again until it works or the time is up, when the error is raised.
+    """
+    deadline = time.monotonic() + BUSY_TIMEOUT
+    while True:
+        try:
+            connection.execute("PRAGMA journal_mode = WAL")
+            return
+        except sqlite3.OperationalError:
+            if time.monotonic() >= deadline:
+                raise
+        time.sleep(RETRY_DELAY)
+
+
 def _set_up(connection: sqlite3.Connection, database: Path, workspace: str) -> str:
     """Put ``connection`` in WAL mode, bring its schema up to date and register ``workspace``;
     returns the workspace's id."""
-    connection.execute("PRAGMA journal_mode = WAL")
+    _use_wal(connection)
     _migrate(connection, database)
     return _register(connection, workspace)
 
@@ -411,6 +446,21 @@ class SqliteStore:
         except sqlite3.Error:
             return None
 
+    async def trim(self, session_id: str, limit: int, target: int) -> None:
+        check_session_id(session_id)
+        try:
+            await self._call(self._trim, session_id, limit, target)
+        except sqlite3.Error as error:
+            message = f"Couldn't trim the events of the session {session_id} in {self._database}"
+            raise RuntimeError(f"{message}: {error}") from error
+
+    async def trimmed(self, session_id: str) -> bool:
+        check_session_id(session_id)
+        try:
+            return await self._call(self._trimmed, session_id)
+        except sqlite3.Error:
+            return False
+
     async def acquire(self, session_id: str) -> bool:
         """Lock the session ``session_id`` for this orbit; returns ``False`` when another
         running orbit has it locked.
@@ -579,6 +629,11 @@ class SqliteStore:
                 VALUES (?, ?, ?, ?, ?, ?)""",
                 rows,
             )
+            self._db.execute(
+                """INSERT INTO logs (workspace_id, session_id, size) VALUES (?, ?, ?)
+                ON CONFLICT (workspace_id, session_id) DO UPDATE SET size = size + excluded.size""",
+                (self._workspace, session_id, sum(row[5] for row in rows)),
+            )
         self._max_seq = max([self._max_seq, *(envelope.seq for envelope in envelopes)])
 
     def _recent(self, session_id: str, limit: int) -> list[str]:
@@ -609,9 +664,52 @@ class SqliteStore:
         )
         return [str(text) for (text,) in rows]
 
+    def _trim(self, session_id: str, limit: int, target: int) -> None:
+        """Delete the session ``session_id``'s oldest events, if its log is over ``limit``
+        bytes, keeping the latest that together come under ``target``."""
+        key = (self._workspace, session_id)
+        with self._transaction():
+            row = self._db.execute(
+                "SELECT size FROM logs WHERE workspace_id = ? AND session_id = ?", key
+            ).fetchone()
+            if row is None or row[0] <= limit:
+                return
+            # An event goes when it and those after it come to the target or more.
+            (cut,) = self._db.execute(
+                """SELECT max(seq) FROM (
+                    SELECT seq, sum(size) OVER (ORDER BY seq DESC) AS kept FROM events
+                    WHERE workspace_id = ? AND session_id = ?
+                ) WHERE kept >= ?""",
+                (*key, target),
+            ).fetchone()
+            self._db.execute(
+                "DELETE FROM events WHERE workspace_id = ? AND session_id = ? AND seq <= ?",
+                (*key, cut),
+            )
+            self._db.execute(
+                """UPDATE logs SET
+                    size = (SELECT coalesce(sum(size), 0) FROM events
+                        WHERE workspace_id = ?1 AND session_id = ?2),
+                    trimmed_seq = coalesce(?3, trimmed_seq)
+                WHERE workspace_id = ?1 AND session_id = ?2""",
+                (*key, cut),
+            )
+
+    def _trimmed(self, session_id: str) -> bool:
+        row = self._db.execute(
+            "SELECT trimmed_seq FROM logs WHERE workspace_id = ? AND session_id = ?",
+            (self._workspace, session_id),
+        ).fetchone()
+        return row is not None and row[0] > 0
+
     def _bounds(self, session_id: str) -> LogBounds:
+        # Once every event kept is trimmed, the oldest that could be kept is after the last cut.
         (first,) = self._db.execute(
-            "SELECT min(seq) FROM events WHERE workspace_id = ? AND session_id = ?",
+            """SELECT coalesce(
+                (SELECT min(seq) FROM events WHERE workspace_id = ?1 AND session_id = ?2),
+                (SELECT trimmed_seq + 1 FROM logs
+                    WHERE workspace_id = ?1 AND session_id = ?2 AND trimmed_seq > 0)
+            )""",
             (self._workspace, session_id),
         ).fetchone()
         (others,) = self._db.execute(
@@ -624,6 +722,10 @@ class SqliteStore:
         with self._transaction():
             self._db.execute(
                 "DELETE FROM events WHERE workspace_id = ? AND session_id = ?",
+                (self._workspace, session_id),
+            )
+            self._db.execute(
+                "DELETE FROM logs WHERE workspace_id = ? AND session_id = ?",
                 (self._workspace, session_id),
             )
             self._db.execute(

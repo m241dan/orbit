@@ -98,8 +98,9 @@ The Snapshot's transcript holds a session's last 500 events; `History` reads fur
 such as the oldest `seq` the frontend shows: the latest `limit` of them, 200 unless given, and
 from 1 to 500. The backend answers with a `HistoryPage` and then `CommandAccepted`. The page
 holds the `session`, its `events`, oldest first, in the envelopes they were sent in, and `more`,
-whether older events remain, to ask for with the oldest `seq` of this page; `trimmed` is false
-until orbit removes old events. A `History` for a session that isn't this workspace's is refused
+whether older events remain, to ask for with the oldest `seq` of this page; `trimmed`, on the
+page with no more before it, says whether older events were removed from the log because the
+session's log grew past `session_log_mb`, and is false on every other page. A `History` for a session that isn't this workspace's is refused
 with `unknown`; without a store, the page is empty and `more` is false. The TUI asks for the
 page before the oldest event it shows when the cursor moves up past the top of the
 conversation, one request at a time.

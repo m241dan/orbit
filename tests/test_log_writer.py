@@ -9,6 +9,7 @@ import pytest
 from orbit.agent import AgentSession
 from orbit.agent.application.log_writer import LogWriter
 from orbit.agent.domain.replay import LogBounds
+from orbit.agent.domain.storage import StorageSettings
 from orbit.agent.external.sqlite_store import SqliteStore
 from orbit.protocol import (
     PROTOCOL_VERSION,
@@ -35,6 +36,7 @@ from orbit.protocol import (
     decode_event,
 )
 from tests.agent_fakes import COMMAND_ID, FakeStore, Ticks, greet, publish, refused, send
+from tests.test_event_log import big
 from tests.test_session_switch import opened, saved, store_with
 from tests.test_sqlite_store import database
 
@@ -248,6 +250,43 @@ async def test_bounds_count_the_events_still_queued_as_logged() -> None:
     assert await writer.bounds("d") == LogBounds(first_seq=None, others_seq=7)
     log.gate.set()
     await writer.close()
+
+
+async def test_with_a_limit_each_session_written_is_trimmed_after_its_append() -> None:
+    log = FakeStore()
+    writer = LogWriter(log, Published(), log_bytes=1000)
+    for session, seq in [("a", 1), ("b", 2)]:
+        writer.add(session, notice(seq, session))
+    await writer.close()
+
+    assert log.trims == [("a", 1000, 900), ("b", 1000, 900)]
+
+
+async def test_without_a_limit_nothing_is_trimmed() -> None:
+    log = FakeStore()
+    writer = LogWriter(log, Published())
+    writer.add("a", notice(1))
+    await writer.close()
+
+    assert log.appends and log.trims == []
+
+
+async def test_a_session_whose_append_fails_isnt_trimmed() -> None:
+    log = FakeStore()
+    log.append_failure = "disk full"
+    writer = LogWriter(log, Published(), log_bytes=1000)
+    writer.add("a", notice(1))
+    await writer.close()
+
+    assert log.trims == []
+
+
+async def test_whether_a_log_was_trimmed_is_the_logs() -> None:
+    log = FakeStore()
+    log.trimmed_logs = {"a"}
+    writer = LogWriter(log, Published())
+
+    assert await writer.trimmed("a") and not await writer.trimmed("b")
 
 
 class Unreadable(FakeStore):
@@ -539,3 +578,99 @@ async def test_history_pages_are_never_logged() -> None:
     await session.close()
 
     assert [type(envelope.payload) for envelope in store.logged] == [CommandAccepted]
+
+
+async def test_history_of_a_trimmed_log_marks_only_its_oldest_page() -> None:
+    store = store_with(saved("auth"))
+    store.logged = [notice(seq, "auth") for seq in (1, 2)]
+    store.trimmed_logs = {"auth"}
+    session = stored_session(store)
+
+    newer = await history(session, History(session="auth", before_seq=10, limit=1))
+    oldest = await history(session, History(session="auth", before_seq=2))
+    await session.close()
+
+    assert newer[0] == HistoryPage(session="auth", events=(notice(2, "auth"),), more=True)
+    assert oldest[0] == HistoryPage(
+        session="auth", events=(notice(1, "auth"),), more=False, trimmed=True
+    )
+
+
+# Trimming the log
+
+
+def log_size(state: Path, session_id: str) -> int:
+    """The bytes of the session ``session_id``'s events in the database in ``state``."""
+    with database(state) as connection:
+        query = "SELECT coalesce(sum(size), 0) FROM events WHERE session_id = ?"
+        (size,) = connection.execute(query, (session_id,)).fetchone()
+    return int(size)
+
+
+def trimming_session(store: SqliteStore, log_mb: int) -> AgentSession:
+    storage = StorageSettings(session_log_mb=log_mb)
+    return AgentSession(store=store, clock=Ticks(), new_id=lambda: "session-1", storage=storage)
+
+
+async def test_a_session_log_over_its_limit_is_trimmed_after_the_next_batch(
+    sqlite: SqliteStore, tmp_path: Path
+) -> None:
+    await sqlite.append("session-1", [big(seq, "session-1") for seq in range(1, 211)])
+    await sqlite.append("other", [big(seq, "other") for seq in range(211, 421)])
+    session = trimming_session(sqlite, 1)
+    await publish(session, Notice(message="hi"))
+    await session.close()
+
+    state = tmp_path / "state"
+    kept = await sqlite.recent("session-1", 1000)
+    assert log_size(state, "session-1") < 1024 * 1024 * 9 // 10
+    assert payloads_of(Notice, kept)[-1] == Notice(message="hi") and kept[0].seq > 1
+    assert len(await sqlite.recent("other", 1000)) == 210
+
+
+async def test_with_no_limit_a_session_log_is_never_trimmed(
+    sqlite: SqliteStore, tmp_path: Path
+) -> None:
+    await sqlite.append("session-1", [big(seq, "session-1") for seq in range(1, 211)])
+    session = trimming_session(sqlite, 0)
+    await publish(session, Notice(message="hi"))
+    await session.close()
+
+    assert (await sqlite.recent("session-1", 1000))[0].seq == 1
+    assert not await sqlite.trimmed("session-1")
+
+
+async def test_after_trimming_the_oldest_page_is_marked_trimmed(sqlite: SqliteStore) -> None:
+    await sqlite.append("session-1", [big(seq, "session-1") for seq in range(1, 211)])
+    writing = trimming_session(sqlite, 1)
+    await publish(writing, Notice(message="hi"))
+    await writing.close()
+    first = (await sqlite.recent("session-1", 1000))[0].seq
+    session = trimming_session(sqlite, 1)
+
+    answer = await history(session, History(session="session-1", before_seq=first + 1))
+    await session.close()
+
+    assert answer[0] == HistoryPage(
+        session="session-1", events=(big(first, "session-1"),), more=False, trimmed=True
+    )
+
+
+async def hello_since(store: SqliteStore, since: int) -> list[EventEnvelope]:
+    """What a session on ``store`` sends a frontend that saw the events up to ``since``."""
+    session = trimming_session(store, 1)
+    hello = Hello(client="orbit-tests", protocol_version=PROTOCOL_VERSION, since=since)
+    await session.send(CommandEnvelope(command_id=COMMAND_ID, payload=hello))
+    await session.close()
+    return delivered(session)
+
+
+async def test_a_frontend_that_saw_only_trimmed_events_gets_a_fresh_snapshot(
+    sqlite: SqliteStore,
+) -> None:
+    await sqlite.append("session-1", [big(seq, "session-1") for seq in range(1, 211)])
+    await sqlite.trim("session-1", 1024 * 1024, 1024 * 1024 * 9 // 10)
+    first = (await sqlite.recent("session-1", 1000))[0].seq
+
+    assert snapshots(await hello_since(sqlite, first - 2))
+    assert not snapshots(await hello_since(sqlite, first - 1))
