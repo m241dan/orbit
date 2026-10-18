@@ -51,8 +51,11 @@ Every stream opens with a `Hello` command:
 `client` names the frontend, `protocol_version` is the major version it speaks
 (`PROTOCOL_VERSION`, now `1`), and `since` is the last `seq` it saw, if it's reconnecting.
 
-The backend publishes nothing before `Hello`, and refuses any other command sent before it with
-`invalid`. A second `Hello` is refused with `invalid` too. A `Hello` naming another major
+The backend publishes nothing but refusals before `Hello`. Every command, `Hello` included, is
+first checked for its address: one naming another workspace is refused with `unknown`, and one
+naming a session other than the open one with `wrong_session`. Only then is a command other
+than `Hello` sent before it refused with `invalid`. A second `Hello` is refused with `invalid`
+too. A `Hello` naming another major
 version is refused with `incompatible`, its message naming both versions, and nothing more is
 sent on that stream.
 
@@ -68,10 +71,12 @@ and the backend's `server_version`. `Welcome` is Hello's outcome: it takes the p
    agents.
 4. One-off notices, such as the workspace note, a missing verification setup, leftover work or
    notes on a resumed session.
-5. Live events, as things happen.
+5. When orbit starts with the session picker, `SessionsListed` with `reason="startup"`, for the
+   user to pick a session in place of the interim one the Snapshot showed.
+6. Live events, as things happen.
 
-When orbit starts with the session picker, the backend sends `SessionsListed` with
-`reason="startup"` after the Snapshot of the interim session, for the user to pick a session.
+`Welcome` only says the Hello was accepted; it's the `Snapshot` that marks the frontend's state
+as current.
 
 Switching sessions works the way joining does: opening, starting or picking a session sends a
 `Catalog` and then a `Snapshot` of the session now open. A rename or delete sends a `Catalog`.
@@ -83,7 +88,8 @@ The backend answers every command with exactly one outcome, `CommandAccepted` or
 `CommandRefused`, carrying the command's `command_id` (`Hello` is answered with `Welcome` in
 place of `CommandAccepted`). The outcome comes after the events the command's handling
 published, such as a `TasksChanged`, so when a frontend sees it, it has seen what the command
-did.
+did. `Hello` is the exception: `Welcome` comes first, and the handshake's events follow it, so a
+frontend that has seen `Welcome` hasn't yet seen the `Snapshot`.
 
 `CommandRefused` says why in `code`, one of the refusal codes below, and `message`, for people.
 A refused command changed nothing, except one refused as `internal`: orbit failed partway
