@@ -594,6 +594,13 @@ CHECKS_EXHAUSTED = "checks_exhausted"
 INTERNAL = "internal"
 """An error's code: orbit itself failed unexpectedly."""
 
+REFUSAL_CODES = (NOT_CONFIGURED, UNKNOWN, BUSY, INVALID, LOCKED, WRONG_SESSION, INCOMPATIBLE)
+"""The codes a ``CommandRefused`` carries, as described in ``docs/protocol.md``."""
+
+ERROR_CODES = (AGENT_FAILED, TIMED_OUT, GIT_FAILED, SAVE_FAILED, CHECKS_EXHAUSTED, INTERNAL)
+"""The codes an ``ErrorOccurred`` carries, besides a refusal code where it fits, as described
+in ``docs/protocol.md``."""
+
 
 class CommandRefused(_Message):
     """Command ``command_id`` was refused, for the reason ``code`` names (one of the refusal

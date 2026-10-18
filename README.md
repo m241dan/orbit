@@ -710,7 +710,8 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
 
 - `orbit.protocol`: pydantic models (`Command`s in, `Event`s out), the `Session`
   interface, and `ThreadedSession`, which runs a session on a thread of its own. It imports no
-  other orbit package.
+  other orbit package. `docs/protocol.md` describes the protocol, its conversation rules and
+  codes, and `schema/protocol.schema.json` is its JSON Schema.
 - `orbit.agent`: backend, with no UI imports. Three layers, each importing only the ones below:
   - `external`: adapters that reach outside the backend. `ClaudeCliRunner` launches agents as
     `claude -p --output-format stream-json` runs connected to orbit (`run_agent`, and `converse`
