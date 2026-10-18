@@ -5,6 +5,7 @@ from collections.abc import Sequence
 
 from orbit.agent.application.failures import ReportedOnce
 from orbit.agent.application.ports import EventLog, Publish
+from orbit.agent.domain.replay import LogBounds
 from orbit.protocol import EventEnvelope
 
 
@@ -26,6 +27,20 @@ def _by_session(queued: Sequence[tuple[str, EventEnvelope]]) -> dict[str, list[E
     for session_id, envelope in queued:
         sessions.setdefault(session_id, []).append(envelope)
     return sessions
+
+
+def _with_pending(
+    bounds: LogBounds, session_id: str, pending: Sequence[tuple[str, EventEnvelope]]
+) -> LogBounds:
+    """``bounds`` of the log of the session ``session_id`` moved to take in the envelopes
+    ``pending``, each with its session's id, as though they were logged."""
+    own = [envelope.seq for session, envelope in pending if session == session_id]
+    others = [envelope.seq for session, envelope in pending if session != session_id]
+    first = [] if bounds.first_seq is None else [bounds.first_seq]
+    return LogBounds(
+        first_seq=min([*first, *own], default=None),
+        others_seq=max([bounds.others_seq, *others]),
+    )
 
 
 class LogWriter:
@@ -74,6 +89,27 @@ class LogWriter:
         found = _in_order([*logged, *pending, *self._unwritten(session_id)])
         earlier = [envelope for envelope in found if envelope.seq < before_seq]
         return _latest(earlier, limit), more or len(earlier) > limit
+
+    async def after(self, session_id: str, after_seq: int) -> list[EventEnvelope] | None:
+        """The events of the session ``session_id`` after ``after_seq``, oldest first, logged or
+        still to be written, each once; ``None`` when the log can't be read."""
+        # Read on both sides of the log's read, as recent does.
+        pending = self._unwritten(session_id)
+        logged = await self._log.after(session_id, after_seq)
+        if logged is None:
+            return None
+        found = _in_order([*logged, *pending, *self._unwritten(session_id)])
+        return [envelope for envelope in found if envelope.seq > after_seq]
+
+    async def bounds(self, session_id: str) -> LogBounds | None:
+        """Where the log of the session ``session_id`` stands in its workspace's, counting the
+        events still to be written as logged; ``None`` when the log can't be read."""
+        # Read on both sides of the log's read, as recent does.
+        pending = [*self._writing, *self._queued]
+        logged = await self._log.bounds(session_id)
+        if logged is None:
+            return None
+        return _with_pending(logged, session_id, [*pending, *self._writing, *self._queued])
 
     def _unwritten(self, session_id: str) -> list[EventEnvelope]:
         """The envelopes of the session ``session_id`` being written or queued, in order."""

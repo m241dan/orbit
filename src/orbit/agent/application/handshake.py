@@ -16,6 +16,7 @@ from orbit.protocol import (
     CommandRefused,
     ErrorOccurred,
     Event,
+    EventEnvelope,
     Hello,
     Notice,
     Snapshot,
@@ -36,7 +37,9 @@ def ends_stream(event: Event) -> bool:
 @dataclass(frozen=True)
 class HandshakeParts:
     """What a handshake publishes after ``Welcome``: the ``catalog``, which it fetches first, the
-    ``latest_usage``, if any was fetched, the ``snapshot`` of the session, the one-off notices
+    ``latest_usage``, if any was fetched, the ``snapshot`` of the session, or, for a ``Hello``
+    whose ``since`` is a ``seq`` the frontend can catch up from, the events it ``missed``, which
+    it fetches first too and ``resend``\\s in their envelopes, the one-off notices
     (the ``workspace``, if any, whether there are ``no_steps``, the ``startup_notes`` and the
     ``leftovers`` of earlier runs) and the saved sessions to pick from, which ``list_sessions``
     publishes, if any. It also ``load_review_count``\\s first, and then has the background
@@ -45,6 +48,8 @@ class HandshakeParts:
     catalog: Callable[[], Awaitable[Catalog]]
     latest_usage: Callable[[], UsageChanged | None]
     snapshot: Callable[[], Awaitable[Snapshot]]
+    missed: Callable[[int], Awaitable[Sequence[EventEnvelope] | None]]
+    resend: Callable[[EventEnvelope], None]
     load_review_count: Callable[[], Awaitable[None]]
     workspace: str | None
     no_steps: Callable[[], bool]
@@ -85,7 +90,8 @@ class Handshake:
 
     async def hello(self, hello: Hello, command_id: str) -> None:
         """Welcome the frontend that sent ``hello`` as ``command_id``, then publish the catalog,
-        the latest usage, if any, a snapshot, the one-off notices and, if asked to, the saved
+        the latest usage, if any, a snapshot, or the events it missed since the ``seq`` it gave,
+        if it can catch up on them alone, the one-off notices and, if asked to, the saved
         sessions to pick from; refused for a second Hello, or another protocol version, and
         failing, with no Welcome, if the catalog can't be had. A step that fails after Welcome
         is published as an ``internal`` error instead, and the steps after it still run."""
@@ -99,31 +105,44 @@ class Handshake:
             )
             raise Refused(INCOMPATIBLE, message)
         catalog = await self._parts.catalog()  # Before Welcome, so its failure refuses Hello.
+        missed = await self._missed(hello.since)  # Before Welcome, which comes after them.
         self._welcomed = True
         await self._events.put(Welcome(command_id=command_id, server_version=__version__))
         try:
-            for step in self._steps(catalog):
+            for step in self._steps(catalog, missed):
                 await self._attempt(step)
         finally:  # A sender cancelled meanwhile mustn't keep the background from starting.
             if not self._parts.closing():
                 self._parts.start()
 
-    async def _publish(self, catalog: Catalog) -> None:
-        """Publish ``catalog``, the latest usage, if any was fetched, and a snapshot of the
-        session."""
+    async def _missed(self, since: int | None) -> Sequence[EventEnvelope] | None:
+        """The events the frontend missed since ``since``, if it gave one and can catch up on
+        them alone; ``None`` when it needs a snapshot."""
+        return None if since is None else await self._parts.missed(since)
+
+    async def _publish(self, catalog: Catalog, missed: Sequence[EventEnvelope] | None) -> None:
+        """Publish ``catalog``, the latest usage, if any was fetched, and the events ``missed``
+        in their envelopes, or, with none to catch up on, a snapshot of the session."""
         parts = self._parts
         await self._events.put(catalog)
         latest = parts.latest_usage()
         if latest is not None:
             await self._events.put(latest)
-        await self._events.put(await parts.snapshot())
+        if missed is None:
+            await self._events.put(await parts.snapshot())
+            return
+        for envelope in missed:
+            parts.resend(envelope)
 
-    def _steps(self, catalog: Catalog) -> list[Callable[[], Awaitable[None]]]:
-        """The steps after Welcome, in order: publishing ``catalog`` and the session, loading the
-        review count, the one-off notices and, if asked to, the saved sessions to pick from."""
+    def _steps(
+        self, catalog: Catalog, missed: Sequence[EventEnvelope] | None
+    ) -> list[Callable[[], Awaitable[None]]]:
+        """The steps after Welcome, in order: publishing ``catalog`` and the session, or the
+        events ``missed``, loading the review count, the one-off notices and, if asked to, the
+        saved sessions to pick from."""
         parts = self._parts
         steps = [
-            lambda: self._publish(catalog),
+            lambda: self._publish(catalog, missed),
             parts.load_review_count,
             self._publish_notes,
             self._publish_leftovers,

@@ -980,7 +980,7 @@
       "type": "object"
     },
     "Hello": {
-      "description": "Open the stream as ``client``, speaking ``protocol_version`` of the protocol; it must\ncome before any other command. ``since`` is the last ``seq`` the client saw, if any; it's\naccepted and ignored for now. Answered with ``Welcome``, or refused.",
+      "description": "Open the stream as ``client``, speaking ``protocol_version`` of the protocol; it must\ncome before any other command. ``since`` is the last ``seq`` the client saw, if any; the\nopen session's events after it are sent again in place of a ``Snapshot`` when they're all it\nmissed. Answered with ``Welcome``, or refused.",
       "properties": {
         "client": {
           "title": "Client",

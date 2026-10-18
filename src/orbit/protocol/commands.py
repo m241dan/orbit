@@ -14,8 +14,9 @@ from orbit.protocol.names import WORK_LANE, BusyLane
 
 class Hello(_Message):
     """Open the stream as ``client``, speaking ``protocol_version`` of the protocol; it must
-    come before any other command. ``since`` is the last ``seq`` the client saw, if any; it's
-    accepted and ignored for now. Answered with ``Welcome``, or refused."""
+    come before any other command. ``since`` is the last ``seq`` the client saw, if any; the
+    open session's events after it are sent again in place of a ``Snapshot`` when they're all it
+    missed. Answered with ``Welcome``, or refused."""
 
     type: Literal["hello"] = "hello"
     client: str

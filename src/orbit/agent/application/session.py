@@ -122,7 +122,8 @@ class AgentSession:
 
     Every stream opens with ``Hello``: the session publishes nothing, and refuses every other
     command, until it's answered with ``Welcome``. A ``Catalog`` of what exists follows it, then
-    the latest usage if any was fetched, a ``Snapshot`` of the session open and the one-off
+    the latest usage if any was fetched, a ``Snapshot`` of the session open (or, for a ``Hello``
+    whose ``since`` it can catch up from, the open session's events after it) and the one-off
     notices: the workspace, no verification steps, the ``startup_notes``, work left by earlier
     runs. Every switch of
     session ends with a ``Catalog`` and a ``Snapshot`` too, and a rename or delete sends a
@@ -220,6 +221,8 @@ class AgentSession:
             self._switcher.catalog,
             self._latest_usage,
             self._snapshot,
+            lambda since: self._events.missed(self._keeper.id, since),
+            self._events.resend,
             self._load_review_count,
             self._workspace,
             self._no_steps,

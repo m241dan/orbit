@@ -9,6 +9,7 @@ from typing import Any, Protocol
 from orbit.agent.domain.agents import Agent
 from orbit.agent.domain.checks import ChecksProposal, Setup
 from orbit.agent.domain.config_errors import ConfigError
+from orbit.agent.domain.replay import LogBounds
 from orbit.agent.domain.roles import Role
 from orbit.agent.domain.sessions import SessionRecord, Unreadable
 from orbit.agent.domain.usage import UsageFetch
@@ -230,6 +231,16 @@ class EventLog(Protocol):
     ) -> tuple[list[EventEnvelope], bool]:
         """The last ``limit`` events logged of the session ``session_id`` before ``before_seq``,
         oldest first, and whether earlier ones remain; none when they can't be read."""
+        ...
+
+    async def after(self, session_id: str, after_seq: int) -> list[EventEnvelope] | None:
+        """The events logged of the session ``session_id`` after ``after_seq``, oldest first;
+        ``None`` when they can't be read."""
+        ...
+
+    async def bounds(self, session_id: str) -> LogBounds | None:
+        """Where the log of the session ``session_id`` stands in its workspace's; ``None`` when
+        that can't be read."""
         ...
 
 

@@ -24,6 +24,7 @@ from orbit.protocol import (
     CommandRefused,
     ErrorOccurred,
     Event,
+    EventEnvelope,
     Hello,
     Notice,
     SessionSummary,
@@ -51,10 +52,12 @@ LISTED = Notice(message="listed")
 
 class Parts:
     """The parts of a session as a handshake sees them, logging into ``log`` the events
-    published and, as strings, what else it was asked to do."""
+    published, the envelopes resent and, as strings, what else it was asked to do; ``missing``
+    is what the frontend missed, when it can catch up on it."""
 
     def __init__(self) -> None:
-        self.log: list[Event | str] = []
+        self.log: list[Event | EventEnvelope | str] = []
+        self.missing: Sequence[EventEnvelope] | None = None
         self.latest: UsageChanged | None = None
         self.no_steps = False
         self.notes: list[str] = []
@@ -93,6 +96,13 @@ class Parts:
     async def snapshot(self) -> Snapshot:
         return SNAPSHOT
 
+    async def missed(self, since: int) -> Sequence[EventEnvelope] | None:
+        await self._part(f"missed since {since}")
+        return self.missing
+
+    def resend(self, envelope: EventEnvelope) -> None:
+        self.log.append(envelope)
+
     def start(self) -> None:
         self.log.append("start")
 
@@ -101,6 +111,8 @@ class Parts:
             self.catalog,
             lambda: self.latest,
             self.snapshot,
+            self.missed,
+            self.resend,
             self.load_review_count,
             workspace,
             lambda: self.no_steps,
@@ -113,8 +125,8 @@ class Parts:
         return Handshake(parts, self)
 
 
-def hello(protocol_version: int = PROTOCOL_VERSION) -> Hello:
-    return Hello(client="orbit-tests", protocol_version=protocol_version)
+def hello(protocol_version: int = PROTOCOL_VERSION, since: int | None = None) -> Hello:
+    return Hello(client="orbit-tests", protocol_version=protocol_version, since=since)
 
 
 def welcome(command_id: str = "hi") -> Welcome:
@@ -208,6 +220,54 @@ async def test_the_background_starts_once_even_when_cancelled_after_welcome() ->
     assert parts.log.count("start") == 1
     assert "leftovers" not in parts.log
     assert handshake.welcomed
+
+
+def missed(seq: int) -> EventEnvelope:
+    return EventEnvelope(seq=seq, session="open", payload=Notice(message=f"missed {seq}"))
+
+
+async def test_a_hello_that_can_catch_up_gets_what_it_missed_in_place_of_the_snapshot() -> None:
+    parts = Parts()
+    parts.latest, parts.notes = USAGE, ["left over"]
+    parts.missing = [missed(16), missed(17)]
+    await parts.handshake(workspace="/work").hello(hello(since=15), "hi")
+    assert parts.log == [
+        "catalog",
+        "missed since 15",
+        welcome(),
+        CATALOG,
+        USAGE,
+        missed(16),
+        missed(17),
+        "review count",
+        Notice(message="Workspace: /work"),
+        "leftovers",
+        Notice(message="left over"),
+        "start",
+    ]
+
+
+async def test_a_hello_that_cant_catch_up_gets_the_snapshot() -> None:
+    parts = Parts()
+    await parts.handshake().hello(hello(since=15), "hi")
+    assert parts.log[:5] == ["catalog", "missed since 15", welcome(), CATALOG, SNAPSHOT]
+
+
+async def test_a_hello_with_nothing_missed_gets_no_snapshot() -> None:
+    parts = Parts()
+    parts.missing = []
+    await parts.handshake().hello(hello(since=15), "hi")
+    assert parts.log[:5] == ["catalog", "missed since 15", welcome(), CATALOG, "review count"]
+
+
+async def test_what_was_missed_that_cant_be_had_fails_hello_with_no_welcome() -> None:
+    parts = Parts()
+    parts.fail_at = "missed since 15"
+    handshake = parts.handshake()
+    with pytest.raises(RuntimeError, match="no missed since 15"):
+        await handshake.hello(hello(since=15), "hi")
+    assert parts.log == ["catalog", "missed since 15"]
+    assert not handshake.welcomed
 
 
 async def test_a_failure_after_welcome_is_an_internal_error_and_the_background_starts() -> None:

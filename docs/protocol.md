@@ -72,7 +72,10 @@ and the backend's `server_version`. `Welcome` is Hello's outcome: it takes the p
 3. `Snapshot`: the open session as it stands, with its settings, busy lanes, tasks,
    verification steps, review status, checks proposals waiting for a decision, running
    agents and its `transcript`: the session's last 500 logged events, oldest first, in the
-   envelopes they were sent in, their `seq`s included (none without a store).
+   envelopes they were sent in, their `seq`s included (none without a store). A `Hello`
+   whose `since` orbit can catch up from gets the open session's events after it here
+   instead, in their original envelopes (see
+   [Sequencing and reconnecting](#sequencing-and-reconnecting)).
 4. One-off notices, such as the workspace note, a missing verification setup, leftover work or
    notes on a resumed session.
 5. When orbit starts with the session picker, `SessionsListed` with `reason="startup"`, for the
@@ -126,9 +129,19 @@ run, with `code`, one of the error codes below or a refusal code where it fits, 
 Events arrive in `seq` order. The Snapshot's own envelope `seq` is the point it's current to:
 it includes the effect of every event before it, and every later event applies on top of it.
 
-A reconnecting frontend sends the last `seq` it saw as `Hello`'s `since`. Until orbit keeps an
-event log, `since` is accepted and answered with a fresh Snapshot, as if it weren't given; the
-frontend replaces its state from the Snapshot rather than catching up event by event.
+A reconnecting frontend sends the last `seq` it saw as `Hello`'s `since`. Orbit replays what it
+missed when the open session's logged events are all it missed: every logged event with a `seq`
+after `since` belongs to the open session, and `since` is no older than that session's oldest
+kept event (`since` is at least that event's `seq` minus one). Then `Welcome`, the `Catalog` and
+the latest usage, if any, are followed by the open session's events after `since`, oldest first
+and in their original envelopes, `seq` and all, with no `Snapshot`; the one-off notices and the
+rest of the handshake follow, then live events. Events no session owns, such as usage, aren't
+logged, so aren't replayed.
+
+Otherwise orbit sends a fresh Snapshot, as if `since` weren't given, and the frontend replaces
+its state from it: when another session's events came after `since` (the user switched
+sessions), when `since` is older than what's kept, when it's ahead of the last event orbit
+stamped, or when orbit keeps no event log.
 
 ## Compatibility
 

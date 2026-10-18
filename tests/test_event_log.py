@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from orbit.agent.application.ports import EventLog
+from orbit.agent.domain.replay import LogBounds
 from orbit.agent.external import sqlite_store
 from orbit.agent.external.sqlite_store import SqliteStore
 from orbit.protocol import EventEnvelope, Notice, TasksChanged, decode_event
@@ -276,3 +277,74 @@ async def test_events_before_a_seq_under_an_id_that_isnt_a_plain_file_name_are_r
     store = await open_store(workspace)
     with pytest.raises(ValueError, match="Not a session id"):
         await store.before("../abc", 10, 10)
+
+
+# Reading those after a seq, and where a session's log stands
+
+
+async def test_events_after_a_seq_are_the_sessions_later_ones_oldest_first(
+    open_store: Opener, tmp_path: Path, workspace: Path
+) -> None:
+    other_workspace = tmp_path / "other"
+    other_workspace.mkdir()
+    store, other = await open_store(workspace), await open_store(other_workspace)
+    await store.append("abc", [notice(seq) for seq in (1, 2, 4, 5)])
+    await store.append("def", [notice(3, "def")])
+    await other.append("abc", [notice(6)])
+
+    assert await store.after("abc", 1) == [notice(2), notice(4), notice(5)]
+    assert await store.after("abc", 5) == []
+    assert await store.after("ghi", 0) == []
+
+
+async def test_events_after_a_seq_of_types_this_orbit_doesnt_know_are_left_out(
+    open_store: Opener, state: Path, workspace: Path
+) -> None:
+    store = await open_store(workspace)
+    await store.append("abc", [notice(1), notice(2)])
+    with database(state) as connection:
+        connection.execute(
+            "UPDATE events SET json = replace(json, '\"notice\"', '\"later\"') WHERE seq = 1"
+        )
+
+    assert await store.after("abc", 0) == [notice(2)]
+
+
+async def test_events_after_a_seq_that_cant_be_read_are_none(
+    open_store: Opener, workspace: Path
+) -> None:
+    store = await open_store(workspace)
+    await store.close()
+
+    assert await store.after("abc", 0) is None
+
+
+async def test_bounds_are_the_sessions_oldest_seq_and_the_highest_of_its_workspaces_others(
+    open_store: Opener, tmp_path: Path, workspace: Path
+) -> None:
+    other_workspace = tmp_path / "other"
+    other_workspace.mkdir()
+    store, other = await open_store(workspace), await open_store(other_workspace)
+    assert await store.bounds("abc") == LogBounds(first_seq=None, others_seq=0)
+    await store.append("abc", [notice(seq) for seq in (3, 4, 7)])
+    await store.append("def", [notice(5, "def")])
+    await other.append("ghi", [notice(9, "ghi")])
+
+    assert await store.bounds("abc") == LogBounds(first_seq=3, others_seq=5)
+    assert await store.bounds("def") == LogBounds(first_seq=5, others_seq=7)
+
+
+async def test_bounds_that_cant_be_read_are_none(open_store: Opener, workspace: Path) -> None:
+    store = await open_store(workspace)
+    await store.close()
+
+    assert await store.bounds("abc") is None
+
+
+@pytest.mark.parametrize("read", ["after", "bounds"])
+async def test_reading_after_a_seq_under_an_id_that_isnt_a_plain_file_name_is_refused(
+    open_store: Opener, workspace: Path, read: str
+) -> None:
+    store = await open_store(workspace)
+    with pytest.raises(ValueError, match="Not a session id"):
+        await (store.after("../abc", 0) if read == "after" else store.bounds("../abc"))

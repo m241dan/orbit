@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Self
 
 from orbit.agent.application.ports import StoredSession
+from orbit.agent.domain.replay import LogBounds
 from orbit.agent.domain.sessions import SessionRecord, Unreadable, parse_record, record_json
 from orbit.agent.external.git_tree import workspace_fingerprint
 from orbit.agent.external.session_locks import SessionLocks, check_session_id
@@ -393,6 +394,23 @@ class SqliteStore:
             return [], False
         return _decoded(texts[:limit]), len(texts) > limit
 
+    async def after(self, session_id: str, after_seq: int) -> list[EventEnvelope] | None:
+        """The events logged of the session ``session_id`` after ``after_seq``, oldest first,
+        but for those of types this orbit doesn't know; ``None`` when they can't be read."""
+        check_session_id(session_id)
+        try:
+            texts = await self._call(self._after, session_id, after_seq)
+        except sqlite3.Error:
+            return None
+        return _decoded(texts)
+
+    async def bounds(self, session_id: str) -> LogBounds | None:
+        check_session_id(session_id)
+        try:
+            return await self._call(self._bounds, session_id)
+        except sqlite3.Error:
+            return None
+
     async def acquire(self, session_id: str) -> bool:
         """Lock the session ``session_id`` for this orbit; returns ``False`` when another
         running orbit has it locked.
@@ -581,6 +599,26 @@ class SqliteStore:
             (self._workspace, session_id, before_seq, limit),
         )
         return [str(text) for (text,) in rows]
+
+    def _after(self, session_id: str, after_seq: int) -> list[str]:
+        """The JSON of the session ``session_id``'s events after ``after_seq``, latest first."""
+        rows = self._db.execute(
+            """SELECT json FROM events WHERE workspace_id = ? AND session_id = ? AND seq > ?
+            ORDER BY seq DESC""",
+            (self._workspace, session_id, after_seq),
+        )
+        return [str(text) for (text,) in rows]
+
+    def _bounds(self, session_id: str) -> LogBounds:
+        (first,) = self._db.execute(
+            "SELECT min(seq) FROM events WHERE workspace_id = ? AND session_id = ?",
+            (self._workspace, session_id),
+        ).fetchone()
+        (others,) = self._db.execute(
+            "SELECT max(seq) FROM events WHERE workspace_id = ? AND session_id != ?",
+            (self._workspace, session_id),
+        ).fetchone()
+        return LogBounds(first_seq=first, others_seq=int(others or 0))
 
     def _delete(self, session_id: str) -> None:
         with self._transaction():

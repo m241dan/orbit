@@ -24,6 +24,7 @@ from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.checks import Setup
+from orbit.agent.domain.replay import LogBounds
 from orbit.agent.domain.roles import REVIEW_ROLES, built_in_roles
 from orbit.agent.domain.sessions import SessionRecord, Unreadable
 from orbit.protocol import (
@@ -331,6 +332,16 @@ class FakeStore:
         logged = self.logged
         earlier = [e for e in logged if e.session == session_id and e.seq < before_seq]
         return earlier[-limit:], len(earlier) > limit
+
+    async def after(self, session_id: str, after_seq: int) -> list[EventEnvelope] | None:
+        await asyncio.sleep(0)  # Reading takes a while.
+        return [e for e in self.logged if e.session == session_id and e.seq > after_seq]
+
+    async def bounds(self, session_id: str) -> LogBounds | None:
+        await asyncio.sleep(0)  # Reading takes a while.
+        own = [e.seq for e in self.logged if e.session == session_id]
+        others = [e.seq for e in self.logged if e.session != session_id]
+        return LogBounds(first_seq=min(own, default=None), others_seq=max(others, default=0))
 
     async def review_count(self) -> int:
         return self.count

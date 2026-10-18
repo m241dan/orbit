@@ -6,6 +6,7 @@ from typing import Protocol
 
 from orbit.agent.application.log_writer import LogWriter
 from orbit.agent.application.ports import EventLog
+from orbit.agent.domain.replay import can_replay
 from orbit.protocol import CONNECTION_EVENTS, SESSIONLESS_EVENTS, Event, EventEnvelope
 
 TRANSCRIPT_LENGTH = 500
@@ -28,7 +29,8 @@ class Outbox:
 
     With a ``log``, each envelope of a session is also written to it in the background, but for
     the events answering one connection; :meth:`transcript` reads a session's latest back,
-    :meth:`history` those before them, and :meth:`close` writes those still queued."""
+    :meth:`history` those before them, :meth:`missed` those after a ``seq``, for
+    :meth:`resend` to queue again, and :meth:`close` writes those still queued."""
 
     def __init__(self, open_session: Callable[[], str], log: EventLog | None = None) -> None:
         self._open = open_session
@@ -70,6 +72,28 @@ class Outbox:
             return (), False
         earlier, more = await self._writer.before(session_id, before_seq, limit)
         return tuple(earlier), more
+
+    async def missed(self, session_id: str, since: int) -> tuple[EventEnvelope, ...] | None:
+        """The events of the session ``session_id`` after ``since`` and up to the last stamped,
+        oldest first, logged or still to be, when a frontend that saw those up to ``since``
+        catches up on them alone; ``None`` when it can't, or the log can't be read, or there's
+        no log."""
+        last = self._seq  # Those stamped from now on are queued for the frontend anyway.
+        if self._writer is None or not await self._replayable(session_id, since, last):
+            return None
+        events = await self._writer.after(session_id, since)
+        return None if events is None else tuple(e for e in events if e.seq <= last)
+
+    async def _replayable(self, session_id: str, since: int, last: int) -> bool:
+        """Whether a frontend that saw the events up to ``since``, with ``last`` the last one
+        stamped, catches up on those of the session ``session_id`` after it alone."""
+        assert self._writer is not None, "There's no log."
+        bounds = await self._writer.bounds(session_id)
+        return bounds is not None and can_replay(since, last, bounds)
+
+    def resend(self, envelope: EventEnvelope) -> None:
+        """Queue ``envelope``, stamped and logged already, as it is."""
+        self._queue.put_nowait(envelope)
 
     async def close(self) -> None:
         """Write the envelopes still queued for the log, if there is one, and stop writing."""

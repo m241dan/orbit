@@ -8,16 +8,20 @@ import pytest
 
 from orbit.agent import AgentSession
 from orbit.agent.application.log_writer import LogWriter
+from orbit.agent.domain.replay import LogBounds
 from orbit.agent.external.sqlite_store import SqliteStore
 from orbit.protocol import (
+    PROTOCOL_VERSION,
     SAVE_FAILED,
     UNKNOWN,
     AddTask,
     Catalog,
     CommandAccepted,
+    CommandEnvelope,
     ErrorOccurred,
     Event,
     EventEnvelope,
+    Hello,
     History,
     HistoryPage,
     Notice,
@@ -213,6 +217,65 @@ async def test_events_before_a_seq_say_more_remain_when_the_log_holds_more() -> 
     writer = LogWriter(log, Published())
 
     assert await writer.before("a", 3, 1) == ([notice(2)], True)
+
+
+async def test_events_after_a_seq_are_the_logged_ones_then_those_still_queued() -> None:
+    log = GatedLog()
+    log.logged = [notice(1), notice(2), notice(3, "b")]
+    writer = LogWriter(log, Published())
+    writer.add("a", notice(4))
+    await log.waiting.wait()  # 4 is being written.
+    writer.add("a", notice(5))
+    writer.add("b", notice(6, "b"))
+
+    assert await writer.after("a", 1) == [notice(2), notice(4), notice(5)]
+    assert await writer.after("a", 4) == [notice(5)]
+    log.gate.set()
+    await writer.close()
+
+
+async def test_bounds_count_the_events_still_queued_as_logged() -> None:
+    log = GatedLog()
+    log.logged = [notice(3), notice(4, "b")]
+    writer = LogWriter(log, Published())
+    writer.add("a", notice(5))
+    await log.waiting.wait()  # 5 is being written.
+    writer.add("b", notice(6, "b"))
+    writer.add("c", notice(7, "c"))
+
+    assert await writer.bounds("a") == LogBounds(first_seq=3, others_seq=7)
+    assert await writer.bounds("c") == LogBounds(first_seq=7, others_seq=6)
+    assert await writer.bounds("d") == LogBounds(first_seq=None, others_seq=7)
+    log.gate.set()
+    await writer.close()
+
+
+class Unreadable(FakeStore):
+    """A log whose events can't be read back."""
+
+    async def after(self, session_id: str, after_seq: int) -> list[EventEnvelope] | None:
+        return None
+
+    async def bounds(self, session_id: str) -> LogBounds | None:
+        return None
+
+
+async def test_reads_after_a_seq_of_a_log_that_cant_be_read_are_none() -> None:
+    writer = LogWriter(Unreadable(), Published())
+    writer.add("a", notice(1))
+
+    assert await writer.after("a", 0) is None
+    assert await writer.bounds("a") is None
+    await writer.close()
+
+
+async def test_a_session_whose_log_cant_be_read_answers_since_with_a_snapshot() -> None:
+    session = stored_session(Unreadable())
+    hello = Hello(client="orbit-tests", protocol_version=PROTOCOL_VERSION, since=0)
+    await session.send(CommandEnvelope(command_id=COMMAND_ID, payload=hello))
+    await session.close()
+
+    assert payloads_of(Snapshot, delivered(session))
 
 
 # What the session logs
