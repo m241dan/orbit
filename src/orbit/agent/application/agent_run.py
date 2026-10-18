@@ -242,9 +242,11 @@ class AgentRun:
         """Serve the agent until it's done, or its role's time runs out."""
         minutes = self.role.timeout_minutes
         try:
-            async with asyncio.timeout(None if minutes is None else minutes * 60):
+            async with asyncio.timeout(None if minutes is None else minutes * 60) as deadline:
                 await self._serve(before)
         except TimeoutError:
+            if not deadline.expired():  # Raised while serving, not the role's time running out.
+                raise
             message = f"{self.agent.id} ran out of time ({minutes:g} minutes)."
             await self._publish(
                 ErrorOccurred(agent_id=self.agent.id, code=TIMED_OUT, message=message)

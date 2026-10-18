@@ -48,6 +48,16 @@ def _seconds(minutes: float | None) -> float | None:
     return None if minutes is None else minutes * 60
 
 
+def _timed_out(
+    exc: TimeoutError, deadline: asyncio.Timeout, minutes: float | None
+) -> tuple[str, str]:
+    """The error code and message for a turn that raised ``exc``: the planner ran out of its
+    ``minutes`` only if ``deadline`` expired, as the turn can raise a TimeoutError of its own."""
+    if not deadline.expired():
+        return AGENT_FAILED, str(exc)
+    return TIMED_OUT, f"The planner ran out of time ({minutes:g} minutes)."
+
+
 class PlannerChat:
     """The conversation with the planner, a turn per prompt; ``step_names`` tells the names of
     the verification steps tasks must pass now."""
@@ -103,14 +113,13 @@ class PlannerChat:
         finished: TurnEndReason | None = None  # How it ended, once its TurnFinished is out.
         minutes = self._desk.agents.roles[PLANNER].timeout_minutes  # Read again on a reset.
         try:
-            async with asyncio.timeout(_seconds(minutes)):
+            async with asyncio.timeout(_seconds(minutes)) as deadline:
                 async for event in self.run_turn(turn_id, text, settings):
                     finished = await self._publish(event, finished)
         except asyncio.CancelledError:
             return await self._end(turn_id, finished, "cancelled")
-        except TimeoutError:
-            message = f"The planner ran out of time ({minutes:g} minutes)."
-            return await self._fail(turn_id, finished, TIMED_OUT, message)
+        except TimeoutError as exc:
+            return await self._fail(turn_id, finished, *_timed_out(exc, deadline, minutes))
         except Exception as exc:
             return await self._fail(turn_id, finished, AGENT_FAILED, str(exc))
         return finished or "completed"

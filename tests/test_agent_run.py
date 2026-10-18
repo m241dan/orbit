@@ -900,3 +900,24 @@ async def test_tree_failed_publishes_the_error_and_ends_in_it() -> None:
         "Error: git broke",
         "git broke",
     )
+
+
+@pytest.mark.parametrize("minutes", [None, 60])
+async def test_a_timeout_that_is_not_the_runs_own_is_raised(minutes: float | None) -> None:
+    events: list[Event] = []
+    verifying = asyncio.Event()
+
+    async def times_out_while_verifying(event: Event) -> None:
+        events.append(event)
+        if verifying.is_set():
+            verifying.clear()  # Only once, so the run can still end.
+            raise TimeoutError("pipe timed out")
+
+    agent_run, running = await started("coder", times_out_while_verifying, minutes)
+    verifying.set()
+    call = asyncio.ensure_future(agent_run.handle("complete_task", {"summary": "done"}))
+    with pytest.raises(TimeoutError, match="pipe timed out"):
+        await asyncio.wait_for(running, 5)
+    assert await call == Reply("Orbit couldn't check your work: pipe timed out", is_error=True)
+    assert not any(isinstance(e, ErrorOccurred) for e in events)
+    assert not any(isinstance(e, ErrorOccurred) for e in events)

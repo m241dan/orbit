@@ -553,3 +553,24 @@ async def test_the_planners_time_limit_is_read_when_each_turn_starts() -> None:
     assert await chat.answer("Plan.", Settings()) == "completed"
     roles[PLANNER] = timed_planner(0.0001)[PLANNER]  # As a reset reads it again.
     assert await chat.answer("More.", Settings()) == "error"
+
+
+async def times_out_elsewhere(call: Call) -> TurnEndReason:
+    raise TimeoutError("pipe timed out")
+
+
+@pytest.mark.parametrize("minutes", [None, 60])
+async def test_a_timeout_that_is_not_the_planners_own_is_a_failure(minutes: float | None) -> None:
+    published: list[Event] = []
+    roles = timed_planner(minutes)
+    chat, _, _ = steps_chat(times_out_elsewhere, published=published, roles=roles)
+    assert await chat.answer("Plan.", Settings()) == "error"
+    turn_id = turn_id_of(published)
+    assert [e for e in published if isinstance(e, ErrorOccurred)] == [
+        ErrorOccurred(
+            turn_id=turn_id, agent_id="agent-1", code=AGENT_FAILED, message="pipe timed out"
+        )
+    ]
+    assert finished_turns(published) == [
+        TurnFinished(turn_id=turn_id, agent_id="agent-1", reason="error")
+    ]
