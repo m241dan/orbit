@@ -44,6 +44,7 @@ from tests.agent_fakes import (
     Steps,
     events_until,
     fetch_usage_unseen,
+    frontend,
     greet,
     of_type,
     put_on_board,
@@ -66,7 +67,7 @@ TASKS = (TaskSpec(prompt="Add a flag."), TaskSpec(prompt="Document it."))
 async def opening(session: AgentSession, count: int) -> list[Event]:
     """The first ``count`` events once ``session`` is greeted, its Welcome first."""
     await greet(session)
-    stream = session.events()
+    stream = frontend(session).events()
     return [(await asyncio.wait_for(anext(stream), 1)).payload for _ in range(count)]
 
 

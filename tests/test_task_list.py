@@ -34,6 +34,7 @@ from orbit.tui.transcript import Transcript
 from orbit.tui.view.common import spinner_frame
 from orbit.tui.view.tasks import task_label, task_numbers, usage_label
 from orbit.tui.widgets import ChatPrompt
+from tests.agent_fakes import frontend
 from tests.test_tui import FakeSession, opened, selected, show_settings
 
 
@@ -458,7 +459,7 @@ async def test_a_refused_planner_prompt_frees_the_prompt() -> None:
 
 
 async def test_a_planner_less_session_leaves_the_prompt_usable() -> None:
-    app = OrbitApp(AgentSession())
+    app = OrbitApp(frontend(AgentSession()))
     async with app.run_test(size=(120, 30)) as pilot:
         prompt = app.query_one(ChatPrompt)
         await pilot.press("ctrl+t", "i", *"plan", "enter")

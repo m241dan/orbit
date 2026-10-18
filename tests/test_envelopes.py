@@ -23,7 +23,7 @@ from orbit.protocol import (
     TaskSpec,
     UsageChanged,
 )
-from tests.agent_fakes import FakeStore, Ticks, greeted, send
+from tests.agent_fakes import FakeStore, Ticks, frontend, greeted, send
 from tests.test_usage_monitor import LIMITS, Source
 
 HELLO = SendMessage(agent=PLANNER, text="hello")
@@ -85,7 +85,7 @@ async def envelopes_until(session: AgentSession, kind: type) -> list[EventEnvelo
     await greeted(session)
 
     async def collect() -> None:
-        async for envelope in session.events():
+        async for envelope in frontend(session).events():
             envelopes.append(envelope)
             if isinstance(envelope.payload, kind):
                 return

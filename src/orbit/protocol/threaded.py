@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from orbit.protocol.envelope import CommandEnvelope, EventEnvelope
-from orbit.protocol.session import Session
+from orbit.protocol.session import Session, SharedSession
 
 _Item = EventEnvelope | Exception | None
 """What a pump hands over: an event, the failure that ended the stream, or ``None`` for its
@@ -20,23 +20,25 @@ _Deliver = Callable[[_Item], None]
 
 @dataclass(frozen=True)
 class _Backend:
-    """The inner session and the loop it runs on."""
+    """The inner session, the connection to it driven here and the loop they run on."""
 
     loop: asyncio.AbstractEventLoop
+    shared: SharedSession
     session: Session
 
 
 class ThreadedSession:
-    """A ``Session`` that builds the one ``make_session`` returns, and drives it, on a thread
-    of its own named "orbit-backend" with its own event loop, run inside ``thread_context``
-    if given, so neither side's work stalls the other's loop.
+    """A ``Session`` that builds the one ``make_session`` returns, and drives one connection
+    to it, on a thread of its own named "orbit-backend" with its own event loop, run inside
+    ``thread_context`` if given, so neither side's work stalls the other's loop.
 
-    The thread starts on ``start`` or the first use; ``close`` ends it.
+    The thread starts on ``start`` or the first use; ``close`` closes the inner session and
+    ends it.
     """
 
     def __init__(
         self,
-        make_session: Callable[[], Session],
+        make_session: Callable[[], SharedSession],
         thread_context: Callable[[], AbstractContextManager[object]] | None = None,
     ) -> None:
         self._make_session = make_session
@@ -88,7 +90,7 @@ class ThreadedSession:
             return
         try:
             if self._backend is not None:
-                await self._on_backend(self._backend, self._backend.session.close())
+                await self._on_backend(self._backend, self._backend.shared.close())
         finally:
             self._stop(self._thread)
 
@@ -125,9 +127,10 @@ class ThreadedSession:
             self._ready.set()
 
     async def _serve(self) -> None:
-        """Build the inner session and keep it until the session is closed."""
+        """Build the inner session, connect to it and keep it until the session is closed."""
         with self._thread_context():
-            self._backend = _Backend(asyncio.get_running_loop(), self._make_session())
+            shared = self._make_session()
+            self._backend = _Backend(asyncio.get_running_loop(), shared, shared.connect())
             self._ready.set()
             await self._stopping.wait()
             for pump in self._pumps:

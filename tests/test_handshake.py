@@ -37,6 +37,7 @@ from tests.agent_fakes import (
     Steps,
     board,
     events_until,
+    frontend,
     greet,
     nothing_queued,
     of_type,
@@ -52,19 +53,19 @@ async def send_as(
 ) -> None:
     """Send ``command`` to ``session`` as ``command_id``, with the envelope's other ``fields``,
     greeted or not."""
-    await session.send(CommandEnvelope(command_id=command_id, payload=command, **fields))
+    await frontend(session).send(CommandEnvelope(command_id=command_id, payload=command, **fields))
 
 
 async def published(session: AgentSession, count: int) -> list[Event]:
     """The next ``count`` events ``session`` publishes."""
-    stream = session.events()
+    stream = frontend(session).events()
     return [(await asyncio.wait_for(anext(stream), 1)).payload for _ in range(count)]
 
 
 async def silent(session: AgentSession) -> bool:
     """Whether ``session`` publishes nothing for a moment."""
     try:
-        await asyncio.wait_for(anext(session.events()), 0.05)
+        await asyncio.wait_for(anext(frontend(session).events()), 0.05)
     except TimeoutError:
         return True
     return False
@@ -179,7 +180,7 @@ async def test_another_protocol_version_is_refused_and_ends_the_stream() -> None
     await send_as(session, "hello", version(PROTOCOL_VERSION + 1))
     await send_as(session, "add", AddTask(task=TaskSpec(prompt="Add a flag.")))
     await send_as(session, "again", HELLO)
-    events = [envelope.payload async for envelope in session.events()]
+    events = [envelope.payload async for envelope in frontend(session).events()]
     await session.close()
 
     message = "Protocol version 2 isn't supported; this orbit speaks version 1."

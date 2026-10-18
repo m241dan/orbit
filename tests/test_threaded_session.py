@@ -13,6 +13,7 @@ from orbit.protocol import (
     Notice,
     SendMessage,
     Session,
+    SharedSession,
     ThreadedSession,
 )
 
@@ -79,6 +80,10 @@ class FakeSession:
             self.stream_closed_on = threading.current_thread().name
             self.stream_closed.set()
 
+    def connect(self) -> "FakeSession":
+        self._record("connect")
+        return self
+
     async def close(self) -> None:
         self._record("close")
         self.closes += 1
@@ -102,6 +107,9 @@ class EchoSession:
         while True:
             yield await self._queue.get()
 
+    def connect(self) -> "EchoSession":
+        return self
+
     async def close(self) -> None:
         pass
 
@@ -111,7 +119,7 @@ def threaded(inner: FakeSession | None = None) -> tuple[ThreadedSession, list[Fa
     each recording that it was built."""
     built: list[FakeSession] = []
 
-    def make() -> Session:
+    def make() -> SharedSession:
         session = inner or FakeSession()
         session.calls.append(("build", threading.current_thread().name))
         session.thread = threading.current_thread()
@@ -146,7 +154,7 @@ async def test_the_inner_session_is_built_and_driven_on_the_backend_thread() -> 
 
     [inner] = built
     assert threading.current_thread().name != "orbit-backend"
-    assert [call for call, _ in inner.calls] == ["build", "send", "events", "close"]
+    assert [call for call, _ in inner.calls] == ["build", "connect", "send", "events", "close"]
     assert {thread for _, thread in inner.calls} == {"orbit-backend"}
 
 
@@ -210,7 +218,7 @@ async def test_close_ends_an_endless_event_stream() -> None:
 
 
 async def test_a_session_that_fails_to_build_raises_and_still_closes() -> None:
-    def make() -> Session:
+    def make() -> SharedSession:
         raise OSError("no backend")
 
     session = ThreadedSession(make)

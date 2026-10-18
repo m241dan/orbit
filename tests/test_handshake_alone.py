@@ -12,7 +12,6 @@ from orbit.agent.application.handshake import (
     NO_STEPS_NOTE,
     Handshake,
     HandshakeParts,
-    ends_stream,
 )
 from orbit.agent.domain.refusals import Refused
 from orbit.protocol import (
@@ -21,7 +20,6 @@ from orbit.protocol import (
     INVALID,
     PROTOCOL_VERSION,
     Catalog,
-    CommandRefused,
     ErrorOccurred,
     Event,
     EventEnvelope,
@@ -112,7 +110,6 @@ class Parts:
             lambda: self.latest,
             self.snapshot,
             self.missed,
-            self.resend,
             self.load_review_count,
             workspace,
             lambda: self.no_steps,
@@ -122,7 +119,7 @@ class Parts:
             self.start,
             lambda: self.closing,
         )
-        return Handshake(parts, self)
+        return Handshake(parts, self, self.resend)
 
 
 def hello(protocol_version: int = PROTOCOL_VERSION, since: int | None = None) -> Hello:
@@ -315,7 +312,43 @@ async def test_a_closing_session_does_not_start_the_background() -> None:
     assert "start" not in parts.log
 
 
-def test_only_an_incompatible_refusal_ends_the_stream() -> None:
-    assert ends_stream(CommandRefused(command_id="hi", code=INCOMPATIBLE, message="no"))
-    assert not ends_stream(CommandRefused(command_id="hi", code=INTERNAL, message="no"))
-    assert not ends_stream(welcome())
+class Watched(Parts):
+    """Parts that note whether the handshake was ``listening`` as what was missed was read."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.handshake_seen: Handshake | None = None
+        self.listening: list[bool] = []
+
+    async def missed(self, since: int) -> Sequence[EventEnvelope] | None:
+        assert self.handshake_seen is not None
+        self.listening.append(self.handshake_seen.listening)
+        return await super().missed(since)
+
+
+async def test_events_reach_the_frontend_from_when_what_it_missed_is_read() -> None:
+    parts = Watched()
+    handshake = parts.handshake_seen = parts.handshake()
+    assert not handshake.listening
+    await handshake.hello(hello(since=15), "hi")
+    assert parts.listening == [True]
+    assert handshake.listening
+
+
+async def test_events_stop_reaching_a_frontend_whose_missed_events_cant_be_had() -> None:
+    parts = Watched()
+    parts.fail_at = "missed since 15"
+    handshake = parts.handshake_seen = parts.handshake()
+    with pytest.raises(RuntimeError):
+        await handshake.hello(hello(since=15), "hi")
+    assert parts.listening == [True]
+    assert not handshake.listening
+
+
+async def test_events_never_reach_a_frontend_whose_catalog_fails() -> None:
+    parts = Parts()
+    parts.fail_at = "catalog"
+    handshake = parts.handshake()
+    with pytest.raises(RuntimeError):
+        await handshake.hello(hello(), "hi")
+    assert not handshake.listening

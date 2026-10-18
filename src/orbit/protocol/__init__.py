@@ -139,7 +139,7 @@ from orbit.protocol.names import (
     TaskOrigin,
 )
 from orbit.protocol.schema import protocol_schema
-from orbit.protocol.session import Session
+from orbit.protocol.session import Session, SharedSession
 from orbit.protocol.threaded import ThreadedSession
 from orbit.protocol.wire import ProtocolError, decode_command, decode_event, encode
 
@@ -239,6 +239,7 @@ __all__ = [
     "SessionsListed",
     "Settings",
     "SettingsChanged",
+    "SharedSession",
     "SkipReason",
     "Snapshot",
     "StartupChecked",

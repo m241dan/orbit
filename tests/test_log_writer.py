@@ -43,8 +43,10 @@ from tests.agent_fakes import (
     Ticks,
     agent_exited,
     events_until,
+    frontend,
     greet,
     publish,
+    queued_envelopes,
     refused,
     save_used,
     send,
@@ -108,8 +110,7 @@ def stored_session(store: FakeStore | SqliteStore) -> AgentSession:
 
 def delivered(session: AgentSession) -> list[EventEnvelope]:
     """The envelopes the session has queued for the frontend, taken from its queue."""
-    queue = session._events._queue
-    return [queue.get_nowait() for _ in range(queue.qsize())]
+    return queued_envelopes(session)
 
 
 def kept(sent: Sequence[EventEnvelope]) -> list[EventEnvelope]:
@@ -571,7 +572,7 @@ async def test_reads_after_a_seq_of_a_log_that_cant_be_read_are_none() -> None:
 async def test_a_session_whose_log_cant_be_read_answers_since_with_a_snapshot() -> None:
     session = stored_session(Unreadable())
     hello = Hello(client="orbit-tests", protocol_version=PROTOCOL_VERSION, since=0)
-    await session.send(CommandEnvelope(command_id=COMMAND_ID, payload=hello))
+    await frontend(session).send(CommandEnvelope(command_id=COMMAND_ID, payload=hello))
     await session.close()
 
     assert payloads_of(Snapshot, delivered(session))
@@ -625,6 +626,7 @@ async def test_a_session_used_after_its_startup_notices_keeps_them(
     sqlite: SqliteStore, tmp_path: Path
 ) -> None:
     session = stored_session(sqlite)
+    await greet(session)
     await publish(session, Notice(message="Workspace: project"))
     await send(session, AddTask(task=TaskSpec(prompt="Add a flag.")))
     await session.close()
@@ -715,6 +717,7 @@ async def test_a_failing_log_halts_the_session_and_the_frontend_gets_every_event
     store = FakeStore()
     store.append_failure = "disk full"
     session = stored_session(store)
+    await greet(session)
     for n in range(3):
         await publish(session, Notice(message=f"n{n}"))
         await asyncio.sleep(0.01)
@@ -1029,7 +1032,7 @@ async def hello_since(store: SqliteStore, since: int) -> list[EventEnvelope]:
     """What a session on ``store`` sends a frontend that saw the events up to ``since``."""
     session = trimming_session(store, 1)
     hello = Hello(client="orbit-tests", protocol_version=PROTOCOL_VERSION, since=since)
-    await session.send(CommandEnvelope(command_id=COMMAND_ID, payload=hello))
+    await frontend(session).send(CommandEnvelope(command_id=COMMAND_ID, payload=hello))
     await session.close()
     return delivered(session)
 

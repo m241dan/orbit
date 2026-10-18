@@ -13,9 +13,7 @@ from orbit.protocol import (
     INVALID,
     PROTOCOL_VERSION,
     Catalog,
-    CommandRefused,
     ErrorOccurred,
-    Event,
     EventEnvelope,
     Hello,
     Notice,
@@ -29,17 +27,12 @@ HELLO_FIRST_MESSAGE = "Send Hello first."
 HELLO_AGAIN_MESSAGE = "Hello was already received."
 
 
-def ends_stream(event: Event) -> bool:
-    """Whether ``event`` is the last of the stream: an incompatible ``Hello``'s refusal."""
-    return isinstance(event, CommandRefused) and event.code == INCOMPATIBLE
-
-
 @dataclass(frozen=True)
 class HandshakeParts:
     """What a handshake publishes after ``Welcome``: the ``catalog``, which it fetches first, the
     ``latest_usage``, if any was fetched, the ``snapshot`` of the session, or, for a ``Hello``
     whose ``since`` is a ``seq`` the frontend can catch up from, the events it ``missed``, which
-    it fetches first too and ``resend``\\s in their envelopes, the one-off notices
+    it fetches first too and the handshake resends in their envelopes, the one-off notices
     (the ``workspace``, if any, whether there are ``no_steps``, the ``startup_notes`` and the
     ``leftovers`` of earlier runs) and the saved sessions to pick from, which ``list_sessions``
     publishes, if any. It also ``load_review_count``\\s first, and then has the background
@@ -49,7 +42,6 @@ class HandshakeParts:
     latest_usage: Callable[[], UsageChanged | None]
     snapshot: Callable[[], Awaitable[Snapshot]]
     missed: Callable[[int], Awaitable[Sequence[EventEnvelope] | None]]
-    resend: Callable[[EventEnvelope], None]
     load_review_count: Callable[[], Awaitable[None]]
     workspace: str | None
     no_steps: Callable[[], bool]
@@ -61,15 +53,23 @@ class HandshakeParts:
 
 
 class Handshake:
-    """Opens a stream with the frontend from ``parts``, publishing into ``events``.
+    """Opens a stream with the frontend from ``parts``, publishing into ``events`` and having
+    the events the frontend missed ``resend`` in their envelopes.
 
     Nothing but ``Hello`` is let through until it's answered with ``Welcome``; a second one is
     refused, and one of another protocol version ends the stream.
     """
 
-    def __init__(self, parts: HandshakeParts, events: EventSink) -> None:
+    def __init__(
+        self,
+        parts: HandshakeParts,
+        events: EventSink,
+        resend: Callable[[EventEnvelope], None],
+    ) -> None:
         self._parts = parts
         self._events = events
+        self._resend = resend
+        self._listening = False
         self._welcomed = False
         self._incompatible = False  # A Hello was refused: nothing more is published.
 
@@ -77,6 +77,12 @@ class Handshake:
     def welcomed(self) -> bool:
         """Whether a ``Hello`` was welcomed."""
         return self._welcomed
+
+    @property
+    def listening(self) -> bool:
+        """Whether the session's events reach the frontend: from the moment what it missed is
+        read, so none falls between those and the live ones, if a ``Hello`` is welcomed."""
+        return self._listening
 
     @property
     def ended(self) -> bool:
@@ -105,7 +111,7 @@ class Handshake:
             )
             raise Refused(INCOMPATIBLE, message)
         catalog = await self._parts.catalog()  # Before Welcome, so its failure refuses Hello.
-        missed = await self._missed(hello.since)  # Before Welcome, which comes after them.
+        missed = await self._listen(hello.since)  # Before Welcome, which comes after them.
         self._welcomed = True
         await self._events.put(Welcome(command_id=command_id, server_version=__version__))
         try:
@@ -114,6 +120,16 @@ class Handshake:
         finally:  # A sender cancelled meanwhile mustn't keep the background from starting.
             if not self._parts.closing():
                 self._parts.start()
+
+    async def _listen(self, since: int | None) -> Sequence[EventEnvelope] | None:
+        """Have the session's events reach the frontend from now on, and return those it missed
+        since ``since``, as :meth:`_missed` does; they stop reaching it if those fail."""
+        self._listening = True
+        try:
+            return await self._missed(since)
+        except BaseException:
+            self._listening = False
+            raise
 
     async def _missed(self, since: int | None) -> Sequence[EventEnvelope] | None:
         """The events the frontend missed since ``since``, if it gave one and can catch up on
@@ -132,7 +148,7 @@ class Handshake:
             await self._events.put(await parts.snapshot())
             return
         for envelope in missed:
-            parts.resend(envelope)
+            self._resend(envelope)
 
     def _steps(
         self, catalog: Catalog, missed: Sequence[EventEnvelope] | None

@@ -30,6 +30,7 @@ from tests.agent_fakes import (
     FakeStore,
     ScriptedLauncher,
     Ticks,
+    frontend,
     greet,
 )
 
@@ -50,7 +51,7 @@ def session_in(
 
 async def published(session: AgentSession, count: int) -> list[Event]:
     """The next ``count`` events ``session`` publishes."""
-    stream = session.events()
+    stream = frontend(session).events()
     return [(await asyncio.wait_for(anext(stream), 1)).payload for _ in range(count)]
 
 
@@ -59,7 +60,7 @@ async def after(session: AgentSession, command: Command, count: int) -> list[Eve
     past its Welcome, Catalog, Snapshot and workspace note."""
     await greet(session)
     await published(session, 4)
-    await session.send(CommandEnvelope(command_id="c", payload=command))
+    await frontend(session).send(CommandEnvelope(command_id="c", payload=command))
     return await published(session, count)
 
 
@@ -152,7 +153,7 @@ def test_a_catalog_round_trips() -> None:
 async def test_the_catalog_belongs_to_no_session() -> None:
     session = AgentSession()
     await greet(session)
-    stream = session.events()
+    stream = frontend(session).events()
     await anext(stream)
     envelope = await asyncio.wait_for(anext(stream), 1)
     await session.close()

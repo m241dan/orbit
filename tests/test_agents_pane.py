@@ -16,7 +16,7 @@ from orbit.protocol import (
 )
 from orbit.tui import OrbitApp
 from orbit.tui.agents import AgentsPane
-from tests.agent_fakes import Call, session_for
+from tests.agent_fakes import Call, frontend, session_for
 from tests.test_task_list import board, feed
 from tests.test_tui import FakeSession, active_tab, shown, tab_strip
 
@@ -182,7 +182,7 @@ async def test_a_real_planners_reply_shows_on_the_planner_tab() -> None:
     session, _, launcher = session_for()
     launcher.planner_turns = [chats]
     launcher.planner_replies = ["Here's a plan."]
-    app = OrbitApp(session)
+    app = OrbitApp(frontend(session))
     async with app.run_test(size=(120, 30)) as pilot:
         await pilot.press("tab", "tab")  # Show another tab, so the reply marks the planner's.
         await pilot.press("i", *"plan it", "enter")

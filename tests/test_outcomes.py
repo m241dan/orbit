@@ -53,6 +53,7 @@ from tests.agent_fakes import (
     Call,
     FakeStore,
     events_until,
+    frontend,
     greet,
     greeted,
     queued,
@@ -71,7 +72,7 @@ async def send_as(
     """Send ``command`` to ``session`` as ``command_id``, with the envelope's other ``fields``,
     greeting it first if it hasn't been."""
     await greeted(session)
-    await session.send(CommandEnvelope(command_id=command_id, payload=command, **fields))
+    await frontend(session).send(CommandEnvelope(command_id=command_id, payload=command, **fields))
 
 
 async def outcome(session: AgentSession) -> list[Event]:

@@ -21,3 +21,16 @@ class Session(Protocol):
         """Stop any work in progress and release what the backend holds; the session is
         done afterwards."""
         ...
+
+
+class SharedSession(Protocol):
+    """A session several frontends share, each through a connection of its own."""
+
+    def connect(self) -> Session:
+        """A new connection to the session, with its own event stream."""
+        ...
+
+    async def close(self) -> None:
+        """Stop any work in progress, release what the backend holds and end every
+        connection; the session is done afterwards."""
+        ...

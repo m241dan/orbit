@@ -1,6 +1,5 @@
-"""The queue the session's events are published into, each stamped as it's published."""
+"""Where the session's events are published, each stamped as it's published."""
 
-import asyncio
 from collections.abc import Callable
 from typing import Protocol
 
@@ -21,6 +20,10 @@ _WHOLE = StorageSettings(tool_output_kb=0, session_log_mb=0)
 _NO_OVERFLOW = Overflow()
 
 
+def _drop(envelope: EventEnvelope) -> None:
+    """Deliver ``envelope`` nowhere."""
+
+
 class EventSink(Protocol):
     """What the session's parts publish their events into."""
 
@@ -30,18 +33,18 @@ class EventSink(Protocol):
 
 
 class Outbox:
-    """Events published here, read back in envelopes stamped when they were put in: the next
-    ``seq``, counted on from the highest in ``log`` (if there is one) else from one, and the
-    session ``open_session`` names then, unless the event belongs to none. Each waits in its
-    envelope, so no event can be read without its stamp.
+    """Events published here, each handed to :attr:`deliver` (which drops it until set) in an
+    envelope stamped when it was put in: the next ``seq``, counted on from the highest in
+    ``log`` (if there is one) else from one, and the session ``open_session`` names then,
+    unless the event belongs to none.
 
     With a ``log``, each envelope of a session is also written to it in the background, but for
     the events answering one connection; :meth:`catch_up` counts on from its highest ``seq``
     now, :meth:`transcript` reads a session's latest back, :meth:`history` those before them,
-    :meth:`missed` those after a ``seq``, for :meth:`resend` to queue again, :meth:`forget`
-    deletes a session's after those queued, and :meth:`close` writes those still queued. The
-    copies written have their text fields cut and each session's log is trimmed as the ``storage``
-    settings say; those read from :meth:`envelope` are whole. A failed append is told to the
+    :meth:`missed` those after a ``seq``, :meth:`forget` deletes a session's after those
+    queued, and :meth:`close` writes those still queued. The copies written have their text
+    fields cut and each session's log is trimmed as the ``storage`` settings say; those
+    delivered are whole. A failed append is told to the
     ``overflow``'s ``failed``; from then on, or once :meth:`stop_log` is called, the envelopes
     go to its fallback instead (nowhere without one), until :meth:`resume_log` works."""
 
@@ -57,22 +60,27 @@ class Outbox:
         # The last event's place in the stream, counted across sessions.
         self._seq = log.max_seq() if log else 0
         self._event_log = log
-        self._queue: asyncio.Queue[EventEnvelope] = asyncio.Queue()
+        self.deliver: Callable[[EventEnvelope], None] = _drop
         log_bytes = storage.session_log_bytes
         self._writer = LogWriter(log, self.put, log_bytes, overflow) if log else None
 
     def put_nowait(self, item: Event) -> None:
-        """Stamp ``item`` and queue it."""
+        """Stamp ``item`` and deliver it."""
+        self.deliver(self.stamp(item))
+
+    async def put(self, item: Event) -> None:
+        """Stamp ``item`` and deliver it."""
+        self.put_nowait(item)
+
+    def stamp(self, item: Event) -> EventEnvelope:
+        """``item`` in its envelope, stamped now, and logged as if published, but not
+        delivered."""
         self._seq += 1
         session = None if isinstance(item, SESSIONLESS_EVENTS) else self._open()
         envelope = EventEnvelope(seq=self._seq, session=session, payload=item)
-        self._queue.put_nowait(envelope)
         if session is not None:
             self._log(session, envelope)
-
-    async def put(self, item: Event) -> None:
-        """Stamp ``item`` and queue it."""
-        self.put_nowait(item)  # Unbounded, so never full: stamped and queued at once.
+        return envelope
 
     async def catch_up(self) -> None:
         """Count on from the highest ``seq`` in the log now, if there is one and it's higher, as
@@ -80,10 +88,6 @@ class Outbox:
         down."""
         latest = await self._event_log.latest_seq() if self._event_log else None
         self._seq = max(self._seq, latest or 0)
-
-    async def envelope(self) -> EventEnvelope:
-        """The next event, in the envelope it was stamped with when published."""
-        return await self._queue.get()
 
     async def transcript(self, session_id: str) -> tuple[EventEnvelope, ...]:
         """The last :data:`TRANSCRIPT_LENGTH` events of the session ``session_id``, oldest
@@ -109,7 +113,7 @@ class Outbox:
         oldest first, logged or still to be, when a frontend that saw those up to ``since``
         catches up on them alone; ``None`` when it can't, or the log can't be read, or there's
         no log."""
-        last = self._seq  # Those stamped from now on are queued for the frontend anyway.
+        last = self._seq  # Those stamped from now on reach the frontend anyway.
         if self._writer is None or not await self._replayable(session_id, since, last):
             return None
         events = await self._writer.after(session_id, since)
@@ -127,10 +131,6 @@ class Outbox:
         once those queued for it are written."""
         if self._writer is not None:
             self._writer.forget(session_id)
-
-    def resend(self, envelope: EventEnvelope) -> None:
-        """Queue ``envelope``, stamped and logged already, as it is."""
-        self._queue.put_nowait(envelope)
 
     async def stop_log(self, session_id: str) -> tuple[list[EventEnvelope], str | None]:
         """Stop writing to the log, sending the envelopes to the fallback instead; returns

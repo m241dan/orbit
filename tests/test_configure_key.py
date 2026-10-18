@@ -38,6 +38,7 @@ from tests.agent_fakes import (
     Steps,
     board,
     events_until,
+    frontend,
     idle,
     of_type,
     refused,
@@ -325,7 +326,7 @@ async def test_in_the_app_ctrl_e_runs_a_configurator_and_refuses_a_second() -> N
         return await configurator(call)
 
     session, _, launcher = session_for(waits, verification=no_steps())
-    app = OrbitApp(session)
+    app = OrbitApp(frontend(session))
     async with app.run_test() as pilot:
         await pilot.press("ctrl+e", "y")
         while not launcher.launches:

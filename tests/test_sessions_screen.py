@@ -24,6 +24,7 @@ from orbit.tui.sessions import SessionsScreen
 from orbit.tui.tasks import TaskList
 from orbit.tui.transcript import Transcript
 from orbit.tui.widgets import ConfirmScreen
+from tests.agent_fakes import frontend
 from tests.test_session_switch import saved, store_with
 from tests.test_tui import FakeSession, entries, feed_events, opened
 
@@ -57,7 +58,7 @@ async def test_sessions_listed_at_startup_show_the_modal_with_new_session_first(
 
 async def test_a_backend_picking_at_startup_shows_the_modal() -> None:
     backend = AgentSession(store=store_with(saved("old")), pick_session=True)
-    app = OrbitApp(backend)
+    app = OrbitApp(frontend(backend))
     async with app.run_test() as pilot:
         await pilot.pause()
         screen = app.screen
@@ -67,7 +68,7 @@ async def test_a_backend_picking_at_startup_shows_the_modal() -> None:
 
 async def test_a_backend_starting_a_new_session_shows_no_modal() -> None:
     backend = AgentSession(store=store_with(saved("old")), name="auth rework")
-    app = OrbitApp(backend)
+    app = OrbitApp(frontend(backend))
     async with app.run_test() as pilot:
         await pilot.pause()
         assert not isinstance(app.screen, SessionsScreen)
@@ -488,7 +489,7 @@ async def test_sessions_listed_again_refresh_the_list_shown_in_place() -> None:
 async def test_renaming_and_deleting_through_the_backend_refresh_the_list() -> None:
     store = store_with(saved("old"), saved("gone"))
     backend = AgentSession(store=store, pick_session=True)
-    app = OrbitApp(backend)
+    app = OrbitApp(frontend(backend))
     async with app.run_test() as pilot:
         await pilot.pause()
         screen = app.screen

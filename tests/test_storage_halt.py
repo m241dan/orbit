@@ -60,6 +60,7 @@ from tests.agent_fakes import (
     Script,
     Steps,
     desk_of,
+    frontend,
     greet,
     payloads,
     planner_turn,
@@ -92,7 +93,7 @@ async def envelopes_until(
     sent: list[EventEnvelope] = []
 
     async def collect() -> None:
-        async for envelope in session.events():
+        async for envelope in frontend(session).events():
             sent.append(envelope)
             if done(sent):
                 return
@@ -404,7 +405,7 @@ async def outcome_of(
     sent: list[EventEnvelope] = []
 
     async def collect() -> None:
-        async for envelope in session.events():
+        async for envelope in frontend(session).events():
             sent.append(envelope)
             payload = envelope.payload
             if isinstance(payload, CommandAccepted | CommandRefused) and (

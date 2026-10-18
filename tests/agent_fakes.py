@@ -6,9 +6,11 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Collection, Sequ
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from weakref import WeakKeyDictionary
 
 from orbit.agent import Agents, AgentSession, Verification, VerificationStep
 from orbit.agent.application.desk import AgentDesk
+from orbit.agent.application.handshake import Handshake
 from orbit.agent.application.ports import (
     AgentLaunch,
     CallHandler,
@@ -581,23 +583,23 @@ HELLO = Hello(client="orbit-tests", protocol_version=PROTOCOL_VERSION)
 """The Hello :func:`greet` sends."""
 
 
-async def greet(session: Session) -> None:
+async def greet(session: Session | AgentSession) -> None:
     """Open ``session``'s stream with Hello, as a frontend does before anything else."""
-    await session.send(CommandEnvelope(command_id=HELLO_ID, payload=HELLO))
+    await frontend(session).send(CommandEnvelope(command_id=HELLO_ID, payload=HELLO))
 
 
-async def send(session: Session, command: Command) -> None:
+async def send(session: Session | AgentSession, command: Command) -> None:
     """Send ``command`` to ``session``, in an envelope for the open session, greeting an
     :class:`AgentSession` first if it hasn't been."""
     await greeted(session)
-    await session.send(CommandEnvelope(command_id=COMMAND_ID, payload=command))
+    await frontend(session).send(CommandEnvelope(command_id=COMMAND_ID, payload=command))
 
 
-async def payloads(session: Session) -> AsyncIterator[Event]:
+async def payloads(session: Session | AgentSession) -> AsyncIterator[Event]:
     """The events in ``session``'s envelopes but for its ``Welcome`` and its catalogs, greeting
     an :class:`AgentSession` first if it hasn't been."""
     await greeted(session)
-    async for envelope in session.events():
+    async for envelope in frontend(session).events():
         if not isinstance(envelope.payload, Welcome | Catalog):
             yield envelope.payload
 
@@ -704,23 +706,70 @@ def replies(events: list[Event]) -> list[str]:
 # The only helpers that reach into a session's private state, so its refactors touch only them.
 
 
+class SoleFrontend:
+    """The one frontend of ``session``, as orbit's in-process one is: a ``Session`` over a
+    connection to it, whose closing closes the session."""
+
+    def __init__(self, session: AgentSession) -> None:
+        self.session = session
+        self.connection = session.connect()
+
+    async def send(self, envelope: CommandEnvelope) -> None:
+        await self.connection.send(envelope)
+
+    def events(self) -> AsyncIterator[EventEnvelope]:
+        return self.connection.events()
+
+    async def close(self) -> None:
+        await self.session.close()
+
+
+_FRONTENDS: WeakKeyDictionary[AgentSession, SoleFrontend] = WeakKeyDictionary()
+
+
+def frontend(session: Session | AgentSession) -> Session:
+    """``session``, or, for an :class:`AgentSession`, the :class:`SoleFrontend` the helpers
+    here drive it through, made on first use."""
+    return _sole_frontend(session) if isinstance(session, AgentSession) else session
+
+
+def _sole_frontend(session: AgentSession) -> SoleFrontend:
+    """The :class:`SoleFrontend` of ``session``, made on first use."""
+    if session not in _FRONTENDS:
+        _FRONTENDS[session] = SoleFrontend(session)
+    return _FRONTENDS[session]
+
+
 def queued(session: AgentSession) -> list[Event]:
-    """Take the events the session has queued but not yet published."""
-    events: list[Event] = []
-    while not session._events._queue.empty():
-        events.append(session._events._queue.get_nowait().payload)
-    return events
+    """Take the events the session has queued for its frontend but not yet published."""
+    return [envelope.payload for envelope in queued_envelopes(session)]
 
 
-async def greeted(session: Session) -> None:
+def queued_envelopes(session: AgentSession) -> list[EventEnvelope]:
+    """Take the envelopes the session has queued for its frontend but not yet published."""
+    queue = _queue_of(session)
+    return [queue.get_nowait() for _ in range(queue.qsize())]
+
+
+async def greeted(session: Session | AgentSession) -> None:
     """Greet ``session``, if it's an :class:`AgentSession` that hasn't been."""
-    if isinstance(session, AgentSession) and not session._handshake.welcomed:
+    if isinstance(session, AgentSession) and not _handshake_of(session).welcomed:
         await greet(session)
 
 
 def nothing_queued(session: AgentSession) -> bool:
-    """Whether the session has no events queued to publish."""
-    return session._events._queue.empty()
+    """Whether the session has no events queued for its frontend."""
+    return _queue_of(session).empty()
+
+
+def _queue_of(session: AgentSession) -> "asyncio.Queue[EventEnvelope]":
+    """The events queued for the frontend of ``session``."""
+    return _sole_frontend(session).connection._queue
+
+
+def _handshake_of(session: AgentSession) -> Handshake:
+    """The handshake of the frontend of ``session``."""
+    return _sole_frontend(session).connection._handshake
 
 
 async def save_used(session: AgentSession) -> None:

@@ -1,7 +1,5 @@
 """The outbox the session publishes into, stamping each event as it's put in."""
 
-import asyncio
-
 from orbit.agent.application.outbox import Outbox
 from orbit.agent.domain.storage import StorageSettings
 from orbit.protocol import EventEnvelope, Notice, SessionsListed, ToolCallFinished, Welcome
@@ -22,11 +20,13 @@ class Open:
 
 
 async def test_envelopes_count_from_one_in_put_order() -> None:
+    sent: list[EventEnvelope] = []
     outbox = Outbox(Open())
+    outbox.deliver = sent.append
     await outbox.put(ONE)
     outbox.put_nowait(TWO)
 
-    assert [await outbox.envelope(), await outbox.envelope()] == [
+    assert sent == [
         EventEnvelope(seq=1, session="a", payload=ONE),
         EventEnvelope(seq=2, session="a", payload=TWO),
     ]
@@ -34,44 +34,58 @@ async def test_envelopes_count_from_one_in_put_order() -> None:
 
 async def test_an_event_keeps_the_session_open_when_it_was_put() -> None:
     session = Open()
+    sent: list[EventEnvelope] = []
     outbox = Outbox(session)
+    outbox.deliver = sent.append
     await outbox.put(ONE)
     session.id = "b"
     await outbox.put(TWO)
 
-    assert (await outbox.envelope()).session == "a"
-    assert (await outbox.envelope()).session == "b"
+    assert [envelope.session for envelope in sent] == ["a", "b"]
 
 
 async def test_a_sessionless_event_belongs_to_no_session() -> None:
+    sent: list[EventEnvelope] = []
     outbox = Outbox(Open())
+    outbox.deliver = sent.append
     await outbox.put(SessionsListed(sessions=(), reason="asked"))
 
-    assert (await outbox.envelope()).session is None
+    assert sent[0].session is None
 
 
-async def test_envelope_waits_for_an_event_to_be_put() -> None:
+async def test_a_stamped_event_is_logged_but_not_delivered() -> None:
+    log = FakeStore()
+    sent: list[EventEnvelope] = []
+    outbox = Outbox(Open(), log)
+    outbox.deliver = sent.append
+    stamped = outbox.stamp(ONE)
+    outbox.put_nowait(TWO)
+    await outbox.close()
+
+    assert stamped == EventEnvelope(seq=1, session="a", payload=ONE)
+    assert sent == [EventEnvelope(seq=2, session="a", payload=TWO)]
+    assert [envelope.seq for envelope in log.logged] == [1, 2]
+
+
+def test_until_told_where_an_outbox_delivers_nothing_but_still_stamps() -> None:
     outbox = Outbox(Open())
-    waiting = asyncio.create_task(outbox.envelope())
-    await asyncio.sleep(0)
     outbox.put_nowait(ONE)
 
-    assert await waiting == EventEnvelope(seq=1, session="a", payload=ONE)
+    assert outbox.stamp(TWO) == EventEnvelope(seq=2, session="a", payload=TWO)
 
 
-def test_an_outbox_reads_events_only_in_their_envelopes() -> None:
+def test_an_outbox_delivers_events_only_in_their_envelopes() -> None:
     public = {name for name in dir(Outbox) if not name.startswith("_")}
 
     assert public == {
         "put",
         "put_nowait",
+        "stamp",
         "catch_up",
-        "envelope",
         "transcript",
         "history",
         "missed",
         "forget",
-        "resend",
         "stop_log",
         "resume_log",
         "close",
@@ -81,33 +95,39 @@ def test_an_outbox_reads_events_only_in_their_envelopes() -> None:
 async def test_with_a_log_envelopes_count_on_from_its_highest_seq() -> None:
     log = FakeStore()
     log.seq = 41
+    sent: list[EventEnvelope] = []
     outbox = Outbox(Open(), log)
+    outbox.deliver = sent.append
     outbox.put_nowait(ONE)
 
-    assert await outbox.envelope() == EventEnvelope(seq=42, session="a", payload=ONE)
+    assert sent[0] == EventEnvelope(seq=42, session="a", payload=ONE)
     await outbox.close()
 
 
 async def test_catching_up_counts_on_from_the_highest_seq_logged_since() -> None:
     log = FakeStore()
+    sent: list[EventEnvelope] = []
     outbox = Outbox(Open(), log)
+    outbox.deliver = sent.append
     log.seq = 50
     await outbox.catch_up()
     outbox.put_nowait(ONE)
 
-    assert (await outbox.envelope()).seq == 51
+    assert sent[0].seq == 51
     await outbox.close()
 
 
 async def test_catching_up_never_counts_down() -> None:
     log = FakeStore()
     log.seq = 50
+    sent: list[EventEnvelope] = []
     outbox = Outbox(Open(), log)
+    outbox.deliver = sent.append
     log.seq = 10
     await outbox.catch_up()
     outbox.put_nowait(ONE)
 
-    assert (await outbox.envelope()).seq == 51
+    assert sent[0].seq == 51
     await outbox.close()
 
 
@@ -121,26 +141,32 @@ class Unread(FakeStore):
 async def test_catching_up_on_a_log_that_cant_be_read_counts_on() -> None:
     log = Unread()
     log.seq = 5
+    sent: list[EventEnvelope] = []
     outbox = Outbox(Open(), log)
+    outbox.deliver = sent.append
     await outbox.catch_up()
     outbox.put_nowait(ONE)
 
-    assert (await outbox.envelope()).seq == 6
+    assert sent[0].seq == 6
     await outbox.close()
 
 
 async def test_catching_up_without_a_log_counts_on() -> None:
+    sent: list[EventEnvelope] = []
     outbox = Outbox(Open())
+    outbox.deliver = sent.append
     outbox.put_nowait(ONE)
     await outbox.catch_up()
     outbox.put_nowait(TWO)
 
-    assert [(await outbox.envelope()).seq for _ in range(2)] == [1, 2]
+    assert [envelope.seq for envelope in sent] == [1, 2]
 
 
 async def test_the_log_gets_a_sessions_events_but_for_those_answering_one_connection() -> None:
     log = FakeStore()
+    sent: list[EventEnvelope] = []
     outbox = Outbox(Open(), log)
+    outbox.deliver = sent.append
     outbox.put_nowait(Welcome(command_id="hello", server_version="1"))
     outbox.put_nowait(SessionsListed(sessions=(), reason="asked"))
     outbox.put_nowait(ONE)
@@ -150,21 +176,25 @@ async def test_the_log_gets_a_sessions_events_but_for_those_answering_one_connec
 
 
 async def test_closing_an_outbox_without_a_log_does_nothing() -> None:
+    sent: list[EventEnvelope] = []
     outbox = Outbox(Open())
+    outbox.deliver = sent.append
     outbox.put_nowait(ONE)
     await outbox.close()
 
-    assert await outbox.envelope() == EventEnvelope(seq=1, session="a", payload=ONE)
+    assert sent[0] == EventEnvelope(seq=1, session="a", payload=ONE)
 
 
 async def test_the_logged_copy_has_its_long_fields_cut_while_the_live_one_is_whole() -> None:
     log = FakeStore()
+    sent: list[EventEnvelope] = []
     outbox = Outbox(Open(), log, StorageSettings(tool_output_kb=1, session_log_mb=0))
+    outbox.deliver = sent.append
     output = "a" * 2500 + "b" * 2500
     outbox.put_nowait(ToolCallFinished(turn_id="t", call_id="c", output=output))
     await outbox.close()
 
-    live = (await outbox.envelope()).payload
+    live = sent[0].payload
     [logged] = log.logged
     assert isinstance(live, ToolCallFinished) and live.output == output
     assert logged.seq == 1
@@ -177,7 +207,9 @@ async def test_the_logged_copy_has_its_long_fields_cut_while_the_live_one_is_who
 
 async def test_by_default_the_logged_copy_is_whole() -> None:
     log = FakeStore()
+    sent: list[EventEnvelope] = []
     outbox = Outbox(Open(), log)
+    outbox.deliver = sent.append
     event = ToolCallFinished(turn_id="t", call_id="c", output="x" * 100_000)
     outbox.put_nowait(event)
     await outbox.close()

@@ -14,7 +14,7 @@ from orbit.protocol import (
     Snapshot,
     Welcome,
 )
-from tests.agent_fakes import HELLO_ID, FakeStore, Ticks
+from tests.agent_fakes import HELLO_ID, FakeStore, Ticks, frontend
 from tests.test_log_writer import GatedLog, delivered
 
 OPEN = "session-1"
@@ -71,7 +71,7 @@ async def reconnected(store: FakeStore | None, since: int | None) -> list[EventE
     """What a session over ``store`` sends a frontend greeting it with ``since``."""
     session = AgentSession(store=store, clock=Ticks(), new_id=lambda: OPEN, workspace="/work")
     hello = Hello(client="orbit-tests", protocol_version=PROTOCOL_VERSION, since=since)
-    await session.send(CommandEnvelope(command_id=HELLO_ID, payload=hello))
+    await frontend(session).send(CommandEnvelope(command_id=HELLO_ID, payload=hello))
     await session.close()
     return delivered(session)
 
@@ -99,7 +99,7 @@ async def test_events_still_to_be_written_are_caught_up_on_once() -> None:
     await session._events.put(Notice(message="b"))
     delivered(session)  # Sent before the frontend went away.
     hello = Hello(client="orbit-tests", protocol_version=PROTOCOL_VERSION, since=0)
-    await session.send(CommandEnvelope(command_id=HELLO_ID, payload=hello))
+    await frontend(session).send(CommandEnvelope(command_id=HELLO_ID, payload=hello))
     store.gate.set()
     await session.close()
 

@@ -1,20 +1,23 @@
-"""In-process implementation of :class:`orbit.protocol.Session`: the application's core.
+"""The application's core: the session the frontends connect to, each connection an
+in-process implementation of :class:`orbit.protocol.Session`.
 
-It takes commands from the frontend, asks the domain what follows from them, drives the
+It takes commands from the frontends, asks the domain what follows from them, drives the
 ports to do it, and reports what happened as events.
 """
 
-from collections.abc import AsyncIterator, Awaitable, Callable, Collection, Sequence
+from collections.abc import Awaitable, Callable, Collection, Sequence
 from dataclasses import replace
 from datetime import datetime
 from pathlib import PurePath
 
-from orbit.agent.application.desk import AgentDesk, Agents
-from orbit.agent.application.handshake import (
-    Handshake,
-    HandshakeParts,
-    ends_stream,
+from orbit.agent.application.connection import (
+    ConnectionParts,
+    Connections,
+    Publish,
+    SessionConnection,
 )
+from orbit.agent.application.desk import AgentDesk, Agents
+from orbit.agent.application.handshake import Handshake, HandshakeParts
 from orbit.agent.application.history import SessionHistory
 from orbit.agent.application.keeper import (
     Clock,
@@ -122,22 +125,23 @@ class AgentSession:
     tasks. ``PlannerSeat`` holds the planner and its turns; ``WorkLane`` holds the rules of a
     task run: verification and fixes; ``WorkTurns`` decides when it runs; ``ReviewLane`` runs
     the reviews; ``SessionSwitcher`` switches between saved sessions; ``WorkCommands`` handles
-    the other commands; ``SessionHistory`` answers ``History``; ``Handshake`` opens every
-    stream.
+    the other commands; ``SessionHistory`` answers ``History``; each ``SessionConnection``
+    from :meth:`connect` is a frontend's, whose ``Handshake`` opens its stream. Commands from
+    every connection are handled as they arrive.
 
     With ``check_at_startup``, the ``verification`` steps also run once in the background as
-    the session welcomes the frontend, on the base commit; a failure adds a draft task to fix
-    it. With a ``usage`` source, the subscription's usage limits are fetched in the background
-    too, from then on.
+    the session welcomes its first frontend, on the base commit; a failure adds a draft task to
+    fix it. With a ``usage`` source, the subscription's usage limits are fetched in the
+    background too, from then on.
 
-    Every stream opens with ``Hello``: the session publishes nothing, and refuses every other
-    command, until it's answered with ``Welcome``. A ``Catalog`` of what exists follows it, then
-    the latest usage if any was fetched, a ``Snapshot`` of the session open (or, for a ``Hello``
-    whose ``since`` it can catch up from, the open session's events after it) and the one-off
-    notices: the workspace, no verification steps, the ``startup_notes``, work left by earlier
-    runs. Every switch of
-    session ends with a ``Catalog`` and a ``Snapshot`` too, and a rename or delete sends a
-    ``Catalog``.
+    Every stream opens with ``Hello``: the session publishes nothing to it, and refuses every
+    other command, until it's answered with ``Welcome``. A ``Catalog`` of what exists follows
+    it, then the latest usage if any was fetched, a ``Snapshot`` of the session open (or, for a
+    ``Hello`` whose ``since`` it can catch up from, the open session's events after it) and the
+    one-off notices: the workspace, no verification steps, the ``startup_notes``, work left by
+    earlier runs. Every switch of session ends with a ``Catalog`` and a ``Snapshot`` too, and a
+    rename or delete sends a ``Catalog``; each reaches only the connection whose command it
+    answers.
 
     The session open here is saved in ``store``, if there is one, once it's used, and its
     events are kept in the store's log, ``seq`` counting on from the highest there, with their
@@ -186,7 +190,9 @@ class AgentSession:
         )
         self._halt = StorageHalt(lambda event: self._events.put(event), halt_hooks)
         overflow = Overflow(fallback, self._log_failed)
+        self._connections = Connections()
         self._events = Outbox(lambda: self._keeper.id, store, storage, overflow)
+        self._events.deliver = self._deliver
         new_sessions = NewSessions(clock, new_id, self._events.forget, self._events.catch_up)
         self._keeper = SessionKeeper(store, self._events.put, self._halt, new_sessions)
         self._keeper.rename(name)
@@ -200,6 +206,7 @@ class AgentSession:
         self._workspace = workspace
         self._startup_notes = tuple(startup_notes)
         self._closing = False
+        self._started = False
         self._lane = self._review_lane()
         hooks = SeatHooks(self._save, self._keeper.use, self._step_names)
         self._seat = PlannerSeat(self._desk, self._tasks, self._events, hooks)
@@ -209,7 +216,7 @@ class AgentSession:
         self._usage = _usage_monitor(usage, self._events)
         self._switcher = self._session_switcher(pick_session)
         self._commands = self._work_commands()
-        self._handshake = Handshake(self._handshake_parts(), self._events)
+        self._greeting = self._handshake_parts()
         self._history = SessionHistory(self._keeper, self._events)
 
     async def _retry_storage(self) -> Failure | None:
@@ -279,7 +286,6 @@ class AgentSession:
             self._latest_usage,
             self._snapshot,
             lambda since: self._events.missed(self._keeper.id, since),
-            self._events.resend,
             self._load_review_count,
             self._workspace,
             self._no_steps,
@@ -352,35 +358,40 @@ class AgentSession:
     def verification(self) -> Verification | None:
         return self._verifier.verification if self._verifier else None
 
-    async def send(self, envelope: CommandEnvelope) -> None:
-        """Handle the command in ``envelope``, then publish its outcome: ``CommandRefused`` if
-        it was refused, as it is but for ``Hello`` and ``ResumeStorage`` while the session is
-        halted, or as
-        ``internal`` if handling it failed, else ``CommandAccepted``, or ``Welcome`` for a
-        ``Hello``. Only cancellation escapes, with no outcome. After an incompatible ``Hello``,
-        nothing is handled."""
-        if self._handshake.ended:
-            return
+    def connect(self) -> SessionConnection:
+        """A new connection to this session, with its own handshake and stream."""
+        parts = ConnectionParts(
+            self._greeting, self._events, self._events.stamp, self._connections, self._answer
+        )
+        return SessionConnection(parts)
+
+    async def _answer(
+        self, envelope: CommandEnvelope, handshake: Handshake, publish: Publish
+    ) -> None:
+        """Handle the command in ``envelope``, from the connection ``handshake`` opens, then
+        ``publish`` its outcome: ``CommandRefused`` if it was refused, as it is but for
+        ``Hello`` and ``ResumeStorage`` while the session is halted, or as ``internal`` if
+        handling it failed, else ``CommandAccepted``, or ``Welcome`` for a ``Hello``. Only
+        cancellation escapes, with no outcome."""
         command_id = envelope.command_id
         try:
             self._check_addressed(envelope)
             command = envelope.payload
             if isinstance(command, Hello):
-                await self._handshake.hello(command, command_id)
+                await handshake.hello(command, command_id)
                 return
-            self._handshake.admit()
+            handshake.admit()
             await self._admitted(command, command_id)
         except Refused as refusal:
-            refused = CommandRefused(command_id=command_id, code=refusal.code, message=str(refusal))
-            await self._events.put(refused)
+            await publish(
+                CommandRefused(command_id=command_id, code=refusal.code, message=str(refusal))
+            )
             return
         except Exception as exc:  # A bug in one handler mustn't leave its command unanswered.
             message = f"Orbit failed to handle {type(envelope.payload).__name__}: {exc}"
-            await self._events.put(
-                CommandRefused(command_id=command_id, code=INTERNAL, message=message)
-            )
+            await publish(CommandRefused(command_id=command_id, code=INTERNAL, message=message))
             return
-        await self._events.put(CommandAccepted(command_id=command_id))
+        await publish(CommandAccepted(command_id=command_id))
 
     def _check_addressed(self, envelope: CommandEnvelope) -> None:
         """Refuse ``envelope`` unless it's for this workspace and the open session, if any."""
@@ -462,8 +473,8 @@ class AgentSession:
         """Stop a storage halt under way, cancel the work in progress, which stops its agent,
         then stop the startup check, the usage monitor, the review lane, the planner, the
         agents' host, the saving of the session, releasing its lock, and the writing of its
-        events to the store, in that order. Each is stopped even if one before it fails; the
-        first failure is raised after."""
+        events to the store, then end every connection's stream, in that order. Each is stopped
+        even if one before it fails; the first failure is raised after."""
         self._closing = True
         failure: Exception | None = None
         for stop in self._stops():
@@ -485,8 +496,12 @@ class AgentSession:
         stops += [part.close for part in parts if part is not None]
         if self._desk is not None:
             stops.append(self._desk.stop)
-        stops += [self._keeper.close, self._events.close]
+        stops += [self._keeper.close, self._events.close, self._end_connections]
         return stops
+
+    async def _end_connections(self) -> None:
+        """End every connection's stream once what it has queued is read."""
+        self._connections.end()
 
     async def _stop_turns(self) -> None:
         """Cancel the work lane's and the planner's turns, and wait for them to end."""
@@ -501,17 +516,17 @@ class AgentSession:
             if part is not None:
                 await part.close()
 
-    async def events(self) -> AsyncIterator[EventEnvelope]:
-        """The events the session publishes, ending after an incompatible ``Hello``'s refusal."""
-        while True:
-            envelope = await self._events.envelope()
-            self._nudge_usage(envelope.payload)
-            yield envelope
-            if ends_stream(envelope.payload):
-                return
+    def _deliver(self, envelope: EventEnvelope) -> None:
+        """Pass ``envelope``, just published, to the connections it's for."""
+        self._nudge_usage(envelope.payload)
+        self._connections.deliver(envelope)
 
     def _start_background(self) -> None:
-        """Start the startup check and the usage monitor, if there are any."""
+        """Start the startup check and the usage monitor, if there are any, unless they were
+        started for an earlier connection."""
+        if self._started:
+            return
+        self._started = True
         if self._startup is not None:
             self._startup.start()
         if self._usage is not None:
