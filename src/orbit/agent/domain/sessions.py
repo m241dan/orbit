@@ -2,7 +2,7 @@
 
 A saved session keeps its task list, its review state, the planner's conversation and the
 settings it ran with. It is unrelated to the backend's connection, :class:`AgentSession`. The
-caller reads and writes the files and the clock; these rules only shape what's in them.
+caller reads and writes the store and the clock; these rules only shape what's in them.
 """
 
 from collections import Counter
@@ -282,8 +282,8 @@ def resumed_settings(saved: Settings, given: Settings, pinned: Collection[str]) 
 
 
 def review_count_json(count: int) -> str:
-    """``count`` commits since the last super review as JSON text, for
-    :func:`parse_review_count` to read back."""
+    """``count`` commits since the last super review as an older orbit's ``reviews.json`` text,
+    for :func:`parse_review_count` to read back. Only tests use it, to write files to import."""
     return _ReviewCount(since_super=count).model_dump_json()
 
 

@@ -202,8 +202,8 @@ class ProposalReview(Protocol):
 
 @dataclass(frozen=True)
 class StoredSession:
-    """A saved session's file: its session ``id``, the ``record`` in it or why that's
-    unreadable, and whether another running orbit has it open (``locked``)."""
+    """A saved session: its session ``id``, its ``record`` or why that's unreadable, and whether
+    another running orbit has it open (``locked``)."""
 
     id: str
     record: SessionRecord | Unreadable

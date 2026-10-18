@@ -61,8 +61,9 @@ one row per workspace, or anything from `.orbit/config.toml`, which is read at s
 - **Layers.** The domain module holds the rules (the record and its format, summaries, when a
   session may be opened, renamed or deleted, crash recovery) without I/O. The application's
   `SessionKeeper` decides when to save and drives switches through the `SessionStore` port, and
-  `SqliteStore` in `external` is the adapter, with `session_locks` for the locks; `session_files`
-  only says where an older orbit's files live, for the import. The TUI's `orbit.tui.view.sessions`
+  `SqliteStore` in `sqlite_store` is the adapter, with `session_locks` for the locks and
+  `session_import` to import an older orbit's files once; `session_files` only says where those
+  files live. The TUI's `orbit.tui.view.sessions`
   holds the list's presentation rules, and `orbit.tui.sessions` the modal.
 
 ## Deferred (to do later)
@@ -70,7 +71,8 @@ one row per workspace, or anything from `.orbit/config.toml`, which is read at s
 - **Restoring the conversation transcript when a session reopens.** The window would need an event
   log per session, written as events are published; events versioned like the record, so a newer
   orbit can still read an older log; and a replay on open that rebuilds the tabs, entries and
-  rules without re-running anything.
+  rules without re-running anything. Its plan is the event log,
+  [docs/00008-feature-event-log.md](00008-feature-event-log.md).
 - **Copying tasks between sessions**, such as moving unfinished work into a new session.
 - **Two orbits running tasks at once in one repository.** Locks protect sessions only. Every orbit
   on a repository shares the coder's worktree, `.git/orbit/coder`, and its branch `orbit/coder`, so
