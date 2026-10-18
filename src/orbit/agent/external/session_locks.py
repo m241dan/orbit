@@ -117,13 +117,13 @@ class SessionLocks:
 
     async def release(self, session_id: str) -> None:
         """Let go of the session ``session_id``'s lock if this holds it, and remove its file;
-        raises ``RuntimeError`` when it can't."""
-        if session_id in self._held:
+        raises ``RuntimeError`` when it can't, as after :meth:`close`."""
+        if self._closed or session_id in self._held:
             await asyncio.to_thread(self._remove, session_id, "unlock")
 
     async def remove(self, session_id: str) -> None:
         """Remove the session ``session_id``'s lock, letting go of it if this holds it, for
-        deleting the session; raises ``RuntimeError`` when it can't."""
+        deleting the session; raises ``RuntimeError`` when it can't, as after :meth:`close`."""
         await asyncio.to_thread(self._remove, session_id, "delete")
 
     @contextmanager
@@ -181,15 +181,27 @@ class SessionLocks:
 
     def _remove(self, session_id: str, action: str) -> None:
         """Let go of the session ``session_id``'s lock if this holds it, and remove its file;
-        errors say what failed to ``action`` it."""
+        errors say what failed to ``action`` it.
+
+        Raises ``RuntimeError`` once this is closed, leaving the file to whichever orbit holds it.
+        """
         lock = self.path(session_id)
         try:
             lock.parent.mkdir(parents=True, exist_ok=True)
             with locked_dir(lock.parent, fcntl.LOCK_EX):
-                with self._guard:
-                    fd = self._held.pop(session_id, None)
-                    if fd is not None:
-                        os.close(fd)
+                self._let_go(session_id, lock, action)
                 lock.unlink(missing_ok=True)
         except OSError as error:
             raise RuntimeError(f"Couldn't {action} the session {lock}: {error}") from error
+
+    def _let_go(self, session_id: str, lock: Path, action: str) -> None:
+        """Let go of the session ``session_id``'s ``lock`` if this holds it.
+
+        Raises ``RuntimeError``, saying it failed to ``action`` it, once this is closed.
+        """
+        with self._guard:
+            if self._closed:
+                raise RuntimeError(f"Couldn't {action} the session {lock}: the locks are closed")
+            fd = self._held.pop(session_id, None)
+            if fd is not None:
+                os.close(fd)

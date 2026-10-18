@@ -13,7 +13,8 @@ from pathlib import Path
 
 import pytest
 
-from orbit.agent.external.session_locks import SessionLocks
+from orbit.agent.external import session_locks
+from orbit.agent.external.session_locks import SessionLocks, locked_dir
 
 
 def locks_in(directory: Path) -> SessionLocks:
@@ -247,6 +248,24 @@ def close_in_thread(locks: SessionLocks, errors: list[BaseException]) -> threadi
     return closer
 
 
+class DirectoryHook:
+    """Stands in for ``locked_dir``, setting ``entered`` once a worker thread holds the
+    directory's lock and, when ``hold``, keeping it there until told to go on."""
+
+    def __init__(self, hold: bool) -> None:
+        self.entered = threading.Event()
+        self.go = threading.Event()
+        self._hold = hold
+
+    @contextmanager
+    def __call__(self, directory: Path, operation: int) -> Iterator[None]:
+        with locked_dir(directory, operation):
+            self.entered.set()
+            if self._hold:
+                self.go.wait(timeout=5)
+            yield
+
+
 async def test_closing_while_a_lock_is_let_go_closes_each_lock_once(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -256,33 +275,90 @@ async def test_closing_while_a_lock_is_let_go_closes_each_lock_once(
     files = sessions(tmp_path) / "abc.lock", sessions(tmp_path) / "def.lock"
     inodes = {file.stat().st_ino for file in files}
     recorder = CloseRecorder(pause_in="closer")
+    hook = DirectoryHook(hold=False)
     errors: list[BaseException] = []
     with monkeypatch.context() as patch:
         patch.setattr(os, "close", recorder)
+        patch.setattr(session_locks, "locked_dir", hook)
         closer = close_in_thread(locks, errors)
         await asyncio.to_thread(recorder.paused.wait, 5)  # close() is mid-way through its locks.
         releasing = asyncio.create_task(locks.release("abc"))
-        await asyncio.sleep(0.05)
+        await asyncio.to_thread(hook.entered.wait, 5)  # The release waits on close().
         recorder.go.set()
         await asyncio.to_thread(closer.join)
-        await releasing
+        with pytest.raises(
+            RuntimeError, match=r"Couldn't unlock the session .*abc\.lock: .*closed"
+        ):
+            await releasing
     assert errors == []
     assert Counter(i for i in recorder.closed if i is None or i in inodes) == Counter(inodes)
+    assert all(file.exists() for file in files)
     assert await locks_in(tmp_path).acquire("abc")
     assert await locks_in(tmp_path).acquire("def")
 
 
-@pytest.mark.parametrize("action", ["release", "remove"])
-async def test_letting_go_after_closing_closes_no_lock(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, action: str
+async def test_closing_before_a_release_reaches_its_lock_leaves_it_open_to_take(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     locks = locks_in(tmp_path)
     await locks.acquire("abc")
     inode = (sessions(tmp_path) / "abc.lock").stat().st_ino
+    recorder = CloseRecorder()
+    hook = DirectoryHook(hold=True)
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "close", recorder)
+        patch.setattr(session_locks, "locked_dir", hook)
+        releasing = asyncio.create_task(locks.release("abc"))
+        await asyncio.to_thread(hook.entered.wait, 5)  # The release holds the directory.
+        locks.close()
+        hook.go.set()
+        with pytest.raises(RuntimeError, match="closed"):
+            await releasing
+    assert [i for i in recorder.closed if i == inode] == [inode]
+    assert (sessions(tmp_path) / "abc.lock").exists()
+    assert await locks_in(tmp_path).acquire("abc")
+
+
+async def test_closing_while_a_release_lets_go_of_its_lock_waits_for_it(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    locks = locks_in(tmp_path)
+    await locks.acquire("abc")
+    inode = (sessions(tmp_path) / "abc.lock").stat().st_ino
+    recorder = CloseRecorder(pause_in="releaser")
+    errors: list[BaseException] = []
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "close", recorder)
+        releaser = threading.Thread(
+            target=asyncio.run, args=(locks.release("abc"),), name="releaser"
+        )
+        releaser.start()
+        await asyncio.to_thread(recorder.paused.wait, 5)  # The release is closing its lock.
+        closer = close_in_thread(locks, errors)
+        recorder.go.set()
+        await asyncio.to_thread(closer.join)
+        await asyncio.to_thread(releaser.join)
+    assert errors == []
+    assert [i for i in recorder.closed if i == inode] == [inode]
+    assert list(sessions(tmp_path).iterdir()) == []
+    assert await locks_in(tmp_path).acquire("abc")
+
+
+@pytest.mark.parametrize("action", ["release", "remove"])
+async def test_letting_go_after_closing_raises_and_leaves_the_lock(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, action: str
+) -> None:
+    locks = locks_in(tmp_path)
+    await locks.acquire("abc")
     locks.close()
+    holder = locks_in(tmp_path)
+    assert await holder.acquire("abc")
+    inode = (sessions(tmp_path) / "abc.lock").stat().st_ino
     recorder = CloseRecorder()
     with monkeypatch.context() as patch:
         patch.setattr(os, "close", recorder)
-        await getattr(locks, action)("abc")
+        with pytest.raises(RuntimeError, match=r"Couldn't \w+ the session .*abc\.lock: .*closed"):
+            await getattr(locks, action)("abc")
     assert [i for i in recorder.closed if i is None or i == inode] == []
-    assert await locks_in(tmp_path).acquire("abc")
+    assert (sessions(tmp_path) / "abc.lock").read_text() == str(os.getpid())
+    assert not await locks_in(tmp_path).acquire("abc")
