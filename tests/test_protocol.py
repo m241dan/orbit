@@ -4,6 +4,8 @@ import pytest
 from pydantic import ValidationError
 
 from orbit.protocol import (
+    CONFIGURE_CHECKS,
+    SUPER_REVIEW,
     AcceptTask,
     AddTask,
     AgentExited,
@@ -16,13 +18,13 @@ from orbit.protocol import (
     CancelTurn,
     EditTask,
     ErrorOccurred,
+    FireTrigger,
     ListSessions,
     NewSession,
     OpenSession,
     PlannerReset,
     ProgressNoted,
     RemoveTask,
-    RequestSuperReview,
     ResetPlanner,
     ReviewStatus,
     RunTasks,
@@ -228,11 +230,20 @@ def test_task_state_carries_its_review_batch_and_round() -> None:
     assert TaskState(id="1", task=TaskSpec(prompt="x")).round == 0
 
 
-def test_request_super_review_round_trips() -> None:
-    assert (
-        command_adapter.validate_json(RequestSuperReview().model_dump_json())
-        == RequestSuperReview()
-    )
+def test_fire_trigger_round_trips_with_input_defaulting_to_empty() -> None:
+    for command in (
+        FireTrigger(trigger=SUPER_REVIEW),
+        FireTrigger(trigger="mine", input={"x": "1"}),
+    ):
+        assert command_adapter.validate_json(command.model_dump_json()) == command
+    parsed = command_adapter.validate_json('{"type": "fire_trigger", "trigger": "t"}')
+    assert parsed == FireTrigger(trigger="t", input={})
+    assert SUPER_REVIEW == "super-review" and CONFIGURE_CHECKS == "configure-checks"
+
+
+def test_fire_trigger_needs_a_trigger_name() -> None:
+    with pytest.raises(ValidationError):
+        FireTrigger(trigger="")
 
 
 def test_planning_and_draft_messages_round_trip() -> None:

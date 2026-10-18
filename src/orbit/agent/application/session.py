@@ -43,22 +43,23 @@ from orbit.agent.domain.verification import VerificationStep, startup_fix_prompt
 from orbit.protocol import (
     CODER,
     CONFIGURATOR,
+    CONFIGURE_CHECKS,
     PLANNER,
     PLANNER_LANE,
+    SUPER_REVIEW,
     WORK_LANE,
     AcceptTask,
     AddTask,
     CancelAgent,
     CancelTurn,
     Command,
-    ConfigureChecks,
     DecideProposal,
     EditTask,
     ErrorOccurred,
     Event,
+    FireTrigger,
     Notice,
     RemoveTask,
-    RequestSuperReview,
     ResetPlanner,
     RunTasks,
     Settings,
@@ -81,11 +82,10 @@ WorkCommand = (
     | ResetPlanner
     | AddTask
     | RunTasks
-    | ConfigureChecks
     | EditTask
     | AcceptTask
     | RemoveTask
-    | RequestSuperReview
+    | FireTrigger
     | CancelAgent
     | DecideProposal
 )
@@ -281,11 +281,11 @@ class AgentSession:
         match command:
             case SubmitPrompt() | CancelTurn() | UpdateSettings():
                 await self._handle_prompts(command)
-            case AddTask() | RunTasks() | ConfigureChecks():
+            case AddTask() | RunTasks():
                 await self._handle_tasks(command)
             case EditTask() | AcceptTask() | RemoveTask():
                 await self._handle_board(command)
-            case RequestSuperReview() | CancelAgent() | DecideProposal() | ResetPlanner():
+            case FireTrigger() | CancelAgent() | DecideProposal() | ResetPlanner():
                 await self._handle_agents(command)
             case _:
                 assert_never(command)
@@ -303,14 +303,12 @@ class AgentSession:
             case _:
                 assert_never(command)
 
-    async def _handle_tasks(self, command: AddTask | RunTasks | ConfigureChecks) -> None:
+    async def _handle_tasks(self, command: AddTask | RunTasks) -> None:
         match command:
             case AddTask(task=task):
                 await self._tasks.change(lambda board: board.add(task))
             case RunTasks():
                 await self._run_tasks_if_possible()
-            case ConfigureChecks():
-                await self._configure_checks()
             case _:
                 assert_never(command)
 
@@ -407,19 +405,36 @@ class AgentSession:
             self._work.stopped_by_user()
 
     async def _handle_agents(
-        self, command: RequestSuperReview | CancelAgent | DecideProposal | ResetPlanner
+        self, command: FireTrigger | CancelAgent | DecideProposal | ResetPlanner
     ) -> None:
         match command:
             case CancelAgent(agent_id=agent_id):
                 await self._cancel_agent(agent_id)
             case DecideProposal():
                 await self._decide(command)
-            case RequestSuperReview():
-                await self._super_review()
+            case FireTrigger():
+                await self._fire_trigger(command)
             case ResetPlanner():
                 await self._seat.reset()
             case _:
                 assert_never(command)
+
+    async def _fire_trigger(self, command: FireTrigger) -> None:
+        """Run the built-in trigger ``command`` names; refused for any other name, or any input,
+        since the built-ins take none."""
+        runs = {SUPER_REVIEW: self._super_review, CONFIGURE_CHECKS: self._configure_checks}
+        run = runs.get(command.trigger)
+        if run is None:
+            message = (
+                f"No trigger {command.trigger!r}; "
+                f"the triggers are {SUPER_REVIEW} and {CONFIGURE_CHECKS}."
+            )
+        elif command.input:
+            message = f"The {command.trigger} trigger takes no input."
+        else:
+            await run()
+            return
+        await self._events.put(ErrorOccurred(message=message))
 
     async def _decide(self, command: DecideProposal) -> None:
         if not self._proposals.decide(command):

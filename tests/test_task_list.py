@@ -6,15 +6,16 @@ from textual.pilot import Pilot
 
 from orbit.agent import AgentSession
 from orbit.protocol import (
+    SUPER_REVIEW,
     AcceptTask,
     AddTask,
     BusyChanged,
     EditTask,
     ErrorOccurred,
     Event,
+    FireTrigger,
     OpenSession,
     RemoveTask,
-    RequestSuperReview,
     RunTasks,
     SessionOpened,
     SessionsListed,
@@ -663,7 +664,7 @@ async def test_ctrl_g_asks_for_a_super_review_even_while_busy() -> None:
     async with app.run_test() as pilot:
         await feed(session, pilot, BusyChanged(busy=True))
         await pilot.press("ctrl+g")
-        assert session.commands == [RequestSuperReview()]
+        assert session.commands == [FireTrigger(trigger=SUPER_REVIEW)]
 
 
 async def test_a_accepts_the_highlighted_draft_and_x_removes_a_task() -> None:

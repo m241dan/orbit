@@ -13,8 +13,10 @@ from textual.containers import Horizontal, Vertical
 from textual.widgets import OptionList, Tabs
 
 from orbit.protocol import (
+    CONFIGURE_CHECKS,
     PLANNER,
     PLANNER_LANE,
+    SUPER_REVIEW,
     WORK_LANE,
     AcceptTask,
     AddTask,
@@ -28,17 +30,16 @@ from orbit.protocol import (
     CancelAgent,
     CancelTurn,
     ChecksProposed,
-    ConfigureChecks,
     DecideProposal,
     EditTask,
     ErrorOccurred,
     Event,
+    FireTrigger,
     ListSessions,
     Notice,
     PlannerReset,
     ProgressNoted,
     RemoveTask,
-    RequestSuperReview,
     ResetPlanner,
     ReviewStatus,
     RunTasks,
@@ -437,7 +438,7 @@ class OrbitApp(App[None], inherit_bindings=False):
 
     async def action_super_review(self) -> None:
         # Reviews have their own lane, so this works while tasks run.
-        await self._session.send(RequestSuperReview())
+        await self._session.send(FireTrigger(trigger=SUPER_REVIEW))
 
     def action_configure_checks(self) -> None:
         """Ask first, so a stray ctrl+e doesn't queue a configurator."""
@@ -445,7 +446,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         async def answered(confirmed: bool | None) -> None:
             # The backend queues it first and runs it, or says one is already on its way.
             if confirmed:
-                await self._session.send(ConfigureChecks())
+                await self._session.send(FireTrigger(trigger=CONFIGURE_CHECKS))
 
         self.push_screen(ConfirmScreen(CONFIGURE_TITLE, CONFIGURE_MESSAGE, CONFIGURE_YES), answered)
 

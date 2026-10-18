@@ -36,6 +36,10 @@ WORK_LANE = "work"
 PLANNER_LANE = "planner"
 """The lanes' names: task runs in the work lane, the planner's turns in its own."""
 
+SUPER_REVIEW = "super-review"
+CONFIGURE_CHECKS = "configure-checks"
+"""The built-in triggers' names: a super review now, and a configurator task to set up checks."""
+
 
 BusyLane = str
 """Where work runs, by name: task runs in ``work``; the planner's turns in ``planner``."""
@@ -125,17 +129,12 @@ class CancelAgent(_Message):
     agent_id: str
 
 
-class RequestSuperReview(_Message):
-    """Ask for a super review of the whole codebase now, without waiting for its turn."""
+class FireTrigger(_Message):
+    """Fire the manual trigger named ``trigger`` with ``input`` as its template values."""
 
-    type: Literal["request_super_review"] = "request_super_review"
-
-
-class ConfigureChecks(_Message):
-    """Queue a configurator task at the front of the task list and run it now, told the steps
-    and setup configured so far; refused while one is queued or running."""
-
-    type: Literal["configure_checks"] = "configure_checks"
+    type: Literal["fire_trigger"] = "fire_trigger"
+    trigger: str = Field(min_length=1)
+    input: dict[str, str] = {}
 
 
 ProposalAction = Literal["accept", "revise", "end"]
@@ -206,12 +205,11 @@ Command = Annotated[
     | AddTask
     | EditTask
     | RunTasks
-    | RequestSuperReview
+    | FireTrigger
     | AcceptTask
     | RemoveTask
     | CancelAgent
     | DecideProposal
-    | ConfigureChecks
     | ListSessions
     | OpenSession
     | NewSession

@@ -10,11 +10,12 @@ from orbit.agent.application.session import CONFIGURING_NOTE, NO_VERIFY_MESSAGE
 from orbit.agent.domain.roles import Setup, configure_prompt
 from orbit.agent.domain.verification import VerificationStep
 from orbit.protocol import (
+    CONFIGURE_CHECKS,
     AddTask,
     CancelTurn,
-    ConfigureChecks,
     ErrorOccurred,
     Event,
+    FireTrigger,
     Notice,
     RunTasks,
     TasksChanged,
@@ -99,7 +100,7 @@ async def test_it_queues_a_configurator_first_and_runs_it_straight_away() -> Non
         configurator, claims_done, verification=verified(Steps(True)), tree=tree
     )
     await session.send(AddTask(task=CODE))
-    await session.send(ConfigureChecks())
+    await session.send(FireTrigger(trigger=CONFIGURE_CHECKS))
     events = await until_idle(session)
     tasks = board(events)
     assert [t.task.role for t in tasks] == ["configurator", "coder"]
@@ -114,7 +115,7 @@ async def test_it_queues_a_configurator_first_and_runs_it_straight_away() -> Non
 async def test_with_nothing_configured_the_prompt_says_so() -> None:
     configurator = Configurator()
     session, _, _ = session_for(configurator, verification=no_steps())
-    await session.send(ConfigureChecks())
+    await session.send(FireTrigger(trigger=CONFIGURE_CHECKS))
     events = await until_idle(session)
     assert board(events)[0].task.prompt == configure_prompt((), None)
     assert "Nothing is configured yet." in configurator.tasks[0]
@@ -122,8 +123,8 @@ async def test_with_nothing_configured_the_prompt_says_so() -> None:
 
 async def test_a_second_request_is_refused_while_one_is_queued_or_running() -> None:
     session, _, _ = session_for(Configurator(), verification=no_steps())
-    await session.send(ConfigureChecks())
-    await session.send(ConfigureChecks())
+    await session.send(FireTrigger(trigger=CONFIGURE_CHECKS))
+    await session.send(FireTrigger(trigger=CONFIGURE_CHECKS))
     events = await until_idle(session)
     assert Notice(message=CONFIGURING_NOTE) in events
     assert CONFIGURING_NOTE == "A configurator task is already queued or running."
@@ -132,9 +133,9 @@ async def test_a_second_request_is_refused_while_one_is_queued_or_running() -> N
 
 async def test_it_can_be_asked_for_again_to_reconfigure() -> None:
     session, _, launcher = session_for(Configurator(), Configurator(), verification=no_steps())
-    await session.send(ConfigureChecks())
+    await session.send(FireTrigger(trigger=CONFIGURE_CHECKS))
     await until_idle(session)
-    await session.send(ConfigureChecks())
+    await session.send(FireTrigger(trigger=CONFIGURE_CHECKS))
     events = await until_idle(session)
     assert [t.task.role for t in board(events)] == ["configurator", "configurator"]
     assert len(launcher.launches) == 2
@@ -145,7 +146,7 @@ async def test_while_tasks_run_it_goes_next() -> None:
 
     async def asks_to_configure(call: Call) -> TurnEndReason:
         assert session is not None
-        await session.send(ConfigureChecks())
+        await session.send(FireTrigger(trigger=CONFIGURE_CHECKS))
         return await claims_done(call)
 
     configurator = Configurator()
@@ -179,7 +180,7 @@ async def test_after_ctrl_s_holds_the_work_it_still_runs_straight_away() -> None
     await asyncio.wait_for(fetched.wait(), 5)
     await session.send(CancelTurn())
     await until_idle(session)
-    await session.send(ConfigureChecks())
+    await session.send(FireTrigger(trigger=CONFIGURE_CHECKS))
     events = await until_idle(session)
     assert [launch.agent.role for launch in launcher.launches] == ["coder", "configurator", "coder"]
     assert len(configurator.tasks) == 1
@@ -188,7 +189,7 @@ async def test_after_ctrl_s_holds_the_work_it_still_runs_straight_away() -> None
 
 async def test_without_agents_it_is_refused() -> None:
     session = AgentSession()
-    await session.send(ConfigureChecks())
+    await session.send(FireTrigger(trigger=CONFIGURE_CHECKS))
     async for event in session.events():
         if isinstance(event, ErrorOccurred):
             assert event.message == "Tasks need agents, and none are set up."
@@ -197,7 +198,7 @@ async def test_without_agents_it_is_refused() -> None:
 
 async def test_without_verification_it_is_refused_and_nothing_starts() -> None:
     session, _, launcher = session_for(Configurator())
-    await session.send(ConfigureChecks())
+    await session.send(FireTrigger(trigger=CONFIGURE_CHECKS))
     events: list[Event] = []
     async for event in session.events():
         events.append(event)
@@ -211,6 +212,36 @@ async def test_without_verification_it_is_refused_and_nothing_starts() -> None:
     assert launcher.launches == []
 
 
+async def until_error(session: AgentSession) -> list[Event]:
+    """Events up to and including the first error."""
+    events: list[Event] = []
+    async for event in session.events():
+        events.append(event)
+        if isinstance(event, ErrorOccurred):
+            break
+    return events
+
+
+async def test_given_input_it_is_refused_and_nothing_is_queued() -> None:
+    session, _, launcher = session_for(Configurator(), verification=no_steps())
+    await session.send(FireTrigger(trigger=CONFIGURE_CHECKS, input={"x": "1"}))
+    events = await until_error(session)
+    assert events[-1] == ErrorOccurred(message="The configure-checks trigger takes no input.")
+    assert not any(isinstance(e, TasksChanged) and e.tasks for e in events)
+    assert launcher.launches == []
+
+
+async def test_an_unknown_trigger_is_refused_naming_the_triggers() -> None:
+    session, _, launcher = session_for(Configurator(), verification=no_steps())
+    await session.send(AddTask(task=CODE))
+    await session.send(FireTrigger(trigger="nope"))
+    events = await until_error(session)
+    message = "No trigger 'nope'; the triggers are super-review and configure-checks."
+    assert events[-1] == ErrorOccurred(message=message)
+    assert [len(e.tasks) for e in events if isinstance(e, TasksChanged)][-1] == 1
+    assert launcher.launches == []
+
+
 async def test_ctrl_e_asks_for_a_configurator() -> None:
     session = FakeSession()
     app = OrbitApp(session)
@@ -219,7 +250,7 @@ async def test_ctrl_e_asks_for_a_configurator() -> None:
         assert session.commands == []
         assert isinstance(app.screen, ConfirmScreen)
         await pilot.press("y")
-        assert session.commands == [ConfigureChecks()]
+        assert session.commands == [FireTrigger(trigger=CONFIGURE_CHECKS)]
         assert not isinstance(app.screen, ConfirmScreen)
 
 
@@ -251,7 +282,7 @@ async def test_ctrl_e_in_the_confirmation_does_not_stack_another() -> None:
         assert len(app.screen_stack) == 2
         await pilot.press("y")
         assert len(app.screen_stack) == 1
-        assert session.commands == [ConfigureChecks()]
+        assert session.commands == [FireTrigger(trigger=CONFIGURE_CHECKS)]
 
 
 async def test_ctrl_e_over_another_modal_does_not_ask() -> None:
@@ -281,8 +312,9 @@ def test_the_confirmation_wording() -> None:
     assert ConfirmScreen("Sure?", "Really.").yes == "confirm"
 
 
-def test_configure_checks_round_trips() -> None:
-    assert command_adapter.validate_json(ConfigureChecks().model_dump_json()) == ConfigureChecks()
+def test_the_configure_checks_trigger_round_trips() -> None:
+    command = FireTrigger(trigger=CONFIGURE_CHECKS)
+    assert command_adapter.validate_json(command.model_dump_json()) == command
 
 
 async def test_in_the_app_ctrl_e_runs_a_configurator_and_refuses_a_second() -> None:

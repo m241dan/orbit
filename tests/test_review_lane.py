@@ -10,6 +10,7 @@ from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.endings import BUG, CANCELLED, REVIEW_STOPPED_BY_YOU, STOPPED_BY_YOU
 from orbit.agent.domain.reviews import ReviewLimits
 from orbit.protocol import (
+    SUPER_REVIEW,
     AddTask,
     AgentExited,
     CancelAgent,
@@ -17,9 +18,9 @@ from orbit.protocol import (
     EditTask,
     ErrorOccurred,
     Event,
+    FireTrigger,
     Notice,
     RemoveTask,
-    RequestSuperReview,
     ReviewStatus,
     RunTasks,
     TasksChanged,
@@ -442,7 +443,7 @@ async def test_a_super_review_can_be_asked_for_before_any_task_ran() -> None:
     # The coder's tree doesn't exist yet, so its head can't be read; the base's commit can.
     tree = FakeTree()
     session, _, _ = session_for(reviewers=(suggests(),), tree=tree, review=True)
-    await session.send(RequestSuperReview())
+    await session.send(FireTrigger(trigger=SUPER_REVIEW))
     events = await asyncio.wait_for(settle(session), 10)
     assert [t.task.role for t in board(events)] == ["super-reviewer"]
     assert tree.snapshots == [tree.base] and tree.prepared == []
@@ -453,16 +454,26 @@ async def test_a_super_review_is_skipped_when_the_base_commit_cannot_be_read() -
     tree = FakeTree()
     tree.failures["base_commit"] = RuntimeError("git rev-parse failed: unknown revision")
     session, _, _ = session_for(reviewers=(suggests(),), tree=tree, review=True)
-    await session.send(RequestSuperReview())
+    await session.send(FireTrigger(trigger=SUPER_REVIEW))
     events = await asyncio.wait_for(settle(session, until=_errored), 10)
     assert "unknown revision" in " ".join(_error_messages(events))
     assert "super-reviewer" not in _roles_seen(events)
     assert tree.snapshots == []
 
 
+async def test_a_super_review_given_input_is_refused_and_none_starts() -> None:
+    tree = FakeTree()
+    session, _, _ = session_for(reviewers=(suggests(),), tree=tree, review=True)
+    await session.send(FireTrigger(trigger=SUPER_REVIEW, input={"x": "1"}))
+    events = await asyncio.wait_for(settle(session, until=_errored), 10)
+    assert _error_messages(events) == ["The super-review trigger takes no input."]
+    assert "super-reviewer" not in _roles_seen(events)
+    assert tree.snapshots == []
+
+
 async def test_without_reviews_a_super_review_is_refused() -> None:
     session, _, _ = session_for(tree=FakeTree())
-    await session.send(RequestSuperReview())
+    await session.send(FireTrigger(trigger=SUPER_REVIEW))
     stream = session.events()
     events = [await anext(stream), await anext(stream)]
     assert any(isinstance(e, ErrorOccurred) and "Super reviews" in e.message for e in events)
