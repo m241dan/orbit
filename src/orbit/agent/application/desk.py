@@ -29,9 +29,12 @@ from orbit.agent.domain.reviews import ReviewLimits
 from orbit.agent.domain.roles import ORBIT_TOOLS, Role
 from orbit.protocol import (
     INTERNAL,
+    AgentExited,
     AgentReply,
     AgentRequest,
+    AgentStarted,
     ErrorOccurred,
+    Event,
     OpenRequest,
     ProgressNoted,
     RunningAgent,
@@ -126,13 +129,24 @@ class AgentDesk:
     def __init__(self, agents: Agents, publish: Publish) -> None:
         self.agents = agents
         self.registry = AgentRegistry(agents.new_token)
-        self.publish = publish
+        self._publish = publish
         # Takes a review task's suggestions: its id, then the suggestion's title and prompt.
         self.suggest: Callable[[str, str, str], Awaitable[Reply]] | None = None
         self._runs: dict[str, CallTarget] = {}
+        # The agents whose start was published and whose exit wasn't, so a snapshot shows what
+        # the events have told the frontend.
+        self._announced: set[str] = set()
         # The calls not yet answered, by request id, with the agent that made each.
         self._requests: dict[str, tuple[str, OpenRequest]] = {}
         self._starting: asyncio.Task[str] | None = None  # The host's start, shared by callers.
+
+    async def publish(self, event: Event) -> None:
+        """Publish ``event``, noting the agents it announces as started or exited."""
+        if isinstance(event, AgentExited):
+            self._announced.discard(event.agent_id)
+        await self._publish(event)
+        if isinstance(event, AgentStarted):
+            self._announced.add(event.agent_id)
 
     async def url(self) -> str:
         """Where agents reach orbit; starts the host the first time, or after a failed start."""
@@ -181,7 +195,8 @@ class AgentDesk:
 
     @property
     def running(self) -> tuple[RunningAgent, ...]:
-        """The agents running, oldest first, each with its calls not yet answered."""
+        """The agents running whose start was published and exit wasn't, oldest first, each
+        with its calls not yet answered."""
         return tuple(
             RunningAgent(
                 agent_id=agent.id,
@@ -190,6 +205,7 @@ class AgentDesk:
                 open_requests=self._open_requests(agent.id),
             )
             for agent in self.registry.live
+            if agent.id in self._announced
         )
 
     def _open_requests(self, agent_id: str) -> tuple[OpenRequest, ...]:
@@ -203,15 +219,20 @@ class AgentDesk:
     def close(self, agent: Agent) -> None:
         self.registry.revoke(agent.id)
         self._runs.pop(agent.id, None)
+        self._announced.discard(agent.id)
 
     async def handle(self, token: str, tool: str, arguments: dict[str, Any]) -> Reply:
         agent = self.registry.by_token(token)
         if agent is None:
             return UNKNOWN_AGENT
         request_id = uuid.uuid4().hex
+        await self.publish(
+            AgentRequest(agent_id=agent.id, request_id=request_id, tool=tool, arguments=arguments)
+        )
+        # Open only once its request is published, so a snapshot can't show it twice.
         self._requests[request_id] = (agent.id, OpenRequest(request_id=request_id, tool=tool))
         try:
-            reply = await self._request(agent, request_id, tool, arguments)
+            reply = await self._request(agent, tool, arguments)
         finally:
             del self._requests[request_id]
         await self.publish(
@@ -221,13 +242,8 @@ class AgentDesk:
         )
         return reply
 
-    async def _request(
-        self, agent: Agent, request_id: str, tool: str, arguments: dict[str, Any]
-    ) -> Reply:
-        """Publish ``agent``'s call ``request_id``, then answer it."""
-        await self.publish(
-            AgentRequest(agent_id=agent.id, request_id=request_id, tool=tool, arguments=arguments)
-        )
+    async def _request(self, agent: Agent, tool: str, arguments: dict[str, Any]) -> Reply:
+        """The answer to ``agent``'s call, once published."""
         run = self._runs.get(agent.id)  # Its run may have closed it during the publish.
         return UNKNOWN_AGENT if run is None else await self._answer(agent, run, tool, arguments)
 

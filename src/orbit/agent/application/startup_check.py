@@ -57,6 +57,7 @@ class StartupCheck:
         self._progress = StepProgress.of(step.name for step in verification.steps)
         self._shown = True  # Whether it still has the verification panel.
         self._started = False
+        self._announced = False  # Whether its start is published and its exit isn't.
         self._background = Background("startup check", publish)
 
     def start(self) -> None:
@@ -73,8 +74,8 @@ class StartupCheck:
 
     @property
     def agent(self) -> RunningAgent | None:
-        """The check as a running agent, while it runs."""
-        if not self.running:
+        """The check as a running agent, between publishing its start and its exit."""
+        if not self._announced:
             return None
         return RunningAgent(agent_id=AGENT_ID, role=ROLE, task_id=STARTUP_TASK)
 
@@ -94,11 +95,13 @@ class StartupCheck:
 
     async def _run(self) -> None:
         await self._publish(AgentStarted(agent_id=AGENT_ID, role=ROLE, task_id=STARTUP_TASK))
+        self._announced = True
         await self._show()
         reason: AgentExitReason = "killed"
         try:
             reason = await self._check()
         finally:
+            self._announced = False
             await self._publish(AgentExited(agent_id=AGENT_ID, reason=reason))
 
     async def _check(self) -> AgentExitReason:

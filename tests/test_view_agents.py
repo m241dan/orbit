@@ -101,3 +101,15 @@ def test_the_review_line_says_whether_review_is_paused() -> None:
 
 def test_an_empty_agents_pane_says_no_agents_run() -> None:
     assert NO_AGENTS_LABEL == "No agents running"
+
+
+def test_a_repeated_start_leaves_the_rows_unchanged() -> None:
+    started = AgentStarted(agent_id="agent-1", role="coder", task_id="1")
+    rows = track_agents((), started)
+    assert track_agents(rows, started) == rows
+
+
+def test_a_repeated_request_leaves_the_rows_unchanged() -> None:
+    request = AgentRequest(agent_id="agent-1", request_id="r", tool="get_task", arguments={})
+    rows = track_agents((AgentRow("agent-1", "coder", "1"),), request)
+    assert track_agents(rows, request) == rows

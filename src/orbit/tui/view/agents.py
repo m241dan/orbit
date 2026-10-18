@@ -39,12 +39,18 @@ def track_agents(rows: tuple[AgentRow, ...], event: Event) -> tuple[AgentRow, ..
 
 
 def _track_starts(rows: tuple[AgentRow, ...], event: Event) -> tuple[AgentRow, ...]:
-    """``rows`` with the agent ``event`` starts added, or the one it exits removed."""
-    if isinstance(event, AgentStarted):
+    """``rows`` with the agent ``event`` starts added, unless it's there, or the one it exits
+    removed."""
+    if isinstance(event, AgentStarted) and not _shown(rows, event.agent_id):
         return (*rows, AgentRow(event.agent_id, event.role, event.task_id))
     if isinstance(event, AgentExited):
         return tuple(row for row in rows if row.agent_id != event.agent_id)
     return rows
+
+
+def _shown(rows: tuple[AgentRow, ...], agent_id: str) -> bool:
+    """Whether agent ``agent_id`` has a row in ``rows``."""
+    return any(row.agent_id == agent_id for row in rows)
 
 
 def _row(agent: RunningAgent) -> AgentRow:
@@ -66,10 +72,17 @@ def _answer(row: AgentRow, event: AgentRequest | AgentReply) -> AgentRow:
     if row.agent_id != event.agent_id:
         return row
     if isinstance(event, AgentRequest):
-        opened = (*row.open_requests, (event.request_id, event.tool))
-        return replace(row, open_requests=opened)
+        return _open(row, event)
     still_open = tuple(pair for pair in row.open_requests if pair[0] != event.request_id)
     return replace(row, open_requests=still_open)
+
+
+def _open(row: AgentRow, event: AgentRequest) -> AgentRow:
+    """``row`` with ``event``'s request opened, unless it's open already."""
+    if any(pair[0] == event.request_id for pair in row.open_requests):
+        return row
+    opened = (*row.open_requests, (event.request_id, event.tool))
+    return replace(row, open_requests=opened)
 
 
 def agent_line(row: AgentRow, number: str | None) -> str:

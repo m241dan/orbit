@@ -1,11 +1,15 @@
 """The snapshot of the open session, sent after Welcome and after every switch."""
 
 import asyncio
+from typing import Any
 
-from orbit.agent import AgentSession, Verification
+from orbit.agent import AgentSession, Verification, VerificationStep
+from orbit.agent.application.desk import AgentDesk, Agents
+from orbit.agent.application.ports import Reply
 from orbit.agent.application.startup_check import AGENT_ID as STARTUP_AGENT
 from orbit.agent.application.startup_check import ROLE as STARTUP_ROLE
 from orbit.agent.application.startup_check import TITLE as STARTUP_TITLE
+from orbit.agent.application.startup_check import StartupCheck
 from orbit.agent.domain.usage import UsageReport
 from orbit.protocol import (
     CONFIGURATOR,
@@ -13,7 +17,9 @@ from orbit.protocol import (
     STARTUP_TASK,
     WORK_LANE,
     AddTask,
+    AgentExited,
     AgentReply,
+    AgentStarted,
     Catalog,
     ChecksProposed,
     DecideProposal,
@@ -30,8 +36,11 @@ from orbit.protocol import (
     Welcome,
 )
 from tests.agent_fakes import (
+    ROLES,
     STEP,
+    FakeHost,
     FakeTree,
+    ScriptedLauncher,
     Steps,
     events_until,
     fetch_usage_unseen,
@@ -195,3 +204,103 @@ async def test_while_the_startup_check_runs_it_is_a_running_agent_with_the_panel
     assert snapshot.agents == (startup,)
     assert snapshot.steps == (StepState(name=STEP.name, status="running"),)
     assert snapshot.steps_title == STARTUP_TITLE
+
+
+class Seen:
+    """What ``desk`` lists as running each time it publishes, by the kind of event."""
+
+    def __init__(self) -> None:
+        self.desk: AgentDesk | None = None
+        self.running: list[tuple[str, tuple[RunningAgent, ...]]] = []
+
+    async def publish(self, event: Event) -> None:
+        assert self.desk is not None
+        self.running.append((type(event).__name__, self.desk.running))
+
+    def at(self, kind: str) -> tuple[RunningAgent, ...]:
+        """What was running as the last event of ``kind`` was published."""
+        return [running for name, running in self.running if name == kind][-1]
+
+
+class Answers:
+    """A run that answers every call, noting what its desk lists as running meanwhile."""
+
+    def __init__(self, desk: AgentDesk) -> None:
+        self.desk = desk
+        self.running: tuple[RunningAgent, ...] = ()
+
+    async def handle(self, tool: str, arguments: dict[str, Any]) -> Reply:
+        self.running = self.desk.running
+        return Reply("ok")
+
+
+def watched_desk() -> tuple[AgentDesk, Seen]:
+    seen = Seen()
+    host = FakeHost()
+    agents = Agents(host, ScriptedLauncher(host), lambda: "token-1", ROLES)
+    seen.desk = AgentDesk(agents, seen.publish)
+    return seen.desk, seen
+
+
+async def test_an_agent_is_running_only_once_its_start_is_published() -> None:
+    desk, _ = watched_desk()
+    agent = desk.open(Answers(desk), "coder", "1")
+    before = desk.running
+    await desk.publish(AgentStarted(agent_id=agent.id, role="coder", task_id="1"))
+
+    assert before == ()
+    assert desk.running == (RunningAgent(agent_id=agent.id, role="coder", task_id="1"),)
+
+
+async def test_an_agent_is_not_running_once_its_exit_is_published() -> None:
+    desk, seen = watched_desk()
+    agent = desk.open(Answers(desk), "coder", "1")
+    await desk.publish(AgentStarted(agent_id=agent.id, role="coder", task_id="1"))
+    await desk.publish(AgentExited(agent_id=agent.id, reason="finished"))
+
+    assert seen.at("AgentExited") == ()
+    assert desk.running == ()
+
+
+async def test_a_closed_agent_is_not_running() -> None:
+    desk, _ = watched_desk()
+    agent = desk.open(Answers(desk), "coder", "1")
+    await desk.publish(AgentStarted(agent_id=agent.id, role="coder", task_id="1"))
+    desk.close(agent)
+
+    assert desk.running == ()
+
+
+async def test_a_call_is_an_open_request_only_once_its_request_is_published() -> None:
+    desk, seen = watched_desk()
+    run = Answers(desk)
+    agent = desk.open(run, "coder", "1")
+    await desk.publish(AgentStarted(agent_id=agent.id, role="coder", task_id="1"))
+    await desk.handle("token-1", "get_task", {})
+
+    [requesting] = seen.at("AgentRequest")
+    [answering] = run.running
+    [replying] = seen.at("AgentReply")
+    assert requesting.open_requests == replying.open_requests == ()
+    assert [request.tool for request in answering.open_requests] == ["get_task"]
+
+
+async def test_the_startup_check_is_an_agent_only_between_its_start_and_exit() -> None:
+    shown: list[tuple[str, RunningAgent | None]] = []
+
+    async def publish(event: Event) -> None:
+        shown.append((type(event).__name__, check.agent))
+
+    async def add_fix(step: VerificationStep, output: str) -> None:
+        pass
+
+    check = StartupCheck(Verification((STEP,), Steps(True)), None, publish, add_fix)
+    check.start()
+    while check.running:
+        await asyncio.sleep(0)
+    await check.close()
+
+    agent = RunningAgent(agent_id=STARTUP_AGENT, role=STARTUP_ROLE, task_id=STARTUP_TASK)
+    kinds = dict(shown)
+    assert (kinds["AgentStarted"], kinds["StartupChecked"]) == (None, agent)
+    assert kinds["AgentExited"] is None and check.agent is None
