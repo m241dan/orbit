@@ -34,13 +34,13 @@ def test_each_built_in_role_is_told_its_file() -> None:
 
 
 def test_the_coder_leaves_committing_to_orbit() -> None:
-    assert "uncommitted" in read_built_in_roles()["coder"].instructions
+    assert "nothing staged or committed" in read_built_in_roles()["coder"].instructions
 
 
 def test_the_review_roles_and_planner_read_but_leave_changes_to_the_coder() -> None:
     roles = read_built_in_roles()
     for name in ("reviewer", "super-reviewer", "planner"):
-        assert "You can read and search the code" in roles[name].instructions
+        assert "read and search the code" in roles[name].instructions
 
 
 def test_the_configurator_looks_for_the_projects_own_checks() -> None:

@@ -39,7 +39,7 @@ def test_the_brief_names_the_checks_and_how_many_the_agent_may_run() -> None:
     agent_task = AgentTask(TaskSpec(prompt="Add a flag."), Limits(max_checks=7))
     brief = agent_task.get_task(("Ruff lint", "Unit tests"), can_check=True)
     assert "Orbit verifies your work with these checks, in order: Ruff lint, Unit tests." in brief
-    assert "run_check" in brief and "7" in brief
+    assert "run each of them with run_check" in brief and "7 runs in all" in brief
 
 
 def test_an_agent_without_run_check_is_told_the_checks_but_not_to_run_them() -> None:
@@ -96,7 +96,13 @@ def test_failing_asks_for_a_fix_in_the_same_session() -> None:
     assert agent_task.phase == "working"
     assert agent_task.attempt == 1
     assert "Unit tests" in reply and "1 failed" in reply
-    assert "complete_task" in reply and "1 of 5" in reply
+    assert "Then call complete_task again." in reply and "1 of 5" in reply
+    assert "run_check" not in reply
+
+
+def test_an_agent_with_run_check_is_asked_to_run_the_failed_step_before_claiming() -> None:
+    reply = verifying().failed(STEP, "1 failed", can_check=True)
+    assert "Run that step with run_check once you've fixed it, then call complete_task" in reply
 
 
 def test_failing_after_the_last_attempt_falls_back() -> None:

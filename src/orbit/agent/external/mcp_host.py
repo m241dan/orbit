@@ -22,19 +22,17 @@ INSTRUCTIONS = (
 
 # What a prompt handed to a fresh coder must cover; the tools that take one say so.
 PROMPT_RECIPE = (
-    "The coder starts fresh with only the prompt, so it must say where (the files and"
-    " functions), what to change and what must stay as it is, and how to tell it's done (the"
-    " tests that should exist and pass)."
+    "The coder starts fresh with only the prompt, so write it in four parts: Where (the files"
+    " and functions), Change (what to do), Keep (what must stay as it is) and Done (the"
+    " behaviours tests must pin down)."
 )
 SUGGEST_TASK = (
     "Suggest a follow-up task for a coder, queued after the current work: a short title, and a"
-    f" prompt. Suggest the most important first. {PROMPT_RECIPE} Give the input or scenario"
-    " that shows each problem."
+    f" prompt. {PROMPT_RECIPE}"
 )
 PROPOSE_TASK = (
     "Propose a task for the plan: a short title, and a prompt. It's added as a draft the user"
-    f" accepts or drops. {PROMPT_RECIPE} Include the decisions made with the user that affect"
-    " it, and the edge cases it must handle."
+    f" accepts or drops. {PROMPT_RECIPE}"
 )
 
 

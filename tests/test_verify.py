@@ -89,7 +89,7 @@ def test_fix_prompt_names_the_step_command_and_output() -> None:
     body = "\n".join(rest)
     assert "uv run pytest -k 'a b'" in body
     assert "FAILED test_x" in body
-    assert "Do not weaken the check" in body
+    assert "leaving the check as strong as it was" in body
 
 
 def test_fix_prompt_keeps_the_start_and_end_of_long_output() -> None:
@@ -144,7 +144,7 @@ def test_startup_fix_prompt_is_titled_by_the_step_and_quotes_its_output() -> Non
     assert "at startup" in body
     assert "ruff check" in body
     assert "E501 line too long" in body
-    assert "Do not weaken the check" in body
+    assert "leaving the check as strong as it was" in body
 
 
 async def test_first_failure_runs_steps_in_order_until_one_fails() -> None:

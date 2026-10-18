@@ -516,8 +516,13 @@ text keeps its newlines. Orbit is for planning, tasks and reviews, with no free-
 The **planner** tab, always second in the strip, shows just the planner conversation: your
 prompts, and the planner's messages, tool calls and exchanges with orbit (`ctrl+t` jumps there,
 and pressed again goes back to the tab you were on). Tell it what you want to build; it asks
-what's unclear and breaks the goal into small tasks, proposing each with `propose_task` (a title
-is required, and kept to one line). Its first prompt, and the first after the verification steps change, tells it
+what's unclear in rounds of a few questions, each offering options with a recommendation, and
+breaks the goal into small tasks, proposing each with `propose_task` (a title is required, and
+kept to one line). Every plan's first task writes the plan's record: a numbered requirements
+document in `docs/` (or wherever the project keeps such records), named like
+`docs/00001-feature-dark-mode.md`, with the decisions you confirmed and the tasks that carry them
+out. Every other task's prompt opens with `Plan: <path>` pointing at it, so coders and reviewers
+read the same record. Its first prompt, and the first after the verification steps change, tells it
 the steps each task must pass. Proposals appear in the task list as 📝 drafts, with the `coder`
 role's default settings, and never run on their own: on the task list, `a` accepts the highlighted
 draft (or edit it with `enter` and save, which accepts it too), and `x` removes it. Accepted tasks
@@ -553,7 +558,9 @@ rule under the planner tab and All. The reset is refused while the planner answe
 
 Every commit from one of your tasks is reviewed in the background while the next task runs. Orbit
 queues a `reviewer` task (it shows in the task list) carrying the commit's diff, and runs it in a
-read-only snapshot of that commit. The reviewer suggests follow-ups with `suggest_task` (a title
+read-only snapshot of that commit. The reviewer judges the change against its task's prompt and,
+when the prompt opens with `Plan: <path>`, against that plan's record, then looks for bugs, gaps
+in tests and unclear code. It suggests follow-ups with `suggest_task` (a title
 is required, and kept to one line): each becomes a task at the end of the queue (with the `coder` role's default settings), and once the review ends
 orbit runs them, unless you pressed `ctrl+s` since your last `ctrl+r`.
 
@@ -571,7 +578,8 @@ Every `super_review_every` commits (default 10, counting every commit orbit land
 `super-reviewer` (Opus by default) reviews the **whole codebase** at the latest commit, looking for
 duplication, structure that no longer fits and gaps in tests, and may suggest up to
 `super_review_suggestions` tasks (default 10). Those form a batch at round 1 and carry on like any
-other review's. `ctrl+g` asks for one straight away and restarts the count. The count belongs to
+other review's. Each review ends with a one-line verdict that also counts the findings its cap
+left out, so `5 suggestions, 2 more left out` tells you a second pass would find more. `ctrl+g` asks for one straight away and restarts the count. The count belongs to
 the repository rather than to a session, so it carries on across sessions and restarts. A super
 review that falls due while review is paused waits until it resumes.
 

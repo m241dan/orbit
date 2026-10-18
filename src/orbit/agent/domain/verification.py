@@ -138,8 +138,8 @@ def check_reply(step: VerificationStep, passed: bool, output: str) -> str:
 
 
 FIX_INSTRUCTIONS = (
-    "Find and fix the cause so the command passes. Do not weaken the check: don't"
-    " lower thresholds, skip or delete tests, or exclude code from coverage."
+    "Find and fix the cause so the command passes, leaving the check as strong as it was: the"
+    " same thresholds, the same tests, the same code under coverage."
 )
 
 

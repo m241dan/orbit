@@ -74,7 +74,9 @@ async def test_the_tools_that_take_a_coders_prompt_say_what_it_must_cover() -> N
     async with serving(RecordingHandler()) as url, connected(url) as client:
         tools = {tool.name: tool for tool in (await client.list_tools()).tools}
         for name in ("suggest_task", "propose_task"):
-            assert PROMPT_RECIPE in (tools[name].description or "")
+            # What the tool is for, then the recipe; the role instructions say the rest.
+            assert (tools[name].description or "").endswith(PROMPT_RECIPE)
+        assert all(part in PROMPT_RECIPE for part in ("Where", "Change", "Keep", "Done"))
 
 
 async def test_passes_calls_with_the_token_to_the_handler_and_returns_its_text() -> None:

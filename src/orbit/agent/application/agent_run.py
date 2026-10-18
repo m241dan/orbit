@@ -353,7 +353,7 @@ class AgentRun:
             return await self._verifier.check(self._task_id, before, self._root)
 
     async def _failed(self, failure: Failure) -> str:
-        reply = self._work.failed(*failure)
+        reply = self._work.failed(*failure, can_check="run_check" in self.role.tools)
         self._failure = failure
         if self._work.phase == "working":
             assert self._verifier is not None  # Only verification fails.

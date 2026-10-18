@@ -76,8 +76,8 @@ def task_brief(task: TaskSpec, steps: Sequence[str] = (), max_checks: int = 0) -
         brief += f"\n\nOrbit verifies your work with these checks, in order: {', '.join(steps)}."
         if max_checks:
             brief += (
-                " Before calling complete_task, you can run any of them with run_check, naming"
-                f" it, up to {max_checks} times in all."
+                " Before calling complete_task, run each of them with run_check, naming it; you"
+                f" have {max_checks} runs in all."
             )
     return brief
 
@@ -112,8 +112,9 @@ class AgentTask:
         self.phase = "done"
         return "All verification steps passed. " + STOP
 
-    def failed(self, step: VerificationStep, output: str) -> str:
-        """The checks failed at ``step``: ask this agent for a fix, or fall back."""
+    def failed(self, step: VerificationStep, output: str, can_check: bool = False) -> str:
+        """The checks failed at ``step``: ask this agent for a fix, or fall back. An agent that
+        ``can_check`` is asked to run the step itself before claiming done again."""
         if not self.alive or self.attempt >= self.limits.max_attempts:
             self.phase = "fallback"
             return (
@@ -121,8 +122,9 @@ class AgentTask:
             )
         self.phase = "working"
         self.attempt += 1
+        then = "Run that step with run_check once you've fixed it, then" if can_check else "Then"
         return (
-            f"{fix_prompt(step, output)}\n\nThen call complete_task again."
+            f"{fix_prompt(step, output)}\n\n{then} call complete_task again."
             f" (Fix {self.attempt} of {self.limits.max_attempts}.)"
         )
 
