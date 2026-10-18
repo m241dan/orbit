@@ -4,7 +4,7 @@ import asyncio
 
 from orbit import __version__
 from orbit.agent import AgentSession, Verification
-from orbit.agent.application.session import HELLO_AGAIN_MESSAGE, HELLO_FIRST_MESSAGE
+from orbit.agent.application.handshake import HELLO_AGAIN_MESSAGE, HELLO_FIRST_MESSAGE
 from orbit.agent.domain.usage import UsageReport
 from orbit.protocol import (
     INCOMPATIBLE,

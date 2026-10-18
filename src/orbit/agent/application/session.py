@@ -12,12 +12,6 @@ from typing import assert_never
 
 from orbit.agent.application.desk import AgentDesk, Agents
 from orbit.agent.application.handshake import (
-    HELLO_AGAIN_MESSAGE as HELLO_AGAIN_MESSAGE,
-)
-from orbit.agent.application.handshake import (
-    HELLO_FIRST_MESSAGE as HELLO_FIRST_MESSAGE,
-)
-from orbit.agent.application.handshake import (
     Handshake,
     HandshakeParts,
     ends_stream,
@@ -47,15 +41,6 @@ from orbit.agent.application.tasks import Tasks
 from orbit.agent.application.usage_monitor import UsageMonitor
 from orbit.agent.application.verifier import Verification, Verifier
 from orbit.agent.application.work_lane import WorkLane
-from orbit.agent.application.work_turns import (
-    CONFIGURING_NOTE as CONFIGURING_NOTE,
-)
-from orbit.agent.application.work_turns import (
-    NO_AGENTS_MESSAGE as NO_AGENTS_MESSAGE,
-)
-from orbit.agent.application.work_turns import (
-    NO_VERIFY_MESSAGE as NO_VERIFY_MESSAGE,
-)
 from orbit.agent.application.work_turns import WorkParts, WorkTurns
 from orbit.agent.domain.agents import Agent
 from orbit.agent.domain.board import TaskBoard

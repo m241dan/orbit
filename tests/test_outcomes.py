@@ -13,7 +13,7 @@ from orbit.agent.application.planner_seat import (
     PLANNER_BUSY_RESET,
 )
 from orbit.agent.application.ports import StoredSession
-from orbit.agent.application.session import CONFIGURING_NOTE, NO_AGENTS_MESSAGE
+from orbit.agent.application.work_turns import CONFIGURING_NOTE, NO_AGENTS_MESSAGE
 from orbit.agent.domain.catalog import LANES, TRIGGERS
 from orbit.protocol import (
     BUSY,

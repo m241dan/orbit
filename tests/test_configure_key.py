@@ -6,7 +6,7 @@ import pytest
 from textual.widgets import Static
 
 from orbit.agent import NO_STEPS_NOTE, AgentSession, Verification
-from orbit.agent.application.session import CONFIGURING_NOTE, NO_VERIFY_MESSAGE
+from orbit.agent.application.work_turns import CONFIGURING_NOTE, NO_VERIFY_MESSAGE
 from orbit.agent.domain.checks import Setup, configure_prompt
 from orbit.agent.domain.verification import VerificationStep
 from orbit.protocol import (

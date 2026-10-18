@@ -12,9 +12,9 @@ from orbit.protocol import (
     TurnStarted,
 )
 from orbit.tui.view import (
-    RunningAgent,
     RunningCall,
     Working,
+    WorkingAgent,
     WorkingView,
     elapsed_clock,
     track_working,
@@ -59,7 +59,7 @@ def test_nobody_runs_before_a_turn_starts() -> None:
 
 def test_a_started_turn_runs_until_it_finishes() -> None:
     working = tracked((turn("agent-1"), 5))
-    assert working == (RunningAgent("agent-1", 5),)
+    assert working == (WorkingAgent("agent-1", 5),)
     assert tracked((turn("agent-1"), 5), (finished("agent-1"), 9)) == ()
 
 
@@ -81,13 +81,13 @@ def test_tool_calls_are_kept_until_they_finish() -> None:
 
 def test_calls_by_an_agent_not_running_are_ignored() -> None:
     working = tracked((turn("agent-2"), 0), (bash("agent-3", "c1"), 1))
-    assert working == (RunningAgent("agent-2", 0),)
+    assert working == (WorkingAgent("agent-2", 0),)
 
 
 def test_unfinished_calls_are_dropped_when_the_turn_ends() -> None:
     working = tracked((turn("agent-2"), 0), (bash("agent-2", "c1"), 1), (finished("agent-2"), 2))
     assert working == ()
-    assert track_working(working, turn("agent-2"), 3) == (RunningAgent("agent-2", 3),)
+    assert track_working(working, turn("agent-2"), 3) == (WorkingAgent("agent-2", 3),)
 
 
 def test_a_restarted_turn_moves_to_the_end() -> None:
@@ -115,11 +115,11 @@ def test_clocks_read_minutes_and_seconds_then_hours() -> None:
 
 
 def test_a_line_without_calls_shows_the_turn_time() -> None:
-    assert working_line(RunningAgent("agent-3", 2), "agent-3", 222, WIDE) == "◜ agent-3 · 3:40"
+    assert working_line(WorkingAgent("agent-3", 2), "agent-3", 222, WIDE) == "◜ agent-3 · 3:40"
 
 
 def test_a_line_shows_the_latest_call_and_its_time() -> None:
-    running = RunningAgent("agent-3", 2, (RunningCall("c1", "Bash uv run pytest", 210),))
+    running = WorkingAgent("agent-3", 2, (RunningCall("c1", "Bash uv run pytest", 210),))
     assert (
         working_line(running, "agent-3", 222, WIDE) == "◜ agent-3 · Bash uv run pytest 0:12 · 3:40"
     )
@@ -131,19 +131,19 @@ def test_a_line_counts_the_other_running_calls() -> None:
         RunningCall("c2", "Bash pwd", 0),
         RunningCall("c3", "Read src/x.py", 212),
     )
-    line = working_line(RunningAgent("agent-3", 2, calls), "agent-3", 222, WIDE)
+    line = working_line(WorkingAgent("agent-3", 2, calls), "agent-3", 222, WIDE)
     assert line == "◜ agent-3 · Read src/x.py (+2 running) 0:10 · 3:40"
 
 
 def test_a_long_call_is_clipped_to_fit_the_width() -> None:
-    running = RunningAgent("agent-3", 0, (RunningCall("c1", "Bash " + "x" * 100, 0),))
+    running = WorkingAgent("agent-3", 0, (RunningCall("c1", "Bash " + "x" * 100, 0),))
     line = working_line(running, "agent-3", 0, 40)
     assert len(line) == 40
     assert line == "◜ agent-3 · Bash xxxxxxxxxx… 0:00 · 0:00"
 
 
 def test_a_call_keeps_at_least_its_ellipsis_in_a_narrow_row() -> None:
-    running = RunningAgent("agent-3", 0, (RunningCall("c1", "Bash ls", 0),))
+    running = WorkingAgent("agent-3", 0, (RunningCall("c1", "Bash ls", 0),))
     assert working_line(running, "agent-3", 0, 5) == "◜ agent-3 · … 0:00 · 0:00"
 
 
@@ -182,14 +182,14 @@ def test_a_turn_with_no_agent_shows_under_all_only() -> None:
 
 
 def test_a_wide_call_is_clipped_to_fit_the_width_in_cells() -> None:
-    running = RunningAgent("agent-3", 0, (RunningCall("c1", "Bash " + "日" * 50, 0),))
+    running = WorkingAgent("agent-3", 0, (RunningCall("c1", "Bash " + "日" * 50, 0),))
     line = working_line(running, "agent-3", 0, 40)
     assert cell_len(line) == 40
     assert line == "◜ agent-3 · Bash 日日日日日… 0:00 · 0:00"
 
 
 def test_a_wide_call_split_by_the_clip_is_padded_to_fit_the_width() -> None:
-    running = RunningAgent("agent-3", 0, (RunningCall("c1", "Bash " + "日" * 50, 0),))
+    running = WorkingAgent("agent-3", 0, (RunningCall("c1", "Bash " + "日" * 50, 0),))
     line = working_line(running, "agent-3", 0, 41)
     assert cell_len(line) == 41
     assert line == "◜ agent-3 · Bash 日日日日日 … 0:00 · 0:00"

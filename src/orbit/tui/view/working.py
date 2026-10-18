@@ -33,7 +33,7 @@ class RunningCall:
 
 
 @dataclass(frozen=True)
-class RunningAgent:
+class WorkingAgent:
     """An agent (None for a turn orbit ended itself, with no agent) whose turn started at
     ``since`` and hasn't ended, with its unfinished ``calls`` in the order they started."""
 
@@ -42,7 +42,7 @@ class RunningAgent:
     calls: tuple[RunningCall, ...] = ()
 
 
-type Working = tuple[RunningAgent, ...]
+type Working = tuple[WorkingAgent, ...]
 """The running agents, oldest turn first."""
 
 
@@ -50,7 +50,7 @@ def track_working(working: Working, event: Event, now: float) -> Working:
     """Who runs, and which of their calls, after ``event`` at ``now``."""
     match event:
         case TurnStarted(agent_id=agent):
-            return (*_without(working, agent), RunningAgent(agent, now))
+            return (*_without(working, agent), WorkingAgent(agent, now))
         case TurnFinished(agent_id=agent) | AgentExited(agent_id=agent):
             return _without(working, agent)
         case ToolCallStarted() | ToolCallFinished():
@@ -105,7 +105,7 @@ def elapsed_clock(seconds: float) -> str:
     return f"{minutes}:{secs:02d}"
 
 
-def working_line(running: RunningAgent, label: str, now: float, width: int) -> str:
+def working_line(running: WorkingAgent, label: str, now: float, width: int) -> str:
     """``running``'s line, headed by ``label``: the spinner, its latest unfinished call (and
     how many others run), clipped so the line fits ``width``, that call's time and the turn's
     time."""

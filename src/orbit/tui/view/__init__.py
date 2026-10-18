@@ -239,9 +239,9 @@ from orbit.tui.view.turns import (
 from orbit.tui.view.windows import NEIGHBORS, OPEN_DETAIL_NEIGHBORS, SIDEBAR_WINDOWS, neighbors
 from orbit.tui.view.working import (
     WORKING_LINES_SHOWN,
-    RunningAgent,
     RunningCall,
     Working,
+    WorkingAgent,
     WorkingView,
     elapsed_clock,
     track_working,
@@ -340,7 +340,6 @@ __all__ = [
     "ExitedAgent",
     "FileDiff",
     "FinishedTurn",
-    "RunningAgent",
     "RunningCall",
     "TaskProgress",
     "ToolCall",
@@ -349,6 +348,7 @@ __all__ = [
     "TurnStep",
     "Turns",
     "Working",
+    "WorkingAgent",
     "WorkingView",
     "active_task",
     "activity_entry",
