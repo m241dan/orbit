@@ -759,7 +759,10 @@ class OrbitApp(App[None], inherit_bindings=False):
             self._usage.show(event)
 
     def _show_proposal(self, event: ChecksProposed) -> None:
-        """Ask the user about ``event``'s proposal; their decision goes to the backend."""
+        """Ask the user about ``event``'s proposal, unless it's the one shown; their decision
+        goes to the backend."""
+        if self._proposal is not None and self._proposal.proposal == event:
+            return  # A snapshot showed it before its event arrived.
         screen = self._proposal = ProposalScreen(event)
 
         async def decided(decision: DecideProposal | None) -> None:

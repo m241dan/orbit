@@ -5,6 +5,7 @@ from orbit.protocol import (
     WORK_LANE,
     AgentStarted,
     ChecksProposed,
+    DecideProposal,
     Notice,
     OpenRequest,
     ProposedStep,
@@ -133,3 +134,31 @@ async def test_a_snapshot_with_another_proposal_shows_that_one_in_place_of_the_s
         await pilot.press("a")
         await pilot.pause()
         assert not isinstance(app.screen, ProposalScreen)
+
+
+def proposal_screens(app: OrbitApp) -> list[ProposalScreen]:
+    """The proposal screens on ``app``'s stack."""
+    return [screen for screen in app.screen_stack if isinstance(screen, ProposalScreen)]
+
+
+async def test_the_proposal_event_after_a_snapshot_showing_it_adds_no_second_screen() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, SNAPSHOT.model_copy(update={"proposals": (PROPOSAL,)}))
+        await feed_events(session, pilot, PROPOSAL)
+        assert len(proposal_screens(app)) == 1
+        await pilot.press("a")
+        await pilot.pause()
+        assert session.commands == [DecideProposal(task_id="1", action="accept")]
+        assert proposal_screens(app) == []
+
+
+async def test_another_proposal_event_while_one_is_shown_shows_its_own_screen() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    other = PROPOSAL.model_copy(update={"task_id": "2"})
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, SNAPSHOT.model_copy(update={"proposals": (PROPOSAL,)}))
+        await feed_events(session, pilot, other)
+        assert [screen.proposal for screen in proposal_screens(app)] == [PROPOSAL, other]
