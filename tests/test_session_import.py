@@ -19,6 +19,7 @@ from orbit.agent.domain.sessions import (
 )
 from orbit.agent.external import session_import, sqlite_store
 from orbit.agent.external.session_import import imported_note
+from orbit.agent.external.session_locks import SessionLocks
 from orbit.agent.external.sqlite_store import SqliteStore
 
 WHEN = datetime(2026, 10, 17, 14, 30, tzinfo=UTC)
@@ -203,6 +204,23 @@ async def test_a_session_open_in_another_orbit_blocks_the_import(
     assert await store.review_count() == 0
     assert (legacy / "sessions").is_dir()
     assert (legacy / "reviews.json").exists()
+
+
+async def test_the_files_are_read_only_once_no_orbit_has_a_session_open(
+    monkeypatch: pytest.MonkeyPatch, store: SqliteStore, legacy: Path
+) -> None:
+    (legacy / "sessions" / "one.lock").touch()
+    held_elsewhere = SessionLocks.held_elsewhere
+
+    def saving_last(self: SessionLocks, session_id: str) -> bool:
+        # Another orbit saves its last change and lets go just before the check.
+        (legacy / "sessions" / "one.json").write_text(record_json(record("one", name="Last")))
+        return held_elsewhere(self, session_id)
+
+    monkeypatch.setattr(SessionLocks, "held_elsewhere", saving_last)
+    assert await import_session_files(store, legacy) == 3
+    one = await store.load("one")
+    assert isinstance(one, SessionRecord) and one.name == "Last"
 
 
 async def test_a_folder_that_cant_be_renamed_blocks_the_import(

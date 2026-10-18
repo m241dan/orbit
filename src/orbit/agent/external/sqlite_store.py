@@ -13,7 +13,7 @@ import asyncio
 import os
 import sqlite3
 import uuid
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import AbstractContextManager, closing
 from dataclasses import dataclass
@@ -84,6 +84,15 @@ class SessionRow:
     name: str
     last_active: str
     record: str
+
+
+@dataclass(frozen=True)
+class NewRows:
+    """Rows to save unless already saved: the sessions' ``rows`` and the ``review_count``, if
+    any."""
+
+    rows: tuple[SessionRow, ...]
+    review_count: int | None
 
 
 def _create_files(database: Path) -> None:
@@ -337,17 +346,18 @@ class SqliteStore:
 
     async def insert_new(
         self,
-        rows: Sequence[SessionRow],
-        review_count: int | None,
+        reading: Callable[[], AbstractContextManager[NewRows]],
         committing: Callable[[], AbstractContextManager[None]],
     ) -> int:
-        """Save the session ``rows`` whose ids aren't saved yet and, unless one is, the
-        ``review_count`` (if any), in one transaction committed inside ``committing()`` and rolled
-        back if anything fails; returns how many sessions it saved.
+        """Save the session rows ``reading()`` gives whose ids aren't saved yet and, unless one
+        is, its review count (if any), in one transaction committed inside ``committing()``, all
+        while ``reading()`` is held, and rolled back if anything fails; returns how many sessions
+        it saved.
 
-        Raises ``sqlite3.Error`` when the database fails, and whatever ``committing`` raises.
+        Raises ``sqlite3.Error`` when the database fails, and whatever ``reading`` or
+        ``committing`` raises.
         """
-        return await self._call(self._insert_new, rows, review_count, committing)
+        return await self._call(self._insert_new, reading, committing)
 
     async def backup(self, target: Path) -> None:
         """Copy the database to ``target``, owner read-write, replacing any file there, with
@@ -412,25 +422,25 @@ class SqliteStore:
 
     def _insert_new(
         self,
-        rows: Sequence[SessionRow],
-        review_count: int | None,
+        reading: Callable[[], AbstractContextManager[NewRows]],
         committing: Callable[[], AbstractContextManager[None]],
     ) -> int:
-        try:
-            self._db.execute("BEGIN IMMEDIATE")
-            saved = sum(self._insert_row(row) for row in rows)
-            if review_count is not None:
-                self._db.execute(
-                    """INSERT INTO reviews (workspace_id, since_super) VALUES (?, ?)
-                    ON CONFLICT (workspace_id) DO NOTHING""",
-                    (self._workspace, review_count),
-                )
-            with committing():
-                self._db.execute("COMMIT")
-        except BaseException:
-            if self._db.in_transaction:
-                self._db.execute("ROLLBACK")
-            raise
+        with reading() as new:
+            try:
+                self._db.execute("BEGIN IMMEDIATE")
+                saved = sum(self._insert_row(row) for row in new.rows)
+                if new.review_count is not None:
+                    self._db.execute(
+                        """INSERT INTO reviews (workspace_id, since_super) VALUES (?, ?)
+                        ON CONFLICT (workspace_id) DO NOTHING""",
+                        (self._workspace, new.review_count),
+                    )
+                with committing():
+                    self._db.execute("COMMIT")
+            except BaseException:
+                if self._db.in_transaction:
+                    self._db.execute("ROLLBACK")
+                raise
         return saved
 
     def _insert_row(self, row: SessionRow) -> int:

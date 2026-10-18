@@ -1,11 +1,13 @@
 """Importing the sessions an older orbit saved as files into the SQLite store.
 
-The old ``sessions`` folder and ``reviews.json`` are read, then copied into the store in one
+Once no orbit has one of the old sessions open, the old ``sessions`` folder and ``reviews.json``
+are read and copied into the store in one
 transaction that commits only once the folder is renamed to ``sessions.imported`` (and
 ``reviews.json`` to ``reviews.json.imported``), or to ``.2``, ``.3`` and so on after that name
 when an earlier import left one there, so they're imported once; when anything fails the files
 are renamed back and nothing is imported, ready for another try. Old files are never deleted or
-replaced, and rows the store already has are never overwritten.
+replaced, and rows the store already has are never overwritten. The folder's shared lock is held
+from the check until the rename, so no orbit can open a session and save it in between.
 """
 
 import asyncio
@@ -13,14 +15,13 @@ import os
 import sqlite3
 from collections.abc import Iterator
 from contextlib import ExitStack, contextmanager
-from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 
 from orbit.agent.domain.sessions import Unreadable, parse_record, parse_review_count
 from orbit.agent.external.session_files import REVIEWS, SESSIONS
 from orbit.agent.external.session_locks import SessionLocks
-from orbit.agent.external.sqlite_store import SessionRow, SqliteStore
+from orbit.agent.external.sqlite_store import NewRows, SessionRow, SqliteStore
 
 IMPORTED = f"{SESSIONS}.imported"
 REVIEWS_IMPORTED = f"{REVIEWS}.imported"
@@ -41,14 +42,6 @@ def imported_note(count: int, legacy_dir: Path) -> str:
     return f"Imported {count} saved {noun} from {sessions}; the old folder is now {IMPORTED}."
 
 
-@dataclass(frozen=True)
-class _Legacy:
-    """What an older orbit saved: its sessions' ``rows`` and its ``review_count``, if any."""
-
-    rows: tuple[SessionRow, ...]
-    review_count: int | None
-
-
 async def import_session_files(store: SqliteStore, legacy_dir: Path) -> int | None:
     """Import the sessions and review count saved as files in ``legacy_dir`` into ``store``;
     returns how many sessions it imported, or none when there's no ``sessions`` folder.
@@ -59,16 +52,37 @@ async def import_session_files(store: SqliteStore, legacy_dir: Path) -> int | No
     sessions = legacy_dir / SESSIONS
     if not await asyncio.to_thread(sessions.is_dir):
         return None
-    legacy = await asyncio.to_thread(_read, legacy_dir)
     try:
-        return await store.insert_new(
-            legacy.rows, legacy.review_count, partial(_retired, legacy_dir)
-        )
+        return await store.insert_new(partial(_checked, legacy_dir), partial(_retired, legacy_dir))
     except sqlite3.Error as error:
         raise ImportBlocked(f"Couldn't import the sessions in {sessions}: {error}") from error
 
 
-def _read(legacy_dir: Path) -> _Legacy:
+@contextmanager
+def _checked(legacy_dir: Path) -> Iterator[NewRows]:
+    """What's saved in ``legacy_dir``, read while no orbit has a session there open, and held so
+    that none can open one until this is done.
+
+    Raises :class:`ImportBlocked` when an orbit has a session there open, or the folder can't be
+    checked or read.
+    """
+    sessions = legacy_dir / SESSIONS
+    with ExitStack() as stack:
+        locks = SessionLocks(sessions)
+        try:
+            stack.enter_context(locks.checking())
+            held = [path for path in sessions.glob("*.lock") if locks.held_elsewhere(path.stem)]
+        except OSError as error:
+            raise ImportBlocked(f"Couldn't check the sessions in {sessions}: {error}") from error
+        if held:
+            raise ImportBlocked(
+                f"Can't import the sessions in {sessions}: an orbit still has a session there "
+                "open. Close it and try again."
+            )
+        yield _read(legacy_dir)
+
+
+def _read(legacy_dir: Path) -> NewRows:
     """The sessions and review count saved in ``legacy_dir``.
 
     Raises :class:`ImportBlocked` when they can't be read.
@@ -76,7 +90,7 @@ def _read(legacy_dir: Path) -> _Legacy:
     sessions = legacy_dir / SESSIONS
     try:
         rows = tuple(_row(path) for path in sorted(sessions.glob("*.json")))
-        return _Legacy(rows, _review_count(legacy_dir / REVIEWS))
+        return NewRows(rows, _review_count(legacy_dir / REVIEWS))
     except OSError as error:
         raise ImportBlocked(f"Couldn't read the sessions in {sessions}: {error}") from error
 
@@ -113,25 +127,13 @@ def _review_count(path: Path) -> int | None:
 
 @contextmanager
 def _retired(legacy_dir: Path) -> Iterator[None]:
-    """Rename ``legacy_dir``'s sessions folder and review count as imported, while no orbit can
-    take a session's lock in it; they're renamed back if what this holds fails.
+    """Rename ``legacy_dir``'s sessions folder and review count as imported; they're renamed
+    back if what this holds fails.
 
-    Raises :class:`ImportBlocked` when an orbit has a session there open, or the folder can't be
-    checked or renamed.
+    Raises :class:`ImportBlocked` when they can't be renamed.
     """
     sessions = legacy_dir / SESSIONS
     with ExitStack() as stack:
-        locks = SessionLocks(sessions)
-        try:
-            stack.enter_context(locks.checking())
-            held = [path for path in sessions.glob("*.lock") if locks.held_elsewhere(path.stem)]
-        except OSError as error:
-            raise ImportBlocked(f"Couldn't check the sessions in {sessions}: {error}") from error
-        if held:
-            raise ImportBlocked(
-                f"Can't import the sessions in {sessions}: an orbit still has a session there "
-                "open. Close it and try again."
-            )
         stack.enter_context(_moved(sessions, _free(legacy_dir / IMPORTED)))
         if (legacy_dir / REVIEWS).exists():
             stack.enter_context(_moved(legacy_dir / REVIEWS, _free(legacy_dir / REVIEWS_IMPORTED)))
