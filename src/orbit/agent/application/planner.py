@@ -163,7 +163,7 @@ class PlannerChat:
         """Turn ``turn_id`` of the planner's conversation, on ``prompt``."""
         assert self._agent is not None
         role = self._desk.agents.roles[PLANNER]
-        own = Settings(model=settings.model, tool_access=role.tool_access)
+        own = Settings(model=settings.model or role.model, tool_access=role.tool_access)
         steps = self._step_names()
         launch = await self._desk.launch(self._agent, self._with_steps(prompt, steps), own, ".")
         async for event in self._desk.agents.launcher.converse(turn_id, launch):

@@ -216,6 +216,35 @@ async def test_closing_ends_the_planners_access() -> None:
     assert await asyncio.wait_for(anext(session.events()), 5) == exited
 
 
+async def planner_model(role_model: str | None, picked: str | None) -> str | None:
+    """The model the planner launches on, with ``role_model`` in its role and ``picked`` chosen."""
+    host = FakeHost()
+    launcher = ScriptedLauncher(host)
+    launcher.planner_turns = [chats]
+    roles = {**ROLES, "planner": ROLES["planner"].model_copy(update={"model": role_model})}
+
+    async def publish(event: Event) -> None:
+        pass
+
+    desk = AgentDesk(Agents(host, launcher, lambda: "token-1", roles), publish)
+    chat = PlannerChat(desk, Tasks(TaskBoard(), publish), lambda: ())
+    async for _ in chat.run_turn("turn", "Plan.", Settings(model=picked)):
+        pass
+    return launcher.launches[-1].settings.model
+
+
+async def test_the_planner_uses_its_roles_model_when_none_is_picked() -> None:
+    assert await planner_model("sonnet", None) == "sonnet"
+
+
+async def test_a_picked_model_wins_over_the_planner_roles() -> None:
+    assert await planner_model("sonnet", "opus") == "opus"
+
+
+async def test_the_planner_uses_the_default_model_when_neither_names_one() -> None:
+    assert await planner_model(None, None) is None
+
+
 def steps_chat(
     *turns: Script, published: list[Event] | None = None
 ) -> tuple[PlannerChat, ScriptedLauncher, list[tuple[str, ...]]]:

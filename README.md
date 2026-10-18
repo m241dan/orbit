@@ -534,7 +534,8 @@ planner tab gets a `*`.
 
 The planner is one agent for the whole session: each prompt resumes its conversation, so it
 remembers what you discussed. It reads your checkout and can search the web but can't edit your
-checkout, and uses the model you picked with `ctrl+o`, which is saved with the session.
+checkout, and uses the model you picked with `ctrl+o`, which is saved with the session; with
+`default` picked, it uses `[roles.planner] model` if `.orbit/config.toml` sets one.
 
 The planner's conversation is kept with its session, so it carries on across restarts and session
 switches. `ctrl+n` resets it, after you confirm (`y` to go ahead, `n`/`esc` to cancel): to pick up a
@@ -643,7 +644,8 @@ appears in the process list. Agents are started with `--strict-mcp-config` (only
 `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` (your Claude Code auto-memory, which worktrees share with the
 repository, stays out of agents' context).
 
-A model picked with `ctrl+o` applies from the planner's next prompt and keeps its conversation; the
+A model picked with `ctrl+o` applies from the planner's next prompt and keeps its conversation
+(with `default` picked, the planner uses `[roles.planner] model` if the config sets one); the
 tool access picked with `ctrl+l` is what new tasks start with in the task editor. Both are saved
 with the session. `ctrl+l` does not
 change the planner's own tool access, which is the planner role's (`[roles.planner] tool_access` in
