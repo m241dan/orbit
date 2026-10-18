@@ -10,6 +10,8 @@ from orbit.protocol import (
     INCOMPATIBLE,
     INVALID,
     PROTOCOL_VERSION,
+    UNKNOWN,
+    WRONG_SESSION,
     AddTask,
     Catalog,
     Command,
@@ -40,9 +42,12 @@ from tests.agent_fakes import (
 from tests.test_usage_monitor import LIMITS, Source
 
 
-async def send_as(session: AgentSession, command_id: str, command: Command) -> None:
-    """Send ``command`` to ``session`` as ``command_id``, greeted or not."""
-    await session.send(CommandEnvelope(command_id=command_id, payload=command))
+async def send_as(
+    session: AgentSession, command_id: str, command: Command, /, **fields: str
+) -> None:
+    """Send ``command`` to ``session`` as ``command_id``, with the envelope's other ``fields``,
+    greeted or not."""
+    await session.send(CommandEnvelope(command_id=command_id, payload=command, **fields))
 
 
 async def published(session: AgentSession, count: int) -> list[Event]:
@@ -99,6 +104,43 @@ async def test_a_command_before_hello_is_refused_as_invalid_and_changes_nothing(
     ]
     assert [t.task.prompt for t in board(tasks)] == ["Add another."]
     assert launcher.launches == []
+
+
+OTHER_WORKSPACE = "No workspace 'other'; the workspace is default."
+OTHER_SESSION = "Session 'other' isn't open; the open session is session-1."
+
+
+async def test_a_misaddressed_command_before_hello_is_refused_for_its_address() -> None:
+    session = AgentSession(new_id=lambda: "session-1")
+    await send_as(session, "c1", AddTask(task=TaskSpec(prompt="Add a flag.")), workspace="other")
+    await send_as(session, "c2", AddTask(task=TaskSpec(prompt="Add a flag.")), session="other")
+    refusals = await published(session, 2)
+    await session.close()
+
+    assert refusals == [
+        CommandRefused(command_id="c1", code=UNKNOWN, message=OTHER_WORKSPACE),
+        CommandRefused(command_id="c2", code=WRONG_SESSION, message=OTHER_SESSION),
+    ]
+
+
+async def test_a_misaddressed_hello_is_refused_unwelcomed_and_a_proper_one_is_welcomed() -> None:
+    session = AgentSession(workspace="/work", new_id=lambda: "session-1")
+    await send_as(session, "h1", HELLO, workspace="other")
+    await send_as(session, "h2", HELLO, session="other")
+    refusals = await published(session, 2)
+    quiet = await silent(session)
+    await greet(session)
+    events = await published(session, 4)
+    await session.close()
+
+    assert refusals == [
+        CommandRefused(command_id="h1", code=UNKNOWN, message=OTHER_WORKSPACE),
+        CommandRefused(command_id="h2", code=WRONG_SESSION, message=OTHER_SESSION),
+    ]
+    assert quiet
+    assert events[0] == Welcome(command_id=HELLO_ID, server_version=__version__)
+    assert [type(event) for event in events[1:]] == [Catalog, Snapshot, Notice]
+    assert nothing_queued(session)
 
 
 async def test_a_second_hello_is_refused_as_invalid() -> None:
