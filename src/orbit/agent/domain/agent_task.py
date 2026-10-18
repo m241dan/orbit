@@ -9,7 +9,12 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Literal
 
-from orbit.agent.domain.verification import VerificationStep, failure_report, fix_prompt
+from orbit.agent.domain.verification import (
+    VerificationStep,
+    failure_report,
+    fix_prompt,
+    step_list,
+)
 from orbit.protocol import TaskSpec
 
 Phase = Literal["assigned", "working", "verifying", "done", "fallback", "gave_up", "ended"]
@@ -73,7 +78,7 @@ def task_brief(task: TaskSpec, steps: Sequence[str] = (), max_checks: int = 0) -
         " with the reason."
     )
     if steps:
-        brief += f"\n\nOrbit verifies your work with these checks, in order: {', '.join(steps)}."
+        brief += f"\n\nOrbit verifies your work with these checks, in order: {step_list(steps)}."
         if max_checks:
             brief += (
                 " Before calling complete_task, run each of them with run_check, naming it; you"

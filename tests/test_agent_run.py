@@ -293,7 +293,7 @@ async def test_agents_can_run_a_check_themselves() -> None:
     async def checks_first(call: Call) -> TurnEndReason:
         await call("get_task")
         unknown = await call("run_check", step="Lint")
-        assert unknown.is_error and "Unit tests" in unknown.text
+        assert unknown.is_error and "the steps are: `Unit tests`." in unknown.text
         check = await call("run_check", step="Unit tests")
         assert "failed" in check.text and "1 test failed" in check.text
         refused = await call("run_check", step="Unit tests")

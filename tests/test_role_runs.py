@@ -42,7 +42,7 @@ async def test_a_verified_agent_is_told_the_checks_and_that_it_may_run_them() ->
 
     session, _, _ = session_for(done, verification=verified(Steps()))
     await asyncio.wait_for(run(session), 5)
-    assert "these checks, in order: Unit tests." in briefs[0] and "run_check" in briefs[0]
+    assert "these checks, in order: `Unit tests`." in briefs[0] and "run_check" in briefs[0]
 
 
 async def test_an_unverified_agent_is_told_no_checks() -> None:

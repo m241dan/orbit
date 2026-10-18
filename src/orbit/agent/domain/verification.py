@@ -161,8 +161,14 @@ def startup_fix_prompt(step: VerificationStep, output: str) -> str:
     )
 
 
+def step_list(names: Sequence[str]) -> str:
+    """The step ``names`` as Markdown code spans, joined with commas, so a name with a comma
+    in it still reads as one name."""
+    return ", ".join(f"`` {name} ``" if "`" in name else f"`{name}`" for name in names)
+
+
 def steps_note(steps: Sequence[str]) -> str:
     """What the planner is told about the verification steps named ``steps``."""
     if not steps:
         return "Orbit note: No verification steps are configured yet, so tasks aren't verified."
-    return f"Orbit note: orbit verifies each task with these checks, in order: {', '.join(steps)}."
+    return f"Orbit note: orbit verifies each task with these checks, in order: {step_list(steps)}."

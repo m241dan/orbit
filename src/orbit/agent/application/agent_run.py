@@ -39,7 +39,12 @@ from orbit.agent.domain.roles import (
     out_of_time,
     task_suggestion,
 )
-from orbit.agent.domain.verification import VerificationStep, check_reply, failure_reason
+from orbit.agent.domain.verification import (
+    VerificationStep,
+    check_reply,
+    failure_reason,
+    step_list,
+)
 from orbit.protocol import (
     AGENT_FAILED,
     GIT_FAILED,
@@ -435,7 +440,8 @@ class AgentRun:
         steps = {step.name: step for step in self._verifier.verification.steps}
         step = steps.get(str(arguments.get("step", "")))
         if step is None:
-            return Reply(f"No step by that name; the steps are: {', '.join(steps)}.", is_error=True)
+            names = step_list(tuple(steps))
+            return Reply(f"No step by that name; the steps are: {names}.", is_error=True)
         refusal = self._work.request_check()
         if refusal is not None:
             return Reply(refusal, is_error=True)
