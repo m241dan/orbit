@@ -18,9 +18,9 @@ from orbit.agent.domain.sessions import (
     review_count_json,
 )
 from orbit.agent.external import session_import, sqlite_store
-from orbit.agent.external.session_import import imported_note
+from orbit.agent.external.session_import import Imported, imported_note
 from orbit.agent.external.session_locks import SessionLocks
-from orbit.agent.external.sqlite_store import SqliteStore
+from orbit.agent.external.sqlite_store import NewRows, SqliteStore
 
 WHEN = datetime(2026, 10, 17, 14, 30, tzinfo=UTC)
 
@@ -88,11 +88,16 @@ def failing_commit(monkeypatch: pytest.MonkeyPatch) -> None:
     """Make the import's commit fail once the old files are renamed, as a full disk would."""
     retired = session_import._retired
 
-    def failing(legacy_dir: Path) -> AbstractContextManager[None]:
-        with retired(legacy_dir):
+    def failing(legacy_dir: Path, folders: list[str]) -> AbstractContextManager[None]:
+        with retired(legacy_dir, folders):
             raise sqlite3.OperationalError("disk I/O error")
 
     monkeypatch.setattr(session_import, "_retired", failing)
+
+
+def first(count: int) -> Imported:
+    """A first import of ``count`` sessions, whose folder is now ``sessions.imported``."""
+    return Imported(count, "sessions.imported")
 
 
 async def ids(store: SqliteStore) -> list[str]:
@@ -102,7 +107,7 @@ async def ids(store: SqliteStore) -> list[str]:
 async def test_the_files_are_imported_and_the_folder_renamed(
     store: SqliteStore, legacy: Path
 ) -> None:
-    assert await import_session_files(store, legacy) == 3
+    assert await import_session_files(store, legacy) == first(3)
     assert await ids(store) == ["bad", "one", "two"]
     assert await store.load("one") == record("one")
     assert await store.review_count() == 3
@@ -127,7 +132,7 @@ async def test_a_file_whose_record_has_another_id_is_imported_under_the_files_na
     store: SqliteStore, legacy: Path
 ) -> None:
     (legacy / "sessions" / "copy.json").write_text(record_json(record("one", name="Copy")))
-    assert await import_session_files(store, legacy) == 4
+    assert await import_session_files(store, legacy) == first(4)
     assert await ids(store) == ["bad", "copy", "one", "two"]
     copy = await store.load("copy")
     assert isinstance(copy, SessionRecord) and copy.name == "Copy"
@@ -139,7 +144,7 @@ async def test_a_record_whose_id_isnt_a_file_name_can_still_be_listed_and_loaded
     store: SqliteStore, legacy: Path
 ) -> None:
     (legacy / "sessions" / "x.json").write_text(record_json(record("../x")))
-    assert await import_session_files(store, legacy) == 4
+    assert await import_session_files(store, legacy) == first(4)
     assert await ids(store) == ["bad", "one", "two", "x"]
     assert isinstance(await store.load("x"), SessionRecord)
 
@@ -149,7 +154,7 @@ async def test_a_file_that_isnt_utf_8_is_listed_unreadable(
 ) -> None:
     text = record_json(record("latin", name="Caf\u00e9"))
     (legacy / "sessions" / "latin.json").write_bytes(text.encode("latin-1"))
-    assert await import_session_files(store, legacy) == 4
+    assert await import_session_files(store, legacy) == first(4)
     latin = next(stored for stored in await store.sessions() if stored.id == "latin")
     assert isinstance(latin.record, Unreadable)
     assert isinstance(await store.load("latin"), Unreadable)
@@ -170,7 +175,7 @@ async def test_without_a_review_count_only_the_sessions_are_imported(
 ) -> None:
     (legacy / "reviews.json").unlink()
     await store.save_review_count(5)
-    assert await import_session_files(store, legacy) == 3
+    assert await import_session_files(store, legacy) == first(3)
     assert await store.review_count() == 5
 
 
@@ -179,14 +184,14 @@ async def test_saved_sessions_and_review_count_are_never_overwritten(
 ) -> None:
     await store.save(record("one", name="Mine"))
     await store.save_review_count(7)
-    assert await import_session_files(store, legacy) == 2
+    assert await import_session_files(store, legacy) == first(2)
     loaded = await store.load("one")
     assert isinstance(loaded, SessionRecord) and loaded.name == "Mine"
     assert await store.review_count() == 7
 
 
 async def test_importing_twice_imports_once(store: SqliteStore, legacy: Path) -> None:
-    assert await import_session_files(store, legacy) == 3
+    assert await import_session_files(store, legacy) == first(3)
     assert await import_session_files(store, legacy) is None
     assert await ids(store) == ["bad", "one", "two"]
 
@@ -218,7 +223,7 @@ async def test_the_files_are_read_only_once_no_orbit_has_a_session_open(
         return held_elsewhere(self, session_id)
 
     monkeypatch.setattr(SessionLocks, "held_elsewhere", saving_last)
-    assert await import_session_files(store, legacy) == 3
+    assert await import_session_files(store, legacy) == first(3)
     one = await store.load("one")
     assert isinstance(one, SessionRecord) and one.name == "Last"
 
@@ -253,11 +258,11 @@ async def test_earlier_imported_files_are_kept_and_the_new_ones_get_fresh_names(
     (legacy / "sessions.imported").mkdir()
     (legacy / "sessions.imported" / "old.json").write_text("earlier")
     (legacy / "reviews.json.imported").write_text("earlier")
-    assert await import_session_files(store, legacy) == 3
+    assert await import_session_files(store, legacy) == Imported(3, "sessions.imported-2")
     assert [path.name for path in (legacy / "sessions.imported").iterdir()] == ["old.json"]
     assert (legacy / "reviews.json.imported").read_text() == "earlier"
-    assert (legacy / "sessions.imported.2" / "one.json").exists()
-    assert (legacy / "reviews.json.imported.2").read_text() == review_count_json(3)
+    assert (legacy / "sessions.imported-2" / "one.json").exists()
+    assert (legacy / "reviews.json.imported-2").read_text() == review_count_json(3)
     assert not (legacy / "sessions").exists()
     assert not (legacy / "reviews.json").exists()
 
@@ -271,9 +276,9 @@ async def test_after_importing_beside_earlier_imported_files_another_import_does
     assert await import_session_files(store, legacy) is None
     assert sorted(path.name for path in legacy.iterdir()) == [
         "reviews.json.imported",
-        "reviews.json.imported.2",
+        "reviews.json.imported-2",
         "sessions.imported",
-        "sessions.imported.2",
+        "sessions.imported-2",
     ]
 
 
@@ -281,11 +286,62 @@ async def test_an_empty_earlier_imported_folder_or_a_dangling_link_is_not_replac
     store: SqliteStore, legacy: Path
 ) -> None:
     (legacy / "sessions.imported").mkdir()
-    (legacy / "sessions.imported.2").symlink_to(legacy / "nowhere")
-    assert await import_session_files(store, legacy) == 3
+    (legacy / "sessions.imported-2").symlink_to(legacy / "nowhere")
+    assert await import_session_files(store, legacy) == Imported(3, "sessions.imported-3")
     assert (legacy / "sessions.imported").is_dir()
-    assert (legacy / "sessions.imported.2").is_symlink()
-    assert (legacy / "sessions.imported.3" / "one.json").exists()
+    assert (legacy / "sessions.imported-2").is_symlink()
+    assert (legacy / "sessions.imported-3" / "one.json").exists()
+
+
+async def test_a_third_import_takes_the_next_free_name(store: SqliteStore, legacy: Path) -> None:
+    for name in ("sessions.imported", "sessions.imported-2"):
+        (legacy / name).mkdir()
+        (legacy / name / "old.json").write_text(name)
+    for name in ("reviews.json.imported", "reviews.json.imported-2"):
+        (legacy / name).write_text(name)
+    assert await import_session_files(store, legacy) == Imported(3, "sessions.imported-3")
+    for name in ("sessions.imported", "sessions.imported-2"):
+        assert (legacy / name / "old.json").read_text() == name
+    for name in ("reviews.json.imported", "reviews.json.imported-2"):
+        assert (legacy / name).read_text() == name
+    assert (legacy / "sessions.imported-3" / "one.json").exists()
+    assert (legacy / "reviews.json.imported-3").read_text() == review_count_json(3)
+
+
+async def test_a_folder_another_orbit_imports_before_the_rename_is_left_to_it(
+    monkeypatch: pytest.MonkeyPatch, store: SqliteStore, legacy: Path
+) -> None:
+    retired = session_import._retired
+
+    def importing_first(legacy_dir: Path, folders: list[str]) -> AbstractContextManager[None]:
+        # Another orbit imports the folder and renames it just before this one does.
+        (legacy_dir / "sessions").rename(legacy_dir / "elsewhere")
+        return retired(legacy_dir, folders)
+
+    monkeypatch.setattr(session_import, "_retired", importing_first)
+    assert await import_session_files(store, legacy) is None
+    assert await ids(store) == []
+    assert await store.review_count() == 0
+    assert (legacy / "elsewhere" / "one.json").exists()
+    assert (legacy / "reviews.json").exists()
+    assert not (legacy / "sessions.imported").exists()
+
+
+async def test_a_folder_another_orbit_imports_before_the_check_is_left_to_it(
+    monkeypatch: pytest.MonkeyPatch, store: SqliteStore, legacy: Path
+) -> None:
+    checked = session_import._checked
+
+    def importing_first(legacy_dir: Path) -> AbstractContextManager[NewRows]:
+        # Another orbit imports the folder and renames it just after this one saw it.
+        (legacy_dir / "sessions").rename(legacy_dir / "elsewhere")
+        return checked(legacy_dir)
+
+    monkeypatch.setattr(session_import, "_checked", importing_first)
+    assert await import_session_files(store, legacy) is None
+    assert await ids(store) == []
+    assert await store.review_count() == 0
+    assert (legacy / "reviews.json").exists()
 
 
 async def test_a_failing_commit_puts_the_folder_and_review_count_back(
@@ -361,11 +417,17 @@ async def test_a_database_that_fails_blocks_the_import(
 
 
 def test_the_import_note_says_how_many_sessions_came_from_where() -> None:
-    assert imported_note(3, Path(".git/orbit")) == (
+    assert imported_note(first(3), Path(".git/orbit")) == (
         "Imported 3 saved sessions from .git/orbit/sessions; the old folder is now "
         "sessions.imported."
     )
 
 
 def test_the_import_note_counts_one_session_as_one() -> None:
-    assert imported_note(1, Path(".orbit")).startswith("Imported 1 saved session from ")
+    assert imported_note(first(1), Path(".orbit")).startswith("Imported 1 saved session from ")
+
+
+def test_the_import_note_names_the_folder_the_sessions_went_to() -> None:
+    assert imported_note(Imported(2, "sessions.imported-2"), Path(".orbit")).endswith(
+        "; the old folder is now sessions.imported-2."
+    )

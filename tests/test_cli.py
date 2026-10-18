@@ -408,6 +408,21 @@ def test_chat_imports_an_older_orbits_session_files(
     ]
 
 
+def test_chat_imports_old_files_beside_an_earlier_import_to_the_next_free_name(
+    greetings: list[Greeted], repo: Path, state: Path
+) -> None:
+    earlier = legacy_sessions(repo / ".git" / "orbit").rename(
+        repo / ".git" / "orbit" / "sessions.imported"
+    )
+    legacy_sessions(repo / ".git" / "orbit")
+    assert runner.invoke(app, ["chat", "-C", str(repo)]).exit_code == 0
+
+    assert (earlier / "abc.json").exists()
+    assert (repo / ".git" / "orbit" / "sessions.imported-2" / "abc.json").exists()
+    [greeting] = greetings
+    assert greeting.notices[-1].endswith("; the old folder is now sessions.imported-2.")
+
+
 def test_the_import_note_names_a_folder_outside_the_workspace_in_full(
     launched: list[AgentSession], greetings: list[Greeted], repo: Path, tmp_path: Path
 ) -> None:

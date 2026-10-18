@@ -3,11 +3,12 @@
 Once no orbit has one of the old sessions open, the old ``sessions`` folder and ``reviews.json``
 are read and copied into the store in one
 transaction that commits only once the folder is renamed to ``sessions.imported`` (and
-``reviews.json`` to ``reviews.json.imported``), or to ``.2``, ``.3`` and so on after that name
+``reviews.json`` to ``reviews.json.imported``), or to ``-2``, ``-3`` and so on after that name
 when an earlier import left one there, so they're imported once; when anything fails the files
 are renamed back and nothing is imported, ready for another try. Old files are never deleted or
 replaced, and rows the store already has are never overwritten. The folder's shared lock is held
-from the check until the rename, so no orbit can open a session and save it in between.
+from the check until the rename, so no orbit can open a session and save it in between. A folder
+that another orbit imports and renames first is left to it, as nothing to import.
 """
 
 import asyncio
@@ -15,6 +16,7 @@ import os
 import sqlite3
 from collections.abc import Iterator
 from contextlib import ExitStack, contextmanager
+from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 
@@ -34,17 +36,33 @@ class ImportBlocked(Exception):
     path."""
 
 
-def imported_note(count: int, legacy_dir: Path) -> str:
-    """The note that ``count`` saved sessions were imported from ``legacy_dir``'s sessions
+class _Gone(Exception):
+    """The old sessions folder went, imported by another orbit, before this could import it."""
+
+
+@dataclass(frozen=True)
+class Imported:
+    """An import of ``count`` saved sessions, whose folder is now named ``folder``."""
+
+    count: int
+    folder: str
+
+
+def imported_note(imported: Imported, legacy_dir: Path) -> str:
+    """The note that ``imported``'s sessions were imported from ``legacy_dir``'s sessions
     folder, which is now renamed."""
+    count = imported.count
     noun = "session" if count == 1 else "sessions"
     sessions = legacy_dir / SESSIONS
-    return f"Imported {count} saved {noun} from {sessions}; the old folder is now {IMPORTED}."
+    return (
+        f"Imported {count} saved {noun} from {sessions}; the old folder is now {imported.folder}."
+    )
 
 
-async def import_session_files(store: SqliteStore, legacy_dir: Path) -> int | None:
+async def import_session_files(store: SqliteStore, legacy_dir: Path) -> Imported | None:
     """Import the sessions and review count saved as files in ``legacy_dir`` into ``store``;
-    returns how many sessions it imported, or none when there's no ``sessions`` folder.
+    returns how many sessions it imported and where their folder went, or none when there's no
+    ``sessions`` folder, or it goes before it's renamed.
 
     Raises :class:`ImportBlocked`, having imported nothing, when an orbit has one of the sessions
     open, or the files can't be read or renamed, or the database fails.
@@ -52,10 +70,16 @@ async def import_session_files(store: SqliteStore, legacy_dir: Path) -> int | No
     sessions = legacy_dir / SESSIONS
     if not await asyncio.to_thread(sessions.is_dir):
         return None
+    retired: list[str] = []
     try:
-        return await store.insert_new(partial(_checked, legacy_dir), partial(_retired, legacy_dir))
+        count = await store.insert_new(
+            partial(_checked, legacy_dir), partial(_retired, legacy_dir, retired)
+        )
+    except _Gone:
+        return None
     except sqlite3.Error as error:
         raise ImportBlocked(f"Couldn't import the sessions in {sessions}: {error}") from error
+    return Imported(count, retired[0])
 
 
 @contextmanager
@@ -72,6 +96,8 @@ def _checked(legacy_dir: Path) -> Iterator[NewRows]:
         try:
             stack.enter_context(locks.checking())
             held = [path for path in sessions.glob("*.lock") if locks.held_elsewhere(path.stem)]
+        except FileNotFoundError as error:
+            raise _Gone from error
         except OSError as error:
             raise ImportBlocked(f"Couldn't check the sessions in {sessions}: {error}") from error
         if held:
@@ -126,27 +152,39 @@ def _review_count(path: Path) -> int | None:
 
 
 @contextmanager
-def _retired(legacy_dir: Path) -> Iterator[None]:
-    """Rename ``legacy_dir``'s sessions folder and review count as imported; they're renamed
-    back if what this holds fails.
+def _retired(legacy_dir: Path, retired: list[str]) -> Iterator[None]:
+    """Rename ``legacy_dir``'s sessions folder and review count as imported, adding the
+    folder's new name to ``retired``; they're renamed back if what this holds fails.
 
-    Raises :class:`ImportBlocked` when they can't be renamed.
+    Raises :class:`ImportBlocked` when they can't be renamed, and ``_Gone`` when the folder has
+    gone.
     """
     sessions = legacy_dir / SESSIONS
+    if not os.path.lexists(sessions):
+        raise _Gone
     with ExitStack() as stack:
-        stack.enter_context(_moved(sessions, _free(legacy_dir / IMPORTED)))
-        if (legacy_dir / REVIEWS).exists():
-            stack.enter_context(_moved(legacy_dir / REVIEWS, _free(legacy_dir / REVIEWS_IMPORTED)))
+        folder = _free(legacy_dir / IMPORTED)
+        stack.enter_context(_moved(sessions, folder))
+        _retire_reviews(stack, legacy_dir)
+        retired.append(folder.name)
         yield
 
 
+def _retire_reviews(stack: ExitStack, legacy_dir: Path) -> None:
+    """Rename ``legacy_dir``'s review count, if it has one, as imported, and back when
+    ``stack`` closes on a failure."""
+    reviews = legacy_dir / REVIEWS
+    if reviews.exists():
+        stack.enter_context(_moved(reviews, _free(legacy_dir / REVIEWS_IMPORTED)))
+
+
 def _free(path: Path) -> Path:
-    """``path``, or the first of ``path.2``, ``path.3`` and so on that nothing is at, not even a
+    """``path``, or the first of ``path-2``, ``path-3`` and so on that nothing is at, not even a
     broken link, so that renaming to it replaces nothing."""
     free, number = path, 1
     while os.path.lexists(free):
         number += 1
-        free = path.with_name(f"{path.name}.{number}")
+        free = path.with_name(f"{path.name}-{number}")
     return free
 
 
