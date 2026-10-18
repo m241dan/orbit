@@ -98,12 +98,13 @@ from orbit.tui.view import (
     RESET_MESSAGE,
     RESET_TITLE,
     RESET_YES,
-    TOOL_ACCESS_OPTIONS,
     coalesce,
     decision_entry,
     edit_refusal,
+    model_choices,
     model_options,
     planner_reset_entry,
+    tool_access_choices,
     tool_access_labels,
     trigger_key_labels,
 )
@@ -530,31 +531,16 @@ class OrbitApp(App[None], inherit_bindings=False):
         await self._send(CancelTurn(lane=PLANNER_LANE))
 
     def action_pick_model(self) -> None:
+        # While a picker is open, its modal screen blocks the app's key bindings, so a second
+        # picker can't be pushed on top.
         if self._settings is not None:
-            models, _ = model_options(self._model_choices)
-            candidates = [self._settings.model_copy(update={"model": m}) for m in models]
-            self._open_picker(self._model_picker, candidates)
+            options, current = model_choices(self._model_choices, self._settings)
+            self._model_picker.choose(options, current, self._request_settings)
 
     def action_pick_tool_access(self) -> None:
         if self._settings is not None:
-            candidates = [
-                self._settings.model_copy(update={"tool_access": a}) for a in TOOL_ACCESS_OPTIONS
-            ]
-            self._open_picker(self._tool_picker, candidates)
-
-    def _open_picker(self, picker: PickerScreen, candidates: list[Settings]) -> None:
-        """Show ``picker``; choosing option ``i`` requests ``candidates[i]``.
-
-        While a picker is open, its modal screen blocks the app's key bindings, so
-        a second picker can't be pushed on top.
-        """
-        picker.current = candidates.index(self._settings) if self._settings in candidates else None
-
-        async def chosen(index: int | None) -> None:
-            if index is not None:
-                await self._request_settings(candidates[index])
-
-        self.push_screen(picker, chosen)
+            options, current = tool_access_choices(self._settings)
+            self._tool_picker.choose(options, current, self._request_settings)
 
     async def _request_settings(self, settings: Settings) -> None:
         # The display updates when the backend confirms with SettingsChanged.

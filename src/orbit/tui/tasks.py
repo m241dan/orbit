@@ -20,13 +20,12 @@ from orbit.tui.view import (
     NEW_TASK_LABEL,
     REASON_HINT,
     TASK_EDITOR_HINT,
-    TOOL_ACCESS_OPTIONS,
     active_task,
     copied_note,
     follow_top,
     join_prompt,
+    model_choices,
     model_label,
-    model_options,
     reason_text,
     reason_title,
     session_usage_subtitle,
@@ -36,6 +35,7 @@ from orbit.tui.view import (
     task_label,
     task_list_title,
     task_numbers,
+    tool_access_choices,
 )
 from orbit.tui.widgets import (
     ListPane,
@@ -342,16 +342,12 @@ class TaskEditorScreen(ModalScreen[TaskSpec | None]):
             self._choose_tools()
 
     def _choose_model(self) -> None:
-        models, _ = model_options(self._models())
-        current = self._settings.model
-        index = models.index(current) if current in models else None
-        self._pick(self._model_picker, index, lambda i: self._update(model=models[i]))
+        options, current = model_choices(self._models(), self._settings)
+        self._model_picker.choose(options, current, self._update)
 
     def _choose_tools(self) -> None:
-        index = TOOL_ACCESS_OPTIONS.index(self._settings.tool_access)
-        self._pick(
-            self._tool_picker, index, lambda i: self._update(tool_access=TOOL_ACCESS_OPTIONS[i])
-        )
+        options, current = tool_access_choices(self._settings)
+        self._tool_picker.choose(options, current, self._update)
 
     def action_save(self) -> None:
         """Save the task, if it has a title; its body may be empty."""
@@ -376,19 +372,8 @@ class TaskEditorScreen(ModalScreen[TaskSpec | None]):
         selected.scroll_visible()
         self._field = field
 
-    def _pick(
-        self, picker: PickerScreen, current: int | None, apply: Callable[[int], None]
-    ) -> None:
-        picker.current = current
-
-        def chosen(index: int | None) -> None:
-            if index is not None:
-                apply(index)
-
-        self.app.push_screen(picker, chosen)
-
-    def _update(self, **changes: object) -> None:
-        self._settings = self._settings.model_copy(update=changes)
+    def _update(self, settings: Settings) -> None:
+        self._settings = settings
         self.query_one("#task-model", FieldBox).update(model_label(self._settings))
         self.query_one("#task-tools", FieldBox).update(self._settings.tool_access)
 

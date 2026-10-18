@@ -1,6 +1,6 @@
 """Building blocks of the orbit screen."""
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, ClassVar, cast
 
@@ -448,6 +448,24 @@ class PickerScreen(ModalScreen[int | None]):
             options = self.query_one(OptionList)
             options.clear_options()
             options.add_options(self._labels)
+
+    def choose[T](
+        self,
+        options: Sequence[T],
+        current: int | None,
+        chosen: Callable[[T], Awaitable[None] | None],
+    ) -> None:
+        """Show the picker with option ``current`` highlighted and call ``chosen`` with the
+        item of ``options`` picked; escape calls nothing."""
+        self.current = current
+
+        async def picked(index: int | None) -> None:
+            if index is not None:
+                result = chosen(options[index])
+                if result is not None:
+                    await result
+
+        self.app.push_screen(self, picked)
 
     def on_screen_resume(self) -> None:
         self.query_one(OptionList).highlighted = self.current

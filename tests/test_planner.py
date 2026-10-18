@@ -515,7 +515,8 @@ async def test_a_planner_turn_that_runs_out_of_time_ends_in_error() -> None:
     published: list[Event] = []
     chat, _, _ = steps_chat(hangs, published=published, roles=timed_planner(0.0001))
     assert await chat.answer("Plan.", Settings()) == "error"
-    turn_id = turn_id_of(published)
+    # The time may run out before the turn is even started, so its TurnStarted may be missing.
+    turn_id = next(e.turn_id for e in published if isinstance(e, TurnFinished))
     message = "The planner ran out of time (0.0001 minutes)."
     assert [e for e in published if isinstance(e, ErrorOccurred)] == [
         ErrorOccurred(turn_id=turn_id, agent_id="agent-1", code=TIMED_OUT, message=message)

@@ -24,6 +24,25 @@ def model_options(choices: Sequence[str]) -> tuple[tuple[str | None, ...], list[
     return (None, *choices), ["default", *choices]
 
 
+def model_choices(choices: Sequence[str], settings: Settings) -> tuple[list[Settings], int | None]:
+    """The settings each option of the model picker gives, ``settings`` with the default or one
+    of ``choices`` as its model, and the index of ``settings`` among them, if it's there."""
+    models, _ = model_options(choices)
+    return _with_current([settings.model_copy(update={"model": m}) for m in models], settings)
+
+
+def tool_access_choices(settings: Settings) -> tuple[list[Settings], int | None]:
+    """The settings each option of the tool access picker gives, ``settings`` with each of
+    ``TOOL_ACCESS_OPTIONS``, and the index of ``settings`` among them."""
+    options = [settings.model_copy(update={"tool_access": a}) for a in TOOL_ACCESS_OPTIONS]
+    return _with_current(options, settings)
+
+
+def _with_current(options: list[Settings], settings: Settings) -> tuple[list[Settings], int | None]:
+    """``options`` and the index of ``settings`` among them, or None when it isn't one."""
+    return options, options.index(settings) if settings in options else None
+
+
 def tool_access_labels() -> list[str]:
     """The labels a picker shows for ``TOOL_ACCESS_OPTIONS``, in the same order."""
     return [TOOL_ACCESS_DESCRIPTIONS[a] for a in TOOL_ACCESS_OPTIONS]

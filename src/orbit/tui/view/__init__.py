@@ -118,8 +118,10 @@ from orbit.tui.view.settings import (
     TOOL_ACCESS_DESCRIPTIONS,
     TOOL_ACCESS_LABELS,
     TOOL_ACCESS_OPTIONS,
+    model_choices,
     model_options,
     settings_summary,
+    tool_access_choices,
     tool_access_labels,
 )
 from orbit.tui.view.tabs import (
@@ -383,6 +385,7 @@ __all__ = [
     "mark_planner_busy",
     "mark_tab_read",
     "mark_tab_unread",
+    "model_choices",
     "model_label",
     "model_options",
     "note_entry",
@@ -425,6 +428,7 @@ __all__ = [
     "task_tab_key",
     "text_lines",
     "token_text",
+    "tool_access_choices",
     "tool_access_labels",
     "tool_call_entry",
     "tool_call_finished",

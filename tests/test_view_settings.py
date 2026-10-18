@@ -2,8 +2,10 @@ from orbit.protocol import (
     Settings,
 )
 from orbit.tui.view import (
+    model_choices,
     model_options,
     settings_summary,
+    tool_access_choices,
     tool_access_labels,
 )
 
@@ -33,3 +35,38 @@ def test_tool_access_labels_describe_each_option_in_order() -> None:
         "restricted: read-only; anything needing approval is refused",
         "full: auto-approve everything",
     ]
+
+
+def test_model_choices_offer_the_default_then_each_model_and_mark_the_current_one() -> None:
+    settings = Settings(model="sonnet", tool_access="full")
+    assert model_choices(("opus", "sonnet"), settings) == (
+        [
+            Settings(model=None, tool_access="full"),
+            Settings(model="opus", tool_access="full"),
+            Settings(model="sonnet", tool_access="full"),
+        ],
+        2,
+    )
+
+
+def test_model_choices_mark_the_default_when_no_model_is_set() -> None:
+    _, current = model_choices(("opus",), Settings())
+    assert current == 0
+
+
+def test_model_choices_mark_nothing_when_the_model_is_not_offered() -> None:
+    options, current = model_choices(("opus",), Settings(model="haiku"))
+    assert options == [Settings(), Settings(model="opus")]
+    assert current is None
+
+
+def test_tool_access_choices_offer_each_access_in_order_and_mark_the_current_one() -> None:
+    settings = Settings(model="opus", tool_access="off")
+    assert tool_access_choices(settings) == (
+        [
+            Settings(model="opus", tool_access="off"),
+            Settings(model="opus", tool_access="restricted"),
+            Settings(model="opus", tool_access="full"),
+        ],
+        0,
+    )
