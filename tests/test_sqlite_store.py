@@ -676,6 +676,21 @@ async def test_a_full_database_fails_its_writes_as_disk_full(
         )
 
 
+async def test_a_failed_delete_says_what_the_database_reported(
+    open_store: Opener, state: Path, workspace: Path
+) -> None:
+    store = await open_store(workspace)
+    with database(state) as connection:
+        connection.execute("DROP TABLE sessions")
+    with pytest.raises(StorageFailed) as failed:
+        await store.delete("abc")
+    assert (failed.value.database, failed.value.error, failed.value.kind) == (
+        str(state / "orbit.db"),
+        "no such table: sessions",
+        StorageErrorKind.UNKNOWN,
+    )
+
+
 async def test_a_failed_review_count_save_says_what_the_database_reported(
     open_store: Opener, state: Path, workspace: Path
 ) -> None:

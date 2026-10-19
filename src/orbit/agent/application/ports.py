@@ -357,7 +357,7 @@ class SessionStore(EventLog, Protocol):
 
     async def delete(self, session_id: str) -> None:
         """Delete the session ``session_id``, its events and its lock, readable or not; raises
-        ``RuntimeError`` when it can't."""
+        ``RuntimeError``, a :class:`StorageFailed` when the database failed, when it can't."""
         ...
 
     async def acquire(self, session_id: str) -> bool:

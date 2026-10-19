@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from orbit.agent import AgentSession
+from orbit.agent.application.keeper import SessionKeeper
 from orbit.agent.application.outbox import Outbox
 from orbit.agent.application.ports import StorageFailed
 from orbit.agent.application.storage_halt import (
@@ -20,6 +21,7 @@ from orbit.agent.application.storage_halt import (
     fault_of,
 )
 from orbit.agent.domain.refusals import Refused
+from orbit.agent.domain.sessions import SessionRecord
 from orbit.agent.domain.storage_halt import (
     NEITHER_PLACE,
     FailedWrite,
@@ -53,6 +55,7 @@ from orbit.protocol import (
 )
 from tests.agent_fakes import (
     COMMAND_ID,
+    START,
     Call,
     FakeFallback,
     FakeStore,
@@ -277,6 +280,42 @@ async def test_a_failed_session_record_save_halts_the_session_the_same_way() -> 
     await session.close()
     assert store.saved == []
     assert any(halted(envelope) for envelope in fallback.files["session-1"])
+
+
+class FullStore(FakeStore):
+    """A store holding the session ``other``, whose session saves fail as a full disk's do."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.saved = [SessionRecord(id="other", name="other", created=START, last_active=START)]
+
+    async def save(self, record: SessionRecord) -> None:
+        raise StorageFailed(
+            "Couldn't save the session other: database or disk is full",
+            "/state/orbit.db",
+            "database or disk is full",
+            StorageErrorKind.DISK_FULL,
+        )
+
+
+async def test_a_failed_rename_halts_the_session_and_lets_go_of_its_lock() -> None:
+    published: list[Event] = []
+
+    async def record(event: Event) -> None:
+        published.append(event)
+
+    store = FullStore()
+    halt = StorageHalt(record)
+    keeper = SessionKeeper(store, record, halt)
+    await keeper.rename_saved("other", "Renamed")
+    while not published:
+        await asyncio.sleep(0)
+    await halt.close()
+
+    assert halt.halted and store.released == ["other"]
+    [error] = published
+    assert isinstance(error, ErrorOccurred) and error.code == STORAGE_FAILED
+    assert "saving the session record to /state/orbit.db failed" in error.message
 
 
 async def test_a_halt_during_an_append_that_then_fails_counts_its_events_unsaved() -> None:

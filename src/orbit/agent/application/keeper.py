@@ -295,13 +295,15 @@ class SessionKeeper:
     async def rename_saved(self, session_id: str, name: str) -> None:
         """Name the saved session ``session_id``, not the one open here, ``name``, holding its
         lock while it's rewritten. Refused (raising :class:`Refused`) if it can't be renamed;
-        store problems are reported."""
+        a failing save halts the session, and other store problems are reported."""
         found = await self._claimed(session_id, _RENAME)
         if found is None:
             return
         assert self._store is not None  # Only a store holds saved sessions.
         try:
-            await self._reported(self._store.save(found.model_copy(update={"name": name})))
+            error = await outcome(self._store.save(found.model_copy(update={"name": name})))
+            if isinstance(error, RuntimeError):
+                self._halt.fail(FailedWrite.SESSION_RECORD, error)
         finally:
             await self._release(self._store, session_id)
 

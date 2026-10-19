@@ -327,12 +327,34 @@ async def test_a_lock_that_cannot_be_released_after_a_refused_open_is_reported()
     assert keeper.id == "session-1"
 
 
-async def test_a_failed_rename_whose_lock_cannot_be_released_reports_both() -> None:
+async def test_a_failed_rename_halts_the_session_and_lets_go_of_its_lock() -> None:
+    store = FakeStore()
+    store.saved = [SessionRecord(id="other", name="other", created=START, last_active=START)]
+    store.failure = "Couldn't save the session: disk full"
+    keeper, halt = halting_keeper(store)
+    await keeper.rename_saved("other", "Renamed")
+    assert halt.failures == [(FailedWrite.SESSION_RECORD, "Couldn't save the session: disk full")]
+    assert store.released == ["other"]
+
+
+async def test_a_failed_rename_whose_lock_cannot_be_released_halts_and_reports_the_lock() -> None:
     store = unreleasable_store_with("other")
     store.failure = "Couldn't save the session: disk full"
-    keeper, published = keeper_for(store)
+    published = Published()
+    halt = FakeHalt()
+    keeper = SessionKeeper(store, published, halt, NewSessions(Ticks(), lambda: "session-1"))
     await keeper.rename_saved("other", "Renamed")
-    assert published.errors == ["Couldn't save the session: disk full", UNLOCKABLE]
+    assert halt.failures == [(FailedWrite.SESSION_RECORD, "Couldn't save the session: disk full")]
+    assert published.errors == [UNLOCKABLE]
+
+
+async def test_a_rename_that_works_tells_the_halt_nothing() -> None:
+    store = FakeStore()
+    store.saved = [SessionRecord(id="other", name="other", created=START, last_active=START)]
+    keeper, halt = halting_keeper(store)
+    await keeper.rename_saved("other", "Renamed")
+    assert halt.failures == [] and store.last.name == "Renamed"
+    assert store.released == ["other"]
 
 
 async def test_a_rename_whose_session_cannot_be_read_is_reported_and_lets_go_of_its_lock() -> None:

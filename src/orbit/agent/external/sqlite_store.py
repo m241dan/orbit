@@ -232,7 +232,7 @@ class SqliteStore:
             await self._call(self._delete, session_id)
         except sqlite3.Error as error:
             message = f"Couldn't delete the session {session_id} from {self._database}: {error}"
-            raise RuntimeError(message) from error
+            raise self._failed(message, error) from error
         await self._locks.remove(session_id)
 
     def max_seq(self) -> int:

@@ -4,11 +4,13 @@ from orbit.agent import AgentSession
 from orbit.protocol import (
     INVALID,
     LOCKED,
+    STORAGE_FAILED,
     UNKNOWN,
     AddTask,
     CommandRefused,
     DeleteSession,
     ErrorOccurred,
+    Event,
     RenameSession,
     SessionsListed,
     SessionSummary,
@@ -29,6 +31,11 @@ async def errors_of(session: AgentSession, command: Managing) -> list[str]:
     """The errors sending ``command`` reports before the sessions are listed again."""
     await send(session, command)
     return messages(ErrorOccurred, await events_until(session, of_type(SessionsListed)))
+
+
+def halted(event: Event) -> bool:
+    """Whether ``event`` is the error the session halted with."""
+    return isinstance(event, ErrorOccurred) and event.code == STORAGE_FAILED
 
 
 async def refusal_of(session: AgentSession, command: Managing) -> tuple[str, str]:
@@ -139,13 +146,16 @@ async def test_renaming_a_session_that_isnt_saved_is_refused() -> None:
     await session.close()
 
 
-async def test_a_rename_that_cannot_be_saved_is_reported_and_lets_go_of_the_lock() -> None:
+async def test_a_rename_that_cannot_be_saved_halts_the_session_and_lets_go_of_the_lock() -> None:
     store = store_with(saved("old"))
     store.failure = "Disk full."
     session, _ = switching(store)
-    errors = await errors_of(session, RenameSession(session_id="old", name="new"))
+    await send(session, RenameSession(session_id="old", name="new"))
+    events = await events_until(session, halted)
 
-    assert errors == ["Disk full."]
+    error = events[-1]
+    assert isinstance(error, ErrorOccurred) and "saving the session record" in error.message
+    assert "Disk full." in error.message
     assert store.released == ["old"] and store.locked == set()
     await session.close()
 
