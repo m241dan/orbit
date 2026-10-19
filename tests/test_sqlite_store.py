@@ -15,15 +15,10 @@ import pytest
 from orbit.agent.application.ports import SessionStore, StorageFailed, StoredSession
 from orbit.agent.domain.sessions import SessionRecord, Unreadable
 from orbit.agent.domain.storage_halt import StorageErrorKind
-from orbit.agent.external import sqlite_store
-from orbit.agent.external.sqlite_store import (
-    MIGRATIONS,
-    THREAD_PREFIX,
-    SqliteStore,
-    StoreError,
-    error_kind,
-    find_workspace_id,
-)
+from orbit.agent.external import sqlite_schema, sqlite_store
+from orbit.agent.external.sqlite_errors import error_kind
+from orbit.agent.external.sqlite_schema import MIGRATIONS, StoreError, transaction
+from orbit.agent.external.sqlite_store import THREAD_PREFIX, SqliteStore, find_workspace_id
 from orbit.protocol import EventEnvelope, Notice
 
 WHEN = datetime(2026, 10, 17, 14, 30, tzinfo=UTC)
@@ -286,7 +281,7 @@ def racing(
     monkeypatch: pytest.MonkeyPatch, state: Path, meanwhile: Callable[[sqlite3.Connection], object]
 ) -> None:
     """Makes another connection run ``meanwhile`` once the store has read its schema version."""
-    read = sqlite_store._schema_version
+    read = sqlite_schema._schema_version
 
     def read_then_race(connection: sqlite3.Connection) -> int:
         version = read(connection)
@@ -294,13 +289,13 @@ def racing(
             meanwhile(other)
         return version
 
-    monkeypatch.setattr(sqlite_store, "_schema_version", read_then_race)
+    monkeypatch.setattr(sqlite_schema, "_schema_version", read_then_race)
 
 
 async def test_a_migration_applied_meanwhile_by_another_orbit_isnt_run_again(
     monkeypatch: pytest.MonkeyPatch, open_store: Opener, state: Path, workspace: Path
 ) -> None:
-    racing(monkeypatch, state, lambda other: sqlite_store._apply(other, 1, state / "orbit.db"))
+    racing(monkeypatch, state, lambda other: sqlite_schema._apply(other, 1, state / "orbit.db"))
     await open_store(workspace)
     with database(state) as connection:
         assert connection.execute("SELECT version FROM schema_version").fetchall() == [
@@ -374,7 +369,7 @@ async def test_a_failed_migration_is_rolled_back_and_refused(
 ) -> None:
     await (await open_store(workspace)).close()
     broken = (*MIGRATIONS, ("CREATE TABLE extra (x)", "NOT SQL"))
-    monkeypatch.setattr(sqlite_store, "MIGRATIONS", broken)
+    monkeypatch.setattr(sqlite_schema, "MIGRATIONS", broken)
     with pytest.raises(StoreError, match=r"upgrade the database .*orbit\.db to schema version 4"):
         await open_store(workspace)
     with database(state) as connection:
@@ -409,7 +404,7 @@ async def test_a_switch_to_wal_mode_refused_at_once_is_tried_until_it_works(
 async def test_a_switch_to_wal_mode_refused_for_too_long_is_refused(
     monkeypatch: pytest.MonkeyPatch, open_store: Opener, state: Path, workspace: Path
 ) -> None:
-    monkeypatch.setattr(sqlite_store, "BUSY_TIMEOUT", 0.05)
+    monkeypatch.setattr(sqlite_schema, "BUSY_TIMEOUT", 0.05)
     refused = pytest.raises(StoreError, match=r"Couldn't open the database .*: database is locked")
     with closing(locked_new_database(state)), refused:
         await open_store(workspace)
@@ -423,7 +418,7 @@ async def test_a_migration_that_cant_start_is_refused(
         connection.execute("PRAGMA journal_mode = WAL")
         connection.execute("CREATE TABLE schema_version (version INTEGER NOT NULL)")
         connection.execute("BEGIN IMMEDIATE")  # Another writer holds the database.
-        monkeypatch.setattr(sqlite_store, "BUSY_TIMEOUT", 0.05)
+        monkeypatch.setattr(sqlite_schema, "BUSY_TIMEOUT", 0.05)
         with pytest.raises(StoreError, match=r"to schema version 1: database is locked"):
             await open_store(workspace)
 
@@ -434,7 +429,7 @@ async def test_a_store_that_fails_to_open_closes_its_connection(
     def fail(path: str) -> str:
         raise RuntimeError("git broke")
 
-    monkeypatch.setattr(sqlite_store, "workspace_fingerprint", fail)
+    monkeypatch.setattr(sqlite_schema, "workspace_fingerprint", fail)
     with pytest.raises(RuntimeError, match="git broke"):
         await open_store(workspace)
     assert store_threads() == []
@@ -615,7 +610,7 @@ def failing_backups(monkeypatch: pytest.MonkeyPatch) -> None:
     def open_existing(database: Path) -> sqlite3.Connection:
         return sqlite3.connect(database, factory=FailingBackup, check_same_thread=False)
 
-    monkeypatch.setattr(sqlite_store, "_open_existing", open_existing)
+    monkeypatch.setattr(sqlite_store, "open_existing", open_existing)
 
 
 async def test_a_failed_backup_keeps_the_file_it_would_have_replaced(
@@ -751,3 +746,49 @@ def test_os_errors_are_told_apart_by_their_errno(number: int, kind: StorageError
 
 def test_an_os_error_without_an_errno_is_not_recognised() -> None:
     assert error_kind(OSError("failed")) == StorageErrorKind.UNKNOWN
+
+
+@contextmanager
+def scratch() -> Iterator[sqlite3.Connection]:
+    """An in-memory database in autocommit mode, with an empty table ``t``."""
+    with closing(sqlite3.connect(":memory:", isolation_level=None)) as connection:
+        connection.execute("CREATE TABLE t (x)")
+        yield connection
+
+
+def test_a_transaction_whose_block_raises_is_rolled_back() -> None:
+    with scratch() as connection:
+        with pytest.raises(RuntimeError, match="broke"), transaction(connection):
+            connection.execute("INSERT INTO t VALUES (1)")
+            raise RuntimeError("broke")
+        assert not connection.in_transaction
+        assert connection.execute("SELECT count(*) FROM t").fetchone() == (0,)
+
+
+def test_a_transaction_commits_inside_the_committing_context() -> None:
+    seen: list[str] = []
+
+    @contextmanager
+    def committing() -> Iterator[None]:
+        seen.append(f"before, in a transaction: {connection.in_transaction}")
+        yield
+        seen.append(f"after, in a transaction: {connection.in_transaction}")
+
+    with scratch() as connection:
+        with transaction(connection, committing):
+            connection.execute("INSERT INTO t VALUES (1)")
+        assert connection.execute("SELECT count(*) FROM t").fetchone() == (1,)
+    assert seen == ["before, in a transaction: True", "after, in a transaction: False"]
+
+
+def test_a_transaction_whose_commit_is_refused_is_rolled_back() -> None:
+    @contextmanager
+    def refusing() -> Iterator[None]:
+        raise RuntimeError("not now")
+        yield
+
+    with scratch() as connection:
+        with pytest.raises(RuntimeError, match="not now"), transaction(connection, refusing):
+            connection.execute("INSERT INTO t VALUES (1)")
+        assert not connection.in_transaction
+        assert connection.execute("SELECT count(*) FROM t").fetchone() == (0,)

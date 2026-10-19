@@ -42,7 +42,8 @@ from orbit.agent.external.mcp_host import McpHost
 from orbit.agent.external.repository import git_top_level, in_git_work_tree, orbit_dir
 from orbit.agent.external.run_file import RunFile, running_server
 from orbit.agent.external.session_import import ImportBlocked, import_session_files, imported_note
-from orbit.agent.external.sqlite_store import SqliteStore, StoreError
+from orbit.agent.external.sqlite_schema import StoreError
+from orbit.agent.external.sqlite_store import SqliteStore
 from orbit.agent.external.token_file import TokenError, TokenFile
 from orbit.agent.external.usage_api import UsageApi
 from orbit.agent.external.user_config import (

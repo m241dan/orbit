@@ -9,7 +9,7 @@ import pytest
 
 from orbit.agent.application.ports import EventLog
 from orbit.agent.domain.replay import LogBounds
-from orbit.agent.external import sqlite_store
+from orbit.agent.external import sqlite_schema
 from orbit.agent.external.sqlite_store import SqliteStore
 from orbit.protocol import EventEnvelope, Notice, TasksChanged, decode_event, encode
 from tests.test_sqlite_store import database, record
@@ -205,7 +205,7 @@ async def test_a_new_database_gets_the_events_table(
 async def test_an_append_that_cant_start_is_refused(
     monkeypatch: pytest.MonkeyPatch, open_store: Opener, state: Path, workspace: Path
 ) -> None:
-    monkeypatch.setattr(sqlite_store, "BUSY_TIMEOUT", 0.05)
+    monkeypatch.setattr(sqlite_schema, "BUSY_TIMEOUT", 0.05)
     store = await open_store(workspace)
     with database(state) as connection:
         connection.execute("BEGIN IMMEDIATE")  # Another writer holds the database.
@@ -548,7 +548,7 @@ async def test_deleting_a_session_forgets_its_trimmed_log(
 async def test_upgrading_counts_the_size_of_the_events_logged_before(
     monkeypatch: pytest.MonkeyPatch, open_store: Opener, state: Path, workspace: Path
 ) -> None:
-    monkeypatch.setattr(sqlite_store, "MIGRATIONS", sqlite_store.MIGRATIONS[:2])
+    monkeypatch.setattr(sqlite_schema, "MIGRATIONS", sqlite_schema.MIGRATIONS[:2])
     await (await open_store(workspace)).close()
     with database(state) as connection:
         for session, seq, size in [("abc", 1, 10), ("abc", 2, 20), ("def", 3, 5)]:

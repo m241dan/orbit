@@ -17,7 +17,7 @@ from orbit.agent.domain.sessions import (
     record_json,
     review_count_json,
 )
-from orbit.agent.external import session_import, sqlite_store
+from orbit.agent.external import session_import, sqlite_schema
 from orbit.agent.external.session_import import Imported, imported_note
 from orbit.agent.external.session_locks import SessionLocks
 from orbit.agent.external.sqlite_store import NewRows, SqliteStore
@@ -400,7 +400,7 @@ async def test_a_folder_that_cant_be_checked_blocks_the_import(
 async def test_a_database_that_fails_blocks_the_import(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, legacy: Path
 ) -> None:
-    monkeypatch.setattr(sqlite_store, "BUSY_TIMEOUT", 0.05)
+    monkeypatch.setattr(sqlite_schema, "BUSY_TIMEOUT", 0.05)
     workspace = tmp_path / "project"
     workspace.mkdir()
     store = await SqliteStore.open(tmp_path / "state", str(workspace))

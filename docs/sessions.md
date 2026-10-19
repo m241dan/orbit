@@ -68,7 +68,8 @@ one row per workspace, or anything from `.orbit/config.toml`, which is read at s
 - **Layers.** The domain module holds the rules (the record and its format, summaries, when a
   session may be opened, renamed or deleted, crash recovery) without I/O. The application's
   `SessionKeeper` decides when to save and drives switches through the `SessionStore` port, and
-  `SqliteStore` in `sqlite_store` is the adapter, with `session_locks` for the locks and
+  `SqliteStore` in `sqlite_store` is the adapter, with `sqlite_schema` to create, migrate and
+  open the database, `session_locks` for the locks and
   `session_import` to import an older orbit's files once; `session_files` only names those
   files. The TUI's `orbit.tui.view.sessions`
   holds the list's presentation rules, and `orbit.tui.sessions` the modal.
