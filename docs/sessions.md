@@ -48,7 +48,8 @@ one row per workspace, or anything from `.orbit/config.toml`, which is read at s
   both take it. Another orbit lists the session as open elsewhere and won't open, rename or delete
   it. The kernel drops the lock when its process ends, so a crash leaves no stale lock. Renaming or deleting a
   session that isn't open takes its lock for as long as that takes.
-- **Switching.** The startup list and `ctrl+p` open a saved session or start a new one. Switching
+- **Switching.** The session picker, at startup and on `ctrl+p`, opens a saved session or starts a
+  new one. Switching
   is refused while tasks run, a review runs or the planner answers, so nothing is running when the
   session's contents are replaced. Opening a session never starts work. Drafts orbit added before
   you picked at startup carry over into the session you pick, and the session they were added to

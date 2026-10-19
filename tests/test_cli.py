@@ -78,10 +78,13 @@ class FakeApp:
     during: ClassVar[Callable[[AgentSession], Coroutine[Any, Any, None]] | None] = None
     # Why each app's session is halted as it exits, if it is.
     halted: ClassVar[str | None] = None
+    # Whether each app was to have the user pick a session at startup.
+    picks: ClassVar[list[bool]] = []
 
-    def __init__(self, session: ThreadedSession) -> None:
+    def __init__(self, session: ThreadedSession, *, pick: bool = False) -> None:
         self.session = session
         self.storage_halt = FakeApp.halted
+        FakeApp.picks.append(pick)
 
     def run(self) -> None:
         asyncio.run(self._open_and_close())
@@ -122,6 +125,7 @@ def launched(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> list[AgentSessi
     FakeApp.profiling = []
     FakeApp.during = None
     FakeApp.halted = None
+    FakeApp.picks = []
     return FakeApp.launched
 
 
@@ -155,7 +159,7 @@ def config_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
 @dataclass(frozen=True)
 class Greeted:
     """What a chat's session publishes once greeted, before anything runs: its ``notices``, and
-    whether it ``listed`` the saved sessions."""
+    whether it ``listed`` the saved sessions, which it never does unasked."""
 
     notices: list[str]
     listed: bool
@@ -695,7 +699,8 @@ def test_chat_has_the_user_pick_a_session_at_startup(
     assert runner.invoke(app, ["chat"]).exit_code == 0
 
     [greeting] = greetings
-    assert greeting.listed
+    assert not greeting.listed
+    assert FakeApp.picks == [True]
 
 
 def test_chat_new_starts_a_new_session_named_for_the_time(
@@ -710,6 +715,7 @@ def test_chat_new_starts_a_new_session_named_for_the_time(
     [session] = launched
     [greeting] = greetings
     assert not greeting.listed
+    assert FakeApp.picks == [False]
     assert session.saved_session.name == default_name(session.saved_session.created)
 
 
@@ -725,6 +731,7 @@ def test_chat_name_starts_a_new_session_with_that_name(
     [session] = launched
     [greeting] = greetings
     assert not greeting.listed
+    assert FakeApp.picks == [False]
     assert session.saved_session.name == "auth rework"
 
 

@@ -40,6 +40,7 @@ class FakeApp:
     session: object
     link: object = None
     opening: Command | None = None
+    pick: bool = False
     storage_halt: str | None = None
     ran: bool = field(default=False)
 

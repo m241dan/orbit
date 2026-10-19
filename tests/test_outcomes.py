@@ -5,14 +5,12 @@ import asyncio
 
 import pytest
 
-from orbit import __version__
 from orbit.agent import AgentSession
 from orbit.agent.application.planner_seat import (
     NO_PLANNER_MESSAGE,
     NOTHING_TO_RESET,
     PLANNER_BUSY_RESET,
 )
-from orbit.agent.application.ports import StoredSession
 from orbit.agent.application.work_turns import CONFIGURING_NOTE, NO_AGENTS_MESSAGE
 from orbit.agent.domain.catalog import LANES, TRIGGERS
 from orbit.protocol import (
@@ -46,7 +44,6 @@ from orbit.protocol import (
     TasksChanged,
     TaskSpec,
     TurnEndReason,
-    Welcome,
 )
 from tests.agent_fakes import (
     HELLO_ID,
@@ -301,36 +298,6 @@ async def test_sessions_that_cannot_be_listed_are_reported_and_listed_as_none() 
     assert ErrorOccurred(code=SAVE_FAILED, message=message) in events
     assert [e.sessions for e in events if isinstance(e, SessionsListed)] == [()]
     assert events[-1] == CommandAccepted(command_id="c19")
-
-
-class SecondListFails(FakeStore):
-    """A store whose sessions list once, for the catalog, then fail to."""
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.listings = 0
-
-    async def sessions(self) -> list[StoredSession]:
-        self.listings += 1
-        if self.listings > 1:
-            raise ValueError("the disk is gone")
-        return await super().sessions()
-
-
-async def test_a_hello_whose_startup_listing_fails_is_welcomed_once_with_an_error() -> None:
-    session = AgentSession(store=SecondListFails(), new_id=lambda: "session-1", pick_session=True)
-    await greet(session)
-    events = queued(session)
-    await send_as(session, "c18", AddTask(task=TASK))
-    accepted = await outcome(session)
-    await session.close()
-
-    message = "Orbit failed to finish greeting the frontend: the disk is gone"
-    assert [event for event in events if isinstance(event, (*OUTCOMES, Welcome))] == [
-        Welcome(command_id=HELLO_ID, server_version=__version__)
-    ]
-    assert ErrorOccurred(code=INTERNAL, message=message) in events
-    assert accepted[-1] == CommandAccepted(command_id="c18")
 
 
 async def test_a_hello_whose_catalog_fails_is_refused_as_internal_with_no_welcome() -> None:

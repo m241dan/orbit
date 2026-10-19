@@ -1,8 +1,9 @@
-"""The modal where the user picks a saved session to open, or starts a new one."""
+"""The modal where the user picks a saved session to view or activate, or starts a new one."""
 
 from collections.abc import Awaitable, Callable, Sequence
-from typing import ClassVar
+from typing import ClassVar, Literal
 
+from rich.text import Text
 from textual import on
 from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
@@ -12,10 +13,12 @@ from textual.widgets import Input, OptionList
 
 from orbit.protocol import (
     ActivateSession,
+    Attach,
+    Catalog,
     DeleteSession,
     NewSession,
     RenameSession,
-    SessionsListed,
+    SessionStateChanged,
     SessionSummary,
 )
 from orbit.tui.view.sessions import (
@@ -27,13 +30,19 @@ from orbit.tui.view.sessions import (
     can_delete,
     can_open,
     delete_message,
+    picked_commands,
+    picker_sessions,
     session_label,
     sessions_hint,
+    with_state,
 )
 from orbit.tui.widgets import ConfirmScreen
 
-SessionChoice = ActivateSession | NewSession
-"""What the user chose: a saved session to activate, or a new one to start."""
+SessionChoice = Attach | ActivateSession | NewSession
+"""What the user chose: a saved session to view, and perhaps activate, or a new one to start."""
+
+StartupPick = Literal["resume", "pick"]
+"""How the picker opens at startup: offering to resume the session viewed, or only to pick one."""
 
 SessionChange = RenameSession | DeleteSession
 """A change to a saved session, made while the list stays open."""
@@ -43,13 +52,15 @@ Manage = Callable[[SessionChange], Awaitable[object]]
 whatever it returns is ignored."""
 
 
-class SessionsScreen(ModalScreen[SessionChoice | None]):
-    """Lists ``sessions`` after ``+ new session``, and dismisses with the user's choice.
+class SessionsScreen(ModalScreen[tuple[SessionChoice, ...]]):
+    """Lists ``sessions`` before ``New session``: the one ``attached`` first (as ``Resume`` if
+    ``startup`` is ``resume``, and not at all if it's ``pick``), then the others; dismisses with
+    the commands the user's choice sends.
 
-    ``j``/``k`` (and the arrows) move and enter opens the highlighted session, unless it can't
-    be opened; the current session dismisses with None, keeping it. Enter on ``+ new session``
+    ``j``/``k`` (and the arrows) move and enter picks the highlighted session, unless it can't
+    be opened; the attached session dismisses with none, keeping it. Enter on ``New session``
     asks for a name, which enter confirms and escape leaves. Escape on the list dismisses with
-    None, or quits orbit at ``startup``, where there's no session to go back to.
+    none, or quits orbit at ``startup``, where there's no session to go back to.
     """
 
     AUTO_FOCUS = "OptionList"
@@ -78,19 +89,31 @@ class SessionsScreen(ModalScreen[SessionChoice | None]):
     ]
 
     def __init__(
-        self, sessions: Sequence[SessionSummary], manage: Manage, *, startup: bool = False
+        self,
+        sessions: Sequence[SessionSummary],
+        attached: str | None,
+        manage: Manage,
+        startup: StartupPick | None = None,
     ) -> None:
         super().__init__()
         self.sessions = tuple(sessions)
-        self.startup = startup
+        self.attached = attached
+        self.startup = startup is not None
+        self.resume = startup == "resume"
         self._manage = manage
         self._renaming: SessionSummary | None = None  # The session being renamed, if any.
+
+    @property
+    def rows(self) -> tuple[SessionSummary, ...]:
+        """The sessions listed, in order, before ``New session``."""
+        with_attached = self.resume or not self.startup
+        return picker_sessions(self.sessions, self.attached, with_attached=with_attached)
 
     def compose(self) -> ComposeResult:
         with Vertical() as box:
             box.border_title = SESSIONS_TITLE
             box.border_subtitle = self._hint(naming=False)
-            yield OptionList(NEW_SESSION_LABEL, *map(session_label, self.sessions))
+            yield OptionList(*self._labels())
             # Typing goes on from the end of a name being changed, rather than replacing it.
             name = Input(placeholder=NAME_PLACEHOLDER, id="session-name", select_on_focus=False)
             name.display = False
@@ -99,40 +122,53 @@ class SessionsScreen(ModalScreen[SessionChoice | None]):
     def on_mount(self) -> None:
         self.query_one(OptionList).highlighted = 0
 
-    def show(self, sessions: Sequence[SessionSummary]) -> None:
-        """List ``sessions`` in place of those listed, keeping the highlight where it was."""
-        self.sessions = tuple(sessions)
+    def show(self, sessions: Sequence[SessionSummary], attached: str | None) -> None:
+        """List ``sessions``, with the one ``attached`` first, in place of those listed, keeping
+        the highlight where it was."""
+        self.sessions, self.attached = tuple(sessions), attached
         if not self.is_mounted:  # Listed again before it's on screen: compose lists them.
             return
         options = self.query_one(OptionList)
         highlighted = options.highlighted or 0
         options.clear_options()
-        options.add_options([NEW_SESSION_LABEL, *map(session_label, self.sessions)])
+        options.add_options(self._labels())
         options.highlighted = min(highlighted, options.option_count - 1)
+
+    def _labels(self) -> list[Text | str]:
+        """The rows' labels, then ``New session``'s."""
+        rows = [
+            session_label(
+                summary,
+                attached=summary.id == self.attached,
+                resume=self.startup and summary.id == self.attached,
+            )
+            for summary in self.rows
+        ]
+        return [*rows, NEW_SESSION_LABEL]
 
     @property
     def _highlighted(self) -> SessionSummary | None:
-        """The session highlighted; none on ``+ new session``."""
-        index = self.query_one(OptionList).highlighted
-        return self.sessions[index - 1] if index else None
+        """The session highlighted; none on ``New session``."""
+        rows = self.rows
+        index = self.query_one(OptionList).highlighted or 0
+        return rows[index] if index < len(rows) else None
 
     @on(OptionList.OptionSelected)
     def _choose(self, event: OptionList.OptionSelected) -> None:
-        if event.option_index == 0:
+        rows = self.rows
+        if event.option_index == len(rows):
             self._naming(True)
             return
-        summary = self.sessions[event.option_index - 1]
-        if summary.current:
-            self.dismiss(None)
-        elif can_open(summary):
-            self.dismiss(ActivateSession(session=summary.id))
+        summary = rows[event.option_index]
+        if can_open(summary):
+            self.dismiss(picked_commands(summary, self.sessions, self.attached))
 
     @on(Input.Submitted, "#session-name")
     async def _named(self, event: Input.Submitted) -> None:
         event.stop()
         name = event.value.strip()
         if self._renaming is None:
-            self.dismiss(NewSession(name=name or None))
+            self.dismiss((NewSession(name=name or None),))
             return
         renaming = self._renaming
         self._naming(False)
@@ -176,7 +212,7 @@ class SessionsScreen(ModalScreen[SessionChoice | None]):
         elif self.startup:
             self.app.exit()
         else:
-            self.dismiss(None)
+            self.dismiss(())
 
     def _naming(self, on: bool, renaming: SessionSummary | None = None) -> None:
         """Show the box for the name of a new session, or the new name of the session
@@ -197,43 +233,64 @@ class SessionsScreen(ModalScreen[SessionChoice | None]):
         return sessions_hint(startup=self.startup, naming=naming, renaming=renaming is not None)
 
 
-Chosen = Callable[[SessionChoice | None], Awaitable[None]]
+Chosen = Callable[[tuple[SessionChoice, ...] | None], Awaitable[None]]
 Push = Callable[[SessionsScreen, Chosen], object]
-Send = Callable[[SessionChoice | SessionChange], Awaitable[object]]
-"""Sends a session command to the backend; whatever it returns is ignored."""
+Send = Callable[[SessionChoice | SessionChange], Awaitable[bool]]
+"""Sends a session command to the backend, returning whether it was sent."""
 
 
 class SessionsHost:
-    """Shows the sessions listed, with ``push``, refreshing the list while it's shown;
-    ``send`` takes the user's choice and their changes to saved sessions."""
+    """Keeps the sessions the latest ``Catalog`` lists, as ``SessionStateChanged`` changes them,
+    and the one this frontend views; shows them with ``push`` when asked, refreshing the picker
+    while it's shown. ``send`` takes the user's choice and their changes to saved sessions."""
 
     def __init__(self, push: Push, send: Send) -> None:
         self._push = push
         self._send = send
-        self.shown: SessionsScreen | None = None  # The list of sessions shown, if any.
-        # Whether the user pressed ctrl+p, after which no list opens as the startup list.
-        self._asked = False
+        self.sessions: tuple[SessionSummary, ...] = ()
+        self.attached: str | None = None  # The session this frontend views, once known.
+        self.shown: SessionsScreen | None = None  # The picker shown, if any.
 
-    def asked(self) -> None:
-        """Note the user asked for the sessions, so none opens as the startup list."""
-        self._asked = True
+    @property
+    def attached_session(self) -> SessionSummary | None:
+        """The session this frontend views, among those listed; none if it isn't."""
+        return next((summary for summary in self.sessions if summary.id == self.attached), None)
 
-    def show(self, listed: SessionsListed) -> None:
-        """Let the user pick one of the sessions ``listed`` or start a new one; at startup, before
-        any ctrl+p, escape quits. Listed while the list is shown, they replace those it shows;
-        refreshed after a rename or delete once the list was closed, they're ignored."""
+    def follow(self, catalog: Catalog) -> None:
+        """List the sessions in ``catalog``; until a snapshot says which one this frontend views,
+        it's the active one, which a frontend views as it joins."""
+        self.sessions = tuple(s for workspace in catalog.workspaces for s in workspace.sessions)
+        if self.attached is None:
+            self.attached = next((s.id for s in self.sessions if s.active), None)
+        self._refresh()
+
+    def follow_state(self, changed: SessionStateChanged) -> None:
+        """Note ``changed``'s session's state."""
+        self.sessions = with_state(self.sessions, changed)
+        self._refresh()
+
+    def attach(self, session: str) -> None:
+        """Note this frontend views ``session``, which a snapshot of it says."""
+        self.attached = session
+        self._refresh()
+
+    def open(self, startup: StartupPick | None = None) -> None:
+        """Let the user pick a session or start a new one, unless the picker is shown already; at
+        ``startup``, opened as it says, escape quits."""
         if self.shown is not None:
-            self.shown.show(listed.sessions)
-            return
-        if listed.reason == "refreshed":
             return
 
-        async def chosen(choice: SessionChoice | None) -> None:
+        async def chosen(choice: tuple[SessionChoice, ...] | None) -> None:
             self.shown = None
             # Refusals come back as errors, shown like any other.
-            if choice is not None:
-                await self._send(choice)
+            for command in choice or ():
+                if not await self._send(command):
+                    return
 
-        startup = listed.reason == "startup" and not self._asked
-        self.shown = SessionsScreen(listed.sessions, self._send, startup=startup)
+        self.shown = SessionsScreen(self.sessions, self.attached, self._send, startup)
         self._push(self.shown, chosen)
+
+    def _refresh(self) -> None:
+        """Show the sessions in the picker, if it's shown."""
+        if self.shown is not None:
+            self.shown.show(self.sessions, self.attached)

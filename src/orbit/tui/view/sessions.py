@@ -1,18 +1,29 @@
 """The list of saved sessions, to pick one from."""
 
+from collections.abc import Sequence
 from datetime import datetime, tzinfo
 
 from rich.text import Text
 
-from orbit.protocol import SessionSummary, TaskStatus, Usage
+from orbit.protocol import (
+    ActivateSession,
+    Attach,
+    SessionStateChanged,
+    SessionSummary,
+    TaskStatus,
+    Usage,
+)
 from orbit.tui.view.common import SPINNER_FRAMES, STATUS_ICONS
 from orbit.tui.view.tasks import usage_label
 
 SESSIONS_TITLE = "Sessions"
-NEW_SESSION_LABEL = "+ new session"
+NEW_SESSION_LABEL = "New session"
+RESUME_PREFIX = "Resume "
 NAME_PLACEHOLDER = "Name (empty: the date and time)"
 CURRENT_MARK = "● "
 LOCKED_NOTE = "open in another orbit"
+ACTIVE_NOTE = "active"
+RUNNING_NOTE = "running"
 DELETE_TITLE = "Delete session"
 DELETE_YES = "delete"
 LIST_HINT = "j/k move · enter open · r rename · x delete · esc close"
@@ -36,12 +47,70 @@ COUNT_ORDER: tuple[TaskStatus, ...] = (
 COUNT_ICONS: dict[TaskStatus, str] = STATUS_ICONS | {"running": SPINNER_FRAMES[0]}
 
 
-def session_label(summary: SessionSummary, zone: tzinfo | None = None) -> Text:
-    """A row: the current session's mark, then the name and what's known of the session, dim
-    when it can't be opened. Times are in ``zone``, the local one by default."""
-    mark = CURRENT_MARK if summary.current else " " * len(CURRENT_MARK)
-    text = " · ".join([summary.name, *_details(summary, zone)])
+def picker_sessions(
+    sessions: Sequence[SessionSummary], attached: str | None, *, with_attached: bool
+) -> tuple[SessionSummary, ...]:
+    """The ``sessions`` the picker lists, in order: the one ``attached`` first, if
+    ``with_attached``, then the others as ``sessions`` has them, the most recently active
+    first."""
+    first = [summary for summary in sessions if summary.id == attached and with_attached]
+    return (*first, *(summary for summary in sessions if summary.id != attached))
+
+
+def session_label(
+    summary: SessionSummary,
+    zone: tzinfo | None = None,
+    *,
+    attached: bool = False,
+    resume: bool = False,
+) -> Text:
+    """A row: the mark of the session ``attached``, then ``Resume`` if ``resume``, the name and
+    what's known of the session, dim when it can't be opened. Times are in ``zone``, the local
+    one by default."""
+    mark = CURRENT_MARK if attached else " " * len(CURRENT_MARK)
+    name = RESUME_PREFIX + summary.name if resume else summary.name
+    text = " · ".join([name, *_details(summary, zone, attached)])
     return Text(mark + text, style="" if can_open(summary) else "dim")
+
+
+def picked_commands(
+    picked: SessionSummary, sessions: Sequence[SessionSummary], attached: str | None
+) -> tuple[Attach | ActivateSession, ...]:
+    """What picking ``picked`` among ``sessions`` sends: nothing for the session ``attached``;
+    else ``Attach``, then ``ActivateSession`` too unless ``picked`` is the active session already
+    or the active one runs or is viewed by another frontend."""
+    if picked.id == attached:
+        return ()
+    attach = Attach(session=picked.id)
+    if picked.active or not _free(sessions, attached):
+        return (attach,)
+    return (attach, ActivateSession(session=picked.id))
+
+
+def _free(sessions: Sequence[SessionSummary], attached: str | None) -> bool:
+    """Whether the active session among ``sessions``, if any, is idle with no frontend viewing it
+    but this one, which views the session ``attached``."""
+    active = next((summary for summary in sessions if summary.active), None)
+    if active is None:
+        return True
+    return active.state == "idle" and _others(active, active.id == attached) == 0
+
+
+def _others(summary: SessionSummary, attached: bool) -> int:
+    """How many frontends view ``summary``'s session besides this one, which views it if
+    ``attached``."""
+    return max(summary.viewers - int(attached), 0)
+
+
+def with_state(
+    sessions: Sequence[SessionSummary], changed: SessionStateChanged
+) -> tuple[SessionSummary, ...]:
+    """``sessions``, with ``changed``'s session now as active, running and viewed as it says."""
+    update = {"active": changed.active, "state": changed.state, "viewers": changed.viewers}
+    return tuple(
+        summary.model_copy(update=update) if summary.id == changed.session else summary
+        for summary in sessions
+    )
 
 
 def can_open(summary: SessionSummary) -> bool:
@@ -59,19 +128,32 @@ def delete_message(summary: SessionSummary) -> str:
     return f'Delete "{summary.name}"? Its tasks and review state are gone for good.'
 
 
-def _details(summary: SessionSummary, zone: tzinfo | None) -> list[str]:
-    """What the row says after the name."""
+def _details(summary: SessionSummary, zone: tzinfo | None, attached: bool) -> list[str]:
+    """What the row says after the name, of a session this frontend views if ``attached``."""
     if summary.unreadable is not None:
         return [f"unreadable: {summary.unreadable}"]
     details = [] if summary.last_active is None else [local_time(summary.last_active, zone)]
     if summary.locked:
         return [*details, LOCKED_NOTE]
+    details.extend(state_notes(summary, attached))
     counts = task_counts(summary.counts)
     if counts:
         details.append(counts)
     if summary.usage != Usage():
         details.append(usage_label(summary.usage))
     return details
+
+
+def state_notes(summary: SessionSummary, attached: bool = False) -> list[str]:
+    """Whether ``summary``'s session is the active one, whether it runs work and how many other
+    frontends view it, besides this one if ``attached``: ``active · running · viewed by 2``."""
+    notes = [ACTIVE_NOTE] if summary.active else []
+    if summary.state == "running":
+        notes.append(RUNNING_NOTE)
+    others = _others(summary, attached)
+    if others:
+        notes.append(f"viewed by {others}")
+    return notes
 
 
 def local_time(when: datetime, zone: tzinfo | None = None) -> str:

@@ -34,9 +34,8 @@ class HandshakeParts:
     whose ``since`` is a ``seq`` the frontend can catch up from, the events it ``missed``, which
     it fetches first too and the handshake resends in their envelopes, the one-off notices
     (the ``workspace``, if any, whether there are ``no_steps``, the ``startup_notes`` and the
-    ``leftovers`` of earlier runs) and the saved sessions to pick from, which ``list_sessions``
-    publishes, if any. It also ``load_review_count``\\s first, and then has the background
-    ``start``, unless the session is ``closing``."""
+    ``leftovers`` of earlier runs). It also ``load_review_count``\\s first, and then has the
+    background ``start``, unless the session is ``closing``."""
 
     catalog: Callable[[], Awaitable[Catalog]]
     latest_usage: Callable[[], UsageChanged | None]
@@ -47,7 +46,6 @@ class HandshakeParts:
     no_steps: Callable[[], bool]
     startup_notes: Sequence[str]
     leftovers: Callable[[], Awaitable[Sequence[str]]]
-    list_sessions: Callable[[], Awaitable[None]] | None
     start: Callable[[], None]
     closing: Callable[[], bool]
 
@@ -161,18 +159,13 @@ class Handshake:
         self, catalog: Catalog, missed: Sequence[EventEnvelope] | None
     ) -> list[Callable[[], Awaitable[None]]]:
         """The steps after Welcome, in order: publishing ``catalog`` and the session, or the
-        events ``missed``, loading the review count, the one-off notices and, if asked to, the
-        saved sessions to pick from."""
-        parts = self._parts
-        steps = [
+        events ``missed``, loading the review count and the one-off notices."""
+        return [
             lambda: self._publish(catalog, missed),
-            parts.load_review_count,
+            self._parts.load_review_count,
             self._publish_notes,
             self._publish_leftovers,
         ]
-        if parts.list_sessions is not None:
-            steps.append(parts.list_sessions)
-        return steps
 
     async def _attempt(self, step: Callable[[], Awaitable[None]]) -> None:
         """Run ``step``, publishing its failure as an ``internal`` error."""

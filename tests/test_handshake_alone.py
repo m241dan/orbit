@@ -45,7 +45,6 @@ SNAPSHOT = Snapshot(
     agents=(),
 )
 USAGE = UsageChanged(detail="fetched")
-LISTED = Notice(message="listed")
 
 
 class Parts:
@@ -87,10 +86,6 @@ class Parts:
         await self._part("leftovers")
         return self.notes
 
-    async def list_sessions(self) -> None:
-        await self._part("list")
-        self.log.append(LISTED)
-
     async def snapshot(self) -> Snapshot:
         return SNAPSHOT
 
@@ -104,7 +99,7 @@ class Parts:
     def start(self) -> None:
         self.log.append("start")
 
-    def handshake(self, workspace: str | None = None, picking: bool = False) -> Handshake:
+    def handshake(self, workspace: str | None = None) -> Handshake:
         parts = HandshakeParts(
             self.catalog,
             lambda: self.latest,
@@ -115,7 +110,6 @@ class Parts:
             lambda: self.no_steps,
             (),
             self.leftovers,
-            self.list_sessions if picking else None,
             self.start,
             lambda: self.closing,
         )
@@ -173,7 +167,7 @@ async def test_another_version_is_refused_incompatible_and_ends_the_stream() -> 
 async def test_a_good_hello_publishes_everything_in_order_and_starts_the_background() -> None:
     parts = Parts()
     parts.latest, parts.no_steps, parts.notes = USAGE, True, ["left over"]
-    handshake = parts.handshake(workspace="/work", picking=True)
+    handshake = parts.handshake(workspace="/work")
     await handshake.hello(hello(), "hi")
     assert parts.log == [
         "catalog",
@@ -186,8 +180,6 @@ async def test_a_good_hello_publishes_everything_in_order_and_starts_the_backgro
         Notice(message=NO_STEPS_NOTE),
         "leftovers",
         Notice(message="left over"),
-        "list",
-        LISTED,
         "start",
     ]
     assert not handshake.ended
@@ -270,18 +262,18 @@ async def test_what_was_missed_that_cant_be_had_fails_hello_with_no_welcome() ->
 async def test_a_failure_after_welcome_is_an_internal_error_and_the_background_starts() -> None:
     parts = Parts()
     parts.fail_at = "leftovers"
-    handshake = parts.handshake(picking=True)
+    handshake = parts.handshake()
     await handshake.hello(hello(), "hi")
     message = "Orbit failed to finish greeting the frontend: no leftovers"
     error = ErrorOccurred(code=INTERNAL, message=message)
-    assert parts.log[-4:] == [error, "list", LISTED, "start"]
+    assert parts.log[-2:] == [error, "start"]
     assert handshake.welcomed
 
 
 async def test_a_review_count_that_fails_still_publishes_the_steps_after_it() -> None:
     parts = Parts()
     parts.fail_at, parts.no_steps, parts.notes = "review count", True, ["left over"]
-    await parts.handshake(picking=True).hello(hello(), "hi")
+    await parts.handshake().hello(hello(), "hi")
     message = "Orbit failed to finish greeting the frontend: no review count"
     assert parts.log[4:] == [
         "review count",
@@ -289,8 +281,6 @@ async def test_a_review_count_that_fails_still_publishes_the_steps_after_it() ->
         Notice(message=NO_STEPS_NOTE),
         "leftovers",
         Notice(message="left over"),
-        "list",
-        LISTED,
         "start",
     ]
 

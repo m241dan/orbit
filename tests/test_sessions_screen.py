@@ -1,5 +1,5 @@
-"""Picking a session: the modal shown at startup and on ctrl+p, opening a saved session or
-starting a new one, and renaming or deleting saved ones."""
+"""Picking a session: the picker shown at startup and on ctrl+p, viewing or activating a saved
+session or starting a new one, and renaming or deleting saved ones."""
 
 from datetime import UTC, datetime
 
@@ -10,14 +10,18 @@ from orbit.agent import AgentSession
 from orbit.protocol import (
     BUSY,
     ActivateSession,
+    Attach,
+    Catalog,
     DeleteSession,
     ErrorOccurred,
     ListSessions,
     NewSession,
     RenameSession,
     SessionsListed,
+    SessionStateChanged,
     SessionSummary,
     Usage,
+    WorkspaceEntry,
 )
 from orbit.tui import OrbitApp
 from orbit.tui.sessions import SessionsScreen
@@ -27,15 +31,27 @@ from orbit.tui.widgets import ConfirmScreen
 from tests.agent_fakes import frontend
 from tests.test_session_switch import saved, store_with
 from tests.test_tui import FakeSession, entries, feed_events, opened
+from tests.test_tui_link import FakeLink
 
 ACTIVE = datetime(2026, 10, 16, 18, 2, tzinfo=UTC)
 OLD = SessionSummary(id="old", name="auth rework", last_active=ACTIVE)
-CURRENT = SessionSummary(id="now", name="today", last_active=ACTIVE, current=True)
+CURRENT = SessionSummary(
+    id="now", name="today", last_active=ACTIVE, current=True, active=True, viewers=1
+)
 LOCKED = SessionSummary(id="busy", name="elsewhere", locked=True)
 BROKEN = SessionSummary(id="bad", name="bad.json", unreadable="not JSON")
-LISTED = SessionsListed(sessions=(CURRENT, OLD, LOCKED, BROKEN), reason="startup")
-ASKED = LISTED.model_copy(update={"reason": "asked"})
-REFRESHED = LISTED.model_copy(update={"reason": "refreshed"})
+OLD_ROW = "  auth rework · Oct 16 18:02"
+SAVED_ROWS = [OLD_ROW, "  elsewhere · open in another orbit", "  bad.json · unreadable: not JSON"]
+RUNNING = SessionStateChanged(session="now", active=True, state="running", viewers=1)
+SWITCH_TO_OLD = [Attach(session="old"), ActivateSession(session="old")]
+
+
+def catalog(*sessions: SessionSummary) -> Catalog:
+    workspace = WorkspaceEntry(id="w", label="project", sessions=sessions)
+    return Catalog(workspaces=(workspace,), agents=(), triggers=(), lanes=())
+
+
+CATALOG = catalog(CURRENT, OLD, LOCKED, BROKEN)
 
 
 def options(screen: SessionsScreen) -> list[str]:
@@ -43,70 +59,141 @@ def options(screen: SessionsScreen) -> list[str]:
     return [str(option_list.get_option_at_index(i).prompt) for i in range(option_list.option_count)]
 
 
-async def test_sessions_listed_at_startup_show_the_modal_with_new_session_first() -> None:
+def picker(app: OrbitApp) -> SessionsScreen:
+    screen = app.screen
+    assert isinstance(screen, SessionsScreen)
+    return screen
+
+
+def no_picker(app: OrbitApp) -> bool:
+    return not any(isinstance(screen, SessionsScreen) for screen in app.screen_stack)
+
+
+def in_process() -> tuple[OrbitApp, FakeSession]:
+    """An app picking a session at startup over a backend in this process."""
     session = FakeSession()
-    app = OrbitApp(session)
+    return OrbitApp(session, pick=True), session
+
+
+def joined() -> tuple[OrbitApp, FakeSession]:
+    """An app picking a session at startup over a control plane it's linked to."""
+    session = FakeSession()
+    return OrbitApp(session, FakeLink(), pick=True), session
+
+
+def started() -> tuple[OrbitApp, FakeSession]:
+    """An app that picks no session at startup."""
+    session = FakeSession()
+    return OrbitApp(session), session
+
+
+async def test_in_process_the_startup_picker_lists_the_saved_sessions_then_new_session() -> None:
+    app, session = in_process()
     async with app.run_test() as pilot:
-        await feed_events(session, pilot, SessionsListed(sessions=(OLD,), reason="startup"))
+        await feed_events(session, pilot, CATALOG)
 
-        screen = app.screen
-        assert isinstance(screen, SessionsScreen)
-        assert screen.startup
-        assert options(screen) == ["+ new session", "  auth rework · Oct 16 18:02"]
+        screen = picker(app)
+        assert screen.startup and not screen.resume
+        assert options(screen) == [*SAVED_ROWS, "New session"]
         assert screen.query_one(OptionList).highlighted == 0
+        assert session.commands == []
 
 
-async def test_a_backend_picking_at_startup_shows_the_modal() -> None:
+async def test_connected_the_startup_picker_offers_to_resume_the_active_session_first() -> None:
+    app, session = joined()
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, CATALOG)
+
+        screen = picker(app)
+        assert options(screen) == [
+            "● Resume today · Oct 16 18:02 · active",
+            *SAVED_ROWS,
+            "New session",
+        ]
+        assert screen.query_one(OptionList).highlighted == 0
+        await pilot.press("enter")
+        assert session.commands == []
+        assert no_picker(app)
+
+
+async def test_with_no_saved_sessions_the_picker_offers_only_a_new_session() -> None:
+    app, session = in_process()
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, catalog(CURRENT))
+        assert options(picker(app)) == ["New session"]
+
+
+async def test_a_backend_picking_at_startup_shows_the_picker_without_its_new_session() -> None:
     backend = AgentSession(store=store_with(saved("old")), pick_session=True)
-    app = OrbitApp(frontend(backend))
+    app = OrbitApp(frontend(backend), pick=True)
     async with app.run_test() as pilot:
         await pilot.pause()
-        screen = app.screen
-        assert isinstance(screen, SessionsScreen)
-        assert [s.id for s in screen.sessions] == ["old"]
+        assert [s.id for s in picker(app).rows] == ["old"]
 
 
-async def test_a_backend_starting_a_new_session_shows_no_modal() -> None:
+async def test_an_app_not_picking_shows_no_picker_and_sends_no_listing() -> None:
     backend = AgentSession(store=store_with(saved("old")), name="auth rework")
     app = OrbitApp(frontend(backend))
     async with app.run_test() as pilot:
         await pilot.pause()
-        assert not isinstance(app.screen, SessionsScreen)
+        assert no_picker(app)
         assert backend.saved_session.name == "auth rework"
 
 
-async def test_enter_opens_the_highlighted_session() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
+async def test_picking_with_the_active_session_idle_and_unviewed_activates_it() -> None:
+    app, session = in_process()
     async with app.run_test() as pilot:
-        await feed_events(session, pilot, LISTED)
-        await pilot.press("j", "j", "k", "down", "enter")
+        await feed_events(session, pilot, CATALOG)
+        await pilot.press("j", "k", "enter")
 
-        assert session.commands == [ActivateSession(session="old")]
-        assert not isinstance(app.screen, SessionsScreen)
+        assert session.commands == SWITCH_TO_OLD
+        assert no_picker(app)
 
 
-async def test_opening_a_session_that_fails_to_send_shows_why() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
+async def test_a_state_change_updates_the_row_while_the_picker_is_open() -> None:
+    app, session = joined()
     async with app.run_test() as pilot:
-        await feed_events(session, pilot, LISTED)
+        await feed_events(session, pilot, CATALOG, RUNNING)
+        assert options(picker(app))[0] == "● Resume today · Oct 16 18:02 · active · running"
+
+
+async def test_picking_while_a_task_runs_only_views_the_session() -> None:
+    app, session = joined()
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, CATALOG, RUNNING)
+        await pilot.press("j", "enter")
+        assert session.commands == [Attach(session="old")]
+
+
+async def test_picking_while_another_frontend_views_the_active_session_only_views() -> None:
+    app, session = joined()
+    async with app.run_test() as pilot:
+        viewed = RUNNING.model_copy(update={"state": "idle", "viewers": 2})
+        await feed_events(session, pilot, CATALOG, viewed)
+        assert options(picker(app))[0] == "● Resume today · Oct 16 18:02 · active · viewed by 1"
+        await pilot.press("j", "enter")
+        assert session.commands == [Attach(session="old")]
+
+
+async def test_picking_a_session_that_fails_to_send_shows_why_and_activates_nothing() -> None:
+    app, session = in_process()
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, CATALOG)
         session.send_error = RuntimeError("the backend is gone")
-        await pilot.press("j", "j", "enter")
+        await pilot.press("enter")
         await pilot.pause()
 
         assert app.is_running
-        assert session.commands == [ActivateSession(session="old")]
+        assert session.commands == [Attach(session="old")]
         assert entries(app)[-1] == ("Couldn't send the command: the backend is gone", "error")
 
 
 async def test_deleting_a_session_that_fails_to_send_shows_why() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
+    app, session = in_process()
     async with app.run_test() as pilot:
-        await feed_events(session, pilot, LISTED)
+        await feed_events(session, pilot, CATALOG)
         session.send_error = RuntimeError("the backend is gone")
-        await pilot.press("j", "j", "x", "y")
+        await pilot.press("x", "y")
         await pilot.pause()
 
         assert app.is_running
@@ -114,230 +201,178 @@ async def test_deleting_a_session_that_fails_to_send_shows_why() -> None:
         assert entries(app)[-1] == ("Couldn't send the command: the backend is gone", "error")
 
 
-async def test_choosing_the_current_session_just_closes_the_modal() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        await feed_events(session, pilot, LISTED)
-        await pilot.press("j", "enter")
-
-        assert session.commands == []
-        assert not isinstance(app.screen, SessionsScreen)
-
-
 async def test_locked_and_unreadable_sessions_cannot_be_opened() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
+    app, session = in_process()
     async with app.run_test() as pilot:
-        await feed_events(session, pilot, LISTED)
-        screen = app.screen
-        assert isinstance(screen, SessionsScreen)
-        assert options(screen)[3:] == [
-            "  elsewhere · open in another orbit",
-            "  bad.json · unreadable: not JSON",
-        ]
-        await pilot.press("j", "j", "j", "enter", "j", "enter")
+        await feed_events(session, pilot, CATALOG)
+        screen = picker(app)
+        await pilot.press("j", "enter", "j", "enter")
 
         assert session.commands == []
         assert app.screen is screen
 
 
 async def test_a_new_session_is_started_with_the_name_typed() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
+    app, session = in_process()
     async with app.run_test() as pilot:
-        await feed_events(session, pilot, LISTED)
-        await pilot.press("enter")
+        await feed_events(session, pilot, CATALOG)
+        await pilot.press("j", "j", "j", "enter")
         name = app.screen.query_one(Input)
         assert name.display
         assert app.focused is name
         await pilot.press(*" jk ", "enter")
 
         assert session.commands == [NewSession(name="jk")]
-        assert not isinstance(app.screen, SessionsScreen)
+        assert no_picker(app)
 
 
 async def test_a_new_session_without_a_name_leaves_it_to_the_backend() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
+    app, session = in_process()
     async with app.run_test() as pilot:
-        await feed_events(session, pilot, LISTED)
+        await feed_events(session, pilot, catalog(CURRENT))
         await pilot.press("enter", "space", "enter")
 
         assert session.commands == [NewSession(name=None)]
 
 
 async def test_escape_from_the_name_goes_back_to_the_list() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
+    app, session = in_process()
     async with app.run_test() as pilot:
-        await feed_events(session, pilot, LISTED)
-        await pilot.press("enter", "a", "escape")
+        await feed_events(session, pilot, catalog(CURRENT, LOCKED))
+        await pilot.press("j", "enter", "a", "escape")
 
-        screen = app.screen
-        assert isinstance(screen, SessionsScreen)
+        screen = picker(app)
         name = screen.query_one(Input)
         assert not name.display
         assert name.value == ""
         assert app.focused is screen.query_one(OptionList)
-        await pilot.press("j", "enter")
-        assert session.commands == []  # Back on the list, j moved to the current session.
+        await pilot.press("k", "enter")
+        assert session.commands == []  # Back on the list, k moved to the locked session.
 
 
 async def test_escape_at_startup_quits_orbit() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
+    app, session = in_process()
     async with app.run_test() as pilot:
-        await feed_events(session, pilot, LISTED)
+        await feed_events(session, pilot, CATALOG)
         await pilot.press("escape")
         await pilot.pause()
         assert not app.is_running
     assert session.commands == []
 
 
-async def test_ctrl_p_lists_the_sessions_in_the_modal() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
+async def test_ctrl_p_shows_the_picker_with_the_session_viewed_first() -> None:
+    app, session = started()
     async with app.run_test() as pilot:
+        await feed_events(session, pilot, CATALOG, opened(CURRENT))
         await pilot.press("ctrl+p")
-        assert session.commands == [ListSessions()]
-        await feed_events(session, pilot, ASKED)
 
-        screen = app.screen
-        assert isinstance(screen, SessionsScreen)
+        screen = picker(app)
         assert not screen.startup
-        await pilot.press("j", "j", "enter")
-        assert session.commands == [ListSessions(), ActivateSession(session="old")]
-
-
-async def test_escape_mid_session_keeps_the_current_session() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        await pilot.press("ctrl+p")
-        await feed_events(session, pilot, ASKED)
-        await pilot.press("escape")
-
-        assert not isinstance(app.screen, SessionsScreen)
-        assert session.commands == [ListSessions()]
-        assert app.is_running
-
-
-async def test_sessions_listed_unasked_after_ctrl_p_open_no_picker() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        await pilot.press("ctrl+p")
-        await feed_events(session, pilot, ASKED)
-        await pilot.press("escape")
-        await feed_events(session, pilot, REFRESHED)
-
-        assert not any(isinstance(s, SessionsScreen) for s in app.screen_stack)
-        assert app.is_running
-
-
-async def test_a_startup_listing_after_ctrl_p_opens_a_list_escape_closes() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        await pilot.press("ctrl+p")
-        await feed_events(session, pilot, LISTED)
-        screen = app.screen
-        assert isinstance(screen, SessionsScreen)
-        assert not screen.startup
-        await pilot.press("escape")
-        await pilot.pause()
-
-        assert not any(isinstance(s, SessionsScreen) for s in app.screen_stack)
-        assert app.is_running
-
-
-async def test_a_ctrl_p_answer_after_the_startup_list_closed_opens_one_escape_closes() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        await pilot.press("ctrl+p")
-        await feed_events(session, pilot, LISTED)
+        assert options(screen)[:2] == ["● today · Oct 16 18:02 · active", OLD_ROW]
         await pilot.press("j", "enter")
-        await feed_events(session, pilot, ASKED)
-        screen = app.screen
-        assert isinstance(screen, SessionsScreen)
-        assert not screen.startup
-        await pilot.press("escape")
-        await pilot.pause()
-
-        assert not any(isinstance(s, SessionsScreen) for s in app.screen_stack)
-        assert app.is_running
+        assert session.commands == SWITCH_TO_OLD
+        assert not any(isinstance(command, ListSessions) for command in session.commands)
 
 
-async def test_a_refreshed_listing_with_no_list_shown_opens_none() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
+async def test_choosing_the_session_viewed_just_closes_the_picker() -> None:
+    app, session = started()
     async with app.run_test() as pilot:
-        await feed_events(session, pilot, REFRESHED)
-        await pilot.press("escape")
-        await pilot.pause()
+        await feed_events(session, pilot, CATALOG)
+        await pilot.press("ctrl+p", "enter")
 
-        assert len(app.screen_stack) == 1
-        assert app.is_running
+        assert session.commands == []
+        assert no_picker(app)
 
 
-async def test_the_listing_after_a_delete_opens_no_picker_once_closed() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
+async def test_escape_mid_session_keeps_the_session_viewed() -> None:
+    app, session = started()
     async with app.run_test() as pilot:
-        await pilot.press("ctrl+p")
-        await feed_events(session, pilot, ASKED)
-        await pilot.press("j", "j", "x", "y", "escape")
-        await feed_events(session, pilot, REFRESHED)
-        await pilot.press("escape")
-        await pilot.pause()
+        await feed_events(session, pilot, CATALOG)
+        await pilot.press("ctrl+p", "escape")
 
-        assert session.commands == [ListSessions(), DeleteSession(session_id="old")]
-        assert not any(isinstance(s, SessionsScreen) for s in app.screen_stack)
+        assert no_picker(app)
+        assert session.commands == []
         assert app.is_running
 
 
-async def test_the_listing_after_a_rename_opens_no_picker_once_closed() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
+async def test_only_the_first_catalog_opens_the_startup_picker() -> None:
+    app, session = in_process()
     async with app.run_test() as pilot:
-        await pilot.press("ctrl+p")
-        await feed_events(session, pilot, ASKED)
-        await pilot.press("j", "j", "r", "ctrl+u", *"jk", "enter", "escape")
-        await feed_events(session, pilot, REFRESHED)
-        await pilot.press("escape")
-        await pilot.pause()
+        await feed_events(session, pilot, CATALOG)
+        await pilot.press("enter")
+        await feed_events(session, pilot, CATALOG)
 
-        assert session.commands == [ListSessions(), RenameSession(session_id="old", name="jk")]
-        assert not any(isinstance(s, SessionsScreen) for s in app.screen_stack)
+        assert session.commands == SWITCH_TO_OLD
+        assert no_picker(app)
         assert app.is_running
+
+
+async def test_a_catalog_opens_no_picker_in_an_app_not_picking() -> None:
+    app, session = started()
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, CATALOG)
+        assert no_picker(app)
+
+
+async def test_sessions_listed_are_ignored() -> None:
+    app, session = started()
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, opened(OLD))
+        renamed = OLD.model_copy(update={"name": "flags", "current": True})
+        await feed_events(session, pilot, SessionsListed(sessions=(renamed,), reason="startup"))
+        assert no_picker(app)
+        assert conversation_title(app) == "Conversation — auth rework"
 
 
 async def test_ctrl_p_does_nothing_over_another_modal() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
+    app, session = in_process()
     async with app.run_test() as pilot:
-        await feed_events(session, pilot, LISTED)
+        await feed_events(session, pilot, CATALOG)
+        screen = picker(app)
         await pilot.press("ctrl+p")
+        assert app.screen is screen
         assert session.commands == []
 
 
-async def test_a_refusal_shows_as_an_error_once_the_modal_closed() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
+async def test_ctrl_p_twice_shows_one_picker_that_escape_closes() -> None:
+    app, session = started()
     async with app.run_test() as pilot:
-        await feed_events(session, pilot, LISTED)
-        await pilot.press("j", "j", "enter")
+        await feed_events(session, pilot, CATALOG)
+        app.action_list_sessions()
+        app.action_list_sessions()
+        await pilot.pause()
+
+        assert len([s for s in app.screen_stack if isinstance(s, SessionsScreen)]) == 1
+        await pilot.press("escape")
+        await pilot.pause()
+        assert app.is_running
+        assert len(app.screen_stack) == 1
+
+
+async def test_ctrl_p_after_the_startup_picker_opens_a_picker_again() -> None:
+    app, session = joined()
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, CATALOG)
+        await pilot.press("enter", "ctrl+p")
+
+        screen = picker(app)
+        assert not screen.startup
+        assert options(screen)[0] == "● today · Oct 16 18:02 · active"
+
+
+async def test_a_refusal_shows_as_an_error_once_the_picker_closed() -> None:
+    app, session = in_process()
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, CATALOG)
+        await pilot.press("enter")
         await feed_events(session, pilot, ErrorOccurred(code=BUSY, message="Tasks are running."))
 
-        assert not isinstance(app.screen, SessionsScreen)
+        assert no_picker(app)
         assert entries(app) == [("Tasks are running.", "error")]
 
 
 async def test_a_snapshot_of_a_session_opened_adds_nothing_to_the_transcript() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
+    app, session = started()
     async with app.run_test() as pilot:
         await feed_events(session, pilot, opened(OLD))
         assert entries(app) == []
@@ -348,14 +383,12 @@ def subtitle(screen: SessionsScreen) -> str:
 
 
 async def test_r_asks_for_the_highlighted_sessions_new_name_starting_from_its_name() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
+    app, session = in_process()
     async with app.run_test() as pilot:
-        await feed_events(session, pilot, LISTED)
-        await pilot.press("j", "j", "r")
+        await feed_events(session, pilot, CATALOG)
+        await pilot.press("r")
 
-        screen = app.screen
-        assert isinstance(screen, SessionsScreen)
+        screen = picker(app)
         name = screen.query_one(Input)
         assert name.display and app.focused is name
         assert name.value == "auth rework"
@@ -369,61 +402,51 @@ async def test_r_asks_for_the_highlighted_sessions_new_name_starting_from_its_na
         assert subtitle(screen) == "j/k move · enter open · r rename · x delete · esc quit"
 
 
-async def test_the_current_session_can_be_renamed() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
+async def test_the_session_viewed_can_be_renamed() -> None:
+    app, session = started()
     async with app.run_test() as pilot:
-        await feed_events(session, pilot, LISTED)
-        await pilot.press("j", "r", "!", "enter")
+        await feed_events(session, pilot, CATALOG)
+        await pilot.press("ctrl+p", "r", "!", "enter")
         assert session.commands == [RenameSession(session_id="now", name="today!")]
 
 
 async def test_an_empty_new_name_keeps_the_old_one() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
+    app, session = in_process()
     async with app.run_test() as pilot:
-        await feed_events(session, pilot, LISTED)
-        await pilot.press("j", "r", "ctrl+u", "space", "enter")
+        await feed_events(session, pilot, CATALOG)
+        await pilot.press("r", "ctrl+u", "space", "enter")
 
         assert session.commands == []
-        assert isinstance(app.screen, SessionsScreen)
-        assert not app.screen.query_one(Input).display
+        assert not picker(app).query_one(Input).display
 
 
 async def test_escape_from_a_new_name_goes_back_to_the_list_without_renaming() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
+    app, session = in_process()
     async with app.run_test() as pilot:
-        await feed_events(session, pilot, LISTED)
-        await pilot.press("j", "r", "a", "escape")
+        await feed_events(session, pilot, catalog(CURRENT, OLD))
+        await pilot.press("r", "a", "escape")
 
-        screen = app.screen
-        assert isinstance(screen, SessionsScreen)
-        assert not screen.query_one(Input).display
-        await pilot.press("k", "enter")  # Back on the list: a new session, not a rename.
+        assert not picker(app).query_one(Input).display
+        await pilot.press("j", "enter")  # Back on the list: a new session, not a rename.
         await pilot.press("enter")
         assert session.commands == [NewSession(name=None)]
 
 
 async def test_r_and_x_do_nothing_on_new_session() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
+    app, session = in_process()
     async with app.run_test() as pilot:
-        await feed_events(session, pilot, LISTED)
+        await feed_events(session, pilot, catalog(CURRENT))
         await pilot.press("r", "x")
 
-        screen = app.screen
-        assert isinstance(screen, SessionsScreen)
-        assert not screen.query_one(Input).display
+        assert not picker(app).query_one(Input).display
         assert session.commands == []
 
 
 async def test_x_deletes_the_highlighted_session_once_confirmed() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
+    app, session = in_process()
     async with app.run_test() as pilot:
-        await feed_events(session, pilot, LISTED)
-        await pilot.press("j", "j", "x")
+        await feed_events(session, pilot, CATALOG)
+        await pilot.press("x")
 
         confirm = app.screen
         assert isinstance(confirm, ConfirmScreen)
@@ -438,22 +461,20 @@ async def test_x_deletes_the_highlighted_session_once_confirmed() -> None:
 
 
 async def test_n_or_escape_keeps_the_session() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
+    app, session = in_process()
     async with app.run_test() as pilot:
-        await feed_events(session, pilot, LISTED)
-        await pilot.press("j", "j", "x", "n", "x", "escape")
+        await feed_events(session, pilot, CATALOG)
+        await pilot.press("x", "n", "x", "escape")
 
         assert session.commands == []
         assert isinstance(app.screen, SessionsScreen)
 
 
 async def test_deleting_a_session_open_somewhere_is_left_to_the_backend_to_refuse() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
+    app, session = started()
     async with app.run_test() as pilot:
-        await feed_events(session, pilot, LISTED)
-        await pilot.press("j", "x", "j", "j", "x")
+        await feed_events(session, pilot, CATALOG)
+        await pilot.press("ctrl+p", "x", "j", "j", "x")
 
         assert session.commands == [
             DeleteSession(session_id="now"),
@@ -462,105 +483,38 @@ async def test_deleting_a_session_open_somewhere_is_left_to_the_backend_to_refus
         assert isinstance(app.screen, SessionsScreen)
 
 
-async def test_sessions_listed_again_refresh_the_list_shown_in_place() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
+async def test_a_catalog_again_refreshes_the_picker_shown_in_place() -> None:
+    app, session = in_process()
     async with app.run_test() as pilot:
-        await feed_events(session, pilot, LISTED)
-        screen = app.screen
-        assert isinstance(screen, SessionsScreen)
-        await pilot.press("j", "j", "j")
+        await feed_events(session, pilot, CATALOG)
+        screen = picker(app)
+        await pilot.press("j", "j")
         renamed = OLD.model_copy(update={"name": "flags"})
-        refreshed = SessionsListed(sessions=(CURRENT, renamed), reason="refreshed")
-        await feed_events(session, pilot, refreshed)
+        await feed_events(session, pilot, catalog(CURRENT, renamed))
 
-        assert screen is app.screen and isinstance(screen, SessionsScreen)
+        assert screen is app.screen
         assert screen.sessions == (CURRENT, renamed)
-        assert options(screen) == [
-            "+ new session",
-            "● today · Oct 16 18:02",
-            "  flags · Oct 16 18:02",
-        ]
-        assert screen.query_one(OptionList).highlighted == 2  # Kept within the list.
-        await pilot.press("enter")
-        assert session.commands == [ActivateSession(session="old")]
+        assert options(screen) == ["  flags · Oct 16 18:02", "New session"]
+        assert screen.query_one(OptionList).highlighted == 1  # Kept within the list.
+        await pilot.press("k", "enter")
+        assert session.commands == SWITCH_TO_OLD
 
 
-async def test_renaming_and_deleting_through_the_backend_refresh_the_list() -> None:
+async def test_renaming_and_deleting_through_the_backend_refresh_the_picker() -> None:
     store = store_with(saved("old"), saved("gone"))
     backend = AgentSession(store=store, pick_session=True)
-    app = OrbitApp(frontend(backend))
+    app = OrbitApp(frontend(backend), pick=True)
     async with app.run_test() as pilot:
         await pilot.pause()
-        screen = app.screen
-        assert isinstance(screen, SessionsScreen)
-        await pilot.press("j", "x", "y")
+        screen = picker(app)
+        await pilot.press("x", "y")
         await pilot.pause()
         await pilot.press("r", "ctrl+u", *"new", "enter")
         await pilot.pause()
 
-        assert screen is app.screen and isinstance(screen, SessionsScreen)
-        assert [(s.id, s.name) for s in screen.sessions] == [("old", "new")]
+        assert screen is app.screen
+        assert [(s.id, s.name) for s in screen.rows] == [("old", "new")]
         assert store.deleted == ["gone"]
-
-
-async def test_ctrl_p_twice_shows_one_list_that_escape_closes() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        await pilot.press("ctrl+p", "ctrl+p")
-        await feed_events(session, pilot, ASKED, ASKED)
-
-        shown = [s for s in app.screen_stack if isinstance(s, SessionsScreen)]
-        assert len(shown) == 1
-        assert not shown[0].startup
-        await pilot.press("escape")
-        await pilot.pause()
-        assert app.is_running
-        assert len(app.screen_stack) == 1
-
-
-async def test_a_listing_answering_ctrl_p_is_never_at_startup() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        await pilot.press("ctrl+p", "ctrl+p")
-        await feed_events(session, pilot, ASKED)
-        await pilot.press("escape")
-        await feed_events(session, pilot, ASKED)
-
-        screen = app.screen
-        assert isinstance(screen, SessionsScreen)
-        assert not screen.startup
-
-
-async def test_a_late_listing_after_the_picker_closed_opens_no_picker() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        await feed_events(session, pilot, LISTED)
-        await pilot.press("j", "j", "j", "x", "k", "enter")
-        await feed_events(session, pilot, REFRESHED)
-
-        assert session.commands == [
-            DeleteSession(session_id="busy"),
-            ActivateSession(session="old"),
-        ]
-        assert not any(isinstance(s, SessionsScreen) for s in app.screen_stack)
-        assert app.is_running
-
-
-async def test_ctrl_p_after_the_startup_picker_opens_a_picker_again() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        await feed_events(session, pilot, LISTED)
-        await pilot.press("j", "enter", "ctrl+p")
-        await feed_events(session, pilot, ASKED)
-
-        screen = app.screen
-        assert isinstance(screen, SessionsScreen)
-        assert not screen.startup
 
 
 def conversation_title(app: OrbitApp) -> str:
@@ -574,8 +528,7 @@ async def test_the_conversation_title_is_plain_before_any_session_event() -> Non
 
 
 async def test_a_session_opened_names_the_conversation_through_tabs_and_hidden_thinking() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
+    app, session = started()
     async with app.run_test(size=(120, 30)) as pilot:
         await feed_events(session, pilot, opened(OLD))
         assert conversation_title(app) == "Conversation — auth rework"
@@ -583,34 +536,21 @@ async def test_a_session_opened_names_the_conversation_through_tabs_and_hidden_t
         assert conversation_title(app) == "Conversation · coder · thinking hidden — auth rework"
 
 
-async def test_a_refreshed_listing_with_the_list_closed_renames_the_conversation() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
+async def test_a_catalog_renaming_the_session_viewed_renames_the_conversation() -> None:
+    app, session = started()
     async with app.run_test() as pilot:
         spent = Usage(input_tokens=2_000, cost_usd=2.0)
         await feed_events(session, pilot, opened(OLD.model_copy(update={"usage": spent})))
-        renamed = OLD.model_copy(update={"name": "flags", "current": True})
-        await feed_events(session, pilot, SessionsListed(sessions=(renamed,), reason="refreshed"))
-        assert not isinstance(app.screen, SessionsScreen)
+        renamed = OLD.model_copy(update={"name": "flags"})
+        await feed_events(session, pilot, catalog(CURRENT, renamed))
+        assert no_picker(app)
         assert conversation_title(app) == "Conversation — flags"
         assert app.query_one(TaskList).border_subtitle == "session: 2k tok · $2.00"
 
 
-async def test_a_listing_shown_in_the_list_renames_the_conversation() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
-    async with app.run_test() as pilot:
-        await feed_events(session, pilot, opened(CURRENT), ASKED)
-        renamed = CURRENT.model_copy(update={"name": "flags"})
-        await feed_events(session, pilot, SessionsListed(sessions=(renamed,), reason="refreshed"))
-        assert isinstance(app.screen, SessionsScreen)
-        assert conversation_title(app) == "Conversation — flags"
-
-
-async def test_a_listing_without_a_current_session_keeps_the_conversation_title() -> None:
-    session = FakeSession()
-    app = OrbitApp(session)
+async def test_a_catalog_without_the_session_viewed_keeps_the_conversation_title() -> None:
+    app, session = started()
     async with app.run_test() as pilot:
         await feed_events(session, pilot, opened(OLD))
-        await feed_events(session, pilot, SessionsListed(sessions=(OLD,), reason="refreshed"))
+        await feed_events(session, pilot, catalog(CURRENT))
         assert conversation_title(app) == "Conversation — auth rework"

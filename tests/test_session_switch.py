@@ -183,11 +183,11 @@ async def test_without_a_store_no_sessions_are_listed() -> None:
     await session.close()
 
 
-async def test_sessions_are_listed_at_startup_for_the_user_to_pick_one() -> None:
+async def test_a_session_picking_at_startup_lists_no_sessions_unasked() -> None:
     session, _ = switching(store_with(saved("old")), pick_session=True)
-    listed = last_of(SessionsListed, await events_until(session, of_type(SessionsListed)))
-    assert [s.id for s in listed.sessions] == ["old"]
-    assert listed.reason == "startup"
+    await send(session, ListSessions())
+    events = await events_until(session, of_type(SessionsListed))
+    assert [e.reason for e in events if isinstance(e, SessionsListed)] == ["asked"]
     await session.close()
 
 
@@ -221,18 +221,10 @@ async def test_a_session_started_without_a_name_is_named_by_its_start() -> None:
     await session.close()
 
 
-async def test_a_session_started_with_the_list_is_snapshot_then_lists_the_sessions() -> None:
-    session, _ = switching(FakeStore(), pick_session=True)
-    events = await events_until(session, of_type(SessionsListed))
-    assert [type(e) for e in events] == [Snapshot, SessionsListed]
-    assert last_of(SessionsListed, events).reason == "startup"
-    await session.close()
-
-
-async def test_a_session_started_with_the_list_lists_it_after_the_leftovers() -> None:
+async def test_a_session_started_to_pick_one_is_snapshot_before_the_leftovers() -> None:
     session = starting(pick_session=True)
-    events = await events_until(session, of_type(SessionsListed))
-    assert [type(e) for e in events] == [Snapshot, Notice, SessionsListed]
+    events = await events_until(session, of_type(Notice))
+    assert [type(e) for e in events] == [Snapshot, Notice]
     await session.close()
 
 

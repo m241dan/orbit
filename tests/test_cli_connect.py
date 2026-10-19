@@ -32,6 +32,7 @@ class FakeApp:
     session: object
     link: object = None
     opening: Command | None = None
+    pick: bool = False
     storage_halt: str | None = None
     ran: bool = field(default=False)
 
@@ -71,6 +72,7 @@ def test_connect_runs_the_tui_over_the_control_plane_with_the_config_dirs_token(
     (tui,) = FakeApp.built
     assert tui.session == FakeClient(URL, "the-token", token_file)
     assert tui.link is tui.session and tui.opening is None and tui.ran
+    assert tui.pick  # The user picks a session once joined.
 
 
 def test_the_token_file_option_names_another_file(tmp_path: Path) -> None:
@@ -85,6 +87,7 @@ def test_the_token_file_option_names_another_file(tmp_path: Path) -> None:
 def test_new_opens_a_new_session_once_welcomed() -> None:
     assert runner.invoke(app, ["chat", "--connect", URL, "--new"]).exit_code == 0
     assert FakeApp.built[0].opening == NewSession()
+    assert not FakeApp.built[0].pick
 
 
 @pytest.mark.usefixtures("token_file")

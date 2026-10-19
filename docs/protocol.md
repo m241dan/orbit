@@ -91,9 +91,10 @@ and the backend's `server_version`. `Welcome` is Hello's outcome: it takes the p
    [Sequencing and reconnecting](#sequencing-and-reconnecting)).
 4. One-off notices, such as the workspace note, a missing verification setup, leftover work or
    notes on a resumed session.
-5. When orbit starts with the session picker, `SessionsListed` with `reason="startup"`, for the
-   user to pick a session in place of the interim one the Snapshot showed.
-6. Live events, as things happen.
+5. Live events, as things happen.
+
+Each frontend shows its own session picker from the Catalog, kept current by
+`SessionStateChanged`; orbit no longer sends `SessionsListed` with `reason="startup"`.
 
 `Welcome` only says the Hello was accepted; it's the `Snapshot` that marks the frontend's state
 as current. `Hello` attaches the connection to the workspace's open session (see
@@ -104,7 +105,7 @@ a `Catalog` and then a `Snapshot` of the session now open (see [Activation](#act
 rename or delete sends a `Catalog`.
 A frontend replaces the conversation it shows with every Snapshot's transcript, so joining
 shows where the session left off and a switch shows the session switched to.
-`SessionsListed` otherwise only answers `ListSessions`.
+`SessionsListed` only answers `ListSessions`, and after a rename or delete.
 
 ## Attaching
 

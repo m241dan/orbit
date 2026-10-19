@@ -10,12 +10,12 @@ from orbit.protocol import (
     AcceptTask,
     ActivateSession,
     BusyChanged,
+    Catalog,
     ErrorOccurred,
     Event,
     FireTrigger,
     RemoveTask,
     RunTasks,
-    SessionsListed,
     SessionSummary,
     Settings,
     TasksChanged,
@@ -25,6 +25,7 @@ from orbit.protocol import (
     TaskStatus,
     TurnFinished,
     Usage,
+    WorkspaceEntry,
 )
 from orbit.tui import OrbitApp
 from orbit.tui.sessions import SessionsScreen
@@ -878,10 +879,12 @@ async def test_switching_session_through_ctrl_p_while_the_list_is_active_leaves_
         task_list = app.query_one(TaskList)
         await feed(session, pilot, many(30))
         await open_task_list(pilot)
-        await pilot.press("ctrl+p")
         other = SessionSummary(id="old", name="old")
-        await feed(session, pilot, SessionsListed(sessions=(other,), reason="asked"))
-        await pilot.press("j", "enter")
+        workspace = WorkspaceEntry(id="w", label="project", sessions=(other,))
+        await feed(
+            session, pilot, Catalog(workspaces=(workspace,), agents=(), triggers=(), lanes=())
+        )
+        await pilot.press("ctrl+p", "enter")
         await feed(session, pilot, opened(other), many(30, running=25))
         assert session.commands[-1] == ActivateSession(session="old")
         assert not isinstance(app.screen, SessionsScreen)

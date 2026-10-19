@@ -77,7 +77,7 @@ In the app:
 | `ctrl+e` | Set up (or redo) the verification steps: after you confirm (`y` to go ahead, `n`/`esc` to cancel), queue a configurator task first and run it (see [Setting up verification](#setting-up-verification)) |
 | `ctrl+o` | Pick the planner's model (default, fable, opus, sonnet, haiku; new tasks default to it too) |
 | `ctrl+l` | Pick the tool access level new tasks start with in the task editor (off, restricted, full) |
-| `ctrl+p` | Switch sessions: open a saved one or start a new one (see [Sessions](#sessions)) |
+| `ctrl+p` | Session picker: view or switch to a saved session, or start a new one (see [Sessions](#sessions)) |
 | `esc` | Stop typing, close the conversation's detail pane, leave a list or close a picker; with the conversation selected and nothing active, let go of its held entry, closing the detail pane, and follow the latest output again; with the detail pane selected, close it; with the Task list selected and nothing active, let go of the held list and follow the active task again |
 | `ctrl+s` | Stop the task run (on any tab) |
 | `ctrl+x` | Stop the planner's turn, leaving the task run going |
@@ -113,21 +113,30 @@ back through earlier events to the session's start, or, once its log was trimmed
 `session_log_mb` under [Where orbit keeps things](#where-orbit-keeps-things)), to the line
 "Older events were removed (session_log_mb)".
 
-At startup orbit lists the saved sessions to pick from: `+ new session` first, then the sessions,
-the most recently active first. Each row shows the session's name, when it was last active (local
-time), how many of its tasks stand at each status, by the task list's icons (`3 ✅ 2 ⏳ 1 📝`), and
-what they cost (`1.2M tok · $0.84`); `●` marks the open session. `j`/`k` (or the arrow keys) move
-and `enter` opens the highlighted session. On `+ new session`, `enter` asks for a name: `enter`
-starts the session, named for the date and time if you leave the name empty, and `esc` goes back to
-the list. `esc` on the list quits orbit. Any draft orbit added before you picked, such as a fix for
-a step that failed the startup check, carries over into the session you pick. `--new` skips the list
-and starts a new session, and `--name NAME` starts one named `NAME`.
+Every chat, in process or connected to an `orbit serve` (see [Serving the control plane](#serving-the-control-plane)),
+starts with the session picker. Connected, `Resume <name>` comes first and is highlighted: the
+session the control plane has active, which runs its work, and `enter` on it just keeps it. A chat
+running its own control plane has no session to resume, so it has no `Resume`. The other saved
+sessions follow, the most recently active first, then `New session`; with none saved, the picker
+offers only `New session`. Each row shows the session's name, when it was last active (local time),
+`active` on the workspace's active session, `running` while it runs work (a task run, a review, a
+planner turn or the startup check), `viewed by N` when N other frontends view it, how many of its
+tasks stand at each status, by the task list's icons (`3 ✅ 2 ⏳ 1 📝`), and what they cost
+(`1.2M tok · $0.84`); `●` marks the session this chat views. The marks follow the sessions live while
+the picker is open. `j`/`k` (or the arrow keys) move and `enter` picks the highlighted session. On
+`New session`, `enter` asks for a name: `enter` starts the session, named for the date and time if
+you leave the name empty, and `esc` goes back to the list. `esc` on the list quits orbit. Any draft
+orbit added before you picked, such as a fix for a step that failed the startup check, carries over
+into the session you pick. `--new` skips the picker and starts a new session, and `--name NAME`
+starts one named `NAME`.
 
-`ctrl+p` shows the same list later, to switch sessions; there `esc` closes it and keeps the open
-session, as does picking the open session. Switching shows the switched-to session's conversation
-in place of the one you left. Switching is refused, with an error saying what to stop,
-while tasks run, a review runs, the planner answers or the startup check runs. Picking a session
-makes it the active one for everyone connected; any other frontend that was viewing the session you
+`ctrl+p` opens the same picker later, the session this chat views first; there `esc` closes it and
+keeps that session, as does picking it. Picking another session switches what runs only when the
+active session is idle and no other frontend views it: the session you pick becomes the active one,
+and its conversation shows in place of the one you left. Otherwise, while the active session runs
+work or another frontend views it, picking a session shows it read-only, and what runs stays as it
+was. Switching is refused, with an error saying what to stop, while tasks run, a review runs, the
+planner answers or the startup check runs. Any other frontend that was viewing the session you
 left keeps it, read-only. Opening a session never starts work by
 itself: its pending tasks wait for `ctrl+r`. A task that was running or being verified when the
 session was last saved (orbit crashed, say) comes back cancelled, and orbit says how many were
@@ -147,12 +156,11 @@ starting from the old one; `enter` saves it (an empty name keeps the old one) an
 Names needn't be unique. `x` deletes the highlighted session after a `y`/`n` confirm (`esc` is no):
 it leaves the store, with any stale lock, while Claude's own conversation files stay. The open session
 can't be deleted, and a session open in another orbit can be neither renamed nor deleted; an
-unreadable one can be deleted but not renamed. The list refreshes after either. On `+ new session`,
+unreadable one can be deleted but not renamed. The list refreshes after either. On `New session`,
 `r` and `x` do nothing.
 
 The Conversation window's title ends with the open session's name, cut to 30 characters
-(`Conversation — auth rework`). It follows a rename of the open session and a switch to another,
-and shows no name before you pick one at startup.
+(`Conversation — auth rework`). It follows a rename of the open session and a switch to another.
 
 ### Tasks
 
@@ -892,13 +900,15 @@ max_message_mb = 64  # a larger message closes the connection
 An unknown key in `[server]`, or a value of the wrong type or out of range, stops `orbit serve`
 with status 2 and a message naming the file and the key.
 
-**Connecting.** `orbit chat --connect <url>` shows the session a running `orbit serve` has open,
-with no picker, rather than running a control plane of its own; it takes `ws://` URLs only in this
+**Connecting.** `orbit chat --connect <url>` joins a running `orbit serve`, starting with the
+session picker, which offers to resume the session it has active (see [Sessions](#sessions)),
+rather than running a control plane of its own; it takes `ws://` URLs only in this
 release. It shows the token in `token` in the config directory, or in the file `--token-file
 <path>` names; a token file that can't be read stops it with status 2. The backend flags
 (`--model`, `--tools`, `--verify`, `--worktree`, `--review`, `--usage`, `--profile`) configure
 the control plane, so with `--connect` they stop it with status 2: give them to `orbit serve`.
-`--new` and `--name` open a new session once connected, for every frontend, as ctrl+p does. Any
+`--new` and `--name` skip the picker and open a new session once connected, as picking `New
+session` does. Any
 number of chats can connect at once, each showing what the others do; quitting one disconnects it
 and leaves the server running.
 

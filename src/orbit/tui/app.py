@@ -52,7 +52,6 @@ from orbit.protocol import (
     HistoryPage,
     Link,
     LinkState,
-    ListSessions,
     LogGap,
     MessageSent,
     NotConnected,
@@ -195,14 +194,22 @@ class OrbitApp(App[None], inherit_bindings=False):
     ]
 
     def __init__(
-        self, session: Session, link: Link | None = None, opening: Command | None = None
+        self,
+        session: Session,
+        link: Link | None = None,
+        opening: Command | None = None,
+        *,
+        pick: bool = False,
     ) -> None:
         """The app over ``session``, showing how its ``link`` to a control plane in another
-        process stands, if it has one, and sending ``opening``, if given, once welcomed."""
+        process stands, if it has one, and sending ``opening``, if given, once welcomed. With
+        ``pick``, the first catalog opens the session picker, offering to resume the session
+        viewed only over a ``link``, as a session opened in process isn't one picked yet."""
         super().__init__()
         self._session = session
         self._link = link
         self._opening = opening
+        self._pick = pick
         # Id of the window h/j/k/l last moved to.
         self._selected = "prompt"
         # Which lanes have work in progress, as last reported (or just requested).
@@ -513,17 +520,9 @@ class OrbitApp(App[None], inherit_bindings=False):
 
         self.push_screen(ConfirmScreen(title, message, yes), answered)
 
-    async def action_list_sessions(self) -> None:
-        """Ask for the saved sessions, which show in a modal once they're listed."""
-        self._sessions.asked()
-        await self._send(ListSessions())
-
-    def _name_current(self, listed: SessionsListed) -> None:
-        """Title the conversation with the name of the open session among those ``listed``,
-        renamed perhaps; a listing without it leaves the title as it is."""
-        current = [summary for summary in listed.sessions if summary.current]
-        if current:
-            self._transcript.show_session(current[0].name)
+    def action_list_sessions(self) -> None:
+        """Show the session picker, the session viewed first."""
+        self._sessions.open()
 
     async def action_cancel_turn(self) -> None:
         # The planner has its own lane, stopped with ctrl+x; ctrl+s stops the task run.
@@ -733,23 +732,34 @@ class OrbitApp(App[None], inherit_bindings=False):
         | OwnershipOffered
         | OwnershipTaken,
     ) -> None:
-        """Show the sessions listed, rule off the planner's conversation where it was reset,
-        show a snapshot of the session open or a page of its history, label the trigger keys
-        from a catalog, or follow the session's hold on the repository. The conversation's
-        title follows the open session's name."""
-        if isinstance(event, SessionsListed):
-            self._name_current(event)
-            self._sessions.show(event)
-        elif isinstance(event, Snapshot):
+        """Rule off the planner's conversation where it was reset, show a snapshot of the session
+        viewed or a page of its history, follow a catalog, or follow the session's hold on the
+        repository. Sessions listed are left alone: the catalog lists them."""
+        if isinstance(event, SessionsListed):  # Deprecated.
+            return
+        if isinstance(event, Snapshot):
             self._render_snapshot(event)
         elif isinstance(event, Catalog):
-            self._label_triggers(trigger_key_labels(event.triggers))
+            self._render_catalog(event)
         elif isinstance(event, HistoryPage):
             self._pager.show(event)
         elif isinstance(event, OwnershipOffered | OwnershipTaken):
             self._render_ownership(event)
         else:
             self._feed.append(*planner_reset_entry(), PLANNER)
+
+    def _render_catalog(self, catalog: Catalog) -> None:
+        """Label the trigger keys from ``catalog`` and list its sessions, titling the
+        conversation with the name of the session viewed, renamed perhaps; the first catalog
+        opens the session picker, if the app picks one."""
+        self._label_triggers(trigger_key_labels(catalog.triggers))
+        self._sessions.follow(catalog)
+        attached = self._sessions.attached_session
+        if attached is not None:
+            self._transcript.show_session(attached.name)
+        if self._pick:
+            self._pick = False
+            self._sessions.open("resume" if self._link is not None else "pick")
 
     def _label_triggers(self, labels: dict[str, str | None]) -> None:
         """Label each trigger's key in the footer with its label in ``labels``, hiding those
@@ -788,6 +798,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         # set after, as the transcript's turns count theirs.
         self._feed.replace((envelope.payload for envelope in snapshot.transcript), snapshot.agents)
         self._pager.follow(snapshot)
+        self._sessions.attach(snapshot.session.id)
         self._open_session(snapshot.session)
         self._prompt.show_read_only(snapshot.read_only)
         if snapshot.storage_halt is None:
@@ -806,8 +817,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         | UsageChanged
         | SessionStateChanged,
     ) -> None:
-        """Show a snapshot of backend state, or a decision it waits for; a session's state isn't
-        shown yet."""
+        """Show a snapshot of backend state, or a decision it waits for."""
         match event:
             case SettingsChanged(settings=settings, model_choices=choices):
                 self._show_settings(settings, choices)
@@ -836,8 +846,8 @@ class OrbitApp(App[None], inherit_bindings=False):
         | UsageChanged
         | SessionStateChanged,
     ) -> None:
-        """Show the verification steps' progress, whether review is paused, proposed steps, or
-        usage limits; a session's state isn't shown until the session picker shows it."""
+        """Show the verification steps' progress, whether review is paused, proposed steps, usage
+        limits, or a session's state, which the session picker shows."""
         if isinstance(event, VerificationChanged):
             self._verification.show(event.steps, event.title)
         elif isinstance(event, ReviewStatus):
@@ -846,6 +856,8 @@ class OrbitApp(App[None], inherit_bindings=False):
             self._proposals.show(event)
         elif isinstance(event, UsageChanged):
             self._usage.show(event)
+        else:
+            self._sessions.follow_state(event)
 
     async def _decide(self, proposal: ChecksProposed, decision: DecideProposal) -> None:
         """Note the user's ``decision`` on ``proposal`` in the conversation and send it."""

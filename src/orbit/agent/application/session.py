@@ -182,9 +182,9 @@ class AgentSession:
     tells the time, ``new_id`` makes its id and ``name`` names it (by the time, if none). The
     user can open another saved session, or a new one, in its place: one opened has its saved
     settings, but for those ``pinned``, by field name, which keep the ``settings`` given here.
-    With ``pick_session``, the saved sessions are listed after ``Welcome``, for the user to
-    pick one; until they do, the session open is a new one, and what orbit adds to it carries
-    over into the one picked; they're listed after the notices.
+    With ``pick_session``, the user picks a saved session from their frontend's picker; until
+    they do, the session open is a new one, and what orbit adds to it carries over into the one
+    picked.
 
     When a write to the store fails, the session halts: the agents running, the planner's turn,
     the reviews and the startup check are cancelled, an ``ErrorOccurred`` coded
@@ -231,7 +231,6 @@ class AgentSession:
         waiting_on = lock if self._read_only else None
         self._takeover = Takeover(waiting_on, lambda event: self._events.put(event), lock_retry)
         self._settings = SessionSettings(settings or Settings(), pinned, model_choices)
-        self._pick_session = pick_session
         self._storage = storage
         halt_hooks = HaltHooks(
             lambda: self._events.stop_log(self._keeper.id), self._stop_work, self._retry_storage
@@ -373,7 +372,6 @@ class AgentSession:
             self._no_steps,
             self._startup_notes,
             self._leftovers,
-            self._list_at_startup if self._pick_session else None,
             self._start_background,
             lambda: self._closing,
         )
@@ -701,10 +699,6 @@ class AgentSession:
     def _no_steps(self) -> bool:
         """Whether verification is on with no steps to verify tasks."""
         return self._verifier is not None and not self._verifier.step_names
-
-    async def _list_at_startup(self) -> None:
-        """List the saved sessions for the user to pick one."""
-        await self._switcher.list_sessions("startup")
 
     async def _leftovers(self) -> list[str]:
         """Notes on the work earlier runs left in the coder's tree."""

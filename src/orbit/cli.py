@@ -255,8 +255,8 @@ def chat(
     """Start an interactive agent session.
 
     At startup, pick a saved session or start a new one (or start one with --new); ctrl+p
-    switches later. With --connect, or when an orbit serve is running for the workspace
-    (unless --local), show the session it has open instead.
+    picks again later. With --connect, or when an orbit serve is running for the workspace
+    (unless --local), join it instead, the picker offering to resume the session it has open.
 
     In the app: h/j/k/l move between windows; i jumps to the prompt, which talks to
     the planner, whose proposals wait on the task list as drafts, and ctrl+s stops the run;
@@ -287,7 +287,7 @@ def chat(
         backend = _Backend(model, tools, verify, worktree, review, usage, new, name, owner, lock)
         build, store = _backend(backend, root, state, user_config, pick_session=not backend.fresh)
         session = ThreadedSession(build, _thread_context(profile))
-        _launch_with(OrbitApp(session), profile, store)
+        _launch_with(OrbitApp(session, pick=not backend.fresh), profile, store)
 
 
 @contextmanager
@@ -413,7 +413,7 @@ def _connected_app(url: str, token_file: Path, opening: NewSession | None) -> Or
         typer.echo(str(exc), err=True)
         raise typer.Exit(2) from None
     client = WebSocketSession(url, token, token_file)
-    return OrbitApp(client, client, opening)
+    return OrbitApp(client, client, opening, pick=opening is None)
 
 
 def _backend(
