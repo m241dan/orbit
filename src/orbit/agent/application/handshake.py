@@ -54,6 +54,10 @@ class Handshake:
     """Opens a stream with the frontend from ``parts``, having its greeting, from ``Welcome`` on,
     ``greet`` the frontend alone and the events it missed ``resend`` in their envelopes.
 
+    The session's live events it :meth:`deliver`\\s while the frontend is being caught up are
+    held, and resent after ``Welcome`` and, if it catches up on what it missed, after those, so
+    it sees them in order.
+
     Nothing but ``Hello`` is let through until it's answered with ``Welcome``; a second one is
     refused, and one of another protocol version ends the stream.
     """
@@ -68,6 +72,7 @@ class Handshake:
         self._greet = greet
         self._resend = resend
         self._listening = False
+        self._held: list[EventEnvelope] | None = None  # None while live events aren't held.
         self._welcomed = False
         self._greeted = False
         self._incompatible = False  # A Hello was refused: nothing more is published.
@@ -87,6 +92,19 @@ class Handshake:
         """Whether the session's events reach the frontend: from the moment what it missed is
         read, so none falls between those and the live ones, if a ``Hello`` is welcomed."""
         return self._listening
+
+    @property
+    def held(self) -> int:
+        """How many live events are held until the frontend is caught up."""
+        return len(self._held or ())
+
+    def deliver(self, envelope: EventEnvelope) -> None:
+        """Resend ``envelope``, a live event of the session, or hold it while the frontend is
+        being caught up."""
+        if self._held is None:
+            self._resend(envelope)
+        else:
+            self._held.append(envelope)
 
     @property
     def ended(self) -> bool:
@@ -116,25 +134,43 @@ class Handshake:
             raise Refused(INCOMPATIBLE, message)
         catalog = await self._parts.catalog()  # Before Welcome, so its failure refuses Hello.
         missed = await self._listen(hello.since)  # Before Welcome, which comes after them.
-        self._welcomed = True
-        await self._greet(Welcome(command_id=command_id, server_version=__version__))
+        await self._welcome(command_id, missed is None)
         try:
             for step in self._steps(catalog, missed):
                 await self._attempt(step)
         finally:  # A sender cancelled meanwhile mustn't keep the background from starting.
+            self._release()
             self._greeted = True
             if not self._parts.closing():
                 self._parts.start()
 
+    async def _welcome(self, command_id: str, snapshot: bool) -> None:
+        """Welcome the frontend that sent ``Hello`` as ``command_id``, resending the live events
+        held at once if it's to have a ``snapshot``, which reflects them or comes before those
+        after them."""
+        self._welcomed = True
+        await self._greet(Welcome(command_id=command_id, server_version=__version__))
+        if snapshot:
+            self._release()
+
     async def _listen(self, since: int | None) -> Sequence[EventEnvelope] | None:
         """Have the session's events reach the frontend from now on, and return those it missed
-        since ``since``, as :meth:`_missed` does; they stop reaching it if those fail."""
+        since ``since``, as :meth:`_missed` does, holding them meanwhile; they stop reaching it,
+        and those held are dropped, if those fail."""
         self._listening = True
+        self._held = []
         try:
             return await self._missed(since)
         except BaseException:
             self._listening = False
+            self._held = None
             raise
+
+    def _release(self) -> None:
+        """Resend the live events held, if any, and stop holding them."""
+        held, self._held = self._held or [], None
+        for envelope in held:
+            self._resend(envelope)
 
     async def _missed(self, since: int | None) -> Sequence[EventEnvelope] | None:
         """The events the frontend missed since ``since``, if it gave one and can catch up on
@@ -143,7 +179,8 @@ class Handshake:
 
     async def _publish(self, catalog: Catalog, missed: Sequence[EventEnvelope] | None) -> None:
         """Publish ``catalog``, the latest usage, if any was fetched, and the events ``missed``
-        in their envelopes, or, with none to catch up on, a snapshot of the session."""
+        in their envelopes, then the live events held, or, with none to catch up on, a snapshot
+        of the session."""
         parts = self._parts
         await self._greet(catalog)
         latest = parts.latest_usage()
@@ -154,6 +191,7 @@ class Handshake:
             return
         for envelope in missed:
             self._resend(envelope)
+        self._release()
 
     def _steps(
         self, catalog: Catalog, missed: Sequence[EventEnvelope] | None

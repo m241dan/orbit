@@ -115,7 +115,7 @@ class Connections:
             return
         for connection in tuple(self._open):
             if connection.listening and self._sees(connection, envelope.session):
-                connection.receive(envelope)
+                connection.deliver(envelope)
 
     def _sees(self, connection: "SessionConnection", session: str | None) -> bool:
         """Whether the events of ``session``, or those of none, reach ``connection``."""
@@ -154,7 +154,8 @@ class SessionConnection:
     It views the open session, whichever that is, until :meth:`attach` attaches it to another.
     What answers a ``Hello``, its greeting unlogged, and the outcome of any command before one
     is welcomed, or while it views a session that isn't open, reaches this connection alone. The
-    stream holds at most :data:`QUEUE_LIMIT` events unread; one more closes the connection as
+    stream, with the live events held while it's being caught up, holds at most
+    :data:`QUEUE_LIMIT` events unread; one more closes the connection as
     :data:`TOO_FAR_BEHIND`, and the session and its other connections carry on.
     """
 
@@ -248,6 +249,16 @@ class SessionConnection:
         connection alone, unlogged, as another connection replaying the log mustn't get it."""
         self.receive(self._parts.stamp(event, logged=False))
 
+    def deliver(self, envelope: EventEnvelope) -> None:
+        """Queue ``envelope``, a live event of the session, for the stream, or have the
+        handshake hold it while the frontend is being caught up; closes the connection as too far
+        behind when the stream and the handshake hold too many events unread between them. Only
+        a listening connection is delivered to."""
+        if self._queue.qsize() + self._handshake.held >= QUEUE_LIMIT:
+            self._drop()
+            return
+        self._handshake.deliver(envelope)
+
     def receive(self, envelope: EventEnvelope) -> None:
         """Queue ``envelope`` for the stream, unless it has ended; closes the connection as too
         far behind when the stream holds too many events unread."""
@@ -256,8 +267,12 @@ class SessionConnection:
         try:
             self._queue.put_nowait(envelope)
         except asyncio.QueueFull:
-            self._dropped = ConnectionDropped(TOO_FAR_BEHIND)
-            self._finish(immediate=True)
+            self._drop()
+
+    def _drop(self) -> None:
+        """Close the connection as too far behind."""
+        self._dropped = ConnectionDropped(TOO_FAR_BEHIND)
+        self._finish(immediate=True)
 
     async def events(self) -> AsyncIterator[EventEnvelope]:
         """The events reaching this connection, ending once it's closed, or failing with

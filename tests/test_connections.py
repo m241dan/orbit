@@ -28,6 +28,7 @@ from orbit.protocol import (
     ErrorOccurred,
     Event,
     EventEnvelope,
+    Hello,
     History,
     HistoryPage,
     Notice,
@@ -44,11 +45,13 @@ from tests.agent_fakes import (
     FakeStore,
     FakeTree,
     Steps,
+    Ticks,
     agent_exited,
     events_until,
     publish,
     session_for,
 )
+from tests.test_replay import OPEN, notice, store_with
 from tests.test_startup_check import checked
 from tests.test_usage_monitor import LIMITS, Source
 
@@ -74,13 +77,18 @@ async def everything(connection: SessionConnection) -> list[Event]:
 
 async def taken(connection: SessionConnection) -> list[Event]:
     """What reached ``connection`` until nothing more comes for a moment."""
-    events: list[Event] = []
+    return [envelope.payload for envelope in await taken_envelopes(connection)]
+
+
+async def taken_envelopes(connection: SessionConnection) -> list[EventEnvelope]:
+    """The envelopes that reached ``connection`` until nothing more comes for a moment."""
+    envelopes: list[EventEnvelope] = []
     stream = connection.events()
     try:
         while True:
-            events.append((await asyncio.wait_for(anext(stream), 0.05)).payload)
+            envelopes.append(await asyncio.wait_for(anext(stream), 0.05))
     except TimeoutError:
-        return events
+        return envelopes
 
 
 def welcomes(events: list[Event]) -> list[Welcome]:
@@ -330,3 +338,63 @@ async def test_a_greetings_notices_are_not_logged() -> None:
     await session.close()
 
     assert notices([e.payload for e in transcript]) == [Notice(message="logged")]
+
+
+LIVE = Notice(message="live")
+
+
+async def rejoined(store: FakeStore, since: int, live: Sequence[Event]) -> SessionConnection:
+    """A connection to a session over ``store`` that has said Hello with ``since``, the ``live``
+    events published while what it missed was being read."""
+    session = AgentSession(store=store, clock=Ticks(), new_id=lambda: OPEN)
+    read = session._greeting.missed
+
+    async def slow(seen: int) -> Sequence[EventEnvelope] | None:
+        missed = await read(seen)
+        for event in live:
+            await publish(session, event)
+        return missed
+
+    session._greeting = replace(session._greeting, missed=slow)
+    connection = session.connect()
+    hello = Hello(client="orbit-tests", protocol_version=HELLO.protocol_version, since=since)
+    await say(connection, "rejoin", hello)
+    return connection
+
+
+def after_catalog(envelopes: list[EventEnvelope]) -> list[EventEnvelope]:
+    """The envelopes after the first ``Catalog`` among ``envelopes``."""
+    payloads = [envelope.payload for envelope in envelopes]
+    return envelopes[[type(p) for p in payloads].index(Catalog) + 1 :]
+
+
+async def test_events_published_while_catching_up_follow_the_ones_resent() -> None:
+    store = store_with(*(notice(seq) for seq in range(10, 21)))
+    connection = await rejoined(store, 15, [LIVE])
+
+    envelopes = await taken_envelopes(connection)
+
+    assert isinstance(envelopes[0].payload, Welcome)
+    rest = after_catalog(envelopes)
+    assert [e.payload for e in rest[:6]] == [n.payload for n in map(notice, range(16, 21))] + [LIVE]
+    seqs = [e.seq for e in rest]
+    assert seqs == sorted(set(seqs))
+
+
+async def test_events_published_while_finding_a_snapshot_is_needed_follow_welcome() -> None:
+    store = store_with(*(notice(seq, "other") for seq in range(1, 16)))
+    connection = await rejoined(store, 15, [LIVE])
+
+    events = await taken(connection)
+
+    assert isinstance(events[0], Welcome)
+    assert LIVE in events and Snapshot in [type(e) for e in events]
+
+
+async def test_a_connection_whose_held_events_overflow_is_closed_as_too_far_behind() -> None:
+    store = store_with(*(notice(seq) for seq in range(10, 21)))
+    live = [Notice(message=str(n)) for n in range(QUEUE_LIMIT + 1)]
+    connection = await rejoined(store, 15, live)
+
+    with pytest.raises(ConnectionDropped, match=TOO_FAR_BEHIND):
+        await everything(connection)
