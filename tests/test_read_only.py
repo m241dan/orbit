@@ -80,6 +80,28 @@ async def test_a_session_owning_the_repository_isnt_read_only() -> None:
     await session.close()
 
 
+LEFTOVER = "1 snapshot worktree left in .git/orbit by earlier runs."
+
+
+async def greeting_notes(session: AgentSession) -> list[str]:
+    """The notices ``session`` greets its frontend with, once its startup work has settled."""
+    await greeted(session)
+    await asyncio.sleep(0.05)
+    notes = [e.message for e in queued(session) if isinstance(e, Notice)]
+    await session.close()
+    return notes
+
+
+async def test_a_read_only_session_publishes_no_leftovers_as_the_owner_may_be_using_them() -> None:
+    session, _, _ = session_for(owner=OWNER, tree=FakeTree(leftovers=(LEFTOVER,)))
+    assert await greeting_notes(session) == [read_only_note(OWNER)]
+
+
+async def test_a_session_owning_the_repository_publishes_its_leftovers() -> None:
+    session, _, _ = session_for(tree=FakeTree(leftovers=(LEFTOVER,)))
+    assert await greeting_notes(session) == [LEFTOVER]
+
+
 async def test_work_asked_of_a_read_only_session_is_accepted_and_queued_not_run() -> None:
     session, _, launcher = session_for(claims_done, owner=OWNER, tree=FakeTree(), review=True)
     await send(session, AddTask(task=TaskSpec(prompt="Add a flag.")))

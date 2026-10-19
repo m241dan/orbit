@@ -199,11 +199,12 @@ class AgentSession:
     With an ``owner``, another orbit owns the repository and this one is read-only: its
     ``Catalog`` and ``Snapshot`` say so, a notice naming the owner comes first among the
     startup notes, ``RunTasks`` and ``FireTrigger`` are accepted and queued rather than run, and
-    no work starts by itself: neither the startup check nor reviews run. Given the repository's
-    ``lock``, it's tried every ``lock_retry`` seconds from the first ``Welcome``; once it's
-    free, it's held and offered with ``OwnershipOffered``. ``TakeOwnership`` answers: taking it
-    publishes ``OwnershipTaken`` and a notice, then runs the work queued, in order; declining it
-    lets the lock go and tries it again later.
+    no work starts by itself: neither the startup check nor reviews run. It notes no leftovers,
+    since only the owner can tell its own running work from what earlier runs left. Given the
+    repository's ``lock``, it's tried every ``lock_retry`` seconds from the first ``Welcome``;
+    once it's free, it's held and offered with ``OwnershipOffered``. ``TakeOwnership`` answers:
+    taking it publishes ``OwnershipTaken`` and a notice, then runs the work queued, in order;
+    declining it lets the lock go and tries it again later.
     """
 
     def __init__(
@@ -703,8 +704,9 @@ class AgentSession:
         return self._verifier is not None and not self._verifier.step_names
 
     async def _leftovers(self) -> list[str]:
-        """Notes on the work earlier runs left in the coder's tree."""
-        tree = self._desk.agents.tree if self._desk else None
+        """Notes on the work earlier runs left in the coder's tree; none while read-only, as
+        the owner's live work would look left over."""
+        tree = self._desk.agents.tree if self._desk and not self._read_only else None
         return await tree.leftovers() if tree else []
 
     async def _snapshot(self, last_active: datetime | None = None) -> Snapshot:
