@@ -235,6 +235,7 @@ async def test_with_the_state_directory_unwritable_events_go_to_the_repository(
     store.append_failure = "disk full"
     repository = tmp_path / "repo" / ".git" / "orbit"
     session, _, _ = session_for(store=store, fallback=FallbackFiles(unwritable, "w1", repository))
+    await send(session, AddTask(task=TASK))  # Saved, so closing it keeps its events.
     await publish(session, Notice(message="lost?"))
     error = await halt_error(session)
     store.append_failure = None

@@ -35,6 +35,12 @@ def _by_session(queued: Sequence[tuple[str, EventEnvelope]]) -> dict[str, list[E
 Queued = list[tuple[str, EventEnvelope]]
 """Envelopes, each with its session's id."""
 
+
+def _without(queued: Queued, session_id: str) -> Queued:
+    """``queued`` but for the envelopes of the session ``session_id``."""
+    return [(session, envelope) for session, envelope in queued if session != session_id]
+
+
 Failed = Callable[[RuntimeError], None]
 """Told that an append failed with the error given."""
 
@@ -94,7 +100,9 @@ class LogWriter:
     A failed append, or :meth:`stop`, stops the appending: the envelopes not appended, and every
     one added from then on, go to the ``overflow``'s fallback instead (nowhere without one), and
     a failed append is told to its ``failed``. Those envelopes are still read back as still to
-    be written, until :meth:`resume` appends them and appending carries on."""
+    be written, until :meth:`resume` appends them and appending carries on. A session forgotten
+    meanwhile has its envelopes not in the log dropped instead, and its events deleted from the
+    log once it resumes."""
 
     def __init__(
         self, log: EventLog, publish: Publish, log_bytes: int = 0, overflow: Overflow = _NO_OVERFLOW
@@ -107,6 +115,7 @@ class LogWriter:
         self._forgets = ReportedOnce(publish)
         self._queued: Queued = []
         self._forgetting: list[str] = []  # The sessions whose events to delete, once written.
+        self._held: list[str] = []  # Those forgotten while stopped, to delete once resumed.
         self._writing: Queued = []  # Taken from the queue to write.
         self._diverted: Queued = []  # Sent to the fallback, as the log can't take them.
         self._places: dict[str, str | None] = {}  # Each session's fallback file, if written.
@@ -219,8 +228,8 @@ class LogWriter:
         """Append to the log again, once stopped: the envelopes the fallback took, then those
         queued, in ``seq`` order, one append per session. Once that works, the fallback files are
         removed and appending carries on; returns the spans of the envelopes no fallback took,
-        which are lost. Returns the error when an append fails, and stays stopped, as it does
-        when cancelled."""
+        which are lost, and the sessions forgotten meanwhile have their events deleted after.
+        Returns the error when an append fails, and stays stopped, as it does when cancelled."""
         if not self._stopped:
             return []
         async with self._diverting:
@@ -233,6 +242,13 @@ class LogWriter:
             spans = lost_spans(self._lost, seqs)
             await self._settle()
         return spans
+
+    def _release(self) -> None:
+        """Have the writer delete the events of the sessions forgotten while stopped."""
+        held, self._held = self._held, []
+        if held:
+            self._forgetting[:0] = held
+            self._wake()
 
     async def _append_taken(self, parked: Queued, queued: Queued) -> RuntimeError | None:
         """Append ``parked`` and ``queued``, taken from the queue, as :meth:`_append_whole`
@@ -271,6 +287,7 @@ class LogWriter:
         self._diverted = [(s, e) for s, e in self._diverted if e.seq not in settled]
         self._places, self._parked, self._lost = {}, set(), set()
         self._stopped = False
+        self._release()
 
     async def close(self) -> None:
         """Write what's queued, then stop the writer; cancelled, it stops at once, an append in
@@ -302,7 +319,29 @@ class LogWriter:
                 await self._append(self._writing)
         self._writing = []
         for session_id in forgetting:
-            await self._forgets.attempt(self._log.forget(session_id))
+            await self._forget(session_id)
+
+    async def _forget(self, session_id: str) -> None:
+        """Delete the events of the session ``session_id`` from the log; once stopped, drop
+        those not in it instead, and delete the rest once resumed."""
+        async with self._diverting:
+            if self._stopped:
+                await self._drop(session_id)
+                self._held.append(session_id)
+                return
+        await self._forgets.attempt(self._log.forget(session_id))
+
+    async def _drop(self, session_id: str) -> None:
+        """Drop the envelopes of the session ``session_id`` that aren't in the log, sent to the
+        fallback or queued, and remove its fallback file."""
+        dropped = {envelope.seq for envelope in self._unwritten(session_id)}
+        self._diverted = _without(self._diverted, session_id)
+        self._queued = _without(self._queued, session_id)
+        self._parked -= dropped
+        self._lost -= dropped
+        self._places.pop(session_id, None)
+        if self._fallback is not None:
+            await self._fallback.remove(session_id)
 
     async def _append(self, queued: Queued) -> None:
         """Append ``queued`` to the log, one append per session; on a failed append, or once
