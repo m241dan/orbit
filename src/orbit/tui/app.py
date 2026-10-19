@@ -160,6 +160,7 @@ class OrbitApp(App[None], inherit_bindings=False):
     DetailPane:focus { border-top: heavy $accent; }
     #storage-halt { color: $error; padding: 0 1; display: none; }
     #link-status { color: $warning; padding: 0 1; display: none; }
+    #viewing { color: $warning; padding: 0 1; display: none; }
     """
     BINDINGS: ClassVar[list[BindingType]] = [
         # Priority, so it beats the prompt's own ctrl+c (copy).
@@ -240,6 +241,7 @@ class OrbitApp(App[None], inherit_bindings=False):
                 yield Transcript(id="transcript")
                 yield Static(id="storage-halt")
                 yield Static(id="link-status")
+                yield Static(id="viewing")
                 yield ChatPrompt(
                     placeholder="Press i to talk to the planner, esc to stop typing", id="prompt"
                 )
@@ -270,6 +272,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         self._side = self.query_one("#side")
         self._halt_status = self.query_one("#storage-halt", Static)
         self._link_status = self.query_one("#link-status", Static)
+        self._viewing = self.query_one("#viewing", Static)
         # Read through, so a clock set later still times the conversation.
         self._feed = ConversationFeed(
             self._transcript, self._tabs, self._task_list, self._verification, lambda: self.clock()
@@ -399,6 +402,8 @@ class OrbitApp(App[None], inherit_bindings=False):
             self._transcript.enter_list_mode()
         elif self._selected == "detail":
             self._transcript.detail.enter_scroll_mode()
+        elif self._selected == "prompt":  # Its viewing mark, while the session is a view.
+            self._sessions.offer()
 
     def action_release_cursor(self) -> None:
         """With the conversation selected, let go of its held cursor; with its detail pane
@@ -757,6 +762,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         attached = self._sessions.attached_session
         if attached is not None:
             self._transcript.show_session(attached.name)
+        self._show_viewing()
         if self._pick:
             self._pick = False
             self._sessions.open("resume" if self._link is not None else "pick")
@@ -798,13 +804,21 @@ class OrbitApp(App[None], inherit_bindings=False):
         # set after, as the transcript's turns count theirs.
         self._feed.replace((envelope.payload for envelope in snapshot.transcript), snapshot.agents)
         self._pager.follow(snapshot)
-        self._sessions.attach(snapshot.session.id)
         self._open_session(snapshot.session)
+        self._sessions.view(snapshot)
+        self._show_viewing()
         self._prompt.show_read_only(snapshot.read_only)
         if snapshot.storage_halt is None:
             self._halt.lifted()
         else:
             self._halt.halted(snapshot.storage_halt)
+
+    def _show_viewing(self) -> None:
+        """Mark the prompt while the session viewed isn't the active one, or hide the mark."""
+        mark = self._sessions.mark
+        line = self._viewing
+        line.update(mark or "")
+        line.display = mark is not None
 
     def _render_state(
         self,

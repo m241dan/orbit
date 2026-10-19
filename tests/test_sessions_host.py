@@ -8,11 +8,20 @@ from orbit.protocol import (
     Attach,
     Catalog,
     NewSession,
+    SessionRef,
     SessionStateChanged,
     SessionSummary,
+    Snapshot,
     WorkspaceEntry,
 )
-from orbit.tui.sessions import SessionChange, SessionChoice, SessionsHost, SessionsScreen
+from orbit.tui.sessions import (
+    ActivationScreen,
+    SessionChange,
+    SessionChoice,
+    SessionsHost,
+    SessionsScreen,
+)
+from tests.test_tui import opened
 
 OLD = SessionSummary(id="old", name="auth rework")
 NOW = SessionSummary(id="now", name="today", current=True, active=True, viewers=1)
@@ -37,6 +46,9 @@ class Host(App[None]):
         self.sent.append(command)
         return command.type not in self.failing
 
+    def activation_screens(self) -> list[ActivationScreen]:
+        return [screen for screen in self.screen_stack if isinstance(screen, ActivationScreen)]
+
     def sessions_screens(self) -> list[SessionsScreen]:
         return [screen for screen in self.screen_stack if isinstance(screen, SessionsScreen)]
 
@@ -51,7 +63,7 @@ def test_a_catalog_lists_its_sessions_the_active_one_viewed() -> None:
 
 def test_a_snapshot_says_which_session_is_viewed_over_the_catalog() -> None:
     host = Host().host
-    host.attach("old")
+    host.view(opened(OLD))
     host.follow(catalog(NOW, OLD))
     assert host.attached_session == OLD
 
@@ -132,3 +144,67 @@ async def test_a_command_that_fails_to_send_stops_those_after_it() -> None:
         app.screen.dismiss((Attach(session="old"), ActivateSession(session="old")))
         await pilot.pause()
         assert app.sent == [Attach(session="old")]
+
+
+def view(summary: SessionSummary) -> Snapshot:
+    """A read-only view of ``summary``'s session, while ``today`` is the active one."""
+    update = {"active": False, "open_session": SessionRef(id="now", name="today")}
+    return opened(summary).model_copy(update=update)
+
+
+def test_a_view_marks_the_session_and_a_live_snapshot_clears_the_mark() -> None:
+    host = Host().host
+    host.view(view(OLD))
+    assert not host.live
+    assert host.mark == "viewing auth rework, not the active session (enter to switch)"
+    host.view(opened(OLD))
+    assert host.live
+    assert host.open_session is None
+    assert host.mark is None
+
+
+async def test_a_live_session_is_offered_nothing() -> None:
+    app = Host()
+    async with app.run_test() as pilot:
+        app.host.view(opened(NOW))
+        app.host.offer()
+        await pilot.pause()
+        assert app.activation_screens() == []
+
+
+async def test_a_view_naming_no_active_session_is_offered_nothing() -> None:
+    app = Host()
+    async with app.run_test() as pilot:
+        app.host.view(opened(OLD).model_copy(update={"active": False}))
+        app.host.offer()
+        await pilot.pause()
+        assert app.activation_screens() == []
+
+
+async def test_offering_twice_shows_one_offer() -> None:
+    app = Host()
+    async with app.run_test() as pilot:
+        app.host.view(view(OLD))
+        app.host.offer()
+        app.host.offer()
+        await pilot.pause()
+        [screen] = app.activation_screens()
+        assert app.host.offered is screen
+        screen.dismiss(False)
+        await pilot.pause()
+        assert app.host.offered is None
+        assert app.sent == []
+
+
+async def test_a_view_picked_that_failed_to_send_is_offered_nothing() -> None:
+    app = Host()
+    app.failing.add("attach")
+    async with app.run_test() as pilot:
+        app.host.follow(catalog(NOW, OLD))
+        app.host.open()
+        await pilot.pause()
+        app.screen.dismiss((Attach(session="old"),))
+        await pilot.pause()
+        app.host.view(view(OLD))
+        await pilot.pause()
+        assert app.activation_screens() == []

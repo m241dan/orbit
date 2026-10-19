@@ -1,7 +1,7 @@
 """The modal where the user picks a saved session to view or activate, or starts a new one."""
 
 from collections.abc import Awaitable, Callable, Sequence
-from typing import ClassVar, Literal
+from typing import Any, ClassVar, Literal
 
 from rich.text import Text
 from textual import on
@@ -9,7 +9,7 @@ from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
 from textual.containers import Vertical
 from textual.screen import ModalScreen
-from textual.widgets import Input, OptionList
+from textual.widgets import Input, OptionList, Static
 
 from orbit.protocol import (
     ActivateSession,
@@ -18,15 +18,22 @@ from orbit.protocol import (
     DeleteSession,
     NewSession,
     RenameSession,
+    SessionRef,
     SessionStateChanged,
     SessionSummary,
+    Snapshot,
 )
 from orbit.tui.view.sessions import (
+    ACTIVATE_CHOICE,
+    ACTIVATION_TITLE,
     DELETE_TITLE,
     DELETE_YES,
     NAME_PLACEHOLDER,
     NEW_SESSION_LABEL,
     SESSIONS_TITLE,
+    activation_choices,
+    activation_message,
+    active_running,
     can_delete,
     can_open,
     delete_message,
@@ -34,6 +41,8 @@ from orbit.tui.view.sessions import (
     picker_sessions,
     session_label,
     sessions_hint,
+    viewed_only,
+    viewing_mark,
     with_state,
 )
 from orbit.tui.widgets import ConfirmScreen
@@ -233,28 +242,95 @@ class SessionsScreen(ModalScreen[tuple[SessionChoice, ...]]):
         return sessions_hint(startup=self.startup, naming=naming, renaming=renaming is not None)
 
 
-Chosen = Callable[[tuple[SessionChoice, ...] | None], Awaitable[None]]
-Push = Callable[[SessionsScreen, Chosen], object]
+class ActivationScreen(ModalScreen[bool]):
+    """Says ``message`` about the session viewed read-only and offers ``choices``, the first
+    preselected; dismisses with True on making it the active session, False on just looking
+    or escape."""
+
+    AUTO_FOCUS = "OptionList"
+    DEFAULT_CSS = """
+    ActivationScreen { align: center middle; }
+    ActivationScreen > Vertical {
+        width: 70;
+        max-width: 90%;
+        height: auto;
+        border: round $accent;
+        padding: 0 1;
+    }
+    ActivationScreen OptionList { height: auto; border: none; }
+    """
+    BINDINGS: ClassVar[list[BindingType]] = [
+        Binding("escape", "just_look", show=False),
+        Binding("j", "move('down')", show=False),
+        Binding("k", "move('up')", show=False),
+    ]
+
+    def __init__(self, message: str, choices: Sequence[str]) -> None:
+        super().__init__()
+        self.message = message
+        self.choices = tuple(choices)
+
+    def compose(self) -> ComposeResult:
+        with Vertical() as box:
+            box.border_title = ACTIVATION_TITLE
+            yield Static(Text(self.message), id="activation-message")
+            yield OptionList(*self.choices)
+
+    def on_mount(self) -> None:
+        self.query_one(OptionList).highlighted = 0
+
+    @on(OptionList.OptionSelected)
+    def _picked(self, event: OptionList.OptionSelected) -> None:
+        self.dismiss(self.choices[event.option_index] == ACTIVATE_CHOICE)
+
+    def action_move(self, direction: str) -> None:
+        options = self.query_one(OptionList)
+        if direction == "down":
+            options.action_cursor_down()
+        else:
+            options.action_cursor_up()
+
+    def action_just_look(self) -> None:
+        self.dismiss(False)
+
+
+Push = Callable[[ModalScreen[Any], Callable[[Any], Awaitable[None]]], object]
+"""Shows a modal screen, calling back with what it dismisses with."""
 Send = Callable[[SessionChoice | SessionChange], Awaitable[bool]]
 """Sends a session command to the backend, returning whether it was sent."""
 
 
 class SessionsHost:
     """Keeps the sessions the latest ``Catalog`` lists, as ``SessionStateChanged`` changes them,
-    and the one this frontend views; shows them with ``push`` when asked, refreshing the picker
-    while it's shown. ``send`` takes the user's choice and their changes to saved sessions."""
+    and the one this frontend views, live or read-only; shows them with ``push`` when asked,
+    refreshing the picker while it's shown, and offers to make a session viewed read-only the
+    active one. ``send`` takes the user's choice and their changes to saved sessions."""
 
     def __init__(self, push: Push, send: Send) -> None:
         self._push = push
         self._send = send
         self.sessions: tuple[SessionSummary, ...] = ()
         self.attached: str | None = None  # The session this frontend views, once known.
+        self.live = True  # Whether the session viewed is the active one.
+        self.open_session: SessionRef | None = None  # The active one, while it's another.
+        self._viewed_name = ""  # The session viewed's name, as its snapshot names it.
+        self._offering: str | None = None  # The session picked to view only, until its view.
         self.shown: SessionsScreen | None = None  # The picker shown, if any.
+        self.offered: ActivationScreen | None = None  # The offer to activate shown, if any.
 
     @property
     def attached_session(self) -> SessionSummary | None:
         """The session this frontend views, among those listed; none if it isn't."""
         return next((summary for summary in self.sessions if summary.id == self.attached), None)
+
+    @property
+    def mark(self) -> str | None:
+        """The mark by the prompt while the session viewed isn't the active one, named as the
+        catalog names it, renamed perhaps; none while it's live."""
+        if self.live:
+            return None
+        attached = self.attached_session
+        return viewing_mark(self._viewed_name if attached is None else attached.name)
 
     def follow(self, catalog: Catalog) -> None:
         """List the sessions in ``catalog``; until a snapshot says which one this frontend views,
@@ -269,10 +345,33 @@ class SessionsHost:
         self.sessions = with_state(self.sessions, changed)
         self._refresh()
 
-    def attach(self, session: str) -> None:
-        """Note this frontend views ``session``, which a snapshot of it says."""
-        self.attached = session
+    def view(self, snapshot: Snapshot) -> None:
+        """Note this frontend views ``snapshot``'s session, live or read-only; a read-only view
+        of the session just picked to view offers to make it the active one."""
+        session = snapshot.session
+        offering, self._offering = self._offering == session.id, None
+        self.attached, self.live, self._viewed_name = session.id, snapshot.active, session.name
+        self.open_session = None if snapshot.active else snapshot.open_session
         self._refresh()
+        if offering:
+            self.offer()
+
+    def offer(self) -> None:
+        """Offer to make the session viewed the active one, or say the active one runs, unless
+        it's live, the active one isn't known or the offer is shown already."""
+        viewed, active = self.attached, self.open_session
+        if viewed is None or active is None or self.offered is not None:
+            return
+        running = active_running(self.sessions)
+        message = activation_message(self._viewed_name, active.name, running=running)
+
+        async def answered(activate: bool | None) -> None:
+            self.offered = None
+            if activate:
+                await self._send(ActivateSession(session=viewed))
+
+        self.offered = ActivationScreen(message, activation_choices(running=running))
+        self._push(self.offered, answered)
 
     def open(self, startup: StartupPick | None = None) -> None:
         """Let the user pick a session or start a new one, unless the picker is shown already; at
@@ -282,9 +381,12 @@ class SessionsHost:
 
         async def chosen(choice: tuple[SessionChoice, ...] | None) -> None:
             self.shown = None
+            # Before sending, as the view may come back before sending returns.
+            self._offering = viewed_only(choice or (), self.sessions)
             # Refusals come back as errors, shown like any other.
             for command in choice or ():
                 if not await self._send(command):
+                    self._offering = None
                     return
 
         self.shown = SessionsScreen(self.sessions, self.attached, self._send, startup)

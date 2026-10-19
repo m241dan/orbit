@@ -8,6 +8,7 @@ from rich.text import Text
 from orbit.protocol import (
     ActivateSession,
     Attach,
+    NewSession,
     SessionStateChanged,
     SessionSummary,
     TaskStatus,
@@ -30,6 +31,9 @@ LIST_HINT = "j/k move · enter open · r rename · x delete · esc close"
 STARTUP_HINT = "j/k move · enter open · r rename · x delete · esc quit"
 NAME_HINT = "enter start · esc back"
 RENAME_HINT = "enter rename · esc back"
+ACTIVATION_TITLE = "Not the active session"
+ACTIVATE_CHOICE = "Make this the active session"
+JUST_LOOK_CHOICE = "Just look"
 
 # The order a session's task counts are shown in: finished work first, then what's still to do.
 COUNT_ORDER: tuple[TaskStatus, ...] = (
@@ -85,6 +89,19 @@ def picked_commands(
     if picked.active or not _free(sessions, attached):
         return (attach,)
     return (attach, ActivateSession(session=picked.id))
+
+
+def viewed_only(
+    choice: Sequence[Attach | ActivateSession | NewSession], sessions: Sequence[SessionSummary]
+) -> str | None:
+    """The session ``choice`` views without activating it, if it views one that isn't the
+    active session among ``sessions``; none otherwise."""
+    match tuple(choice):
+        case (Attach(session=session),):
+            active = any(summary.id == session and summary.active for summary in sessions)
+            return None if active else session
+        case _:
+            return None
 
 
 def _free(sessions: Sequence[SessionSummary], attached: str | None) -> bool:
@@ -176,3 +193,28 @@ def sessions_hint(*, startup: bool, naming: bool, renaming: bool) -> str:
     if naming:
         return RENAME_HINT if renaming else NAME_HINT
     return STARTUP_HINT if startup else LIST_HINT
+
+
+def viewing_mark(name: str) -> str:
+    """The mark by the prompt while this frontend views the session ``name``, which isn't the
+    active one."""
+    return f"viewing {name}, not the active session (enter to switch)"
+
+
+def active_running(sessions: Sequence[SessionSummary]) -> bool:
+    """Whether the active session among ``sessions`` runs work."""
+    return any(summary.active and summary.state == "running" for summary in sessions)
+
+
+def activation_message(viewed: str, open_name: str, *, running: bool) -> str:
+    """What the prompt to make the session ``viewed`` the active one says, while the session
+    ``open_name`` is, and is ``running`` or idle."""
+    if running:
+        return f"{open_name} is running; you can switch once it's idle."
+    return f"{viewed} is a read-only view; {open_name} is the active session, which runs work."
+
+
+def activation_choices(*, running: bool) -> tuple[str, ...]:
+    """What the prompt offers: making the session viewed the active one unless the active one is
+    ``running``, then just looking."""
+    return (JUST_LOOK_CHOICE,) if running else (ACTIVATE_CHOICE, JUST_LOOK_CHOICE)

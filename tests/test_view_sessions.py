@@ -1,11 +1,23 @@
 from datetime import UTC, datetime, timedelta, timezone
 
-from orbit.protocol import ActivateSession, Attach, SessionStateChanged, SessionSummary, Usage
+from orbit.protocol import (
+    ActivateSession,
+    Attach,
+    NewSession,
+    SessionStateChanged,
+    SessionSummary,
+    Usage,
+)
 from orbit.tui.view.sessions import (
+    ACTIVATE_CHOICE,
+    JUST_LOOK_CHOICE,
     LIST_HINT,
     NAME_HINT,
     RENAME_HINT,
     STARTUP_HINT,
+    activation_choices,
+    activation_message,
+    active_running,
     can_delete,
     can_open,
     delete_message,
@@ -16,6 +28,8 @@ from orbit.tui.view.sessions import (
     sessions_hint,
     state_notes,
     task_counts,
+    viewed_only,
+    viewing_mark,
     with_state,
 )
 
@@ -218,3 +232,46 @@ def test_a_state_change_updates_only_its_session() -> None:
     updated = with_state((NOW, OLD), changed)
     assert updated[0] == NOW
     assert (updated[1].active, updated[1].state, updated[1].viewers) == (True, "running", 3)
+
+
+def test_the_viewing_mark_names_the_session_and_how_to_switch() -> None:
+    assert viewing_mark("auth rework") == (
+        "viewing auth rework, not the active session (enter to switch)"
+    )
+
+
+def test_with_the_active_session_idle_the_prompt_offers_to_activate_or_just_look() -> None:
+    assert activation_choices(running=False) == (ACTIVATE_CHOICE, JUST_LOOK_CHOICE)
+    assert ACTIVATE_CHOICE == "Make this the active session"
+    assert JUST_LOOK_CHOICE == "Just look"
+    assert activation_message("auth rework", "today", running=False) == (
+        "auth rework is a read-only view; today is the active session, which runs work."
+    )
+
+
+def test_with_the_active_session_running_the_prompt_only_offers_to_just_look() -> None:
+    assert activation_choices(running=True) == (JUST_LOOK_CHOICE,)
+    assert activation_message("auth rework", "today", running=True) == (
+        "today is running; you can switch once it's idle."
+    )
+
+
+def test_the_active_session_runs_when_its_state_says_so() -> None:
+    idle = SessionSummary(id="s", name="today", active=True)
+    running = idle.model_copy(update={"state": "running"})
+    other = SessionSummary(id="o", name="auth rework", state="running")
+    assert active_running((other, running))
+    assert not active_running((other, idle))
+    assert not active_running(())
+
+
+def test_attaching_alone_to_an_inactive_session_views_it_only() -> None:
+    sessions = (
+        SessionSummary(id="now", name="today", active=True),
+        SessionSummary(id="o", name="x"),
+    )
+    assert viewed_only((Attach(session="o"),), sessions) == "o"
+    assert viewed_only((Attach(session="now"),), sessions) is None
+    assert viewed_only((Attach(session="o"), ActivateSession(session="o")), sessions) is None
+    assert viewed_only((NewSession(),), sessions) is None
+    assert viewed_only((), sessions) is None

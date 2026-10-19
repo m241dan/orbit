@@ -69,6 +69,7 @@ In the app:
 | `enter` | On the conversation's detail pane: activate it (`j`/`k` scroll it, `y` copies its call's whole output, `esc` leaves with the pane still open) |
 | `enter` | On the task list: activate and hold it (`j`/`k` move, `enter` edits a task or adds one on `+ new task`, `a` accepts a draft, `x` removes a task, `f` shows why a task failed or stopped, `esc` leaves, the list still held) |
 | `enter` | On the agents pane: activate it (`j`/`k` move, `c` cancels the highlighted agent's work, `esc` leaves) |
+| `enter` | On the prompt, while viewing a session read-only: ask whether to make it the active session (see [Sessions](#sessions)) |
 | `t` | Hide agents' dim messages, still thinking out loud, in every tab; again, show them (works with the conversation activated too) |
 | `ctrl+b` | Hide the sidebar so the conversation takes the full width (`h`/`j`/`k`/`l` skip its windows meanwhile); again, show it as it was (not while typing) |
 | `ctrl+t` | Jump to the **planner** tab; again, back to the tab you were on |
@@ -137,7 +138,22 @@ and its conversation shows in place of the one you left. Otherwise, while the ac
 work or another frontend views it, picking a session shows it read-only, and what runs stays as it
 was. Switching is refused, with an error saying what to stop, while tasks run, a review runs, the
 planner answers or the startup check runs. Any other frontend that was viewing the session you
-left keeps it, read-only. Opening a session never starts work by
+left keeps it, read-only.
+
+A read-only view shows the session as it was last saved, with its conversation's last events. You
+can browse it, rename or delete it from the picker and page back through its history, but anything
+that would change it or run work, such as a prompt, `ctrl+r` or editing a task, is refused with an
+error naming the active session and how to switch. While you view one, the line above the prompt
+says `viewing <name>, not the active session (enter to switch)`. This is not the prompt title's
+`read-only` mark, which means another orbit owns the repository (see [Owning the
+repository](#owning-the-repository)): each has its own fix, and both can show at once. Picking a
+session that opens read-only asks, in a modal, whether to "Make this the active session" or "Just
+look"; `enter` on the prompt, while it's selected, asks the same. Making it the active one switches
+as picking does, and is refused, with an error, if work started meanwhile; "Just look" or `esc`
+keeps the view. While the active session runs work, the modal says `<name> is running; you can
+switch once it's idle.` and offers only "Just look".
+
+Opening a session never starts work by
 itself: its pending tasks wait for `ctrl+r`. A task that was running or being verified when the
 session was last saved (orbit crashed, say) comes back cancelled, and orbit says how many were
 interrupted. An interrupted review ends as a cancelled one does: if its batch is then due a
