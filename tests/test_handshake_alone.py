@@ -65,9 +65,6 @@ class Parts:
     async def put(self, item: Event) -> None:
         self.log.append(item)
 
-    def put_nowait(self, item: Event) -> None:
-        self.log.append(item)
-
     async def _part(self, name: str) -> None:
         self.log.append(name)
         if name == self.cancel_at:
@@ -113,7 +110,7 @@ class Parts:
             self.start,
             lambda: self.closing,
         )
-        return Handshake(parts, self, self.resend)
+        return Handshake(parts, self.put, self.resend)
 
 
 def hello(protocol_version: int = PROTOCOL_VERSION, since: int | None = None) -> Hello:

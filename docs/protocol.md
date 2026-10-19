@@ -43,7 +43,7 @@ An event travels in an `EventEnvelope`:
   `Snapshot`, `CommandAccepted` and `CommandRefused`), which carry that session's id and are
   never logged. Every event of a session is kept in the store's event log but for
   `CONNECTION_EVENTS` (`Welcome`, `Catalog`, `Snapshot` and `HistoryPage`), which answer one
-  connection.
+  connection, and a connection's greeting (see [The handshake](#the-handshake)).
 - `workspace`, `traceparent` and `tracestate`, as on commands.
 
 ```json
@@ -92,6 +92,10 @@ and the backend's `server_version`. `Welcome` is Hello's outcome: it takes the p
 4. One-off notices, such as the workspace note, a missing verification setup, leftover work or
    notes on a resumed session.
 5. Live events, as things happen.
+
+Steps 1 to 4, and an `ErrorOccurred` coded `internal` for any of them that fails, are the
+connection's greeting: they reach the connection that said `Hello` alone, never the others
+already connected, and aren't logged, so another frontend reconnecting isn't sent them again.
 
 Each frontend shows its own session picker from the Catalog, kept current by
 `SessionStateChanged`; orbit no longer sends `SessionsListed` with `reason="startup"`.

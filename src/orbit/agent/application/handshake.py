@@ -5,7 +5,6 @@ from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 
 from orbit import __version__
-from orbit.agent.application.outbox import EventSink
 from orbit.agent.domain.refusals import Refused
 from orbit.protocol import (
     INCOMPATIBLE,
@@ -14,6 +13,7 @@ from orbit.protocol import (
     PROTOCOL_VERSION,
     Catalog,
     ErrorOccurred,
+    Event,
     EventEnvelope,
     Hello,
     Notice,
@@ -51,8 +51,8 @@ class HandshakeParts:
 
 
 class Handshake:
-    """Opens a stream with the frontend from ``parts``, publishing into ``events`` and having
-    the events the frontend missed ``resend`` in their envelopes.
+    """Opens a stream with the frontend from ``parts``, having its greeting, from ``Welcome`` on,
+    ``greet`` the frontend alone and the events it missed ``resend`` in their envelopes.
 
     Nothing but ``Hello`` is let through until it's answered with ``Welcome``; a second one is
     refused, and one of another protocol version ends the stream.
@@ -61,11 +61,11 @@ class Handshake:
     def __init__(
         self,
         parts: HandshakeParts,
-        events: EventSink,
+        greet: Callable[[Event], Awaitable[None]],
         resend: Callable[[EventEnvelope], None],
     ) -> None:
         self._parts = parts
-        self._events = events
+        self._greet = greet
         self._resend = resend
         self._listening = False
         self._welcomed = False
@@ -117,7 +117,7 @@ class Handshake:
         catalog = await self._parts.catalog()  # Before Welcome, so its failure refuses Hello.
         missed = await self._listen(hello.since)  # Before Welcome, which comes after them.
         self._welcomed = True
-        await self._events.put(Welcome(command_id=command_id, server_version=__version__))
+        await self._greet(Welcome(command_id=command_id, server_version=__version__))
         try:
             for step in self._steps(catalog, missed):
                 await self._attempt(step)
@@ -145,12 +145,12 @@ class Handshake:
         """Publish ``catalog``, the latest usage, if any was fetched, and the events ``missed``
         in their envelopes, or, with none to catch up on, a snapshot of the session."""
         parts = self._parts
-        await self._events.put(catalog)
+        await self._greet(catalog)
         latest = parts.latest_usage()
         if latest is not None:
-            await self._events.put(latest)
+            await self._greet(latest)
         if missed is None:
-            await self._events.put(await parts.snapshot())
+            await self._greet(await parts.snapshot())
             return
         for envelope in missed:
             self._resend(envelope)
@@ -173,18 +173,18 @@ class Handshake:
             await step()
         except Exception as exc:  # Hello has its outcome, Welcome; this mustn't be a second.
             message = f"Orbit failed to finish greeting the frontend: {exc}"
-            await self._events.put(ErrorOccurred(code=INTERNAL, message=message))
+            await self._greet(ErrorOccurred(code=INTERNAL, message=message))
 
     async def _publish_notes(self) -> None:
         """Publish the workspace, if any, that no steps verify tasks, if none do, and the startup
         notes."""
         for note in self._notes():
-            await self._events.put(Notice(message=note))
+            await self._greet(Notice(message=note))
 
     async def _publish_leftovers(self) -> None:
         """Publish the leftovers of earlier runs."""
         for note in await self._parts.leftovers():
-            await self._events.put(Notice(message=note))
+            await self._greet(Notice(message=note))
 
     def _notes(self) -> list[str]:
         """The workspace, if any, that no steps verify tasks, if none do, and the startup notes."""

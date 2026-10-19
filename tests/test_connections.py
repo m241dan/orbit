@@ -1,6 +1,8 @@
 """Several frontends sharing one session, each through a connection of its own."""
 
 import asyncio
+from collections.abc import Sequence
+from dataclasses import replace
 
 import pytest
 
@@ -13,7 +15,9 @@ from orbit.agent.application.connection import (
     SessionConnection,
 )
 from orbit.agent.application.handshake import HELLO_FIRST_MESSAGE
+from orbit.agent.domain.usage import UsageReport
 from orbit.protocol import (
+    INTERNAL,
     INVALID,
     AddTask,
     Catalog,
@@ -21,6 +25,7 @@ from orbit.protocol import (
     CommandAccepted,
     CommandEnvelope,
     CommandRefused,
+    ErrorOccurred,
     Event,
     EventEnvelope,
     History,
@@ -31,10 +36,12 @@ from orbit.protocol import (
     Snapshot,
     TasksChanged,
     TaskSpec,
+    UsageChanged,
     Welcome,
 )
 from tests.agent_fakes import (
     HELLO,
+    FakeStore,
     FakeTree,
     Steps,
     agent_exited,
@@ -43,6 +50,7 @@ from tests.agent_fakes import (
     session_for,
 )
 from tests.test_startup_check import checked
+from tests.test_usage_monitor import LIMITS, Source
 
 TASK = TaskSpec(prompt="Add a flag.", settings=Settings(model="opus"))
 
@@ -267,3 +275,58 @@ async def test_an_event_for_a_closed_connection_is_dropped() -> None:
 
     assert await everything(connection) == []
     await session.close()
+
+
+def greeting(events: list[Event]) -> list[Event]:
+    """The notices, usage and errors among ``events``, which only a greeting sends here."""
+    return [e for e in events if isinstance(e, Notice | UsageChanged | ErrorOccurred)]
+
+
+async def test_a_second_hello_greets_only_the_connection_saying_it() -> None:
+    usage = Source(UsageReport(LIMITS))
+    session = AgentSession(workspace="w", startup_notes=["n"], usage=usage)
+    first = await welcomed(session, "first")
+    seen = await taken(first)
+    while UsageChanged(limits=LIMITS) not in seen:
+        seen += await taken(first)
+
+    second = await welcomed(session, "second")
+
+    assert greeting(await taken(first)) == []
+    assert greeting(await taken(second)) == [
+        UsageChanged(limits=LIMITS),
+        Notice(message="Workspace: w"),
+        Notice(message="n"),
+    ]
+    await session.close()
+
+
+async def test_a_second_hellos_failed_greeting_step_reaches_only_that_connection() -> None:
+    session = AgentSession()
+    first = await welcomed(session, "first")
+    await taken(first)
+
+    async def no_leftovers() -> Sequence[str]:
+        raise RuntimeError("no leftovers")
+
+    session._greeting = replace(session._greeting, leftovers=no_leftovers)
+    second = await welcomed(session, "second")
+
+    message = "Orbit failed to finish greeting the frontend: no leftovers"
+    assert greeting(await taken(second)) == [ErrorOccurred(code=INTERNAL, message=message)]
+    assert greeting(await taken(first)) == []
+    await session.close()
+
+
+async def test_a_greetings_notices_are_not_logged() -> None:
+    session = AgentSession(store=FakeStore(), workspace="w", startup_notes=["n"])
+    first = await welcomed(session, "first")
+    second = await welcomed(session, "second")
+    await taken(first), await taken(second)
+    await publish(session, Notice(message="logged"))
+    await taken(first)
+
+    transcript = await session._events.transcript(session.saved_session.id)
+    await session.close()
+
+    assert notices([e.payload for e in transcript]) == [Notice(message="logged")]

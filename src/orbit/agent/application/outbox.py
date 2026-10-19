@@ -72,14 +72,16 @@ class Outbox:
         """Stamp ``item`` and deliver it."""
         self.put_nowait(item)
 
-    def stamp(self, item: Event, viewed: str | None = None) -> EventEnvelope:
-        """``item`` in its envelope, stamped now, and logged as if published, but not
-        delivered; with ``viewed``, it's stamped as that session's, a session that isn't open,
-        and never logged, as it answers a connection viewing it."""
+    def stamp(
+        self, item: Event, viewed: str | None = None, *, logged: bool = True
+    ) -> EventEnvelope:
+        """``item`` in its envelope, stamped now, and logged as if published, unless not
+        ``logged``, but not delivered; with ``viewed``, it's stamped as that session's, a
+        session that isn't open, and never logged, as it answers a connection viewing it."""
         self._seq += 1
         session = None if isinstance(item, SESSIONLESS_EVENTS) else viewed or self._open()
         envelope = EventEnvelope(seq=self._seq, session=session, payload=item)
-        if session is not None and viewed is None:
+        if session is not None and viewed is None and logged:
             self._log(session, envelope)
         return envelope
 

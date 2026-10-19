@@ -6,6 +6,7 @@ from collections import Counter
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextvars import ContextVar
 from dataclasses import dataclass
+from typing import Protocol
 
 from orbit.agent.application.handshake import Handshake, HandshakeParts
 from orbit.agent.application.outbox import EventSink
@@ -34,6 +35,15 @@ Answer = Callable[[CommandEnvelope, "SessionConnection", Publish], Awaitable[Non
 
 class ConnectionDropped(Exception):
     """Ends the stream of a connection the session closed, for the reason in its message."""
+
+
+class Stamp(Protocol):
+    """Stamps an event without publishing it, as the session it's given, if one is, and logs
+    it, unless it's ``viewed`` or not ``logged``."""
+
+    def __call__(
+        self, item: Event, viewed: str | None = None, *, logged: bool = True
+    ) -> EventEnvelope: ...
 
 
 class Connections:
@@ -125,12 +135,12 @@ _answering: ContextVar["SessionConnection | None"] = ContextVar("answering", def
 class ConnectionParts:
     """What a connection to a session uses: the ``handshake`` parts, the ``events`` the session
     publishes into, ``stamp``, which stamps an event without publishing it, as the session it's
-    given if one is, the ``connections``
-    open to the session, and ``answer``, which handles a command and publishes its outcome."""
+    given if one is, the ``connections`` open to the session, and ``answer``, which handles a
+    command and publishes its outcome."""
 
     handshake: HandshakeParts
     events: EventSink
-    stamp: Callable[[Event, str | None], EventEnvelope]
+    stamp: Stamp
     connections: Connections
     answer: Answer
 
@@ -142,15 +152,15 @@ class SessionConnection:
     Once it's welcomed, the stream gets every event the session publishes of the session it
     views and of none, but for the ``CONNECTION_EVENTS`` answering another connection's command.
     It views the open session, whichever that is, until :meth:`attach` attaches it to another.
-    What answers a ``Hello``, and the outcome of any command before one is welcomed, or while it
-    views a session that isn't open, reaches this connection alone. The
+    What answers a ``Hello``, its greeting unlogged, and the outcome of any command before one
+    is welcomed, or while it views a session that isn't open, reaches this connection alone. The
     stream holds at most :data:`QUEUE_LIMIT` events unread; one more closes the connection as
     :data:`TOO_FAR_BEHIND`, and the session and its other connections carry on.
     """
 
     def __init__(self, parts: ConnectionParts) -> None:
         self._parts = parts
-        self._handshake = Handshake(parts.handshake, parts.events, self.receive)
+        self._handshake = Handshake(parts.handshake, self._greet, self.receive)
         self._queue: asyncio.Queue[EventEnvelope] = asyncio.Queue(QUEUE_LIMIT)
         self._dropped: ConnectionDropped | None = None
         self._ended = False
@@ -232,6 +242,11 @@ class SessionConnection:
         queue it for this connection alone."""
         viewing = self.viewing
         self.receive(self._parts.stamp(event, None if viewing is None else viewing.id))
+
+    async def _greet(self, event: Event) -> None:
+        """Stamp ``event``, a part of this connection's greeting, and queue it for this
+        connection alone, unlogged, as another connection replaying the log mustn't get it."""
+        self.receive(self._parts.stamp(event, logged=False))
 
     def receive(self, envelope: EventEnvelope) -> None:
         """Queue ``envelope`` for the stream, unless it has ended; closes the connection as too
