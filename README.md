@@ -879,9 +879,9 @@ frontend connected. It takes `-C` and the backend flags `chat` has (`--model`, `
 It opens the repository's most recently active saved session that no other orbit has open, or a
 new one when there's none; `--new` or `--name` start a new one. Once listening it prints one line
 with the repository, its URL, whether it owns the repository or is read-only (naming the owner)
-and the token file, then one line as each frontend connects (with the
-name its `Hello` gives and its address) and disconnects, and one as it stops; warnings and errors
-go to stderr. While it runs, `run/<workspace id>.json` in the state directory, readable by you
+and the token file, then one line as each frontend connects (with the name its `Hello` gives and
+its address) and disconnects, and one as it stops; a connection closed without a `Hello`, like the
+probe `orbit chat` makes to find a server, gets no line. Warnings and errors go to stderr. While it runs, `run/<workspace id>.json` in the state directory, readable by you
 alone, holds its URL and process id; it's removed as it stops.
 
 The first `ctrl+c` (or SIGTERM) stops it: it stops accepting frontends (one that arrives then is

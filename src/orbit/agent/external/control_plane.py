@@ -307,4 +307,5 @@ class ControlPlaneServer:
             await conversation.run()
         finally:
             self._open.discard(conversation)
-            self._say(f"{conversation.client or 'A frontend'} disconnected from {peer}.")
+            if conversation.client:
+                self._say(f"{conversation.client} disconnected from {peer}.")

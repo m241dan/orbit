@@ -28,6 +28,7 @@ from orbit.agent.external.control_plane import (
     close_reason,
     ws_url,
 )
+from orbit.client import accepts
 from orbit.protocol import (
     INVALID,
     PROTOCOL_VERSION,
@@ -277,15 +278,26 @@ async def test_the_server_says_as_frontends_connect_and_disconnect() -> None:
             await hello(websocket, "orbit-tui")
             await until(websocket, Snapshot)
             port = websocket.local_address[1]
-        async with frontend(url):
-            pass
-        while len(lines.said) < 3:
+        while len(lines.said) < 2:
             await asyncio.sleep(0.01)
-    assert lines.said[:2] == [
+    assert lines.said == [
         f"orbit-tui connected from 127.0.0.1:{port}.",
         f"orbit-tui disconnected from 127.0.0.1:{port}.",
     ]
-    assert lines.said[2].startswith("A frontend disconnected from 127.0.0.1:")
+
+
+async def test_the_server_says_nothing_of_a_frontend_that_closes_without_a_hello() -> None:
+    lines = Lines()
+    async with serving(lines=lines) as url, frontend(url):
+        pass
+    assert lines.said == []
+
+
+async def test_discoverys_probe_is_accepted_without_the_server_saying_anything() -> None:
+    lines = Lines()
+    async with serving(lines=lines) as url:
+        assert await accepts(url, TOKEN)
+    assert lines.said == []
 
 
 async def claims_done(call: Call) -> TurnEndReason:
