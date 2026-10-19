@@ -512,7 +512,7 @@ def serve(
             not backend.fresh,
             settings,
             _current_token(token_file),
-            RunFile(state, store.workspace_id),
+            None if owner else RunFile(state, store.workspace_id),
             _banner(root, token_file, owner),
             lock,
         )
@@ -610,15 +610,15 @@ def _current_token(token_file: TokenFile) -> Callable[[], str]:
 class _ServeParts:
     """What ``orbit serve`` serves: the session ``build`` makes, with the most recently active
     saved one opened if ``latest``, on the server ``settings`` say, to frontends showing the
-    token ``token`` gives as they connect, saying where it is in ``run_file`` while it does,
-    the ``banner`` it prints once listening, given the server's URL, and the
-    workspace ``lock``, which names the server's URL while it's held."""
+    token ``token`` gives as they connect, saying where it is in ``run_file``, if it owns the
+    repository, while it does, the ``banner`` it prints once listening, given the server's
+    URL, and the workspace ``lock``, which names the server's URL while it's held."""
 
     build: Callable[[], AgentSession]
     latest: bool
     settings: ServerSettings
     token: Callable[[], str]
-    run_file: RunFile
+    run_file: RunFile | None
     banner: Callable[[str], str]
     lock: WorkspaceLock
 
@@ -646,16 +646,17 @@ async def _until_stopped(
     session: AgentSession, server: ControlPlaneServer, parts: _ServeParts, url: str
 ) -> None:
     """Serve ``session`` on ``server``, listening at ``url``, until the first ctrl+c or
-    SIGTERM, then stop it, removing the run file.
+    SIGTERM, then stop it, removing the run file it wrote.
 
     Exits with status 2 if the run file can't be written.
     """
     stopping = asyncio.Event()
     _on_signals(stopping)
-    written = False
+    written: RunFile | None = None
     try:
-        _write_run_file(parts.run_file, url)
-        written = True
+        if parts.run_file is not None:
+            _write_run_file(parts.run_file, url)
+            written = parts.run_file
         parts.lock.announce(url)
         typer.echo(parts.banner(url))
         await stopping.wait()
@@ -664,8 +665,8 @@ async def _until_stopped(
             await server.stop(session.close)
         finally:
             # One that couldn't be written may not be removable either.
-            if written:
-                parts.run_file.remove()
+            if written is not None:
+                written.remove()
 
 
 def _write_run_file(run_file: RunFile, url: str) -> None:

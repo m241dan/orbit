@@ -3,6 +3,7 @@
 import asyncio
 import json
 import os
+import queue
 import signal
 import socket
 import stat
@@ -18,7 +19,8 @@ from websockets.exceptions import ConnectionClosed, InvalidStatus
 from websockets.sync.client import ClientConnection, connect
 
 from orbit import cli
-from orbit.agent import TokenFile, WorkspaceLock, WorkspaceOwner
+from orbit.agent import ControlPlaneServer, RunFile, TokenFile, WorkspaceLock, WorkspaceOwner
+from orbit.agent.external.sqlite_store import find_workspace_id
 from orbit.cli import app
 from orbit.protocol import (
     PROTOCOL_VERSION,
@@ -73,6 +75,7 @@ class Frontend:
     state: Path
     config_dir: Path
     work: Callable[[ClientConnection], list[Event]] = lambda websocket: []
+    listening: Callable[[Path], dict[str, object]] = lambda state: _run_file(state)
     run_file: dict[str, object] = field(default_factory=dict)
     events: list[Event] = field(default_factory=list)
     close: tuple[int | None, str | None] = (None, None)
@@ -83,7 +86,7 @@ class Frontend:
         return thread
 
     def _run(self) -> None:
-        self.run_file = _run_file(self.state)
+        self.run_file = self.listening(self.state)
         token = (self.config_dir / "token").read_text().strip()
         url = str(self.run_file["url"])
         with connect(url, additional_headers={"Authorization": f"Bearer {token}"}) as ws:
@@ -208,13 +211,28 @@ def test_serve_names_its_url_in_the_workspace_lock_while_it_owns_the_repository(
     after.close()
 
 
+def _listening_urls(monkeypatch: pytest.MonkeyPatch) -> Callable[[Path], dict[str, object]]:
+    """What gives, once ``orbit serve`` listens, its URL as a run file would, for a serve that
+    writes none."""
+    urls: queue.Queue[str] = queue.Queue()
+    start = ControlPlaneServer.start
+
+    async def recording(server: ControlPlaneServer) -> str:
+        url = await start(server)
+        urls.put(url)
+        return url
+
+    monkeypatch.setattr(ControlPlaneServer, "start", recording)
+    return lambda state: {"url": urls.get(timeout=30)}
+
+
 def test_serve_on_a_repository_another_orbit_owns_is_read_only_naming_it(
-    project: Path, state: Path, config_dir: Path
+    monkeypatch: pytest.MonkeyPatch, project: Path, state: Path, config_dir: Path
 ) -> None:
     owner = WorkspaceLock(project / ".orbit")
     owner.take()
     try:
-        frontend = Frontend(state, config_dir)
+        frontend = Frontend(state, config_dir, listening=_listening_urls(monkeypatch))
         output = served(frontend, "--port", "0")
     finally:
         owner.close()
@@ -226,6 +244,34 @@ def test_serve_on_a_repository_another_orbit_owns_is_read_only_naming_it(
         f"Serving {project} at {url} read-only, as an orbit chat, pid {os.getpid()} owns it;"
         f" frontends show the token in {token}."
     )
+
+
+def test_a_read_only_serve_leaves_the_owners_run_file_as_it_was(
+    monkeypatch: pytest.MonkeyPatch, project: Path, state: Path, config_dir: Path
+) -> None:
+    served(Frontend(state, config_dir), "--port", "0")
+    workspace_id = find_workspace_id(state, str(project))
+    assert workspace_id is not None
+    owners_file = RunFile(state, workspace_id)
+    owners_file.write("ws://127.0.0.1:7433/", 1)
+    before = owners_file.path.read_text()
+    seen: list[str] = []
+
+    def reads_the_run_files(websocket: ClientConnection) -> list[Event]:
+        seen.extend(path.read_text() for path in (state / "run").iterdir())
+        return []
+
+    owner = WorkspaceLock(project / ".orbit")
+    owner.take()
+    try:
+        frontend = Frontend(state, config_dir, reads_the_run_files, _listening_urls(monkeypatch))
+        served(frontend, "--port", "0")
+    finally:
+        owner.close()
+
+    assert seen == [before]
+    assert list((state / "run").iterdir()) == [owners_file.path]
+    assert owners_file.path.read_text() == before
 
 
 def test_serve_takes_its_port_from_the_config_file(state: Path, config_dir: Path) -> None:

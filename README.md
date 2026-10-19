@@ -568,7 +568,7 @@ your checkout out of its way, it doesn't sandbox it.
 | Config files | `.orbit/config.toml` in the repository | the verification steps, setup, roles and limits, committed with your code |
 | User config | `config.toml` in the config directory | your own settings for every repository, such as `[storage]` and `[server]` |
 | The token | `token` in the config directory | what frontends show `orbit serve` to connect (see [Serving the control plane](#serving-the-control-plane)) |
-| Run files | `run/` in the state directory | where each running `orbit serve` listens, by repository |
+| Run files | `run/` in the state directory | where the `orbit serve` that owns each repository listens |
 | Runtime-owned | `~/.claude` | Claude Code's own: your login, read for usage limits, and the agents' conversations |
 
 The state directory is `--state-dir`, else `$ORBIT_STATE_DIR`, else `$XDG_STATE_HOME/orbit`, else
@@ -944,16 +944,16 @@ reconnecting going on behind it; either modal closes once it's connected again. 
 refuses shows a message naming the token file, and the chat quits once it's closed, without
 retrying.
 
-**Finding the server.** Without `--connect`, `orbit chat` looks for an `orbit serve` running for
-its repository, from the run file in the state directory, and connects to it as `--connect` does,
-printing nothing extra: the backend flags stop it with status 2, saying they belong on `orbit
-serve` or call for `--local`, and `--new` and `--name` open a new session once connected. A run
-file whose process is gone, or a server that can't be reached, is ignored, and the chat runs
-in-process as usual. A server found is never bypassed: if it refuses the token, or the token file
-can't be read, the chat stops with status 2, naming the token file. Only servers of the same
-account on the same machine are found this way; for any other, give `--connect` its URL.
-`--local` skips the search and always runs in-process, taking the backend flags; it can't go with
-`--connect`.
+**Finding the server.** Without `--connect`, `orbit chat` looks for the `orbit serve` that owns its
+repository (see [Owning the repository](#owning-the-repository)), from the run file in the state
+directory, and connects to it as `--connect` does, printing nothing extra: the backend flags stop
+it with status 2, saying they belong on `orbit serve` or call for `--local`, and `--new` and
+`--name` open a new session once connected. A run file whose process is gone, or a server that
+can't be reached, is ignored, and the chat runs in-process as usual. A server found is never
+bypassed: if it refuses the token, or the token file can't be read, the chat stops with status 2,
+naming the token file. Only servers of the same account on the same machine are found this way; for
+any other, give `--connect` its URL. `--local` skips the search and always runs in-process, taking
+the backend flags; it can't go with `--connect`.
 
 ### Owning the repository
 
@@ -968,11 +968,12 @@ lock of its own: the server does.
 Any other orbit started on the repository meanwhile is read-only. It opens with a note naming the
 owner, such as "Read-only: an orbit chat, pid 4242 owns this repository. Tasks you run are queued
 until this orbit owns it.", and the prompt's title carries a "read-only" mark. `orbit serve`'s
-first line says so too. Running tasks (`ctrl+r`) and the triggers (`ctrl+g`, `ctrl+e`) are
-accepted and queued, in order, but nothing runs: no task, review or startup check. Those an owning
-orbit would refuse, such as a super review with reviews off, are refused just the same. It notes no
-work left in `.git/orbit` by earlier runs, since what's there may be the owner's running work. The
-planner, the sessions, drafts and settings work as usual. The queue is dropped when the orbit exits.
+first line says so too, and it writes no run file, leaving the owner's for chats to find. Running
+tasks (`ctrl+r`) and the triggers (`ctrl+g`, `ctrl+e`) are accepted and queued, in order, but
+nothing runs: no task, review or startup check. Those an owning orbit would refuse, such as a super
+review with reviews off, are refused just the same. It notes no work left in `.git/orbit` by
+earlier runs, since what's there may be the owner's running work. The planner, the sessions, drafts
+and settings work as usual. The queue is dropped when the orbit exits.
 
 A read-only orbit tries the lock every 5 seconds. Once the owner has gone, it takes the lock and
 asks, once, in a modal: "The repository is free". `y` takes it over: the orbit owns the
