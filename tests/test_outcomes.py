@@ -13,6 +13,7 @@ from orbit.agent.application.planner_seat import (
 )
 from orbit.agent.application.work_turns import CONFIGURING_NOTE, NO_AGENTS_MESSAGE
 from orbit.agent.domain.catalog import LANES, TRIGGERS
+from orbit.agent.domain.sessions import SessionRecord
 from orbit.protocol import (
     BUSY,
     CONFIGURE_CHECKS,
@@ -31,12 +32,14 @@ from orbit.protocol import (
     CommandAccepted,
     CommandEnvelope,
     CommandRefused,
+    DeleteSession,
     ErrorOccurred,
     Event,
     FireTrigger,
     ListSessions,
     Notice,
     RemoveTask,
+    RenameSession,
     ResetConversation,
     RunTasks,
     SendMessage,
@@ -47,6 +50,7 @@ from orbit.protocol import (
 )
 from tests.agent_fakes import (
     HELLO_ID,
+    START,
     Call,
     FakeStore,
     events_until,
@@ -298,6 +302,29 @@ async def test_sessions_that_cannot_be_listed_are_reported_and_listed_as_none() 
     assert ErrorOccurred(code=SAVE_FAILED, message=message) in events
     assert [e.sessions for e in events if isinstance(e, SessionsListed)] == [()]
     assert events[-1] == CommandAccepted(command_id="c19")
+
+
+@pytest.mark.parametrize(
+    "command",
+    [RenameSession(session_id="other", name="Renamed"), DeleteSession(session_id="other")],
+)
+async def test_a_change_while_sessions_cannot_be_listed_reports_it_once_and_is_answered(
+    command: RenameSession | DeleteSession,
+) -> None:
+    store = FakeStore()
+    store.saved = [SessionRecord(id="other", name="other", created=START, last_active=START)]
+    session = AgentSession(store=store, new_id=lambda: "session-1")
+    await greeted(session)
+    store.list_failure = RuntimeError("Couldn't list the sessions in orbit.db: busy")
+    await send_as(session, "c20", command)
+    events = await outcome(session)
+    await session.close()
+
+    message = "Couldn't list the sessions in orbit.db: busy"
+    errors = [e for e in events if isinstance(e, ErrorOccurred)]
+    assert errors == [ErrorOccurred(code=SAVE_FAILED, message=message)]
+    assert [e.sessions for e in events if isinstance(e, SessionsListed)] == [()]
+    assert events[-1] == CommandAccepted(command_id="c20")
 
 
 async def test_a_hello_whose_catalog_fails_is_refused_as_internal_with_no_welcome() -> None:

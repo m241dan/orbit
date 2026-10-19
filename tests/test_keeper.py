@@ -458,8 +458,26 @@ async def test_a_rename_or_delete_while_the_sessions_cannot_be_listed_does_nothi
     keeper, published = keeper_for(store)
     await keeper.rename_saved("other", "Renamed")
     await keeper.delete_saved("other")
-    assert published.errors == [LISTING_FAILED, LISTING_FAILED]
+    assert published.errors == [LISTING_FAILED]
     assert store.last.name == "other" and store.locked == set()
+
+
+async def test_listings_failing_in_a_row_are_reported_once() -> None:
+    keeper, published = keeper_for(unlistable_store_with("other"))
+    assert await keeper.summaries() == ()
+    assert await keeper.summaries() == ()
+    assert published.errors == [LISTING_FAILED]
+
+
+async def test_a_listing_failing_after_one_that_worked_is_reported_again() -> None:
+    store = unlistable_store_with("other")
+    keeper, published = keeper_for(store)
+    await keeper.summaries()
+    store.list_failure = None
+    assert [summary.id for summary in await keeper.summaries()] == ["other"]
+    store.list_failure = RuntimeError(LISTING_FAILED)
+    assert await keeper.summaries() == ()
+    assert published.errors == [LISTING_FAILED, LISTING_FAILED]
 
 
 def forgetting_keeper(store: FakeStore) -> tuple[SessionKeeper, list[str]]:

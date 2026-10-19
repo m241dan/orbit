@@ -10,7 +10,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime
 
-from orbit.agent.application.failures import outcome
+from orbit.agent.application.failures import ReportedOnce, outcome
 from orbit.agent.application.ports import Publish, SessionStore, StoredSession
 from orbit.agent.application.storage_halt import Halting
 from orbit.agent.domain.refusals import Refused
@@ -171,6 +171,7 @@ class SessionKeeper:
     ) -> None:
         self._store = store
         self._publish = publish
+        self._listings = ReportedOnce(publish)
         self._halt = halt
         self._clock = new_sessions.clock
         self._new_id = new_sessions.new_id
@@ -269,7 +270,8 @@ class SessionKeeper:
 
     async def summaries(self) -> tuple[SessionSummary, ...]:
         """The saved sessions, the most recently active first, the one open here marked
-        current; none without a store, or, reported, when they can't be listed."""
+        current; none without a store, or when they can't be listed, the first such failure
+        since a listing worked reported."""
         stored = await self._stored()
         if stored is None:
             return ()
@@ -388,11 +390,12 @@ class SessionKeeper:
         return record_name(session_id, found.record), checked
 
     async def _stored(self) -> list[StoredSession] | None:
-        """The saved sessions, of which there are none without a store; ``None``, reported, if
-        they can't be listed."""
+        """The saved sessions, of which there are none without a store; ``None`` if they can't be
+        listed, the first such failure since a listing worked reported, so one action listing
+        them several times reports it once."""
         if self._store is None:
             return []
-        return await self._reported(self._store.sessions())
+        return await self._listings.value(self._store.sessions())
 
     async def _reread[T](
         self, store: SessionStore, session_id: str, action: _Action[T]
