@@ -510,6 +510,41 @@ async def test_a_forget_made_while_stopped_deletes_the_logged_events_once_resume
     assert log.logged == [] and log.forgotten == ["a"]
 
 
+async def test_closing_a_stopped_writer_after_a_forget_leaves_no_fallback_file_for_it() -> None:
+    log, fallback = FakeStore(), FakeFallback()
+    log.append_failure = "disk full"
+    writer = LogWriter(log, Published(), overflow=Overflow(fallback))
+    writer.add("a", notice(1))
+    writer.add("b", notice(2, "b"))
+    await asyncio.sleep(0.01)
+    assert set(fallback.files) == {"a", "b"}
+
+    writer.forget("a")
+    await writer.close()
+
+    assert fallback.files == {"b": [notice(2, "b")]} and log.forgotten == []
+
+
+async def test_resuming_after_a_forget_appends_the_other_sessions_parked_envelopes() -> None:
+    log, fallback = FakeStore(), FakeFallback()
+    log.append_failure = "disk full"
+    writer = LogWriter(log, Published(), overflow=Overflow(fallback))
+    writer.add("a", notice(1))
+    writer.add("b", notice(2, "b"))
+    await asyncio.sleep(0.01)
+    writer.add("b", notice(3, "b"))
+    writer.add("a", notice(4))
+    writer.forget("a")
+    await asyncio.sleep(0.01)
+    log.append_failure = None
+
+    assert await writer.resume() == []
+    await writer.close()
+    assert log.appends[-1] == ("b", [notice(2, "b"), notice(3, "b")])
+    assert log.logged == [notice(2, "b"), notice(3, "b")] and log.forgotten == ["a"]
+    assert fallback.files == {}
+
+
 async def test_a_writer_closed_forgets_nothing() -> None:
     log = FakeStore()
     writer = LogWriter(log, Published())
