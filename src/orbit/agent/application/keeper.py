@@ -334,7 +334,8 @@ class SessionKeeper:
         """Make the saved session ``session_id`` the one open here, locked, if ``load`` switches
         to its record as read once it's locked; returns what was opened, or none if a store
         problem, reported, kept it from opening. A refusal, its own or ``load``'s, raises
-        :class:`Refused`, with the session's lock let go of."""
+        :class:`Refused`, with the session's lock let go of, as it is if catching up fails or is
+        cancelled."""
         async with self._saving:
             record = await self._claimed(session_id, _OPEN)
             if record is None:
@@ -342,10 +343,10 @@ class SessionKeeper:
             assert self._store is not None  # Only saved sessions are locked to open.
             # Another orbit may have logged the session since this one opened: its events go
             # on from there, counted on before it's the session open and its events are logged.
-            await self._catch_up()
             try:
+                await self._catch_up()
                 load(record)
-            except Refused:
+            except BaseException:
                 await self._release(self._store, record.id)
                 raise
             left = self._become(record.id, record.name, record.created)

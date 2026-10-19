@@ -563,3 +563,25 @@ async def test_opening_a_saved_session_catches_up_on_its_log_once_locked_before_
     await keeper.open("other", loads)
 
     assert caught_up == [("one", {"other"})] and keeper.id == "other"
+
+
+async def test_an_open_cancelled_while_catching_up_lets_go_of_its_lock() -> None:
+    store = FakeStore()
+    store.saved = [SessionRecord(id="other", name="other", created=START, last_active=START)]
+    catching_up = asyncio.Event()
+
+    async def catch_up() -> None:
+        catching_up.set()
+        await asyncio.Event().wait()
+
+    keeper = SessionKeeper(
+        store, Published(), FakeHalt(), NewSessions(Ticks(), lambda: "one", catch_up=catch_up)
+    )
+    opening = asyncio.create_task(keeper.open("other", loads))
+    await catching_up.wait()
+    opening.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await opening
+    assert store.released == ["other"] and store.locked == set()
+    assert keeper.id == "one" and not keeper.used
