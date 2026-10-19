@@ -18,7 +18,7 @@ from orbit.agent.application.ports import (
     StoredSession,
     Workspace,
 )
-from orbit.agent.application.recovery import RecoveryFailed, recover_parked
+from orbit.agent.application.recovery import RecoveryFailed
 from orbit.agent.application.session import AgentSession
 from orbit.agent.application.verifier import Verification
 from orbit.agent.domain.agent_task import Limits
@@ -29,7 +29,6 @@ from orbit.agent.domain.ownership import WorkspaceOwner
 from orbit.agent.domain.roles import Role
 from orbit.agent.domain.server import ServerSettings, is_loopback
 from orbit.agent.domain.storage import StorageSettings
-from orbit.agent.domain.storage_halt import recovered_note
 from orbit.agent.domain.verification import VerificationStep
 from orbit.agent.external.checks import run_step
 from orbit.agent.external.claude_cli import MODEL_ALIASES, ClaudeCliRunner
@@ -41,9 +40,10 @@ from orbit.agent.external.git_tree import GitCoderTree
 from orbit.agent.external.mcp_host import McpHost
 from orbit.agent.external.repository import git_top_level, in_git_work_tree, orbit_dir
 from orbit.agent.external.run_file import RunFile, running_server
-from orbit.agent.external.session_import import ImportBlocked, import_session_files, imported_note
+from orbit.agent.external.session_import import ImportBlocked
 from orbit.agent.external.sqlite_schema import StoreError
 from orbit.agent.external.sqlite_store import SqliteStore
+from orbit.agent.external.store_startup import OpenedStore, open_workspace_store
 from orbit.agent.external.token_file import TokenError, TokenFile
 from orbit.agent.external.usage_api import UsageApi
 from orbit.agent.external.user_config import (
@@ -71,6 +71,7 @@ __all__ = [
     "Limits",
     "ListenFailed",
     "McpHost",
+    "OpenedStore",
     "OrbitConfig",
     "ProposalDecision",
     "ProposalReview",
@@ -94,16 +95,13 @@ __all__ = [
     "WorkspaceLock",
     "WorkspaceOwner",
     "git_top_level",
-    "import_session_files",
-    "imported_note",
     "in_git_work_tree",
     "is_loopback",
+    "open_workspace_store",
     "orbit_dir",
     "read_config",
     "read_server",
     "read_storage",
-    "recover_parked",
-    "recovered_note",
     "resolve_config_dir",
     "resolve_state_dir",
     "run_step",

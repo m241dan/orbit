@@ -22,11 +22,11 @@ from orbit.agent import (
     ClaudeCliRunner,
     ConfigError,
     ControlPlaneServer,
-    FallbackFiles,
     GitCoderTree,
     ImportBlocked,
     ListenFailed,
     McpHost,
+    OpenedStore,
     OrbitConfig,
     RecoveryFailed,
     Role,
@@ -42,16 +42,13 @@ from orbit.agent import (
     WorkspaceLock,
     WorkspaceOwner,
     git_top_level,
-    import_session_files,
-    imported_note,
     in_git_work_tree,
     is_loopback,
+    open_workspace_store,
     orbit_dir,
     read_config,
     read_server,
     read_storage,
-    recover_parked,
-    recovered_note,
     resolve_config_dir,
     resolve_state_dir,
     run_step,
@@ -699,16 +696,7 @@ def _storage(config_dir: Path) -> StorageSettings:
         raise typer.Exit(2) from None
 
 
-@dataclass(frozen=True)
-class _OpenedStore:
-    """The store, the notes on what was imported into it, and the workspace's fallback files."""
-
-    store: SqliteStore
-    notes: list[str]
-    fallback: FallbackFiles
-
-
-def _open_store(state: Path, root: Path) -> _OpenedStore:
+def _open_store(state: Path, root: Path) -> OpenedStore:
     """The store in the ``state`` directory for the workspace at ``root``, with the sessions an
     older orbit saved as files and the events an earlier run parked in fallback files imported,
     the notes on what was imported, and the fallback files.
@@ -717,42 +705,10 @@ def _open_store(state: Path, root: Path) -> _OpenedStore:
     fallback file can't be recovered.
     """
     try:
-        return asyncio.run(_opened_store(state, root))
+        return asyncio.run(open_workspace_store(state, root))
     except (StoreError, ImportBlocked, RecoveryFailed) as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(2) from None
-
-
-async def _opened_store(state: Path, root: Path) -> _OpenedStore:
-    """The store in ``state`` for ``root``, with the old session files and the fallback files
-    imported, the notes on what was imported, and the fallback files, in ``state`` and in the
-    repository; the store is closed if an import fails."""
-    store = await SqliteStore.open(state, str(root))
-    try:
-        fallback = FallbackFiles(state, store.workspace_id, orbit_dir(str(root)))
-        return _OpenedStore(store, await _imported(store, fallback, root), fallback)
-    except BaseException:
-        await store.close()
-        raise
-
-
-async def _imported(store: SqliteStore, fallback: FallbackFiles, root: Path) -> list[str]:
-    """Import into ``store`` the old session files of the workspace at ``root``, then its
-    ``fallback`` files; returns the notes on what was imported."""
-    legacy = orbit_dir(str(root))
-    imported = await import_session_files(store, legacy)
-    notes = [] if imported is None else [imported_note(imported, _shown(legacy, root))]
-    recovered = await recover_parked(fallback, store)
-    return notes + [
-        recovered_note(file.count, str(_shown(Path(file.path), root)))
-        for file in recovered
-        if file.count
-    ]
-
-
-def _shown(path: Path, root: Path) -> Path:
-    """``path`` as shown to the user: relative to the workspace at ``root``, if it's inside."""
-    return path.relative_to(root) if path.is_relative_to(root) else path
 
 
 def _verification(config: OrbitConfig) -> Verification:

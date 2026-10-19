@@ -418,43 +418,6 @@ def test_chat_imports_an_older_orbits_session_files(
     ]
 
 
-def test_chat_imports_old_files_beside_an_earlier_import_to_the_next_free_name(
-    greetings: list[Greeted], repo: Path, state: Path
-) -> None:
-    earlier = legacy_sessions(repo / ".git" / "orbit").rename(
-        repo / ".git" / "orbit" / "sessions.imported"
-    )
-    legacy_sessions(repo / ".git" / "orbit")
-    assert runner.invoke(app, ["chat", "-C", str(repo)]).exit_code == 0
-
-    assert (earlier / "abc.json").exists()
-    assert (repo / ".git" / "orbit" / "sessions.imported-2" / "abc.json").exists()
-    [greeting] = greetings
-    assert greeting.notices[-1].endswith("; the old folder is now sessions.imported-2.")
-
-
-def test_the_import_note_names_a_folder_outside_the_workspace_in_full(
-    launched: list[AgentSession], greetings: list[Greeted], repo: Path, tmp_path: Path
-) -> None:
-    linked = tmp_path / "linked"
-    git(repo, "worktree", "add", "-q", str(linked))
-    legacy_sessions(repo / ".git" / "orbit")
-    assert runner.invoke(app, ["chat", "-C", str(linked), "--no-worktree"]).exit_code == 0
-
-    [greeting] = greetings
-    sessions = repo.resolve() / ".git" / "orbit" / "sessions"
-    assert f"Imported 1 saved session from {sessions}; " in greeting.notices[-1]
-
-
-def test_chat_without_old_session_files_has_no_import_note(
-    greetings: list[Greeted], tmp_path: Path
-) -> None:
-    assert runner.invoke(app, ["chat", "-C", str(tmp_path), "--no-verify"]).exit_code == 0
-
-    [greeting] = greetings
-    assert greeting.notices == [f"Workspace: {tmp_path.resolve()}"]
-
-
 def parked_notice(seq: int) -> EventEnvelope:
     return EventEnvelope(seq=seq, session="s1", payload=Notice(message=f"parked {seq}"))
 
@@ -521,69 +484,6 @@ def test_chat_recovers_parked_events_and_notes_it_after_the_snapshot(
     shown = path.relative_to(tmp_path)  # The state directory is in the workspace here.
     note = f"Recovered 2 events from {shown} into the session's log."
     assert order.notices[note] > order.snapshot
-
-
-def test_a_parked_file_in_the_workspace_is_recovered_and_named_within_it(
-    greetings: list[Greeted], state: Path, tmp_path: Path
-) -> None:
-    path = tmp_path / ".orbit" / "fallback" / "s1.jsonl"
-    path.parent.mkdir(parents=True)
-    path.write_text(f"{encode(parked_notice(1))}\n")
-    assert runner.invoke(app, ["chat", "-C", str(tmp_path)]).exit_code == 0
-
-    assert asyncio.run(logged_in(state, tmp_path.resolve())) == [parked_notice(1)]
-    [greeting] = greetings
-    assert greeting.notices[-1] == (
-        "Recovered 1 event from .orbit/fallback/s1.jsonl into the session's log."
-    )
-
-
-def test_events_recovered_twice_are_stored_once(
-    greetings: list[Greeted], state: Path, tmp_path: Path
-) -> None:
-    park(state, tmp_path, 1, 2)
-    assert runner.invoke(app, ["chat", "-C", str(tmp_path)]).exit_code == 0
-    park(state, tmp_path, 2, 3)
-    assert runner.invoke(app, ["chat", "-C", str(tmp_path)]).exit_code == 0
-
-    logged = asyncio.run(logged_in(state, tmp_path.resolve()))
-    assert logged == [parked_notice(1), parked_notice(2), parked_notice(3)]
-
-
-def test_only_the_events_newly_stored_are_counted_in_the_note(
-    greetings: list[Greeted], state: Path, tmp_path: Path
-) -> None:
-    park(state, tmp_path, 1, 2)
-    assert runner.invoke(app, ["chat", "-C", str(tmp_path)]).exit_code == 0
-    path = park(state, tmp_path, 1, 2, 3)
-    assert runner.invoke(app, ["chat", "-C", str(tmp_path)]).exit_code == 0
-
-    assert not path.exists()
-    shown = path.relative_to(tmp_path)
-    assert greetings[-1].notices[-1] == f"Recovered 1 event from {shown} into the session's log."
-
-
-def test_a_parked_file_whose_events_are_all_stored_is_removed_without_a_note(
-    greetings: list[Greeted], state: Path, tmp_path: Path
-) -> None:
-    park(state, tmp_path, 1, 2)
-    assert runner.invoke(app, ["chat", "-C", str(tmp_path), "--no-verify"]).exit_code == 0
-    path = park(state, tmp_path, 2, 1)
-    assert runner.invoke(app, ["chat", "-C", str(tmp_path), "--no-verify"]).exit_code == 0
-
-    assert not path.exists()
-    assert greetings[-1].notices == [f"Workspace: {tmp_path.resolve()}"]
-
-
-def test_an_empty_parked_file_is_removed_without_a_note(
-    greetings: list[Greeted], state: Path, tmp_path: Path
-) -> None:
-    path = park(state, tmp_path)
-    assert runner.invoke(app, ["chat", "-C", str(tmp_path), "--no-verify"]).exit_code == 0
-
-    assert not path.exists()
-    [greeting] = greetings
-    assert greeting.notices == [f"Workspace: {tmp_path.resolve()}"]
 
 
 def test_a_parked_file_that_cant_be_read_stops_chat_naming_it(

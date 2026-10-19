@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from orbit.agent import ImportBlocked, import_session_files
+from orbit.agent import ImportBlocked
 from orbit.agent.domain.sessions import (
     SessionRecord,
     Unreadable,
@@ -18,7 +18,7 @@ from orbit.agent.domain.sessions import (
     review_count_json,
 )
 from orbit.agent.external import session_import, sqlite_schema
-from orbit.agent.external.session_import import Imported, imported_note
+from orbit.agent.external.session_import import Imported, import_session_files, imported_note
 from orbit.agent.external.session_locks import SessionLocks
 from orbit.agent.external.sqlite_store import NewRows, SqliteStore
 
