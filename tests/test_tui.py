@@ -230,6 +230,21 @@ async def test_a_refused_message_shows_why_and_frees_the_prompt() -> None:
     assert session.commands[-1] == SendMessage(agent=PLANNER, text="again")
 
 
+async def test_a_refusal_of_an_earlier_message_leaves_the_planner_busy() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        prompt = app.query_one("#prompt", ChatPrompt)
+        await pilot.press("i", *"hi", "enter")
+        [first] = session.envelopes
+        await feed_events(session, pilot, BusyChanged(busy=False, lane="planner"))
+        await pilot.press("i", *"again", "enter")
+        refused = CommandRefused(command_id=first.command_id, code="unknown", message="Late.")
+        await feed_events(session, pilot, refused)
+        assert entries(app)[-1] == ("Late.", "error")
+        assert prompt.border_title == "Prompt · planner · busy"
+
+
 async def test_a_refusal_of_another_command_leaves_the_planner_busy() -> None:
     session = FakeSession()
     app = OrbitApp(session)

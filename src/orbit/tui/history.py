@@ -6,19 +6,20 @@ from orbit.protocol import Command, HistoryPage, Snapshot
 from orbit.tui.conversation import ConversationFeed
 from orbit.tui.transcript import Transcript
 from orbit.tui.view.history import Paging, earlier_request, loading, page_arrived, paging_from
+from orbit.tui.view.outcomes import Awaited
 
 
 class HistoryPager:
     """Asks with ``send`` for the page of events before the oldest the conversation shows,
-    one page at a time, showing in ``transcript`` that it loads, and has ``feed`` show the page
-    above the conversation once it arrives; ``transcript`` shows too when the last page reaches
-    events trimmed from the log."""
+    one page at a time, showing in ``transcript`` that it loads until it arrives or is refused,
+    and has ``feed`` show the page above the conversation once it arrives; ``transcript`` shows
+    too when the last page reaches events trimmed from the log."""
 
     def __init__(
         self,
         transcript: Transcript,
         feed: ConversationFeed,
-        send: Callable[[Command], Awaitable[bool]],
+        send: Callable[[Command, Awaited], Awaitable[bool]],
     ) -> None:
         self._transcript = transcript
         self._feed = feed
@@ -38,12 +39,11 @@ class HistoryPager:
         if request is None:
             return
         self._show_loading(True)
-        if not await self._send(request):
-            self._show_loading(False)
+        await self._send(request, Awaited(refused=self._refused))
 
-    def refused(self) -> None:
-        """Stop waiting for the page asked for, which the backend refused, so it can be asked
-        for again."""
+    def _refused(self) -> None:
+        """Stop waiting for the page asked for, which was refused or not sent, so it can be
+        asked for again."""
         self._show_loading(False)
 
     def show(self, page: HistoryPage) -> None:

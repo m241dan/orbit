@@ -136,6 +136,19 @@ async def test_another_commands_acceptance_keeps_the_halt() -> None:
         assert halt_screens(app) != [] and status(app) == EVENT_LOG_STATUS
 
 
+async def test_an_earlier_try_agains_acceptance_keeps_the_halt() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, HALT)
+        await pilot.press("enter")
+        first = session.envelopes[-1].command_id
+        await pilot.press("enter")
+        assert session.commands == [ResumeStorage(), ResumeStorage()]
+        await feed_events(session, pilot, CommandAccepted(command_id=first))
+        assert halt_screens(app) != [] and status(app) == EVENT_LOG_STATUS
+
+
 async def test_a_refused_try_again_shows_the_new_text() -> None:
     session = FakeSession()
     app = OrbitApp(session)

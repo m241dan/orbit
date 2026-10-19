@@ -48,7 +48,6 @@ from orbit.protocol import (
     Event,
     FireTrigger,
     Hello,
-    History,
     HistoryPage,
     Link,
     LinkState,
@@ -123,6 +122,7 @@ from orbit.tui.view.confirm import (
     TAKE_OVER_YES,
 )
 from orbit.tui.view.events import coalesce
+from orbit.tui.view.outcomes import Awaited, Outcomes, awaiting, settled
 from orbit.tui.view.proposals import decision_entry
 from orbit.tui.view.rules import planner_reset_entry
 from orbit.tui.view.settings import (
@@ -220,12 +220,10 @@ class OrbitApp(App[None], inherit_bindings=False):
         self._model_choices: tuple[str, ...] = ()
         self._proposals = ProposalHost(self.push_screen, self._decide)
         self._sessions = SessionsHost(self.push_screen, self._send)
-        self._message_id: str | None = None  # The command id of the last message sent.
+        self._outcomes = Outcomes()  # What awaits the outcomes of the commands sent.
         # The command ids of the messages and decisions sent, shown already, whose echo isn't.
         self._echoes: set[str] = set()
         self._halt = StorageHaltHost(self.push_screen, self._resume_storage, self._show_halt)
-        self._resume_id: str | None = None  # The command id of the last ResumeStorage sent.
-        self._history_id: str | None = None  # The command id of the last History sent.
         self._link_host = LinkHost(self.push_screen, self.exit, self._show_link, self.set_timer)
         # The actions of the keys whose trigger the last catalog lacks, which are hidden.
         self._missing_triggers: frozenset[str] = frozenset()
@@ -300,7 +298,8 @@ class OrbitApp(App[None], inherit_bindings=False):
         # Busy from now, not from TurnStarted, so a second prompt can't race the turn.
         self._set_busy(PLANNER_LANE, True)
         self._feed.append(text, "prompt", PLANNER)
-        await self._send(SendMessage(agent=PLANNER, text=text))
+        freed = Awaited(refused=lambda: self._set_busy(PLANNER_LANE, False))
+        await self._send(SendMessage(agent=PLANNER, text=text), freed)
 
     def _render_answer(
         self, event: CommandAccepted | CommandRefused | Welcome | MessageSent | ProposalDecided
@@ -321,17 +320,24 @@ class OrbitApp(App[None], inherit_bindings=False):
             self._feed.render(event)
 
     def _render_outcome(self, event: CommandAccepted | CommandRefused | Welcome) -> None:
-        """Show why a command was refused, freeing the planner from a message it refused and the
-        pager from the History it refused; an accepted one, or the Welcome answering Hello,
-        shows nothing."""
+        """Show why a command was refused, doing what awaits its outcome; an accepted one, or
+        the Welcome answering Hello, shows nothing."""
         self._echoes.discard(event.command_id)
-        if isinstance(event, CommandAccepted | Welcome):
+        if isinstance(event, Welcome):
             return
-        if event.command_id == self._message_id:
-            self._set_busy(PLANNER_LANE, False)
-        elif event.command_id == self._history_id:
-            self._pager.refused()
-        self._feed.render(event)
+        self._settle(event.command_id, accepted=isinstance(event, CommandAccepted))
+        if isinstance(event, CommandRefused):
+            self._feed.render(event)
+
+    def _settle(self, command_id: str, accepted: bool) -> None:
+        """Do what awaits ``command_id`` being ``accepted``, or else refused, if anything does."""
+        self._outcomes, awaited = settled(self._outcomes, command_id)
+        if awaited is None:
+            return
+        if accepted:
+            awaited.accepted()
+        else:
+            awaited.refused()
 
     # Window navigation only applies at the top level, when no window is active.
 
@@ -552,43 +558,41 @@ class OrbitApp(App[None], inherit_bindings=False):
         # The display updates when the backend confirms with SettingsChanged.
         await self._send(UpdateSettings(settings=settings))
 
-    async def _send(self, command: Command, failure: str = "Couldn't send the command") -> bool:
+    async def _send(
+        self,
+        command: Command,
+        awaited: Awaited | None = None,
+        failure: str = "Couldn't send the command",
+    ) -> bool:
         """Whether ``command`` was sent to the open session in the default workspace, under a
-        fresh id remembered as :meth:`_remember` does; a failure to send it is shown as
-        :meth:`_unsent` does."""
+        fresh id remembered as :meth:`_remember` does, with ``awaited`` awaiting its outcome;
+        a failure to send it is shown as :meth:`_unsent` does."""
         command_id = uuid4().hex
         self._remember(command, command_id)
+        if awaited is not None:
+            self._outcomes = awaiting(self._outcomes, command_id, command.type, awaited)
         try:
             await self._session.send(CommandEnvelope(command_id=command_id, payload=command))
         except Exception as exc:
-            self._unsent(command, command_id, exc, failure)
+            self._unsent(command_id, exc, failure)
             return False
         return True
 
     def _remember(self, command: Command, command_id: str) -> None:
-        """Remember ``command_id`` for a message, a ResumeStorage or a History, and for a
-        message or decision, whose echo isn't shown."""
-        if isinstance(command, SendMessage):
-            self._message_id = command_id
-        elif isinstance(command, ResumeStorage):
-            self._resume_id = command_id
-        elif isinstance(command, History):
-            self._history_id = command_id
+        """Remember ``command_id`` for a message or decision, whose echo isn't shown."""
         if isinstance(command, SendMessage | DecideProposal):
             self._echoes.add(command_id)
 
-    def _unsent(self, command: Command, command_id: str, exc: Exception, failure: str) -> None:
-        """Show that ``command``, as ``command_id``, wasn't sent for ``exc``: refused while not
-        connected, else failed, after ``failure``; either frees the planner from a message, as
-        a refusal does."""
+    def _unsent(self, command_id: str, exc: Exception, failure: str) -> None:
+        """Show that the command ``command_id`` wasn't sent for ``exc``: refused while not
+        connected, else failed, after ``failure``; either does what awaits its refusal."""
         if isinstance(exc, NotConnected):
             self._render_event(
                 CommandRefused(command_id=command_id, code=INVALID, message=str(exc))
             )
             return
         self._echoes.discard(command_id)
-        if isinstance(command, SendMessage):
-            self._set_busy(PLANNER_LANE, False)
+        self._settle(command_id, accepted=False)
         self._render_event(ErrorOccurred(code=INTERNAL, message=f"{failure}: {exc}"))
 
     @work(exclusive=True, group="events")
@@ -608,7 +612,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         """Whether the Hello opening the session was sent; a failure to send it is shown."""
         return await self._send(
             Hello(client=f"orbit-tui {__version__}", protocol_version=PROTOCOL_VERSION),
-            "The backend failed to start the session",
+            failure="The backend failed to start the session",
         )
 
     async def _open_once_welcomed(self, batch: list[Event]) -> None:
@@ -698,19 +702,17 @@ class OrbitApp(App[None], inherit_bindings=False):
         self.push_screen(offer, answered)
 
     def _follow_halt(self, event: Event) -> None:
-        """Show the halt a storage error or a command refused for it reports, or lift it
-        once trying again is accepted."""
+        """Show the halt a storage error or a command refused for it reports."""
         match event:
             case (
                 ErrorOccurred(code=code, message=message)
                 | CommandRefused(code=code, message=message)
             ) if code == STORAGE_FAILED:
                 self._halt.halted(message)
-            case CommandAccepted(command_id=command_id) if command_id == self._resume_id:
-                self._halt.lifted()
 
     async def _resume_storage(self) -> None:
-        await self._send(ResumeStorage())
+        # Trying again lifts the halt once accepted.
+        await self._send(ResumeStorage(), Awaited(accepted=self._halt.lifted))
 
     def _show_halt(self, status: str | None) -> None:
         """Show ``status`` by the prompt, or hide the line when there's none."""
