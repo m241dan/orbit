@@ -738,7 +738,7 @@ class AgentSession:
             transcript=transcript,
             storage_halt=self._halt.message,
             read_only=self._read_only,
-            ownership_offered=self._takeover.open,
+            ownership_offered=self._takeover.offered,
             open_session=self._views.open_session(),
             viewers=self._states.of(self._keeper.id).viewers,
         )

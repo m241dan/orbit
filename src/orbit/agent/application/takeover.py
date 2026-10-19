@@ -40,7 +40,7 @@ class Takeover:
         self._offered = False
 
     @property
-    def open(self) -> bool:
+    def offered(self) -> bool:
         """Whether an offer is open, waiting for its answer."""
         return self._offered
 
