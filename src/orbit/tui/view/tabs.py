@@ -131,6 +131,17 @@ def _own_roles(agents: Iterable[RunningAgent]) -> dict[str, str]:
     return {agent.agent_id: agent.role for agent in agents if agent.role not in ROLE_TABS}
 
 
+def stopped_callers(
+    events: Iterable[Event], agents: Iterable[RunningAgent]
+) -> tuple[str | None, ...]:
+    """The agents that start tool calls or requests to orbit in ``events`` but aren't among
+    the ``agents`` running, so none of their calls can still run; the planner's agent is among
+    them from its first turn until the session ends."""
+    running = {agent.agent_id for agent in agents}
+    callers = (e.agent_id for e in events if isinstance(e, ToolCallStarted | AgentRequest))
+    return tuple(dict.fromkeys(agent for agent in callers if agent not in running))
+
+
 def track_roles(roles: Mapping[str, str], event: Event) -> Mapping[str, str]:
     """Which pinned role each agent started in, by agent id, after ``event``."""
     if isinstance(event, AgentStarted) and event.role in ROLE_TABS:

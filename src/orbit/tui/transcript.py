@@ -167,13 +167,18 @@ class Transcript(Vertical):
 
     def prepend(self, add: Callable[[], None]) -> None:
         """Have the entries ``add`` adds come before every entry, in every log, each log's
-        cursor kept on its entry."""
+        cursor kept on its entry; their calls still running show as having no result, since
+        their results, if any, are already shown."""
         logs = list(self._logs.values())
         for log in logs:
             log.begin_earlier()
         add()
-        for log in logs:
-            log.end_earlier()
+        for log in self._logs.values():
+            # A log ``add`` opened holds only earlier entries.
+            if log in logs:
+                log.end_earlier()
+            else:
+                log.end_running_calls()
         self._keep_ticking()
 
     def show_loading(self, loading: bool) -> None:

@@ -4,6 +4,7 @@ from orbit.protocol import (
     PLANNER,
     PLANNER_LANE,
     WORK_LANE,
+    AgentRequest,
     AgentStarted,
     AssistantMessage,
     BusyChanged,
@@ -224,6 +225,64 @@ async def test_a_running_agent_started_before_the_transcript_gets_its_roles_tab(
         [call] = [entry for entry in app.query_one(Transcript).entries("coder") if entry.call]
         assert call.call is not None and call.call.status == "passed"
         assert texts(app, "agent-3") == []
+
+
+CRASHED_CALL = CODER_CALL[:2]
+"""A coder's call whose orbit crashed before it finished: no result, and no exit."""
+
+
+def call_statuses(app: OrbitApp, key: str | None) -> list[str]:
+    """The statuses of the calls and requests under the tab keyed ``key``."""
+    return [e.call.status for e in app.query_one(Transcript).entries(key) if e.call is not None]
+
+
+async def test_a_replayed_call_of_an_agent_not_running_shows_no_result() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    crashed = SNAPSHOT.model_copy(update={"agents": (), "transcript": logged(*CRASHED_CALL)})
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, crashed)
+        assert call_statuses(app, "coder") == ["no_result"]
+        assert call_statuses(app, None) == ["no_result"]
+        assert not app.query_one(Transcript).ticking
+
+
+async def test_a_replayed_call_of_a_running_agent_stays_running() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    running = SNAPSHOT.model_copy(update={"transcript": logged(*CRASHED_CALL)})
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, running)
+        assert call_statuses(app, "coder") == ["running"]
+        assert app.query_one(Transcript).ticking
+
+
+async def test_a_replayed_request_of_an_agent_not_running_shows_no_result() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    request = AgentRequest(agent_id="agent-3", request_id="r1", tool="get_task", arguments={})
+    crashed = SNAPSHOT.model_copy(
+        update={"agents": (), "transcript": logged(CODER_CALL[0], request)}
+    )
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, crashed)
+        assert call_statuses(app, "coder") == ["no_result"]
+        assert not app.query_one(Transcript).ticking
+
+
+async def test_a_replayed_call_of_the_planner_listed_running_stays_running() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    planner = RunningAgent(agent_id="agent-1", role=PLANNER, task_id="plan")
+    started = AgentStarted(agent_id="agent-1", role=PLANNER, task_id="plan")
+    call = ToolCallStarted(turn_id="p1", agent_id="agent-1", call_id="y", name="Read", arguments={})
+    busy = SNAPSHOT.model_copy(
+        update={"agents": (planner, CODER), "transcript": logged(started, call, *CRASHED_CALL)}
+    )
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, busy)
+        assert call_statuses(app, PLANNER) == ["running"]
+        assert call_statuses(app, "coder") == ["running"]
 
 
 async def test_a_snapshots_transcript_shows_a_reset_and_a_refusal_as_they_were_shown() -> None:

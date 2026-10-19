@@ -32,6 +32,7 @@ from orbit.tui.view.tabs import (
     mark_tab_unread,
     reset_tabs,
     running_roles,
+    stopped_callers,
     tab_key,
     tab_labels,
     task_tab_key,
@@ -308,3 +309,14 @@ def test_following_running_agents_keeps_their_open_tabs_and_opens_the_missing() 
         kept,
         ConversationTab("agent-6", "linter"),
     )
+
+
+def test_stopped_callers_are_those_calling_in_the_events_but_not_running_once_each() -> None:
+    def call(agent: str) -> ToolCallStarted:
+        return ToolCallStarted(turn_id="t", agent_id=agent, call_id="c", name="Read", arguments={})
+
+    request = AgentRequest(agent_id="agent-2", request_id="r", tool="get_task", arguments={})
+    events: list[Event] = [call("agent-1"), request, call("agent-3"), call("agent-1")]
+    events.append(Notice(message="n"))
+    running = (RunningAgent(agent_id="agent-3", role="coder", task_id="1"),)
+    assert stopped_callers(events, running) == ("agent-1", "agent-2")

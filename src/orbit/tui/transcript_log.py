@@ -209,8 +209,7 @@ class TranscriptLog(ListPane):
         assert self._later is not None  # Only ever after begin_earlier.
         entries, collapsed, calls, held = self._later
         self._later = None
-        for index, call in list(self._calls.items()):
-            self._set_call(index, tool_call_unfinished(call))
+        self.end_running_calls()
         offset = len(self._entries)
         self._entries += entries
         self._collapsed += collapsed
@@ -261,6 +260,11 @@ class TranscriptLog(ListPane):
         for index, call in list(self._calls.items()):
             if self._entries[index].agent == agent and (requests or not call.request):
                 self._set_call(index, tool_call_unfinished(call))
+
+    def end_running_calls(self) -> None:
+        """Show every call and request still running as having no result."""
+        for index, call in list(self._calls.items()):
+            self._set_call(index, tool_call_unfinished(call))
 
     def tick(self) -> None:
         """Turn the spinners: redraw just the entries of running calls."""

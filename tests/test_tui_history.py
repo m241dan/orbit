@@ -362,6 +362,22 @@ async def test_earlier_events_go_under_their_pinned_tabs_their_calls_ended() -> 
         assert not any(log.running for log in app.query(TranscriptLog))
 
 
+async def test_an_earlier_call_under_a_tab_not_shown_yet_is_ended() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    reviewer = AgentStarted(agent_id="agent-5", role="reviewer", task_id="1")
+    call = ToolCallStarted(turn_id="t5", agent_id="agent-5", call_id="y", name="Read", arguments={})
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, snapshot(*logged(501, *notices("c"))))
+        await at_the_top(pilot, 1)
+        await pilot.press("k")
+        await feed_events(session, pilot, page(*logged(1, reviewer, call)))
+
+        [entry] = [e.call for e in app.query_one(Transcript).entries("reviewer") if e.call]
+        assert entry.status == "no_result"
+        assert not app.query_one(Transcript).ticking
+
+
 async def test_the_turn_running_carries_on_after_earlier_events() -> None:
     session = FakeSession()
     app = OrbitApp(session)

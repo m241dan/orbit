@@ -42,6 +42,7 @@ from orbit.tui.view.log import Entry
 from orbit.tui.view.progress import TaskProgress, task_note
 from orbit.tui.view.proposals import decision_entry
 from orbit.tui.view.rules import exit_rule, planner_reset_entry, turn_rule_entry
+from orbit.tui.view.tabs import stopped_callers
 from orbit.tui.view.transcript import (
     AgentNote,
     activity_entry,
@@ -142,15 +143,19 @@ class ConversationFeed:
     def replace(self, events: Iterable[Event], running: Sequence[RunningAgent]) -> None:
         """Show ``events`` in place of the conversation and its running turns, as they were
         shown when they happened, with tabs for the agents ``running``, whose entries go under
-        their pinned roles' tabs even when ``events`` don't hold their start."""
+        their pinned roles' tabs even when ``events`` don't hold their start. The calls and
+        requests of agents not ``running`` show as having no result."""
         self.transcript.clear()
         self.tabs.reset(running)
         self._turns = Turns()
-        for event in events:
+        logged = tuple(events)
+        for event in logged:
             self.tabs.track(event)
             self._show_logged(event)
         # The log may end with agents that never exited, or start after some still running.
         self.tabs.follow(running)
+        for agent in stopped_callers(logged, running):
+            self.transcript.end_tool_calls(agent, requests=True)
 
     def prepend(self, events: Iterable[Event]) -> None:
         """Show ``events``, which came before every event shown, above them, as they were
