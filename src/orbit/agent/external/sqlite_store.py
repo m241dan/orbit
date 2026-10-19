@@ -204,35 +204,20 @@ class SqliteStore:
 
     async def save(self, record: SessionRecord) -> None:
         check_session_id(record.id)
-        try:
-            await self._call(self._save, record)
-        except sqlite3.Error as error:
-            message = f"Couldn't save the session {record.id} to {self._database}: {error}"
-            raise self._failed(message, error) from error
+        await self._write(f"Couldn't save the session {record.id} to", self._save, record)
 
     async def load(self, session_id: str) -> SessionRecord | Unreadable:
         check_session_id(session_id)
-        try:
-            text = await self._call(self._load, session_id)
-        except sqlite3.Error as error:
-            return Unreadable(f"it can't be read from {self._database}: {error}")
-        return Unreadable("it isn't saved") if text is None else parse_record(text)
+        return await self._read(self._unreadable, self._load, session_id)
 
     async def sessions(self) -> list[StoredSession]:
-        try:
-            rows = await self._call(self._rows)
-        except sqlite3.Error as error:
-            message = f"Couldn't list the sessions in {self._database}: {error}"
-            raise RuntimeError(message) from error
+        rows = await self._run("Couldn't list the sessions in", self._rows)
         return await asyncio.to_thread(self._listed, rows)
 
     async def delete(self, session_id: str) -> None:
         check_session_id(session_id)
-        try:
-            await self._call(self._delete, session_id)
-        except sqlite3.Error as error:
-            message = f"Couldn't delete the session {session_id} from {self._database}: {error}"
-            raise self._failed(message, error) from error
+        message = f"Couldn't delete the session {session_id} from"
+        await self._write(message, self._delete, session_id)
         await self._locks.remove(session_id)
 
     def max_seq(self) -> int:
@@ -241,28 +226,18 @@ class SqliteStore:
         return self._max_seq
 
     async def latest_seq(self) -> int | None:
-        try:
-            return await self._call(self._latest_seq)
-        except sqlite3.Error:
-            return None
+        return await self._read(lambda _: None, self._latest_seq)
 
     async def append(self, session_id: str, envelopes: Sequence[EventEnvelope]) -> int:
         check_session_id(session_id)
-        try:
-            return await self._call(self._append, session_id, envelopes)
-        except sqlite3.Error as error:
-            message = f"Couldn't save the events of the session {session_id} to {self._database}"
-            raise self._failed(f"{message}: {error}", error) from error
+        message = f"Couldn't save the events of the session {session_id} to"
+        return await self._write(message, self._append, session_id, envelopes)
 
     async def recent(self, session_id: str, limit: int) -> list[EventEnvelope]:
         """The last ``limit`` events logged of the session ``session_id``, oldest first, but for
         those of types this orbit doesn't know; none when they can't be read."""
         check_session_id(session_id)
-        try:
-            texts = await self._call(self._recent, session_id, limit)
-        except sqlite3.Error:
-            return []
-        return _decoded(texts)
+        return await self._read(lambda _: [], self._recent, session_id, limit)
 
     async def before(
         self, session_id: str, before_seq: int, limit: int
@@ -271,54 +246,34 @@ class SqliteStore:
         oldest first, but for those of types this orbit doesn't know, and whether earlier ones
         remain. Raises ``RuntimeError`` when they can't be read."""
         check_session_id(session_id)
-        try:
-            texts = await self._call(self._before, session_id, before_seq, limit + 1)
-        except sqlite3.Error as error:
-            message = f"Couldn't read the events of the session {session_id} from"
-            raise RuntimeError(f"{message} {self._database}: {error}") from error
-        return _decoded(texts[:limit]), len(texts) > limit
+        message = f"Couldn't read the events of the session {session_id} from"
+        return await self._run(message, self._before, session_id, before_seq, limit)
 
     async def after(self, session_id: str, after_seq: int) -> list[EventEnvelope] | None:
         """The events logged of the session ``session_id`` after ``after_seq``, oldest first,
         but for those of types this orbit doesn't know; ``None`` when they can't be read."""
         check_session_id(session_id)
-        try:
-            texts = await self._call(self._after, session_id, after_seq)
-        except sqlite3.Error:
-            return None
-        return _decoded(texts)
+        return await self._read(lambda _: None, self._after, session_id, after_seq)
 
     async def bounds(self, session_id: str, since: int) -> LogBounds | None:
         """Where the log of the session ``session_id`` stands in its workspace's, for a frontend
         that saw the events up to ``since``; ``None`` when that can't be read."""
         check_session_id(session_id)
-        try:
-            return await self._call(self._bounds, session_id, since)
-        except sqlite3.Error:
-            return None
+        return await self._read(lambda _: None, self._bounds, session_id, since)
 
     async def trim(self, session_id: str, limit: int, target: int) -> None:
         check_session_id(session_id)
-        try:
-            await self._call(self._trim, session_id, limit, target)
-        except sqlite3.Error as error:
-            message = f"Couldn't trim the events of the session {session_id} in {self._database}"
-            raise RuntimeError(f"{message}: {error}") from error
+        message = f"Couldn't trim the events of the session {session_id} in"
+        await self._run(message, self._trim, session_id, limit, target)
 
     async def trimmed(self, session_id: str) -> bool:
         check_session_id(session_id)
-        try:
-            return await self._call(self._trimmed, session_id)
-        except sqlite3.Error:
-            return False
+        return await self._read(lambda _: False, self._trimmed, session_id)
 
     async def forget(self, session_id: str) -> None:
         check_session_id(session_id)
-        try:
-            await self._call(self._forget, session_id)
-        except sqlite3.Error as error:
-            message = f"Couldn't delete the events of the session {session_id} from"
-            raise RuntimeError(f"{message} {self._database}: {error}") from error
+        message = f"Couldn't delete the events of the session {session_id} from"
+        await self._run(message, self._forget, session_id)
 
     async def acquire(self, session_id: str) -> bool:
         """Lock the session ``session_id`` for this orbit; returns ``False`` when another
@@ -332,18 +287,11 @@ class SqliteStore:
         await self._locks.release(session_id)
 
     async def review_count(self) -> int:
-        try:
-            return await self._call(self._review_count)
-        except sqlite3.Error as error:
-            message = f"Couldn't read the review count from {self._database}: {error}"
-            raise RuntimeError(message) from error
+        return await self._run("Couldn't read the review count from", self._review_count)
 
     async def save_review_count(self, count: int) -> None:
-        try:
-            await self._call(self._save_review_count, count)
-        except sqlite3.Error as error:
-            message = f"Couldn't save the review count to {self._database}: {error}"
-            raise self._failed(message, error) from error
+        message = "Couldn't save the review count to"
+        await self._write(message, self._save_review_count, count)
 
     async def insert_new(
         self,
@@ -369,6 +317,45 @@ class SqliteStore:
         its files, or when the copy fails, leaving ``target`` as it was.
         """
         await self._call(self._backup, target)
+
+    async def _read[*A, T](
+        self, fallback: Callable[[sqlite3.Error], T], function: Callable[[*A], T], *args: *A
+    ) -> T:
+        """What ``function(*args)`` returns, run on the database's thread, or what ``fallback``
+        makes of the error when the database fails."""
+        try:
+            return await self._call(function, *args)
+        except sqlite3.Error as error:
+            return fallback(error)
+
+    async def _write[*A, T](self, message: str, function: Callable[[*A], T], *args: *A) -> T:
+        """What ``function(*args)`` returns, run on the database's thread.
+
+        Raises :class:`StorageFailed`, saying ``message`` and the database, when the database
+        fails.
+        """
+        try:
+            return await self._call(function, *args)
+        except sqlite3.Error as error:
+            raise self._failed(self._message(message, error), error) from error
+
+    async def _run[*A, T](self, message: str, function: Callable[[*A], T], *args: *A) -> T:
+        """What ``function(*args)`` returns, run on the database's thread.
+
+        Raises ``RuntimeError``, saying ``message`` and the database, when the database fails.
+        """
+        try:
+            return await self._call(function, *args)
+        except sqlite3.Error as error:
+            raise RuntimeError(self._message(message, error)) from error
+
+    def _message(self, message: str, error: sqlite3.Error) -> str:
+        """``message``, followed by the database and ``error``."""
+        return f"{message} {self._database}: {error}"
+
+    def _unreadable(self, error: sqlite3.Error) -> Unreadable:
+        """Why a session can't be loaded when the database raised ``error``."""
+        return Unreadable(self._message("it can't be read from", error))
 
     def _failed(self, message: str, error: sqlite3.Error) -> StorageFailed:
         """The failure, saying ``message``, of a write to the database that raised ``error``."""
@@ -457,12 +444,12 @@ class SqliteStore:
         )
         return cursor.rowcount
 
-    def _load(self, session_id: str) -> str | None:
+    def _load(self, session_id: str) -> SessionRecord | Unreadable:
         row = self._db.execute(
             "SELECT record FROM sessions WHERE workspace_id = ? AND id = ?",
             (self._workspace, session_id),
         ).fetchone()
-        return None if row is None else str(row[0])
+        return Unreadable("it isn't saved") if row is None else parse_record(str(row[0]))
 
     def _rows(self) -> list[tuple[str, str]]:
         rows = self._db.execute(
@@ -501,33 +488,38 @@ class SqliteStore:
         )
         return cursor.rowcount > 0
 
-    def _recent(self, session_id: str, limit: int) -> list[str]:
-        """The JSON of the session ``session_id``'s last ``limit`` events, latest first."""
+    def _recent(self, session_id: str, limit: int) -> list[EventEnvelope]:
+        """The session ``session_id``'s last ``limit`` events, oldest first, but for those of
+        types this orbit doesn't know."""
         rows = self._db.execute(
             """SELECT json FROM events WHERE workspace_id = ? AND session_id = ?
             ORDER BY seq DESC LIMIT ?""",
             (self._workspace, session_id, limit),
         )
-        return [str(text) for (text,) in rows]
+        return _decoded([str(text) for (text,) in rows])
 
-    def _before(self, session_id: str, before_seq: int, limit: int) -> list[str]:
-        """The JSON of the session ``session_id``'s last ``limit`` events before ``before_seq``,
-        latest first."""
+    def _before(
+        self, session_id: str, before_seq: int, limit: int
+    ) -> tuple[list[EventEnvelope], bool]:
+        """The session ``session_id``'s last ``limit`` events before ``before_seq``, oldest
+        first, but for those of types this orbit doesn't know, and whether earlier ones remain."""
         rows = self._db.execute(
             """SELECT json FROM events WHERE workspace_id = ? AND session_id = ? AND seq < ?
             ORDER BY seq DESC LIMIT ?""",
-            (self._workspace, session_id, before_seq, limit),
+            (self._workspace, session_id, before_seq, limit + 1),
         )
-        return [str(text) for (text,) in rows]
+        texts = [str(text) for (text,) in rows]
+        return _decoded(texts[:limit]), len(texts) > limit
 
-    def _after(self, session_id: str, after_seq: int) -> list[str]:
-        """The JSON of the session ``session_id``'s events after ``after_seq``, latest first."""
+    def _after(self, session_id: str, after_seq: int) -> list[EventEnvelope]:
+        """The session ``session_id``'s events after ``after_seq``, oldest first, but for those
+        of types this orbit doesn't know."""
         rows = self._db.execute(
             """SELECT json FROM events WHERE workspace_id = ? AND session_id = ? AND seq > ?
             ORDER BY seq DESC""",
             (self._workspace, session_id, after_seq),
         )
-        return [str(text) for (text,) in rows]
+        return _decoded([str(text) for (text,) in rows])
 
     def _trim(self, session_id: str, limit: int, target: int) -> None:
         """Delete the session ``session_id``'s oldest events, if its log is over ``limit``

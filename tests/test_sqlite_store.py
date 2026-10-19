@@ -253,6 +253,52 @@ async def test_a_closed_store_fails_each_call_as_the_port_says(
         await store.save_review_count(1)
 
 
+type StoreCall = Callable[[SqliteStore], Awaitable[object]]
+type Outcome = type[RuntimeError] | Callable[[Path], object]
+
+
+@pytest.mark.parametrize(
+    ("call", "outcome"),
+    [
+        (lambda store: store.save(record()), StorageFailed),
+        (
+            lambda store: store.load("abc"),
+            lambda database: Unreadable(f"it can't be read from {database}: the store is closed"),
+        ),
+        (lambda store: store.sessions(), RuntimeError),
+        (lambda store: store.delete("abc"), StorageFailed),
+        (lambda store: store.latest_seq(), lambda _: None),
+        (lambda store: store.append("abc", [big_notice()]), StorageFailed),
+        (lambda store: store.recent("abc", 10), lambda _: []),
+        (lambda store: store.before("abc", 10, 10), RuntimeError),
+        (lambda store: store.after("abc", 0), lambda _: None),
+        (lambda store: store.bounds("abc", 0), lambda _: None),
+        (lambda store: store.trim("abc", 10, 5), RuntimeError),
+        (lambda store: store.trimmed("abc"), lambda _: False),
+        (lambda store: store.forget("abc"), RuntimeError),
+        (lambda store: store.review_count(), RuntimeError),
+        (lambda store: store.save_review_count(1), StorageFailed),
+    ],
+)
+async def test_each_call_on_a_closed_store_has_its_own_failure(
+    open_store: Opener, state: Path, workspace: Path, call: StoreCall, outcome: Outcome
+) -> None:
+    store = await open_store(workspace)
+    await store.close()
+    if not isinstance(outcome, type):
+        assert await call(store) == outcome(state / "orbit.db")
+        return
+    with pytest.raises(outcome) as raised:
+        await call(store)
+    assert type(raised.value) is outcome
+    assert str(raised.value).endswith(f"{state / 'orbit.db'}: the store is closed")
+    if isinstance(raised.value, StorageFailed):
+        assert (raised.value.database, raised.value.kind) == (
+            str(state / "orbit.db"),
+            StorageErrorKind.UNKNOWN,
+        )
+
+
 async def test_acquiring_after_closing_raises_and_takes_no_lock(
     open_store: Opener, workspace: Path
 ) -> None:
