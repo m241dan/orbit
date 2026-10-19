@@ -404,11 +404,11 @@ def _connected_app(url: str, token_file: Path, opening: NewSession | None) -> Or
         )
         raise typer.Exit(2)
     try:
-        token = read_token(token_file)
+        read_token(token_file)  # The session reads it again for each connection.
     except TokenUnreadable as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(2) from None
-    client = WebSocketSession(url, token, token_file)
+    client = WebSocketSession(url, token_file)
     return OrbitApp(client, client, opening, pick=opening is None)
 
 

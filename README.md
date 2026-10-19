@@ -908,7 +908,10 @@ all and readable by you alone, and says so, naming the file but never the token.
 serve` reads the token for each frontend that connects, so the new one takes effect at once:
 frontends connecting with the old token are refused with HTTP 401, while those already connected
 stay connected. If a token leaks, rotate it, then restart `orbit serve` to drop every connection
-made with it. Copy the new token to your other machines as before, over a trusted channel.
+made with it. An `orbit chat` reads its token file again each time it reconnects, so one connected
+on the server's machine picks up the new token when it reconnects, while a frontend on another
+machine needs the new copy first. Copy the new token to your other machines as before, over a
+trusted channel.
 
 The `[server]` table in your `config.toml` sets where it listens and the largest message either
 way; the flags override it:

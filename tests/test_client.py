@@ -2,7 +2,7 @@
 
 import asyncio
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -42,13 +42,19 @@ from orbit.protocol import (
 )
 
 TOKEN = "the-token"
-TOKEN_FILE = Path("/home/someone/.config/orbit/token")
+TOKEN_FILE = Path("token")  # In the directory each test runs in.
 QUICK = Backoff(first=0.01, most=0.02)
 HELLO = CommandEnvelope(
     command_id="hello", payload=Hello(client="tests", protocol_version=PROTOCOL_VERSION)
 )
 RUN = CommandEnvelope(command_id="run", payload=RunTasks())
 ATTACH = CommandEnvelope(command_id="attach", payload=Attach(session="earlier"))
+
+
+@pytest.fixture(autouse=True)
+def in_tmp_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Run each test in its own directory, where ``TOKEN_FILE`` is written."""
+    monkeypatch.chdir(tmp_path)
 
 
 class FakePlane:
@@ -119,7 +125,8 @@ class States:
 def client(
     url: str, token: str = TOKEN, backoff: Backoff = QUICK
 ) -> tuple[WebSocketSession, States]:
-    session = WebSocketSession(url, token, TOKEN_FILE, backoff)
+    TOKEN_FILE.write_text(f"{token}\n")
+    session = WebSocketSession(url, TOKEN_FILE, backoff)
     states = States()
     session.watch(states)
     return session, states
@@ -338,6 +345,40 @@ async def test_a_refused_token_is_reported_naming_its_file_and_not_retried() -> 
         await session.close()
 
 
+async def test_a_token_still_refused_on_reconnecting_is_reported_naming_its_file() -> None:
+    async with plane() as (fake, url):
+        session, states = client(url)
+        session.events()
+        connection = await fake.connection()
+        fake.status = 401
+        await connection.close(1011, "Oops")
+        refused = await states.until(TokenRefused)
+        assert refused == TokenRefused(f"The control plane refused the token from {TOKEN_FILE}.")
+        await session.close()
+
+
+@pytest.mark.parametrize(
+    ("spoil", "message"),
+    [
+        (lambda path: path.unlink(), f"Can't read the token file {TOKEN_FILE}: "),
+        (lambda path: path.write_text("\n"), f"The token file {TOKEN_FILE} is empty."),
+    ],
+)
+async def test_a_token_file_unreadable_on_reconnecting_is_reported_naming_it(
+    spoil: Callable[[Path], object], message: str
+) -> None:
+    async with plane() as (fake, url):
+        session, states = client(url)
+        session.events()
+        connection = await fake.connection()
+        spoil(TOKEN_FILE)
+        await connection.close(1011, "Oops")
+        refused = await states.until(TokenRefused)
+        assert isinstance(refused, TokenRefused) and refused.message.startswith(message)
+        assert len(fake.headers) == 1
+        await session.close()
+
+
 async def test_closing_ends_the_events_and_stops_reconnecting() -> None:
     async with plane() as (fake, url):
         session, states = client(url)
@@ -383,6 +424,30 @@ async def test_it_talks_to_the_control_plane_server() -> None:
         await session.send(HELLO)
         kinds = [type((await next_event(events)).payload) for _ in range(3)]
         assert kinds[0] is Welcome and Snapshot in kinds
+    finally:
+        await session.close()
+        await server.stop(served.close)
+
+
+async def test_a_rotated_token_file_is_shown_on_reconnecting() -> None:
+    tokens = [TOKEN]
+    served = AgentSession()
+    server = ControlPlaneServer(
+        served, lambda: tokens[-1], ServerSettings(port=0), lambda line: None
+    )
+    url = await server.start()
+    session, states = client(url)
+    events = session.events()
+    try:
+        await session.send(HELLO)
+        assert type((await next_event(events)).payload) is Welcome
+        TOKEN_FILE.write_text("the-new-token\n")
+        tokens.append("the-new-token")
+        assert session._websocket is not None
+        await session._websocket.close()
+        while type((await next_event(events)).payload) is not Welcome:
+            pass
+        assert [type(state) for state in states.seen] == [Connected, Reconnecting, Connected]
     finally:
         await session.close()
         await server.stop(served.close)

@@ -16,10 +16,9 @@ URL = "ws://127.0.0.1:7433/"
 
 @dataclass
 class FakeClient:
-    """The WebSocket session built: where to, with which token, read from which file."""
+    """The WebSocket session built: where to, shown the token read from which file."""
 
     url: str
-    token: str
     token_file: Path
 
 
@@ -70,7 +69,7 @@ def test_connect_runs_the_tui_over_the_control_plane_with_the_config_dirs_token(
     result = runner.invoke(app, ["chat", "--connect", URL])
     assert result.exit_code == 0, result.output
     (tui,) = FakeApp.built
-    assert tui.session == FakeClient(URL, "the-token", token_file)
+    assert tui.session == FakeClient(URL, token_file)
     assert tui.link is tui.session and tui.opening is None and tui.ran
     assert tui.pick  # The user picks a session once joined.
 
@@ -80,7 +79,7 @@ def test_the_token_file_option_names_another_file(tmp_path: Path) -> None:
     other.write_text("another\n")
     result = runner.invoke(app, ["chat", "--connect", URL, "--token-file", str(other)])
     assert result.exit_code == 0, result.output
-    assert FakeApp.built[0].session == FakeClient(URL, "another", other)
+    assert FakeApp.built[0].session == FakeClient(URL, other)
 
 
 @pytest.mark.usefixtures("token_file")

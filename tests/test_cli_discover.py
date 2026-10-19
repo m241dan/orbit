@@ -24,10 +24,9 @@ URL = "ws://127.0.0.1:7433/"
 
 @dataclass
 class FakeClient:
-    """The WebSocket session built: where to, with which token, read from which file."""
+    """The WebSocket session built: where to, shown the token read from which file."""
 
     url: str
-    token: str
     token_file: Path
 
 
@@ -140,7 +139,7 @@ def test_chat_connects_to_the_control_plane_serving_the_workspace(
     assert result.exit_code == 0, result.output
     assert result.output == ""
     (tui,) = FakeApp.built
-    assert tui.session == FakeClient(URL, "the-token", token_file)
+    assert tui.session == FakeClient(URL, token_file)
     assert tui.opening is None and tui.ran
     assert plane.shown == [(URL, "the-token")]
     assert in_process.built == []

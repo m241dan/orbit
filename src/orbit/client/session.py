@@ -18,6 +18,7 @@ from pathlib import Path
 from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import ConnectionClosed, InvalidStatus, WebSocketException
 
+from orbit.client.token import TokenUnreadable, read_token
 from orbit.protocol import (
     Attach,
     CommandEnvelope,
@@ -73,20 +74,21 @@ BACKOFF = Backoff()
 
 
 class _TurnedAway(Exception):
-    """The control plane turned the token away."""
+    """The control plane turned the token away, or it couldn't be read; the message says
+    which."""
 
 
 class WebSocketSession:
-    """The control plane at ``url``, shown ``token``, read from ``token_file``; a lost
-    connection is retried as ``backoff`` says.
+    """The control plane at ``url``, shown the token in ``token_file``, read afresh for each
+    attempt to connect, so a rotated one is shown on reconnecting; a lost connection is retried
+    as ``backoff`` says.
 
     It connects once it's first used. While the connection is down, :meth:`send` raises
     :class:`NotConnected`, but for a ``Hello``, which is kept to be sent on connecting.
     """
 
-    def __init__(self, url: str, token: str, token_file: Path, backoff: Backoff = BACKOFF) -> None:
+    def __init__(self, url: str, token_file: Path, backoff: Backoff = BACKOFF) -> None:
         self.url = url
-        self._headers = {"Authorization": f"Bearer {token}"}
         self._token_file = token_file
         self._backoff = backoff
         self._events: asyncio.Queue[EventEnvelope | Exception | None] = asyncio.Queue()
@@ -164,21 +166,20 @@ class WebSocketSession:
         return hello.model_copy(update={"payload": payload})
 
     async def _run(self) -> None:
-        """Keep connected until the session closes, or the token is turned away; an event that
-        can't be read ends the events with its error."""
+        """Keep connected until the session closes, or the token is turned away or can't be
+        read; an event that can't be read ends the events with its error."""
         try:
             await self._keep_connected()
-        except _TurnedAway:
-            message = f"The control plane refused the token from {self._token_file}."
-            self._report(TokenRefused(message))
+        except _TurnedAway as error:
+            self._report(TokenRefused(str(error)))
         except ProtocolError as error:
             self._events.put_nowait(error)
 
     async def _keep_connected(self) -> None:
         """Connect, and connect again each time the connection fails or is lost, until the
         session closes, waiting the backoff before each attempt again; raises
-        :class:`_TurnedAway` if the token is. Only a connection that received something resets
-        the backoff, so one dropped as soon as it opens counts as a failure."""
+        :class:`_TurnedAway` if the token is, or can't be read. Only a connection that received
+        something resets the backoff, so one dropped as soon as it opens counts as a failure."""
         failures = 0
         while True:
             websocket = await self._connect()
@@ -191,12 +192,17 @@ class WebSocketSession:
             failures += 1
 
     async def _connect(self) -> ClientConnection | None:
-        """A new connection to the control plane, or none if it can't be made; raises
-        :class:`_TurnedAway` if the token is."""
+        """A new connection to the control plane, shown the token in the token file as it is
+        now, or none if it can't be made; raises :class:`_TurnedAway` if the token is, or can't
+        be read."""
+        try:
+            token = read_token(self._token_file)
+        except TokenUnreadable as error:
+            raise _TurnedAway(str(error)) from None
         try:
             return await connect(
                 self.url,
-                additional_headers=self._headers,
+                additional_headers={"Authorization": f"Bearer {token}"},
                 ping_interval=PING_SECONDS,
                 ping_timeout=PING_SECONDS,
                 max_size=MAX_MESSAGE_BYTES,
@@ -204,7 +210,8 @@ class WebSocketSession:
             )
         except InvalidStatus as error:
             if error.response.status_code == UNAUTHORIZED:
-                raise _TurnedAway() from None
+                message = f"The control plane refused the token from {self._token_file}."
+                raise _TurnedAway(message) from None
             return None
         except (OSError, TimeoutError, WebSocketException):
             return None
