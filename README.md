@@ -1021,9 +1021,10 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     limits (`UsageApi`) with the token in `~/.claude/.credentials.json`; `sqlite_store` is the
     `SessionStore` port's adapter (`SqliteStore`): saved sessions and each repository's super
     review count in `orbit.db` in the state directory, with `session_locks`' lock files while
-    an orbit has a session open, `sqlite_schema` creating, migrating and opening the database
-    and `sqlite_errors` telling its errors apart; `directories` picks the state and config directories
-    (`resolve_state_dir`, `resolve_config_dir`); `session_import` imports the session files
+    an orbit has a session open, `sqlite_schema` creating, migrating and opening the database,
+    `sqlite_backup` copying it to a backup and `sqlite_errors` telling its errors apart;
+    `directories` picks the state and config directories (`resolve_state_dir`,
+    `resolve_config_dir`); `session_import` imports the session files
     older orbits saved in orbit's directory, under the names `session_files` gives. `WorkspaceLock`
     (in `workspace_lock`) is the lock the orbit owning a repository holds.
     `ControlPlaneServer` (in `control_plane`) is the server adapter: it serves `AgentSession`

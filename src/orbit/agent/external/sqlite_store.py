@@ -3,7 +3,7 @@
 The database is ``orbit.db`` in the state directory, in WAL mode. One connection serves it, owned
 by a single thread: every database call runs there, a statement or a transaction at a time, so a
 caller that's cancelled while awaiting one never leaves the connection mid-transaction. The schema
-and opening it are :mod:`sqlite_schema`'s.
+and opening it are :mod:`sqlite_schema`'s, and copying it to a backup :mod:`sqlite_backup`'s.
 
 Each session's log has a row in ``logs`` with the size of its events, kept as they're appended
 and trimmed, and the highest ``seq`` trimmed from it.
@@ -13,9 +13,7 @@ directory, so that a crash leaves no stale lock behind.
 """
 
 import asyncio
-import os
 import sqlite3
-import tempfile
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import AbstractContextManager, closing
@@ -27,6 +25,7 @@ from orbit.agent.application.ports import StorageFailed, StoredSession
 from orbit.agent.domain.replay import LogBounds
 from orbit.agent.domain.sessions import SessionRecord, Unreadable, parse_record, record_json
 from orbit.agent.external.session_locks import SessionLocks, check_session_id
+from orbit.agent.external.sqlite_backup import copy_to, is_database_file
 from orbit.agent.external.sqlite_errors import error_kind
 from orbit.agent.external.sqlite_schema import (
     BUSY_TIMEOUT,
@@ -38,7 +37,6 @@ from orbit.agent.external.sqlite_schema import (
 from orbit.protocol import EventEnvelope, decode_event, encode
 
 DATABASE = "orbit.db"
-WAL_FILES = ("-wal", "-shm")  # The endings of the files SQLite keeps beside the database.
 LOCKS = "locks"
 THREAD_PREFIX = "orbit-sqlite"
 
@@ -101,37 +99,6 @@ def find_workspace_id(state_dir: Path, workspace: str) -> str | None:
     except sqlite3.Error:
         return None
     return None if row is None else str(row[0])
-
-
-def _is_database_file(target: Path, database: Path) -> bool:
-    """Whether ``target`` is ``database`` or its ``-wal`` or ``-shm`` file, by any path."""
-    files = (database, *(database.with_name(database.name + end) for end in WAL_FILES))
-    return any(_same_file(target, path) for path in files)
-
-
-def _same_file(target: Path, path: Path) -> bool:
-    """Whether ``target`` and ``path`` resolve to one path, or exist as one file."""
-    if target.resolve() == path.resolve():
-        return True
-    return target.exists() and path.exists() and os.path.samefile(target, path)
-
-
-def _copy_to(source: sqlite3.Connection, target: Path) -> None:
-    """Back ``source`` up to ``target``, owner read-write, through a temporary file beside it
-    that replaces ``target`` only once the copy is whole, and is removed if it fails."""
-    descriptor, name = tempfile.mkstemp(prefix=f".{target.name}.", dir=target.parent)
-    temporary = Path(name)
-    try:
-        try:
-            os.fchmod(descriptor, 0o600)
-        finally:
-            os.close(descriptor)
-        with closing(sqlite3.connect(temporary)) as copy:
-            source.backup(copy)
-        os.replace(temporary, target)
-    except BaseException:
-        temporary.unlink(missing_ok=True)
-        raise
 
 
 class SqliteStore:
@@ -387,14 +354,14 @@ class SqliteStore:
         self._connection = open_existing(self._database)
 
     def _backup(self, target: Path) -> None:
-        if _is_database_file(target, self._database):
+        if is_database_file(target, self._database):
             message = (
                 f"Won't back up the database {self._database} onto itself: {target} is the"
                 " database or one of its files."
             )
             raise StoreError(message)
         try:
-            _copy_to(self._db, target)
+            copy_to(self._db, target)
         except (OSError, sqlite3.Error) as error:
             message = f"Couldn't back up the database {self._database} to {target}: {error}"
             raise StoreError(message) from error

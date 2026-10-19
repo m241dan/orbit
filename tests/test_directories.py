@@ -28,6 +28,14 @@ def test_by_default_the_config_directory_is_in_the_home_directory() -> None:
     assert resolve_config_dir(None, {"XDG_CONFIG_HOME": ""}) == Path.home() / ".config/orbit"
 
 
+def test_the_config_directory_is_expanded_and_made_absolute(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    assert resolve_config_dir(Path("config"), {}) == tmp_path / "config"
+    assert resolve_config_dir(None, {"ORBIT_CONFIG_DIR": "~/config"}) == Path.home() / "config"
+
+
 # The state directory
 
 

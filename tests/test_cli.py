@@ -1201,7 +1201,7 @@ def test_db_backup_that_fails_keeps_the_file_it_would_have_replaced(
 ) -> None:
     asyncio.run(saved_sessions(state, tmp_path, "abc"))
     Path("out.db").write_text("mine")
-    monkeypatch.setattr("orbit.agent.external.sqlite_store._copy_to", failing_copy)
+    monkeypatch.setattr("orbit.agent.external.sqlite_store.copy_to", failing_copy)
     result = runner.invoke(app, ["db", "backup", "out.db", "--force"])
 
     assert result.exit_code == 2
