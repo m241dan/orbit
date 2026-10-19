@@ -550,6 +550,31 @@ def test_events_recovered_twice_are_stored_once(
     assert logged == [parked_notice(1), parked_notice(2), parked_notice(3)]
 
 
+def test_only_the_events_newly_stored_are_counted_in_the_note(
+    greetings: list[Greeted], state: Path, tmp_path: Path
+) -> None:
+    park(state, tmp_path, 1, 2)
+    assert runner.invoke(app, ["chat", "-C", str(tmp_path)]).exit_code == 0
+    path = park(state, tmp_path, 1, 2, 3)
+    assert runner.invoke(app, ["chat", "-C", str(tmp_path)]).exit_code == 0
+
+    assert not path.exists()
+    shown = path.relative_to(tmp_path)
+    assert greetings[-1].notices[-1] == f"Recovered 1 event from {shown} into the session's log."
+
+
+def test_a_parked_file_whose_events_are_all_stored_is_removed_without_a_note(
+    greetings: list[Greeted], state: Path, tmp_path: Path
+) -> None:
+    park(state, tmp_path, 1, 2)
+    assert runner.invoke(app, ["chat", "-C", str(tmp_path), "--no-verify"]).exit_code == 0
+    path = park(state, tmp_path, 2, 1)
+    assert runner.invoke(app, ["chat", "-C", str(tmp_path), "--no-verify"]).exit_code == 0
+
+    assert not path.exists()
+    assert greetings[-1].notices == [f"Workspace: {tmp_path.resolve()}"]
+
+
 def test_an_empty_parked_file_is_removed_without_a_note(
     greetings: list[Greeted], state: Path, tmp_path: Path
 ) -> None:

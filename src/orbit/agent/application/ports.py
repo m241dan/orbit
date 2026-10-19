@@ -289,10 +289,10 @@ class EventLog(Protocol):
         ``None`` when it can't be read."""
         ...
 
-    async def append(self, session_id: str, envelopes: Sequence[EventEnvelope]) -> None:
+    async def append(self, session_id: str, envelopes: Sequence[EventEnvelope]) -> int:
         """Add ``envelopes``, events of the session ``session_id``, to its log, all of them or
-        none, skipping those whose ``seq`` it holds already; raises ``RuntimeError``, a
-        :class:`StorageFailed` when the database failed, when it can't."""
+        none, skipping those whose ``seq`` it holds already; returns how many it added. Raises
+        ``RuntimeError``, a :class:`StorageFailed` when the database failed, when it can't."""
         ...
 
     async def recent(self, session_id: str, limit: int) -> list[EventEnvelope]:

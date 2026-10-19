@@ -437,6 +437,15 @@ async def test_events_already_stored_are_skipped_and_counted_once(
     assert stored_sizes(state) == {"abc": (sizes_of_events(state)["abc"], 0)}
 
 
+async def test_appending_returns_how_many_events_it_stored_skipping_those_stored_already(
+    open_store: Opener, workspace: Path
+) -> None:
+    store = await open_store(workspace)
+    assert await store.append("abc", [notice(1), notice(2)]) == 2
+    assert await store.append("abc", [notice(2), notice(3), notice(4)]) == 2
+    assert await store.append("abc", [notice(1), notice(4)]) == 0
+
+
 async def test_a_log_over_the_limit_keeps_its_newest_events_under_the_target(
     open_store: Opener, state: Path, workspace: Path
 ) -> None:

@@ -673,7 +673,8 @@ Restarting orbit recovers the events too. On every start, once the database is o
 imports each of the repository's fallback files, from both places, into the log the same way,
 skipping events already stored, deletes it, and says in the conversation how many events it
 recovered from which file, as in "Recovered 37 events from .git/orbit/fallback/<session
-id>.jsonl into the session's log." A fallback file that can't be read or imported stops orbit
+id>.jsonl into the session's log.", counting only the events it newly stored; a file whose events
+were all stored already is deleted without a word. A fallback file that can't be read or imported stops orbit
 before the app starts, with status 2 and a message naming the file and the error, leaving the
 file as it was.
 

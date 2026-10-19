@@ -611,11 +611,11 @@ class OnceWorkingStore(FakeStore):
         super().__init__()
         self.appends_left: int | None = None
 
-    async def append(self, session_id: str, envelopes: Sequence[EventEnvelope]) -> None:
+    async def append(self, session_id: str, envelopes: Sequence[EventEnvelope]) -> int:
         if self.appends_left is not None:
             self.append_failure = None if self.appends_left else "full again"
             self.appends_left = max(self.appends_left - 1, 0)
-        await super().append(session_id, envelopes)
+        return await super().append(session_id, envelopes)
 
 
 async def test_a_failure_while_the_halt_is_lifted_halts_the_session_again() -> None:

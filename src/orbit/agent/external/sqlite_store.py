@@ -488,10 +488,10 @@ class SqliteStore:
         except sqlite3.Error:
             return None
 
-    async def append(self, session_id: str, envelopes: Sequence[EventEnvelope]) -> None:
+    async def append(self, session_id: str, envelopes: Sequence[EventEnvelope]) -> int:
         check_session_id(session_id)
         try:
-            await self._call(self._append, session_id, envelopes)
+            return await self._call(self._append, session_id, envelopes)
         except sqlite3.Error as error:
             message = f"Couldn't save the events of the session {session_id} to {self._database}"
             raise self._failed(f"{message}: {error}", error) from error
@@ -732,18 +732,20 @@ class SqliteStore:
         )
         return [(str(session_id), str(text)) for session_id, text in rows]
 
-    def _append(self, session_id: str, envelopes: Sequence[EventEnvelope]) -> None:
+    def _append(self, session_id: str, envelopes: Sequence[EventEnvelope]) -> int:
         """Add ``envelopes`` to the session ``session_id``'s log, but for those whose ``seq`` it
-        holds already, as when parked events are imported again."""
+        holds already, as when parked events are imported again; returns how many it added."""
         rows = [_event_row(self._workspace, session_id, envelope) for envelope in envelopes]
         with self._transaction():
-            added = sum(row[5] for row in rows if self._insert_event(row))
+            inserted = [row for row in rows if self._insert_event(row)]
+            added = sum(row[5] for row in inserted)
             self._db.execute(
                 """INSERT INTO logs (workspace_id, session_id, size) VALUES (?, ?, ?)
                 ON CONFLICT (workspace_id, session_id) DO UPDATE SET size = size + excluded.size""",
                 (self._workspace, session_id, added),
             )
         self._max_seq = max([self._max_seq, *(envelope.seq for envelope in envelopes)])
+        return len(inserted)
 
     def _latest_seq(self) -> int:
         """The highest ``seq`` in the log now, counted in :meth:`max_seq` from then on."""

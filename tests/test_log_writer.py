@@ -77,10 +77,10 @@ class FailsFor(FakeStore):
         super().__init__()
         self.failing = failing
 
-    async def append(self, session_id: str, envelopes: Sequence[EventEnvelope]) -> None:
+    async def append(self, session_id: str, envelopes: Sequence[EventEnvelope]) -> int:
         if session_id == self.failing:
             raise RuntimeError("disk full")
-        await super().append(session_id, envelopes)
+        return await super().append(session_id, envelopes)
 
 
 class FailingTrims(FakeStore):
@@ -98,10 +98,10 @@ class GatedLog(FakeStore):
         self.gate = asyncio.Event()
         self.waiting = asyncio.Event()
 
-    async def append(self, session_id: str, envelopes: Sequence[EventEnvelope]) -> None:
+    async def append(self, session_id: str, envelopes: Sequence[EventEnvelope]) -> int:
         self.waiting.set()
         await self.gate.wait()
-        await super().append(session_id, envelopes)
+        return await super().append(session_id, envelopes)
 
 
 def stored_session(store: FakeStore | SqliteStore) -> AgentSession:
