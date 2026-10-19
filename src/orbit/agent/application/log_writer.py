@@ -218,21 +218,38 @@ class LogWriter:
         """Append to the log again, once stopped: the envelopes the fallback took, then those
         queued, in ``seq`` order, one append per session. Once that works, the fallback files are
         removed and appending carries on; returns the spans of the envelopes no fallback took,
-        which are lost. Returns the error when an append fails, and stays stopped."""
+        which are lost. Returns the error when an append fails, and stays stopped, as it does
+        when cancelled."""
         if not self._stopped:
             return []
         async with self._diverting:
             queued, self._queued = self._queued, []
             parked = [(s, e) for s, e in self._diverted if e.seq in self._parked]
-            error = await self._append_whole([*parked, *queued])
+            error = await self._append_taken(parked, queued)
             if error is not None:
-                self._queued[:0] = queued  # Still stopped, so they go to the fallback.
-                self._ready.set()
                 return error
             seqs = [envelope.seq for _, envelope in [*self._diverted, *queued]]
             spans = lost_spans(self._lost, seqs)
             await self._settle()
         return spans
+
+    async def _append_taken(self, parked: Queued, queued: Queued) -> RuntimeError | None:
+        """Append ``parked`` and ``queued``, taken from the queue, as :meth:`_append_whole`
+        does; when that fails or is cancelled, ``queued`` are queued again, so that, still
+        stopped, the writer sends them to the fallback."""
+        try:
+            error = await self._append_whole([*parked, *queued])
+        except BaseException:
+            self._put_back(queued)
+            raise
+        if error is not None:
+            self._put_back(queued)
+        return error
+
+    def _put_back(self, queued: Queued) -> None:
+        """Queue ``queued`` again, ahead of what's queued since."""
+        self._queued[:0] = queued
+        self._ready.set()
 
     async def _append_whole(self, queued: Queued) -> RuntimeError | None:
         """Append ``queued`` to the log by ``seq``, one append per session; returns the error

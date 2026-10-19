@@ -349,6 +349,28 @@ async def test_resuming_while_the_log_still_fails_keeps_diverting() -> None:
     assert await writer.stop("a") == ([notice(1), notice(2), notice(3)], FakeFallback.path("a"))
 
 
+async def test_a_cancelled_resume_keeps_the_queued_events_and_stays_stopped() -> None:
+    log, fallback = GatedLog(), FakeFallback()
+    writer = LogWriter(log, Published(), overflow=Overflow(fallback))
+    await writer.stop("a")
+    writer.add("a", notice(1))
+    await asyncio.sleep(0.01)
+    resuming = asyncio.create_task(writer.resume())
+    writer.add("a", notice(2))  # Queued as the resume starts, so it takes it to append.
+    await log.waiting.wait()
+    resuming.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await resuming
+    assert await writer.recent("a", 10) == [notice(1), notice(2)]
+    await asyncio.sleep(0.01)
+    assert fallback.files == {"a": [notice(1), notice(2)]}
+    log.gate.set()
+    assert await writer.resume() == []
+    await writer.close()
+    assert log.logged == [notice(1), notice(2)] and fallback.files == {}
+
+
 async def test_resuming_a_writer_that_never_stopped_does_nothing() -> None:
     log = FakeStore()
     writer = LogWriter(log, Published())
