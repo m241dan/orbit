@@ -5,7 +5,7 @@ import secrets
 import stat
 from pathlib import Path
 
-from orbit.agent.external.private_files import write_private
+from orbit.agent.external.private_files import create_private, write_private
 
 TOKEN_FILE = "token"
 TOKEN_BYTES = 32
@@ -24,13 +24,14 @@ class TokenFile:
     def token(self) -> str:
         """The token in the file, made with random bytes first if there's no file.
 
-        Raises :class:`TokenError` if the file can be read by others, is empty, or can't be
-        read or written.
+        Raises :class:`TokenError` if the directory can be written by others, the file can be
+        read by others, is empty, or can't be read or written.
         """
+        self._check_directory()
         try:
             mode = self.path.stat().st_mode
         except FileNotFoundError:
-            return self._made()
+            return self._created()
         except OSError as exc:
             raise TokenError(f"Can't read the token file {self.path}: {exc}") from None
         if stat.S_IMODE(mode) & 0o077:
@@ -38,6 +39,22 @@ class TokenFile:
                 f"The token file {self.path} can be read by others; run chmod 600 {self.path}."
             )
         return self._read()
+
+    def _check_directory(self) -> None:
+        """Raises :class:`TokenError` if others could replace the file, by writing its directory,
+        or if the directory can't be looked at; one not made yet is made owner-only."""
+        directory = self.path.parent
+        try:
+            mode = directory.stat().st_mode
+        except FileNotFoundError:
+            return
+        except OSError as exc:
+            raise TokenError(f"Can't read the token file {self.path}: {exc}") from None
+        if stat.S_IMODE(mode) & 0o022:
+            raise TokenError(
+                f"The token file's directory {directory} can be written by others;"
+                f" run chmod 700 {directory}."
+            )
 
     def _read(self) -> str:
         """The token the file holds; raises :class:`TokenError` if it holds none."""
@@ -62,3 +79,14 @@ class TokenFile:
         except OSError as exc:
             raise TokenError(f"Can't write the token file {self.path}: {exc}") from None
         return token
+
+    def _created(self) -> str:
+        """A new token, written to the file unless another was written first, or else the one
+        the file holds; raises :class:`TokenError` if neither can be."""
+        try:
+            create_private(self.path, secrets.token_urlsafe(TOKEN_BYTES) + "\n")
+        except FileExistsError:
+            pass
+        except OSError as exc:
+            raise TokenError(f"Can't write the token file {self.path}: {exc}") from None
+        return self._read()

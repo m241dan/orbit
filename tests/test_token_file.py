@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from orbit.agent.external.private_files import write_private
+from orbit.agent.external.private_files import create_private, write_private
 from orbit.agent.external.token_file import TokenError, TokenFile
 
 
@@ -64,7 +64,7 @@ def test_a_token_that_cant_be_written_is_refused(
     def unwritable(path: Path, text: str) -> None:
         raise PermissionError("read-only")
 
-    monkeypatch.setattr("orbit.agent.external.token_file.write_private", unwritable)
+    monkeypatch.setattr("orbit.agent.external.token_file.create_private", unwritable)
     with pytest.raises(TokenError, match=r"Can't write the token file .*: read-only"):
         TokenFile(tmp_path).token()
 
@@ -112,3 +112,77 @@ def test_a_private_file_that_cant_replace_its_target_leaves_no_temporary_file(
     with pytest.raises(IsADirectoryError):
         write_private(tmp_path / "target", "text")
     assert [p.name for p in tmp_path.iterdir()] == ["target"]
+
+
+@pytest.mark.parametrize("directory_mode", [0o770, 0o707, 0o777])
+def test_a_token_in_a_directory_others_can_write_is_refused_with_the_fix(
+    tmp_path: Path, directory_mode: int
+) -> None:
+    config = tmp_path / "config"
+    config.mkdir()
+    TokenFile(config).token()
+    config.chmod(directory_mode)
+    with pytest.raises(
+        TokenError, match=f"directory {config} can be written by others; run chmod 700 {config}"
+    ):
+        TokenFile(config).token()
+
+
+def test_no_token_is_made_in_a_directory_others_can_write(tmp_path: Path) -> None:
+    config = tmp_path / "config"
+    config.mkdir(mode=0o775)
+    config.chmod(0o775)
+    with pytest.raises(TokenError, match="chmod 700"):
+        TokenFile(config).token()
+    assert not (config / "token").exists()
+
+
+def test_a_token_in_a_directory_others_can_only_read_is_accepted(tmp_path: Path) -> None:
+    config = tmp_path / "config"
+    config.mkdir()
+    config.chmod(0o755)
+    token = TokenFile(config).token()
+    assert TokenFile(config).token() == token
+
+
+def test_a_token_directory_that_cant_be_looked_at_is_refused(tmp_path: Path) -> None:
+    (tmp_path / "config").write_text("not a directory")
+    with pytest.raises(TokenError, match="Can't read the token file"):
+        TokenFile(tmp_path / "config" / "orbit").token()
+
+
+def test_the_first_token_written_wins(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    path = tmp_path / "token"
+
+    def raced(nbytes: int) -> str:
+        path.write_text("theirs\n")
+        path.chmod(0o600)
+        return "ours"
+
+    monkeypatch.setattr("orbit.agent.external.token_file.secrets.token_urlsafe", raced)
+    assert TokenFile(tmp_path).token() == "theirs"
+    assert path.read_text() == "theirs\n"
+    assert [p.name for p in tmp_path.iterdir()] == ["token"]
+
+
+def test_a_private_file_that_exists_is_not_replaced_by_creating_it(tmp_path: Path) -> None:
+    path = tmp_path / "target"
+    path.write_text("first")
+    with pytest.raises(FileExistsError):
+        create_private(path, "second")
+    assert path.read_text() == "first"
+    assert [p.name for p in tmp_path.iterdir()] == ["target"]
+
+
+def test_a_private_file_is_created_owner_only_in_an_owner_only_directory(tmp_path: Path) -> None:
+    path = tmp_path / "private" / "target"
+    create_private(path, "text")
+    assert path.read_text() == "text"
+    assert (mode(path), mode(path.parent)) == (0o600, 0o700)
+    assert [p.name for p in path.parent.iterdir()] == ["target"]
+
+
+def test_a_private_file_that_cant_be_written_leaves_no_temporary_file(tmp_path: Path) -> None:
+    with pytest.raises(UnicodeEncodeError):
+        write_private(tmp_path / "target", "\ud800")
+    assert list(tmp_path.iterdir()) == []

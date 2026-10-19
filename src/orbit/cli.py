@@ -126,8 +126,8 @@ ConfigDirOption = Annotated[
     typer.Option(
         "--config-dir",
         help="The directory of your own config.toml, whose [storage] sets what orbit keeps of"
-        " sessions (default: $ORBIT_CONFIG_DIR, else $XDG_CONFIG_HOME/orbit, else"
-        " ~/.config/orbit).",
+        " sessions and [server] how orbit serve listens, and of the token frontends show it"
+        " (default: $ORBIT_CONFIG_DIR, else $XDG_CONFIG_HOME/orbit, else ~/.config/orbit).",
     ),
 ]
 

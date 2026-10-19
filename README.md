@@ -892,7 +892,11 @@ once.
 **The token.** A frontend connects by showing the token in `token` in the config directory, sent
 as `Authorization: Bearer <token>`; without it the connection is refused with HTTP 401. `orbit
 serve` makes it on first start, 32 random bytes, in a file readable by you alone, and reuses it
-after; a token file others can read stops it with status 2 and the `chmod 600` that fixes it. The
+after, making its directory readable by you alone if it has to make it. The directory must not
+be writable by others, who could replace the token with one they know: a token file in a directory
+others can write, or a token file others can read, stops it with status 2 and the `chmod 700` or
+`chmod 600` that fixes it. Two `orbit serve`s making the token at once agree on it: the first to
+write it wins, and the other uses that one. The
 token grants full control of the control plane: anyone who has it can run agents in your
 repository with the access you give them. It's never printed or logged; don't share it. To connect
 from another machine, copy it over a trusted channel, such as `scp ~/.config/orbit/token
