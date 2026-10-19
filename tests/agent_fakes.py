@@ -11,6 +11,7 @@ from weakref import WeakKeyDictionary
 from orbit.agent import Agents, AgentSession, Verification, VerificationStep
 from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.handshake import Handshake
+from orbit.agent.application.ownership import Ownership
 from orbit.agent.application.ports import (
     AgentLaunch,
     CallHandler,
@@ -819,6 +820,11 @@ def lane_of(session: AgentSession) -> ReviewLane:
     """The session's review lane, which it must have."""
     assert session._lane is not None
     return session._lane
+
+
+def ownership_of(session: AgentSession) -> Ownership:
+    """Whether the session owns the repository, shared by its parts."""
+    return session._ownership
 
 
 def tasks_of(session: AgentSession) -> Tasks:

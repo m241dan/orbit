@@ -1,11 +1,12 @@
 """The work commands: prompts to the planner, tasks and the board, and the agents' work."""
 
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import assert_never
 
 from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.outbox import EventSink
+from orbit.agent.application.ownership import Ownership
 from orbit.agent.application.planner_seat import PlannerSeat
 from orbit.agent.application.proposals import FrontendReview
 from orbit.agent.application.review_lane import ReviewLane
@@ -69,7 +70,7 @@ class CommandParts:
     into, its ``tasks``, its planner ``seat``, the work lane's ``turns``, its review ``lane``,
     if any, the ``proposals`` waiting for the user, the ``desk`` running its agents and the
     ``startup`` check, if any; ``save`` saves the session and ``reviews_changed`` saves its
-    review state; ``read_only`` says another orbit owns the repository."""
+    review state; ``ownership`` says whether another orbit owns the repository."""
 
     settings: SessionSettings
     events: EventSink
@@ -82,7 +83,7 @@ class CommandParts:
     startup: StartupCheck | None
     save: Callable[[], Awaitable[None]]
     reviews_changed: Callable[[], Awaitable[None]]
-    read_only: bool = False
+    ownership: Ownership = field(default_factory=Ownership)
 
 
 class WorkCommands:
@@ -91,7 +92,6 @@ class WorkCommands:
 
     def __init__(self, parts: CommandParts) -> None:
         self._parts = parts
-        self._read_only = parts.read_only
         self._queued: list[QueuedWork] = []
 
     @property
@@ -102,16 +102,15 @@ class WorkCommands:
     async def handle(self, command: WorkCommand, command_id: str) -> None:
         """Handle ``command``, sent as ``command_id``, or queue it if it starts work while
         read-only; work that couldn't run once this orbit owns the repository is refused."""
-        if self._read_only and isinstance(command, QueuedWork):
+        if self._parts.ownership.read_only and isinstance(command, QueuedWork):
             self._check(command)
             self._queued.append(command)
         else:
             await self._dispatch(command, command_id)
 
     async def own(self, command_id: str) -> None:
-        """Stop queueing, as this orbit owns the repository now, and run the commands queued,
-        in order, for ``command_id``; one refused now is reported as an error."""
-        self._read_only = False
+        """Run the commands queued while read-only, in order, for ``command_id``, as this orbit
+        owns the repository now; one refused now is reported as an error."""
         queued, self._queued = self._queued, []
         for command in queued:
             try:
