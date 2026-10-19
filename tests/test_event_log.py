@@ -295,14 +295,16 @@ async def test_events_before_a_seq_of_types_this_orbit_doesnt_know_are_left_out(
     assert await store.before("abc", 4, 2) == ([notice(3)], True)
 
 
-async def test_events_before_a_seq_that_cant_be_read_are_none(
+async def test_events_before_a_seq_that_cant_be_read_raise_naming_the_database(
     open_store: Opener, workspace: Path
 ) -> None:
     store = await open_store(workspace)
     await store.append("abc", [notice(1)])
     await store.close()
 
-    assert await store.before("abc", 10, 10) == ([], False)
+    match = r"Couldn't read the events of the session abc from .*orbit\.db: "
+    with pytest.raises(RuntimeError, match=match):
+        await store.before("abc", 10, 10)
 
 
 async def test_events_before_a_seq_under_an_id_that_isnt_a_plain_file_name_are_refused(

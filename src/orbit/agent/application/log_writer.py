@@ -155,7 +155,8 @@ class LogWriter:
         self, session_id: str, before_seq: int, limit: int
     ) -> tuple[list[EventEnvelope], bool]:
         """The last ``limit`` events of the session ``session_id`` before ``before_seq``, oldest
-        first, logged or still to be written, each once, and whether earlier ones remain."""
+        first, logged or still to be written, each once, and whether earlier ones remain. Raises
+        ``RuntimeError`` when the log can't be read."""
         # Read on both sides of the log's read, as recent does.
         pending = self._unwritten(session_id)
         logged, more = await self._log.before(session_id, before_seq, limit)

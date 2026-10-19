@@ -102,7 +102,8 @@ class Outbox:
     ) -> tuple[tuple[EventEnvelope, ...], bool, bool]:
         """The last ``limit`` events of the session ``session_id`` before ``before_seq``, oldest
         first, logged or still to be, whether earlier ones remain, and, when none do, whether
-        earlier ones were trimmed from the log; none without a log."""
+        earlier ones were trimmed from the log; none without a log. Raises ``RuntimeError`` when
+        the log can't be read."""
         if self._writer is None:
             return (), False, False
         earlier, more = await self._writer.before(session_id, before_seq, limit)

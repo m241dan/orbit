@@ -12,6 +12,7 @@ from orbit.agent.domain.replay import LogBounds
 from orbit.agent.domain.storage import StorageSettings
 from orbit.agent.external.sqlite_store import SqliteStore
 from orbit.protocol import (
+    INTERNAL,
     PROTOCOL_VERSION,
     SAVE_FAILED,
     STORAGE_FAILED,
@@ -618,6 +619,20 @@ class Unreadable(FakeStore):
     async def bounds(self, session_id: str, since: int) -> LogBounds | None:
         return None
 
+    async def before(
+        self, session_id: str, before_seq: int, limit: int
+    ) -> tuple[list[EventEnvelope], bool]:
+        raise RuntimeError("database is locked")
+
+
+async def test_reads_before_a_seq_of_a_log_that_cant_be_read_raise() -> None:
+    writer = LogWriter(Unreadable(), Published())
+    writer.add("a", notice(1))
+
+    with pytest.raises(RuntimeError, match="database is locked"):
+        await writer.before("a", 10, 10)
+    await writer.close()
+
 
 async def test_reads_after_a_seq_of_a_log_that_cant_be_read_are_none() -> None:
     writer = LogWriter(Unreadable(), Published())
@@ -982,6 +997,15 @@ async def test_history_of_a_session_that_isnt_this_workspaces_is_refused(
     await session.close()
 
     assert answer == [refused(UNKNOWN, "There's no saved session 'elsewhere'.")]
+
+
+async def test_history_of_a_session_whose_log_cant_be_read_is_refused() -> None:
+    session = stored_session(Unreadable())
+
+    answer = await history(session, History(session="session-1", before_seq=10))
+    await session.close()
+
+    assert answer == [refused(INTERNAL, "Orbit failed to handle History: database is locked")]
 
 
 async def test_history_without_a_store_is_an_empty_last_page() -> None:

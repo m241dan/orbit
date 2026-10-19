@@ -294,7 +294,9 @@ the mark stays, the conversation stops following new output, and `enter` picks u
 the conversation follows the latest output again. Each tab holds its own spot, kept while you switch tabs.
 `k` on the first entry pages back through the session's history: "Loading earlier messages…" shows
 at the top while orbit reads the events before it from the event log, up to 200 at a time, and they
-appear above, the mark staying on its entry; keep going to page back to the session's start.
+appear above, the mark staying on its entry; keep going to page back to the session's start. When
+the event log can't be read, such as while the database stays locked, orbit refuses the page with
+the reason, and `k` asks again.
 
 Every turn, the planner's and each agent's, ends with a muted rule across the conversation's width,
 under All and the agent's tab: `── done · 1m12s · ↑1.2M ↓8k ──`. It says how the turn ended

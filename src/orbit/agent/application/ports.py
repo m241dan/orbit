@@ -304,7 +304,8 @@ class EventLog(Protocol):
         self, session_id: str, before_seq: int, limit: int
     ) -> tuple[list[EventEnvelope], bool]:
         """The last ``limit`` events logged of the session ``session_id`` before ``before_seq``,
-        oldest first, and whether earlier ones remain; none when they can't be read."""
+        oldest first, and whether earlier ones remain. Raises ``RuntimeError`` when they can't be
+        read."""
         ...
 
     async def after(self, session_id: str, after_seq: int) -> list[EventEnvelope] | None:

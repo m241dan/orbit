@@ -511,12 +511,13 @@ class SqliteStore:
     ) -> tuple[list[EventEnvelope], bool]:
         """The last ``limit`` events logged of the session ``session_id`` before ``before_seq``,
         oldest first, but for those of types this orbit doesn't know, and whether earlier ones
-        remain; none when they can't be read."""
+        remain. Raises ``RuntimeError`` when they can't be read."""
         check_session_id(session_id)
         try:
             texts = await self._call(self._before, session_id, before_seq, limit + 1)
-        except sqlite3.Error:
-            return [], False
+        except sqlite3.Error as error:
+            message = f"Couldn't read the events of the session {session_id} from"
+            raise RuntimeError(f"{message} {self._database}: {error}") from error
         return _decoded(texts[:limit]), len(texts) > limit
 
     async def after(self, session_id: str, after_seq: int) -> list[EventEnvelope] | None:
