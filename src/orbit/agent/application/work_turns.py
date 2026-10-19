@@ -58,8 +58,7 @@ class WorkTurns:
     async def run_tasks(self) -> None:
         """Start a run for the user, lifting a hold; refused without agents, or while one
         runs."""
-        if self._parts.work is None:
-            raise Refused(NOT_CONFIGURED, NO_AGENTS_MESSAGE)
+        self.check_run_tasks()
         if self._parts.lane is not None:
             self._parts.lane.kick()
         await self._start(asked=True)
@@ -67,11 +66,9 @@ class WorkTurns:
     async def configure_checks(self) -> None:
         """Queue a configurator first and run it, unless work is running already (then it goes
         next); refused without verification or while one is queued or running."""
+        self.check_configure_checks()
         desk, verifier = self._parts.desk, self._parts.verifier
-        if desk is None or self._parts.work is None:
-            raise Refused(NOT_CONFIGURED, NO_AGENTS_MESSAGE)
-        if verifier is None:
-            raise Refused(NOT_CONFIGURED, NO_VERIFY_MESSAGE)
+        assert desk is not None and verifier is not None  # Checked just now.
         if self._board.has_waiting(CONFIGURATOR):
             self._parts.post(Notice(message=CONFIGURING_NOTE))
             return
@@ -79,6 +76,19 @@ class WorkTurns:
         await self._parts.tasks.change(lambda board: board.add_first(task))
         if not self.running:
             await self._start(asked=True)
+
+    def check_run_tasks(self) -> None:
+        """Refuse :meth:`run_tasks` if it couldn't start a run at all: without agents."""
+        if self._parts.work is None:
+            raise Refused(NOT_CONFIGURED, NO_AGENTS_MESSAGE)
+
+    def check_configure_checks(self) -> None:
+        """Refuse :meth:`configure_checks` if it couldn't run at all: without agents or
+        verification."""
+        if self._parts.desk is None or self._parts.work is None:
+            raise Refused(NOT_CONFIGURED, NO_AGENTS_MESSAGE)
+        if self._parts.verifier is None:
+            raise Refused(NOT_CONFIGURED, NO_VERIFY_MESSAGE)
 
     def hold(self) -> None:
         """Cancel the run, and hold the lane until the user asks for work again."""

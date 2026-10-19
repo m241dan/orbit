@@ -4,16 +4,15 @@ import asyncio
 
 from orbit.agent.application.session import OWNED_NOTE
 from orbit.agent.application.takeover import NO_OFFER
+from orbit.agent.application.work_turns import TASKS_RUNNING_MESSAGE
 from orbit.agent.domain.ownership import WorkspaceOwner
 from orbit.protocol import (
+    BUSY,
     INVALID,
-    NOT_CONFIGURED,
-    SUPER_REVIEW,
     AddTask,
     CommandRefused,
     ErrorOccurred,
     Event,
-    FireTrigger,
     NewSession,
     Notice,
     OwnershipOffered,
@@ -143,16 +142,28 @@ async def test_taking_over_lets_reviews_run() -> None:
 
 
 async def test_queued_work_refused_once_owning_is_reported_as_an_error() -> None:
-    lock = FakeLock(free=True)
-    session, _, _ = session_for(owner=OWNER, lock=lock)
-    await send(session, FireTrigger(trigger=SUPER_REVIEW))
+    release = asyncio.Event()
+
+    async def waits(call: Call) -> TurnEndReason:
+        await call("get_task")
+        await release.wait()
+        return "completed"
+
+    lock = FakeLock()
+    session, _, _ = session_for(waits, owner=OWNER, lock=lock)
+    for prompt in ("Add a flag.", "Add a test."):
+        await send(session, AddTask(task=TaskSpec(prompt=prompt)))
+    await send(session, RunTasks())
+    await send(session, RunTasks())
+    lock.free = True
     await events_until(session, offered)
 
     await send(session, TakeOwnership(take=True))
     events = await events_until(session, lambda event: event == ACCEPTED)
 
     [error] = [event for event in events if isinstance(event, ErrorOccurred)]
-    assert error.code == NOT_CONFIGURED
+    assert error == ErrorOccurred(code=BUSY, message=TASKS_RUNNING_MESSAGE)
+    release.set()
     await session.close()
 
 

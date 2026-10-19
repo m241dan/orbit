@@ -969,7 +969,8 @@ Any other orbit started on the repository meanwhile is read-only. It opens with 
 owner, such as "Read-only: an orbit chat, pid 4242 owns this repository. Tasks you run are queued
 until this orbit owns it.", and the prompt's title carries a "read-only" mark. `orbit serve`'s
 first line says so too. Running tasks (`ctrl+r`) and the triggers (`ctrl+g`, `ctrl+e`) are
-accepted and queued, in order, but nothing runs: no task, review or startup check. The planner,
+accepted and queued, in order, but nothing runs: no task, review or startup check. Those an owning
+orbit would refuse, such as a super review with reviews off, are refused just the same. The planner,
 the sessions, drafts and settings work as usual. The queue is dropped when the orbit exits.
 
 A read-only orbit tries the lock every 5 seconds. Once the owner has gone, it takes the lock and

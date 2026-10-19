@@ -101,8 +101,9 @@ class WorkCommands:
 
     async def handle(self, command: WorkCommand, command_id: str) -> None:
         """Handle ``command``, sent as ``command_id``, or queue it if it starts work while
-        read-only."""
+        read-only; work that couldn't run once this orbit owns the repository is refused."""
         if self._read_only and isinstance(command, QueuedWork):
+            self._check(command)
             self._queued.append(command)
         else:
             await self._dispatch(command, command_id)
@@ -118,6 +119,16 @@ class WorkCommands:
             except Refused as refusal:
                 error = ErrorOccurred(code=refusal.code, message=refusal.message)
                 await self._parts.events.put(error)
+
+    def _check(self, command: QueuedWork) -> None:
+        """Refuse ``command`` as running it would, for what doesn't change with ownership."""
+        match command:
+            case RunTasks():
+                self._parts.turns.check_run_tasks()
+            case FireTrigger():
+                self._check_trigger(command)
+            case _:
+                assert_never(command)
 
     async def _dispatch(self, command: WorkCommand, command_id: str) -> None:
         match command:
@@ -234,13 +245,21 @@ class WorkCommands:
     async def _fire_trigger(self, command: FireTrigger) -> None:
         """Run the built-in trigger ``command`` names; refused for any other name, or any input,
         since the built-ins take none."""
+        self._check_trigger(command)
+        configure = self._parts.turns.configure_checks
+        runs = {SUPER_REVIEW: self._super_review, CONFIGURE_CHECKS: configure}
+        await runs[command.trigger]()
+
+    def _check_trigger(self, command: FireTrigger) -> None:
+        """Refuse a trigger that isn't built in, given input, or that couldn't run here."""
         if command.trigger not in TRIGGER_NAMES:
             raise unknown(f"No trigger {command.trigger!r}", "the triggers are", TRIGGER_NAMES)
         if command.input:
             raise Refused(INVALID, f"The {command.trigger} trigger takes no input.")
-        configure = self._parts.turns.configure_checks
-        runs = {SUPER_REVIEW: self._super_review, CONFIGURE_CHECKS: configure}
-        await runs[command.trigger]()
+        if command.trigger == SUPER_REVIEW:
+            self._check_super_review()
+        else:
+            self._parts.turns.check_configure_checks()
 
     async def _decide(self, command: DecideProposal, command_id: str) -> None:
         """Settle the proposal ``command`` decides and publish the decision; refused when none
@@ -287,8 +306,12 @@ class WorkCommands:
         startup.cancel()
         return True
 
-    async def _super_review(self) -> None:
+    def _check_super_review(self) -> None:
+        """Refuse a super review without reviews."""
         if self._parts.lane is None:
             message = "Super reviews need reviews turned on, inside a git repository."
             raise Refused(NOT_CONFIGURED, message)
+
+    async def _super_review(self) -> None:
+        assert self._parts.lane is not None  # _check_trigger refuses a super review without.
         await self._parts.lane.super_review()

@@ -2,15 +2,20 @@
 
 import asyncio
 
+import pytest
+
 from orbit.agent import AgentSession
 from orbit.agent.domain.ownership import WorkspaceOwner, read_only_note
 from orbit.protocol import (
+    CONFIGURE_CHECKS,
     PLANNER,
     SUPER_REVIEW,
     AddTask,
     AssistantMessage,
     Catalog,
+    Command,
     CommandAccepted,
+    CommandRefused,
     FireTrigger,
     Notice,
     RunTasks,
@@ -28,6 +33,7 @@ from tests.agent_fakes import (
     greeted,
     idle,
     lane_of,
+    of_type,
     queued,
     send,
     session_for,
@@ -86,6 +92,51 @@ async def test_work_asked_of_a_read_only_session_is_accepted_and_queued_not_run(
     assert session.queued_work == (RunTasks(), FireTrigger(trigger=SUPER_REVIEW))
     assert launcher.launches == []
     await session.close()
+
+
+async def refusal_of(session: AgentSession, command: Command) -> CommandRefused:
+    """What ``session`` answered ``command`` with, which must be a refusal."""
+    await send(session, command)
+    events = await events_until(session, of_type(CommandRefused))
+    refused = events[-1]
+    assert isinstance(refused, CommandRefused)
+    assert not any(isinstance(e, CommandAccepted) for e in events)
+    return refused
+
+
+INVALID_WORK = [
+    pytest.param(FireTrigger(trigger="bogus"), id="unknown-trigger"),
+    pytest.param(FireTrigger(trigger=SUPER_REVIEW, input={"x": "1"}), id="trigger-input"),
+    pytest.param(FireTrigger(trigger=SUPER_REVIEW), id="super-review-without-reviews"),
+    pytest.param(FireTrigger(trigger=CONFIGURE_CHECKS), id="configure-without-verification"),
+]
+
+
+@pytest.mark.parametrize("command", INVALID_WORK)
+async def test_a_read_only_session_refuses_invalid_work_as_an_owning_one_does(
+    command: RunTasks | FireTrigger,
+) -> None:
+    owning, _, _ = session_for(tree=FakeTree())
+    read_only, _, _ = session_for(tree=FakeTree(), owner=OWNER)
+
+    expected = await refusal_of(owning, command)
+    assert await refusal_of(read_only, command) == expected
+    assert read_only.queued_work == ()
+    await owning.close()
+    await read_only.close()
+
+
+@pytest.mark.parametrize("command", [RunTasks(), FireTrigger(trigger=CONFIGURE_CHECKS)])
+async def test_a_read_only_session_without_agents_refuses_work_as_an_owning_one_does(
+    command: RunTasks | FireTrigger,
+) -> None:
+    owning, read_only = AgentSession(), AgentSession(owner=OWNER)
+
+    expected = await refusal_of(owning, command)
+    assert await refusal_of(read_only, command) == expected
+    assert read_only.queued_work == ()
+    await owning.close()
+    await read_only.close()
 
 
 async def test_the_planner_still_answers_a_read_only_session() -> None:

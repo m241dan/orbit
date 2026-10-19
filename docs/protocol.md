@@ -194,7 +194,8 @@ The first orbit to reach a repository, an `orbit serve` or an `orbit chat` runni
 owns it, and runs its work. Any other orbit on it is read-only: its `Catalog` and `Snapshot` have
 `read_only` true, and a `Notice` after the Snapshot names the owner. A read-only orbit accepts
 `RunTasks` and `FireTrigger` with `CommandAccepted` and queues them, in order, rather than running
-them, and starts no work by itself, such as reviews or the startup check; the planner, sessions,
+them, after refusing, as an owning orbit would, those that couldn't run here (an unknown trigger,
+input to one, or work without the agents, reviews or verification it needs), and starts no work by itself, such as reviews or the startup check; the planner, sessions,
 drafts and settings work as usual. The queue is dropped when the orbit exits.
 
 A read-only orbit tries the repository's lock every 5 seconds from its first `Welcome`. Once the
