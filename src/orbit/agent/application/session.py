@@ -566,7 +566,7 @@ class AgentSession:
 
     async def _take_ownership(self, command: TakeOwnership, command_id: str) -> None:
         """Answer the offer of the repository: own it, if ``command`` takes it, and run the work
-        queued for ``command_id``; refused when no offer is open."""
+        queued for ``command_id`` and the reviews waiting; refused when no offer is open."""
         self._takeover.answer(command.take)
         if not command.take:
             await self._events.put(OwnershipDeclined())
@@ -577,6 +577,8 @@ class AgentSession:
         await self._events.put(OwnershipTaken())
         await self._events.put(Notice(message=OWNED_NOTE))
         await self._commands.own(command_id)
+        if self._lane is not None:  # After the queued work, so its tasks get agents first.
+            self._lane.kick()
 
     def _agent_on(self, task_id: str) -> str:
         """The agent working on task ``task_id``; only asked while one is."""

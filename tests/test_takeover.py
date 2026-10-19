@@ -166,9 +166,7 @@ async def test_taking_over_lets_reviews_run() -> None:
     await events_until(session, offered)
     await send(session, TakeOwnership(take=True))
 
-    lane = lane_of(session)
-    lane.kick()
-    assert lane.running
+    assert lane_of(session).running
     await session.close()
 
 
