@@ -4,7 +4,7 @@ cancelled and the unsaved events parked in a fallback file."""
 import asyncio
 import re
 import stat
-from collections.abc import AsyncIterator, Callable, Iterator
+from collections.abc import AsyncIterator, Callable, Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -601,3 +601,61 @@ async def test_a_resumed_halt_halts_again_on_the_next_failure() -> None:
 
     errors = [event.message for event in published if isinstance(event, ErrorOccurred)]
     assert ["second" in message for message in errors] == [False, True]
+
+
+class OnceWorkingStore(FakeStore):
+    """A store whose appends work once ``appends_left`` is set, for that many appends, and
+    then fail again for want of space."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.appends_left: int | None = None
+
+    async def append(self, session_id: str, envelopes: Sequence[EventEnvelope]) -> None:
+        if self.appends_left is not None:
+            self.append_failure = None if self.appends_left else "full again"
+            self.appends_left = max(self.appends_left - 1, 0)
+        await super().append(session_id, envelopes)
+
+
+async def test_a_failure_while_the_halt_is_lifted_halts_the_session_again() -> None:
+    store, fallback = OnceWorkingStore(), FakeFallback()
+    session = await halted_session(store, fallback)
+    store.appends_left = 1  # Enough for the parked events, not the next.
+
+    await send(session, ResumeStorage())
+    error = await halt_error(session)
+    assert "full again" in error.message
+    assert (await session._snapshot()).storage_halt == error.message
+    assert (await outcome_of(session, RunTasks()))[-1].payload == refused(
+        STORAGE_FAILED, error.message
+    )
+    await session.close()
+
+
+async def test_a_halt_lifted_despite_failures_halts_again_on_the_first() -> None:
+    published: list[Event] = []
+
+    async def record(event: Event) -> None:
+        published.append(event)
+
+    async def retry() -> tuple[FailedWrite, RuntimeError] | None:
+        halt.fail(FailedWrite.EVENT_LOG, RuntimeError("again"))
+        halt.fail(FailedWrite.SESSION_RECORD, RuntimeError("later"))
+        return None
+
+    halt = StorageHalt(record, HaltHooks(retry=retry))
+    halt.fail(FailedWrite.EVENT_LOG, RuntimeError("first"))
+    while halt.message == halting_message(FailedWrite.EVENT_LOG):
+        await asyncio.sleep(0)
+    await asyncio.sleep(0.01)
+    await halt.resume()
+    assert halt.halted
+    while halt.message == halting_message(FailedWrite.EVENT_LOG):
+        await asyncio.sleep(0)
+    await halt.close()
+
+    errors = [event.message for event in published if isinstance(event, ErrorOccurred)]
+    [_, again] = errors
+    assert "again" in again
+    assert "session record" not in again

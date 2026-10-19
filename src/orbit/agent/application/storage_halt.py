@@ -93,6 +93,7 @@ class StorageHalt:
         self._fault: StorageFault | None = None
         self._explanation: str | None = None
         self._halting = False  # The halt is under way in the background.
+        self._lifting: list[Failure] | None = None  # The failures while the halt is lifted.
         self._background = Background("storage halt", publish)
         self._closed = False
 
@@ -113,8 +114,11 @@ class StorageHalt:
 
     def fail(self, write: FailedWrite, error: RuntimeError) -> None:
         """Halt the session because ``write`` failed with ``error``, unless it's halted already;
-        once closed, only mark it halted."""
+        once closed, only mark it halted. While :meth:`resume` lifts the halt, the failure
+        halts the session again once it's lifted."""
         if self._fault is not None:
+            if self._lifting is not None:
+                self._lifting.append((write, error))
             return
         self._fault = fault_of(write, error)
         if not self._closed:
@@ -129,16 +133,23 @@ class StorageHalt:
     async def resume(self) -> None:
         """Retry the writes that failed and lift the halt once they work; does nothing while
         the session isn't halted. While halting is under way, or a write still fails, raises
-        :class:`Refused`, the halt kept, explained afresh for the write that failed now."""
+        :class:`Refused`, the halt kept, explained afresh for the write that failed now. A
+        write failing once the retried ones worked halts the session again."""
         if self._fault is None:
             return
         if self._halting:
             raise Refused(STORAGE_FAILED, self._message(self._fault))
-        failure = await self._retry()
+        self._lifting = []
+        try:
+            failure = await self._retry()
+        finally:
+            failed, self._lifting = self._lifting, None
         if failure is not None:
             fault = fault_of(*failure)
             raise Refused(STORAGE_FAILED, await self._explain(fault))
         self._fault, self._explanation = None, None
+        if failed:
+            self.fail(*failed[0])
 
     async def close(self) -> None:
         """Stop halting, if it's under way; a failure from now on only marks the session
