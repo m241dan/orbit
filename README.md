@@ -1010,14 +1010,17 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
 
 - `orbit.protocol`: pydantic models (`Command`s in, `Event`s out), the `Session`
   interface, the `Link` a session to a control plane elsewhere reports its state through (in
-  `link`, with `NotConnected`), and `ThreadedSession`, which runs a session on a thread of its own. It imports no
+  `link`, with `NotConnected`), the WebSocket transport's close codes, 401 status, default
+  message limit and `bearer_header` (in `transport`), which the control plane and `orbit.client`
+  share, and `ThreadedSession`, which runs a session on a thread of its own. It imports no
   other orbit package. `docs/protocol.md` describes the protocol, its conversation rules and
   codes, and `schema/protocol.schema.json` is its JSON Schema.
 - `orbit.client`: the frontends' side of a control plane in another process. `WebSocketSession`
   (in `session`) is a `Session` over a WebSocket (the `websockets` library) that reconnects with
   backoff, sends its last `Hello` again with `since`, and reports how the link stands through
   `orbit.protocol`'s `Link`; `read_token` (in `token`) reads the token it shows, and `accepts`
-  (in `probe`) asks a control plane whether it takes it. It imports no
+  (in `probe`) asks a control plane whether it takes it; both open the WebSocket through
+  `open_connection` (in `upgrade`), which raises `TokenRejected` on a 401. It imports no
   orbit package but `orbit.protocol`, and only `orbit.cli` imports it.
 - `orbit.agent`: backend, with no UI imports. Three layers, each importing only the ones below:
   - `external`: adapters that reach outside the backend. `ClaudeCliRunner` launches agents as

@@ -1,17 +1,10 @@
 """Whether a control plane takes a frontend's token, asked with an upgrade that's closed at
 once."""
 
-from websockets.asyncio.client import connect
-from websockets.exceptions import InvalidStatus, WebSocketException
-
-from orbit.client.session import UNAUTHORIZED
+from orbit.client.upgrade import open_connection
 
 PROBE_SECONDS = 5
 """How long the upgrade may take before the control plane is taken as unreachable."""
-
-
-class TokenRejected(Exception):
-    """The control plane turned the token away."""
 
 
 async def accepts(url: str, token: str) -> bool:
@@ -20,17 +13,8 @@ async def accepts(url: str, token: str) -> bool:
 
     Raises :class:`TokenRejected` if it turns the token away.
     """
-    try:
-        async with connect(
-            url,
-            additional_headers={"Authorization": f"Bearer {token}"},
-            open_timeout=PROBE_SECONDS,
-            proxy=None,
-        ):
-            return True
-    except InvalidStatus as error:
-        if error.response.status_code == UNAUTHORIZED:
-            raise TokenRejected() from None
+    websocket = await open_connection(url, token, open_timeout=PROBE_SECONDS)
+    if websocket is None:
         return False
-    except (OSError, TimeoutError, WebSocketException):
-        return False
+    async with websocket:
+        return True

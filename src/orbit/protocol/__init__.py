@@ -162,6 +162,15 @@ from orbit.protocol.names import (
 from orbit.protocol.schema import protocol_schema
 from orbit.protocol.session import Session, SharedSession
 from orbit.protocol.threaded import ThreadedSession
+from orbit.protocol.transport import (
+    DEFAULT_MAX_MESSAGE_MB,
+    GOING_AWAY,
+    MESSAGE_TOO_BIG,
+    NORMAL,
+    POLICY_VIOLATION,
+    UNAUTHORIZED,
+    bearer_header,
+)
 from orbit.protocol.wire import ProtocolError, decode_command, decode_event, encode
 
 __all__ = [
@@ -174,15 +183,19 @@ __all__ = [
     "CONFIGURATOR",
     "CONFIGURE_CHECKS",
     "CONNECTION_EVENTS",
+    "DEFAULT_MAX_MESSAGE_MB",
     "DEFAULT_WORKSPACE",
     "DEPRECATED_MESSAGES",
     "ERROR_CODES",
     "GIT_FAILED",
+    "GOING_AWAY",
     "INCOMPATIBLE",
     "INTERNAL",
     "INVALID",
     "LOCKED",
     "MANUAL_ORIGIN",
+    "MESSAGE_TOO_BIG",
+    "NORMAL",
     "NOT_ACTIVE",
     "NOT_CONFIGURED",
     "NOT_CONNECTED",
@@ -190,6 +203,7 @@ __all__ = [
     "PLANNER_LANE",
     "PLANNER_ORIGIN",
     "PLAN_TASK",
+    "POLICY_VIOLATION",
     "PROTOCOL_VERSION",
     "REFUSAL_CODES",
     "REVIEWER",
@@ -202,6 +216,7 @@ __all__ = [
     "SUPER_REVIEWER",
     "SUPER_REVIEW_ORIGIN",
     "TIMED_OUT",
+    "UNAUTHORIZED",
     "UNKNOWN",
     "WORK_LANE",
     "WRONG_SESSION",
@@ -312,6 +327,7 @@ __all__ = [
     "VerificationStarted",
     "Welcome",
     "WorkspaceEntry",
+    "bearer_header",
     "command_adapter",
     "decode_command",
     "decode_event",

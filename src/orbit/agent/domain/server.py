@@ -7,6 +7,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from orbit.agent.domain.config_errors import ConfigError, validation_problems
+from orbit.protocol import DEFAULT_MAX_MESSAGE_MB
 
 LOCALHOST = "localhost"
 
@@ -19,7 +20,7 @@ class ServerSettings(BaseModel):
 
     host: str = Field(default="127.0.0.1", min_length=1)
     port: int = Field(default=7433, ge=0, le=65535)
-    max_message_mb: int = Field(default=64, ge=1)
+    max_message_mb: int = Field(default=DEFAULT_MAX_MESSAGE_MB, ge=1)
 
     @property
     def max_message_bytes(self) -> int:

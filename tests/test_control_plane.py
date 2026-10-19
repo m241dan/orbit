@@ -16,10 +16,6 @@ from orbit.agent.application import connection as connection_module
 from orbit.agent.application.connection import SessionConnection
 from orbit.agent.domain.server import ServerSettings
 from orbit.agent.external.control_plane import (
-    GOING_AWAY,
-    MESSAGE_TOO_BIG,
-    NORMAL,
-    POLICY_VIOLATION,
     SHUTTING_DOWN,
     UNAUTHORIZED,
     ControlPlaneServer,
@@ -30,7 +26,11 @@ from orbit.agent.external.control_plane import (
 )
 from orbit.client import accepts
 from orbit.protocol import (
+    GOING_AWAY,
     INVALID,
+    MESSAGE_TOO_BIG,
+    NORMAL,
+    POLICY_VIOLATION,
     PROTOCOL_VERSION,
     UNKNOWN,
     AddTask,

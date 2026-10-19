@@ -15,11 +15,14 @@ from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 
-from websockets.asyncio.client import ClientConnection, connect
-from websockets.exceptions import ConnectionClosed, InvalidStatus, WebSocketException
+from websockets.asyncio.client import ClientConnection
+from websockets.exceptions import ConnectionClosed
 
 from orbit.client.token import TokenUnreadable, read_token
+from orbit.client.upgrade import TokenRejected, open_connection
 from orbit.protocol import (
+    DEFAULT_MAX_MESSAGE_MB,
+    GOING_AWAY,
     Attach,
     CommandEnvelope,
     Connected,
@@ -36,18 +39,12 @@ from orbit.protocol import (
     encode,
 )
 
-MAX_MESSAGE_BYTES = 64 * 1024 * 1024
+MAX_MESSAGE_BYTES = DEFAULT_MAX_MESSAGE_MB * 1024 * 1024
 """The largest message taken from the control plane, as large as it sends by default."""
 
 PING_SECONDS = 20
 """How often the connection is pinged, and how long a ping may go unanswered before it's
 taken as lost."""
-
-GOING_AWAY = 1001
-"""The close code of a control plane shutting down."""
-
-UNAUTHORIZED = 401
-"""The status of an upgrade turned away for its token."""
 
 
 _MOST_DOUBLINGS = 64
@@ -200,21 +197,16 @@ class WebSocketSession:
         except TokenUnreadable as error:
             raise _TurnedAway(str(error)) from None
         try:
-            return await connect(
+            return await open_connection(
                 self.url,
-                additional_headers={"Authorization": f"Bearer {token}"},
+                token,
                 ping_interval=PING_SECONDS,
                 ping_timeout=PING_SECONDS,
                 max_size=MAX_MESSAGE_BYTES,
-                proxy=None,
             )
-        except InvalidStatus as error:
-            if error.response.status_code == UNAUTHORIZED:
-                message = f"The control plane refused the token from {self._token_file}."
-                raise _TurnedAway(message) from None
-            return None
-        except (OSError, TimeoutError, WebSocketException):
-            return None
+        except TokenRejected:
+            message = f"The control plane refused the token from {self._token_file}."
+            raise _TurnedAway(message) from None
 
     async def _linked(self, websocket: ClientConnection) -> bool:
         """Greet the control plane on ``websocket`` with the last ``Hello``, if any, and take

@@ -18,6 +18,7 @@ from orbit.agent.external.control_plane import ControlPlaneServer
 from orbit.client import Backoff, TokenUnreadable, WebSocketSession, read_token
 from orbit.client.session import MAX_MESSAGE_BYTES
 from orbit.protocol import (
+    DEFAULT_MAX_MESSAGE_MB,
     NOT_CONNECTED,
     PROTOCOL_VERSION,
     Attach,
@@ -455,6 +456,11 @@ async def test_a_rotated_token_file_is_shown_on_reconnecting() -> None:
 
 def test_messages_up_to_the_servers_default_limit_are_taken() -> None:
     assert ServerSettings().max_message_bytes == MAX_MESSAGE_BYTES
+
+
+def test_both_limits_come_from_the_shared_default() -> None:
+    assert ServerSettings().max_message_mb == DEFAULT_MAX_MESSAGE_MB
+    assert MAX_MESSAGE_BYTES == DEFAULT_MAX_MESSAGE_MB * 1024 * 1024
 
 
 def test_the_token_is_read_from_its_file(tmp_path: Path) -> None:

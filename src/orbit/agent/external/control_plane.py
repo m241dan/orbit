@@ -28,7 +28,11 @@ from orbit.agent.domain.server import ServerSettings
 from orbit.agent.external.embedded_server import EmbeddedServer
 from orbit.agent.external.mcp_host import bearer_token
 from orbit.protocol import (
+    GOING_AWAY,
     INVALID,
+    MESSAGE_TOO_BIG,
+    NORMAL,
+    POLICY_VIOLATION,
     UNKNOWN,
     CommandEnvelope,
     Hello,
@@ -36,19 +40,7 @@ from orbit.protocol import (
     decode_command,
     encode,
 )
-
-NORMAL = 1000
-"""The close code of a WebSocket whose stream ended, as an incompatible ``Hello``'s does."""
-
-GOING_AWAY = 1001
-"""The close code of every WebSocket as the server shuts down."""
-
-POLICY_VIOLATION = 1008
-"""The close code of a WebSocket that sent a frame with no readable ``command_id``, or fell
-too far behind."""
-
-MESSAGE_TOO_BIG = 1009
-"""The close code of a WebSocket a message over the limit was sent to, or from."""
+from orbit.protocol import UNAUTHORIZED as UNAUTHORIZED_STATUS
 
 SHUTTING_DOWN = "orbit serve is shutting down"
 """The close reason as the server shuts down."""
@@ -290,7 +282,9 @@ class ControlPlaneServer:
         """Serve the frontend at ``websocket``, if it showed the token and the server isn't
         stopping, until it's closed."""
         if not self._authorized(websocket):
-            await websocket.send_denial_response(PlainTextResponse(UNAUTHORIZED, 401))
+            await websocket.send_denial_response(
+                PlainTextResponse(UNAUTHORIZED, UNAUTHORIZED_STATUS)
+            )
             return
         if self._stopping:
             await websocket.send_denial_response(PlainTextResponse(SHUTTING_DOWN, 503))
