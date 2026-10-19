@@ -1,6 +1,7 @@
 """The WebSocket session a frontend talks to a control plane in another process through."""
 
 import asyncio
+import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -52,7 +53,8 @@ ATTACH = CommandEnvelope(command_id="attach", payload=Attach(session="earlier"))
 
 class FakePlane:
     """A control plane that notes the headers and commands each connection brings, sends what
-    a test gives it, and turns upgrades away with ``status`` while it's set."""
+    a test gives it, turns upgrades away with ``status`` while it's set, and closes each
+    connection at once while ``hang_up`` is set."""
 
     def __init__(self) -> None:
         self.connections: asyncio.Queue[ServerConnection] = asyncio.Queue()
@@ -60,6 +62,7 @@ class FakePlane:
         self.headers: list[Headers] = []
         self.status: int | None = None
         self.turned_away = asyncio.Event()
+        self.hang_up = False
 
     def check(self, connection: ServerConnection, request: Request) -> Response | None:
         self.headers.append(request.headers)
@@ -70,6 +73,9 @@ class FakePlane:
 
     async def handle(self, connection: ServerConnection) -> None:
         self.connections.put_nowait(connection)
+        if self.hang_up:
+            await connection.close(1008, "Too far behind")
+            return
         async for text in connection:
             self.commands.put_nowait(decode_command(str(text)))
 
@@ -110,8 +116,10 @@ class States:
         return next(state for state in self.seen if isinstance(state, kind))
 
 
-def client(url: str, token: str = TOKEN) -> tuple[WebSocketSession, States]:
-    session = WebSocketSession(url, token, TOKEN_FILE, QUICK)
+def client(
+    url: str, token: str = TOKEN, backoff: Backoff = QUICK
+) -> tuple[WebSocketSession, States]:
+    session = WebSocketSession(url, token, TOKEN_FILE, backoff)
     states = States()
     session.watch(states)
     return session, states
@@ -226,6 +234,31 @@ async def test_a_lost_connection_reconnects_asking_for_what_was_missed() -> None
         assert again.command_id == HELLO.command_id
         assert states.seen[-1] == Connected(url)
         assert not any(isinstance(state, Stopped) for state in states.seen)
+        await session.close()
+
+
+async def test_a_connection_lost_at_once_each_time_is_retried_with_growing_waits() -> None:
+    async with plane() as (fake, url):
+        fake.hang_up = True
+        session, _ = client(url, backoff=Backoff(first=0.02, most=1, jitter=0))
+        session.events()
+        await asyncio.sleep(0.3)  # Waits of 0.02, 0.04, 0.08 and 0.16 s fit in it.
+        await session.close()
+        assert 2 <= fake.connections.qsize() <= 6
+
+
+async def test_a_lost_connection_waits_the_backoff_before_reconnecting() -> None:
+    async with plane() as (fake, url):
+        session, states = client(url, backoff=Backoff(first=0.2, most=1, jitter=0))
+        events = session.events()
+        first = await fake.connection()
+        await first.send(event(1))
+        await next_event(events)
+        await first.close(1011, "Oops")
+        reconnecting = await states.until(Reconnecting)
+        await fake.connection()
+        assert isinstance(reconnecting, Reconnecting)
+        assert time.monotonic() - reconnecting.since >= 0.2
         await session.close()
 
 

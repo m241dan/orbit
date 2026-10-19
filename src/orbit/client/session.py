@@ -175,20 +175,20 @@ class WebSocketSession:
             self._events.put_nowait(error)
 
     async def _keep_connected(self) -> None:
-        """Connect, and connect again with backoff each time the connection fails or is lost,
-        until the session closes; raises :class:`_TurnedAway` if the token is."""
+        """Connect, and connect again each time the connection fails or is lost, until the
+        session closes, waiting the backoff before each attempt again; raises
+        :class:`_TurnedAway` if the token is. Only a connection that received something resets
+        the backoff, so one dropped as soon as it opens counts as a failure."""
         failures = 0
-        while not self._closed:
+        while True:
             websocket = await self._connect()
-            if websocket is None:
-                self._lost()
-                await asyncio.sleep(self._backoff.delay(failures, random.random()))
-                failures += 1
-                continue
-            failures = 0
-            await self._linked(websocket)
-            if not self._closed:
-                self._lost()
+            if websocket is not None and await self._linked(websocket):
+                failures = 0
+            if self._closed:
+                return
+            self._lost()
+            await asyncio.sleep(self._backoff.delay(failures, random.random()))
+            failures += 1
 
     async def _connect(self) -> ClientConnection | None:
         """A new connection to the control plane, or none if it can't be made; raises
@@ -209,20 +209,22 @@ class WebSocketSession:
         except (OSError, TimeoutError, WebSocketException):
             return None
 
-    async def _linked(self, websocket: ClientConnection) -> None:
+    async def _linked(self, websocket: ClientConnection) -> bool:
         """Greet the control plane on ``websocket`` with the last ``Hello``, if any, and take
-        its events until the connection closes, noting if it said it was shutting down."""
+        its events until the connection closes, noting if it said it was shutting down; whether
+        it received anything."""
         async with websocket:
             self._websocket = websocket
             try:
                 self._report(Connected(self.url))
                 with suppress(ConnectionClosed):
                     await self._greet(websocket)
-                await self._read(websocket)
+                received = await self._read(websocket)
             finally:
                 self._websocket = None
         if websocket.close_code == GOING_AWAY:
             self._report(Stopped(self.url))
+        return received
 
     async def _greet(self, websocket: ClientConnection) -> None:
         """Send the last ``Hello`` on ``websocket``, if any, then the last ``Attach``, if the
@@ -234,17 +236,21 @@ class WebSocketSession:
         if self._viewing and self._attach is not None:
             await websocket.send(encode(self._attach))
 
-    async def _read(self, websocket: ClientConnection) -> None:
+    async def _read(self, websocket: ClientConnection) -> bool:
         """Queue the events ``websocket`` brings, skipping those of unknown types, until it
-        closes; raises :class:`ProtocolError` for one that can't be read."""
+        closes, and whether it brought any; raises :class:`ProtocolError` for one that can't be
+        read."""
+        received = False
         with suppress(ConnectionClosed):
             while True:
                 envelope = decode_event(await websocket.recv(decode=True))
+                received = True
                 if envelope is not None:
                     self._seq = envelope.seq
                     if isinstance(envelope.payload, Snapshot):
                         self._viewing = not envelope.payload.active
                     self._events.put_nowait(envelope)
+        return received
 
     def _lost(self) -> None:
         """Report that the connection is down, from now unless it already was."""
