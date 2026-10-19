@@ -163,6 +163,34 @@ def test_serve_welcomes_a_frontend_with_the_token_until_stopped(
     assert token.read_text().strip() not in output
 
 
+def test_serve_names_paths_with_braces_verbatim(
+    monkeypatch: pytest.MonkeyPatch, state: Path, tmp_path: Path
+) -> None:
+    project = tmp_path / "proj{1}"
+    project.mkdir()
+    config = tmp_path / "{x}"
+    monkeypatch.setenv("ORBIT_CONFIG_DIR", str(config))
+    frontend = Frontend(state, config)
+    output = served(frontend, "--port", "0", "-C", str(project))
+
+    assert [type(e) for e in frontend.events] == [Welcome, Catalog, Snapshot]
+    url = frontend.run_file["url"]
+    assert output.splitlines()[0] == (
+        f"Serving {project} at {url} as its owner; frontends show the token in {config / 'token'}."
+    )
+
+
+def test_serve_stops_if_it_cant_write_its_run_file_naming_it(state: Path) -> None:
+    state.mkdir()
+    (state / "run").write_text("not a directory\n")
+    result = runner.invoke(app, ["serve", *QUIET, "--port", "0"])
+
+    assert result.exit_code == 2
+    assert f"Can't write the run file {state / 'run'}" in result.stderr
+    assert "Traceback" not in result.output
+    assert not [t for t in threading.enumerate() if t.name.startswith("orbit-sqlite")]
+
+
 def test_serve_names_its_url_in_the_workspace_lock_while_it_owns_the_repository(
     project: Path, state: Path, config_dir: Path
 ) -> None:

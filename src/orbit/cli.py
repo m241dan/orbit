@@ -520,12 +520,18 @@ def serve(
     typer.echo("orbit serve stopped.")
 
 
-def _banner(root: Path, token_file: TokenFile, owner: WorkspaceOwner | None) -> str:
-    """The line ``orbit serve`` prints once listening, serving the repository at ``root`` as its
-    owner, or read-only while another orbit, ``owner``, owns it, saying where ``token_file``
-    is, with ``{url}`` in it for the server's URL."""
+def _banner(
+    root: Path, token_file: TokenFile, owner: WorkspaceOwner | None
+) -> Callable[[str], str]:
+    """What gives the line ``orbit serve`` prints once listening at a URL, serving the
+    repository at ``root`` as its owner, or read-only while another orbit, ``owner``, owns it,
+    saying where ``token_file`` is."""
     standing = "as its owner" if owner is None else f"read-only, as {owner.described} owns it"
-    return f"Serving {root} at {{url}} {standing}; frontends show the token in {token_file.path}."
+
+    def banner(url: str) -> str:
+        return f"Serving {root} at {url} {standing}; frontends show the token in {token_file.path}."
+
+    return banner
 
 
 def _serve_until_stopped(
@@ -605,7 +611,7 @@ class _ServeParts:
     """What ``orbit serve`` serves: the session ``build`` makes, with the most recently active
     saved one opened if ``latest``, on the server ``settings`` say, to frontends showing the
     token ``token`` gives as they connect, saying where it is in ``run_file`` while it does,
-    the ``banner`` it prints once listening, with ``{url}`` in it for the server's URL, and the
+    the ``banner`` it prints once listening, given the server's URL, and the
     workspace ``lock``, which names the server's URL while it's held."""
 
     build: Callable[[], AgentSession]
@@ -613,7 +619,7 @@ class _ServeParts:
     settings: ServerSettings
     token: Callable[[], str]
     run_file: RunFile
-    banner: str
+    banner: Callable[[str], str]
     lock: WorkspaceLock
 
 
@@ -640,19 +646,38 @@ async def _until_stopped(
     session: AgentSession, server: ControlPlaneServer, parts: _ServeParts, url: str
 ) -> None:
     """Serve ``session`` on ``server``, listening at ``url``, until the first ctrl+c or
-    SIGTERM, then stop it, removing the run file."""
+    SIGTERM, then stop it, removing the run file.
+
+    Exits with status 2 if the run file can't be written.
+    """
     stopping = asyncio.Event()
     _on_signals(stopping)
+    written = False
     try:
-        parts.run_file.write(url, os.getpid())
+        _write_run_file(parts.run_file, url)
+        written = True
         parts.lock.announce(url)
-        typer.echo(parts.banner.format(url=url))
+        typer.echo(parts.banner(url))
         await stopping.wait()
     finally:
         try:
             await server.stop(session.close)
         finally:
-            parts.run_file.remove()
+            # One that couldn't be written may not be removable either.
+            if written:
+                parts.run_file.remove()
+
+
+def _write_run_file(run_file: RunFile, url: str) -> None:
+    """Say in ``run_file`` that this process is serving at ``url``.
+
+    Exits with status 2 if it can't.
+    """
+    try:
+        run_file.write(url, os.getpid())
+    except OSError as exc:
+        typer.echo(f"Can't write the run file {run_file.path}: {exc}", err=True)
+        raise typer.Exit(2) from None
 
 
 def _on_signals(stopping: asyncio.Event) -> None:
