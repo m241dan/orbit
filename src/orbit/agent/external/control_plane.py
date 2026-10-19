@@ -4,8 +4,9 @@ frontend that shows the token.
 Each WebSocket that's let in gets a connection of its own to the session: its text frames are
 decoded into commands and sent on it, and its events are encoded into text frames. A frontend
 that sends no ``Authorization: Bearer`` with the token is turned away with HTTP 401 before the
-WebSocket opens. The token is read afresh for each frontend, so a new one admits frontends at
-once, while those already let in stay.
+WebSocket opens, and one that arrives as the server stops, with HTTP 503. The token is read
+afresh for each frontend, so a new one admits frontends at once, while those already let in
+stay.
 """
 
 import asyncio
@@ -286,9 +287,13 @@ class ControlPlaneServer:
         return bool(token) and hmac.compare_digest(bearer_token(websocket.headers).encode(), token)
 
     async def _websocket(self, websocket: WebSocket) -> None:
-        """Serve the frontend at ``websocket``, if it showed the token, until it's closed."""
+        """Serve the frontend at ``websocket``, if it showed the token and the server isn't
+        stopping, until it's closed."""
         if not self._authorized(websocket):
             await websocket.send_denial_response(PlainTextResponse(UNAUTHORIZED, 401))
+            return
+        if self._stopping:
+            await websocket.send_denial_response(PlainTextResponse(SHUTTING_DOWN, 503))
             return
         await websocket.accept()
         client = websocket.client

@@ -884,10 +884,10 @@ name its `Hello` gives and its address) and disconnects, and one as it stops; wa
 go to stderr. While it runs, `run/<workspace id>.json` in the state directory, readable by you
 alone, holds its URL and process id; it's removed as it stops.
 
-The first `ctrl+c` (or SIGTERM) stops it: it stops accepting frontends, cancels the work in
-progress (stopping the agents and revoking their tokens), writes the event log, closes every
-frontend's connection saying the server is shutting down, and exits. A second `ctrl+c` exits at
-once.
+The first `ctrl+c` (or SIGTERM) stops it: it stops accepting frontends (one that arrives then is
+refused with HTTP 503), cancels the work in progress (stopping the agents and revoking their
+tokens), writes the event log, closes every frontend's connection saying the server is shutting
+down, and exits. A second `ctrl+c` exits at once.
 
 **The token.** A frontend connects by showing the token in `token` in the config directory, sent
 as `Authorization: Bearer <token>`; without it the connection is refused with HTTP 401. `orbit

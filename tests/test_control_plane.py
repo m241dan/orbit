@@ -6,12 +6,14 @@ from contextlib import asynccontextmanager
 from typing import cast
 
 import pytest
+from starlette.responses import Response
 from starlette.websockets import WebSocket, WebSocketDisconnect
 from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import ConnectionClosed, InvalidStatus
 
 from orbit.agent import AgentSession
 from orbit.agent.application import connection as connection_module
+from orbit.agent.application.connection import SessionConnection
 from orbit.agent.domain.server import ServerSettings
 from orbit.agent.external.control_plane import (
     GOING_AWAY,
@@ -19,6 +21,7 @@ from orbit.agent.external.control_plane import (
     NORMAL,
     POLICY_VIOLATION,
     SHUTTING_DOWN,
+    UNAUTHORIZED,
     ControlPlaneServer,
     ListenFailed,
     _Conversation,
@@ -380,3 +383,59 @@ async def test_a_frontend_gone_as_an_event_is_sent_ends_its_connection_unclosed(
 
     assert not connection.listening and vanished.closes == 0
     await session.close()
+
+
+class Upgrade:
+    """A WebSocket upgrade request showing ``token``: denial responses are recorded, and
+    accepting it fails."""
+
+    def __init__(self, token: str) -> None:
+        self.headers = {"authorization": f"Bearer {token}"}
+        self.client = None
+        self.denied: list[tuple[int, bytes]] = []
+
+    async def send_denial_response(self, response: Response) -> None:
+        self.denied.append((response.status_code, bytes(response.body)))
+
+    async def accept(self) -> None:
+        raise AssertionError("A WebSocket was accepted.")
+
+
+class Counted:
+    """A session that counts the connections made to it."""
+
+    def __init__(self) -> None:
+        self.session = AgentSession()
+        self.connections = 0
+
+    def connect(self) -> SessionConnection:
+        self.connections += 1
+        return self.session.connect()
+
+
+@pytest.mark.parametrize(
+    ("token", "denied"),
+    [(TOKEN, (503, SHUTTING_DOWN.encode())), ("wrong", (401, UNAUTHORIZED.encode()))],
+)
+async def test_a_websocket_arriving_as_the_server_stops_is_turned_away(
+    token: str, denied: tuple[int, bytes]
+) -> None:
+    counted = Counted()
+    server = ControlPlaneServer(counted, lambda: TOKEN, LOOPBACK, Lines())
+    await server.start()
+    closing, release = asyncio.Event(), asyncio.Event()
+
+    async def close_session() -> None:
+        closing.set()
+        await release.wait()
+
+    stopping = asyncio.create_task(server.stop(close_session))
+    await closing.wait()
+    upgrade = Upgrade(token)
+
+    await server._websocket(cast(WebSocket, upgrade))
+
+    release.set()
+    await stopping
+    assert upgrade.denied == [denied] and counted.connections == 0
+    await counted.session.close()
