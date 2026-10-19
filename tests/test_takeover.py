@@ -30,6 +30,7 @@ from tests.agent_fakes import (
     ACCEPTED,
     COMMAND_ID,
     HELLO,
+    LOCK_RETRY,
     Call,
     FakeTree,
     events_until,
@@ -197,23 +198,60 @@ async def test_queued_work_refused_once_owning_is_reported_as_an_error() -> None
     await session.close()
 
 
-async def test_staying_read_only_lets_the_lock_go_and_offers_it_again_later() -> None:
-    lock = FakeLock(free=True)
-    session, _, _ = session_for(owner=OWNER, lock=lock)
+async def declined(session: AgentSession) -> list[Event]:
+    """The events up to accepting a decline of the offer ``session`` makes."""
     await greeted(session)
     await events_until(session, offered)
-    lock.failing = True  # Hold off the next offer until another orbit has had its chance.
-
     await send(session, TakeOwnership(take=False))
-    events = await events_until(session, lambda event: event == ACCEPTED)
-    assert OwnershipDeclined() in events
+    return await events_until(session, lambda event: event == ACCEPTED)
+
+
+async def test_staying_read_only_lets_the_lock_go_at_once() -> None:
+    lock = FakeLock(free=True)
+    session, _, _ = session_for(owner=OWNER, lock=lock)
+
+    assert OwnershipDeclined() in await declined(session)
     assert lock.free and not lock.held
     assert session.read_only
     assert not (await snapshot_on_joining(session)).ownership_offered
+    await session.close()
 
-    lock.failing = False
+
+async def test_a_declined_repository_left_free_is_not_offered_again_soon() -> None:
+    lock = FakeLock(free=True)
+    session, _, _ = session_for(owner=OWNER, lock=lock)
+    await declined(session)
+    tries = lock.tries
+
+    await asyncio.sleep(LOCK_RETRY * 20)
+    assert lock.tries > tries + 5
+    assert not any(offered(event) for event in queued(session))
+    assert lock.free and not lock.held
+    await session.close()
+
+
+async def test_a_declined_repository_is_offered_again_once_another_orbit_has_held_it() -> None:
+    lock = FakeLock(free=True)
+    session, _, _ = session_for(owner=OWNER, lock=lock)
+    await declined(session)
+    lock.free = False
+    tries = lock.tries
+    while lock.tries < tries + 2:
+        await asyncio.sleep(LOCK_RETRY)
+
+    lock.free = True
     await events_until(session, offered)
-    assert session.read_only
+    assert lock.held and session.read_only
+    await session.close()
+
+
+async def test_a_declined_repository_still_free_is_offered_again_after_the_back_off() -> None:
+    lock = FakeLock(free=True)
+    session, _, _ = session_for(owner=OWNER, lock=lock, lock_declined_retry=LOCK_RETRY * 10)
+    await declined(session)
+
+    await events_until(session, offered)
+    assert lock.held and session.read_only
     await session.close()
 
 

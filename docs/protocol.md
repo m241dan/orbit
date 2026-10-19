@@ -206,8 +206,9 @@ orbit owns the repository from then on, publishing `OwnershipTaken()` and a `Not
 now owns the repository; queued work is running."), then running the work queued, in order, a
 command refused now reported as an `ErrorOccurred` with the refusal's code; later `Catalog`s and
 `Snapshot`s have `read_only` false. With `take` false it lets the lock go, so another orbit can
-take it, publishing `OwnershipDeclined()`, stays read-only and offers the repository again the
-next time it finds it free. While an offer is open, a `Snapshot` has `ownership_offered` true,
+take it, publishing `OwnershipDeclined()`, stays read-only and offers the repository again once
+it has found another orbit holding the lock since and then finds it free, or, if it stays free,
+after 5 minutes. While an offer is open, a `Snapshot` has `ownership_offered` true,
 so a frontend that connects after `OwnershipOffered` went out can still answer it; once
 `OwnershipTaken` or `OwnershipDeclined` settles it, from whichever frontend answered, the others
 close the offer they show.

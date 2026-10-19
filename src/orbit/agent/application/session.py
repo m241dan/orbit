@@ -50,7 +50,7 @@ from orbit.agent.application.switcher import (
     SessionSwitcher,
     SwitchParts,
 )
-from orbit.agent.application.takeover import RETRY_SECONDS, Takeover
+from orbit.agent.application.takeover import DECLINED_RETRY_SECONDS, RETRY_SECONDS, Takeover
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.application.usage_monitor import UsageMonitor
 from orbit.agent.application.verifier import Verification, Verifier
@@ -205,7 +205,8 @@ class AgentSession:
     repository's ``lock``, it's tried every ``lock_retry`` seconds from the first ``Welcome``;
     once it's free, it's held and offered with ``OwnershipOffered``. ``TakeOwnership`` answers:
     taking it publishes ``OwnershipTaken`` and a notice, then runs the work queued, in order;
-    declining it publishes ``OwnershipDeclined``, lets the lock go and tries it again later.
+    declining it publishes ``OwnershipDeclined``, lets the lock go and offers it again once
+    another orbit has held it since, or after ``lock_declined_retry`` seconds.
     While the offer is open, ``Snapshot`` says so.
     """
 
@@ -231,10 +232,13 @@ class AgentSession:
         owner: WorkspaceOwner | None = None,
         lock: RepositoryLock | None = None,
         lock_retry: float = RETRY_SECONDS,
+        lock_declined_retry: float = DECLINED_RETRY_SECONDS,
     ) -> None:
         self._read_only = owner is not None
         waiting_on = lock if self._read_only else None
-        self._takeover = Takeover(waiting_on, lambda event: self._events.put(event), lock_retry)
+        self._takeover = Takeover(
+            waiting_on, lambda event: self._events.put(event), lock_retry, lock_declined_retry
+        )
         self._settings = SessionSettings(settings or Settings(), pinned, model_choices)
         self._storage = storage
         halt_hooks = HaltHooks(

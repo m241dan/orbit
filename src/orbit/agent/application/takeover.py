@@ -2,6 +2,7 @@
 the user to own it in its place."""
 
 import asyncio
+from enum import Enum, auto
 
 from orbit.agent.application.lanes import Background
 from orbit.agent.application.ports import Publish, RepositoryLock
@@ -11,20 +12,30 @@ from orbit.protocol import INVALID, OwnershipOffered
 RETRY_SECONDS = 5.0
 """How long a read-only orbit waits between tries of the repository's lock."""
 
+DECLINED_RETRY_SECONDS = 300.0
+"""How long a read-only orbit waits after a declined offer before offering a repository that
+has stayed free since."""
+
 NO_OFFER = "No offer of the repository is open: another orbit still owns it."
 
 
 class Takeover:
     """Tries ``lock`` every ``interval`` seconds, once started; once it's taken, holds it and
-    publishes ``OwnershipOffered`` with ``publish``, once, until the offer is answered. Without
-    a ``lock`` it never offers anything."""
+    publishes ``OwnershipOffered`` with ``publish``, once, until the offer is answered. After a
+    decline, it offers again only once another orbit has held the lock since, or after
+    ``declined_interval`` seconds. Without a ``lock`` it never offers anything."""
 
     def __init__(
-        self, lock: RepositoryLock | None, publish: Publish, interval: float = RETRY_SECONDS
+        self,
+        lock: RepositoryLock | None,
+        publish: Publish,
+        interval: float = RETRY_SECONDS,
+        declined_interval: float = DECLINED_RETRY_SECONDS,
     ) -> None:
         self._lock = lock
         self._publish = publish
         self._interval = interval
+        self._declined_interval = declined_interval
         self._background = Background("ownership", publish)
         self._offered = False
 
@@ -39,35 +50,57 @@ class Takeover:
             self._background.start(self._retry())
 
     def answer(self, take: bool) -> None:
-        """Settle the offer: keep the lock if ``take``, else let it go and try again later;
-        refused with ``invalid`` when no offer is open."""
+        """Settle the offer: keep the lock if ``take``, else let it go and offer it again once
+        another orbit has held it or the back-off has passed; refused with ``invalid`` when no
+        offer is open."""
         if not self._offered:
             raise Refused(INVALID, NO_OFFER)
         self._offered = False
         if not take:
             assert self._lock is not None  # Only a lock taken is offered.
             self._lock.close()
-            self.start()
+            self._background.start(self._retry(self._declined_interval))
 
     async def close(self) -> None:
         """Stop trying the lock."""
         await self._background.close()
 
-    async def _retry(self) -> None:
-        """Try the lock every interval until it's taken, then offer the repository."""
+    async def _retry(self, hold_off: float = 0.0) -> None:
+        """Try the lock every interval until it's taken, then offer the repository; for
+        ``hold_off`` seconds, a lock taken is let go again unless another orbit has held it
+        since."""
         assert self._lock is not None  # Only started with a lock.
+        loop = asyncio.get_running_loop()
+        offer_from = loop.time() + hold_off
         while True:
             await asyncio.sleep(self._interval)
-            if _took(self._lock):
-                break
+            attempt = _attempt(self._lock)
+            if attempt is _Attempt.HELD:
+                offer_from = loop.time()
+            elif attempt is _Attempt.TAKEN:
+                if loop.time() >= offer_from:
+                    break
+                # Still free since the decline: keep watching without holding it.
+                self._lock.close()
         await self._publish(OwnershipOffered())
         # Open once published, so an answer finds this try ended and can start another.
         self._offered = True
 
 
-def _took(lock: RepositoryLock) -> bool:
-    """Whether ``lock`` was taken now; a lock that can't be made is tried again later."""
+class _Attempt(Enum):
+    """How a try of the lock went."""
+
+    TAKEN = auto()
+    HELD = auto()
+    """Another orbit holds it."""
+    FAILED = auto()
+    """It couldn't be made; it's tried again later."""
+
+
+def _attempt(lock: RepositoryLock) -> _Attempt:
+    """How taking ``lock`` now went."""
     try:
-        return lock.take() is None
+        owner = lock.take()
     except OSError:
-        return False
+        return _Attempt.FAILED
+    return _Attempt.TAKEN if owner is None else _Attempt.HELD

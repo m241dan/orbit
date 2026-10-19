@@ -536,6 +536,14 @@ def verified(
     return Verification((STEP,), steps, workspace, fallback_fixes)
 
 
+LOCK_RETRY = 0.01
+"""How often a test's read-only session tries the repository's lock, in seconds."""
+
+LOCK_DECLINED_RETRY = 60.0
+"""How long a test's read-only session holds off offering a repository it was declined: longer
+than any test runs."""
+
+
 def session_for(
     *scripts: Script,
     verification: Verification | None = None,
@@ -546,13 +554,15 @@ def session_for(
     fallback: Fallback | None = None,
     owner: WorkspaceOwner | None = None,
     lock: RepositoryLock | None = None,
+    lock_declined_retry: float = LOCK_DECLINED_RETRY,
     **options: Any,
 ) -> tuple[AgentSession, FakeHost, ScriptedLauncher]:
     """A session whose tasks run through agents playing ``scripts``, one per launch, and
     whose reviews run through agents playing ``reviewers``, with usage from ``usage``. It's
     saved in ``store``, if given, as ``session-1``, on a :class:`Ticks` clock, its unsaved
     events going to ``fallback``, if given, and read-only if another ``owner`` owns the
-    repository, trying its ``lock``, if given, every :data:`LOCK_RETRY` seconds.
+    repository, trying its ``lock``, if given, every :data:`LOCK_RETRY` seconds and offering it
+    again ``lock_declined_retry`` seconds after a decline.
 
     ``options`` go to :class:`Agents`, such as ``limits``, ``tree`` or ``roles`` (:data:`ROLES`
     unless given).
@@ -574,12 +584,10 @@ def session_for(
         owner=owner,
         lock=lock,
         lock_retry=LOCK_RETRY,
+        lock_declined_retry=lock_declined_retry,
     )
     return session, host, launcher
 
-
-LOCK_RETRY = 0.01
-"""How often a test's read-only session tries the repository's lock, in seconds."""
 
 COMMAND_ID = "command"
 """The id :func:`send` sends every command under."""
