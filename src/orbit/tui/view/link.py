@@ -1,5 +1,7 @@
 """How the link to a control plane in another process is shown."""
 
+from orbit.protocol import Ended, TokenRefused
+
 LOST_AFTER = 120.0
 """How many seconds of reconnecting go by before the user is asked whether to keep trying."""
 
@@ -10,6 +12,7 @@ CHOICES = (KEEP_TRYING, QUIT)
 
 STOPPED_TITLE = "The control plane stopped"
 REFUSED_TITLE = "Can't connect"
+ENDED_TITLE = "Disconnected"
 
 
 def reconnecting_status(url: str) -> str:
@@ -30,6 +33,21 @@ def lost_message(url: str) -> str:
 def stopped_message(url: str) -> str:
     """What the modal saying the control plane at ``url`` stopped says."""
     return f"The control plane at {url} is shutting down. Orbit keeps trying to reconnect."
+
+
+def ended_message(url: str, reason: str) -> str:
+    """What the modal saying the control plane at ``url`` closed the connection for good, for
+    ``reason`` if it gave one, says."""
+    closed = f"The control plane at {url} closed the connection"
+    because = f": {reason}." if reason else "."
+    return f"{closed}{because} Reconnecting would end the same way."
+
+
+def final_notice(state: TokenRefused | Ended) -> tuple[str, str]:
+    """The title and message of the modal saying why the link, in ``state``, isn't retried."""
+    if isinstance(state, TokenRefused):
+        return REFUSED_TITLE, state.message
+    return ENDED_TITLE, ended_message(state.url, state.reason)
 
 
 def lost_delay(since: float, now: float) -> float:

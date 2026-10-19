@@ -357,14 +357,16 @@ outcomes of other connections' commands included, but for the events answering o
   with code 1008 and the decoding error as the reason.
 - **The message limit** is 64 MiB each way by default (`max_message_mb` in `[server]` of the
   server's `config.toml`). A larger frame from the frontend, or an event too large to send to
-  it, closes the WebSocket with code 1009 and a reason saying how large it was.
+  it, closes the WebSocket with code 1009 and a reason saying how large it was. A frontend
+  doesn't reconnect after a 1009, from either side, as replaying what it missed would send the
+  same event again.
 - **Slow clients**: the server holds at most 10,000 events unsent to one connection. One more
   closes the WebSocket with code 1008 and the reason `too far behind`, and the session and its
   other connections carry on; the frontend reconnects with `Hello`'s `since` to catch up.
 - **Shutting down**: as the server stops, after cancelling the work in progress, it closes every
   WebSocket with code 1001 and the reason `orbit serve is shutting down`.
 - A stream that ends otherwise, as an incompatible `Hello`'s does, closes the WebSocket with code
-  1000.
+  1000. A frontend doesn't reconnect after it, as the same `Hello` would be refused again.
 
 Work doesn't depend on any frontend: queued work goes on to the end with none connected.
 

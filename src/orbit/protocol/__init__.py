@@ -114,6 +114,7 @@ from orbit.protocol.events import (
 from orbit.protocol.link import (
     NOT_CONNECTED,
     Connected,
+    Ended,
     Link,
     LinkState,
     NotConnected,
@@ -246,6 +247,7 @@ __all__ = [
     "DecideProposal",
     "DeleteSession",
     "EditTask",
+    "Ended",
     "ErrorOccurred",
     "Event",
     "EventEnvelope",

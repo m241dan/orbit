@@ -420,7 +420,9 @@ async def test_runner_reports_missing_cli(tmp_path: Path) -> None:
 async def test_cancel_kills_the_cli_process(tmp_path: Path) -> None:
     runner, scenario = make_runner(tmp_path, stdout=lines(INIT), hang=True)
     turn = asyncio.create_task(run(runner, "hi"))
-    while not Path(f"{scenario}.calls").exists():
+    recorded = Path(f"{scenario}.calls")
+    # The file opens before its line is written, so wait for the whole line.
+    while not (recorded.exists() and recorded.read_text().endswith("\n")):
         await asyncio.sleep(0.01)
     turn.cancel()
     with pytest.raises(asyncio.CancelledError):

@@ -8,6 +8,7 @@ from textual.widgets import OptionList, Static
 from orbit.protocol import (
     PLANNER,
     Connected,
+    Ended,
     LinkState,
     NewSession,
     NotConnected,
@@ -19,7 +20,7 @@ from orbit.protocol import (
 )
 from orbit.tui import OrbitApp
 from orbit.tui.link import LinkScreen
-from orbit.tui.view.link import LOST_AFTER, lost_delay
+from orbit.tui.view.link import LOST_AFTER, ended_message, lost_delay
 from tests.test_tui import FakeSession, entries, feed_events
 
 URL = "ws://127.0.0.1:7433/"
@@ -159,6 +160,30 @@ async def test_a_refused_token_shows_why_and_quits_once_closed() -> None:
         await pilot.press("enter")
         await pilot.pause()
     assert app.return_code == 0
+
+
+async def test_an_ended_link_shows_why_and_quits_once_closed() -> None:
+    app, _, link = linked()
+    async with app.run_test() as pilot:
+        await link.move(pilot, Reconnecting(URL, NOW))
+        await link.move(pilot, Ended(URL, "An event of 99 bytes is over the 9-byte limit"))
+        shown = modal(app)
+        assert shown is not None and shown.choices == ("Quit",)
+        assert shown.title_text == "Disconnected"
+        assert shown.message == (
+            f"The control plane at {URL} closed the connection: "
+            "An event of 99 bytes is over the 9-byte limit. Reconnecting would end the same way."
+        )
+        assert status(app) is None
+        await pilot.press("enter")
+        await pilot.pause()
+    assert app.return_code == 0
+
+
+def test_an_ended_link_without_a_reason_says_so_plainly() -> None:
+    assert ended_message(URL, "") == (
+        f"The control plane at {URL} closed the connection. Reconnecting would end the same way."
+    )
 
 
 async def test_the_opening_command_is_sent_once_welcomed_and_only_once() -> None:

@@ -39,7 +39,16 @@ class TokenRefused:
     message: str
 
 
-LinkState = Connected | Reconnecting | Stopped | TokenRefused
+@dataclass(frozen=True)
+class Ended:
+    """The control plane at ``url`` closed the connection in a way reconnecting would only
+    repeat, giving ``reason``, which may be empty; the link isn't retried."""
+
+    url: str
+    reason: str
+
+
+LinkState = Connected | Reconnecting | Stopped | TokenRefused | Ended
 
 
 class NotConnected(Exception):

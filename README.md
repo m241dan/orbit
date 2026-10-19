@@ -945,7 +945,9 @@ modal, "Lost the control plane at <url>", offers "Keep trying" or "Quit". When t
 it's shutting down, "The control plane stopped" opens at once, with "Keep trying" preselected and
 reconnecting going on behind it; either modal closes once it's connected again. A token the server
 refuses shows a message naming the token file, and the chat quits once it's closed, without
-retrying.
+retrying. Likewise "Disconnected", giving the reason, shows when the connection closes in a way
+reconnecting would only repeat: a message over the size limit, sent either way, or the server
+refusing the chat's `Hello` as incompatible.
 
 **Finding the server.** Without `--connect`, `orbit chat` looks for the `orbit serve` that owns its
 repository (see [Owning the repository](#owning-the-repository)), from the run file in the state
@@ -1017,7 +1019,8 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
   codes, and `schema/protocol.schema.json` is its JSON Schema.
 - `orbit.client`: the frontends' side of a control plane in another process. `WebSocketSession`
   (in `session`) is a `Session` over a WebSocket (the `websockets` library) that reconnects with
-  backoff, sends its last `Hello` again with `since`, and reports how the link stands through
+  backoff, but not after a close that would recur (1000 or 1009), sends its last `Hello` again
+  with `since`, and reports how the link stands through
   `orbit.protocol`'s `Link`; `read_token` (in `token`) reads the token it shows, and `accepts`
   (in `probe`) asks a control plane whether it takes it; both open the WebSocket through
   `open_connection` (in `upgrade`), which raises `TokenRejected` on a 401. It imports no

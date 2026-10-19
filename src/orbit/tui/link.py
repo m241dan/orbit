@@ -13,12 +13,12 @@ from textual.screen import ModalScreen
 from textual.timer import Timer
 from textual.widgets import OptionList, Static
 
-from orbit.protocol import Connected, LinkState, Reconnecting, Stopped, TokenRefused
+from orbit.protocol import Connected, Ended, LinkState, Reconnecting, Stopped, TokenRefused
 from orbit.tui.view.link import (
     CHOICES,
     QUIT,
-    REFUSED_TITLE,
     STOPPED_TITLE,
+    final_notice,
     lost_delay,
     lost_message,
     lost_title,
@@ -78,7 +78,8 @@ After = Callable[[float, Callable[[], None]], Timer]
 class LinkHost:
     """Follows the link to the control plane: while it's down, the status line is shown with
     ``show_status`` and, after two minutes, a modal pushed with ``push`` asks whether to keep
-    trying, as one does at once when the control plane stops; ``quit`` ends the app, and
+    trying, as one does at once when the control plane stops, and a link that won't be retried
+    is shown with only the choice to quit; ``quit`` ends the app, and
     ``after`` calls back after a delay."""
 
     def __init__(self, push: Push, quit: Callable[[], None], show_status: ShowStatus, after: After):
@@ -98,8 +99,8 @@ class LinkHost:
                 self._reconnecting(url, lost_delay(since, now))
             case Stopped(url=url):
                 self._ask(STOPPED_TITLE, stopped_message(url))
-            case TokenRefused(message=message):
-                self._refused(message)
+            case TokenRefused() | Ended():
+                self._final(*final_notice(state))
             case _:
                 assert_never(state)
 
@@ -118,11 +119,12 @@ class LinkHost:
             ask = lambda: self._ask(lost_title(url), lost_message(url))  # noqa: E731
             self._timer = self._after(max(delay, _SOONEST), ask)
 
-    def _refused(self, message: str) -> None:
-        """Show that the token was refused, as ``message`` says, quitting once it's closed."""
+    def _final(self, title: str, message: str) -> None:
+        """Show ``title`` with ``message``, saying why the link won't be retried, quitting once
+        it's closed."""
         self._show_status(None)
         self._stop_timer()
-        self._push(LinkScreen(REFUSED_TITLE, message, (QUIT,)), lambda _: self._quit())
+        self._push(LinkScreen(title, message, (QUIT,)), lambda _: self._quit())
 
     def _ask(self, title: str, message: str) -> None:
         """Ask ``title`` with ``message`` whether to keep trying, unless that's being asked."""

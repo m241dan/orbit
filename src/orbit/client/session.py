@@ -1,7 +1,9 @@
 """A session with a control plane in another process, over a WebSocket: one text frame per
 envelope, the token sent as ``Authorization: Bearer`` on the upgrade.
 
-A lost connection is retried with backoff until the session is closed, and the last ``Hello``
+A lost connection is retried with backoff until the session is closed, but for one closed as
+its stream ended (1000) or for a message over the limit (1009), which reconnecting would only
+repeat; on reconnecting, the last ``Hello``
 sent again with ``since`` the last ``seq`` received, so the control plane resends what was
 missed, then, if the connection viewed a session that isn't open, the last ``Attach`` sent, so
 it views that session again. How the link stands is reported to whoever watches it.
@@ -17,15 +19,19 @@ from pathlib import Path
 
 from websockets.asyncio.client import ClientConnection
 from websockets.exceptions import ConnectionClosed
+from websockets.frames import Close
 
 from orbit.client.token import TokenUnreadable, read_token
 from orbit.client.upgrade import TokenRejected, open_connection
 from orbit.protocol import (
     DEFAULT_MAX_MESSAGE_MB,
     GOING_AWAY,
+    MESSAGE_TOO_BIG,
+    NORMAL,
     Attach,
     CommandEnvelope,
     Connected,
+    Ended,
     EventEnvelope,
     Hello,
     LinkState,
@@ -48,6 +54,10 @@ taken as lost."""
 
 
 _MOST_DOUBLINGS = 64
+
+_FINAL_CLOSES = frozenset({NORMAL, MESSAGE_TOO_BIG})
+"""The close codes that would recur on reconnecting: a stream that ended, as an incompatible
+``Hello``'s does, and an event over the limit, which the control plane would resend."""
 
 
 @dataclass(frozen=True)
@@ -73,6 +83,17 @@ BACKOFF = Backoff()
 class _TurnedAway(Exception):
     """The control plane turned the token away, or it couldn't be read; the message says
     which."""
+
+
+class _Ended(Exception):
+    """The connection closed in a way reconnecting would only repeat, for the reason the
+    message gives."""
+
+
+def _closing(websocket: ClientConnection) -> Close | None:
+    """The close frame ``websocket`` received, else the one it sent, as one it fails on its
+    own, such as for a message over the limit, isn't answered; none if neither was."""
+    return websocket.protocol.close_rcvd or websocket.protocol.close_sent
 
 
 class WebSocketSession:
@@ -163,19 +184,23 @@ class WebSocketSession:
         return hello.model_copy(update={"payload": payload})
 
     async def _run(self) -> None:
-        """Keep connected until the session closes, or the token is turned away or can't be
-        read; an event that can't be read ends the events with its error."""
+        """Keep connected until the session closes, the token is turned away or can't be read,
+        or the connection closes in a way that would recur; an event that can't be read ends
+        the events with its error."""
         try:
             await self._keep_connected()
         except _TurnedAway as error:
             self._report(TokenRefused(str(error)))
+        except _Ended as ended:
+            self._report(Ended(self.url, str(ended)))
         except ProtocolError as error:
             self._events.put_nowait(error)
 
     async def _keep_connected(self) -> None:
         """Connect, and connect again each time the connection fails or is lost, until the
         session closes, waiting the backoff before each attempt again; raises
-        :class:`_TurnedAway` if the token is, or can't be read. Only a connection that received
+        :class:`_TurnedAway` if the token is, or can't be read, and :class:`_Ended` if the
+        connection closes in a way that would recur. Only a connection that received
         something resets the backoff, so one dropped as soon as it opens counts as a failure."""
         failures = 0
         while True:
@@ -211,7 +236,8 @@ class WebSocketSession:
     async def _linked(self, websocket: ClientConnection) -> bool:
         """Greet the control plane on ``websocket`` with the last ``Hello``, if any, and take
         its events until the connection closes, noting if it said it was shutting down; whether
-        it received anything."""
+        it received anything. Raises :class:`_Ended` if it closed, from either side, in a way
+        that would recur, unless the session closed it."""
         async with websocket:
             self._websocket = websocket
             try:
@@ -221,9 +247,19 @@ class WebSocketSession:
                 received = await self._read(websocket)
             finally:
                 self._websocket = None
-        if websocket.close_code == GOING_AWAY:
-            self._report(Stopped(self.url))
+        self._closed_as(_closing(websocket))
         return received
+
+    def _closed_as(self, close: Close | None) -> None:
+        """Note how the connection closed, as ``close``, the frame that closed it, if any, says:
+        report that the control plane is shutting down if it said so, and raise
+        :class:`_Ended` if it closed in a way that would recur, unless the session closed it."""
+        if close is None:
+            return
+        if close.code == GOING_AWAY:
+            self._report(Stopped(self.url))
+        elif close.code in _FINAL_CLOSES and not self._closed:
+            raise _Ended(close.reason)
 
     async def _greet(self, websocket: ClientConnection) -> None:
         """Send the last ``Hello`` on ``websocket``, if any, then the last ``Attach``, if the

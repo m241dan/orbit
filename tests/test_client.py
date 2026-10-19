@@ -24,6 +24,7 @@ from orbit.protocol import (
     Attach,
     CommandEnvelope,
     Connected,
+    Ended,
     EventEnvelope,
     Hello,
     LinkState,
@@ -334,6 +335,78 @@ async def test_a_control_plane_shutting_down_is_reported_and_retried() -> None:
         await session.close()
 
 
+@pytest.mark.parametrize(
+    ("code", "reason"),
+    [(1000, ""), (1009, "An event of 99 bytes is over the 9-byte limit")],
+)
+async def test_a_close_that_would_recur_ends_the_link_with_its_reason(
+    code: int, reason: str
+) -> None:
+    async with plane() as (fake, url):
+        session, states = client(url)
+        await session.send(HELLO)
+        await fake.command()
+        await (await fake.connection()).close(code, reason)
+        assert await states.until(Ended) == Ended(url, reason) == session.state
+        await asyncio.sleep(0.1)  # Long enough for several attempts.
+        assert fake.connections.empty()
+        assert [type(state) for state in states.seen] == [Connected, Ended]
+        await session.close()
+
+
+async def test_an_event_over_the_clients_limit_ends_the_link(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("orbit.client.session.MAX_MESSAGE_BYTES", 100)
+    async with plane() as (fake, url):
+        session, states = client(url)
+        session.events()
+        await (await fake.connection()).send(event(1, "x" * 200))
+        ended = await states.until(Ended)
+        assert isinstance(ended, Ended) and ended.url == url
+        await asyncio.sleep(0.1)
+        assert fake.connections.empty()
+        await session.close()
+
+
+@pytest.mark.parametrize("code", [1008, 1011])
+async def test_a_close_that_may_pass_is_reconnected_after(code: int) -> None:
+    async with plane() as (fake, url):
+        session, states = client(url)
+        await session.send(HELLO)
+        await fake.command()
+        await (await fake.connection()).close(code, "Too far behind")
+        assert await fake.command() == HELLO
+        assert [type(state) for state in states.seen] == [Connected, Reconnecting, Connected]
+        await session.close()
+
+
+async def test_a_connection_dropped_without_a_close_frame_is_reconnected_after() -> None:
+    async with plane() as (fake, url):
+        session, states = client(url)
+        await session.send(HELLO)
+        await fake.command()
+        (await fake.connection()).transport.abort()
+        assert await fake.command() == HELLO
+        assert [type(state) for state in states.seen] == [Connected, Reconnecting, Connected]
+        await session.close()
+
+
+async def test_an_incompatible_hello_ends_the_link_to_the_control_plane_server() -> None:
+    served = AgentSession()
+    server = ControlPlaneServer(served, lambda: TOKEN, ServerSettings(port=0), lambda line: None)
+    url = await server.start()
+    session, states = client(url)
+    session.events()
+    future = HELLO.model_copy(update={"payload": Hello(client="tests", protocol_version=99)})
+    try:
+        await session.send(future)
+        assert await states.until(Ended) == Ended(url, "")
+    finally:
+        await session.close()
+        await server.stop(served.close)
+
+
 async def test_a_refused_token_is_reported_naming_its_file_and_not_retried() -> None:
     async with plane() as (fake, url):
         fake.status = 401
@@ -445,7 +518,7 @@ async def test_a_rotated_token_file_is_shown_on_reconnecting() -> None:
         TOKEN_FILE.write_text("the-new-token\n")
         tokens.append("the-new-token")
         assert session._websocket is not None
-        await session._websocket.close()
+        await session._websocket.close(1011)
         while type((await next_event(events)).payload) is not Welcome:
             pass
         assert [type(state) for state in states.seen] == [Connected, Reconnecting, Connected]
