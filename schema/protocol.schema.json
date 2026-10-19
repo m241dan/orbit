@@ -831,6 +831,7 @@
               "log_gap": "#/$defs/LogGap",
               "message_sent": "#/$defs/MessageSent",
               "notice": "#/$defs/Notice",
+              "ownership_declined": "#/$defs/OwnershipDeclined",
               "ownership_offered": "#/$defs/OwnershipOffered",
               "ownership_taken": "#/$defs/OwnershipTaken",
               "progress_noted": "#/$defs/ProgressNoted",
@@ -957,6 +958,9 @@
             },
             {
               "$ref": "#/$defs/OwnershipTaken"
+            },
+            {
+              "$ref": "#/$defs/OwnershipDeclined"
             },
             {
               "$ref": "#/$defs/SessionStateChanged"
@@ -1339,6 +1343,22 @@
       "title": "OpenSession",
       "type": "object"
     },
+    "OwnershipDeclined": {
+      "description": "The offer of the repository was declined, so this orbit stays read-only and lets the\nrepository go; the offer is settled.",
+      "properties": {
+        "type": {
+          "const": "ownership_declined",
+          "default": "ownership_declined",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "OwnershipDeclined",
+      "type": "object"
+    },
     "OwnershipOffered": {
       "description": "The repository this read-only orbit waits on is free, and this orbit holds it until the\nuser answers with ``TakeOwnership``; sent once for each time it's found free.",
       "properties": {
@@ -1356,7 +1376,7 @@
       "type": "object"
     },
     "OwnershipTaken": {
-      "description": "This orbit owns the repository now, so it's no longer read-only and runs its work.",
+      "description": "This orbit owns the repository now, so it's no longer read-only and runs its work; the\noffer is settled.",
       "properties": {
         "type": {
           "const": "ownership_taken",
@@ -1941,7 +1961,7 @@
       "type": "object"
     },
     "Snapshot": {
-      "description": "The session a connection views as it stands, sent after ``Welcome``, after every switch\nand in answer to ``Attach``; its envelope's ``seq`` is the point it's current to.\n\nIt holds the ``session``'s summary, its ``settings`` and ``model_choices``, whether each\nlane is ``busy``, its ``tasks``, the verification ``steps`` and the ``steps_title`` they\nshow under, the ``review`` status (none when reviews are off), the checks ``proposals``\nwaiting for a decision, the ``agents`` running, the ``transcript``: the session's\nlast logged events, at most 500, oldest first, in the envelopes they were sent in, and,\nwhile the session is halted because storage failed, ``storage_halt``: why, and how to\nresume; ``read_only`` says another orbit owns the repository, so the work this one is\nasked to run waits. ``active`` says whether the session is the workspace's open one, which\nruns work; one that isn't is a read-only view, from its saved record and its last logged\nevents. ``open_session`` names the workspace's open session, and ``viewers`` counts the\nconnections viewing this one.",
+      "description": "The session a connection views as it stands, sent after ``Welcome``, after every switch\nand in answer to ``Attach``; its envelope's ``seq`` is the point it's current to.\n\nIt holds the ``session``'s summary, its ``settings`` and ``model_choices``, whether each\nlane is ``busy``, its ``tasks``, the verification ``steps`` and the ``steps_title`` they\nshow under, the ``review`` status (none when reviews are off), the checks ``proposals``\nwaiting for a decision, the ``agents`` running, the ``transcript``: the session's\nlast logged events, at most 500, oldest first, in the envelopes they were sent in, and,\nwhile the session is halted because storage failed, ``storage_halt``: why, and how to\nresume; ``read_only`` says another orbit owns the repository, so the work this one is\nasked to run waits, and ``ownership_offered`` that the repository is offered, as\n``OwnershipOffered`` said, until the offer is settled. ``active`` says whether the session\nis the workspace's open one, which runs work; one that isn't is a read-only view, from its\nsaved record and its last logged events. ``open_session`` names the workspace's open\nsession, and ``viewers`` counts the connections viewing this one.",
       "properties": {
         "active": {
           "default": true,
@@ -1979,6 +1999,11 @@
             }
           ],
           "default": null
+        },
+        "ownership_offered": {
+          "default": false,
+          "title": "Ownership Offered",
+          "type": "boolean"
         },
         "proposals": {
           "items": {

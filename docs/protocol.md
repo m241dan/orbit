@@ -85,7 +85,8 @@ and the backend's `server_version`. `Welcome` is Hello's outcome: it takes the p
    envelopes they were sent in, their `seq`s included (none without a store), and, while the
    session is halted because a write to the store failed, its `storage_halt`: the explanation
    the halting `ErrorOccurred` carried (see `storage_failed` under [Codes](#codes)), and
-   `read_only`, as the Catalog has it. A `Hello`
+   `read_only`, as the Catalog has it, with `ownership_offered`, true while an offer of the
+   repository is open (see [Read-only orbits](#read-only-orbits)). A `Hello`
    whose `since` orbit can catch up from gets the open session's events after it here
    instead, in their original envelopes (see
    [Sequencing and reconnecting](#sequencing-and-reconnecting)).
@@ -205,7 +206,11 @@ orbit owns the repository from then on, publishing `OwnershipTaken()` and a `Not
 now owns the repository; queued work is running."), then running the work queued, in order, a
 command refused now reported as an `ErrorOccurred` with the refusal's code; later `Catalog`s and
 `Snapshot`s have `read_only` false. With `take` false it lets the lock go, so another orbit can
-take it, stays read-only and offers the repository again the next time it finds it free.
+take it, publishing `OwnershipDeclined()`, stays read-only and offers the repository again the
+next time it finds it free. While an offer is open, a `Snapshot` has `ownership_offered` true,
+so a frontend that connects after `OwnershipOffered` went out can still answer it; once
+`OwnershipTaken` or `OwnershipDeclined` settles it, from whichever frontend answered, the others
+close the offer they show.
 `TakeOwnership` is refused with `invalid` when no offer is open, as it always is for an owner.
 
 ## The user's messages and decisions

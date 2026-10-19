@@ -28,6 +28,11 @@ class Takeover:
         self._background = Background("ownership", publish)
         self._offered = False
 
+    @property
+    def open(self) -> bool:
+        """Whether an offer is open, waiting for its answer."""
+        return self._offered
+
     def start(self) -> None:
         """Start trying the lock in the background, if there's one."""
         if self._lock is not None:

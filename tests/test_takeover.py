@@ -2,6 +2,7 @@
 
 import asyncio
 
+from orbit.agent import AgentSession
 from orbit.agent.application.session import OWNED_NOTE
 from orbit.agent.application.takeover import NO_OFFER
 from orbit.agent.application.work_turns import TASKS_RUNNING_MESSAGE
@@ -10,11 +11,13 @@ from orbit.protocol import (
     BUSY,
     INVALID,
     AddTask,
+    CommandEnvelope,
     CommandRefused,
     ErrorOccurred,
     Event,
     NewSession,
     Notice,
+    OwnershipDeclined,
     OwnershipOffered,
     OwnershipTaken,
     RunTasks,
@@ -26,6 +29,7 @@ from orbit.protocol import (
 from tests.agent_fakes import (
     ACCEPTED,
     COMMAND_ID,
+    HELLO,
     Call,
     FakeTree,
     events_until,
@@ -78,6 +82,16 @@ def refused(event: Event) -> bool:
     return isinstance(event, CommandRefused)
 
 
+async def snapshot_on_joining(session: AgentSession) -> Snapshot:
+    """The Snapshot a new connection to ``session`` gets for its Hello."""
+    connection = session.connect()
+    await connection.send(CommandEnvelope(command_id="join", payload=HELLO))
+    stream = connection.events()
+    while not isinstance(payload := (await asyncio.wait_for(anext(stream), 5)).payload, Snapshot):
+        pass
+    return payload
+
+
 async def test_a_read_only_session_offers_the_repository_once_its_owner_goes() -> None:
     lock = FakeLock()
     session, _, _ = session_for(owner=OWNER, lock=lock)
@@ -90,6 +104,22 @@ async def test_a_read_only_session_offers_the_repository_once_its_owner_goes() -
     assert lock.held
     await asyncio.sleep(0.05)
     assert not any(offered(event) for event in queued(session))  # Once, until answered.
+    await session.close()
+
+
+async def test_a_snapshot_says_an_offer_is_open_only_while_it_is() -> None:
+    lock = FakeLock()
+    session, _, _ = session_for(owner=OWNER, lock=lock)
+    await greeted(session)
+    assert not (await snapshot_on_joining(session)).ownership_offered
+
+    lock.free = True
+    await events_until(session, offered)
+    assert (await snapshot_on_joining(session)).ownership_offered
+
+    await send(session, TakeOwnership(take=True))
+    await events_until(session, lambda event: event == ACCEPTED)
+    assert not (await snapshot_on_joining(session)).ownership_offered
     await session.close()
 
 
@@ -175,9 +205,11 @@ async def test_staying_read_only_lets_the_lock_go_and_offers_it_again_later() ->
     lock.failing = True  # Hold off the next offer until another orbit has had its chance.
 
     await send(session, TakeOwnership(take=False))
-    await events_until(session, lambda event: event == ACCEPTED)
+    events = await events_until(session, lambda event: event == ACCEPTED)
+    assert OwnershipDeclined() in events
     assert lock.free and not lock.held
     assert session.read_only
+    assert not (await snapshot_on_joining(session)).ownership_offered
 
     lock.failing = False
     await events_until(session, offered)

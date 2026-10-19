@@ -980,7 +980,9 @@ asks, once, in a modal: "The repository is free". `y` takes it over: the orbit o
 repository from then on, the "read-only" mark goes, a note says "This orbit now owns the
 repository; queued work is running." and the work queued runs, in order. `n` or `esc` stays
 read-only: the orbit lets the lock go again, so another orbit can take it, and asks again the
-next time the repository is free. An orbit that owns the repository never asks.
+next time the repository is free. Under `orbit serve`, every frontend connected asks, as does
+one that connects while the question is open; once one answers, the others close the modal. An
+orbit that owns the repository never asks.
 
 ## Development
 

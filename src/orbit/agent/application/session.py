@@ -92,6 +92,7 @@ from orbit.protocol import (
     LogGap,
     NewSession,
     Notice,
+    OwnershipDeclined,
     OwnershipTaken,
     ResumeStorage,
     RunningAgent,
@@ -204,7 +205,8 @@ class AgentSession:
     repository's ``lock``, it's tried every ``lock_retry`` seconds from the first ``Welcome``;
     once it's free, it's held and offered with ``OwnershipOffered``. ``TakeOwnership`` answers:
     taking it publishes ``OwnershipTaken`` and a notice, then runs the work queued, in order;
-    declining it lets the lock go and tries it again later.
+    declining it publishes ``OwnershipDeclined``, lets the lock go and tries it again later.
+    While the offer is open, ``Snapshot`` says so.
     """
 
     def __init__(
@@ -563,6 +565,7 @@ class AgentSession:
         queued for ``command_id``; refused when no offer is open."""
         self._takeover.answer(command.take)
         if not command.take:
+            await self._events.put(OwnershipDeclined())
             return
         self._read_only = False
         if self._lane is not None:
@@ -729,6 +732,7 @@ class AgentSession:
             transcript=transcript,
             storage_halt=self._halt.message,
             read_only=self._read_only,
+            ownership_offered=self._takeover.open,
             open_session=self._views.open_session(),
             viewers=self._states.of(self._keeper.id).viewers,
         )

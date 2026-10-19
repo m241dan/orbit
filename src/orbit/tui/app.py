@@ -55,6 +55,7 @@ from orbit.protocol import (
     MessageSent,
     NotConnected,
     Notice,
+    OwnershipDeclined,
     OwnershipOffered,
     OwnershipTaken,
     ProgressNoted,
@@ -105,6 +106,7 @@ from orbit.tui.reason import ReasonScreen
 from orbit.tui.sessions import SessionsHost
 from orbit.tui.storage_halt import StorageHaltHost
 from orbit.tui.tabs import ConversationTabs
+from orbit.tui.takeover import TakeoverHost
 from orbit.tui.task_editor import TaskEditorScreen
 from orbit.tui.tasks import TaskList
 from orbit.tui.transcript import Transcript
@@ -116,10 +118,6 @@ from orbit.tui.view.confirm import (
     RESET_MESSAGE,
     RESET_TITLE,
     RESET_YES,
-    TAKE_OVER_MESSAGE,
-    TAKE_OVER_NO,
-    TAKE_OVER_TITLE,
-    TAKE_OVER_YES,
 )
 from orbit.tui.view.events import coalesce
 from orbit.tui.view.outcomes import Awaited, Outcomes, awaiting, settled
@@ -223,6 +221,9 @@ class OrbitApp(App[None], inherit_bindings=False):
         self._outcomes = Outcomes()  # What awaits the outcomes of the commands sent.
         # The command ids of the messages and decisions sent, shown already, whose echo isn't.
         self._echoes: set[str] = set()
+        self._takeover = TakeoverHost(
+            self.push_screen, lambda take: self._send(TakeOwnership(take=take))
+        )
         self._halt = StorageHaltHost(self.push_screen, self._resume_storage, self._show_halt)
         self._link_host = LinkHost(self.push_screen, self.exit, self._show_link, self.set_timer)
         # The actions of the keys whose trigger the last catalog lacks, which are hidden.
@@ -678,6 +679,7 @@ class OrbitApp(App[None], inherit_bindings=False):
                 | HistoryPage()
                 | OwnershipOffered()
                 | OwnershipTaken()
+                | OwnershipDeclined()
             ):
                 self._render_session(event)
             case (
@@ -688,18 +690,17 @@ class OrbitApp(App[None], inherit_bindings=False):
                 assert_never(event)
         self._follow_halt(event)
 
-    def _render_ownership(self, event: OwnershipOffered | OwnershipTaken) -> None:
-        """Ask whether to take over the repository offered, sending the answer, or clear the
-        read-only mark once this orbit owns it."""
+    def _render_ownership(
+        self, event: OwnershipOffered | OwnershipTaken | OwnershipDeclined
+    ) -> None:
+        """Ask whether to take over the repository offered, or close the offer once it's
+        settled, clearing the read-only mark if this orbit owns it."""
+        if isinstance(event, OwnershipOffered):
+            self._takeover.offered()
+            return
+        self._takeover.settled()
         if isinstance(event, OwnershipTaken):
             self._prompt.show_read_only(False)
-            return
-
-        async def answered(take: bool | None) -> None:
-            await self._send(TakeOwnership(take=bool(take)))
-
-        offer = ConfirmScreen(TAKE_OVER_TITLE, TAKE_OVER_MESSAGE, TAKE_OVER_YES, TAKE_OVER_NO)
-        self.push_screen(offer, answered)
 
     def _follow_halt(self, event: Event) -> None:
         """Show the halt a storage error or a command refused for it reports."""
@@ -737,7 +738,8 @@ class OrbitApp(App[None], inherit_bindings=False):
         | Catalog
         | HistoryPage
         | OwnershipOffered
-        | OwnershipTaken,
+        | OwnershipTaken
+        | OwnershipDeclined,
     ) -> None:
         """Rule off the planner's conversation where it was reset, show a snapshot of the session
         viewed or a page of its history, follow a catalog, or follow the session's hold on the
@@ -750,7 +752,7 @@ class OrbitApp(App[None], inherit_bindings=False):
             self._render_catalog(event)
         elif isinstance(event, HistoryPage):
             self._pager.show(event)
-        elif isinstance(event, OwnershipOffered | OwnershipTaken):
+        elif isinstance(event, OwnershipOffered | OwnershipTaken | OwnershipDeclined):
             self._render_ownership(event)
         else:
             self._feed.append(*planner_reset_entry(), PLANNER)
@@ -794,7 +796,8 @@ class OrbitApp(App[None], inherit_bindings=False):
 
     def _render_snapshot(self, snapshot: Snapshot) -> None:
         """Replace the state shown with ``snapshot``'s, the conversation with its transcript's,
-        and open the session it holds; the agents pane follows it as it follows every event."""
+        and open the session it holds, asking about the repository while it says it's offered;
+        the agents pane follows it as it follows every event."""
         self._show_settings(snapshot.settings, snapshot.model_choices)
         for lane, busy in snapshot.busy.items():
             self._set_busy(lane, busy)
@@ -810,6 +813,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         self._sessions.view(snapshot)
         self._show_viewing()
         self._prompt.show_read_only(snapshot.read_only)
+        self._takeover.follow(snapshot.ownership_offered)
         if snapshot.storage_halt is None:
             self._halt.lifted()
         else:

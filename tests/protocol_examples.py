@@ -44,6 +44,7 @@ from orbit.protocol import (
     Notice,
     OpenRequest,
     OpenSession,
+    OwnershipDeclined,
     OwnershipOffered,
     OwnershipTaken,
     ProgressNoted,
@@ -251,6 +252,7 @@ EVENTS: tuple[EventEnvelope, ...] = (
     event(LogGap(first_seq=1204, last_seq=1210)),
     event(OwnershipOffered()),
     event(OwnershipTaken()),
+    event(OwnershipDeclined()),
     event(SessionStateChanged(session="s1", active=True, state="running", viewers=2)),
     event(
         Snapshot(
@@ -274,6 +276,7 @@ EVENTS: tuple[EventEnvelope, ...] = (
             transcript=(event(AssistantMessage(turn_id="turn-1", text="Done.")),),
             storage_halt="Orbit stopped this session: saving the event log failed.",
             read_only=True,
+            ownership_offered=True,
             active=False,
             open_session=SessionRef(id="s2", name="Today"),
             viewers=2,

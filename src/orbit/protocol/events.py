@@ -394,10 +394,11 @@ class Snapshot(_Message):
     last logged events, at most 500, oldest first, in the envelopes they were sent in, and,
     while the session is halted because storage failed, ``storage_halt``: why, and how to
     resume; ``read_only`` says another orbit owns the repository, so the work this one is
-    asked to run waits. ``active`` says whether the session is the workspace's open one, which
-    runs work; one that isn't is a read-only view, from its saved record and its last logged
-    events. ``open_session`` names the workspace's open session, and ``viewers`` counts the
-    connections viewing this one.
+    asked to run waits, and ``ownership_offered`` that the repository is offered, as
+    ``OwnershipOffered`` said, until the offer is settled. ``active`` says whether the session
+    is the workspace's open one, which runs work; one that isn't is a read-only view, from its
+    saved record and its last logged events. ``open_session`` names the workspace's open
+    session, and ``viewers`` counts the connections viewing this one.
     """
 
     type: Literal["snapshot"] = "snapshot"
@@ -414,6 +415,7 @@ class Snapshot(_Message):
     transcript: tuple["EventEnvelope", ...] = ()
     storage_halt: str | None = None
     read_only: bool = False
+    ownership_offered: bool = False
     active: bool = True
     open_session: SessionRef | None = None
     viewers: int = Field(default=0, ge=0)
@@ -448,9 +450,17 @@ class OwnershipOffered(_Message):
 
 
 class OwnershipTaken(_Message):
-    """This orbit owns the repository now, so it's no longer read-only and runs its work."""
+    """This orbit owns the repository now, so it's no longer read-only and runs its work; the
+    offer is settled."""
 
     type: Literal["ownership_taken"] = "ownership_taken"
+
+
+class OwnershipDeclined(_Message):
+    """The offer of the repository was declined, so this orbit stays read-only and lets the
+    repository go; the offer is settled."""
+
+    type: Literal["ownership_declined"] = "ownership_declined"
 
 
 class SessionStateChanged(_Message):
@@ -538,6 +548,7 @@ Event = Annotated[
     | LogGap
     | OwnershipOffered
     | OwnershipTaken
+    | OwnershipDeclined
     | SessionStateChanged
     | Snapshot
     | HistoryPage
