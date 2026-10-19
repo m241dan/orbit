@@ -31,7 +31,9 @@ from orbit.protocol import (
     Hello,
     History,
     HistoryPage,
+    NewSession,
     Notice,
+    RenameSession,
     SessionStateChanged,
     Settings,
     Snapshot,
@@ -150,6 +152,42 @@ async def test_a_history_page_reaches_only_the_connection_that_asked() -> None:
 
     assert [type(e) for e in await taken(first)] == [HistoryPage, CommandAccepted]
     assert await taken(second) == [CommandAccepted(command_id="page")]
+    await session.close()
+
+
+async def test_a_new_session_gives_every_connection_its_catalog_and_snapshot() -> None:
+    session = AgentSession()
+    first = await welcomed(session, "first")
+    second = await welcomed(session, "second")
+    await taken(first), await taken(second)
+
+    await say(first, "new", NewSession(name="Next"))
+
+    for events in (await taken(first), await taken(second)):
+        switch = [e for e in events if isinstance(e, Catalog | Snapshot | CommandAccepted)]
+        assert [type(e) for e in switch] == [Catalog, Snapshot, CommandAccepted]
+        snapshot = switch[1]
+        assert isinstance(snapshot, Snapshot)
+        assert snapshot.session.id == session.saved_session.id
+    await session.close()
+
+
+def catalog_names(events: list[Event]) -> list[list[str]]:
+    """The names of the sessions each catalog among ``events`` holds."""
+    catalogs = [e for e in events if isinstance(e, Catalog)]
+    return [[s.name for w in c.workspaces for s in w.sessions] for c in catalogs]
+
+
+async def test_a_rename_gives_every_connection_the_updated_catalog() -> None:
+    session = AgentSession()
+    first = await welcomed(session, "first")
+    second = await welcomed(session, "second")
+    await taken(first), await taken(second)
+
+    await say(first, "rename", RenameSession(session_id=session.saved_session.id, name="Kept"))
+
+    for events in (await taken(first), await taken(second)):
+        assert catalog_names(events) == [["Kept"]]
     await session.close()
 
 

@@ -3,7 +3,8 @@ stream of the session's events."""
 
 import asyncio
 from collections import Counter
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
+from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Protocol
@@ -107,10 +108,10 @@ class Connections:
 
     def deliver(self, envelope: EventEnvelope) -> None:
         """Pass ``envelope`` to the connection whose command it answers, if it's one of the
-        ``CONNECTION_EVENTS``, else to every connection that's listening and views the session
-        it belongs to, if it belongs to one."""
+        ``CONNECTION_EVENTS`` not published :func:`to_everyone`, else to every connection that's
+        listening and views the session it belongs to, if it belongs to one."""
         asker = _answering.get()
-        if asker is not None and isinstance(envelope.payload, CONNECTION_EVENTS):
+        if asker is not None and _answers_one(envelope):
             asker.receive(envelope)
             return
         for connection in tuple(self._open):
@@ -129,6 +130,26 @@ class Connections:
 
 _answering: ContextVar["SessionConnection | None"] = ContextVar("answering", default=None)
 """The connection whose command is being answered, if any."""
+
+_to_everyone: ContextVar[bool] = ContextVar("to_everyone", default=False)
+"""Whether the events published now reach every connection, as the session's new state."""
+
+
+def _answers_one(envelope: EventEnvelope) -> bool:
+    """Whether ``envelope`` answers only the connection whose command is being answered."""
+    return isinstance(envelope.payload, CONNECTION_EVENTS) and not _to_everyone.get()
+
+
+@contextmanager
+def to_everyone() -> Iterator[None]:
+    """Have the events published within reach every connection that views the session they
+    belong to, the ``CONNECTION_EVENTS`` too, even while a connection's command is answered:
+    they're the session's new state, not an answer to that connection alone."""
+    token = _to_everyone.set(True)
+    try:
+        yield
+    finally:
+        _to_everyone.reset(token)
 
 
 @dataclass(frozen=True)
@@ -150,7 +171,8 @@ class SessionConnection:
     handshake and its own stream.
 
     Once it's welcomed, the stream gets every event the session publishes of the session it
-    views and of none, but for the ``CONNECTION_EVENTS`` answering another connection's command.
+    views and of none, but for the ``CONNECTION_EVENTS`` answering another connection's command;
+    those published :func:`to_everyone`, as a switch's or a rename's, reach it too.
     It views the open session, whichever that is, until :meth:`attach` attaches it to another.
     What answers a ``Hello``, its greeting unlogged, and the outcome of any command before one
     is welcomed, or while it views a session that isn't open, reaches this connection alone. The

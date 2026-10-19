@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import assert_never
 
+from orbit.agent.application.connection import to_everyone
 from orbit.agent.application.keeper import Contents, Left, SessionKeeper
 from orbit.agent.application.outbox import EventSink
 from orbit.agent.application.planner_seat import PlannerSeat
@@ -28,6 +29,7 @@ from orbit.protocol import (
     ActivateSession,
     Catalog,
     DeleteSession,
+    Event,
     ListingReason,
     ListSessions,
     NewSession,
@@ -143,8 +145,13 @@ class SessionSwitcher:
         return self._parts.catalog(await self._sessions())
 
     async def publish_catalog(self) -> None:
-        """Publish the catalog, holding the sessions as they are now."""
-        await self._events.put(await self.catalog())
+        """Publish the catalog, holding the sessions as they are now, to every connection."""
+        await self._to_everyone(await self.catalog())
+
+    async def _to_everyone(self, event: Event) -> None:
+        """Publish ``event``, the session's new state, to every connection that views it."""
+        with to_everyone():
+            await self._events.put(event)
 
     async def _sessions(self) -> tuple[SessionSummary, ...]:
         """The saved sessions, as the list of sessions shows them, after the one open here if
@@ -288,8 +295,9 @@ class SessionSwitcher:
     ) -> None:
         """Finish a switch from the session ``left``, deleting it if its tasks carried over:
         close its planner, end the reviews ``stopped`` when it was saved, then save the session
-        opened and publish the catalog and its snapshot, last active at ``last_active``, which
-        alone shows what ending the reviews changed, and then note a review pause."""
+        opened and publish to every connection the catalog and its snapshot, last active at
+        ``last_active``, which alone shows what ending the reviews changed, and then note a
+        review pause."""
         parts = self._parts
         discard, self._picking = self._picking, False
         await self._keeper.leave(left, discard)
@@ -298,7 +306,7 @@ class SessionSwitcher:
             await parts.lane.end_interrupted(stopped)
         await parts.tasks.changed_elsewhere()
         await self.publish_catalog()
-        await self._events.put(await parts.snapshot(last_active))
+        await self._to_everyone(await parts.snapshot(last_active))
         if parts.lane is not None:
             await parts.lane.note_pause()
 

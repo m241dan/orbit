@@ -164,11 +164,13 @@ class AgentSession:
     it, then the latest usage if any was fetched, a ``Snapshot`` of the session open (or, for a
     ``Hello`` whose ``since`` it can catch up from, the open session's events after it) and the
     one-off notices: the workspace, no verification steps, the ``startup_notes``, work left by
-    earlier runs. Every switch of session ends with a ``Catalog`` and a ``Snapshot`` too, and a
-    rename or delete sends a ``Catalog``; each reaches only the connection whose command it
-    answers. Every connection gets a ``SessionStateChanged`` whenever whether the open session
-    runs work, or how many connections view a session, changes: a connection views the open
-    session once its greeting is sent, until it closes or ``Attach``\\es to another.
+    earlier runs; these reach only the connection whose ``Hello`` they answer, as a
+    ``HistoryPage`` does the one asking. Every switch of session ends with a ``Catalog`` and a
+    ``Snapshot`` too, and a rename or delete sends a ``Catalog``; these, the session's new
+    state, reach every connection viewing it. Every connection gets a ``SessionStateChanged``
+    whenever whether the open session runs work, or how many connections view a session,
+    changes: a connection views the open session once its greeting is sent, until it closes or
+    ``Attach``\\es to another.
     ``SessionViews`` attaches connections: to a saved session that isn't open, as a read-only
     view whose ``Snapshot`` comes from its record and its log, and where only ``History``,
     ``RenameSession``, ``DeleteSession`` and ``Attach`` work. A connection gets the events of
