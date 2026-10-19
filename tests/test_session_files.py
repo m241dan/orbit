@@ -1,4 +1,5 @@
-"""Where an older orbit saved sessions on disk, which the import reads."""
+"""The repository's orbit directory, where an older orbit saved sessions, which the import
+reads."""
 
 import subprocess
 from pathlib import Path
@@ -6,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from orbit.agent.external.git_tree import GitCoderTree
-from orbit.agent.external.session_files import legacy_dir
+from orbit.agent.external.repository import orbit_dir
 
 
 def git(cwd: Path, *args: str) -> str:
@@ -23,11 +24,11 @@ def repo(tmp_path: Path) -> Path:
 
 
 def test_in_a_repository_sessions_lived_in_the_git_directory(repo: Path) -> None:
-    assert legacy_dir(str(repo)) == repo / ".git" / "orbit"
+    assert orbit_dir(str(repo)) == repo / ".git" / "orbit"
 
 
 def test_outside_a_repository_sessions_lived_in_the_workspace(tmp_path: Path) -> None:
-    assert legacy_dir(str(tmp_path)) == tmp_path / ".orbit"
+    assert orbit_dir(str(tmp_path)) == tmp_path / ".orbit"
 
 
 async def test_sessions_lived_beside_the_coders_worktree(repo: Path) -> None:
@@ -44,4 +45,4 @@ async def test_sessions_lived_beside_the_coders_worktree(repo: Path) -> None:
         "x",
     )
     coder = Path(await GitCoderTree(str(repo)).prepare(keep=False))
-    assert coder.parent == legacy_dir(str(repo))
+    assert coder.parent == orbit_dir(str(repo))

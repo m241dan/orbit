@@ -46,7 +46,6 @@ from orbit.agent import (
     imported_note,
     in_git_work_tree,
     is_loopback,
-    legacy_dir,
     orbit_dir,
     read_config,
     read_server,
@@ -431,7 +430,7 @@ def _backend(
     agents = _agents(config, worktree=backend.worktree, review=backend.review)
     settings, pinned = _settings(backend.model, backend.tools)
     usage_source = UsageApi() if backend.usage else None
-    store, notes = _open_store(state, root)
+    opened = _open_store(state, root)
 
     def build() -> AgentSession:
         return AgentSession(
@@ -442,18 +441,18 @@ def _backend(
             workspace=str(root),
             check_at_startup=True,
             usage=usage_source,
-            store=store,
+            store=opened.store,
             pinned=pinned,
             pick_session=pick_session,
             name=backend.name,
-            startup_notes=notes,
+            startup_notes=opened.notes,
             storage=storage,
-            fallback=FallbackFiles(state, store.workspace_id, orbit_dir(str(root))),
+            fallback=opened.fallback,
             owner=backend.owner,
             lock=backend.lock,
         )
 
-    return build, store
+    return build, opened.store
 
 
 HostOption = Annotated[
@@ -700,10 +699,19 @@ def _storage(config_dir: Path) -> StorageSettings:
         raise typer.Exit(2) from None
 
 
-def _open_store(state: Path, root: Path) -> tuple[SqliteStore, list[str]]:
+@dataclass(frozen=True)
+class _OpenedStore:
+    """The store, the notes on what was imported into it, and the workspace's fallback files."""
+
+    store: SqliteStore
+    notes: list[str]
+    fallback: FallbackFiles
+
+
+def _open_store(state: Path, root: Path) -> _OpenedStore:
     """The store in the ``state`` directory for the workspace at ``root``, with the sessions an
     older orbit saved as files and the events an earlier run parked in fallback files imported,
-    and the notes on what was imported.
+    the notes on what was imported, and the fallback files.
 
     Exits with status 2 if the store can't be opened, the old sessions can't be imported or a
     fallback file can't be recovered.
@@ -715,27 +723,26 @@ def _open_store(state: Path, root: Path) -> tuple[SqliteStore, list[str]]:
         raise typer.Exit(2) from None
 
 
-async def _opened_store(state: Path, root: Path) -> tuple[SqliteStore, list[str]]:
+async def _opened_store(state: Path, root: Path) -> _OpenedStore:
     """The store in ``state`` for ``root``, with the old session files and the fallback files
-    imported, and the notes on what was imported; the store is closed if an import fails."""
+    imported, the notes on what was imported, and the fallback files, in ``state`` and in the
+    repository; the store is closed if an import fails."""
     store = await SqliteStore.open(state, str(root))
     try:
-        return store, await _imported(store, state, root)
+        fallback = FallbackFiles(state, store.workspace_id, orbit_dir(str(root)))
+        return _OpenedStore(store, await _imported(store, fallback, root), fallback)
     except BaseException:
         await store.close()
         raise
 
 
-async def _imported(store: SqliteStore, state: Path, root: Path) -> list[str]:
+async def _imported(store: SqliteStore, fallback: FallbackFiles, root: Path) -> list[str]:
     """Import into ``store`` the old session files of the workspace at ``root``, then its
-    fallback files, in ``state`` and in the repository; returns the notes on what was
-    imported."""
-    legacy = legacy_dir(str(root))
+    ``fallback`` files; returns the notes on what was imported."""
+    legacy = orbit_dir(str(root))
     imported = await import_session_files(store, legacy)
     notes = [] if imported is None else [imported_note(imported, _shown(legacy, root))]
-    recovered = await recover_parked(
-        FallbackFiles(state, store.workspace_id, orbit_dir(str(root))), store
-    )
+    recovered = await recover_parked(fallback, store)
     return notes + [
         recovered_note(file.count, str(_shown(Path(file.path), root)))
         for file in recovered

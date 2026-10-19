@@ -19,7 +19,7 @@ import sqlite3
 import tempfile
 import time
 import uuid
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import AbstractContextManager, closing, contextmanager
 from dataclasses import dataclass
@@ -40,7 +40,6 @@ LOCKS = "locks"
 BUSY_TIMEOUT = 5.0
 RETRY_DELAY = 0.01
 THREAD_PREFIX = "orbit-sqlite"
-STATE_DIR_VARIABLE = "ORBIT_STATE_DIR"
 
 # Each migration's statements, in order; migration ``n`` (from 1) brings the schema to version n.
 MIGRATIONS: tuple[tuple[str, ...], ...] = (
@@ -122,20 +121,6 @@ def error_kind(error: sqlite3.Error | OSError) -> StorageErrorKind:
     if not isinstance(code, int):
         return StorageErrorKind.UNKNOWN
     return _EXTENDED_KINDS.get(code) or _SQLITE_KINDS.get(code & 0xFF, StorageErrorKind.UNKNOWN)
-
-
-def resolve_state_dir(flag: Path | None, environ: Mapping[str, str]) -> Path:
-    """The state directory, expanded and absolute: ``flag``, if given, else ``ORBIT_STATE_DIR``
-    in ``environ``, else ``orbit`` in its ``XDG_STATE_HOME``, else ``~/.local/state/orbit``."""
-    if flag is not None:
-        chosen = flag
-    elif environ.get(STATE_DIR_VARIABLE):
-        chosen = Path(environ[STATE_DIR_VARIABLE])
-    elif environ.get("XDG_STATE_HOME"):
-        chosen = Path(environ["XDG_STATE_HOME"]) / "orbit"
-    else:
-        chosen = Path("~/.local/state/orbit")
-    return chosen.expanduser().absolute()
 
 
 class StoreError(Exception):
