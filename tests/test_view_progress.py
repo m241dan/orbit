@@ -50,6 +50,20 @@ def test_verification_notes_name_the_step_they_index() -> None:
     )
 
 
+def test_verification_notes_of_steps_not_shown_name_them_by_number() -> None:
+    # A viewed session's log, or one from before the steps changed, indexes steps not shown.
+    started = VerificationStarted(task_id="7", step=0)
+    assert task_note(started, CODER_TASK, "1", ()) == (
+        ("🔍 Verifying: step 1…", "verify"),
+        "coder",
+    )
+    passed = VerificationFinished(task_id="7", step=2, passed=True)
+    assert task_note(passed, CODER_TASK, "1", STEPS) == (
+        ("✅ Verification passed: step 3", "verify"),
+        "coder",
+    )
+
+
 def test_a_skipped_verification_says_why() -> None:
     skipped = VerificationSkipped(task_id="7", reason="no_changes")
     assert task_note(skipped, None, None, ()) == (
@@ -71,14 +85,13 @@ def test_task_progress_entries() -> None:
     assert task_started_entry("1.2", state) == ("Task 1.2: do it", "user")
     # A task that isn't on the list has no prompt to show, only its id.
     assert task_started_entry("9", None) == ("Task 9", "user")
-    step = StepState(name="Lint")
-    assert verification_started_entry(step) == ("🔍 Verifying: Lint…", "verify")
+    assert verification_started_entry("Lint") == ("🔍 Verifying: Lint…", "verify")
     assert verification_skipped_entry("no_changes") == (
         "⏩ Verification skipped: no files changed",
         "verify",
     )
-    assert verification_finished_entry(step, True) == ("✅ Verification passed: Lint", "verify")
-    assert verification_finished_entry(step, False) == ("❌ Verification failed: Lint", "error")
+    assert verification_finished_entry("Lint", True) == ("✅ Verification passed: Lint", "verify")
+    assert verification_finished_entry("Lint", False) == ("❌ Verification failed: Lint", "error")
 
 
 def test_no_steps_skip_reason_reads_naturally() -> None:

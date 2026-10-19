@@ -67,13 +67,21 @@ def verification_entry(
     entry; ``steps`` are the steps the event's step indexes."""
     match event:
         case VerificationStarted(step=step):
-            return verification_started_entry(steps[step])
+            return verification_started_entry(step_name(steps, step))
         case VerificationSkipped(reason=reason):
             return verification_skipped_entry(reason)
         case VerificationFinished(step=step, passed=passed):
-            return verification_finished_entry(steps[step], passed)
+            return verification_finished_entry(step_name(steps, step), passed)
         case _:
             assert_never(event)
+
+
+def step_name(steps: tuple[StepState, ...], step: int) -> str:
+    """The name of step ``step`` of ``steps``, or its number when ``steps`` don't hold it, as
+    when a session's log is replayed with other steps shown, or none."""
+    if step < len(steps):
+        return steps[step].name
+    return f"step {step + 1}"
 
 
 def task_started_entry(number: str, state: TaskState | None) -> tuple[str, EntryKind]:
@@ -84,15 +92,15 @@ def task_started_entry(number: str, state: TaskState | None) -> tuple[str, Entry
     return f"Task {number}: {state.task.prompt}", "user"
 
 
-def verification_started_entry(step: StepState) -> tuple[str, EntryKind]:
-    return f"🔍 Verifying: {step.name}…", "verify"
+def verification_started_entry(name: str) -> tuple[str, EntryKind]:
+    return f"🔍 Verifying: {name}…", "verify"
 
 
 def verification_skipped_entry(reason: SkipReason) -> tuple[str, EntryKind]:
     return f"⏩ Verification skipped: {SKIP_REASONS[reason]}", "verify"
 
 
-def verification_finished_entry(step: StepState, passed: bool) -> tuple[str, EntryKind]:
+def verification_finished_entry(name: str, passed: bool) -> tuple[str, EntryKind]:
     if passed:
-        return f"✅ Verification passed: {step.name}", "verify"
-    return f"❌ Verification failed: {step.name}", "error"
+        return f"✅ Verification passed: {name}", "verify"
+    return f"❌ Verification failed: {name}", "error"
