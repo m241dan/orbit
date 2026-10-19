@@ -212,3 +212,35 @@ async def test_closing_the_modal_lets_other_screens_open() -> None:
         await feed_events(session, pilot, HALT)
         await pilot.press("escape", "ctrl+n")
         assert isinstance(app.screen, ConfirmScreen)
+
+
+async def test_a_halt_after_the_try_agains_acceptance_reopens_the_modal() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, HALT)
+        await pilot.press("enter")
+        command_id = session.envelopes[-1].command_id
+        again = ErrorOccurred(code=STORAGE_FAILED, message=STILL)
+        await feed_events(session, pilot, CommandAccepted(command_id=command_id), again)
+        assert len(halt_screens(app)) == 1
+        assert modal_text(app) == STILL
+        assert status(app) == "Session stopped: session record failed; see the transcript"
+
+
+async def test_a_halt_after_a_snapshot_lifts_it_reopens_the_modal() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, HALT, snapshot(None), HALT)
+        assert len(halt_screens(app)) == 1
+
+
+async def test_a_closed_modal_leaves_the_one_opened_since_shown() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, HALT, snapshot(None), HALT)
+        await feed_events(session, pilot, snapshot(STILL))
+        assert len(halt_screens(app)) == 1
+        assert modal_text(app) == STILL

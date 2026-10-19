@@ -83,8 +83,13 @@ class StorageHaltHost:
         if self.shown is not None:
             self.shown.show(explanation)
             return
-        self.shown = StorageHaltScreen(explanation, self._retry)
-        self._push(self.shown, self._closed)
+        screen = self.shown = StorageHaltScreen(explanation, self._retry)
+
+        def closed(_: None) -> None:
+            if self.shown is screen:  # Not one shown since.
+                self.shown = None
+
+        self._push(screen, closed)
 
     def lifted(self) -> None:
         """Show that the session isn't halted, closing the modal if it's open."""
@@ -92,6 +97,4 @@ class StorageHaltHost:
         self._show_status(None)
         if self.shown is not None:
             self.shown.dismiss(None)
-
-    def _closed(self, _: None) -> None:
-        self.shown = None
+            self.shown = None  # Its close callback runs later, after any halt that follows.
