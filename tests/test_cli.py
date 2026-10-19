@@ -22,14 +22,12 @@ from orbit.agent import (
     AgentSession,
     ClaudeCliRunner,
     ConfigError,
-    FallbackFiles,
     GitCoderTree,
     Limits,
     McpHost,
     Role,
     Setup,
     SqliteStore,
-    StorageSettings,
     UsageApi,
     Verification,
     VerificationStep,
@@ -44,16 +42,20 @@ from orbit.agent.domain.reviews import ReviewLimits
 from orbit.agent.domain.sessions import SessionRecord, Unreadable, default_name, record_json
 from orbit.cli import app
 from orbit.protocol import (
+    AddTask,
     Catalog,
     EventEnvelope,
     Notice,
     SessionsListed,
     Settings,
     Snapshot,
+    TasksChanged,
+    TaskSpec,
     ThreadedSession,
+    decode_event,
     encode,
 )
-from tests.agent_fakes import greeted, queued, sole, startup_of, store_of
+from tests.agent_fakes import greeted, queued, send, sole, startup_of, store_of
 
 runner = CliRunner()
 
@@ -318,20 +320,67 @@ def test_chat_keeps_sessions_in_the_store_in_the_state_directory(
     assert store_threads() == []  # The store was closed once the app ended.
 
 
-def test_chat_parks_unsaved_events_in_the_state_directory_else_the_workspace(
+def adds_tasks(*prompts: str, before_last: Callable[[], None] = lambda: None) -> list[str]:
+    """Have each chat's session given a task for each of ``prompts``, calling ``before_last``
+    before the last; the ids of the sessions, as they're given their tasks."""
+    ids: list[str] = []
+
+    async def add(session: AgentSession) -> None:
+        for n, prompt in enumerate(prompts, 1):
+            if n == len(prompts):
+                before_last()
+            await send(session, AddTask(task=TaskSpec(prompt=prompt)))
+            queued(session)
+        ids.append(session.saved_session.id)
+
+    FakeApp.during = add
+    return ids
+
+
+async def log_of(state: Path, workspace: Path, session_id: str) -> tuple[list[str], bool]:
+    """The prompts on the latest task list the session ``session_id`` logged in the store in
+    ``state`` for ``workspace``, and whether its log was trimmed."""
+    store = await SqliteStore.open(state, str(workspace))
+    try:
+        events = [e.payload for e in await store.recent(session_id, 100)]
+        trimmed = await store.trimmed(session_id)
+    finally:
+        await store.close()
+    tasks = [e for e in events if isinstance(e, TasksChanged)][-1].tasks
+    return [task.task.prompt for task in tasks], trimmed
+
+
+def unwritable_log(state: Path) -> Callable[[], None]:
+    """What has the store in ``state`` refuse every event it's asked to log from then on."""
+
+    def refuse() -> None:
+        with closing(sqlite3.connect(state / "orbit.db", isolation_level=None)) as connection:
+            connection.execute(
+                "CREATE TRIGGER refuse BEFORE INSERT ON events"
+                " BEGIN SELECT RAISE(ABORT, 'unwritable'); END"
+            )
+
+    return refuse
+
+
+LONG = "x" * 2048
+
+
+def test_chat_parks_unsaved_events_in_the_state_directory(
     launched: list[AgentSession], state: Path, tmp_path: Path
 ) -> None:
+    ids = adds_tasks("Saved, so its events are kept.", "parked", before_last=unwritable_log(state))
     assert runner.invoke(app, ["chat", "-C", str(tmp_path)]).exit_code == 0
 
     [session] = launched
-    writer = session._events._writer
-    assert writer is not None and isinstance(writer._fallback, FallbackFiles)
+    [session_id] = ids
     workspace_id = store_in(session).workspace_id
-    assert workspace_id
-    assert writer._fallback.places("s1") == [
-        state / "fallback" / f"{workspace_id}-s1.jsonl",
-        tmp_path.resolve() / ".orbit" / "fallback" / "s1.jsonl",
-    ]
+    parked = state / "fallback" / f"{workspace_id}-{session_id}.jsonl"
+    events = [decode_event(line) for line in parked.read_text().splitlines()]
+    assert any(
+        e is not None and isinstance(e.payload, TasksChanged) and len(e.payload.tasks) == 2
+        for e in events
+    )
 
 
 def test_the_state_directory_option_wins_over_the_environment(
@@ -345,40 +394,61 @@ def test_the_state_directory_option_wins_over_the_environment(
     assert (tmp_path / "elsewhere" / "orbit.db").exists()
 
 
-def test_without_a_user_config_chat_keeps_the_default_storage_settings(
-    launched: list[AgentSession],
+def test_without_a_user_config_chat_keeps_long_text_whole_and_logs_untrimmed(
+    launched: list[AgentSession], tmp_path: Path
 ) -> None:
+    ids = adds_tasks(LONG)
     assert runner.invoke(app, ["chat"]).exit_code == 0
 
-    [session] = launched
-    assert session._storage == StorageSettings()
+    [session_id] = ids
+    workspace = (tmp_path / "start").resolve()
+    assert asyncio.run(log_of(tmp_path / "state", workspace, session_id)) == ([LONG], False)
 
 
-def test_chat_reads_the_storage_settings_in_the_config_directory(
-    launched: list[AgentSession], config_dir: Path
+def test_chat_cuts_long_text_as_the_storage_settings_in_the_config_directory_say(
+    launched: list[AgentSession], config_dir: Path, state: Path, tmp_path: Path
 ) -> None:
     config_dir.mkdir()
     (config_dir / "config.toml").write_text("[storage]\ntool_output_kb = 1\n\n[server]\n")
+    ids = adds_tasks(LONG)
     assert runner.invoke(app, ["chat"]).exit_code == 0
 
-    [session] = launched
-    assert session._storage == StorageSettings(tool_output_kb=1)
-    assert session._events._cut_bytes == 1024
+    [session_id] = ids
+    [prompt], _ = asyncio.run(log_of(state, (tmp_path / "start").resolve(), session_id))
+    assert prompt != LONG
+    assert len(prompt) < len(LONG)
+
+
+def test_chat_trims_the_log_as_the_storage_settings_in_the_config_directory_say(
+    launched: list[AgentSession], config_dir: Path, state: Path, tmp_path: Path
+) -> None:
+    config_dir.mkdir()
+    (config_dir / "config.toml").write_text("[storage]\ntool_output_kb = 0\nsession_log_mb = 1\n")
+    big = "x" * 400_000  # The second task list logs both, taking the log over 1 MB.
+    ids = adds_tasks(big, big)
+    assert runner.invoke(app, ["chat"]).exit_code == 0
+
+    [session_id] = ids
+    prompts, trimmed = asyncio.run(log_of(state, (tmp_path / "start").resolve(), session_id))
+    assert prompts == [big, big]
+    assert trimmed
 
 
 def test_the_config_directory_option_wins_over_the_environment(
-    launched: list[AgentSession], tmp_path: Path
+    launched: list[AgentSession], state: Path, tmp_path: Path
 ) -> None:
     (tmp_path / "start" / "mine").mkdir()
-    (tmp_path / "start" / "mine" / "config.toml").write_text("[storage]\nsession_log_mb = 5\n")
+    (tmp_path / "start" / "mine" / "config.toml").write_text("[storage]\ntool_output_kb = 1\n")
     workspace = tmp_path / "project"
     workspace.mkdir()
+    ids = adds_tasks(LONG)
     # A relative directory is taken from where orbit started, not the workspace.
     result = runner.invoke(app, ["chat", "--config-dir", "mine", "-C", str(workspace)])
 
     assert result.exit_code == 0
-    [session] = launched
-    assert session._storage == StorageSettings(session_log_mb=5)
+    [session_id] = ids
+    [prompt], _ = asyncio.run(log_of(state, workspace.resolve(), session_id))
+    assert prompt != LONG
 
 
 @pytest.mark.parametrize(
