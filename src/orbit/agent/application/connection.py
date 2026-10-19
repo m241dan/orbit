@@ -73,20 +73,20 @@ class Connections:
     def viewed(self, *, joining: bool = False) -> Counter[str]:
         """How many connections view each session they view: those greeted, and, if
         ``joining``, the one whose ``Hello`` is being answered."""
-        asker = _answering.get() if joining else None
+        asker = _asker() if joining else None
         return Counter(self._viewed_by(c) for c in self._open if c.greeted or c is asker)
 
     def others_viewing(self, session_id: str) -> int:
         """How many greeted connections view the session ``session_id``, but for the one whose
         command is being answered."""
-        asker = _answering.get()
+        asker = _asker()
         viewers = (c for c in self._open if c.greeted and c is not asker)
         return sum(1 for c in viewers if self._viewed_by(c) == session_id)
 
     def others_attached(self, session_id: str) -> list["SessionConnection"]:
         """The greeted connections attached to the session ``session_id``, but for the one whose
         command is being answered."""
-        asker = _answering.get()
+        asker = _asker()
         others = (c for c in self._open if c.greeted and c is not asker)
         return [c for c in others if c.attached_id == session_id]
 
@@ -94,7 +94,7 @@ class Connections:
         """Have the connection whose command is being answered, if any, view the open session,
         whichever that is, and, given the session ``left``, the others viewing the open session
         keep viewing that one once another is open in its place."""
-        asker = _answering.get()
+        asker = _asker()
         for connection in tuple(self._open):
             if connection is asker:
                 connection.attach(None)
@@ -108,9 +108,10 @@ class Connections:
 
     def deliver(self, envelope: EventEnvelope) -> None:
         """Pass ``envelope`` to the connection whose command it answers, if it's one of the
-        ``CONNECTION_EVENTS`` not published :func:`to_everyone`, else to every connection that's
+        ``CONNECTION_EVENTS`` not published :func:`to_everyone` and is published by the task
+        answering that command, not one it started, else to every connection that's
         listening and views the session it belongs to, if it belongs to one."""
-        asker = _answering.get()
+        asker = _asker()
         if asker is not None and _answers_one(envelope):
             asker.receive(envelope)
             return
@@ -128,8 +129,21 @@ class Connections:
             connection.end()
 
 
-_answering: ContextVar["SessionConnection | None"] = ContextVar("answering", default=None)
-"""The connection whose command is being answered, if any."""
+_answering: ContextVar["tuple[SessionConnection, object] | None"] = ContextVar(
+    "answering", default=None
+)
+"""The connection whose command is being answered, if any, with the task answering it."""
+
+
+def _asker() -> "SessionConnection | None":
+    """The connection whose command the current task is answering, if any: not one whose
+    command was being answered when a task started in the background, which inherits the
+    context but answers no one."""
+    answering = _answering.get()
+    if answering is None or answering[1] is not asyncio.current_task():
+        return None
+    return answering[0]
+
 
 _to_everyone: ContextVar[bool] = ContextVar("to_everyone", default=False)
 """Whether the events published now reach every connection, as the session's new state."""
@@ -228,7 +242,7 @@ class SessionConnection:
         if self._ended:
             return
         publish = self._publisher(private=isinstance(envelope.payload, Hello))
-        token = _answering.set(self)
+        token = _answering.set((self, asyncio.current_task()))
         try:
             await self._parts.answer(envelope, self, publish)
         finally:

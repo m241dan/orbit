@@ -436,3 +436,29 @@ async def test_a_connection_whose_held_events_overflow_is_closed_as_too_far_behi
 
     with pytest.raises(ConnectionDropped, match=TOO_FAR_BEHIND):
         await everything(connection)
+
+
+async def test_a_catalog_from_a_task_a_command_started_reaches_every_connection() -> None:
+    session = AgentSession()
+    first = await welcomed(session, "first")
+    catalog = next(e for e in await taken(first) if isinstance(e, Catalog))
+    asker = await welcomed(session, "asker")
+    await taken(asker)
+    go = asyncio.Event()
+    started: list[asyncio.Task[None]] = []
+
+    async def later() -> None:
+        await go.wait()
+        await session._events.put(catalog)
+
+    async def spawned(*args: object) -> None:
+        started.append(asyncio.create_task(later()))
+
+    asker._parts = replace(asker._parts, answer=spawned)
+    await say(asker, "spawn", AddTask(task=TASK))
+    await asker.close()
+    go.set()
+    await started[0]
+
+    assert [e for e in await taken(first) if isinstance(e, Catalog)] == [catalog]
+    await session.close()
