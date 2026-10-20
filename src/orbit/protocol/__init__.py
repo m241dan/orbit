@@ -110,6 +110,7 @@ from orbit.protocol.events import (
     Welcome,
     WorkspaceEntry,
     event_adapter,
+    with_state,
 )
 from orbit.protocol.link import (
     NOT_CONNECTED,
@@ -340,4 +341,5 @@ __all__ = [
     "encode",
     "event_adapter",
     "protocol_schema",
+    "with_state",
 ]

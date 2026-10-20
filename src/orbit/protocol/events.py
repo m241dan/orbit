@@ -475,6 +475,15 @@ class SessionStateChanged(_Message):
     viewers: int = Field(ge=0)
 
 
+def with_state(summary: SessionSummary, changed: SessionStateChanged) -> SessionSummary:
+    """``summary``, as active, running and viewed as ``changed`` says, if ``changed`` is about
+    its session."""
+    if changed.session != summary.id:
+        return summary
+    update = {"active": changed.active, "state": changed.state, "viewers": changed.viewers}
+    return summary.model_copy(update=update)
+
+
 class WorkspaceEntry(_Message):
     """Workspace ``id``, shown as ``label``, and its ``sessions`` as the list of sessions shows
     them."""

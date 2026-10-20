@@ -9,7 +9,6 @@ from orbit.protocol import (
     ActivateSession,
     Attach,
     NewSession,
-    SessionStateChanged,
     SessionSummary,
     TaskStatus,
     Usage,
@@ -119,25 +118,15 @@ def _others(summary: SessionSummary, attached: bool) -> int:
     return max(summary.viewers - int(attached), 0)
 
 
-def with_state(
-    sessions: Sequence[SessionSummary], changed: SessionStateChanged
-) -> tuple[SessionSummary, ...]:
-    """``sessions``, with ``changed``'s session now as active, running and viewed as it says."""
-    update = {"active": changed.active, "state": changed.state, "viewers": changed.viewers}
-    return tuple(
-        summary.model_copy(update=update) if summary.id == changed.session else summary
-        for summary in sessions
-    )
-
-
 def can_open(summary: SessionSummary) -> bool:
     """Whether ``summary``'s session can be opened: it's readable and no other orbit has it."""
     return not summary.locked and summary.unreadable is None
 
 
 def can_delete(summary: SessionSummary) -> bool:
-    """Whether ``summary``'s session may be deleted: it isn't open, here or in another orbit."""
-    return not summary.current and not summary.locked
+    """Whether ``summary``'s session may be deleted: it isn't the active session, here or in
+    another orbit."""
+    return not summary.active and not summary.locked
 
 
 def delete_message(summary: SessionSummary) -> str:

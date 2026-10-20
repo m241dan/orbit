@@ -4,7 +4,6 @@ from orbit.protocol import (
     ActivateSession,
     Attach,
     NewSession,
-    SessionStateChanged,
     SessionSummary,
     Usage,
 )
@@ -30,7 +29,6 @@ from orbit.tui.view.sessions import (
     task_counts,
     viewed_only,
     viewing_mark,
-    with_state,
 )
 
 ACTIVE = datetime(2026, 10, 16, 18, 2, tzinfo=UTC)
@@ -118,8 +116,16 @@ def test_only_readable_unlocked_sessions_can_be_opened() -> None:
 def test_only_sessions_open_nowhere_can_be_deleted() -> None:
     assert can_delete(SessionSummary(id="s", name="a"))
     assert can_delete(SessionSummary(id="s", name="a", unreadable="gone"))
-    assert not can_delete(SessionSummary(id="s", name="a", current=True))
+    assert not can_delete(SessionSummary(id="s", name="a", current=True, active=True))
     assert not can_delete(SessionSummary(id="s", name="a", locked=True))
+
+
+def test_a_session_once_open_here_but_no_longer_active_can_be_deleted() -> None:
+    assert can_delete(SessionSummary(id="s", name="a", current=True, active=False))
+
+
+def test_the_active_session_cannot_be_deleted() -> None:
+    assert not can_delete(SessionSummary(id="s", name="a", active=True))
 
 
 def test_deleting_asks_about_the_session_by_name() -> None:
@@ -225,13 +231,6 @@ def test_with_no_active_session_picking_activates() -> None:
         Attach(session="old"),
         ActivateSession(session="old"),
     )
-
-
-def test_a_state_change_updates_only_its_session() -> None:
-    changed = SessionStateChanged(session="old", active=True, state="running", viewers=3)
-    updated = with_state((NOW, OLD), changed)
-    assert updated[0] == NOW
-    assert (updated[1].active, updated[1].state, updated[1].viewers) == (True, "running", 3)
 
 
 def test_the_viewing_mark_names_the_session_and_how_to_switch() -> None:

@@ -43,6 +43,7 @@ from orbit.protocol import (
     RunTasks,
     SendMessage,
     SessionsListed,
+    SessionStateChanged,
     SessionSummary,
     Settings,
     SettingsChanged,
@@ -68,6 +69,7 @@ from orbit.protocol import (
     VerificationStarted,
     command_adapter,
     event_adapter,
+    with_state,
 )
 
 
@@ -413,3 +415,19 @@ def test_a_snapshot_round_trips_with_its_running_agents_and_their_open_requests(
     )
 
     assert event_adapter.validate_json(snapshot.model_dump_json()) == snapshot
+
+
+def test_a_state_change_sets_its_session_active_running_and_viewed() -> None:
+    summary = SessionSummary(id="s1", name="auth", current=True, active=True)
+    changed = SessionStateChanged(session="s1", active=False, state="running", viewers=2)
+
+    updated = with_state(summary, changed)
+
+    assert updated == summary.model_copy(update={"active": False, "state": "running", "viewers": 2})
+
+
+def test_a_state_change_leaves_other_sessions_alone() -> None:
+    summary = SessionSummary(id="s1", name="auth", active=True)
+    changed = SessionStateChanged(session="s2", active=False, state="running", viewers=2)
+
+    assert with_state(summary, changed) == summary

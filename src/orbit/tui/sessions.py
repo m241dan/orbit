@@ -22,6 +22,7 @@ from orbit.protocol import (
     SessionStateChanged,
     SessionSummary,
     Snapshot,
+    with_state,
 )
 from orbit.tui.view.sessions import (
     ACTIVATE_CHOICE,
@@ -43,7 +44,6 @@ from orbit.tui.view.sessions import (
     sessions_hint,
     viewed_only,
     viewing_mark,
-    with_state,
 )
 from orbit.tui.widgets import ConfirmScreen
 
@@ -351,7 +351,7 @@ class SessionsHost:
 
     def follow_state(self, changed: SessionStateChanged) -> None:
         """Note ``changed``'s session's state."""
-        self.sessions = with_state(self.sessions, changed)
+        self.sessions = tuple(with_state(summary, changed) for summary in self.sessions)
         self._refresh()
 
     def view(self, snapshot: Snapshot) -> None:

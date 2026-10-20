@@ -21,6 +21,7 @@ from orbit.tui.sessions import (
     SessionsHost,
     SessionsScreen,
 )
+from orbit.tui.widgets import ConfirmScreen
 from tests.test_tui import opened
 
 OLD = SessionSummary(id="old", name="auth rework")
@@ -116,6 +117,22 @@ async def test_a_state_change_while_shown_updates_its_row() -> None:
         [screen] = app.sessions_screens()
         assert screen.sessions[0].state == "running"
         assert app.host.sessions[0].state == "running"
+
+
+async def test_x_on_a_session_no_longer_active_asks_before_deleting_it() -> None:
+    app = Host()
+    async with app.run_test() as pilot:
+        app.host.follow(catalog(NOW, OLD))
+        app.host.open()
+        await pilot.pause()
+        app.host.follow_state(
+            SessionStateChanged(session="now", active=False, viewers=1, state="idle")
+        )
+        await pilot.pause()
+        await pilot.press("x")
+
+        assert isinstance(app.screen, ConfirmScreen)
+        assert app.sent == []
 
 
 async def test_opening_twice_shows_one_picker() -> None:

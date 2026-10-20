@@ -1,7 +1,7 @@
 """The catalog of what exists: the workspace and its sessions, the agents' roles, the triggers
 and the lanes."""
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable
 
 from orbit.protocol import (
     CODER,
@@ -20,6 +20,7 @@ from orbit.protocol import (
     SessionSummary,
     TriggerEntry,
     WorkspaceEntry,
+    with_state,
 )
 
 ROLE_LABELS = {
@@ -56,15 +57,6 @@ def agent_entry(role: str) -> AgentEntry:
     return AgentEntry(name=role, label=label, conversational=role in CONVERSATIONAL_ROLES)
 
 
-def with_state(summary: SessionSummary, live: Mapping[str, SessionStateChanged]) -> SessionSummary:
-    """``summary``, with the state ``live`` gives that session, by id, if it gives one."""
-    state_now = live.get(summary.id)
-    if state_now is None:
-        return summary
-    state = {"active": state_now.active, "state": state_now.state, "viewers": state_now.viewers}
-    return summary.model_copy(update=state)
-
-
 def catalog(
     directory: str | None,
     sessions: tuple[SessionSummary, ...],
@@ -78,7 +70,10 @@ def catalog(
     orbit that's ``read_only`` if so."""
     label = directory or NO_WORKSPACE_LABEL
     states = {state.session: state for state in live}
-    shown = tuple(with_state(summary, states) for summary in sessions)
+    shown = tuple(
+        with_state(summary, states[summary.id]) if summary.id in states else summary
+        for summary in sessions
+    )
     entry = WorkspaceEntry(id=DEFAULT_WORKSPACE, label=label, sessions=shown)
     return Catalog(
         workspaces=(entry,),
