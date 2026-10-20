@@ -347,12 +347,14 @@ def test_chat_keeps_sessions_in_the_store_in_the_state_directory(
 
 def adds_tasks(*prompts: str, before_last: Callable[[], None] = lambda: None) -> list[str]:
     """Have each chat's session given a task for each of ``prompts``, calling ``before_last``
-    before the last; the ids of the sessions, as they're given their tasks."""
+    before the last, once the tasks before it are logged; the ids of the sessions, as they're
+    given their tasks."""
     ids: list[str] = []
 
     async def add(session: AgentSession) -> None:
         for n, prompt in enumerate(prompts, 1):
             if n == len(prompts):
+                await logged_tasks(session, n - 1)
                 before_last()
             await send(session, AddTask(task=TaskSpec(prompt=prompt)))
             queued(session)
@@ -360,6 +362,22 @@ def adds_tasks(*prompts: str, before_last: Callable[[], None] = lambda: None) ->
 
     FakeApp.during = add
     return ids
+
+
+async def logged_tasks(session: AgentSession, count: int) -> None:
+    """Wait until the latest task list the session logged in its store holds ``count`` tasks,
+    as the log is written behind the events' delivery."""
+    async with asyncio.timeout(60):
+        while count and await logged_task_count(session) != count:
+            await asyncio.sleep(0.01)
+
+
+async def logged_task_count(session: AgentSession) -> int | None:
+    """How many tasks the latest task list the session logged in its store holds; ``None``
+    before it logged one."""
+    events = await store_in(session).recent(session.saved_session.id, 100)
+    lists = [len(e.payload.tasks) for e in events if isinstance(e.payload, TasksChanged)]
+    return lists[-1] if lists else None
 
 
 async def log_of(state: Path, workspace: Path, session_id: str) -> tuple[list[str], bool]:
