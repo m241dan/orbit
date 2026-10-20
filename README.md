@@ -908,8 +908,8 @@ main port, without the token, with `GET /healthz` and `GET /readyz`; both answer
 | `/readyz` | 503 `{"status": "fail", "output": "shutting_down"}` | it's stopping |
 | `/readyz` | 503 `{"status": "fail", "output": "storage_halted"}` | storage is halted until resumed |
 
-They say nothing more: no version, paths or details. Under mTLS they need a client certificate
-like any other connection, for now.
+They say nothing more: no version, paths or details. Under mTLS they answer without a client
+certificate too, so a probe needs no secrets.
 
 **The token.** A frontend connects by showing the token in `token` in the config directory, sent
 as `Authorization: Bearer <token>`; without it the connection is refused with HTTP 401. `orbit
@@ -999,11 +999,13 @@ orbit chat --connect wss://orbit.example.lan:7433/ --ca ~/.config/orbit/tls/ca.p
 ```
 
 **Client certificates.** With `tls = "mtls"` (`--tls mtls --client-ca <path>`), `orbit serve`
-needs `client_ca` too, the CA that signs client certificates, and the TLS handshake refuses a
-client that shows no certificate, or one that CA didn't sign, before any WebSocket opens; `orbit
-serve` prints a line saying why. The certificate is the client's identity: the token isn't asked
-for, and any sent is ignored. Each connect line names the certificate's subject and SHA-256
-fingerprint, such as `orbit-chat connected from 192.168.1.30:51234 as CN=laptop (3F:A2:…:9C)`.
+needs `client_ca` too, the CA that signs client certificates. The TLS handshake asks for a
+certificate and refuses one that CA didn't sign before any WebSocket opens; a client that shows
+none is let through the handshake, for the health checks, but turned away from the WebSocket,
+and every other path, with HTTP 401. Either way `orbit serve` prints a line saying why. The
+certificate is the client's identity: the token isn't asked for, and any sent is ignored. Each
+connect line names the certificate's subject and SHA-256 fingerprint, such as `orbit-chat
+connected from 192.168.1.30:51234 as CN=laptop (3F:A2:…:9C)`.
 
 To make a client certificate for each client machine, signed by the CA above (which may serve
 as `client_ca` too), make its key on the client and sign its request on the machine holding
@@ -1062,7 +1064,7 @@ setting, file or URL:
 | The server certificate has expired. | Renew it, replace the file and restart `orbit serve`. |
 | The server certificate isn't valid yet. | Check the machine's clock, or make a certificate valid from now. |
 | The server certificate expires soon. | A warning: renew it and restart `orbit serve` before the date it names. |
-| A client showed no certificate. | Printed by `orbit serve` under mTLS: make the client a certificate the client CA signs, and connect with `--cert` and `--key`. |
+| A client showed no certificate. | Printed by `orbit serve` under mTLS, and the body of the HTTP 401: make the client a certificate the client CA signs, and connect with `--cert` and `--key`. |
 | A client's certificate isn't signed by the client CA. | Printed by `orbit serve` under mTLS: sign the client's certificate with the CA in `client_ca`, or set `client_ca` to the CA that signed it. |
 | The client's certificate is revoked. | The body of the HTTP 403: give the client a new certificate, or remove its fingerprint from `revoked` to admit it again. |
 | The server's certificate isn't signed by a trusted CA. | Pass `--ca` with the CA file that signed the server's certificate (the server's `ca.pem`), or set the remote's `ca`. |

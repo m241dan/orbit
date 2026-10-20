@@ -13,7 +13,7 @@ A control plane can run on another machine and be reached safely: traffic is enc
 
 ## Identity
 
-3. Under mTLS the client certificate is the identity: the handshake fails without one the CA signed, any token is ignored, and `orbit serve`'s connect line names the certificate's subject and SHA-256 fingerprint. With `tls` or `off`, phase 3a's bearer token is required. Over certificate and token: two secrets with no added identity; over certificate or token: a leaked token bypasses mTLS.
+3. Under mTLS the client certificate is the identity: the handshake asks for one without requiring it and fails on one the CA didn't sign, the WebSocket route (and every route but the health checks of `docs/00012-feature-health-and-container.md`) refuses a connection that showed none with HTTP 401, so health checks need none, any token is ignored, and `orbit serve`'s connect line names the certificate's subject and SHA-256 fingerprint. With `tls` or `off`, phase 3a's bearer token is required. Over certificate and token: two secrets with no added identity; over certificate or token: a leaked token bypasses mTLS.
 4. `[server] revoked` lists client certificate fingerprints, re-read for each new connection; a match is refused at the upgrade with HTTP 403 naming the fingerprint. Over a CRL file: CA tooling and a restart; over replacing the CA: drastic for one lost laptop.
 
 ## Clients

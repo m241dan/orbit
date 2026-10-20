@@ -52,8 +52,8 @@ CLIENT_CERT_REQUIRED = (
     "A client showed no certificate. Under tls = 'mtls' each client needs a certificate"
     " {client_ca} signed: make it one and pass it to orbit chat with --cert and --key."
 )
-"""A client refused under mutual TLS for showing no certificate, ``client_ca`` the CA that
-signs them."""
+"""The body of the HTTP 401 a client showing no certificate under mutual TLS gets, also said
+to the user, ``client_ca`` the CA that signs them."""
 
 CLIENT_CERT_UNTRUSTED = (
     "A client's certificate isn't signed by the client CA. Under tls = 'mtls' clients need a"

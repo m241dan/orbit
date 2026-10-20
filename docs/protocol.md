@@ -350,9 +350,11 @@ outcomes of other connections' commands included, but for the events answering o
 - **TLS**: with `tls = "off"` (the default) the server speaks plaintext `ws://` and listens on
   loopback alone. With `tls = "tls"` (`--tls tls`) it terminates TLS itself with the server
   certificate and key in `[server]` (`cert`, `key`), at a `wss://` URL, on any address; clients
-  verify the certificate and its hostname. With `tls = "mtls"` the handshake also requires a
-  client certificate the CA in `client_ca` signed, and drops the connection without one. TLS
-  changes nothing above the WebSocket.
+  verify the certificate and its hostname. With `tls = "mtls"` the handshake also asks for a
+  client certificate, and drops the connection if it shows one the CA in `client_ca` didn't
+  sign; one that shows none gets through the handshake, for the health checks, and is answered
+  HTTP 401 on the upgrade and every other path, with `WWW-Authenticate: ClientCertificate`.
+  TLS changes nothing above the WebSocket.
 - **Authentication** is on the upgrade: the request must carry `Authorization: Bearer <token>`,
   the token in the token file of the server's config directory. Without it, or with another
   token, the server answers HTTP 401 and no WebSocket opens. Under mutual TLS the client
@@ -382,7 +384,7 @@ outcomes of other connections' commands included, but for the events answering o
   accepted, with storage working; 200 `{"status": "warn", "output": "read_only"}` while another
   orbit owns the repository; and otherwise 503 `{"status": "fail", "output": <reason>}`, the
   reason `starting`, `shutting_down` or `storage_halted`. Neither says more: no version, paths or
-  checks. Under mutual TLS the handshake still asks for a client certificate before either.
+  checks. Under mutual TLS neither needs a client certificate.
 
 Work doesn't depend on any frontend: queued work goes on to the end with none connected.
 

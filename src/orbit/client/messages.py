@@ -51,12 +51,12 @@ TOKEN_REFUSED = (
 """A token, read from the file at ``path``, the control plane turned away."""
 
 CLIENT_CERT_REQUIRED = (
-    "The server requires a client certificate. {url} closed the connection unanswered, as a"
-    " server under mutual TLS does for a client showing none: pass --cert and --key with a"
-    " certificate its client CA signed."
+    "The server requires a client certificate. {url} refused the connection, as a server under"
+    " mutual TLS does for a client showing none: pass --cert and --key with a certificate its"
+    " client CA signed."
 )
-"""A ``wss://`` server at ``url`` that closed the connection before answering a client showing
-no certificate."""
+"""A ``wss://`` server at ``url`` that refused a client showing no certificate, with HTTP 401
+or by closing the connection before answering."""
 
 CLIENT_CERT_REJECTED = (
     "The server rejected the client certificate. {url} closed the connection unanswered, as a"

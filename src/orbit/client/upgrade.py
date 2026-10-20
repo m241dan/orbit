@@ -1,15 +1,16 @@
 """Opening a WebSocket to a control plane, showing a frontend's token on the upgrade, or under
-mutual TLS its client certificate in the TLS handshake."""
+mutual TLS its client certificate in the TLS handshake, which the upgrade then checks."""
 
 import ssl
 from typing import Any
 
 from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import InvalidStatus, WebSocketException
+from websockets.http11 import Response
 
 from orbit.client import messages
 from orbit.client.handshake import handshake_failure
-from orbit.protocol import UNAUTHORIZED, bearer_header
+from orbit.protocol import CERTIFICATE_CHALLENGE, UNAUTHORIZED, bearer_header
 
 _FORBIDDEN = 403  # As a control plane under mutual TLS refuses a revoked certificate.
 
@@ -39,7 +40,7 @@ async def open_connection(
     try:
         return await connect(url, additional_headers=headers, proxy=None, **options)
     except InvalidStatus as error:
-        _check_refusal(url, error.response.status_code, token)
+        _check_refusal(url, error.response, token)
         return None
     except (OSError, TimeoutError, WebSocketException) as error:
         message = handshake_failure(url, error, certified=token is None)
@@ -48,17 +49,20 @@ async def open_connection(
         return None
 
 
-def _check_refusal(url: str, status: int, token: str | None) -> None:
-    """Note that the control plane at ``url`` answered the upgrade with ``status``, the client
-    showing ``token``, or without one a client certificate.
+def _check_refusal(url: str, response: Response, token: str | None) -> None:
+    """Note that the control plane at ``url`` answered the upgrade with ``response``, the
+    client showing ``token``, or without one a client certificate.
 
     Raises :class:`TokenRejected` if it turned the token away, and :class:`HandshakeRefused`
-    if it wants a token, not a certificate, or the certificate is revoked.
+    if it wants a token, not a certificate, or a certificate the client didn't show, or the
+    certificate is revoked.
     """
-    if status == _FORBIDDEN:
+    if response.status_code == _FORBIDDEN:
         raise HandshakeRefused(messages.REVOKED.format(url=url))
-    if status != UNAUTHORIZED:
+    if response.status_code != UNAUTHORIZED:
         return
+    if response.headers.get("WWW-Authenticate") == CERTIFICATE_CHALLENGE:
+        raise HandshakeRefused(messages.CLIENT_CERT_REQUIRED.format(url=url))
     if token is None:
         raise HandshakeRefused(messages.TOKEN_EXPECTED.format(url=url))
     raise TokenRejected()

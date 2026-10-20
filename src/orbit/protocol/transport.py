@@ -17,6 +17,10 @@ MESSAGE_TOO_BIG = 1009
 UNAUTHORIZED = 401
 """The HTTP status of an upgrade turned away for its token."""
 
+CERTIFICATE_CHALLENGE = "ClientCertificate"
+"""The ``WWW-Authenticate`` challenge of an HTTP 401 turning away, under mutual TLS, a client
+that showed no certificate, which tells it from a token turned away."""
+
 DEFAULT_MAX_MESSAGE_MB = 64
 """The largest message either way, in MiB, unless the server settings say otherwise."""
 

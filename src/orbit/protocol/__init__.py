@@ -165,6 +165,7 @@ from orbit.protocol.schema import protocol_schema
 from orbit.protocol.session import Session, SharedSession
 from orbit.protocol.threaded import ThreadedSession
 from orbit.protocol.transport import (
+    CERTIFICATE_CHALLENGE,
     DEFAULT_MAX_MESSAGE_MB,
     GOING_AWAY,
     MESSAGE_TOO_BIG,
@@ -180,6 +181,7 @@ __all__ = [
     "AGENT_FAILED",
     "BUILT_IN_ROLE_NAMES",
     "BUSY",
+    "CERTIFICATE_CHALLENGE",
     "CHECKS_EXHAUSTED",
     "CODER",
     "CONFIGURATOR",

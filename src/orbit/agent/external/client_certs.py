@@ -1,6 +1,6 @@
 """Client certificates under mutual TLS: each WebSocket's certificate passed to the app in its
-ASGI scope, as the TLS extension's ``client_cert_chain``, and each handshake refused for want of
-a trusted one told to the user, as the TLS layer refuses it before any WebSocket opens."""
+ASGI scope, as the TLS extension's ``client_cert_chain``, and each handshake refused for an
+untrusted one told to the user, as the TLS layer refuses it before any WebSocket opens."""
 
 import ssl
 from collections.abc import Callable
@@ -15,8 +15,6 @@ from orbit.agent.external import tls_messages
 
 # OpenSSL's verification errors for a certificate whose chain ends at no trusted CA.
 _UNTRUSTED = frozenset({2, 18, 19, 20, 21})
-# Its error for a client that showed no certificate.
-_NO_CERTIFICATE = "PEER_DID_NOT_RETURN_A_CERTIFICATE"
 
 
 class CertifiedWebSocketProtocol(WebSocketsSansIOProtocol):
@@ -52,18 +50,16 @@ def certificate_subject(der: bytes) -> str:
 
 
 def refused_client(error: ssl.SSLError, client_ca: str) -> str | None:
-    """What to tell the user about a handshake that failed with ``error`` for want of a client
-    certificate ``client_ca`` signed; none if it failed for another reason."""
+    """What to tell the user about a handshake that failed with ``error`` for a client
+    certificate ``client_ca`` didn't sign; none if it failed for another reason."""
     if isinstance(error, ssl.SSLCertVerificationError) and error.verify_code in _UNTRUSTED:
         return tls_messages.CLIENT_CERT_UNTRUSTED.format(client_ca=client_ca)
-    if error.reason == _NO_CERTIFICATE:
-        return tls_messages.CLIENT_CERT_REQUIRED.format(client_ca=client_ca)
     return None
 
 
 def reporting_handshakes(say: Callable[[str], None], client_ca: str) -> type[ssl.SSLObject]:
-    """The TLS connection class whose handshakes ``say`` why a client was refused for want of
-    a certificate ``client_ca`` signed, which the TLS layer otherwise drops unseen."""
+    """The TLS connection class whose handshakes ``say`` why a client was refused for a
+    certificate ``client_ca`` didn't sign, which the TLS layer otherwise drops unseen."""
 
     class Reporting(ssl.SSLObject):
         def do_handshake(self) -> None:

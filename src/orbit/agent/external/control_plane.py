@@ -7,13 +7,14 @@ decoded into commands and sent on it, and its events are encoded into text frame
 that sends no ``Authorization: Bearer`` with the token is turned away with HTTP 401 before the
 WebSocket opens, and one that arrives as the server stops, with HTTP 503. The token is read
 afresh for each frontend, so a new one admits frontends at once, while those already let in
-stay. Under mutual TLS the TLS handshake refuses a client without a certificate the client CA
-signed, the token isn't asked for, and a certificate whose fingerprint is revoked, as the
+stay. Under mutual TLS the TLS handshake asks for a client certificate and refuses one the
+client CA didn't sign, every route but the health checks turns away a client that showed none
+with HTTP 401, the token isn't asked for, and a certificate whose fingerprint is revoked, as the
 revoked fingerprints are read afresh for each frontend, is turned away with HTTP 403.
 
-``GET /healthz`` and ``GET /readyz`` answer health checks without the token, in
-``application/health+json``: the first passes while the server runs, the second says whether
-it's ready.
+``GET /healthz`` and ``GET /readyz`` answer health checks without the token or a client
+certificate, in ``application/health+json``: the first passes while the server runs, the second
+says whether it's ready.
 """
 
 import asyncio
@@ -26,10 +27,11 @@ from typing import Protocol
 
 import uvicorn
 from starlette.applications import Starlette
+from starlette.middleware import Middleware
 from starlette.requests import Request
-from starlette.responses import JSONResponse, PlainTextResponse
+from starlette.responses import JSONResponse, PlainTextResponse, Response
 from starlette.routing import Route, WebSocketRoute
-from starlette.types import Message
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from starlette.websockets import WebSocket, WebSocketDisconnect, WebSocketDisconnected
 
 from orbit.agent.application.connection import ConnectionDropped, SessionConnection
@@ -45,6 +47,7 @@ from orbit.agent.external.client_certs import (
 from orbit.agent.external.embedded_server import EmbeddedServer
 from orbit.agent.external.mcp_host import bearer_token
 from orbit.protocol import (
+    CERTIFICATE_CHALLENGE,
     GOING_AWAY,
     INVALID,
     MESSAGE_TOO_BIG,
@@ -70,6 +73,9 @@ BINARY_FRAME = "Send each envelope as JSON in a text frame."
 
 HEALTH_JSON = "application/health+json"
 """The content type of the health checks' answers."""
+
+HEALTH_PATHS = frozenset({"/healthz", "/readyz"})
+"""The paths of the health checks, which answer without the token or a client certificate."""
 
 GRACE_SECONDS = 5
 """How long the server waits, as it shuts down, for the WebSockets to finish closing."""
@@ -124,6 +130,31 @@ def _decoded(message: Message) -> CommandEnvelope:
     if text is None:
         raise ProtocolError(BINARY_FRAME)
     return decode_command(text)
+
+
+class _CertificateGate:
+    """``app``, but for a request to any path besides the health checks that showed no client
+    certificate, which is answered with what ``refusal`` returns then."""
+
+    def __init__(self, app: ASGIApp, refusal: Callable[[], Response]) -> None:
+        self._app = app
+        self._refusal = refusal
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if _let_through(scope):
+            await self._app(scope, receive, send)
+        elif scope["type"] == "websocket":
+            await WebSocket(scope, receive, send).send_denial_response(self._refusal())
+        else:
+            await self._refusal()(scope, receive, send)
+
+
+def _let_through(scope: Scope) -> bool:
+    """Whether the certificate gate lets ``scope`` through: the app's lifespan, a health
+    check, or a request that showed a client certificate."""
+    if scope["type"] == "lifespan" or scope["path"] in HEALTH_PATHS:
+        return True
+    return client_certificate(scope) is not None
 
 
 class _Conversation:
@@ -292,22 +323,28 @@ class ControlPlaneServer:
         """Whether the server serves mutual TLS, requiring client certificates."""
         return self._settings.tls == "mtls"
 
-    def _config(self) -> uvicorn.Config:
-        """How uvicorn serves the app: logging left to the program, messages kept under the
-        limit, over TLS with the settings' certificate and key if it's secure, and requiring a
-        client certificate the client CA signed if it's mutual."""
+    def app(self) -> Starlette:
+        """The app serving frontends and health checks, behind a gate turning away every request
+        but a health check that showed no client certificate if it's mutual."""
         routes = [
             WebSocketRoute("/", self._websocket),
             Route("/healthz", _healthz, methods=["GET"]),
             Route("/readyz", self._readyz, methods=["GET"]),
         ]
-        app = Starlette(routes=routes)
+        gate = [Middleware(_CertificateGate, refusal=self._no_certificate)]
+        return Starlette(routes=routes, middleware=gate if self._mutual else [])
+
+    def _config(self) -> uvicorn.Config:
+        """How uvicorn serves the app: logging left to the program, messages kept under the
+        limit, over TLS with the settings' certificate and key if it's secure, and if it's
+        mutual asking for a client certificate, which must be one the client CA signed, without
+        requiring one, so health checks need none."""
         return uvicorn.Config(
-            app,
+            self.app(),
             ssl_certfile=self._settings.cert if self._secure else None,
             ssl_keyfile=self._settings.key if self._secure else None,
             ssl_ca_certs=self._settings.client_ca if self._mutual else None,
-            ssl_cert_reqs=ssl.CERT_REQUIRED if self._mutual else ssl.CERT_NONE,
+            ssl_cert_reqs=ssl.CERT_OPTIONAL if self._mutual else ssl.CERT_NONE,
             ssl_context_factory=self._ssl_context if self._mutual else None,
             log_config=None,
             lifespan="off",
@@ -320,7 +357,7 @@ class ControlPlaneServer:
         self, config: uvicorn.Config, default: Callable[[], ssl.SSLContext]
     ) -> ssl.SSLContext:
         """uvicorn's ``default`` context for ``config``, saying why each client the TLS
-        handshake refuses for want of a trusted certificate was refused."""
+        handshake refuses for an untrusted certificate was refused."""
         context = default()
         assert self._settings.client_ca is not None  # As mutual TLS needs one.
         context.sslobject_class = reporting_handshakes(self._say, self._settings.client_ca)
@@ -369,12 +406,19 @@ class ControlPlaneServer:
             return PlainTextResponse(SHUTTING_DOWN, 503)
         return refusal
 
+    def _no_certificate(self) -> PlainTextResponse:
+        """The HTTP 401 turning away a client that showed no certificate under mutual TLS,
+        telling the user why."""
+        message = tls_messages.CLIENT_CERT_REQUIRED.format(client_ca=self._settings.client_ca)
+        self._say(message)
+        headers = {"WWW-Authenticate": CERTIFICATE_CHALLENGE}
+        return PlainTextResponse(message, UNAUTHORIZED_STATUS, headers=headers)
+
     def _uncertified(self, der: bytes | None) -> PlainTextResponse | None:
         """What turns away a frontend that showed the client certificate ``der``, in DER, if
-        it showed none, which the TLS handshake already refuses, or it's revoked."""
+        it showed none, which the certificate gate already turns away, or it's revoked."""
         if der is None:
-            message = tls_messages.CLIENT_CERT_REQUIRED.format(client_ca=self._settings.client_ca)
-            return PlainTextResponse(message, UNAUTHORIZED_STATUS)
+            return self._no_certificate()
         fingerprint = client_fingerprint(der)
         if is_revoked(fingerprint, self.revoked()):
             return PlainTextResponse(tls_messages.REVOKED.format(fingerprint=fingerprint), 403)

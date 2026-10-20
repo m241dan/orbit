@@ -1,8 +1,9 @@
 """Which failures to open a connection say the control plane can't be reached safely as asked,
 so retrying would only fail the same way, and what to tell the user for each.
 
-A server under mutual TLS that refuses a client's certificate drops the connection without
-saying why, so the client can only tell, by whether it showed one, which it likely was."""
+A server under mutual TLS that refuses a client's certificate in the TLS handshake drops the
+connection without saying why, so the client can only tell, by whether it showed one, which it
+likely was."""
 
 import ssl
 from urllib.parse import urlsplit
@@ -51,5 +52,5 @@ def _unanswered(url: str, certified: bool) -> str:
 def _closed_unanswered(error: Exception) -> bool:
     """Whether ``error`` is a connection closed before any HTTP answer: over ``ws://``, as a
     server serving TLS closes one that doesn't start with a TLS handshake, and over
-    ``wss://``, as one under mutual TLS closes one without a certificate its CA signed."""
+    ``wss://``, as one under mutual TLS closes one showing a certificate its CA didn't sign."""
     return isinstance(error, InvalidMessage) and isinstance(error.__cause__, EOFError)

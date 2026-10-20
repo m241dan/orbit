@@ -1,5 +1,6 @@
 """The control plane under mutual TLS: a client certificate the client CA signed is the identity,
-without a token, and one whose fingerprint is revoked is turned away."""
+without a token, one whose fingerprint is revoked is turned away, and every route but the health
+checks turns away a client that showed none."""
 
 import asyncio
 import hashlib
@@ -9,8 +10,11 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import cast
 
+import httpx
 import pytest
 from starlette.responses import Response
+from starlette.routing import BaseRoute, Route, WebSocketRoute
+from starlette.testclient import TestClient, WebSocketDenialResponse
 from starlette.websockets import WebSocket
 from websockets.asyncio.client import connect
 from websockets.exceptions import InvalidMessage, InvalidStatus
@@ -19,9 +23,17 @@ from orbit.agent import AgentSession
 from orbit.agent.domain.server import ServerSettings, client_fingerprint, is_revoked
 from orbit.agent.external import tls_messages
 from orbit.agent.external.client_certs import client_certificate, refused_client
-from orbit.agent.external.control_plane import ControlPlaneServer
+from orbit.agent.external.control_plane import HEALTH_PATHS, ControlPlaneServer
 from orbit.agent.external.tls import TlsError, tls_warnings
-from orbit.protocol import PROTOCOL_VERSION, CommandEnvelope, Hello, Welcome, decode_event, encode
+from orbit.protocol import (
+    CERTIFICATE_CHALLENGE,
+    PROTOCOL_VERSION,
+    CommandEnvelope,
+    Hello,
+    Welcome,
+    decode_event,
+    encode,
+)
 from tests.tls_certs import Ca, ServerFiles, make_ca, make_client, make_server
 
 HELLO = CommandEnvelope(
@@ -100,14 +112,53 @@ async def test_a_certificate_the_client_ca_signed_is_welcomed_without_a_token_an
     assert any(f" as CN=laptop ({fingerprint})." in line for line in lines.said), lines.said
 
 
-async def test_a_client_without_a_certificate_is_refused_at_the_handshake(
+async def test_a_client_without_a_certificate_is_refused_at_the_upgrade_with_401(
     ca: Ca, settings: ServerSettings
 ) -> None:
     lines = Lines()
     async with serving(settings, lines) as (url, _):
-        with pytest.raises(InvalidMessage):
+        with pytest.raises(InvalidStatus) as refused:
             await _welcomed(url, _context(ca, None))
-    assert lines.said == [tls_messages.CLIENT_CERT_REQUIRED.format(client_ca=ca.path)]
+    message = tls_messages.CLIENT_CERT_REQUIRED.format(client_ca=ca.path)
+    assert refused.value.response.status_code == 401
+    assert (refused.value.response.body or b"").decode() == message
+    assert refused.value.response.headers["WWW-Authenticate"] == CERTIFICATE_CHALLENGE
+    assert lines.said == [message]
+
+
+@pytest.mark.parametrize("path", sorted(HEALTH_PATHS))
+async def test_the_health_checks_answer_without_a_certificate(
+    ca: Ca, settings: ServerSettings, path: str
+) -> None:
+    async with serving(settings, Lines()) as (url, _):
+        base = url.replace("wss://", "https://")
+        async with httpx.AsyncClient(base_url=base, verify=_context(ca, None)) as client:
+            response = await client.get(path)
+    assert response.status_code == 200
+
+
+def _status_without_certificate(client: TestClient, route: BaseRoute) -> int:
+    """The status ``client``, showing no certificate, is answered with at ``route``."""
+    if isinstance(route, WebSocketRoute):
+        with pytest.raises(WebSocketDenialResponse) as denied, client.websocket_connect(route.path):
+            pass
+        return denied.value.status_code
+    assert isinstance(route, Route), f"{route!r} is a kind of route this test doesn't know"
+    statuses = {client.request(method, route.path).status_code for method in route.methods or ()}
+    [status] = statuses
+    return status
+
+
+def test_every_route_but_the_health_checks_turns_away_a_client_without_a_certificate(
+    settings: ServerSettings,
+) -> None:
+    app = ControlPlaneServer(AgentSession(), lambda: "", settings, Lines()).app()
+    guarded = [route for route in app.routes if getattr(route, "path", None) not in HEALTH_PATHS]
+    assert guarded
+    with TestClient(app) as client:
+        assert [_status_without_certificate(client, route) for route in guarded] == [401] * len(
+            guarded
+        )
 
 
 async def test_a_certificate_another_ca_signed_is_rejected(
@@ -157,8 +208,18 @@ async def test_the_settings_revoked_fingerprints_are_used_by_default(
             await _welcomed(url, _context(ca, client))
 
 
+@pytest.mark.parametrize("path", ["/", "/elsewhere"])
+def test_a_request_to_another_path_without_a_certificate_is_turned_away_with_401(
+    settings: ServerSettings, ca: Ca, path: str
+) -> None:
+    app = ControlPlaneServer(AgentSession(), lambda: "", settings, Lines()).app()
+    response = TestClient(app).get(path)
+    assert response.status_code == 401
+    assert response.text == tls_messages.CLIENT_CERT_REQUIRED.format(client_ca=ca.path)
+
+
 class _Uncertified:
-    """A WebSocket that showed no certificate, as the TLS handshake lets none through."""
+    """A WebSocket that showed no certificate, as the certificate gate lets none through."""
 
     def __init__(self) -> None:
         self.scope: dict[str, object] = {"type": "websocket", "extensions": {}}
