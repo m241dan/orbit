@@ -113,7 +113,7 @@ def serve(
             settings,
             _current_token(token_file),
             _current_revoked(user_config, settings.revoked),
-            None if owner else RunFile(state, store.workspace_id),
+            RunFile(state, store.workspace_id),
             _local_tls(settings, root),
             _banner(root, token_file, owner, settings),
             lock,
@@ -250,8 +250,8 @@ class _ServeParts:
     """What ``orbit serve`` serves: the session ``build`` makes, with the most recently active
     saved one opened if ``latest``, on the server ``settings`` say, to frontends showing the
     token ``token`` gives as they connect, or under mutual TLS a certificate not among those
-    ``revoked`` gives then, saying where it is in ``run_file``, if it owns the repository, while
-    it does, and how frontends here reach it over TLS, ``local``, the ``banner`` it prints once
+    ``revoked`` gives then, saying where it is in ``run_file`` while it owns the repository,
+    and how frontends here reach it over TLS, ``local``, the ``banner`` it prints once
     listening, given the server's URL, and the workspace ``lock``, which names the server's URL
     while it's held."""
 
@@ -260,7 +260,7 @@ class _ServeParts:
     settings: ServerSettings
     token: Callable[[], str]
     revoked: Callable[[], Collection[str]]
-    run_file: RunFile | None
+    run_file: RunFile
     local: LocalTls | None
     banner: Callable[[str], str]
     lock: WorkspaceLock
@@ -290,17 +290,19 @@ async def _until_stopped(
     session: AgentSession, server: ControlPlaneServer, parts: _ServeParts, url: str
 ) -> None:
     """Serve ``session`` on ``server``, listening at ``url``, until the first ctrl+c or
-    SIGTERM, then stop it, removing the run file it wrote.
+    SIGTERM, then stop it, removing the run file it wrote: at once if it owns the repository,
+    else once it takes the repository over.
 
-    Exits with status 2 if the run file or the workspace lock can't be written.
+    Exits with status 2 if the workspace lock, or the run file at once, can't be written.
     """
     stopping = asyncio.Event()
     _on_signals(stopping)
-    written: RunFile | None = None
+    written: list[RunFile] = []
+    session.owned = _taking_over(parts.run_file, url, parts.local, written)
     try:
-        if parts.run_file is not None:
+        if not session.read_only:
             _write_run_file(parts.run_file, url, parts.local)
-            written = parts.run_file
+            written.append(parts.run_file)
         _announce(parts.lock, url)
         typer.echo(parts.banner(url))
         await stopping.wait()
@@ -309,8 +311,8 @@ async def _until_stopped(
             await server.stop(session.close)
         finally:
             # One that couldn't be written may not be removable either.
-            if written is not None:
-                written.remove()
+            for run_file in written:
+                run_file.remove()
 
 
 def _write_run_file(run_file: RunFile, url: str, local: LocalTls | None) -> None:
@@ -319,8 +321,31 @@ def _write_run_file(run_file: RunFile, url: str, local: LocalTls | None) -> None
 
     Exits with status 2 if it can't.
     """
-    with _exit_on(OSError, message=lambda exc: f"Can't write the run file {run_file.path}: {exc}"):
+    with _exit_on(OSError, message=lambda exc: _unwritable(run_file, exc)):
         run_file.write(url, os.getpid(), local)
+
+
+def _taking_over(
+    run_file: RunFile, url: str, local: LocalTls | None, written: list[RunFile]
+) -> Callable[[], None]:
+    """What says in ``run_file`` that this process is serving at ``url``, reached from this
+    machine as ``local`` says, as it takes the repository over, adding it to ``written``; if it
+    can't, it says why on stderr and serves on."""
+
+    def owned() -> None:
+        try:
+            run_file.write(url, os.getpid(), local)
+        except OSError as exc:
+            typer.echo(_unwritable(run_file, exc), err=True)
+            return
+        written.append(run_file)
+
+    return owned
+
+
+def _unwritable(run_file: RunFile, exc: OSError) -> str:
+    """What says ``run_file`` can't be written, as ``exc`` says."""
+    return f"Can't write the run file {run_file.path}: {exc}"
 
 
 def _announce(lock: WorkspaceLock, url: str) -> None:

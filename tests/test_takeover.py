@@ -385,3 +385,29 @@ async def test_taking_over_leaves_the_work_commands_reviews_and_snapshot_all_own
     assert session.queued_work == () and len(launcher.launches) == 1
     assert not (await snapshot_on_joining(session)).read_only and not session.read_only
     await session.close()
+
+
+async def test_taking_over_calls_owned_before_saying_so() -> None:
+    lock = FakeLock(free=True)
+    session, _, _ = session_for(owner=OWNER, lock=lock)
+    calls: list[bool] = []
+    session.owned = lambda: calls.append(session.read_only)
+    await greeted(session)
+    await events_until(session, offered)
+    assert calls == []
+
+    await send(session, TakeOwnership(take=True))
+    await events_until(session, lambda event: isinstance(event, OwnershipTaken))
+    assert calls == [False]
+    await session.close()
+
+
+async def test_declining_the_offer_does_not_call_owned() -> None:
+    lock = FakeLock(free=True)
+    session, _, _ = session_for(owner=OWNER, lock=lock)
+    calls: list[bool] = []
+    session.owned = lambda: calls.append(True)
+
+    await declined(session)
+    assert calls == []
+    await session.close()

@@ -217,7 +217,8 @@ class AgentSession:
     taking it publishes ``OwnershipTaken`` and a notice, then runs the work queued, in order;
     declining it publishes ``OwnershipDeclined``, lets the lock go and offers it again once
     another orbit has held it since, or after ``lock_declined_retry`` seconds.
-    While the offer is open, ``Snapshot`` says so.
+    While the offer is open, ``Snapshot`` says so. ``owned`` is called as it's taken, before
+    ``OwnershipTaken`` is published.
     """
 
     def __init__(
@@ -244,6 +245,7 @@ class AgentSession:
         lock_retry: float = RETRY_SECONDS,
         lock_declined_retry: float = DECLINED_RETRY_SECONDS,
     ) -> None:
+        self.owned: Callable[[], None] = lambda: None
         self._takeover = Takeover(
             owner is not None,
             lock,
@@ -598,6 +600,7 @@ class AgentSession:
         if not command.take:
             await self._events.put(OwnershipDeclined())
             return
+        self.owned()
         await self._events.put(OwnershipTaken())
         await self._events.put(Notice(message=OWNED_NOTE))
         await self._commands.own(command_id)

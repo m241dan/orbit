@@ -898,7 +898,8 @@ name its `Hello` gives and its address, and under mTLS its certificate's subject
 fingerprint) and disconnects, and one as it stops; a connection closed without a `Hello`, like the
 probe `orbit chat` makes to find a server, gets no line. Warnings and errors go to stderr. While it runs, `run/<workspace id>.json` in the state directory, readable by you
 alone, holds its URL and process id, and over TLS the CA a frontend on the same machine trusts and
-the hostname it connects by (see **Finding the server** below); it's removed as it stops.
+the hostname it connects by (see **Finding the server** below); it's removed as it stops. A
+read-only `orbit serve` writes it only once it takes the repository over.
 
 The first `ctrl+c` (or SIGTERM) stops it: it stops accepting frontends (one that arrives then is
 refused with HTTP 503), cancels the work in progress (stopping the agents and revoking their
@@ -1132,7 +1133,7 @@ refusing the chat's `Hello` as incompatible.
 
 **Finding the server.** Without `--connect`, `orbit chat` looks for the `orbit serve` that owns its
 repository (see [Owning the repository](#owning-the-repository)), from the run file in the state
-directory, and connects to it as `--connect` does, printing nothing extra: the backend flags stop
+directory, which a serve that takes the repository over writes then, and connects to it as `--connect` does, printing nothing extra: the backend flags stop
 it with status 2, saying they belong on `orbit serve` or call for `--local`, and `--new` and
 `--name` open a new session once connected. A run file whose process is gone, or a server that
 can't be reached, is ignored, and the chat runs in-process as usual. A server found is never
@@ -1336,7 +1337,8 @@ and settings work as usual. The queue is dropped when the orbit exits.
 
 A read-only orbit tries the lock every 5 seconds. Once the owner has gone, it takes the lock and
 asks, once, in a modal: "The repository is free". `y` takes it over: the orbit owns the
-repository from then on, the "read-only" mark goes, a note says "This orbit now owns the
+repository from then on, the "read-only" mark goes, `orbit serve` writes its run file so chats
+find it (a run file it can't write is reported on stderr, and it serves on), a note says "This orbit now owns the
 repository; queued work is running." and the work queued runs, in order. `n` or `esc` stays
 read-only: the orbit lets the lock go again, so another orbit can take it, and asks again once
 another orbit has owned the repository and gone, or after 5 minutes if it's still free. Under `orbit serve`, every frontend connected asks, as does

@@ -21,7 +21,14 @@ from typer.testing import CliRunner
 from websockets.exceptions import ConnectionClosed, InvalidStatus
 from websockets.sync.client import ClientConnection, connect
 
-from orbit.agent import ControlPlaneServer, RunFile, TokenFile, WorkspaceLock, WorkspaceOwner
+from orbit.agent import (
+    AgentSession,
+    ControlPlaneServer,
+    RunFile,
+    TokenFile,
+    WorkspaceLock,
+    WorkspaceOwner,
+)
 from orbit.agent.domain.server import client_fingerprint
 from orbit.agent.external.sqlite_store import find_workspace_id
 from orbit.cli import app, chat, serve
@@ -34,7 +41,11 @@ from orbit.protocol import (
     CommandEnvelope,
     Event,
     Hello,
+    OwnershipDeclined,
+    OwnershipOffered,
+    OwnershipTaken,
     Snapshot,
+    TakeOwnership,
     TaskSpec,
     Welcome,
     decode_event,
@@ -296,6 +307,85 @@ def test_a_read_only_serve_leaves_the_owners_run_file_as_it_was(
     assert seen == [before]
     assert list((state / "run").iterdir()) == [owners_file.path]
     assert owners_file.path.read_text() == before
+
+
+@pytest.fixture
+def quick_retries(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Have a read-only serve try the repository's lock every 50ms rather than every 5s."""
+    defaults = AgentSession.__init__.__kwdefaults__
+    assert defaults is not None
+    monkeypatch.setitem(defaults, "lock_retry", 0.05)
+
+
+def _answers_the_offer(
+    owner: WorkspaceLock, take: bool, state: Path, seen: list[list[str]]
+) -> Callable[[ClientConnection], list[Event]]:
+    """What lets ``owner`` go, answers the offer of the repository with ``take`` once made, and
+    then notes in ``seen`` the run files in ``state``, then adds a task."""
+
+    def answers(websocket: ClientConnection) -> list[Event]:
+        owner.close()
+        events = until(websocket, OwnershipOffered)
+        say(websocket, "take", TakeOwnership(take=take))
+        events += until(websocket, OwnershipTaken if take else OwnershipDeclined)
+        found = (state / "run").glob("*.json") if (state / "run").is_dir() else []
+        seen.append([path.read_text() for path in found])
+        return events + adds_a_task(websocket)
+
+    return answers
+
+
+@pytest.mark.usefixtures("quick_retries")
+def test_a_read_only_serve_that_takes_the_repository_over_writes_its_run_file_until_stopped(
+    monkeypatch: pytest.MonkeyPatch, project: Path, state: Path, config_dir: Path
+) -> None:
+    owner = WorkspaceLock(project / ".orbit")
+    owner.take()
+    seen: list[list[str]] = []
+    work = _answers_the_offer(owner, True, state, seen)
+    frontend = Frontend(state, config_dir, work, _listening_urls(monkeypatch))
+    served(frontend, "--port", "0")
+
+    [[written]] = seen
+    assert json.loads(written) == {"url": frontend.run_file["url"], "pid": os.getpid()}
+    assert not list((state / "run").iterdir())
+
+
+@pytest.mark.usefixtures("quick_retries")
+def test_a_read_only_serve_that_declines_the_repository_writes_no_run_file(
+    monkeypatch: pytest.MonkeyPatch, project: Path, state: Path, config_dir: Path
+) -> None:
+    owner = WorkspaceLock(project / ".orbit")
+    owner.take()
+    seen: list[list[str]] = []
+    work = _answers_the_offer(owner, False, state, seen)
+    frontend = Frontend(state, config_dir, work, _listening_urls(monkeypatch))
+    served(frontend, "--port", "0")
+
+    assert seen == [[]]
+    assert not (state / "run").exists() or not list((state / "run").iterdir())
+
+
+@pytest.mark.usefixtures("quick_retries")
+def test_a_serve_that_cant_write_its_run_file_on_taking_over_says_so_and_serves_on(
+    monkeypatch: pytest.MonkeyPatch, project: Path, state: Path, config_dir: Path
+) -> None:
+    state.mkdir()
+    (state / "run").write_text("not a directory\n")
+    owner = WorkspaceLock(project / ".orbit")
+    owner.take()
+    seen: list[list[str]] = []
+    work = _answers_the_offer(owner, True, state, seen)
+    frontend = Frontend(state, config_dir, work, _listening_urls(monkeypatch))
+    thread = frontend.start()
+    result = runner.invoke(app, ["serve", *QUIET, "--port", "0"])
+    thread.join(10)
+
+    assert result.exit_code == 0, result.output
+    assert f"Can't write the run file {state / 'run'}" in result.stderr
+    assert "Traceback" not in result.output
+    assert isinstance(frontend.events[-1], CommandAccepted)
+    assert (state / "run").read_text() == "not a directory\n"
 
 
 def test_serve_takes_its_port_from_the_config_file(state: Path, config_dir: Path) -> None:
