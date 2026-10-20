@@ -49,7 +49,8 @@ ConfigDirOption = Annotated[
     typer.Option(
         "--config-dir",
         help="The directory of your own config.toml, whose [storage] sets what orbit keeps of"
-        " sessions and [server] how orbit serve listens, and of the token frontends show it"
+        " sessions, [server] how orbit serve listens and [remotes] the control planes orbit chat"
+        " --remote joins, and of the token frontends show it"
         " (default: $ORBIT_CONFIG_DIR, else $XDG_CONFIG_HOME/orbit, else ~/.config/orbit).",
     ),
 ]
@@ -105,6 +106,16 @@ ConnectOption = Annotated[
         metavar="URL",
         help="Connect to the control plane orbit serve runs at this wss:// URL (or ws:// on"
         " loopback) rather than run one here; the backend flags belong on orbit serve then.",
+    ),
+]
+RemoteOption = Annotated[
+    str | None,
+    typer.Option(
+        "--remote",
+        metavar="NAME",
+        help="Connect, as --connect does, to the control plane [remotes.NAME] in your"
+        " config.toml names, with its ca and its token_file or cert and key; the flags given"
+        " override them.",
     ),
 ]
 CaOption = Annotated[

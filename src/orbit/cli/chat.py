@@ -11,13 +11,23 @@ from pathlib import Path
 import typer
 
 from orbit.agent import (
+    USER_CONFIG_FILE,
+    ConfigError,
+    RemoteSettings,
     SqliteStore,
     TokenFile,
+    read_remotes,
     resolve_config_dir,
     resolve_state_dir,
     running_server,
 )
-from orbit.cli.backend import _Backend, _backend, _repository_lock, _workspace
+from orbit.cli.backend import (
+    INVALID_CONFIG,
+    _Backend,
+    _backend,
+    _repository_lock,
+    _workspace,
+)
 from orbit.cli.errors import _exit_on
 from orbit.cli.options import (
     _SERVE_FLAGS,
@@ -31,6 +41,7 @@ from orbit.cli.options import (
     NameOption,
     NewOption,
     ProfileOption,
+    RemoteOption,
     ReviewOption,
     StateDirOption,
     TokenFileOption,
@@ -71,6 +82,7 @@ def chat(
     state: StateDirOption = None,
     config_dir: ConfigDirOption = None,
     connect: ConnectOption = None,
+    remote: RemoteOption = None,
     token_file: TokenFileOption = None,
     ca: CaOption = None,
     cert: ClientCertOption = None,
@@ -82,6 +94,7 @@ def chat(
     At startup, pick a saved session or start a new one (or start one with --new); ctrl+p
     picks again later. With --connect, or when an orbit serve is running for the workspace
     (unless --local), join it instead, the picker offering to resume the session it has open.
+    --remote NAME joins the one [remotes.NAME] in your config.toml names.
     A control plane serving mutual TLS is shown a client certificate, with --cert and --key,
     rather than the token.
 
@@ -93,12 +106,16 @@ def chat(
     and failures go back to it to fix.
     """
     user_config = resolve_config_dir(config_dir, os.environ)
+    given = _ClientFiles(token_file, ca, cert, key)
+    target = _target(connect, remote, user_config, given)
+    if target is not None:
+        _refuse_local(local)
+        _join(
+            _joining(ctx, target.files, user_config, _opening(new, name)), target.url, target.where
+        )
+        return
     token_path = token_file or TokenFile(user_config).path
     joining = _Joining(ctx, token_path, ca, _opening(new, name))
-    if connect is not None:
-        _refuse_local(local)
-        _join(_certified(joining, cert, key, token_file), connect, "not orbit chat --connect")
-        return
     state = resolve_state_dir(state, os.environ)
     root = _workspace(workspace)
     found = None if local else _discovered(state, root, token_path)
@@ -115,6 +132,84 @@ def chat(
         build, store = _backend(backend, root, state, user_config, pick_session=not backend.fresh)
         session = ThreadedSession(build, _thread_context(profile))
         _launch_with(OrbitApp(session, pick=not backend.fresh), profile, store)
+
+
+@dataclass(frozen=True)
+class _ClientFiles:
+    """The files a chat joining a control plane shows it: the token in ``token_file``, or the
+    client certificate ``cert`` with its ``key``, verifying it by the CA in ``ca``; each may be
+    ``None``."""
+
+    token_file: Path | None = None
+    ca: Path | None = None
+    cert: Path | None = None
+    key: Path | None = None
+
+    def over(self, configured: "_ClientFiles") -> "_ClientFiles":
+        """These files over the ``configured`` ones: the token or client certificate given, if
+        any, in place of the configured one, and the CA given, if any."""
+        given = (self.token_file, self.cert, self.key) != (None, None, None)
+        return replace(self if given else configured, ca=self.ca or configured.ca)
+
+
+@dataclass(frozen=True)
+class _Target:
+    """The control plane at ``url`` a chat was asked to join, showing it ``files``; ``where``
+    says, after "belong on orbit serve", how it was asked."""
+
+    url: str
+    files: _ClientFiles
+    where: str
+
+
+def _target(
+    connect: str | None, remote: str | None, config_dir: Path, given: _ClientFiles
+) -> _Target | None:
+    """The control plane --connect, ``connect``, or --remote, ``remote``, names, as the user
+    config in ``config_dir`` says, with the ``given`` files over the remote's; ``None`` if
+    neither was given.
+
+    Exits with status 2 if both were given, or the remote isn't configured.
+    """
+    if remote is None:
+        return None if connect is None else _Target(connect, given, "not orbit chat --connect")
+    if connect is not None:
+        typer.echo(
+            "--remote names the control plane to connect to, so it can't go with --connect.",
+            err=True,
+        )
+        raise typer.Exit(2)
+    configured = _remote(config_dir, remote)
+    return _Target(configured.url, given.over(_remote_files(configured)), "not orbit chat --remote")
+
+
+def _remote(config_dir: Path, name: str) -> RemoteSettings:
+    """The remote ``name`` in the user config in ``config_dir``.
+
+    Exits with status 2 if the config is invalid, or names no such remote.
+    """
+    with _exit_on(ConfigError, prefix=INVALID_CONFIG):
+        remotes = read_remotes(config_dir)
+    if name in remotes:
+        return remotes[name]
+    typer.echo(_unknown_remote(name, sorted(remotes), config_dir / USER_CONFIG_FILE), err=True)
+    raise typer.Exit(2)
+
+
+def _unknown_remote(name: str, configured: list[str], path: Path) -> str:
+    """What says there's no remote ``name`` in the user config at ``path``, listing the
+    ``configured`` ones."""
+    if not configured:
+        return (
+            f"No remote named {name}: none are configured in {path}; add a [remotes.{name}] table."
+        )
+    return f"No remote named {name} in {path}; the remotes configured are {', '.join(configured)}."
+
+
+def _remote_files(remote: RemoteSettings) -> _ClientFiles:
+    """The files ``remote`` names."""
+    paths = (remote.token_file, remote.ca, remote.cert, remote.key)
+    return _ClientFiles(*(None if path is None else Path(path) for path in paths))
 
 
 @dataclass(frozen=True)
@@ -150,6 +245,19 @@ def _certified(
         )
         raise typer.Exit(2)
     return replace(joining, token_file=None, cert=cert, key=key)
+
+
+def _joining(
+    ctx: typer.Context, files: _ClientFiles, config_dir: Path, opening: NewSession | None
+) -> _Joining:
+    """How a chat with the flags in ``ctx`` joins a control plane showing it ``files``, or the
+    token in the config directory ``config_dir`` without one, and sending ``opening``, if any.
+
+    Exits with status 2 if a client certificate was given with a token file.
+    """
+    token_path = files.token_file or TokenFile(config_dir).path
+    joining = _Joining(ctx, token_path, files.ca, opening)
+    return _certified(joining, files.cert, files.key, files.token_file)
 
 
 def _opening(new: bool, name: str | None) -> NewSession | None:

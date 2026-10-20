@@ -48,6 +48,7 @@ uv run orbit serve --port 0                    # on a port the system chooses
 uv run orbit serve --tls tls --cert server.pem --key server-key.pem --host 0.0.0.0  # over TLS
 uv run orbit chat --connect ws://127.0.0.1:7433/  # show the session orbit serve runs
 uv run orbit chat --connect wss://orbit.example.lan:7433/ --ca ca.pem  # over TLS
+uv run orbit chat --remote work                # connect to the control plane [remotes.work] names
 uv run orbit chat --local                      # run in-process even with orbit serve running
 uv run orbit token rotate                      # replace the token frontends show orbit serve
 ```
@@ -568,7 +569,7 @@ your checkout out of its way, it doesn't sandbox it.
 | `.git/orbit` | the repository's git directory | the coder's worktree, review snapshots, what earlier runs left there and `workspace.lock`, which says which orbit owns the repository (`.orbit/workspace.lock` outside git; see [Owning the repository](#owning-the-repository)) |
 | The store | the state directory | `orbit.db`, the saved sessions, their event logs and the super review count of every repository, `locks/`, and `fallback/` for events a failed write left unsaved (see [Storage failures](#storage-failures)) |
 | Config files | `.orbit/config.toml` in the repository | the verification steps, setup, roles and limits, committed with your code |
-| User config | `config.toml` in the config directory | your own settings for every repository, such as `[storage]` and `[server]` |
+| User config | `config.toml` in the config directory | your own settings for every repository, such as `[storage]`, `[server]` and `[remotes]` |
 | The token | `token` in the config directory | what frontends show `orbit serve` to connect (see [Serving the control plane](#serving-the-control-plane)) |
 | Run files | `run/` in the state directory | where the `orbit serve` that owns each repository listens |
 | Runtime-owned | `~/.claude` | Claude Code's own: your login, read for usage limits, and the agents' conversations |
@@ -1051,7 +1052,7 @@ setting, file or URL:
 | The server isn't speaking TLS. | Connect with `ws://` to a server on loopback, or serve it with `--tls tls`. |
 | The server is speaking TLS. | Connect with `wss://` rather than `ws://`. |
 | Plaintext is refused beyond loopback. | Connect with `wss://` to a server serving TLS, or through an SSH tunnel to a loopback address. |
-| The CA file can't be read. | Check the path given to `--ca`, and that the file is a PEM certificate. |
+| The CA file can't be read. | Check the path given to `--ca`, or the remote's `ca`, and that the file is a PEM certificate. |
 | The control plane refused the token. | Give it the token `orbit serve` uses: copy it to the file named, or name another with `--token-file`. |
 | The server requires a client certificate. | The server serves mTLS: pass `--cert` and `--key` with a certificate its client CA signed. |
 | The server rejected the client certificate. | Use a certificate signed by the CA the server has as `client_ca`. |
@@ -1100,8 +1101,73 @@ it with status 2, saying they belong on `orbit serve` or call for `--local`, and
 can't be reached, is ignored, and the chat runs in-process as usual. A server found is never
 bypassed: if it refuses the token, or the token file can't be read, the chat stops with status 2,
 naming the token file. Only servers of the same account on the same machine are found this way; for
-any other, give `--connect` its URL. `--local` skips the search and always runs in-process, taking
-the backend flags; it can't go with `--connect`.
+any other, give `--connect` its URL, or name it in `[remotes]`. `--local` skips the search and
+always runs in-process, taking the backend flags; it can't go with `--connect` or `--remote`.
+
+**Named remotes.** Each `[remotes.<name>]` table in your `config.toml` names a control plane, and
+`orbit chat --remote <name>` connects to it as `--connect` would with its settings:
+
+```toml
+[remotes.work]
+url = "wss://orbit.example.lan:7433/"  # wss://, or ws:// to loopback
+ca = "tls/work-ca.pem"                  # verifies the server (default: the system's trusted CAs)
+token_file = "work-token"               # the token to show (default: token in the config directory)
+# or, for a server serving mTLS, a client certificate rather than the token:
+# cert = "tls/laptop.pem"
+# key = "tls/laptop-key.pem"            # chmod 600
+```
+
+A relative path is taken from the config directory, and `~` is expanded. `--ca` given beside
+`--remote` replaces the remote's `ca`, and `--token-file`, or `--cert` and `--key`, its token or
+certificate. A remote not configured stops it with status 2, listing the names that are (or saying
+none are); so do an unknown key in a remote, a `url` that isn't `wss://` or `ws://`, `cert`
+without `key` or the reverse, or `cert` and `key` with `token_file`, each naming the file and the
+key. `--remote` can't go with `--connect`, and the backend flags belong on `orbit serve` as they do
+with `--connect`.
+
+**Two machines.** To run the control plane on a server, `orbit.example.lan` (192.168.1.20), and
+chat from a laptop: on the server, make the CA and the server's certificate as in **TLS** above,
+in `~/.config/orbit/tls`, and serve with
+
+```toml
+# The server's ~/.config/orbit/config.toml
+[server]
+host = "0.0.0.0"
+tls = "tls"   # or "mtls", with client_ca
+cert = "/home/me/.config/orbit/tls/server.pem"
+key = "/home/me/.config/orbit/tls/server-key.pem"
+ca = "/home/me/.config/orbit/tls/ca.pem"
+# client_ca = "/home/me/.config/orbit/tls/ca.pem"   # for mtls
+```
+
+and `orbit serve`, which makes the token on first start. Then copy `ca.pem` and, under `tls`, the
+token to the laptop over a trusted channel, keeping both readable by you alone:
+
+```sh
+# On the laptop.
+mkdir -p ~/.config/orbit/tls && chmod 700 ~/.config/orbit
+scp orbit.example.lan:.config/orbit/tls/ca.pem ~/.config/orbit/tls/work-ca.pem
+scp orbit.example.lan:.config/orbit/token ~/.config/orbit/work-token   # under tls
+chmod 600 ~/.config/orbit/work-token
+```
+
+Under `mtls` copy no token: make the laptop's key and certificate as in **Client certificates**
+above, its key staying on the laptop and only `laptop.csr` and `laptop.pem` travelling. On the
+laptop, name the server:
+
+```toml
+# The laptop's ~/.config/orbit/config.toml
+[remotes.work]
+url = "wss://orbit.example.lan:7433/"
+ca = "tls/work-ca.pem"
+token_file = "work-token"    # under tls
+# cert = "tls/laptop.pem"    # under mtls, instead of token_file
+# key = "tls/laptop-key.pem"
+```
+
+and connect with `orbit chat --remote work`. In all, the server keeps `ca.pem`, `server.pem`,
+`server-key.pem` and the token (`ca-key.pem` is best kept off it); the laptop keeps its copy of
+`ca.pem`, and the token's copy under `tls`, or `laptop.pem` and `laptop-key.pem` under `mtls`.
 
 ### Owning the repository
 
@@ -1195,7 +1261,7 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     token it checks, read afresh for each frontend, and rotates it, `tls_warnings` (in `tls`) checks
     the server's TLS settings, key and certificate before it listens, with the messages in
     `tls_messages`, `RunFile` (in `run_file`) says where it listens, both written through
-    `private_files`, and `user_config` reads `[storage]` and `[server]`.
+    `private_files`, and `user_config` reads `[storage]`, `[server]` and `[remotes]`.
   - `application`: `AgentSession` (in `session`) implements `Session`: it takes commands, asks
     the domain what follows, drives the ports and publishes events into the `Outbox` (in
     `outbox`), which stamps each with its `seq` and the session it belongs to. `Tasks` (in
@@ -1248,7 +1314,7 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     `agents`: agent ids and tokens), `roles` (built-in roles, given their instructions, and the
     tasks orbit queues in them), `config` (`OrbitConfig`: the limits, roles, verification steps
     and setup a project file sets over the built-in defaults) and `config_errors` (`ConfigError`,
-    and what's wrong with an invalid file or proposal), `server` (`ServerSettings`, the user config's `[server]` with its `TlsSettings`, which files each TLS mode needs, where now falls in a certificate's validity, and which hosts are loopback), `ownership` (`WorkspaceOwner`, who a workspace lock names, and the read-only note), `checks` (the verification steps, the
+    and what's wrong with an invalid file or proposal), `server` (`ServerSettings`, the user config's `[server]` with its `TlsSettings`, which files each TLS mode needs, where now falls in a certificate's validity, and which hosts are loopback), `remotes` (`RemoteSettings`, a `[remotes.<name>]` table, and which credentials go together), `ownership` (`WorkspaceOwner`, who a workspace lock names, and the read-only note), `checks` (the verification steps, the
     setup step that makes a fresh worktree ready, and the checks a configurator proposes), the
     `Catalog` (in `catalog`: the workspace and its sessions, the agents' roles, the triggers and
     the lanes), `ReviewPlanner` (in `reviews`: when to review, batches, rounds and caps), commit

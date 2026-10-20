@@ -26,6 +26,7 @@ from orbit.agent.domain.checks import ChecksProposal, Setup
 from orbit.agent.domain.config import OrbitConfig
 from orbit.agent.domain.config_errors import ConfigError
 from orbit.agent.domain.ownership import WorkspaceOwner
+from orbit.agent.domain.remotes import RemoteSettings
 from orbit.agent.domain.roles import Role
 from orbit.agent.domain.server import ServerSettings, TlsMode
 from orbit.agent.domain.storage import StorageSettings
@@ -49,6 +50,7 @@ from orbit.agent.external.token_file import TokenError, TokenFile
 from orbit.agent.external.usage_api import UsageApi
 from orbit.agent.external.user_config import (
     USER_CONFIG_FILE,
+    read_remotes,
     read_server,
     read_storage,
 )
@@ -77,6 +79,7 @@ __all__ = [
     "ProposalDecision",
     "ProposalReview",
     "RecoveryFailed",
+    "RemoteSettings",
     "Role",
     "RunFile",
     "ServerSettings",
@@ -102,6 +105,7 @@ __all__ = [
     "open_workspace_store",
     "orbit_dir",
     "read_config",
+    "read_remotes",
     "read_server",
     "read_storage",
     "resolve_config_dir",
