@@ -52,6 +52,7 @@ class UsageMonitor:
         self._wake = asyncio.Event()
         self._background = Background("usage", publish)
         self._latest: UsageChanged | None = None
+        self._closed = False
 
     @property
     def latest(self) -> UsageChanged | None:
@@ -71,11 +72,15 @@ class UsageMonitor:
             self._wake.set()
 
     async def close(self) -> None:
+        self._closed = True
         await self._background.close()
 
     async def _run(self) -> None:
         while True:
             outcome = await self._fetch()
+            # A fetch can swallow the cancel that closing sends, and return as if never sent.
+            if self._closed:
+                return
             self._latest = usage_event(outcome, self._limits, self._now())
             await self._publish(self._latest)
             if isinstance(outcome, UsageReport):

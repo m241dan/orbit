@@ -4,6 +4,9 @@ import os
 
 import pytest
 
+from orbit.agent.domain.usage import UsageFetch, UsageUnavailable
+from orbit.agent.external.usage_api import UsageApi
+
 # The tab strip's underline slides for 0.3 s on each activation, and the pilot waits for it;
 # tests check where it lands, not the slide. Set before Textual is imported, which reads it then.
 os.environ.setdefault("TEXTUAL_ANIMATIONS", "none")
@@ -20,3 +23,21 @@ def pytest_xdist_auto_num_workers(config: pytest.Config) -> int | None:
     if os.environ.get("PYTEST_XDIST_AUTO_NUM_WORKERS"):
         return None
     return 2 * (os.process_cpu_count() or 1)
+
+
+OFFLINE = "offline in tests"
+"""Why the usage limits the CLI fetches in tests are unavailable."""
+
+
+class OfflineUsageApi(UsageApi):
+    """The usage API, never fetching: a real fetch would use the login of whoever runs the
+    tests, and the network."""
+
+    async def __call__(self) -> UsageFetch:
+        return UsageUnavailable(OFFLINE)
+
+
+@pytest.fixture(autouse=True)
+def offline_usage(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Have the CLI fetch its usage limits with :class:`OfflineUsageApi`."""
+    monkeypatch.setattr("orbit.cli.backend.UsageApi", OfflineUsageApi)

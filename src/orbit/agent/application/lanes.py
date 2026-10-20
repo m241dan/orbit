@@ -58,11 +58,18 @@ class Background:
             self._task.cancel()
 
     async def close(self) -> None:
-        """Cancel the work, if any, and wait for it to stop."""
+        """Cancel the work, if any, and wait for it to stop; cancelled meanwhile, this is
+        cancelled once it has."""
         self.cancel()
-        if self._task is not None:
-            with suppress(asyncio.CancelledError):
-                await self._task
+        if self._task is None:
+            return
+        try:
+            await self._task
+        except asyncio.CancelledError:
+            # The work's own cancel ends here; one meant for this close goes on.
+            task = asyncio.current_task()
+            if task is not None and task.cancelling():
+                raise
 
     async def _guarded(self, work: Coroutine[Any, Any, object]) -> None:
         try:

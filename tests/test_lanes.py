@@ -104,6 +104,29 @@ async def test_close_when_never_started_does_nothing() -> None:
     assert not lane.running and events.empty()
 
 
+async def test_close_cancelled_while_the_work_stops_is_cancelled() -> None:
+    lane, _ = background()
+    started, stop = asyncio.Event(), asyncio.Event()
+
+    async def slow_to_stop() -> None:
+        try:
+            started.set()
+            await asyncio.Event().wait()
+        finally:
+            await stop.wait()
+
+    lane.start(slow_to_stop())
+    await started.wait()
+    closing = asyncio.create_task(lane.close())
+    await asyncio.sleep(0)
+    closing.cancel()
+    stop.set()
+
+    with pytest.raises(asyncio.CancelledError):
+        await closing
+    assert not lane.running
+
+
 async def test_a_crash_is_reported_once_and_close_does_not_raise_it() -> None:
     lane, events = background()
 

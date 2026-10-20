@@ -2,6 +2,7 @@
 
 import asyncio
 from collections.abc import AsyncIterator
+from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -200,6 +201,30 @@ async def test_close_cancels_the_loop_and_can_be_repeated() -> None:
     await watched.monitor.close()
     await watched.monitor.close()
     assert await watched.none()
+
+
+class Swallowing(Source):
+    """A fetch that never ends until cancelled, then swallows the cancel and returns a report,
+    as the usage API's was seen to."""
+
+    async def __call__(self) -> UsageFetch:
+        self.calls += 1
+        with suppress(asyncio.CancelledError):
+            await asyncio.Event().wait()
+        return UsageReport(LIMITS)
+
+
+async def test_close_stops_the_loop_when_the_source_swallows_the_cancel() -> None:
+    source = Swallowing()
+    watched = Monitored(source)
+    watched.monitor.start()
+    while source.calls == 0:
+        await asyncio.sleep(0)
+    closing = asyncio.create_task(watched.monitor.close())
+    await asyncio.wait([closing], timeout=1)
+    assert closing.done()
+    assert await watched.none()
+    assert source.calls == 1
 
 
 async def test_close_before_start_does_nothing() -> None:

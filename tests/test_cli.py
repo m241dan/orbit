@@ -41,6 +41,7 @@ from orbit.agent.application.ports import UsageSource
 from orbit.agent.domain.ownership import read_only_note
 from orbit.agent.domain.reviews import ReviewLimits
 from orbit.agent.domain.sessions import SessionRecord, Unreadable, default_name, record_json
+from orbit.agent.domain.usage import UsageUnavailable
 from orbit.cli import app
 from orbit.cli.errors import _exit_on
 from orbit.protocol import (
@@ -58,6 +59,7 @@ from orbit.protocol import (
     encode,
 )
 from tests.agent_fakes import greeted, queued, send, sole, startup_of, store_of
+from tests.conftest import OFFLINE
 
 runner = CliRunner()
 
@@ -1024,6 +1026,16 @@ def test_chat_shows_usage_limits_from_the_claude_login(
     [source] = usage_sources
     assert isinstance(source, UsageApi)
     assert source.credentials == Path("~/.claude/.credentials.json").expanduser()
+
+
+def test_chat_fetches_no_real_usage_in_tests(
+    launched: list[AgentSession], usage_sources: list[UsageSource | None]
+) -> None:
+    # A real fetch would use the login of whoever runs the tests, and the network.
+    assert runner.invoke(app, ["chat"]).exit_code == 0
+    [source] = usage_sources
+    assert isinstance(source, UsageApi)
+    assert asyncio.run(source()) == UsageUnavailable(OFFLINE)
 
 
 def test_chat_can_turn_usage_limits_off(
