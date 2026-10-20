@@ -20,7 +20,8 @@ from orbit.agent.domain.sessions import (
 from orbit.agent.external import session_import, sqlite_schema
 from orbit.agent.external.session_import import Imported, import_session_files, imported_note
 from orbit.agent.external.session_locks import SessionLocks
-from orbit.agent.external.sqlite_store import NewRows, SqliteStore
+from orbit.agent.external.sqlite_store import NewRows
+from tests.store_views import OwnView, open_view
 
 WHEN = datetime(2026, 10, 17, 14, 30, tzinfo=UTC)
 
@@ -44,10 +45,10 @@ def legacy(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-async def store(tmp_path: Path) -> AsyncIterator[SqliteStore]:
+async def store(tmp_path: Path) -> AsyncIterator[OwnView]:
     workspace = tmp_path / "project"
     workspace.mkdir()
-    opened = await SqliteStore.open(tmp_path / "state", str(workspace))
+    opened = await open_view(tmp_path / "state", workspace)
     yield opened
     await opened.close()
 
@@ -100,13 +101,11 @@ def first(count: int) -> Imported:
     return Imported(count, "sessions.imported")
 
 
-async def ids(store: SqliteStore) -> list[str]:
+async def ids(store: OwnView) -> list[str]:
     return [stored.id for stored in await store.sessions()]
 
 
-async def test_the_files_are_imported_and_the_folder_renamed(
-    store: SqliteStore, legacy: Path
-) -> None:
+async def test_the_files_are_imported_and_the_folder_renamed(store: OwnView, legacy: Path) -> None:
     assert await import_session_files(store, legacy) == first(3)
     assert await ids(store) == ["bad", "one", "two"]
     assert await store.load("one") == record("one")
@@ -118,7 +117,7 @@ async def test_the_files_are_imported_and_the_folder_renamed(
 
 
 async def test_an_unreadable_file_is_listed_unreadable_with_its_text_kept(
-    store: SqliteStore, legacy: Path, tmp_path: Path
+    store: OwnView, legacy: Path, tmp_path: Path
 ) -> None:
     await import_session_files(store, legacy)
     bad = next(stored for stored in await store.sessions() if stored.id == "bad")
@@ -129,7 +128,7 @@ async def test_an_unreadable_file_is_listed_unreadable_with_its_text_kept(
 
 
 async def test_a_file_whose_record_has_another_id_is_imported_under_the_files_name(
-    store: SqliteStore, legacy: Path
+    store: OwnView, legacy: Path
 ) -> None:
     (legacy / "sessions" / "copy.json").write_text(record_json(record("one", name="Copy")))
     assert await import_session_files(store, legacy) == first(4)
@@ -141,7 +140,7 @@ async def test_a_file_whose_record_has_another_id_is_imported_under_the_files_na
 
 
 async def test_a_record_whose_id_isnt_a_file_name_can_still_be_listed_and_loaded(
-    store: SqliteStore, legacy: Path
+    store: OwnView, legacy: Path
 ) -> None:
     (legacy / "sessions" / "x.json").write_text(record_json(record("../x")))
     assert await import_session_files(store, legacy) == first(4)
@@ -149,9 +148,7 @@ async def test_a_record_whose_id_isnt_a_file_name_can_still_be_listed_and_loaded
     assert isinstance(await store.load("x"), SessionRecord)
 
 
-async def test_a_file_that_isnt_utf_8_is_listed_unreadable(
-    store: SqliteStore, legacy: Path
-) -> None:
+async def test_a_file_that_isnt_utf_8_is_listed_unreadable(store: OwnView, legacy: Path) -> None:
     text = record_json(record("latin", name="Caf\u00e9"))
     (legacy / "sessions" / "latin.json").write_bytes(text.encode("latin-1"))
     assert await import_session_files(store, legacy) == first(4)
@@ -160,9 +157,7 @@ async def test_a_file_that_isnt_utf_8_is_listed_unreadable(
     assert isinstance(await store.load("latin"), Unreadable)
 
 
-async def test_without_a_sessions_folder_nothing_is_done(
-    store: SqliteStore, tmp_path: Path
-) -> None:
+async def test_without_a_sessions_folder_nothing_is_done(store: OwnView, tmp_path: Path) -> None:
     (tmp_path / "reviews.json").write_text(review_count_json(3))
     assert await import_session_files(store, tmp_path) is None
     assert await ids(store) == []
@@ -171,7 +166,7 @@ async def test_without_a_sessions_folder_nothing_is_done(
 
 
 async def test_without_a_review_count_only_the_sessions_are_imported(
-    store: SqliteStore, legacy: Path
+    store: OwnView, legacy: Path
 ) -> None:
     (legacy / "reviews.json").unlink()
     await store.save_review_count(5)
@@ -180,7 +175,7 @@ async def test_without_a_review_count_only_the_sessions_are_imported(
 
 
 async def test_saved_sessions_and_review_count_are_never_overwritten(
-    store: SqliteStore, legacy: Path
+    store: OwnView, legacy: Path
 ) -> None:
     await store.save(record("one", name="Mine"))
     await store.save_review_count(7)
@@ -190,14 +185,14 @@ async def test_saved_sessions_and_review_count_are_never_overwritten(
     assert await store.review_count() == 7
 
 
-async def test_importing_twice_imports_once(store: SqliteStore, legacy: Path) -> None:
+async def test_importing_twice_imports_once(store: OwnView, legacy: Path) -> None:
     assert await import_session_files(store, legacy) == first(3)
     assert await import_session_files(store, legacy) is None
     assert await ids(store) == ["bad", "one", "two"]
 
 
 async def test_a_session_open_in_another_orbit_blocks_the_import(
-    store: SqliteStore, legacy: Path
+    store: OwnView, legacy: Path
 ) -> None:
     (legacy / "sessions" / "free.lock").touch()
     with (
@@ -212,7 +207,7 @@ async def test_a_session_open_in_another_orbit_blocks_the_import(
 
 
 async def test_the_files_are_read_only_once_no_orbit_has_a_session_open(
-    monkeypatch: pytest.MonkeyPatch, store: SqliteStore, legacy: Path
+    monkeypatch: pytest.MonkeyPatch, store: OwnView, legacy: Path
 ) -> None:
     (legacy / "sessions" / "one.lock").touch()
     held_elsewhere = SessionLocks.held_elsewhere
@@ -229,7 +224,7 @@ async def test_the_files_are_read_only_once_no_orbit_has_a_session_open(
 
 
 async def test_a_folder_that_cant_be_renamed_blocks_the_import(
-    store: SqliteStore, legacy: Path
+    store: OwnView, legacy: Path
 ) -> None:
     with (
         read_only(legacy),
@@ -241,7 +236,7 @@ async def test_a_folder_that_cant_be_renamed_blocks_the_import(
 
 
 async def test_a_review_count_that_cant_be_renamed_puts_the_folder_back(
-    monkeypatch: pytest.MonkeyPatch, store: SqliteStore, legacy: Path
+    monkeypatch: pytest.MonkeyPatch, store: OwnView, legacy: Path
 ) -> None:
     failing_rename(monkeypatch, "reviews.json")
     with pytest.raises(ImportBlocked, match=r"Couldn't rename .*legacy/reviews\.json to"):
@@ -253,7 +248,7 @@ async def test_a_review_count_that_cant_be_renamed_puts_the_folder_back(
 
 
 async def test_earlier_imported_files_are_kept_and_the_new_ones_get_fresh_names(
-    store: SqliteStore, legacy: Path
+    store: OwnView, legacy: Path
 ) -> None:
     (legacy / "sessions.imported").mkdir()
     (legacy / "sessions.imported" / "old.json").write_text("earlier")
@@ -268,7 +263,7 @@ async def test_earlier_imported_files_are_kept_and_the_new_ones_get_fresh_names(
 
 
 async def test_after_importing_beside_earlier_imported_files_another_import_does_nothing(
-    store: SqliteStore, legacy: Path
+    store: OwnView, legacy: Path
 ) -> None:
     (legacy / "sessions.imported").mkdir()
     (legacy / "reviews.json.imported").write_text("earlier")
@@ -283,7 +278,7 @@ async def test_after_importing_beside_earlier_imported_files_another_import_does
 
 
 async def test_an_empty_earlier_imported_folder_or_a_dangling_link_is_not_replaced(
-    store: SqliteStore, legacy: Path
+    store: OwnView, legacy: Path
 ) -> None:
     (legacy / "sessions.imported").mkdir()
     (legacy / "sessions.imported-2").symlink_to(legacy / "nowhere")
@@ -293,7 +288,7 @@ async def test_an_empty_earlier_imported_folder_or_a_dangling_link_is_not_replac
     assert (legacy / "sessions.imported-3" / "one.json").exists()
 
 
-async def test_a_third_import_takes_the_next_free_name(store: SqliteStore, legacy: Path) -> None:
+async def test_a_third_import_takes_the_next_free_name(store: OwnView, legacy: Path) -> None:
     for name in ("sessions.imported", "sessions.imported-2"):
         (legacy / name).mkdir()
         (legacy / name / "old.json").write_text(name)
@@ -309,7 +304,7 @@ async def test_a_third_import_takes_the_next_free_name(store: SqliteStore, legac
 
 
 async def test_a_folder_another_orbit_imports_before_the_rename_is_left_to_it(
-    monkeypatch: pytest.MonkeyPatch, store: SqliteStore, legacy: Path
+    monkeypatch: pytest.MonkeyPatch, store: OwnView, legacy: Path
 ) -> None:
     retired = session_import._retired
 
@@ -328,7 +323,7 @@ async def test_a_folder_another_orbit_imports_before_the_rename_is_left_to_it(
 
 
 async def test_a_folder_another_orbit_imports_before_the_check_is_left_to_it(
-    monkeypatch: pytest.MonkeyPatch, store: SqliteStore, legacy: Path
+    monkeypatch: pytest.MonkeyPatch, store: OwnView, legacy: Path
 ) -> None:
     checked = session_import._checked
 
@@ -345,7 +340,7 @@ async def test_a_folder_another_orbit_imports_before_the_check_is_left_to_it(
 
 
 async def test_a_failing_commit_puts_the_folder_and_review_count_back(
-    monkeypatch: pytest.MonkeyPatch, store: SqliteStore, legacy: Path
+    monkeypatch: pytest.MonkeyPatch, store: OwnView, legacy: Path
 ) -> None:
     failing_commit(monkeypatch)
     with pytest.raises(ImportBlocked, match=r"sessions in .*legacy/sessions: disk I/O error"):
@@ -359,7 +354,7 @@ async def test_a_failing_commit_puts_the_folder_and_review_count_back(
 
 
 async def test_a_file_that_cant_be_renamed_back_blocks_the_import_naming_both(
-    monkeypatch: pytest.MonkeyPatch, store: SqliteStore, legacy: Path
+    monkeypatch: pytest.MonkeyPatch, store: OwnView, legacy: Path
 ) -> None:
     failing_commit(monkeypatch)
     failing_rename(monkeypatch, "reviews.json.imported")
@@ -374,7 +369,7 @@ async def test_a_file_that_cant_be_renamed_back_blocks_the_import_naming_both(
     assert (legacy / "reviews.json.imported").exists()
 
 
-async def test_a_file_that_cant_be_read_blocks_the_import(store: SqliteStore, legacy: Path) -> None:
+async def test_a_file_that_cant_be_read_blocks_the_import(store: OwnView, legacy: Path) -> None:
     (legacy / "sessions" / "folder.json").mkdir()
     with pytest.raises(ImportBlocked, match=r"Couldn't read the sessions in .*legacy/sessions:"):
         await import_session_files(store, legacy)
@@ -383,7 +378,7 @@ async def test_a_file_that_cant_be_read_blocks_the_import(store: SqliteStore, le
 
 
 async def test_a_folder_that_cant_be_checked_blocks_the_import(
-    store: SqliteStore, legacy: Path
+    store: OwnView, legacy: Path
 ) -> None:
     (legacy / "sessions").chmod(0o300)
     try:
@@ -403,7 +398,7 @@ async def test_a_database_that_fails_blocks_the_import(
     monkeypatch.setattr(sqlite_schema, "BUSY_TIMEOUT", 0.05)
     workspace = tmp_path / "project"
     workspace.mkdir()
-    store = await SqliteStore.open(tmp_path / "state", str(workspace))
+    store = await open_view(tmp_path / "state", workspace)
     try:
         with closing(sqlite3.connect(tmp_path / "state" / "orbit.db", isolation_level=None)) as db:
             db.execute("BEGIN IMMEDIATE")  # Another writer holds the database.

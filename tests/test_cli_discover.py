@@ -14,10 +14,11 @@ import pytest
 import typer
 from typer.testing import CliRunner
 
-from orbit.agent import LocalTls, RunFile, SqliteStore
+from orbit.agent import LocalTls, RunFile
 from orbit.cli import app
 from orbit.client import TokenRejected
 from orbit.protocol import Command, NewSession
+from tests.store_views import open_view
 from tests.tls_certs import ServerFiles, make_ca, make_client
 
 runner = CliRunner()
@@ -138,7 +139,7 @@ def serving(
     default) serves ``workspace`` at ``url``, verified as ``local`` says if given."""
 
     async def registered() -> str:
-        store = await SqliteStore.open(state, str(workspace))
+        store = await open_view(state, workspace)
         await store.close()
         return store.workspace_id
 

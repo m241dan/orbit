@@ -1,4 +1,5 @@
-"""Saved sessions and their events' log in one SQLite database per user, keyed by workspace.
+"""Saved sessions and their events' log in one SQLite database per user, keyed by workspace, and
+a view of it for each workspace.
 
 The database is ``orbit.db`` in the state directory, in WAL mode. One connection serves it, owned
 by a single thread: every database call runs there, a statement or a transaction at a time, so a
@@ -108,8 +109,9 @@ def find_workspace_id(state_dir: Path, workspace: str) -> str | None:
 
 
 class SqliteStore:
-    """Saved sessions, their events' log and the review count of one workspace, in the state
-    directory's database.
+    """The state directory's database, shared by every workspace an orbit serves: each
+    workspace's saved sessions, events' log and review count are reached through its
+    :meth:`workspace_view`, and the workspaces themselves through a ``WorkspaceRegistry``.
 
     Each stands for one orbit: the session locks it holds are its own, even against another
     ``SqliteStore`` in the same process. Open one with :meth:`open` and :meth:`close` it when
@@ -124,22 +126,19 @@ class SqliteStore:
         self._closed = False
         # The highest seq ever logged when it opened or was last read, or appended since.
         self._max_seq = 0
-        # Both are the workspace's once the store is open.
-        self._workspace = ""
-        self._lock_dir = state_dir / LOCKS
-        self._locks = SessionLocks(self._lock_dir)
+        # Each workspace's session locks, by its id, made as they're first used.
+        self._locks: dict[str, SessionLocks] = {}
 
     @classmethod
-    async def open(cls, state_dir: Path | str, workspace: str) -> Self:
-        """The store in ``state_dir`` for the workspace at ``workspace``, creating the directory,
-        the database and the workspace's entry as needed.
+    async def open(cls, state_dir: Path | str) -> Self:
+        """The store in ``state_dir``, creating the directory and the database as needed.
 
         Raises :class:`StoreError`, naming the file, when the database can't be opened, is newer
         than this orbit, or can't be upgraded.
         """
         store = cls(Path(state_dir))
         try:
-            await store._call(store._connect, workspace)
+            await store._call(store._connect)
         except BaseException:
             await store.close()
             raise
@@ -162,38 +161,55 @@ class SqliteStore:
         return store
 
     @property
-    def workspace_id(self) -> str:
-        """The id of the store's workspace; empty until the store is open."""
-        return self._workspace
+    def state_dir(self) -> Path:
+        """The state directory the database is in."""
+        return self._state_dir
+
+    def workspace_view(self, workspace_id: str) -> "WorkspaceStore":
+        """The saved sessions, events' log, review count and session locks of the workspace
+        ``workspace_id``, in this store."""
+        return WorkspaceStore(self, workspace_id)
 
     async def close(self) -> None:
         """Let go of this store's locks, and close the database once the calls in flight are
         done, leaving no thread running; once closed, it stays closed."""
-        self._locks.close()
+        for locks in self._locks.values():
+            locks.close()
         if not self._closed:
             self._closed = True
             self._executor.submit(self._disconnect)
         await asyncio.shield(asyncio.to_thread(self._executor.shutdown))
 
-    async def save(self, record: SessionRecord) -> None:
+    async def run[T](self, message: str, function: Callable[[sqlite3.Connection], T]) -> T:
+        """What ``function`` returns given the connection, run on the database's thread.
+
+        Raises :class:`StoreError`, saying ``message`` and the database, when the database
+        fails, as once the store is closed.
+        """
+        try:
+            return await self._call(lambda: function(self._db))
+        except sqlite3.Error as error:
+            raise StoreError(self._message(message, error)) from error
+
+    async def save(self, workspace: str, record: SessionRecord) -> None:
         check_session_id(record.id)
-        await self._or_raise(
-            f"Couldn't save the session {record.id} to", self._save, record, failed=True
-        )
+        message = f"Couldn't save the session {record.id} to"
+        await self._or_raise(message, self._save, workspace, record, failed=True)
 
-    async def load(self, session_id: str) -> SessionRecord | Unreadable:
+    async def load(self, workspace: str, session_id: str) -> SessionRecord | Unreadable:
         check_session_id(session_id)
-        return await self._read_or(self._unreadable, self._load, session_id)
+        return await self._read_or(self._unreadable, self._load, workspace, session_id)
 
-    async def sessions(self) -> list[StoredSession]:
-        rows = await self._or_raise("Couldn't list the sessions in", self._rows)
-        return await asyncio.to_thread(self._listed, rows)
+    async def sessions(self, workspace: str) -> list[StoredSession]:
+        rows = await self._or_raise("Couldn't list the sessions in", self._rows, workspace)
+        locks = self._locks_of(workspace)
+        return await asyncio.to_thread(self._listed, workspace, locks, rows)
 
-    async def delete(self, session_id: str) -> None:
+    async def delete(self, workspace: str, session_id: str) -> None:
         check_session_id(session_id)
         message = f"Couldn't delete the session {session_id} from"
-        await self._or_raise(message, self._delete, session_id, failed=True)
-        await self._locks.remove(session_id)
+        await self._or_raise(message, self._delete, workspace, session_id, failed=True)
+        await self._locks_of(workspace).remove(session_id)
 
     def max_seq(self) -> int:
         """The highest ``seq`` ever logged, across workspaces, when the store opened or
@@ -203,85 +219,96 @@ class SqliteStore:
     async def latest_seq(self) -> int | None:
         return await self._read_or(lambda _: None, self._latest_seq)
 
-    async def append(self, session_id: str, envelopes: Sequence[EventEnvelope]) -> int:
+    async def append(
+        self, workspace: str, session_id: str, envelopes: Sequence[EventEnvelope]
+    ) -> int:
         check_session_id(session_id)
         message = f"Couldn't save the events of the session {session_id} to"
-        return await self._or_raise(message, self._append, session_id, envelopes, failed=True)
+        return await self._or_raise(
+            message, self._append, workspace, session_id, envelopes, failed=True
+        )
 
-    async def recent(self, session_id: str, limit: int) -> list[EventEnvelope]:
-        """The last ``limit`` events logged of the session ``session_id``, oldest first, but for
-        those of types this orbit doesn't know; none when they can't be read."""
+    async def recent(self, workspace: str, session_id: str, limit: int) -> list[EventEnvelope]:
+        """The last ``limit`` events logged of the session ``session_id`` in the workspace
+        ``workspace``, oldest first, but for those of types this orbit doesn't know; none when
+        they can't be read."""
         check_session_id(session_id)
-        return await self._read_or(lambda _: [], self._recent, session_id, limit)
+        return await self._read_or(lambda _: [], self._recent, workspace, session_id, limit)
 
     async def before(
-        self, session_id: str, before_seq: int, limit: int
+        self, workspace: str, session_id: str, before_seq: int, limit: int
     ) -> tuple[list[EventEnvelope], bool]:
-        """The last ``limit`` events logged of the session ``session_id`` before ``before_seq``,
-        oldest first, but for those of types this orbit doesn't know, and whether earlier ones
-        remain. Raises ``RuntimeError`` when they can't be read."""
+        """The last ``limit`` events logged of the session ``session_id`` in the workspace
+        ``workspace`` before ``before_seq``, oldest first, but for those of types this orbit
+        doesn't know, and whether earlier ones remain. Raises ``RuntimeError`` when they can't
+        be read."""
         check_session_id(session_id)
         message = f"Couldn't read the events of the session {session_id} from"
-        return await self._or_raise(message, self._before, session_id, before_seq, limit)
+        return await self._or_raise(message, self._before, workspace, session_id, before_seq, limit)
 
-    async def after(self, session_id: str, after_seq: int) -> list[EventEnvelope] | None:
-        """The events logged of the session ``session_id`` after ``after_seq``, oldest first,
-        but for those of types this orbit doesn't know; ``None`` when they can't be read."""
+    async def after(
+        self, workspace: str, session_id: str, after_seq: int
+    ) -> list[EventEnvelope] | None:
+        """The events logged of the session ``session_id`` in the workspace ``workspace`` after
+        ``after_seq``, oldest first, but for those of types this orbit doesn't know; ``None``
+        when they can't be read."""
         check_session_id(session_id)
-        return await self._read_or(lambda _: None, self._after, session_id, after_seq)
+        return await self._read_or(lambda _: None, self._after, workspace, session_id, after_seq)
 
-    async def bounds(self, session_id: str, since: int) -> LogBounds | None:
-        """Where the log of the session ``session_id`` stands in its workspace's, for a frontend
-        that saw the events up to ``since``; ``None`` when that can't be read."""
+    async def bounds(self, workspace: str, session_id: str, since: int) -> LogBounds | None:
+        """Where the log of the session ``session_id`` stands in the workspace ``workspace``'s,
+        for a frontend that saw the events up to ``since``; ``None`` when that can't be read."""
         check_session_id(session_id)
-        return await self._read_or(lambda _: None, self._bounds, session_id, since)
+        return await self._read_or(lambda _: None, self._bounds, workspace, session_id, since)
 
-    async def trim(self, session_id: str, limit: int, target: int) -> None:
+    async def trim(self, workspace: str, session_id: str, limit: int, target: int) -> None:
         check_session_id(session_id)
         message = f"Couldn't trim the events of the session {session_id} in"
-        await self._or_raise(message, self._trim, session_id, limit, target)
+        await self._or_raise(message, self._trim, workspace, session_id, limit, target)
 
-    async def trimmed(self, session_id: str) -> bool:
+    async def trimmed(self, workspace: str, session_id: str) -> bool:
         check_session_id(session_id)
-        return await self._read_or(lambda _: False, self._trimmed, session_id)
+        return await self._read_or(lambda _: False, self._trimmed, workspace, session_id)
 
-    async def forget(self, session_id: str) -> None:
+    async def forget(self, workspace: str, session_id: str) -> None:
         check_session_id(session_id)
         message = f"Couldn't delete the events of the session {session_id} from"
-        await self._or_raise(message, self._forget, session_id)
+        await self._or_raise(message, self._forget, workspace, session_id)
 
-    async def acquire(self, session_id: str) -> bool:
-        """Lock the session ``session_id`` for this orbit; returns ``False`` when another
-        running orbit has it locked.
+    async def acquire(self, workspace: str, session_id: str) -> bool:
+        """Lock the session ``session_id`` of the workspace ``workspace`` for this orbit;
+        returns ``False`` when another running orbit has it locked.
 
         Raises ``RuntimeError`` when the lock can't be taken, as once the store is closed.
         """
-        return await self._locks.acquire(session_id)
+        return await self._locks_of(workspace).acquire(session_id)
 
-    async def release(self, session_id: str) -> None:
-        await self._locks.release(session_id)
+    async def release(self, workspace: str, session_id: str) -> None:
+        await self._locks_of(workspace).release(session_id)
 
-    async def review_count(self) -> int:
-        return await self._or_raise("Couldn't read the review count from", self._review_count)
+    async def review_count(self, workspace: str) -> int:
+        message = "Couldn't read the review count from"
+        return await self._or_raise(message, self._review_count, workspace)
 
-    async def save_review_count(self, count: int) -> None:
+    async def save_review_count(self, workspace: str, count: int) -> None:
         message = "Couldn't save the review count to"
-        await self._or_raise(message, self._save_review_count, count, failed=True)
+        await self._or_raise(message, self._save_review_count, workspace, count, failed=True)
 
     async def insert_new(
         self,
+        workspace: str,
         reading: Callable[[], AbstractContextManager[NewRows]],
         committing: Callable[[], AbstractContextManager[None]],
     ) -> int:
-        """Save the session rows ``reading()`` gives whose ids aren't saved yet and, unless one
-        is, its review count (if any), in one transaction committed inside ``committing()``, all
-        while ``reading()`` is held, and rolled back if anything fails; returns how many sessions
-        it saved.
+        """Save, in the workspace ``workspace``, the session rows ``reading()`` gives whose ids
+        aren't saved yet and, unless one is, its review count (if any), in one transaction
+        committed inside ``committing()``, all while ``reading()`` is held, and rolled back if
+        anything fails; returns how many sessions it saved.
 
         Raises ``sqlite3.Error`` when the database fails, and whatever ``reading`` or
         ``committing`` raises.
         """
-        return await self._call(self._insert_new, reading, committing)
+        return await self._call(self._insert_new, workspace, reading, committing)
 
     async def backup(self, target: Path) -> None:
         """Copy the database to ``target``, owner read-write, replacing any file there only once
@@ -346,11 +373,23 @@ class SqliteStore:
         assert self._connection is not None, "The store isn't open."
         return self._connection
 
-    def _connect(self, workspace: str) -> None:
-        self._connection, self._workspace = open_database(self._database, workspace)
+    def _locks_of(self, workspace: str) -> SessionLocks:
+        """The workspace ``workspace``'s session locks, made if they aren't yet: closed, taking
+        none, once the store is."""
+        if workspace not in self._locks:
+            locks = SessionLocks(self._lock_dir(workspace))
+            if self._closed:
+                locks.close()
+            self._locks[workspace] = locks
+        return self._locks[workspace]
+
+    def _lock_dir(self, workspace: str) -> Path:
+        """The directory of the workspace ``workspace``'s session locks."""
+        return self._state_dir / LOCKS / workspace
+
+    def _connect(self) -> None:
+        self._connection = open_database(self._database)
         self._max_seq = _max_seq(self._connection)
-        self._lock_dir = self._state_dir / LOCKS / self._workspace
-        self._locks = SessionLocks(self._lock_dir)
 
     def _connect_existing(self) -> None:
         self._connection = open_existing(self._database)
@@ -372,7 +411,7 @@ class SqliteStore:
         if self._connection is not None:
             self._connection.close()
 
-    def _save(self, record: SessionRecord) -> None:
+    def _save(self, workspace: str, record: SessionRecord) -> None:
         self._db.execute(
             """INSERT INTO sessions (workspace_id, id, name, last_active, record)
             VALUES (?, ?, ?, ?, ?)
@@ -380,7 +419,7 @@ class SqliteStore:
                 name = excluded.name, last_active = excluded.last_active, record = excluded.record
             """,
             (
-                self._workspace,
+                workspace,
                 record.id,
                 record.name,
                 record.last_active.isoformat(),
@@ -390,47 +429,48 @@ class SqliteStore:
 
     def _insert_new(
         self,
+        workspace: str,
         reading: Callable[[], AbstractContextManager[NewRows]],
         committing: Callable[[], AbstractContextManager[None]],
     ) -> int:
         with reading() as new, transaction(self._db, committing):
-            saved = sum(self._insert_row(row) for row in new.rows)
+            saved = sum(self._insert_row(workspace, row) for row in new.rows)
             if new.review_count is not None:
                 self._db.execute(
                     """INSERT INTO reviews (workspace_id, since_super) VALUES (?, ?)
                     ON CONFLICT (workspace_id) DO NOTHING""",
-                    (self._workspace, new.review_count),
+                    (workspace, new.review_count),
                 )
         return saved
 
-    def _insert_row(self, row: SessionRow) -> int:
+    def _insert_row(self, workspace: str, row: SessionRow) -> int:
         """Save ``row`` unless its id is saved; returns how many rows it saved."""
         cursor = self._db.execute(
             """INSERT INTO sessions (workspace_id, id, name, last_active, record)
             VALUES (?, ?, ?, ?, ?)
             ON CONFLICT (workspace_id, id) DO NOTHING""",
-            (self._workspace, row.id, row.name, row.last_active, row.record),
+            (workspace, row.id, row.name, row.last_active, row.record),
         )
         return cursor.rowcount
 
-    def _load(self, session_id: str) -> SessionRecord | Unreadable:
+    def _load(self, workspace: str, session_id: str) -> SessionRecord | Unreadable:
         row = self._db.execute(
             "SELECT record FROM sessions WHERE workspace_id = ? AND id = ?",
-            (self._workspace, session_id),
+            (workspace, session_id),
         ).fetchone()
         return Unreadable("it isn't saved") if row is None else parse_record(str(row[0]))
 
-    def _rows(self) -> list[tuple[str, str]]:
+    def _rows(self, workspace: str) -> list[tuple[str, str]]:
         rows = self._db.execute(
             "SELECT id, record FROM sessions WHERE workspace_id = ? ORDER BY id",
-            (self._workspace,),
+            (workspace,),
         )
         return [(str(session_id), str(text)) for session_id, text in rows]
 
-    def _append(self, session_id: str, envelopes: Sequence[EventEnvelope]) -> int:
+    def _append(self, workspace: str, session_id: str, envelopes: Sequence[EventEnvelope]) -> int:
         """Add ``envelopes`` to the session ``session_id``'s log, but for those whose ``seq`` it
         holds already, as when parked events are imported again; returns how many it added."""
-        rows = [_event_row(self._workspace, session_id, envelope) for envelope in envelopes]
+        rows = [_event_row(workspace, session_id, envelope) for envelope in envelopes]
         highest = max([0, *(envelope.seq for envelope in envelopes)])
         with transaction(self._db):
             inserted = [row for row in rows if self._insert_event(row)]
@@ -438,7 +478,7 @@ class SqliteStore:
             self._db.execute(
                 """INSERT INTO logs (workspace_id, session_id, size) VALUES (?, ?, ?)
                 ON CONFLICT (workspace_id, session_id) DO UPDATE SET size = size + excluded.size""",
-                (self._workspace, session_id, added),
+                (workspace, session_id, added),
             )
             self._db.execute("UPDATE high_water SET seq = max(seq, ?)", (highest,))
         self._max_seq = max(self._max_seq, highest)
@@ -459,45 +499,45 @@ class SqliteStore:
         )
         return cursor.rowcount > 0
 
-    def _recent(self, session_id: str, limit: int) -> list[EventEnvelope]:
+    def _recent(self, workspace: str, session_id: str, limit: int) -> list[EventEnvelope]:
         """The session ``session_id``'s last ``limit`` events, oldest first, but for those of
         types this orbit doesn't know."""
         rows = self._db.execute(
             """SELECT json FROM events WHERE workspace_id = ? AND session_id = ?
             ORDER BY seq DESC LIMIT ?""",
-            (self._workspace, session_id, limit),
+            (workspace, session_id, limit),
         )
         return _decoded([str(text) for (text,) in rows])
 
     def _before(
-        self, session_id: str, before_seq: int, limit: int
+        self, workspace: str, session_id: str, before_seq: int, limit: int
     ) -> tuple[list[EventEnvelope], bool]:
         """The session ``session_id``'s last ``limit`` events before ``before_seq``, oldest
         first, but for those of types this orbit doesn't know, and whether earlier ones remain."""
         rows = self._db.execute(
             """SELECT json FROM events WHERE workspace_id = ? AND session_id = ? AND seq < ?
             ORDER BY seq DESC LIMIT ?""",
-            (self._workspace, session_id, before_seq, limit + 1),
+            (workspace, session_id, before_seq, limit + 1),
         )
         texts = [str(text) for (text,) in rows]
         return _decoded(texts[:limit]), len(texts) > limit
 
-    def _after(self, session_id: str, after_seq: int) -> list[EventEnvelope]:
+    def _after(self, workspace: str, session_id: str, after_seq: int) -> list[EventEnvelope]:
         """The session ``session_id``'s events after ``after_seq``, oldest first, but for those
         of types this orbit doesn't know."""
         rows = self._db.execute(
             """SELECT json FROM events WHERE workspace_id = ? AND session_id = ? AND seq > ?
             ORDER BY seq DESC""",
-            (self._workspace, session_id, after_seq),
+            (workspace, session_id, after_seq),
         )
         return _decoded([str(text) for (text,) in rows])
 
-    def _trim(self, session_id: str, limit: int, target: int) -> None:
+    def _trim(self, workspace: str, session_id: str, limit: int, target: int) -> None:
         """Delete the session ``session_id``'s oldest events, if its log is over ``limit``
         bytes, keeping the latest that together come under ``target``, and always its newest:
         a newest event of ``target`` bytes or more is kept alone, over ``target`` or even
         ``limit`` until a later one is appended."""
-        key = (self._workspace, session_id)
+        key = (workspace, session_id)
         with transaction(self._db):
             row = self._db.execute(
                 "SELECT size FROM logs WHERE workspace_id = ? AND session_id = ?", key
@@ -527,19 +567,19 @@ class SqliteStore:
                 (*key, cut),
             )
 
-    def _trimmed(self, session_id: str) -> bool:
+    def _trimmed(self, workspace: str, session_id: str) -> bool:
         row = self._db.execute(
             "SELECT trimmed_seq FROM logs WHERE workspace_id = ? AND session_id = ?",
-            (self._workspace, session_id),
+            (workspace, session_id),
         ).fetchone()
         return row is not None and row[0] > 0
 
-    def _bounds(self, session_id: str, since: int) -> LogBounds:
+    def _bounds(self, workspace: str, session_id: str, since: int) -> LogBounds:
         """The bounds of the session ``session_id``'s log in the workspace's, for a frontend that
         saw the events up to ``since``."""
         (first,) = self._db.execute(
             "SELECT min(seq) FROM events WHERE workspace_id = ? AND session_id = ?",
-            (self._workspace, session_id),
+            (workspace, session_id),
         ).fetchone()
         # Events forgotten count as another session's: a frontend may have seen them last.
         (others,) = self._db.execute(
@@ -547,7 +587,7 @@ class SqliteStore:
                 coalesce((SELECT max(seq) FROM events WHERE workspace_id = ?1 AND session_id != ?2),
                     0),
                 (SELECT forgotten_seq FROM workspaces WHERE id = ?1))""",
-            (self._workspace, session_id),
+            (workspace, session_id),
         ).fetchone()
         # The last event trimmed was the session's too.
         (own,) = self._db.execute(
@@ -557,67 +597,149 @@ class SqliteStore:
                     WHERE workspace_id = ?1 AND session_id = ?2
                     AND trimmed_seq > 0 AND trimmed_seq <= ?3
             )""",
-            (self._workspace, session_id, since),
+            (workspace, session_id, since),
         ).fetchone()
         return LogBounds(first_seq=first, others_seq=int(others), own_seq=own)
 
-    def _forget(self, session_id: str) -> None:
+    def _forget(self, workspace: str, session_id: str) -> None:
         with transaction(self._db):
-            self._forget_log(session_id)
+            self._forget_log(workspace, session_id)
 
-    def _forget_log(self, session_id: str) -> None:
+    def _forget_log(self, workspace: str, session_id: str) -> None:
         """Delete the session ``session_id``'s events and its row in ``logs``, within a
         transaction, raising the workspace's ``forgotten_seq`` to the highest deleted."""
         self._db.execute(
             """UPDATE workspaces SET forgotten_seq = max(forgotten_seq, coalesce(
                 (SELECT max(seq) FROM events WHERE workspace_id = ?1 AND session_id = ?2), 0))
             WHERE id = ?1""",
-            (self._workspace, session_id),
+            (workspace, session_id),
         )
         self._db.execute(
             "DELETE FROM events WHERE workspace_id = ? AND session_id = ?",
-            (self._workspace, session_id),
+            (workspace, session_id),
         )
         self._db.execute(
             "DELETE FROM logs WHERE workspace_id = ? AND session_id = ?",
-            (self._workspace, session_id),
+            (workspace, session_id),
         )
 
-    def _delete(self, session_id: str) -> None:
+    def _delete(self, workspace: str, session_id: str) -> None:
         with transaction(self._db):
-            self._forget_log(session_id)
+            self._forget_log(workspace, session_id)
             self._db.execute(
                 "DELETE FROM sessions WHERE workspace_id = ? AND id = ?",
-                (self._workspace, session_id),
+                (workspace, session_id),
             )
 
-    def _review_count(self) -> int:
+    def _review_count(self, workspace: str) -> int:
         row = self._db.execute(
-            "SELECT since_super FROM reviews WHERE workspace_id = ?", (self._workspace,)
+            "SELECT since_super FROM reviews WHERE workspace_id = ?", (workspace,)
         ).fetchone()
         return 0 if row is None else int(row[0])
 
-    def _save_review_count(self, count: int) -> None:
+    def _save_review_count(self, workspace: str, count: int) -> None:
         self._db.execute(
             """INSERT INTO reviews (workspace_id, since_super) VALUES (?, ?)
             ON CONFLICT (workspace_id) DO UPDATE SET since_super = excluded.since_super""",
-            (self._workspace, count),
+            (workspace, count),
         )
 
-    def _listed(self, rows: list[tuple[str, str]]) -> list[StoredSession]:
-        """The sessions saved as ``rows``, each marked locked when another orbit holds it.
+    def _listed(
+        self, workspace: str, locks: SessionLocks, rows: list[tuple[str, str]]
+    ) -> list[StoredSession]:
+        """The sessions of the workspace ``workspace`` saved as ``rows``, each marked locked when
+        another orbit holds it in ``locks``.
 
         Raises ``RuntimeError`` when the locks can't be checked.
         """
         try:
-            self._lock_dir.mkdir(parents=True, exist_ok=True)
-            with self._locks.checking():
+            self._lock_dir(workspace).mkdir(parents=True, exist_ok=True)
+            with locks.checking():
                 return [
-                    StoredSession(
-                        session_id, parse_record(text), self._locks.held_elsewhere(session_id)
-                    )
+                    StoredSession(session_id, parse_record(text), locks.held_elsewhere(session_id))
                     for session_id, text in rows
                 ]
         except OSError as error:
             message = f"Couldn't list the sessions in {self._database}: their locks can't be"
             raise RuntimeError(f"{message} checked: {error}") from error
+
+
+class WorkspaceStore:
+    """The saved sessions, events' log, review count and session locks of the workspace
+    ``workspace_id`` in the shared ``store``, as a :class:`SessionStore` sees them: every call
+    goes to the store, scoped to the workspace, but for the highest ``seq``, which is the
+    store's across workspaces. Closing the store closes it."""
+
+    def __init__(self, store: SqliteStore, workspace_id: str) -> None:
+        self._store = store
+        self._id = workspace_id
+
+    @property
+    def workspace_id(self) -> str:
+        """The id of the workspace this is a view of."""
+        return self._id
+
+    async def save(self, record: SessionRecord) -> None:
+        await self._store.save(self._id, record)
+
+    async def load(self, session_id: str) -> SessionRecord | Unreadable:
+        return await self._store.load(self._id, session_id)
+
+    async def sessions(self) -> list[StoredSession]:
+        return await self._store.sessions(self._id)
+
+    async def delete(self, session_id: str) -> None:
+        await self._store.delete(self._id, session_id)
+
+    def max_seq(self) -> int:
+        """The highest ``seq`` ever logged, across workspaces, as the store knows it."""
+        return self._store.max_seq()
+
+    async def latest_seq(self) -> int | None:
+        return await self._store.latest_seq()
+
+    async def append(self, session_id: str, envelopes: Sequence[EventEnvelope]) -> int:
+        return await self._store.append(self._id, session_id, envelopes)
+
+    async def recent(self, session_id: str, limit: int) -> list[EventEnvelope]:
+        return await self._store.recent(self._id, session_id, limit)
+
+    async def before(
+        self, session_id: str, before_seq: int, limit: int
+    ) -> tuple[list[EventEnvelope], bool]:
+        return await self._store.before(self._id, session_id, before_seq, limit)
+
+    async def after(self, session_id: str, after_seq: int) -> list[EventEnvelope] | None:
+        return await self._store.after(self._id, session_id, after_seq)
+
+    async def bounds(self, session_id: str, since: int) -> LogBounds | None:
+        return await self._store.bounds(self._id, session_id, since)
+
+    async def trim(self, session_id: str, limit: int, target: int) -> None:
+        await self._store.trim(self._id, session_id, limit, target)
+
+    async def trimmed(self, session_id: str) -> bool:
+        return await self._store.trimmed(self._id, session_id)
+
+    async def forget(self, session_id: str) -> None:
+        await self._store.forget(self._id, session_id)
+
+    async def acquire(self, session_id: str) -> bool:
+        return await self._store.acquire(self._id, session_id)
+
+    async def release(self, session_id: str) -> None:
+        await self._store.release(self._id, session_id)
+
+    async def review_count(self) -> int:
+        return await self._store.review_count(self._id)
+
+    async def save_review_count(self, count: int) -> None:
+        await self._store.save_review_count(self._id, count)
+
+    async def insert_new(
+        self,
+        reading: Callable[[], AbstractContextManager[NewRows]],
+        committing: Callable[[], AbstractContextManager[None]],
+    ) -> int:
+        """As :meth:`SqliteStore.insert_new`, in this workspace."""
+        return await self._store.insert_new(self._id, reading, committing)

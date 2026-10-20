@@ -18,10 +18,11 @@ from orbit.agent.external import sqlite_store
 from orbit.agent.external.sqlite_schema import StoreError
 from orbit.agent.external.sqlite_store import THREAD_PREFIX, SqliteStore, find_workspace_id
 from orbit.protocol import EventEnvelope, Notice
+from tests.store_views import OwnView, open_view
 
 WHEN = datetime(2026, 10, 17, 14, 30, tzinfo=UTC)
 
-type Opener = Callable[[Path], Awaitable[SqliteStore]]
+type Opener = Callable[[Path], Awaitable[OwnView]]
 
 
 def record(session_id: str = "abc") -> SessionRecord:
@@ -48,10 +49,10 @@ def workspace(tmp_path: Path) -> Path:
 @pytest.fixture
 async def open_store(state: Path) -> AsyncIterator[Opener]:
     """Opens a store in ``state`` for a workspace, closing it after the test."""
-    opened: list[SqliteStore] = []
+    opened: list[OwnView] = []
 
-    async def open_at(workspace: Path) -> SqliteStore:
-        opened.append(await SqliteStore.open(state, str(workspace)))
+    async def open_at(workspace: Path) -> OwnView:
+        opened.append(await open_view(state, workspace))
         return opened[-1]
 
     yield open_at
@@ -177,6 +178,76 @@ async def test_a_missing_session_isnt_saved(open_store: Opener, workspace: Path)
     assert await (await open_store(workspace)).load("abc") == Unreadable("it isn't saved")
 
 
+# Views of one store
+
+
+@pytest.fixture
+async def shared(state: Path) -> AsyncIterator[SqliteStore]:
+    """One store in ``state``, shared by the views of a test, closed after it."""
+    store = await SqliteStore.open(state)
+    yield store
+    await store.close()
+
+
+async def test_two_views_of_one_store_see_only_their_own_sessions_and_review_counts(
+    shared: SqliteStore,
+) -> None:
+    mine, theirs = shared.workspace_view("mine"), shared.workspace_view("theirs")
+    await register_ids(shared, "mine", "theirs")
+    await mine.save(record("a"))
+    await theirs.save(record("b"))
+    await mine.save_review_count(3)
+    assert [entry.id for entry in await mine.sessions()] == ["a"]
+    assert [entry.id for entry in await theirs.sessions()] == ["b"]
+    assert isinstance(await theirs.load("a"), Unreadable)
+    assert (await mine.review_count(), await theirs.review_count()) == (3, 0)
+    assert (mine.workspace_id, theirs.workspace_id) == ("mine", "theirs")
+
+
+async def test_two_views_of_one_store_see_only_their_own_events_but_share_one_seq(
+    shared: SqliteStore,
+) -> None:
+    mine, theirs = shared.workspace_view("mine"), shared.workspace_view("theirs")
+    await register_ids(shared, "mine", "theirs")
+    await mine.append("abc", [EventEnvelope(seq=1, session="abc", payload=Notice(message="a"))])
+    await theirs.append("abc", [EventEnvelope(seq=2, session="abc", payload=Notice(message="b"))])
+    assert [envelope.seq for envelope in await mine.recent("abc", 10)] == [1]
+    assert [envelope.seq for envelope in await theirs.recent("abc", 10)] == [2]
+    assert (mine.max_seq(), theirs.max_seq(), shared.max_seq()) == (2, 2, 2)
+    assert await mine.latest_seq() == 2
+
+
+async def test_two_views_of_one_workspace_share_its_locks(shared: SqliteStore, state: Path) -> None:
+    first, second = shared.workspace_view("w"), shared.workspace_view("w")
+    assert await first.acquire("abc")
+    assert await second.acquire("abc")
+    other = await SqliteStore.open(state)
+    try:
+        assert not await other.workspace_view("w").acquire("abc")
+    finally:
+        await other.close()
+
+
+async def test_a_view_made_after_the_store_closed_takes_no_lock(state: Path) -> None:
+    store = await SqliteStore.open(state)
+    await store.close()
+    with pytest.raises(RuntimeError, match="closed"):
+        await store.workspace_view("w").acquire("abc")
+
+
+async def register_ids(store: SqliteStore, *workspace_ids: str) -> None:
+    """Register workspaces with ``workspace_ids`` in ``store``'s database, at made-up paths."""
+
+    def insert(connection: sqlite3.Connection) -> None:
+        for workspace_id in workspace_ids:
+            connection.execute(
+                "INSERT INTO workspaces (id, path, name) VALUES (?, ?, ?)",
+                (workspace_id, f"/{workspace_id}", workspace_id),
+            )
+
+    await store.run("Couldn't register", insert)
+
+
 # Locks
 
 
@@ -251,7 +322,7 @@ async def test_a_closed_store_fails_each_call_as_the_port_says(
         await store.save_review_count(1)
 
 
-type StoreCall = Callable[[SqliteStore], Awaitable[object]]
+type StoreCall = Callable[[OwnView], Awaitable[object]]
 type Outcome = type[RuntimeError] | Callable[[Path], object]
 
 
@@ -523,14 +594,14 @@ async def test_a_failed_backup_leaves_no_file_behind(
 # Failed writes, described for the storage halt
 
 
-async def fill_up(store: SqliteStore) -> None:
+async def fill_up(store: OwnView) -> None:
     """Have ``store``'s database refuse to grow, as a full disk does."""
 
     def cap() -> None:
-        (pages,) = store._db.execute("PRAGMA page_count").fetchone()
-        store._db.execute(f"PRAGMA max_page_count = {pages}")
+        (pages,) = store.store._db.execute("PRAGMA page_count").fetchone()
+        store.store._db.execute(f"PRAGMA max_page_count = {pages}")
 
-    await store._call(cap)
+    await store.store._call(cap)
 
 
 async def test_a_full_database_fails_its_writes_as_disk_full(

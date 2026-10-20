@@ -7,12 +7,9 @@ its own transaction.
 import os
 import sqlite3
 import time
-import uuid
 from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager, contextmanager, nullcontext
 from pathlib import Path
-
-from orbit.agent.external.repository import workspace_fingerprint
 
 BUSY_TIMEOUT = 5.0
 RETRY_DELAY = 0.01
@@ -68,6 +65,10 @@ MIGRATIONS: tuple[tuple[str, ...], ...] = (
         "INSERT INTO high_water (seq) SELECT coalesce(max(seq), 0) FROM events",
         # The highest seq deleted with a session's log in each workspace.
         "ALTER TABLE workspaces ADD COLUMN forgotten_seq INTEGER NOT NULL DEFAULT 0",
+    ),
+    (
+        # Whether a server serves the workspace.
+        "ALTER TABLE workspaces ADD COLUMN served INTEGER NOT NULL DEFAULT 0",
     ),
 )
 
@@ -161,19 +162,6 @@ def _migrate(connection: sqlite3.Connection, database: Path) -> None:
         _check_supported(_apply(connection, pending, database), database)
 
 
-def _register(connection: sqlite3.Connection, workspace: str) -> str:
-    """The id of ``workspace`` in ``connection``, found by its path or registered with a new one;
-    its fingerprint is brought up to date."""
-    path = Path(workspace).resolve()
-    (workspace_id,) = connection.execute(
-        """INSERT INTO workspaces (id, path, fingerprint, name) VALUES (?, ?, ?, ?)
-        ON CONFLICT (path) DO UPDATE SET fingerprint = excluded.fingerprint
-        RETURNING id""",
-        (uuid.uuid4().hex, str(path), workspace_fingerprint(workspace), path.name),
-    ).fetchone()
-    return str(workspace_id)
-
-
 def _use_wal(connection: sqlite3.Connection) -> None:
     """Put ``connection``'s database in WAL mode, trying for up to :data:`BUSY_TIMEOUT` seconds.
 
@@ -192,16 +180,14 @@ def _use_wal(connection: sqlite3.Connection) -> None:
         time.sleep(RETRY_DELAY)
 
 
-def _set_up(connection: sqlite3.Connection, database: Path, workspace: str) -> str:
-    """Put ``connection`` in WAL mode, bring its schema up to date and register ``workspace``;
-    returns the workspace's id."""
+def _set_up(connection: sqlite3.Connection, database: Path) -> None:
+    """Put ``connection`` in WAL mode and bring its schema up to date."""
     _use_wal(connection)
     _migrate(connection, database)
-    return _register(connection, workspace)
 
 
-def open_database(database: Path, workspace: str) -> tuple[sqlite3.Connection, str]:
-    """A connection to ``database``, set up for ``workspace``, and the workspace's id.
+def open_database(database: Path) -> sqlite3.Connection:
+    """A connection to ``database``, in WAL mode with its schema up to date.
 
     Raises :class:`StoreError` naming ``database`` when it can't be opened or set up.
     """
@@ -211,13 +197,14 @@ def open_database(database: Path, workspace: str) -> tuple[sqlite3.Connection, s
     except sqlite3.Error as error:
         raise StoreError(f"Couldn't open the database {database}: {error}") from error
     try:
-        return connection, _set_up(connection, database, workspace)
+        _set_up(connection, database)
     except sqlite3.Error as error:
         connection.close()
         raise StoreError(f"Couldn't open the database {database}: {error}") from error
     except BaseException:
         connection.close()
         raise
+    return connection
 
 
 def open_existing(database: Path) -> sqlite3.Connection:

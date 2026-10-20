@@ -11,9 +11,11 @@ import pytest
 from orbit.agent.external import sqlite_schema
 from orbit.agent.external.sqlite_schema import MIGRATIONS, StoreError, transaction
 from orbit.agent.external.sqlite_store import SqliteStore
+from orbit.agent.external.workspace_registry import register
+from tests.store_views import OwnView, open_view
 from tests.test_sqlite_store import database, store_threads
 
-type Opener = Callable[[Path], Awaitable[SqliteStore]]
+type Opener = Callable[[Path], Awaitable[OwnView]]
 
 
 @pytest.fixture
@@ -31,10 +33,10 @@ def workspace(tmp_path: Path) -> Path:
 @pytest.fixture
 async def open_store(state: Path) -> AsyncIterator[Opener]:
     """Opens a store in ``state`` for a workspace, closing it after the test."""
-    opened: list[SqliteStore] = []
+    opened: list[OwnView] = []
 
-    async def open_at(workspace: Path) -> SqliteStore:
-        opened.append(await SqliteStore.open(state, str(workspace)))
+    async def open_at(workspace: Path) -> OwnView:
+        opened.append(await open_view(state, workspace))
         return opened[-1]
 
     yield open_at
@@ -51,7 +53,7 @@ async def test_a_newer_database_is_refused_naming_both_versions(
     await (await open_store(workspace)).close()
     with database(state) as connection:
         connection.execute("INSERT INTO schema_version (version) VALUES (99)")
-    with pytest.raises(StoreError, match=r"orbit\.db has schema version 99, newer than .* 4;"):
+    with pytest.raises(StoreError, match=r"orbit\.db has schema version 99, newer than .* 5;"):
         await open_store(workspace)
     assert store_threads() == []
 
@@ -82,6 +84,7 @@ async def test_a_migration_applied_meanwhile_by_another_orbit_isnt_run_again(
             (2,),
             (3,),
             (4,),
+            (5,),
         ]
 
 
@@ -92,7 +95,7 @@ async def test_a_newer_version_written_meanwhile_is_refused(
         other.execute("INSERT INTO schema_version (version) VALUES (99)")
 
     racing(monkeypatch, state, newer)
-    with pytest.raises(StoreError, match=r"orbit\.db has schema version 99, newer than .* 4;"):
+    with pytest.raises(StoreError, match=r"orbit\.db has schema version 99, newer than .* 5;"):
         await open_store(workspace)
     with database(state) as connection:
         tables = connection.execute("SELECT name FROM sqlite_master WHERE name = 'workspaces'")
@@ -112,6 +115,7 @@ async def test_stores_opened_at_once_on_a_new_state_directory_both_open(
             (2,),
             (3,),
             (4,),
+            (5,),
         ]
         assert connection.execute("SELECT count(*) FROM workspaces").fetchone() == (2,)
 
@@ -151,10 +155,10 @@ async def test_a_failed_migration_is_rolled_back_and_refused(
     await (await open_store(workspace)).close()
     broken = (*MIGRATIONS, ("CREATE TABLE extra (x)", "NOT SQL"))
     monkeypatch.setattr(sqlite_schema, "MIGRATIONS", broken)
-    with pytest.raises(StoreError, match=r"upgrade the database .*orbit\.db to schema version 5"):
+    with pytest.raises(StoreError, match=r"upgrade the database .*orbit\.db to schema version 6"):
         await open_store(workspace)
     with database(state) as connection:
-        assert connection.execute("SELECT max(version) FROM schema_version").fetchone() == (4,)
+        assert connection.execute("SELECT max(version) FROM schema_version").fetchone() == (5,)
         tables = connection.execute("SELECT name FROM sqlite_master WHERE name = 'extra'")
         assert tables.fetchall() == []
 
@@ -205,15 +209,32 @@ async def test_a_migration_that_cant_start_is_refused(
 
 
 async def test_a_store_that_fails_to_open_closes_its_connection(
-    monkeypatch: pytest.MonkeyPatch, open_store: Opener, workspace: Path
+    monkeypatch: pytest.MonkeyPatch, state: Path
 ) -> None:
-    def fail(path: str) -> str:
-        raise RuntimeError("git broke")
+    def fail(connection: sqlite3.Connection, database: Path) -> None:
+        raise RuntimeError("migration broke")
 
-    monkeypatch.setattr(sqlite_schema, "workspace_fingerprint", fail)
-    with pytest.raises(RuntimeError, match="git broke"):
-        await open_store(workspace)
+    monkeypatch.setattr(sqlite_schema, "_migrate", fail)
+    with pytest.raises(RuntimeError, match="migration broke"):
+        await SqliteStore.open(state)
     assert store_threads() == []
+
+
+async def test_a_version_4_database_upgrades_to_5_with_no_workspace_served(
+    monkeypatch: pytest.MonkeyPatch, state: Path, workspace: Path
+) -> None:
+    with monkeypatch.context() as patched:
+        patched.setattr(sqlite_schema, "MIGRATIONS", MIGRATIONS[:4])
+        connection = sqlite_schema.open_database(state / "orbit.db")
+        register(connection, str(workspace))
+        connection.close()
+    store = await SqliteStore.open(state)
+    await store.close()
+    with database(state) as connection:
+        assert connection.execute("SELECT max(version) FROM schema_version").fetchone() == (5,)
+        assert connection.execute("SELECT path, served FROM workspaces").fetchall() == [
+            (str(workspace), 0)
+        ]
 
 
 # Transactions

@@ -9,7 +9,7 @@ import pytest
 
 from orbit.agent.application.ports import SessionStore, StoredSession
 from orbit.agent.domain.sessions import SessionRecord, Unreadable
-from orbit.agent.external.sqlite_store import SqliteStore
+from tests.store_views import OwnView, open_view
 
 WHEN = datetime(2026, 10, 17, 14, 30, tzinfo=UTC)
 
@@ -25,10 +25,10 @@ async def open_store(tmp_path: Path) -> AsyncIterator[Opener]:
     """Opens another orbit's store on the same saved sessions each time it's called."""
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    opened: list[SqliteStore] = []
+    opened: list[OwnView] = []
 
     async def open_sqlite() -> SessionStore:
-        opened.append(await SqliteStore.open(tmp_path / "state", str(workspace)))
+        opened.append(await open_view(tmp_path / "state", workspace))
         return opened[-1]
 
     yield open_sqlite

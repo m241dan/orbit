@@ -10,7 +10,6 @@ from orbit.agent import WorkspaceHost
 from orbit.agent.application.log_writer import LogWriter, Overflow
 from orbit.agent.domain.replay import LogBounds
 from orbit.agent.domain.storage import StorageSettings
-from orbit.agent.external.sqlite_store import SqliteStore
 from orbit.protocol import (
     INTERNAL,
     PROTOCOL_VERSION,
@@ -52,6 +51,7 @@ from tests.agent_fakes import (
     save_used,
     send,
 )
+from tests.store_views import OwnView, open_view
 from tests.test_event_log import big
 from tests.test_session_switch import failing_startup, opened, saved, store_with, switching
 from tests.test_sqlite_store import database
@@ -105,7 +105,7 @@ class GatedLog(FakeStore):
         return await super().append(session_id, envelopes)
 
 
-def stored_session(store: FakeStore | SqliteStore) -> WorkspaceHost:
+def stored_session(store: FakeStore | OwnView) -> WorkspaceHost:
     return WorkspaceHost(store=store, clock=Ticks(), new_id=lambda: "session-1")
 
 
@@ -780,16 +780,16 @@ async def test_a_session_whose_log_cant_be_read_answers_since_with_a_snapshot() 
 
 
 @pytest.fixture
-async def sqlite(tmp_path: Path) -> AsyncIterator[SqliteStore]:
+async def sqlite(tmp_path: Path) -> AsyncIterator[OwnView]:
     workspace = tmp_path / "project"
     workspace.mkdir()
-    store = await SqliteStore.open(tmp_path / "state", str(workspace))
+    store = await open_view(tmp_path / "state", workspace)
     yield store
     await store.close()
 
 
 async def test_a_sessions_events_are_logged_but_for_those_answering_one_connection(
-    sqlite: SqliteStore, tmp_path: Path
+    sqlite: OwnView, tmp_path: Path
 ) -> None:
     session = stored_session(sqlite)
     await send(session, AddTask(task=TaskSpec(prompt="Add a flag.")))
@@ -810,7 +810,7 @@ async def test_a_sessions_events_are_logged_but_for_those_answering_one_connecti
 
 
 async def test_a_session_closed_unused_leaves_no_events_behind(
-    sqlite: SqliteStore, tmp_path: Path
+    sqlite: OwnView, tmp_path: Path
 ) -> None:
     session = stored_session(sqlite)
     await greet(session)
@@ -821,7 +821,7 @@ async def test_a_session_closed_unused_leaves_no_events_behind(
 
 
 async def test_a_session_used_after_its_startup_notices_keeps_them(
-    sqlite: SqliteStore, tmp_path: Path
+    sqlite: OwnView, tmp_path: Path
 ) -> None:
     session = stored_session(sqlite)
     await greet(session)
@@ -992,13 +992,13 @@ async def test_a_session_opened_again_after_a_restart_shows_its_earlier_events(
 ) -> None:
     workspace = tmp_path / "project"
     workspace.mkdir()
-    store = await SqliteStore.open(tmp_path / "state", str(workspace))
+    store = await open_view(tmp_path / "state", workspace)
     first = stored_session(store)
     await send(first, AddTask(task=TaskSpec(prompt="Add a flag.")))
     await first.close()
     await store.close()
 
-    store = await SqliteStore.open(tmp_path / "state", str(workspace))
+    store = await open_view(tmp_path / "state", workspace)
     again = WorkspaceHost(store=store, clock=Ticks(), new_id=lambda: "session-2")
     events = await opened(again, ActivateSession(session="session-1"))
     await again.close()
@@ -1018,7 +1018,7 @@ async def opened_after_another_logged_it(tmp_path: Path) -> WorkspaceHost:
     closed."""
     workspace = tmp_path / "project"
     workspace.mkdir()
-    this, other = [await SqliteStore.open(tmp_path / "state", str(workspace)) for _ in range(2)]
+    this, other = [await open_view(tmp_path / "state", workspace) for _ in range(2)]
     await other.save(saved("auth"))
     await other.append("auth", [notice(seq, "auth") for seq in range(1, 51)])
     await other.close()
@@ -1061,7 +1061,7 @@ async def history(session: WorkspaceHost, command: History) -> list[Event]:
 
 
 async def test_history_pages_back_from_the_snapshot_to_the_sessions_start(
-    sqlite: SqliteStore,
+    sqlite: OwnView,
 ) -> None:
     await sqlite.append("session-1", [notice(seq, "session-1") for seq in range(1, 1201)])
     session = stored_session(sqlite)
@@ -1107,11 +1107,11 @@ async def test_history_pages_a_saved_session_other_than_the_one_open() -> None:
 
 
 async def test_history_of_a_session_that_isnt_this_workspaces_is_refused(
-    sqlite: SqliteStore, tmp_path: Path
+    sqlite: OwnView, tmp_path: Path
 ) -> None:
     other_workspace = tmp_path / "other"
     other_workspace.mkdir()
-    other = await SqliteStore.open(tmp_path / "state", str(other_workspace))
+    other = await open_view(tmp_path / "state", other_workspace)
     await other.save(saved("elsewhere"))
     await other.append("elsewhere", [notice(1, "elsewhere")])
     await other.close()
@@ -1183,13 +1183,13 @@ def log_size(state: Path, session_id: str) -> int:
     return int(size)
 
 
-def trimming_session(store: SqliteStore, log_mb: int) -> WorkspaceHost:
+def trimming_session(store: OwnView, log_mb: int) -> WorkspaceHost:
     storage = StorageSettings(session_log_mb=log_mb)
     return WorkspaceHost(store=store, clock=Ticks(), new_id=lambda: "session-1", storage=storage)
 
 
 async def test_a_session_log_over_its_limit_is_trimmed_after_the_next_batch(
-    sqlite: SqliteStore, tmp_path: Path
+    sqlite: OwnView, tmp_path: Path
 ) -> None:
     await sqlite.append("session-1", [big(seq, "session-1") for seq in range(1, 211)])
     await sqlite.append("other", [big(seq, "other") for seq in range(211, 421)])
@@ -1206,7 +1206,7 @@ async def test_a_session_log_over_its_limit_is_trimmed_after_the_next_batch(
 
 
 async def test_with_no_limit_a_session_log_is_never_trimmed(
-    sqlite: SqliteStore, tmp_path: Path
+    sqlite: OwnView, tmp_path: Path
 ) -> None:
     await sqlite.append("session-1", [big(seq, "session-1") for seq in range(1, 211)])
     session = trimming_session(sqlite, 0)
@@ -1218,7 +1218,7 @@ async def test_with_no_limit_a_session_log_is_never_trimmed(
     assert not await sqlite.trimmed("session-1")
 
 
-async def test_after_trimming_the_oldest_page_is_marked_trimmed(sqlite: SqliteStore) -> None:
+async def test_after_trimming_the_oldest_page_is_marked_trimmed(sqlite: OwnView) -> None:
     await sqlite.append("session-1", [big(seq, "session-1") for seq in range(1, 211)])
     writing = trimming_session(sqlite, 1)
     await save_used(writing)
@@ -1235,7 +1235,7 @@ async def test_after_trimming_the_oldest_page_is_marked_trimmed(sqlite: SqliteSt
     )
 
 
-async def hello_since(store: SqliteStore, since: int) -> list[EventEnvelope]:
+async def hello_since(store: OwnView, since: int) -> list[EventEnvelope]:
     """What a session on ``store`` sends a frontend that saw the events up to ``since``."""
     session = trimming_session(store, 1)
     hello = Hello(client="orbit-tests", protocol_version=PROTOCOL_VERSION, since=since)
@@ -1244,7 +1244,7 @@ async def hello_since(store: SqliteStore, since: int) -> list[EventEnvelope]:
     return delivered(session)
 
 
-async def trimmed_log(store: SqliteStore) -> int:
+async def trimmed_log(store: OwnView) -> int:
     """The ``seq`` of the oldest event kept of a log of ``session-1`` written to ``store``, after
     any logged before it, and trimmed."""
     await store.forget("session-1")
@@ -1255,7 +1255,7 @@ async def trimmed_log(store: SqliteStore) -> int:
 
 
 async def test_a_frontend_that_saw_only_trimmed_events_gets_a_fresh_snapshot(
-    sqlite: SqliteStore,
+    sqlite: OwnView,
 ) -> None:
     first = await trimmed_log(sqlite)
     assert snapshots(await hello_since(sqlite, first - 2))

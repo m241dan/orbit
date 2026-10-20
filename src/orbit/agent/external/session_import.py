@@ -23,7 +23,7 @@ from pathlib import Path
 from orbit.agent.domain.sessions import Unreadable, parse_record, parse_review_count
 from orbit.agent.external.session_files import REVIEWS, SESSIONS
 from orbit.agent.external.session_locks import SessionLocks
-from orbit.agent.external.sqlite_store import NewRows, SessionRow, SqliteStore
+from orbit.agent.external.sqlite_store import NewRows, SessionRow, WorkspaceStore
 
 IMPORTED = f"{SESSIONS}.imported"
 REVIEWS_IMPORTED = f"{REVIEWS}.imported"
@@ -59,7 +59,7 @@ def imported_note(imported: Imported, legacy_dir: Path) -> str:
     )
 
 
-async def import_session_files(store: SqliteStore, legacy_dir: Path) -> Imported | None:
+async def import_session_files(store: WorkspaceStore, legacy_dir: Path) -> Imported | None:
     """Import the sessions and review count saved as files in ``legacy_dir`` into ``store``;
     returns how many sessions it imported and where their folder went, or none when there's no
     ``sessions`` folder, or it goes before it's renamed.

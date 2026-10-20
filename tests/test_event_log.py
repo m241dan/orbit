@@ -10,11 +10,12 @@ import pytest
 from orbit.agent.application.ports import EventLog
 from orbit.agent.domain.replay import LogBounds, can_replay
 from orbit.agent.external import sqlite_schema
-from orbit.agent.external.sqlite_store import SqliteStore
+from orbit.agent.external.workspace_registry import register
 from orbit.protocol import EventEnvelope, Notice, TasksChanged, decode_event, encode
+from tests.store_views import OwnView, open_view
 from tests.test_sqlite_store import database, record
 
-type Opener = Callable[[Path], Awaitable[SqliteStore]]
+type Opener = Callable[[Path], Awaitable[OwnView]]
 
 
 def notice(seq: int, session: str = "abc", message: str = "hi") -> EventEnvelope:
@@ -36,10 +37,10 @@ def workspace(tmp_path: Path) -> Path:
 @pytest.fixture
 async def open_store(state: Path) -> AsyncIterator[Opener]:
     """Opens a store in ``state`` for a workspace, closing it after the test."""
-    opened: list[SqliteStore] = []
+    opened: list[OwnView] = []
 
-    async def open_at(workspace: Path) -> SqliteStore:
-        opened.append(await SqliteStore.open(state, str(workspace)))
+    async def open_at(workspace: Path) -> OwnView:
+        opened.append(await open_view(state, workspace))
         return opened[-1]
 
     yield open_at
@@ -403,7 +404,8 @@ def old_database(
     """Create the database in ``state`` with the schema of ``version``, registering
     ``workspace``, leaving ``MIGRATIONS`` cut to that version until ``monkeypatch`` is undone."""
     monkeypatch.setattr(sqlite_schema, "MIGRATIONS", sqlite_schema.MIGRATIONS[:version])
-    connection, _ = sqlite_schema.open_database(state / "orbit.db", str(workspace))
+    connection = sqlite_schema.open_database(state / "orbit.db")
+    register(connection, str(workspace))
     connection.close()
 
 
@@ -663,8 +665,8 @@ async def test_forgetting_under_an_id_that_isnt_a_plain_file_name_is_refused(
 
 # Forgotten events
 
-Drop = Callable[[SqliteStore, str], Awaitable[None]]
-DROPS: list[Drop] = [SqliteStore.forget, SqliteStore.delete]
+Drop = Callable[[OwnView, str], Awaitable[None]]
+DROPS: list[Drop] = [OwnView.forget, OwnView.delete]
 
 
 @pytest.mark.parametrize("drop", DROPS, ids=["forget", "delete"])

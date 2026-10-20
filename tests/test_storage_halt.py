@@ -30,7 +30,6 @@ from orbit.agent.domain.storage_halt import (
     halting_message,
 )
 from orbit.agent.external.fallback_files import FallbackFiles
-from orbit.agent.external.sqlite_store import SqliteStore
 from orbit.protocol import (
     PLANNER,
     PLANNER_LANE,
@@ -74,6 +73,7 @@ from tests.agent_fakes import (
     startup_of,
     tasks_of,
 )
+from tests.store_views import open_view
 from tests.test_log_writer import GatedLog, payloads_of
 from tests.test_planner_lane import gated_planner
 from tests.test_review_lane import claims_done, suggests
@@ -174,7 +174,7 @@ class FullDisk:
 @pytest.fixture
 async def full_disk(tmp_path: Path) -> AsyncIterator[FullDisk]:
     state = tmp_path / "state"
-    store = await SqliteStore.open(state, str(tmp_path))
+    store = await open_view(state, tmp_path)
     started = asyncio.Event()
     fallback = FallbackFiles(state, store.workspace_id, tmp_path / ".orbit")
     session, _, _ = session_for(waiting_agent(started), store=store, fallback=fallback)

@@ -35,6 +35,7 @@ from orbit.agent import (
     WorkspaceHost,
     WorkspaceLock,
     WorkspaceOwner,
+    WorkspaceStore,
     run_step,
     workspace_state,
 )
@@ -44,7 +45,7 @@ from orbit.agent.domain.reviews import ReviewLimits
 from orbit.agent.domain.sessions import SessionRecord, Unreadable, default_name, record_json
 from orbit.agent.domain.usage import UsageUnavailable
 from orbit.cli import app
-from orbit.cli.backend import _Backend, _Directories, _in_process
+from orbit.cli.backend import _Backend, _Directories, _in_process, _Made
 from orbit.cli.errors import _configured, _exit_on
 from orbit.protocol import (
     AddTask,
@@ -62,6 +63,7 @@ from orbit.protocol import (
 )
 from tests.agent_fakes import greeted, queued, send, sole, startup_of, store_of
 from tests.conftest import OFFLINE
+from tests.store_views import open_view
 
 runner = CliRunner()
 
@@ -341,9 +343,9 @@ def legacy_sessions(directory: Path) -> Path:
     return sessions
 
 
-def store_in(session: WorkspaceHost) -> SqliteStore:
+def store_in(session: WorkspaceHost) -> WorkspaceStore:
     store = store_of(session)
-    assert isinstance(store, SqliteStore)
+    assert isinstance(store, WorkspaceStore)
     return store
 
 
@@ -353,7 +355,7 @@ def store_threads() -> list[str]:
 
 async def stored_ids(state: Path, workspace: Path) -> list[str]:
     """The ids of the sessions saved in ``state`` for ``workspace``."""
-    store = await SqliteStore.open(state, str(workspace))
+    store = await open_view(state, workspace)
     try:
         return [stored.id for stored in await store.sessions()]
     finally:
@@ -366,7 +368,7 @@ def test_chat_keeps_sessions_in_the_store_in_the_state_directory(
     assert runner.invoke(app, ["chat", "-C", str(tmp_path)]).exit_code == 0
 
     [session] = launched
-    assert store_in(session)._state_dir == state
+    assert store_in(session)._store.state_dir == state
     assert (state / "orbit.db").exists()
     # Only the workspace lock is kept in the workspace outside git.
     assert [p.name for p in (tmp_path / ".orbit").iterdir()] == ["workspace.lock"]
@@ -411,7 +413,7 @@ async def logged_task_count(session: WorkspaceHost) -> int | None:
 async def log_of(state: Path, workspace: Path, session_id: str) -> tuple[list[str], bool]:
     """The prompts on the latest task list the session ``session_id`` logged in the store in
     ``state`` for ``workspace``, and whether its log was trimmed."""
-    store = await SqliteStore.open(state, str(workspace))
+    store = await open_view(state, workspace)
     try:
         events = [e.payload for e in await store.recent(session_id, 100)]
         trimmed = await store.trimmed(session_id)
@@ -461,7 +463,7 @@ def test_the_state_directory_option_wins_over_the_environment(
     assert runner.invoke(app, ["chat", "--state-dir", "elsewhere"]).exit_code == 0
 
     [session] = launched
-    assert store_in(session)._state_dir == tmp_path / "elsewhere"
+    assert store_in(session)._store.state_dir == tmp_path / "elsewhere"
     assert (tmp_path / "elsewhere" / "orbit.db").exists()
 
 
@@ -564,7 +566,7 @@ def parked_notice(seq: int) -> EventEnvelope:
 
 
 async def workspace_id_of(state: Path, workspace: Path) -> str:
-    store = await SqliteStore.open(state, str(workspace))
+    store = await open_view(state, workspace)
     try:
         return store.workspace_id
     finally:
@@ -573,7 +575,7 @@ async def workspace_id_of(state: Path, workspace: Path) -> str:
 
 async def logged_in(state: Path, workspace: Path) -> list[EventEnvelope]:
     """The session ``s1``'s events in the store in ``state`` for ``workspace``."""
-    store = await SqliteStore.open(state, str(workspace))
+    store = await open_view(state, workspace)
     try:
         return await store.recent("s1", 100)
     finally:
@@ -651,7 +653,7 @@ def test_a_database_newer_than_orbit_stops_chat(
     result = runner.invoke(app, ["chat", "-C", str(tmp_path)])
 
     assert result.exit_code == 2
-    assert "has schema version 99, newer than this orbit's 4" in result.output
+    assert "has schema version 99, newer than this orbit's 5" in result.output
     assert launched == []
     assert store_threads() == []
 
@@ -689,7 +691,7 @@ def test_two_orbits_with_one_state_directory_cant_open_one_session_at_once(
 
     async def open_twice(session: WorkspaceHost) -> None:
         taken.append(await store_in(session).acquire("abc"))
-        other = await SqliteStore.open(state, str(tmp_path.resolve()))
+        other = await open_view(state, tmp_path.resolve())
         try:
             taken.append(await other.acquire("abc"))
         finally:
@@ -1159,7 +1161,7 @@ def test_exiting_unhalted_prints_nothing(
 
 async def saved_sessions(state: Path, workspace: Path, *ids: str) -> None:
     """Save sessions with ``ids`` for ``workspace`` in the store in ``state``."""
-    store = await SqliteStore.open(state, str(workspace))
+    store = await open_view(state, workspace)
     try:
         for session_id in ids:
             await store.save(SessionRecord(id=session_id, name="x", created=WHEN, last_active=WHEN))
@@ -1266,7 +1268,7 @@ def failing_copy(source: sqlite3.Connection, target: Path) -> None:
 
 def test_db_backup_while_another_orbit_has_the_database_open(state: Path, tmp_path: Path) -> None:
     async def backed_up_while_open() -> int:
-        store = await SqliteStore.open(state, str(tmp_path))
+        store = await open_view(state, tmp_path)
         try:
             await store.save(SAVED)
             result = await asyncio.to_thread(runner.invoke, app, ["db", "backup", "out.db"])
@@ -1377,15 +1379,15 @@ class Made:
 
     def __call__(
         self, backend: _Backend, directories: _Directories, *, pick_session: bool
-    ) -> tuple[Callable[[], ControlPlane], SqliteStore]:
+    ) -> _Made:
         self.backends.append((backend, pick_session))
-        store = asyncio.run(SqliteStore.open(directories.state, str(directories.root)))
+        store = asyncio.run(SqliteStore.open(directories.state))
         self.stores.append(store)
 
         def build() -> ControlPlane:
             raise AssertionError("Nothing builds the session here.")
 
-        return build, store
+        return _Made(build, store, "the-workspace")
 
 
 @pytest.fixture
@@ -1407,6 +1409,7 @@ def test_the_in_process_setup_holds_the_workspace_lock_while_its_block_runs(
     with _in_process(FLAGS, directories, pick_session=True, make=made) as in_process:
         assert WorkspaceLock(directories.root / ".orbit").take() == WorkspaceOwner(pid=os.getpid())
         assert in_process.store is made.stores[0] and in_process.owner is None
+        assert in_process.workspace_id == "the-workspace"
     after = WorkspaceLock(directories.root / ".orbit")
     assert after.take() is None
     after.close()

@@ -11,7 +11,7 @@ import pytest
 
 from orbit.agent.domain.server import LocalTls, RunningServer
 from orbit.agent.external.run_file import RunFile, running_server
-from orbit.agent.external.sqlite_store import SqliteStore
+from tests.store_views import open_view
 
 
 def test_the_run_file_holds_the_url_and_process_id_owner_only(tmp_path: Path) -> None:
@@ -74,7 +74,7 @@ def test_reading_a_run_file_that_is_a_directory_gives_none(tmp_path: Path) -> No
 
 async def registered(state: Path, workspace: Path) -> str:
     """The id the store in ``state`` gives ``workspace``."""
-    store = await SqliteStore.open(state, str(workspace))
+    store = await open_view(state, workspace)
     await store.close()
     return store.workspace_id
 

@@ -96,21 +96,33 @@ class _Directories:
     user_config: Path
 
 
+@dataclass(frozen=True)
+class _Made:
+    """What a backend's wiring made: what ``build``s its control plane, the ``store`` it opened,
+    and the id of the workspace it serves."""
+
+    build: Callable[[], ControlPlane]
+    store: SqliteStore
+    workspace_id: str
+
+
 class _MakeBackend(Protocol):
     """What builds the control plane a backend asks for, as :func:`_backend` does."""
 
     def __call__(
         self, backend: _Backend, directories: _Directories, *, pick_session: bool
-    ) -> tuple[Callable[[], ControlPlane], SqliteStore]: ...
+    ) -> _Made: ...
 
 
 @dataclass(frozen=True)
 class _InProcess:
-    """A backend set up in this process: what ``build``s its control plane, its ``store``, and
-    the workspace ``lock``, with the repository's ``owner`` if another orbit owns it."""
+    """A backend set up in this process: what ``build``s its control plane, its ``store``, the
+    id of the workspace it serves, and the workspace ``lock``, with the repository's ``owner``
+    if another orbit owns it."""
 
     build: Callable[[], ControlPlane]
     store: SqliteStore
+    workspace_id: str
     lock: WorkspaceLock
     owner: WorkspaceOwner | None
 
@@ -129,11 +141,11 @@ def _in_process(
     """
     with _repository_lock(directories.root) as (lock, owner):
         backend = replace(flags, owner=owner, lock=lock)
-        build, store = make(backend, directories, pick_session=pick_session)
+        made = make(backend, directories, pick_session=pick_session)
         try:
-            yield _InProcess(build, store, lock, owner)
+            yield _InProcess(made.build, made.store, made.workspace_id, lock, owner)
         finally:  # Whatever ran the session has closed it, so nothing uses the store any more.
-            asyncio.run(store.close())
+            asyncio.run(made.store.close())
 
 
 @contextmanager
@@ -154,12 +166,10 @@ def _repository_lock(root: Path) -> Iterator[tuple[WorkspaceLock, WorkspaceOwner
         lock.close()
 
 
-def _backend(
-    backend: _Backend, directories: _Directories, *, pick_session: bool
-) -> tuple[Callable[[], ControlPlane], SqliteStore]:
+def _backend(backend: _Backend, directories: _Directories, *, pick_session: bool) -> _Made:
     """What builds the control plane over the workspace host ``backend`` asks for in
-    ``directories``, listing the saved sessions to pick from if ``pick_session``, and the
-    store.
+    ``directories``, listing the saved sessions to pick from if ``pick_session``, with the store
+    it opened once and the workspace's view of it.
 
     Exits with status 2 if a configuration is invalid or the store can't be opened.
     """
@@ -170,7 +180,7 @@ def _backend(
     agents = _agents(config, worktree=backend.worktree, review=backend.review)
     settings, pinned = _settings(backend.model, backend.tools)
     usage_source = UsageApi() if backend.usage else None
-    opened = _open_store(directories.state, root)
+    store, opened = _open_store(directories.state, root)
 
     def build() -> ControlPlane:
         host = WorkspaceHost(
@@ -192,7 +202,7 @@ def _backend(
         )
         return ControlPlane(host, usage_source)
 
-    return build, opened.store
+    return _Made(build, store, opened.store.workspace_id)
 
 
 def _config() -> OrbitConfig:
@@ -211,16 +221,27 @@ def _storage(config_dir: Path) -> StorageSettings:
     return _configured(lambda: read_storage(config_dir))
 
 
-def _open_store(state: Path, root: Path) -> OpenedStore:
-    """The store in the ``state`` directory for the workspace at ``root``, with the sessions an
-    older orbit saved as files and the events an earlier run parked in fallback files imported,
-    the notes on what was imported, and the fallback files.
+def _open_store(state: Path, root: Path) -> tuple[SqliteStore, OpenedStore]:
+    """The store in the ``state`` directory and the workspace at ``root``'s view of it, with the
+    sessions an older orbit saved as files and the events an earlier run parked in fallback files
+    imported, the notes on what was imported, and the fallback files.
 
     Exits with status 2 if the store can't be opened, the old sessions can't be imported or a
     fallback file can't be recovered.
     """
     with _exit_on(StoreError, ImportBlocked, RecoveryFailed):
-        return asyncio.run(open_workspace_store(state, root))
+        return asyncio.run(_opened(state, root))
+
+
+async def _opened(state: Path, root: Path) -> tuple[SqliteStore, OpenedStore]:
+    """The store in the ``state`` directory and the workspace at ``root``'s view of it, as
+    :func:`open_workspace_store` opens it; the store is closed if that fails."""
+    store = await SqliteStore.open(state)
+    try:
+        return store, await open_workspace_store(store, root)
+    except BaseException:
+        await store.close()
+        raise
 
 
 def _verification(config: OrbitConfig) -> Verification:

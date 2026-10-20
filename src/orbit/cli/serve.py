@@ -112,7 +112,7 @@ def serve(
             settings,
             _current_token(token_file),
             _current_revoked(user_config, settings.revoked),
-            RunFile(state, backend.store.workspace_id),
+            RunFile(state, backend.workspace_id),
             _local_tls(settings, root),
             _banner(root, token_file, backend.owner, settings),
             backend.lock,

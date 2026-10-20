@@ -50,7 +50,7 @@ from orbit.agent.external.repository import (
 from orbit.agent.external.run_file import RunFile, running_server
 from orbit.agent.external.session_import import ImportBlocked
 from orbit.agent.external.sqlite_schema import StoreError
-from orbit.agent.external.sqlite_store import SqliteStore
+from orbit.agent.external.sqlite_store import SqliteStore, WorkspaceStore
 from orbit.agent.external.store_startup import OpenedStore, open_workspace_store
 from orbit.agent.external.tls import LocalDiscoveryUnavailable, TlsError, local_tls, tls_warnings
 from orbit.agent.external.token_file import TokenError, TokenFile
@@ -63,6 +63,7 @@ from orbit.agent.external.user_config import (
 )
 from orbit.agent.external.workspace import workspace_state
 from orbit.agent.external.workspace_lock import WorkspaceLock
+from orbit.agent.external.workspace_registry import WorkspaceRegistry
 
 __all__ = [
     "MODEL_ALIASES",
@@ -111,6 +112,8 @@ __all__ = [
     "WorkspaceHost",
     "WorkspaceLock",
     "WorkspaceOwner",
+    "WorkspaceRegistry",
+    "WorkspaceStore",
     "git_top_level",
     "has_git_identity",
     "in_git_work_tree",
