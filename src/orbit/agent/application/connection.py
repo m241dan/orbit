@@ -129,6 +129,13 @@ class Connections:
             if connection.listening and self._sees(connection, envelope.session):
                 connection.deliver(envelope)
 
+    def broadcast(self, envelope: EventEnvelope) -> None:
+        """Pass ``envelope``, a session-less event, to every connection that's listening,
+        whichever session it views and whoever's command is being answered."""
+        for connection in tuple(self._open):
+            if connection.listening:
+                connection.deliver(envelope)
+
     def _sees(self, connection: "SessionConnection", session: str | None) -> bool:
         """Whether the events of ``session``, or those of none, reach ``connection``."""
         return session is None or self._viewed_by(connection) == session
@@ -196,7 +203,8 @@ class SessionConnection:
 
     Once it's welcomed, the stream gets every event the session publishes of the session it
     views and of none, but for the ``CONNECTION_EVENTS`` answering another connection's command;
-    those published :func:`to_everyone`, as a switch's or a rename's, reach it too.
+    those published :func:`to_everyone`, as a switch's ``Snapshot``, and the ``Catalog`` a change
+    to the sessions broadcasts reach it too.
     It views the open session, whichever that is, until :meth:`attach` attaches it to another.
     What answers a ``Hello``, its greeting unlogged, and the outcome of any command before one
     is welcomed, or while it views a session that isn't open, reaches this connection alone. The

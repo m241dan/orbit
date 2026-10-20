@@ -20,11 +20,13 @@ from orbit.protocol import (
     INTERNAL,
     INVALID,
     AddTask,
+    Attach,
     Catalog,
     Command,
     CommandAccepted,
     CommandEnvelope,
     CommandRefused,
+    DeleteSession,
     ErrorOccurred,
     Event,
     EventEnvelope,
@@ -53,6 +55,7 @@ from tests.agent_fakes import (
     publish,
     session_for,
 )
+from tests.test_attach import EARLIER, joined, stored, workspace
 from tests.test_replay import OPEN, notice, store_with
 from tests.test_startup_check import checked
 from tests.test_usage_monitor import LIMITS, Source
@@ -462,3 +465,79 @@ async def test_a_catalog_from_a_task_a_command_started_reaches_every_connection(
 
     assert [e for e in await taken(first) if isinstance(e, Catalog)] == [catalog]
     await session.close()
+
+
+async def test_a_new_session_gives_the_others_a_catalog_listing_it() -> None:
+    session = AgentSession()
+    asker = await welcomed(session, "asker")
+    other = await welcomed(session, "other")
+    await taken(asker), await taken(other)
+
+    await say(asker, "new", NewSession(name="Next"))
+    asked, seen = await taken(asker), await taken(other)
+    await session.close()
+
+    assert kinds(asked) == [Catalog, Snapshot]
+    assert catalog_names(asked) == catalog_names(seen) == [["Next"]]
+
+
+async def test_a_delete_gives_every_connection_a_catalog_without_the_session() -> None:
+    session = workspace(stored())
+    asker = await joined(session, "asker")
+    other = await joined(session, "other")
+
+    await say(asker, "delete", DeleteSession(session_id=EARLIER))
+    asked, seen = await taken(asker), await taken(other)
+    await session.close()
+
+    assert catalog_names(asked) == catalog_names(seen) == [["today"]]
+
+
+async def test_a_closed_connection_gets_no_catalog_after_a_rename() -> None:
+    session = AgentSession()
+    asker = await welcomed(session, "asker")
+    closed = await welcomed(session, "closed")
+    await taken(asker), await taken(closed)
+    await closed.close()
+
+    await say(asker, "rename", RenameSession(session_id=session.saved_session.id, name="Kept"))
+
+    assert await everything(closed) == []
+    assert catalog_names(await taken(asker)) == [["Kept"]]
+    await session.close()
+
+
+async def test_a_connection_not_yet_welcomed_gets_only_its_greetings_catalog() -> None:
+    session = AgentSession()
+    asker = await welcomed(session, "asker")
+    await taken(asker)
+    go = asyncio.Event()
+    fetch = session._greeting.catalog
+
+    async def slow() -> Catalog:
+        await go.wait()
+        return await fetch()
+
+    session._greeting = replace(session._greeting, catalog=slow)
+    joining = session.connect()
+    greeting = asyncio.create_task(say(joining, "joining", HELLO))
+    await asyncio.sleep(0.01)
+    await say(asker, "rename", RenameSession(session_id=session.saved_session.id, name="Kept"))
+    go.set()
+    await greeting
+
+    assert catalog_names(await taken(joining)) == [["Kept"]]
+    await session.close()
+
+
+async def test_attaching_to_the_open_session_gives_only_the_asker_a_snapshot() -> None:
+    session = workspace(stored())
+    asker = await joined(session, "asker")
+    other = await joined(session, "other")
+
+    await say(asker, "attach", Attach(session=session.saved_session.id))
+    asked, seen = await taken(asker), await taken(other)
+    await session.close()
+
+    assert kinds(asked) == [Snapshot]
+    assert kinds(seen) == []

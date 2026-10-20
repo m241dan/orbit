@@ -169,11 +169,12 @@ class AgentSession:
     one-off notices: the workspace, no verification steps, the ``startup_notes``, work left by
     earlier runs; these reach only the connection whose ``Hello`` they answer, as a
     ``HistoryPage`` does the one asking. Every switch of session ends with a ``Catalog`` and a
-    ``Snapshot`` too, and a rename or delete sends a ``Catalog``; these, the session's new
-    state, reach every connection viewing it. Every connection gets a ``SessionStateChanged``
-    whenever whether the open session runs work, or how many connections view a session,
-    changes: a connection views the open session once its greeting is sent, until it closes or
-    ``Attach``\\es to another.
+    ``Snapshot`` too, and a rename or delete sends a ``Catalog``; each such ``Catalog`` reaches
+    every listening connection, so every frontend's picker follows new, renamed and deleted
+    sessions, and the ``Snapshot``, the session's new state, every connection viewing it.
+    Every connection gets a ``SessionStateChanged`` whenever whether the open session runs
+    work, or how many connections view a session, changes: a connection views the open
+    session once its greeting is sent, until it closes or ``Attach``\\es to another.
     ``SessionViews`` attaches connections: to a saved session that isn't open, as a read-only
     view whose ``Snapshot`` comes from its record and its log, and where only ``History``,
     ``RenameSession``, ``DeleteSession`` and ``Attach`` work. A connection gets the events of
@@ -353,6 +354,7 @@ class AgentSession:
             lambda: self._startup is not None and self._startup.running,
             self._snapshot,
             self._catalog,
+            lambda catalog: self._connections.broadcast(self._events.stamp(catalog)),
             lambda kept: self._views.switching(kept),
         )
         return SessionSwitcher(parts, self._settings, self._events, picking)

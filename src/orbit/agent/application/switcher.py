@@ -72,8 +72,9 @@ class SwitchParts:
     its planner ``seat``, its review ``lane`` and ``work`` lane, if any, and whether
     ``tasks_running`` now or the startup check is ``checking``; the ``snapshot`` of the session
     open, last active then, that follows a switch; the ``catalog`` holding the sessions given,
-    sent whenever they change; and ``switching``, called as a switch is no longer refused, just
-    before the session open is another, with whether the session left stays saved."""
+    which ``broadcast`` sends every listening connection whenever they change; and
+    ``switching``, called as a switch is no longer refused, just before the session open is
+    another, with whether the session left stays saved."""
 
     keeper: SessionKeeper
     tasks: Tasks
@@ -84,6 +85,7 @@ class SwitchParts:
     checking: Callable[[], bool]
     snapshot: Callable[[datetime | None], Awaitable[Snapshot]]
     catalog: Callable[[tuple[SessionSummary, ...]], Catalog]
+    broadcast: Callable[[Catalog], None]
     switching: Callable[[bool], None]
 
 
@@ -145,8 +147,9 @@ class SessionSwitcher:
         return self._parts.catalog(await self._sessions())
 
     async def publish_catalog(self) -> None:
-        """Publish the catalog, holding the sessions as they are now, to every connection."""
-        await self._to_everyone(await self.catalog())
+        """Send the catalog, holding the sessions as they are now, to every listening
+        connection, whichever session it views."""
+        self._parts.broadcast(await self.catalog())
 
     async def _to_everyone(self, event: Event) -> None:
         """Publish ``event``, the session's new state, to every connection that views it."""

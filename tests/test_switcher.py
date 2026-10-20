@@ -103,6 +103,7 @@ def switcher_for(
         lambda: held.checking,
         held.snapshot,
         held.catalog,
+        events.put_nowait,
         held.switches.append,
     )
     held.owned = SessionSettings(held.owned.given, pinned)

@@ -107,7 +107,11 @@ as current. `Hello` attaches the connection to the workspace's open session (see
 
 Switching sessions works the way joining does: activating, starting or picking a session sends
 a `Catalog` and then a `Snapshot` of the session now open (see [Activation](#activation)). A
-rename or delete sends a `Catalog`.
+rename or delete sends a `Catalog`. Each of these Catalogs, after a new session, an activation, a
+rename or a delete, reaches every listening connection, not just the one whose command made the
+change, so every frontend's picker follows new, renamed and deleted sessions; the connection that
+asked gets it once, before its `Snapshot`. Orbit sends no Catalog when only a session's state
+changes.
 A frontend replaces the conversation it shows with every Snapshot's transcript, so joining
 shows where the session left off and a switch shows the session switched to.
 `SessionsListed` only answers `ListSessions`, and after a rename or delete.

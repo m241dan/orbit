@@ -127,7 +127,7 @@ offers only `New session`. Each row shows the session's name, when it was last a
 planner turn or the startup check), `viewed by N` when N other frontends view it, how many of its
 tasks stand at each status, by the task list's icons (`3 ✅ 2 ⏳ 1 📝`), and what they cost
 (`1.2M tok · $0.84`); `●` marks the session this chat views. The marks follow the sessions live while
-the picker is open. `j`/`k` (or the arrow keys) move and `enter` picks the highlighted session. On
+the picker is open, as do sessions another frontend starts, renames or deletes. `j`/`k` (or the arrow keys) move and `enter` picks the highlighted session. On
 `New session`, `enter` asks for a name: `enter` starts the session, named for the date and time if
 you leave the name empty, and `esc` goes back to the list. `esc` on the list quits orbit. Any draft
 orbit added before you picked, such as a fix for a step that failed the startup check, carries over

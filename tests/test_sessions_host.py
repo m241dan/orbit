@@ -89,6 +89,21 @@ async def test_a_catalog_while_shown_replaces_the_rows_in_place() -> None:
         assert screen.query_one(OptionList).option_count == 3
 
 
+async def test_a_catalog_listing_a_session_made_elsewhere_shows_it_while_shown() -> None:
+    app = Host()
+    made = SessionSummary(id="made", name="made elsewhere")
+    async with app.run_test() as pilot:
+        app.host.follow(catalog(NOW, OLD))
+        app.host.open()
+        await pilot.pause()
+        app.host.follow(catalog(made, NOW, OLD))
+        await pilot.pause()
+        [screen] = app.sessions_screens()
+        options = screen.query_one(OptionList)
+        labels = [str(options.get_option_at_index(i).prompt) for i in range(options.option_count)]
+        assert any("made elsewhere" in label for label in labels)
+
+
 async def test_a_state_change_while_shown_updates_its_row() -> None:
     app = Host()
     async with app.run_test() as pilot:
