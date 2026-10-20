@@ -172,7 +172,9 @@ from orbit.protocol.transport import (
     MESSAGE_TOO_BIG,
     NORMAL,
     POLICY_VIOLATION,
+    SHUTTING_DOWN,
     UNAUTHORIZED,
+    UNAVAILABLE,
     bearer_header,
 )
 from orbit.protocol.wire import ProtocolError, decode_command, decode_event, encode
@@ -215,6 +217,7 @@ __all__ = [
     "REVIEW_ORIGIN",
     "SAVE_FAILED",
     "SESSIONLESS_EVENTS",
+    "SHUTTING_DOWN",
     "STARTUP_TASK",
     "STORAGE_FAILED",
     "SUPER_REVIEW",
@@ -222,6 +225,7 @@ __all__ = [
     "SUPER_REVIEW_ORIGIN",
     "TIMED_OUT",
     "UNAUTHORIZED",
+    "UNAVAILABLE",
     "UNKNOWN",
     "WORK_LANE",
     "WRONG_SESSION",

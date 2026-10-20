@@ -383,7 +383,8 @@ outcomes of other connections' commands included, but for the events answering o
   closes the WebSocket with code 1008 and the reason `too far behind`, and the session and its
   other connections carry on; the frontend reconnects with `Hello`'s `since` to catch up.
 - **Shutting down**: as the server stops, after cancelling the work in progress, it closes every
-  WebSocket with code 1001 and the reason `orbit serve is shutting down`.
+  WebSocket with code 1001 and the reason `orbit serve is shutting down`. An upgrade that
+  arrives as it stops is answered HTTP 503, with that reason as the body, and no WebSocket opens.
 - A stream that ends otherwise, as an incompatible `Hello`'s does, closes the WebSocket with code
   1000. A frontend doesn't reconnect after it, as the same `Hello` would be refused again.
 - **Health checks**: `GET /healthz` and `GET /readyz` answer on the same port without the token,

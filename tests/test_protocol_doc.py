@@ -1,4 +1,5 @@
-"""The protocol document: its code tables list every refusal and error code the protocol has."""
+"""The protocol document: its code tables list every refusal and error code the protocol has,
+and its Transport section states the transport's close codes, statuses, reason and header."""
 
 import re
 from pathlib import Path
@@ -9,22 +10,37 @@ from orbit.protocol import (
     CHECKS_EXHAUSTED,
     ERROR_CODES,
     GIT_FAILED,
+    GOING_AWAY,
     INCOMPATIBLE,
     INTERNAL,
     INVALID,
     LOCKED,
+    MESSAGE_TOO_BIG,
+    NORMAL,
     NOT_ACTIVE,
     NOT_CONFIGURED,
+    POLICY_VIOLATION,
     REFUSAL_CODES,
     SAVE_FAILED,
+    SHUTTING_DOWN,
     STORAGE_FAILED,
     TIMED_OUT,
+    UNAUTHORIZED,
+    UNAVAILABLE,
     UNKNOWN,
     WRONG_SESSION,
+    bearer_header,
 )
 
 PROTOCOL_DOC = Path(__file__).parent.parent / "docs" / "protocol.md"
 CODE_ROW = re.compile(r"^\| `(\w+)` \|", re.MULTILINE)
+TRANSPORT_PHRASES = (
+    *(f"code {code}" for code in (NORMAL, GOING_AWAY, POLICY_VIOLATION, MESSAGE_TOO_BIG)),
+    *(f"HTTP {status}" for status in (UNAUTHORIZED, UNAVAILABLE)),
+    f"the reason `{SHUTTING_DOWN}`",
+    *(f"`{name}: {value}`" for name, value in bearer_header("<token>").items()),
+)
+"""What the Transport section must say for each of the transport's constants."""
 
 
 def code_tables(markdown: str) -> list[set[str]]:
@@ -136,3 +152,29 @@ def test_protocol_doc_says_a_refusal_may_carry_internal() -> None:
     refused = re.search(r"`CommandRefused` says why in `code`,[^.]*\.", section)
     assert refused is not None
     assert f"`{INTERNAL}`" in refused.group()
+
+
+def transport_problems(markdown: str) -> list[str]:
+    """The transport phrases ``markdown``'s ``## Transport`` section doesn't say."""
+    section = markdown.split("\n## Transport\n", 1)[1].split("\n## ", 1)[0]
+    flat = " ".join(section.split())
+    return [f"it doesn't say {phrase}" for phrase in TRANSPORT_PHRASES if phrase not in flat]
+
+
+def transport_doc() -> str:
+    """A small protocol doc whose Transport section says every transport phrase."""
+    return f"# Protocol\n\n## Transport\n\n{'. '.join(TRANSPORT_PHRASES)}.\n\n## Later\n"
+
+
+def test_a_transport_section_saying_every_phrase_has_no_problems() -> None:
+    assert transport_problems(transport_doc()) == []
+
+
+def test_a_transport_phrase_only_outside_the_section_is_a_problem() -> None:
+    doc = transport_doc().replace(f"code {GOING_AWAY}", "code 4000") + f"code {GOING_AWAY}\n"
+    assert transport_problems(doc) == [f"it doesn't say code {GOING_AWAY}"]
+
+
+def test_protocol_doc_transport_states_the_transport_constants() -> None:
+    problems = transport_problems(PROTOCOL_DOC.read_text())
+    assert not problems, f"docs/protocol.md's Transport section is wrong: {'; '.join(problems)}"

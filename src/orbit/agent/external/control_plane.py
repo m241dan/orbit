@@ -53,6 +53,9 @@ from orbit.protocol import (
     MESSAGE_TOO_BIG,
     NORMAL,
     POLICY_VIOLATION,
+    SHUTTING_DOWN,
+    UNAUTHORIZED,
+    UNAVAILABLE,
     UNKNOWN,
     CommandEnvelope,
     Hello,
@@ -60,12 +63,8 @@ from orbit.protocol import (
     decode_command,
     encode,
 )
-from orbit.protocol import UNAUTHORIZED as UNAUTHORIZED_STATUS
 
-SHUTTING_DOWN = "orbit serve is shutting down"
-"""The close reason as the server shuts down."""
-
-UNAUTHORIZED = "Send the token in orbit's token file as Authorization: Bearer <token>."
+UNAUTHORIZED_BODY = "Send the token in orbit's token file as Authorization: Bearer <token>."
 """The body of the HTTP 401 a frontend without the token gets."""
 
 BINARY_FRAME = "Send each envelope as JSON in a text frame."
@@ -400,10 +399,10 @@ class ControlPlaneServer:
         if self._mutual:
             refusal = self._uncertified(client_certificate(websocket.scope))
         else:
-            unauthorized = PlainTextResponse(UNAUTHORIZED, UNAUTHORIZED_STATUS)
+            unauthorized = PlainTextResponse(UNAUTHORIZED_BODY, UNAUTHORIZED)
             refusal = None if self._authorized(websocket) else unauthorized
         if refusal is None and self._stopping:
-            return PlainTextResponse(SHUTTING_DOWN, 503)
+            return PlainTextResponse(SHUTTING_DOWN, UNAVAILABLE)
         return refusal
 
     def _no_certificate(self) -> PlainTextResponse:
@@ -412,7 +411,7 @@ class ControlPlaneServer:
         message = tls_messages.CLIENT_CERT_REQUIRED.format(client_ca=self._settings.client_ca)
         self._say(message)
         headers = {"WWW-Authenticate": CERTIFICATE_CHALLENGE}
-        return PlainTextResponse(message, UNAUTHORIZED_STATUS, headers=headers)
+        return PlainTextResponse(message, UNAUTHORIZED, headers=headers)
 
     def _uncertified(self, der: bytes | None) -> PlainTextResponse | None:
         """What turns away a frontend that showed the client certificate ``der``, in DER, if

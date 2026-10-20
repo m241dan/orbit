@@ -14,8 +14,15 @@ too far behind."""
 MESSAGE_TOO_BIG = 1009
 """The close code of a WebSocket a message over the limit was sent to, or from."""
 
+SHUTTING_DOWN = "orbit serve is shutting down"
+"""The close reason of every WebSocket, and the body of every upgrade turned away, as the
+control plane shuts down."""
+
 UNAUTHORIZED = 401
 """The HTTP status of an upgrade turned away for its token."""
+
+UNAVAILABLE = 503
+"""The HTTP status of an upgrade turned away as the control plane shuts down."""
 
 CERTIFICATE_CHALLENGE = "ClientCertificate"
 """The ``WWW-Authenticate`` challenge of an HTTP 401 turning away, under mutual TLS, a client

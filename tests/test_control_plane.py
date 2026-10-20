@@ -16,8 +16,7 @@ from orbit.agent.application import connection as connection_module
 from orbit.agent.application.connection import SessionConnection
 from orbit.agent.domain.server import ServerSettings
 from orbit.agent.external.control_plane import (
-    SHUTTING_DOWN,
-    UNAUTHORIZED,
+    UNAUTHORIZED_BODY,
     ControlPlaneServer,
     ListenFailed,
     _Conversation,
@@ -32,6 +31,9 @@ from orbit.protocol import (
     NORMAL,
     POLICY_VIOLATION,
     PROTOCOL_VERSION,
+    SHUTTING_DOWN,
+    UNAUTHORIZED,
+    UNAVAILABLE,
     UNKNOWN,
     AddTask,
     Catalog,
@@ -448,7 +450,10 @@ class Counted:
 
 @pytest.mark.parametrize(
     ("token", "denied"),
-    [(TOKEN, (503, SHUTTING_DOWN.encode())), ("wrong", (401, UNAUTHORIZED.encode()))],
+    [
+        (TOKEN, (UNAVAILABLE, SHUTTING_DOWN.encode())),
+        ("wrong", (UNAUTHORIZED, UNAUTHORIZED_BODY.encode())),
+    ],
 )
 async def test_a_websocket_arriving_as_the_server_stops_is_turned_away(
     token: str, denied: tuple[int, bytes]
