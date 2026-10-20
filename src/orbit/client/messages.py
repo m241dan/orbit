@@ -50,6 +50,53 @@ TOKEN_REFUSED = (
 )
 """A token, read from the file at ``path``, the control plane turned away."""
 
+CLIENT_CERT_REQUIRED = (
+    "The server requires a client certificate. {url} closed the connection unanswered, as a"
+    " server under mutual TLS does for a client showing none: pass --cert and --key with a"
+    " certificate its client CA signed."
+)
+"""A ``wss://`` server at ``url`` that closed the connection before answering a client showing
+no certificate."""
+
+CLIENT_CERT_REJECTED = (
+    "The server rejected the client certificate. {url} closed the connection unanswered, as a"
+    " server under mutual TLS does for a certificate its client CA didn't sign: pass --cert"
+    " and --key with one signed by the CA in the server's client_ca."
+)
+"""A ``wss://`` server at ``url`` that closed the connection before answering a client showing
+a certificate."""
+
+REVOKED = (
+    "The server has revoked the client certificate. {url} refused it with HTTP 403: ask its"
+    " operator for a new certificate, or to remove its fingerprint from [server] revoked."
+)
+"""A server at ``url`` that turned the client certificate away as revoked."""
+
+TOKEN_EXPECTED = (
+    "The server wants a token, not a client certificate. {url} doesn't serve mutual TLS: pass"
+    " --token-file rather than --cert and --key."
+)
+"""A server at ``url`` that turned away a client showing a certificate rather than a token."""
+
+KEY_READABLE = (
+    "The private key can be read by others. {path} must be readable by you alone: run"
+    " chmod 600 {path}."
+)
+"""A client certificate's private key at ``path`` others can read."""
+
+CLIENT_CERT_UNREADABLE = (
+    "The client certificate can't be used. {cert} with the key {key}: {reason}; check the paths"
+    " given to --cert and --key, and that the key is the certificate's."
+)
+"""A client certificate, ``cert``, and key, ``key``, that can't be read or don't match, for
+``reason``."""
+
+CERT_WITHOUT_KEY = (
+    "A client certificate goes with its key. Only {given} was given: pass --cert and --key"
+    " together."
+)
+"""A client certificate or key, the one ``given``, without the other."""
+
 ALL = (
     UNKNOWN_CA,
     HOSTNAME_MISMATCH,
@@ -59,5 +106,12 @@ ALL = (
     PLAINTEXT_NOT_LOOPBACK,
     CA_UNREADABLE,
     TOKEN_REFUSED,
+    CLIENT_CERT_REQUIRED,
+    CLIENT_CERT_REJECTED,
+    REVOKED,
+    TOKEN_EXPECTED,
+    KEY_READABLE,
+    CLIENT_CERT_UNREADABLE,
+    CERT_WITHOUT_KEY,
 )
 """Every message, for README.md's table to list."""

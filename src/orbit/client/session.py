@@ -102,9 +102,9 @@ def _closing(websocket: ClientConnection) -> Close | None:
 
 class WebSocketSession:
     """The control plane at ``url``, shown the token in ``token_file``, read afresh for each
-    attempt to connect, so a rotated one is shown on reconnecting; a lost connection is retried
-    as ``backoff`` says. A ``wss://`` URL is verified with ``ssl_context``, or the system's
-    trusted CAs without one.
+    attempt to connect, so a rotated one is shown on reconnecting, or without one the client
+    certificate in ``ssl_context``; a lost connection is retried as ``backoff`` says. A
+    ``wss://`` URL is verified with ``ssl_context``, or the system's trusted CAs without one.
 
     Raises :class:`PlaintextRefused` for a ``ws://`` URL to a host beyond loopback, before
     connecting. It connects once it's first used. While the connection is down, :meth:`send` raises
@@ -114,7 +114,7 @@ class WebSocketSession:
     def __init__(
         self,
         url: str,
-        token_file: Path,
+        token_file: Path | None,
         backoff: Backoff = BACKOFF,
         ssl_context: ssl.SSLContext | None = None,
     ) -> None:
@@ -231,12 +231,10 @@ class WebSocketSession:
 
     async def _connect(self) -> ClientConnection | None:
         """A new connection to the control plane, shown the token in the token file as it is
-        now, or none if it can't be made; raises :class:`_TurnedAway` if the token is, or can't
-        be read, and :class:`HandshakeRefused` if it can't be made safely."""
-        try:
-            token = read_token(self._token_file)
-        except TokenUnreadable as error:
-            raise _TurnedAway(str(error)) from None
+        now, if there's one, or none if it can't be made; raises :class:`_TurnedAway` if the
+        token is, or can't be read, and :class:`HandshakeRefused` if it can't be made
+        safely."""
+        token = self._token()
         try:
             return await open_connection(
                 self.url,
@@ -248,6 +246,18 @@ class WebSocketSession:
             )
         except TokenRejected:
             raise _TurnedAway(messages.TOKEN_REFUSED.format(path=self._token_file)) from None
+
+    def _token(self) -> str | None:
+        """The token in the token file as it is now; none without a token file.
+
+        Raises :class:`_TurnedAway` if it can't be read.
+        """
+        if self._token_file is None:
+            return None
+        try:
+            return read_token(self._token_file)
+        except TokenUnreadable as error:
+            raise _TurnedAway(str(error)) from None
 
     async def _linked(self, websocket: ClientConnection) -> bool:
         """Greet the control plane on ``websocket`` with the last ``Hello``, if any, and take

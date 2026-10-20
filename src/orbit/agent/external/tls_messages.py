@@ -15,12 +15,6 @@ NOT_LOOPBACK = (
 )
 """A plaintext server asked to listen beyond loopback, on ``host``."""
 
-MTLS_NOT_SUPPORTED = (
-    "Mutual TLS isn't supported yet. Use --tls tls, or tls = 'tls' in [server], with the token"
-    " for now."
-)
-"""The ``mtls`` mode, which a later release serves."""
-
 UNREADABLE = "A TLS file can't be read. {path}: {reason}; check the path in [server] or the flag."
 """A certificate or key at ``path`` that can't be read, or isn't PEM, for ``reason``."""
 
@@ -54,15 +48,37 @@ EXPIRING = (
 )
 """The warning for a server certificate, ``cert``, that expires within 14 days."""
 
+CLIENT_CERT_REQUIRED = (
+    "A client showed no certificate. Under tls = 'mtls' each client needs a certificate"
+    " {client_ca} signed: make it one and pass it to orbit chat with --cert and --key."
+)
+"""A client refused under mutual TLS for showing no certificate, ``client_ca`` the CA that
+signs them."""
+
+CLIENT_CERT_UNTRUSTED = (
+    "A client's certificate isn't signed by the client CA. Under tls = 'mtls' clients need a"
+    " certificate {client_ca} signed: sign the client's with it, or set client_ca to the CA"
+    " that signed it."
+)
+"""A client refused under mutual TLS for a certificate ``client_ca`` didn't sign."""
+
+REVOKED = (
+    "The client's certificate is revoked. Its fingerprint {fingerprint} is in [server] revoked:"
+    " give the client a new certificate, or remove the fingerprint to admit it again."
+)
+"""The body of the HTTP 403 a client whose certificate, of ``fingerprint``, is revoked gets."""
+
 ALL = (
     MISSING_FILE,
     NOT_LOOPBACK,
-    MTLS_NOT_SUPPORTED,
     UNREADABLE,
     KEY_READABLE,
     KEY_MISMATCH,
     EXPIRED,
     NOT_YET_VALID,
     EXPIRING,
+    CLIENT_CERT_REQUIRED,
+    CLIENT_CERT_UNTRUSTED,
+    REVOKED,
 )
 """Every message, for README.md's table to list."""

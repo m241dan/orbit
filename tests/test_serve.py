@@ -21,6 +21,7 @@ from websockets.exceptions import ConnectionClosed, InvalidStatus
 from websockets.sync.client import ClientConnection, connect
 
 from orbit.agent import ControlPlaneServer, RunFile, TokenFile, WorkspaceLock, WorkspaceOwner
+from orbit.agent.domain.server import client_fingerprint
 from orbit.agent.external.sqlite_store import find_workspace_id
 from orbit.cli import app, chat, serve
 from orbit.protocol import (
@@ -38,7 +39,7 @@ from orbit.protocol import (
     decode_event,
     encode,
 )
-from tests.tls_certs import DAY, ServerFiles, make_ca, make_server, other_key
+from tests.tls_certs import DAY, Ca, ServerFiles, make_ca, make_client, make_server, other_key
 
 runner = CliRunner()
 TASK = TaskSpec(prompt="Add a flag.")
@@ -345,6 +346,61 @@ def test_serve_over_tls_welcomes_a_frontend_trusting_its_ca_beyond_loopback(
     assert [type(e) for e in frontend.events] == [Welcome, Catalog, Snapshot]
     assert str(frontend.run_file["url"]).startswith("wss://0.0.0.0:")
     assert "orbit-tests connected from" in output
+
+
+def _mtls_config(config_dir: Path, ca: Ca, files: ServerFiles, revoked: str = "") -> None:
+    """Have the config file in ``config_dir`` serve mutual TLS with ``files`` and the client CA
+    ``ca``, revoking ``revoked`` if given."""
+    config_dir.mkdir(exist_ok=True)
+    (config_dir / "config.toml").write_text(
+        f'[server]\nport = 0\ntls = "mtls"\ncert = "{files.cert}"\nkey = "{files.key}"\n'
+        f'client_ca = "{ca.path}"\nrevoked = [{f'"{revoked}"' if revoked else ""}]\n'
+    )
+
+
+def _trusting(ca: Ca, client: ServerFiles) -> ssl.SSLContext:
+    context = ssl.create_default_context(cafile=ca.path)
+    context.load_cert_chain(client.cert, client.key)
+    return context
+
+
+def test_serve_over_mtls_names_the_client_certificate_and_revokes_it_without_restarting(
+    state: Path, config_dir: Path, tmp_path: Path
+) -> None:
+    ca = make_ca(tmp_path)
+    files = make_server(ca, tmp_path)
+    client = make_client(ca, tmp_path)
+    fingerprint = client_fingerprint(ssl.PEM_cert_to_DER_cert(client.cert.read_text()))
+    _mtls_config(config_dir, ca, files)
+    statuses: list[int] = []
+    frontend = Frontend(state, config_dir, trust=_trusting(ca, client))
+
+    def revokes(websocket: ClientConnection) -> list[Event]:
+        _mtls_config(config_dir, ca, files, revoked=fingerprint)
+        with pytest.raises(InvalidStatus) as refused:
+            connect(str(frontend.run_file["url"]), ssl=frontend.trust)
+        statuses.append(refused.value.response.status_code)
+        return adds_a_task(websocket)
+
+    frontend.work = revokes
+    output = served(frontend)
+
+    assert statuses == [403]
+    assert f"as CN=laptop ({fingerprint})." in output
+    assert f"frontends show a client certificate {ca.path} signed." in output
+
+
+def test_while_the_config_is_invalid_the_last_revoked_fingerprints_stay(
+    config_dir: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    config_dir.mkdir()
+    path = config_dir / "config.toml"
+    path.write_text('[server]\nrevoked = ["AB:CD"]\n')
+    revoked = serve._current_revoked(config_dir, ())
+    assert revoked() == ("AB:CD",)
+    path.write_text("[server]\nrevoked = 'all'\n")
+    assert revoked() == ("AB:CD",)
+    assert "server.revoked" in caplog.text
 
 
 def test_serve_takes_its_tls_settings_from_the_config_file(

@@ -11,7 +11,7 @@ from typer.testing import CliRunner
 from orbit.cli import app
 from orbit.client import WebSocketSession, messages
 from orbit.protocol import Command, NewSession
-from tests.tls_certs import make_ca
+from tests.tls_certs import make_ca, make_client
 
 runner = CliRunner()
 URL = "ws://127.0.0.1:7433/"
@@ -23,7 +23,7 @@ class FakeClient:
     with which context."""
 
     url: str
-    token_file: Path
+    token_file: Path | None
     ssl_context: ssl.SSLContext | None = None
 
 
@@ -194,4 +194,37 @@ def test_a_missing_token_file_exits_naming_it(tmp_path: Path) -> None:
     result = runner.invoke(app, ["chat", "--connect", URL])
     assert result.exit_code == 2
     assert f"Can't read the token file {tmp_path / 'config' / 'token'}: " in result.stderr
+    assert FakeApp.built == []
+
+
+def test_a_client_certificate_is_shown_rather_than_the_token(tmp_path: Path) -> None:
+    ca = make_ca(tmp_path)
+    client = make_client(ca, tmp_path)
+    url = "wss://orbit.example.lan:7433/"
+    flags = ["--ca", str(ca.path), "--cert", str(client.cert), "--key", str(client.key)]
+    result = runner.invoke(app, ["chat", "--connect", url, *flags])
+    assert result.exit_code == 0, result.output
+    session = FakeApp.built[0].session
+    assert isinstance(session, FakeClient) and session.token_file is None
+    assert session.ssl_context is not None
+
+
+def test_a_client_certificate_cant_go_with_a_token_file(tmp_path: Path) -> None:
+    client = make_client(make_ca(tmp_path), tmp_path)
+    flags = ["--cert", str(client.cert), "--key", str(client.key)]
+    result = runner.invoke(
+        app, ["chat", "--connect", URL, *flags, "--token-file", str(tmp_path / "token")]
+    )
+    assert result.exit_code == 2
+    assert "can't go with --token-file" in result.stderr
+    assert FakeApp.built == []
+
+
+def test_a_client_key_others_can_read_exits_with_the_chmod_that_fixes_it(tmp_path: Path) -> None:
+    client = make_client(make_ca(tmp_path), tmp_path)
+    client.key.chmod(0o644)
+    flags = ["--cert", str(client.cert), "--key", str(client.key)]
+    result = runner.invoke(app, ["chat", "--connect", "wss://orbit.example.lan/", *flags])
+    assert result.exit_code == 2
+    assert messages.KEY_READABLE.format(path=client.key) in result.stderr
     assert FakeApp.built == []

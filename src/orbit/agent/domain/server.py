@@ -1,7 +1,9 @@
 """Where ``orbit serve`` listens: the user's server settings, which hosts it may bind, how it
 serves TLS, and what its run file says while it does."""
 
+import hashlib
 import ipaddress
+from collections.abc import Iterable
 from datetime import datetime, timedelta
 from enum import StrEnum
 from typing import Any, Literal
@@ -68,16 +70,34 @@ def certificate_dates(not_before: datetime, not_after: datetime, now: datetime) 
 
 class ServerSettings(TlsSettings):
     """The user config's ``[server]``: the ``host`` and ``port`` ``orbit serve`` listens on (0
-    lets the system choose one), ``max_message_mb``, the largest message either way, and its TLS
-    settings."""
+    lets the system choose one), ``max_message_mb``, the largest message either way, its TLS
+    settings, and the fingerprints of the client certificates ``revoked`` under mutual TLS."""
 
     host: str = Field(default="127.0.0.1", min_length=1)
     port: int = Field(default=7433, ge=0, le=65535)
     max_message_mb: int = Field(default=DEFAULT_MAX_MESSAGE_MB, ge=1)
+    revoked: tuple[str, ...] = Field(default=(), strict=False)  # A TOML array is a list.
 
     @property
     def max_message_bytes(self) -> int:
         return self.max_message_mb * 1024 * 1024
+
+
+def client_fingerprint(der: bytes) -> str:
+    """The SHA-256 fingerprint of the certificate ``der``, in DER, as colon-separated
+    uppercase hex."""
+    return ":".join(f"{byte:02X}" for byte in hashlib.sha256(der).digest())
+
+
+def is_revoked(fingerprint: str, revoked: Iterable[str]) -> bool:
+    """Whether ``fingerprint`` is among the ``revoked`` ones, which may be written in either
+    case and with or without colons."""
+    return _bare(fingerprint) in {_bare(entry) for entry in revoked}
+
+
+def _bare(fingerprint: str) -> str:
+    """``fingerprint`` without colons or spaces, in uppercase."""
+    return fingerprint.replace(":", "").replace(" ", "").upper()
 
 
 class _UserConfig(BaseModel):

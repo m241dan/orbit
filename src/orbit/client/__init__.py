@@ -2,7 +2,12 @@
 
 from orbit.client.probe import accepts
 from orbit.client.session import BACKOFF, Backoff, WebSocketSession
-from orbit.client.tls import CaUnreadable, PlaintextRefused, client_ssl_context
+from orbit.client.tls import (
+    CaUnreadable,
+    ClientCertUnusable,
+    PlaintextRefused,
+    client_ssl_context,
+)
 from orbit.client.token import TokenUnreadable, read_token
 from orbit.client.upgrade import TokenRejected
 
@@ -10,6 +15,7 @@ __all__ = [
     "BACKOFF",
     "Backoff",
     "CaUnreadable",
+    "ClientCertUnusable",
     "PlaintextRefused",
     "TokenRejected",
     "TokenUnreadable",

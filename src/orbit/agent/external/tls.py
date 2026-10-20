@@ -1,5 +1,6 @@
 """Whether ``orbit serve`` can serve as its settings say: plaintext on loopback alone, and over
-TLS a private key readable by its owner alone, matching a certificate that's valid now."""
+TLS a private key readable by its owner alone, matching a certificate that's valid now, and
+under mutual TLS a client CA that can be read."""
 
 import ssl
 import stat
@@ -33,6 +34,9 @@ def tls_warnings(settings: ServerSettings, now: datetime | None = None) -> tuple
         _check_plaintext(settings.host)
         return ()
     cert, key = _files(settings)
+    if settings.tls == "mtls":
+        assert settings.client_ca is not None  # As _files checked.
+        _certificate(Path(settings.client_ca))
     _check_key(key)
     warnings = _check_dates(cert, now or datetime.now(UTC))
     _check_pair(cert, key)
@@ -48,14 +52,12 @@ def _check_plaintext(host: str) -> None:
 def _files(settings: ServerSettings) -> tuple[Path, Path]:
     """The certificate and private key ``settings`` name.
 
-    Raises :class:`TlsError` if their mode is missing one of its files, or is mutual TLS.
+    Raises :class:`TlsError` if their mode is missing one of its files.
     """
     missing = missing_tls_key(settings)
     if missing is not None:
         flag = missing.replace("_", "-")
         raise TlsError(tls_messages.MISSING_FILE.format(mode=settings.tls, key=missing, flag=flag))
-    if settings.tls == "mtls":
-        raise TlsError(tls_messages.MTLS_NOT_SUPPORTED)
     assert settings.cert is not None and settings.key is not None
     return Path(settings.cert), Path(settings.key)
 

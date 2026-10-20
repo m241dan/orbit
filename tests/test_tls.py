@@ -56,12 +56,6 @@ def test_a_mode_missing_a_file_is_refused_naming_its_key(
         tls_warnings(settings)
 
 
-def test_mutual_tls_is_refused_as_not_supported_yet() -> None:
-    settings = ServerSettings(tls="mtls", cert="c.pem", key="k.pem", client_ca="ca.pem")
-    with pytest.raises(TlsError, match=r"^Mutual TLS isn't supported yet"):
-        tls_warnings(settings)
-
-
 def test_a_key_others_can_read_is_refused_with_the_chmod_that_fixes_it(
     files: ServerFiles,
 ) -> None:

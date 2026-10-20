@@ -4,7 +4,7 @@ import asyncio
 import logging
 import os
 import signal
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Collection, Mapping
 from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
@@ -84,7 +84,8 @@ def serve(
     the token file in your config directory. The first orbit on a repository owns it; while
     another does, this one is read-only, queueing the work it's asked to run. The first ctrl+c
     stops it, cancelling the work in progress; a second exits at once. Beyond loopback it
-    serves over TLS alone, with --tls tls and a certificate and key.
+    serves over TLS alone, with --tls tls and a certificate and key; with --tls mtls and
+    --client-ca, frontends show a client certificate that CA signed rather than the token.
     """
     profile = profile.expanduser().resolve() if profile else None
     state = resolve_state_dir(state, os.environ)
@@ -104,8 +105,9 @@ def serve(
             not backend.fresh,
             settings,
             _current_token(token_file),
+            _current_revoked(user_config, settings.revoked),
             None if owner else RunFile(state, store.workspace_id),
-            _banner(root, token_file, owner),
+            _banner(root, token_file, owner, settings),
             lock,
         )
         _serve_until_stopped(parts, profile, user_config, store)
@@ -113,15 +115,20 @@ def serve(
 
 
 def _banner(
-    root: Path, token_file: TokenFile, owner: WorkspaceOwner | None
+    root: Path, token_file: TokenFile, owner: WorkspaceOwner | None, settings: ServerSettings
 ) -> Callable[[str], str]:
     """What gives the line ``orbit serve`` prints once listening at a URL, serving the
     repository at ``root`` as its owner, or read-only while another orbit, ``owner``, owns it,
-    saying where ``token_file`` is."""
+    saying what frontends show it: where ``token_file`` is, or under mutual TLS the client CA
+    in ``settings``."""
     standing = "as its owner" if owner is None else f"read-only, as {owner.described} owns it"
+    if settings.tls == "mtls":
+        shown = f"a client certificate {settings.client_ca} signed"
+    else:
+        shown = f"the token in {token_file.path}"
 
     def banner(url: str) -> str:
-        return f"Serving {root} at {url} {standing}; frontends show the token in {token_file.path}."
+        return f"Serving {root} at {url} {standing}; frontends show {shown}."
 
     return banner
 
@@ -188,11 +195,28 @@ def _current_token(token_file: TokenFile) -> Callable[[], str]:
     return current
 
 
+def _current_revoked(config_dir: Path, first: Collection[str]) -> Callable[[], Collection[str]]:
+    """What gives the revoked fingerprints in the user config in ``config_dir`` as it is now,
+    ``first`` those it started with; while it's invalid, a warning and those last read, so a
+    fingerprint revoked stays revoked."""
+    last = [first]
+
+    def current() -> Collection[str]:
+        try:
+            last[0] = read_server(config_dir).revoked
+        except ConfigError as exc:
+            logger.warning("%s%s", INVALID_CONFIG, exc)
+        return last[0]
+
+    return current
+
+
 @dataclass(frozen=True)
 class _ServeParts:
     """What ``orbit serve`` serves: the session ``build`` makes, with the most recently active
     saved one opened if ``latest``, on the server ``settings`` say, to frontends showing the
-    token ``token`` gives as they connect, saying where it is in ``run_file``, if it owns the
+    token ``token`` gives as they connect, or under mutual TLS a certificate not among those
+    ``revoked`` gives then, saying where it is in ``run_file``, if it owns the
     repository, while it does, the ``banner`` it prints once listening, given the server's
     URL, and the workspace ``lock``, which names the server's URL while it's held."""
 
@@ -200,6 +224,7 @@ class _ServeParts:
     latest: bool
     settings: ServerSettings
     token: Callable[[], str]
+    revoked: Callable[[], Collection[str]]
     run_file: RunFile | None
     banner: Callable[[str], str]
     lock: WorkspaceLock
@@ -214,6 +239,7 @@ async def _served(parts: _ServeParts, profile: Path | None) -> None:
     with profiled(profile, "serve") if profile else nullcontext():
         session = parts.build()
         server = ControlPlaneServer(session, parts.token, parts.settings, typer.echo)
+        server.revoked = parts.revoked
         try:
             if parts.latest:
                 await session.open_latest()

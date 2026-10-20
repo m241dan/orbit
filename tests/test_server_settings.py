@@ -31,6 +31,17 @@ def test_the_files_tls_settings_are_read(tmp_path: Path) -> None:
     )
 
 
+def test_the_files_revoked_fingerprints_are_read(tmp_path: Path) -> None:
+    (tmp_path / "config.toml").write_text('[server]\nrevoked = ["AB:CD", "EF:01"]\n')
+    assert read_server(tmp_path).revoked == ("AB:CD", "EF:01")
+
+
+def test_revoked_must_hold_fingerprints(tmp_path: Path) -> None:
+    (tmp_path / "config.toml").write_text("[server]\nrevoked = [1]\n")
+    with pytest.raises(ConfigError, match="revoked"):
+        read_server(tmp_path)
+
+
 def test_the_message_limit_is_counted_in_mebibytes() -> None:
     assert ServerSettings(max_message_mb=2).max_message_bytes == 2 * 1024 * 1024
 

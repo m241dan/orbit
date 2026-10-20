@@ -882,8 +882,9 @@ frontend connected. It takes `-C` and the backend flags `chat` has (`--model`, `
 It opens the repository's most recently active saved session that no other orbit has open, or a
 new one when there's none; `--new` or `--name` start a new one. Once listening it prints one line
 with the repository, its URL, whether it owns the repository or is read-only (naming the owner)
-and the token file, then one line as each frontend connects (with the name its `Hello` gives and
-its address) and disconnects, and one as it stops; a connection closed without a `Hello`, like the
+and the token file (under mTLS, the client CA), then one line as each frontend connects (with the
+name its `Hello` gives and its address, and under mTLS its certificate's subject and SHA-256
+fingerprint) and disconnects, and one as it stops; a connection closed without a `Hello`, like the
 probe `orbit chat` makes to find a server, gets no line. Warnings and errors go to stderr. While it runs, `run/<workspace id>.json` in the state directory, readable by you
 alone, holds its URL and process id; it's removed as it stops.
 
@@ -905,7 +906,7 @@ repository with the access you give them. It's never printed or logged; don't sh
 from another machine, copy it over a trusted channel, such as `scp ~/.config/orbit/token
 other:.config/orbit/token`, and reach the server over TLS (see **TLS** below), or through an SSH tunnel to
 a loopback server, such as `ssh -L 7433:127.0.0.1:7433 server`. The token stays required over
-TLS.
+TLS; under mTLS the client certificate replaces it (see **Client certificates** below).
 
 `orbit token rotate [--config-dir PATH]` replaces the token with a new one, written whole or not at
 all and readable by you alone, and says so, naming the file but never the token. A running `orbit
@@ -930,6 +931,7 @@ cert = "/home/me/.config/orbit/tls/server.pem"      # the server certificate (--
 key = "/home/me/.config/orbit/tls/server-key.pem"   # its private key, chmod 600 (--key)
 client_ca = "/home/me/.config/orbit/tls/ca.pem"     # signs client certificates, for mtls (--client-ca)
 ca = "/home/me/.config/orbit/tls/ca.pem"            # the CA that signed cert
+revoked = []         # client certificate fingerprints refused under mtls
 ```
 
 An unknown key in `[server]`, or a value of the wrong type or out of range, stops `orbit serve`
@@ -941,7 +943,7 @@ with status 2 and a message naming the file and the key.
 | --- | --- | --- |
 | `off` (the default) | `ws://` | every frontend is on the same machine, or reaches it through an SSH tunnel or a reverse proxy that terminates TLS; plaintext listens on loopback alone |
 | `tls` | `wss://` | frontends on other machines connect directly: traffic is encrypted, the server is verified by its certificate, and frontends show the token |
-| `mtls` | `wss://` | frontends must also show a client certificate the CA signed; not supported yet, so it stops `orbit serve` with status 2 |
+| `mtls` | `wss://` | each frontend machine should have an identity of its own that can be revoked alone: frontends show a client certificate the client CA signed rather than the token |
 
 With `tls`, `orbit serve` needs `cert`, the server certificate, and `key`, its private key, both
 PEM files; a mode missing one stops it with status 2, naming the key and its flag (`mtls` also
@@ -976,6 +978,56 @@ trusting the CA (see **Connecting** below):
 orbit chat --connect wss://orbit.example.lan:7433/ --ca ~/.config/orbit/tls/ca.pem
 ```
 
+**Client certificates.** With `tls = "mtls"` (`--tls mtls --client-ca <path>`), `orbit serve`
+needs `client_ca` too, the CA that signs client certificates, and the TLS handshake refuses a
+client that shows no certificate, or one that CA didn't sign, before any WebSocket opens; `orbit
+serve` prints a line saying why. The certificate is the client's identity: the token isn't asked
+for, and any sent is ignored. Each connect line names the certificate's subject and SHA-256
+fingerprint, such as `orbit-chat connected from 192.168.1.30:51234 as CN=laptop (3F:A2:…:9C)`.
+
+To make a client certificate for each client machine, signed by the CA above (which may serve
+as `client_ca` too), make its key on the client and sign its request on the machine holding
+`ca-key.pem`:
+
+```sh
+# On the client: its key, which never leaves it, and a request to sign.
+mkdir -p ~/.config/orbit/tls && cd ~/.config/orbit/tls
+openssl req -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes \
+  -subj "/CN=laptop" -keyout laptop-key.pem -out laptop.csr
+chmod 600 laptop-key.pem
+# On the CA's machine, given laptop.csr: the certificate, sent back to the client.
+openssl x509 -req -in laptop.csr -CA ca.pem -CAkey ca-key.pem -days 365 -out laptop.pem
+# Its fingerprint, as orbit serve shows it.
+openssl x509 -in laptop.pem -noout -fingerprint -sha256
+```
+
+The server keeps `server.pem`, `server-key.pem` and `ca.pem` (as `client_ca`); each client keeps
+its own `laptop.pem` and `laptop-key.pem` and a copy of `ca.pem` to verify the server by. Only
+certificates and requests travel, never a key; `ca-key.pem` is best kept off both. Serve and
+connect with:
+
+```sh
+orbit serve --tls mtls --cert server.pem --key server-key.pem --client-ca ca.pem --host 0.0.0.0
+orbit chat --connect wss://orbit.example.lan:7433/ --ca ca.pem --cert laptop.pem --key laptop-key.pem
+```
+
+`orbit chat` with `--cert` and `--key` shows the certificate rather than the token, so they
+don't go with `--token-file`; one without the other, a key others can read (`chmod 600`), or
+files that can't be read or don't match stop it with status 2.
+
+To revoke a lost machine's certificate, add its fingerprint, as its connect line shows it (in
+either case, with or without colons), to `revoked` in `[server]`:
+
+```toml
+[server]
+revoked = ["3F:A2:…:9C"]
+```
+
+`orbit serve` reads `revoked` afresh for each new connection, so there's no restart: the next
+connection with that certificate is refused at the upgrade with HTTP 403, naming its fingerprint,
+while one already open stays open until it disconnects (restart `orbit serve` to drop it). While
+the config file is invalid, it warns and keeps the fingerprints it read last.
+
 **TLS and connection errors.** Each message `orbit serve` stops (or warns) with, and each one
 `orbit chat` stops with or shows when it can't connect, starts with what's wrong, then names the
 setting, file or URL:
@@ -984,13 +1036,15 @@ setting, file or URL:
 | --- | --- |
 | The TLS mode is missing a file. | Set the key it names in `[server]`, or pass its flag (`--cert`, `--key`, `--client-ca`). |
 | Plaintext is for loopback alone. | Serve with `--tls tls`, a certificate and key, or listen on `127.0.0.1` and reach it through an SSH tunnel. |
-| Mutual TLS isn't supported yet. | Use `tls = "tls"` with the token for now. |
 | A TLS file can't be read. | Check the path it names, in `[server]` or the flag, and that the file is PEM (an unencrypted key). |
 | The private key can be read by others. | Run the `chmod 600 <path>` it gives. |
 | The certificate and key don't match. | Give the key the certificate was made for, or make a new certificate for the key. |
 | The server certificate has expired. | Renew it, replace the file and restart `orbit serve`. |
 | The server certificate isn't valid yet. | Check the machine's clock, or make a certificate valid from now. |
 | The server certificate expires soon. | A warning: renew it and restart `orbit serve` before the date it names. |
+| A client showed no certificate. | Printed by `orbit serve` under mTLS: make the client a certificate the client CA signs, and connect with `--cert` and `--key`. |
+| A client's certificate isn't signed by the client CA. | Printed by `orbit serve` under mTLS: sign the client's certificate with the CA in `client_ca`, or set `client_ca` to the CA that signed it. |
+| The client's certificate is revoked. | The body of the HTTP 403: give the client a new certificate, or remove its fingerprint from `revoked` to admit it again. |
 | The server's certificate isn't signed by a trusted CA. | Pass `--ca` with the CA file that signed the server's certificate (the server's `ca.pem`), or set the remote's `ca`. |
 | The hostname doesn't match the server's certificate. | Connect by a name the certificate gives as a subject alternative name, or reissue it with the name you connect by. |
 | The server's certificate can't be used. | It fails verification for the reason given, such as having expired: renew it on the server, or check the client machine's clock. |
@@ -999,6 +1053,12 @@ setting, file or URL:
 | Plaintext is refused beyond loopback. | Connect with `wss://` to a server serving TLS, or through an SSH tunnel to a loopback address. |
 | The CA file can't be read. | Check the path given to `--ca`, and that the file is a PEM certificate. |
 | The control plane refused the token. | Give it the token `orbit serve` uses: copy it to the file named, or name another with `--token-file`. |
+| The server requires a client certificate. | The server serves mTLS: pass `--cert` and `--key` with a certificate its client CA signed. |
+| The server rejected the client certificate. | Use a certificate signed by the CA the server has as `client_ca`. |
+| The server has revoked the client certificate. | Ask the server's operator for a new certificate, or to remove its fingerprint from `revoked`. |
+| The server wants a token, not a client certificate. | The server doesn't serve mTLS: pass `--token-file` (or nothing, for the default) rather than `--cert` and `--key`. |
+| The client certificate can't be used. | Check the paths given to `--cert` and `--key`, and that the key is the certificate's. |
+| A client certificate goes with its key. | Pass `--cert` and `--key` together. |
 
 **Connecting.** `orbit chat --connect <url>` joins a running `orbit serve`, starting with the
 session picker, which offers to resume the session it has active (see [Sessions](#sessions)),
@@ -1009,7 +1069,8 @@ it always verifies the server: its certificate must be signed by the CA in the f
 names, or by one the system trusts without `--ca`, and must name the host connected to. There's
 no way to turn either check off. A CA file that can't be read stops it with status 2. It shows
 the token in `token` in the config directory, or in the file `--token-file <path>` names; a token
-file that can't be read stops it with status 2. The backend flags
+file that can't be read stops it with status 2. To a server serving mTLS it shows the client
+certificate `--cert <path>` and `--key <path>` give instead (see **Client certificates** above). The backend flags
 (`--model`, `--tools`, `--verify`, `--worktree`, `--review`, `--usage`, `--profile`) configure
 the control plane, so with `--connect` they stop it with status 2: give them to `orbit serve`.
 `--new` and `--name` skip the picker and open a new session once connected, as picking `New
@@ -1025,8 +1086,9 @@ it's shutting down, "The control plane stopped" opens at once, with "Keep trying
 reconnecting going on behind it; either modal closes once it's connected again. A token the server
 refuses shows a message naming the token file, and the chat quits once it's closed, without
 retrying; so does a connection that can't be made safely as asked: a server certificate that
-isn't trusted, doesn't name the host or fails verification otherwise, or a server speaking TLS to
-a `ws://` URL or plaintext to a `wss://` one, each shown with its message from the table above. Likewise "Disconnected", giving the reason, shows when the connection closes in a way
+isn't trusted, doesn't name the host or fails verification otherwise, a server speaking TLS to
+a `ws://` URL or plaintext to a `wss://` one, or under mTLS a client certificate missing,
+rejected or revoked, each shown with its message from the table above. Likewise "Disconnected", giving the reason, shows when the connection closes in a way
 reconnecting would only repeat: a message over the size limit, sent either way, or the server
 refusing the chat's `Hello` as incompatible.
 

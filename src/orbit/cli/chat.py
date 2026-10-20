@@ -5,7 +5,7 @@ import os
 import ssl
 from collections.abc import Callable
 from contextlib import AbstractContextManager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import typer
@@ -22,6 +22,8 @@ from orbit.cli.errors import _exit_on
 from orbit.cli.options import (
     _SERVE_FLAGS,
     CaOption,
+    ClientCertOption,
+    ClientKeyOption,
     ConfigDirOption,
     ConnectOption,
     LocalOption,
@@ -40,6 +42,7 @@ from orbit.cli.options import (
 )
 from orbit.client import (
     CaUnreadable,
+    ClientCertUnusable,
     PlaintextRefused,
     TokenRejected,
     TokenUnreadable,
@@ -70,6 +73,8 @@ def chat(
     connect: ConnectOption = None,
     token_file: TokenFileOption = None,
     ca: CaOption = None,
+    cert: ClientCertOption = None,
+    key: ClientKeyOption = None,
     local: LocalOption = False,
 ) -> None:
     """Start an interactive agent session.
@@ -77,6 +82,8 @@ def chat(
     At startup, pick a saved session or start a new one (or start one with --new); ctrl+p
     picks again later. With --connect, or when an orbit serve is running for the workspace
     (unless --local), join it instead, the picker offering to resume the session it has open.
+    A control plane serving mutual TLS is shown a client certificate, with --cert and --key,
+    rather than the token.
 
     In the app: h/j/k/l move between windows; i jumps to the prompt, which talks to
     the planner, whose proposals wait on the task list as drafts, and ctrl+s stops the run;
@@ -90,7 +97,7 @@ def chat(
     joining = _Joining(ctx, token_path, ca, _opening(new, name))
     if connect is not None:
         _refuse_local(local)
-        _join(joining, connect, "not orbit chat --connect")
+        _join(_certified(joining, cert, key, token_file), connect, "not orbit chat --connect")
         return
     state = resolve_state_dir(state, os.environ)
     root = _workspace(workspace)
@@ -113,13 +120,36 @@ def chat(
 @dataclass(frozen=True)
 class _Joining:
     """How a chat joins a running control plane: with the flags in ``ctx``, showing the token
-    in ``token_file``, verifying a ``wss://`` one by the CA in ``ca``, if given, and sending
+    in ``token_file``, or without one the client certificate at ``cert`` with its key at
+    ``key``, verifying a ``wss://`` one by the CA in ``ca``, if given, and sending
     ``opening``, if any, once welcomed."""
 
     ctx: typer.Context
-    token_file: Path
+    token_file: Path | None
     ca: Path | None
     opening: NewSession | None
+    cert: Path | None = None
+    key: Path | None = None
+
+
+def _certified(
+    joining: _Joining, cert: Path | None, key: Path | None, token_file: Path | None
+) -> _Joining:
+    """``joining`` showing the client certificate at ``cert`` with its key at ``key`` rather
+    than the token, if either is given.
+
+    Exits with status 2 if --token-file, ``token_file``, was given along with them.
+    """
+    if cert is None and key is None:
+        return joining
+    if token_file is not None:
+        typer.echo(
+            "--cert and --key show a client certificate rather than the token, so they can't go"
+            " with --token-file.",
+            err=True,
+        )
+        raise typer.Exit(2)
+    return replace(joining, token_file=None, cert=cert, key=key)
 
 
 def _opening(new: bool, name: str | None) -> NewSession | None:
@@ -199,25 +229,30 @@ def _connected_app(url: str, joining: _Joining) -> OrbitApp:
     """The TUI over the control plane at ``url``, joined as ``joining`` says.
 
     Exits with status 2 if ``url`` isn't a ws:// or wss:// URL, is a ws:// one beyond loopback,
-    or the token or the CA can't be read.
+    or the token, the CA or the client certificate can't be read.
     """
     if not url.startswith(("ws://", "wss://")):
         typer.echo(f"orbit chat --connect takes a wss:// or ws:// URL, not {url}.", err=True)
         raise typer.Exit(2)
-    with _exit_on(TokenUnreadable, CaUnreadable, PlaintextRefused):
-        read_token(joining.token_file)  # The session reads it again for each connection.
-        context = _ssl_context(url, joining.ca)
+    with _exit_on(TokenUnreadable, CaUnreadable, ClientCertUnusable, PlaintextRefused):
+        if joining.token_file is not None:
+            read_token(joining.token_file)  # The session reads it again for each connection.
+        context = _ssl_context(url, joining)
         client = WebSocketSession(url, joining.token_file, ssl_context=context)
     return OrbitApp(client, client, joining.opening, pick=joining.opening is None)
 
 
-def _ssl_context(url: str, ca: Path | None) -> ssl.SSLContext | None:
-    """What verifies the control plane at ``url``, trusting the CA in ``ca`` if given: none
-    for a ``ws://`` URL, which has no TLS.
+def _ssl_context(url: str, joining: _Joining) -> ssl.SSLContext | None:
+    """What verifies the control plane at ``url``, trusting the CA ``joining`` gives if any,
+    and shows the client certificate it gives, if any: none for a ``ws://`` URL, which has no
+    TLS.
 
-    Raises :class:`CaUnreadable` if ``ca`` can't be read.
+    Raises :class:`CaUnreadable` if the CA can't be read, and :class:`ClientCertUnusable` if
+    the client certificate can't be used.
     """
-    return client_ssl_context(ca) if url.startswith("wss://") else None
+    if not url.startswith("wss://"):
+        return None
+    return client_ssl_context(joining.ca, joining.cert, joining.key)
 
 
 def _thread_context(profile: Path | None) -> Callable[[], AbstractContextManager[None]] | None:

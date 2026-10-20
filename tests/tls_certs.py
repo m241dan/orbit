@@ -1,4 +1,5 @@
-"""Test certificates: a private CA and server certificates it signs, written as PEM files."""
+"""Test certificates: a private CA and the server and client certificates it signs, written as
+PEM files."""
 
 import ipaddress
 from dataclasses import dataclass
@@ -37,7 +38,7 @@ class Ca:
 
 @dataclass(frozen=True)
 class ServerFiles:
-    """A server certificate at ``cert`` and its private key at ``key``."""
+    """A server or client certificate at ``cert`` and its private key at ``key``."""
 
     cert: Path
     key: Path
@@ -123,6 +124,28 @@ def make_server(
     )
     cert = _pem(directory / "server.pem", certificate.public_bytes(serialization.Encoding.PEM))
     return ServerFiles(cert, _pem(directory / "server-key.pem", _key_pem(key)))
+
+
+def make_client(ca: Ca, directory: Path, name: str = "laptop") -> ServerFiles:
+    """A client certificate for ``name`` that ``ca`` signs, valid for 90 days from yesterday,
+    written with its key to ``<name>.pem`` and ``<name>-key.pem`` in ``directory``."""
+    key = ec.generate_private_key(ec.SECP256R1())
+    start = datetime.now(UTC) - DAY
+    certificate = (
+        x509.CertificateBuilder()
+        .subject_name(_name(name))
+        .issuer_name(ca.certificate.subject)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(start)
+        .not_valid_after(start + 90 * DAY)
+        .add_extension(
+            x509.AuthorityKeyIdentifier.from_issuer_public_key(ca.key.public_key()), critical=False
+        )
+        .sign(ca.key, hashes.SHA256())
+    )
+    cert = _pem(directory / f"{name}.pem", certificate.public_bytes(serialization.Encoding.PEM))
+    return ServerFiles(cert, _pem(directory / f"{name}-key.pem", _key_pem(key)))
 
 
 def other_key(directory: Path) -> Path:

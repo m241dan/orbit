@@ -1,18 +1,22 @@
 """The control plane's server: the protocol over a WebSocket, one frame per envelope, for each
-frontend that shows the token, over TLS if the settings say so.
+frontend that shows the token, or under mutual TLS a client certificate, over TLS if the
+settings say so.
 
 Each WebSocket that's let in gets a connection of its own to the session: its text frames are
 decoded into commands and sent on it, and its events are encoded into text frames. A frontend
 that sends no ``Authorization: Bearer`` with the token is turned away with HTTP 401 before the
 WebSocket opens, and one that arrives as the server stops, with HTTP 503. The token is read
 afresh for each frontend, so a new one admits frontends at once, while those already let in
-stay.
+stay. Under mutual TLS the TLS handshake refuses a client without a certificate the client CA
+signed, the token isn't asked for, and a certificate whose fingerprint is revoked, as the
+revoked fingerprints are read afresh for each frontend, is turned away with HTTP 403.
 """
 
 import asyncio
 import hmac
 import socket
-from collections.abc import Awaitable, Callable
+import ssl
+from collections.abc import Awaitable, Callable, Collection
 from contextlib import suppress
 from typing import Protocol
 
@@ -24,7 +28,14 @@ from starlette.types import Message
 from starlette.websockets import WebSocket, WebSocketDisconnect, WebSocketDisconnected
 
 from orbit.agent.application.connection import ConnectionDropped, SessionConnection
-from orbit.agent.domain.server import ServerSettings
+from orbit.agent.domain.server import ServerSettings, client_fingerprint, is_revoked
+from orbit.agent.external import tls_messages
+from orbit.agent.external.client_certs import (
+    CertifiedWebSocketProtocol,
+    certificate_subject,
+    client_certificate,
+    reporting_handshakes,
+)
 from orbit.agent.external.embedded_server import EmbeddedServer
 from orbit.agent.external.mcp_host import bearer_token
 from orbit.protocol import (
@@ -203,8 +214,9 @@ class _Conversation:
 
 class ControlPlaneServer:
     """Serves ``session`` to every frontend that shows the token ``token`` returns as it
-    connects, on the host and port in ``settings``, until stopped; ``say`` tells the user as
-    frontends connect and disconnect. An empty token admits no one."""
+    connects, or under mutual TLS a client certificate whose fingerprint isn't among those
+    :attr:`revoked` returns then, on the host and port in ``settings``, until stopped; ``say``
+    tells the user as frontends connect and disconnect. An empty token admits no one."""
 
     def __init__(
         self, session: Connectable, token: Callable[[], str], settings: ServerSettings, say: Say
@@ -217,6 +229,7 @@ class ControlPlaneServer:
         self._stopping = False
         self._server: uvicorn.Server | None = None
         self._serving: asyncio.Task[None] | None = None
+        self.revoked: Callable[[], Collection[str]] = lambda: settings.revoked
 
     async def start(self) -> str:
         """Listen for frontends; returns the server's URL, with the port it listens on.
@@ -246,20 +259,39 @@ class ControlPlaneServer:
         """Whether the server serves over TLS."""
         return self._settings.tls != "off"
 
+    @property
+    def _mutual(self) -> bool:
+        """Whether the server serves mutual TLS, requiring client certificates."""
+        return self._settings.tls == "mtls"
+
     def _config(self) -> uvicorn.Config:
         """How uvicorn serves the app: logging left to the program, messages kept under the
-        limit, over TLS with the settings' certificate and key if it's secure."""
+        limit, over TLS with the settings' certificate and key if it's secure, and requiring a
+        client certificate the client CA signed if it's mutual."""
         app = Starlette(routes=[WebSocketRoute("/", self._websocket)])
         return uvicorn.Config(
             app,
             ssl_certfile=self._settings.cert if self._secure else None,
             ssl_keyfile=self._settings.key if self._secure else None,
+            ssl_ca_certs=self._settings.client_ca if self._mutual else None,
+            ssl_cert_reqs=ssl.CERT_REQUIRED if self._mutual else ssl.CERT_NONE,
+            ssl_context_factory=self._ssl_context if self._mutual else None,
             log_config=None,
             lifespan="off",
-            ws="websockets-sansio",
+            ws=CertifiedWebSocketProtocol,
             ws_max_size=self._settings.max_message_bytes,
             timeout_graceful_shutdown=GRACE_SECONDS,
         )
+
+    def _ssl_context(
+        self, config: uvicorn.Config, default: Callable[[], ssl.SSLContext]
+    ) -> ssl.SSLContext:
+        """uvicorn's ``default`` context for ``config``, saying why each client the TLS
+        handshake refuses for want of a trusted certificate was refused."""
+        context = default()
+        assert self._settings.client_ca is not None  # As mutual TLS needs one.
+        context.sslobject_class = reporting_handshakes(self._say, self._settings.client_ca)
+        return context
 
     async def stop(self, close_session: Callable[[], Awaitable[None]]) -> None:
         """Stop accepting frontends, ``close_session``, then close every WebSocket as the
@@ -286,20 +318,38 @@ class ControlPlaneServer:
         token = self._token().encode()
         return bool(token) and hmac.compare_digest(bearer_token(websocket.headers).encode(), token)
 
+    def _refusal(self, websocket: WebSocket) -> PlainTextResponse | None:
+        """What turns ``websocket`` away: under mutual TLS, a certificate missing or revoked,
+        and otherwise a token missing or wrong; then a server that's stopping. None if it's
+        let in."""
+        if self._mutual:
+            refusal = self._uncertified(client_certificate(websocket.scope))
+        else:
+            unauthorized = PlainTextResponse(UNAUTHORIZED, UNAUTHORIZED_STATUS)
+            refusal = None if self._authorized(websocket) else unauthorized
+        if refusal is None and self._stopping:
+            return PlainTextResponse(SHUTTING_DOWN, 503)
+        return refusal
+
+    def _uncertified(self, der: bytes | None) -> PlainTextResponse | None:
+        """What turns away a frontend that showed the client certificate ``der``, in DER, if
+        it showed none, which the TLS handshake already refuses, or it's revoked."""
+        if der is None:
+            message = tls_messages.CLIENT_CERT_REQUIRED.format(client_ca=self._settings.client_ca)
+            return PlainTextResponse(message, UNAUTHORIZED_STATUS)
+        fingerprint = client_fingerprint(der)
+        if is_revoked(fingerprint, self.revoked()):
+            return PlainTextResponse(tls_messages.REVOKED.format(fingerprint=fingerprint), 403)
+        return None
+
     async def _websocket(self, websocket: WebSocket) -> None:
-        """Serve the frontend at ``websocket``, if it showed the token and the server isn't
-        stopping, until it's closed."""
-        if not self._authorized(websocket):
-            await websocket.send_denial_response(
-                PlainTextResponse(UNAUTHORIZED, UNAUTHORIZED_STATUS)
-            )
-            return
-        if self._stopping:
-            await websocket.send_denial_response(PlainTextResponse(SHUTTING_DOWN, 503))
+        """Serve the frontend at ``websocket``, if it's let in, until it's closed."""
+        refusal = self._refusal(websocket)
+        if refusal is not None:
+            await websocket.send_denial_response(refusal)
             return
         await websocket.accept()
-        client = websocket.client
-        peer = f"{client.host}:{client.port}" if client else "an unknown address"
+        peer = _peer(websocket)
         conversation = _Conversation(
             websocket, self._session.connect(), self._settings.max_message_bytes, self._farewell
         )
@@ -311,3 +361,14 @@ class ControlPlaneServer:
             self._open.discard(conversation)
             if conversation.client:
                 self._say(f"{conversation.client} disconnected from {peer}.")
+
+
+def _peer(websocket: WebSocket) -> str:
+    """Where ``websocket`` connected from, with the subject and fingerprint of its client
+    certificate if it showed one."""
+    client = websocket.client
+    peer = f"{client.host}:{client.port}" if client else "an unknown address"
+    der = client_certificate(websocket.scope)
+    if der is None:
+        return peer
+    return f"{peer} as {certificate_subject(der)} ({client_fingerprint(der)})"

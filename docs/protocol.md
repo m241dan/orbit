@@ -350,12 +350,14 @@ outcomes of other connections' commands included, but for the events answering o
 - **TLS**: with `tls = "off"` (the default) the server speaks plaintext `ws://` and listens on
   loopback alone. With `tls = "tls"` (`--tls tls`) it terminates TLS itself with the server
   certificate and key in `[server]` (`cert`, `key`), at a `wss://` URL, on any address; clients
-  verify the certificate and its hostname. Mutual TLS (`tls = "mtls"`), requiring a client
-  certificate, isn't served yet. TLS changes nothing above the WebSocket: the token is still
-  required.
+  verify the certificate and its hostname. With `tls = "mtls"` the handshake also requires a
+  client certificate the CA in `client_ca` signed, and drops the connection without one. TLS
+  changes nothing above the WebSocket.
 - **Authentication** is on the upgrade: the request must carry `Authorization: Bearer <token>`,
   the token in the token file of the server's config directory. Without it, or with another
-  token, the server answers HTTP 401 and no WebSocket opens.
+  token, the server answers HTTP 401 and no WebSocket opens. Under mutual TLS the client
+  certificate is the identity instead and any token is ignored; one whose SHA-256 fingerprint is
+  in `[server] revoked` is answered HTTP 403, naming the fingerprint.
 - **Frames**: each envelope is one text frame, in the wire format below. A frame that can't be
   decoded but has a `command_id` is answered with `CommandRefused` coded `unknown` for a command
   type the server doesn't know, else `invalid`; the connection stays open. One without a

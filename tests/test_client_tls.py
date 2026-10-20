@@ -12,10 +12,11 @@ from websockets.asyncio.server import ServerConnection, serve
 from websockets.exceptions import InvalidMessage
 
 from orbit.agent import AgentSession
-from orbit.agent.domain.server import ServerSettings
+from orbit.agent.domain.server import ServerSettings, client_fingerprint
 from orbit.agent.external.control_plane import ControlPlaneServer
 from orbit.client import (
     CaUnreadable,
+    ClientCertUnusable,
     PlaintextRefused,
     WebSocketSession,
     accepts,
@@ -35,7 +36,7 @@ from orbit.protocol import (
     LinkState,
     Welcome,
 )
-from tests.tls_certs import DAY, Ca, ServerFiles, make_ca, make_server
+from tests.tls_certs import DAY, Ca, ServerFiles, make_ca, make_client, make_server, other_key
 
 TOKEN = "the-token"
 HELLO = CommandEnvelope(
@@ -84,8 +85,14 @@ async def tls_server(files: ServerFiles) -> AsyncIterator[int]:
         yield next(iter(server.sockets)).getsockname()[1]
 
 
+def _mtls(files: ServerFiles, ca: Ca, revoked: tuple[str, ...] = ()) -> ServerSettings:
+    return _settings(files).model_copy(
+        update={"tls": "mtls", "client_ca": str(ca.path), "revoked": revoked}
+    )
+
+
 async def final_state(
-    url: str, token_file: Path, context: ssl.SSLContext | None = None
+    url: str, token_file: Path | None, context: ssl.SSLContext | None = None
 ) -> LinkState:
     """The first state a session with ``url`` reports, once it has stopped trying."""
     session = WebSocketSession(url, token_file, ssl_context=context)
@@ -222,10 +229,117 @@ def test_other_tls_errors_may_pass() -> None:
     assert handshake_failure("wss://localhost/", error) is None
 
 
-def test_a_connection_closed_unanswered_over_tls_may_pass() -> None:
+def test_a_connection_closed_unanswered_over_tls_says_a_client_certificate_is_wanted() -> None:
     error = InvalidMessage("did not receive a valid HTTP response")
     error.__cause__ = EOFError("connection closed while reading HTTP status line")
-    assert handshake_failure("wss://localhost/", error) is None
+    url = "wss://localhost/"
+    assert handshake_failure(url, error) == messages.CLIENT_CERT_REQUIRED.format(url=url)
+    rejected = messages.CLIENT_CERT_REJECTED.format(url=url)
+    assert handshake_failure(url, error, certified=True) == rejected
+
+
+def test_the_context_shows_the_client_certificate_given(ca: Ca, tmp_path: Path) -> None:
+    client = make_client(ca, tmp_path)
+    context = client_ssl_context(ca.path, client.cert, client.key)
+    assert context.verify_mode == ssl.CERT_REQUIRED and context.check_hostname
+
+
+@pytest.mark.parametrize("given", ["--cert", "--key"])
+def test_a_client_certificate_without_its_key_is_refused(
+    ca: Ca, tmp_path: Path, given: str
+) -> None:
+    client = make_client(ca, tmp_path)
+    cert, key = (client.cert, None) if given == "--cert" else (None, client.key)
+    with pytest.raises(ClientCertUnusable) as raised:
+        client_ssl_context(ca.path, cert, key)
+    assert str(raised.value) == messages.CERT_WITHOUT_KEY.format(given=given)
+
+
+def test_a_client_key_others_can_read_is_refused_with_the_chmod_that_fixes_it(
+    ca: Ca, tmp_path: Path
+) -> None:
+    client = make_client(ca, tmp_path)
+    client.key.chmod(0o644)
+    with pytest.raises(ClientCertUnusable) as raised:
+        client_ssl_context(ca.path, client.cert, client.key)
+    assert str(raised.value).endswith(f"run chmod 600 {client.key}.")
+
+
+def test_a_missing_client_key_is_named(ca: Ca, tmp_path: Path) -> None:
+    client = make_client(ca, tmp_path)
+    missing = tmp_path / "missing.pem"
+    with pytest.raises(ClientCertUnusable) as raised:
+        client_ssl_context(ca.path, client.cert, missing)
+    assert str(raised.value).startswith(
+        f"The client certificate can't be used. {client.cert} with the key {missing}: No such"
+    )
+
+
+def test_a_key_that_isnt_the_client_certificates_is_refused(ca: Ca, tmp_path: Path) -> None:
+    client = make_client(ca, tmp_path)
+    with pytest.raises(ClientCertUnusable, match=r"^The client certificate can't be used\."):
+        client_ssl_context(ca.path, client.cert, other_key(tmp_path))
+
+
+async def test_a_client_certificate_is_welcomed_by_a_mutual_tls_control_plane_without_a_token(
+    ca: Ca, tmp_path: Path
+) -> None:
+    client = make_client(ca, tmp_path)
+    async with control_plane(_mtls(make_server(ca, tmp_path), ca)) as port:
+        url = f"wss://localhost:{port}/"
+        context = client_ssl_context(ca.path, client.cert, client.key)
+        session = WebSocketSession(url, None, ssl_context=context)
+        events = session.events()
+        try:
+            await session.send(HELLO)
+            first = await asyncio.wait_for(anext(aiter(events)), 5)
+            assert type(first.payload) is Welcome
+        finally:
+            await session.close()
+
+
+async def test_a_mutual_tls_control_plane_wants_a_client_certificate(
+    ca: Ca, tmp_path: Path, token_file: Path
+) -> None:
+    async with control_plane(_mtls(make_server(ca, tmp_path), ca)) as port:
+        url = f"wss://localhost:{port}/"
+        state = await final_state(url, token_file, client_ssl_context(ca.path))
+    assert state == HandshakeFailed(url, messages.CLIENT_CERT_REQUIRED.format(url=url))
+
+
+async def test_a_client_certificate_another_ca_signed_is_reported_rejected(
+    ca: Ca, tmp_path: Path
+) -> None:
+    (tmp_path / "other").mkdir()
+    stranger = make_client(make_ca(tmp_path / "other"), tmp_path / "other")
+    async with control_plane(_mtls(make_server(ca, tmp_path), ca)) as port:
+        url = f"wss://localhost:{port}/"
+        context = client_ssl_context(ca.path, stranger.cert, stranger.key)
+        state = await final_state(url, None, context)
+    assert state == HandshakeFailed(url, messages.CLIENT_CERT_REJECTED.format(url=url))
+
+
+async def test_a_revoked_client_certificate_is_reported_and_not_retried(
+    ca: Ca, tmp_path: Path
+) -> None:
+    client = make_client(ca, tmp_path)
+    fingerprint = client_fingerprint(ssl.PEM_cert_to_DER_cert(client.cert.read_text()))
+    async with control_plane(_mtls(make_server(ca, tmp_path), ca, (fingerprint,))) as port:
+        url = f"wss://localhost:{port}/"
+        context = client_ssl_context(ca.path, client.cert, client.key)
+        state = await final_state(url, None, context)
+    assert state == HandshakeFailed(url, messages.REVOKED.format(url=url))
+
+
+async def test_a_client_certificate_without_a_token_is_refused_by_a_tls_control_plane(
+    ca: Ca, tmp_path: Path
+) -> None:
+    client = make_client(ca, tmp_path)
+    async with control_plane(_settings(make_server(ca, tmp_path))) as port:
+        url = f"wss://localhost:{port}/"
+        context = client_ssl_context(ca.path, client.cert, client.key)
+        state = await final_state(url, None, context)
+    assert state == HandshakeFailed(url, messages.TOKEN_EXPECTED.format(url=url))
 
 
 def test_an_answer_that_isnt_http_may_pass() -> None:

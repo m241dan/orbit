@@ -116,6 +116,23 @@ CaOption = Annotated[
         " control plane by (default: the system's trusted CAs).",
     ),
 ]
+ClientCertOption = Annotated[
+    Path | None,
+    typer.Option(
+        "--cert",
+        metavar="PATH",
+        help="The client certificate, in PEM, to show a control plane serving mutual TLS"
+        " rather than the token; with --key.",
+    ),
+]
+ClientKeyOption = Annotated[
+    Path | None,
+    typer.Option(
+        "--key",
+        metavar="PATH",
+        help="The client certificate's private key, in PEM and readable by you alone.",
+    ),
+]
 TokenFileOption = Annotated[
     Path | None,
     typer.Option(
@@ -157,7 +174,7 @@ TlsOption = Annotated[
     typer.Option(
         "--tls",
         help="How to serve: off (plaintext, on loopback alone), tls (wss:// with --cert and"
-        " --key) or mtls (also requiring client certificates; not yet supported) (default:"
+        " --key) or mtls (also requiring client certificates --client-ca signed) (default:"
         " [server] tls in your config.toml, else off).",
     ),
 ]
