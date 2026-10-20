@@ -50,7 +50,8 @@ class Stamp(Protocol):
 class Connections:
     """The connections open to one session, among which its events are routed, each viewing
     the session ``open_session`` names or another; ``viewers_changed`` is called whenever one
-    may have joined or left a session's viewers."""
+    may have joined or left a session's viewers. Once they're ended, a connection added ends at
+    once."""
 
     def __init__(
         self, viewers_changed: Callable[[], None], open_session: Callable[[], str]
@@ -58,8 +59,14 @@ class Connections:
         self._open: set[SessionConnection] = set()
         self.viewers_changed = viewers_changed
         self._open_session = open_session
+        self._ended = False
 
     def add(self, connection: "SessionConnection") -> None:
+        """Route events to ``connection``, or end its stream at once if the connections have
+        ended."""
+        if self._ended:
+            connection.end()
+            return
         self._open.add(connection)
 
     def discard(self, connection: "SessionConnection") -> None:
@@ -141,7 +148,9 @@ class Connections:
         return session is None or self._viewed_by(connection) == session
 
     def end(self) -> None:
-        """End every connection's stream once what it has queued is read."""
+        """End every connection's stream once what it has queued is read, and that of any added
+        later at once."""
+        self._ended = True
         for connection in tuple(self._open):
             connection.end()
 

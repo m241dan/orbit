@@ -301,6 +301,18 @@ async def test_closing_the_session_ends_every_connections_stream() -> None:
     assert welcomes(await everything(second)) == [welcome("second")]
 
 
+async def test_a_connection_made_after_the_session_closed_ends_at_once_and_ignores_commands() -> (
+    None
+):
+    session = AgentSession()
+    await session.close()
+    connection = session.connect()
+
+    await say(connection, "late", HELLO)
+
+    assert await everything(connection) == []
+
+
 async def test_the_startup_check_runs_once_for_the_first_connection_only() -> None:
     steps = Steps(True, True)
     tree = FakeTree()
