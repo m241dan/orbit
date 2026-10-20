@@ -303,6 +303,37 @@ async def test_a_lost_connection_waits_the_backoff_before_reconnecting() -> None
         await session.close()
 
 
+async def test_a_connection_that_received_something_resets_the_backoff() -> None:
+    async with plane() as (fake, url):
+        fake.hang_up = True
+        session, _ = client(url, backoff=Backoff(first=0.05, most=5, jitter=0))
+        events = session.events()
+        for _ in range(5):  # Waits of 0.05, 0.1, 0.2, 0.4 and 0.8 s; the next would be 1.6.
+            await fake.connection()
+        fake.hang_up = False
+        working = await fake.connection()
+        await working.send(event(1))
+        await next_event(events)
+        lost = time.monotonic()
+        await working.close(1011, "Oops")
+        await fake.connection()
+        assert time.monotonic() - lost < 1
+        await session.close()
+
+
+async def test_closing_while_waiting_the_backoff_stops_at_once() -> None:
+    async with plane() as (fake, url):
+        session, states = client(url, backoff=Backoff(first=30, most=30, jitter=0))
+        session.events()
+        await (await fake.connection()).close(1011, "Oops")
+        await states.until(Reconnecting)
+        start = time.monotonic()
+        async with asyncio.timeout(5):  # Passed on to the wait, so it can't fail on its own.
+            await session.close()
+        assert time.monotonic() - start < 1
+        assert fake.connections.empty()
+
+
 async def test_a_reconnecting_client_viewing_a_session_attaches_to_it_again() -> None:
     async with viewing() as (fake, session, events, first):
         await drop_after(first, events)
