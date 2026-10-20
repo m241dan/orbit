@@ -67,6 +67,7 @@ app.add_typer(db, name="db")
 token = typer.Typer(help="Look after the token frontends show orbit serve.", no_args_is_help=True)
 app.add_typer(token, name="token")
 logger = logging.getLogger(__name__)
+_INVALID_CONFIG = "Invalid orbit configuration: "
 
 
 def _workspace(path: Path) -> Path:
@@ -83,6 +84,17 @@ def _workspace(path: Path) -> Path:
         raise typer.Exit(2)
     top = git_top_level(str(resolved))
     return Path(top) if top else resolved
+
+
+@contextmanager
+def _exit_on(*errors: type[Exception], prefix: str = "") -> Iterator[None]:
+    """Run the block, exiting with status 2 if it raises one of ``errors``, after saying
+    ``prefix`` and the error."""
+    try:
+        yield
+    except errors as exc:
+        typer.echo(f"{prefix}{exc}", err=True)
+        raise typer.Exit(2) from None
 
 
 # Options declared apart, so chat stays short.
@@ -294,11 +306,8 @@ def _repository_lock(root: Path) -> Iterator[tuple[WorkspaceLock, WorkspaceOwner
     Exits with status 2 if the lock can't be made.
     """
     lock = WorkspaceLock(orbit_dir(str(root)))
-    try:
+    with _exit_on(OSError, prefix=f"Couldn't lock the repository with {lock.path}: "):
         owner = lock.take()
-    except OSError as exc:
-        typer.echo(f"Couldn't lock the repository with {lock.path}: {exc}", err=True)
-        raise typer.Exit(2) from None
     try:
         yield lock, owner
     finally:
@@ -358,10 +367,8 @@ def _discovered(state: Path, workspace: Path, token_file: Path) -> str | None:
     Exits with status 2 if the token can't be read, or the control plane turns it away.
     """
     try:
-        return discover_control_plane(state, workspace, token_file)
-    except TokenUnreadable as exc:
-        typer.echo(str(exc), err=True)
-        raise typer.Exit(2) from None
+        with _exit_on(TokenUnreadable):
+            return discover_control_plane(state, workspace, token_file)
     except TokenRejected:
         typer.echo(
             f"The control plane serving {workspace} refused the token from {token_file}; give it"
@@ -403,11 +410,8 @@ def _connected_app(url: str, token_file: Path, opening: NewSession | None) -> Or
             err=True,
         )
         raise typer.Exit(2)
-    try:
+    with _exit_on(TokenUnreadable):
         read_token(token_file)  # The session reads it again for each connection.
-    except TokenUnreadable as exc:
-        typer.echo(str(exc), err=True)
-        raise typer.Exit(2) from None
     client = WebSocketSession(url, token_file)
     return OrbitApp(client, client, opening, pick=opening is None)
 
@@ -563,11 +567,8 @@ def _server_settings(config_dir: Path, host: str | None, port: int | None) -> Se
 
     Exits with status 2 if the file is invalid, or the host isn't loopback.
     """
-    try:
+    with _exit_on(ConfigError, prefix=_INVALID_CONFIG):
         settings = read_server(config_dir)
-    except ConfigError as exc:
-        typer.echo(f"Invalid orbit configuration: {exc}", err=True)
-        raise typer.Exit(2) from None
     given = {"host": host, "port": port}
     settings = settings.model_copy(update={k: v for k, v in given.items() if v is not None})
     if not is_loopback(settings.host):
@@ -585,11 +586,8 @@ def _token(token_file: TokenFile) -> str:
 
     Exits with status 2 if it can't be used.
     """
-    try:
+    with _exit_on(TokenError):
         return token_file.token()
-    except TokenError as exc:
-        typer.echo(str(exc), err=True)
-        raise typer.Exit(2) from None
 
 
 def _current_token(token_file: TokenFile) -> Callable[[], str]:
@@ -703,11 +701,8 @@ def _config() -> OrbitConfig:
 
     Exits with status 2 if the file is invalid.
     """
-    try:
+    with _exit_on(ConfigError, prefix=_INVALID_CONFIG):
         return read_config()
-    except ConfigError as exc:
-        typer.echo(f"Invalid orbit configuration: {exc}", err=True)
-        raise typer.Exit(2) from None
 
 
 def _storage(config_dir: Path) -> StorageSettings:
@@ -715,11 +710,8 @@ def _storage(config_dir: Path) -> StorageSettings:
 
     Exits with status 2 if the file is invalid.
     """
-    try:
+    with _exit_on(ConfigError, prefix=_INVALID_CONFIG):
         return read_storage(config_dir)
-    except ConfigError as exc:
-        typer.echo(f"Invalid orbit configuration: {exc}", err=True)
-        raise typer.Exit(2) from None
 
 
 def _open_store(state: Path, root: Path) -> OpenedStore:
@@ -730,11 +722,8 @@ def _open_store(state: Path, root: Path) -> OpenedStore:
     Exits with status 2 if the store can't be opened, the old sessions can't be imported or a
     fallback file can't be recovered.
     """
-    try:
+    with _exit_on(StoreError, ImportBlocked, RecoveryFailed):
         return asyncio.run(open_workspace_store(state, root))
-    except (StoreError, ImportBlocked, RecoveryFailed) as exc:
-        typer.echo(str(exc), err=True)
-        raise typer.Exit(2) from None
 
 
 def _verification(config: OrbitConfig) -> Verification:
@@ -825,11 +814,8 @@ def backup(
     if target.exists() and not force:
         typer.echo(f"{target} already exists; pass --force to replace it.", err=True)
         raise typer.Exit(2)
-    try:
+    with _exit_on(StoreError):
         asyncio.run(_backed_up(resolve_state_dir(state, os.environ), target))
-    except StoreError as exc:
-        typer.echo(str(exc), err=True)
-        raise typer.Exit(2) from None
     typer.echo(f"Backed up orbit's database to {target}.")
 
 
@@ -847,11 +833,8 @@ def rotate(config_dir: ConfigDirOption = None) -> None:
     """Replace the token in your config directory with a new one; frontends connecting need
     the new token at once, while those connected stay until orbit serve restarts."""
     token_file = TokenFile(resolve_config_dir(config_dir, os.environ))
-    try:
+    with _exit_on(TokenError):
         token_file.rotate()
-    except TokenError as exc:
-        typer.echo(str(exc), err=True)
-        raise typer.Exit(2) from None
     typer.echo(
         f"Rotated the token in {token_file.path}; frontends connecting need the new token,"
         " while those connected stay until orbit serve restarts."

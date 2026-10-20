@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 import pytest
+import typer
 from typer.testing import CliRunner
 
 from orbit import __version__
@@ -40,7 +41,7 @@ from orbit.agent.application.ports import UsageSource
 from orbit.agent.domain.ownership import read_only_note
 from orbit.agent.domain.reviews import ReviewLimits
 from orbit.agent.domain.sessions import SessionRecord, Unreadable, default_name, record_json
-from orbit.cli import app
+from orbit.cli import _exit_on, app
 from orbit.protocol import (
     AddTask,
     Catalog,
@@ -64,6 +65,27 @@ def test_version() -> None:
     result = runner.invoke(app, ["version"])
     assert result.exit_code == 0
     assert result.stdout.strip() == __version__
+
+
+def test_exit_on_echoes_the_prefix_and_message_and_exits_2(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with pytest.raises(typer.Exit) as exited, _exit_on(KeyError, ValueError, prefix="Bad: "):
+        raise ValueError("no good")
+    assert exited.value.exit_code == 2
+    assert exited.value.__suppress_context__
+    assert capsys.readouterr().err == "Bad: no good\n"
+
+
+def test_exit_on_lets_other_errors_through(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(OSError, match="elsewhere"), _exit_on(ValueError):
+        raise OSError("elsewhere")
+    assert capsys.readouterr().err == ""
+
+
+def test_exit_on_does_nothing_without_an_error() -> None:
+    with _exit_on(ValueError):
+        pass
 
 
 class FakeApp:
