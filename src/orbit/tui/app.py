@@ -10,7 +10,7 @@ from textual import on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding, BindingType
 from textual.containers import Horizontal, Vertical
-from textual.widgets import OptionList, Static, Tabs
+from textual.widgets import OptionList, Tabs
 
 from orbit import __version__
 from orbit.protocol import (
@@ -134,8 +134,8 @@ from orbit.tui.widgets import (
     ChatPrompt,
     ConfirmScreen,
     PickerScreen,
+    StatusLine,
     mark_selected,
-    show_status,
 )
 
 
@@ -154,9 +154,9 @@ class OrbitApp(App[None], inherit_bindings=False):
     }
     DetailPane.selected { border: none; border-top: solid $accent; }
     DetailPane:focus { border-top: heavy $accent; }
-    #storage-halt { color: $error; padding: 0 1; display: none; }
-    #link-status { color: $warning; padding: 0 1; display: none; }
-    #viewing { color: $warning; padding: 0 1; display: none; }
+    #storage-halt { color: $error; }
+    #link-status { color: $warning; }
+    #viewing { color: $warning; }
     """
     BINDINGS: ClassVar[list[BindingType]] = [
         # Priority, so it beats the prompt's own ctrl+c (copy).
@@ -235,9 +235,9 @@ class OrbitApp(App[None], inherit_bindings=False):
             with Vertical():
                 yield ConversationTabs(id="conversation-tabs")
                 yield Transcript(id="transcript")
-                yield Static(id="storage-halt")
-                yield Static(id="link-status")
-                yield Static(id="viewing")
+                yield StatusLine(id="storage-halt")
+                yield StatusLine(id="link-status")
+                yield StatusLine(id="viewing")
                 yield ChatPrompt(
                     placeholder="Press i to talk to the planner, esc to stop typing", id="prompt"
                 )
@@ -266,9 +266,9 @@ class OrbitApp(App[None], inherit_bindings=False):
         self._usage = self.query_one(UsagePanel)
         self._agents = self.query_one(AgentsPane)
         self._side = self.query_one("#side")
-        self._halt_status = self.query_one("#storage-halt", Static)
-        self._link_status = self.query_one("#link-status", Static)
-        self._viewing = self.query_one("#viewing", Static)
+        self._halt_status = self.query_one("#storage-halt", StatusLine)
+        self._link_status = self.query_one("#link-status", StatusLine)
+        self._viewing = self.query_one("#viewing", StatusLine)
         # Read through, so a clock set later still times the conversation.
         self._feed = ConversationFeed(
             self._transcript, self._tabs, self._task_list, self._verification, lambda: self.clock()
@@ -649,14 +649,14 @@ class OrbitApp(App[None], inherit_bindings=False):
 
     def _show_halt(self, status: str | None) -> None:
         """Show ``status`` by the prompt, or hide the line when there's none."""
-        show_status(self._halt_status, status)
+        self._halt_status.show(status)
 
     def _follow_link(self, state: LinkState) -> None:
         self._link_host.follow(state, self.clock())
 
     def _show_link(self, status: str | None) -> None:
         """Show ``status`` by the prompt, or hide the line when there's none."""
-        show_status(self._link_status, status)
+        self._link_status.show(status)
 
     def _render_session(
         self,
@@ -749,7 +749,7 @@ class OrbitApp(App[None], inherit_bindings=False):
 
     def _show_viewing(self) -> None:
         """Mark the prompt while the session viewed isn't the active one, or hide the mark."""
-        show_status(self._viewing, self._sessions.mark)
+        self._viewing.show(self._sessions.mark)
 
     def _render_state(
         self,

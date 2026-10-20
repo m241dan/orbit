@@ -3,11 +3,11 @@
 from typing import Any
 
 from textual.app import App, ComposeResult
-from textual.widgets import Input, OptionList, Static
+from textual.widgets import Input, OptionList
 
 from orbit.protocol import SessionSummary
 from orbit.tui.sessions import ActivationScreen, SessionChange, SessionsScreen
-from orbit.tui.widgets import ListScreen, PickerScreen, show_status
+from orbit.tui.widgets import ListScreen, PickerScreen, StatusLine
 
 SESSIONS = (SessionSummary(id="a", name="first"), SessionSummary(id="b", name="second"))
 
@@ -52,16 +52,16 @@ async def test_j_and_k_type_in_the_session_name_box() -> None:
 
 class Lines(App[None]):
     def compose(self) -> ComposeResult:
-        yield Static("old", id="line")
+        yield StatusLine("old", id="line")
 
 
-async def test_a_status_shows_its_line_and_none_hides_it() -> None:
+async def test_a_status_line_shows_its_status_and_none_hides_it() -> None:
     app = Lines()
     async with app.run_test():
-        line = app.query_one("#line", Static)
-        show_status(line, "halted")
+        line = app.query_one("#line", StatusLine)
+        line.show("halted")
         assert str(line.render()) == "halted"
         assert line.display
-        show_status(line, None)
+        line.show(None)
         assert str(line.render()) == ""
         assert not line.display

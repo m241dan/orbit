@@ -212,10 +212,20 @@ class PromptBox(ModalTextArea):
         super().__init__(text, soft_wrap=True, show_line_numbers=False, **kwargs)
 
 
-def show_status(line: Static, status: str | None) -> None:
-    """Show ``status`` on ``line``, or hide the line when there's none."""
-    line.update(status or "")
-    line.display = status is not None
+class StatusLine(Static):
+    """Line by the prompt showing a status, hidden while there's none."""
+
+    DEFAULT_CSS = """
+    StatusLine {
+        padding: 0 1;
+        display: none;
+    }
+    """
+
+    def show(self, status: str | None) -> None:
+        """Show ``status``, or hide the line when there's none."""
+        self.update(status or "")
+        self.display = status is not None
 
 
 class ListScreen[T](ModalScreen[T]):
