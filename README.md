@@ -1137,8 +1137,8 @@ retrying; so does a connection that can't be made safely as asked: a server cert
 isn't trusted, doesn't name the host or fails verification otherwise, a server speaking TLS to
 a `ws://` URL or plaintext to a `wss://` one, or under mTLS a client certificate missing,
 rejected or revoked, each shown with its message from the table above. Likewise "Disconnected", giving the reason, shows when the connection closes in a way
-reconnecting would only repeat: a message over the size limit, sent either way, or the server
-refusing the chat's `Hello` as incompatible.
+reconnecting would only repeat: a message over the size limit, sent either way, the server
+refusing the chat's `Hello` as incompatible, or an event from the server the chat can't read.
 
 **Finding the server.** Without `--connect`, `orbit chat` looks for the `orbit serve` that owns its
 repository (see [Owning the repository](#owning-the-repository)), from the run file in the state

@@ -257,6 +257,20 @@ async def test_an_unreadable_event_ends_the_events_with_its_error() -> None:
         await session.close()
 
 
+async def test_an_unreadable_event_ends_the_link_without_reconnecting() -> None:
+    async with plane() as (fake, url):
+        session, states = client(url)
+        session.events()
+        await (await fake.connection()).send("not json")
+        ended = await states.until(Ended)
+        assert isinstance(ended, Ended) and ended == session.state
+        assert ended.url == url and ended.reason.startswith("An event can't be read: Not JSON")
+        await asyncio.sleep(0.1)  # Long enough for several attempts.
+        assert fake.connections.empty()
+        assert [type(state) for state in states.seen] == [Connected, Ended]
+        await session.close()
+
+
 async def test_a_lost_connection_reconnects_asking_for_what_was_missed() -> None:
     async with plane() as (fake, url):
         session, states = client(url)

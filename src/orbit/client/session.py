@@ -2,8 +2,8 @@
 envelope, the token sent as ``Authorization: Bearer`` on the upgrade.
 
 A lost connection is retried with backoff until the session is closed, but for one closed as
-its stream ended (1000) or for a message over the limit (1009), which reconnecting would only
-repeat; on reconnecting, the last ``Hello``
+its stream ended (1000), for a message over the limit (1009) or for an event that can't be read,
+which reconnecting would only repeat; on reconnecting, the last ``Hello``
 sent again with ``since`` the last ``seq`` received, so the control plane resends what was
 missed, then, if the connection viewed a session that isn't open, the last ``Attach`` sent, so
 it views that session again. How the link stands is reported to whoever watches it.
@@ -210,8 +210,8 @@ class WebSocketSession:
 
     async def _run(self) -> None:
         """Keep connected until the session closes, the token is turned away or can't be read,
-        the connection can't be made safely, or it closes in a way that would recur; an event
-        that can't be read ends the events with its error."""
+        the connection can't be made safely, or it closes in a way that would recur, as it would
+        for an event that can't be read, which also ends the events with its error."""
         try:
             await self._keep_connected()
         except _TurnedAway as error:
@@ -222,6 +222,8 @@ class WebSocketSession:
             self._report(Ended(self.url, str(ended)))
         except ProtocolError as error:
             self._events.put_nowait(error)
+            # The control plane would resend it on reconnecting, from the last seq received.
+            self._report(Ended(self.url, f"An event can't be read: {error}"))
 
     async def _keep_connected(self) -> None:
         """Connect, and connect again each time the connection fails or is lost, until the

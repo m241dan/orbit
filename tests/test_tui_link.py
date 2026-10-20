@@ -2,6 +2,7 @@
 
 from collections.abc import Callable
 
+import pytest
 from textual.pilot import Pilot
 from textual.widgets import OptionList, Static
 
@@ -205,17 +206,21 @@ async def test_a_failed_handshake_shows_why_and_quits_once_closed() -> None:
     assert app.return_code == 0
 
 
-async def test_an_ended_link_shows_why_and_quits_once_closed() -> None:
+@pytest.mark.parametrize(
+    "reason",
+    ["An event of 99 bytes is over the 9-byte limit", "An event can't be read: Not JSON"],
+)
+async def test_an_ended_link_shows_why_and_quits_once_closed(reason: str) -> None:
     app, _, link = linked()
     async with app.run_test() as pilot:
         await link.move(pilot, Reconnecting(URL, NOW))
-        await link.move(pilot, Ended(URL, "An event of 99 bytes is over the 9-byte limit"))
+        await link.move(pilot, Ended(URL, reason))
         shown = modal(app)
         assert shown is not None and shown.choices == ("Quit",)
         assert shown.title_text == "Disconnected"
         assert shown.message == (
-            f"The control plane at {URL} closed the connection: "
-            "An event of 99 bytes is over the 9-byte limit. Reconnecting would end the same way."
+            f"The connection to the control plane at {URL} ended: {reason}."
+            " Reconnecting would end the same way."
         )
         assert status(app) is None
         await pilot.press("enter")
@@ -225,7 +230,7 @@ async def test_an_ended_link_shows_why_and_quits_once_closed() -> None:
 
 def test_an_ended_link_without_a_reason_says_so_plainly() -> None:
     assert ended_message(URL, "") == (
-        f"The control plane at {URL} closed the connection. Reconnecting would end the same way."
+        f"The connection to the control plane at {URL} ended. Reconnecting would end the same way."
     )
 
 

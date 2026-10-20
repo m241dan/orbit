@@ -36,11 +36,11 @@ def stopped_message(url: str) -> str:
 
 
 def ended_message(url: str, reason: str) -> str:
-    """What the modal saying the control plane at ``url`` closed the connection for good, for
-    ``reason`` if it gave one, says."""
-    closed = f"The control plane at {url} closed the connection"
+    """What the modal saying the connection to the control plane at ``url`` ended for good, for
+    ``reason`` if one was given, says."""
+    ended = f"The connection to the control plane at {url} ended"
     because = f": {reason}." if reason else "."
-    return f"{closed}{because} Reconnecting would end the same way."
+    return f"{ended}{because} Reconnecting would end the same way."
 
 
 def final_notice(state: TokenRefused | HandshakeFailed | Ended) -> tuple[str, str]:

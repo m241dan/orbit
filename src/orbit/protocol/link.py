@@ -41,8 +41,8 @@ class TokenRefused:
 
 @dataclass(frozen=True)
 class Ended:
-    """The control plane at ``url`` closed the connection in a way reconnecting would only
-    repeat, giving ``reason``, which may be empty; the link isn't retried."""
+    """The connection to the control plane at ``url`` ended in a way reconnecting would only
+    repeat, for ``reason``, which may be empty; the link isn't retried."""
 
     url: str
     reason: str
