@@ -165,7 +165,8 @@ The activating connection then views the session activated, live, and gets its `
 that viewed the session left keep it as a read-only view and get a fresh `Snapshot` of it, with
 `active` false and `open_session` naming the session activated, and those attached to the
 session activated get its `Snapshot`, now live. A session left that was never saved has nothing
-to view, so its viewers view the session activated instead. `SessionStateChanged` follows for
+to view, so its viewers view the session activated instead, live, and get its `Catalog`, which
+no longer lists the session left, and its `Snapshot`. `SessionStateChanged` follows for
 both sessions (see [Session state](#session-state)).
 
 `NewSession(name)` creates a session, `name`d so or by the time it started, and activates it in

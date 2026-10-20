@@ -8,6 +8,7 @@ from orbit.protocol import (
     ActivateSession,
     AddTask,
     Attach,
+    Catalog,
     CommandAccepted,
     CommandRefused,
     NewSession,
@@ -121,6 +122,37 @@ async def test_others_follow_an_unsaved_session_left_as_there_is_nothing_to_view
 
     assert outcome(added) == CommandAccepted(command_id="add")
     assert session.saved_session.id == EARLIER
+
+
+async def test_others_following_an_unsaved_session_left_get_the_activated_one() -> None:
+    session = workspace(stored())
+    activating = await joined(session, "activating")
+    other = await joined(session, "other")
+    await taken(activating)
+    await say(activating, "activate", ActivateSession(session=EARLIER))
+    seen = await taken(other)
+    await session.close()
+
+    snapshot = snapshot_in(seen)
+    assert (snapshot.session.id, snapshot.active) == (EARLIER, True)
+    [catalog] = [e for e in seen if isinstance(e, Catalog)]
+    listed = [s.id for w in catalog.workspaces for s in w.sessions]
+    assert OPEN not in listed
+    assert seen.index(catalog) < seen.index(snapshot)
+
+
+async def test_others_following_an_unsaved_session_left_get_a_new_one() -> None:
+    ids = iter((OPEN, "fresh-id"))
+    session = AgentSession(store=stored(), clock=Ticks(), new_id=lambda: next(ids), name="today")
+    creating = await joined(session, "creating")
+    other = await joined(session, "other")
+    await taken(creating)
+    await say(creating, "new", NewSession(name="fresh"))
+    seen = await taken(other)
+    await session.close()
+
+    snapshot = snapshot_in(seen)
+    assert (snapshot.session.id, snapshot.active) == ("fresh-id", True)
 
 
 async def test_a_new_session_is_activated_for_the_connection_creating_it() -> None:
