@@ -431,6 +431,9 @@ class ControlPlaneServer:
             await websocket.send_denial_response(refusal)
             return
         await websocket.accept()
+        if self._stopping:  # Began stopping as it was accepted, so stop won't close it.
+            await websocket.close(GOING_AWAY, close_reason(SHUTTING_DOWN))
+            return
         peer = _peer(websocket)
         conversation = _Conversation(
             websocket, self._session.connect(), self._settings.max_message_bytes, self._farewell

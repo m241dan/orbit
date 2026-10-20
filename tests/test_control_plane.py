@@ -1,7 +1,7 @@
 """The control plane's server over a real WebSocket on loopback, as a frontend uses it."""
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from typing import cast
 
@@ -456,4 +456,47 @@ async def test_a_websocket_arriving_as_the_server_stops_is_turned_away(
     release.set()
     await stopping
     assert upgrade.denied == [denied] and counted.connections == 0
+    await counted.session.close()
+
+
+class Accepting:
+    """A WebSocket upgrade request showing the token, which awaits ``accepted`` as it's
+    accepted; closes are recorded."""
+
+    def __init__(self, accepted: Callable[[], Awaitable[None]]) -> None:
+        self.headers = {"authorization": f"Bearer {TOKEN}"}
+        self.client = None
+        self.closed: list[tuple[int, str]] = []
+        self._accepted = accepted
+
+    async def accept(self) -> None:
+        await self._accepted()
+
+    async def close(self, code: int, reason: str) -> None:
+        self.closed.append((code, reason))
+
+
+async def test_a_websocket_accepted_as_the_server_stops_is_closed_unconnected() -> None:
+    counted = Counted()
+    server = ControlPlaneServer(counted, lambda: TOKEN, LOOPBACK, Lines())
+    await server.start()
+    closing, release = asyncio.Event(), asyncio.Event()
+    stops: list[asyncio.Task[None]] = []
+
+    async def close_session() -> None:
+        closing.set()
+        await release.wait()
+
+    async def accepted() -> None:
+        stops.append(asyncio.create_task(server.stop(close_session)))
+        await closing.wait()
+
+    accepting = Accepting(accepted)
+
+    await server._websocket(cast(WebSocket, accepting))
+
+    release.set()
+    await stops[0]
+    assert accepting.closed == [(GOING_AWAY, close_reason(SHUTTING_DOWN))]
+    assert counted.connections == 0
     await counted.session.close()
