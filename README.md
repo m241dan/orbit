@@ -123,15 +123,17 @@ session the control plane has active, which runs its work, and `enter` on it jus
 running its own control plane has no session to resume, so it has no `Resume`. The other saved
 sessions follow, the most recently active first, then `New session`; with none saved, the picker
 offers only `New session`. Each row shows the session's name, when it was last active (local time),
-`active` on the workspace's active session, `running` while it runs work (a task run, a review, a
-planner turn or the startup check), `viewed by N` when N other frontends view it, how many of its
+`active` on the workspace's active session, `running` while it runs work (a task run, a review or a
+planner turn), `viewed by N` when N other frontends view it, how many of its
 tasks stand at each status, by the task list's icons (`3 ✅ 2 ⏳ 1 📝`), and what they cost
 (`1.2M tok · $0.84`); `●` marks the session this chat views. The marks follow the sessions live while
 the picker is open, as do sessions another frontend starts, renames or deletes. `j`/`k` (or the arrow keys) move and `enter` picks the highlighted session. On
 `New session`, `enter` asks for a name: `enter` starts the session, named for the date and time if
 you leave the name empty, and `esc` goes back to the list. `esc` on the list quits orbit. Any draft
 orbit added before you picked, such as a fix for a step that failed the startup check, carries over
-into the session you pick. `--new` skips the picker and starts a new session, and `--name NAME`
+into the session you pick. The startup check doesn't keep you from switching: it runs on the base
+commit rather than in a session, and if it fails after you picked, its fix draft goes to the session
+active then. `--new` skips the picker and starts a new session, and `--name NAME`
 starts one named `NAME`.
 
 `ctrl+p` opens the same picker later, the session this chat views first; there `esc` closes it and
@@ -139,8 +141,8 @@ keeps that session, as does picking it. Picking another session switches what ru
 active session is idle and no other frontend views it: the session you pick becomes the active one,
 and its conversation shows in place of the one you left. Otherwise, while the active session runs
 work or another frontend views it, picking a session shows it read-only, and what runs stays as it
-was. Switching is refused, with an error saying what to stop, while tasks run, a review runs, the
-planner answers or the startup check runs. Any other frontend that was viewing the session you
+was. Switching is refused, with an error saying what to stop, while tasks run, a review runs or the
+planner answers. Any other frontend that was viewing the session you
 left keeps it, read-only.
 
 A read-only view shows the session as it was last saved, with its conversation's last events. You

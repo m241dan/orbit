@@ -6,20 +6,17 @@ from dataclasses import dataclass
 TASKS_RUNNING = "Can't switch: tasks are running. Press ctrl+s to stop them."
 REVIEW_RUNNING = "Can't switch: a review is running. Press c on it in the agents pane to stop it."
 PLANNER_ANSWERING = "Can't switch: the planner is answering. Press ctrl+x to stop it."
-STARTUP_CHECKING = (
-    "Can't switch: the startup check is running. Press c on it in the agents pane to stop it."
-)
 
 
 @dataclass(frozen=True)
 class Activity:
-    """What's in progress in a session: a task run (``tasks``), a ``review``, a ``planner``
-    turn and the ``startup_check``."""
+    """What's in progress in a session: a task run (``tasks``), a ``review`` and a ``planner``
+    turn. The startup check runs on the base commit rather than in a session, so it's not among
+    them."""
 
     tasks: bool = False
     review: bool = False
     planner: bool = False
-    startup_check: bool = False
 
     @property
     def running(self) -> bool:
@@ -29,11 +26,10 @@ class Activity:
 
 def switch_refusal(activity: Activity) -> str | None:
     """Why a switch is refused while ``activity`` is in progress, saying what runs first of a
-    task run, a review, a planner turn and the startup check; none when nothing runs."""
+    task run, a review and a planner turn; none when nothing runs."""
     refusals = (
         (activity.tasks, TASKS_RUNNING),
         (activity.review, REVIEW_RUNNING),
         (activity.planner, PLANNER_ANSWERING),
-        (activity.startup_check, STARTUP_CHECKING),
     )
     return next((refusal for runs, refusal in refusals if runs), None)

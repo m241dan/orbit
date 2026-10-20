@@ -139,8 +139,8 @@ class TaskState(_Message):
 
 
 SessionState = Literal["running", "idle"]
-"""Whether a session is ``running`` a task run, a review, a planner turn or the startup check,
-or ``idle``, running none."""
+"""Whether a session is ``running`` a task run, a review or a planner turn, or ``idle``, running
+none."""
 
 
 class SessionSummary(_Message):

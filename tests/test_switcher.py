@@ -11,7 +11,7 @@ from orbit.agent.application.planner_seat import PlannerSeat, SeatHooks
 from orbit.agent.application.settings import SessionSettings
 from orbit.agent.application.switcher import OPEN_RETIRED, SessionSwitcher, SwitchParts
 from orbit.agent.application.tasks import Tasks
-from orbit.agent.domain.activity import STARTUP_CHECKING, TASKS_RUNNING, Activity
+from orbit.agent.domain.activity import TASKS_RUNNING, Activity
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.reviews import LaneSnapshot, PlannerSnapshot
@@ -123,16 +123,6 @@ async def test_switching_is_refused_while_tasks_run() -> None:
         await switcher.handle(NewSession(name="other"))
     assert (refused.value.code, str(refused.value)) == (BUSY, TASKS_RUNNING)
     assert drained(events) == []
-
-
-async def test_switching_is_refused_while_the_startup_check_runs() -> None:
-    held = Held(Settings())
-    held.activity = Activity(startup_check=True)
-    switcher, _, _ = switcher_for(FakeStore(), held)
-    with pytest.raises(Refused) as refused:
-        await switcher.handle(NewSession(name="other"))
-    assert (refused.value.code, str(refused.value)) == (BUSY, STARTUP_CHECKING)
-    assert held.switches == []
 
 
 async def test_open_session_is_refused_as_retired() -> None:

@@ -184,14 +184,15 @@ session, and `ActivateSession`, to make it the active one.
 Each session in a `Catalog` carries its state as it is when the Catalog is sent:
 
 - `active`: whether it's the workspace's open session, the one that runs work.
-- `state`: `running` while a task run, a review, a planner turn or the startup check is in
-  progress, otherwise `idle`.
+- `state`: `running` while a task run, a review or a planner turn is in progress, otherwise
+  `idle`. The startup check runs on the base commit, not in a session, so it leaves the state
+  `idle`.
 - `viewers`: how many welcomed connections view it: the open session's, and, for another
   session, those attached to it (see [Attaching](#attaching)).
 
 Whenever one of them changes for a session, every welcomed connection gets
-`SessionStateChanged(session, active, state, viewers)` with the new values: a task run, review,
-planner turn or startup check starting or ending, a connection joining, closing or attaching to
+`SessionStateChanged(session, active, state, viewers)` with the new values: a task run, review or
+planner turn starting or ending, a connection joining, closing or attaching to
 another session, which sends one for the session it left and one for the session it views, and
 another session activated, which sends one for the session left (inactive, idle, no viewers unless
 connections attached to it) and one for the session activated. A connection joins once everything that follows its `Welcome` is sent, so the

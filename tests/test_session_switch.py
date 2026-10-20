@@ -662,13 +662,16 @@ async def test_the_sessions_list_shows_what_a_session_spent() -> None:
     await session.close()
 
 
-def failing_startup(store: FakeStore) -> AgentSession:
-    """A session for the user to pick, whose startup check fails, adding a draft to fix it."""
+def failing_startup(store: FakeStore, gate: asyncio.Event | None = None) -> AgentSession:
+    """A session for the user to pick, whose startup check fails, once ``gate`` opens if given,
+    adding a draft to fix it."""
     lint = VerificationStep(name="Lint", command=("ruff", "check"))
+    steps = Steps(False)
+    steps.gate = gate
     session, _ = switching(
         store,
         reviews=False,
-        verification=Verification((lint,), Steps(False)),
+        verification=Verification((lint,), steps),
         check_at_startup=True,
         pick_session=True,
     )
@@ -685,6 +688,24 @@ async def test_tasks_orbit_added_before_a_session_was_picked_carry_over_into_it(
     assert [(t.id, t.status) for t in board] == [("4", "completed"), ("5", "draft")]
     assert store.deleted == ["session-1"]
     assert store.released == []
+    await session.close()
+
+
+async def test_a_session_picked_while_the_startup_check_runs_gets_its_fix_draft() -> None:
+    store = store_with(saved("auth", state("4", "completed")))
+    gate = asyncio.Event()
+    session = failing_startup(store, gate)
+    await events_until(session, of_type(AgentStarted))
+    events = await opened(session, ActivateSession(session="auth"))
+    assert not [e for e in events if isinstance(e, CommandRefused)]
+    gate.set()
+    events = await events_until(session, agent_exited("startup-check"))
+
+    assert [(t.id, t.status) for t in board(events)] == [("4", "completed"), ("5", "draft")]
+    assert store.last.id == "auth" and [t.status for t in store.last.tasks] == [
+        "completed",
+        "draft",
+    ]
     await session.close()
 
 

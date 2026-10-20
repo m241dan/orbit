@@ -34,6 +34,7 @@ from tests.agent_fakes import (
     FakeTree,
     Steps,
     Ticks,
+    agent_exited,
     frontend,
     greet,
     send,
@@ -184,13 +185,13 @@ async def test_a_planner_turn_makes_the_open_session_running_until_it_ends() -> 
     assert (changes(running), changes(ended)) == ([state("running")], [state("idle")])
 
 
-async def test_the_startup_check_makes_the_open_session_running_until_it_ends() -> None:
+async def test_the_startup_check_leaves_the_open_session_idle() -> None:
     session, _, _ = session_for(verification=checked(Steps(True, True)), check_at_startup=True)
     await greet(session)
-    events = await asyncio.wait_for(until(session, idle_again), 5)
+    events = await asyncio.wait_for(until(session, agent_exited("startup-check")), 5)
     await session.close()
 
-    assert changes(events) == [state("running"), state("idle")]
+    assert changes(events) == [state("idle")]
 
 
 async def test_a_second_hello_and_its_closing_change_the_viewers_for_every_connection() -> None:

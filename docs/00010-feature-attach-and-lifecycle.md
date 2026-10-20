@@ -19,7 +19,7 @@ Looking at a session never changes what runs. Any frontend can browse any sessio
 ## Activation
 
 5. `ActivateSession(session)` makes that session the workspace's open one; refused with `busy` unless the current one is idle. Viewers of the old one keep it as a read-only view; the activating connection now views a live session. `NewSession` creates a session and activates it under the same rule. Over activating on `Attach`: browsing would change what runs; over moving the other viewers: views change under people.
-6. Idle means no task run, review, planner turn or startup check in progress; running means one is.
+6. Idle means no task run, review or planner turn in progress; running means one is. The startup check doesn't block switching: it runs on the base commit, not in a session, and a failure adds its fix draft to whichever session is active then (see `docs/00013-bugfix-startup-check-in-session-views.md`).
 
 ## The picker
 
