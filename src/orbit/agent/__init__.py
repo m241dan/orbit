@@ -27,7 +27,7 @@ from orbit.agent.domain.config import OrbitConfig
 from orbit.agent.domain.config_errors import ConfigError
 from orbit.agent.domain.ownership import WorkspaceOwner
 from orbit.agent.domain.roles import Role
-from orbit.agent.domain.server import ServerSettings, is_loopback
+from orbit.agent.domain.server import ServerSettings, TlsMode
 from orbit.agent.domain.storage import StorageSettings
 from orbit.agent.domain.verification import VerificationStep
 from orbit.agent.external.checks import run_step
@@ -44,6 +44,7 @@ from orbit.agent.external.session_import import ImportBlocked
 from orbit.agent.external.sqlite_schema import StoreError
 from orbit.agent.external.sqlite_store import SqliteStore
 from orbit.agent.external.store_startup import OpenedStore, open_workspace_store
+from orbit.agent.external.tls import TlsError, tls_warnings
 from orbit.agent.external.token_file import TokenError, TokenFile
 from orbit.agent.external.usage_api import UsageApi
 from orbit.agent.external.user_config import (
@@ -86,6 +87,8 @@ __all__ = [
     "StorageSettings",
     "StoreError",
     "StoredSession",
+    "TlsError",
+    "TlsMode",
     "TokenError",
     "TokenFile",
     "UsageApi",
@@ -96,7 +99,6 @@ __all__ = [
     "WorkspaceOwner",
     "git_top_level",
     "in_git_work_tree",
-    "is_loopback",
     "open_workspace_store",
     "orbit_dir",
     "read_config",
@@ -106,6 +108,7 @@ __all__ = [
     "resolve_state_dir",
     "run_step",
     "running_server",
+    "tls_warnings",
     "workspace_state",
     "write_checks",
 ]

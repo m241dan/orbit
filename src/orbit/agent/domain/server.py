@@ -1,8 +1,10 @@
-"""Where ``orbit serve`` listens: the user's server settings, which hosts it may bind, and what
-its run file says while it does."""
+"""Where ``orbit serve`` listens: the user's server settings, which hosts it may bind, how it
+serves TLS, and what its run file says while it does."""
 
 import ipaddress
-from typing import Any
+from datetime import datetime, timedelta
+from enum import StrEnum
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -11,12 +13,63 @@ from orbit.protocol import DEFAULT_MAX_MESSAGE_MB
 
 LOCALHOST = "localhost"
 
+EXPIRY_WARNING = timedelta(days=14)
+"""How long before a server certificate expires ``orbit serve`` warns of it."""
 
-class ServerSettings(BaseModel):
-    """The user config's ``[server]``: the ``host`` and ``port`` ``orbit serve`` listens on (0
-    lets the system choose one), and ``max_message_mb``, the largest message either way."""
+TlsMode = Literal["off", "tls", "mtls"]
+"""How ``orbit serve`` serves: plaintext, TLS with a server certificate, or mutual TLS."""
+
+_NEEDED: dict[TlsMode, tuple[str, ...]] = {
+    "off": (),
+    "tls": ("cert", "key"),
+    "mtls": ("cert", "key", "client_ca"),
+}
+
+
+class TlsSettings(BaseModel):
+    """How ``orbit serve`` serves TLS: its ``tls`` mode, the server certificate ``cert`` and its
+    private ``key``, the ``client_ca`` that signs client certificates under mutual TLS, and the
+    ``ca`` that signed ``cert``, each a path or ``None``."""
 
     model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
+
+    tls: TlsMode = "off"
+    cert: str | None = None
+    key: str | None = None
+    client_ca: str | None = None
+    ca: str | None = None
+
+
+def missing_tls_key(settings: TlsSettings) -> str | None:
+    """The first key ``settings``' mode needs that isn't set; ``None`` if none is missing."""
+    return next((key for key in _NEEDED[settings.tls] if getattr(settings, key) is None), None)
+
+
+class CertificateDates(StrEnum):
+    """Where now falls in a certificate's validity."""
+
+    VALID = "valid"
+    EXPIRING = "expiring"
+    EXPIRED = "expired"
+    NOT_YET_VALID = "not yet valid"
+
+
+def certificate_dates(not_before: datetime, not_after: datetime, now: datetime) -> CertificateDates:
+    """Where ``now`` falls in a certificate valid from ``not_before`` to ``not_after``:
+    expiring if it ends within :data:`EXPIRY_WARNING`."""
+    if now < not_before:
+        return CertificateDates.NOT_YET_VALID
+    if now > not_after:
+        return CertificateDates.EXPIRED
+    if not_after - now < EXPIRY_WARNING:
+        return CertificateDates.EXPIRING
+    return CertificateDates.VALID
+
+
+class ServerSettings(TlsSettings):
+    """The user config's ``[server]``: the ``host`` and ``port`` ``orbit serve`` listens on (0
+    lets the system choose one), ``max_message_mb``, the largest message either way, and its TLS
+    settings."""
 
     host: str = Field(default="127.0.0.1", min_length=1)
     port: int = Field(default=7433, ge=0, le=65535)

@@ -4,7 +4,7 @@ import asyncio
 import logging
 import os
 import signal
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,20 +20,24 @@ from orbit.agent import (
     RunFile,
     ServerSettings,
     SqliteStore,
+    TlsError,
     TokenError,
     TokenFile,
     WorkspaceLock,
     WorkspaceOwner,
-    is_loopback,
     read_server,
     resolve_config_dir,
     resolve_state_dir,
+    tls_warnings,
 )
 from orbit.cli.backend import INVALID_CONFIG, _Backend, _backend, _repository_lock, _workspace
 from orbit.cli.errors import _exit_on
 from orbit.cli.options import (
+    CertOption,
+    ClientCaOption,
     ConfigDirOption,
     HostOption,
+    KeyOption,
     ModelOption,
     NameOption,
     NewOption,
@@ -41,6 +45,7 @@ from orbit.cli.options import (
     ProfileOption,
     ReviewOption,
     StateDirOption,
+    TlsOption,
     ToolsOption,
     UsageOption,
     VerifyOption,
@@ -67,6 +72,10 @@ def serve(
     config_dir: ConfigDirOption = None,
     host: HostOption = None,
     port: PortOption = None,
+    tls: TlsOption = None,
+    cert: CertOption = None,
+    key: KeyOption = None,
+    client_ca: ClientCaOption = None,
 ) -> None:
     """Run the control plane on its own, for frontends to connect to over a WebSocket.
 
@@ -74,14 +83,16 @@ def serve(
     --name), and its work goes on with no frontend connected. Frontends show the token in
     the token file in your config directory. The first orbit on a repository owns it; while
     another does, this one is read-only, queueing the work it's asked to run. The first ctrl+c
-    stops it, cancelling the work in progress; a second exits at once.
+    stops it, cancelling the work in progress; a second exits at once. Beyond loopback it
+    serves over TLS alone, with --tls tls and a certificate and key.
     """
     profile = profile.expanduser().resolve() if profile else None
     state = resolve_state_dir(state, os.environ)
     user_config = resolve_config_dir(config_dir, os.environ)
     root = _workspace(workspace)
     os.chdir(root)
-    settings = _server_settings(user_config, host, port)
+    given = {"host": host, "port": port, "tls": tls, "cert": cert, "key": key}
+    settings = _server_settings(user_config, {**given, "client_ca": client_ca})
     token_file = TokenFile(user_config)
     _token(token_file)
     with _repository_lock(root) as (lock, owner):
@@ -138,23 +149,19 @@ def _serve_until_stopped(
         asyncio.run(store.close())
 
 
-def _server_settings(config_dir: Path, host: str | None, port: int | None) -> ServerSettings:
-    """The server settings in the user config in ``config_dir``, with ``host`` and ``port``
-    over them, if given.
+def _server_settings(config_dir: Path, given: Mapping[str, object]) -> ServerSettings:
+    """The server settings in the user config in ``config_dir``, with the ``given`` ones that
+    aren't ``None`` over them, after warning of what they serve with.
 
-    Exits with status 2 if the file is invalid, or the host isn't loopback.
+    Exits with status 2 if the file is invalid, or the server can't serve as they say.
     """
     with _exit_on(ConfigError, prefix=INVALID_CONFIG):
         settings = read_server(config_dir)
-    given = {"host": host, "port": port}
-    settings = settings.model_copy(update={k: v for k, v in given.items() if v is not None})
-    if not is_loopback(settings.host):
-        typer.echo(
-            f"orbit serve listens on loopback alone for now, not on {settings.host}; TLS, for"
-            " listening beyond it, comes in a later release. Use an SSH tunnel meanwhile.",
-            err=True,
-        )
-        raise typer.Exit(2)
+    update = {k: str(v) if isinstance(v, Path) else v for k, v in given.items() if v is not None}
+    settings = settings.model_copy(update=update)
+    with _exit_on(TlsError):
+        for warning in tls_warnings(settings):
+            typer.echo(f"Warning: {warning}", err=True)
     return settings
 
 

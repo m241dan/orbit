@@ -4,8 +4,10 @@ import asyncio
 import json
 import os
 import queue
+import re
 import signal
 import socket
+import ssl
 import stat
 import threading
 import time
@@ -36,6 +38,7 @@ from orbit.protocol import (
     decode_event,
     encode,
 )
+from tests.tls_certs import DAY, ServerFiles, make_ca, make_server, other_key
 
 runner = CliRunner()
 TASK = TaskSpec(prompt="Add a flag.")
@@ -78,6 +81,7 @@ class Frontend:
     run_file: dict[str, object] = field(default_factory=dict)
     events: list[Event] = field(default_factory=list)
     close: tuple[int | None, str | None] = (None, None)
+    trust: ssl.SSLContext | None = None
 
     def start(self) -> threading.Thread:
         thread = threading.Thread(target=self._run, daemon=True)
@@ -87,8 +91,10 @@ class Frontend:
     def _run(self) -> None:
         self.run_file = self.listening(self.state)
         token = (self.config_dir / "token").read_text().strip()
-        url = str(self.run_file["url"])
-        with connect(url, additional_headers={"Authorization": f"Bearer {token}"}) as ws:
+        # A server listening on every address is reached on the one its certificate names.
+        url = str(self.run_file["url"]).replace("//0.0.0.0:", "//localhost:")
+        headers = {"Authorization": f"Bearer {token}"}
+        with connect(url, additional_headers=headers, ssl=self.trust) as ws:
             say(ws, "hello", Hello(client="orbit-tests", protocol_version=PROTOCOL_VERSION))
             self.events = until(ws, Snapshot) + self.work(ws)
             os.kill(os.getpid(), signal.SIGTERM)
@@ -317,10 +323,79 @@ def test_serve_can_profile_itself(state: Path, config_dir: Path, tmp_path: Path)
     assert names == ["serve-blocked.log", "serve.prof"]
 
 
-def test_serve_refuses_a_host_beyond_loopback() -> None:
+def test_serve_refuses_a_host_beyond_loopback_without_tls() -> None:
     result = runner.invoke(app, ["serve", *QUIET, "--host", "0.0.0.0"])
     assert result.exit_code == 2
-    assert "not on 0.0.0.0" in result.output and "TLS" in result.output
+    assert result.stderr.startswith("Plaintext is for loopback alone.")
+    assert "0.0.0.0" in result.stderr and "--tls tls" in result.stderr
+
+
+def _tls_flags(files: ServerFiles) -> list[str]:
+    return ["--tls", "tls", "--cert", str(files.cert), "--key", str(files.key)]
+
+
+def test_serve_over_tls_welcomes_a_frontend_trusting_its_ca_beyond_loopback(
+    state: Path, config_dir: Path, tmp_path: Path
+) -> None:
+    ca = make_ca(tmp_path)
+    files = make_server(ca, tmp_path)
+    frontend = Frontend(state, config_dir, trust=ssl.create_default_context(cafile=ca.path))
+    output = served(frontend, *_tls_flags(files), "--host", "0.0.0.0", "--port", "0")
+
+    assert [type(e) for e in frontend.events] == [Welcome, Catalog, Snapshot]
+    assert str(frontend.run_file["url"]).startswith("wss://0.0.0.0:")
+    assert "orbit-tests connected from" in output
+
+
+def test_serve_takes_its_tls_settings_from_the_config_file(
+    state: Path, config_dir: Path, tmp_path: Path
+) -> None:
+    ca = make_ca(tmp_path)
+    files = make_server(ca, tmp_path, valid_for=10 * DAY)
+    config_dir.mkdir()
+    (config_dir / "config.toml").write_text(
+        f'[server]\nport = 0\ntls = "tls"\ncert = "{files.cert}"\nkey = "{files.key}"\n'
+    )
+    frontend = Frontend(state, config_dir, trust=ssl.create_default_context(cafile=ca.path))
+    thread = frontend.start()
+    result = runner.invoke(app, ["serve", *QUIET])
+    thread.join(10)
+
+    assert result.exit_code == 0, result.output
+    assert [type(e) for e in frontend.events] == [Welcome, Catalog, Snapshot]
+    assert str(frontend.run_file["url"]).startswith("wss://127.0.0.1:")
+    assert result.stderr.startswith("Warning: The server certificate expires soon.")
+
+
+def test_serve_over_tls_without_a_key_names_it(tmp_path: Path) -> None:
+    files = make_server(make_ca(tmp_path), tmp_path)
+    result = runner.invoke(app, ["serve", *QUIET, "--tls", "tls", "--cert", str(files.cert)])
+    assert result.exit_code == 2
+    assert "needs key" in result.stderr and "--key" in result.stderr
+
+
+def test_serve_refuses_a_key_others_can_read_with_the_chmod_that_fixes_it(tmp_path: Path) -> None:
+    files = make_server(make_ca(tmp_path), tmp_path)
+    files.key.chmod(0o644)
+    result = runner.invoke(app, ["serve", *QUIET, *_tls_flags(files)])
+    assert result.exit_code == 2
+    assert f"chmod 600 {files.key}" in result.stderr
+
+
+def test_serve_refuses_a_key_that_isnt_the_certificates(tmp_path: Path) -> None:
+    files = make_server(make_ca(tmp_path), tmp_path)
+    mismatched = ServerFiles(files.cert, other_key(tmp_path))
+    result = runner.invoke(app, ["serve", *QUIET, *_tls_flags(mismatched)])
+    assert result.exit_code == 2
+    assert result.stderr.startswith("The certificate and key don't match.")
+
+
+def test_serve_refuses_an_expired_certificate_naming_its_dates(tmp_path: Path) -> None:
+    files = make_server(make_ca(tmp_path), tmp_path, valid_from=-10 * DAY, valid_for=5 * DAY)
+    result = runner.invoke(app, ["serve", *QUIET, *_tls_flags(files)])
+    assert result.exit_code == 2
+    assert result.stderr.startswith("The server certificate has expired.")
+    assert re.search(r"valid from \d{4}-\d\d-\d\d .* to \d{4}-", result.stderr)
 
 
 def test_serve_refuses_a_port_in_use_naming_it(config_dir: Path) -> None:

@@ -340,13 +340,19 @@ doesn't know.
 
 ## Transport
 
-`orbit serve` serves the protocol over a WebSocket on loopback, at the URL it prints and writes to
-its run file (`ws://127.0.0.1:7433/` by default). Each WebSocket is a connection of its own, with
+`orbit serve` serves the protocol over a WebSocket, at the URL it prints and writes to its run
+file (`ws://127.0.0.1:7433/` by default). Each WebSocket is a connection of its own, with
 its own handshake and stream: it starts with `Hello` like any other, and what it's sent follows
 the rules above, so every connection gets every event of the session it views and of none,
 outcomes of other connections' commands included, but for the events answering one connection
 (`Welcome`, `Catalog`, `Snapshot`, `HistoryPage`), which reach only it.
 
+- **TLS**: with `tls = "off"` (the default) the server speaks plaintext `ws://` and listens on
+  loopback alone. With `tls = "tls"` (`--tls tls`) it terminates TLS itself with the server
+  certificate and key in `[server]` (`cert`, `key`), at a `wss://` URL, on any address; clients
+  verify the certificate and its hostname. Mutual TLS (`tls = "mtls"`), requiring a client
+  certificate, isn't served yet. TLS changes nothing above the WebSocket: the token is still
+  required.
 - **Authentication** is on the upgrade: the request must carry `Authorization: Bearer <token>`,
   the token in the token file of the server's config directory. Without it, or with another
   token, the server answers HTTP 401 and no WebSocket opens.

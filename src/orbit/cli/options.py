@@ -5,7 +5,7 @@ from typing import Annotated
 
 import typer
 
-from orbit.agent import MODEL_ALIASES
+from orbit.agent import MODEL_ALIASES, TlsMode
 from orbit.protocol import ToolAccess
 
 # Options declared apart, so chat stays short.
@@ -131,7 +131,7 @@ HostOption = Annotated[
     str | None,
     typer.Option(
         help="The address to listen on (default: [server] host in your config.toml, else"
-        " 127.0.0.1); only loopback for now."
+        " 127.0.0.1); beyond loopback only with --tls."
     ),
 ]
 PortOption = Annotated[
@@ -141,5 +141,37 @@ PortOption = Annotated[
         max=65535,
         help="The port to listen on (default: [server] port in your config.toml, else 7433);"
         " 0 lets the system choose one.",
+    ),
+]
+TlsOption = Annotated[
+    TlsMode | None,
+    typer.Option(
+        "--tls",
+        help="How to serve: off (plaintext, on loopback alone), tls (wss:// with --cert and"
+        " --key) or mtls (also requiring client certificates; not yet supported) (default:"
+        " [server] tls in your config.toml, else off).",
+    ),
+]
+CertOption = Annotated[
+    Path | None,
+    typer.Option(
+        "--cert",
+        help="The server certificate, in PEM (default: [server] cert in your config.toml).",
+    ),
+]
+KeyOption = Annotated[
+    Path | None,
+    typer.Option(
+        "--key",
+        help="The server certificate's private key, in PEM and readable by you alone (default:"
+        " [server] key in your config.toml).",
+    ),
+]
+ClientCaOption = Annotated[
+    Path | None,
+    typer.Option(
+        "--client-ca",
+        help="The CA that signs client certificates under mtls (default: [server] client_ca in"
+        " your config.toml).",
     ),
 ]

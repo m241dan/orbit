@@ -1,5 +1,5 @@
 """The control plane's server: the protocol over a WebSocket, one frame per envelope, for each
-frontend that shows the token.
+frontend that shows the token, over TLS if the settings say so.
 
 Each WebSocket that's let in gets a connection of its own to the session: its text frames are
 decoded into commands and sent on it, and its events are encoded into text frames. A frontend
@@ -84,10 +84,11 @@ def close_reason(text: str) -> str:
     return text.encode()[:_REASON_BYTES].decode(errors="ignore")
 
 
-def ws_url(host: str, port: int) -> str:
-    """The URL of the server on ``host`` and ``port``, an IPv6 address in brackets."""
+def ws_url(host: str, port: int, secure: bool = False) -> str:
+    """The URL of the server on ``host`` and ``port``, an IPv6 address in brackets, ``wss://``
+    if it's ``secure``, over TLS."""
     netloc = f"[{host}]:{port}" if ":" in host else f"{host}:{port}"
-    return f"ws://{netloc}/"
+    return f"{'wss' if secure else 'ws'}://{netloc}/"
 
 
 def _decoded(message: Message) -> CommandEnvelope:
@@ -228,7 +229,7 @@ class ControlPlaneServer:
             sock = socket.create_server((host, port), family=family)
         except OSError as exc:
             raise ListenFailed(host, port, exc.strerror or str(exc)) from None
-        url = ws_url(host, sock.getsockname()[1])
+        url = ws_url(host, sock.getsockname()[1], self._secure)
         self._server = EmbeddedServer(self._config())
         self._serving = asyncio.create_task(self._server.serve(sockets=[sock]))
         while not self._server.started:
@@ -240,12 +241,19 @@ class ControlPlaneServer:
             await asyncio.sleep(0.01)
         return url
 
+    @property
+    def _secure(self) -> bool:
+        """Whether the server serves over TLS."""
+        return self._settings.tls != "off"
+
     def _config(self) -> uvicorn.Config:
         """How uvicorn serves the app: logging left to the program, messages kept under the
-        limit."""
+        limit, over TLS with the settings' certificate and key if it's secure."""
         app = Starlette(routes=[WebSocketRoute("/", self._websocket)])
         return uvicorn.Config(
             app,
+            ssl_certfile=self._settings.cert if self._secure else None,
+            ssl_keyfile=self._settings.key if self._secure else None,
             log_config=None,
             lifespan="off",
             ws="websockets-sansio",

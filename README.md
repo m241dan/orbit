@@ -45,6 +45,7 @@ uv run orbit chat --state-dir /tmp/orbit-state # keep saved sessions somewhere e
 uv run orbit db backup ~/orbit-backup.db       # back up the saved sessions (--force replaces)
 uv run orbit serve                             # run the control plane on its own, for frontends
 uv run orbit serve --port 0                    # on a port the system chooses
+uv run orbit serve --tls tls --cert server.pem --key server-key.pem --host 0.0.0.0  # over TLS
 uv run orbit chat --connect ws://127.0.0.1:7433/  # show the session orbit serve runs
 uv run orbit chat --local                      # run in-process even with orbit serve running
 uv run orbit token rotate                      # replace the token frontends show orbit serve
@@ -870,11 +871,12 @@ frontend connected. It takes `-C` and the backend flags `chat` has (`--model`, `
 `--verify`, `--worktree`, `--review`, `--usage`, `--new`, `--name`, `--profile`, which writes
 `serve.prof` and `serve-blocked.log`), `--state-dir` and `--config-dir`, and:
 
-- `--host`: the address to listen on, by default `127.0.0.1`. For now only loopback is allowed
-  (`127.0.0.1`, `::1`, `localhost`); another host stops it with status 2, as TLS, for listening
-  beyond it, comes in a later release.
+- `--host`: the address to listen on, by default `127.0.0.1`. Without TLS only loopback is
+  allowed (`127.0.0.1`, `::1`, `localhost`); another host stops it with status 2, pointing at
+  `--tls`. With TLS any address is.
 - `--port`: the port, by default 7433; 0 lets the system choose one. A port in use stops it with
   status 2, naming the port.
+- `--tls`, `--cert`, `--key` and `--client-ca`: how it serves TLS (see **TLS** below).
 
 It opens the repository's most recently active saved session that no other orbit has open, or a
 new one when there's none; `--new` or `--name` start a new one. Once listening it prints one line
@@ -900,8 +902,9 @@ write it wins, and the other uses that one. The
 token grants full control of the control plane: anyone who has it can run agents in your
 repository with the access you give them. It's never printed or logged; don't share it. To connect
 from another machine, copy it over a trusted channel, such as `scp ~/.config/orbit/token
-other:.config/orbit/token`, and in this release reach the server through an SSH tunnel, such as
-`ssh -L 7433:127.0.0.1:7433 server`, as it listens on loopback alone.
+other:.config/orbit/token`, and reach the server over TLS (see **TLS** below), or through an SSH tunnel to
+a loopback server, such as `ssh -L 7433:127.0.0.1:7433 server`. The token stays required over
+TLS.
 
 `orbit token rotate [--config-dir PATH]` replaces the token with a new one, written whole or not at
 all and readable by you alone, and says so, naming the file but never the token. A running `orbit
@@ -913,18 +916,74 @@ on the server's machine picks up the new token when it reconnects, while a front
 machine needs the new copy first. Copy the new token to your other machines as before, over a
 trusted channel.
 
-The `[server]` table in your `config.toml` sets where it listens and the largest message either
-way; the flags override it:
+The `[server]` table in your `config.toml` sets where it listens, the largest message either
+way and how it serves TLS; the flags override it:
 
 ```toml
 [server]
-host = "127.0.0.1"   # loopback only, for now
+host = "127.0.0.1"   # beyond loopback only with TLS
 port = 7433          # 0 lets the system choose
 max_message_mb = 64  # a larger message closes the connection
+tls = "off"          # "off", "tls" or "mtls" (--tls)
+cert = "/home/me/.config/orbit/tls/server.pem"      # the server certificate (--cert)
+key = "/home/me/.config/orbit/tls/server-key.pem"   # its private key, chmod 600 (--key)
+client_ca = "/home/me/.config/orbit/tls/ca.pem"     # signs client certificates, for mtls (--client-ca)
+ca = "/home/me/.config/orbit/tls/ca.pem"            # the CA that signed cert
 ```
 
 An unknown key in `[server]`, or a value of the wrong type or out of range, stops `orbit serve`
 with status 2 and a message naming the file and the key.
+
+**TLS.** `orbit serve` serves in one of three modes, set by `tls` in `[server]` or `--tls`:
+
+| Mode | URL | Use it when |
+| --- | --- | --- |
+| `off` (the default) | `ws://` | every frontend is on the same machine, or reaches it through an SSH tunnel or a reverse proxy that terminates TLS; plaintext listens on loopback alone |
+| `tls` | `wss://` | frontends on other machines connect directly: traffic is encrypted, the server is verified by its certificate, and frontends show the token |
+| `mtls` | `wss://` | frontends must also show a client certificate the CA signed; not supported yet, so it stops `orbit serve` with status 2 |
+
+With `tls`, `orbit serve` needs `cert`, the server certificate, and `key`, its private key, both
+PEM files; a mode missing one stops it with status 2, naming the key and its flag (`mtls` also
+needs `client_ca`). Before listening it checks them, stopping with status 2 and the fix if the key
+can be read by anyone but you (`chmod 600 <path>`), a file can't be read or isn't PEM, the key
+isn't the certificate's, or the certificate has expired or isn't valid yet (naming its dates). A
+certificate expiring within 14 days starts it with a warning. The certificate is read once, at
+start: to renew it, replace the files and restart `orbit serve`; frontends reconnect on their own.
+
+To make a private CA and a server certificate with openssl, naming the server's hostname (here
+`orbit.example.lan`, and its address) as a subject alternative name, which clients check:
+
+```sh
+mkdir -p ~/.config/orbit/tls && cd ~/.config/orbit/tls
+# The CA: keep ca-key.pem secret, ideally off the server; ca.pem goes to every client.
+openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 3650 \
+  -subj "/CN=orbit CA" -keyout ca-key.pem -out ca.pem
+# The server's key and certificate, signed by the CA.
+openssl req -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes \
+  -subj "/CN=orbit.example.lan" -keyout server-key.pem -out server.csr
+openssl x509 -req -in server.csr -CA ca.pem -CAkey ca-key.pem -days 365 -out server.pem \
+  -extfile <(printf "subjectAltName=DNS:orbit.example.lan,IP:192.168.1.20")
+chmod 600 ca-key.pem server-key.pem
+orbit serve --tls tls --cert server.pem --key server-key.pem --host 0.0.0.0
+```
+
+`server.pem` and `server-key.pem` stay on the server; copy `ca.pem` and the token to each client
+machine over a trusted channel, such as `scp`.
+
+**TLS and connection errors.** Each message `orbit serve` stops (or warns) with starts with what's
+wrong, then names the setting or file:
+
+| Message | Fix |
+| --- | --- |
+| The TLS mode is missing a file. | Set the key it names in `[server]`, or pass its flag (`--cert`, `--key`, `--client-ca`). |
+| Plaintext is for loopback alone. | Serve with `--tls tls`, a certificate and key, or listen on `127.0.0.1` and reach it through an SSH tunnel. |
+| Mutual TLS isn't supported yet. | Use `tls = "tls"` with the token for now. |
+| A TLS file can't be read. | Check the path it names, in `[server]` or the flag, and that the file is PEM (an unencrypted key). |
+| The private key can be read by others. | Run the `chmod 600 <path>` it gives. |
+| The certificate and key don't match. | Give the key the certificate was made for, or make a new certificate for the key. |
+| The server certificate has expired. | Renew it, replace the file and restart `orbit serve`. |
+| The server certificate isn't valid yet. | Check the machine's clock, or make a certificate valid from now. |
+| The server certificate expires soon. | A warning: renew it and restart `orbit serve` before the date it names. |
 
 **Connecting.** `orbit chat --connect <url>` joins a running `orbit serve`, starting with the
 session picker, which offers to resume the session it has active (see [Sessions](#sessions)),
@@ -1049,7 +1108,9 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     over a WebSocket (starlette on uvicorn, through `embedded_server`'s `EmbeddedServer`, which
     leaves signals to the program), one `SessionConnection` per frontend that shows the token,
     turning frames into commands and events into frames; `TokenFile` (in `token_file`) is the
-    token it checks, read afresh for each frontend, and rotates it, `RunFile` (in `run_file`) says where it listens, both written through
+    token it checks, read afresh for each frontend, and rotates it, `tls_warnings` (in `tls`) checks
+    the server's TLS settings, key and certificate before it listens, with the messages in
+    `tls_messages`, `RunFile` (in `run_file`) says where it listens, both written through
     `private_files`, and `user_config` reads `[storage]` and `[server]`.
   - `application`: `AgentSession` (in `session`) implements `Session`: it takes commands, asks
     the domain what follows, drives the ports and publishes events into the `Outbox` (in
@@ -1103,7 +1164,7 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     `agents`: agent ids and tokens), `roles` (built-in roles, given their instructions, and the
     tasks orbit queues in them), `config` (`OrbitConfig`: the limits, roles, verification steps
     and setup a project file sets over the built-in defaults) and `config_errors` (`ConfigError`,
-    and what's wrong with an invalid file or proposal), `server` (`ServerSettings`, the user config's `[server]`, and which hosts are loopback), `ownership` (`WorkspaceOwner`, who a workspace lock names, and the read-only note), `checks` (the verification steps, the
+    and what's wrong with an invalid file or proposal), `server` (`ServerSettings`, the user config's `[server]` with its `TlsSettings`, which files each TLS mode needs, where now falls in a certificate's validity, and which hosts are loopback), `ownership` (`WorkspaceOwner`, who a workspace lock names, and the read-only note), `checks` (the verification steps, the
     setup step that makes a fresh worktree ready, and the checks a configurator proposes), the
     `Catalog` (in `catalog`: the workspace and its sessions, the agents' roles, the triggers and
     the lanes), `ReviewPlanner` (in `reviews`: when to review, batches, rounds and caps), commit

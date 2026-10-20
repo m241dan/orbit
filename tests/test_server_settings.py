@@ -22,6 +22,15 @@ def test_the_files_server_settings_are_read_and_the_rest_ignored(tmp_path: Path)
     assert read_server(tmp_path) == ServerSettings(host="::1", port=0, max_message_mb=2)
 
 
+def test_the_files_tls_settings_are_read(tmp_path: Path) -> None:
+    (tmp_path / "config.toml").write_text(
+        '[server]\ntls = "tls"\ncert = "s.pem"\nkey = "k.pem"\nclient_ca = "c.pem"\nca = "a.pem"\n'
+    )
+    assert read_server(tmp_path) == ServerSettings(
+        tls="tls", cert="s.pem", key="k.pem", client_ca="c.pem", ca="a.pem"
+    )
+
+
 def test_the_message_limit_is_counted_in_mebibytes() -> None:
     assert ServerSettings(max_message_mb=2).max_message_bytes == 2 * 1024 * 1024
 
@@ -33,6 +42,8 @@ def test_the_message_limit_is_counted_in_mebibytes() -> None:
         ("[server]\nport = 70000\n", "server.port"),
         ("[server]\nport = '7433'\n", "server.port"),
         ("[server]\nmax_message_mb = 0\n", "server.max_message_mb"),
+        ("[server]\ntls = 'on'\n", "server.tls"),
+        ("[server]\ncert = 1\n", "server.cert"),
     ],
 )
 def test_an_invalid_setting_names_the_file_and_the_key(

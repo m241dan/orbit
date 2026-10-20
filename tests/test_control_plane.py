@@ -353,6 +353,10 @@ def test_an_ipv6_url_has_its_address_in_brackets() -> None:
     assert ws_url("localhost", 80) == "ws://localhost:80/"
 
 
+def test_a_secure_url_is_wss() -> None:
+    assert ws_url("0.0.0.0", 443, secure=True) == "wss://0.0.0.0:443/"
+
+
 def test_a_close_reason_is_cut_to_fit_a_close_frame() -> None:
     assert len(close_reason("é" * 100).encode()) == 122
     assert close_reason("short") == "short"
