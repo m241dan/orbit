@@ -122,18 +122,18 @@ class SessionSwitcher:
             case OpenSession():
                 raise Refused(INVALID, OPEN_RETIRED)
             case ActivateSession() | NewSession():
-                await self._activate(command)
+                await self.activate(command)
             case RenameSession() | DeleteSession():
                 await self._change_saved(command)
             case _:
                 assert_never(command)
 
-    async def _activate(self, command: ActivateSession | NewSession) -> None:
-        """Make the saved session ``command`` names, or a new one, the one open here."""
+    async def activate(self, command: ActivateSession | NewSession) -> str | None:
+        """Make the saved session ``command`` names, or a new one, the one open here; returns
+        the id of the session the switch left, if it stays saved, or none."""
         if isinstance(command, ActivateSession):
-            await self._open_session(command.session)
-        else:
-            await self._new_session(command.name)
+            return await self._open_session(command.session)
+        return await self._new_session(command.name)
 
     async def list_sessions(self, reason: ListingReason) -> None:
         """Publish the saved sessions, listed for ``reason``."""
@@ -204,27 +204,30 @@ class SessionSwitcher:
         else:
             await self._keeper.rename_saved(session_id, named)
 
-    async def _open_session(self, session_id: str) -> None:
+    async def _open_session(self, session_id: str) -> str | None:
         """Open the saved session ``session_id`` in place of this one, without running
-        anything: what was running when it was saved is cancelled. Refused while anything runs,
-        or if it can't be opened; opening this session does nothing."""
+        anything: what was running when it was saved is cancelled; returns the id of the
+        session left, if it stays saved. Refused while anything runs, or if it can't be opened;
+        opening this session does nothing."""
         if session_id == self._keeper.id:
-            return
+            return None
         self._may_switch()
         opened = await self._keeper.open(session_id, self._load)
         if opened is None:
-            return
+            return None
         record = opened.record
         tasks, count = interrupted(record.tasks)
         await self._switched(opened.left, _stopped(record.tasks, tasks), record.last_active)
         for note in resumed_notes(record, count):
             await self._events.put(Notice(message=note))
+        return opened.left.id
 
-    async def _new_session(self, name: str | None) -> None:
-        """Start a new session ``name``d so in place of this one; refused while anything
-        runs."""
+    async def _new_session(self, name: str | None) -> str | None:
+        """Start a new session ``name``d so in place of this one; returns the id of the session
+        left, if it stays saved. Refused while anything runs."""
         left = await self._keeper.renew(name, self._clear)
         await self._switched(left, (), None)
+        return left.id
 
     def _may_switch(self) -> None:
         """Refuse a switch, raising :class:`Refused`, while anything runs, saying what runs."""

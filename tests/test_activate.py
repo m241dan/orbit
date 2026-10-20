@@ -1,8 +1,11 @@
 """Activating sessions: making a saved one, or a new one, the workspace's open session, which
 the activating connection then views live while the others keep viewing what they viewed."""
 
+import asyncio
+
 from orbit.agent import AgentSession
 from orbit.agent.application.connection import SessionConnection
+from orbit.agent.domain.sessions import SessionRecord
 from orbit.protocol import (
     INVALID,
     ActivateSession,
@@ -11,6 +14,7 @@ from orbit.protocol import (
     Catalog,
     CommandAccepted,
     CommandRefused,
+    Event,
     NewSession,
     OpenSession,
     SessionRef,
@@ -23,6 +27,7 @@ from tests.test_attach import (
     OPEN,
     SAVED_TASK,
     TASK,
+    WHEN,
     joined,
     outcome,
     say,
@@ -246,3 +251,62 @@ async def test_a_left_session_that_cant_be_read_back_sends_its_viewers_no_view()
     assert outcome(events) == CommandAccepted(command_id="activate")
     assert not any(isinstance(e, Snapshot) for e in seen)
     assert session.saved_session.id == EARLIER
+
+
+async def activated_meanwhile(
+    session_id: str, once_switched: bool = False
+) -> tuple[SessionConnection, list[Event], list[Event]]:
+    """The first of two connections, which activated ``earlier``, with what reached it and the
+    second, which activated the session ``session_id`` while that switch was under way, before
+    ``earlier`` was open unless ``once_switched``."""
+    store = stored()
+    store.saved.append(SessionRecord(id="later", name="later work", created=WHEN, last_active=WHEN))
+    session = workspace(store)
+    first = await used(session, "first")
+    second = await joined(session, "second")
+    await taken(first)
+    activating: list[asyncio.Task[None]] = []
+
+    async def activate() -> None:
+        while once_switched and session.saved_session.id != EARLIER:
+            await asyncio.sleep(0)
+        await say(second, "activate", ActivateSession(session=session_id))
+
+    async def activate_another() -> None:
+        store.on_acquire = None
+        activating.append(asyncio.create_task(activate()))
+
+    store.on_acquire = activate_another
+    await say(first, "activate", ActivateSession(session=EARLIER))
+    await asyncio.gather(*activating)
+    events = await taken(first)
+    seen = await taken(second)
+    await session.close()
+    return first, events, seen
+
+
+def last_snapshot(events: list[Event]) -> Snapshot:
+    return [e for e in events if isinstance(e, Snapshot)][-1]
+
+
+async def test_a_switch_away_meanwhile_leaves_the_first_asker_a_view_of_its_session() -> None:
+    first, events, seen = await activated_meanwhile("later")
+
+    view = last_snapshot(events)
+    assert (view.session.id, view.active) == (EARLIER, False)
+    assert view.open_session == SessionRef(id="later", name="later work")
+    live = last_snapshot(seen)
+    assert (live.session.id, live.active) == ("later", True)
+    assert first.viewing == SessionRef(id=EARLIER, name="old work")
+
+
+async def test_a_switch_back_meanwhile_sends_no_view_of_the_session_open_again() -> None:
+    first, events, seen = await activated_meanwhile(OPEN, once_switched=True)
+
+    views = [e for e in events + seen if isinstance(e, Snapshot) and not e.active]
+    assert [(v.session.id, v.open_session) for v in views] == [
+        (EARLIER, SessionRef(id=OPEN, name="today"))
+    ]
+    live = last_snapshot(seen)
+    assert (live.session.id, live.active) == (OPEN, True)
+    assert first.viewing == SessionRef(id=EARLIER, name="old work")
