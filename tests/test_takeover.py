@@ -365,3 +365,23 @@ async def test_the_review_lane_and_work_commands_follow_the_takeover_once_taken(
     await events_until(session, idle())
     assert session.queued_work == () and len(launcher.launches) == 1
     await session.close()
+
+
+async def test_taking_over_leaves_the_work_commands_reviews_and_snapshot_all_owned() -> None:
+    lock = FakeLock(free=True)
+    session, _, launcher = session_for(
+        claims_done, owner=OWNER, lock=lock, tree=FakeTree(), review=True
+    )
+    await greeted(session)
+    assert (await snapshot_on_joining(session)).read_only
+    await events_until(session, offered)
+    await send(session, TakeOwnership(take=True))
+    await events_until(session, lambda event: event == ACCEPTED)
+
+    assert lane_of(session).running
+    await send(session, AddTask(task=TaskSpec(prompt="Add a flag.")))
+    await send(session, RunTasks())
+    await events_until(session, idle())
+    assert session.queued_work == () and len(launcher.launches) == 1
+    assert not (await snapshot_on_joining(session)).read_only and not session.read_only
+    await session.close()
