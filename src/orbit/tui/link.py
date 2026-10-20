@@ -118,6 +118,7 @@ class LinkHost:
         self._stop_timer()
         if self.shown is not None:
             self.shown.dismiss(0)
+            self.shown = None  # Its close callback runs later, after any stop that follows.
 
     def _reconnecting(self, url: str, delay: float) -> None:
         """Show that the link to ``url`` is being retried, asking whether to keep trying in
@@ -136,14 +137,17 @@ class LinkHost:
 
     def _ask(self, title: str, message: str) -> None:
         """Ask ``title`` with ``message`` whether to keep trying, unless that's being asked."""
-        if self.shown is None:
-            self.shown = LinkScreen(title, message, CHOICES)
-            self._push(self.shown, self._answered)
+        if self.shown is not None:
+            return
+        screen = self.shown = LinkScreen(title, message, CHOICES)
 
-    def _answered(self, index: int | None) -> None:
-        self.shown = None
-        if index is not None and CHOICES[index] == QUIT:
-            self._quit()
+        def answered(index: int | None) -> None:
+            if self.shown is screen:  # Not one shown since.
+                self.shown = None
+            if index is not None and CHOICES[index] == QUIT:
+                self._quit()
+
+        self._push(screen, answered)
 
     def _stop_timer(self) -> None:
         if self._timer is not None:

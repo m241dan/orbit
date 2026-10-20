@@ -137,6 +137,35 @@ async def test_a_stopped_control_plane_shows_its_modal_at_once() -> None:
         assert modal(app) is None and status(app) is None
 
 
+async def test_a_stop_right_after_reconnecting_shows_its_modal() -> None:
+    app, _, link = linked()
+    async with app.run_test() as pilot:
+        await link.move(pilot, lost_long_ago())
+        for changed in link.watchers:  # Before the lost modal's close callback runs.
+            changed(Connected(URL))
+            changed(Stopped(URL))
+        await pilot.pause()
+        shown = modal(app)
+        assert shown is not None and shown.title_text == "The control plane stopped"
+        assert app.return_code is None
+
+
+async def test_the_old_modals_late_callback_leaves_the_new_one_open() -> None:
+    app, _, link = linked()
+    async with app.run_test() as pilot:
+        await link.move(pilot, lost_long_ago())
+        for changed in link.watchers:
+            changed(Connected(URL))
+            changed(Stopped(URL))
+        await pilot.pause()
+        stopped = modal(app)
+        assert stopped is not None
+        await link.move(pilot, Stopped(URL))  # Still asked by the open one.
+        assert app.screen is stopped
+        await pilot.press("escape")
+        assert modal(app) is None
+
+
 async def test_escape_keeps_trying_and_quit_exits_from_the_stopped_modal() -> None:
     app, _, link = linked()
     async with app.run_test() as pilot:
