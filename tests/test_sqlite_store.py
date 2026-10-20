@@ -291,8 +291,9 @@ async def test_each_call_on_a_closed_store_has_its_own_failure(
     assert type(raised.value) is outcome
     assert str(raised.value).endswith(f"{state / 'orbit.db'}: the store is closed")
     if isinstance(raised.value, StorageFailed):
-        assert (raised.value.database, raised.value.kind) == (
+        assert (raised.value.database, raised.value.error, raised.value.kind) == (
             str(state / "orbit.db"),
+            "the store is closed",
             StorageErrorKind.UNKNOWN,
         )
 
