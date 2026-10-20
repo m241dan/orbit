@@ -221,7 +221,8 @@ class OrbitApp(App[None], inherit_bindings=False):
         # The feed shows answers once mounted, before any event arrives.
         self._desk = CommandDesk(session.send, self._render_event, lambda e: self._feed.render(e))
         self._takeover = TakeoverHost(
-            self.push_screen, lambda take: self._send(TakeOwnership(take=take))
+            self.push_screen,
+            lambda take, awaited: self._send(TakeOwnership(take=take), awaited),
         )
         self._halt = StorageHaltHost(self.push_screen, self._resume_storage, self._show_halt)
         self._link_host = LinkHost(self.push_screen, self.exit, self._show_link, self.set_timer)
