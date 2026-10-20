@@ -7,9 +7,8 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from orbit import cli
 from orbit.agent import TokenFile
-from orbit.cli import app
+from orbit.cli import app, serve
 
 runner = CliRunner()
 
@@ -49,7 +48,7 @@ def test_a_rotation_that_cant_be_written_stops_with_the_reason(tmp_path: Path) -
 
 def test_the_served_token_is_the_one_in_the_file_now(tmp_path: Path) -> None:
     tokens = TokenFile(tmp_path)
-    current = cli._current_token(tokens)
+    current = serve._current_token(tokens)
     old = current()
     tokens.rotate()
     assert current() == tokens.token() != old
@@ -62,5 +61,5 @@ def test_a_token_file_unusable_while_serving_admits_no_one_and_warns(
     tokens.token()
     tokens.path.chmod(0o644)
     with caplog.at_level(logging.WARNING):
-        assert cli._current_token(tokens)() == ""
+        assert serve._current_token(tokens)() == ""
     assert f"chmod 600 {tokens.path}" in caplog.text

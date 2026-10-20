@@ -41,7 +41,8 @@ from orbit.agent.application.ports import UsageSource
 from orbit.agent.domain.ownership import read_only_note
 from orbit.agent.domain.reviews import ReviewLimits
 from orbit.agent.domain.sessions import SessionRecord, Unreadable, default_name, record_json
-from orbit.cli import _exit_on, app
+from orbit.cli import app
+from orbit.cli.errors import _exit_on
 from orbit.protocol import (
     AddTask,
     Catalog,
@@ -140,8 +141,8 @@ def launched(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> list[AgentSessi
         FakeApp.usage_sources.append(usage)
         return built
 
-    monkeypatch.setattr("orbit.cli.OrbitApp", FakeApp)
-    monkeypatch.setattr("orbit.cli.AgentSession", session)
+    monkeypatch.setattr("orbit.cli.chat.OrbitApp", FakeApp)
+    monkeypatch.setattr("orbit.cli.backend.AgentSession", session)
     FakeApp.launched = []
     FakeApp.threads = []
     FakeApp.usage_sources = []
@@ -830,7 +831,7 @@ def test_chat_runs_tasks_through_agents_connected_over_mcp(launched: list[AgentS
 def test_chat_works_in_the_coder_tree_inside_a_git_repository(
     launched: list[AgentSession], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("orbit.cli.in_git_work_tree", lambda path: True)
+    monkeypatch.setattr("orbit.cli.backend.in_git_work_tree", lambda path: True)
     result = runner.invoke(app, ["chat"])
     assert result.exit_code == 0
     [session] = launched
@@ -841,7 +842,7 @@ def test_chat_works_in_the_coder_tree_inside_a_git_repository(
 def test_chat_works_in_place_outside_a_git_repository(
     launched: list[AgentSession], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("orbit.cli.in_git_work_tree", lambda path: False)
+    monkeypatch.setattr("orbit.cli.backend.in_git_work_tree", lambda path: False)
     result = runner.invoke(app, ["chat"])
     assert result.exit_code == 0
     [session] = launched
@@ -894,7 +895,7 @@ def test_chat_sets_up_the_coder_tree_as_the_project_file_says(
         '[setup]\ncommand = ["make", "deps"]\nwatch = ["deps.lock"]\n'
     )
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr("orbit.cli.in_git_work_tree", lambda path: True)
+    monkeypatch.setattr("orbit.cli.backend.in_git_work_tree", lambda path: True)
     runner.invoke(app, ["chat"])
     [session] = launched
     assert session.agents is not None
@@ -976,7 +977,7 @@ def test_chat_reviews_landed_work_with_the_files_limits(
         "super_review_suggestions = 6\n"
     )
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr("orbit.cli.in_git_work_tree", lambda path: True)
+    monkeypatch.setattr("orbit.cli.backend.in_git_work_tree", lambda path: True)
     runner.invoke(app, ["chat"])
     [session] = launched
     agents = session.agents

@@ -18,10 +18,9 @@ from typer.testing import CliRunner
 from websockets.exceptions import ConnectionClosed, InvalidStatus
 from websockets.sync.client import ClientConnection, connect
 
-from orbit import cli
 from orbit.agent import ControlPlaneServer, RunFile, TokenFile, WorkspaceLock, WorkspaceOwner
 from orbit.agent.external.sqlite_store import find_workspace_id
-from orbit.cli import app
+from orbit.cli import app, chat, serve
 from orbit.protocol import (
     PROTOCOL_VERSION,
     AddTask,
@@ -304,7 +303,7 @@ def test_a_chat_discovers_the_control_plane_serving_its_workspace(
     found: list[str | None] = []
 
     def discovers(websocket: ClientConnection) -> list[Event]:
-        found.append(cli.discover_control_plane(state, project, config_dir / "token"))
+        found.append(chat.discover_control_plane(state, project, config_dir / "token"))
         return []
 
     frontend = Frontend(state, config_dir, discovers)
@@ -384,7 +383,7 @@ async def test_the_first_signal_stops_serving_and_a_second_ctrl_c_exits_at_once(
     exits: list[int] = []
     monkeypatch.setattr(os, "_exit", exits.append)
     stopping = asyncio.Event()
-    cli._on_signals(stopping)
+    serve._on_signals(stopping)
     try:
         signal.raise_signal(signal.SIGINT)
         await asyncio.wait_for(stopping.wait(), 5)

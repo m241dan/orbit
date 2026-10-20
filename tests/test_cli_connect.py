@@ -47,9 +47,9 @@ def fakes(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     def no_backend(*args: Any, **kwargs: Any) -> None:
         raise AssertionError("A connected chat builds no backend.")
 
-    monkeypatch.setattr("orbit.cli.OrbitApp", FakeApp)
-    monkeypatch.setattr("orbit.cli.WebSocketSession", FakeClient)
-    monkeypatch.setattr("orbit.cli._backend", no_backend)
+    monkeypatch.setattr("orbit.cli.chat.OrbitApp", FakeApp)
+    monkeypatch.setattr("orbit.cli.chat.WebSocketSession", FakeClient)
+    monkeypatch.setattr("orbit.cli.chat._backend", no_backend)
     monkeypatch.setenv("ORBIT_CONFIG_DIR", str(tmp_path / "config"))
     FakeApp.built = []
 

@@ -105,16 +105,16 @@ def token_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
 @pytest.fixture
 def plane(monkeypatch: pytest.MonkeyPatch) -> Plane:
     fake = Plane()
-    monkeypatch.setattr("orbit.cli.accepts", fake.accepts)
+    monkeypatch.setattr("orbit.cli.chat.accepts", fake.accepts)
     return fake
 
 
 @pytest.fixture
 def in_process(monkeypatch: pytest.MonkeyPatch) -> InProcess:
     fake = InProcess()
-    monkeypatch.setattr("orbit.cli._backend", fake)
-    monkeypatch.setattr("orbit.cli.OrbitApp", FakeApp)
-    monkeypatch.setattr("orbit.cli.WebSocketSession", FakeClient)
+    monkeypatch.setattr("orbit.cli.chat._backend", fake)
+    monkeypatch.setattr("orbit.cli.chat.OrbitApp", FakeApp)
+    monkeypatch.setattr("orbit.cli.chat.WebSocketSession", FakeClient)
     FakeApp.built = []
     return fake
 

@@ -1142,5 +1142,8 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
   `ControlPlaneServer` instead, on the main thread's event loop. `orbit chat --connect` builds no
   backend: it hands the TUI an `orbit.client.WebSocketSession`, which runs on the TUI's own event
   loop; neither does a chat that `discover_control_plane` finds a running `orbit serve` for.
+  It's a module per command (`chat`, `serve`, and `maintenance` for `version`, `db` and
+  `token`), with `backend` wiring the adapters for both chat and serve, `options` the options
+  they share and `errors` how they exit; its `__init__` registers the commands on the app.
 
 These rules are enforced by `lint-imports` (see `[tool.importlinter]` in `pyproject.toml`).
