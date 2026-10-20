@@ -364,6 +364,61 @@ async def test_a_session_only_the_deleting_connection_views_is_deleted() -> None
     assert store.deleted == [EARLIER]
 
 
+async def test_deleting_the_viewed_session_moves_the_connection_to_the_open_one() -> None:
+    session = workspace(stored())
+    viewer = await viewing(session, "viewer")
+    await say(viewer, "delete", DeleteSession(session_id=EARLIER))
+    deleted = await taken(viewer)
+    await say(viewer, "add", AddTask(task=TASK))
+    added = await taken(viewer)
+    await session.close()
+
+    snapshot = snapshot_in(deleted)
+    assert (snapshot.session.id, snapshot.active, snapshot.viewers) == (OPEN, True, 1)
+    assert outcome(deleted) == CommandAccepted(command_id="delete")
+    assert outcome(added) == CommandAccepted(command_id="add")
+
+
+async def test_deleting_the_viewed_session_publishes_it_left_with_no_viewers() -> None:
+    session = workspace(stored())
+    viewer = await viewing(session, "viewer")
+    await say(viewer, "delete", DeleteSession(session_id=EARLIER))
+    deleted = await taken(viewer)
+    joining = session.connect()
+    await say(joining, "joining", HELLO)
+    [catalog] = [e for e in await taken(joining) if isinstance(e, Catalog)]
+    await session.close()
+
+    assert states(deleted) == [(EARLIER, False, 0), (OPEN, True, 1)]
+    [entry] = catalog.workspaces
+    assert {s.id: s.viewers for s in entry.sessions} == {OPEN: 2}
+
+
+async def test_a_connection_attaching_while_its_session_is_deleted_views_the_open_one() -> None:
+    store = stored()
+    session = workspace(store)
+    deleting = await joined(session, "deleting")
+    attaching = await joined(session, "attaching")
+    release = asyncio.Event()
+
+    async def held() -> None:
+        await release.wait()
+
+    store.on_delete = held
+    delete = asyncio.create_task(say(deleting, "delete", DeleteSession(session_id=EARLIER)))
+    await asyncio.sleep(0.01)
+    await say(attaching, "attach", Attach(session=EARLIER))
+    release.set()
+    await delete
+    events = await taken(attaching)
+    await session.close()
+
+    assert store.deleted == [EARLIER]
+    assert attaching.viewing is None
+    snapshots = [e for e in events if isinstance(e, Snapshot)]
+    assert [(s.session.id, s.active) for s in snapshots] == [(EARLIER, False), (OPEN, True)]
+
+
 async def test_a_viewed_session_gone_from_the_list_is_named_by_its_id() -> None:
     store = stored()
     session = workspace(store)

@@ -176,7 +176,9 @@ class AgentSession:
     ``SessionViews`` attaches connections: to a saved session that isn't open, as a read-only
     view whose ``Snapshot`` comes from its record and its log, and where only ``History``,
     ``RenameSession``, ``DeleteSession`` and ``Attach`` work. A connection gets the events of
-    the session it views and of none; a session another connection views can't be deleted.
+    the session it views and of none; a session another connection views can't be deleted,
+    and once one is, those still attached to it, the one deleting it or one that attached while
+    it was being deleted, view the open session, each sent its live ``Snapshot``.
     ``ActivateSession`` and ``NewSession`` switch the open session for the connection sending
     them, which views it live; the others viewing the session left keep it as a read-only view.
 
@@ -564,6 +566,7 @@ class AgentSession:
         elif isinstance(command, DeleteSession):
             await self._views.check_deletable(command.session_id)
             await self._switcher.handle(command)
+            await self._views.deleted(command.session_id)
         elif isinstance(command, TakeOwnership):
             await self._take_ownership(command, command_id)
         elif isinstance(command, SessionCommand):

@@ -90,6 +90,10 @@ class Connections:
         others = (c for c in self._open if c.greeted and c is not asker)
         return [c for c in others if c.attached_id == session_id]
 
+    def attached(self, session_id: str) -> list["SessionConnection"]:
+        """The connections attached to the session ``session_id``."""
+        return [c for c in self._open if c.attached_id == session_id]
+
     def activate(self, left: SessionRef | None) -> None:
         """Have the connection whose command is being answered, if any, view the open session,
         whichever that is, and, given the session ``left``, the others viewing the open session

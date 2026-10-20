@@ -141,7 +141,11 @@ commands reach it alone.
 
 A session another connection views can't be deleted: `DeleteSession` is refused with `busy`,
 its message saying how many connections view it, such as `Can't delete "old work": 1 other
-frontend views it.`
+frontend views it.` A connection can delete the session it views itself: once the session is
+deleted, every connection still attached to it, the one deleting it or one that attached while
+it was being deleted, views the open session again and gets the open session's live `Snapshot`,
+to it alone, as `Attach` does; a `SessionStateChanged` reports the deleted session with no
+viewers. The delete's `CommandAccepted` follows.
 
 A reconnecting `orbit.client.WebSocketSession` that was viewing a session other than the open
 one sends its last `Attach` again after its `Hello`, so it views that session again.

@@ -136,6 +136,21 @@ class SessionViews:
         name = next((s.name for s in summaries if s.id == session_id), session_id)
         raise viewed_refusal(name, viewers)
 
+    async def deleted(self, session_id: str) -> None:
+        """Have each connection still attached to the session ``session_id``, now deleted, view
+        the open session, publishing its live snapshot to each of them alone, and publish that
+        the deleted session has no viewers left."""
+        parts = self._parts
+        moved = parts.connections.attached(session_id)
+        for connection in moved:
+            connection.attach(None)
+        if moved:
+            live = await parts.live()
+            # One may have attached elsewhere while the snapshot was taken.
+            for connection in [c for c in moved if c.attached is None]:
+                await connection.publish_here(live)
+        parts.states.check()
+
     async def _view(self, record: SessionRecord) -> Snapshot:
         """The read-only view of the session saved as ``record``: as it was saved, with its last
         logged events, nothing running in it."""
