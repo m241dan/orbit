@@ -667,7 +667,8 @@ written, `.git/orbit/fallback/<session id>.jsonl` in the repository (`.orbit/fal
 git). The explanation names the file, or says that neither place could be written.
 
 Once the cause is fixed, "Try again" retries the writes that failed: the session record as it is
-now, the super review count and the event log. When they work, the events in the fallback file
+now, a saved session's rename whose save failed (dropped, with an error, if that session was
+deleted or another orbit has it open since), the super review count and the event log. When they work, the events in the fallback file
 and those still waiting are appended to the log in `seq` order in one go, skipping any it already
 holds, the fallback file is deleted and the halt is lifted: commands are accepted again and work
 can carry on. Events that reached neither the log nor a fallback file are recorded as a gap, which

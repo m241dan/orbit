@@ -294,8 +294,9 @@ class AgentSession:
         return await self._retry_saves() or await self._resume_log()
 
     async def _retry_saves(self) -> Failure | None:
-        """Save the session record as it is now, then the review count, though halted; returns
-        the one that failed and its error, if one did."""
+        """Save the session record as it is now, and a saved session's rename whose save failed,
+        then the review count, though halted; returns the one that failed and its error, if one
+        did."""
         record = await self._keeper.retry(self._switcher.contents)
         if record is not None:
             return FailedWrite.SESSION_RECORD, record

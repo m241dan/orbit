@@ -12,11 +12,13 @@ from orbit.protocol import (
     ErrorOccurred,
     Event,
     RenameSession,
+    ResumeStorage,
     SessionsListed,
     SessionSummary,
 )
 from tests.agent_fakes import FakeStore, events_until, of_type, send
 from tests.test_session_switch import EARLIER, TASK, last_of, messages, saved, store_with, switching
+from tests.test_storage_halt import ACCEPTED, outcome_of
 
 Managing = RenameSession | DeleteSession
 
@@ -157,6 +159,41 @@ async def test_a_rename_that_cannot_be_saved_halts_the_session_and_lets_go_of_th
     assert isinstance(error, ErrorOccurred) and "saving the session record" in error.message
     assert "Disk full." in error.message
     assert store.released == ["old"] and store.locked == set()
+    await session.close()
+
+
+async def halted_by_a_rename(store: FakeStore) -> AgentSession:
+    """A session over ``store``, halted as renaming its saved session ``old`` to "new" failed
+    to save with "Disk full."."""
+    store.failure = "Disk full."
+    session, _ = switching(store)
+    await send(session, RenameSession(session_id="old", name="new"))
+    await events_until(session, halted)
+    return session
+
+
+async def test_resuming_once_the_store_works_redoes_a_rename_that_failed() -> None:
+    store = store_with(saved("old"))
+    session = await halted_by_a_rename(store)
+    store.failure = None
+
+    assert (await outcome_of(session, ResumeStorage()))[-1].payload == ACCEPTED
+    assert store.last == saved("old", name="new")
+    assert store.released == ["old", "old"] and store.locked == set()
+    assert (await session._snapshot()).storage_halt is None
+    await session.close()
+
+
+async def test_resuming_while_a_rename_still_fails_is_refused_and_stays_halted() -> None:
+    store = store_with(saved("old"))
+    session = await halted_by_a_rename(store)
+
+    refusal = (await outcome_of(session, ResumeStorage()))[-1].payload
+    assert isinstance(refusal, CommandRefused) and refusal.code == STORAGE_FAILED
+    assert "Disk full." in refusal.message
+    assert (await session._snapshot()).storage_halt == refusal.message
+    assert store.released == ["old", "old"] and store.locked == set()
+    assert store.last == saved("old")
     await session.close()
 
 

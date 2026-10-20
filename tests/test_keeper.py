@@ -20,7 +20,9 @@ from orbit.agent.domain.sessions import SessionRecord
 from orbit.agent.domain.storage_halt import FailedWrite
 from orbit.protocol import (
     BUSY,
+    LOCKED,
     SAVE_FAILED,
+    UNKNOWN,
     ErrorOccurred,
     Event,
     Settings,
@@ -346,6 +348,62 @@ async def test_a_failed_rename_whose_lock_cannot_be_released_halts_and_reports_t
     await keeper.rename_saved("other", "Renamed")
     assert halt.failures == [(FailedWrite.SESSION_RECORD, "Couldn't save the session: disk full")]
     assert published.errors == [UNLOCKABLE]
+
+
+def failed_rename() -> tuple[SessionKeeper, Published, FakeStore]:
+    """A keeper, what it publishes and its store, whose rename of the saved session ``other``
+    failed to save; the store works again."""
+    store = FakeStore()
+    store.saved = [SessionRecord(id="other", name="other", created=START, last_active=START)]
+    store.failure = "disk full"
+    keeper, published = keeper_for(store)
+    return keeper, published, store
+
+
+async def test_a_retried_rename_that_works_is_not_saved_again() -> None:
+    keeper, _, store = failed_rename()
+    await keeper.rename_saved("other", "Renamed")
+    store.failure = None
+
+    assert await keeper.retry(lambda: EMPTY) is None
+    assert store.last.name == "Renamed" and len(store.saved) == 2
+    assert await keeper.retry(lambda: EMPTY) is None
+    assert len(store.saved) == 2 and store.released == ["other", "other"]
+
+
+async def test_a_retried_rename_that_fails_again_is_kept_to_retry() -> None:
+    keeper, _, store = failed_rename()
+    await keeper.rename_saved("other", "Renamed")
+
+    error = await keeper.retry(lambda: EMPTY)
+    assert isinstance(error, RuntimeError) and str(error) == "disk full"
+    store.failure = None
+    assert await keeper.retry(lambda: EMPTY) is None
+    assert store.last.name == "Renamed" and store.released == ["other"] * 3
+
+
+async def test_a_pending_rename_of_a_session_since_deleted_is_dropped_and_reported() -> None:
+    keeper, published, store = failed_rename()
+    await keeper.rename_saved("other", "Renamed")
+    store.saved, store.failure = [], None
+
+    assert await keeper.retry(lambda: EMPTY) is None
+    assert published.codes == [UNKNOWN]
+    store.saved = [SessionRecord(id="other", name="other", created=START, last_active=START)]
+    assert await keeper.retry(lambda: EMPTY) is None
+    assert store.last.name == "other"
+
+
+async def test_a_pending_rename_of_a_session_open_elsewhere_is_dropped_and_reported() -> None:
+    keeper, published, store = failed_rename()
+    await keeper.rename_saved("other", "Renamed")
+    store.elsewhere, store.failure = {"other"}, None
+
+    assert await keeper.retry(lambda: EMPTY) is None
+    assert published.codes == [LOCKED]
+    store.elsewhere = set()
+    assert await keeper.retry(lambda: EMPTY) is None
+    assert store.last.name == "other"
 
 
 async def test_a_rename_that_works_tells_the_halt_nothing() -> None:
