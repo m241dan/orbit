@@ -47,8 +47,10 @@ one row per workspace, or anything from `.orbit/config.toml`, which is read at s
   doesn't fit the record, is unreadable. Records are kept as raw JSON text in their `sessions`
   row, so an unreadable one stays as it was: it is listed with the reason, can be deleted, and is
   never opened, renamed or overwritten.
-- **Lifetime.** Sessions are kept until you delete one; nothing is pruned. Deleting removes the
-  record and its lock, not Claude's own conversation files.
+- **Lifetime.** Sessions are kept until you delete one; no session is pruned, but a session's
+  event log is trimmed of its oldest events once it grows past `session_log_mb` (see
+  [Where orbit keeps things](../README.md#where-orbit-keeps-things)). Deleting removes the record,
+  its event log and its lock, not Claude's own conversation files.
 - **Locks.** An orbit locks a session from its first save until it closes or switches away, with
   an exclusive `flock` on `<state dir>/locks/<workspace id>/<session id>.lock`, so two orbits can't
   both take it. Another orbit lists the session as open elsewhere and won't open, rename or delete
