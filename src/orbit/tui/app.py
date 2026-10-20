@@ -5,7 +5,6 @@ from collections.abc import AsyncIterator, Callable
 from contextlib import aclosing
 from dataclasses import replace
 from typing import ClassVar, assert_never
-from uuid import uuid4
 
 from textual import on, work
 from textual.app import App, ComposeResult
@@ -17,7 +16,6 @@ from orbit import __version__
 from orbit.protocol import (
     CONFIGURE_CHECKS,
     INTERNAL,
-    INVALID,
     PLANNER,
     PLANNER_LANE,
     PROTOCOL_VERSION,
@@ -39,7 +37,6 @@ from orbit.protocol import (
     ChecksProposed,
     Command,
     CommandAccepted,
-    CommandEnvelope,
     CommandRefused,
     ConversationReset,
     DecideProposal,
@@ -53,7 +50,6 @@ from orbit.protocol import (
     LinkState,
     LogGap,
     MessageSent,
-    NotConnected,
     Notice,
     OwnershipDeclined,
     OwnershipOffered,
@@ -94,6 +90,7 @@ from orbit.protocol import (
     Welcome,
 )
 from orbit.tui.agents import AgentsPane
+from orbit.tui.commands import CommandDesk
 from orbit.tui.conversation import ConversationFeed
 from orbit.tui.detail import DetailPane
 from orbit.tui.event_stream import event_batches
@@ -120,7 +117,7 @@ from orbit.tui.view.confirm import (
     RESET_YES,
 )
 from orbit.tui.view.events import coalesce
-from orbit.tui.view.outcomes import Awaited, Outcomes, awaiting, settled
+from orbit.tui.view.outcomes import Awaited
 from orbit.tui.view.proposals import decision_entry
 from orbit.tui.view.rules import planner_reset_entry
 from orbit.tui.view.settings import (
@@ -218,9 +215,8 @@ class OrbitApp(App[None], inherit_bindings=False):
         self._model_choices: tuple[str, ...] = ()
         self._proposals = ProposalHost(self.push_screen, self._decide)
         self._sessions = SessionsHost(self.push_screen, self._send)
-        self._outcomes = Outcomes()  # What awaits the outcomes of the commands sent.
-        # The command ids of the messages and decisions sent, shown already, whose echo isn't.
-        self._echoes: set[str] = set()
+        # The feed shows answers once mounted, before any event arrives.
+        self._desk = CommandDesk(session.send, self._render_event, lambda e: self._feed.render(e))
         self._takeover = TakeoverHost(
             self.push_screen, lambda take: self._send(TakeOwnership(take=take))
         )
@@ -301,44 +297,6 @@ class OrbitApp(App[None], inherit_bindings=False):
         self._feed.append(text, "prompt", PLANNER)
         freed = Awaited(refused=lambda: self._set_busy(PLANNER_LANE, False))
         await self._send(SendMessage(agent=PLANNER, text=text), freed)
-
-    def _render_answer(
-        self, event: CommandAccepted | CommandRefused | Welcome | MessageSent | ProposalDecided
-    ) -> None:
-        """Show what the backend made of a command: its outcome, or the message or decision it
-        accepted."""
-        if isinstance(event, MessageSent | ProposalDecided):
-            self._render_echo(event)
-        else:
-            self._render_outcome(event)
-
-    def _render_echo(self, event: MessageSent | ProposalDecided) -> None:
-        """Show a message or decision a frontend sent, unless it's one this one sent and showed
-        when sending it."""
-        if event.command_id in self._echoes:
-            self._echoes.discard(event.command_id)
-        else:
-            self._feed.render(event)
-
-    def _render_outcome(self, event: CommandAccepted | CommandRefused | Welcome) -> None:
-        """Show why a command was refused, doing what awaits its outcome; an accepted one, or
-        the Welcome answering Hello, shows nothing."""
-        self._echoes.discard(event.command_id)
-        if isinstance(event, Welcome):
-            return
-        self._settle(event.command_id, accepted=isinstance(event, CommandAccepted))
-        if isinstance(event, CommandRefused):
-            self._feed.render(event)
-
-    def _settle(self, command_id: str, accepted: bool) -> None:
-        """Do what awaits ``command_id`` being ``accepted``, or else refused, if anything does."""
-        self._outcomes, awaited = settled(self._outcomes, command_id)
-        if awaited is None:
-            return
-        if accepted:
-            awaited.accepted()
-        else:
-            awaited.refused()
 
     # Window navigation only applies at the top level, when no window is active.
 
@@ -565,36 +523,9 @@ class OrbitApp(App[None], inherit_bindings=False):
         awaited: Awaited | None = None,
         failure: str = "Couldn't send the command",
     ) -> bool:
-        """Whether ``command`` was sent to the open session in the default workspace, under a
-        fresh id remembered as :meth:`_remember` does, with ``awaited`` awaiting its outcome;
-        a failure to send it is shown as :meth:`_unsent` does."""
-        command_id = uuid4().hex
-        self._remember(command, command_id)
-        if awaited is not None:
-            self._outcomes = awaiting(self._outcomes, command_id, command.type, awaited)
-        try:
-            await self._session.send(CommandEnvelope(command_id=command_id, payload=command))
-        except Exception as exc:
-            self._unsent(command_id, exc, failure)
-            return False
-        return True
-
-    def _remember(self, command: Command, command_id: str) -> None:
-        """Remember ``command_id`` for a message or decision, whose echo isn't shown."""
-        if isinstance(command, SendMessage | DecideProposal):
-            self._echoes.add(command_id)
-
-    def _unsent(self, command_id: str, exc: Exception, failure: str) -> None:
-        """Show that the command ``command_id`` wasn't sent for ``exc``: refused while not
-        connected, else failed, after ``failure``; either does what awaits its refusal."""
-        if isinstance(exc, NotConnected):
-            self._render_event(
-                CommandRefused(command_id=command_id, code=INVALID, message=str(exc))
-            )
-            return
-        self._echoes.discard(command_id)
-        self._settle(command_id, accepted=False)
-        self._render_event(ErrorOccurred(code=INTERNAL, message=f"{failure}: {exc}"))
+        """Whether ``command`` was sent to the open session, as :meth:`CommandDesk.send` sends
+        it."""
+        return await self._desk.send(command, awaited, failure)
 
     @work(exclusive=True, group="events")
     async def _consume_events(self) -> None:
@@ -685,7 +616,7 @@ class OrbitApp(App[None], inherit_bindings=False):
             case (
                 CommandAccepted() | CommandRefused() | Welcome() | MessageSent() | ProposalDecided()
             ):
-                self._render_answer(event)
+                self._desk.answer(event)
             case _:
                 assert_never(event)
         self._follow_halt(event)
