@@ -215,7 +215,9 @@ class OrbitApp(App[None], inherit_bindings=False):
         self._settings: Settings | None = None
         self._model_choices: tuple[str, ...] = ()
         self._proposals = ProposalHost(self.push_screen, self._decide)
-        self._sessions = SessionsHost(self.push_screen, self._send)
+        self._sessions = SessionsHost(
+            self.push_screen, self._send, lambda: self._task_list.numbers_by_id
+        )
         # The feed shows answers once mounted, before any event arrives.
         self._desk = CommandDesk(session.send, self._render_event, lambda e: self._feed.render(e))
         self._takeover = TakeoverHost(
@@ -782,6 +784,7 @@ class OrbitApp(App[None], inherit_bindings=False):
     def _show_tasks(self, tasks: tuple[TaskState, ...]) -> None:
         self._task_list.show(tasks)
         self._agents.number_tasks(self._task_list.numbers_by_id)
+        self._show_viewing()  # Its mark names tasks by their numbers.
 
     def _show_progress(
         self,
@@ -803,6 +806,7 @@ class OrbitApp(App[None], inherit_bindings=False):
             self._usage.show(event)
         else:
             self._sessions.follow_state(event)
+            self._show_viewing()
 
     async def _decide(self, proposal: ChecksProposed, decision: DecideProposal) -> None:
         """Note the user's ``decision`` on ``proposal`` in the conversation and send it."""

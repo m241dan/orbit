@@ -149,14 +149,21 @@ A read-only view shows the session as it was last saved, with its conversation's
 can browse it, rename or delete it from the picker and page back through its history, but anything
 that would change it or run work, such as a prompt, `ctrl+r` or editing a task, is refused with an
 error naming the active session and how to switch. While you view one, the line above the prompt
-says `viewing <name>, not the active session (enter to switch)`. This is not the prompt title's
+says what the active session is doing: `viewing <name>; <active> is running <what> (enter to switch
+when it's idle)` while it runs work, where `<what>` names it by the task list's numbers (`task 3`,
+`the review of task 5`, `the planner`, joined when several, and `a task` for one the list lacks),
+and `viewing <name>; <active> is idle (enter to switch)` otherwise. The startup check doesn't count
+as running: it never keeps you from switching. This is not the prompt title's
 `read-only` mark, which means another orbit owns the repository (see [Owning the
 repository](#owning-the-repository)): each has its own fix, and both can show at once. Picking a
 session that opens read-only asks, in a modal, whether to "Make this the active session" or "Just
 look"; `enter` on the prompt, while it's selected, asks the same. Making it the active one switches
 as picking does, and is refused, with an error, if work started meanwhile; "Just look" or `esc`
-keeps the view. While the active session runs work, the modal says `<name> is running; you can
-switch once it's idle.` and offers only "Just look". If the session you view becomes the active one
+keeps the view. While the active session runs work, the modal says `<name> is running <what>;
+you can switch once it's idle.` and offers only "Just look". If you picked the session and were held
+back so, the modal comes back once when the active session turns idle, saying `<name> is idle now.`,
+with "Make this the active session" highlighted and "Just look"; a frontend that only views the
+session without having picked it just sees the line above the prompt change. If the session you view becomes the active one
 meanwhile, say from another frontend, the modal closes.
 
 Opening a session never starts work by

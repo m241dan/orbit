@@ -1,12 +1,14 @@
 """The list of saved sessions, to pick one from."""
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import datetime, tzinfo
 
 from rich.text import Text
 
 from orbit.protocol import (
     ActivateSession,
+    Activity,
+    ActivityKind,
     Attach,
     NewSession,
     SessionSummary,
@@ -184,10 +186,40 @@ def sessions_hint(*, startup: bool, naming: bool, renaming: bool) -> str:
     return STARTUP_HINT if startup else LIST_HINT
 
 
-def viewing_mark(name: str) -> str:
+def viewing_mark(name: str, active: str | None, running: str | None) -> str:
     """The mark by the prompt while this frontend views the session ``name``, which isn't the
-    active one."""
-    return f"viewing {name}, not the active session (enter to switch)"
+    active one: what the session ``active`` is ``running``, or that it's idle while that's none."""
+    if active is None:
+        return f"viewing {name}, not the active session (enter to switch)"
+    if running is None:
+        return f"viewing {name}; {active} is idle (enter to switch)"
+    return f"viewing {name}; {active} is running {running} (enter to switch when it's idle)"
+
+
+def activity_words(activity: Sequence[Activity], numbers: Mapping[str, str]) -> str:
+    """What ``activity`` is, in words, its tasks named by their ``numbers``: ``task 3``,
+    ``the review of task 5``, ``the planner`` or ``the startup check``, several joined as
+    ``the planner and task 3``; ``work`` when there's none."""
+    words = [_activity_word(each, numbers) for each in activity]
+    if not words:
+        return "work"
+    if len(words) == 1:
+        return words[0]
+    return f"{', '.join(words[:-1])} and {words[-1]}"
+
+
+def _activity_word(activity: Activity, numbers: Mapping[str, str]) -> str:
+    """What ``activity`` is, in words, its task named by its number in ``numbers``, or as
+    ``a task`` without one."""
+    number = numbers.get(activity.task_id or "")
+    task = "a task" if number is None else f"task {number}"
+    words: dict[ActivityKind, str] = {
+        "task_run": task,
+        "review": f"the review of {task}",
+        "planner": "the planner",
+        "startup_check": "the startup check",
+    }
+    return words[activity.kind]
 
 
 def active_name(sessions: Sequence[SessionSummary]) -> str | None:
@@ -195,17 +227,27 @@ def active_name(sessions: Sequence[SessionSummary]) -> str | None:
     return next((summary.name for summary in sessions if summary.active), None)
 
 
-def active_running(sessions: Sequence[SessionSummary]) -> bool:
-    """Whether the active session among ``sessions`` runs work."""
-    return any(summary.active and summary.state == "running" for summary in sessions)
+def running_words(sessions: Sequence[SessionSummary], numbers: Mapping[str, str]) -> str | None:
+    """What the active session among ``sessions`` runs, in words, its tasks named by their
+    ``numbers``; none while it's idle or none is active."""
+    active = next((summary for summary in sessions if summary.active), None)
+    if active is None or active.state != "running":
+        return None
+    return activity_words(active.activity, numbers)
 
 
-def activation_message(viewed: str, open_name: str, *, running: bool) -> str:
+def activation_message(viewed: str, open_name: str, *, running: str | None) -> str:
     """What the prompt to make the session ``viewed`` the active one says, while the session
-    ``open_name`` is, and is ``running`` or idle."""
-    if running:
-        return f"{open_name} is running; you can switch once it's idle."
+    ``open_name`` is, and is ``running`` what it says, or idle while that's none."""
+    if running is not None:
+        return f"{open_name} is running {running}; you can switch once it's idle."
     return f"{viewed} is a read-only view; {open_name} is the active session, which runs work."
+
+
+def idle_now_message(open_name: str) -> str:
+    """What the prompt to make the session viewed the active one says when the session
+    ``open_name``, which held it back by running, turns idle."""
+    return f"{open_name} is idle now."
 
 
 def activation_choices(*, running: bool) -> tuple[str, ...]:

@@ -2,6 +2,7 @@ from datetime import UTC, datetime, timedelta, timezone
 
 from orbit.protocol import (
     ActivateSession,
+    Activity,
     Attach,
     NewSession,
     SessionSummary,
@@ -17,13 +18,15 @@ from orbit.tui.view.sessions import (
     activation_choices,
     activation_message,
     active_name,
-    active_running,
+    activity_words,
     can_delete,
     can_open,
     delete_message,
+    idle_now_message,
     local_time,
     picked_commands,
     picker_sessions,
+    running_words,
     session_label,
     sessions_hint,
     state_notes,
@@ -234,35 +237,77 @@ def test_with_no_active_session_picking_activates() -> None:
     )
 
 
-def test_the_viewing_mark_names_the_session_and_how_to_switch() -> None:
-    assert viewing_mark("auth rework") == (
+def test_the_viewing_mark_names_what_the_active_session_runs() -> None:
+    assert viewing_mark("old", "today", "task 3") == (
+        "viewing old; today is running task 3 (enter to switch when it's idle)"
+    )
+
+
+def test_the_viewing_mark_says_when_the_active_session_is_idle() -> None:
+    assert viewing_mark("old", "today", None) == "viewing old; today is idle (enter to switch)"
+
+
+def test_the_viewing_mark_without_a_known_active_session_says_how_to_switch() -> None:
+    assert viewing_mark("auth rework", None, None) == (
         "viewing auth rework, not the active session (enter to switch)"
     )
+
+
+def test_a_task_run_is_named_by_its_number() -> None:
+    assert activity_words((Activity(kind="task_run", task_id="t1"),), {"t1": "3"}) == "task 3"
+
+
+def test_several_activities_are_joined() -> None:
+    activity = (Activity(kind="planner"), Activity(kind="review", task_id="t5"))
+    assert activity_words(activity, {"t5": "5"}) == "the planner and the review of task 5"
+
+
+def test_more_than_two_activities_are_joined_by_commas_then_and() -> None:
+    activity = (
+        Activity(kind="startup_check"),
+        Activity(kind="task_run", task_id="t1"),
+        Activity(kind="planner"),
+    )
+    assert activity_words(activity, {"t1": "3"}) == "the startup check, task 3 and the planner"
+
+
+def test_a_task_without_a_number_is_a_task() -> None:
+    activity = (Activity(kind="task_run", task_id="gone"), Activity(kind="review"))
+    assert activity_words(activity, {}) == "a task and the review of a task"
+
+
+def test_no_activity_is_work() -> None:
+    assert activity_words((), {}) == "work"
 
 
 def test_with_the_active_session_idle_the_prompt_offers_to_activate_or_just_look() -> None:
     assert activation_choices(running=False) == (ACTIVATE_CHOICE, JUST_LOOK_CHOICE)
     assert ACTIVATE_CHOICE == "Make this the active session"
     assert JUST_LOOK_CHOICE == "Just look"
-    assert activation_message("auth rework", "today", running=False) == (
+    assert activation_message("auth rework", "today", running=None) == (
         "auth rework is a read-only view; today is the active session, which runs work."
     )
 
 
 def test_with_the_active_session_running_the_prompt_only_offers_to_just_look() -> None:
     assert activation_choices(running=True) == (JUST_LOOK_CHOICE,)
-    assert activation_message("auth rework", "today", running=True) == (
-        "today is running; you can switch once it's idle."
+    assert activation_message("auth rework", "today", running="task 3") == (
+        "today is running task 3; you can switch once it's idle."
     )
 
 
-def test_the_active_session_runs_when_its_state_says_so() -> None:
-    idle = SessionSummary(id="s", name="today", active=True)
+def test_the_prompt_again_says_the_active_session_is_idle_now() -> None:
+    assert idle_now_message("today") == "today is idle now."
+
+
+def test_what_the_active_session_runs_is_worded_while_its_state_says_it_runs() -> None:
+    task = (Activity(kind="task_run", task_id="t1"),)
+    idle = SessionSummary(id="s", name="today", active=True, activity=task)
     running = idle.model_copy(update={"state": "running"})
     other = SessionSummary(id="o", name="auth rework", state="running")
-    assert active_running((other, running))
-    assert not active_running((other, idle))
-    assert not active_running(())
+    assert running_words((other, running), {"t1": "3"}) == "task 3"
+    assert running_words((other, idle), {"t1": "3"}) is None
+    assert running_words((), {}) is None
 
 
 def test_attaching_alone_to_an_inactive_session_views_it_only() -> None:

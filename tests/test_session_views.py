@@ -7,6 +7,7 @@ from orbit.protocol import (
     BUSY,
     NOT_ACTIVE,
     ActivateSession,
+    Activity,
     Attach,
     CommandRefused,
     RunTasks,
@@ -14,6 +15,9 @@ from orbit.protocol import (
     SessionStateChanged,
     SessionSummary,
     Snapshot,
+    TasksChanged,
+    TaskSpec,
+    TaskState,
 )
 from orbit.tui import OrbitApp
 from orbit.tui.sessions import ActivationScreen
@@ -21,12 +25,18 @@ from orbit.tui.widgets import ChatPrompt
 from tests.test_sessions_screen import CATALOG, CURRENT, OLD, RUNNING, catalog, joined, started
 from tests.test_tui import entries, feed_events, opened
 
-VIEWING_OLD = "viewing auth rework, not the active session (enter to switch)"
+VIEWING_OLD = "viewing auth rework; today is idle (enter to switch)"
 TODAY = SessionRef(id="now", name="today")
 THIRD = SessionSummary(id="third", name="flags")
 LEFT = SessionStateChanged(session="now", active=False, state="idle", viewers=0)
 VIEWED = RUNNING.model_copy(update={"state": "idle", "viewers": 2})
 """The active session idle, but viewed by another frontend."""
+RUNNING_T3 = RUNNING.model_copy(update={"activity": (Activity(kind="task_run", task_id="t3"),)})
+"""The active session running the task numbered 3 in the session viewed."""
+IDLE = RUNNING.model_copy(update={"state": "idle"})
+THREE_TASKS = TasksChanged(
+    tasks=tuple(TaskState(id=f"t{n}", task=TaskSpec(prompt=f"task {n}")) for n in (1, 2, 3))
+)
 
 
 def view(summary: SessionSummary) -> Snapshot:
@@ -74,7 +84,7 @@ async def test_the_viewing_mark_follows_a_rename_in_the_catalog() -> None:
     async with app.run_test() as pilot:
         renamed = OLD.model_copy(update={"name": "flags"})
         await feed_events(session, pilot, view(OLD), catalog(CURRENT, renamed))
-        assert mark(app) == "viewing flags, not the active session (enter to switch)"
+        assert mark(app) == "viewing flags; today is idle (enter to switch)"
 
 
 async def test_the_viewing_and_repository_marks_show_together() -> None:
@@ -130,13 +140,13 @@ async def test_escape_just_looks() -> None:
 async def test_with_the_active_session_running_the_prompt_only_offers_to_just_look() -> None:
     app, session = joined()
     async with app.run_test() as pilot:
-        await feed_events(session, pilot, CATALOG, RUNNING)
+        await feed_events(session, pilot, CATALOG, RUNNING_T3)
         await pilot.press("j", "enter")
         await feed_events(session, pilot, view(OLD))
 
         screen = prompt(app)
         assert choices(screen) == ["Just look"]
-        assert message(screen) == "today is running; you can switch once it's idle."
+        assert message(screen) == "today is running a task; you can switch once it's idle."
         await pilot.press("enter")
         assert session.commands == [Attach(session="old")]
         assert not isinstance(app.screen, ActivationScreen)
@@ -227,7 +237,7 @@ async def test_a_state_change_running_a_third_session_names_it_in_the_prompt() -
         third = SessionStateChanged(session="third", active=True, state="running", viewers=1)
         await feed_events(session, pilot, catalog(CURRENT, OLD, THIRD), view(OLD), LEFT, third)
         await pilot.press("enter")
-        assert message(prompt(app)) == "flags is running; you can switch once it's idle."
+        assert message(prompt(app)) == "flags is running work; you can switch once it's idle."
         assert choices(prompt(app)) == ["Just look"]
 
 
@@ -266,3 +276,53 @@ async def test_a_live_snapshot_closes_the_prompt_shown_and_sends_nothing() -> No
         await pilot.press("enter")
         assert not isinstance(app.screen, ActivationScreen)
         assert session.commands == []
+
+
+async def test_the_viewing_mark_names_what_the_active_session_runs_until_it_is_idle() -> None:
+    app, session = started()
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, CATALOG, view(OLD), THREE_TASKS, RUNNING_T3)
+        assert mark(app) == (
+            "viewing auth rework; today is running task 3 (enter to switch when it's idle)"
+        )
+        await feed_events(session, pilot, IDLE)
+        assert mark(app) == VIEWING_OLD
+
+
+async def test_a_pick_held_back_by_a_running_session_is_offered_again_once_it_is_idle() -> None:
+    app, session = joined()
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, CATALOG, RUNNING_T3)
+        await pilot.press("j", "enter")
+        await feed_events(session, pilot, view(OLD))
+        await pilot.press("enter")
+        await feed_events(session, pilot, IDLE)
+
+        screen = prompt(app)
+        assert message(screen) == "today is idle now."
+        assert choices(screen) == ["Make this the active session", "Just look"]
+        await pilot.press("enter")
+        assert session.commands == [Attach(session="old"), ActivateSession(session="old")]
+
+
+async def test_the_offer_again_replaces_the_one_still_shown_and_comes_once() -> None:
+    app, session = joined()
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, CATALOG, RUNNING_T3)
+        await pilot.press("j", "enter")
+        await feed_events(session, pilot, view(OLD), IDLE)
+
+        [screen] = [s for s in app.screen_stack if isinstance(s, ActivationScreen)]
+        assert message(screen) == "today is idle now."
+        await pilot.press("escape")
+        await feed_events(session, pilot, RUNNING_T3, IDLE)
+        assert not isinstance(app.screen, ActivationScreen)
+        assert session.commands == [Attach(session="old")]
+
+
+async def test_a_view_not_picked_here_is_not_offered_again_when_the_active_one_is_idle() -> None:
+    app, session = started()
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, CATALOG, RUNNING_T3, view(OLD), IDLE)
+        assert not isinstance(app.screen, ActivationScreen)
+        assert mark(app) == VIEWING_OLD

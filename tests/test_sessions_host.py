@@ -5,6 +5,7 @@ from textual.widgets import OptionList
 
 from orbit.protocol import (
     ActivateSession,
+    Activity,
     Attach,
     Catalog,
     NewSession,
@@ -26,6 +27,7 @@ from tests.test_tui import opened
 
 OLD = SessionSummary(id="old", name="auth rework")
 NOW = SessionSummary(id="now", name="today", current=True, active=True, viewers=1)
+RUNNING = SessionStateChanged(session="now", active=True, state="running", viewers=1)
 
 
 def catalog(*sessions: SessionSummary) -> Catalog:
@@ -188,7 +190,7 @@ def test_a_view_marks_the_session_and_a_live_snapshot_clears_the_mark() -> None:
     host = Host().host
     host.view(view(OLD))
     assert not host.live
-    assert host.mark == "viewing auth rework, not the active session (enter to switch)"
+    assert host.mark == "viewing auth rework; today is idle (enter to switch)"
     host.view(opened(OLD))
     assert host.live
     assert host.open_session is None
@@ -253,3 +255,38 @@ async def test_a_live_snapshot_dismisses_the_offer_shown() -> None:
         await pilot.pause()
         assert app.activation_screens() == []
         assert app.sent == []
+
+
+def test_the_mark_names_the_tasks_the_active_session_runs_by_their_numbers() -> None:
+    app = Host()
+    host = SessionsHost(app.push_screen, app._sent, lambda: {"t1": "3"})
+    host.follow(catalog(NOW, OLD))
+    host.view(view(OLD))
+    run = (Activity(kind="task_run", task_id="t1"),)
+    host.follow_state(RUNNING.model_copy(update={"activity": run}))
+    assert host.mark == (
+        "viewing auth rework; today is running task 3 (enter to switch when it's idle)"
+    )
+
+
+async def test_a_held_pick_made_active_itself_is_not_offered_again() -> None:
+    app = Host()
+    async with app.run_test() as pilot:
+        app.host.follow(catalog(NOW, OLD))
+        app.host.follow_state(RUNNING)
+        app.host.open()
+        await pilot.pause()
+        app.screen.dismiss((Attach(session="old"),))
+        await pilot.pause()
+        app.host.view(view(OLD))
+        await pilot.pause()
+        [held] = app.activation_screens()
+
+        app.host.follow_state(
+            SessionStateChanged(session="now", active=False, state="idle", viewers=0)
+        )
+        app.host.follow_state(
+            SessionStateChanged(session="old", active=True, state="idle", viewers=1)
+        )
+        await pilot.pause()
+        assert app.activation_screens() == [held]

@@ -1,6 +1,6 @@
 """The modal where the user picks a saved session to view or activate, or starts a new one."""
 
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from typing import Any, ClassVar, Literal
 
 from rich.text import Text
@@ -35,12 +35,13 @@ from orbit.tui.view.sessions import (
     activation_choices,
     activation_message,
     active_name,
-    active_running,
     can_delete,
     can_open,
     delete_message,
+    idle_now_message,
     picked_commands,
     picker_sessions,
+    running_words,
     session_label,
     sessions_hint,
     viewed_only,
@@ -274,7 +275,9 @@ class ActivationScreen(ListScreen[bool]):
             yield OptionList(*self.choices)
 
     def on_mount(self) -> None:
-        self.query_one(OptionList).highlighted = 0
+        # One dismissed before it mounts, replaced by a newer offer, has no list left.
+        for options in self.query(OptionList):
+            options.highlighted = 0
 
     @on(OptionList.OptionSelected)
     def _picked(self, event: OptionList.OptionSelected) -> None:
@@ -288,23 +291,29 @@ Push = Callable[[ModalScreen[Any], Callable[[Any], Awaitable[None]]], object]
 """Shows a modal screen, calling back with what it dismisses with."""
 Send = Callable[[SessionChoice | SessionChange], Awaitable[bool]]
 """Sends a session command to the backend, returning whether it was sent."""
+Numbers = Callable[[], Mapping[str, str]]
+"""The task list's numbers, by task id."""
 
 
 class SessionsHost:
     """Keeps the sessions the latest ``Catalog`` lists, as ``SessionStateChanged`` changes them,
     and the one this frontend views, live or read-only; shows them with ``push`` when asked,
     refreshing the picker while it's shown, and offers to make a session viewed read-only the
-    active one. ``send`` takes the user's choice and their changes to saved sessions."""
+    active one, naming what the active one runs by the task ``numbers``. ``send`` takes the
+    user's choice and their changes to saved sessions."""
 
-    def __init__(self, push: Push, send: Send) -> None:
+    def __init__(self, push: Push, send: Send, numbers: Numbers = lambda: {}) -> None:
         self._push = push
         self._send = send
+        self._numbers = numbers
         self.sessions: tuple[SessionSummary, ...] = ()
         self.attached: str | None = None  # The session this frontend views, once known.
         self.live = True  # Whether the session viewed is the active one.
         self.open_session: SessionRef | None = None  # The active one, while it's another.
         self._viewed_name = ""  # The session viewed's name, as its snapshot names it.
         self._offering: str | None = None  # The session picked to view only, until its view.
+        # The session picked and viewed only as the active one ran, until that one turns idle.
+        self._held: str | None = None
         self.shown: SessionsScreen | None = None  # The picker shown, if any.
         self.offered: ActivationScreen | None = None  # The offer to activate shown, if any.
 
@@ -316,10 +325,16 @@ class SessionsHost:
     @property
     def mark(self) -> str | None:
         """The mark by the prompt while the session viewed isn't the active one, named as the
-        catalog names it, renamed perhaps; none while it's live."""
+        catalog names it, renamed perhaps, with what the active one runs; none while it's
+        live."""
         if self.live:
             return None
-        return viewing_mark(self.viewed_name)
+        return viewing_mark(self.viewed_name, self.active_name, self.running)
+
+    @property
+    def running(self) -> str | None:
+        """What the active session runs, in words; none while it's idle or isn't known."""
+        return running_words(self.sessions, self._numbers())
 
     @property
     def viewed_name(self) -> str:
@@ -345,9 +360,16 @@ class SessionsHost:
         self._refresh()
 
     def follow_state(self, changed: SessionStateChanged) -> None:
-        """Note ``changed``'s session's state."""
+        """Note ``changed``'s session's state; once the active session that held back the
+        session picked turns idle, offer again to make that one the active session."""
         self.sessions = tuple(with_state(summary, changed) for summary in self.sessions)
         self._refresh()
+        held = self._held
+        active = None if held is None else self._turned_idle(held)
+        if held is not None and active is not None:
+            self._held = None
+            self._withdraw()
+            self._show_offer(held, idle_now_message(active), activation_choices(running=False))
 
     def view(self, snapshot: Snapshot) -> None:
         """Note this frontend views ``snapshot``'s session, live or read-only; a read-only view
@@ -356,29 +378,54 @@ class SessionsHost:
         offering, self._offering = self._offering == session.id, None
         self.attached, self.live, self._viewed_name = session.id, snapshot.active, session.name
         self.open_session = None if snapshot.active else snapshot.open_session
-        if snapshot.active and self.offered is not None:  # The offer is moot once it's live.
-            self.offered.dismiss(False)
-            self.offered = None
+        if snapshot.active:  # The offer is moot once it's live.
+            self._withdraw()
         self._refresh()
+        self._held = self._held_back(session.id) if offering else None
         if offering:
             self.offer()
 
     def offer(self) -> None:
-        """Offer to make the session viewed the active one, or say the active one runs, unless
-        it's live, the active one isn't known or the offer is shown already."""
+        """Offer to make the session viewed the active one, or say what the active one runs,
+        unless it's live, the active one isn't known or the offer is shown already."""
         viewed, active = self.attached, self.active_name
         if viewed is None or active is None or self.offered is not None:
             return
-        running = active_running(self.sessions)
+        running = self.running
         message = activation_message(self.viewed_name, active, running=running)
+        self._show_offer(viewed, message, activation_choices(running=running is not None))
+
+    def _held_back(self, viewed: str) -> str | None:
+        """The session ``viewed``, if a running active session keeps it from being the active
+        one; none otherwise."""
+        return viewed if self.running is not None and self.active_name is not None else None
+
+    def _turned_idle(self, held: str) -> str | None:
+        """The name of the active session, if it's idle and isn't the session ``held``."""
+        active = next((summary for summary in self.sessions if summary.active), None)
+        if active is None or active.id == held or active.state != "idle":
+            return None
+        return active.name
+
+    def _show_offer(self, viewed: str, message: str, choices: Sequence[str]) -> None:
+        """Show the offer to make the session ``viewed`` the active one, saying ``message`` and
+        offering ``choices``."""
 
         async def answered(activate: bool | None) -> None:
-            self.offered = None
+            if self.offered is screen:
+                self.offered = None
             if activate:
                 await self._send(ActivateSession(session=viewed))
 
-        self.offered = ActivationScreen(message, activation_choices(running=running))
-        self._push(self.offered, answered)
+        screen = ActivationScreen(message, choices)
+        self.offered = screen
+        self._push(screen, answered)
+
+    def _withdraw(self) -> None:
+        """Close the offer shown, if any."""
+        if self.offered is not None:
+            self.offered.dismiss(False)
+            self.offered = None
 
     def open(self, startup: StartupPick | None = None) -> None:
         """Let the user pick a session or start a new one, unless the picker is shown already; at
