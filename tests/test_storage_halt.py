@@ -4,7 +4,7 @@ cancelled and the unsaved events parked in a fallback file."""
 import asyncio
 import re
 import stat
-from collections.abc import AsyncIterator, Callable, Iterator, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -738,3 +738,72 @@ async def test_a_halt_lifted_despite_failures_halts_again_on_the_first() -> None
     [_, again] = errors
     assert "again" in again
     assert "session record" not in again
+
+
+@dataclass
+class BlockedRetry:
+    """A retry that waits for :attr:`release`, counting how often it ran."""
+
+    started: asyncio.Event
+    release: asyncio.Event
+    runs: int = 0
+
+    async def __call__(self) -> tuple[FailedWrite, RuntimeError] | None:
+        self.runs += 1
+        self.started.set()
+        await self.release.wait()
+        return None
+
+
+async def halted_on_retry(
+    record: Callable[[Event], Awaitable[None]],
+) -> tuple[StorageHalt, BlockedRetry]:
+    """A halt, its halting done, whose retry blocks until released."""
+    retry = BlockedRetry(asyncio.Event(), asyncio.Event())
+    halt = StorageHalt(record, HaltHooks(retry=retry))
+    halt.fail(FailedWrite.EVENT_LOG, RuntimeError("first"))
+    while halt.message == halting_message(FailedWrite.EVENT_LOG):
+        await asyncio.sleep(0)
+    await asyncio.sleep(0.01)
+    return halt, retry
+
+
+async def test_a_resume_while_one_is_under_way_is_refused() -> None:
+    async def record(event: Event) -> None:
+        pass
+
+    halt, retry = await halted_on_retry(record)
+    first = asyncio.create_task(halt.resume())
+    await retry.started.wait()
+    with pytest.raises(Refused) as refusal:
+        await asyncio.wait_for(halt.resume(), 1)
+    assert refusal.value.code == STORAGE_FAILED
+    retry.release.set()
+    await first
+    assert retry.runs == 1
+    assert not halt.halted
+    await halt.close()
+
+
+async def test_a_failure_during_a_resume_refused_a_second_time_halts_again() -> None:
+    published: list[Event] = []
+
+    async def record(event: Event) -> None:
+        published.append(event)
+
+    halt, retry = await halted_on_retry(record)
+    first = asyncio.create_task(halt.resume())
+    await retry.started.wait()
+    with pytest.raises(Refused):
+        await asyncio.wait_for(halt.resume(), 1)
+    halt.fail(FailedWrite.EVENT_LOG, RuntimeError("again"))
+    retry.release.set()
+    await first
+    assert halt.halted
+    while halt.message == halting_message(FailedWrite.EVENT_LOG):
+        await asyncio.sleep(0)
+    await halt.close()
+
+    errors = [event.message for event in published if isinstance(event, ErrorOccurred)]
+    [_, again] = errors
+    assert "again" in again

@@ -132,12 +132,13 @@ class StorageHalt:
 
     async def resume(self) -> None:
         """Retry the writes that failed and lift the halt once they work; does nothing while
-        the session isn't halted. While halting is under way, or a write still fails, raises
-        :class:`Refused`, the halt kept, explained afresh for the write that failed now. A
-        write failing once the retried ones worked halts the session again."""
+        the session isn't halted. While halting or another resume is under way, or a write
+        still fails, raises :class:`Refused`, the halt kept, explained afresh for the write
+        that failed now. A write failing once the retried ones worked halts the session
+        again."""
         if self._fault is None:
             return
-        if self._halting:
+        if self._under_way:
             raise Refused(STORAGE_FAILED, self._message(self._fault))
         self._lifting = []
         try:
@@ -150,6 +151,11 @@ class StorageHalt:
         self._fault, self._explanation = None, None
         if failed:
             self.fail(*failed[0])
+
+    @property
+    def _under_way(self) -> bool:
+        """Whether halting, or lifting the halt, is under way."""
+        return self._halting or self._lifting is not None
 
     async def close(self) -> None:
         """Stop halting, if it's under way; a failure from now on only marks the session
