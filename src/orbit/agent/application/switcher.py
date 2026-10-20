@@ -14,6 +14,7 @@ from orbit.agent.application.review_lane import ReviewLane
 from orbit.agent.application.settings import SessionSettings
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.application.work_lane import WorkLane
+from orbit.agent.domain.activity import Activity, switch_refusal
 from orbit.agent.domain.board import interrupted
 from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.reviews import LaneSnapshot, PlannerSnapshot
@@ -43,12 +44,6 @@ from orbit.protocol import (
     Usage,
 )
 
-TASKS_RUNNING = "Can't switch: tasks are running. Press ctrl+s to stop them."
-REVIEW_RUNNING = "Can't switch: a review is running. Press c on it in the agents pane to stop it."
-PLANNER_ANSWERING = "Can't switch: the planner is answering. Press ctrl+x to stop it."
-STARTUP_CHECKING = (
-    "Can't switch: the startup check is running. Press c on it in the agents pane to stop it."
-)
 OPEN_RETIRED = (
     "OpenSession is retired: send Attach to view a session, or ActivateSession to make it the "
     "active one."
@@ -69,8 +64,8 @@ def _stopped(saved: Sequence[TaskState], now: Sequence[TaskState]) -> list[str]:
 @dataclass(frozen=True)
 class SwitchParts:
     """What a switch replaces the contents of: the ``keeper`` saving the session, its ``tasks``,
-    its planner ``seat``, its review ``lane`` and ``work`` lane, if any, and whether
-    ``tasks_running`` now or the startup check is ``checking``; the ``snapshot`` of the session
+    its planner ``seat``, its review ``lane`` and ``work`` lane, if any, and the ``activity``
+    now in progress there; the ``snapshot`` of the session
     open, last active then, that follows a switch; the ``catalog`` holding the sessions given,
     which ``broadcast`` sends every listening connection whenever they change; and
     ``switching``, called as a switch is no longer refused, just before the session open is
@@ -81,8 +76,7 @@ class SwitchParts:
     seat: PlannerSeat
     lane: ReviewLane | None
     work: WorkLane | None
-    tasks_running: Callable[[], bool]
-    checking: Callable[[], bool]
+    activity: Callable[[], Activity]
     snapshot: Callable[[datetime | None], Awaitable[Snapshot]]
     catalog: Callable[[tuple[SessionSummary, ...]], Catalog]
     broadcast: Callable[[Catalog], None]
@@ -234,18 +228,9 @@ class SessionSwitcher:
 
     def _may_switch(self) -> None:
         """Refuse a switch, raising :class:`Refused`, while anything runs, saying what runs."""
-        lane = self._parts.lane
-        if self._parts.tasks_running():
-            refusal = TASKS_RUNNING
-        elif lane is not None and lane.running:
-            refusal = REVIEW_RUNNING
-        elif self._parts.seat.running:
-            refusal = PLANNER_ANSWERING
-        elif self._parts.checking():
-            refusal = STARTUP_CHECKING
-        else:
-            return
-        raise Refused(BUSY, refusal)
+        refusal = switch_refusal(self._parts.activity())
+        if refusal is not None:
+            raise Refused(BUSY, refusal)
 
     def _load(self, record: SessionRecord) -> None:
         """Hold what ``record`` does, its tasks as interrupted; refused while anything runs."""

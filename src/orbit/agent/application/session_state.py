@@ -5,17 +5,18 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from orbit.agent.application.connection import Connections
+from orbit.agent.domain.activity import Activity
 from orbit.protocol import Event, SessionStateChanged
 
 
 @dataclass(frozen=True)
 class StateParts:
-    """What the state of the sessions is read from: the ``open_session``'s id, whether it's
-    ``running``, the ``connections`` viewing the sessions, and ``post``, which publishes an
+    """What the state of the sessions is read from: the ``open_session``'s id, the ``activity``
+    in progress there, the ``connections`` viewing the sessions, and ``post``, which publishes an
     event without blocking."""
 
     open_session: Callable[[], str]
-    running: Callable[[], bool]
+    activity: Callable[[], Activity]
     connections: Connections
     post: Callable[[Event], None]
 
@@ -49,7 +50,7 @@ class SessionStates:
         states[open_id] = SessionStateChanged(
             session=open_id,
             active=True,
-            state="running" if parts.running() else "idle",
+            state="running" if parts.activity().running else "idle",
             viewers=viewed[open_id],
         )
         return states

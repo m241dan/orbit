@@ -9,14 +9,9 @@ import pytest
 from orbit.agent.application.keeper import NewSessions, SessionKeeper
 from orbit.agent.application.planner_seat import PlannerSeat, SeatHooks
 from orbit.agent.application.settings import SessionSettings
-from orbit.agent.application.switcher import (
-    OPEN_RETIRED,
-    STARTUP_CHECKING,
-    TASKS_RUNNING,
-    SessionSwitcher,
-    SwitchParts,
-)
+from orbit.agent.application.switcher import OPEN_RETIRED, SessionSwitcher, SwitchParts
 from orbit.agent.application.tasks import Tasks
+from orbit.agent.domain.activity import STARTUP_CHECKING, TASKS_RUNNING, Activity
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.reviews import LaneSnapshot, PlannerSnapshot
@@ -45,14 +40,13 @@ REVIEWS = LaneSnapshot(planner=PlannerSnapshot(paused=True))
 
 
 class Held:
-    """A session's settings and whether its tasks run, as the switcher sees them, and when
+    """A session's settings and what's in progress there, as the switcher sees them, and when
     the sessions it was asked to snapshot were last active, and the sessions each catalog it
     was asked for holds."""
 
     def __init__(self, settings: Settings) -> None:
         self.owned = SessionSettings(settings)
-        self.running = False
-        self.checking = False
+        self.activity = Activity()
         self.switches: list[bool] = []
         self.snapshots: list[datetime | None] = []
         self.catalogs: list[tuple[SessionSummary, ...]] = []
@@ -99,8 +93,7 @@ def switcher_for(
         seat,
         None,
         None,
-        lambda: held.running,
-        lambda: held.checking,
+        lambda: held.activity,
         held.snapshot,
         held.catalog,
         events.put_nowait,
@@ -124,7 +117,7 @@ def saved(**fields: object) -> SessionRecord:
 
 async def test_switching_is_refused_while_tasks_run() -> None:
     held = Held(Settings())
-    held.running = True
+    held.activity = Activity(tasks=True)
     switcher, events, _ = switcher_for(FakeStore(), held)
     with pytest.raises(Refused) as refused:
         await switcher.handle(NewSession(name="other"))
@@ -134,7 +127,7 @@ async def test_switching_is_refused_while_tasks_run() -> None:
 
 async def test_switching_is_refused_while_the_startup_check_runs() -> None:
     held = Held(Settings())
-    held.checking = True
+    held.activity = Activity(startup_check=True)
     switcher, _, _ = switcher_for(FakeStore(), held)
     with pytest.raises(Refused) as refused:
         await switcher.handle(NewSession(name="other"))

@@ -64,6 +64,7 @@ from orbit.agent.application.work_commands import (
 )
 from orbit.agent.application.work_lane import WorkLane
 from orbit.agent.application.work_turns import WorkParts, WorkTurns
+from orbit.agent.domain.activity import Activity
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.catalog import catalog
 from orbit.agent.domain.ownership import WorkspaceOwner, read_only_note
@@ -318,7 +319,10 @@ class AgentSession:
     def _session_states(self) -> SessionStates:
         """What publishes the open session's state as it changes."""
         parts = StateParts(
-            lambda: self._keeper.id, self._running, self._connections, self._events.put_nowait
+            lambda: self._keeper.id,
+            self._activity,
+            self._connections,
+            self._events.put_nowait,
         )
         return SessionStates(parts)
 
@@ -350,8 +354,7 @@ class AgentSession:
             self._seat,
             self._lane,
             self._work,
-            lambda: self._turns.running,
-            lambda: self._startup is not None and self._startup.running,
+            self._activity,
             self._snapshot,
             self._catalog,
             lambda catalog: self._connections.broadcast(self._events.stamp(catalog)),
@@ -699,10 +702,14 @@ class AgentSession:
         self._connections.deliver(envelope)
         self._states.check()
 
-    def _running(self) -> bool:
-        """Whether a task run, a review, a planner turn or the startup check is in progress."""
-        background = (part for part in (self._lane, self._startup) if part is not None)
-        return self._turns.running or self._seat.running or any(p.running for p in background)
+    def _activity(self) -> Activity:
+        """What's in progress now: a task run, a review, a planner turn or the startup check."""
+        return Activity(
+            tasks=self._turns.running,
+            review=self._lane is not None and self._lane.running,
+            planner=self._seat.running,
+            startup_check=self._startup is not None and self._startup.running,
+        )
 
     def _start_background(self) -> None:
         """Start the startup check and the usage monitor, if there are any, and the tries of

@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from orbit.agent import Agents, AgentSession, Verification, VerificationStep
-from orbit.agent.application.switcher import PLANNER_ANSWERING, REVIEW_RUNNING, TASKS_RUNNING
+from orbit.agent.domain.activity import PLANNER_ANSWERING, REVIEW_RUNNING, TASKS_RUNNING
 from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.reviews import LaneSnapshot, PlannerSnapshot
 from orbit.agent.domain.sessions import SessionRecord
