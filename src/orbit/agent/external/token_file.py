@@ -68,7 +68,9 @@ class TokenFile:
 
     def rotate(self) -> None:
         """Replace the token in the file with a new one, made with random bytes, whole or not at
-        all; raises :class:`TokenError` if it can't be written."""
+        all; raises :class:`TokenError` if the directory can be written by others or the file
+        can't be written."""
+        self._check_directory()
         self._made()
 
     def _made(self) -> str:

@@ -145,6 +145,29 @@ def test_a_token_in_a_directory_others_can_only_read_is_accepted(tmp_path: Path)
     assert TokenFile(config).token() == token
 
 
+@pytest.mark.parametrize("directory_mode", [0o770, 0o707, 0o777])
+def test_no_token_is_rotated_into_a_directory_others_can_write(
+    tmp_path: Path, directory_mode: int
+) -> None:
+    config = tmp_path / "config"
+    old = TokenFile(config).token()
+    config.chmod(directory_mode)
+    with pytest.raises(
+        TokenError, match=f"directory {config} can be written by others; run chmod 700 {config}"
+    ):
+        TokenFile(config).rotate()
+    assert (config / "token").read_text() == old + "\n"
+    assert [p.name for p in config.iterdir()] == ["token"]
+
+
+def test_a_token_is_rotated_in_a_directory_others_can_only_read(tmp_path: Path) -> None:
+    config = tmp_path / "config"
+    old = TokenFile(config).token()
+    config.chmod(0o755)
+    TokenFile(config).rotate()
+    assert TokenFile(config).token() != old
+
+
 def test_a_token_directory_that_cant_be_looked_at_is_refused(tmp_path: Path) -> None:
     (tmp_path / "config").write_text("not a directory")
     with pytest.raises(TokenError, match="Can't read the token file"):

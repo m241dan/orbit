@@ -46,6 +46,19 @@ def test_a_rotation_that_cant_be_written_stops_with_the_reason(tmp_path: Path) -
     assert "Can't write the token file" in result.stderr
 
 
+def test_a_rotation_into_a_directory_others_can_write_stops_with_the_fix(
+    tmp_path: Path,
+) -> None:
+    config = tmp_path / "config"
+    old = TokenFile(config).token()
+    config.chmod(0o775)
+    result = runner.invoke(app, ["token", "rotate", "--config-dir", str(config)])
+
+    assert result.exit_code == 2
+    assert f"run chmod 700 {config}" in result.stderr
+    assert (config / "token").read_text().strip() == old
+
+
 def test_the_served_token_is_the_one_in_the_file_now(tmp_path: Path) -> None:
     tokens = TokenFile(tmp_path)
     current = serve._current_token(tokens)
