@@ -7,7 +7,6 @@ token, which decides who is asking.
 
 import asyncio
 import socket
-from collections.abc import Mapping
 from typing import Any, NotRequired, TypedDict
 
 import uvicorn
@@ -26,6 +25,7 @@ from orbit.agent.domain.roles import (
     SUGGEST_TASK,
 )
 from orbit.agent.external.embedded_server import EmbeddedServer
+from orbit.protocol import bearer_token
 
 INSTRUCTIONS = (
     "Orbit hands out tasks and verifies the work; these tools are how an agent talks to it."
@@ -59,12 +59,6 @@ class ProposedSetup(TypedDict):
 
     command: list[str]
     watch: NotRequired[list[str]]
-
-
-def bearer_token(headers: Mapping[str, str] | None) -> str:
-    """The token in a ``Bearer`` authorization header; empty when there isn't one."""
-    scheme, _, token = (headers or {}).get("authorization", "").partition(" ")
-    return token.strip() if scheme.lower() == "bearer" else ""
 
 
 def build_server(handler: CallHandler) -> MCPServer:

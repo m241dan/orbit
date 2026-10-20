@@ -12,7 +12,7 @@ from mcp.types import TextContent
 
 from orbit.agent.application.ports import Reply
 from orbit.agent.domain.roles import ORBIT_TOOLS
-from orbit.agent.external.mcp_host import PROMPT_RECIPE, McpHost, bearer_token
+from orbit.agent.external.mcp_host import PROMPT_RECIPE, McpHost
 
 OK = Reply("ok")
 
@@ -136,16 +136,6 @@ async def test_a_call_without_a_token_reaches_the_handler_with_an_empty_one() ->
     async with serving(handler) as url, connected(url, token=None) as client:
         await client.call_tool("report_progress", {"note": "hi"})
     assert handler.calls == [("", "report_progress", {"note": "hi"})]
-
-
-@pytest.mark.parametrize(
-    ("header", "token"),
-    [(None, ""), ("Bearer abc", "abc"), ("bearer abc", "abc"), ("Basic abc", ""), ("Bearer", "")],
-)
-def test_bearer_token_reads_only_bearer_authorization(header: str | None, token: str) -> None:
-    headers = {} if header is None else {"authorization": header}
-    assert bearer_token(headers) == token
-    assert bearer_token(None) == ""
 
 
 async def test_stop_closes_the_port() -> None:

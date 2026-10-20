@@ -45,7 +45,6 @@ from orbit.agent.external.client_certs import (
     reporting_handshakes,
 )
 from orbit.agent.external.embedded_server import EmbeddedServer
-from orbit.agent.external.mcp_host import bearer_token
 from orbit.protocol import (
     CERTIFICATE_CHALLENGE,
     GOING_AWAY,
@@ -60,6 +59,7 @@ from orbit.protocol import (
     CommandEnvelope,
     Hello,
     ProtocolError,
+    bearer_token,
     decode_command,
     encode,
 )

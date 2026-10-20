@@ -1378,9 +1378,9 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
 - `orbit.protocol`: pydantic models (`Command`s in, `Event`s out), the `Session`
   interface, the `Link` a session to a control plane elsewhere reports its state through (in
   `link`, with `NotConnected`), the WebSocket transport's close codes, 401 status, default
-  message limit and `bearer_header` (in `transport`), which the control plane and `orbit.client`
-  share, and `ThreadedSession`, which runs a session on a thread of its own. It imports no
-  other orbit package. `docs/protocol.md` describes the protocol, its conversation rules and
+  message limit, `bearer_header` and its reader `bearer_token` (in `transport`), which the
+  control plane, the MCP host and `orbit.client` share, and `ThreadedSession`, which runs a
+  session on a thread of its own. It imports no other orbit package. `docs/protocol.md` describes the protocol, its conversation rules and
   codes, and `schema/protocol.schema.json` is its JSON Schema.
 - `orbit.client`: the frontends' side of a control plane in another process. `WebSocketSession`
   (in `session`) is a `Session` over a WebSocket (the `websockets` library) that reconnects with

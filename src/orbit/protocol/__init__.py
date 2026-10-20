@@ -178,6 +178,7 @@ from orbit.protocol.transport import (
     UNAUTHORIZED,
     UNAVAILABLE,
     bearer_header,
+    bearer_token,
 )
 from orbit.protocol.wire import ProtocolError, decode_command, decode_event, encode
 
@@ -343,6 +344,7 @@ __all__ = [
     "Welcome",
     "WorkspaceEntry",
     "bearer_header",
+    "bearer_token",
     "command_adapter",
     "decode_command",
     "decode_event",

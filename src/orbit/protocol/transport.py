@@ -1,6 +1,8 @@
 """The WebSocket transport's numbers, which the control plane and its frontends share, as
 described in ``docs/protocol.md``."""
 
+from collections.abc import Mapping
+
 NORMAL = 1000
 """The close code of a WebSocket whose stream ended, as an incompatible ``Hello``'s does."""
 
@@ -35,3 +37,9 @@ DEFAULT_MAX_MESSAGE_MB = 64
 def bearer_header(token: str) -> dict[str, str]:
     """The upgrade's header showing ``token``."""
     return {"Authorization": f"Bearer {token}"}
+
+
+def bearer_token(headers: Mapping[str, str] | None) -> str:
+    """The token in a ``Bearer`` authorization header; empty when there isn't one."""
+    scheme, _, token = (headers or {}).get("authorization", "").partition(" ")
+    return token.strip() if scheme.lower() == "bearer" else ""
