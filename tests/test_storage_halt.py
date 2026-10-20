@@ -76,7 +76,7 @@ from tests.agent_fakes import (
 )
 from tests.test_log_writer import GatedLog, payloads_of
 from tests.test_planner_lane import gated_planner
-from tests.test_review_lane import claims_done
+from tests.test_review_lane import claims_done, suggests
 from tests.test_sqlite_store import fill_up
 from tests.test_startup_check import checked
 
@@ -421,6 +421,32 @@ async def test_a_review_ending_while_halted_starts_no_work_on_its_fixes() -> Non
 
     coders = [la for la in launcher.launches if la.agent.role == "coder"]
     assert len(coders) == 1  # The user's task, but none for the fix.
+
+
+async def test_a_fix_cancelled_by_the_halt_leaves_its_batchs_review_waiting() -> None:
+    started = asyncio.Event()
+    session, _, launcher = session_for(
+        claims_done,
+        claims_done,
+        waiting_agent(started),
+        reviewers=(suggests("Add tests", "Add docs"),),
+        tree=FakeTree(),
+        review=True,
+        store=FakeStore(),
+        fallback=FakeFallback(),
+    )
+    await send(session, AddTask(task=TASK))
+    await send(session, RunTasks())
+    await asyncio.wait_for(started.wait(), 5)  # The last fix runs; its end makes a review due.
+    session._halt.fail(FailedWrite.EVENT_LOG, RuntimeError("disk full"))
+    await envelopes_until(session, work_stopped_after_halt)
+    await asyncio.sleep(0.05)
+    reviewers = [la for la in launcher.launches if la.agent.role == "reviewer"]
+    reviews = [t for t in tasks_of(session).board.tasks if t.task.role == "reviewer"]
+    await session.close()
+
+    assert len(reviewers) == 1  # The first review, but none of the fixes.
+    assert [t.status for t in reviews] == ["completed", "pending"]
 
 
 # The halt itself

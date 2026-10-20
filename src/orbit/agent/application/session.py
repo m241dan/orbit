@@ -594,6 +594,7 @@ class AgentSession:
         lane = ReviewLane(desk, self._tasks, planner, lambda: self._turns.wake())
         lane.changed = self._reviews_changed
         lane.ownership = self._ownership
+        lane.halted = lambda: self._halt.halted
         desk.suggest = lane.suggest
         return lane
 

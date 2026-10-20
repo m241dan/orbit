@@ -469,6 +469,22 @@ async def test_a_super_review_can_be_asked_for_before_any_task_ran() -> None:
     assert not any(isinstance(e, ErrorOccurred) for e in events)
 
 
+async def test_while_halted_a_kick_starts_no_review_until_the_halt_lifts() -> None:
+    halted = [True]
+    session, _, launcher = session_for(reviewers=(suggests(),), tree=FakeTree(), review=True)
+    lane_of(session).halted = lambda: halted[0]
+    await send(session, FireTrigger(trigger=SUPER_REVIEW))
+    events = await asyncio.wait_for(settle(session, until=lambda _: True), 10)
+    assert [(t.task.role, t.status) for t in board(events)] == [("super-reviewer", "pending")]
+    assert launcher.launches == []
+
+    halted[0] = False
+    lane_of(session).kick()
+    events = await asyncio.wait_for(settle(session), 10)
+    assert [(t.task.role, t.status) for t in board(events)] == [("super-reviewer", "completed")]
+    assert [la.agent.role for la in launcher.launches] == ["super-reviewer"]
+
+
 async def test_a_super_review_is_skipped_when_the_base_commit_cannot_be_read() -> None:
     tree = FakeTree()
     tree.failures["base_commit"] = RuntimeError("git rev-parse failed: unknown revision")

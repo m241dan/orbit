@@ -41,8 +41,9 @@ from orbit.protocol import (
 class ReviewLane:
     """Queues and runs reviews of ``tasks``' tasks through ``desk``'s agents.
 
-    ``wake_work`` asks the work lane to run the suggestions a review queued, and ``changed`` is
-    called after the lane's state may have changed.
+    ``wake_work`` asks the work lane to run the suggestions a review queued, ``changed`` is
+    called after the lane's state may have changed, and ``halted`` tells whether the session is
+    halted, when no review starts.
     """
 
     def __init__(
@@ -61,6 +62,7 @@ class ReviewLane:
         self._wake_work = wake_work
         self.changed: Changed = unchanged
         self.ownership = Ownership()  # While another orbit owns the repository, run no reviews.
+        self.halted: Callable[[], bool] = lambda: False
         self._publish = desk.publish
         self._jobs: dict[str, ReviewJob] = {}  # Review task id -> what it reviews.
         self._batches: dict[str, str] = {}  # Review task id -> the batch it suggests into.
@@ -177,9 +179,10 @@ class ReviewLane:
 
     def kick(self) -> None:
         """Run the reviews waiting, if they aren't being run already, unless this orbit is
-        read-only."""
-        if not self.ownership.read_only and not self._background.running:
-            self._background.start(self._run_reviews())
+        read-only or the session is halted; those queued meanwhile wait on the board."""
+        if self.ownership.read_only or self.halted() or self._background.running:
+            return
+        self._background.start(self._run_reviews())
 
     async def close(self) -> None:
         await self._background.close()
