@@ -154,7 +154,8 @@ session that opens read-only asks, in a modal, whether to "Make this the active 
 look"; `enter` on the prompt, while it's selected, asks the same. Making it the active one switches
 as picking does, and is refused, with an error, if work started meanwhile; "Just look" or `esc`
 keeps the view. While the active session runs work, the modal says `<name> is running; you can
-switch once it's idle.` and offers only "Just look".
+switch once it's idle.` and offers only "Just look". If the session you view becomes the active one
+meanwhile, say from another frontend, the modal closes.
 
 Opening a session never starts work by
 itself: its pending tasks wait for `ctrl+r`. A task that was running or being verified when the

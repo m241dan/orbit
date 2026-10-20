@@ -34,6 +34,7 @@ from orbit.tui.view.sessions import (
     SESSIONS_TITLE,
     activation_choices,
     activation_message,
+    active_name,
     active_running,
     can_delete,
     can_open,
@@ -338,8 +339,22 @@ class SessionsHost:
         catalog names it, renamed perhaps; none while it's live."""
         if self.live:
             return None
+        return viewing_mark(self.viewed_name)
+
+    @property
+    def viewed_name(self) -> str:
+        """The session viewed's name, as the catalog names it, renamed perhaps, or else as its
+        snapshot does."""
         attached = self.attached_session
-        return viewing_mark(self._viewed_name if attached is None else attached.name)
+        return self._viewed_name if attached is None else attached.name
+
+    @property
+    def active_name(self) -> str | None:
+        """The active session's name, as the catalog names it, or else as the snapshot of the
+        session viewed read-only does; none while the session viewed is live."""
+        if self.open_session is None:
+            return None
+        return active_name(self.sessions) or self.open_session.name
 
     def follow(self, catalog: Catalog) -> None:
         """List the sessions in ``catalog``; until a snapshot says which one this frontend views,
@@ -361,6 +376,9 @@ class SessionsHost:
         offering, self._offering = self._offering == session.id, None
         self.attached, self.live, self._viewed_name = session.id, snapshot.active, session.name
         self.open_session = None if snapshot.active else snapshot.open_session
+        if snapshot.active and self.offered is not None:  # The offer is moot once it's live.
+            self.offered.dismiss(False)
+            self.offered = None
         self._refresh()
         if offering:
             self.offer()
@@ -368,11 +386,11 @@ class SessionsHost:
     def offer(self) -> None:
         """Offer to make the session viewed the active one, or say the active one runs, unless
         it's live, the active one isn't known or the offer is shown already."""
-        viewed, active = self.attached, self.open_session
+        viewed, active = self.attached, self.active_name
         if viewed is None or active is None or self.offered is not None:
             return
         running = active_running(self.sessions)
-        message = activation_message(self._viewed_name, active.name, running=running)
+        message = activation_message(self.viewed_name, active, running=running)
 
         async def answered(activate: bool | None) -> None:
             self.offered = None

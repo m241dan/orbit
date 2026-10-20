@@ -240,3 +240,16 @@ async def test_a_view_picked_that_failed_to_send_is_offered_nothing() -> None:
         app.host.view(view(OLD))
         await pilot.pause()
         assert app.activation_screens() == []
+
+
+async def test_a_live_snapshot_dismisses_the_offer_shown() -> None:
+    app = Host()
+    async with app.run_test() as pilot:
+        app.host.view(view(OLD))
+        app.host.offer()
+        await pilot.pause()
+        app.host.view(opened(OLD))
+        assert app.host.offered is None
+        await pilot.pause()
+        assert app.activation_screens() == []
+        assert app.sent == []

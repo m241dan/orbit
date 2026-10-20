@@ -190,6 +190,11 @@ def viewing_mark(name: str) -> str:
     return f"viewing {name}, not the active session (enter to switch)"
 
 
+def active_name(sessions: Sequence[SessionSummary]) -> str | None:
+    """The name of the active session among ``sessions``; none if none is."""
+    return next((summary.name for summary in sessions if summary.active), None)
+
+
 def active_running(sessions: Sequence[SessionSummary]) -> bool:
     """Whether the active session among ``sessions`` runs work."""
     return any(summary.active and summary.state == "running" for summary in sessions)

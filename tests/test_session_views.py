@@ -11,6 +11,7 @@ from orbit.protocol import (
     CommandRefused,
     RunTasks,
     SessionRef,
+    SessionStateChanged,
     SessionSummary,
     Snapshot,
 )
@@ -22,6 +23,8 @@ from tests.test_tui import entries, feed_events, opened
 
 VIEWING_OLD = "viewing auth rework, not the active session (enter to switch)"
 TODAY = SessionRef(id="now", name="today")
+THIRD = SessionSummary(id="third", name="flags")
+LEFT = SessionStateChanged(session="now", active=False, state="idle", viewers=0)
 VIEWED = RUNNING.model_copy(update={"state": "idle", "viewers": 2})
 """The active session idle, but viewed by another frontend."""
 
@@ -205,3 +208,61 @@ async def test_j_and_k_move_between_the_choices() -> None:
         await feed_events(session, pilot, CATALOG, view(OLD))
         await pilot.press("enter", "j", "k", "enter")
         assert session.commands == [ActivateSession(session="old")]
+
+
+async def test_a_state_change_activating_a_third_session_names_it_in_the_prompt() -> None:
+    app, session = started()
+    async with app.run_test() as pilot:
+        third = SessionStateChanged(session="third", active=True, state="idle", viewers=1)
+        await feed_events(session, pilot, catalog(CURRENT, OLD, THIRD), view(OLD), LEFT, third)
+        await pilot.press("enter")
+        assert message(prompt(app)) == (
+            "auth rework is a read-only view; flags is the active session, which runs work."
+        )
+
+
+async def test_a_state_change_running_a_third_session_names_it_in_the_prompt() -> None:
+    app, session = started()
+    async with app.run_test() as pilot:
+        third = SessionStateChanged(session="third", active=True, state="running", viewers=1)
+        await feed_events(session, pilot, catalog(CURRENT, OLD, THIRD), view(OLD), LEFT, third)
+        await pilot.press("enter")
+        assert message(prompt(app)) == "flags is running; you can switch once it's idle."
+        assert choices(prompt(app)) == ["Just look"]
+
+
+async def test_a_catalog_activating_a_third_session_names_it_in_the_prompt() -> None:
+    app, session = started()
+    async with app.run_test() as pilot:
+        left = CURRENT.model_copy(update={"active": False})
+        third = THIRD.model_copy(update={"active": True})
+        await feed_events(session, pilot, CATALOG, view(OLD), catalog(left, OLD, third))
+        await pilot.press("enter")
+        assert message(prompt(app)) == (
+            "auth rework is a read-only view; flags is the active session, which runs work."
+        )
+
+
+async def test_the_prompt_names_the_session_viewed_as_renamed_in_the_catalog() -> None:
+    app, session = started()
+    async with app.run_test() as pilot:
+        renamed = OLD.model_copy(update={"name": "auth v2"})
+        await feed_events(session, pilot, CATALOG, view(OLD), catalog(CURRENT, renamed))
+        await pilot.press("enter")
+        assert message(prompt(app)) == (
+            "auth v2 is a read-only view; today is the active session, which runs work."
+        )
+
+
+async def test_a_live_snapshot_closes_the_prompt_shown_and_sends_nothing() -> None:
+    app, session = started()
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, CATALOG, view(OLD))
+        await pilot.press("enter")
+        prompt(app)
+        await feed_events(session, pilot, opened(OLD))
+        assert not isinstance(app.screen, ActivationScreen)
+
+        await pilot.press("enter")
+        assert not isinstance(app.screen, ActivationScreen)
+        assert session.commands == []

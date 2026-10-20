@@ -16,6 +16,7 @@ from orbit.tui.view.sessions import (
     STARTUP_HINT,
     activation_choices,
     activation_message,
+    active_name,
     active_running,
     can_delete,
     can_open,
@@ -274,3 +275,10 @@ def test_attaching_alone_to_an_inactive_session_views_it_only() -> None:
     assert viewed_only((Attach(session="o"), ActivateSession(session="o")), sessions) is None
     assert viewed_only((NewSession(),), sessions) is None
     assert viewed_only((), sessions) is None
+
+
+def test_the_active_session_is_named_as_the_sessions_name_it() -> None:
+    idle = SessionSummary(id="s", name="today", active=True)
+    other = SessionSummary(id="o", name="auth rework")
+    assert active_name((other, idle)) == "today"
+    assert active_name((other,)) is None
