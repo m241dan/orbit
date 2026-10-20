@@ -2,15 +2,15 @@
 frontend that shows the token, or under mutual TLS a client certificate, over TLS if the
 settings say so.
 
-Each WebSocket that's let in gets a connection of its own to the session: its text frames are
-decoded into commands and sent on it, and its events are encoded into text frames. A frontend
-that sends no ``Authorization: Bearer`` with the token is turned away with HTTP 401 before the
-WebSocket opens, and one that arrives as the server stops, with HTTP 503. The token is read
-afresh for each frontend, so a new one admits frontends at once, while those already let in
-stay. Under mutual TLS the TLS handshake asks for a client certificate and refuses one the
-client CA didn't sign, every route but the health checks turns away a client that showed none
-with HTTP 401, the token isn't asked for, and a certificate whose fingerprint is revoked, as the
-revoked fingerprints are read afresh for each frontend, is turned away with HTTP 403.
+Each WebSocket that's let in gets a connection of its own to the control plane: its text
+frames are decoded into commands and sent on it, and its events are encoded into text frames.
+A frontend that sends no ``Authorization: Bearer`` with the token is turned away with HTTP 401
+before the WebSocket opens, and one that arrives as the server stops, with HTTP 503. The token
+is read afresh for each frontend, so a new one admits frontends at once, while those already
+let in stay. Under mutual TLS the TLS handshake asks for a client certificate and refuses one
+the client CA didn't sign, every route but the health checks turns away a client that showed
+none with HTTP 401, the token isn't asked for, and a certificate whose fingerprint is revoked,
+as the revoked fingerprints are read afresh for each frontend, is turned away with HTTP 403.
 
 ``GET /healthz`` and ``GET /readyz`` answer health checks without the token or a client
 certificate, in ``application/health+json``: the first passes while the server runs, the second
@@ -86,8 +86,8 @@ Say = Callable[[str], None]
 
 
 class Connectable(Protocol):
-    """A session frontends connect to, saying whether it's read-only, as another orbit owns the
-    repository, and whether its storage is halted."""
+    """A control plane frontends connect to, saying whether it's read-only, as another orbit
+    owns the repository, and whether its storage is halted."""
 
     def connect(self) -> SessionConnection: ...
 
@@ -259,15 +259,16 @@ class _Conversation:
 
 
 class ControlPlaneServer:
-    """Serves ``session`` to every frontend that shows the token ``token`` returns as it
-    connects, or under mutual TLS a client certificate whose fingerprint isn't among those
-    :attr:`revoked` returns then, on the host and port in ``settings``, until stopped; ``say``
-    tells the user as frontends connect and disconnect. An empty token admits no one."""
+    """Serves the control plane ``plane`` to every frontend that shows the token ``token``
+    returns as it connects, or under mutual TLS a client certificate whose fingerprint isn't
+    among those :attr:`revoked` returns then, on the host and port in ``settings``, until
+    stopped; ``say`` tells the user as frontends connect and disconnect. An empty token admits
+    no one."""
 
     def __init__(
-        self, session: Connectable, token: Callable[[], str], settings: ServerSettings, say: Say
+        self, plane: Connectable, token: Callable[[], str], settings: ServerSettings, say: Say
     ) -> None:
-        self._session = session
+        self._plane = plane
         self._token = token
         self._settings = settings
         self._say = say
@@ -304,12 +305,12 @@ class ControlPlaneServer:
 
     def readiness(self) -> Readiness:
         """How ready the server is: starting until it accepts frontends, shutting down once it
-        stops, and otherwise as its session's storage and ownership say."""
+        stops, and otherwise as its control plane's storage and ownership say."""
         return readiness(
             accepting=self._accepting,
             stopping=self._stopping,
-            halted=self._session.storage_halted,
-            read_only=self._session.read_only,
+            halted=self._plane.storage_halted,
+            read_only=self._plane.read_only,
         )
 
     @property
@@ -435,7 +436,7 @@ class ControlPlaneServer:
             return
         peer = _peer(websocket)
         conversation = _Conversation(
-            websocket, self._session.connect(), self._settings.max_message_bytes, self._farewell
+            websocket, self._plane.connect(), self._settings.max_message_bytes, self._farewell
         )
         conversation.greeted = lambda name: self._say(f"{name} connected from {peer}.")
         self._open.add(conversation)

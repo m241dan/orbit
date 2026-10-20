@@ -22,10 +22,10 @@ from websockets.exceptions import ConnectionClosed, InvalidStatus
 from websockets.sync.client import ClientConnection, connect
 
 from orbit.agent import (
-    AgentSession,
     ControlPlaneServer,
     RunFile,
     TokenFile,
+    WorkspaceHost,
     WorkspaceLock,
     WorkspaceOwner,
 )
@@ -312,7 +312,7 @@ def test_a_read_only_serve_leaves_the_owners_run_file_as_it_was(
 @pytest.fixture
 def quick_retries(monkeypatch: pytest.MonkeyPatch) -> None:
     """Have a read-only serve try the repository's lock every 50ms rather than every 5s."""
-    defaults = AgentSession.__init__.__kwdefaults__
+    defaults = WorkspaceHost.__init__.__kwdefaults__
     assert defaults is not None
     monkeypatch.setitem(defaults, "lock_retry", 0.05)
 

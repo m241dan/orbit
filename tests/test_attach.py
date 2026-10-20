@@ -3,7 +3,7 @@
 import asyncio
 from datetime import UTC, datetime
 
-from orbit.agent import AgentSession
+from orbit.agent import WorkspaceHost
 from orbit.agent.application.connection import SessionConnection
 from orbit.agent.domain.sessions import SessionRecord
 from orbit.protocol import (
@@ -34,7 +34,7 @@ from orbit.protocol import (
     TaskSpec,
     TaskState,
 )
-from tests.agent_fakes import HELLO, FakeStore, Ticks
+from tests.agent_fakes import HELLO, FakeStore, Ticks, connect
 
 OPEN = "today-id"
 """The id of the workspace's open session."""
@@ -66,9 +66,9 @@ def stored() -> FakeStore:
     return store
 
 
-def workspace(store: FakeStore) -> AgentSession:
+def workspace(store: FakeStore) -> WorkspaceHost:
     """A session saved in ``store``, its open one named "today"."""
-    return AgentSession(store=store, clock=Ticks(), new_id=lambda: OPEN, name="today")
+    return WorkspaceHost(store=store, clock=Ticks(), new_id=lambda: OPEN, name="today")
 
 
 async def say(
@@ -94,16 +94,16 @@ async def taken(connection: SessionConnection) -> list[Event]:
     return [envelope.payload for envelope in await envelopes(connection)]
 
 
-async def joined(session: AgentSession, name: str) -> SessionConnection:
+async def joined(session: WorkspaceHost, name: str) -> SessionConnection:
     """A new connection to ``session`` that has said Hello as ``name``, and read what that
     brought."""
-    connection = session.connect()
+    connection = connect(session)
     await say(connection, name, HELLO)
     await taken(connection)
     return connection
 
 
-async def viewing(session: AgentSession, name: str) -> SessionConnection:
+async def viewing(session: WorkspaceHost, name: str) -> SessionConnection:
     """A connection to ``session`` that has attached to ``earlier``, and read what that
     brought."""
     connection = await joined(session, name)
@@ -176,7 +176,7 @@ async def test_a_viewer_no_longer_gets_the_open_sessions_events_while_others_sti
 async def test_the_open_sessions_snapshot_is_active_and_counts_its_viewers() -> None:
     session = workspace(stored())
     await joined(session, "first")
-    second = session.connect()
+    second = connect(session)
     await say(second, "second", HELLO)
     snapshot = snapshot_in(await taken(second))
     await session.close()
@@ -218,7 +218,7 @@ async def test_attaching_publishes_the_viewers_of_both_sessions_to_every_connect
 async def test_a_joining_connections_catalog_counts_the_viewers_of_a_view() -> None:
     session = workspace(stored())
     await viewing(session, "viewer")
-    joining = session.connect()
+    joining = connect(session)
     await say(joining, "joining", HELLO)
     events = await taken(joining)
     await session.close()
@@ -415,7 +415,7 @@ async def test_deleting_the_viewed_session_publishes_it_left_with_no_viewers() -
     viewer = await viewing(session, "viewer")
     await say(viewer, "delete", DeleteSession(session_id=EARLIER))
     deleted = await taken(viewer)
-    joining = session.connect()
+    joining = connect(session)
     await say(joining, "joining", HELLO)
     [catalog] = [e for e in await taken(joining) if isinstance(e, Catalog)]
     await session.close()

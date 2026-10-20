@@ -9,9 +9,9 @@ import pytest
 
 from orbit.agent import (
     NO_STEPS_NOTE,
-    AgentSession,
     GitCoderTree,
     Verification,
+    WorkspaceHost,
     read_config,
     write_checks,
 )
@@ -77,7 +77,7 @@ async def claims_done(call: Call) -> TurnEndReason:
     return "completed"
 
 
-async def everything(session: AgentSession, *tasks: TaskSpec) -> list[Event]:
+async def everything(session: WorkspaceHost, *tasks: TaskSpec) -> list[Event]:
     """Queue ``tasks`` and run them; every event until the session goes idle."""
     for task in tasks:
         await send(session, AddTask(task=task))
@@ -90,7 +90,7 @@ async def everything(session: AgentSession, *tasks: TaskSpec) -> list[Event]:
     raise AssertionError("unreachable")
 
 
-def accepting(*scripts: Script, steps: Steps, **options: Any) -> AgentSession:
+def accepting(*scripts: Script, steps: Steps, **options: Any) -> WorkspaceHost:
     """A session whose configurator proposes ``CHECKS``, which the user accepts; ``scripts``
     play the agents of the tasks after it."""
     session, _, _ = session_for(

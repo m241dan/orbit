@@ -5,7 +5,7 @@ import asyncio
 
 import pytest
 
-from orbit.agent import AgentSession
+from orbit.agent import WorkspaceHost
 from orbit.agent.application.planner_seat import (
     NO_PLANNER_MESSAGE,
     NOTHING_TO_RESET,
@@ -68,7 +68,7 @@ OUTCOMES = (CommandAccepted, CommandRefused)
 
 
 async def send_as(
-    session: AgentSession, command_id: str, command: Command, /, **fields: str
+    session: WorkspaceHost, command_id: str, command: Command, /, **fields: str
 ) -> None:
     """Send ``command`` to ``session`` as ``command_id``, with the envelope's other ``fields``,
     greeting it first if it hasn't been."""
@@ -76,12 +76,12 @@ async def send_as(
     await frontend(session).send(CommandEnvelope(command_id=command_id, payload=command, **fields))
 
 
-async def outcome(session: AgentSession) -> list[Event]:
+async def outcome(session: WorkspaceHost) -> list[Event]:
     """The session's events up to and including the next command's outcome."""
     return await events_until(session, lambda event: isinstance(event, OUTCOMES))
 
 
-async def refusal(session: AgentSession, command_id: str, command: Command) -> CommandRefused:
+async def refusal(session: WorkspaceHost, command_id: str, command: Command) -> CommandRefused:
     """What ``session`` refused ``command`` with, sent as ``command_id``; checks that it's the
     only answer, with no error and no other outcome after it."""
     await send_as(session, command_id, command)
@@ -95,7 +95,7 @@ async def refusal(session: AgentSession, command_id: str, command: Command) -> C
 
 
 async def test_an_accepted_command_is_answered_after_the_events_it_published() -> None:
-    session = AgentSession()
+    session = WorkspaceHost()
     await send_as(session, "c1", AddTask(task=TASK))
     events = await outcome(session)
     await session.close()
@@ -105,7 +105,7 @@ async def test_an_accepted_command_is_answered_after_the_events_it_published() -
 
 
 async def test_an_unknown_trigger_is_refused_as_unknown_with_its_message() -> None:
-    session = AgentSession()
+    session = WorkspaceHost()
     refused = await refusal(session, "c2", FireTrigger(trigger="nope"))
     await session.close()
 
@@ -114,7 +114,7 @@ async def test_an_unknown_trigger_is_refused_as_unknown_with_its_message() -> No
 
 
 async def test_running_tasks_without_agents_is_refused_as_not_configured() -> None:
-    session = AgentSession()
+    session = WorkspaceHost()
     refused = await refusal(session, "c3", RunTasks())
     await session.close()
 
@@ -122,7 +122,7 @@ async def test_running_tasks_without_agents_is_refused_as_not_configured() -> No
 
 
 async def test_input_to_a_trigger_is_refused_as_invalid() -> None:
-    session = AgentSession()
+    session = WorkspaceHost()
     refused = await refusal(session, "c4", FireTrigger(trigger=SUPER_REVIEW, input={"x": "1"}))
     await session.close()
 
@@ -150,7 +150,7 @@ async def test_removing_a_running_task_is_refused_as_busy() -> None:
 
 
 async def test_a_command_for_another_workspace_is_refused_unhandled() -> None:
-    session = AgentSession()
+    session = WorkspaceHost()
     await send_as(session, "c6", AddTask(task=TASK), workspace="other")
     events = await outcome(session)
     await session.close()
@@ -161,7 +161,7 @@ async def test_a_command_for_another_workspace_is_refused_unhandled() -> None:
 
 
 async def test_a_command_for_a_session_not_open_is_refused_unhandled() -> None:
-    session = AgentSession(new_id=lambda: "session-1")
+    session = WorkspaceHost(new_id=lambda: "session-1")
     await send_as(session, "c7", AddTask(task=TASK), session="other")
     events = await outcome(session)
     await session.close()
@@ -172,7 +172,7 @@ async def test_a_command_for_a_session_not_open_is_refused_unhandled() -> None:
 
 
 async def test_a_command_for_the_open_session_by_its_id_is_handled() -> None:
-    session = AgentSession(new_id=lambda: "session-1")
+    session = WorkspaceHost(new_id=lambda: "session-1")
     await send_as(session, "c8", AddTask(task=TASK), session="session-1")
     events = await outcome(session)
     await session.close()
@@ -194,7 +194,7 @@ async def test_a_configurator_already_queued_is_noted_and_the_command_accepted()
     assert not any(isinstance(event, CommandRefused) for event in events)
 
 
-async def answering() -> AgentSession:
+async def answering() -> WorkspaceHost:
     """A session whose planner is answering, and goes on until cancelled."""
     session, _, launcher = session_for()
     launcher.planner_turns = [hangs]
@@ -214,7 +214,7 @@ async def test_a_message_to_the_planner_while_it_answers_is_refused_as_busy() ->
 
 
 async def test_a_message_without_a_planner_is_refused_as_not_configured() -> None:
-    session = AgentSession()
+    session = WorkspaceHost()
     refused = await refusal(session, "c10", SendMessage(agent=PLANNER, text="Plan."))
     await session.close()
 
@@ -262,7 +262,7 @@ async def test_running_tasks_while_they_run_is_refused_as_busy() -> None:
 async def test_a_save_that_cannot_take_its_lock_is_an_error_not_a_refusal() -> None:
     store = FakeStore()
     store.free = False
-    session = AgentSession(store=store, new_id=lambda: "session-1")
+    session = WorkspaceHost(store=store, new_id=lambda: "session-1")
     await send_as(session, "c14", AddTask(task=TASK))
     events = await outcome(session)
     await session.close()
@@ -275,7 +275,7 @@ async def test_a_save_that_cannot_take_its_lock_is_an_error_not_a_refusal() -> N
 
 async def test_a_handler_that_fails_is_refused_as_internal_and_the_session_goes_on() -> None:
     store = FakeStore()
-    session = AgentSession(store=store, new_id=lambda: "session-1")
+    session = WorkspaceHost(store=store, new_id=lambda: "session-1")
     await greeted(session)
     store.list_failure = ValueError("the disk is gone")
     refused = await refusal(session, "c15", ListSessions())
@@ -291,7 +291,7 @@ async def test_a_handler_that_fails_is_refused_as_internal_and_the_session_goes_
 
 async def test_sessions_that_cannot_be_listed_are_reported_and_listed_as_none() -> None:
     store = FakeStore()
-    session = AgentSession(store=store, new_id=lambda: "session-1")
+    session = WorkspaceHost(store=store, new_id=lambda: "session-1")
     await greeted(session)
     store.list_failure = RuntimeError("Couldn't list the sessions in orbit.db: busy")
     await send_as(session, "c19", ListSessions())
@@ -313,7 +313,7 @@ async def test_a_change_while_sessions_cannot_be_listed_reports_it_once_and_is_a
 ) -> None:
     store = FakeStore()
     store.saved = [SessionRecord(id="other", name="other", created=START, last_active=START)]
-    session = AgentSession(store=store, new_id=lambda: "session-1")
+    session = WorkspaceHost(store=store, new_id=lambda: "session-1")
     await greeted(session)
     store.list_failure = RuntimeError("Couldn't list the sessions in orbit.db: busy")
     await send_as(session, "c20", command)
@@ -330,7 +330,7 @@ async def test_a_change_while_sessions_cannot_be_listed_reports_it_once_and_is_a
 async def test_a_hello_whose_catalog_fails_is_refused_as_internal_with_no_welcome() -> None:
     store = FakeStore()
     store.list_failure = ValueError("the disk is gone")
-    session = AgentSession(store=store, new_id=lambda: "session-1")
+    session = WorkspaceHost(store=store, new_id=lambda: "session-1")
     await greet(session)
     events = queued(session)
     await session.close()
@@ -341,7 +341,7 @@ async def test_a_hello_whose_catalog_fails_is_refused_as_internal_with_no_welcom
 
 async def test_a_cancelled_handler_is_cancelled_with_no_outcome() -> None:
     store = FakeStore()
-    session = AgentSession(store=store, new_id=lambda: "session-1")
+    session = WorkspaceHost(store=store, new_id=lambda: "session-1")
     await greeted(session)
     store.list_failure = asyncio.CancelledError()
     with pytest.raises(asyncio.CancelledError):
@@ -355,7 +355,7 @@ async def test_a_cancelled_handler_is_cancelled_with_no_outcome() -> None:
 
 @pytest.mark.parametrize("trigger", [entry.name for entry in TRIGGERS])
 async def test_every_catalogued_trigger_is_run_by_fire_trigger(trigger: str) -> None:
-    session = AgentSession()
+    session = WorkspaceHost()
     refused = await refusal(session, "c1", FireTrigger(trigger=trigger))
     await session.close()
 
@@ -365,7 +365,7 @@ async def test_every_catalogued_trigger_is_run_by_fire_trigger(trigger: str) -> 
 
 @pytest.mark.parametrize("lane", LANES)
 async def test_every_catalogued_lane_is_accepted_by_cancel_turn(lane: str) -> None:
-    session = AgentSession()
+    session = WorkspaceHost()
     await send_as(session, "c1", CancelTurn(lane=lane))
     events = await outcome(session)
     await session.close()

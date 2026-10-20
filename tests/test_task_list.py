@@ -3,7 +3,7 @@ from rich.cells import cell_len
 from textual import events
 from textual.pilot import Pilot
 
-from orbit.agent import AgentSession
+from orbit.agent import WorkspaceHost
 from orbit.protocol import (
     NOT_CONFIGURED,
     SUPER_REVIEW,
@@ -460,7 +460,7 @@ async def test_a_refused_planner_prompt_frees_the_prompt() -> None:
 
 
 async def test_a_planner_less_session_leaves_the_prompt_usable() -> None:
-    app = OrbitApp(frontend(AgentSession()))
+    app = OrbitApp(frontend(WorkspaceHost()))
     async with app.run_test(size=(120, 30)) as pilot:
         prompt = app.query_one(ChatPrompt)
         await pilot.press("ctrl+t", "i", *"plan", "enter")

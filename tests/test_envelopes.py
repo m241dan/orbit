@@ -5,7 +5,7 @@ import asyncio
 import pytest
 from pydantic import ValidationError
 
-from orbit.agent import AgentSession
+from orbit.agent import WorkspaceHost
 from orbit.agent.domain.usage import UsageReport
 from orbit.protocol import (
     DEFAULT_WORKSPACE,
@@ -23,7 +23,7 @@ from orbit.protocol import (
     TaskSpec,
     UsageChanged,
 )
-from tests.agent_fakes import FakeStore, Ticks, frontend, greeted, send
+from tests.agent_fakes import FakeStore, Ticks, frontend, greeted, send, served
 from tests.test_usage_monitor import LIMITS, Source
 
 HELLO = SendMessage(agent=PLANNER, text="hello")
@@ -71,14 +71,16 @@ def test_envelopes_refuse_unknown_fields(raw: dict[str, object]) -> None:
         kind.model_validate(raw)
 
 
-def saved_session(usage: Source | None = None) -> AgentSession:
+def saved_session(usage: Source | None = None) -> WorkspaceHost:
     """A session saved as ``session-1``, then ``session-2`` and so on, with usage from
     ``usage``."""
     ids = iter(f"session-{n}" for n in range(1, 100))
-    return AgentSession(store=FakeStore(), clock=Ticks(), new_id=lambda: next(ids), usage=usage)
+    session = WorkspaceHost(store=FakeStore(), clock=Ticks(), new_id=lambda: next(ids))
+    served(session, usage)
+    return session
 
 
-async def envelopes_until(session: AgentSession, kind: type) -> list[EventEnvelope]:
+async def envelopes_until(session: WorkspaceHost, kind: type) -> list[EventEnvelope]:
     """The session's envelopes up to and including the first holding a ``kind`` event, greeting
     it first if it hasn't been."""
     envelopes: list[EventEnvelope] = []

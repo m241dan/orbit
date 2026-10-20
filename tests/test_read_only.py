@@ -4,7 +4,7 @@ import asyncio
 
 import pytest
 
-from orbit.agent import AgentSession
+from orbit.agent import WorkspaceHost
 from orbit.agent.domain.ownership import WorkspaceOwner, read_only_note
 from orbit.protocol import (
     CONFIGURE_CHECKS,
@@ -83,7 +83,7 @@ async def test_a_session_owning_the_repository_isnt_read_only() -> None:
 LEFTOVER = "1 snapshot worktree left in .git/orbit by earlier runs."
 
 
-async def greeting_notes(session: AgentSession) -> list[str]:
+async def greeting_notes(session: WorkspaceHost) -> list[str]:
     """The notices ``session`` greets its frontend with, once its startup work has settled."""
     await greeted(session)
     await asyncio.sleep(0.05)
@@ -116,7 +116,7 @@ async def test_work_asked_of_a_read_only_session_is_accepted_and_queued_not_run(
     await session.close()
 
 
-async def refusal_of(session: AgentSession, command: Command) -> CommandRefused:
+async def refusal_of(session: WorkspaceHost, command: Command) -> CommandRefused:
     """What ``session`` answered ``command`` with, which must be a refusal."""
     await send(session, command)
     events = await events_until(session, of_type(CommandRefused))
@@ -152,7 +152,7 @@ async def test_a_read_only_session_refuses_invalid_work_as_an_owning_one_does(
 async def test_a_read_only_session_without_agents_refuses_work_as_an_owning_one_does(
     command: RunTasks | FireTrigger,
 ) -> None:
-    owning, read_only = AgentSession(), AgentSession(owner=OWNER)
+    owning, read_only = WorkspaceHost(), WorkspaceHost(owner=OWNER)
 
     expected = await refusal_of(owning, command)
     assert await refusal_of(read_only, command) == expected
@@ -191,4 +191,4 @@ async def test_a_read_only_session_runs_no_reviews() -> None:
 
 
 def test_a_session_given_no_owner_queues_nothing() -> None:
-    assert AgentSession().queued_work == ()
+    assert WorkspaceHost().queued_work == ()

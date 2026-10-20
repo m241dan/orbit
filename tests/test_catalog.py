@@ -3,7 +3,7 @@
 import asyncio
 from collections.abc import Mapping
 
-from orbit.agent import Agents, AgentSession
+from orbit.agent import Agents, WorkspaceHost
 from orbit.agent.domain.catalog import catalog
 from orbit.agent.domain.roles import Role
 from orbit.protocol import (
@@ -39,23 +39,23 @@ SECURITY = Role(instructions="Look for security holes.")
 
 def session_in(
     workspace: str | None, roles: Mapping[str, Role] = ROLES, store: FakeStore | None = None
-) -> AgentSession:
+) -> WorkspaceHost:
     """A session in the repository at ``workspace``, with agents in ``roles``, saved in
     ``store`` if given."""
     host = FakeHost()
     agents = Agents(host, ScriptedLauncher(host), lambda: "token", roles=roles)
-    return AgentSession(
+    return WorkspaceHost(
         agents=agents, workspace=workspace, store=store, clock=Ticks(), new_id=lambda: "s1"
     )
 
 
-async def published(session: AgentSession, count: int) -> list[Event]:
+async def published(session: WorkspaceHost, count: int) -> list[Event]:
     """The next ``count`` events ``session`` publishes."""
     stream = frontend(session).events()
     return [(await asyncio.wait_for(anext(stream), 1)).payload for _ in range(count)]
 
 
-async def after(session: AgentSession, command: Command, count: int) -> list[Event]:
+async def after(session: WorkspaceHost, command: Command, count: int) -> list[Event]:
     """The first ``count`` events ``session`` publishes for ``command``, once greeted and
     past its Welcome, Catalog, Snapshot, workspace note and the change counting its viewer."""
     await greet(session)
@@ -110,7 +110,7 @@ async def test_a_project_role_is_listed_by_its_name_and_not_conversational() -> 
 
 
 async def test_a_session_without_agents_catalogs_none_in_the_default_workspace() -> None:
-    session = AgentSession()
+    session = WorkspaceHost()
     await greet(session)
     _, catalog = await published(session, 2)
     await session.close()
@@ -152,7 +152,7 @@ def test_a_catalog_round_trips() -> None:
 
 
 async def test_the_catalog_belongs_to_no_session() -> None:
-    session = AgentSession()
+    session = WorkspaceHost()
     await greet(session)
     stream = frontend(session).events()
     await anext(stream)

@@ -2,10 +2,10 @@
 
 import asyncio
 
-from orbit.agent import AgentSession
-from orbit.agent.application.session import OWNED_NOTE
+from orbit.agent import WorkspaceHost
 from orbit.agent.application.takeover import NO_OFFER, RetryTimes, Takeover
 from orbit.agent.application.work_turns import TASKS_RUNNING_MESSAGE
+from orbit.agent.application.workspace_host import OWNED_NOTE
 from orbit.agent.domain.ownership import WorkspaceOwner
 from orbit.protocol import (
     BUSY,
@@ -34,6 +34,7 @@ from tests.agent_fakes import (
     LOCK_RETRY,
     Call,
     FakeTree,
+    connect,
     events_until,
     greeted,
     idle,
@@ -86,9 +87,9 @@ def refused(event: Event) -> bool:
     return isinstance(event, CommandRefused)
 
 
-async def snapshot_on_joining(session: AgentSession) -> Snapshot:
+async def snapshot_on_joining(session: WorkspaceHost) -> Snapshot:
     """The Snapshot a new connection to ``session`` gets for its Hello."""
-    connection = session.connect()
+    connection = connect(session)
     await connection.send(CommandEnvelope(command_id="join", payload=HELLO))
     stream = connection.events()
     while not isinstance(payload := (await asyncio.wait_for(anext(stream), 5)).payload, Snapshot):
@@ -211,7 +212,7 @@ async def test_queued_work_refused_once_owning_is_reported_as_an_error() -> None
     await session.close()
 
 
-async def declined(session: AgentSession) -> list[Event]:
+async def declined(session: WorkspaceHost) -> list[Event]:
     """The events up to accepting a decline of the offer ``session`` makes."""
     await greeted(session)
     await events_until(session, offered)

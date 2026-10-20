@@ -19,7 +19,7 @@ from starlette.websockets import WebSocket
 from websockets.asyncio.client import connect
 from websockets.exceptions import InvalidMessage, InvalidStatus
 
-from orbit.agent import AgentSession
+from orbit.agent import ControlPlane, WorkspaceHost
 from orbit.agent.domain.server import ServerSettings, client_fingerprint, is_revoked
 from orbit.agent.external import tls_messages
 from orbit.agent.external.client_certs import client_certificate, refused_client
@@ -81,7 +81,7 @@ async def serving(
     settings: ServerSettings, lines: Lines, revoked: list[str] | None = None
 ) -> AsyncIterator[tuple[str, ControlPlaneServer]]:
     """The URL of a server serving as ``settings`` say, telling ``lines``, and the server."""
-    served = AgentSession()
+    served = ControlPlane(WorkspaceHost())
     server = ControlPlaneServer(served, lambda: "", settings, lines)
     if revoked is not None:
         server.revoked = lambda: revoked
@@ -152,7 +152,7 @@ def _status_without_certificate(client: TestClient, route: BaseRoute) -> int:
 def test_every_route_but_the_health_checks_turns_away_a_client_without_a_certificate(
     settings: ServerSettings,
 ) -> None:
-    app = ControlPlaneServer(AgentSession(), lambda: "", settings, Lines()).app()
+    app = ControlPlaneServer(ControlPlane(WorkspaceHost()), lambda: "", settings, Lines()).app()
     guarded = [route for route in app.routes if getattr(route, "path", None) not in HEALTH_PATHS]
     assert guarded
     with TestClient(app) as client:
@@ -212,7 +212,7 @@ async def test_the_settings_revoked_fingerprints_are_used_by_default(
 def test_a_request_to_another_path_without_a_certificate_is_turned_away_with_401(
     settings: ServerSettings, ca: Ca, path: str
 ) -> None:
-    app = ControlPlaneServer(AgentSession(), lambda: "", settings, Lines()).app()
+    app = ControlPlaneServer(ControlPlane(WorkspaceHost()), lambda: "", settings, Lines()).app()
     response = TestClient(app).get(path)
     assert response.status_code == 401
     assert response.text == tls_messages.CLIENT_CERT_REQUIRED.format(client_ca=ca.path)
@@ -232,7 +232,7 @@ class _Uncertified:
 async def test_a_websocket_without_a_certificate_is_turned_away(
     settings: ServerSettings, ca: Ca
 ) -> None:
-    server = ControlPlaneServer(AgentSession(), lambda: "", settings, Lines())
+    server = ControlPlaneServer(ControlPlane(WorkspaceHost()), lambda: "", settings, Lines())
     websocket = _Uncertified()
     await server._websocket(cast(WebSocket, websocket))
     [denied] = websocket.denied

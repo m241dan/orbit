@@ -5,7 +5,7 @@ from collections.abc import Callable, Iterator
 from typing import Any
 
 from orbit.agent.application.ports import ProposalDecision
-from orbit.agent.application.session import AgentSession
+from orbit.agent.application.workspace_host import WorkspaceHost
 from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.checks import ChecksProposal, Setup
 from orbit.agent.domain.endings import ENDED_AT_PROPOSAL, NO_PROPOSAL
@@ -300,7 +300,7 @@ async def test_an_agent_exiting_while_its_proposal_is_shown_drops_it_and_cancels
 Decide = Callable[[ChecksProposed], Command]
 
 
-async def decided(session: AgentSession, decide: Decide) -> list[Event]:
+async def decided(session: WorkspaceHost, decide: Decide) -> list[Event]:
     """Run a configurator task, answering each proposal it shows with ``decide``; returns the
     events until the session goes idle."""
     await send(session, AddTask(task=CONFIGURE))
@@ -317,7 +317,7 @@ async def decided(session: AgentSession, decide: Decide) -> list[Event]:
 
 def frontend(
     *arguments: dict[str, Any], replies: list[str], steps: Steps, store: FakeStore | None = None
-) -> AgentSession:
+) -> WorkspaceHost:
     """A session without a review of its own, so its frontend decides on proposals; it's
     saved in ``store``, if given."""
     session, _, _ = session_for(

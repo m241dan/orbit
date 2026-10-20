@@ -11,7 +11,7 @@ from starlette.websockets import WebSocket, WebSocketDisconnect
 from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import ConnectionClosed, InvalidStatus
 
-from orbit.agent import AgentSession
+from orbit.agent import ControlPlane, WorkspaceHost
 from orbit.agent.application import connection as connection_module
 from orbit.agent.application.connection import SessionConnection
 from orbit.agent.domain.server import ServerSettings
@@ -53,7 +53,7 @@ from orbit.protocol import (
     decode_event,
     encode,
 )
-from tests.agent_fakes import Call, board_of, session_for
+from tests.agent_fakes import Call, board_of, control_plane, session_for
 
 TOKEN = "the-token"
 LOOPBACK = ServerSettings(port=0)
@@ -72,12 +72,12 @@ class Lines:
 
 @asynccontextmanager
 async def serving(
-    session: AgentSession | None = None,
+    session: WorkspaceHost | None = None,
     settings: ServerSettings = LOOPBACK,
     lines: Lines | None = None,
 ) -> AsyncIterator[str]:
     """The URL of a server of ``session`` (a new one if none), stopped and closed after."""
-    served = session or AgentSession()
+    served = control_plane(session or WorkspaceHost())
     server = ControlPlaneServer(served, lambda: TOKEN, settings, lines or Lines())
     url = await server.start()
     try:
@@ -140,7 +140,7 @@ async def test_a_frontend_without_the_token_is_turned_away(token: str | None) ->
 
 async def test_a_new_token_admits_new_frontends_at_once_and_keeps_open_ones() -> None:
     tokens = [TOKEN]
-    served = AgentSession()
+    served = ControlPlane(WorkspaceHost())
     server = ControlPlaneServer(served, lambda: tokens[-1], LOOPBACK, Lines())
     url = await server.start()
     try:
@@ -162,7 +162,7 @@ async def test_a_new_token_admits_new_frontends_at_once_and_keeps_open_ones() ->
 
 
 async def test_an_empty_token_admits_no_frontend() -> None:
-    served = AgentSession()
+    served = ControlPlane(WorkspaceHost())
     server = ControlPlaneServer(served, lambda: "", LOOPBACK, Lines())
     url = await server.start()
     try:
@@ -259,7 +259,7 @@ async def test_a_frontend_too_far_behind_is_closed_saying_so(
 
 
 async def test_shutting_down_closes_every_websocket_saying_so() -> None:
-    session = AgentSession()
+    session = ControlPlane(WorkspaceHost())
     server = ControlPlaneServer(session, lambda: TOKEN, LOOPBACK, Lines())
     url = await server.start()
     async with frontend(url) as greeted, frontend(url) as silent:
@@ -341,7 +341,7 @@ async def test_a_port_in_use_cant_be_listened_on() -> None:
     async with serving() as url:
         port = int(url.split(":")[2].rstrip("/"))
         server = ControlPlaneServer(
-            AgentSession(), lambda: TOKEN, ServerSettings(port=port), Lines()
+            ControlPlane(WorkspaceHost()), lambda: TOKEN, ServerSettings(port=port), Lines()
         )
         with pytest.raises(ListenFailed, match=f"Can't listen on 127.0.0.1:{port}: ") as failed:
             await server.start()
@@ -353,14 +353,14 @@ async def test_a_server_that_fails_to_start_is_reported(monkeypatch: pytest.Monk
         raise OSError("no sockets for you")
 
     monkeypatch.setattr("uvicorn.Server.serve", broken)
-    server = ControlPlaneServer(AgentSession(), lambda: TOKEN, LOOPBACK, Lines())
+    server = ControlPlaneServer(ControlPlane(WorkspaceHost()), lambda: TOKEN, LOOPBACK, Lines())
     with pytest.raises(RuntimeError, match="failed to start") as raised:
         await server.start()
     assert isinstance(raised.value.__cause__, OSError)
 
 
 async def test_stopping_a_server_that_never_started_is_harmless() -> None:
-    session = AgentSession()
+    session = ControlPlane(WorkspaceHost())
     await ControlPlaneServer(session, lambda: TOKEN, LOOPBACK, Lines()).stop(session.close)
     await session.close()
 
@@ -404,7 +404,7 @@ class VanishedWebSocket:
 
 
 async def test_a_frontend_gone_as_an_event_is_sent_ends_its_connection_unclosed() -> None:
-    session = AgentSession()
+    session = ControlPlane(WorkspaceHost())
     vanished = VanishedWebSocket()
     connection = session.connect()
     conversation = _Conversation(cast(WebSocket, vanished), connection, 1024, normally)
@@ -438,7 +438,7 @@ class Counted:
     """A session that counts the connections made to it."""
 
     def __init__(self) -> None:
-        self.session = AgentSession()
+        self.session = ControlPlane(WorkspaceHost())
         self.connections = 0
         self.read_only = False
         self.storage_halted = False

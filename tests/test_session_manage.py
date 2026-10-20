@@ -1,6 +1,6 @@
 """Renaming and deleting saved sessions from the list of sessions, which is listed again after."""
 
-from orbit.agent import AgentSession
+from orbit.agent import WorkspaceHost
 from orbit.protocol import (
     INVALID,
     LOCKED,
@@ -23,13 +23,13 @@ from tests.test_storage_halt import ACCEPTED, outcome_of
 Managing = RenameSession | DeleteSession
 
 
-async def listed_after(session: AgentSession, command: Managing) -> tuple[SessionSummary, ...]:
+async def listed_after(session: WorkspaceHost, command: Managing) -> tuple[SessionSummary, ...]:
     """The sessions listed after sending ``command``."""
     await send(session, command)
     return last_of(SessionsListed, await events_until(session, of_type(SessionsListed))).sessions
 
 
-async def errors_of(session: AgentSession, command: Managing) -> list[str]:
+async def errors_of(session: WorkspaceHost, command: Managing) -> list[str]:
     """The errors sending ``command`` reports before the sessions are listed again."""
     await send(session, command)
     return messages(ErrorOccurred, await events_until(session, of_type(SessionsListed)))
@@ -40,7 +40,7 @@ def halted(event: Event) -> bool:
     return isinstance(event, ErrorOccurred) and event.code == STORAGE_FAILED
 
 
-async def refusal_of(session: AgentSession, command: Managing) -> tuple[str, str]:
+async def refusal_of(session: WorkspaceHost, command: Managing) -> tuple[str, str]:
     """The code and message ``command`` is refused with, once the sessions are listed again
     before it, and with no error reported."""
     await send(session, command)
@@ -142,7 +142,7 @@ async def test_renaming_an_unreadable_session_is_refused() -> None:
 
 
 async def test_renaming_a_session_that_isnt_saved_is_refused() -> None:
-    session = AgentSession()
+    session = WorkspaceHost()
     refusal = await refusal_of(session, RenameSession(session_id="gone", name="new"))
     assert refusal == (UNKNOWN, "There's no saved session 'gone'.")
     await session.close()
@@ -162,7 +162,7 @@ async def test_a_rename_that_cannot_be_saved_halts_the_session_and_lets_go_of_th
     await session.close()
 
 
-async def halted_by_a_rename(store: FakeStore) -> AgentSession:
+async def halted_by_a_rename(store: FakeStore) -> WorkspaceHost:
     """A session over ``store``, halted as renaming its saved session ``old`` to "new" failed
     to save with "Disk full."."""
     store.failure = "Disk full."

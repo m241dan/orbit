@@ -3,10 +3,12 @@
 Layered, outermost first; each layer may import only the ones below it:
 
 - ``external``: adapters that reach outside the backend (the Claude CLI, processes, git).
-- ``application``: the session, which handles commands and drives the ports.
+- ``application``: the control plane and the workspace hosts, which handle commands and drive
+  the ports.
 - ``domain``: the rules the application decides by. Pure.
 """
 
+from orbit.agent.application.control_plane import ControlPlane
 from orbit.agent.application.desk import Agents
 from orbit.agent.application.handshake import NO_STEPS_NOTE
 from orbit.agent.application.ports import (
@@ -19,8 +21,8 @@ from orbit.agent.application.ports import (
     Workspace,
 )
 from orbit.agent.application.recovery import RecoveryFailed
-from orbit.agent.application.session import AgentSession
 from orbit.agent.application.verifier import Verification
+from orbit.agent.application.workspace_host import WorkspaceHost
 from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.checks import ChecksProposal, Setup
 from orbit.agent.domain.config import OrbitConfig
@@ -66,12 +68,12 @@ __all__ = [
     "MODEL_ALIASES",
     "NO_STEPS_NOTE",
     "USER_CONFIG_FILE",
-    "AgentSession",
     "Agents",
     "ChecksProposal",
     "ClaudeCliRunner",
     "ConfigError",
     "ConfigWriter",
+    "ControlPlane",
     "ControlPlaneServer",
     "FallbackFiles",
     "GitCoderTree",
@@ -106,6 +108,7 @@ __all__ = [
     "Verification",
     "VerificationStep",
     "Workspace",
+    "WorkspaceHost",
     "WorkspaceLock",
     "WorkspaceOwner",
     "git_top_level",

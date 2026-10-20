@@ -9,7 +9,7 @@ import pytest
 from websockets.asyncio.client import connect
 from websockets.exceptions import InvalidStatus
 
-from orbit.agent import AgentSession
+from orbit.agent import ControlPlane, WorkspaceHost
 from orbit.agent.application.connection import SessionConnection
 from orbit.agent.domain.health import Readiness, readiness, ready_answer
 from orbit.agent.domain.server import ServerSettings
@@ -24,7 +24,7 @@ class Standing:
     """A session whose ``read_only`` and ``storage_halted`` the test sets."""
 
     def __init__(self) -> None:
-        self.session = AgentSession()
+        self.session = ControlPlane(WorkspaceHost())
         self.read_only = False
         self.storage_halted = False
 

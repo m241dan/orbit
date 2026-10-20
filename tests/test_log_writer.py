@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from orbit.agent import AgentSession
+from orbit.agent import WorkspaceHost
 from orbit.agent.application.log_writer import LogWriter, Overflow
 from orbit.agent.domain.replay import LogBounds
 from orbit.agent.domain.storage import StorageSettings
@@ -105,11 +105,11 @@ class GatedLog(FakeStore):
         return await super().append(session_id, envelopes)
 
 
-def stored_session(store: FakeStore | SqliteStore) -> AgentSession:
-    return AgentSession(store=store, clock=Ticks(), new_id=lambda: "session-1")
+def stored_session(store: FakeStore | SqliteStore) -> WorkspaceHost:
+    return WorkspaceHost(store=store, clock=Ticks(), new_id=lambda: "session-1")
 
 
-def delivered(session: AgentSession) -> list[EventEnvelope]:
+def delivered(session: WorkspaceHost) -> list[EventEnvelope]:
     """The envelopes the session has queued for the frontend, taken from its queue."""
     return queued_envelopes(session)
 
@@ -844,7 +844,7 @@ def gated_with_auth(queued: bool) -> GatedLog:
     return store
 
 
-async def pick_auth(session: AgentSession, store: GatedLog) -> None:
+async def pick_auth(session: WorkspaceHost, store: GatedLog) -> None:
     """Pick the saved session ``auth`` in ``session``, then open ``store``'s gate and close."""
     await opened(session, ActivateSession(session="auth"))
     store.gate.set()
@@ -967,7 +967,7 @@ async def test_events_still_queued_end_a_snapshots_transcript_once() -> None:
 
 
 async def test_a_snapshot_without_a_store_has_no_transcript() -> None:
-    session = AgentSession(clock=Ticks())
+    session = WorkspaceHost(clock=Ticks())
     await publish(session, Notice(message="hi"))
     await greet(session)
     await session.close()
@@ -999,7 +999,7 @@ async def test_a_session_opened_again_after_a_restart_shows_its_earlier_events(
     await store.close()
 
     store = await SqliteStore.open(tmp_path / "state", str(workspace))
-    again = AgentSession(store=store, clock=Ticks(), new_id=lambda: "session-2")
+    again = WorkspaceHost(store=store, clock=Ticks(), new_id=lambda: "session-2")
     events = await opened(again, ActivateSession(session="session-1"))
     await again.close()
     await store.close()
@@ -1012,7 +1012,7 @@ async def test_a_session_opened_again_after_a_restart_shows_its_earlier_events(
     ]
 
 
-async def opened_after_another_logged_it(tmp_path: Path) -> AgentSession:
+async def opened_after_another_logged_it(tmp_path: Path) -> WorkspaceHost:
     """A session whose store opened while the log was empty, after another orbit's logged the
     saved session ``auth`` up to ``seq`` 50, having opened ``auth``, published a notice and
     closed."""
@@ -1022,7 +1022,7 @@ async def opened_after_another_logged_it(tmp_path: Path) -> AgentSession:
     await other.save(saved("auth"))
     await other.append("auth", [notice(seq, "auth") for seq in range(1, 51)])
     await other.close()
-    session = AgentSession(store=this, clock=Ticks(), new_id=lambda: "session-2")
+    session = WorkspaceHost(store=this, clock=Ticks(), new_id=lambda: "session-2")
     await opened(session, ActivateSession(session="auth"))
     await publish(session, Notice(message="later"))
     await session.close()
@@ -1052,7 +1052,7 @@ async def test_a_session_another_orbit_logged_since_this_one_opened_goes_on_abov
 # Paging through history
 
 
-async def history(session: AgentSession, command: History) -> list[Event]:
+async def history(session: WorkspaceHost, command: History) -> list[Event]:
     """What ``session`` answers ``command`` with: its page and its outcome."""
     await greet(session)
     delivered(session)
@@ -1133,7 +1133,7 @@ async def test_history_of_a_session_whose_log_cant_be_read_is_refused() -> None:
 
 
 async def test_history_without_a_store_is_an_empty_last_page() -> None:
-    session = AgentSession(clock=Ticks(), new_id=lambda: "session-1")
+    session = WorkspaceHost(clock=Ticks(), new_id=lambda: "session-1")
     await publish(session, Notice(message="hi"))
 
     answer = await history(session, History(session="session-1", before_seq=10))
@@ -1183,9 +1183,9 @@ def log_size(state: Path, session_id: str) -> int:
     return int(size)
 
 
-def trimming_session(store: SqliteStore, log_mb: int) -> AgentSession:
+def trimming_session(store: SqliteStore, log_mb: int) -> WorkspaceHost:
     storage = StorageSettings(session_log_mb=log_mb)
-    return AgentSession(store=store, clock=Ticks(), new_id=lambda: "session-1", storage=storage)
+    return WorkspaceHost(store=store, clock=Ticks(), new_id=lambda: "session-1", storage=storage)
 
 
 async def test_a_session_log_over_its_limit_is_trimmed_after_the_next_batch(

@@ -3,7 +3,7 @@
 import asyncio
 
 from orbit import __version__
-from orbit.agent import AgentSession, Verification
+from orbit.agent import Verification, WorkspaceHost
 from orbit.agent.application.handshake import HELLO_AGAIN_MESSAGE, HELLO_FIRST_MESSAGE
 from orbit.agent.domain.usage import UsageReport
 from orbit.protocol import (
@@ -50,20 +50,20 @@ from tests.test_usage_monitor import LIMITS, Source
 
 
 async def send_as(
-    session: AgentSession, command_id: str, command: Command, /, **fields: str
+    session: WorkspaceHost, command_id: str, command: Command, /, **fields: str
 ) -> None:
     """Send ``command`` to ``session`` as ``command_id``, with the envelope's other ``fields``,
     greeted or not."""
     await frontend(session).send(CommandEnvelope(command_id=command_id, payload=command, **fields))
 
 
-async def published(session: AgentSession, count: int) -> list[Event]:
+async def published(session: WorkspaceHost, count: int) -> list[Event]:
     """The next ``count`` events ``session`` publishes."""
     stream = frontend(session).events()
     return [(await asyncio.wait_for(anext(stream), 1)).payload for _ in range(count)]
 
 
-async def silent(session: AgentSession) -> bool:
+async def silent(session: WorkspaceHost) -> bool:
     """Whether ``session`` publishes nothing for a moment."""
     try:
         await asyncio.wait_for(anext(frontend(session).events()), 0.05)
@@ -77,7 +77,7 @@ def version(protocol_version: int) -> Hello:
 
 
 async def test_nothing_is_published_before_hello() -> None:
-    session = AgentSession(workspace="/work")
+    session = WorkspaceHost(workspace="/work")
     assert await silent(session)
     await session.close()
 
@@ -85,7 +85,7 @@ async def test_nothing_is_published_before_hello() -> None:
 async def test_hello_is_welcomed_then_a_catalog_a_snapshot_the_workspace_note_and_a_viewer() -> (
     None
 ):
-    session = AgentSession(
+    session = WorkspaceHost(
         workspace="/work", verification=Verification((STEP,), Steps()), new_id=lambda: "s1"
     )
     await greet(session)
@@ -103,7 +103,7 @@ async def test_hello_is_welcomed_then_a_catalog_a_snapshot_the_workspace_note_an
 
 async def test_the_startup_notes_follow_the_workspace_note() -> None:
     notes = ("Imported 2 saved sessions.", "Something else.")
-    session = AgentSession(workspace="/work", startup_notes=notes)
+    session = WorkspaceHost(workspace="/work", startup_notes=notes)
     await greet(session)
     events = await published(session, 6)
     await session.close()
@@ -137,7 +137,7 @@ OTHER_SESSION = "Session 'other' isn't open; the open session is session-1."
 
 
 async def test_a_misaddressed_command_before_hello_is_refused_for_its_address() -> None:
-    session = AgentSession(new_id=lambda: "session-1")
+    session = WorkspaceHost(new_id=lambda: "session-1")
     await send_as(session, "c1", AddTask(task=TaskSpec(prompt="Add a flag.")), workspace="other")
     await send_as(session, "c2", AddTask(task=TaskSpec(prompt="Add a flag.")), session="other")
     refusals = await published(session, 2)
@@ -150,7 +150,7 @@ async def test_a_misaddressed_command_before_hello_is_refused_for_its_address() 
 
 
 async def test_a_misaddressed_hello_is_refused_unwelcomed_and_a_proper_one_is_welcomed() -> None:
-    session = AgentSession(workspace="/work", new_id=lambda: "session-1")
+    session = WorkspaceHost(workspace="/work", new_id=lambda: "session-1")
     await send_as(session, "h1", HELLO, workspace="other")
     await send_as(session, "h2", HELLO, session="other")
     refusals = await published(session, 2)
@@ -171,7 +171,7 @@ async def test_a_misaddressed_hello_is_refused_unwelcomed_and_a_proper_one_is_we
 
 
 async def test_a_second_hello_is_refused_as_invalid() -> None:
-    session = AgentSession()
+    session = WorkspaceHost()
     await greet(session)
     await send_as(session, "again", HELLO)
     events = await published(session, 5)
@@ -183,7 +183,7 @@ async def test_a_second_hello_is_refused_as_invalid() -> None:
 
 
 async def test_another_protocol_version_is_refused_and_ends_the_stream() -> None:
-    session = AgentSession()
+    session = WorkspaceHost()
     await send_as(session, "hello", version(PROTOCOL_VERSION + 1))
     await send_as(session, "add", AddTask(task=TaskSpec(prompt="Add a flag.")))
     await send_as(session, "again", HELLO)

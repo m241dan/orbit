@@ -1,7 +1,7 @@
 """Saved sessions: stretches of work the user can come back to.
 
 A saved session keeps its task list, its review state, the planner's conversation and the
-settings it ran with. It is unrelated to the backend's connection, :class:`AgentSession`. The
+settings it ran with. It is unrelated to the backend's connection, :class:`WorkspaceHost`. The
 caller reads and writes the store and the clock; these rules only shape what's in them.
 """
 

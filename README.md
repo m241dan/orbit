@@ -1410,7 +1410,7 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     `resolve_config_dir`); `session_import` imports the session files
     older orbits saved in orbit's directory, under the names `session_files` gives. `WorkspaceLock`
     (in `workspace_lock`) is the lock the orbit owning a repository holds.
-    `ControlPlaneServer` (in `control_plane`) is the server adapter: it serves `AgentSession`
+    `ControlPlaneServer` (in `control_plane`) is the server adapter: it serves `ControlPlane`
     over a WebSocket (starlette on uvicorn, through `embedded_server`'s `EmbeddedServer`, which
     leaves signals to the program), one `SessionConnection` per frontend that shows the token,
     turning frames into commands and events into frames; `TokenFile` (in `token_file`) is the
@@ -1418,9 +1418,14 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     the server's TLS settings, key and certificate before it listens, with the messages in
     `tls_messages`, `RunFile` (in `run_file`) says where it listens, both written through
     `private_files`, and `user_config` reads `[storage]`, `[server]` and `[remotes]`.
-  - `application`: `AgentSession` (in `session`) implements `Session`: it takes commands, asks
-    the domain what follows, drives the ports and publishes events into the `Outbox` (in
-    `outbox`), which stamps each with its `seq` and the session it belongs to. `Tasks` (in
+  - `application`: `ControlPlane` (in `control_plane`) is what frontends connect to: each
+    `SessionConnection` (in `connection`) from its `connect()` implements `Session`. It owns
+    what's shared: the connections, the `Outbox` (in `outbox`), which stamps each event with its
+    `seq` and the session it belongs to, every stream's `Handshake` and the `UsageMonitor`; it
+    routes every command to the `WorkspaceHost` it holds (one for now) and passes the host's
+    events to the connections. `WorkspaceHost` (in `workspace_host`) is one workspace's
+    backend: its open session, lanes, agents and workspace lock; it takes the commands routed
+    to it, asks the domain what follows, drives the ports and publishes its events. `Tasks` (in
     `tasks`) holds the `TaskBoard`, marks tasks running and finished, and is the one place that
     publishes the board, whole, once its callers have changed it. `WorkLane` (in `work_lane`) is
     the work lane: it runs the board's tasks one at a time, queues a fix after each failed step
@@ -1504,10 +1509,10 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
   and `widgets` for the building blocks they share) lay it out, and `app` is the Textual app that
   holds them.
 - `orbit.cli`: the composition root, and the only place the two sides are wired together: it
-  plugs the external adapters into `AgentSession` and hands that to the TUI. It runs the
-  backend on its own thread and event loop through `orbit.protocol.ThreadedSession`, so neither
-  side's work stalls the other. `orbit serve` plugs them in the same way but hands `AgentSession` to
-  `ControlPlaneServer` instead, on the main thread's event loop. `orbit chat --connect` builds no
+  plugs the external adapters into a `WorkspaceHost`, builds a `ControlPlane` around it and
+  hands that to the TUI. It runs the backend on its own thread and event loop through
+  `orbit.protocol.ThreadedSession`, so neither side's work stalls the other. `orbit serve`
+  plugs them in the same way but hands the `ControlPlane` to `ControlPlaneServer` instead, on the main thread's event loop. `orbit chat --connect` builds no
   backend: it hands the TUI an `orbit.client.WebSocketSession`, which runs on the TUI's own event
   loop; neither does a chat that `discover_control_plane` finds a running `orbit serve` for.
   It's a module per command (`chat`, `serve`, and `maintenance` for `version`, `db` and

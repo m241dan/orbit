@@ -1,5 +1,5 @@
-"""The application's core: the session the frontends connect to, each connection an
-in-process implementation of :class:`orbit.protocol.Session`.
+"""The application's core: one workspace's backend, which the control plane routes the
+frontends' commands to.
 
 It takes commands from the frontends, asks the domain what follows from them, drives the
 ports to do it, and reports what happened as events.
@@ -7,18 +7,12 @@ ports to do it, and reports what happened as events.
 
 from collections.abc import Awaitable, Callable, Collection, Sequence
 from contextlib import suppress
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import PurePath
 
-from orbit.agent.application.connection import (
-    ConnectionParts,
-    Connections,
-    Publish,
-    SessionConnection,
-)
+from orbit.agent.application.connection import Connections, SessionConnection
 from orbit.agent.application.desk import AgentDesk, Agents
-from orbit.agent.application.handshake import HandshakeParts
 from orbit.agent.application.history import SessionHistory
 from orbit.agent.application.keeper import (
     Clock,
@@ -36,7 +30,6 @@ from orbit.agent.application.ports import (
     ProposalReview,
     RepositoryLock,
     SessionStore,
-    UsageSource,
 )
 from orbit.agent.application.proposals import FrontendReview
 from orbit.agent.application.review_count import ReviewCount
@@ -57,7 +50,6 @@ from orbit.agent.application.takeover import (
     Takeover,
 )
 from orbit.agent.application.tasks import Tasks
-from orbit.agent.application.usage_monitor import UsageMonitor
 from orbit.agent.application.verifier import Verification, Verifier
 from orbit.agent.application.views import SessionViews, ViewParts
 from orbit.agent.application.work_commands import (
@@ -79,21 +71,14 @@ from orbit.agent.domain.storage_halt import FailedWrite
 from orbit.agent.domain.verification import VerificationStep, startup_fix_prompt
 from orbit.protocol import (
     CODER,
-    DEFAULT_WORKSPACE,
-    INTERNAL,
     PLANNER_LANE,
-    UNKNOWN,
     WORK_LANE,
     ActivateSession,
     Attach,
     Catalog,
-    CommandAccepted,
-    CommandEnvelope,
-    CommandRefused,
     DeleteSession,
     Event,
     EventEnvelope,
-    Hello,
     History,
     LogGap,
     NewSession,
@@ -110,7 +95,6 @@ from orbit.protocol import (
     TakeOwnership,
     TaskSpec,
     TurnFinished,
-    UsageChanged,
 )
 
 
@@ -125,11 +109,6 @@ def _verifier(
     if verification is None:
         return None
     return Verifier(verification, tasks, events.put, agents.tree if agents else None)
-
-
-def _usage_monitor(usage: UsageSource | None, events: EventSink) -> UsageMonitor | None:
-    """What fetches the usage limits from ``usage`` into ``events``; none without a source."""
-    return UsageMonitor(usage, events.put) if usage else None
 
 
 def _reviewed(agents: Agents | None, review: ProposalReview) -> Agents | None:
@@ -150,30 +129,46 @@ OWNED_NOTE = "This orbit now owns the repository; queued work is running."
 """The notice once a read-only orbit takes the repository over."""
 
 
-class AgentSession:
-    """Takes commands, runs work in the background and publishes its events.
+@dataclass(frozen=True)
+class HostGreeting:
+    """What a host gives the handshake of a connection viewing it: the ``catalog`` of what
+    exists, the ``snapshot`` of the session open, the events of it a frontend ``missed`` since a
+    ``seq``, what loads the review count (``load_review_count``) and the one-off notices: the
+    ``workspace``, if any, whether there are ``no_steps``, the ``startup_notes`` and the
+    ``leftovers`` of earlier runs."""
+
+    catalog: Callable[[], Awaitable[Catalog]]
+    snapshot: Callable[[], Awaitable[Snapshot]]
+    missed: Callable[[int], Awaitable[Sequence[EventEnvelope] | None]]
+    load_review_count: Callable[[], Awaitable[None]]
+    workspace: str | None
+    no_steps: Callable[[], bool]
+    startup_notes: Sequence[str]
+    leftovers: Callable[[], Awaitable[Sequence[str]]]
+
+
+class WorkspaceHost:
+    """One workspace's backend: takes the commands the control plane routes to it, runs work in
+    the background and publishes its events.
 
     The session owns the task board and reports it whole on every change. It starts two
     lanes: the planner's, whose turns answer prompts, and the work lane's, which runs the
     tasks. ``PlannerSeat`` holds the planner and its turns; ``WorkLane`` holds the rules of a
     task run: verification and fixes; ``WorkTurns`` decides when it runs; ``ReviewLane`` runs
     the reviews; ``SessionSwitcher`` switches between saved sessions; ``WorkCommands`` handles
-    the other commands; ``SessionHistory`` answers ``History``; each ``SessionConnection``
-    from :meth:`connect` is a frontend's, whose ``Handshake`` opens its stream. Commands from
-    every connection are handled as they arrive.
+    the other commands; ``SessionHistory`` answers ``History``. Its ``Outbox`` stamps its
+    events and its ``Connections`` route them among the connections the control plane makes,
+    whose ``Handshake`` greets each with the :attr:`greeting`. Commands from every connection
+    are handled as they arrive.
 
     With ``check_at_startup``, the ``verification`` steps also run once in the background as
     the session welcomes its first frontend, on the base commit; a failure adds a draft task to
-    fix it. With a ``usage`` source, the subscription's usage limits are fetched in the
-    background too, from then on.
+    fix it.
 
-    Every stream opens with ``Hello``: the session publishes nothing to it, and refuses every
-    other command, until it's answered with ``Welcome``. A ``Catalog`` of what exists follows
-    it, then the latest usage if any was fetched, a ``Snapshot`` of the session open (or, for a
-    ``Hello`` whose ``since`` it can catch up from, the open session's events after it) and the
-    one-off notices: the workspace, no verification steps, the ``startup_notes``, work left by
-    earlier runs; these reach only the connection whose ``Hello`` they answer, as a
-    ``HistoryPage`` does the one asking. Every switch of session ends with a ``Catalog`` and a
+    The one-off notices of a greeting are the workspace, no verification steps, the
+    ``startup_notes`` and work left by earlier runs; like the rest of a greeting, they reach
+    only the connection whose ``Hello`` they answer, as a ``HistoryPage`` does the one asking.
+    Every switch of session ends with a ``Catalog`` and a
     ``Snapshot`` too, and a rename or delete sends a ``Catalog``; each such ``Catalog`` reaches
     every listening connection, so every frontend's picker follows new, renamed and deleted
     sessions, and the ``Snapshot``, the session's new state, every connection viewing it.
@@ -230,7 +225,6 @@ class AgentSession:
         workspace: str | None = None,
         check_at_startup: bool = False,
         *,
-        usage: UsageSource | None = None,
         store: SessionStore | None = None,
         clock: Clock = local_now,
         new_id: IdMaker = new_session_id,
@@ -261,7 +255,6 @@ class AgentSession:
         overflow = Overflow(fallback, self._log_failed)
         self._connections = Connections(lambda: self._states.check(), lambda: self._keeper.id)
         self._events = Outbox(lambda: self._keeper.id, store, storage, overflow)
-        self._events.deliver = self._deliver
         new_sessions = NewSessions(clock, new_id, self._events.forget, self._events.catch_up)
         self._keeper = SessionKeeper(store, self._events.put, self._halt, new_sessions)
         self._keeper.rename(name)
@@ -285,10 +278,9 @@ class AgentSession:
         )
         self._work = self._work_lane()
         self._turns = self._work_turns()
-        self._usage = _usage_monitor(usage, self._events)
         self._switcher = self._session_switcher(pick_session)
         self._commands = self._work_commands()
-        self._greeting = self._handshake_parts()
+        self._greeting = self._host_greeting()
         self._history = SessionHistory(self._keeper, self._events)
         self._states = self._session_states()
         self._views = self._session_views()
@@ -388,11 +380,10 @@ class AgentSession:
         )
         return WorkCommands(parts)
 
-    def _handshake_parts(self) -> HandshakeParts:
-        """What the handshake publishes after ``Welcome``, and starts once it has."""
-        return HandshakeParts(
+    def _host_greeting(self) -> HostGreeting:
+        """What the handshake of a connection publishes of this host after ``Welcome``."""
+        return HostGreeting(
             self._switcher.catalog,
-            self._latest_usage,
             self._snapshot,
             lambda since: self._events.missed(self._keeper.id, since),
             self._load_review_count,
@@ -400,8 +391,6 @@ class AgentSession:
             self._no_steps,
             self._startup_notes,
             self._leftovers,
-            self._start_background,
-            lambda: self._closing,
         )
 
     def _work_turns(self) -> WorkTurns:
@@ -482,12 +471,25 @@ class AgentSession:
         """The commands that start work, queued while read-only, oldest first."""
         return self._commands.queued
 
-    def connect(self) -> SessionConnection:
-        """A new connection to this session, with its own handshake and stream."""
-        parts = ConnectionParts(
-            self._greeting, self._events, self._events.stamp, self._connections, self._answer
-        )
-        return SessionConnection(parts)
+    @property
+    def outbox(self) -> Outbox:
+        """Where this host's events are published, each stamped as it is."""
+        return self._events
+
+    @property
+    def connections(self) -> Connections:
+        """The connections among which this host's events are routed."""
+        return self._connections
+
+    @property
+    def greeting(self) -> HostGreeting:
+        """What the handshake of a connection publishes of this host after ``Welcome``."""
+        return self._greeting
+
+    @property
+    def closing(self) -> bool:
+        """Whether this host is closing, or closed."""
+        return self._closing
 
     async def open_latest(self) -> None:
         """Open the most recently active saved session no other orbit has open in place of the
@@ -499,44 +501,22 @@ class AgentSession:
                     await self._switcher.handle(ActivateSession(session=summary.id))
                 return
 
-    async def _answer(
-        self, envelope: CommandEnvelope, connection: SessionConnection, publish: Publish
-    ) -> None:
-        """Handle the command in ``envelope``, from ``connection``, then ``publish`` its
-        outcome: ``CommandRefused`` if it was refused, as it is but for ``Hello`` and
-        ``ResumeStorage`` while the session is halted, or but for those a view lets through
-        while the connection views a session that isn't open, or as ``internal`` if handling it
-        failed, else ``CommandAccepted``, or ``Welcome`` for a ``Hello``. Only cancellation
-        escapes, with no outcome."""
-        command_id = envelope.command_id
-        handshake = connection.handshake
-        try:
-            self._check_addressed(envelope, connection)
-            command = envelope.payload
-            if isinstance(command, Hello):
-                await handshake.hello(command, command_id)
-                return
-            handshake.admit()
-            self._views.admit(connection, command)
-            await self._admitted(command, command_id, connection)
-        except Refused as refusal:
-            await publish(
-                CommandRefused(command_id=command_id, code=refusal.code, message=str(refusal))
-            )
-            return
-        except Exception as exc:  # A bug in one handler mustn't leave its command unanswered.
-            message = f"Orbit failed to handle {type(envelope.payload).__name__}: {exc}"
-            await publish(CommandRefused(command_id=command_id, code=INTERNAL, message=message))
-            return
-        await publish(CommandAccepted(command_id=command_id))
+    def check_addressed(self, connection: SessionConnection, session: str | None) -> None:
+        """Refuse a command for ``session``, if it names one, unless it's the session
+        ``connection`` views."""
+        self._views.check_addressed(connection, session)
 
-    def _check_addressed(self, envelope: CommandEnvelope, connection: SessionConnection) -> None:
-        """Refuse ``envelope`` unless it's for this workspace and the session ``connection``
-        views, if any."""
-        if envelope.workspace != DEFAULT_WORKSPACE:
-            message = f"No workspace {envelope.workspace!r}; the workspace is {DEFAULT_WORKSPACE}."
-            raise Refused(UNKNOWN, message)
-        self._views.check_addressed(connection, envelope.session)
+    async def handle(
+        self,
+        command: SessionCommand | WorkCommand | History | ResumeStorage | TakeOwnership | Attach,
+        command_id: str,
+        connection: SessionConnection,
+    ) -> None:
+        """Handle ``command``, sent as ``command_id`` from ``connection`` once its handshake is
+        done: refused while the session is halted, but for ``ResumeStorage``, or but for those a
+        view lets through while ``connection`` views a session that isn't open."""
+        self._views.admit(connection, command)
+        await self._admitted(command, command_id, connection)
 
     async def _admitted(
         self,
@@ -655,11 +635,10 @@ class AgentSession:
 
     async def close(self) -> None:
         """Stop a storage halt under way and the tries of the repository's lock, cancel the
-        work in progress, which stops its agent, then stop the startup check, the usage
-        monitor, the review lane, the planner, the agents' host, the saving of the session,
-        releasing its lock, and the writing of its events to the store, then end every
-        connection's stream, in that order. Each is stopped even if one before it fails; the
-        first failure is raised after."""
+        work in progress, which stops its agent, then stop the startup check, the review lane,
+        the planner, the agents' host, the saving of the session, releasing its lock, and the
+        writing of its events to the store, then end every connection's stream, in that order.
+        Each is stopped even if one before it fails; the first failure is raised after."""
         self._closing = True
         failure: Exception | None = None
         for stop in self._stops():
@@ -672,7 +651,7 @@ class AgentSession:
 
     def _stops(self) -> list[Callable[[], Awaitable[None]]]:
         """What :meth:`close` awaits, in order."""
-        parts = (self._startup, self._usage, self._lane, self._seat)
+        parts = (self._startup, self._lane, self._seat)
         stops: list[Callable[[], Awaitable[None]]] = [
             self._halt.close,
             self._takeover.close,
@@ -703,11 +682,8 @@ class AgentSession:
                 await part.close()
         await self._stop_turns()
 
-    def _deliver(self, envelope: EventEnvelope) -> None:
-        """Pass ``envelope``, just published, to the connections it's for, then publish the open
-        session's state if that changed."""
-        self._nudge_usage(envelope.payload)
-        self._connections.deliver(envelope)
+    def check_state(self) -> None:
+        """Publish the open session's state, if that changed."""
         self._states.check()
 
     def _activity(self) -> Activity:
@@ -722,26 +698,15 @@ class AgentSession:
             reviewing=self._lane.reviewing if self._lane else None,
         )
 
-    def _start_background(self) -> None:
-        """Start the startup check and the usage monitor, if there are any, and the tries of
-        the repository's lock, unless they were started for an earlier connection."""
+    def start_background(self) -> None:
+        """Start the startup check, if there is one, and the tries of the repository's lock,
+        unless they were started for an earlier connection."""
         if self._started:
             return
         self._started = True
         self._takeover.start()
         if self._startup is not None:
             self._startup.start()
-        if self._usage is not None:
-            self._usage.start()
-
-    def _nudge_usage(self, event: Event) -> None:
-        """Have the usage monitor fetch again, if due, once ``event`` ends an agent's turn."""
-        if self._usage is not None and isinstance(event, TurnFinished) and event.agent_id:
-            self._usage.nudge()
-
-    def _latest_usage(self) -> UsageChanged | None:
-        """The usage limits fetched last; none without a usage monitor, or before a fetch."""
-        return self._usage.latest if self._usage else None
 
     def _no_steps(self) -> bool:
         """Whether verification is on with no steps to verify tasks."""

@@ -3,7 +3,7 @@ the reviews its crash interrupted ended."""
 
 import asyncio
 
-from orbit.agent import AgentSession
+from orbit.agent import WorkspaceHost
 from orbit.agent.domain.reviews import BatchSnapshot, LaneSnapshot, PlannerSnapshot, ReviewJob
 from orbit.agent.domain.sessions import SessionRecord
 from orbit.protocol import (
@@ -36,7 +36,7 @@ from tests.test_review_lane import claims_done, start
 from tests.test_session_switch import last_of, messages, opened, saved, store_with, switching
 
 
-async def suggesting() -> tuple[AgentSession, FakeStore]:
+async def suggesting() -> tuple[WorkspaceHost, FakeStore]:
     """A session saved in its store whose review of its one task suggested a task and is
     still running."""
     suggested = asyncio.Event()
@@ -119,7 +119,7 @@ def reviewing(*suggestions: str, finished: frozenset[str] = frozenset()) -> Lane
 
 async def reopened(
     tasks: tuple[TaskState, ...], snapshot: LaneSnapshot
-) -> tuple[AgentSession, ScriptedLauncher, FakeStore, list[Event]]:
+) -> tuple[WorkspaceHost, ScriptedLauncher, FakeStore, list[Event]]:
     """A session that opened the session saved with ``tasks`` and ``snapshot``, its store and
     the events from opening it."""
     store = store_with(saved("auth", *tasks, reviews=snapshot))
@@ -130,7 +130,7 @@ async def reopened(
 
 async def switched(
     tasks: tuple[TaskState, ...], snapshot: LaneSnapshot
-) -> tuple[AgentSession, list[Event]]:
+) -> tuple[WorkspaceHost, list[Event]]:
     """A session that started, then opened the session saved with ``tasks`` and ``snapshot``,
     and the events from opening it alone."""
     session, _ = switching(store_with(saved("auth", *tasks, reviews=snapshot)))

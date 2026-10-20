@@ -3,7 +3,7 @@ role is read again from the project's config."""
 
 import asyncio
 
-from orbit.agent import AgentSession, ConfigError, Role
+from orbit.agent import ConfigError, Role, WorkspaceHost
 from orbit.agent.application.planner_seat import (
     NO_PLANNER_MESSAGE,
     NOTHING_TO_RESET,
@@ -52,20 +52,20 @@ NEW_ROLE = ROLES["planner"].model_copy(
 )
 
 
-async def reset(session: AgentSession) -> list[Event]:
+async def reset(session: WorkspaceHost) -> list[Event]:
     """The events from asking to reset the planner until it's reset."""
     await send(session, ResetConversation(agent=PLANNER))
     return await events_until(session, of_type(ConversationReset))
 
 
-async def refusal(session: AgentSession) -> Event:
+async def refusal(session: WorkspaceHost) -> Event:
     """What asking to reset the planner is answered with, when it's refused."""
     await send(session, ResetConversation(agent=PLANNER))
     answered = Stop("refused", lambda e: isinstance(e, CommandRefused | Notice))
     return (await events_until(session, answered))[-1]
 
 
-async def planned_twice(launcher: ScriptedLauncher, session: AgentSession) -> None:
+async def planned_twice(launcher: ScriptedLauncher, session: WorkspaceHost) -> None:
     """Prompt the planner, reset it, and prompt it again."""
     launcher.planner_turns = [chats, chats]
     await plan(session, "Plan.")
@@ -162,7 +162,7 @@ async def test_before_the_first_prompt_there_is_nothing_to_reset() -> None:
 
 
 async def test_resetting_needs_a_planner() -> None:
-    session = AgentSession()
+    session = WorkspaceHost()
     assert await refusal(session) == refused(NOT_CONFIGURED, NO_PLANNER_MESSAGE)
     await session.close()
 

@@ -5,7 +5,7 @@ import asyncio
 from collections.abc import Callable
 from datetime import UTC, datetime
 
-from orbit.agent import AgentSession
+from orbit.agent import WorkspaceHost
 from orbit.agent.application.connection import SessionConnection
 from orbit.agent.domain.sessions import SessionRecord
 from orbit.protocol import (
@@ -35,6 +35,7 @@ from tests.agent_fakes import (
     FakeTree,
     Steps,
     Ticks,
+    connect,
     frontend,
     greet,
     send,
@@ -87,7 +88,7 @@ def changed(event: Event) -> bool:
     return isinstance(event, SessionStateChanged)
 
 
-async def until(session: AgentSession, done: Callable[[Event], bool]) -> list[Event]:
+async def until(session: WorkspaceHost, done: Callable[[Event], bool]) -> list[Event]:
     """The events reaching ``session``'s frontend up to and including the first that's
     ``done``."""
     stream = frontend(session).events()
@@ -97,7 +98,7 @@ async def until(session: AgentSession, done: Callable[[Event], bool]) -> list[Ev
     return events
 
 
-async def greeted_and_counted(session: AgentSession) -> list[Event]:
+async def greeted_and_counted(session: WorkspaceHost) -> list[Event]:
     """Greet ``session`` and return its events up to the change counting its frontend."""
     await greet(session)
     return await asyncio.wait_for(until(session, changed), 5)
@@ -118,9 +119,9 @@ async def taken(connection: Session) -> list[Event]:
         return events
 
 
-async def joined(session: AgentSession, name: str) -> SessionConnection:
+async def joined(session: WorkspaceHost, name: str) -> SessionConnection:
     """A new connection to ``session`` that has said Hello as ``name``."""
-    connection = session.connect()
+    connection = connect(session)
     await say(connection, name, HELLO)
     return connection
 
@@ -216,7 +217,7 @@ async def test_the_startup_check_is_reported_but_leaves_the_open_session_idle() 
 
 
 async def test_a_second_hello_and_its_closing_change_the_viewers_for_every_connection() -> None:
-    session = AgentSession(new_id=lambda: OPEN)
+    session = WorkspaceHost(new_id=lambda: OPEN)
     first = await joined(session, "first")
     await taken(first)
 
@@ -259,7 +260,7 @@ def saved(session_id: str) -> SessionRecord:
 async def test_the_catalog_shows_other_sessions_inactive_idle_and_unviewed() -> None:
     store = FakeStore()
     store.saved.append(saved("earlier"))
-    session = AgentSession(store=store, clock=Ticks(), new_id=lambda: OPEN)
+    session = WorkspaceHost(store=store, clock=Ticks(), new_id=lambda: OPEN)
     connection = await joined(session, "first")
     sessions = open_entry(await taken(connection))
     await session.close()
@@ -271,7 +272,7 @@ async def test_the_catalog_shows_other_sessions_inactive_idle_and_unviewed() -> 
 async def test_opening_another_session_publishes_both_sessions_states() -> None:
     store = FakeStore()
     store.saved.append(saved("earlier"))
-    session = AgentSession(store=store, clock=Ticks(), new_id=lambda: OPEN)
+    session = WorkspaceHost(store=store, clock=Ticks(), new_id=lambda: OPEN)
     connection = await joined(session, "first")
     await taken(connection)
 
@@ -287,7 +288,7 @@ async def test_opening_another_session_publishes_both_sessions_states() -> None:
 
 async def test_state_changes_belong_to_no_session_and_are_never_logged() -> None:
     store = FakeStore()
-    session = AgentSession(store=store, clock=Ticks(), new_id=lambda: OPEN)
+    session = WorkspaceHost(store=store, clock=Ticks(), new_id=lambda: OPEN)
     connection = await joined(session, "first")
     await say(connection, "add", AddTask(task=TASK))
     envelopes = []

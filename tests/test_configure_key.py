@@ -5,7 +5,7 @@ import asyncio
 import pytest
 from textual.widgets import Static
 
-from orbit.agent import NO_STEPS_NOTE, AgentSession, Verification
+from orbit.agent import NO_STEPS_NOTE, Verification, WorkspaceHost
 from orbit.agent.application.work_turns import CONFIGURING_NOTE, NO_VERIFY_MESSAGE
 from orbit.agent.domain.checks import Setup, configure_prompt
 from orbit.agent.domain.verification import VerificationStep
@@ -74,7 +74,7 @@ async def claims_done(call: Call) -> TurnEndReason:
     return "completed"
 
 
-async def until_idle(session: AgentSession) -> list[Event]:
+async def until_idle(session: WorkspaceHost) -> list[Event]:
     return await events_until(session, idle())
 
 
@@ -151,7 +151,7 @@ async def test_it_can_be_asked_for_again_to_reconfigure() -> None:
 
 
 async def test_while_tasks_run_it_goes_next() -> None:
-    session: AgentSession | None = None
+    session: WorkspaceHost | None = None
 
     async def asks_to_configure(call: Call) -> TurnEndReason:
         assert session is not None
@@ -197,7 +197,7 @@ async def test_after_ctrl_s_holds_the_work_it_still_runs_straight_away() -> None
 
 
 async def test_without_agents_it_is_refused() -> None:
-    session = AgentSession()
+    session = WorkspaceHost()
     await send(session, FireTrigger(trigger=CONFIGURE_CHECKS))
     events = await until_refused(session)
     assert events[-1] == refused(NOT_CONFIGURED, "Tasks need agents, and none are set up.")
@@ -215,7 +215,7 @@ async def test_without_verification_it_is_refused_and_nothing_starts() -> None:
     assert launcher.launches == []
 
 
-async def until_refused(session: AgentSession) -> list[Event]:
+async def until_refused(session: WorkspaceHost) -> list[Event]:
     """Events up to and including the first refusal; none of them an error."""
     events = await events_until(session, of_type(CommandRefused))
     assert not any(isinstance(e, ErrorOccurred) for e in events)

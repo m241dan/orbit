@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from orbit.agent import AgentSession
+from orbit.agent import WorkspaceHost
 from orbit.agent.domain.sessions import SessionRecord
 from orbit.protocol import (
     BUSY,
@@ -51,7 +51,7 @@ TASK = TaskSpec(prompt="Add a flag.")
 RUNNING = Stop("running", lambda e: isinstance(e, SessionStateChanged) and e.state == "running")
 IDLE = Stop("idle", lambda e: isinstance(e, SessionStateChanged) and e.state == "idle")
 
-Busy = Callable[[FakeStore, asyncio.Event], Awaitable[tuple[AgentSession, Stop]]]
+Busy = Callable[[FakeStore, asyncio.Event], Awaitable[tuple[WorkspaceHost, Stop]]]
 """Makes a session saved in a store busy with one activity until a gate opens; returns it and
 the event at which that activity is the one in progress."""
 
@@ -60,7 +60,7 @@ class Watch:
     """The events reaching ``session``'s frontend, those ``seen`` so far, and the open
     session's state as last published among them."""
 
-    def __init__(self, session: AgentSession) -> None:
+    def __init__(self, session: WorkspaceHost) -> None:
         self._stream = frontend(session).events()
         self.seen: list[Event] = []
         self.state: SessionState | None = None
@@ -86,14 +86,14 @@ def gated_work(gate: asyncio.Event) -> Callable[[Call], Awaitable[TurnEndReason]
     return works
 
 
-async def running_tasks(store: FakeStore, gate: asyncio.Event) -> tuple[AgentSession, Stop]:
+async def running_tasks(store: FakeStore, gate: asyncio.Event) -> tuple[WorkspaceHost, Stop]:
     session, _, _ = session_for(gated_work(gate), store=store)
     await send(session, AddTask(task=TASK))
     await send(session, RunTasks())
     return session, RUNNING
 
 
-async def reviewing(store: FakeStore, gate: asyncio.Event) -> tuple[AgentSession, Stop]:
+async def reviewing(store: FakeStore, gate: asyncio.Event) -> tuple[WorkspaceHost, Stop]:
     reviewer = gated_work(gate)
     session, _, _ = session_for(
         claims_done, reviewers=(reviewer,), tree=FakeTree(), review=True, store=store
@@ -104,7 +104,7 @@ async def reviewing(store: FakeStore, gate: asyncio.Event) -> tuple[AgentSession
     return session, all_of(started, idle("work"))
 
 
-async def planning(store: FakeStore, gate: asyncio.Event) -> tuple[AgentSession, Stop]:
+async def planning(store: FakeStore, gate: asyncio.Event) -> tuple[WorkspaceHost, Stop]:
     session, _, launcher = session_for(store=store)
     launcher.planner_turns = [gated_planner(gate)]
     await send(session, SendMessage(agent=PLANNER, text="Plan."))
@@ -119,7 +119,7 @@ def saved_earlier() -> FakeStore:
     return store
 
 
-async def activating(session: AgentSession, watch: Watch, command_id: str) -> Event:
+async def activating(session: WorkspaceHost, watch: Watch, command_id: str) -> Event:
     """The answer to activating the saved session ``earlier`` as ``command_id``."""
     command = ActivateSession(session="earlier")
     await frontend(session).send(CommandEnvelope(command_id=command_id, payload=command))

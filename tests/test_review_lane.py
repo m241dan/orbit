@@ -4,7 +4,7 @@ import asyncio
 import itertools
 from collections.abc import Callable
 
-from orbit.agent import AgentSession
+from orbit.agent import WorkspaceHost
 from orbit.agent.application.ports import Reply
 from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.endings import BUG, CANCELLED, REVIEW_STOPPED_BY_YOU, STOPPED_BY_YOU
@@ -78,7 +78,7 @@ def suggests(*titles: str, replies: list[Reply] | None = None) -> Script:
 
 
 async def settle(
-    session: AgentSession,
+    session: WorkspaceHost,
     events: list[Event] | None = None,
     until: Callable[[list[Event]], bool] | None = None,
 ) -> list[Event]:
@@ -156,7 +156,7 @@ def latest_board(events: list[Event]) -> tuple[TaskState, ...]:
     return board(events) if any(isinstance(e, TasksChanged) for e in events) else ()
 
 
-async def start(session: AgentSession, *prompts: str) -> None:
+async def start(session: WorkspaceHost, *prompts: str) -> None:
     for prompt in prompts or ("Make it faster.",):
         await send(session, AddTask(task=TaskSpec(prompt=prompt)))
     await send(session, RunTasks())
@@ -655,7 +655,7 @@ async def test_cancelling_a_review_that_is_not_running_does_nothing() -> None:
 async def test_a_review_can_suggest_after_its_first_suggestion_landed() -> None:
     suggested = asyncio.Event()
     replies: list[Reply] = []
-    sessions: list[AgentSession] = []
+    sessions: list[WorkspaceHost] = []
 
     async def waits_for_suggestion(call: Call) -> TurnEndReason:
         await suggested.wait()
@@ -757,7 +757,7 @@ async def test_an_unexpected_error_in_the_review_lane_is_reported() -> None:
 
 
 async def test_a_suggestion_removed_from_its_batch_leaves_the_rest_reviewed() -> None:
-    sessions: list[AgentSession] = []
+    sessions: list[WorkspaceHost] = []
 
     async def suggests_then_one_is_removed(call: Call) -> TurnEndReason:
         await call("get_task")
@@ -828,7 +828,7 @@ async def test_a_finished_review_can_be_removed_but_not_edited() -> None:
     assert [e for e in events if isinstance(e, ReviewStatus)][-1].open_batches == 0
 
 
-async def edit_a_user_review(session: AgentSession) -> list[Event]:
+async def edit_a_user_review(session: WorkspaceHost) -> list[Event]:
     """The events after adding a reviewer task to ``session`` and editing its prompt."""
     await send(session, AddTask(task=TaskSpec(prompt="Review the parser", role="reviewer")))
     await send(session, EditTask(task_id="1", task=TaskSpec(prompt="Again", role="reviewer")))
@@ -852,7 +852,7 @@ async def test_a_review_the_user_queued_can_be_edited_with_the_review_lane() -> 
 
 
 async def test_a_task_edited_back_to_pending_is_reviewed_with_its_batch() -> None:
-    sessions: list[AgentSession] = []
+    sessions: list[WorkspaceHost] = []
 
     async def gives_up(call: Call) -> TurnEndReason:
         await call("get_task")

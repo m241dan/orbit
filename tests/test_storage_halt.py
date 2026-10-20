@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from orbit.agent import AgentSession
+from orbit.agent import WorkspaceHost
 from orbit.agent.application.keeper import SessionKeeper
 from orbit.agent.application.outbox import Outbox
 from orbit.agent.application.ports import StorageFailed
@@ -90,7 +90,7 @@ def halted(event: Event | EventEnvelope) -> bool:
 
 
 async def envelopes_until(
-    session: AgentSession, done: Callable[[list[EventEnvelope]], bool], timeout: float = 5
+    session: WorkspaceHost, done: Callable[[list[EventEnvelope]], bool], timeout: float = 5
 ) -> list[EventEnvelope]:
     """The session's envelopes, from its Welcome on, up to the first that makes ``done`` hold
     of those so far."""
@@ -107,7 +107,7 @@ async def envelopes_until(
     return sent
 
 
-async def halt_error(session: AgentSession) -> ErrorOccurred:
+async def halt_error(session: WorkspaceHost) -> ErrorOccurred:
     """The error the session halted with, once it's published."""
     sent = await envelopes_until(session, lambda sent: halted(sent[-1]))
     error = sent[-1].payload
@@ -163,7 +163,7 @@ class FullDisk:
     stopping, the ``error`` it halted with, the ``seq`` of the event that didn't fit, the
     ``database`` and the fallback ``file``."""
 
-    session: AgentSession
+    session: WorkspaceHost
     sent: list[EventEnvelope]
     error: ErrorOccurred
     seq: int
@@ -404,7 +404,7 @@ async def test_halting_cancels_the_startup_check() -> None:
 
 
 async def test_a_review_ending_while_halted_starts_no_work_on_its_fixes() -> None:
-    store, sessions = GatedLog(), list[AgentSession]()
+    store, sessions = GatedLog(), list[WorkspaceHost]()
 
     async def suggests_then_halts(call: Call) -> TurnEndReason:
         await call("get_task")
@@ -531,7 +531,7 @@ async def test_an_outbox_without_a_log_diverts_and_loses_nothing() -> None:
 
 
 async def outcome_of(
-    session: AgentSession, command: ResumeStorage | RunTasks | History
+    session: WorkspaceHost, command: ResumeStorage | RunTasks | History
 ) -> list[EventEnvelope]:
     """The envelopes the session sends once ``command`` is sent, up to its outcome."""
     await send(session, command)
@@ -553,7 +553,7 @@ async def outcome_of(
 ACCEPTED = CommandAccepted(command_id=COMMAND_ID)
 
 
-async def halted_session(store: FakeStore, fallback: FakeFallback) -> AgentSession:
+async def halted_session(store: FakeStore, fallback: FakeFallback) -> WorkspaceHost:
     """A session over ``store`` halted by its failing appends, with three notices published
     first."""
     store.append_failure = "disk full"

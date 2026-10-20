@@ -7,12 +7,12 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from orbit.agent import AgentSession
+from orbit.agent import WorkspaceHost
 from orbit.agent.application import usage_monitor
 from orbit.agent.application.usage_monitor import UsageMonitor
 from orbit.agent.domain.usage import UsageFetch, UsageRateLimited, UsageReport, UsageUnavailable
 from orbit.protocol import Event, TurnFinished, UsageChanged, UsageLimit
-from tests.agent_fakes import payloads, publish
+from tests.agent_fakes import payloads, publish, served
 
 NOW = datetime(2026, 10, 16, 12, 0, tzinfo=UTC)
 LIMITS = (UsageLimit(label="Session", percent=52.0),)
@@ -259,33 +259,33 @@ def always_due(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 async def test_a_session_without_a_usage_source_sends_no_usage() -> None:
-    session = AgentSession()
+    session = WorkspaceHost()
     await publish(session, TurnFinished(turn_id="t", agent_id="agent-1", reason="completed"))
     assert await quiet_of_usage(payloads(session))
     await session.close()
 
 
 async def test_a_session_with_a_usage_source_publishes_its_usage() -> None:
-    session = AgentSession(usage=Source(UsageReport(LIMITS)))
+    session = served(WorkspaceHost(), Source(UsageReport(LIMITS)))
     assert await usage_events(payloads(session), 1) == [UsageChanged(limits=LIMITS)]
     await session.close()
 
 
 @pytest.mark.usefixtures("always_due")
 async def test_an_agents_finished_turn_nudges_the_usage_monitor() -> None:
-    session = AgentSession(usage=Source(UsageReport(LIMITS), UsageReport(LATER)))
+    session = served(WorkspaceHost(), Source(UsageReport(LIMITS), UsageReport(LATER)))
     stream = payloads(session)
     await usage_events(stream, 1)
-    await publish(session, TurnFinished(turn_id="t", agent_id="agent-1", reason="completed"))
+    await publish(session.host, TurnFinished(turn_id="t", agent_id="agent-1", reason="completed"))
     assert await usage_events(stream, 1) == [UsageChanged(limits=LATER)]
     await session.close()
 
 
 @pytest.mark.usefixtures("always_due")
 async def test_a_turn_finished_without_an_agent_does_not_nudge() -> None:
-    session = AgentSession(usage=Source(UsageReport(LIMITS), UsageReport(LATER)))
+    session = served(WorkspaceHost(), Source(UsageReport(LIMITS), UsageReport(LATER)))
     stream = payloads(session)
     await usage_events(stream, 1)
-    await publish(session, TurnFinished(turn_id="t", reason="completed"))
+    await publish(session.host, TurnFinished(turn_id="t", reason="completed"))
     assert await quiet_of_usage(stream)
     await session.close()

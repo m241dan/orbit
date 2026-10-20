@@ -5,8 +5,8 @@ from collections.abc import AsyncIterator
 
 import pytest
 
-from orbit.agent import AgentSession, Setup, Verification, VerificationStep
-from orbit.agent.application import session as session_module
+from orbit.agent import Setup, Verification, VerificationStep, WorkspaceHost
+from orbit.agent.application import workspace_host as session_module
 from orbit.agent.application.startup_check import CANCELLED_NOTE, StartupCheck
 from orbit.protocol import (
     GIT_FAILED,
@@ -58,12 +58,12 @@ def titled(*statuses: str) -> VerificationChanged:
     )
 
 
-async def until_checked(session: AgentSession) -> list[Event]:
+async def until_checked(session: WorkspaceHost) -> list[Event]:
     """The events until the startup check's agent exits."""
     return await events_until(session, agent_exited("startup-check"))
 
 
-async def quiet(session: AgentSession) -> list[Event]:
+async def quiet(session: WorkspaceHost) -> list[Event]:
     """The events published as the events start, and for a moment after."""
     events: list[Event] = []
     stream: AsyncIterator[Event] = payloads(session)
@@ -142,7 +142,7 @@ async def test_a_failing_setup_is_the_failing_check() -> None:
 
 async def test_without_a_tree_it_runs_in_the_current_directory() -> None:
     steps = Steps(True, False)
-    session = AgentSession(verification=checked(steps), check_at_startup=True)
+    session = WorkspaceHost(verification=checked(steps), check_at_startup=True)
 
     events = await until_checked(session)
 
@@ -155,9 +155,9 @@ async def test_without_a_tree_it_runs_in_the_current_directory() -> None:
 
 async def test_it_is_skipped_without_verification_or_steps_or_when_not_asked() -> None:
     sessions = [
-        AgentSession(check_at_startup=True),
-        AgentSession(verification=Verification((), Steps()), check_at_startup=True),
-        AgentSession(verification=checked(Steps())),
+        WorkspaceHost(check_at_startup=True),
+        WorkspaceHost(verification=Verification((), Steps()), check_at_startup=True),
+        WorkspaceHost(verification=checked(Steps())),
     ]
     for session in sessions:
         events = await quiet(session)

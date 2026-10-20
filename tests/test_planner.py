@@ -5,7 +5,7 @@ from collections.abc import Mapping
 
 import pytest
 
-from orbit.agent import Agents, AgentSession
+from orbit.agent import Agents, WorkspaceHost
 from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.planner import RESUME_FAILED_NOTE, PlannerChat
 from orbit.agent.application.ports import Reply, ResumeFailed
@@ -58,7 +58,7 @@ from tests.agent_fakes import (
 )
 
 
-async def until_idle(session: AgentSession) -> list[Event]:
+async def until_idle(session: WorkspaceHost) -> list[Event]:
     return await events_until(session, idle(lane=None))
 
 
@@ -73,7 +73,7 @@ async def chats(call: Call) -> TurnEndReason:
     return "completed"
 
 
-async def plan(session: AgentSession, text: str) -> list[Event]:
+async def plan(session: WorkspaceHost, text: str) -> list[Event]:
     await send(session, SendMessage(agent=PLANNER, text=text))
     return await until_idle(session)
 
@@ -126,7 +126,7 @@ async def test_the_first_turn_says_which_agent_is_the_planner() -> None:
     assert not any(isinstance(e, AgentStarted) for e in later)
 
 
-async def refused_planning(session: AgentSession) -> list[Event]:
+async def refused_planning(session: WorkspaceHost) -> list[Event]:
     await send(session, SendMessage(agent=PLANNER, text="Plan."))
     return await events_until(session, lambda e: isinstance(e, CommandRefused))
 
@@ -135,7 +135,7 @@ NO_PLANNER = refused(NOT_CONFIGURED, "Planning needs agents and a planner role."
 
 
 async def test_planning_needs_agents() -> None:
-    events = await refused_planning(AgentSession())
+    events = await refused_planning(WorkspaceHost())
     assert events[-1] == NO_PLANNER
     assert BusyChanged(busy=False, lane="planner") in events  # Frees the prompt.
     assert not any(isinstance(e, ErrorOccurred) for e in events)

@@ -13,8 +13,8 @@ import typer
 
 from orbit.agent import (
     USER_CONFIG_FILE,
-    AgentSession,
     ConfigError,
+    ControlPlane,
     ControlPlaneServer,
     ListenFailed,
     LocalDiscoveryUnavailable,
@@ -240,15 +240,15 @@ def _current_revoked(config_dir: Path, first: Collection[str]) -> Callable[[], C
 
 @dataclass(frozen=True)
 class _ServeParts:
-    """What ``orbit serve`` serves: the session ``build`` makes, with the most recently active
-    saved one opened if ``latest``, on the server ``settings`` say, to frontends showing the
-    token ``token`` gives as they connect, or under mutual TLS a certificate not among those
-    ``revoked`` gives then, saying where it is in ``run_file`` while it owns the repository,
-    and how frontends here reach it over TLS, ``local``, the ``banner`` it prints once
-    listening, given the server's URL, and the workspace ``lock``, which names the server's URL
-    while it's held."""
+    """What ``orbit serve`` serves: the control plane ``build`` makes, with its workspace's most
+    recently active saved session opened if ``latest``, on the server ``settings`` say, to
+    frontends showing the token ``token`` gives as they connect, or under mutual TLS a
+    certificate not among those ``revoked`` gives then, saying where it is in ``run_file``
+    while it owns the repository, and how frontends here reach it over TLS, ``local``, the
+    ``banner`` it prints once listening, given the server's URL, and the workspace ``lock``,
+    which names the server's URL while it's held."""
 
-    build: Callable[[], AgentSession]
+    build: Callable[[], ControlPlane]
     latest: bool
     settings: ServerSettings
     token: Callable[[], str]
@@ -266,23 +266,23 @@ async def _served(parts: _ServeParts, profile: Path | None) -> None:
     Raises :class:`ListenFailed` if the server can't listen.
     """
     with profiled(profile, "serve") if profile else nullcontext():
-        session = parts.build()
-        server = ControlPlaneServer(session, parts.token, parts.settings, typer.echo)
+        plane = parts.build()
+        server = ControlPlaneServer(plane, parts.token, parts.settings, typer.echo)
         server.revoked = parts.revoked
         try:
             if parts.latest:
-                await session.open_latest()
+                await plane.host.open_latest()
             url = await server.start()
         except BaseException:
-            await session.close()
+            await plane.close()
             raise
-        await _until_stopped(session, server, parts, url)
+        await _until_stopped(plane, server, parts, url)
 
 
 async def _until_stopped(
-    session: AgentSession, server: ControlPlaneServer, parts: _ServeParts, url: str
+    plane: ControlPlane, server: ControlPlaneServer, parts: _ServeParts, url: str
 ) -> None:
-    """Serve ``session`` on ``server``, listening at ``url``, until the first ctrl+c or
+    """Serve ``plane`` on ``server``, listening at ``url``, until the first ctrl+c or
     SIGTERM, then stop it, removing the run file it wrote: at once if it owns the repository,
     else once it takes the repository over.
 
@@ -291,9 +291,9 @@ async def _until_stopped(
     stopping = asyncio.Event()
     _on_signals(stopping)
     written: list[RunFile] = []
-    session.owned = _taking_over(parts.run_file, url, parts.local, written)
+    plane.host.owned = _taking_over(parts.run_file, url, parts.local, written)
     try:
-        if not session.read_only:
+        if not plane.read_only:
             _write_run_file(parts.run_file, url, parts.local)
             written.append(parts.run_file)
         _announce(parts.lock, url)
@@ -301,7 +301,7 @@ async def _until_stopped(
         await stopping.wait()
     finally:
         try:
-            await server.stop(session.close)
+            await server.stop(plane.close)
         finally:
             # One that couldn't be written may not be removable either.
             for run_file in written:

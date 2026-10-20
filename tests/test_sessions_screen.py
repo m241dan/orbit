@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from textual.containers import Vertical
 from textual.widgets import Input, OptionList
 
-from orbit.agent import AgentSession
+from orbit.agent import WorkspaceHost
 from orbit.protocol import (
     BUSY,
     ActivateSession,
@@ -124,7 +124,7 @@ async def test_with_no_saved_sessions_the_picker_offers_only_a_new_session() -> 
 
 
 async def test_a_backend_picking_at_startup_shows_the_picker_without_its_new_session() -> None:
-    backend = AgentSession(store=store_with(saved("old")), pick_session=True)
+    backend = WorkspaceHost(store=store_with(saved("old")), pick_session=True)
     app = OrbitApp(frontend(backend), pick=True)
     async with app.run_test() as pilot:
         await pilot.pause()
@@ -132,7 +132,7 @@ async def test_a_backend_picking_at_startup_shows_the_picker_without_its_new_ses
 
 
 async def test_an_app_not_picking_shows_no_picker_and_sends_no_listing() -> None:
-    backend = AgentSession(store=store_with(saved("old")), name="auth rework")
+    backend = WorkspaceHost(store=store_with(saved("old")), name="auth rework")
     app = OrbitApp(frontend(backend))
     async with app.run_test() as pilot:
         await pilot.pause()
@@ -549,7 +549,7 @@ async def test_a_catalog_dropping_the_highlighted_session_keeps_the_highlight_in
 
 async def test_renaming_and_deleting_through_the_backend_refresh_the_picker() -> None:
     store = store_with(saved("old"), saved("gone"))
-    backend = AgentSession(store=store, pick_session=True)
+    backend = WorkspaceHost(store=store, pick_session=True)
     app = OrbitApp(frontend(backend), pick=True)
     async with app.run_test() as pilot:
         await pilot.pause()

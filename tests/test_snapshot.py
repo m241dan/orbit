@@ -3,7 +3,7 @@
 import asyncio
 from typing import Any
 
-from orbit.agent import AgentSession, Verification, VerificationStep
+from orbit.agent import Verification, VerificationStep, WorkspaceHost
 from orbit.agent.application.desk import AgentDesk, Agents
 from orbit.agent.application.ports import Reply
 from orbit.agent.application.startup_check import AGENT_ID as STARTUP_AGENT
@@ -64,7 +64,7 @@ def last_of[E](kind: type[E], events: list[Event]) -> E:
 TASKS = (TaskSpec(prompt="Add a flag."), TaskSpec(prompt="Document it."))
 
 
-async def opening(session: AgentSession, count: int) -> list[Event]:
+async def opening(session: WorkspaceHost, count: int) -> list[Event]:
     """The first ``count`` events once ``session`` is greeted, its Welcome first."""
     await greet(session)
     stream = frontend(session).events()
@@ -90,7 +90,7 @@ async def test_welcome_is_followed_by_a_snapshot_of_the_open_session() -> None:
 
 
 async def test_a_session_without_verification_or_agents_snapshots_none() -> None:
-    session = AgentSession(settings=Settings(model="opus"), model_choices=("opus", "sonnet"))
+    session = WorkspaceHost(settings=Settings(model="opus"), model_choices=("opus", "sonnet"))
     *_, snapshot = await opening(session, 3)
     await session.close()
 
@@ -129,7 +129,7 @@ async def test_with_no_usage_fetched_the_catalog_is_followed_by_the_snapshot() -
     assert [type(e).__name__ for e in events] == ["Welcome", "Catalog", "Snapshot"]
 
 
-async def proposal_waiting(session: AgentSession) -> ChecksProposed:
+async def proposal_waiting(session: WorkspaceHost) -> ChecksProposed:
     """Run a configurator task in ``session`` up to the proposal it waits on."""
     await send(session, AddTask(task=CONFIGURE))
     await send(session, RunTasks())
@@ -139,7 +139,7 @@ async def proposal_waiting(session: AgentSession) -> ChecksProposed:
     return proposal
 
 
-def proposing() -> AgentSession:
+def proposing() -> WorkspaceHost:
     """A session whose configurator proposes a lint step for the frontend to decide on."""
     replies: list[str] = []
     session, _, _ = session_for(

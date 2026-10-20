@@ -8,7 +8,8 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from weakref import WeakKeyDictionary
 
-from orbit.agent import Agents, AgentSession, Verification, VerificationStep
+from orbit.agent import Agents, ControlPlane, Verification, VerificationStep, WorkspaceHost
+from orbit.agent.application.connection import SessionConnection
 from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.handshake import Handshake
 from orbit.agent.application.ports import (
@@ -68,6 +69,9 @@ from orbit.protocol import (
     VerificationChanged,
     Welcome,
 )
+
+Backend = WorkspaceHost | ControlPlane
+"""A workspace host, driven through the control plane around it, or a control plane."""
 
 ROLES = built_in_roles({name: f"You are orbit's {name}." for name in BUILT_IN_ROLE_NAMES})
 """The built-in roles, with stand-in instructions."""
@@ -560,7 +564,7 @@ def session_for(
     lock: RepositoryLock | None = None,
     lock_declined_retry: float = LOCK_DECLINED_RETRY,
     **options: Any,
-) -> tuple[AgentSession, FakeHost, ScriptedLauncher]:
+) -> tuple[WorkspaceHost, FakeHost, ScriptedLauncher]:
     """A session whose tasks run through agents playing ``scripts``, one per launch, and
     whose reviews run through agents playing ``reviewers``, with usage from ``usage``. It's
     saved in ``store``, if given, as ``session-1``, on a :class:`Ticks` clock, its unsaved
@@ -576,11 +580,10 @@ def session_for(
     tokens = iter(f"token-{n}" for n in range(1, 100))
     options = {"limits": Limits(), "exit_grace": 0.5, "roles": ROLES, **options}
     agents = Agents(host, launcher, lambda: next(tokens), **options)
-    session = AgentSession(
+    session = WorkspaceHost(
         verification=verification,
         agents=agents,
         check_at_startup=check_at_startup,
-        usage=usage,
         store=store,
         clock=Ticks(),
         new_id=lambda: "session-1",
@@ -590,6 +593,8 @@ def session_for(
         lock_retry=LOCK_RETRY,
         lock_declined_retry=lock_declined_retry,
     )
+    if usage is not None:
+        served(session, usage)
     return session, host, launcher
 
 
@@ -613,28 +618,28 @@ HELLO = Hello(client="orbit-tests", protocol_version=PROTOCOL_VERSION)
 """The Hello :func:`greet` sends."""
 
 
-async def greet(session: Session | AgentSession) -> None:
+async def greet(session: Session | Backend) -> None:
     """Open ``session``'s stream with Hello, as a frontend does before anything else."""
     await frontend(session).send(CommandEnvelope(command_id=HELLO_ID, payload=HELLO))
 
 
-async def send(session: Session | AgentSession, command: Command) -> None:
-    """Send ``command`` to ``session``, in an envelope for the open session, greeting an
-    :class:`AgentSession` first if it hasn't been."""
+async def send(session: Session | Backend, command: Command) -> None:
+    """Send ``command`` to ``session``, in an envelope for the open session, greeting a
+    :data:`Backend` first if it hasn't been."""
     await greeted(session)
     await frontend(session).send(CommandEnvelope(command_id=COMMAND_ID, payload=command))
 
 
-async def payloads(session: Session | AgentSession) -> AsyncIterator[Event]:
+async def payloads(session: Session | Backend) -> AsyncIterator[Event]:
     """The events in ``session``'s envelopes but for its ``Welcome``, its catalogs and its
-    sessions' state changes, greeting an :class:`AgentSession` first if it hasn't been."""
+    sessions' state changes, greeting a :data:`Backend` first if it hasn't been."""
     await greeted(session)
     async for envelope in frontend(session).events():
         if not isinstance(envelope.payload, Welcome | Catalog | SessionStateChanged):
             yield envelope.payload
 
 
-async def run(session: AgentSession, *tasks: TaskSpec) -> list[Event]:
+async def run(session: WorkspaceHost, *tasks: TaskSpec) -> list[Event]:
     """Queue ``tasks``, run them, and return the events until the session goes idle."""
     for task in tasks or (TaskSpec(prompt="Add a flag.", settings=Settings(model="opus")),):
         await send(session, AddTask(task=task))
@@ -689,7 +694,7 @@ def of_type(kind: type) -> Stop:
 
 
 async def events_until(
-    session: AgentSession,
+    session: WorkspaceHost,
     done: Callable[[Event], bool],
     *,
     skip: tuple[type, ...] = (),
@@ -742,13 +747,31 @@ def replies(events: list[Event]) -> list[str]:
 # The only helpers that reach into a session's private state, so its refactors touch only them.
 
 
-class SoleFrontend:
-    """The one frontend of ``session``, as orbit's in-process one is: a ``Session`` over a
-    connection to it, whose closing closes the session."""
+_PLANES: WeakKeyDictionary[WorkspaceHost, ControlPlane] = WeakKeyDictionary()
 
-    def __init__(self, session: AgentSession) -> None:
-        self.session = session
-        self.connection = session.connect()
+
+def served(host: WorkspaceHost, usage: UsageSource | None = None) -> ControlPlane:
+    """A control plane around ``host``, fetching usage from ``usage``, if given, which the
+    helpers here drive ``host`` through from now on."""
+    _PLANES[host] = ControlPlane(host, usage)
+    return _PLANES[host]
+
+
+def control_plane(session: Backend) -> ControlPlane:
+    """``session``, if it's a control plane, else the one around it the helpers here drive it
+    through, made on first use."""
+    if isinstance(session, ControlPlane):
+        return session
+    return _PLANES[session] if session in _PLANES else served(session)
+
+
+class SoleFrontend:
+    """The one frontend of ``plane``, as orbit's in-process one is: a ``Session`` over a
+    connection to it, whose closing closes the control plane."""
+
+    def __init__(self, plane: ControlPlane) -> None:
+        self.plane = plane
+        self.connection = plane.connect()
 
     async def send(self, envelope: CommandEnvelope) -> None:
         await self.connection.send(envelope)
@@ -757,45 +780,58 @@ class SoleFrontend:
         return self.connection.events()
 
     async def close(self) -> None:
-        await self.session.close()
+        await self.plane.close()
 
 
-_FRONTENDS: WeakKeyDictionary[AgentSession, SoleFrontend] = WeakKeyDictionary()
+_FRONTENDS: WeakKeyDictionary[ControlPlane, SoleFrontend] = WeakKeyDictionary()
 
 
-def frontend(session: Session | AgentSession) -> Session:
-    """``session``, or, for an :class:`AgentSession`, the :class:`SoleFrontend` the helpers
-    here drive it through, made on first use."""
-    return _sole_frontend(session) if isinstance(session, AgentSession) else session
+def frontend(session: Session | Backend) -> Session:
+    """``session``, or, for a :data:`Backend`, the :class:`SoleFrontend` the helpers here drive
+    it through, made on first use."""
+    if isinstance(session, WorkspaceHost | ControlPlane):
+        return _sole_frontend(session)
+    return session
 
 
-def _sole_frontend(session: AgentSession) -> SoleFrontend:
-    """The :class:`SoleFrontend` of ``session``, made on first use."""
-    if session not in _FRONTENDS:
-        _FRONTENDS[session] = SoleFrontend(session)
-    return _FRONTENDS[session]
+def _sole_frontend(session: Backend) -> SoleFrontend:
+    """The :class:`SoleFrontend` of ``session``'s control plane, made on first use."""
+    plane = control_plane(session)
+    if plane not in _FRONTENDS:
+        _FRONTENDS[plane] = SoleFrontend(plane)
+    return _FRONTENDS[plane]
 
 
-def queued(session: AgentSession) -> list[Event]:
+def connect(session: Backend) -> SessionConnection:
+    """A new connection to ``session``'s control plane."""
+    return control_plane(session).connect()
+
+
+async def close(session: Backend) -> None:
+    """Close ``session``'s control plane, which closes its host and ends its connections."""
+    await control_plane(session).close()
+
+
+def queued(session: Backend) -> list[Event]:
     """Take the events the session has queued for its frontend but not yet published."""
     return [envelope.payload for envelope in queued_envelopes(session)]
 
 
-def queued_envelopes(session: AgentSession) -> list[EventEnvelope]:
+def queued_envelopes(session: Backend) -> list[EventEnvelope]:
     """Take the envelopes the session has queued for its frontend but not yet published."""
     queue = _queue_of(session)
     return [queue.get_nowait() for _ in range(queue.qsize())]
 
 
-async def greeted(session: Session | AgentSession) -> None:
-    """Greet ``session``, if it's an :class:`AgentSession` that hasn't been."""
-    if isinstance(session, AgentSession) and not _handshake_of(session).welcomed:
+async def greeted(session: Session | Backend) -> None:
+    """Greet ``session``, if it's a :data:`Backend` that hasn't been."""
+    if isinstance(session, WorkspaceHost | ControlPlane) and not _handshake_of(session).welcomed:
         await greet(session)
 
 
-async def views_on_joining(session: AgentSession) -> list[Event]:
+async def views_on_joining(session: Backend) -> list[Event]:
     """The events a new connection to ``session`` gets for its Hello, up to its Snapshot."""
-    connection = session.connect()
+    connection = connect(session)
     await connection.send(CommandEnvelope(command_id="join", payload=HELLO))
     stream = connection.events()
     events = [(await asyncio.wait_for(anext(stream), 5)).payload]
@@ -804,82 +840,82 @@ async def views_on_joining(session: AgentSession) -> list[Event]:
     return events
 
 
-def nothing_queued(session: AgentSession) -> bool:
+def nothing_queued(session: Backend) -> bool:
     """Whether the session has no events queued for its frontend."""
     return _queue_of(session).empty()
 
 
-def _queue_of(session: AgentSession) -> "asyncio.Queue[EventEnvelope]":
+def _queue_of(session: Backend) -> "asyncio.Queue[EventEnvelope]":
     """The events queued for the frontend of ``session``."""
     return _sole_frontend(session).connection._queue
 
 
-def _handshake_of(session: AgentSession) -> Handshake:
+def _handshake_of(session: Backend) -> Handshake:
     """The handshake of the frontend of ``session``."""
     return _sole_frontend(session).connection._handshake
 
 
-async def save_used(session: AgentSession) -> None:
+async def save_used(session: WorkspaceHost) -> None:
     """Mark ``session`` used and save it, so its logged events outlast its closing."""
     session._keeper.use()
     await session._save()
 
 
-async def publish(session: AgentSession, event: Event) -> None:
+async def publish(session: WorkspaceHost, event: Event) -> None:
     """Queue ``event`` for the session to publish, as its parts do."""
     await session._events.put(event)
 
 
-def lane_of(session: AgentSession) -> ReviewLane:
+def lane_of(session: WorkspaceHost) -> ReviewLane:
     """The session's review lane, which it must have."""
     assert session._lane is not None
     return session._lane
 
 
-def tasks_of(session: AgentSession) -> Tasks:
+def tasks_of(session: WorkspaceHost) -> Tasks:
     """The session's tasks, which save and publish the board as it changes."""
     return session._tasks
 
 
-def board_of(session: AgentSession) -> TaskBoard:
+def board_of(session: WorkspaceHost) -> TaskBoard:
     """The session's task board."""
     return session._board
 
 
-def desk_of(session: AgentSession) -> AgentDesk | None:
+def desk_of(session: WorkspaceHost) -> AgentDesk | None:
     """The session's agent desk, if it runs agents."""
     return session._desk
 
 
-def startup_of(session: AgentSession) -> StartupCheck | None:
+def startup_of(session: WorkspaceHost) -> StartupCheck | None:
     """The check the session runs at startup, if any."""
     return session._startup
 
 
-def planner_turn(session: AgentSession) -> "asyncio.Task[object] | None":
+def planner_turn(session: WorkspaceHost) -> "asyncio.Task[object] | None":
     """The planner's current turn, if it has one."""
     return session._seat.turn
 
 
-def store_of(session: AgentSession) -> SessionStore | None:
+def store_of(session: WorkspaceHost) -> SessionStore | None:
     """Where the session is saved, if anywhere."""
     return session.saved_session._store
 
 
-async def snapshot_of(session: AgentSession) -> Snapshot:
+async def snapshot_of(session: WorkspaceHost) -> Snapshot:
     """The snapshot of the session as it stands now."""
     return await session._snapshot()
 
 
-def put_on_board(session: AgentSession, *tasks: TaskSpec) -> None:
+def put_on_board(session: WorkspaceHost, *tasks: TaskSpec) -> None:
     """Put ``tasks`` on the session's board without publishing it, as if it opened with them."""
     for task in tasks:
         session._board.add(task)
 
 
-async def fetch_usage_unseen(session: AgentSession) -> None:
+async def fetch_usage_unseen(session: Backend) -> None:
     """Have the session's usage monitor fetch once before Hello, dropping what it published."""
-    monitor = session._usage
+    monitor = control_plane(session)._usage
     assert monitor is not None
     monitor.start()
     while monitor.latest is None:

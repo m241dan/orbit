@@ -8,10 +8,10 @@ import pytest
 
 from orbit.agent import (
     NO_STEPS_NOTE,
-    AgentSession,
     Verification,
     VerificationStep,
     Workspace,
+    WorkspaceHost,
     run_step,
 )
 from orbit.agent.application.desk import AgentDesk
@@ -55,6 +55,7 @@ from tests.agent_fakes import (
     Call,
     FakeTree,
     Steps,
+    close,
     events_until,
     idle,
     nothing_queued,
@@ -77,7 +78,7 @@ async def fails(call: Call) -> TurnEndReason:
     raise RuntimeError("boom")
 
 
-async def collect_run(session: AgentSession) -> list[Event]:
+async def collect_run(session: WorkspaceHost) -> list[Event]:
     """Events until the planner goes idle, ignoring settings announcements and snapshots."""
     return await events_until(session, idle("planner"), skip=(SettingsChanged, Snapshot))
 
@@ -106,13 +107,13 @@ async def test_a_prompt_starts_a_turn_of_the_planner() -> None:
     assert any(isinstance(e, TurnFinished) and e.reason == "completed" for e in events)
 
 
-def only_state_queued(session: AgentSession) -> bool:
+def only_state_queued(session: WorkspaceHost) -> bool:
     """Whether the session has nothing but changes of its state queued for its frontend."""
     return all(isinstance(event, SessionStateChanged) for event in queued(session))
 
 
 async def test_a_prompt_without_a_planner_is_refused() -> None:
-    session = AgentSession()
+    session = WorkspaceHost()
     await send(session, SendMessage(agent=PLANNER, text="hello"))
     stream = payloads(session)
     assert isinstance(await anext(stream), Snapshot)
@@ -151,7 +152,7 @@ async def test_cancel_without_a_turn_is_a_noop() -> None:
 
 async def test_session_snapshots_its_initial_settings() -> None:
     settings = Settings(model="opus", tool_access="off")
-    session = AgentSession(settings, model_choices=("opus", "sonnet"))
+    session = WorkspaceHost(settings, model_choices=("opus", "sonnet"))
     assert session.settings == settings
     snapshot = await anext(payloads(session))
     assert isinstance(snapshot, Snapshot)
@@ -180,7 +181,7 @@ async def test_the_planner_takes_the_model_from_updated_settings() -> None:
 
 
 async def test_add_and_edit_tasks_publish_the_board() -> None:
-    session = AgentSession()
+    session = WorkspaceHost()
     stream = payloads(session)
     assert isinstance(await anext(stream), Snapshot)
 
@@ -234,7 +235,7 @@ FAILING_STEP = VerificationStep(
 
 
 async def test_session_snapshots_its_verification_steps() -> None:
-    session = AgentSession(verification=verified((FAILING_STEP,)))
+    session = WorkspaceHost(verification=verified((FAILING_STEP,)))
     assert session.verification == verified((FAILING_STEP,))
     snapshot = await anext(payloads(session))
     assert isinstance(snapshot, Snapshot)
@@ -243,7 +244,7 @@ async def test_session_snapshots_its_verification_steps() -> None:
 
 
 async def test_verification_without_steps_notes_that_nothing_is_verified() -> None:
-    session = AgentSession(verification=verified(()))
+    session = WorkspaceHost(verification=verified(()))
     assert session.verification == verified(())
     stream = payloads(session)
     snapshot = await anext(stream)
@@ -253,7 +254,7 @@ async def test_verification_without_steps_notes_that_nothing_is_verified() -> No
 
 
 async def test_session_notes_its_workspace_at_startup() -> None:
-    session = AgentSession(workspace="/code/project")
+    session = WorkspaceHost(workspace="/code/project")
     stream = payloads(session)
     assert isinstance(await anext(stream), Snapshot)
     assert await anext(stream) == Notice(message="Workspace: /code/project")
@@ -297,7 +298,7 @@ def record_stops(monkeypatch: pytest.MonkeyPatch, failing: str = "") -> list[str
     return stopped
 
 
-def full_session() -> AgentSession:
+def full_session() -> WorkspaceHost:
     """A session with every part closing stops: a startup check, usage, reviews and a planner."""
     session, _, _ = session_for(
         verification=Verification((STEP,), Steps()),
@@ -314,9 +315,9 @@ async def test_closing_stops_the_background_then_the_planner_then_the_host(
 ) -> None:
     stopped = record_stops(monkeypatch)
 
-    await full_session().close()
+    await close(full_session())
 
-    assert stopped == ["startup", "usage", "review", "planner", "host"]
+    assert stopped == ["usage", "startup", "review", "planner", "host"]
 
 
 async def test_closing_stops_every_part_even_if_one_fails_then_raises_it(
@@ -325,6 +326,17 @@ async def test_closing_stops_every_part_even_if_one_fails_then_raises_it(
     stopped = record_stops(monkeypatch, failing="startup")
 
     with pytest.raises(ValueError, match="startup broke"):
-        await full_session().close()
+        await close(full_session())
 
-    assert stopped == ["startup", "usage", "review", "planner", "host"]
+    assert stopped == ["usage", "startup", "review", "planner", "host"]
+
+
+async def test_closing_closes_the_host_even_if_the_usage_monitor_fails_then_raises_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stopped = record_stops(monkeypatch, failing="usage")
+
+    with pytest.raises(ValueError, match="usage broke"):
+        await close(full_session())
+
+    assert stopped == ["usage", "startup", "review", "planner", "host"]

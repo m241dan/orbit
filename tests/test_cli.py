@@ -20,9 +20,9 @@ from typer.testing import CliRunner
 from orbit import __version__
 from orbit.agent import (
     MODEL_ALIASES,
-    AgentSession,
     ClaudeCliRunner,
     ConfigError,
+    ControlPlane,
     GitCoderTree,
     Limits,
     McpHost,
@@ -32,6 +32,7 @@ from orbit.agent import (
     UsageApi,
     Verification,
     VerificationStep,
+    WorkspaceHost,
     WorkspaceLock,
     WorkspaceOwner,
     run_step,
@@ -118,14 +119,14 @@ class FakeApp:
     """Starts its session, which builds the backend on its thread, and closes it."""
 
     # The backend sessions built, the threads they were built on and their usage sources.
-    launched: ClassVar[list[AgentSession]] = []
+    launched: ClassVar[list[WorkspaceHost]] = []
     threads: ClassVar[list[str]] = []
     usage_sources: ClassVar[list[UsageSource | None]] = []
     # The files in profile_dir while each app ran async.
     profile_dir: ClassVar[Path] = Path()
     profiling: ClassVar[list[list[str]]] = []
     # What each app does with the backend session while it runs, if anything.
-    during: ClassVar[Callable[[AgentSession], Coroutine[Any, Any, None]] | None] = None
+    during: ClassVar[Callable[[WorkspaceHost], Coroutine[Any, Any, None]] | None] = None
     # Why each app's session is halted as it exits, if it is.
     halted: ClassVar[str | None] = None
     # Whether each app was to have the user pick a session at startup.
@@ -158,16 +159,20 @@ class FakeApp:
 
 
 @pytest.fixture
-def launched(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> list[AgentSession]:
-    def session(*args: Any, usage: UsageSource | None = None, **kwargs: Any) -> AgentSession:
-        built = AgentSession(*args, usage=usage, **kwargs)
+def launched(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> list[WorkspaceHost]:
+    def session(*args: Any, **kwargs: Any) -> WorkspaceHost:
+        built = WorkspaceHost(*args, **kwargs)
         FakeApp.launched.append(built)
         FakeApp.threads.append(threading.current_thread().name)
-        FakeApp.usage_sources.append(usage)
         return built
 
+    def plane(host: WorkspaceHost, usage: UsageSource | None = None) -> ControlPlane:
+        FakeApp.usage_sources.append(usage)
+        return ControlPlane(host, usage)
+
     monkeypatch.setattr("orbit.cli.chat.OrbitApp", FakeApp)
-    monkeypatch.setattr("orbit.cli.backend.AgentSession", session)
+    monkeypatch.setattr("orbit.cli.backend.WorkspaceHost", session)
+    monkeypatch.setattr("orbit.cli.backend.ControlPlane", plane)
     FakeApp.launched = []
     FakeApp.threads = []
     FakeApp.usage_sources = []
@@ -216,11 +221,11 @@ class Greeted:
 
 
 @pytest.fixture
-def greetings(launched: list[AgentSession]) -> list[Greeted]:
+def greetings(launched: list[WorkspaceHost]) -> list[Greeted]:
     """What each chat's session publishes once greeted, while its app runs."""
     seen: list[Greeted] = []
 
-    async def greet_it(session: AgentSession) -> None:
+    async def greet_it(session: WorkspaceHost) -> None:
         await greeted(session)
         events = queued(session)
         notices = [e.message for e in events if isinstance(e, Notice)]
@@ -244,7 +249,7 @@ def test_chat_works_in_the_current_directory_by_default(
 
 @pytest.mark.parametrize("flag", ["-C", "--workspace"])
 def test_chat_works_in_the_workspace_it_is_given(
-    launched: list[AgentSession],
+    launched: list[WorkspaceHost],
     greetings: list[Greeted],
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -269,7 +274,7 @@ def test_chat_works_in_the_workspace_it_is_given(
 
 
 def test_a_workspace_inside_a_git_repository_is_its_top_level(
-    launched: list[AgentSession], greetings: list[Greeted], tmp_path: Path
+    launched: list[WorkspaceHost], greetings: list[Greeted], tmp_path: Path
 ) -> None:
     repo = tmp_path / "repo"
     sub = repo / "src" / "pkg"
@@ -287,7 +292,7 @@ def test_a_workspace_inside_a_git_repository_is_its_top_level(
 
 
 def test_a_workspace_outside_git_is_used_as_given(
-    launched: list[AgentSession], tmp_path: Path
+    launched: list[WorkspaceHost], tmp_path: Path
 ) -> None:
     plain = tmp_path / "plain" / "sub"
     plain.mkdir(parents=True)
@@ -336,7 +341,7 @@ def legacy_sessions(directory: Path) -> Path:
     return sessions
 
 
-def store_in(session: AgentSession) -> SqliteStore:
+def store_in(session: WorkspaceHost) -> SqliteStore:
     store = store_of(session)
     assert isinstance(store, SqliteStore)
     return store
@@ -356,7 +361,7 @@ async def stored_ids(state: Path, workspace: Path) -> list[str]:
 
 
 def test_chat_keeps_sessions_in_the_store_in_the_state_directory(
-    launched: list[AgentSession], state: Path, tmp_path: Path
+    launched: list[WorkspaceHost], state: Path, tmp_path: Path
 ) -> None:
     assert runner.invoke(app, ["chat", "-C", str(tmp_path)]).exit_code == 0
 
@@ -374,7 +379,7 @@ def adds_tasks(*prompts: str, before_last: Callable[[], None] = lambda: None) ->
     given their tasks."""
     ids: list[str] = []
 
-    async def add(session: AgentSession) -> None:
+    async def add(session: WorkspaceHost) -> None:
         for n, prompt in enumerate(prompts, 1):
             if n == len(prompts):
                 await logged_tasks(session, n - 1)
@@ -387,7 +392,7 @@ def adds_tasks(*prompts: str, before_last: Callable[[], None] = lambda: None) ->
     return ids
 
 
-async def logged_tasks(session: AgentSession, count: int) -> None:
+async def logged_tasks(session: WorkspaceHost, count: int) -> None:
     """Wait until the latest task list the session logged in its store holds ``count`` tasks,
     as the log is written behind the events' delivery."""
     async with asyncio.timeout(60):
@@ -395,7 +400,7 @@ async def logged_tasks(session: AgentSession, count: int) -> None:
             await asyncio.sleep(0.01)
 
 
-async def logged_task_count(session: AgentSession) -> int | None:
+async def logged_task_count(session: WorkspaceHost) -> int | None:
     """How many tasks the latest task list the session logged in its store holds; ``None``
     before it logged one."""
     events = await store_in(session).recent(session.saved_session.id, 100)
@@ -433,7 +438,7 @@ LONG = "x" * 2048
 
 
 def test_chat_parks_unsaved_events_in_the_state_directory(
-    launched: list[AgentSession], state: Path, tmp_path: Path
+    launched: list[WorkspaceHost], state: Path, tmp_path: Path
 ) -> None:
     ids = adds_tasks("Saved, so its events are kept.", "parked", before_last=unwritable_log(state))
     assert runner.invoke(app, ["chat", "-C", str(tmp_path)]).exit_code == 0
@@ -450,7 +455,7 @@ def test_chat_parks_unsaved_events_in_the_state_directory(
 
 
 def test_the_state_directory_option_wins_over_the_environment(
-    launched: list[AgentSession], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    launched: list[WorkspaceHost], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.chdir(tmp_path)
     assert runner.invoke(app, ["chat", "--state-dir", "elsewhere"]).exit_code == 0
@@ -461,7 +466,7 @@ def test_the_state_directory_option_wins_over_the_environment(
 
 
 def test_without_a_user_config_chat_keeps_long_text_whole_and_logs_untrimmed(
-    launched: list[AgentSession], tmp_path: Path
+    launched: list[WorkspaceHost], tmp_path: Path
 ) -> None:
     ids = adds_tasks(LONG)
     assert runner.invoke(app, ["chat"]).exit_code == 0
@@ -472,7 +477,7 @@ def test_without_a_user_config_chat_keeps_long_text_whole_and_logs_untrimmed(
 
 
 def test_chat_cuts_long_text_as_the_storage_settings_in_the_config_directory_say(
-    launched: list[AgentSession], config_dir: Path, state: Path, tmp_path: Path
+    launched: list[WorkspaceHost], config_dir: Path, state: Path, tmp_path: Path
 ) -> None:
     config_dir.mkdir()
     (config_dir / "config.toml").write_text("[storage]\ntool_output_kb = 1\n\n[server]\n")
@@ -486,7 +491,7 @@ def test_chat_cuts_long_text_as_the_storage_settings_in_the_config_directory_say
 
 
 def test_chat_trims_the_log_as_the_storage_settings_in_the_config_directory_say(
-    launched: list[AgentSession], config_dir: Path, state: Path, tmp_path: Path
+    launched: list[WorkspaceHost], config_dir: Path, state: Path, tmp_path: Path
 ) -> None:
     config_dir.mkdir()
     (config_dir / "config.toml").write_text("[storage]\ntool_output_kb = 0\nsession_log_mb = 1\n")
@@ -501,7 +506,7 @@ def test_chat_trims_the_log_as_the_storage_settings_in_the_config_directory_say(
 
 
 def test_the_config_directory_option_wins_over_the_environment(
-    launched: list[AgentSession], state: Path, tmp_path: Path
+    launched: list[WorkspaceHost], state: Path, tmp_path: Path
 ) -> None:
     (tmp_path / "start" / "mine").mkdir()
     (tmp_path / "start" / "mine" / "config.toml").write_text("[storage]\ntool_output_kb = 1\n")
@@ -526,7 +531,7 @@ def test_the_config_directory_option_wins_over_the_environment(
     ],
 )
 def test_an_invalid_storage_setting_stops_chat_naming_the_file_and_the_key(
-    launched: list[AgentSession], config_dir: Path, line: str, key: str
+    launched: list[WorkspaceHost], config_dir: Path, line: str, key: str
 ) -> None:
     config_dir.mkdir()
     path = config_dir / "config.toml"
@@ -593,11 +598,11 @@ class Order:
 
 
 @pytest.fixture
-def orders(launched: list[AgentSession]) -> list[Order]:
+def orders(launched: list[WorkspaceHost]) -> list[Order]:
     """Where the Snapshot and the notices come in what each chat's session publishes first."""
     seen: list[Order] = []
 
-    async def greet_it(session: AgentSession) -> None:
+    async def greet_it(session: WorkspaceHost) -> None:
         await greeted(session)
         events = queued(session)
         snapshot = next(n for n, event in enumerate(events) if isinstance(event, Snapshot))
@@ -623,7 +628,7 @@ def test_chat_recovers_parked_events_and_notes_it_after_the_snapshot(
 
 
 def test_a_parked_file_that_cant_be_read_stops_chat_naming_it(
-    launched: list[AgentSession], state: Path, tmp_path: Path
+    launched: list[WorkspaceHost], state: Path, tmp_path: Path
 ) -> None:
     path = park(state, tmp_path, 1)
     path.write_text("not an envelope\n")
@@ -637,7 +642,7 @@ def test_a_parked_file_that_cant_be_read_stops_chat_naming_it(
 
 
 def test_a_database_newer_than_orbit_stops_chat(
-    launched: list[AgentSession], state: Path, tmp_path: Path
+    launched: list[WorkspaceHost], state: Path, tmp_path: Path
 ) -> None:
     state.mkdir()
     with closing(sqlite3.connect(state / "orbit.db", isolation_level=None)) as connection:
@@ -663,7 +668,7 @@ def held(lock: Path) -> Iterator[None]:
 
 
 def test_old_sessions_another_orbit_has_open_stop_chat(
-    launched: list[AgentSession], state: Path, tmp_path: Path
+    launched: list[WorkspaceHost], state: Path, tmp_path: Path
 ) -> None:
     sessions = legacy_sessions(tmp_path / ".orbit")
     with held(sessions / "abc.lock"):
@@ -678,11 +683,11 @@ def test_old_sessions_another_orbit_has_open_stop_chat(
 
 
 def test_two_orbits_with_one_state_directory_cant_open_one_session_at_once(
-    launched: list[AgentSession], state: Path, tmp_path: Path
+    launched: list[WorkspaceHost], state: Path, tmp_path: Path
 ) -> None:
     taken: list[bool] = []
 
-    async def open_twice(session: AgentSession) -> None:
+    async def open_twice(session: WorkspaceHost) -> None:
         taken.append(await store_in(session).acquire("abc"))
         other = await SqliteStore.open(state, str(tmp_path.resolve()))
         try:
@@ -696,14 +701,14 @@ def test_two_orbits_with_one_state_directory_cant_open_one_session_at_once(
 
 
 def test_a_session_saved_opens_again_after_a_restart(
-    launched: list[AgentSession], tmp_path: Path
+    launched: list[WorkspaceHost], tmp_path: Path
 ) -> None:
     loaded: list[SessionRecord | Unreadable] = []
 
-    async def save(session: AgentSession) -> None:
+    async def save(session: WorkspaceHost) -> None:
         await store_in(session).save(SAVED)
 
-    async def load(session: AgentSession) -> None:
+    async def load(session: WorkspaceHost) -> None:
         loaded.append(await store_in(session).load("abc"))
 
     for during in (save, load):
@@ -712,7 +717,7 @@ def test_a_session_saved_opens_again_after_a_restart(
     assert loaded == [SAVED]
 
 
-def test_a_missing_workspace_stops_chat(launched: list[AgentSession], tmp_path: Path) -> None:
+def test_a_missing_workspace_stops_chat(launched: list[WorkspaceHost], tmp_path: Path) -> None:
     before = Path.cwd()
     result = runner.invoke(app, ["chat", "-C", str(tmp_path / "nowhere")])
 
@@ -723,7 +728,7 @@ def test_a_missing_workspace_stops_chat(launched: list[AgentSession], tmp_path: 
 
 
 def test_a_workspace_that_is_a_file_stops_chat(
-    launched: list[AgentSession], tmp_path: Path
+    launched: list[WorkspaceHost], tmp_path: Path
 ) -> None:
     file = tmp_path / "notes.txt"
     file.write_text("hi\n")
@@ -734,14 +739,14 @@ def test_a_workspace_that_is_a_file_stops_chat(
     assert launched == []
 
 
-def test_chat_builds_the_backend_on_its_own_thread(launched: list[AgentSession]) -> None:
+def test_chat_builds_the_backend_on_its_own_thread(launched: list[WorkspaceHost]) -> None:
     assert runner.invoke(app, ["chat"]).exit_code == 0
 
     assert len(launched) == 1
     assert FakeApp.threads == ["orbit-backend"]
 
 
-def test_chat_runs_tui_against_claude_cli(launched: list[AgentSession]) -> None:
+def test_chat_runs_tui_against_claude_cli(launched: list[WorkspaceHost]) -> None:
     result = runner.invoke(app, ["chat"])
 
     assert result.exit_code == 0
@@ -765,7 +770,7 @@ def test_chat_has_the_user_pick_a_session_at_startup(
 
 
 def test_chat_new_starts_a_new_session_named_for_the_time(
-    launched: list[AgentSession],
+    launched: list[WorkspaceHost],
     greetings: list[Greeted],
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -781,7 +786,7 @@ def test_chat_new_starts_a_new_session_named_for_the_time(
 
 
 def test_chat_name_starts_a_new_session_with_that_name(
-    launched: list[AgentSession],
+    launched: list[WorkspaceHost],
     greetings: list[Greeted],
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -796,7 +801,7 @@ def test_chat_name_starts_a_new_session_with_that_name(
     assert session.saved_session.name == "auth rework"
 
 
-def test_chat_accepts_model_and_tool_access(launched: list[AgentSession]) -> None:
+def test_chat_accepts_model_and_tool_access(launched: list[WorkspaceHost]) -> None:
     result = runner.invoke(app, ["chat", "--model", "opus", "--tools", "full"])
 
     assert result.exit_code == 0
@@ -805,7 +810,7 @@ def test_chat_accepts_model_and_tool_access(launched: list[AgentSession]) -> Non
     assert session.pinned == ("model", "tool_access")
 
 
-def test_chat_pins_only_the_settings_given(launched: list[AgentSession]) -> None:
+def test_chat_pins_only_the_settings_given(launched: list[WorkspaceHost]) -> None:
     result = runner.invoke(app, ["chat", "--tools", "off"])
 
     assert result.exit_code == 0
@@ -814,7 +819,7 @@ def test_chat_pins_only_the_settings_given(launched: list[AgentSession]) -> None
     assert session.pinned == ("tool_access",)
 
 
-def test_chat_rejects_unknown_tool_access(launched: list[AgentSession]) -> None:
+def test_chat_rejects_unknown_tool_access(launched: list[WorkspaceHost]) -> None:
     result = runner.invoke(app, ["chat", "--tools", "sometimes"])
 
     assert result.exit_code == 2
@@ -822,7 +827,7 @@ def test_chat_rejects_unknown_tool_access(launched: list[AgentSession]) -> None:
 
 
 def test_chat_verifies_tasks_with_the_project_files_steps(
-    launched: list[AgentSession], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    launched: list[WorkspaceHost], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     (tmp_path / ".orbit").mkdir()
     (tmp_path / ".orbit" / "config.toml").write_text(
@@ -839,7 +844,7 @@ def test_chat_verifies_tasks_with_the_project_files_steps(
 
 
 def test_chat_without_steps_verifies_nothing(
-    launched: list[AgentSession], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    launched: list[WorkspaceHost], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.chdir(tmp_path)
     result = runner.invoke(app, ["chat"])
@@ -849,7 +854,7 @@ def test_chat_without_steps_verifies_nothing(
     assert session.verification == Verification((), run_step, workspace_state)
 
 
-def test_chat_can_turn_verification_off(launched: list[AgentSession]) -> None:
+def test_chat_can_turn_verification_off(launched: list[WorkspaceHost]) -> None:
     result = runner.invoke(app, ["chat", "--no-verify"])
 
     assert result.exit_code == 0
@@ -857,7 +862,7 @@ def test_chat_can_turn_verification_off(launched: list[AgentSession]) -> None:
     assert session.verification is None
 
 
-def test_chat_runs_tasks_through_agents_connected_over_mcp(launched: list[AgentSession]) -> None:
+def test_chat_runs_tasks_through_agents_connected_over_mcp(launched: list[WorkspaceHost]) -> None:
     result = runner.invoke(app, ["chat"])
 
     assert result.exit_code == 0
@@ -872,7 +877,7 @@ def test_chat_runs_tasks_through_agents_connected_over_mcp(launched: list[AgentS
 
 
 def test_chat_works_in_the_coder_tree_inside_a_git_repository(
-    launched: list[AgentSession], monkeypatch: pytest.MonkeyPatch
+    launched: list[WorkspaceHost], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr("orbit.cli.backend.in_git_work_tree", lambda path: True)
     result = runner.invoke(app, ["chat"])
@@ -883,7 +888,7 @@ def test_chat_works_in_the_coder_tree_inside_a_git_repository(
 
 
 def test_chat_works_in_place_outside_a_git_repository(
-    launched: list[AgentSession], monkeypatch: pytest.MonkeyPatch
+    launched: list[WorkspaceHost], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr("orbit.cli.backend.in_git_work_tree", lambda path: False)
     result = runner.invoke(app, ["chat"])
@@ -892,7 +897,7 @@ def test_chat_works_in_place_outside_a_git_repository(
     assert session.agents is not None and session.agents.tree is None
 
 
-def test_chat_can_turn_the_coder_tree_off(launched: list[AgentSession]) -> None:
+def test_chat_can_turn_the_coder_tree_off(launched: list[WorkspaceHost]) -> None:
     result = runner.invoke(app, ["chat", "--no-worktree"])
     assert result.exit_code == 0
     [session] = launched
@@ -900,7 +905,7 @@ def test_chat_can_turn_the_coder_tree_off(launched: list[AgentSession]) -> None:
 
 
 def test_chat_reads_roles_and_limits_from_the_project_file(
-    launched: list[AgentSession], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    launched: list[WorkspaceHost], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     (tmp_path / ".orbit").mkdir()
     (tmp_path / ".orbit" / "config.toml").write_text(
@@ -916,7 +921,7 @@ def test_chat_reads_roles_and_limits_from_the_project_file(
 
 
 def test_chat_gives_verification_the_project_files_fallback_fixes(
-    launched: list[AgentSession], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    launched: list[WorkspaceHost], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     (tmp_path / ".orbit").mkdir()
     (tmp_path / ".orbit" / "config.toml").write_text("fix_attempts = 2\nfallback_fixes = 7\n")
@@ -931,7 +936,7 @@ def test_chat_gives_verification_the_project_files_fallback_fixes(
 
 
 def test_chat_sets_up_the_coder_tree_as_the_project_file_says(
-    launched: list[AgentSession], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    launched: list[WorkspaceHost], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     (tmp_path / ".orbit").mkdir()
     (tmp_path / ".orbit" / "config.toml").write_text(
@@ -946,7 +951,7 @@ def test_chat_sets_up_the_coder_tree_as_the_project_file_says(
     assert session.agents.tree.setup == Setup(command=("make", "deps"), watch=("deps.lock",))
 
 
-def planner_role_read_after(config: Path, text: str, launched: list[AgentSession]) -> object:
+def planner_role_read_after(config: Path, text: str, launched: list[WorkspaceHost]) -> object:
     """The planner's role the chat's session reads again once ``config`` reads ``text``."""
     [session] = launched
     assert session.agents is not None and session.agents.planner_role is not None
@@ -955,7 +960,7 @@ def planner_role_read_after(config: Path, text: str, launched: list[AgentSession
 
 
 def test_chat_rereads_the_planners_role_from_the_project_file(
-    launched: list[AgentSession], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    launched: list[WorkspaceHost], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     (tmp_path / ".orbit").mkdir()
     config = tmp_path / ".orbit" / "config.toml"
@@ -966,7 +971,7 @@ def test_chat_rereads_the_planners_role_from_the_project_file(
 
 
 def test_rereading_an_invalid_project_file_gives_its_problems(
-    launched: list[AgentSession], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    launched: list[WorkspaceHost], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     (tmp_path / ".orbit").mkdir()
     config = tmp_path / ".orbit" / "config.toml"
@@ -977,7 +982,7 @@ def test_rereading_an_invalid_project_file_gives_its_problems(
 
 
 def test_an_invalid_project_file_stops_chat_with_its_problems(
-    launched: list[AgentSession], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    launched: list[WorkspaceHost], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     (tmp_path / ".orbit").mkdir()
     (tmp_path / ".orbit" / "config.toml").write_text("[roles.coder]\ntool_access = 'maybe'\n")
@@ -989,7 +994,7 @@ def test_an_invalid_project_file_stops_chat_with_its_problems(
 
 
 def test_a_non_utf8_project_file_stops_chat_as_invalid(
-    launched: list[AgentSession], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    launched: list[WorkspaceHost], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     (tmp_path / ".orbit").mkdir()
     (tmp_path / ".orbit" / "config.toml").write_bytes(b"fix_attempts = '\xff'\n")
@@ -1001,7 +1006,7 @@ def test_a_non_utf8_project_file_stops_chat_as_invalid(
 
 
 def test_a_project_file_that_is_a_directory_stops_chat_as_invalid(
-    launched: list[AgentSession], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    launched: list[WorkspaceHost], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     (tmp_path / ".orbit" / "config.toml").mkdir(parents=True)
     monkeypatch.chdir(tmp_path)
@@ -1012,7 +1017,7 @@ def test_a_project_file_that_is_a_directory_stops_chat_as_invalid(
 
 
 def test_chat_reviews_landed_work_with_the_files_limits(
-    launched: list[AgentSession], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    launched: list[WorkspaceHost], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     (tmp_path / ".orbit").mkdir()
     (tmp_path / ".orbit" / "config.toml").write_text(
@@ -1031,14 +1036,14 @@ def test_chat_reviews_landed_work_with_the_files_limits(
     )
 
 
-def test_chat_can_turn_review_off(launched: list[AgentSession]) -> None:
+def test_chat_can_turn_review_off(launched: list[WorkspaceHost]) -> None:
     runner.invoke(app, ["chat", "--no-review"])
     [session] = launched
     assert session.agents is not None and not session.agents.review
 
 
 def test_chat_checks_the_steps_at_startup(
-    launched: list[AgentSession], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    launched: list[WorkspaceHost], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     (tmp_path / ".orbit").mkdir()
     (tmp_path / ".orbit" / "config.toml").write_text(
@@ -1055,13 +1060,13 @@ def test_chat_checks_the_steps_at_startup(
 
 
 @pytest.fixture
-def usage_sources(launched: list[AgentSession]) -> list[UsageSource | None]:
+def usage_sources(launched: list[WorkspaceHost]) -> list[UsageSource | None]:
     """The usage sources chat gives its sessions."""
     return FakeApp.usage_sources
 
 
 def test_chat_shows_usage_limits_from_the_claude_login(
-    launched: list[AgentSession], usage_sources: list[UsageSource | None]
+    launched: list[WorkspaceHost], usage_sources: list[UsageSource | None]
 ) -> None:
     assert runner.invoke(app, ["chat"]).exit_code == 0
     [source] = usage_sources
@@ -1070,7 +1075,7 @@ def test_chat_shows_usage_limits_from_the_claude_login(
 
 
 def test_chat_fetches_no_real_usage_in_tests(
-    launched: list[AgentSession], usage_sources: list[UsageSource | None]
+    launched: list[WorkspaceHost], usage_sources: list[UsageSource | None]
 ) -> None:
     # A real fetch would use the login of whoever runs the tests, and the network.
     assert runner.invoke(app, ["chat"]).exit_code == 0
@@ -1080,7 +1085,7 @@ def test_chat_fetches_no_real_usage_in_tests(
 
 
 def test_chat_can_turn_usage_limits_off(
-    launched: list[AgentSession], usage_sources: list[UsageSource | None]
+    launched: list[WorkspaceHost], usage_sources: list[UsageSource | None]
 ) -> None:
     assert runner.invoke(app, ["chat", "--no-usage"]).exit_code == 0
     assert usage_sources == [None]
@@ -1088,7 +1093,7 @@ def test_chat_can_turn_usage_limits_off(
 
 
 def test_chat_can_profile_the_app(
-    launched: list[AgentSession], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    launched: list[WorkspaceHost], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     project = tmp_path / "project"
     project.mkdir()
@@ -1111,7 +1116,7 @@ def test_chat_can_profile_the_app(
 
 
 def test_chat_runs_the_app_unprofiled_by_default(
-    launched: list[AgentSession], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    launched: list[WorkspaceHost], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.chdir(tmp_path)
     assert runner.invoke(app, ["chat"]).exit_code == 0
@@ -1122,7 +1127,7 @@ def test_chat_runs_the_app_unprofiled_by_default(
 
 
 def test_exiting_while_halted_prints_why_to_stderr(
-    launched: list[AgentSession], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    launched: list[WorkspaceHost], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.chdir(tmp_path)
     FakeApp.halted = "Orbit stopped this session: saving the event log failed."
@@ -1133,7 +1138,7 @@ def test_exiting_while_halted_prints_why_to_stderr(
 
 
 def test_exiting_while_halted_after_profiling_prints_why_too(
-    launched: list[AgentSession], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    launched: list[WorkspaceHost], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.chdir(tmp_path)
     FakeApp.halted = "Halted."
@@ -1143,7 +1148,7 @@ def test_exiting_while_halted_after_profiling_prints_why_too(
 
 
 def test_exiting_unhalted_prints_nothing(
-    launched: list[AgentSession], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    launched: list[WorkspaceHost], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.chdir(tmp_path)
     assert runner.invoke(app, ["chat"]).stderr == ""
@@ -1284,11 +1289,11 @@ class Standing:
 
 
 @pytest.fixture
-def standings(launched: list[AgentSession]) -> list[Standing]:
+def standings(launched: list[WorkspaceHost]) -> list[Standing]:
     """How each chat's session stood once greeted, while its app ran."""
     seen: list[Standing] = []
 
-    async def greet_it(session: AgentSession) -> None:
+    async def greet_it(session: WorkspaceHost) -> None:
         await greeted(session)
         events = queued(session)
         notices = [e.message for e in events if isinstance(e, Notice)]
@@ -1315,11 +1320,11 @@ def test_a_chat_on_a_repository_another_orbit_owns_is_read_only_naming_it(
 
 
 def test_a_chat_owns_a_repository_no_other_orbit_holds_until_it_ends(
-    launched: list[AgentSession], tmp_path: Path
+    launched: list[WorkspaceHost], tmp_path: Path
 ) -> None:
     refused: list[WorkspaceOwner | None] = []
 
-    async def try_to_take(session: AgentSession) -> None:
+    async def try_to_take(session: WorkspaceHost) -> None:
         refused.append(WorkspaceLock(tmp_path / ".orbit").take())
 
     FakeApp.during = try_to_take
@@ -1350,7 +1355,7 @@ def test_a_chat_owns_a_repository_whose_owners_process_ended(
 
 
 def test_a_repository_that_cant_be_locked_stops_chat(
-    launched: list[AgentSession], tmp_path: Path
+    launched: list[WorkspaceHost], tmp_path: Path
 ) -> None:
     (tmp_path / ".orbit").write_text("a file, not orbit's directory")
     result = runner.invoke(app, ["chat", "-C", str(tmp_path)])
@@ -1372,12 +1377,12 @@ class Made:
 
     def __call__(
         self, backend: _Backend, directories: _Directories, *, pick_session: bool
-    ) -> tuple[Callable[[], AgentSession], SqliteStore]:
+    ) -> tuple[Callable[[], ControlPlane], SqliteStore]:
         self.backends.append((backend, pick_session))
         store = asyncio.run(SqliteStore.open(directories.state, str(directories.root)))
         self.stores.append(store)
 
-        def build() -> AgentSession:
+        def build() -> ControlPlane:
             raise AssertionError("Nothing builds the session here.")
 
         return build, store

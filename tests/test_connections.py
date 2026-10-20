@@ -7,7 +7,7 @@ from dataclasses import replace
 import pytest
 
 from orbit import __version__
-from orbit.agent import AgentSession
+from orbit.agent import WorkspaceHost
 from orbit.agent.application.connection import (
     QUEUE_LIMIT,
     TOO_FAR_BEHIND,
@@ -51,8 +51,11 @@ from tests.agent_fakes import (
     Steps,
     Ticks,
     agent_exited,
+    close,
+    connect,
     events_until,
     publish,
+    served,
     session_for,
 )
 from tests.test_attach import EARLIER, joined, stored, workspace
@@ -68,9 +71,9 @@ async def say(connection: SessionConnection, command_id: str, command: Command) 
     await connection.send(CommandEnvelope(command_id=command_id, payload=command))
 
 
-async def welcomed(session: AgentSession, name: str) -> SessionConnection:
+async def welcomed(session: WorkspaceHost, name: str) -> SessionConnection:
     """A new connection to ``session`` that has said Hello as ``name``."""
-    connection = session.connect()
+    connection = connect(session)
     await say(connection, name, HELLO)
     return connection
 
@@ -121,7 +124,7 @@ def welcome(command_id: str) -> Welcome:
 
 
 async def test_each_connection_gets_its_own_welcome_catalog_and_snapshot() -> None:
-    session = AgentSession()
+    session = WorkspaceHost()
     first = await welcomed(session, "first")
     second = await welcomed(session, "second")
     await session.close()
@@ -132,7 +135,7 @@ async def test_each_connection_gets_its_own_welcome_catalog_and_snapshot() -> No
 
 
 async def test_a_command_on_one_connection_reaches_every_welcomed_one_with_its_outcome() -> None:
-    session = AgentSession()
+    session = WorkspaceHost()
     first = await welcomed(session, "first")
     second = await welcomed(session, "second")
     await taken(first), await taken(second)
@@ -146,7 +149,7 @@ async def test_a_command_on_one_connection_reaches_every_welcomed_one_with_its_o
 
 
 async def test_a_history_page_reaches_only_the_connection_that_asked() -> None:
-    session = AgentSession()
+    session = WorkspaceHost()
     first = await welcomed(session, "first")
     second = await welcomed(session, "second")
     await taken(first), await taken(second)
@@ -159,7 +162,7 @@ async def test_a_history_page_reaches_only_the_connection_that_asked() -> None:
 
 
 async def test_a_new_session_gives_every_connection_its_catalog_and_snapshot() -> None:
-    session = AgentSession()
+    session = WorkspaceHost()
     first = await welcomed(session, "first")
     second = await welcomed(session, "second")
     await taken(first), await taken(second)
@@ -182,7 +185,7 @@ def catalog_names(events: list[Event]) -> list[list[str]]:
 
 
 async def test_a_rename_gives_every_connection_the_updated_catalog() -> None:
-    session = AgentSession()
+    session = WorkspaceHost()
     first = await welcomed(session, "first")
     second = await welcomed(session, "second")
     await taken(first), await taken(second)
@@ -195,10 +198,10 @@ async def test_a_rename_gives_every_connection_the_updated_catalog() -> None:
 
 
 async def test_a_command_before_hello_is_refused_on_that_connection_alone() -> None:
-    session = AgentSession()
+    session = WorkspaceHost()
     first = await welcomed(session, "first")
     await taken(first)
-    second = session.connect()
+    second = connect(session)
 
     await say(second, "early", AddTask(task=TASK))
 
@@ -209,7 +212,7 @@ async def test_a_command_before_hello_is_refused_on_that_connection_alone() -> N
 
 
 async def test_a_connection_that_falls_too_far_behind_is_closed_and_the_others_carry_on() -> None:
-    session = AgentSession()
+    session = WorkspaceHost()
     stalled = await welcomed(session, "stalled")
     reading = await welcomed(session, "reading")
     await taken(reading)
@@ -236,7 +239,7 @@ async def test_a_connection_that_falls_too_far_behind_is_closed_and_the_others_c
 
 
 async def test_an_unreadable_command_is_refused_to_every_welcomed_connection() -> None:
-    session = AgentSession()
+    session = WorkspaceHost()
     first = await welcomed(session, "first")
     second = await welcomed(session, "second")
     await taken(first), await taken(second)
@@ -249,10 +252,10 @@ async def test_an_unreadable_command_is_refused_to_every_welcomed_connection() -
 
 
 async def test_an_unreadable_command_before_hello_is_refused_on_that_connection_alone() -> None:
-    session = AgentSession()
+    session = WorkspaceHost()
     first = await welcomed(session, "first")
     await taken(first)
-    second = session.connect()
+    second = connect(session)
 
     await second.refuse("c1", INVALID, "Not a command")
 
@@ -262,7 +265,7 @@ async def test_an_unreadable_command_before_hello_is_refused_on_that_connection_
 
 
 async def test_an_unreadable_command_on_a_closed_connection_is_not_refused() -> None:
-    session = AgentSession()
+    session = WorkspaceHost()
     connection = await welcomed(session, "closed")
     await taken(connection)
     await connection.close()
@@ -274,7 +277,7 @@ async def test_an_unreadable_command_on_a_closed_connection_is_not_refused() -> 
 
 
 async def test_closing_one_connection_leaves_the_others_working() -> None:
-    session = AgentSession()
+    session = WorkspaceHost()
     first = await welcomed(session, "first")
     second = await welcomed(session, "second")
     await taken(second)
@@ -291,7 +294,7 @@ async def test_closing_one_connection_leaves_the_others_working() -> None:
 
 
 async def test_closing_the_session_ends_every_connections_stream() -> None:
-    session = AgentSession()
+    session = WorkspaceHost()
     first = await welcomed(session, "first")
     second = await welcomed(session, "second")
 
@@ -304,9 +307,9 @@ async def test_closing_the_session_ends_every_connections_stream() -> None:
 async def test_a_connection_made_after_the_session_closed_ends_at_once_and_ignores_commands() -> (
     None
 ):
-    session = AgentSession()
+    session = WorkspaceHost()
     await session.close()
-    connection = session.connect()
+    connection = connect(session)
 
     await say(connection, "late", HELLO)
 
@@ -328,8 +331,8 @@ async def test_the_startup_check_runs_once_for_the_first_connection_only() -> No
 
 
 async def test_an_event_for_a_closed_connection_is_dropped() -> None:
-    session = AgentSession()
-    connection = session.connect()
+    session = WorkspaceHost()
+    connection = connect(session)
     await connection.close()
 
     connection.receive(EventEnvelope(seq=1, payload=Notice(message="late")))
@@ -345,7 +348,8 @@ def greeting(events: list[Event]) -> list[Event]:
 
 async def test_a_second_hello_greets_only_the_connection_saying_it() -> None:
     usage = Source(UsageReport(LIMITS))
-    session = AgentSession(workspace="w", startup_notes=["n"], usage=usage)
+    session = WorkspaceHost(workspace="w", startup_notes=["n"])
+    served(session, usage)
     first = await welcomed(session, "first")
     seen = await taken(first)
     while UsageChanged(limits=LIMITS) not in seen:
@@ -359,11 +363,11 @@ async def test_a_second_hello_greets_only_the_connection_saying_it() -> None:
         Notice(message="Workspace: w"),
         Notice(message="n"),
     ]
-    await session.close()
+    await close(session)
 
 
 async def test_a_second_hellos_failed_greeting_step_reaches_only_that_connection() -> None:
-    session = AgentSession()
+    session = WorkspaceHost()
     first = await welcomed(session, "first")
     await taken(first)
 
@@ -380,7 +384,7 @@ async def test_a_second_hellos_failed_greeting_step_reaches_only_that_connection
 
 
 async def test_a_greetings_notices_are_not_logged() -> None:
-    session = AgentSession(store=FakeStore(), workspace="w", startup_notes=["n"])
+    session = WorkspaceHost(store=FakeStore(), workspace="w", startup_notes=["n"])
     first = await welcomed(session, "first")
     second = await welcomed(session, "second")
     await taken(first), await taken(second)
@@ -409,7 +413,7 @@ async def rejoined(
     """A connection to a session over ``store`` that has said Hello with ``since``, the ``live``
     events published while what it missed was being read, after which it had ``check`` see the
     connection, before what it missed was returned."""
-    session = AgentSession(store=store, clock=Ticks(), new_id=lambda: OPEN)
+    session = WorkspaceHost(store=store, clock=Ticks(), new_id=lambda: OPEN)
     read = session._greeting.missed
 
     async def slow(seen: int) -> Sequence[EventEnvelope] | None:
@@ -420,7 +424,7 @@ async def rejoined(
         return missed
 
     session._greeting = replace(session._greeting, missed=slow)
-    connection = session.connect()
+    connection = connect(session)
     hello = Hello(client="orbit-tests", protocol_version=HELLO.protocol_version, since=since)
     await say(connection, "rejoin", hello)
     return connection
@@ -471,7 +475,7 @@ async def test_a_connection_whose_held_events_overflow_is_closed_as_too_far_behi
 
 
 async def test_a_catalog_from_a_task_a_command_started_reaches_every_connection() -> None:
-    session = AgentSession()
+    session = WorkspaceHost()
     first = await welcomed(session, "first")
     catalog = next(e for e in await taken(first) if isinstance(e, Catalog))
     asker = await welcomed(session, "asker")
@@ -497,7 +501,7 @@ async def test_a_catalog_from_a_task_a_command_started_reaches_every_connection(
 
 
 async def test_a_new_session_gives_the_others_a_catalog_listing_it() -> None:
-    session = AgentSession()
+    session = WorkspaceHost()
     asker = await welcomed(session, "asker")
     other = await welcomed(session, "other")
     await taken(asker), await taken(other)
@@ -523,7 +527,7 @@ async def test_a_delete_gives_every_connection_a_catalog_without_the_session() -
 
 
 async def test_a_closed_connection_gets_no_catalog_after_a_rename() -> None:
-    session = AgentSession()
+    session = WorkspaceHost()
     asker = await welcomed(session, "asker")
     closed = await welcomed(session, "closed")
     await taken(asker), await taken(closed)
@@ -537,7 +541,7 @@ async def test_a_closed_connection_gets_no_catalog_after_a_rename() -> None:
 
 
 async def test_a_connection_not_yet_welcomed_gets_only_its_greetings_catalog() -> None:
-    session = AgentSession()
+    session = WorkspaceHost()
     asker = await welcomed(session, "asker")
     await taken(asker)
     go = asyncio.Event()
@@ -548,7 +552,7 @@ async def test_a_connection_not_yet_welcomed_gets_only_its_greetings_catalog() -
         return await fetch()
 
     session._greeting = replace(session._greeting, catalog=slow)
-    joining = session.connect()
+    joining = connect(session)
     greeting = asyncio.create_task(say(joining, "joining", HELLO))
     await asyncio.sleep(0.01)
     await say(asker, "rename", RenameSession(session_id=session.saved_session.id, name="Kept"))

@@ -9,9 +9,9 @@ import pytest
 
 from orbit.agent import (
     NO_STEPS_NOTE,
-    AgentSession,
     Verification,
     VerificationStep,
+    WorkspaceHost,
     run_step,
 )
 from orbit.agent.application.agent_run import AgentRun
@@ -96,7 +96,7 @@ async def keeps_claiming(call: Call) -> TurnEndReason:
     return "completed"
 
 
-async def idle(session: AgentSession) -> list[Event]:
+async def idle(session: WorkspaceHost) -> list[Event]:
     """The session's events until it next goes idle."""
     events: list[Event] = []
     async for event in payloads(session):
@@ -152,7 +152,7 @@ async def test_running_does_nothing_when_nothing_is_runnable() -> None:
 
 
 async def test_running_without_agents_is_refused() -> None:
-    session = AgentSession()
+    session = WorkspaceHost()
     await send(session, AddTask(task=TaskSpec(prompt="a")))
     await send(session, RunTasks())
     stream = payloads(session)
@@ -309,7 +309,7 @@ def first_board(events: list[Event], shows: Callable[[tuple[TaskState, ...]], bo
 
 
 async def test_a_fix_completes_after_the_task_it_fixed_is_removed() -> None:
-    sessions: list[AgentSession] = []
+    sessions: list[WorkspaceHost] = []
 
     async def removes_what_it_fixes(call: Call) -> TurnEndReason:
         await call("get_task")

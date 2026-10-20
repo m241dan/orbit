@@ -2,7 +2,7 @@
 
 import pytest
 
-from orbit.agent import AgentSession
+from orbit.agent import WorkspaceHost
 from orbit.agent.domain.replay import LogBounds, can_replay
 from orbit.protocol import (
     PROTOCOL_VERSION,
@@ -72,7 +72,7 @@ def store_with(*logged: EventEnvelope) -> FakeStore:
 
 async def reconnected(store: FakeStore | None, since: int | None) -> list[EventEnvelope]:
     """What a session over ``store`` sends a frontend greeting it with ``since``."""
-    session = AgentSession(store=store, clock=Ticks(), new_id=lambda: OPEN, workspace="/work")
+    session = WorkspaceHost(store=store, clock=Ticks(), new_id=lambda: OPEN, workspace="/work")
     hello = Hello(client="orbit-tests", protocol_version=PROTOCOL_VERSION, since=since)
     await frontend(session).send(CommandEnvelope(command_id=HELLO_ID, payload=hello))
     await session.close()
@@ -97,7 +97,7 @@ async def test_a_reconnecting_frontend_gets_what_it_missed_in_place_of_a_snapsho
 
 async def test_events_still_to_be_written_are_caught_up_on_once() -> None:
     store = GatedLog()
-    session = AgentSession(store=store, clock=Ticks(), new_id=lambda: OPEN)
+    session = WorkspaceHost(store=store, clock=Ticks(), new_id=lambda: OPEN)
     await session._events.put(Notice(message="a"))
     await store.waiting.wait()  # 1 is being written.
     await session._events.put(Notice(message="b"))

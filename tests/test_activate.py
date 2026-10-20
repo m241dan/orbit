@@ -3,7 +3,7 @@ the activating connection then views live while the others keep viewing what the
 
 import asyncio
 
-from orbit.agent import AgentSession
+from orbit.agent import WorkspaceHost
 from orbit.agent.application.connection import SessionConnection
 from orbit.agent.domain.sessions import SessionRecord
 from orbit.protocol import (
@@ -45,7 +45,7 @@ OPEN_RETIRED = (
 )
 
 
-async def used(session: AgentSession, name: str) -> SessionConnection:
+async def used(session: WorkspaceHost, name: str) -> SessionConnection:
     """A connection to ``session`` that has added a task to the open session, so it's saved,
     and read what that brought."""
     connection = await joined(session, name)
@@ -148,7 +148,7 @@ async def test_others_following_an_unsaved_session_left_get_the_activated_one() 
 
 async def test_others_following_an_unsaved_session_left_get_a_new_one() -> None:
     ids = iter((OPEN, "fresh-id"))
-    session = AgentSession(store=stored(), clock=Ticks(), new_id=lambda: next(ids), name="today")
+    session = WorkspaceHost(store=stored(), clock=Ticks(), new_id=lambda: next(ids), name="today")
     creating = await joined(session, "creating")
     other = await joined(session, "other")
     await taken(creating)
@@ -162,7 +162,7 @@ async def test_others_following_an_unsaved_session_left_get_a_new_one() -> None:
 
 async def test_a_new_session_is_activated_for_the_connection_creating_it() -> None:
     ids = iter((OPEN, "fresh-id"))
-    session = AgentSession(store=stored(), clock=Ticks(), new_id=lambda: next(ids), name="today")
+    session = WorkspaceHost(store=stored(), clock=Ticks(), new_id=lambda: next(ids), name="today")
     creating = await used(session, "creating")
     other = await joined(session, "other")
     await taken(creating)

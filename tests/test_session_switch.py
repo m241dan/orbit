@@ -5,7 +5,7 @@ import asyncio
 from datetime import UTC, datetime
 from typing import Any
 
-from orbit.agent import Agents, AgentSession, Verification, VerificationStep
+from orbit.agent import Agents, Verification, VerificationStep, WorkspaceHost
 from orbit.agent.domain.activity import PLANNER_ANSWERING, REVIEW_RUNNING, TASKS_RUNNING
 from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.reviews import LaneSnapshot, PlannerSnapshot
@@ -94,10 +94,10 @@ def store_with(*records: SessionRecord) -> FakeStore:
 
 def switching(
     store: FakeStore, *scripts: Script, reviews: bool = True, **session: Any
-) -> tuple[AgentSession, ScriptedLauncher]:
+) -> tuple[WorkspaceHost, ScriptedLauncher]:
     """A session saved in ``store``, as ``session-1`` then ``session-2`` and so on, whose tasks
     run through agents playing ``scripts``, reviewing them if ``reviews``; ``session`` goes to
-    :class:`AgentSession`."""
+    :class:`WorkspaceHost`."""
     host = FakeHost()
     launcher = ScriptedLauncher(host, *scripts)
     tokens = iter(f"token-{n}" for n in range(1, 100))
@@ -106,7 +106,7 @@ def switching(
         host, launcher, lambda: next(tokens), ROLES, Limits(), tree=tree, review=reviews
     )
     ids = iter(f"session-{n}" for n in range(1, 100))
-    built = AgentSession(
+    built = WorkspaceHost(
         agents=agents, store=store, clock=Ticks(), new_id=lambda: next(ids), **session
     )
     return built, launcher
@@ -124,7 +124,7 @@ def errors(events: list[Event]) -> list[tuple[str, str]]:
     return [(e.code, e.message) for e in events if isinstance(e, ErrorOccurred)]
 
 
-async def opened(session: AgentSession, command: ActivateSession | NewSession) -> list[Event]:
+async def opened(session: WorkspaceHost, command: ActivateSession | NewSession) -> list[Event]:
     """The events from sending ``command`` until its session is opened, and its notes."""
     await send(session, command)
     await send(session, ListSessions())  # Marks the end of the notes that follow.
@@ -132,7 +132,7 @@ async def opened(session: AgentSession, command: ActivateSession | NewSession) -
 
 
 async def refused(
-    session: AgentSession, command: ActivateSession | NewSession
+    session: WorkspaceHost, command: ActivateSession | NewSession
 ) -> list[tuple[str, str]]:
     """The codes and messages ``command`` is refused with, reporting no error."""
     await send(session, command)
@@ -176,7 +176,7 @@ async def test_sessions_list_newest_first_marking_the_current_locked_and_unreada
 
 
 async def test_without_a_store_no_sessions_are_listed() -> None:
-    session = AgentSession()
+    session = WorkspaceHost()
     await send(session, ListSessions())
     listed = last_of(SessionsListed, await events_until(session, of_type(SessionsListed)))
     assert listed.sessions == ()
@@ -194,13 +194,13 @@ async def test_a_session_picking_at_startup_lists_no_sessions_unasked() -> None:
 LEFTOVER = "2 commits on orbit/coder not yet merged into main."
 
 
-def starting(**session: Any) -> AgentSession:
+def starting(**session: Any) -> WorkspaceHost:
     """A session started without the list of sessions, whose coder's tree has a leftover;
-    ``session`` goes to :class:`AgentSession`."""
+    ``session`` goes to :class:`WorkspaceHost`."""
     host = FakeHost()
     tree = FakeTree(leftovers=(LEFTOVER,))
     agents = Agents(host, ScriptedLauncher(host), lambda: "token", ROLES, Limits(), tree=tree)
-    return AgentSession(agents=agents, store=FakeStore(), clock=Ticks(), **session)
+    return WorkspaceHost(agents=agents, store=FakeStore(), clock=Ticks(), **session)
 
 
 async def test_a_session_started_without_the_list_is_snapshot_before_the_leftovers() -> None:
@@ -516,7 +516,7 @@ async def test_a_new_session_has_a_fresh_planner_conversation() -> None:
     await session.close()
 
 
-async def with_a_chain_out_of_fixes(store: FakeStore, *scripts: Script) -> AgentSession:
+async def with_a_chain_out_of_fixes(store: FakeStore, *scripts: Script) -> WorkspaceHost:
     """A session whose task 1 failed verification until its fix, task 2, ran out of fixes,
     whose later tasks run through agents playing ``scripts``."""
     always_fails = Steps(*[False] * 40)
@@ -534,7 +534,7 @@ async def with_a_chain_out_of_fixes(store: FakeStore, *scripts: Script) -> Agent
     return session
 
 
-async def ran(session: AgentSession, *tasks: TaskSpec) -> tuple[TaskState, ...]:
+async def ran(session: WorkspaceHost, *tasks: TaskSpec) -> tuple[TaskState, ...]:
     """The board once ``tasks`` were added and ran."""
     for task in tasks:
         await send(session, AddTask(task=task))
@@ -576,7 +576,7 @@ def spent_live(events: list[Event]) -> Usage:
     return sum(finished, Usage())
 
 
-async def spent_on_a_removed_task(session: AgentSession, launcher: ScriptedLauncher) -> Usage:
+async def spent_on_a_removed_task(session: WorkspaceHost, launcher: ScriptedLauncher) -> Usage:
     """What ``session`` spent, as its events showed it, on a planner turn and a task that was
     removed once it ran."""
     launcher.planner_turns = [chats]
@@ -662,7 +662,7 @@ async def test_the_sessions_list_shows_what_a_session_spent() -> None:
     await session.close()
 
 
-def failing_startup(store: FakeStore, gate: asyncio.Event | None = None) -> AgentSession:
+def failing_startup(store: FakeStore, gate: asyncio.Event | None = None) -> WorkspaceHost:
     """A session for the user to pick, whose startup check fails, once ``gate`` opens if given,
     adding a draft to fix it."""
     lint = VerificationStep(name="Lint", command=("ruff", "check"))
@@ -756,7 +756,7 @@ async def test_a_switch_whose_old_lock_cant_be_released_still_opens_the_session(
 async def test_a_session_without_agents_opens_its_board_and_settings() -> None:
     settings = Settings(model="opus")
     store = store_with(saved("auth", state("1", "pending"), settings=settings))
-    session = AgentSession(store=store, clock=Ticks())
+    session = WorkspaceHost(store=store, clock=Ticks())
     events = await opened(session, ActivateSession(session="auth"))
     assert [t.id for t in last_of(Snapshot, events).tasks] == ["1"]
     assert session.settings == settings
@@ -781,7 +781,7 @@ async def test_a_session_without_reviews_keeps_the_reviews_of_the_session_it_ope
 
 async def test_a_session_without_a_planner_keeps_the_conversation_of_the_session_it_opens() -> None:
     store = store_with(saved("auth", state("1", "pending"), planner_conversation="conv-1"))
-    session = AgentSession(store=store, clock=Ticks())
+    session = WorkspaceHost(store=store, clock=Ticks())
     await opened(session, ActivateSession(session="auth"))
     assert store.last.id == "auth" and store.last.planner_conversation == "conv-1"
     await opened(session, NewSession())

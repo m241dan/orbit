@@ -12,7 +12,7 @@ from websockets.asyncio.server import Server, ServerConnection, serve
 from websockets.datastructures import Headers
 from websockets.http11 import Request, Response
 
-from orbit.agent import AgentSession
+from orbit.agent import ControlPlane, WorkspaceHost
 from orbit.agent.domain.server import ServerSettings
 from orbit.agent.external.control_plane import ControlPlaneServer
 from orbit.client import Backoff, TokenUnreadable, WebSocketSession, messages, read_token
@@ -514,7 +514,7 @@ async def test_a_connection_dropped_without_a_close_frame_is_reconnected_after()
 
 
 async def test_an_incompatible_hello_ends_the_link_to_the_control_plane_server() -> None:
-    served = AgentSession()
+    served = ControlPlane(WorkspaceHost())
     server = ControlPlaneServer(served, lambda: TOKEN, ServerSettings(port=0), lambda line: None)
     url = await server.start()
     session, states = client(url)
@@ -610,7 +610,7 @@ async def test_the_backoff_doubles_up_to_its_most_and_jitters() -> None:
 
 
 async def test_it_talks_to_the_control_plane_server() -> None:
-    served = AgentSession()
+    served = ControlPlane(WorkspaceHost())
     server = ControlPlaneServer(served, lambda: TOKEN, ServerSettings(port=0), lambda line: None)
     url = await server.start()
     session, _ = client(url)
@@ -626,7 +626,7 @@ async def test_it_talks_to_the_control_plane_server() -> None:
 
 async def test_a_rotated_token_file_is_shown_on_reconnecting() -> None:
     tokens = [TOKEN]
-    served = AgentSession()
+    served = ControlPlane(WorkspaceHost())
     server = ControlPlaneServer(
         served, lambda: tokens[-1], ServerSettings(port=0), lambda line: None
     )

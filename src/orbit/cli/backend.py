@@ -13,9 +13,9 @@ import typer
 from orbit.agent import (
     MODEL_ALIASES,
     Agents,
-    AgentSession,
     ClaudeCliRunner,
     ConfigError,
+    ControlPlane,
     GitCoderTree,
     ImportBlocked,
     McpHost,
@@ -28,6 +28,7 @@ from orbit.agent import (
     StoreError,
     UsageApi,
     Verification,
+    WorkspaceHost,
     WorkspaceLock,
     WorkspaceOwner,
     git_top_level,
@@ -96,19 +97,19 @@ class _Directories:
 
 
 class _MakeBackend(Protocol):
-    """What builds the session a backend asks for, as :func:`_backend` does."""
+    """What builds the control plane a backend asks for, as :func:`_backend` does."""
 
     def __call__(
         self, backend: _Backend, directories: _Directories, *, pick_session: bool
-    ) -> tuple[Callable[[], AgentSession], SqliteStore]: ...
+    ) -> tuple[Callable[[], ControlPlane], SqliteStore]: ...
 
 
 @dataclass(frozen=True)
 class _InProcess:
-    """A backend set up in this process: what ``build``s its session, its ``store``, and the
-    workspace ``lock``, with the repository's ``owner`` if another orbit owns it."""
+    """A backend set up in this process: what ``build``s its control plane, its ``store``, and
+    the workspace ``lock``, with the repository's ``owner`` if another orbit owns it."""
 
-    build: Callable[[], AgentSession]
+    build: Callable[[], ControlPlane]
     store: SqliteStore
     lock: WorkspaceLock
     owner: WorkspaceOwner | None
@@ -155,9 +156,10 @@ def _repository_lock(root: Path) -> Iterator[tuple[WorkspaceLock, WorkspaceOwner
 
 def _backend(
     backend: _Backend, directories: _Directories, *, pick_session: bool
-) -> tuple[Callable[[], AgentSession], SqliteStore]:
-    """What builds the session ``backend`` asks for in ``directories``, listing the saved
-    sessions to pick from if ``pick_session``, and the store.
+) -> tuple[Callable[[], ControlPlane], SqliteStore]:
+    """What builds the control plane over the workspace host ``backend`` asks for in
+    ``directories``, listing the saved sessions to pick from if ``pick_session``, and the
+    store.
 
     Exits with status 2 if a configuration is invalid or the store can't be opened.
     """
@@ -170,15 +172,14 @@ def _backend(
     usage_source = UsageApi() if backend.usage else None
     opened = _open_store(directories.state, root)
 
-    def build() -> AgentSession:
-        return AgentSession(
+    def build() -> ControlPlane:
+        host = WorkspaceHost(
             settings,
             model_choices=MODEL_ALIASES,
             verification=verification,
             agents=agents,
             workspace=str(root),
             check_at_startup=True,
-            usage=usage_source,
             store=opened.store,
             pinned=pinned,
             pick_session=pick_session,
@@ -189,6 +190,7 @@ def _backend(
             owner=backend.owner,
             lock=backend.lock,
         )
+        return ControlPlane(host, usage_source)
 
     return build, opened.store
 

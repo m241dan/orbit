@@ -11,7 +11,7 @@ import pytest
 from websockets.asyncio.server import ServerConnection, serve
 from websockets.exceptions import InvalidMessage
 
-from orbit.agent import AgentSession
+from orbit.agent import ControlPlane, WorkspaceHost
 from orbit.agent.domain.server import ServerSettings, client_fingerprint
 from orbit.agent.external.control_plane import ControlPlaneServer
 from orbit.client import (
@@ -63,7 +63,7 @@ def _settings(files: ServerFiles) -> ServerSettings:
 @asynccontextmanager
 async def control_plane(settings: ServerSettings) -> AsyncIterator[int]:
     """A control plane serving as ``settings`` say, and its port."""
-    served = AgentSession()
+    served = ControlPlane(WorkspaceHost())
     server = ControlPlaneServer(served, lambda: TOKEN, settings, lambda line: None)
     url = await server.start()
     try:
