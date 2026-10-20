@@ -947,7 +947,9 @@ machine needs the new copy first. Copy the new token to your other machines as b
 trusted channel.
 
 The `[server]` table in your `config.toml` sets where it listens, the largest message either
-way and how it serves TLS; the flags override it:
+way and how it serves TLS; the flags override it. The server enforces `max_message_mb` on what
+it accepts and on what it sends, and chats take whatever size their server sends, so raising it
+on the server is enough:
 
 ```toml
 [server]

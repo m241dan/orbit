@@ -27,7 +27,6 @@ from orbit.client.tls import refuse_plaintext
 from orbit.client.token import TokenUnreadable, read_token
 from orbit.client.upgrade import HandshakeRefused, TokenRejected, open_connection
 from orbit.protocol import (
-    DEFAULT_MAX_MESSAGE_MB,
     GOING_AWAY,
     MESSAGE_TOO_BIG,
     NORMAL,
@@ -51,9 +50,6 @@ from orbit.protocol import (
     decode_event,
     encode,
 )
-
-MAX_MESSAGE_BYTES = DEFAULT_MAX_MESSAGE_MB * 1024 * 1024
-"""The largest message taken from the control plane, as large as it sends by default."""
 
 PING_SECONDS = 20
 """How often the connection is pinged, and how long a ping may go unanswered before it's
@@ -99,7 +95,7 @@ class _Ended(Exception):
 
 def _closing(websocket: ClientConnection) -> Close | None:
     """The close frame ``websocket`` received, else the one it sent, as one it fails on its
-    own, such as for a message over the limit, isn't answered; none if neither was."""
+    own, such as for a frame breaking the protocol, isn't answered; none if neither was."""
     return websocket.protocol.close_rcvd or websocket.protocol.close_sent
 
 
@@ -257,7 +253,8 @@ class WebSocketSession:
                 ssl_context=self._ssl_context,
                 ping_interval=PING_SECONDS,
                 ping_timeout=PING_SECONDS,
-                max_size=MAX_MESSAGE_BYTES,
+                # Unlimited: the control plane, shown the token, enforces its own limit.
+                max_size=None,
             )
         except TokenRejected:
             raise _TurnedAway(messages.TOKEN_REFUSED.format(path=self._token_file)) from None

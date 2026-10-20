@@ -16,7 +16,6 @@ from orbit.agent import AgentSession
 from orbit.agent.domain.server import ServerSettings
 from orbit.agent.external.control_plane import ControlPlaneServer
 from orbit.client import Backoff, TokenUnreadable, WebSocketSession, messages, read_token
-from orbit.client.session import MAX_MESSAGE_BYTES
 from orbit.protocol import (
     DEFAULT_MAX_MESSAGE_MB,
     NOT_CONNECTED,
@@ -465,18 +464,15 @@ async def test_a_close_that_would_recur_ends_the_link_with_its_reason(
         await session.close()
 
 
-async def test_an_event_over_the_clients_limit_ends_the_link(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr("orbit.client.session.MAX_MESSAGE_BYTES", 100)
+async def test_an_event_over_the_default_limit_is_taken() -> None:
+    large = "x" * (DEFAULT_MAX_MESSAGE_MB * 1024 * 1024 + 1)
     async with plane() as (fake, url):
         session, states = client(url)
-        session.events()
-        await (await fake.connection()).send(event(1, "x" * 200))
-        ended = await states.until(Ended)
-        assert isinstance(ended, Ended) and ended.url == url
-        await asyncio.sleep(0.1)
-        assert fake.connections.empty()
+        events = session.events()
+        await (await fake.connection()).send(event(1, large))
+        envelope = await asyncio.wait_for(anext(events), 60)  # Slow to encode and decode.
+        assert envelope.payload == Notice(message=large)
+        assert [type(state) for state in states.seen] == [Connected]
         await session.close()
 
 
@@ -636,15 +632,6 @@ async def test_a_rotated_token_file_is_shown_on_reconnecting() -> None:
     finally:
         await session.close()
         await server.stop(served.close)
-
-
-def test_messages_up_to_the_servers_default_limit_are_taken() -> None:
-    assert ServerSettings().max_message_bytes == MAX_MESSAGE_BYTES
-
-
-def test_both_limits_come_from_the_shared_default() -> None:
-    assert ServerSettings().max_message_mb == DEFAULT_MAX_MESSAGE_MB
-    assert MAX_MESSAGE_BYTES == DEFAULT_MAX_MESSAGE_MB * 1024 * 1024
 
 
 def test_the_token_is_read_from_its_file(tmp_path: Path) -> None:

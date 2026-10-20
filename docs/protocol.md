@@ -374,11 +374,13 @@ outcomes of other connections' commands included, but for the events answering o
   type the server doesn't know, else `invalid`; the connection stays open. One without a
   readable `command_id`, such as text that isn't JSON, or a binary frame, closes the WebSocket
   with code 1008 and the decoding error as the reason.
-- **The message limit** is 64 MiB each way by default (`max_message_mb` in `[server]` of the
-  server's `config.toml`). A larger frame from the frontend, or an event too large to send to
-  it, closes the WebSocket with code 1009 and a reason saying how large it was. A frontend
-  doesn't reconnect after a 1009, from either side, as replaying what it missed would send the
-  same event again.
+- **The message limit** is the server's: 64 MiB each way by default (`max_message_mb` in
+  `[server]` of the server's `config.toml`), enforced by the server both on the frames it
+  accepts and on the events it sends. A larger frame from the frontend, or an event too large to
+  send to it, closes the WebSocket with code 1009 and a reason saying how large it was. The
+  frontend sets no limit of its own, taking any event the server sends, so a server with a
+  raised limit is followed. A frontend doesn't reconnect after a 1009, as replaying what it
+  missed would send the same event again.
 - **Slow clients**: the server holds at most 10,000 events unsent to one connection. One more
   closes the WebSocket with code 1008 and the reason `too far behind`, and the session and its
   other connections carry on; the frontend reconnects with `Hello`'s `since` to catch up.
