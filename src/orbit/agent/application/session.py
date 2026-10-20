@@ -335,7 +335,7 @@ class AgentSession:
             self._states,
             self._settings,
             self._snapshot,
-            lambda: self._ownership.read_only,
+            self._ownership,
         )
         return SessionViews(parts)
 

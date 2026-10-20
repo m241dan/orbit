@@ -11,6 +11,7 @@ from orbit.protocol import (
     BUSY,
     INVALID,
     AddTask,
+    Catalog,
     CommandEnvelope,
     CommandRefused,
     ErrorOccurred,
@@ -40,6 +41,8 @@ from tests.agent_fakes import (
     queued,
     send,
     session_for,
+    sole,
+    views_on_joining,
 )
 
 OWNER = WorkspaceOwner(pid=42)
@@ -167,6 +170,18 @@ async def test_taking_over_lets_reviews_run() -> None:
     await send(session, TakeOwnership(take=True))
 
     assert lane_of(session).running
+    await session.close()
+
+
+async def test_taking_over_clears_read_only_from_the_catalog_and_snapshot() -> None:
+    lock = FakeLock(free=True)
+    session, _, _ = session_for(owner=OWNER, lock=lock)
+    await greeted(session)
+    await events_until(session, offered)
+    await send(session, TakeOwnership(take=True))
+    events = await views_on_joining(session)
+
+    assert not sole(events, Catalog).read_only and not sole(events, Snapshot).read_only
     await session.close()
 
 

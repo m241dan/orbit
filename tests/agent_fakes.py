@@ -794,6 +794,17 @@ async def greeted(session: Session | AgentSession) -> None:
         await greet(session)
 
 
+async def views_on_joining(session: AgentSession) -> list[Event]:
+    """The events a new connection to ``session`` gets for its Hello, up to its Snapshot."""
+    connection = session.connect()
+    await connection.send(CommandEnvelope(command_id="join", payload=HELLO))
+    stream = connection.events()
+    events = [(await asyncio.wait_for(anext(stream), 5)).payload]
+    while not isinstance(events[-1], Snapshot):
+        events.append((await asyncio.wait_for(anext(stream), 5)).payload)
+    return events
+
+
 def nothing_queued(session: AgentSession) -> bool:
     """Whether the session has no events queued for its frontend."""
     return _queue_of(session).empty()

@@ -15,9 +15,7 @@ from orbit.protocol import (
     Catalog,
     Command,
     CommandAccepted,
-    CommandEnvelope,
     CommandRefused,
-    Event,
     FireTrigger,
     Notice,
     RunTasks,
@@ -28,7 +26,6 @@ from orbit.protocol import (
 )
 from tests.agent_fakes import (
     ACCEPTED,
-    HELLO,
     Call,
     FakeTree,
     Steps,
@@ -44,6 +41,7 @@ from tests.agent_fakes import (
     sole,
     startup_of,
     verified,
+    views_on_joining,
 )
 
 OWNER = WorkspaceOwner(pid=42)
@@ -218,17 +216,6 @@ async def test_owning_the_shared_ownership_lets_the_review_lane_run_reviews() ->
     lane.kick()
     assert lane.running
     await session.close()
-
-
-async def views_on_joining(session: AgentSession) -> list[Event]:
-    """The events a new connection to ``session`` gets for its Hello, up to its Snapshot."""
-    connection = session.connect()
-    await connection.send(CommandEnvelope(command_id="join", payload=HELLO))
-    stream = connection.events()
-    events = [(await asyncio.wait_for(anext(stream), 5)).payload]
-    while not isinstance(events[-1], Snapshot):
-        events.append((await asyncio.wait_for(anext(stream), 5)).payload)
-    return events
 
 
 async def test_owning_the_shared_ownership_clears_read_only_from_the_catalog_and_snapshot() -> None:
