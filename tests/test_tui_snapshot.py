@@ -285,6 +285,50 @@ async def test_a_replayed_call_of_the_planner_listed_running_stays_running() -> 
         assert call_statuses(app, "coder") == ["running"]
 
 
+RESTARTED_CALL = (
+    AgentStarted(agent_id="agent-3", role="coder", task_id="2"),
+    ToolCallStarted(turn_id="c2", agent_id="agent-3", call_id="y", name="Read", arguments={}),
+)
+"""A coder's call in a run orbit started, after a restart, under the crashed run's id."""
+
+
+async def test_a_replayed_call_of_an_earlier_run_under_a_running_agents_id_shows_no_result() -> (
+    None
+):
+    session = FakeSession()
+    app = OrbitApp(session)
+    restarted = SNAPSHOT.model_copy(update={"transcript": logged(*CRASHED_CALL, *RESTARTED_CALL)})
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, restarted)
+        assert call_statuses(app, "coder") == ["no_result", "running"]
+        assert call_statuses(app, None) == ["no_result", "running"]
+
+
+async def test_a_replayed_request_of_an_earlier_run_under_a_running_agents_id_shows_no_result() -> (
+    None
+):
+    session = FakeSession()
+    app = OrbitApp(session)
+    request = AgentRequest(agent_id="agent-3", request_id="r0", tool="get_task", arguments={})
+    events = logged(CODER_CALL[0], request, *RESTARTED_CALL)
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, SNAPSHOT.model_copy(update={"transcript": events}))
+        assert call_statuses(app, "coder") == ["no_result", "running"]
+        assert call_statuses(app, None) == ["no_result", "running"]
+
+
+async def test_an_agent_starting_under_an_id_ends_the_earlier_runs_calls_live() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, SNAPSHOT.model_copy(update={"agents": ()}))
+        await feed_events(session, pilot, *CRASHED_CALL)
+        assert app.query_one(Transcript).ticking
+        await feed_events(session, pilot, RESTARTED_CALL[0])
+        assert call_statuses(app, "coder") == ["no_result"]
+        assert not app.query_one(Transcript).ticking
+
+
 async def test_a_snapshots_transcript_shows_a_reset_and_a_refusal_as_they_were_shown() -> None:
     session = FakeSession()
     app = OrbitApp(session)

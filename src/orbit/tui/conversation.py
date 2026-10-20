@@ -144,7 +144,8 @@ class ConversationFeed:
         """Show ``events`` in place of the conversation and its running turns, as they were
         shown when they happened, with tabs for the agents ``running``, whose entries go under
         their pinned roles' tabs even when ``events`` don't hold their start. The calls and
-        requests of agents not ``running`` show as having no result."""
+        requests of agents not ``running``, and of runs a later start under the same id
+        ended, show as having no result."""
         self.transcript.clear()
         self.tabs.reset(running)
         self._turns = Turns()
@@ -217,8 +218,9 @@ class ConversationFeed:
         self.transcript.add_entry(Entry(text, kind), key)
 
     def _render_activity(self, event: AgentNote | AgentRequest | AgentExited) -> None:
-        """Show an agent's activity, a notice or the startup check's result; an agent's exit
-        ends its run in one rule, and a request to orbit is an entry its reply updates."""
+        """Show an agent's activity, a notice or the startup check's result; an agent's start
+        ends the calls and requests of any earlier run under its id, its exit ends its run in
+        one rule, and a request to orbit is an entry its reply updates."""
         if isinstance(event, AgentExited):
             self._agent_exited(event)
         elif isinstance(event, AgentRequest):
@@ -227,6 +229,8 @@ class ConversationFeed:
             self._replied(event)
         else:
             if isinstance(event, AgentStarted):
+                # Ids start again when orbit restarts: an earlier run under this one is over.
+                self.transcript.end_tool_calls(event.agent_id, requests=True)
                 self._turns = agent_started(self._turns, event, self.clock())
             self.append(*activity_entry(event), getattr(event, "agent_id", None))
 

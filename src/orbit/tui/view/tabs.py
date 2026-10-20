@@ -136,7 +136,7 @@ def stopped_callers(
 ) -> tuple[str | None, ...]:
     """The agents that start tool calls or requests to orbit in ``events`` but aren't among
     the ``agents`` running, so none of their calls can still run; the planner's agent is among
-    them from its first turn until the session ends."""
+    those running from its first turn until the session ends."""
     running = {agent.agent_id for agent in agents}
     callers = (e.agent_id for e in events if isinstance(e, ToolCallStarted | AgentRequest))
     return tuple(dict.fromkeys(agent for agent in callers if agent not in running))
