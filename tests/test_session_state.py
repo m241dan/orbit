@@ -18,16 +18,20 @@ from orbit.protocol import (
     Event,
     RunTasks,
     SendMessage,
+    Session,
     SessionState,
     SessionStateChanged,
     SessionSummary,
     Settings,
     Snapshot,
     TaskSpec,
+    TurnEndReason,
 )
 from tests.agent_fakes import (
     HELLO,
+    Call,
     FakeStore,
+    FakeTree,
     Steps,
     Ticks,
     frontend,
@@ -91,7 +95,7 @@ async def say(connection: SessionConnection, command_id: str, command: Command) 
     await connection.send(CommandEnvelope(command_id=command_id, payload=command))
 
 
-async def taken(connection: SessionConnection) -> list[Event]:
+async def taken(connection: Session) -> list[Event]:
     """What reached ``connection`` until nothing more comes for a moment."""
     events: list[Event] = []
     stream = connection.events()
@@ -134,6 +138,36 @@ async def test_a_task_run_makes_the_open_session_running_until_it_ends() -> None
     await session.close()
 
     assert changes(events) == [state("running"), state("idle")]
+
+
+async def test_a_review_keeps_the_open_session_running_until_it_ends() -> None:
+    reviewing, gate = asyncio.Event(), asyncio.Event()
+
+    async def gated_review(call: Call) -> TurnEndReason:
+        await call("get_task")
+        reviewing.set()
+        await gate.wait()
+        await call("complete_task", summary="Reviewed")
+        return "completed"
+
+    session, _, _ = session_for(
+        claims_done, reviewers=(gated_review,), tree=FakeTree(), review=True
+    )
+    await greeted_and_counted(session)
+    await send(session, AddTask(task=TASK))
+    await send(session, RunTasks())
+    running = await asyncio.wait_for(until(session, running_now), 5)
+    await asyncio.wait_for(reviewing.wait(), 5)
+    during = await taken(frontend(session))
+    gate.set()
+    ended = await asyncio.wait_for(until(session, idle_again), 5)
+    await session.close()
+
+    assert (changes(running), changes(during), changes(ended)) == (
+        [state("running")],
+        [],
+        [state("idle")],
+    )
 
 
 async def test_a_planner_turn_makes_the_open_session_running_until_it_ends() -> None:
