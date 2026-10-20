@@ -352,6 +352,26 @@ def test_a_read_only_serve_that_takes_the_repository_over_writes_its_run_file_un
 
 
 @pytest.mark.usefixtures("quick_retries")
+def test_a_chat_discovers_a_read_only_serve_once_it_takes_the_repository_over(
+    monkeypatch: pytest.MonkeyPatch, project: Path, state: Path, config_dir: Path
+) -> None:
+    owner = WorkspaceLock(project / ".orbit")
+    owner.take()
+    answers = _answers_the_offer(owner, True, state, [])
+    found: list[chat.Discovered | None] = []
+
+    def discovers(websocket: ClientConnection) -> list[Event]:
+        events = answers(websocket)
+        found.append(chat.discover_control_plane(state, project, config_dir / "token", config_dir))
+        return events
+
+    frontend = Frontend(state, config_dir, discovers, _listening_urls(monkeypatch))
+    served(frontend, "--port", "0")
+    [discovered] = found
+    assert discovered is not None and discovered.url == frontend.run_file["url"]
+
+
+@pytest.mark.usefixtures("quick_retries")
 def test_a_read_only_serve_that_declines_the_repository_writes_no_run_file(
     monkeypatch: pytest.MonkeyPatch, project: Path, state: Path, config_dir: Path
 ) -> None:
@@ -367,23 +387,31 @@ def test_a_read_only_serve_that_declines_the_repository_writes_no_run_file(
 
 
 @pytest.mark.usefixtures("quick_retries")
-def test_a_serve_that_cant_write_its_run_file_on_taking_over_says_so_and_serves_on(
-    monkeypatch: pytest.MonkeyPatch, project: Path, state: Path, config_dir: Path
+def test_a_serve_that_cant_write_its_run_file_on_taking_over_warns_and_owns_the_repository(
+    monkeypatch: pytest.MonkeyPatch,
+    project: Path,
+    state: Path,
+    config_dir: Path,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     state.mkdir()
     (state / "run").write_text("not a directory\n")
     owner = WorkspaceLock(project / ".orbit")
     owner.take()
-    seen: list[list[str]] = []
-    work = _answers_the_offer(owner, True, state, seen)
-    frontend = Frontend(state, config_dir, work, _listening_urls(monkeypatch))
-    thread = frontend.start()
-    result = runner.invoke(app, ["serve", *QUIET, "--port", "0"])
-    thread.join(10)
+    answers = _answers_the_offer(owner, True, state, [])
+    owners: list[WorkspaceOwner] = []
 
-    assert result.exit_code == 0, result.output
-    assert f"Can't write the run file {state / 'run'}" in result.stderr
-    assert "Traceback" not in result.output
+    def reads_the_lock(websocket: ClientConnection) -> list[Event]:
+        events = answers(websocket)
+        owners.append(WorkspaceLock(project / ".orbit").owner())
+        return events
+
+    frontend = Frontend(state, config_dir, reads_the_lock, _listening_urls(monkeypatch))
+    output = served(frontend, "--port", "0")
+
+    assert f"Can't write the run file {state / 'run'}" in caplog.text
+    assert "Traceback" not in output
+    assert owners == [WorkspaceOwner(pid=os.getpid(), url=str(frontend.run_file["url"]))]
     assert isinstance(frontend.events[-1], CommandAccepted)
     assert (state / "run").read_text() == "not a directory\n"
 

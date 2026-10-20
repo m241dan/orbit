@@ -1337,7 +1337,7 @@ lock of its own: the server does.
 Any other orbit started on the repository meanwhile is read-only. It opens with a note naming the
 owner, such as "Read-only: an orbit chat, pid 4242 owns this repository. Tasks you run are queued
 until this orbit owns it.", and the prompt's title carries a "read-only" mark. `orbit serve`'s
-first line says so too, and it writes no run file, leaving the owner's for chats to find. Running
+first line says so too, and it writes no run file until it takes the repository over, leaving the owner's for chats to find. Running
 tasks (`ctrl+r`) and the triggers (`ctrl+g`, `ctrl+e`) are accepted and queued, in order, but
 nothing runs: no task, review or startup check. Those an owning orbit would refuse, such as a super
 review with reviews off, are refused just the same. It notes no work left in `.git/orbit` by
@@ -1347,7 +1347,7 @@ and settings work as usual. The queue is dropped when the orbit exits.
 A read-only orbit tries the lock every 5 seconds. Once the owner has gone, it takes the lock and
 asks, once, in a modal: "The repository is free". `y` takes it over: the orbit owns the
 repository from then on, the "read-only" mark goes, `orbit serve` writes its run file so chats
-find it (a run file it can't write is reported on stderr, and it serves on), a note says "This orbit now owns the
+find it (a run file it can't write is logged as a warning, and it serves on, owning the repository), a note says "This orbit now owns the
 repository; queued work is running." and the work queued runs, in order. `n` or `esc` stays
 read-only: the orbit lets the lock go again, so another orbit can take it, and asks again once
 another orbit has owned the repository and gone, or after 5 minutes if it's still free. Under `orbit serve`, every frontend connected asks, as does

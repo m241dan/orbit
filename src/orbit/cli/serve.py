@@ -330,13 +330,13 @@ def _taking_over(
 ) -> Callable[[], None]:
     """What says in ``run_file`` that this process is serving at ``url``, reached from this
     machine as ``local`` says, as it takes the repository over, adding it to ``written``; if it
-    can't, it says why on stderr and serves on."""
+    can't, it logs a warning saying why and serves on."""
 
     def owned() -> None:
         try:
             run_file.write(url, os.getpid(), local)
         except OSError as exc:
-            typer.echo(_unwritable(run_file, exc), err=True)
+            logger.warning("%s", _unwritable(run_file, exc))
             return
         written.append(run_file)
 

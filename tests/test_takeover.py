@@ -411,3 +411,14 @@ async def test_declining_the_offer_does_not_call_owned() -> None:
     await declined(session)
     assert calls == []
     await session.close()
+
+
+async def test_an_owner_from_the_start_never_calls_owned() -> None:
+    session, _, _ = session_for(lock=FakeLock(free=True))
+    calls: list[bool] = []
+    session.owned = lambda: calls.append(True)
+    await greeted(session)
+    await send(session, TakeOwnership(take=True))
+    await events_until(session, refused)
+    assert calls == []
+    await session.close()
