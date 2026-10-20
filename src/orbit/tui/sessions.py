@@ -46,7 +46,7 @@ from orbit.tui.view.sessions import (
     viewed_only,
     viewing_mark,
 )
-from orbit.tui.widgets import ConfirmScreen
+from orbit.tui.widgets import ConfirmScreen, ListScreen
 
 SessionChoice = Attach | ActivateSession | NewSession
 """What the user chose: a saved session to view, and perhaps activate, or a new one to start."""
@@ -62,7 +62,7 @@ Manage = Callable[[SessionChange], Awaitable[object]]
 whatever it returns is ignored."""
 
 
-class SessionsScreen(ModalScreen[tuple[SessionChoice, ...]]):
+class SessionsScreen(ListScreen[tuple[SessionChoice, ...]]):
     """Lists ``sessions`` before ``New session``: the one ``attached`` first (as ``Resume`` if
     ``startup`` is ``resume``, and not at all if it's ``pick``), then the others; dismisses with
     the commands the user's choice sends.
@@ -90,10 +90,6 @@ class SessionsScreen(ModalScreen[tuple[SessionChoice, ...]]):
     """
     BINDINGS: ClassVar[list[BindingType]] = [
         Binding("escape", "back", show=False),
-        # Vim-style movement alongside the list's own arrow keys; the name box takes them as
-        # typing, since a focused input handles keys first.
-        Binding("j", "move('down')", show=False),
-        Binding("k", "move('up')", show=False),
         Binding("r", "rename", show=False),
         Binding("x", "delete", show=False),
     ]
@@ -218,13 +214,6 @@ class SessionsScreen(ModalScreen[tuple[SessionChoice, ...]]):
         confirm = ConfirmScreen(DELETE_TITLE, delete_message(summary), DELETE_YES)
         self.app.push_screen(confirm, answered)
 
-    def action_move(self, direction: str) -> None:
-        options = self.query_one(OptionList)
-        if direction == "down":
-            options.action_cursor_down()
-        else:
-            options.action_cursor_up()
-
     def action_back(self) -> None:
         if self.query_one(Input).display:
             self._naming(False)
@@ -252,7 +241,7 @@ class SessionsScreen(ModalScreen[tuple[SessionChoice, ...]]):
         return sessions_hint(startup=self.startup, naming=naming, renaming=renaming is not None)
 
 
-class ActivationScreen(ModalScreen[bool]):
+class ActivationScreen(ListScreen[bool]):
     """Says ``message`` about the session viewed read-only and offers ``choices``, the first
     preselected; dismisses with True on making it the active session, False on just looking
     or escape."""
@@ -271,8 +260,6 @@ class ActivationScreen(ModalScreen[bool]):
     """
     BINDINGS: ClassVar[list[BindingType]] = [
         Binding("escape", "just_look", show=False),
-        Binding("j", "move('down')", show=False),
-        Binding("k", "move('up')", show=False),
     ]
 
     def __init__(self, message: str, choices: Sequence[str]) -> None:
@@ -292,13 +279,6 @@ class ActivationScreen(ModalScreen[bool]):
     @on(OptionList.OptionSelected)
     def _picked(self, event: OptionList.OptionSelected) -> None:
         self.dismiss(self.choices[event.option_index] == ACTIVATE_CHOICE)
-
-    def action_move(self, direction: str) -> None:
-        options = self.query_one(OptionList)
-        if direction == "down":
-            options.action_cursor_down()
-        else:
-            options.action_cursor_up()
 
     def action_just_look(self) -> None:
         self.dismiss(False)

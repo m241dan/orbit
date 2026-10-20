@@ -135,6 +135,7 @@ from orbit.tui.widgets import (
     ConfirmScreen,
     PickerScreen,
     mark_selected,
+    show_status,
 )
 
 
@@ -648,18 +649,14 @@ class OrbitApp(App[None], inherit_bindings=False):
 
     def _show_halt(self, status: str | None) -> None:
         """Show ``status`` by the prompt, or hide the line when there's none."""
-        line = self._halt_status
-        line.update(status or "")
-        line.display = status is not None
+        show_status(self._halt_status, status)
 
     def _follow_link(self, state: LinkState) -> None:
         self._link_host.follow(state, self.clock())
 
     def _show_link(self, status: str | None) -> None:
         """Show ``status`` by the prompt, or hide the line when there's none."""
-        line = self._link_status
-        line.update(status or "")
-        line.display = status is not None
+        show_status(self._link_status, status)
 
     def _render_session(
         self,
@@ -752,10 +749,7 @@ class OrbitApp(App[None], inherit_bindings=False):
 
     def _show_viewing(self) -> None:
         """Mark the prompt while the session viewed isn't the active one, or hide the mark."""
-        mark = self._sessions.mark
-        line = self._viewing
-        line.update(mark or "")
-        line.display = mark is not None
+        show_status(self._viewing, self._sessions.mark)
 
     def _render_state(
         self,

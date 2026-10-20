@@ -212,7 +212,30 @@ class PromptBox(ModalTextArea):
         super().__init__(text, soft_wrap=True, show_line_numbers=False, **kwargs)
 
 
-class PickerScreen(ModalScreen[int | None]):
+def show_status(line: Static, status: str | None) -> None:
+    """Show ``status`` on ``line``, or hide the line when there's none."""
+    line.update(status or "")
+    line.display = status is not None
+
+
+class ListScreen[T](ModalScreen[T]):
+    """Modal screen around an ``OptionList``, whose highlight ``j`` and ``k`` move alongside
+    the list's own arrow keys; a focused input handles keys first, so takes them as typing."""
+
+    BINDINGS: ClassVar[list[BindingType]] = [
+        Binding("j", "move('down')", "Down", show=False),
+        Binding("k", "move('up')", "Up", show=False),
+    ]
+
+    def action_move(self, direction: str) -> None:
+        options = self.query_one(OptionList)
+        if direction == "down":
+            options.action_cursor_down()
+        else:
+            options.action_cursor_up()
+
+
+class PickerScreen(ListScreen[int | None]):
     """Pop-up list of options. Dismisses with the chosen index, or None on escape.
 
     Meant to be built once and installed so reopening it is instant.
@@ -232,9 +255,6 @@ class PickerScreen(ModalScreen[int | None]):
     AUTO_FOCUS = "OptionList"
     BINDINGS: ClassVar[list[BindingType]] = [
         Binding("escape", "close", "Close"),
-        # Vim-style movement alongside the list's own arrow keys.
-        Binding("j", "move('down')", "Down", show=False),
-        Binding("k", "move('up')", "Up", show=False),
     ]
 
     def __init__(self, title_text: str, labels: Sequence[str]) -> None:
@@ -280,13 +300,6 @@ class PickerScreen(ModalScreen[int | None]):
     @on(OptionList.OptionSelected)
     def _select(self, event: OptionList.OptionSelected) -> None:
         self.dismiss(event.option_index)
-
-    def action_move(self, direction: str) -> None:
-        options = self.query_one(OptionList)
-        if direction == "down":
-            options.action_cursor_down()
-        else:
-            options.action_cursor_up()
 
     def action_close(self) -> None:
         self.dismiss(None)
