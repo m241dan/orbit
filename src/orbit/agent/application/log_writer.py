@@ -102,7 +102,7 @@ class LogWriter:
     a failed append is told to its ``failed``. Those envelopes are still read back as still to
     be written, until :meth:`resume` appends them and appending carries on. A session forgotten
     meanwhile has its envelopes not in the log dropped instead, and its events deleted from the
-    log once it resumes."""
+    log then, or, when that fails, once it resumes."""
 
     def __init__(
         self, log: EventLog, publish: Publish, log_bytes: int = 0, overflow: Overflow = _NO_OVERFLOW
@@ -115,7 +115,7 @@ class LogWriter:
         self._forgets = ReportedOnce(publish)
         self._queued: Queued = []
         self._forgetting: list[str] = []  # The sessions whose events to delete, once written.
-        self._held: list[str] = []  # Those forgotten while stopped, to delete once resumed.
+        self._held: list[str] = []  # Those whose delete failed while stopped, to retry resumed.
         self._writing: Queued = []  # Taken from the queue to write.
         self._diverted: Queued = []  # Sent to the fallback, as the log can't take them.
         self._places: dict[str, str | None] = {}  # Each session's fallback file, if written.
@@ -323,11 +323,14 @@ class LogWriter:
 
     async def _forget(self, session_id: str) -> None:
         """Delete the events of the session ``session_id`` from the log; once stopped, drop
-        those not in it instead, and delete the rest once resumed."""
+        those not in it too, and when the delete fails, unreported, try it again once
+        resumed."""
         async with self._diverting:
             if self._stopped:
                 await self._drop(session_id)
-                self._held.append(session_id)
+                # The halt that stopped the writer already reported the storage problem.
+                if isinstance(await outcome(self._log.forget(session_id)), RuntimeError):
+                    self._held.append(session_id)
                 return
         await self._forgets.attempt(self._log.forget(session_id))
 
