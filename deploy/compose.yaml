@@ -1,0 +1,56 @@
+# Orbit's control plane in a container, served over TLS: see "Hosting in a container" in
+# README.md. Run it from this directory (deploy/) with `docker compose up -d --build`.
+#
+# orbit-config/ (next to this file, chmod 700) is orbit's config directory. Its config.toml
+# must serve TLS on every address in the container, with the certificate and key in it:
+#
+#   [server]
+#   host = "0.0.0.0"
+#   port = 7433
+#   tls = "tls"
+#   cert = "/home/orbit/.config/orbit/tls/server.pem"
+#   key = "/home/orbit/.config/orbit/tls/server-key.pem"   # chmod 600
+#
+# orbit serve makes the token there, in orbit-config/token, on first start.
+services:
+  orbit:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      args:
+        UID: "${UID:-1000}"
+        GID: "${GID:-1000}"
+    image: orbit
+    # The host user that owns the repository, so the commits orbit makes are theirs.
+    user: "${UID:-1000}:${GID:-1000}"
+    # ANTHROPIC_API_KEY=..., instead of logging Claude in; the file is optional.
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - ..:/workspace
+      - ./orbit-config:/home/orbit/.config/orbit
+      - orbit-state:/home/orbit/.local/state/orbit
+      - claude-login:/home/orbit/.claude
+      - ~/.gitconfig:/home/orbit/.gitconfig:ro
+    ports:
+      - "7433:7433"
+    healthcheck:
+      test: ["CMD", "curl", "-fsk", "https://127.0.0.1:7433/readyz"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+    restart: unless-stopped
+
+# For a single Linux machine, the host's network with plaintext on loopback instead: drop
+# `ports:`, set `host = "127.0.0.1"` and `tls = "off"` (or leave out cert and key) in
+# config.toml, and use these in the service:
+#
+#    network_mode: host
+#    healthcheck:
+#      test: ["CMD", "curl", "-fs", "http://127.0.0.1:7433/readyz"]
+
+volumes:
+  orbit-state:
+  claude-login:

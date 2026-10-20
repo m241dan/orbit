@@ -1,0 +1,16 @@
+# Kept out of the image: secrets, orbit's own files and local build output.
+**/.env
+**/.env.*
+**/orbit-config
+**/*.pem
+**/*-key.pem
+**/*.key
+**/token
+.git/orbit
+.venv
+**/__pycache__
+.mypy_cache
+.pytest_cache
+.ruff_cache
+.import_linter_cache
+.coverage

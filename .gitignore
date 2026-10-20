@@ -67,3 +67,6 @@ textual.log
 ._*
 Thumbs.db
 Desktop.ini
+
+# orbit in a container: its config directory holds the token and keys
+deploy/orbit-config/

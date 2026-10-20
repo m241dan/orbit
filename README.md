@@ -869,7 +869,8 @@ affected. The panel is display only.
 
 `orbit serve` runs orbit's backend, the control plane, on its own: it serves the protocol (see
 [docs/protocol.md](docs/protocol.md#transport)) over a WebSocket, and the work goes on with no
-frontend connected. It takes `-C` and the backend flags `chat` has (`--model`, `--tools`,
+frontend connected (to host it in a container, see
+[Hosting in a container](#hosting-in-a-container)). It takes `-C` and the backend flags `chat` has (`--model`, `--tools`,
 `--verify`, `--worktree`, `--review`, `--usage`, `--new`, `--name`, `--profile`, which writes
 `serve.prof` and `serve-blocked.log`), `--state-dir` and `--config-dir`, and:
 
@@ -977,7 +978,8 @@ PEM files; a mode missing one stops it with status 2, naming the key and its fla
 needs `client_ca`). Before listening it checks them, stopping with status 2 and the fix if the key
 can be read by anyone but you (`chmod 600 <path>`), a file can't be read or isn't PEM, the key
 isn't the certificate's, or the certificate has expired or isn't valid yet (naming its dates). A
-certificate expiring within 14 days starts it with a warning. The certificate is read once, at
+certificate expiring within 14 days starts it with a warning. In a container, mount the
+certificate and key with the config directory (see [Hosting in a container](#hosting-in-a-container)). The certificate is read once, at
 start: to renew it, replace the files and restart `orbit serve`; frontends reconnect on their own.
 
 To make a private CA and a server certificate with openssl, naming the server's hostname (here
@@ -1211,6 +1213,102 @@ token_file = "work-token"    # under tls
 and connect with `orbit chat --remote work`. In all, the server keeps `ca.pem`, `server.pem`,
 `server-key.pem` and the token (`ca-key.pem` is best kept off it); the laptop keeps its copy of
 `ca.pem`, and the token's copy under `tls`, or `laptop.pem` and `laptop-key.pem` under `mtls`.
+
+### Hosting in a container
+
+The recommended way to host the control plane is in a container, built from this repository's
+own files: `deploy/Dockerfile` makes an image of `orbit serve` (Python 3.13, git, Node.js LTS and
+the Claude Code CLI pinned by the `CLAUDE_CODE_VERSION` build argument, and orbit installed from
+the checkout with `uv sync --frozen --no-dev`), and `deploy/compose.yaml` runs it over TLS. The
+image holds no credential: Claude's login, the token, the certificates and their keys live in
+volumes, and `.dockerignore` keeps `.env`, `orbit-config`, keys and `.git/orbit` out of the build.
+
+The compose file runs one service, `orbit`, as your user (`user: "${UID:-1000}:${GID:-1000}"`,
+so the commits it makes in your checkout are yours), with these mounts:
+
+| Mount | In the container | What |
+| --- | --- | --- |
+| the repository (`..`) | `/workspace` | the checkout `orbit serve -C /workspace` works on; git trusts it through `safe.directory` |
+| `deploy/orbit-config` | `/home/orbit/.config/orbit` (`ORBIT_CONFIG_DIR`) | `config.toml`, the token and the certificates |
+| the volume `orbit-state` | `/home/orbit/.local/state/orbit` (`ORBIT_STATE_DIR`) | the store and run files |
+| the volume `claude-login` | `/home/orbit/.claude` (`CLAUDE_CONFIG_DIR`) | Claude Code's login |
+| `~/.gitconfig`, read-only | `/home/orbit/.gitconfig` | your commit identity |
+
+Bash doesn't export `UID` or `GID`, so unless your ids are 1000, run `export UID; export GID=$(id
+-g)` first, or put both in `deploy/.env`; the image is built with the same ids.
+
+To set it up, from the repository's top level:
+
+1. Make the CA and the server's certificate as in **TLS** above, naming the host clients reach
+   the server by, and put `server.pem` and `server-key.pem` in `deploy/orbit-config/tls`:
+
+   ```sh
+   mkdir -p deploy/orbit-config/tls && chmod 700 deploy/orbit-config
+   cp server.pem server-key.pem deploy/orbit-config/tls/ && chmod 600 deploy/orbit-config/tls/server-key.pem
+   ```
+
+2. Write `deploy/orbit-config/config.toml`, serving TLS on every address inside the container with
+   the paths as the container sees them:
+
+   ```toml
+   [server]
+   host = "0.0.0.0"
+   tls = "tls"   # or "mtls", with client_ca
+   cert = "/home/orbit/.config/orbit/tls/server.pem"
+   key = "/home/orbit/.config/orbit/tls/server-key.pem"
+   ```
+
+3. Log Claude in once, into the `claude-login` volume, or put `ANTHROPIC_API_KEY=...` in
+   `deploy/.env` (kept out of git and the image) instead:
+
+   ```sh
+   cd deploy
+   docker compose build
+   docker compose run --rm --entrypoint claude orbit login
+   ```
+
+4. Start it: `docker compose up -d`. `orbit serve` takes the commit identity from your
+   `~/.gitconfig`, and stops with status 2 if it has none (see **Serving the control plane**
+   above). It makes the token in `deploy/orbit-config/token` on first start; `docker compose
+   logs orbit` shows its line with the URL.
+
+To connect from another machine, copy `ca.pem` and the token (under `mtls`, make the client its
+certificate instead) as in **Two machines** above, name the server in `[remotes]`, and run
+`orbit chat --remote work`.
+
+The healthcheck asks `/readyz` with `curl` inside the container every 30 seconds, so `docker
+compose ps` shows the container healthy once `orbit serve` answers 200: `pass` when it's serving,
+or `warn` (`read_only`) when another orbit owns the repository. A 503 (`starting`,
+`shutting_down` or `storage_halted`, see **Health checks** above) marks it unhealthy; storage
+halted needs your attention, not a restart.
+
+To back up the store, back it up inside the container and copy the backup out:
+
+```sh
+docker compose exec orbit orbit db backup /home/orbit/.local/state/orbit/backup.db --force
+docker compose cp orbit:/home/orbit/.local/state/orbit/backup.db ./orbit-backup.db
+```
+
+On a single Linux machine you can skip TLS: the compose file's commented variant uses the host's
+network (`network_mode: host`, no `ports:`), with `host = "127.0.0.1"` and `tls = "off"` in
+`config.toml`, and a healthcheck over `http://`. Frontends on the same machine then connect to
+`ws://127.0.0.1:7433/` with the token in `deploy/orbit-config/token`.
+
+A manual smoke test, after the setup above:
+
+```sh
+cd deploy
+docker compose up -d --build
+docker compose ps                     # healthy, once it's serving
+curl -fsk https://127.0.0.1:7433/readyz   # {"status": "pass"}
+orbit chat --connect wss://orbit.example.lan:7433/ --ca ca.pem --token-file orbit-config/token
+```
+
+What the container doesn't protect: the agents run inside it as the same user as `orbit serve`, so
+they can read and change the control plane's own files, the token, the certificates' keys, the
+store and Claude's login, like the rest of the container; the container keeps them from your host,
+not from orbit's agents. And one container serves one repository: run workspaces that trust each
+other differently in containers of their own, each with its own config, token and volumes.
 
 ### Owning the repository
 
