@@ -94,6 +94,12 @@ class Connections:
         """The connections attached to the session ``session_id``."""
         return [c for c in self._open if c.attached_id == session_id]
 
+    def renamed(self, session: SessionRef) -> None:
+        """Have the connections attached to the session ``session`` names attached to it as it's
+        named now."""
+        for connection in self.attached(session.id):
+            connection.attach(session)
+
     def activate(self, left: SessionRef | None) -> None:
         """Have the connection whose command is being answered, if any, view the open session,
         whichever that is, and, given the session ``left``, the others viewing the open session

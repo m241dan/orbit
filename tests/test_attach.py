@@ -304,6 +304,37 @@ async def test_a_view_renames_the_session_it_views() -> None:
     assert store.last.name == "older work"
 
 
+RENAMED_MESSAGE = (
+    "Session 'older work' isn't the active session; 'today' is. Activate it to work in it."
+)
+
+
+async def test_a_view_refuses_work_naming_the_session_as_the_viewer_renamed_it() -> None:
+    session = workspace(stored())
+    viewer = await viewing(session, "viewer")
+    await say(viewer, "rename", RenameSession(session_id=EARLIER, name="older work"))
+    await taken(viewer)
+    await say(viewer, "run", RunTasks())
+    events = await taken(viewer)
+    await session.close()
+
+    assert events == [CommandRefused(command_id="run", code=NOT_ACTIVE, message=RENAMED_MESSAGE)]
+
+
+async def test_a_view_refuses_work_naming_the_session_as_another_renamed_it() -> None:
+    session = workspace(stored())
+    viewer = await viewing(session, "viewer")
+    other = await joined(session, "other")
+    await say(other, "rename", RenameSession(session_id=EARLIER, name="  older work "))
+    await taken(other)
+    await taken(viewer)
+    await say(viewer, "run", RunTasks())
+    events = await taken(viewer)
+    await session.close()
+
+    assert events == [CommandRefused(command_id="run", code=NOT_ACTIVE, message=RENAMED_MESSAGE)]
+
+
 async def test_a_command_for_another_session_than_the_one_viewed_is_wrong_session() -> None:
     session = workspace(stored())
     viewer = await viewing(session, "viewer")

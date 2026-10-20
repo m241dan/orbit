@@ -13,6 +13,7 @@ from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.sessions import (
     SessionRecord,
     not_active_message,
+    session_name,
     summarize,
     viewed_refusal,
 )
@@ -150,6 +151,13 @@ class SessionViews:
             for connection in [c for c in moved if c.attached is None]:
                 await connection.publish_here(live)
         parts.states.check()
+
+    def renamed(self, session_id: str, name: str) -> None:
+        """Have each connection attached to the session ``session_id``, now renamed ``name``,
+        name it so from now on."""
+        named = session_name(name)
+        assert named is not None  # An empty name is refused.
+        self._parts.connections.renamed(SessionRef(id=session_id, name=named))
 
     async def _view(self, record: SessionRecord) -> Snapshot:
         """The read-only view of the session saved as ``record``: as it was saved, with its last

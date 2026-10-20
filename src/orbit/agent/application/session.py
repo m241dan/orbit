@@ -95,6 +95,7 @@ from orbit.protocol import (
     Notice,
     OwnershipDeclined,
     OwnershipTaken,
+    RenameSession,
     ResumeStorage,
     RunningAgent,
     SessionSummary,
@@ -567,6 +568,9 @@ class AgentSession:
             await self._views.check_deletable(command.session_id)
             await self._switcher.handle(command)
             await self._views.deleted(command.session_id)
+        elif isinstance(command, RenameSession):
+            await self._switcher.handle(command)
+            self._views.renamed(command.session_id, command.name)
         elif isinstance(command, TakeOwnership):
             await self._take_ownership(command, command_id)
         elif isinstance(command, SessionCommand):
