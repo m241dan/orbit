@@ -1,5 +1,5 @@
 """The git repository a workspace is in: its top level, its shared git directory, what
-identifies it, and orbit's directory in it."""
+identifies it, whether git has an identity for commits in it, and orbit's directory in it."""
 
 import subprocess
 from pathlib import Path
@@ -35,6 +35,13 @@ def git_common_dir(path: str) -> str | None:
     """The git directory the repository ``path`` is in shares among its worktrees; none outside
     one (or without git)."""
     return _git_query(path, "rev-parse", "--path-format=absolute", "--git-common-dir")
+
+
+def has_git_identity(path: str) -> bool:
+    """Whether git resolves an author and a committer for commits in the repository ``path``
+    is in, from the environment or its config, as committing there needs (and git can be run)."""
+    idents = ("GIT_AUTHOR_IDENT", "GIT_COMMITTER_IDENT")
+    return all(_git_query(path, "var", ident) is not None for ident in idents)
 
 
 def orbit_dir(workspace: str) -> Path:

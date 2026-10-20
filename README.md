@@ -880,6 +880,13 @@ frontend connected. It takes `-C` and the backend flags `chat` has (`--model`, `
   status 2, naming the port.
 - `--tls`, `--cert`, `--key` and `--client-ca`: how it serves TLS (see **TLS** below).
 
+In a git repository, unless `--no-worktree` is given, orbit commits the coder's work, so `orbit
+serve` checks as it starts that git has an identity for commits there: `user.name` and
+`user.email` from the repository's, your global or the system git config, or the
+`GIT_AUTHOR_*` and `GIT_COMMITTER_*` environment variables. Without one it stops with status 2,
+saying to set them (`git config --global user.name "Your Name"` and `git config --global
+user.email you@example.com`) or, in a container, to mount your `~/.gitconfig` into it.
+
 It opens the repository's most recently active saved session that no other orbit has open, or a
 new one when there's none; `--new` or `--name` start a new one. Once listening it prints one line
 with the repository, its URL, whether it owns the repository or is read-only (naming the owner)

@@ -39,7 +39,12 @@ from orbit.agent.external.directories import resolve_config_dir, resolve_state_d
 from orbit.agent.external.fallback_files import FallbackFiles
 from orbit.agent.external.git_tree import GitCoderTree
 from orbit.agent.external.mcp_host import McpHost
-from orbit.agent.external.repository import git_top_level, in_git_work_tree, orbit_dir
+from orbit.agent.external.repository import (
+    git_top_level,
+    has_git_identity,
+    in_git_work_tree,
+    orbit_dir,
+)
 from orbit.agent.external.run_file import RunFile, running_server
 from orbit.agent.external.session_import import ImportBlocked
 from orbit.agent.external.sqlite_schema import StoreError
@@ -104,6 +109,7 @@ __all__ = [
     "WorkspaceLock",
     "WorkspaceOwner",
     "git_top_level",
+    "has_git_identity",
     "in_git_work_tree",
     "local_tls",
     "open_workspace_store",

@@ -9,6 +9,7 @@ import signal
 import socket
 import ssl
 import stat
+import subprocess
 import threading
 import time
 from collections.abc import Callable, Iterator
@@ -534,6 +535,57 @@ def test_serve_refuses_a_port_in_use_naming_it(config_dir: Path) -> None:
     assert result.exit_code == 2
     assert f"Can't listen on port {port}" in result.output
     assert "--port" in result.output and str(config_dir / "config.toml") in result.output
+
+
+@pytest.fixture
+def no_identity(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, project: Path) -> Path:
+    """The project made a git repository, with git configured with no identity."""
+    empty = tmp_path / "empty-gitconfig"
+    empty.write_text("")
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(empty))
+    monkeypatch.setenv("GIT_CONFIG_SYSTEM", str(empty))
+    monkeypatch.setenv("EMAIL", "")
+    for name in ("AUTHOR", "COMMITTER"):
+        for part in ("NAME", "EMAIL"):
+            monkeypatch.delenv(f"GIT_{name}_{part}", raising=False)
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=project, check=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=project, check=True)
+    return project
+
+
+def test_serve_refuses_a_repository_git_has_no_identity_for(no_identity: Path) -> None:
+    result = runner.invoke(app, ["serve", *QUIET, "--port", "0"])
+    assert result.exit_code == 2
+    assert result.stderr == (
+        f"Git has no identity for commits in {no_identity}: set user.name and user.email"
+        ' (git config --global user.name "…"), or mount your ~/.gitconfig into the'
+        " container.\n"
+    )
+
+
+def test_serve_takes_the_identity_from_the_environment(
+    monkeypatch: pytest.MonkeyPatch, no_identity: Path, state: Path, config_dir: Path
+) -> None:
+    monkeypatch.setenv("GIT_AUTHOR_EMAIL", "author@example.com")
+    monkeypatch.setenv("GIT_COMMITTER_EMAIL", "committer@example.com")
+    output = served(Frontend(state, config_dir), "--port", "0")
+    assert output.startswith(f"Serving {no_identity} at ")
+
+
+def test_serve_takes_the_identity_from_the_repositorys_config(
+    no_identity: Path, state: Path, config_dir: Path
+) -> None:
+    subprocess.run(["git", "config", "user.email", "t@example.com"], cwd=no_identity, check=True)
+    output = served(Frontend(state, config_dir), "--port", "0")
+    assert output.startswith(f"Serving {no_identity} at ")
+
+
+def test_serve_without_a_worktree_needs_no_identity(
+    no_identity: Path, state: Path, config_dir: Path
+) -> None:
+    output = served(Frontend(state, config_dir), "--port", "0", "--no-worktree")
+    assert output.startswith(f"Serving {no_identity} at ")
 
 
 def test_serve_refuses_an_invalid_server_setting(config_dir: Path) -> None:

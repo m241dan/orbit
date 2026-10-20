@@ -8,6 +8,7 @@ import pytest
 from orbit.agent.external.repository import (
     git_common_dir,
     git_top_level,
+    has_git_identity,
     in_git_work_tree,
     orbit_dir,
     workspace_fingerprint,
@@ -60,6 +61,41 @@ def test_without_git_nothing_is_found(monkeypatch: pytest.MonkeyPatch, repo: Pat
     assert not in_git_work_tree(str(repo))
     assert git_top_level(str(repo)) is None
     assert git_common_dir(str(repo)) is None
+    assert not has_git_identity(str(repo))
+
+
+@pytest.fixture
+def no_identity(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Git configured with no identity beyond the repository's own config."""
+    empty = tmp_path / "empty-gitconfig"
+    empty.write_text("")
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(empty))
+    monkeypatch.setenv("GIT_CONFIG_SYSTEM", str(empty))
+    monkeypatch.setenv("EMAIL", "")
+    for name in ("AUTHOR", "COMMITTER"):
+        for part in ("NAME", "EMAIL"):
+            monkeypatch.delenv(f"GIT_{name}_{part}", raising=False)
+
+
+@pytest.mark.usefixtures("no_identity")
+def test_a_repository_configured_with_an_identity_has_one(repo: Path) -> None:
+    assert has_git_identity(str(repo))
+
+
+@pytest.mark.usefixtures("no_identity")
+def test_a_repository_without_user_email_has_no_identity(repo: Path) -> None:
+    git(repo, "config", "--unset", "user.email")
+    assert not has_git_identity(str(repo))
+
+
+@pytest.mark.usefixtures("no_identity")
+def test_an_identity_in_the_environment_counts(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
+    git(repo, "config", "--unset", "user.email")
+    monkeypatch.setenv("GIT_AUTHOR_EMAIL", "author@example.com")
+    assert not has_git_identity(str(repo))
+    monkeypatch.setenv("GIT_COMMITTER_EMAIL", "committer@example.com")
+    assert has_git_identity(str(repo))
 
 
 def test_git_top_level_is_the_work_trees_root(repo: Path, outside: Path) -> None:

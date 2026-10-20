@@ -27,6 +27,8 @@ from orbit.agent import (
     TokenFile,
     WorkspaceLock,
     WorkspaceOwner,
+    has_git_identity,
+    in_git_work_tree,
     local_tls,
     read_server,
     resolve_config_dir,
@@ -94,6 +96,8 @@ def serve(
     state = resolve_state_dir(state, os.environ)
     user_config = resolve_config_dir(config_dir, os.environ)
     root = _workspace(workspace)
+    if worktree:
+        _require_git_identity(root)
     os.chdir(root)
     given = {"host": host, "port": port, "tls": tls, "cert": cert, "key": key}
     settings = _server_settings(user_config, {**given, "client_ca": client_ca})
@@ -116,6 +120,19 @@ def serve(
         )
         _serve_until_stopped(parts, profile, user_config, store)
     typer.echo("orbit serve stopped.")
+
+
+def _require_git_identity(root: Path) -> None:
+    """Exit with status 2 if the workspace at ``root`` is a git repository that git has no
+    identity for commits in, as the coder's worktree commits there."""
+    if not in_git_work_tree(str(root)) or has_git_identity(str(root)):
+        return
+    typer.echo(
+        f"Git has no identity for commits in {root}: set user.name and user.email"
+        ' (git config --global user.name "…"), or mount your ~/.gitconfig into the container.',
+        err=True,
+    )
+    raise typer.Exit(2)
 
 
 def _banner(
