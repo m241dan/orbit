@@ -21,7 +21,6 @@ from orbit.agent import (
     LocalTls,
     RunFile,
     ServerSettings,
-    SqliteStore,
     TlsError,
     TokenError,
     TokenFile,
@@ -35,7 +34,7 @@ from orbit.agent import (
     resolve_state_dir,
     tls_warnings,
 )
-from orbit.cli.backend import _Backend, _backend, _repository_lock, _workspace
+from orbit.cli.backend import _Backend, _backend, _Directories, _in_process, _workspace
 from orbit.cli.errors import INVALID_CONFIG, _configured, _exit_on
 from orbit.cli.options import (
     CertOption,
@@ -103,22 +102,22 @@ def serve(
     settings = _server_settings(user_config, {**given, "client_ca": client_ca})
     token_file = TokenFile(user_config)
     _token(token_file)
-    with _repository_lock(root) as (lock, owner):
-        backend = _Backend(model, tools, verify, worktree, review, usage, new, name, owner, lock)
-        build, store = _backend(backend, root, state, user_config, pick_session=False)
+    flags = _Backend(model, tools, verify, worktree, review, usage, new, name)
+    directories = _Directories(root, state, user_config)
+    with _in_process(flags, directories, pick_session=False, make=_backend) as backend:
         logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
         parts = _ServeParts(
-            build,
-            not backend.fresh,
+            backend.build,
+            not flags.fresh,
             settings,
             _current_token(token_file),
             _current_revoked(user_config, settings.revoked),
-            RunFile(state, store.workspace_id),
+            RunFile(state, backend.store.workspace_id),
             _local_tls(settings, root),
-            _banner(root, token_file, owner, settings),
-            lock,
+            _banner(root, token_file, backend.owner, settings),
+            backend.lock,
         )
-        _serve_until_stopped(parts, profile, user_config, store)
+        _serve_until_stopped(parts, profile, user_config)
     typer.echo("orbit serve stopped.")
 
 
@@ -154,11 +153,8 @@ def _banner(
     return banner
 
 
-def _serve_until_stopped(
-    parts: "_ServeParts", profile: Path | None, user_config: Path, store: SqliteStore
-) -> None:
-    """Serve as ``parts`` say, profiled into ``profile`` if given, until stopped, then close
-    ``store``.
+def _serve_until_stopped(parts: "_ServeParts", profile: Path | None, user_config: Path) -> None:
+    """Serve as ``parts`` say, profiled into ``profile`` if given, until stopped.
 
     Exits with status 2 if the server can't listen, naming the user config in
     ``user_config`` that sets its port.
@@ -171,11 +167,8 @@ def _serve_until_stopped(
             f" or with port in [server] in {config_file}."
         )
 
-    try:
-        with _exit_on(ListenFailed, message=unable):
-            asyncio.run(_served(parts, profile))
-    finally:
-        asyncio.run(store.close())
+    with _exit_on(ListenFailed, message=unable):
+        asyncio.run(_served(parts, profile))
 
 
 def _server_settings(config_dir: Path, given: Mapping[str, object]) -> ServerSettings:

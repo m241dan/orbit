@@ -4,8 +4,9 @@ import asyncio
 import secrets
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import Protocol
 
 import typer
 
@@ -84,6 +85,56 @@ class _Backend:
         return self.new or self.name is not None
 
 
+@dataclass(frozen=True)
+class _Directories:
+    """Where a backend works: the workspace at ``root``, with the store in ``state`` and the
+    user config in ``user_config``."""
+
+    root: Path
+    state: Path
+    user_config: Path
+
+
+class _MakeBackend(Protocol):
+    """What builds the session a backend asks for, as :func:`_backend` does."""
+
+    def __call__(
+        self, backend: _Backend, directories: _Directories, *, pick_session: bool
+    ) -> tuple[Callable[[], AgentSession], SqliteStore]: ...
+
+
+@dataclass(frozen=True)
+class _InProcess:
+    """A backend set up in this process: what ``build``s its session, its ``store``, and the
+    workspace ``lock``, with the repository's ``owner`` if another orbit owns it."""
+
+    build: Callable[[], AgentSession]
+    store: SqliteStore
+    lock: WorkspaceLock
+    owner: WorkspaceOwner | None
+
+
+@contextmanager
+def _in_process(
+    flags: _Backend, directories: _Directories, *, pick_session: bool, make: _MakeBackend
+) -> Iterator[_InProcess]:
+    """Run the block with the backend ``flags`` ask for, made by ``make`` in ``directories``,
+    holding the workspace lock if no other orbit does, and listing the saved sessions to pick
+    from if ``pick_session``; yields the backend set up, then closes its store and lets the
+    lock go.
+
+    Exits with status 2 if the lock can't be made, a configuration is invalid or the store
+    can't be opened.
+    """
+    with _repository_lock(directories.root) as (lock, owner):
+        backend = replace(flags, owner=owner, lock=lock)
+        build, store = make(backend, directories, pick_session=pick_session)
+        try:
+            yield _InProcess(build, store, lock, owner)
+        finally:  # Whatever ran the session has closed it, so nothing uses the store any more.
+            asyncio.run(store.close())
+
+
 @contextmanager
 def _repository_lock(root: Path) -> Iterator[tuple[WorkspaceLock, WorkspaceOwner | None]]:
     """Hold the workspace lock on the repository at ``root`` while the block runs, if no other
@@ -103,21 +154,21 @@ def _repository_lock(root: Path) -> Iterator[tuple[WorkspaceLock, WorkspaceOwner
 
 
 def _backend(
-    backend: _Backend, root: Path, state: Path, user_config: Path, *, pick_session: bool
+    backend: _Backend, directories: _Directories, *, pick_session: bool
 ) -> tuple[Callable[[], AgentSession], SqliteStore]:
-    """What builds the session ``backend`` asks for in the workspace at ``root``, with the
-    store in ``state`` and the user config in ``user_config``, listing the saved sessions to
-    pick from if ``pick_session``, and the store.
+    """What builds the session ``backend`` asks for in ``directories``, listing the saved
+    sessions to pick from if ``pick_session``, and the store.
 
     Exits with status 2 if a configuration is invalid or the store can't be opened.
     """
+    root = directories.root
     config = _config()
-    storage = _storage(user_config)
+    storage = _storage(directories.user_config)
     verification = _verification(config) if backend.verify else None
     agents = _agents(config, worktree=backend.worktree, review=backend.review)
     settings, pinned = _settings(backend.model, backend.tools)
     usage_source = UsageApi() if backend.usage else None
-    opened = _open_store(state, root)
+    opened = _open_store(directories.state, root)
 
     def build() -> AgentSession:
         return AgentSession(

@@ -14,7 +14,6 @@ from orbit.agent import (
     USER_CONFIG_FILE,
     RemoteSettings,
     RunningServer,
-    SqliteStore,
     TokenFile,
     read_remotes,
     read_server,
@@ -22,7 +21,7 @@ from orbit.agent import (
     resolve_state_dir,
     running_server,
 )
-from orbit.cli.backend import _Backend, _backend, _repository_lock, _workspace
+from orbit.cli.backend import _Backend, _backend, _Directories, _in_process, _workspace
 from orbit.cli.errors import _configured, _exit_on
 from orbit.cli.options import (
     _SERVE_FLAGS,
@@ -125,11 +124,12 @@ def chat(
     # directory, so move into the workspace before anything reads the filesystem.
     profile = profile.expanduser().resolve() if profile else None
     os.chdir(root)
-    with _repository_lock(root) as (lock, owner):
-        backend = _Backend(model, tools, verify, worktree, review, usage, new, name, owner, lock)
-        build, store = _backend(backend, root, state, user_config, pick_session=not backend.fresh)
-        session = ThreadedSession(build, _thread_context(profile))
-        _launch_with(OrbitApp(session, pick=not backend.fresh), profile, store)
+    flags = _Backend(model, tools, verify, worktree, review, usage, new, name)
+    directories = _Directories(root, state, user_config)
+    picking = not flags.fresh
+    with _in_process(flags, directories, pick_session=picking, make=_backend) as backend:
+        session = ThreadedSession(backend.build, _thread_context(profile))
+        _launch(OrbitApp(session, pick=picking), profile)
 
 
 @dataclass(frozen=True)
@@ -412,14 +412,6 @@ def _thread_context(profile: Path | None) -> Callable[[], AbstractContextManager
     if profile is None:
         return None
     return lambda: profiled(profile, "backend")
-
-
-def _launch_with(tui: OrbitApp, profile: Path | None, store: SqliteStore) -> None:
-    """Run ``tui`` as :func:`_launch` does, then close ``store``."""
-    try:
-        _launch(tui, profile)
-    finally:  # The app has closed its session, so nothing uses the store any more.
-        asyncio.run(store.close())
 
 
 def _launch(tui: OrbitApp, profile: Path | None) -> None:
