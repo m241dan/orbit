@@ -43,7 +43,7 @@ from orbit.agent.domain.reviews import ReviewLimits
 from orbit.agent.domain.sessions import SessionRecord, Unreadable, default_name, record_json
 from orbit.agent.domain.usage import UsageUnavailable
 from orbit.cli import app
-from orbit.cli.errors import _exit_on
+from orbit.cli.errors import _configured, _exit_on
 from orbit.protocol import (
     AddTask,
     Catalog,
@@ -70,14 +70,36 @@ def test_version() -> None:
     assert result.stdout.strip() == __version__
 
 
-def test_exit_on_echoes_the_prefix_and_message_and_exits_2(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    with pytest.raises(typer.Exit) as exited, _exit_on(KeyError, ValueError, prefix="Bad: "):
+def test_exit_on_echoes_the_error_and_exits_2(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(typer.Exit) as exited, _exit_on(KeyError, ValueError):
         raise ValueError("no good")
     assert exited.value.exit_code == 2
     assert exited.value.__suppress_context__
-    assert capsys.readouterr().err == "Bad: no good\n"
+    assert capsys.readouterr().err == "no good\n"
+
+
+def test_exit_on_echoes_the_message_made_of_the_error(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with pytest.raises(typer.Exit), _exit_on(ValueError, message=lambda exc: f"Bad: {exc}!"):
+        raise ValueError("no good")
+    assert capsys.readouterr().err == "Bad: no good!\n"
+
+
+def test_configured_gives_what_was_read() -> None:
+    assert _configured(lambda: 3) == 3
+
+
+def test_configured_exits_2_saying_the_configuration_is_invalid(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def read() -> int:
+        raise ConfigError("no port")
+
+    with pytest.raises(typer.Exit) as exited:
+        _configured(read)
+    assert exited.value.exit_code == 2
+    assert capsys.readouterr().err == "Invalid orbit configuration: no port\n"
 
 
 def test_exit_on_lets_other_errors_through(capsys: pytest.CaptureFixture[str]) -> None:

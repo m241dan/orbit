@@ -39,10 +39,8 @@ from orbit.agent import (
     workspace_state,
     write_checks,
 )
-from orbit.cli.errors import _exit_on
+from orbit.cli.errors import _configured, _exit_on
 from orbit.protocol import PLANNER, Settings, ToolAccess
-
-INVALID_CONFIG = "Invalid orbit configuration: "
 
 
 def _workspace(path: Path) -> Path:
@@ -94,7 +92,9 @@ def _repository_lock(root: Path) -> Iterator[tuple[WorkspaceLock, WorkspaceOwner
     Exits with status 2 if the lock can't be made.
     """
     lock = WorkspaceLock(orbit_dir(str(root)))
-    with _exit_on(OSError, prefix=f"Couldn't lock the repository with {lock.path}: "):
+    with _exit_on(
+        OSError, message=lambda exc: f"Couldn't lock the repository with {lock.path}: {exc}"
+    ):
         owner = lock.take()
     try:
         yield lock, owner
@@ -147,8 +147,7 @@ def _config() -> OrbitConfig:
 
     Exits with status 2 if the file is invalid.
     """
-    with _exit_on(ConfigError, prefix=INVALID_CONFIG):
-        return read_config()
+    return _configured(read_config)
 
 
 def _storage(config_dir: Path) -> StorageSettings:
@@ -156,8 +155,7 @@ def _storage(config_dir: Path) -> StorageSettings:
 
     Exits with status 2 if the file is invalid.
     """
-    with _exit_on(ConfigError, prefix=INVALID_CONFIG):
-        return read_storage(config_dir)
+    return _configured(lambda: read_storage(config_dir))
 
 
 def _open_store(state: Path, root: Path) -> OpenedStore:

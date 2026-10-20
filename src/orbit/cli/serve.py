@@ -35,8 +35,8 @@ from orbit.agent import (
     resolve_state_dir,
     tls_warnings,
 )
-from orbit.cli.backend import INVALID_CONFIG, _Backend, _backend, _repository_lock, _workspace
-from orbit.cli.errors import _exit_on
+from orbit.cli.backend import _Backend, _backend, _repository_lock, _workspace
+from orbit.cli.errors import INVALID_CONFIG, _configured, _exit_on
 from orbit.cli.options import (
     CertOption,
     ClientCaOption,
@@ -163,16 +163,17 @@ def _serve_until_stopped(
     Exits with status 2 if the server can't listen, naming the user config in
     ``user_config`` that sets its port.
     """
-    try:
-        asyncio.run(_served(parts, profile))
-    except ListenFailed as failed:
-        config_file = user_config / USER_CONFIG_FILE
-        typer.echo(
+    config_file = user_config / USER_CONFIG_FILE
+
+    def unable(failed: ListenFailed) -> str:
+        return (
             f"Can't listen on port {failed.port}: {failed.reason}. Choose another with --port,"
-            f" or with port in [server] in {config_file}.",
-            err=True,
+            f" or with port in [server] in {config_file}."
         )
-        raise typer.Exit(2) from None
+
+    try:
+        with _exit_on(ListenFailed, message=unable):
+            asyncio.run(_served(parts, profile))
     finally:
         asyncio.run(store.close())
 
@@ -183,8 +184,7 @@ def _server_settings(config_dir: Path, given: Mapping[str, object]) -> ServerSet
 
     Exits with status 2 if the file is invalid, or the server can't serve as they say.
     """
-    with _exit_on(ConfigError, prefix=INVALID_CONFIG):
-        settings = read_server(config_dir)
+    settings = _configured(lambda: read_server(config_dir))
     update = {k: str(v) if isinstance(v, Path) else v for k, v in given.items() if v is not None}
     settings = settings.model_copy(update=update)
     with _exit_on(TlsError):
@@ -319,11 +319,8 @@ def _write_run_file(run_file: RunFile, url: str, local: LocalTls | None) -> None
 
     Exits with status 2 if it can't.
     """
-    try:
+    with _exit_on(OSError, message=lambda exc: f"Can't write the run file {run_file.path}: {exc}"):
         run_file.write(url, os.getpid(), local)
-    except OSError as exc:
-        typer.echo(f"Can't write the run file {run_file.path}: {exc}", err=True)
-        raise typer.Exit(2) from None
 
 
 def _on_signals(stopping: asyncio.Event) -> None:

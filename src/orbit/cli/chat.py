@@ -12,7 +12,6 @@ import typer
 
 from orbit.agent import (
     USER_CONFIG_FILE,
-    ConfigError,
     RemoteSettings,
     RunningServer,
     SqliteStore,
@@ -23,14 +22,8 @@ from orbit.agent import (
     resolve_state_dir,
     running_server,
 )
-from orbit.cli.backend import (
-    INVALID_CONFIG,
-    _Backend,
-    _backend,
-    _repository_lock,
-    _workspace,
-)
-from orbit.cli.errors import _exit_on
+from orbit.cli.backend import _Backend, _backend, _repository_lock, _workspace
+from orbit.cli.errors import _configured, _exit_on
 from orbit.cli.options import (
     _SERVE_FLAGS,
     CaOption,
@@ -193,8 +186,7 @@ def _remote(config_dir: Path, name: str) -> RemoteSettings:
 
     Exits with status 2 if the config is invalid, or names no such remote.
     """
-    with _exit_on(ConfigError, prefix=INVALID_CONFIG):
-        remotes = read_remotes(config_dir)
+    remotes = _configured(lambda: read_remotes(config_dir))
     if name in remotes:
         return remotes[name]
     typer.echo(_unknown_remote(name, sorted(remotes), config_dir / USER_CONFIG_FILE), err=True)
@@ -354,16 +346,12 @@ def _discovered(
     Exits with status 2 if the token, the user config, the CA or the client certificate can't
     be used, or the control plane turns the token away.
     """
-    try:
-        with _exit_on(ConfigError, prefix=INVALID_CONFIG), _exit_on(*_LOCAL_ERRORS):
-            return discover_control_plane(state, workspace, token_file, config_dir)
-    except TokenRejected:
-        typer.echo(
-            f"The control plane serving {workspace} refused the token from {token_file}; give it"
-            " the token orbit serve uses, or pass --local to run one here.",
-            err=True,
-        )
-        raise typer.Exit(2) from None
+    refused = (
+        f"The control plane serving {workspace} refused the token from {token_file}; give it"
+        " the token orbit serve uses, or pass --local to run one here."
+    )
+    with _exit_on(TokenRejected, message=lambda _: refused), _exit_on(*_LOCAL_ERRORS):
+        return _configured(lambda: discover_control_plane(state, workspace, token_file, config_dir))
 
 
 _LOCAL_ERRORS = (TokenUnreadable, LocalCertMissing, CaUnreadable, ClientCertUnusable)
