@@ -201,6 +201,23 @@ def test_serve_stops_if_it_cant_write_its_run_file_naming_it(state: Path) -> Non
     assert not [t for t in threading.enumerate() if t.name.startswith("orbit-sqlite")]
 
 
+def test_serve_stops_if_it_cant_name_its_url_in_the_workspace_lock_naming_it(
+    project: Path, state: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def unwritable(lock: WorkspaceLock, url: str) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(WorkspaceLock, "announce", unwritable)
+    result = runner.invoke(app, ["serve", *QUIET, "--port", "0"])
+
+    lock = project / ".orbit" / "workspace.lock"
+    assert result.exit_code == 2
+    assert f"Can't write the workspace lock {lock}: disk full" in result.stderr
+    assert "Traceback" not in result.output
+    assert not list((state / "run").glob("*.json"))
+    assert not [t for t in threading.enumerate() if t.name.startswith("orbit-sqlite")]
+
+
 def test_serve_names_its_url_in_the_workspace_lock_while_it_owns_the_repository(
     project: Path, state: Path, config_dir: Path
 ) -> None:

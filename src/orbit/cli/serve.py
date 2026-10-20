@@ -292,7 +292,7 @@ async def _until_stopped(
     """Serve ``session`` on ``server``, listening at ``url``, until the first ctrl+c or
     SIGTERM, then stop it, removing the run file it wrote.
 
-    Exits with status 2 if the run file can't be written.
+    Exits with status 2 if the run file or the workspace lock can't be written.
     """
     stopping = asyncio.Event()
     _on_signals(stopping)
@@ -301,7 +301,7 @@ async def _until_stopped(
         if parts.run_file is not None:
             _write_run_file(parts.run_file, url, parts.local)
             written = parts.run_file
-        parts.lock.announce(url)
+        _announce(parts.lock, url)
         typer.echo(parts.banner(url))
         await stopping.wait()
     finally:
@@ -321,6 +321,17 @@ def _write_run_file(run_file: RunFile, url: str, local: LocalTls | None) -> None
     """
     with _exit_on(OSError, message=lambda exc: f"Can't write the run file {run_file.path}: {exc}"):
         run_file.write(url, os.getpid(), local)
+
+
+def _announce(lock: WorkspaceLock, url: str) -> None:
+    """Say in ``lock`` that its owner is serving at ``url``.
+
+    Exits with status 2 if it can't.
+    """
+    with _exit_on(
+        OSError, message=lambda exc: f"Can't write the workspace lock {lock.path}: {exc}"
+    ):
+        lock.announce(url)
 
 
 def _on_signals(stopping: asyncio.Event) -> None:
