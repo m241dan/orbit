@@ -32,9 +32,12 @@ from orbit.protocol import (
     MESSAGE_TOO_BIG,
     NORMAL,
     Attach,
+    CommandAccepted,
     CommandEnvelope,
+    CommandRefused,
     Connected,
     Ended,
+    Event,
     EventEnvelope,
     HandshakeFailed,
     Hello,
@@ -127,7 +130,8 @@ class WebSocketSession:
         self._websocket: ClientConnection | None = None  # While connected.
         self._hello: CommandEnvelope | None = None  # The last Hello sent.
         self._attach: CommandEnvelope | None = None  # The last Attach sent.
-        self._viewing = False  # Whether the last Snapshot received was of a read-only view.
+        self._viewing = False  # Whether the last Attach answered left a read-only view.
+        self._shown_view = False  # Whether the last Snapshot received was of one.
         self._seq: int | None = None  # The last seq received.
         self._watchers: list[Callable[[LinkState], None]] = []
         self.state: LinkState | None = None  # None until the first attempt to connect ends.
@@ -147,9 +151,10 @@ class WebSocketSession:
             with suppress(NotConnected):  # Sent again on reconnecting.
                 await self._send_now(self._greeting(envelope))
             return
-        await self._send_now(envelope)
         if isinstance(envelope.payload, Attach):
-            self._attach = envelope
+            await self._send_attach(envelope)
+            return
+        await self._send_now(envelope)
 
     def events(self) -> AsyncIterator[EventEnvelope]:
         """The events the control plane sends, across reconnections, until the session closes;
@@ -189,6 +194,16 @@ class WebSocketSession:
             await websocket.send(encode(envelope))
         except ConnectionClosed:
             raise NotConnected() from None
+
+    async def _send_attach(self, attach: CommandEnvelope) -> None:
+        """Send ``attach``, noted as the last ``Attach`` first, so its answer is known as one
+        however soon it comes, unless it can't be sent."""
+        previous, self._attach = self._attach, attach
+        try:
+            await self._send_now(attach)
+        except NotConnected:
+            self._attach = previous
+            raise
 
     def _greeting(self, hello: CommandEnvelope) -> CommandEnvelope:
         """``hello`` asking for the events since the last ``seq`` received, if any was."""
@@ -288,9 +303,9 @@ class WebSocketSession:
             raise _Ended(close.reason)
 
     async def _greet(self, websocket: ClientConnection) -> None:
-        """Send the last ``Hello`` on ``websocket``, if any, then the last ``Attach``, if the
-        connection lost viewed the session it attached to, as ``Hello`` attaches it to the open
-        one."""
+        """Send the last ``Hello`` on ``websocket``, if any, then the last ``Attach``, if its
+        answer left the connection viewing a session that isn't open, as ``Hello`` attaches it
+        to the open one."""
         if self._hello is None:
             return
         await websocket.send(encode(self._greeting(self._hello)))
@@ -308,10 +323,25 @@ class WebSocketSession:
                 received = True
                 if envelope is not None:
                     self._seq = envelope.seq
-                    if isinstance(envelope.payload, Snapshot):
-                        self._viewing = not envelope.payload.active
+                    self._note(envelope.payload)
                     self._events.put_nowait(envelope)
         return received
+
+    def _note(self, event: Event) -> None:
+        """Note what ``event`` says of the session the connection views: a Snapshot whether
+        it's a view, and the answer to the last ``Attach`` whether that left one, as the
+        Snapshot before an acceptance answered it, and a refusal, such as of one sent again
+        for a session deleted since, leaves the open one."""
+        if isinstance(event, Snapshot):
+            self._shown_view = not event.active
+        elif isinstance(event, CommandAccepted | CommandRefused) and self._answers_attach(
+            event.command_id
+        ):
+            self._viewing = isinstance(event, CommandAccepted) and self._shown_view
+
+    def _answers_attach(self, command_id: str) -> bool:
+        """Whether ``command_id`` is the last ``Attach``'s."""
+        return self._attach is not None and self._attach.command_id == command_id
 
     def _lost(self) -> None:
         """Report that the connection is down, from now unless it already was."""

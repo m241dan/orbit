@@ -21,8 +21,11 @@ from orbit.protocol import (
     DEFAULT_MAX_MESSAGE_MB,
     NOT_CONNECTED,
     PROTOCOL_VERSION,
+    UNKNOWN,
     Attach,
+    CommandAccepted,
     CommandEnvelope,
+    CommandRefused,
     Connected,
     Ended,
     EventEnvelope,
@@ -159,9 +162,42 @@ def snapshot(seq: int, active: bool) -> str:
     return encode(EventEnvelope(seq=seq, session="earlier", payload=shown))
 
 
-async def reconnected_after(*snapshots: str) -> list[CommandEnvelope]:
-    """The commands a client sends on reconnecting, then ``RUN``, once it said Hello, attached
-    to ``earlier`` and received ``snapshots`` before its connection was lost."""
+def answer(seq: int, command: CommandEnvelope, refused: bool = False) -> str:
+    """The answer to ``command``: refused, if ``refused``, else accepted."""
+    answered: CommandAccepted | CommandRefused = CommandAccepted(command_id=command.command_id)
+    if refused:
+        answered = CommandRefused(command_id=command.command_id, code=UNKNOWN, message="Gone.")
+    return encode(EventEnvelope(seq=seq, payload=answered))
+
+
+async def drop_after(
+    connection: ServerConnection, events: AsyncIterator[EventEnvelope], *frames: str
+) -> None:
+    """Send ``frames`` on ``connection``, wait for the client to take each, then drop it."""
+    for frame in frames:
+        await connection.send(frame)
+        await next_event(events)
+    await connection.close(1011, "Oops")
+
+
+async def reconnecting(
+    fake: FakePlane, session: WebSocketSession
+) -> tuple[ServerConnection, list[CommandEnvelope]]:
+    """The next connection the client makes and the commands it greets with, up to ``RUN``,
+    sent once the first arrives."""
+    connection = await fake.connection()
+    greeting = [await fake.command()]
+    await session.send(RUN)
+    while (command := await fake.command()) != RUN:
+        greeting.append(command)
+    return connection, greeting
+
+
+@asynccontextmanager
+async def viewing() -> AsyncIterator[
+    tuple[FakePlane, WebSocketSession, AsyncIterator[EventEnvelope], ServerConnection]
+]:
+    """A client that said Hello and attached to ``earlier``, a view, on its connection."""
     async with plane() as (fake, url):
         session, _ = client(url)
         events = session.events()
@@ -170,16 +206,12 @@ async def reconnected_after(*snapshots: str) -> list[CommandEnvelope]:
         await fake.command()
         await session.send(ATTACH)
         await fake.command()
-        for shown in snapshots:
-            await first.send(shown)
-            await next_event(events)
-        await first.close(1011, "Oops")
-        again = [await fake.command()]
-        await session.send(RUN)
-        while again[-1] != RUN:
-            again.append(await fake.command())
+        await first.send(snapshot(3, active=False))
+        await first.send(answer(4, ATTACH))
+        await next_event(events)
+        await next_event(events)
+        yield fake, session, events, first
         await session.close()
-        return again
 
 
 async def test_it_connects_showing_the_token_and_greets_with_the_hello() -> None:
@@ -272,16 +304,64 @@ async def test_a_lost_connection_waits_the_backoff_before_reconnecting() -> None
 
 
 async def test_a_reconnecting_client_viewing_a_session_attaches_to_it_again() -> None:
-    again = await reconnected_after(snapshot(3, active=False))
+    async with viewing() as (fake, session, events, first):
+        await drop_after(first, events)
+        _, again = await reconnecting(fake, session)
 
-    assert [type(c.payload) for c in again] == [Hello, Attach, RunTasks]
-    assert again[1] == ATTACH
+    assert again == [again[0], ATTACH] and isinstance(again[0].payload, Hello)
+
+
+async def test_a_link_lost_before_the_view_is_shown_again_attaches_on_the_next() -> None:
+    async with viewing() as (fake, session, events, first):
+        await drop_after(first, events)
+        second, _ = await reconnecting(fake, session)
+        await drop_after(second, events, snapshot(5, active=True))
+        _, again = await reconnecting(fake, session)
+
+    assert [type(c.payload) for c in again] == [Hello, Attach]
+
+
+async def test_a_refused_attach_is_not_sent_again_on_reconnecting() -> None:
+    async with viewing() as (fake, session, events, first):
+        await drop_after(first, events)
+        second, _ = await reconnecting(fake, session)
+        await drop_after(second, events, snapshot(5, active=True), answer(6, ATTACH, True))
+        _, again = await reconnecting(fake, session)
+
+    assert [type(c.payload) for c in again] == [Hello]
 
 
 async def test_a_reconnecting_client_back_on_the_open_session_only_says_hello() -> None:
-    again = await reconnected_after(snapshot(3, active=False), snapshot(4, active=True))
+    back = CommandEnvelope(command_id="back", payload=Attach(session="today"))
+    async with viewing() as (fake, session, events, first):
+        await session.send(back)
+        await fake.command()
+        await drop_after(first, events, snapshot(5, active=True), answer(6, back))
+        _, again = await reconnecting(fake, session)
 
-    assert [type(c.payload) for c in again] == [Hello, RunTasks]
+    assert [type(c.payload) for c in again] == [Hello]
+
+
+async def test_an_attach_that_couldnt_be_sent_is_not_sent_on_reconnecting() -> None:
+    back = CommandEnvelope(command_id="back", payload=Attach(session="today"))
+    async with viewing() as (fake, session, events, first):
+        fake.status = 503
+        await drop_after(first, events)
+        await asyncio.wait_for(fake.turned_away.wait(), 5)
+        with pytest.raises(NotConnected):
+            await session.send(back)
+        fake.status = None
+        _, again = await reconnecting(fake, session)
+
+    assert again[1:] == [ATTACH]
+
+
+async def test_an_answer_to_another_command_leaves_the_view_to_attach_again() -> None:
+    async with viewing() as (fake, session, events, first):
+        await drop_after(first, events, snapshot(5, active=True), answer(6, RUN))
+        _, again = await reconnecting(fake, session)
+
+    assert [type(c.payload) for c in again] == [Hello, Attach]
 
 
 async def test_a_command_sent_while_disconnected_raises_not_connected() -> None:
