@@ -30,7 +30,6 @@ from orbit.agent.application.keeper import (
 )
 from orbit.agent.application.log_writer import Overflow
 from orbit.agent.application.outbox import EventSink, Outbox
-from orbit.agent.application.ownership import Ownership
 from orbit.agent.application.planner_seat import PlannerSeat, SeatHooks
 from orbit.agent.application.ports import (
     Fallback,
@@ -51,7 +50,12 @@ from orbit.agent.application.switcher import (
     SessionSwitcher,
     SwitchParts,
 )
-from orbit.agent.application.takeover import DECLINED_RETRY_SECONDS, RETRY_SECONDS, Takeover
+from orbit.agent.application.takeover import (
+    DECLINED_RETRY_SECONDS,
+    RETRY_SECONDS,
+    RetryTimes,
+    Takeover,
+)
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.application.usage_monitor import UsageMonitor
 from orbit.agent.application.verifier import Verification, Verifier
@@ -240,10 +244,11 @@ class AgentSession:
         lock_retry: float = RETRY_SECONDS,
         lock_declined_retry: float = DECLINED_RETRY_SECONDS,
     ) -> None:
-        self._ownership = Ownership(read_only=owner is not None)
-        waiting_on = lock if self._ownership.read_only else None
         self._takeover = Takeover(
-            waiting_on, lambda event: self._events.put(event), lock_retry, lock_declined_retry
+            owner is not None,
+            lock,
+            lambda event: self._events.put(event),
+            RetryTimes(lock_retry, lock_declined_retry),
         )
         self._settings = SessionSettings(settings or Settings(), pinned, model_choices)
         self._storage = storage
@@ -274,7 +279,7 @@ class AgentSession:
         hooks = SeatHooks(self._save, self._keeper.use, self._step_names)
         self._seat = PlannerSeat(self._desk, self._tasks, self._events, hooks)
         self._startup = self._startup_check(
-            verification, check_at_startup and not self._ownership.read_only
+            verification, check_at_startup and not self._takeover.read_only
         )
         self._work = self._work_lane()
         self._turns = self._work_turns()
@@ -336,7 +341,7 @@ class AgentSession:
             self._states,
             self._settings,
             self._snapshot,
-            self._ownership,
+            lambda: self._takeover.read_only,
         )
         return SessionViews(parts)
 
@@ -377,7 +382,7 @@ class AgentSession:
             self._startup,
             self._save,
             self._reviews_changed,
-            self._ownership,
+            lambda: self._takeover.read_only,
         )
         return WorkCommands(parts)
 
@@ -463,7 +468,7 @@ class AgentSession:
     @property
     def read_only(self) -> bool:
         """Whether another orbit owns the repository, so the work asked for is queued."""
-        return self._ownership.read_only
+        return self._takeover.read_only
 
     @property
     def storage_halted(self) -> bool:
@@ -593,7 +598,6 @@ class AgentSession:
         if not command.take:
             await self._events.put(OwnershipDeclined())
             return
-        self._ownership.own()
         await self._events.put(OwnershipTaken())
         await self._events.put(Notice(message=OWNED_NOTE))
         await self._commands.own(command_id)
@@ -612,7 +616,7 @@ class AgentSession:
         planner = ReviewPlanner(desk.agents.review_limits)
         lane = ReviewLane(desk, self._tasks, planner, lambda: self._turns.wake())
         lane.changed = self._reviews_changed
-        lane.ownership = self._ownership
+        lane.read_only = lambda: self._takeover.read_only
         lane.halted = lambda: self._halt.halted
         desk.suggest = lane.suggest
         return lane
@@ -740,7 +744,7 @@ class AgentSession:
     async def _leftovers(self) -> list[str]:
         """Notes on the work earlier runs left in the coder's tree; none while read-only, as
         the owner's live work would look left over."""
-        tree = self._desk.agents.tree if self._desk and not self._ownership.read_only else None
+        tree = self._desk.agents.tree if self._desk and not self._takeover.read_only else None
         return await tree.leftovers() if tree else []
 
     async def _snapshot(self, last_active: datetime | None = None) -> Snapshot:
@@ -762,7 +766,7 @@ class AgentSession:
             agents=self._running_agents(),
             transcript=transcript,
             storage_halt=self._halt.message,
-            read_only=self._ownership.read_only,
+            read_only=self._takeover.read_only,
             ownership_offered=self._takeover.offered,
             open_session=self._views.open_session(),
             viewers=self._states.of(self._keeper.id).viewers,
@@ -774,7 +778,7 @@ class AgentSession:
         roles = self._desk.agents.roles if self._desk else ()
         label = _workspace_label(self._workspace)
         live = self._states.current(joining=True).values()
-        return catalog(label, sessions, roles, read_only=self._ownership.read_only, live=live)
+        return catalog(label, sessions, roles, read_only=self._takeover.read_only, live=live)
 
     def _steps_shown(self) -> tuple[tuple[StepState, ...], str]:
         """The verification steps the panel shows, and their title: the startup check's while

@@ -34,14 +34,12 @@ from tests.agent_fakes import (
     idle,
     lane_of,
     of_type,
-    ownership_of,
     queued,
     send,
     session_for,
     sole,
     startup_of,
     verified,
-    views_on_joining,
 )
 
 OWNER = WorkspaceOwner(pid=42)
@@ -194,36 +192,3 @@ async def test_a_read_only_session_runs_no_reviews() -> None:
 
 def test_a_session_given_no_owner_queues_nothing() -> None:
     assert AgentSession().queued_work == ()
-
-
-async def test_owning_the_shared_ownership_runs_work_asked_rather_than_queueing_it() -> None:
-    session, _, launcher = session_for(claims_done, owner=OWNER)
-    await greeted(session)
-    ownership_of(session).own()
-    await send(session, AddTask(task=TaskSpec(prompt="Add a flag.")))
-    await send(session, RunTasks())
-    await events_until(session, idle())
-
-    assert session.queued_work == ()
-    assert len(launcher.launches) == 1
-    await session.close()
-
-
-async def test_owning_the_shared_ownership_lets_the_review_lane_run_reviews() -> None:
-    session, _, _ = session_for(owner=OWNER, tree=FakeTree(), review=True)
-    ownership_of(session).own()
-    lane = lane_of(session)
-    lane.kick()
-    assert lane.running
-    await session.close()
-
-
-async def test_owning_the_shared_ownership_clears_read_only_from_the_catalog_and_snapshot() -> None:
-    session, _, _ = session_for(owner=OWNER)
-    await greeted(session)
-    ownership_of(session).own()
-    events = await views_on_joining(session)
-
-    assert not sole(events, Catalog).read_only and not sole(events, Snapshot).read_only
-    assert not session.read_only
-    await session.close()

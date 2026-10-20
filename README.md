@@ -1435,7 +1435,8 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     spent; `WorkCommands` (in `work_commands`) handles the other commands, the prompts, tasks,
     board and agents' work, refusing those that name no such agent, lane or trigger, and
     queueing those that start work while the session is read-only; `Takeover` (in `takeover`)
-    tries a read-only session's workspace lock, through the `RepositoryLock` port, until the
+    keeps whether the session is read-only, which the other parts read through it, tries a
+    read-only session's workspace lock, through the `RepositoryLock` port, until the
     repository is free, and holds the offer of it until the user answers;
     `ReviewCount` (in `review_count`) keeps the repository's super review count apart from
     any one session; `SessionSettings` (in `settings`) holds the open session's settings, at

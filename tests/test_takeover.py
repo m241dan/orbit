@@ -4,7 +4,7 @@ import asyncio
 
 from orbit.agent import AgentSession
 from orbit.agent.application.session import OWNED_NOTE
-from orbit.agent.application.takeover import NO_OFFER
+from orbit.agent.application.takeover import NO_OFFER, RetryTimes, Takeover
 from orbit.agent.application.work_turns import TASKS_RUNNING_MESSAGE
 from orbit.agent.domain.ownership import WorkspaceOwner
 from orbit.protocol import (
@@ -299,4 +299,69 @@ async def test_an_owner_never_tries_the_lock_or_offers_it() -> None:
     assert not any(offered(event) for event in queued(session))
     await send(session, TakeOwnership(take=True))
     await events_until(session, refused)
+    await session.close()
+
+
+async def offered_takeover(events: list[Event], lock: FakeLock) -> Takeover:
+    """A read-only Takeover of ``lock``, publishing into ``events``, once it has offered it."""
+
+    async def publish(event: Event) -> None:
+        events.append(event)
+
+    takeover = Takeover(True, lock, publish, RetryTimes(LOCK_RETRY))
+    takeover.start()
+    while not takeover.offered:
+        await asyncio.sleep(LOCK_RETRY)
+    return takeover
+
+
+async def test_a_takeover_with_an_owner_is_read_only_until_taken() -> None:
+    events: list[Event] = []
+    takeover = await offered_takeover(events, FakeLock(free=True))
+    assert takeover.read_only and events == [OwnershipOffered()]
+
+    takeover.answer(True)
+    assert not takeover.read_only
+    await takeover.close()
+
+
+async def test_a_takeover_declined_stays_read_only() -> None:
+    lock = FakeLock(free=True)
+    takeover = await offered_takeover([], lock)
+
+    takeover.answer(False)
+    assert takeover.read_only and not lock.held
+    await takeover.close()
+
+
+async def test_a_takeover_without_an_owner_is_not_read_only_and_never_tries_the_lock() -> None:
+    async def publish(event: Event) -> None:
+        raise AssertionError(event)
+
+    lock = FakeLock(free=True)
+    takeover = Takeover(False, lock, publish, RetryTimes(LOCK_RETRY))
+    takeover.start()
+    await asyncio.sleep(LOCK_RETRY * 5)
+    assert not takeover.read_only and lock.tries == 0
+    await takeover.close()
+
+
+async def test_the_review_lane_and_work_commands_follow_the_takeover_once_taken() -> None:
+    lock = FakeLock(free=True)
+    session, _, launcher = session_for(
+        claims_done, owner=OWNER, lock=lock, tree=FakeTree(), review=True
+    )
+    lane = lane_of(session)
+    lane.kick()
+    assert not lane.running
+    await greeted(session)
+    await events_until(session, offered)
+    await send(session, TakeOwnership(take=True))
+    await events_until(session, lambda event: event == ACCEPTED)
+
+    assert lane.running
+    await send(session, AddTask(task=TaskSpec(prompt="Add a flag.")))
+    await send(session, RunTasks())
+    await events_until(session, idle())
+    assert session.queued_work == () and len(launcher.launches) == 1
     await session.close()

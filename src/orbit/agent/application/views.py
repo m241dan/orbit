@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from orbit.agent.application.connection import Connections, SessionConnection
 from orbit.agent.application.keeper import SessionKeeper
 from orbit.agent.application.outbox import Outbox
-from orbit.agent.application.ownership import Ownership
 from orbit.agent.application.session_state import SessionStates
 from orbit.agent.application.settings import SessionSettings
 from orbit.agent.domain.refusals import Refused
@@ -44,7 +43,7 @@ class ViewParts:
     """What attaching uses: the ``keeper`` of the open session and the saved ones, the
     ``events`` it publishes into and reads the logged ones back from, the ``connections``, the
     sessions' ``states``, the ``settings``, the ``live`` snapshot of the open session, and
-    the ``ownership`` saying whether the orbit is read-only."""
+    ``read_only`` saying whether the orbit is read-only."""
 
     keeper: SessionKeeper
     events: Outbox
@@ -52,7 +51,7 @@ class ViewParts:
     states: SessionStates
     settings: SessionSettings
     live: Callable[[], Awaitable[Snapshot]]
-    ownership: Ownership
+    read_only: Callable[[], bool]
 
 
 class SessionViews:
@@ -177,7 +176,7 @@ class SessionViews:
             proposals=(),
             agents=(),
             transcript=transcript,
-            read_only=parts.ownership.read_only,
+            read_only=parts.read_only(),
             active=False,
             open_session=self.open_session(),
             viewers=parts.states.of(record.id).viewers,

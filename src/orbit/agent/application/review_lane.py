@@ -11,7 +11,6 @@ from collections.abc import Awaitable, Callable, Collection
 from orbit.agent.application.agent_run import AgentRun, Outcome, ended, see_to_end, tree_failed
 from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.lanes import Background
-from orbit.agent.application.ownership import Ownership
 from orbit.agent.application.ports import CoderTree, Reply
 from orbit.agent.application.tasks import Changed, Tasks, unchanged
 from orbit.agent.domain.board import TaskBoard
@@ -61,7 +60,8 @@ class ReviewLane:
         self.planner = planner
         self._wake_work = wake_work
         self.changed: Changed = unchanged
-        self.ownership = Ownership()  # While another orbit owns the repository, run no reviews.
+        # While another orbit owns the repository, run no reviews.
+        self.read_only: Callable[[], bool] = lambda: False
         self.halted: Callable[[], bool] = lambda: False
         self._publish = desk.publish
         self._jobs: dict[str, ReviewJob] = {}  # Review task id -> what it reviews.
@@ -180,7 +180,7 @@ class ReviewLane:
     def kick(self) -> None:
         """Run the reviews waiting, if they aren't being run already, unless this orbit is
         read-only or the session is halted; those queued meanwhile wait on the board."""
-        if self.ownership.read_only or self.halted() or self._background.running:
+        if self.read_only() or self.halted() or self._background.running:
             return
         self._background.start(self._run_reviews())
 
