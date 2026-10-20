@@ -89,8 +89,9 @@ class Handshake:
 
     @property
     def listening(self) -> bool:
-        """Whether the session's events reach the frontend: from the moment what it missed is
-        read, so none falls between those and the live ones, if a ``Hello`` is welcomed."""
+        """Whether the session's events are delivered to the frontend: from the moment what it
+        missed is read, so none falls between those and the live ones, if a ``Hello`` is
+        welcomed; those delivered are held until it's caught up."""
         return self._listening
 
     @property
@@ -119,8 +120,8 @@ class Handshake:
     async def hello(self, hello: Hello, command_id: str) -> None:
         """Welcome the frontend that sent ``hello`` as ``command_id``, then publish the catalog,
         the latest usage, if any, a snapshot, or the events it missed since the ``seq`` it gave,
-        if it can catch up on them alone, the one-off notices and, if asked to, the saved
-        sessions to pick from; refused for a second Hello, or another protocol version, and
+        if it can catch up on them alone, then the live events held meanwhile, and the one-off
+        notices; refused for a second Hello, or another protocol version, and
         failing, with no Welcome, if the catalog can't be had. A step that fails after Welcome
         is published as an ``internal`` error instead, and the steps after it still run."""
         if self._welcomed:

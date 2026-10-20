@@ -1,7 +1,7 @@
 """Several frontends sharing one session, each through a connection of its own."""
 
 import asyncio
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import replace
 
 import pytest
@@ -384,9 +384,19 @@ async def test_a_greetings_notices_are_not_logged() -> None:
 LIVE = Notice(message="live")
 
 
-async def rejoined(store: FakeStore, since: int, live: Sequence[Event]) -> SessionConnection:
+def unchecked(connection: SessionConnection) -> None:
+    """Check nothing of ``connection``."""
+
+
+async def rejoined(
+    store: FakeStore,
+    since: int,
+    live: Sequence[Event],
+    check: Callable[[SessionConnection], None] = unchecked,
+) -> SessionConnection:
     """A connection to a session over ``store`` that has said Hello with ``since``, the ``live``
-    events published while what it missed was being read."""
+    events published while what it missed was being read, after which it had ``check`` see the
+    connection, before what it missed was returned."""
     session = AgentSession(store=store, clock=Ticks(), new_id=lambda: OPEN)
     read = session._greeting.missed
 
@@ -394,6 +404,7 @@ async def rejoined(store: FakeStore, since: int, live: Sequence[Event]) -> Sessi
         missed = await read(seen)
         for event in live:
             await publish(session, event)
+        check(connection)
         return missed
 
     session._greeting = replace(session._greeting, missed=slow)
@@ -435,8 +446,14 @@ async def test_events_published_while_finding_a_snapshot_is_needed_follow_welcom
 async def test_a_connection_whose_held_events_overflow_is_closed_as_too_far_behind() -> None:
     store = store_with(*(notice(seq) for seq in range(10, 21)))
     live = [Notice(message=str(n)) for n in range(QUEUE_LIMIT + 1)]
-    connection = await rejoined(store, 15, live)
+    while_held: list[tuple[bool, int]] = []
 
+    def check(connection: SessionConnection) -> None:
+        while_held.append((connection._dropped is not None, connection._handshake.held))
+
+    connection = await rejoined(store, 15, live, check)
+
+    assert while_held == [(True, QUEUE_LIMIT)]
     with pytest.raises(ConnectionDropped, match=TOO_FAR_BEHIND):
         await everything(connection)
 
