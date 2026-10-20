@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from orbit.agent.application.ports import EventLog
-from orbit.agent.domain.replay import LogBounds
+from orbit.agent.domain.replay import LogBounds, can_replay
 from orbit.agent.external import sqlite_schema
 from orbit.agent.external.sqlite_store import SqliteStore
 from orbit.protocol import EventEnvelope, Notice, TasksChanged, decode_event, encode
@@ -397,6 +397,33 @@ def big(seq: int, session: str = "abc") -> EventEnvelope:
     return notice(seq, session, "x" * 10_000)
 
 
+def old_database(
+    monkeypatch: pytest.MonkeyPatch, state: Path, workspace: Path, version: int
+) -> None:
+    """Create the database in ``state`` with the schema of ``version``, registering
+    ``workspace``, leaving ``MIGRATIONS`` cut to that version until ``monkeypatch`` is undone."""
+    monkeypatch.setattr(sqlite_schema, "MIGRATIONS", sqlite_schema.MIGRATIONS[:version])
+    connection, _ = sqlite_schema.open_database(state / "orbit.db", str(workspace))
+    connection.close()
+
+
+def insert_events(connection: sqlite3.Connection, rows: list[tuple[str, int, int]]) -> None:
+    """Add events, as their session, ``seq`` and size, to the only workspace's log."""
+    for session, seq, size in rows:
+        connection.execute(
+            "INSERT INTO events VALUES ((SELECT id FROM workspaces), ?, ?, 'notice', '{}', ?)",
+            (session, seq, size),
+        )
+
+
+def marks(state: Path) -> tuple[int, list[int]]:
+    """The highest ``seq`` ever appended, and each workspace's highest ``seq`` forgotten."""
+    with database(state) as connection:
+        (mark,) = connection.execute("SELECT seq FROM high_water").fetchone()
+        forgotten = connection.execute("SELECT forgotten_seq FROM workspaces ORDER BY path")
+        return int(mark), [int(seq) for (seq,) in forgotten]
+
+
 def stored_sizes(state: Path) -> dict[str, tuple[int, int]]:
     """Each session's log in ``logs``, as its size and the highest seq trimmed, by its id."""
     with database(state) as connection:
@@ -548,18 +575,37 @@ async def test_deleting_a_session_forgets_its_trimmed_log(
 async def test_upgrading_counts_the_size_of_the_events_logged_before(
     monkeypatch: pytest.MonkeyPatch, open_store: Opener, state: Path, workspace: Path
 ) -> None:
-    monkeypatch.setattr(sqlite_schema, "MIGRATIONS", sqlite_schema.MIGRATIONS[:2])
-    await (await open_store(workspace)).close()
+    old_database(monkeypatch, state, workspace, 2)
     with database(state) as connection:
-        for session, seq, size in [("abc", 1, 10), ("abc", 2, 20), ("def", 3, 5)]:
-            connection.execute(
-                "INSERT INTO events VALUES ((SELECT id FROM workspaces), ?, ?, 'notice', '{}', ?)",
-                (session, seq, size),
-            )
+        insert_events(connection, [("abc", 1, 10), ("abc", 2, 20), ("def", 3, 5)])
     monkeypatch.undo()
     await open_store(workspace)
 
     assert stored_sizes(state) == {"abc": (30, 0), "def": (5, 0)}
+    assert marks(state) == (3, [0])
+
+
+async def test_upgrading_from_version_3_starts_the_mark_at_the_highest_seq_and_nothing_forgotten(
+    monkeypatch: pytest.MonkeyPatch, open_store: Opener, state: Path, workspace: Path
+) -> None:
+    old_database(monkeypatch, state, workspace, 3)
+    with database(state) as connection:
+        insert_events(connection, [("abc", 4, 10), ("abc", 9, 10)])
+    monkeypatch.undo()
+    store = await open_store(workspace)
+
+    assert marks(state) == (9, [0])
+    assert store.max_seq() == 9
+
+
+async def test_upgrading_an_empty_log_starts_the_mark_at_0(
+    monkeypatch: pytest.MonkeyPatch, open_store: Opener, state: Path, workspace: Path
+) -> None:
+    old_database(monkeypatch, state, workspace, 3)
+    monkeypatch.undo()
+    await open_store(workspace)
+
+    assert marks(state) == (0, [0])
 
 
 async def test_a_trim_that_fails_is_refused_and_trimmed_reads_false(
@@ -613,3 +659,113 @@ async def test_forgetting_under_an_id_that_isnt_a_plain_file_name_is_refused(
     store = await open_store(workspace)
     with pytest.raises(ValueError, match="Not a session id"):
         await store.forget("../abc")
+
+
+# Forgotten events
+
+Drop = Callable[[SqliteStore, str], Awaitable[None]]
+DROPS: list[Drop] = [SqliteStore.forget, SqliteStore.delete]
+
+
+@pytest.mark.parametrize("drop", DROPS, ids=["forget", "delete"])
+async def test_seq_resumes_past_events_forgotten_or_deleted(
+    open_store: Opener, workspace: Path, drop: Drop
+) -> None:
+    store = await open_store(workspace)
+    await store.append("auth", [notice(seq, "auth") for seq in range(1, 6)])
+    await store.append("x", [notice(seq, "x") for seq in range(6, 21)])
+    await drop(store, "x")
+    await store.close()
+    reopened = await open_store(workspace)
+
+    assert reopened.max_seq() == 20
+    assert await reopened.latest_seq() == 20
+
+
+async def test_the_mark_is_the_highest_seq_appended_in_any_workspace(
+    open_store: Opener, state: Path, tmp_path: Path, workspace: Path
+) -> None:
+    other_workspace = tmp_path / "other"
+    other_workspace.mkdir()
+    store, other = await open_store(workspace), await open_store(other_workspace)
+    await other.append("abc", [notice(8)])
+    await store.append("abc", [notice(3)])
+    await store.append("abc", [])
+
+    assert marks(state)[0] == 8
+
+
+async def test_the_mark_never_counts_down_from_the_highest_seq_stored(
+    open_store: Opener, state: Path, workspace: Path
+) -> None:
+    store = await open_store(workspace)
+    await store.append("abc", [notice(4)])
+    with database(state) as connection:
+        connection.execute("UPDATE high_water SET seq = 0")
+    await store.close()
+
+    assert (await open_store(workspace)).max_seq() == 4
+
+
+@pytest.mark.parametrize("drop", DROPS, ids=["forget", "delete"])
+async def test_a_frontend_that_last_saw_a_forgotten_sessions_events_isnt_replayed(
+    open_store: Opener, workspace: Path, drop: Drop
+) -> None:
+    store = await open_store(workspace)
+    await store.append("auth", [notice(seq, "auth") for seq in range(1, 6)])
+    await store.append("x", [notice(seq, "x") for seq in range(6, 21)])
+    await drop(store, "x")
+    await store.append("auth", [notice(21, "auth"), notice(22, "auth")])
+
+    bounds = await store.bounds("auth", 20)
+    assert bounds == LogBounds(first_seq=1, others_seq=20, own_seq=5)
+    assert not can_replay(20, 22, bounds)
+
+
+async def test_a_frontend_that_saw_the_open_sessions_events_after_those_forgotten_is_replayed(
+    open_store: Opener, workspace: Path
+) -> None:
+    store = await open_store(workspace)
+    await store.append("auth", [notice(seq, "auth") for seq in range(1, 6)])
+    await store.append("x", [notice(seq, "x") for seq in range(6, 11)])
+    await store.forget("x")
+    await store.append("auth", [notice(seq, "auth") for seq in range(11, 16)])
+
+    bounds = await store.bounds("auth", 12)
+    assert bounds == LogBounds(first_seq=1, others_seq=10, own_seq=12)
+    assert can_replay(12, 15, bounds)
+
+
+async def test_forgetting_keeps_the_highest_seq_forgotten_in_its_workspace_alone(
+    open_store: Opener, state: Path, tmp_path: Path, workspace: Path
+) -> None:
+    other_workspace = tmp_path / "other"
+    other_workspace.mkdir()
+    store, other = await open_store(workspace), await open_store(other_workspace)
+    await store.append("x", [notice(3, "x"), notice(7, "x")])
+    await store.append("y", [notice(4, "y")])
+    await other.append("z", [notice(9, "z")])
+    await store.forget("x")
+    await store.forget("y")
+    await store.forget("never-logged")
+    await other.forget("never-logged")
+
+    forgotten = dict(
+        zip(sorted([str(workspace), str(other_workspace)]), marks(state)[1], strict=True)
+    )
+    assert forgotten == {str(workspace): 7, str(other_workspace): 0}
+    assert await other.bounds("z", 9) == LogBounds(first_seq=9, others_seq=0, own_seq=9)
+
+
+async def test_trimming_leaves_the_highest_seq_forgotten_and_the_next_seq_alone(
+    open_store: Opener, state: Path, workspace: Path
+) -> None:
+    store = await open_store(workspace)
+    await store.append("abc", [big(1), big(2), big(3)])
+    await store.trim("abc", 1, 1)
+    await store.close()
+    reopened = await open_store(workspace)
+
+    assert await reopened.trimmed("abc")
+    assert marks(state) == (3, [0])
+    assert reopened.max_seq() == 3

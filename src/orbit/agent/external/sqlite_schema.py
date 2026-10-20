@@ -62,6 +62,13 @@ MIGRATIONS: tuple[tuple[str, ...], ...] = (
         """INSERT INTO logs (workspace_id, session_id, size)
         SELECT workspace_id, session_id, sum(size) FROM events GROUP BY workspace_id, session_id""",
     ),
+    (
+        # The highest seq ever appended, in one row, so that seq is never handed out again.
+        "CREATE TABLE high_water (seq INTEGER NOT NULL)",
+        "INSERT INTO high_water (seq) SELECT coalesce(max(seq), 0) FROM events",
+        # The highest seq deleted with a session's log in each workspace.
+        "ALTER TABLE workspaces ADD COLUMN forgotten_seq INTEGER NOT NULL DEFAULT 0",
+    ),
 )
 
 

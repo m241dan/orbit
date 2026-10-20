@@ -1245,10 +1245,11 @@ async def hello_since(store: SqliteStore, since: int) -> list[EventEnvelope]:
 
 
 async def trimmed_log(store: SqliteStore) -> int:
-    """The ``seq`` of the oldest event kept of a log of ``session-1`` written to ``store`` and
-    trimmed."""
+    """The ``seq`` of the oldest event kept of a log of ``session-1`` written to ``store``, after
+    any logged before it, and trimmed."""
     await store.forget("session-1")
-    await store.append("session-1", [big(seq, "session-1") for seq in range(1, 211)])
+    start = (await store.latest_seq() or 0) + 1
+    await store.append("session-1", [big(seq, "session-1") for seq in range(start, start + 210)])
     await store.trim("session-1", 1024 * 1024, 1024 * 1024 * 9 // 10)
     return (await store.recent("session-1", 1000))[0].seq
 

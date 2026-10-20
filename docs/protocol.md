@@ -34,8 +34,9 @@ An event travels in an `EventEnvelope`:
 
 - `seq`: the event's place in the backend's stream, counted from 1. There's one counter per
   control plane, shared by every session, so one session's events can have gaps between them.
-  With a store, it carries on from the highest `seq` the store's event log holds, and again
-  when a saved session is opened, past any events another orbit logged since.
+  With a store, it carries on from the highest `seq` the store has ever logged, and again
+  when a saved session is opened, past any events another orbit logged since, so a `seq` is
+  never handed out twice, even once the events that had it are deleted.
 - `session`: the session the event belongs to. The event's type decides it: the types in
   `SESSIONLESS_EVENTS` (`UsageChanged`, `SessionsListed`, `Catalog` and `SessionStateChanged`)
   belong to no session, carry `null` and are never logged, and every other event carries the
@@ -316,7 +317,9 @@ its state from it: when another session's events came after `since` (the user sw
 sessions), when the open session has no event at or before `since` newer than every other
 session's (the frontend's state is of another session, as when a new orbit opens a new or other
 session), when `since` is older than what's kept, when it's ahead of the last event orbit
-stamped, or when orbit keeps no event log.
+stamped, or when orbit keeps no event log. A session's events that were deleted, as when an
+unsaved session is left or a session is deleted, count as another session's: a frontend that
+last saw them gets a fresh Snapshot.
 
 ## Deprecated
 

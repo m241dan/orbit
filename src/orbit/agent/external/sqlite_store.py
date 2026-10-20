@@ -6,7 +6,9 @@ caller that's cancelled while awaiting one never leaves the connection mid-trans
 and opening it are :mod:`sqlite_schema`'s, and copying it to a backup :mod:`sqlite_backup`'s.
 
 Each session's log has a row in ``logs`` with the size of its events, kept as they're appended
-and trimmed, and the highest ``seq`` trimmed from it.
+and trimmed, and the highest ``seq`` trimmed from it. ``high_water`` holds the highest ``seq`` ever
+appended, so that none is handed out again once its event is deleted, and each workspace's
+``forgotten_seq`` the highest deleted with a session's log, which counts as another session's.
 
 Session locks are :class:`SessionLocks` lock files in ``locks/<workspace id>`` in the state
 directory, so that a crash leaves no stale lock behind.
@@ -62,9 +64,13 @@ class NewRows:
 
 
 def _max_seq(connection: sqlite3.Connection) -> int:
-    """The highest ``seq`` in ``connection``'s ``events`` table, 0 when it's empty."""
-    (seq,) = connection.execute("SELECT max(seq) FROM events").fetchone()
-    return int(seq or 0)
+    """The highest ``seq`` ever appended to ``connection``'s log, 0 when there's none: the
+    higher of its mark and its ``events`` table's highest."""
+    (seq,) = connection.execute(
+        """SELECT max(coalesce((SELECT max(seq) FROM high_water), 0),
+            coalesce((SELECT max(seq) FROM events), 0))"""
+    ).fetchone()
+    return int(seq)
 
 
 type EventRow = tuple[str, str, int, str, str, int]
@@ -116,7 +122,7 @@ class SqliteStore:
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix=THREAD_PREFIX)
         self._connection: sqlite3.Connection | None = None
         self._closed = False
-        # The highest seq in the log when it opened or was last read, or appended since.
+        # The highest seq ever logged when it opened or was last read, or appended since.
         self._max_seq = 0
         # Both are the workspace's once the store is open.
         self._workspace = ""
@@ -190,7 +196,7 @@ class SqliteStore:
         await self._locks.remove(session_id)
 
     def max_seq(self) -> int:
-        """The highest ``seq`` in the log, across workspaces, when the store opened or
+        """The highest ``seq`` ever logged, across workspaces, when the store opened or
         :meth:`latest_seq` last read it, or appended by it since; 0 when there's none."""
         return self._max_seq
 
@@ -425,6 +431,7 @@ class SqliteStore:
         """Add ``envelopes`` to the session ``session_id``'s log, but for those whose ``seq`` it
         holds already, as when parked events are imported again; returns how many it added."""
         rows = [_event_row(self._workspace, session_id, envelope) for envelope in envelopes]
+        highest = max([0, *(envelope.seq for envelope in envelopes)])
         with transaction(self._db):
             inserted = [row for row in rows if self._insert_event(row)]
             added = sum(row[5] for row in inserted)
@@ -433,11 +440,12 @@ class SqliteStore:
                 ON CONFLICT (workspace_id, session_id) DO UPDATE SET size = size + excluded.size""",
                 (self._workspace, session_id, added),
             )
-        self._max_seq = max([self._max_seq, *(envelope.seq for envelope in envelopes)])
+            self._db.execute("UPDATE high_water SET seq = max(seq, ?)", (highest,))
+        self._max_seq = max(self._max_seq, highest)
         return len(inserted)
 
     def _latest_seq(self) -> int:
-        """The highest ``seq`` in the log now, counted in :meth:`max_seq` from then on."""
+        """The highest ``seq`` ever logged now, counted in :meth:`max_seq` from then on."""
         self._max_seq = max(self._max_seq, _max_seq(self._db))
         return self._max_seq
 
@@ -533,8 +541,12 @@ class SqliteStore:
             "SELECT min(seq) FROM events WHERE workspace_id = ? AND session_id = ?",
             (self._workspace, session_id),
         ).fetchone()
+        # Events forgotten count as another session's: a frontend may have seen them last.
         (others,) = self._db.execute(
-            "SELECT max(seq) FROM events WHERE workspace_id = ? AND session_id != ?",
+            """SELECT max(
+                coalesce((SELECT max(seq) FROM events WHERE workspace_id = ?1 AND session_id != ?2),
+                    0),
+                (SELECT forgotten_seq FROM workspaces WHERE id = ?1))""",
             (self._workspace, session_id),
         ).fetchone()
         # The last event trimmed was the session's too.
@@ -547,7 +559,7 @@ class SqliteStore:
             )""",
             (self._workspace, session_id, since),
         ).fetchone()
-        return LogBounds(first_seq=first, others_seq=int(others or 0), own_seq=own)
+        return LogBounds(first_seq=first, others_seq=int(others), own_seq=own)
 
     def _forget(self, session_id: str) -> None:
         with transaction(self._db):
@@ -555,7 +567,13 @@ class SqliteStore:
 
     def _forget_log(self, session_id: str) -> None:
         """Delete the session ``session_id``'s events and its row in ``logs``, within a
-        transaction."""
+        transaction, raising the workspace's ``forgotten_seq`` to the highest deleted."""
+        self._db.execute(
+            """UPDATE workspaces SET forgotten_seq = max(forgotten_seq, coalesce(
+                (SELECT max(seq) FROM events WHERE workspace_id = ?1 AND session_id = ?2), 0))
+            WHERE id = ?1""",
+            (self._workspace, session_id),
+        )
         self._db.execute(
             "DELETE FROM events WHERE workspace_id = ? AND session_id = ?",
             (self._workspace, session_id),
