@@ -500,6 +500,53 @@ async def test_a_catalog_again_refreshes_the_picker_shown_in_place() -> None:
         assert session.commands == SWITCH_TO_OLD
 
 
+NEWER = SessionSummary(id="new", name="fresh", last_active=ACTIVE)
+
+
+async def test_a_catalog_adding_a_session_above_keeps_the_highlighted_session() -> None:
+    app, session = in_process()
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, CATALOG)
+        await feed_events(session, pilot, catalog(CURRENT, NEWER, OLD, LOCKED, BROKEN))
+
+        assert picker(app).query_one(OptionList).highlighted == 1
+        await pilot.press("enter")
+        assert session.commands == SWITCH_TO_OLD
+
+
+async def test_a_catalog_reordering_the_rows_keeps_the_highlighted_session() -> None:
+    app, session = in_process()
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, CATALOG)
+        await pilot.press("j", "j")
+        await feed_events(session, pilot, catalog(CURRENT, BROKEN, OLD, LOCKED))
+
+        screen = picker(app)
+        assert screen.query_one(OptionList).highlighted == 0
+        assert screen.rows[0] == BROKEN
+
+
+async def test_a_catalog_adding_a_session_keeps_new_session_highlighted() -> None:
+    app, session = in_process()
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, CATALOG)
+        await pilot.press("j", "j", "j")
+        await feed_events(session, pilot, catalog(CURRENT, NEWER, OLD, LOCKED, BROKEN))
+
+        assert picker(app).query_one(OptionList).highlighted == 4  # New session.
+
+
+async def test_a_catalog_dropping_the_highlighted_session_keeps_the_highlight_in_place() -> None:
+    app, session = in_process()
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, CATALOG)
+        await feed_events(session, pilot, catalog(CURRENT, LOCKED, BROKEN))
+
+        assert picker(app).query_one(OptionList).highlighted == 0
+        await pilot.press("enter")
+        assert session.commands == []  # Now on the locked session.
+
+
 async def test_renaming_and_deleting_through_the_backend_refresh_the_picker() -> None:
     store = store_with(saved("old"), saved("gone"))
     backend = AgentSession(store=store, pick_session=True)

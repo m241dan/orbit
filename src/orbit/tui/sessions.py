@@ -133,15 +133,24 @@ class SessionsScreen(ModalScreen[tuple[SessionChoice, ...]]):
 
     def show(self, sessions: Sequence[SessionSummary], attached: str | None) -> None:
         """List ``sessions``, with the one ``attached`` first, in place of those listed, keeping
-        the highlight where it was."""
-        self.sessions, self.attached = tuple(sessions), attached
+        the highlight on the session it was on, or where it was if that one's gone."""
         if not self.is_mounted:  # Listed again before it's on screen: compose lists them.
+            self.sessions, self.attached = tuple(sessions), attached
             return
         options = self.query_one(OptionList)
-        highlighted = options.highlighted or 0
+        kept, highlighted = self._highlighted, options.highlighted or 0
+        self.sessions, self.attached = tuple(sessions), attached
         options.clear_options()
         options.add_options(self._labels())
-        options.highlighted = min(highlighted, options.option_count - 1)
+        options.highlighted = self._row_of(kept, highlighted)
+
+    def _row_of(self, summary: SessionSummary | None, fallback: int) -> int:
+        """The index of ``summary``'s row, or ``New session``'s if it's none; ``fallback``,
+        kept within the list, once ``summary`` isn't listed."""
+        ids = [row.id for row in self.rows]
+        if summary is None:
+            return len(ids)
+        return ids.index(summary.id) if summary.id in ids else min(fallback, len(ids))
 
     def _labels(self) -> list[Text | str]:
         """The rows' labels, then ``New session``'s."""
