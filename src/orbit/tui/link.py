@@ -13,7 +13,15 @@ from textual.screen import ModalScreen
 from textual.timer import Timer
 from textual.widgets import OptionList, Static
 
-from orbit.protocol import Connected, Ended, LinkState, Reconnecting, Stopped, TokenRefused
+from orbit.protocol import (
+    Connected,
+    Ended,
+    HandshakeFailed,
+    LinkState,
+    Reconnecting,
+    Stopped,
+    TokenRefused,
+)
 from orbit.tui.view.link import (
     CHOICES,
     QUIT,
@@ -99,7 +107,7 @@ class LinkHost:
                 self._reconnecting(url, lost_delay(since, now))
             case Stopped(url=url):
                 self._ask(STOPPED_TITLE, stopped_message(url))
-            case TokenRefused() | Ended():
+            case TokenRefused() | HandshakeFailed() | Ended():
                 self._final(*final_notice(state))
             case _:
                 assert_never(state)

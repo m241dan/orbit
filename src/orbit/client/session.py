@@ -11,6 +11,7 @@ it views that session again. How the link stands is reported to whoever watches 
 
 import asyncio
 import random
+import ssl
 import time
 from collections.abc import AsyncIterator, Callable
 from contextlib import suppress
@@ -21,8 +22,10 @@ from websockets.asyncio.client import ClientConnection
 from websockets.exceptions import ConnectionClosed
 from websockets.frames import Close
 
+from orbit.client import messages
+from orbit.client.tls import refuse_plaintext
 from orbit.client.token import TokenUnreadable, read_token
-from orbit.client.upgrade import TokenRejected, open_connection
+from orbit.client.upgrade import HandshakeRefused, TokenRejected, open_connection
 from orbit.protocol import (
     DEFAULT_MAX_MESSAGE_MB,
     GOING_AWAY,
@@ -33,6 +36,7 @@ from orbit.protocol import (
     Connected,
     Ended,
     EventEnvelope,
+    HandshakeFailed,
     Hello,
     LinkState,
     NotConnected,
@@ -99,14 +103,24 @@ def _closing(websocket: ClientConnection) -> Close | None:
 class WebSocketSession:
     """The control plane at ``url``, shown the token in ``token_file``, read afresh for each
     attempt to connect, so a rotated one is shown on reconnecting; a lost connection is retried
-    as ``backoff`` says.
+    as ``backoff`` says. A ``wss://`` URL is verified with ``ssl_context``, or the system's
+    trusted CAs without one.
 
-    It connects once it's first used. While the connection is down, :meth:`send` raises
+    Raises :class:`PlaintextRefused` for a ``ws://`` URL to a host beyond loopback, before
+    connecting. It connects once it's first used. While the connection is down, :meth:`send` raises
     :class:`NotConnected`, but for a ``Hello``, which is kept to be sent on connecting.
     """
 
-    def __init__(self, url: str, token_file: Path, backoff: Backoff = BACKOFF) -> None:
+    def __init__(
+        self,
+        url: str,
+        token_file: Path,
+        backoff: Backoff = BACKOFF,
+        ssl_context: ssl.SSLContext | None = None,
+    ) -> None:
+        refuse_plaintext(url)
         self.url = url
+        self._ssl_context = ssl_context
         self._token_file = token_file
         self._backoff = backoff
         self._events: asyncio.Queue[EventEnvelope | Exception | None] = asyncio.Queue()
@@ -185,12 +199,14 @@ class WebSocketSession:
 
     async def _run(self) -> None:
         """Keep connected until the session closes, the token is turned away or can't be read,
-        or the connection closes in a way that would recur; an event that can't be read ends
-        the events with its error."""
+        the connection can't be made safely, or it closes in a way that would recur; an event
+        that can't be read ends the events with its error."""
         try:
             await self._keep_connected()
         except _TurnedAway as error:
             self._report(TokenRefused(str(error)))
+        except HandshakeRefused as error:
+            self._report(HandshakeFailed(self.url, str(error)))
         except _Ended as ended:
             self._report(Ended(self.url, str(ended)))
         except ProtocolError as error:
@@ -216,7 +232,7 @@ class WebSocketSession:
     async def _connect(self) -> ClientConnection | None:
         """A new connection to the control plane, shown the token in the token file as it is
         now, or none if it can't be made; raises :class:`_TurnedAway` if the token is, or can't
-        be read."""
+        be read, and :class:`HandshakeRefused` if it can't be made safely."""
         try:
             token = read_token(self._token_file)
         except TokenUnreadable as error:
@@ -225,13 +241,13 @@ class WebSocketSession:
             return await open_connection(
                 self.url,
                 token,
+                ssl_context=self._ssl_context,
                 ping_interval=PING_SECONDS,
                 ping_timeout=PING_SECONDS,
                 max_size=MAX_MESSAGE_BYTES,
             )
         except TokenRejected:
-            message = f"The control plane refused the token from {self._token_file}."
-            raise _TurnedAway(message) from None
+            raise _TurnedAway(messages.TOKEN_REFUSED.format(path=self._token_file)) from None
 
     async def _linked(self, websocket: ClientConnection) -> bool:
         """Greet the control plane on ``websocket`` with the last ``Hello``, if any, and take

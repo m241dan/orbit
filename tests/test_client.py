@@ -15,7 +15,7 @@ from websockets.http11 import Request, Response
 from orbit.agent import AgentSession
 from orbit.agent.domain.server import ServerSettings
 from orbit.agent.external.control_plane import ControlPlaneServer
-from orbit.client import Backoff, TokenUnreadable, WebSocketSession, read_token
+from orbit.client import Backoff, TokenUnreadable, WebSocketSession, messages, read_token
 from orbit.client.session import MAX_MESSAGE_BYTES
 from orbit.protocol import (
     DEFAULT_MAX_MESSAGE_MB,
@@ -413,7 +413,7 @@ async def test_a_refused_token_is_reported_naming_its_file_and_not_retried() -> 
         session, states = client(url, "wrong")
         session.events()
         refused = await states.until(TokenRefused)
-        assert refused == TokenRefused(f"The control plane refused the token from {TOKEN_FILE}.")
+        assert refused == TokenRefused(messages.TOKEN_REFUSED.format(path=TOKEN_FILE))
         await asyncio.sleep(0.1)
         assert len(fake.headers) == 1
         await session.close()
@@ -427,7 +427,7 @@ async def test_a_token_still_refused_on_reconnecting_is_reported_naming_its_file
         fake.status = 401
         await connection.close(1011, "Oops")
         refused = await states.until(TokenRefused)
-        assert refused == TokenRefused(f"The control plane refused the token from {TOKEN_FILE}.")
+        assert refused == TokenRefused(messages.TOKEN_REFUSED.format(path=TOKEN_FILE))
         await session.close()
 
 

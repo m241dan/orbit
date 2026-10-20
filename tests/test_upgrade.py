@@ -12,7 +12,7 @@ from websockets.asyncio.client import ClientConnection
 from websockets.asyncio.server import ServerConnection, serve
 from websockets.http11 import Request, Response
 
-from orbit.client import TokenRejected, WebSocketSession, accepts, probe, session
+from orbit.client import TokenRejected, WebSocketSession, accepts, messages, probe, session
 from orbit.client.upgrade import open_connection
 from orbit.protocol import UNAUTHORIZED, LinkState, TokenRefused, bearer_header
 
@@ -84,5 +84,5 @@ async def test_the_session_is_turned_away_through_the_shared_opener(
     websocket_session.watch(states.put_nowait)
     websocket_session.events()
     refused = await asyncio.wait_for(states.get(), 5)
-    assert refused == TokenRefused(f"The control plane refused the token from {token_file}.")
+    assert refused == TokenRefused(messages.TOKEN_REFUSED.format(path=token_file))
     await websocket_session.close()

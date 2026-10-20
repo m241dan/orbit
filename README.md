@@ -47,6 +47,7 @@ uv run orbit serve                             # run the control plane on its ow
 uv run orbit serve --port 0                    # on a port the system chooses
 uv run orbit serve --tls tls --cert server.pem --key server-key.pem --host 0.0.0.0  # over TLS
 uv run orbit chat --connect ws://127.0.0.1:7433/  # show the session orbit serve runs
+uv run orbit chat --connect wss://orbit.example.lan:7433/ --ca ca.pem  # over TLS
 uv run orbit chat --local                      # run in-process even with orbit serve running
 uv run orbit token rotate                      # replace the token frontends show orbit serve
 ```
@@ -968,10 +969,16 @@ orbit serve --tls tls --cert server.pem --key server-key.pem --host 0.0.0.0
 ```
 
 `server.pem` and `server-key.pem` stay on the server; copy `ca.pem` and the token to each client
-machine over a trusted channel, such as `scp`.
+machine over a trusted channel, such as `scp`. Then connect by the name the certificate gives,
+trusting the CA (see **Connecting** below):
 
-**TLS and connection errors.** Each message `orbit serve` stops (or warns) with starts with what's
-wrong, then names the setting or file:
+```sh
+orbit chat --connect wss://orbit.example.lan:7433/ --ca ~/.config/orbit/tls/ca.pem
+```
+
+**TLS and connection errors.** Each message `orbit serve` stops (or warns) with, and each one
+`orbit chat` stops with or shows when it can't connect, starts with what's wrong, then names the
+setting, file or URL:
 
 | Message | Fix |
 | --- | --- |
@@ -984,12 +991,25 @@ wrong, then names the setting or file:
 | The server certificate has expired. | Renew it, replace the file and restart `orbit serve`. |
 | The server certificate isn't valid yet. | Check the machine's clock, or make a certificate valid from now. |
 | The server certificate expires soon. | A warning: renew it and restart `orbit serve` before the date it names. |
+| The server's certificate isn't signed by a trusted CA. | Pass `--ca` with the CA file that signed the server's certificate (the server's `ca.pem`), or set the remote's `ca`. |
+| The hostname doesn't match the server's certificate. | Connect by a name the certificate gives as a subject alternative name, or reissue it with the name you connect by. |
+| The server's certificate can't be used. | It fails verification for the reason given, such as having expired: renew it on the server, or check the client machine's clock. |
+| The server isn't speaking TLS. | Connect with `ws://` to a server on loopback, or serve it with `--tls tls`. |
+| The server is speaking TLS. | Connect with `wss://` rather than `ws://`. |
+| Plaintext is refused beyond loopback. | Connect with `wss://` to a server serving TLS, or through an SSH tunnel to a loopback address. |
+| The CA file can't be read. | Check the path given to `--ca`, and that the file is a PEM certificate. |
+| The control plane refused the token. | Give it the token `orbit serve` uses: copy it to the file named, or name another with `--token-file`. |
 
 **Connecting.** `orbit chat --connect <url>` joins a running `orbit serve`, starting with the
 session picker, which offers to resume the session it has active (see [Sessions](#sessions)),
-rather than running a control plane of its own; it takes `ws://` URLs only in this
-release. It shows the token in `token` in the config directory, or in the file `--token-file
-<path>` names; a token file that can't be read stops it with status 2. The backend flags
+rather than running a control plane of its own. It takes a `wss://` URL, to a server serving
+TLS, or a `ws://` one to loopback (`127.0.0.1`, `::1`, `localhost`); a `ws://` URL to any other
+host stops it with status 2 before connecting, as it would carry the token unencrypted. Over TLS
+it always verifies the server: its certificate must be signed by the CA in the file `--ca <path>`
+names, or by one the system trusts without `--ca`, and must name the host connected to. There's
+no way to turn either check off. A CA file that can't be read stops it with status 2. It shows
+the token in `token` in the config directory, or in the file `--token-file <path>` names; a token
+file that can't be read stops it with status 2. The backend flags
 (`--model`, `--tools`, `--verify`, `--worktree`, `--review`, `--usage`, `--profile`) configure
 the control plane, so with `--connect` they stop it with status 2: give them to `orbit serve`.
 `--new` and `--name` skip the picker and open a new session once connected, as picking `New
@@ -1004,7 +1024,9 @@ modal, "Lost the control plane at <url>", offers "Keep trying" or "Quit". When t
 it's shutting down, "The control plane stopped" opens at once, with "Keep trying" preselected and
 reconnecting going on behind it; either modal closes once it's connected again. A token the server
 refuses shows a message naming the token file, and the chat quits once it's closed, without
-retrying. Likewise "Disconnected", giving the reason, shows when the connection closes in a way
+retrying; so does a connection that can't be made safely as asked: a server certificate that
+isn't trusted, doesn't name the host or fails verification otherwise, or a server speaking TLS to
+a `ws://` URL or plaintext to a `wss://` one, each shown with its message from the table above. Likewise "Disconnected", giving the reason, shows when the connection closes in a way
 reconnecting would only repeat: a message over the size limit, sent either way, or the server
 refusing the chat's `Hello` as incompatible.
 

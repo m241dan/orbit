@@ -1,6 +1,6 @@
 """How the link to a control plane in another process is shown."""
 
-from orbit.protocol import Ended, TokenRefused
+from orbit.protocol import Ended, HandshakeFailed, TokenRefused
 
 LOST_AFTER = 120.0
 """How many seconds of reconnecting go by before the user is asked whether to keep trying."""
@@ -43,9 +43,9 @@ def ended_message(url: str, reason: str) -> str:
     return f"{closed}{because} Reconnecting would end the same way."
 
 
-def final_notice(state: TokenRefused | Ended) -> tuple[str, str]:
+def final_notice(state: TokenRefused | HandshakeFailed | Ended) -> tuple[str, str]:
     """The title and message of the modal saying why the link, in ``state``, isn't retried."""
-    if isinstance(state, TokenRefused):
+    if isinstance(state, TokenRefused | HandshakeFailed):
         return REFUSED_TITLE, state.message
     return ENDED_TITLE, ended_message(state.url, state.reason)
 

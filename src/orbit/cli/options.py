@@ -103,8 +103,17 @@ ConnectOption = Annotated[
     typer.Option(
         "--connect",
         metavar="URL",
-        help="Connect to the control plane orbit serve runs at this ws:// URL rather than run"
-        " one here; the backend flags belong on orbit serve then.",
+        help="Connect to the control plane orbit serve runs at this wss:// URL (or ws:// on"
+        " loopback) rather than run one here; the backend flags belong on orbit serve then.",
+    ),
+]
+CaOption = Annotated[
+    Path | None,
+    typer.Option(
+        "--ca",
+        metavar="PATH",
+        help="The CA certificate that signed the server's certificate, to verify a wss://"
+        " control plane by (default: the system's trusted CAs).",
     ),
 ]
 TokenFileOption = Annotated[

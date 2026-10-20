@@ -1,5 +1,6 @@
 """``orbit chat --connect``: the TUI over a control plane ``orbit serve`` runs."""
 
+import ssl
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, ClassVar
@@ -8,7 +9,9 @@ import pytest
 from typer.testing import CliRunner
 
 from orbit.cli import app
+from orbit.client import WebSocketSession, messages
 from orbit.protocol import Command, NewSession
+from tests.tls_certs import make_ca
 
 runner = CliRunner()
 URL = "ws://127.0.0.1:7433/"
@@ -16,10 +19,12 @@ URL = "ws://127.0.0.1:7433/"
 
 @dataclass
 class FakeClient:
-    """The WebSocket session built: where to, shown the token read from which file."""
+    """The WebSocket session built: where to, shown the token read from which file, verified
+    with which context."""
 
     url: str
     token_file: Path
+    ssl_context: ssl.SSLContext | None = None
 
 
 @dataclass
@@ -126,10 +131,62 @@ def test_every_backend_flag_given_is_named() -> None:
 
 
 @pytest.mark.usefixtures("token_file")
-def test_a_url_other_than_ws_exits() -> None:
-    result = runner.invoke(app, ["chat", "--connect", "wss://example.com/"])
+def test_a_url_other_than_ws_or_wss_exits() -> None:
+    result = runner.invoke(app, ["chat", "--connect", "http://example.com/"])
     assert result.exit_code == 2
-    assert "takes a ws:// URL, not wss://example.com/" in result.stderr
+    assert "takes a wss:// or ws:// URL, not http://example.com/" in result.stderr
+    assert FakeApp.built == []
+
+
+@pytest.mark.usefixtures("token_file")
+def test_a_wss_url_is_verified_by_the_ca_given(tmp_path: Path) -> None:
+    ca = make_ca(tmp_path)
+    url = "wss://orbit.example.lan:7433/"
+    result = runner.invoke(app, ["chat", "--connect", url, "--ca", str(ca.path)])
+    assert result.exit_code == 0, result.output
+    client = FakeApp.built[0].session
+    assert isinstance(client, FakeClient) and client.url == url
+    assert client.ssl_context is not None and client.ssl_context.check_hostname
+    subjects = [certificate["subject"] for certificate in client.ssl_context.get_ca_certs()]
+    assert subjects == [((("commonName", "orbit test CA"),),)]
+
+
+@pytest.mark.usefixtures("token_file")
+def test_a_wss_url_without_a_ca_is_verified_by_the_systems_cas() -> None:
+    result = runner.invoke(app, ["chat", "--connect", "wss://orbit.example.lan:7433/"])
+    assert result.exit_code == 0, result.output
+    client = FakeApp.built[0].session
+    assert isinstance(client, FakeClient) and client.ssl_context is not None
+    assert client.ssl_context.get_ca_certs() == ssl.create_default_context().get_ca_certs()
+
+
+@pytest.mark.usefixtures("token_file")
+def test_a_ws_url_has_no_tls_context(tmp_path: Path) -> None:
+    result = runner.invoke(app, ["chat", "--connect", URL, "--ca", str(tmp_path / "unused")])
+    assert result.exit_code == 0, result.output
+    assert FakeApp.built[0].session == FakeClient(URL, tmp_path / "config" / "token")
+
+
+@pytest.mark.usefixtures("token_file")
+def test_a_ca_file_that_cant_be_read_exits_naming_it(tmp_path: Path) -> None:
+    missing = tmp_path / "missing.pem"
+    result = runner.invoke(
+        app, ["chat", "--connect", "wss://orbit.example.lan/", "--ca", str(missing)]
+    )
+    assert result.exit_code == 2
+    assert f"The CA file can't be read. {missing}: " in result.stderr
+    assert FakeApp.built == []
+
+
+@pytest.mark.usefixtures("token_file")
+def test_plaintext_beyond_loopback_exits_before_connecting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("orbit.cli.chat.WebSocketSession", WebSocketSession)
+    url = "ws://example.com:7433"
+    result = runner.invoke(app, ["chat", "--connect", url])
+    assert result.exit_code == 2
+    assert messages.PLAINTEXT_NOT_LOOPBACK.format(url=url, host="example.com") in result.stderr
     assert FakeApp.built == []
 
 

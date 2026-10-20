@@ -9,6 +9,7 @@ from orbit.protocol import (
     PLANNER,
     Connected,
     Ended,
+    HandshakeFailed,
     LinkState,
     NewSession,
     NotConnected,
@@ -157,6 +158,19 @@ async def test_a_refused_token_shows_why_and_quits_once_closed() -> None:
         assert shown is not None and shown.choices == ("Quit",)
         assert shown.message == "The control plane refused the token from /t."
         assert status(app) is None
+        await pilot.press("enter")
+        await pilot.pause()
+    assert app.return_code == 0
+
+
+async def test_a_failed_handshake_shows_why_and_quits_once_closed() -> None:
+    app, _, link = linked()
+    async with app.run_test() as pilot:
+        await link.move(pilot, HandshakeFailed(URL, "The server is speaking TLS. Use wss://."))
+        shown = modal(app)
+        assert shown is not None and shown.choices == ("Quit",)
+        assert shown.title_text == "Can't connect"
+        assert shown.message == "The server is speaking TLS. Use wss://."
         await pilot.press("enter")
         await pilot.pause()
     assert app.return_code == 0

@@ -86,15 +86,27 @@ def make_ca(directory: Path) -> Ca:
     return Ca(path, certificate, key)
 
 
+def _alternative_name(host: str) -> x509.GeneralName:
+    """``host`` as a subject alternative name: an address, else a DNS name."""
+    try:
+        return x509.IPAddress(ipaddress.ip_address(host))
+    except ValueError:
+        return x509.DNSName(host)
+
+
 def make_server(
-    ca: Ca, directory: Path, valid_from: timedelta = -DAY, valid_for: timedelta = 90 * DAY
+    ca: Ca,
+    directory: Path,
+    valid_from: timedelta = -DAY,
+    valid_for: timedelta = 90 * DAY,
+    hosts: tuple[str, ...] = ("localhost", "127.0.0.1"),
 ) -> ServerFiles:
-    """A certificate for localhost and 127.0.0.1 that ``ca`` signs, valid from ``valid_from``
-    after now for ``valid_for``, written with its key to ``server.pem`` and ``server-key.pem``
-    in ``directory``."""
+    """A certificate for ``hosts`` that ``ca`` signs, valid from ``valid_from`` after now for
+    ``valid_for``, written with its key to ``server.pem`` and ``server-key.pem`` in
+    ``directory``."""
     key = ec.generate_private_key(ec.SECP256R1())
     start = datetime.now(UTC) + valid_from
-    names = [x509.DNSName("localhost"), x509.IPAddress(ipaddress.ip_address("127.0.0.1"))]
+    names = [_alternative_name(host) for host in hosts]
     certificate = (
         x509.CertificateBuilder()
         .subject_name(_name("localhost"))

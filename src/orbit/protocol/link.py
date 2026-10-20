@@ -48,7 +48,16 @@ class Ended:
     reason: str
 
 
-LinkState = Connected | Reconnecting | Stopped | TokenRefused | Ended
+@dataclass(frozen=True)
+class HandshakeFailed:
+    """The connection to the control plane at ``url`` can't be made safely as asked, such as
+    for a certificate that isn't trusted, as ``message`` says; the link isn't retried."""
+
+    url: str
+    message: str
+
+
+LinkState = Connected | Reconnecting | Stopped | TokenRefused | Ended | HandshakeFailed
 
 
 class NotConnected(Exception):

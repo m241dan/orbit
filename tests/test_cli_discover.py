@@ -2,6 +2,7 @@
 
 import asyncio
 import os
+import ssl
 import subprocess
 import sys
 from collections.abc import Iterator
@@ -24,10 +25,12 @@ URL = "ws://127.0.0.1:7433/"
 
 @dataclass
 class FakeClient:
-    """The WebSocket session built: where to, shown the token read from which file."""
+    """The WebSocket session built: where to, shown the token read from which file, verified
+    with which context."""
 
     url: str
     token_file: Path
+    ssl_context: ssl.SSLContext | None = None
 
 
 @dataclass
