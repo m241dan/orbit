@@ -351,6 +351,19 @@ async def test_a_snapshot_taken_while_halted_carries_the_explanation() -> None:
     await session.close()
 
 
+async def test_the_session_says_whether_storage_is_halted() -> None:
+    store = FakeStore()
+    session, _, _ = session_for(store=store, fallback=FakeFallback())
+    await greet(session)
+    assert not session.storage_halted
+    store.failure = "full"
+    await send(session, AddTask(task=TASK))
+    await halt_error(session)
+
+    assert session.storage_halted
+    await session.close()
+
+
 # The work cancelled
 
 

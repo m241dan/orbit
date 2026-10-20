@@ -10,6 +10,10 @@ afresh for each frontend, so a new one admits frontends at once, while those alr
 stay. Under mutual TLS the TLS handshake refuses a client without a certificate the client CA
 signed, the token isn't asked for, and a certificate whose fingerprint is revoked, as the
 revoked fingerprints are read afresh for each frontend, is turned away with HTTP 403.
+
+``GET /healthz`` and ``GET /readyz`` answer health checks without the token, in
+``application/health+json``: the first passes while the server runs, the second says whether
+it's ready.
 """
 
 import asyncio
@@ -22,12 +26,14 @@ from typing import Protocol
 
 import uvicorn
 from starlette.applications import Starlette
-from starlette.responses import PlainTextResponse
-from starlette.routing import WebSocketRoute
+from starlette.requests import Request
+from starlette.responses import JSONResponse, PlainTextResponse
+from starlette.routing import Route, WebSocketRoute
 from starlette.types import Message
 from starlette.websockets import WebSocket, WebSocketDisconnect, WebSocketDisconnected
 
 from orbit.agent.application.connection import ConnectionDropped, SessionConnection
+from orbit.agent.domain.health import Readiness, readiness, ready_answer
 from orbit.agent.domain.server import ServerSettings, client_fingerprint, is_revoked
 from orbit.agent.external import tls_messages
 from orbit.agent.external.client_certs import (
@@ -62,6 +68,9 @@ UNAUTHORIZED = "Send the token in orbit's token file as Authorization: Bearer <t
 BINARY_FRAME = "Send each envelope as JSON in a text frame."
 """Why a binary frame was refused."""
 
+HEALTH_JSON = "application/health+json"
+"""The content type of the health checks' answers."""
+
 GRACE_SECONDS = 5
 """How long the server waits, as it shuts down, for the WebSockets to finish closing."""
 
@@ -72,9 +81,16 @@ Say = Callable[[str], None]
 
 
 class Connectable(Protocol):
-    """A session frontends connect to."""
+    """A session frontends connect to, saying whether it's read-only, as another orbit owns the
+    repository, and whether its storage is halted."""
 
     def connect(self) -> SessionConnection: ...
+
+    @property
+    def read_only(self) -> bool: ...
+
+    @property
+    def storage_halted(self) -> bool: ...
 
 
 class ListenFailed(Exception):
@@ -227,6 +243,7 @@ class ControlPlaneServer:
         self._say = say
         self._open: set[_Conversation] = set()
         self._stopping = False
+        self._accepting = False
         self._server: uvicorn.Server | None = None
         self._serving: asyncio.Task[None] | None = None
         self.revoked: Callable[[], Collection[str]] = lambda: settings.revoked
@@ -252,7 +269,18 @@ class ControlPlaneServer:
                     self._serving.exception()
                 )
             await asyncio.sleep(0.01)
+        self._accepting = True
         return url
+
+    def readiness(self) -> Readiness:
+        """How ready the server is: starting until it accepts frontends, shutting down once it
+        stops, and otherwise as its session's storage and ownership say."""
+        return readiness(
+            accepting=self._accepting,
+            stopping=self._stopping,
+            halted=self._session.storage_halted,
+            read_only=self._session.read_only,
+        )
 
     @property
     def _secure(self) -> bool:
@@ -268,7 +296,12 @@ class ControlPlaneServer:
         """How uvicorn serves the app: logging left to the program, messages kept under the
         limit, over TLS with the settings' certificate and key if it's secure, and requiring a
         client certificate the client CA signed if it's mutual."""
-        app = Starlette(routes=[WebSocketRoute("/", self._websocket)])
+        routes = [
+            WebSocketRoute("/", self._websocket),
+            Route("/healthz", _healthz, methods=["GET"]),
+            Route("/readyz", self._readyz, methods=["GET"]),
+        ]
+        app = Starlette(routes=routes)
         return uvicorn.Config(
             app,
             ssl_certfile=self._settings.cert if self._secure else None,
@@ -308,6 +341,11 @@ class ControlPlaneServer:
                 await conversation.close(GOING_AWAY, SHUTTING_DOWN)
             self._server.should_exit = True
             await self._serving
+
+    async def _readyz(self, request: Request) -> JSONResponse:
+        """Whether the server is ready, as ``/readyz`` answers it."""
+        status, body = ready_answer(self.readiness())
+        return JSONResponse(body, status, media_type=HEALTH_JSON)
 
     def _farewell(self) -> tuple[int, str]:
         """How a WebSocket whose stream ended is closed: as the server shuts down, if it is."""
@@ -361,6 +399,11 @@ class ControlPlaneServer:
             self._open.discard(conversation)
             if conversation.client:
                 self._say(f"{conversation.client} disconnected from {peer}.")
+
+
+async def _healthz(request: Request) -> JSONResponse:
+    """That the server runs, as ``/healthz`` answers it."""
+    return JSONResponse({"status": "pass"}, media_type=HEALTH_JSON)
 
 
 def _peer(websocket: WebSocket) -> str:

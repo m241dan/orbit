@@ -375,6 +375,14 @@ outcomes of other connections' commands included, but for the events answering o
   WebSocket with code 1001 and the reason `orbit serve is shutting down`.
 - A stream that ends otherwise, as an incompatible `Hello`'s does, closes the WebSocket with code
   1000. A frontend doesn't reconnect after it, as the same `Hello` would be refused again.
+- **Health checks**: `GET /healthz` and `GET /readyz` answer on the same port without the token,
+  in `application/health+json`, the IETF health-check draft's minimal form; the status code is
+  the contract. `/healthz` answers 200 `{"status": "pass"}` while the server runs. `/readyz`
+  answers 200 `{"status": "pass"}` once the store is open, the workspace loaded and frontends
+  accepted, with storage working; 200 `{"status": "warn", "output": "read_only"}` while another
+  orbit owns the repository; and otherwise 503 `{"status": "fail", "output": <reason>}`, the
+  reason `starting`, `shutting_down` or `storage_halted`. Neither says more: no version, paths or
+  checks. Under mutual TLS the handshake still asks for a client certificate before either.
 
 Work doesn't depend on any frontend: queued work goes on to the end with none connected.
 

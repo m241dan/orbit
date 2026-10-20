@@ -895,6 +895,22 @@ refused with HTTP 503), cancels the work in progress (stopping the agents and re
 tokens), writes the event log, closes every frontend's connection saying the server is shutting
 down, and exits. A second `ctrl+c` exits at once.
 
+**Health checks.** A service manager or container orchestrator can watch `orbit serve` on its
+main port, without the token, with `GET /healthz` and `GET /readyz`; both answer in
+`application/health+json`, and the status code is what counts:
+
+| Path | Answer | When |
+| --- | --- | --- |
+| `/healthz` | 200 `{"status": "pass"}` | the server is running |
+| `/readyz` | 200 `{"status": "pass"}` | it's serving, with the store open, the workspace loaded and storage working |
+| `/readyz` | 200 `{"status": "warn", "output": "read_only"}` | another orbit owns the repository, so this one is read-only |
+| `/readyz` | 503 `{"status": "fail", "output": "starting"}` | it isn't accepting frontends yet |
+| `/readyz` | 503 `{"status": "fail", "output": "shutting_down"}` | it's stopping |
+| `/readyz` | 503 `{"status": "fail", "output": "storage_halted"}` | storage is halted until resumed |
+
+They say nothing more: no version, paths or details. Under mTLS they need a client certificate
+like any other connection, for now.
+
 **The token.** A frontend connects by showing the token in `token` in the config directory, sent
 as `Authorization: Bearer <token>`; without it the connection is refused with HTTP 401. `orbit
 serve` makes it on first start, 32 random bytes, in a file readable by you alone, and reuses it

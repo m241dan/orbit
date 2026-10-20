@@ -457,6 +457,11 @@ class AgentSession:
         return self._ownership.read_only
 
     @property
+    def storage_halted(self) -> bool:
+        """Whether a write to the store failed, so the session is halted until resumed."""
+        return self._halt.halted
+
+    @property
     def queued_work(self) -> tuple[QueuedWork, ...]:
         """The commands that start work, queued while read-only, oldest first."""
         return self._commands.queued

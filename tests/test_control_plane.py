@@ -423,6 +423,8 @@ class Counted:
     def __init__(self) -> None:
         self.session = AgentSession()
         self.connections = 0
+        self.read_only = False
+        self.storage_halted = False
 
     def connect(self) -> SessionConnection:
         self.connections += 1
