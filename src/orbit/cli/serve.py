@@ -17,6 +17,8 @@ from orbit.agent import (
     ConfigError,
     ControlPlaneServer,
     ListenFailed,
+    LocalDiscoveryUnavailable,
+    LocalTls,
     RunFile,
     ServerSettings,
     SqliteStore,
@@ -25,6 +27,7 @@ from orbit.agent import (
     TokenFile,
     WorkspaceLock,
     WorkspaceOwner,
+    local_tls,
     read_server,
     resolve_config_dir,
     resolve_state_dir,
@@ -107,6 +110,7 @@ def serve(
             _current_token(token_file),
             _current_revoked(user_config, settings.revoked),
             None if owner else RunFile(state, store.workspace_id),
+            _local_tls(settings, root),
             _banner(root, token_file, owner, settings),
             lock,
         )
@@ -172,6 +176,19 @@ def _server_settings(config_dir: Path, given: Mapping[str, object]) -> ServerSet
     return settings
 
 
+def _local_tls(settings: ServerSettings, root: Path) -> LocalTls | None:
+    """How a frontend on this machine reaches the server ``settings`` serve with TLS, relative
+    paths taken from ``root``; ``None`` for plaintext, or, with a warning saying why, when it
+    can't find it on its own."""
+    if settings.tls == "off":
+        return None
+    try:
+        return local_tls(settings, root)
+    except LocalDiscoveryUnavailable as exc:
+        typer.echo(f"Warning: {exc}", err=True)
+        return None
+
+
 def _token(token_file: TokenFile) -> str:
     """The token in ``token_file``, made if there's none.
 
@@ -216,9 +233,10 @@ class _ServeParts:
     """What ``orbit serve`` serves: the session ``build`` makes, with the most recently active
     saved one opened if ``latest``, on the server ``settings`` say, to frontends showing the
     token ``token`` gives as they connect, or under mutual TLS a certificate not among those
-    ``revoked`` gives then, saying where it is in ``run_file``, if it owns the
-    repository, while it does, the ``banner`` it prints once listening, given the server's
-    URL, and the workspace ``lock``, which names the server's URL while it's held."""
+    ``revoked`` gives then, saying where it is in ``run_file``, if it owns the repository, while
+    it does, and how frontends here reach it over TLS, ``local``, the ``banner`` it prints once
+    listening, given the server's URL, and the workspace ``lock``, which names the server's URL
+    while it's held."""
 
     build: Callable[[], AgentSession]
     latest: bool
@@ -226,6 +244,7 @@ class _ServeParts:
     token: Callable[[], str]
     revoked: Callable[[], Collection[str]]
     run_file: RunFile | None
+    local: LocalTls | None
     banner: Callable[[str], str]
     lock: WorkspaceLock
 
@@ -263,7 +282,7 @@ async def _until_stopped(
     written: RunFile | None = None
     try:
         if parts.run_file is not None:
-            _write_run_file(parts.run_file, url)
+            _write_run_file(parts.run_file, url, parts.local)
             written = parts.run_file
         parts.lock.announce(url)
         typer.echo(parts.banner(url))
@@ -277,13 +296,14 @@ async def _until_stopped(
                 written.remove()
 
 
-def _write_run_file(run_file: RunFile, url: str) -> None:
-    """Say in ``run_file`` that this process is serving at ``url``.
+def _write_run_file(run_file: RunFile, url: str, local: LocalTls | None) -> None:
+    """Say in ``run_file`` that this process is serving at ``url``, reached from this machine
+    as ``local`` says.
 
     Exits with status 2 if it can't.
     """
     try:
-        run_file.write(url, os.getpid())
+        run_file.write(url, os.getpid(), local)
     except OSError as exc:
         typer.echo(f"Can't write the run file {run_file.path}: {exc}", err=True)
         raise typer.Exit(2) from None

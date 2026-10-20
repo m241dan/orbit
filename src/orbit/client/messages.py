@@ -97,6 +97,14 @@ CERT_WITHOUT_KEY = (
 )
 """A client certificate or key, the one ``given``, without the other."""
 
+LOCAL_CLIENT_CERT_MISSING = (
+    "Local discovery under mutual TLS needs a client certificate. {url} serves mutual TLS: set"
+    " local_client_cert and local_client_key in [server] in {path} to a certificate its client"
+    " CA signed and its key."
+)
+"""A control plane on this machine, at ``url``, serving mutual TLS, while the user config at
+``path`` names no client certificate for frontends here to show it."""
+
 ALL = (
     UNKNOWN_CA,
     HOSTNAME_MISMATCH,
@@ -113,5 +121,6 @@ ALL = (
     KEY_READABLE,
     CLIENT_CERT_UNREADABLE,
     CERT_WITHOUT_KEY,
+    LOCAL_CLIENT_CERT_MISSING,
 )
 """Every message, for README.md's table to list."""

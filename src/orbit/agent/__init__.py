@@ -28,7 +28,7 @@ from orbit.agent.domain.config_errors import ConfigError
 from orbit.agent.domain.ownership import WorkspaceOwner
 from orbit.agent.domain.remotes import RemoteSettings
 from orbit.agent.domain.roles import Role
-from orbit.agent.domain.server import ServerSettings, TlsMode
+from orbit.agent.domain.server import LocalTls, RunningServer, ServerSettings, TlsMode
 from orbit.agent.domain.storage import StorageSettings
 from orbit.agent.domain.verification import VerificationStep
 from orbit.agent.external.checks import run_step
@@ -45,7 +45,7 @@ from orbit.agent.external.session_import import ImportBlocked
 from orbit.agent.external.sqlite_schema import StoreError
 from orbit.agent.external.sqlite_store import SqliteStore
 from orbit.agent.external.store_startup import OpenedStore, open_workspace_store
-from orbit.agent.external.tls import TlsError, tls_warnings
+from orbit.agent.external.tls import LocalDiscoveryUnavailable, TlsError, local_tls, tls_warnings
 from orbit.agent.external.token_file import TokenError, TokenFile
 from orbit.agent.external.usage_api import UsageApi
 from orbit.agent.external.user_config import (
@@ -73,6 +73,8 @@ __all__ = [
     "ImportBlocked",
     "Limits",
     "ListenFailed",
+    "LocalDiscoveryUnavailable",
+    "LocalTls",
     "McpHost",
     "OpenedStore",
     "OrbitConfig",
@@ -82,6 +84,7 @@ __all__ = [
     "RemoteSettings",
     "Role",
     "RunFile",
+    "RunningServer",
     "ServerSettings",
     "SessionStore",
     "Setup",
@@ -102,6 +105,7 @@ __all__ = [
     "WorkspaceOwner",
     "git_top_level",
     "in_git_work_tree",
+    "local_tls",
     "open_workspace_store",
     "orbit_dir",
     "read_config",

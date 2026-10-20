@@ -1,6 +1,6 @@
 """Whether ``orbit serve`` can serve as its settings say: plaintext on loopback alone, and over
 TLS a private key readable by its owner alone, matching a certificate that's valid now, and
-under mutual TLS a client CA that can be read."""
+under mutual TLS a client CA that can be read; and how a frontend on this machine reaches it."""
 
 import ssl
 import stat
@@ -12,9 +12,12 @@ from cryptography.hazmat.primitives.serialization import load_pem_private_key
 
 from orbit.agent.domain.server import (
     CertificateDates,
+    LocalTls,
     ServerSettings,
     certificate_dates,
     is_loopback,
+    local_candidates,
+    local_hostname,
     missing_tls_key,
 )
 from orbit.agent.external import tls_messages
@@ -22,6 +25,11 @@ from orbit.agent.external import tls_messages
 
 class TlsError(Exception):
     """``orbit serve`` can't serve as its settings say; the message says why and the fix."""
+
+
+class LocalDiscoveryUnavailable(Exception):
+    """Frontends on this machine can't find the server on their own; the message says why and
+    the fix."""
 
 
 def tls_warnings(settings: ServerSettings, now: datetime | None = None) -> tuple[str, ...]:
@@ -124,3 +132,34 @@ def _unreadable(path: Path, reason: str) -> str:
 def _date(moment: datetime) -> str:
     """``moment`` to the minute, as messages show it."""
     return moment.strftime("%Y-%m-%d %H:%M UTC")
+
+
+def local_tls(settings: ServerSettings, base: Path) -> LocalTls:
+    """How a frontend on this machine reaches the server ``settings`` serve with TLS, which
+    :func:`tls_warnings` has checked: trusting ``ca``, else ``client_ca``, taken from the
+    directory ``base`` if relative, by a name the certificate gives.
+
+    Raises :class:`LocalDiscoveryUnavailable` if neither CA is set, or the certificate gives
+    no name for this machine.
+    """
+    assert settings.cert is not None  # As tls_warnings checked.
+    ca = settings.ca or settings.client_ca
+    if ca is None:
+        raise LocalDiscoveryUnavailable(tls_messages.LOCAL_NO_CA.format(cert=settings.cert))
+    cert = Path(settings.cert)
+    hostname = local_hostname(settings.host, _certificate_names(_certificate(cert)))
+    if hostname is None:
+        names = ", ".join(local_candidates(settings.host))
+        message = tls_messages.LOCAL_NO_HOSTNAME.format(cert=cert, names=names)
+        raise LocalDiscoveryUnavailable(message)
+    return LocalTls(mutual=settings.tls == "mtls", ca=str(base / ca), hostname=hostname)
+
+
+def _certificate_names(certificate: x509.Certificate) -> tuple[str, ...]:
+    """The hostnames and addresses ``certificate`` gives as subject alternative names."""
+    try:
+        names = certificate.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
+    except x509.ExtensionNotFound:
+        return ()
+    addresses = names.get_values_for_type(x509.IPAddress)
+    return (*names.get_values_for_type(x509.DNSName), *(str(a) for a in addresses))

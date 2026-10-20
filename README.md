@@ -887,7 +887,8 @@ and the token file (under mTLS, the client CA), then one line as each frontend c
 name its `Hello` gives and its address, and under mTLS its certificate's subject and SHA-256
 fingerprint) and disconnects, and one as it stops; a connection closed without a `Hello`, like the
 probe `orbit chat` makes to find a server, gets no line. Warnings and errors go to stderr. While it runs, `run/<workspace id>.json` in the state directory, readable by you
-alone, holds its URL and process id; it's removed as it stops.
+alone, holds its URL and process id, and over TLS the CA a frontend on the same machine trusts and
+the hostname it connects by (see **Finding the server** below); it's removed as it stops.
 
 The first `ctrl+c` (or SIGTERM) stops it: it stops accepting frontends (one that arrives then is
 refused with HTTP 503), cancels the work in progress (stopping the agents and revoking their
@@ -933,6 +934,8 @@ key = "/home/me/.config/orbit/tls/server-key.pem"   # its private key, chmod 600
 client_ca = "/home/me/.config/orbit/tls/ca.pem"     # signs client certificates, for mtls (--client-ca)
 ca = "/home/me/.config/orbit/tls/ca.pem"            # the CA that signed cert
 revoked = []         # client certificate fingerprints refused under mtls
+local_client_cert = "/home/me/.config/orbit/tls/local.pem"      # shown by chats here, under mtls
+local_client_key = "/home/me/.config/orbit/tls/local-key.pem"   # its private key, chmod 600
 ```
 
 An unknown key in `[server]`, or a value of the wrong type or out of range, stops `orbit serve`
@@ -1060,6 +1063,9 @@ setting, file or URL:
 | The server wants a token, not a client certificate. | The server doesn't serve mTLS: pass `--token-file` (or nothing, for the default) rather than `--cert` and `--key`. |
 | The client certificate can't be used. | Check the paths given to `--cert` and `--key`, and that the key is the certificate's. |
 | A client certificate goes with its key. | Pass `--cert` and `--key` together. |
+| Local discovery won't work without a CA. | A warning from `orbit serve` over TLS: set `ca` (or, under mTLS, `client_ca`) in `[server]`, or join with `orbit chat --connect` and `--ca`. |
+| Local discovery won't work with this certificate. | A warning from `orbit serve` over TLS: add `localhost` (or the host it listens on) to the certificate as a subject alternative name, or join with `orbit chat --connect` by a name it gives. |
+| Local discovery under mutual TLS needs a client certificate. | Set `local_client_cert` and `local_client_key` in `[server]` to a certificate the client CA signed and its key. |
 
 **Connecting.** `orbit chat --connect <url>` joins a running `orbit serve`, starting with the
 session picker, which offers to resume the session it has active (see [Sessions](#sessions)),
@@ -1103,6 +1109,18 @@ bypassed: if it refuses the token, or the token file can't be read, the chat sto
 naming the token file. Only servers of the same account on the same machine are found this way; for
 any other, give `--connect` its URL, or name it in `[remotes]`. `--local` skips the search and
 always runs in-process, taking the backend flags; it can't go with `--connect` or `--remote`.
+
+A server serving TLS is found too. Its run file records the CA to trust, `ca` in `[server]`, or
+`client_ca` without one, and the hostname to connect by: one its certificate gives as a subject
+alternative name, `localhost` first for a server listening on every address (`0.0.0.0` or `::`),
+then `127.0.0.1` and `::1`; the host itself first for one on loopback, then `localhost`; and the
+host itself otherwise. With no CA set, or a certificate that names none of these, `orbit serve`
+starts anyway with a warning that local discovery won't work, saying why, and chats here run
+in-process unless given `--connect`. Under mTLS the chat shows the client certificate
+`local_client_cert` and `local_client_key` in `[server]` name, from the same `config.toml`, rather
+than the token: make one with the client CA as in **Client certificates** above. Without them it
+stops with status 2, naming the two keys, rather than running in-process; a key others can read
+stops it with status 2 and the `chmod 600` that fixes it, as do files that can't be read.
 
 **Named remotes.** Each `[remotes.<name>]` table in your `config.toml` names a control plane, and
 `orbit chat --remote <name>` connects to it as `--connect` would with its settings:

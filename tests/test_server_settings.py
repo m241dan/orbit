@@ -6,7 +6,13 @@ from pathlib import Path
 import pytest
 
 from orbit.agent.domain.config_errors import ConfigError
-from orbit.agent.domain.server import ServerSettings, is_loopback
+from orbit.agent.domain.server import (
+    LocalTls,
+    RunningServer,
+    ServerSettings,
+    is_loopback,
+    local_hostname,
+)
 from orbit.agent.external.user_config import read_server
 
 
@@ -29,6 +35,14 @@ def test_the_files_tls_settings_are_read(tmp_path: Path) -> None:
     assert read_server(tmp_path) == ServerSettings(
         tls="tls", cert="s.pem", key="k.pem", client_ca="c.pem", ca="a.pem"
     )
+
+
+def test_the_files_local_client_certificate_is_read(tmp_path: Path) -> None:
+    (tmp_path / "config.toml").write_text(
+        '[server]\nlocal_client_cert = "me.pem"\nlocal_client_key = "me-key.pem"\n'
+    )
+    settings = read_server(tmp_path)
+    assert (settings.local_client_cert, settings.local_client_key) == ("me.pem", "me-key.pem")
 
 
 def test_the_files_revoked_fingerprints_are_read(tmp_path: Path) -> None:
@@ -74,3 +88,54 @@ def test_loopback_hosts_are_loopback(host: str) -> None:
 @pytest.mark.parametrize("host", ["0.0.0.0", "192.168.1.2", "::", "example.com"])
 def test_other_hosts_are_not_loopback(host: str) -> None:
     assert not is_loopback(host)
+
+
+@pytest.mark.parametrize(
+    ("host", "names", "hostname"),
+    [
+        ("127.0.0.1", ("localhost", "127.0.0.1"), "127.0.0.1"),
+        ("127.0.0.1", ("LOCALHOST",), "localhost"),
+        ("::1", ("0:0:0:0:0:0:0:1",), "::1"),
+        ("0.0.0.0", ("orbit.example.lan", "localhost"), "localhost"),
+        ("0.0.0.0", ("127.0.0.1",), "127.0.0.1"),
+        ("::", ("::1",), "::1"),
+        ("orbit.example.lan", ("Orbit.Example.Lan",), "orbit.example.lan"),
+        ("orbit.example.lan", ("*.example.lan",), "orbit.example.lan"),
+        ("192.168.1.20", ("localhost", "192.168.1.20"), "192.168.1.20"),
+    ],
+)
+def test_a_local_client_connects_by_a_name_the_certificate_gives(
+    host: str, names: tuple[str, ...], hostname: str
+) -> None:
+    assert local_hostname(host, names) == hostname
+
+
+@pytest.mark.parametrize(
+    ("host", "names"),
+    [
+        ("0.0.0.0", ("orbit.example.lan",)),
+        ("192.168.1.20", ("localhost", "127.0.0.1")),
+        ("orbit.example.lan", ("*.lan", "*.other.lan")),
+        ("example.lan", ("*.example.lan",)),
+        ("127.0.0.1", ()),
+    ],
+)
+def test_a_certificate_naming_no_local_name_gives_no_hostname(
+    host: str, names: tuple[str, ...]
+) -> None:
+    assert local_hostname(host, names) is None
+
+
+def test_a_plaintext_server_is_reached_at_its_url() -> None:
+    assert RunningServer(url="ws://127.0.0.1:7433/", pid=1).local_url == "ws://127.0.0.1:7433/"
+
+
+@pytest.mark.parametrize(
+    ("hostname", "url"),
+    [("localhost", "wss://localhost:7433/"), ("::1", "wss://[::1]:7433/")],
+)
+def test_a_tls_server_is_reached_by_the_hostname_its_certificate_gives(
+    hostname: str, url: str
+) -> None:
+    local = LocalTls(mutual=False, ca="/ca.pem", hostname=hostname)
+    assert RunningServer(url="wss://0.0.0.0:7433/", pid=1, tls=local).local_url == url

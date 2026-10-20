@@ -14,9 +14,11 @@ from orbit.agent import (
     USER_CONFIG_FILE,
     ConfigError,
     RemoteSettings,
+    RunningServer,
     SqliteStore,
     TokenFile,
     read_remotes,
+    read_server,
     resolve_config_dir,
     resolve_state_dir,
     running_server,
@@ -60,6 +62,7 @@ from orbit.client import (
     WebSocketSession,
     accepts,
     client_ssl_context,
+    messages,
     read_token,
 )
 from orbit.profiling import profiled
@@ -118,9 +121,11 @@ def chat(
     joining = _Joining(ctx, token_path, ca, _opening(new, name))
     state = resolve_state_dir(state, os.environ)
     root = _workspace(workspace)
-    found = None if local else _discovered(state, root, token_path)
+    found = None if local else _discovered(state, root, token_path, user_config)
     if found is not None:
-        _join(joining, found, f"which serves {root} at {found}; or pass --local to run one here")
+        joining = _joining(ctx, found.files, user_config, joining.opening)
+        where = f"which serves {root} at {found.url}; or pass --local to run one here"
+        _join(joining, found.url, where)
         return
     # The only place the backend and frontend meet, and where the backend's external
     # adapters are plugged into its ports. Every adapter works relative to the current
@@ -282,29 +287,76 @@ def _join(joining: _Joining, url: str, where: str) -> None:
     _launch(_connected_app(url, joining), None)
 
 
-def discover_control_plane(state: Path, workspace: Path, token_file: Path) -> str | None:
-    """The URL of the control plane serving the workspace at ``workspace``, as its run file in
-    the ``state`` directory says, if the process it names is alive and it takes the token in
-    ``token_file``; ``None`` if there's none, or it can't be reached.
+class LocalCertMissing(Exception):
+    """A control plane on this machine serves mutual TLS, and the user config names no client
+    certificate to show it; the message names the keys to set."""
 
-    Raises :class:`TokenUnreadable` if the token can't be read, and :class:`TokenRejected` if
-    the control plane turns it away.
+
+@dataclass(frozen=True)
+class Discovered:
+    """A control plane found serving the workspace: the ``url`` a frontend here connects to,
+    showing it ``files``."""
+
+    url: str
+    files: _ClientFiles
+
+
+def discover_control_plane(
+    state: Path, workspace: Path, token_file: Path, config_dir: Path
+) -> Discovered | None:
+    """The control plane serving the workspace at ``workspace``, as its run file in the
+    ``state`` directory says, if the process it names is alive and it takes the token in
+    ``token_file``, or under mutual TLS the client certificate the user config in
+    ``config_dir`` names; ``None`` if there's none, or it can't be reached.
+
+    Raises :class:`TokenUnreadable` if the token can't be read, :class:`TokenRejected` if the
+    control plane turns it away, :class:`ConfigError` if the user config is invalid,
+    :class:`LocalCertMissing` if it names no client certificate under mutual TLS, and
+    :class:`CaUnreadable` or :class:`ClientCertUnusable` if the CA or the client certificate
+    can't be used.
     """
     server = running_server(state, str(workspace))
     if server is None:
         return None
-    token = read_token(token_file)
-    return server.url if asyncio.run(accepts(server.url, token)) else None
+    files = _local_files(server, token_file, config_dir)
+    url = server.local_url
+    context = None if server.tls is None else client_ssl_context(files.ca, files.cert, files.key)
+    token = None if files.token_file is None else read_token(files.token_file)
+    return Discovered(url, files) if asyncio.run(accepts(url, token, context)) else None
 
 
-def _discovered(state: Path, workspace: Path, token_file: Path) -> str | None:
+def _local_files(server: RunningServer, token_file: Path, config_dir: Path) -> _ClientFiles:
+    """The files a frontend on this machine shows ``server``: the token in ``token_file``,
+    verifying it by the CA its run file names over TLS, or under mutual TLS the client
+    certificate in the user config in ``config_dir`` instead of the token.
+
+    Raises :class:`ConfigError` if the user config is invalid, and :class:`LocalCertMissing`
+    if it names no client certificate under mutual TLS.
+    """
+    if server.tls is None:
+        return _ClientFiles(token_file)
+    ca = Path(server.tls.ca)
+    if not server.tls.mutual:
+        return _ClientFiles(token_file, ca)
+    settings = read_server(config_dir)
+    cert, key = settings.local_client_cert, settings.local_client_key
+    if cert is None or key is None:
+        path = config_dir / USER_CONFIG_FILE
+        raise LocalCertMissing(messages.LOCAL_CLIENT_CERT_MISSING.format(url=server.url, path=path))
+    return _ClientFiles(None, ca, Path(cert), Path(key))
+
+
+def _discovered(
+    state: Path, workspace: Path, token_file: Path, config_dir: Path
+) -> Discovered | None:
     """What :func:`discover_control_plane` finds; a control plane found is never bypassed.
 
-    Exits with status 2 if the token can't be read, or the control plane turns it away.
+    Exits with status 2 if the token, the user config, the CA or the client certificate can't
+    be used, or the control plane turns the token away.
     """
     try:
-        with _exit_on(TokenUnreadable):
-            return discover_control_plane(state, workspace, token_file)
+        with _exit_on(ConfigError, prefix=INVALID_CONFIG), _exit_on(*_LOCAL_ERRORS):
+            return discover_control_plane(state, workspace, token_file, config_dir)
     except TokenRejected:
         typer.echo(
             f"The control plane serving {workspace} refused the token from {token_file}; give it"
@@ -312,6 +364,10 @@ def _discovered(state: Path, workspace: Path, token_file: Path) -> str | None:
             err=True,
         )
         raise typer.Exit(2) from None
+
+
+_LOCAL_ERRORS = (TokenUnreadable, LocalCertMissing, CaUnreadable, ClientCertUnusable)
+"""What stops a chat finding a control plane on this machine, said as it is."""
 
 
 def _refuse_serve_flags(ctx: typer.Context, where: str) -> None:

@@ -5,7 +5,7 @@ import os
 import ssl
 import subprocess
 import sys
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, ClassVar
@@ -14,10 +14,11 @@ import pytest
 import typer
 from typer.testing import CliRunner
 
-from orbit.agent import RunFile, SqliteStore
+from orbit.agent import LocalTls, RunFile, SqliteStore
 from orbit.cli import app
 from orbit.client import TokenRejected
 from orbit.protocol import Command, NewSession
+from tests.tls_certs import ServerFiles, make_ca, make_client
 
 runner = CliRunner()
 URL = "ws://127.0.0.1:7433/"
@@ -29,7 +30,7 @@ class FakeClient:
     with which context."""
 
     url: str
-    token_file: Path
+    token_file: Path | None
     ssl_context: ssl.SSLContext | None = None
 
 
@@ -59,10 +60,14 @@ class Plane:
     reached if false, and turns it away if ``None``; and the tokens it was shown."""
 
     answer: bool | None = True
-    shown: list[tuple[str, str]] = field(default_factory=list)
+    shown: list[tuple[str, str | None]] = field(default_factory=list)
+    contexts: list[ssl.SSLContext | None] = field(default_factory=list)
 
-    async def accepts(self, url: str, token: str) -> bool:
+    async def accepts(
+        self, url: str, token: str | None, ssl_context: ssl.SSLContext | None = None
+    ) -> bool:
         self.shown.append((url, token))
+        self.contexts.append(ssl_context)
         if self.answer is None:
             raise TokenRejected()
         return self.answer
@@ -122,16 +127,22 @@ def in_process(monkeypatch: pytest.MonkeyPatch) -> InProcess:
     return fake
 
 
-def serving(state: Path, workspace: Path, pid: int | None = None) -> None:
+def serving(
+    state: Path,
+    workspace: Path,
+    pid: int | None = None,
+    url: str = URL,
+    local: LocalTls | None = None,
+) -> None:
     """Say, in a run file in ``state``, that an orbit serve in process ``pid`` (this one, by
-    default) serves ``workspace`` at ``URL``."""
+    default) serves ``workspace`` at ``url``, verified as ``local`` says if given."""
 
     async def registered() -> str:
         store = await SqliteStore.open(state, str(workspace))
         await store.close()
         return store.workspace_id
 
-    RunFile(state, asyncio.run(registered())).write(URL, pid or os.getpid())
+    RunFile(state, asyncio.run(registered())).write(url, pid or os.getpid(), local)
 
 
 def test_chat_connects_to_the_control_plane_serving_the_workspace(
@@ -251,3 +262,114 @@ def test_local_and_connect_together_stop_chat(in_process: InProcess) -> None:
     assert result.exit_code == 2
     assert "--local runs the control plane here, so it can't go with --connect." in result.stderr
     assert FakeApp.built == []
+
+
+TLS_URL = "wss://0.0.0.0:7433/"
+LOCAL_URL = "wss://localhost:7433/"
+
+
+@pytest.fixture
+def ca_path(tmp_path: Path) -> Path:
+    return make_ca(tmp_path).path
+
+
+@pytest.fixture
+def client(tmp_path: Path) -> ServerFiles:
+    """A client certificate signed by a CA of its own, kept apart from the server's."""
+    directory = tmp_path / "client"
+    directory.mkdir()
+    return make_client(make_ca(directory), directory)
+
+
+@pytest.fixture
+def serving_tls(project: Path, state: Path, ca_path: Path) -> Callable[[bool], None]:
+    """What says, in a run file, that an orbit serve serves the project over TLS at
+    ``TLS_URL``, mutual TLS if asked, its certificate giving ``localhost``."""
+
+    def serve(mutual: bool) -> None:
+        local = LocalTls(mutual=mutual, ca=str(ca_path), hostname="localhost")
+        serving(state, project, url=TLS_URL, local=local)
+
+    return serve
+
+
+def _local_client(token_file: Path, cert: Path, key: Path) -> None:
+    """Name, in ``[server]`` in the config file beside ``token_file``, the client certificate
+    ``cert`` and its ``key`` frontends here show."""
+    (token_file.parent / "config.toml").write_text(
+        f'[server]\nlocal_client_cert = "{cert}"\nlocal_client_key = "{key}"\n'
+    )
+
+
+def test_chat_connects_to_a_control_plane_serving_tls_by_the_ca_and_hostname_it_recorded(
+    token_file: Path, serving_tls: Callable[[bool], None], in_process: InProcess, plane: Plane
+) -> None:
+    serving_tls(False)
+    result = runner.invoke(app, ["chat"])
+    assert result.exit_code == 0, result.output
+    (tui,) = FakeApp.built
+    assert isinstance(tui.session, FakeClient)
+    assert (tui.session.url, tui.session.token_file) == (LOCAL_URL, token_file)
+    assert isinstance(tui.session.ssl_context, ssl.SSLContext)
+    assert plane.shown == [(LOCAL_URL, "the-token")]
+    assert all(isinstance(context, ssl.SSLContext) for context in plane.contexts)
+    assert in_process.built == []
+
+
+def test_chat_shows_a_control_plane_serving_mtls_the_local_client_certificate(
+    token_file: Path,
+    client: ServerFiles,
+    serving_tls: Callable[[bool], None],
+    in_process: InProcess,
+    plane: Plane,
+) -> None:
+    _local_client(token_file, client.cert, client.key)
+    serving_tls(True)
+    result = runner.invoke(app, ["chat"])
+    assert result.exit_code == 0, result.output
+    (tui,) = FakeApp.built
+    assert isinstance(tui.session, FakeClient)
+    assert (tui.session.url, tui.session.token_file) == (LOCAL_URL, None)
+    assert plane.shown == [(LOCAL_URL, None)]
+    assert in_process.built == []
+
+
+@pytest.mark.usefixtures("plane")
+def test_without_a_local_client_certificate_chat_stops_naming_the_keys_it_needs(
+    token_file: Path, serving_tls: Callable[[bool], None], in_process: InProcess
+) -> None:
+    serving_tls(True)
+    result = runner.invoke(app, ["chat"])
+    assert result.exit_code == 2
+    assert result.stderr.startswith("Local discovery under mutual TLS needs a client certificate.")
+    assert "local_client_cert and local_client_key" in result.stderr
+    assert str(token_file.parent / "config.toml") in result.stderr
+    assert in_process.built == [] and FakeApp.built == []
+
+
+@pytest.mark.usefixtures("plane")
+def test_a_local_client_key_others_can_read_stops_chat_with_the_chmod_that_fixes_it(
+    token_file: Path,
+    client: ServerFiles,
+    serving_tls: Callable[[bool], None],
+    in_process: InProcess,
+) -> None:
+    client.key.chmod(0o644)
+    _local_client(token_file, client.cert, client.key)
+    serving_tls(True)
+    result = runner.invoke(app, ["chat"])
+    assert result.exit_code == 2
+    assert f"chmod 600 {client.key}" in result.stderr
+    assert in_process.built == [] and FakeApp.built == []
+
+
+@pytest.mark.usefixtures("plane")
+def test_an_invalid_config_under_mtls_stops_chat_naming_it(
+    token_file: Path, serving_tls: Callable[[bool], None], in_process: InProcess
+) -> None:
+    (token_file.parent / "config.toml").write_text("[server]\nlocal_client_cert = 1\n")
+    serving_tls(True)
+    result = runner.invoke(app, ["chat"])
+    assert result.exit_code == 2
+    assert "server.local_client_cert" in result.stderr
+    assert in_process.built == [] and FakeApp.built == []

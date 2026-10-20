@@ -1,10 +1,11 @@
 """Where a running ``orbit serve`` says it is: ``run/<workspace id>.json`` in the state
-directory, holding its URL and process id, readable by its owner alone, while it listens."""
+directory, holding its URL and process id, and over TLS how a frontend on this machine reaches
+it, readable by its owner alone, while it listens."""
 
 import json
 from pathlib import Path
 
-from orbit.agent.domain.server import RunningServer, parse_running
+from orbit.agent.domain.server import LocalTls, RunningServer, parse_running
 from orbit.agent.external.private_files import write_private
 from orbit.agent.external.processes import process_alive
 from orbit.agent.external.sqlite_store import find_workspace_id
@@ -18,10 +19,11 @@ class RunFile:
     def __init__(self, state: Path, workspace_id: str) -> None:
         self.path = state / RUN / f"{workspace_id}.json"
 
-    def write(self, url: str, pid: int) -> None:
-        """Say the server at ``url``, in process ``pid``, is listening; raises ``OSError`` when
-        it can't."""
-        write_private(self.path, json.dumps({"url": url, "pid": pid}) + "\n")
+    def write(self, url: str, pid: int, tls: LocalTls | None = None) -> None:
+        """Say the server at ``url``, in process ``pid``, is listening, reached from this
+        machine as ``tls`` says, if given; raises ``OSError`` when it can't."""
+        server = RunningServer(url=url, pid=pid, tls=tls)
+        write_private(self.path, json.dumps(server.model_dump(exclude_none=True)) + "\n")
 
     def read(self) -> RunningServer | None:
         """The server the file names; ``None`` if there's no file or it can't be read."""

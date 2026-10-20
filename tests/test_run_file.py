@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from orbit.agent.domain.server import RunningServer
+from orbit.agent.domain.server import LocalTls, RunningServer
 from orbit.agent.external.run_file import RunFile, running_server
 from orbit.agent.external.sqlite_store import SqliteStore
 
@@ -35,6 +35,20 @@ def test_reading_the_run_file_gives_the_server_it_names(tmp_path: Path) -> None:
     run_file = RunFile(tmp_path, "workspace-1")
     run_file.write("ws://127.0.0.1:4567/", 42)
     assert run_file.read() == RunningServer(url="ws://127.0.0.1:4567/", pid=42)
+
+
+def test_a_tls_servers_run_file_records_the_ca_and_hostname_to_verify_it_by(
+    tmp_path: Path,
+) -> None:
+    run_file = RunFile(tmp_path, "workspace-1")
+    local = LocalTls(mutual=True, ca="/tls/ca.pem", hostname="localhost")
+    run_file.write("wss://0.0.0.0:4567/", 42, local)
+    assert json.loads(run_file.path.read_text()) == {
+        "url": "wss://0.0.0.0:4567/",
+        "pid": 42,
+        "tls": {"mutual": True, "ca": "/tls/ca.pem", "hostname": "localhost"},
+    }
+    assert run_file.read() == RunningServer(url="wss://0.0.0.0:4567/", pid=42, tls=local)
 
 
 def test_reading_no_run_file_gives_none(tmp_path: Path) -> None:

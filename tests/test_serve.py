@@ -307,15 +307,16 @@ def test_serve_opens_the_most_recently_active_session_unless_told_to_start_anew(
 def test_a_chat_discovers_the_control_plane_serving_its_workspace(
     project: Path, state: Path, config_dir: Path
 ) -> None:
-    found: list[str | None] = []
+    found: list[chat.Discovered | None] = []
 
     def discovers(websocket: ClientConnection) -> list[Event]:
-        found.append(chat.discover_control_plane(state, project, config_dir / "token"))
+        found.append(chat.discover_control_plane(state, project, config_dir / "token", config_dir))
         return []
 
     frontend = Frontend(state, config_dir, discovers)
     served(frontend, "--port", "0")
-    assert found == [frontend.run_file["url"]]
+    [discovered] = found
+    assert discovered is not None and discovered.url == frontend.run_file["url"]
 
 
 def test_serve_can_profile_itself(state: Path, config_dir: Path, tmp_path: Path) -> None:
@@ -346,6 +347,57 @@ def test_serve_over_tls_welcomes_a_frontend_trusting_its_ca_beyond_loopback(
     assert [type(e) for e in frontend.events] == [Welcome, Catalog, Snapshot]
     assert str(frontend.run_file["url"]).startswith("wss://0.0.0.0:")
     assert "orbit-tests connected from" in output
+
+
+def _discovering(
+    state: Path, project: Path, config_dir: Path, found: list[chat.Discovered | None]
+) -> Callable[[ClientConnection], list[Event]]:
+    """What has a chat in ``project`` discover the control plane serving it, noting what it found
+    in ``found``."""
+
+    def discovers(websocket: ClientConnection) -> list[Event]:
+        found.append(chat.discover_control_plane(state, project, config_dir / "token", config_dir))
+        return []
+
+    return discovers
+
+
+def test_a_chat_discovers_a_control_plane_serving_tls_trusting_the_ca_in_its_run_file(
+    project: Path, state: Path, config_dir: Path, tmp_path: Path
+) -> None:
+    ca = make_ca(tmp_path)
+    files = make_server(ca, tmp_path)
+    config_dir.mkdir()
+    (config_dir / "config.toml").write_text(f'[server]\nca = "{ca.path}"\n')
+    found: list[chat.Discovered | None] = []
+    trust = ssl.create_default_context(cafile=ca.path)
+    frontend = Frontend(
+        state, config_dir, _discovering(state, project, config_dir, found), trust=trust
+    )
+    output = served(frontend, *_tls_flags(files), "--host", "0.0.0.0", "--port", "0")
+
+    port = str(frontend.run_file["url"]).rsplit(":", 1)[1]
+    assert frontend.run_file["tls"] == {
+        "mutual": False,
+        "ca": str(ca.path),
+        "hostname": "localhost",
+    }
+    [discovered] = found
+    assert discovered is not None
+    assert discovered.url == f"wss://localhost:{port}"
+    assert discovered.files.ca == ca.path and discovered.files.cert is None
+    assert "Warning" not in output
+
+
+def test_a_tls_serve_without_a_ca_says_local_discovery_wont_work(
+    state: Path, config_dir: Path, tmp_path: Path
+) -> None:
+    ca = make_ca(tmp_path)
+    frontend = Frontend(state, config_dir, trust=ssl.create_default_context(cafile=ca.path))
+    output = served(frontend, *_tls_flags(make_server(ca, tmp_path)), "--port", "0")
+
+    assert "tls" not in frontend.run_file
+    assert "Warning: Local discovery won't work without a CA." in output
 
 
 def _mtls_config(config_dir: Path, ca: Ca, files: ServerFiles, revoked: str = "") -> None:
@@ -388,6 +440,27 @@ def test_serve_over_mtls_names_the_client_certificate_and_revokes_it_without_res
     assert statuses == [403]
     assert f"as CN=laptop ({fingerprint})." in output
     assert f"frontends show a client certificate {ca.path} signed." in output
+
+
+def test_a_chat_discovers_a_control_plane_serving_mtls_showing_the_local_client_certificate(
+    project: Path, state: Path, config_dir: Path, tmp_path: Path
+) -> None:
+    ca = make_ca(tmp_path)
+    files = make_server(ca, tmp_path)
+    client = make_client(ca, tmp_path)
+    _mtls_config(config_dir, ca, files)
+    with (config_dir / "config.toml").open("a") as config:
+        config.write(f'local_client_cert = "{client.cert}"\nlocal_client_key = "{client.key}"\n')
+    found: list[chat.Discovered | None] = []
+    discovers = _discovering(state, project, config_dir, found)
+    frontend = Frontend(state, config_dir, discovers, trust=_trusting(ca, client))
+    served(frontend)
+
+    assert frontend.run_file["tls"] == {"mutual": True, "ca": str(ca.path), "hostname": "127.0.0.1"}
+    [discovered] = found
+    assert discovered is not None
+    assert discovered.files.token_file is None
+    assert (discovered.files.cert, discovered.files.key) == (client.cert, client.key)
 
 
 def test_while_the_config_is_invalid_the_last_revoked_fingerprints_stay(

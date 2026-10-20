@@ -68,6 +68,22 @@ REVOKED = (
 )
 """The body of the HTTP 403 a client whose certificate, of ``fingerprint``, is revoked gets."""
 
+LOCAL_NO_CA = (
+    "Local discovery won't work without a CA. orbit chat on this machine can't verify {cert}"
+    " without the CA that signed it: set ca in [server] to its file, or join with orbit chat"
+    " --connect and --ca."
+)
+"""The warning for a server serving TLS with ``cert`` that names neither ``ca`` nor
+``client_ca``, so frontends here can't find it on their own."""
+
+LOCAL_NO_HOSTNAME = (
+    "Local discovery won't work with this certificate. {cert} names none of {names}, by which"
+    " orbit chat on this machine would connect: add one as a subject alternative name, or join"
+    " with orbit chat --connect by a name it gives."
+)
+"""The warning for a server certificate, ``cert``, naming none of ``names``, the names this
+machine reaches the server by."""
+
 ALL = (
     MISSING_FILE,
     NOT_LOOPBACK,
@@ -80,5 +96,7 @@ ALL = (
     CLIENT_CERT_REQUIRED,
     CLIENT_CERT_UNTRUSTED,
     REVOKED,
+    LOCAL_NO_CA,
+    LOCAL_NO_HOSTNAME,
 )
 """Every message, for README.md's table to list."""

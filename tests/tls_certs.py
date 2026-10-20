@@ -107,8 +107,7 @@ def make_server(
     ``directory``."""
     key = ec.generate_private_key(ec.SECP256R1())
     start = datetime.now(UTC) + valid_from
-    names = [_alternative_name(host) for host in hosts]
-    certificate = (
+    builder = (
         x509.CertificateBuilder()
         .subject_name(_name("localhost"))
         .issuer_name(ca.certificate.subject)
@@ -116,12 +115,14 @@ def make_server(
         .serial_number(x509.random_serial_number())
         .not_valid_before(start)
         .not_valid_after(start + valid_for)
-        .add_extension(x509.SubjectAlternativeName(names), critical=False)
         .add_extension(
             x509.AuthorityKeyIdentifier.from_issuer_public_key(ca.key.public_key()), critical=False
         )
-        .sign(ca.key, hashes.SHA256())
     )
+    if hosts:  # Without hosts, a certificate with no subject alternative names at all.
+        names = [_alternative_name(host) for host in hosts]
+        builder = builder.add_extension(x509.SubjectAlternativeName(names), critical=False)
+    certificate = builder.sign(ca.key, hashes.SHA256())
     cert = _pem(directory / "server.pem", certificate.public_bytes(serialization.Encoding.PEM))
     return ServerFiles(cert, _pem(directory / "server-key.pem", _key_pem(key)))
 

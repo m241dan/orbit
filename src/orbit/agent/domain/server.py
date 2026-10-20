@@ -7,6 +7,7 @@ from collections.abc import Iterable
 from datetime import datetime, timedelta
 from enum import StrEnum
 from typing import Any, Literal
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -71,12 +72,16 @@ def certificate_dates(not_before: datetime, not_after: datetime, now: datetime) 
 class ServerSettings(TlsSettings):
     """The user config's ``[server]``: the ``host`` and ``port`` ``orbit serve`` listens on (0
     lets the system choose one), ``max_message_mb``, the largest message either way, its TLS
-    settings, and the fingerprints of the client certificates ``revoked`` under mutual TLS."""
+    settings, the fingerprints of the client certificates ``revoked`` under mutual TLS, and the
+    client certificate ``local_client_cert``, with its private key ``local_client_key``, that
+    frontends on this machine show it under mutual TLS."""
 
     host: str = Field(default="127.0.0.1", min_length=1)
     port: int = Field(default=7433, ge=0, le=65535)
     max_message_mb: int = Field(default=DEFAULT_MAX_MESSAGE_MB, ge=1)
     revoked: tuple[str, ...] = Field(default=(), strict=False)  # A TOML array is a list.
+    local_client_cert: str | None = None
+    local_client_key: str | None = None
 
     @property
     def max_message_bytes(self) -> int:
@@ -120,14 +125,84 @@ def load_server(data: dict[str, Any]) -> ServerSettings:
         raise ConfigError(validation_problems(exc)) from None
 
 
+_WILDCARDS = frozenset({"0.0.0.0", "::"})
+"""The hosts that listen on every address."""
+
+
+def local_hostname(host: str, names: Iterable[str]) -> str | None:
+    """The name a frontend on this machine connects by to a server listening on ``host`` whose
+    certificate gives ``names``: one of :func:`local_candidates` the certificate covers; ``None``
+    if it covers none."""
+    return next((c for c in local_candidates(host) if _named(c, names)), None)
+
+
+def local_candidates(host: str) -> tuple[str, ...]:
+    """The names a frontend on this machine may reach a server listening on ``host`` by, the
+    first preferred."""
+    if host in _WILDCARDS:
+        return (LOCALHOST, "127.0.0.1", "::1")
+    if is_loopback(host):
+        return (host, LOCALHOST)
+    return (host,)
+
+
+def _named(candidate: str, names: Iterable[str]) -> bool:
+    """Whether a certificate giving ``names`` covers ``candidate``, a hostname or address."""
+    return any(_covers(name, candidate) for name in names)
+
+
+def _covers(name: str, candidate: str) -> bool:
+    """Whether the certificate name ``name`` covers ``candidate``: the same address, the same
+    hostname in any case, or a wildcard ``*.`` standing for its first label."""
+    address, wanted = _address(name), _address(candidate)
+    if address is not None or wanted is not None:
+        return address == wanted
+    name, candidate = name.lower(), candidate.lower()
+    if name.startswith("*."):
+        return candidate.partition(".")[2] == name[2:]
+    return name == candidate
+
+
+def _address(host: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address | None:
+    """``host`` as an IP address; ``None`` if it's a hostname."""
+    try:
+        return ipaddress.ip_address(host)
+    except ValueError:
+        return None
+
+
+class LocalTls(BaseModel):
+    """How a frontend on this machine reaches a server serving TLS: showing a client
+    certificate if ``mutual``, trusting the CA certificate at ``ca``, and connecting by
+    ``hostname``, which the server's certificate gives."""
+
+    model_config = ConfigDict(frozen=True, strict=True)
+
+    mutual: bool
+    ca: str
+    hostname: str
+
+
 class RunningServer(BaseModel):
     """A running ``orbit serve``, as its run file says: the ``url`` it listens at, in the
-    process ``pid``."""
+    process ``pid``, and, if it serves TLS, how a frontend on this machine reaches it."""
 
     model_config = ConfigDict(frozen=True, strict=True)
 
     url: str
     pid: int = Field(gt=0)
+    tls: LocalTls | None = None
+
+    @property
+    def local_url(self) -> str:
+        """The URL a frontend on this machine connects to: :attr:`url`, by the hostname its TLS
+        certificate gives, if any."""
+        if self.tls is None:
+            return self.url
+        parts = urlsplit(self.url)
+        host = self.tls.hostname
+        netloc = f"[{host}]:{parts.port}" if ":" in host else f"{host}:{parts.port}"
+        return parts._replace(netloc=netloc).geturl()
 
 
 def parse_running(text: str) -> RunningServer | None:

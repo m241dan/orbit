@@ -8,11 +8,12 @@ import pytest
 
 from orbit.agent.domain.server import (
     CertificateDates,
+    LocalTls,
     ServerSettings,
     certificate_dates,
     missing_tls_key,
 )
-from orbit.agent.external.tls import TlsError, tls_warnings
+from orbit.agent.external.tls import LocalDiscoveryUnavailable, TlsError, local_tls, tls_warnings
 from tests.tls_certs import DAY, ServerFiles, make_ca, make_server, other_key
 
 NOW = datetime(2026, 10, 20, tzinfo=UTC)
@@ -130,3 +131,49 @@ def test_where_now_falls_in_a_certificates_validity(
 def test_plaintext_needs_no_files() -> None:
     assert missing_tls_key(ServerSettings()) is None
     assert missing_tls_key(ServerSettings(tls="tls", cert="c", key="k")) is None
+
+
+def test_a_local_client_trusts_the_ca_and_connects_by_a_name_the_certificate_gives(
+    files: ServerFiles, tmp_path: Path
+) -> None:
+    settings = _tls(files, ca="ca.pem", client_ca="client-ca.pem", host="0.0.0.0")
+    assert local_tls(settings, tmp_path) == LocalTls(
+        mutual=False, ca=str(tmp_path / "ca.pem"), hostname="localhost"
+    )
+
+
+def test_under_mtls_a_local_client_shows_a_certificate_and_trusts_the_client_ca_without_a_ca(
+    files: ServerFiles, tmp_path: Path
+) -> None:
+    settings = _tls(files, tls="mtls", client_ca=str(tmp_path / "ca.pem"))
+    assert local_tls(settings, tmp_path) == LocalTls(
+        mutual=True, ca=str(tmp_path / "ca.pem"), hostname="127.0.0.1"
+    )
+
+
+def test_without_a_ca_local_discovery_is_unavailable_naming_the_setting(
+    files: ServerFiles, tmp_path: Path
+) -> None:
+    with pytest.raises(
+        LocalDiscoveryUnavailable,
+        match=r"^Local discovery won't work without a CA\..*set ca in \[server\]",
+    ):
+        local_tls(_tls(files), tmp_path)
+
+
+def test_a_certificate_naming_no_local_name_leaves_local_discovery_unavailable(
+    tmp_path: Path,
+) -> None:
+    files = make_server(make_ca(tmp_path), tmp_path, hosts=("orbit.example.lan",))
+    settings = _tls(files, ca="ca.pem", host="0.0.0.0")
+    message = r"^Local discovery won't work with this certificate\..*localhost, 127\.0\.0\.1, ::1"
+    with pytest.raises(LocalDiscoveryUnavailable, match=message):
+        local_tls(settings, tmp_path)
+
+
+def test_a_certificate_without_alternative_names_leaves_local_discovery_unavailable(
+    tmp_path: Path,
+) -> None:
+    files = make_server(make_ca(tmp_path), tmp_path, hosts=())
+    with pytest.raises(LocalDiscoveryUnavailable, match="with this certificate"):
+        local_tls(_tls(files, ca="ca.pem"), tmp_path)
