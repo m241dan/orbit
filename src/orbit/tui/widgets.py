@@ -213,13 +213,16 @@ class PromptBox(ModalTextArea):
 
 
 class StatusLine(Static):
-    """Line by the prompt showing a status, hidden while there's none."""
+    """Line by the prompt showing a status, hidden while there's none, coloured as a warning,
+    or as an error with the ``error`` class."""
 
     DEFAULT_CSS = """
     StatusLine {
+        color: $warning;
         padding: 0 1;
         display: none;
     }
+    StatusLine.error { color: $error; }
     """
 
     def show(self, status: str | None) -> None:

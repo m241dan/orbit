@@ -154,9 +154,6 @@ class OrbitApp(App[None], inherit_bindings=False):
     }
     DetailPane.selected { border: none; border-top: solid $accent; }
     DetailPane:focus { border-top: heavy $accent; }
-    #storage-halt { color: $error; }
-    #link-status { color: $warning; }
-    #viewing { color: $warning; }
     """
     BINDINGS: ClassVar[list[BindingType]] = [
         # Priority, so it beats the prompt's own ctrl+c (copy).
@@ -224,8 +221,14 @@ class OrbitApp(App[None], inherit_bindings=False):
             self.push_screen,
             lambda take, awaited: self._send(TakeOwnership(take=take), awaited),
         )
-        self._halt = StorageHaltHost(self.push_screen, self._resume_storage, self._show_halt)
-        self._link_host = LinkHost(self.push_screen, self.exit, self._show_link, self.set_timer)
+        # The lines by the prompt, built here so their hosts can show statuses on them.
+        self._halt_status = StatusLine(id="storage-halt", classes="error")
+        self._link_status = StatusLine(id="link-status")
+        self._viewing = StatusLine(id="viewing")
+        self._halt = StorageHaltHost(self.push_screen, self._resume_storage, self._halt_status.show)
+        self._link_host = LinkHost(
+            self.push_screen, self.exit, self._link_status.show, self.set_timer
+        )
         # The actions of the keys whose trigger the last catalog lacks, which are hidden.
         self._missing_triggers: frozenset[str] = frozenset()
         self.clock: Callable[[], float] = time.monotonic
@@ -238,9 +241,9 @@ class OrbitApp(App[None], inherit_bindings=False):
             with Vertical():
                 yield ConversationTabs(id="conversation-tabs")
                 yield Transcript(id="transcript")
-                yield StatusLine(id="storage-halt")
-                yield StatusLine(id="link-status")
-                yield StatusLine(id="viewing")
+                yield self._halt_status
+                yield self._link_status
+                yield self._viewing
                 yield ChatPrompt(
                     placeholder="Press i to talk to the planner, esc to stop typing", id="prompt"
                 )
@@ -269,9 +272,6 @@ class OrbitApp(App[None], inherit_bindings=False):
         self._usage = self.query_one(UsagePanel)
         self._agents = self.query_one(AgentsPane)
         self._side = self.query_one("#side")
-        self._halt_status = self.query_one("#storage-halt", StatusLine)
-        self._link_status = self.query_one("#link-status", StatusLine)
-        self._viewing = self.query_one("#viewing", StatusLine)
         # Read through, so a clock set later still times the conversation.
         self._feed = ConversationFeed(
             self._transcript, self._tabs, self._task_list, self._verification, lambda: self.clock()
@@ -650,16 +650,8 @@ class OrbitApp(App[None], inherit_bindings=False):
         # Trying again lifts the halt once accepted.
         await self._send(ResumeStorage(), Awaited(accepted=self._halt.lifted))
 
-    def _show_halt(self, status: str | None) -> None:
-        """Show ``status`` by the prompt, or hide the line when there's none."""
-        self._halt_status.show(status)
-
     def _follow_link(self, state: LinkState) -> None:
         self._link_host.follow(state, self.clock())
-
-    def _show_link(self, status: str | None) -> None:
-        """Show ``status`` by the prompt, or hide the line when there's none."""
-        self._link_status.show(status)
 
     def _render_session(
         self,

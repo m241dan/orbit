@@ -3,6 +3,7 @@
 from typing import Any
 
 from textual.app import App, ComposeResult
+from textual.color import Color
 from textual.widgets import Input, OptionList
 
 from orbit.protocol import SessionSummary
@@ -65,3 +66,19 @@ async def test_a_status_line_shows_its_status_and_none_hides_it() -> None:
         line.show(None)
         assert str(line.render()) == ""
         assert not line.display
+
+
+class Tones(App[None]):
+    def compose(self) -> ComposeResult:
+        yield StatusLine("late", id="warning")
+        yield StatusLine("halted", id="error", classes="error")
+
+
+async def test_a_status_line_is_a_warning_unless_marked_an_error() -> None:
+    app = Tones()
+    async with app.run_test():
+        theme = app.get_css_variables()
+        warning = app.query_one("#warning", StatusLine).styles.color
+        error = app.query_one("#error", StatusLine).styles.color
+        assert warning.hex == Color.parse(theme["warning"]).hex
+        assert error.hex == Color.parse(theme["error"]).hex
