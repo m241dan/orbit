@@ -286,6 +286,21 @@ async def test_the_server_says_as_frontends_connect_and_disconnect() -> None:
     ]
 
 
+async def test_the_server_says_as_an_unnamed_frontend_connects_and_disconnects() -> None:
+    lines = Lines()
+    async with serving(lines=lines) as url:
+        async with frontend(url) as websocket:
+            await hello(websocket, "")
+            await until(websocket, Snapshot)
+            port = websocket.local_address[1]
+        while len(lines.said) < 2:
+            await asyncio.sleep(0.01)
+    assert lines.said == [
+        f" connected from 127.0.0.1:{port}.",
+        f" disconnected from 127.0.0.1:{port}.",
+    ]
+
+
 async def test_the_server_says_nothing_of_a_frontend_that_closes_without_a_hello() -> None:
     lines = Lines()
     async with serving(lines=lines) as url, frontend(url):
