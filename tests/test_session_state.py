@@ -11,6 +11,7 @@ from orbit.agent.domain.sessions import SessionRecord
 from orbit.protocol import (
     PLANNER,
     ActivateSession,
+    Activity,
     AddTask,
     Catalog,
     Command,
@@ -34,7 +35,6 @@ from tests.agent_fakes import (
     FakeTree,
     Steps,
     Ticks,
-    agent_exited,
     frontend,
     greet,
     send,
@@ -51,10 +51,21 @@ TASK = TaskSpec(prompt="Add a flag.", settings=Settings(model="opus"))
 
 
 def state(
-    state: SessionState = "idle", viewers: int = 1, session: str = OPEN, active: bool = True
+    state: SessionState = "idle",
+    viewers: int = 1,
+    session: str = OPEN,
+    active: bool = True,
+    activity: tuple[Activity, ...] = (),
 ) -> SessionStateChanged:
-    """The open session's state change to ``state`` with ``viewers``."""
-    return SessionStateChanged(session=session, active=active, state=state, viewers=viewers)
+    """The open session's state change to ``state`` with ``viewers``, doing ``activity``."""
+    return SessionStateChanged(
+        session=session, active=active, state=state, viewers=viewers, activity=activity
+    )
+
+
+def running(*activity: Activity) -> SessionStateChanged:
+    """The open session's state change to running ``activity``, with one viewer."""
+    return state("running", activity=activity)
 
 
 def changes(events: list[Event]) -> list[SessionStateChanged]:
@@ -130,7 +141,7 @@ async def test_the_first_hello_publishes_the_open_session_with_one_viewer() -> N
     assert changes(events) == [state(viewers=1)]
 
 
-async def test_a_task_run_makes_the_open_session_running_until_it_ends() -> None:
+async def test_a_task_run_makes_the_open_session_running_its_task_until_it_ends() -> None:
     session, _, _ = session_for(claims_done)
     await greeted_and_counted(session)
     await send(session, AddTask(task=TASK))
@@ -138,10 +149,10 @@ async def test_a_task_run_makes_the_open_session_running_until_it_ends() -> None
     events = await asyncio.wait_for(until(session, idle_again), 5)
     await session.close()
 
-    assert changes(events) == [state("running"), state("idle")]
+    assert changes(events) == [running(Activity(kind="task_run", task_id="1")), state("idle")]
 
 
-async def test_a_review_keeps_the_open_session_running_until_it_ends() -> None:
+async def test_a_review_keeps_the_open_session_running_its_review_until_it_ends() -> None:
     reviewing, gate = asyncio.Event(), asyncio.Event()
 
     async def gated_review(call: Call) -> TurnEndReason:
@@ -157,41 +168,51 @@ async def test_a_review_keeps_the_open_session_running_until_it_ends() -> None:
     await greeted_and_counted(session)
     await send(session, AddTask(task=TASK))
     await send(session, RunTasks())
-    running = await asyncio.wait_for(until(session, running_now), 5)
+    started = await asyncio.wait_for(until(session, running_now), 5)
     await asyncio.wait_for(reviewing.wait(), 5)
     during = await taken(frontend(session))
     gate.set()
     ended = await asyncio.wait_for(until(session, idle_again), 5)
     await session.close()
 
-    assert (changes(running), changes(during), changes(ended)) == (
-        [state("running")],
-        [],
+    work = Activity(kind="task_run", task_id="1")
+    review = Activity(kind="review", task_id="2")
+    assert (changes(started), changes(during), changes(ended)) == (
+        [running(work)],
+        [running(review)],
         [state("idle")],
     )
 
 
-async def test_a_planner_turn_makes_the_open_session_running_until_it_ends() -> None:
+async def test_a_planner_turn_makes_the_open_session_running_the_planner_until_it_ends() -> None:
     gate = asyncio.Event()
     session, _, launcher = session_for()
     launcher.planner_turns = [gated_planner(gate)]
     await greeted_and_counted(session)
     await send(session, SendMessage(agent=PLANNER, text="Plan."))
-    running = await asyncio.wait_for(until(session, running_now), 5)
+    started = await asyncio.wait_for(until(session, running_now), 5)
     gate.set()
     ended = await asyncio.wait_for(until(session, idle_again), 5)
     await session.close()
 
-    assert (changes(running), changes(ended)) == ([state("running")], [state("idle")])
+    assert (changes(started), changes(ended)) == (
+        [running(Activity(kind="planner"))],
+        [state("idle")],
+    )
 
 
-async def test_the_startup_check_leaves_the_open_session_idle() -> None:
-    session, _, _ = session_for(verification=checked(Steps(True, True)), check_at_startup=True)
+async def test_the_startup_check_is_reported_but_leaves_the_open_session_idle() -> None:
+    steps = Steps(True, True)
+    steps.gate = asyncio.Event()
+    session, _, _ = session_for(verification=checked(steps), check_at_startup=True)
     await greet(session)
-    events = await asyncio.wait_for(until(session, agent_exited("startup-check")), 5)
+    during = await taken(frontend(session))
+    steps.gate.set()
+    ended = await asyncio.wait_for(until(session, changed), 5)
     await session.close()
 
-    assert changes(events) == [state("idle")]
+    checking = state(activity=(Activity(kind="startup_check"),))
+    assert (changes(during)[-1], changes(ended)) == (checking, [state()])
 
 
 async def test_a_second_hello_and_its_closing_change_the_viewers_for_every_connection() -> None:
@@ -220,11 +241,12 @@ async def test_a_joining_connections_catalog_counts_it_and_has_the_open_sessions
     gate.set()
     await session.close()
 
-    assert (summary.id, summary.active, summary.state, summary.viewers) == (
+    assert (summary.id, summary.active, summary.state, summary.viewers, summary.activity) == (
         OPEN,
         True,
         "running",
         2,
+        (Activity(kind="planner"),),
     )
 
 

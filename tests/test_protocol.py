@@ -16,6 +16,7 @@ from orbit.protocol import (
     SUPER_REVIEW_ORIGIN,
     WORK_LANE,
     AcceptTask,
+    Activity,
     AddTask,
     AgentExited,
     AgentReply,
@@ -417,13 +418,17 @@ def test_a_snapshot_round_trips_with_its_running_agents_and_their_open_requests(
     assert event_adapter.validate_json(snapshot.model_dump_json()) == snapshot
 
 
-def test_a_state_change_sets_its_session_active_running_and_viewed() -> None:
+def test_a_state_change_sets_its_session_active_running_viewed_and_doing() -> None:
     summary = SessionSummary(id="s1", name="auth", current=True, active=True)
-    changed = SessionStateChanged(session="s1", active=False, state="running", viewers=2)
+    doing = (Activity(kind="task_run", task_id="t1"),)
+    changed = SessionStateChanged(
+        session="s1", active=False, state="running", viewers=2, activity=doing
+    )
 
     updated = with_state(summary, changed)
 
-    assert updated == summary.model_copy(update={"active": False, "state": "running", "viewers": 2})
+    update = {"active": False, "state": "running", "viewers": 2, "activity": doing}
+    assert updated == summary.model_copy(update=update)
 
 
 def test_a_state_change_leaves_other_sessions_alone() -> None:

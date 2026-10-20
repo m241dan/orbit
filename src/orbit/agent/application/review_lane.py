@@ -68,6 +68,7 @@ class ReviewLane:
         self._batches: dict[str, str] = {}  # Review task id -> the batch it suggests into.
         self._background = Background("review", desk.publish)
         self._current: tuple[str, asyncio.Task[Outcome]] | None = None  # The review running.
+        self._reviewing: str | None = None  # The review task running, until it's followed up.
         self._paused_noted = False
         self._status: ReviewStatus | None = None
 
@@ -81,6 +82,12 @@ class ReviewLane:
     def running(self) -> bool:
         """Whether reviews are being run."""
         return self._background.running
+
+    @property
+    def reviewing(self) -> str | None:
+        """The review task running or, before the lane picks one, the one it will pick; none
+        when there's none."""
+        return self._reviewing or self._next_review(self._spent())
 
     def on_stopped(self, stopped: Callable[[], None]) -> None:
         """Have ``stopped`` called whenever the reviews stop running."""
@@ -257,9 +264,17 @@ class ReviewLane:
 
     async def _run_reviews(self) -> None:
         tried = self._spent()
-        while (task_id := self._board.next_runnable(skip=tried, roles=REVIEW_ROLES)) is not None:
+        while (task_id := self._next_review(tried)) is not None:
             tried.add(task_id)
-            await self._review(task_id)
+            self._reviewing = task_id
+            try:
+                await self._review(task_id)
+            finally:
+                self._reviewing = None
+
+    def _next_review(self, tried: Collection[str]) -> str | None:
+        """The next review to run, skipping those ``tried``."""
+        return self._board.next_runnable(skip=tried, roles=REVIEW_ROLES)
 
     def _spent(self) -> set[str]:
         """Reviews that ended, however they did: their batch is over or no longer filling, so

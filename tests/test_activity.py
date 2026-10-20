@@ -7,8 +7,10 @@ from orbit.agent.domain.activity import (
     REVIEW_RUNNING,
     TASKS_RUNNING,
     Activity,
+    reported,
     switch_refusal,
 )
+from orbit.protocol import Activity as Reported
 
 
 @pytest.mark.parametrize(
@@ -39,3 +41,36 @@ def test_several_at_once_refuse_with_the_first_in_order(activity: Activity, refu
 
 def test_nothing_in_progress_refuses_nothing_and_is_idle() -> None:
     assert (switch_refusal(Activity()), Activity().running) == (None, False)
+
+
+def test_the_startup_check_alone_refuses_nothing_and_is_idle() -> None:
+    activity = Activity(startup_check=True)
+
+    assert (switch_refusal(activity), activity.running) == (None, False)
+
+
+def test_everything_in_progress_is_reported_in_order_with_its_task() -> None:
+    activity = Activity(
+        tasks=True, review=True, planner=True, startup_check=True, task_id="t1", reviewing="t2"
+    )
+
+    assert reported(activity) == (
+        Reported(kind="task_run", task_id="t1"),
+        Reported(kind="review", task_id="t2"),
+        Reported(kind="planner"),
+        Reported(kind="startup_check"),
+    )
+
+
+def test_only_what_is_in_progress_is_reported() -> None:
+    activity = Activity(planner=True, task_id="t1", reviewing="t2")
+
+    assert reported(activity) == (Reported(kind="planner"),)
+
+
+def test_nothing_in_progress_reports_nothing() -> None:
+    assert reported(Activity()) == ()
+
+
+def test_a_task_run_or_review_whose_task_is_not_known_yet_is_not_reported() -> None:
+    assert reported(Activity(tasks=True, review=True)) == ()

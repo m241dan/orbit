@@ -1,7 +1,9 @@
 """What runs in a session: the one definition of whether it's idle or running, and so whether
-it may be switched for another."""
+it may be switched for another, and of what connections are told is in progress."""
 
 from dataclasses import dataclass
+
+from orbit.protocol import Activity as Reported
 
 TASKS_RUNNING = "Can't switch: tasks are running. Press ctrl+s to stop them."
 REVIEW_RUNNING = "Can't switch: a review is running. Press c on it in the agents pane to stop it."
@@ -10,17 +12,22 @@ PLANNER_ANSWERING = "Can't switch: the planner is answering. Press ctrl+x to sto
 
 @dataclass(frozen=True)
 class Activity:
-    """What's in progress in a session: a task run (``tasks``), a ``review`` and a ``planner``
-    turn. The startup check runs on the base commit rather than in a session, so it's not among
-    them."""
+    """What's in progress in a session: a task run (``tasks``) on task ``task_id``, a
+    ``review`` by review task ``reviewing``, a ``planner`` turn and the ``startup_check``; each
+    task is none while it isn't known. The startup check runs on the base commit rather than in
+    a session, so it leaves the session idle."""
 
     tasks: bool = False
     review: bool = False
     planner: bool = False
+    startup_check: bool = False
+    task_id: str | None = None
+    reviewing: str | None = None
 
     @property
     def running(self) -> bool:
-        """Whether anything is in progress; the session is idle otherwise."""
+        """Whether anything but the startup check is in progress; the session is idle
+        otherwise."""
         return switch_refusal(self) is not None
 
 
@@ -33,3 +40,18 @@ def switch_refusal(activity: Activity) -> str | None:
         (activity.planner, PLANNER_ANSWERING),
     )
     return next((refusal for runs, refusal in refusals if runs), None)
+
+
+def reported(activity: Activity) -> tuple[Reported, ...]:
+    """What's in progress in ``activity`` as connections are told it: a task run, a review, a
+    planner turn and the startup check, in that order; a task run or a review once its task is
+    known."""
+    task_run = activity.tasks and activity.task_id is not None
+    review = activity.review and activity.reviewing is not None
+    entries = (
+        (task_run, Reported(kind="task_run", task_id=activity.task_id)),
+        (review, Reported(kind="review", task_id=activity.reviewing)),
+        (activity.planner, Reported(kind="planner")),
+        (activity.startup_check, Reported(kind="startup_check")),
+    )
+    return tuple(entry for runs, entry in entries if runs)

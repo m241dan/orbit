@@ -143,13 +143,26 @@ SessionState = Literal["running", "idle"]
 none."""
 
 
+ActivityKind = Literal["task_run", "review", "planner", "startup_check"]
+"""What's in progress in a session: a ``task_run``, a ``review``, a ``planner`` turn or the
+``startup_check``."""
+
+
+class Activity(_Message):
+    """Something in progress in a session, of ``kind``; ``task_id`` is the task a task run runs
+    or a review reviews as, and none otherwise."""
+
+    kind: ActivityKind
+    task_id: str | None = None
+
+
 class SessionSummary(_Message):
     """A saved session as the list of sessions shows it: how many of its tasks stand at each
     status in ``counts``, and what they cost together in ``usage``. ``current`` marks the
     session open here, ``locked`` one open in another orbit, and ``unreadable`` says why a
     session can't be opened, if it can't. In a ``Catalog``, ``active`` marks the workspace's
-    open session, ``state`` says whether it's running, and ``viewers`` counts the connections
-    viewing it."""
+    open session, ``state`` says whether it's running, ``viewers`` counts the connections
+    viewing it, and ``activity`` says what's in progress in it."""
 
     id: str
     name: str
@@ -162,6 +175,7 @@ class SessionSummary(_Message):
     active: bool = False
     state: SessionState = "idle"
     viewers: int = Field(default=0, ge=0)
+    activity: tuple[Activity, ...] = ()
 
 
 class SessionRef(_Message):

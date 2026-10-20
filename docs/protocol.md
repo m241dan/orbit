@@ -189,10 +189,15 @@ Each session in a `Catalog` carries its state as it is when the Catalog is sent:
   `idle`.
 - `viewers`: how many welcomed connections view it: the open session's, and, for another
   session, those attached to it (see [Attaching](#attaching)).
+- `activity`: what's in progress in the open session, in this order, each an
+  `Activity(kind, task_id)`: a `task_run` of task `task_id`, a `review` by review task
+  `task_id`, a `planner` turn and the `startup_check`, whose `task_id` is null. It's empty for
+  any other session. The startup check shows here though it leaves the state `idle`.
 
 Whenever one of them changes for a session, every welcomed connection gets
-`SessionStateChanged(session, active, state, viewers)` with the new values: a task run, review or
-planner turn starting or ending, a connection joining, closing or attaching to
+`SessionStateChanged(session, active, state, viewers, activity)` with the new values: a task run,
+review, planner turn or the startup check starting or ending, a run moving on to its next task, a
+connection joining, closing or attaching to
 another session, which sends one for the session it left and one for the session it views, and
 another session activated, which sends one for the session left (inactive, idle, no viewers unless
 connections attached to it) and one for the session activated. A connection joins once everything that follows its `Welcome` is sent, so the

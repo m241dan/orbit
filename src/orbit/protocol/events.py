@@ -10,6 +10,7 @@ from pydantic import AwareDatetime, Field, TypeAdapter
 
 from orbit.protocol.commands import ProposalAction
 from orbit.protocol.models import (
+    Activity,
     ProposedSetup,
     ProposedStep,
     SessionRef,
@@ -465,22 +466,28 @@ class OwnershipDeclined(_Message):
 
 class SessionStateChanged(_Message):
     """Session ``session`` is now ``active`` (the workspace's open session) or not, in
-    ``state``, with ``viewers`` connections viewing it; sent to every connection whenever one of
-    them changes, and never logged."""
+    ``state``, with ``viewers`` connections viewing it, and ``activity`` in progress in it; sent
+    to every connection whenever one of them changes, and never logged."""
 
     type: Literal["session_state_changed"] = "session_state_changed"
     session: str
     active: bool
     state: SessionState
     viewers: int = Field(ge=0)
+    activity: tuple[Activity, ...] = ()
 
 
 def with_state(summary: SessionSummary, changed: SessionStateChanged) -> SessionSummary:
-    """``summary``, as active, running and viewed as ``changed`` says, if ``changed`` is about
-    its session."""
+    """``summary``, as active, running, viewed and doing what ``changed`` says, if ``changed``
+    is about its session."""
     if changed.session != summary.id:
         return summary
-    update = {"active": changed.active, "state": changed.state, "viewers": changed.viewers}
+    update = {
+        "active": changed.active,
+        "state": changed.state,
+        "viewers": changed.viewers,
+        "activity": changed.activity,
+    }
     return summary.model_copy(update=update)
 
 

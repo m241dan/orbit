@@ -1,11 +1,12 @@
-"""Each session's state as connections see it: whether it's the open one, whether it's running,
-and how many connections view it, published whenever any of these changes."""
+"""Each session's state as connections see it: whether it's the open one, whether it's running
+and what's in progress in it, and how many connections view it, published whenever any of these
+changes."""
 
 from collections.abc import Callable
 from dataclasses import dataclass
 
 from orbit.agent.application.connection import Connections
-from orbit.agent.domain.activity import Activity
+from orbit.agent.domain.activity import Activity, reported
 from orbit.protocol import Event, SessionStateChanged
 
 
@@ -28,8 +29,9 @@ def _unviewed(session_id: str) -> SessionStateChanged:
 
 class SessionStates:
     """Publishes ``SessionStateChanged`` for a session in ``parts`` whenever whether it's the
-    open one, whether it's running or how many connections view it changes: the open session,
-    and those connections view, and any that was and no longer is either."""
+    open one, whether it's running, what's in progress in it or how many connections view it
+    changes: the open session, and those connections view, and any that was and no longer is
+    either."""
 
     def __init__(self, parts: StateParts) -> None:
         self._parts = parts
@@ -47,11 +49,13 @@ class SessionStates:
             for session_id, viewers in viewed.items()
             if session_id != open_id
         }
+        activity = parts.activity()
         states[open_id] = SessionStateChanged(
             session=open_id,
             active=True,
-            state="running" if parts.activity().running else "idle",
+            state="running" if activity.running else "idle",
             viewers=viewed[open_id],
+            activity=reported(activity),
         )
         return states
 

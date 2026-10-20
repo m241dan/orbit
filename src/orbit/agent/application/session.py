@@ -711,11 +711,15 @@ class AgentSession:
         self._states.check()
 
     def _activity(self) -> Activity:
-        """What's in progress now: a task run, a review or a planner turn."""
+        """What's in progress now: a task run, a review, a planner turn and the startup check,
+        with the tasks the run and the review are on."""
         return Activity(
             tasks=self._turns.running,
             review=self._lane is not None and self._lane.running,
             planner=self._seat.running,
+            startup_check=self._startup is not None and self._startup.running,
+            task_id=self._work.current if self._work else None,
+            reviewing=self._lane.reviewing if self._lane else None,
         )
 
     def _start_background(self) -> None:

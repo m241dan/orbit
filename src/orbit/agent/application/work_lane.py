@@ -57,6 +57,7 @@ class WorkLane:
         # the cap.
         self._fallbacks = FallbackFixes()
         self._stopped = False  # The user stopped the run going now.
+        self._current: str | None = None  # The task running, until the review lane hears of it.
 
     def reset(self) -> None:
         """Forget the fix counts of the session left, whose task ids the next one reuses."""
@@ -66,6 +67,12 @@ class WorkLane:
         """The run going now is being cancelled because the user stopped it, which the task it
         cancels says."""
         self._stopped = True
+
+    @property
+    def current(self) -> str | None:
+        """The task the run is on or, before it picks one, the one it will pick; none when
+        there's none."""
+        return self._current or self.next_work()
 
     def next_work(self, tried: Collection[str] = ()) -> str | None:
         """The next task for the work lane; reviews have their own lane, if there is one."""
@@ -82,7 +89,16 @@ class WorkLane:
                 return
 
     async def _run_task(self, task_id: str) -> TaskStatus:
-        """Run one task through a new agent; returns its final status."""
+        """Run one task through a new agent, as the :attr:`current` one; returns its final
+        status."""
+        self._current = task_id
+        try:
+            return await self._run_current(task_id)
+        finally:
+            self._current = None
+
+    async def _run_current(self, task_id: str) -> TaskStatus:
+        """Run task ``task_id`` through a new agent; returns its final status."""
         await self._tasks.start(task_id)
         if self.startup is not None:
             self.startup.release_panel()

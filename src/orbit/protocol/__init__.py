@@ -126,6 +126,8 @@ from orbit.protocol.link import (
 )
 from orbit.protocol.models import (
     ACTIVE_STATUSES,
+    Activity,
+    ActivityKind,
     ProposedSetup,
     ProposedStep,
     SessionRef,
@@ -231,6 +233,8 @@ __all__ = [
     "WRONG_SESSION",
     "AcceptTask",
     "ActivateSession",
+    "Activity",
+    "ActivityKind",
     "AddTask",
     "AgentEntry",
     "AgentExitReason",

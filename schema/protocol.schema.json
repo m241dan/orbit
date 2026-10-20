@@ -42,6 +42,38 @@
       "title": "ActivateSession",
       "type": "object"
     },
+    "Activity": {
+      "description": "Something in progress in a session, of ``kind``; ``task_id`` is the task a task run runs\nor a review reviews as, and none otherwise.",
+      "properties": {
+        "kind": {
+          "enum": [
+            "task_run",
+            "review",
+            "planner",
+            "startup_check"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "task_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Task Id"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "Activity",
+      "type": "object"
+    },
     "AddTask": {
       "description": "Append ``task`` to the backend's task list.",
       "properties": {
@@ -1722,11 +1754,19 @@
       "type": "object"
     },
     "SessionStateChanged": {
-      "description": "Session ``session`` is now ``active`` (the workspace's open session) or not, in\n``state``, with ``viewers`` connections viewing it; sent to every connection whenever one of\nthem changes, and never logged.",
+      "description": "Session ``session`` is now ``active`` (the workspace's open session) or not, in\n``state``, with ``viewers`` connections viewing it, and ``activity`` in progress in it; sent\nto every connection whenever one of them changes, and never logged.",
       "properties": {
         "active": {
           "title": "Active",
           "type": "boolean"
+        },
+        "activity": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Activity"
+          },
+          "title": "Activity",
+          "type": "array"
         },
         "session": {
           "title": "Session",
@@ -1763,12 +1803,20 @@
       "type": "object"
     },
     "SessionSummary": {
-      "description": "A saved session as the list of sessions shows it: how many of its tasks stand at each\nstatus in ``counts``, and what they cost together in ``usage``. ``current`` marks the\nsession open here, ``locked`` one open in another orbit, and ``unreadable`` says why a\nsession can't be opened, if it can't. In a ``Catalog``, ``active`` marks the workspace's\nopen session, ``state`` says whether it's running, and ``viewers`` counts the connections\nviewing it.",
+      "description": "A saved session as the list of sessions shows it: how many of its tasks stand at each\nstatus in ``counts``, and what they cost together in ``usage``. ``current`` marks the\nsession open here, ``locked`` one open in another orbit, and ``unreadable`` says why a\nsession can't be opened, if it can't. In a ``Catalog``, ``active`` marks the workspace's\nopen session, ``state`` says whether it's running, ``viewers`` counts the connections\nviewing it, and ``activity`` says what's in progress in it.",
       "properties": {
         "active": {
           "default": false,
           "title": "Active",
           "type": "boolean"
+        },
+        "activity": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Activity"
+          },
+          "title": "Activity",
+          "type": "array"
         },
         "counts": {
           "additionalProperties": {

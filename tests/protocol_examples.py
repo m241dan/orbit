@@ -9,6 +9,7 @@ from orbit.protocol import (
     REVIEW_ORIGIN,
     AcceptTask,
     ActivateSession,
+    Activity,
     AddTask,
     AgentEntry,
     AgentExited,
@@ -130,6 +131,7 @@ SUMMARY = SessionSummary(
     active=True,
     state="running",
     viewers=2,
+    activity=(Activity(kind="task_run", task_id="t1"), Activity(kind="startup_check")),
 )
 STEP = StepState(name="Unit tests", status="failed")
 REVIEW = ReviewStatus(paused=True, open_batches=2)
@@ -253,7 +255,15 @@ EVENTS: tuple[EventEnvelope, ...] = (
     event(OwnershipOffered()),
     event(OwnershipTaken()),
     event(OwnershipDeclined()),
-    event(SessionStateChanged(session="s1", active=True, state="running", viewers=2)),
+    event(
+        SessionStateChanged(
+            session="s1",
+            active=True,
+            state="running",
+            viewers=2,
+            activity=(Activity(kind="review", task_id="t2"), Activity(kind="planner")),
+        )
+    ),
     event(
         Snapshot(
             session=SUMMARY,
