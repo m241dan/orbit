@@ -1,6 +1,7 @@
 """The workspaces registered in the state directory's database: each found by its path or
 registered with a new id, and whether a server serves it."""
 
+import asyncio
 import sqlite3
 import uuid
 from pathlib import Path
@@ -9,15 +10,14 @@ from orbit.agent.external.repository import workspace_fingerprint
 from orbit.agent.external.sqlite_store import SqliteStore
 
 
-def register(connection: sqlite3.Connection, workspace: str) -> str:
-    """The id of ``workspace`` in ``connection``, found by its path or registered with a new one;
-    its fingerprint is brought up to date."""
-    path = Path(workspace).resolve()
+def register(connection: sqlite3.Connection, path: Path, fingerprint: str | None) -> str:
+    """The id of the workspace at the resolved ``path`` in ``connection``, found by its path or
+    registered with a new one; its fingerprint is brought up to date to ``fingerprint``."""
     (workspace_id,) = connection.execute(
         """INSERT INTO workspaces (id, path, fingerprint, name) VALUES (?, ?, ?, ?)
         ON CONFLICT (path) DO UPDATE SET fingerprint = excluded.fingerprint
         RETURNING id""",
-        (uuid.uuid4().hex, str(path), workspace_fingerprint(workspace), path.name),
+        (uuid.uuid4().hex, str(path), fingerprint, path.name),
     ).fetchone()
     return str(workspace_id)
 
@@ -49,9 +49,16 @@ class WorkspaceRegistry:
 
     async def find_or_register(self, workspace: str) -> str:
         """The id of the workspace at ``workspace``, found by its path or registered with a new
-        one, with its name, and its fingerprint brought up to date."""
+        one, with its name, and its fingerprint brought up to date.
+
+        The path and fingerprint are worked out off the database's thread, so git doesn't hold
+        up other workspaces' calls."""
+        path = await asyncio.to_thread(Path(workspace).resolve)
+        fingerprint = await asyncio.to_thread(workspace_fingerprint, workspace)
         message = f"Couldn't register the workspace {workspace} in"
-        return await self._store.run(message, lambda connection: register(connection, workspace))
+        return await self._store.run(
+            message, lambda connection: register(connection, path, fingerprint)
+        )
 
     async def served(self) -> list[tuple[str, str]]:
         """The id and path of each workspace a server serves, by path."""

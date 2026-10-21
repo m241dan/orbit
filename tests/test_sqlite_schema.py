@@ -225,7 +225,7 @@ async def test_a_version_4_database_upgrades_to_5_with_no_workspace_served(
     with monkeypatch.context() as patched:
         patched.setattr(sqlite_schema, "MIGRATIONS", MIGRATIONS[:4])
         connection = sqlite_schema.open_database(state / "orbit.db")
-        register(connection, str(workspace))
+        register(connection, workspace.resolve(), None)
         connection.close()
     store = await SqliteStore.open(state)
     await store.close()

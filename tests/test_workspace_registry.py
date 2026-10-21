@@ -1,10 +1,12 @@
 """The workspace registry: finding or registering workspaces by path, and which are served."""
 
+import threading
 from collections.abc import AsyncIterator
 from pathlib import Path
 
 import pytest
 
+from orbit.agent.external import sqlite_store, workspace_registry
 from orbit.agent.external.sqlite_schema import StoreError
 from orbit.agent.external.sqlite_store import SqliteStore
 from orbit.agent.external.workspace_registry import WorkspaceRegistry
@@ -77,6 +79,35 @@ async def test_the_flag_is_kept_when_the_workspace_is_found_again(
     await registry.set_served(workspace_id, True)
     await registry.find_or_register(str(workspace))
     assert await registry.served() == [(workspace_id, str(workspace.resolve()))]
+
+
+async def test_the_fingerprint_is_brought_up_to_date(
+    monkeypatch: pytest.MonkeyPatch, store: SqliteStore, tmp_path: Path
+) -> None:
+    workspace = directory(tmp_path, "project")
+    registry = WorkspaceRegistry(store)
+    monkeypatch.setattr(workspace_registry, "workspace_fingerprint", lambda path: "old")
+    workspace_id = await registry.find_or_register(str(workspace))
+    monkeypatch.setattr(workspace_registry, "workspace_fingerprint", lambda path: "new")
+    assert await registry.find_or_register(str(workspace)) == workspace_id
+    query = "SELECT fingerprint FROM workspaces"
+    rows = await store.run("Couldn't read", lambda connection: connection.execute(query).fetchall())
+    assert rows == [("new",)]
+
+
+async def test_the_fingerprint_is_worked_out_off_the_database_thread(
+    monkeypatch: pytest.MonkeyPatch, store: SqliteStore, tmp_path: Path
+) -> None:
+    threads: list[str] = []
+
+    def fingerprint(path: str) -> str:
+        threads.append(threading.current_thread().name)
+        return "fingerprint"
+
+    monkeypatch.setattr(workspace_registry, "workspace_fingerprint", fingerprint)
+    await WorkspaceRegistry(store).find_or_register(str(directory(tmp_path, "project")))
+    assert len(threads) == 1
+    assert not threads[0].startswith(sqlite_store.THREAD_PREFIX)
 
 
 async def test_a_closed_store_fails_each_call_naming_the_database(

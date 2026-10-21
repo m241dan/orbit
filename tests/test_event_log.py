@@ -396,7 +396,7 @@ def old_database(
     ``workspace``, leaving ``MIGRATIONS`` cut to that version until ``monkeypatch`` is undone."""
     monkeypatch.setattr(sqlite_schema, "MIGRATIONS", sqlite_schema.MIGRATIONS[:version])
     connection = sqlite_schema.open_database(state / "orbit.db")
-    register(connection, str(workspace))
+    register(connection, workspace.resolve(), None)
     connection.close()
 
 
