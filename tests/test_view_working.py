@@ -6,6 +6,10 @@ from orbit.protocol import (
     AgentExited,
     Event,
     Notice,
+    RunningAgent,
+    SessionSummary,
+    Settings,
+    Snapshot,
     ToolCallFinished,
     ToolCallStarted,
     TurnFinished,
@@ -50,6 +54,21 @@ def bash(agent: str | None, call_id: str, command: str = "uv run pytest") -> Too
 
 def done(agent: str | None, call_id: str) -> ToolCallFinished:
     return ToolCallFinished(turn_id="t", agent_id=agent, call_id=call_id, output="")
+
+
+def snapshot(*agents: str) -> Snapshot:
+    """A snapshot of a session with ``agents`` running."""
+    return Snapshot(
+        session=SessionSummary(id="s", name="s"),
+        settings=Settings(),
+        model_choices=(),
+        busy={},
+        tasks=(),
+        steps=(),
+        review=None,
+        proposals=(),
+        agents=tuple(RunningAgent(agent_id=agent, role="coder", task_id="1") for agent in agents),
+    )
 
 
 def test_nobody_runs_before_a_turn_starts() -> None:
@@ -193,3 +212,13 @@ def test_a_wide_call_split_by_the_clip_is_padded_to_fit_the_width() -> None:
     line = working_line(running, "agent-3", 0, 41)
     assert cell_len(line) == 41
     assert line == "◜ agent-3 · Bash 日日日日日 … 0:00 · 0:00"
+
+
+def test_a_snapshot_without_running_agents_drops_every_turn_and_call() -> None:
+    working = tracked((turn("agent-1"), 0), (turn("agent-2"), 1), (bash("agent-2", "c1"), 2))
+    assert track_working(working, snapshot(), 3) == ()
+
+
+def test_a_snapshot_runs_only_its_agents_timed_from_the_snapshot() -> None:
+    working = tracked((turn("agent-2"), 0), (bash("agent-2", "c1"), 1), (turn("agent-1"), 2))
+    assert track_working(working, snapshot("agent-2"), 7) == (WorkingAgent("agent-2", 7),)

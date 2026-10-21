@@ -9,6 +9,7 @@ from orbit.protocol import (
     PLANNER,
     AgentExited,
     Event,
+    Snapshot,
     ToolCallFinished,
     ToolCallStarted,
     TurnFinished,
@@ -47,7 +48,15 @@ type Working = tuple[WorkingAgent, ...]
 
 
 def track_working(working: Working, event: Event, now: float) -> Working:
-    """Who runs, and which of their calls, after ``event`` at ``now``."""
+    """Who runs, and which of their calls, after ``event`` at ``now``; a snapshot replaces
+    them with the agents it says run, timed from ``now``."""
+    if isinstance(event, Snapshot):
+        return tuple(WorkingAgent(running.agent_id, now) for running in event.agents)
+    return _track_turn(working, event, now)
+
+
+def _track_turn(working: Working, event: Event, now: float) -> Working:
+    """``working`` with the turn ``event`` starts or ends, or the call it starts or ends."""
     match event:
         case TurnStarted(agent_id=agent):
             return (*_without(working, agent), WorkingAgent(agent, now))

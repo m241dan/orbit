@@ -4,6 +4,7 @@ from textual.pilot import Pilot
 
 from orbit.protocol import (
     AgentExited,
+    Attach,
     Event,
     ToolCallFinished,
     ToolCallStarted,
@@ -14,8 +15,10 @@ from orbit.tui import OrbitApp
 from orbit.tui.tabs import ConversationTabs
 from orbit.tui.transcript import Transcript
 from orbit.tui.working import WorkingRow
+from tests.test_sessions_screen import CATALOG, OLD, RUNNING, SWITCH_TO_OLD, in_process, joined
 from tests.test_transcript import labels
 from tests.test_tui import FakeSession, feed_events, started
+from tests.test_tui import opened as snapshot_of
 
 NOW = 222.0  # Shows the spinner's first frame.
 
@@ -232,3 +235,29 @@ async def test_a_cancelled_planner_turn_leaves_the_row_and_ends_its_running_call
         await fed(session, pilot, cancelled)
         assert lines(row) == ()
         assert "agent-1: → Read a.py ⊘ no result" in labels(app)
+
+
+async def test_activating_another_session_clears_the_working_lines() -> None:
+    app, session = in_process()
+    async with app.run_test(size=(80, 24)) as pilot:
+        row = await opened(app, pilot)
+        await fed(session, pilot, started("agent-2"), turn("agent-2"), read("agent-2", "c1", "a"))
+        await fed(session, pilot, CATALOG)
+        await pilot.press("j", "k", "enter")
+        assert session.commands == SWITCH_TO_OLD
+        await fed(session, pilot, snapshot_of(OLD))
+        assert lines(row) == ()
+        assert not ticking(app)
+
+
+async def test_attaching_to_another_session_clears_the_working_lines() -> None:
+    app, session = joined()
+    async with app.run_test(size=(80, 24)) as pilot:
+        row = await opened(app, pilot)
+        await fed(session, pilot, CATALOG, RUNNING)
+        await pilot.press("enter", "j", "enter")
+        assert session.commands == [Attach(workspace="w", session="old")]
+        await fed(session, pilot, started("agent-2"), turn("agent-2"), read("agent-2", "c1", "a"))
+        await fed(session, pilot, snapshot_of(OLD))
+        assert lines(row) == ()
+        assert not ticking(app)
