@@ -14,6 +14,7 @@ from orbit.agent.application.work_turns import WorkParts, WorkTurns
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.refusals import Refused
 from orbit.protocol import (
+    INTERNAL,
     INVALID,
     NOT_CONFIGURED,
     PLANNER,
@@ -25,9 +26,11 @@ from orbit.protocol import (
     CancelTurn,
     DecideProposal,
     EditTask,
+    ErrorOccurred,
     Event,
     FireTrigger,
     RemoveTask,
+    RunTasks,
     SendMessage,
     Settings,
     SettingsChanged,
@@ -62,12 +65,33 @@ async def nothing() -> None:
     return None
 
 
-def commands_for(recorded: Recorded) -> tuple[WorkCommands, Tasks]:
-    """The work commands of a session without agents, its effects ``recorded``."""
+class ScriptedTurns(WorkTurns):
+    """A work lane whose runs take, in turn, the first of ``outcomes``: raising it, or
+    succeeding for None."""
+
+    def __init__(self, parts: WorkParts, outcomes: list[Exception | None]) -> None:
+        super().__init__(parts)
+        self.outcomes = outcomes
+
+    def check_run_tasks(self) -> None:
+        return None
+
+    async def run_tasks(self) -> None:
+        outcome = self.outcomes.pop(0)
+        if outcome is not None:
+            raise outcome
+
+
+def commands_for(
+    recorded: Recorded, outcomes: list[Exception | None] | None = None
+) -> tuple[WorkCommands, Tasks]:
+    """The work commands of a session without agents, its effects ``recorded``; given
+    ``outcomes``, it's read-only and its runs are scripted by them."""
     events: EventSink = recorded
     tasks = Tasks(TaskBoard(), recorded.put)
     seat = PlannerSeat(None, tasks, events, SeatHooks(recorded.save, lambda: None, tuple))
-    turns = WorkTurns(WorkParts(None, None, tasks, None, None, recorded.put_nowait, lambda: False))
+    work = WorkParts(None, None, tasks, None, None, recorded.put_nowait, lambda: False)
+    turns = WorkTurns(work) if outcomes is None else ScriptedTurns(work, outcomes)
     parts = CommandParts(
         SessionSettings(Settings()),
         events,
@@ -80,6 +104,7 @@ def commands_for(recorded: Recorded) -> tuple[WorkCommands, Tasks]:
         None,
         recorded.save,
         nothing,
+        lambda: outcomes is not None,
     )
     return WorkCommands(parts), tasks
 
@@ -174,3 +199,32 @@ async def test_deciding_on_no_waiting_proposal_is_refused() -> None:
     code, message = await refusal(commands, DecideProposal(task_id="7", action="accept"))
     assert (code, message) == (UNKNOWN, "No proposal is waiting for task '7'.")
     assert recorded.effects == []
+
+
+async def own_queued(recorded: Recorded, outcomes: list[Exception | None]) -> WorkCommands:
+    """Commands that queued one run per outcome while read-only, then owned the repository."""
+    commands, _ = commands_for(recorded, outcomes)
+    for _ in outcomes:
+        await commands.handle(RunTasks(), COMMAND_ID)
+    await commands.own(COMMAND_ID)
+    return commands
+
+
+async def test_a_queued_command_that_fails_reports_an_error_and_the_rest_still_run() -> None:
+    recorded = Recorded()
+    outcomes: list[Exception | None] = [None, RuntimeError("disk gone"), None]
+    commands = await own_queued(recorded, outcomes)
+    assert outcomes == []
+    message = "Orbit failed to handle RunTasks: disk gone"
+    assert recorded.effects == [ErrorOccurred(code=INTERNAL, message=message)]
+    assert commands.queued == ()
+
+
+async def test_a_queued_command_refused_reports_its_refusal_and_the_rest_still_run() -> None:
+    recorded = Recorded()
+    refused = Refused(NOT_CONFIGURED, "No agents.")
+    outcomes: list[Exception | None] = [refused, None]
+    commands = await own_queued(recorded, outcomes)
+    assert outcomes == []
+    assert recorded.effects == [ErrorOccurred(code=NOT_CONFIGURED, message="No agents.")]
+    assert commands.queued == ()

@@ -20,6 +20,7 @@ from orbit.agent.domain.refusals import Refused, unknown
 from orbit.agent.domain.roles import REVIEW_ROLES
 from orbit.protocol import (
     CONFIGURE_CHECKS,
+    INTERNAL,
     INVALID,
     NOT_CONFIGURED,
     PLANNER,
@@ -109,14 +110,24 @@ class WorkCommands:
 
     async def own(self, command_id: str) -> None:
         """Run the commands queued while read-only, in order, for ``command_id``, as this orbit
-        owns the repository now; one refused now is reported as an error."""
+        owns the repository now; one that fails is reported as an error, and the rest still
+        run."""
         queued, self._queued = self._queued, []
         for command in queued:
-            try:
-                await self._dispatch(command, command_id)
-            except Refused as refusal:
-                error = ErrorOccurred(code=refusal.code, message=refusal.message)
-                await self._parts.events.put(error)
+            await self._run_queued(command, command_id)
+
+    async def _run_queued(self, command: QueuedWork, command_id: str) -> None:
+        """Run the queued ``command`` for ``command_id``, reporting a refusal, or any other
+        failure, as an error, as nothing waits on its answer now."""
+        try:
+            await self._dispatch(command, command_id)
+            return
+        except Refused as refusal:
+            error = ErrorOccurred(code=refusal.code, message=refusal.message)
+        except Exception as exc:
+            message = f"Orbit failed to handle {type(command).__name__}: {exc}"
+            error = ErrorOccurred(code=INTERNAL, message=message)
+        await self._parts.events.put(error)
 
     def _check(self, command: QueuedWork) -> None:
         """Refuse ``command`` as running it would, for what doesn't change with ownership."""
