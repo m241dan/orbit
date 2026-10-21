@@ -692,8 +692,8 @@ state directory, replace `orbit.db` with the backup, and start orbit again.
 
 ### Storage failures
 
-When a write to the store fails, whether the event log, the session record or the super review
-count, orbit halts the session instead of carrying on with work it can't record: the running
+When a write to the store fails, whether the event log, the session record (taking its lock on
+the first save included) or the super review count, orbit halts the session instead of carrying on with work it can't record: the running
 agents, the planner's turn, the reviews and the startup check are cancelled, and every command
 but quitting and "Try again" is refused with `storage_failed` and the same explanation. Nothing more is written
 to `orbit.db` until storage is resumed.
@@ -723,7 +723,7 @@ written, `.git/orbit/fallback/<session id>.jsonl` in the repository (`.orbit/fal
 git). The explanation names the file, or says that neither place could be written.
 
 Once the cause is fixed, "Try again" retries the writes that failed: the session record as it is
-now, a saved session's rename whose save failed (dropped, with an error, if that session was
+now, taking its lock first if that failed, a saved session's rename whose save failed (dropped, with an error, if that session was
 deleted or another orbit has it open since), the super review count and the event log. When they work, the events in the fallback file
 and those still waiting are appended to the log in `seq` order in one go, skipping any it already
 holds, the fallback file is deleted and the halt is lifted: commands are accepted again and work

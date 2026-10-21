@@ -629,6 +629,23 @@ async def test_resuming_while_the_session_record_still_fails_names_it() -> None:
     await session.close()
 
 
+async def test_a_session_whose_lock_could_not_be_taken_is_saved_on_resuming() -> None:
+    store = FakeStore()
+    store.lock_failure = "Couldn't lock the session x.lock: disk full"
+    session, _, _ = session_for(store=store, fallback=FakeFallback())
+    await send(session, AddTask(task=TASK))
+    error = await halt_error(session)
+
+    assert "saving the session record" in error.message
+    assert "Couldn't lock the session x.lock: disk full" in error.message
+    store.lock_failure = None
+    assert (await outcome_of(session, ResumeStorage()))[-1].payload == ACCEPTED
+    assert store.locked == {"session-1"}
+    assert [record.tasks[0].task for record in store.saved] == [TASK]
+    await session.close()
+    assert store.released == ["session-1"]
+
+
 async def test_resuming_while_the_review_count_still_fails_names_it() -> None:
     store = FakeStore()
     store.count_failure = "count still full"

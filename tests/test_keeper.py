@@ -220,16 +220,61 @@ async def test_a_lock_held_elsewhere_is_reported_and_nothing_is_saved() -> None:
     assert store.saved == [] and store.released == []
 
 
-async def test_a_lock_that_cannot_be_taken_is_reported() -> None:
+async def test_a_lock_held_elsewhere_is_never_tried_again() -> None:
     store = FakeStore()
-    store.lock_failure = "Couldn't lock the session x.lock: disk full"
+    store.free = False
     keeper, published = keeper_for(store)
     await save(keeper, WITH_TASK)
-    assert published.errors == [
-        "Couldn't lock the session x.lock: disk full; the session won't be saved."
+    store.free = True
+
+    assert await keeper.retry(lambda: EMPTY) is None
+    assert published.codes == [LOCKED]
+    assert store.saved == [] and store.locked == set() and not keeper.kept
+
+
+async def test_a_lock_that_cannot_be_taken_halts_the_session_unkept() -> None:
+    store = FakeStore()
+    store.lock_failure = "Couldn't lock the session x.lock: disk full"
+    keeper, halt = halting_keeper(store)
+    await save(keeper, WITH_TASK)
+    assert halt.failures == [
+        (FailedWrite.SESSION_RECORD, "Couldn't lock the session x.lock: disk full")
     ]
-    assert published.codes == [SAVE_FAILED]
-    assert store.saved == []
+    assert store.saved == [] and not keeper.kept
+
+
+async def test_a_retry_takes_the_lock_that_could_not_be_taken_and_saves_the_session() -> None:
+    store = FakeStore()
+    store.lock_failure = "disk full"
+    keeper, halt = halting_keeper(store)
+    await save(keeper, WITH_TASK)
+    error = await keeper.retry(lambda: WITH_TASK)
+    assert isinstance(error, RuntimeError) and str(error) == "disk full"
+    store.lock_failure = None
+
+    assert await keeper.retry(lambda: WITH_TASK) is None
+    assert store.locked == {"session-1"} and store.last.tasks == (TASK,) and keeper.kept
+    assert len(halt.failures) == 1
+
+
+async def test_a_session_locked_on_a_retry_lets_go_of_its_lock_on_close() -> None:
+    store = FakeStore()
+    store.lock_failure = "disk full"
+    keeper, forgotten = forgetting_keeper(store)
+    await save(keeper, WITH_TASK)
+    store.lock_failure = None
+    await keeper.retry(lambda: WITH_TASK)
+    await keeper.close()
+    assert store.released == ["session-1"] and forgotten == []
+
+
+async def test_a_session_halted_before_its_lock_was_taken_keeps_its_logged_events() -> None:
+    store = FakeStore()
+    store.lock_failure = "disk full"
+    keeper, forgotten = forgetting_keeper(store)
+    await save(keeper, WITH_TASK)
+    await keeper.close()
+    assert store.released == [] and forgotten == []
 
 
 async def test_a_failing_save_halts_the_session_and_nothing_more_is_saved() -> None:

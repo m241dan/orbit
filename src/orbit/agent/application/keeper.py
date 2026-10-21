@@ -176,8 +176,9 @@ class SessionKeeper:
     the store from its first save until :meth:`close`, or until another session is opened in
     its place. A session closed or left unsaved, or deleted, has its logged events forgotten.
 
-    A failing save halts the session through ``halt``, and nothing is saved while it's halted;
-    :meth:`retry` saves it again, along with a saved session's rename whose save failed.
+    A failing save, or a store failing as the lock is taken, halts the session through ``halt``,
+    and nothing is saved while it's halted; :meth:`retry` takes the lock and saves it again, along
+    with a saved session's rename whose save failed.
     """
 
     def __init__(
@@ -222,7 +223,8 @@ class SessionKeeper:
 
     async def save(self, contents: Callable[[], Contents]) -> None:
         """Save the session, holding what ``contents`` says it does as it's saved, if it's used
-        and changed since it was last saved."""
+        and changed since it was last saved. A failing save, or a store failing as the session's
+        lock is taken on its first save, halts the session."""
         error = await self._save(contents, retrying=False)
         if error is not None:
             self._halt.fail(FailedWrite.SESSION_RECORD, error)
@@ -249,9 +251,12 @@ class SessionKeeper:
             return None
         async with self._saving:
             contents_now = contents()
-            if self._due(contents_now, retrying) and await self._lock(self._store):
+            if not self._due(contents_now, retrying):
+                return None
+            locked = await self._lock(self._store)
+            if locked is True:
                 return await self._write(self._store, contents_now)
-        return None
+        return locked if isinstance(locked, RuntimeError) else None
 
     def _due(self, contents: Contents, retrying: bool) -> bool:
         """Whether ``contents`` are to be saved: the session is open, not halted unless
@@ -261,18 +266,21 @@ class SessionKeeper:
         open_now = not self._closed and (retrying or not self._halt.halted)
         return open_now and self.used and contents != self._saved
 
-    async def _lock(self, store: SessionStore) -> bool:
-        """Lock the session in ``store`` on its first save; returns whether it's locked."""
+    async def _lock(self, store: SessionStore) -> RuntimeError | bool:
+        """Lock the session in ``store`` on its first save; returns whether it's locked, or the
+        error when the store fails as it's taken, leaving it to be tried again."""
         if self._locked is None:
-            self._locked = await self._acquire(store)
+            acquired = await self._acquire(store)
+            if isinstance(acquired, RuntimeError):
+                return acquired
+            self._locked = acquired
         return self._locked
 
-    async def _acquire(self, store: SessionStore) -> bool:
-        """Take the session's lock in ``store``; reports it if it can't be taken."""
-        acquired = await self._reported(store.acquire(self.id), "; the session won't be saved.")
-        if acquired is None:
-            return False
-        if not acquired:
+    async def _acquire(self, store: SessionStore) -> RuntimeError | bool:
+        """Take the session's lock in ``store``; returns whether it was taken, reporting it if
+        another orbit holds it, or the error when the store fails."""
+        acquired = await outcome(store.acquire(self.id))
+        if acquired is False:
             message = f"Another orbit has the session {self.id} open, so it won't be saved."
             await self._publish(ErrorOccurred(code=LOCKED, message=message))
         return acquired
@@ -505,11 +513,12 @@ class SessionKeeper:
 
     async def close(self) -> None:
         """Stop saving, and let go of the session's lock if it was taken, else forget its logged
-        events; reports it if the lock can't be let go of."""
+        events unless it's halted; reports it if the lock can't be let go of."""
         async with self._saving:
             self._closed = True
             if not self._locked:
-                self._forget(self.id)
+                if not self._halt.halted:
+                    self._forget(self.id)
                 return
             assert self._store is not None  # Only a store holds locks.
             await self._release(self._store, self.id)
