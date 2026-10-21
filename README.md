@@ -984,7 +984,8 @@ One `orbit serve` runs per account and machine, or rather per state directory: w
 and over TLS the CA a frontend on the same machine trusts and the hostname it connects by (see
 **Finding the server** below); it's removed as it stops. A second `orbit serve` on the same state
 directory stops with status 2, saying `orbit serve is already running at <url> (pid N); use
---state-dir for a separate one.`; a run file whose process is gone is replaced.
+--state-dir for a separate one.`; a run file left by a serve that didn't stop cleanly, whose
+process is gone or is the new serve itself (as pid 1 in a container always is), is replaced.
 
 The first `ctrl+c` (or SIGTERM) stops it: it stops accepting frontends (one that arrives then is
 refused with HTTP 503), cancels the work in progress (stopping the agents and revoking their

@@ -451,12 +451,17 @@ def test_serve_with_no_workspace_flagged_starts_empty_and_says_so(
 
 
 def test_a_second_serve_exits_naming_the_first(state: Path) -> None:
-    RunFile(state).write("ws://127.0.0.1:7433/", os.getpid())
-    result = runner.invoke(app, ["serve", *QUIET, "--add", ".", "--port", "0"])
+    first = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    try:
+        RunFile(state).write("ws://127.0.0.1:7433/", first.pid)
+        result = runner.invoke(app, ["serve", *QUIET, "--add", ".", "--port", "0"])
+    finally:
+        first.kill()
+        first.wait()
 
     assert result.exit_code == 2
     assert result.stderr == (
-        f"orbit serve is already running at ws://127.0.0.1:7433/ (pid {os.getpid()}); use"
+        f"orbit serve is already running at ws://127.0.0.1:7433/ (pid {first.pid}); use"
         " --state-dir for a separate one.\n"
     )
 
@@ -468,6 +473,22 @@ def test_a_stale_run_file_is_replaced(state: Path, config_dir: Path) -> None:
 
     def ours(state: Path) -> dict[str, object]:
         while (found := _run_file(state))["pid"] != os.getpid():
+            time.sleep(0.02)
+        return found
+
+    frontend = Frontend(state, config_dir, listening=ours)
+    served(frontend, "--port", "0")
+    assert [type(e) for e in frontend.events] == ATTACHED
+    assert not RunFile(state).path.exists()
+
+
+def test_a_run_file_naming_this_process_is_stale_and_replaced(
+    state: Path, config_dir: Path
+) -> None:
+    RunFile(state).write("ws://127.0.0.1:1/", os.getpid())
+
+    def ours(state: Path) -> dict[str, object]:
+        while (found := _run_file(state))["url"] == "ws://127.0.0.1:1/":
             time.sleep(0.02)
         return found
 

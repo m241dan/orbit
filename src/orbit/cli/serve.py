@@ -117,9 +117,10 @@ def serve(
 
 def _refuse_second(state: Path) -> None:
     """Exit with status 2 if an ``orbit serve`` is already running on the ``state``
-    directory, naming it."""
+    directory, naming it. A run file naming this process is stale, left by a serve that didn't
+    stop cleanly whose pid this one now has, as pid 1 in a container always does."""
     running = running_server(state)
-    if running is None:
+    if running is None or running.pid == os.getpid():
         return
     typer.echo(
         f"orbit serve is already running at {running.url} (pid {running.pid}); use --state-dir"
