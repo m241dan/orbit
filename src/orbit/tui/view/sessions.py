@@ -57,10 +57,12 @@ COUNT_ICONS: dict[TaskStatus, str] = STATUS_ICONS | {"running": SPINNER_FRAMES[0
 @dataclass(frozen=True)
 class Viewing:
     """Which session, ``attached``, of the workspace ``workspace`` a frontend views; none
-    while it views none."""
+    while it views none. Unless it has ``joined`` the workspace, it views none there yet, and
+    ``attached`` is the active session it would resume."""
 
     workspace: str
     attached: str | None
+    joined: bool = True
 
 
 def chosen_workspace(
@@ -79,6 +81,11 @@ def workspace_sessions(
     listed."""
     entry = next((entry for entry in workspaces if entry.id == workspace), None)
     return entry.sessions if entry else ()
+
+
+def active_id(sessions: Sequence[SessionSummary]) -> str | None:
+    """The id of the active session among ``sessions``; none if none is."""
+    return next((summary.id for summary in sessions if summary.active), None)
 
 
 def opening_attach(workspace: str | None, sessions: Sequence[SessionSummary]) -> Attach | None:
@@ -132,6 +139,16 @@ def picked_commands(
     if picked.active or not _free(sessions, attached):
         return (attach,)
     return (attach, ActivateSession(session=picked.id))
+
+
+def starting_commands(name: str | None, viewing: Viewing) -> tuple[Attach | NewSession, ...]:
+    """What starting a new session called ``name`` (the date and time if none) sends from
+    ``viewing``: ``NewSession``, after attaching to the workspace's active session if the
+    frontend hasn't joined it yet."""
+    start = NewSession(name=name)
+    if viewing.joined or viewing.attached is None:
+        return (start,)
+    return (Attach(workspace=viewing.workspace, session=viewing.attached), start)
 
 
 def viewed_only(

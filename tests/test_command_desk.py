@@ -149,3 +149,27 @@ async def test_a_failure_to_send_reports_the_default_failure_text() -> None:
     assert desk.reported == [
         ErrorOccurred(code=INTERNAL, message="Couldn't send the command: boom")
     ]
+
+
+async def test_a_refusal_tells_what_awaits_it_why() -> None:
+    desk = Desk()
+    reasons: list[str] = []
+    await desk.desk.send(RunTasks(), Awaited(why=reasons.append))
+    desk.desk.answer(CommandRefused(command_id=desk.last_id, code=INVALID, message="no"))
+    assert reasons == ["no"]
+
+
+async def test_an_acceptance_tells_no_reason() -> None:
+    desk = Desk()
+    reasons: list[str] = []
+    await desk.desk.send(RunTasks(), Awaited(why=reasons.append))
+    desk.desk.answer(CommandAccepted(command_id=desk.last_id))
+    assert reasons == []
+
+
+async def test_a_failure_to_send_tells_what_awaits_it_why() -> None:
+    desk = Desk()
+    desk.failing = RuntimeError("boom")
+    reasons: list[str] = []
+    assert not await desk.desk.send(RunTasks(), Awaited(why=reasons.append))
+    assert reasons == ["Couldn't send the command: boom"]

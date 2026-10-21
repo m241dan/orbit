@@ -84,8 +84,9 @@ class CommandDesk:
             self._report(CommandRefused(command_id=command_id, code=INVALID, message=str(exc)))
             return
         self._echoes.discard(command_id)
-        self._settle(command_id, accepted=False)
-        self._report(ErrorOccurred(code=INTERNAL, message=f"{failure}: {exc}"))
+        message = f"{failure}: {exc}"
+        self._settle(command_id, refusal=message)
+        self._report(ErrorOccurred(code=INTERNAL, message=message))
 
     def _echo(self, event: MessageSent | ProposalDecided) -> None:
         """Show a message or decision a frontend sent, unless it's one this one sent and showed
@@ -101,16 +102,20 @@ class CommandDesk:
         self._echoes.discard(event.command_id)
         if isinstance(event, Welcome):
             return
-        self._settle(event.command_id, accepted=isinstance(event, CommandAccepted))
-        if isinstance(event, CommandRefused):
-            self._show(event)
+        if isinstance(event, CommandAccepted):
+            self._settle(event.command_id)
+            return
+        self._settle(event.command_id, refusal=event.message)
+        self._show(event)
 
-    def _settle(self, command_id: str, accepted: bool) -> None:
-        """Do what awaits ``command_id`` being ``accepted``, or else refused, if anything does."""
+    def _settle(self, command_id: str, refusal: str | None = None) -> None:
+        """Do what awaits ``command_id`` being accepted, or refused for the ``refusal`` given, if
+        anything does."""
         self._outcomes, awaited = settled(self._outcomes, command_id)
         if awaited is None:
             return
-        if accepted:
+        if refusal is None:
             awaited.accepted()
         else:
             awaited.refused()
+            awaited.why(refusal)

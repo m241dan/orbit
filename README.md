@@ -83,6 +83,7 @@ In the app:
 | `ctrl+o` | Pick the planner's model (default, fable, opus, sonnet, haiku; new tasks default to it too) |
 | `ctrl+l` | Pick the tool access level new tasks start with in the task editor (off, restricted, full) |
 | `ctrl+p` | Session picker: view or switch to a saved session, or start a new one (see [Sessions](#sessions)) |
+| `ctrl+w` | Workspace picker, connected to an `orbit serve`: move to another workspace it serves, add one or remove one (see [Workspaces](#workspaces)); not while typing |
 | `esc` | Stop typing, close the conversation's detail pane, leave a list or close a picker; with the conversation selected and nothing active, let go of its held entry, closing the detail pane, and follow the latest output again; with the detail pane selected, close it; with the Task list selected and nothing active, let go of the held list and follow the active task again |
 | `ctrl+s` | Stop the task run (on any tab) |
 | `ctrl+x` | Stop the planner's turn, leaving the task run going |
@@ -92,7 +93,31 @@ In the app:
 | `ctrl+c` | Quit |
 
 In a picker, `j`/`k` (or the arrow keys) move and `enter` chooses. In the list of sessions, `r`
-renames the highlighted session and `x` deletes it (see [Sessions](#sessions)).
+renames the highlighted session and `x` deletes it (see [Sessions](#sessions)); in the list of
+workspaces, `x` removes the highlighted workspace (see [Workspaces](#workspaces)).
+
+### Workspaces
+
+Connected to an `orbit serve` (see [Serving the control plane](#serving-the-control-plane)), a
+chat starts with the workspace picker, as one server serves many workspaces; `ctrl+w` opens it
+again later. A chat running its own control plane works on its repository alone, so it has no
+workspace picker and opens on that repository. The picker lists:
+
+- `Add <path>` first, when the repository the chat runs in isn't among the workspaces served:
+  `enter` adds it, then goes on as for a workspace served.
+- The workspaces served, each with its label, its path, its active session's name and whether
+  that one is `running` or `idle`, and `read-only` while another orbit owns its repository. The
+  workspace of the repository the chat runs in is highlighted, else the first.
+- `Add a path…`: `enter` asks for a path on the server's host, which `enter` adds and `esc`
+  leaves; a path that's refused, such as one that doesn't exist, shows why under the box.
+
+`enter` on a workspace opens its session picker, `Resume <name>` first (see
+[Sessions](#sessions)), and picking a session there moves the chat to that workspace. `x` removes
+the highlighted workspace once you confirm (`y` to go ahead, `n`/`esc` to cancel): the server
+stops serving it, keeping its sessions for when it's added again; it's refused, saying why under
+the list, while the workspace runs work or another frontend views one of its sessions. `esc` on
+the list quits orbit at startup, and later closes the picker. When the workspace this chat is on
+is removed, the workspace picker opens.
 
 ### Sessions
 
@@ -119,8 +144,9 @@ back through earlier events to the session's start, or, once its log was trimmed
 "Older events were removed (session_log_mb)".
 
 Every chat, in process or connected to an `orbit serve` (see [Serving the control plane](#serving-the-control-plane)),
-starts with the session picker. Connected, `Resume <name>` comes first and is highlighted: the
-session the control plane has active, which runs its work, and `enter` on it just keeps it. A chat
+starts with the session picker, connected once you've picked the workspace (see
+[Workspaces](#workspaces)). Connected, `Resume <name>` comes first and is highlighted: the
+session the control plane has active, which runs its work, and `enter` on it views it. A chat
 running its own control plane has no session to resume, so it has no `Resume`. The other saved
 sessions follow, the most recently active first, then `New session`; with none saved, the picker
 offers only `New session`. Each row shows the session's name, when it was last active (local time),
@@ -1152,8 +1178,9 @@ setting, file or URL:
 | Local discovery under mutual TLS needs a client certificate. | Set `local_client_cert` and `local_client_key` in `[server]` to a certificate the client CA signed and its key. |
 
 **Connecting.** `orbit chat --connect <url>` joins a running `orbit serve`, starting with the
-session picker, which offers to resume the session it has active (see [Sessions](#sessions)),
-rather than running a control plane of its own. It takes a `wss://` URL, to a server serving
+workspace picker (see [Workspaces](#workspaces)), then the session picker, which offers to resume
+the session the workspace has active (see [Sessions](#sessions)), rather than running a control
+plane of its own. It takes a `wss://` URL, to a server serving
 TLS, or a `ws://` one to loopback (`127.0.0.1`, `::1`, `localhost`); a `ws://` URL to any other
 host stops it with status 2 before connecting, as it would carry the token unencrypted. Over TLS
 it always verifies the server: its certificate must be signed by the CA in the file `--ca <path>`
@@ -1164,8 +1191,8 @@ file that can't be read stops it with status 2. To a server serving mTLS it show
 certificate `--cert <path>` and `--key <path>` give instead (see **Client certificates** above). The backend flags
 (`--model`, `--tools`, `--verify`, `--worktree`, `--review`, `--usage`, `--profile`) configure
 the control plane, so with `--connect` they stop it with status 2: give them to `orbit serve`.
-`--new` and `--name` skip the picker and open a new session once connected, as picking `New
-session` does. Any
+`--new` and `--name` skip the session picker and open a new session in the workspace picked, as
+picking `New session` does. Any
 number of chats can connect at once, each showing what the others do; quitting one disconnects it
 and leaves the server running.
 
@@ -1185,11 +1212,11 @@ refusing the chat's `Hello` as incompatible (a chat and a serve speaking differe
 versions, as after upgrading one of them), or an event from the server the chat can't read.
 
 **Finding the server.** Without `--connect`, `orbit chat` looks for the `orbit serve` running on
-its state directory, from the run file there, and connects to it as `--connect` does, opening on
-the workspace of the repository it runs in if the server serves it, else the first it lists,
+its state directory, from the run file there, and connects to it as `--connect` does, the
+workspace picker highlighting the workspace of the repository it runs in, or offering to add it,
 printing nothing extra: the backend flags stop
 it with status 2, saying they belong on `orbit serve` or call for `--local`, and `--new` and
-`--name` open a new session once connected. A run file whose process is gone, or a server that
+`--name` open a new session in the workspace picked. A run file whose process is gone, or a server that
 can't be reached, is ignored, and the chat runs in-process as usual. A server found is never
 bypassed: if it refuses the token, or the token file can't be read, the chat stops with status 2,
 naming the token file. Only servers of the same account on the same machine are found this way; for
@@ -1541,7 +1568,7 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
   edit's diff, `progress` for notes on a task's run, `rules` for the rules ending turns and
   agents' runs, `turns` for the conversation's running turns, `working` for the working row,
   `log` for which of a tab's transcript entries are shown and where, `sessions` for the list of
-  sessions, `windows` for the window h/j/k/l reaches from each window, `triggers` for the keys
+  sessions, `workspaces` for the list of workspaces, `windows` for the window h/j/k/l reaches from each window, `triggers` for the keys
   that fire triggers and their footer labels, `confirm` for the confirmations asked before a
   key's action, `link` for how the link to a control plane elsewhere is shown, and `settings` and
   `common` for what they share); the widgets (`transcript`,
@@ -1554,7 +1581,8 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
   `detail` for the detail pane, `working` for the working row, `proposals`, the proposal modal
   and the `ProposalHost` that shows each waiting proposal once and closes it when it's withdrawn,
   `sessions`, the modal listing the sessions and the `SessionsHost` that shows it and refreshes
-  it while it's open, `list_pane` for the list pane the lists share, `footer` for the key footer,
+  it while it's open, `workspaces`, the modal listing the workspaces served and the
+  `WorkspacesHost` that shows it, `list_pane` for the list pane the lists share, `footer` for the key footer,
   and `widgets` for the building blocks they share) lay it out, and `app` is the Textual app that
   holds them.
 - `orbit.cli`: the composition root, and the only place the two sides are wired together: it

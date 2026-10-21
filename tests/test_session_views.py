@@ -99,7 +99,7 @@ async def test_picking_a_session_viewed_read_only_offers_to_make_it_active() -> 
     app, session = joined()
     async with app.run_test() as pilot:
         await feed_events(session, pilot, CATALOG, VIEWED)
-        await pilot.press("j", "enter")
+        await pilot.press("enter", "j", "enter")
         await feed_events(session, pilot, view(OLD))
 
         screen = prompt(app)
@@ -119,7 +119,7 @@ async def test_just_look_closes_the_prompt_and_keeps_the_view() -> None:
     app, session = joined()
     async with app.run_test() as pilot:
         await feed_events(session, pilot, CATALOG, VIEWED)
-        await pilot.press("j", "enter")
+        await pilot.press("enter", "j", "enter")
         await feed_events(session, pilot, view(OLD))
         await pilot.press("j", "enter")
 
@@ -132,7 +132,7 @@ async def test_escape_just_looks() -> None:
     app, session = joined()
     async with app.run_test() as pilot:
         await feed_events(session, pilot, CATALOG, VIEWED)
-        await pilot.press("j", "enter")
+        await pilot.press("enter", "j", "enter")
         await feed_events(session, pilot, view(OLD))
         await pilot.press("escape")
 
@@ -144,7 +144,7 @@ async def test_with_the_active_session_running_the_prompt_only_offers_to_just_lo
     app, session = joined()
     async with app.run_test() as pilot:
         await feed_events(session, pilot, CATALOG, RUNNING_T3)
-        await pilot.press("j", "enter")
+        await pilot.press("enter", "j", "enter")
         await feed_events(session, pilot, view(OLD))
 
         screen = prompt(app)
@@ -159,7 +159,7 @@ async def test_a_session_activated_directly_offers_nothing() -> None:
     app, session = joined()
     async with app.run_test() as pilot:
         await feed_events(session, pilot, CATALOG)
-        await pilot.press("j", "enter")
+        await pilot.press("enter", "j", "enter")
         await feed_events(session, pilot, opened(OLD))
         assert not isinstance(app.screen, ActivationScreen)
 
@@ -296,7 +296,7 @@ async def test_a_pick_held_back_by_a_running_session_is_offered_again_once_it_is
     app, session = joined()
     async with app.run_test() as pilot:
         await feed_events(session, pilot, CATALOG, RUNNING_T3)
-        await pilot.press("j", "enter")
+        await pilot.press("enter", "j", "enter")
         await feed_events(session, pilot, view(OLD))
         await pilot.press("enter")
         await feed_events(session, pilot, IDLE)
@@ -315,7 +315,7 @@ async def test_the_offer_again_replaces_the_one_still_shown_and_comes_once() -> 
     app, session = joined()
     async with app.run_test() as pilot:
         await feed_events(session, pilot, CATALOG, RUNNING_T3)
-        await pilot.press("j", "enter")
+        await pilot.press("enter", "j", "enter")
         await feed_events(session, pilot, view(OLD), IDLE)
 
         [screen] = [s for s in app.screen_stack if isinstance(s, ActivationScreen)]

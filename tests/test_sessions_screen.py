@@ -74,8 +74,10 @@ def in_process() -> tuple[OrbitApp, FakeSession]:
 
 
 def joined() -> tuple[OrbitApp, FakeSession]:
-    """An app picking a session at startup over a control plane it's linked to."""
+    """An app picking a session at startup over a control plane it's linked to, once the user
+    picks the workspace, which it attaches to only then."""
     session = FakeSession()
+    session.attached = True  # The user's pick attaches, so its Attach is one of the commands.
     return OrbitApp(session, FakeLink(), Opening(pick=True)), session
 
 
@@ -101,16 +103,17 @@ async def test_connected_the_startup_picker_offers_to_resume_the_active_session_
     app, session = joined()
     async with app.run_test() as pilot:
         await feed_events(session, pilot, CATALOG)
+        await pilot.press("enter")
 
         screen = picker(app)
         assert options(screen) == [
-            "● Resume today · Oct 16 18:02 · active",
+            "  Resume today · Oct 16 18:02 · active · viewed by 1",
             *SAVED_ROWS,
             "New session",
         ]
         assert screen.query_one(OptionList).highlighted == 0
         await pilot.press("enter")
-        assert session.commands == []
+        assert session.commands == [Attach(workspace="w", session="now")]
         assert no_picker(app)
 
 
@@ -151,15 +154,19 @@ async def test_picking_with_the_active_session_idle_and_unviewed_activates_it() 
 async def test_a_state_change_updates_the_row_while_the_picker_is_open() -> None:
     app, session = joined()
     async with app.run_test() as pilot:
-        await feed_events(session, pilot, CATALOG, RUNNING)
-        assert options(picker(app))[0] == "● Resume today · Oct 16 18:02 · active · running"
+        await feed_events(session, pilot, CATALOG)
+        await pilot.press("enter")
+        await feed_events(session, pilot, RUNNING)
+        assert options(picker(app))[0] == (
+            "  Resume today · Oct 16 18:02 · active · running · viewed by 1"
+        )
 
 
 async def test_picking_while_a_task_runs_only_views_the_session() -> None:
     app, session = joined()
     async with app.run_test() as pilot:
         await feed_events(session, pilot, CATALOG, RUNNING)
-        await pilot.press("j", "enter")
+        await pilot.press("enter", "j", "enter")
         assert session.commands == [Attach(workspace="w", session="old")]
 
 
@@ -168,7 +175,8 @@ async def test_picking_while_another_frontend_views_the_active_session_only_view
     async with app.run_test() as pilot:
         viewed = RUNNING.model_copy(update={"state": "idle", "viewers": 2})
         await feed_events(session, pilot, CATALOG, viewed)
-        assert options(picker(app))[0] == "● Resume today · Oct 16 18:02 · active · viewed by 1"
+        await pilot.press("enter")
+        assert options(picker(app))[0] == "  Resume today · Oct 16 18:02 · active · viewed by 2"
         await pilot.press("j", "enter")
         assert session.commands == [Attach(workspace="w", session="old")]
 
@@ -340,7 +348,7 @@ async def test_ctrl_p_after_the_startup_picker_opens_a_picker_again() -> None:
     app, session = joined()
     async with app.run_test() as pilot:
         await feed_events(session, pilot, CATALOG)
-        await pilot.press("enter", "ctrl+p")
+        await pilot.press("enter", "enter", "ctrl+p")
 
         screen = picker(app)
         assert not screen.startup

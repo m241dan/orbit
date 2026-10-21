@@ -22,6 +22,7 @@ from orbit.protocol import (
     SessionStateChanged,
     SessionSummary,
     Snapshot,
+    WorkspaceEntry,
     with_state,
 )
 from orbit.tui.view.sessions import (
@@ -35,10 +36,10 @@ from orbit.tui.view.sessions import (
     Viewing,
     activation_choices,
     activation_message,
+    active_id,
     active_name,
     can_delete,
     can_open,
-    chosen_workspace,
     delete_message,
     idle_now_message,
     opening_attach,
@@ -47,10 +48,12 @@ from orbit.tui.view.sessions import (
     running_words,
     session_label,
     sessions_hint,
+    starting_commands,
     viewed_only,
     viewing_mark,
     workspace_sessions,
 )
+from orbit.tui.view.workspaces import with_states
 from orbit.tui.widgets import ConfirmScreen, ListScreen
 
 SessionChoice = Attach | ActivateSession | NewSession
@@ -69,8 +72,9 @@ whatever it returns is ignored."""
 
 class SessionsScreen(ListScreen[tuple[SessionChoice, ...]]):
     """Lists ``sessions`` of the workspace ``viewing`` names before ``New session``: the one it
-    has attached first (as ``Resume`` if ``startup`` is ``resume``, and not at all if it's
-    ``pick``), then the others; dismisses with the commands the user's choice sends.
+    has attached first (as ``Resume`` if ``startup`` is ``resume`` or it hasn't joined the
+    workspace, and not at all if ``startup`` is ``pick``), then the others; dismisses with the
+    commands the user's choice sends, attaching to the workspace if it hasn't joined it.
 
     ``j``/``k`` (and the arrows) move and enter picks the highlighted session, unless it can't
     be opened; the attached session dismisses with none, keeping it. Enter on ``New session``
@@ -108,6 +112,7 @@ class SessionsScreen(ListScreen[tuple[SessionChoice, ...]]):
     ) -> None:
         super().__init__()
         self.workspace = viewing.workspace
+        self.joined = viewing.joined
         self.sessions = tuple(sessions)
         self.attached = viewing.attached
         self.startup = startup is not None
@@ -160,8 +165,8 @@ class SessionsScreen(ListScreen[tuple[SessionChoice, ...]]):
         rows = [
             session_label(
                 summary,
-                attached=summary.id == self.attached,
-                resume=self.startup and summary.id == self.attached,
+                attached=self.joined and summary.id == self.attached,
+                resume=(self.startup or not self.joined) and summary.id == self.attached,
             )
             for summary in self.rows
         ]
@@ -182,14 +187,16 @@ class SessionsScreen(ListScreen[tuple[SessionChoice, ...]]):
             return
         summary = rows[event.option_index]
         if can_open(summary):
-            self.dismiss(picked_commands(summary, self.sessions, self.attached, self.workspace))
+            attached = self.attached if self.joined else None
+            self.dismiss(picked_commands(summary, self.sessions, attached, self.workspace))
 
     @on(Input.Submitted, "#session-name")
     async def _named(self, event: Input.Submitted) -> None:
         event.stop()
         name = event.value.strip()
         if self._renaming is None:
-            self.dismiss((NewSession(name=name or None),))
+            viewing = Viewing(self.workspace, self.attached, self.joined)
+            self.dismiss(starting_commands(name or None, viewing))
             return
         renaming = self._renaming
         self._naming(False)
@@ -298,14 +305,22 @@ Send = Callable[[SessionChoice | SessionChange], Awaitable[bool]]
 """Sends a session command to the backend, returning whether it was sent."""
 Numbers = Callable[[], Mapping[str, str]]
 """The task list's numbers, by task id."""
+OpensOn = Callable[[Sequence[WorkspaceEntry]], WorkspaceEntry | None]
+"""The workspace a frontend opens on by itself, among those a catalog lists; none while the
+user is to pick one."""
+
+
+def _first(workspaces: Sequence[WorkspaceEntry]) -> WorkspaceEntry | None:
+    """The first of ``workspaces``, if there's one."""
+    return next(iter(workspaces), None)
 
 
 class SessionsHost:
-    """Keeps the sessions the latest ``Catalog`` lists of the workspace this frontend opens on,
-    the one at the ``repository`` it runs in if there's one, as ``SessionStateChanged`` changes
-    them, and the one this frontend views, live or read-only; shows them with ``push`` when
-    asked, refreshing the picker while it's shown, and offers to make a session viewed read-only
-    the active one, naming what the active one runs by the task ``numbers``. ``send`` takes the
+    """Keeps the sessions the latest ``Catalog`` lists of the workspace this frontend is on,
+    which it ``opens_on`` by itself or the user picks, as ``SessionStateChanged`` changes them,
+    and the one this frontend views, live or read-only; shows them with ``push`` when asked,
+    refreshing the picker while it's shown, and offers to make a session viewed read-only the
+    active one, naming what the active one runs by the task ``numbers``. ``send`` takes the
     user's choice and their changes to saved sessions."""
 
     def __init__(
@@ -313,13 +328,14 @@ class SessionsHost:
         push: Push,
         send: Send,
         numbers: Numbers = lambda: {},
-        repository: str | None = None,
+        opens_on: OpensOn = _first,
     ) -> None:
         self._push = push
         self._send = send
         self._numbers = numbers
-        self._repository = repository
-        self.workspace: str | None = None  # The id of the workspace opened on, once listed.
+        self._opens_on = opens_on
+        self._workspaces: tuple[WorkspaceEntry, ...] = ()  # As the latest catalog lists them.
+        self.workspace: str | None = None  # The id of the workspace it's on, once there.
         self.sessions: tuple[SessionSummary, ...] = ()
         self.attached: str | None = None  # The session this frontend views, once known.
         self.live = True  # Whether the session viewed is the active one.
@@ -366,21 +382,40 @@ class SessionsHost:
         return active_name(self.sessions) or self.open_session.name
 
     def follow(self, catalog: Catalog) -> None:
-        """List the sessions in ``catalog`` of the workspace opened on, which the first catalog
-        chooses; until a snapshot says which one this frontend views, it's the active one, which
-        a frontend attaches to as it opens."""
+        """List the sessions in ``catalog`` of the workspace this frontend is on, which, until
+        it's on one, it may open on by itself, and which it leaves once ``catalog`` doesn't list
+        it; until a snapshot says which one this frontend views, it's the active one, which a
+        frontend attaches to as it opens."""
+        self._workspaces = catalog.workspaces
         if self.workspace is None:
-            chosen = chosen_workspace(catalog.workspaces, self._repository)
+            chosen = self._opens_on(catalog.workspaces)
             self.workspace = chosen.id if chosen else None
+        elif not any(entry.id == self.workspace for entry in catalog.workspaces):
+            self._leave()
         self.sessions = workspace_sessions(catalog.workspaces, self.workspace)
         if self.attached is None:
-            self.attached = next((s.id for s in self.sessions if s.active), None)
+            self.attached = active_id(self.sessions)
         self._refresh()
+
+    def _leave(self) -> None:
+        """Be on no workspace, viewing no session."""
+        self.workspace = self.attached = self.open_session = None
+        self.live = True
+
+    def join(self, workspace: str) -> Attach | None:
+        """Be on the workspace ``workspace``, viewing its active session once attached, and
+        return what attaches to that one; none if it has none."""
+        self.workspace, self.live, self.open_session = workspace, True, None
+        self.sessions = workspace_sessions(self._workspaces, workspace)
+        self.attached = active_id(self.sessions)
+        self._refresh()
+        return self.opening
 
     def follow_state(self, changed: SessionStateChanged) -> None:
         """Note ``changed``'s session's state; once the active session that held back the
         session picked turns idle, offer again to make that one the active session."""
         self.sessions = tuple(with_state(summary, changed) for summary in self.sessions)
+        self._workspaces = with_states(self._workspaces, changed)
         self._refresh()
         held = self._held
         active = None if held is None else self._turned_idle(held)
@@ -451,28 +486,53 @@ class SessionsHost:
             self.offered.dismiss(False)
             self.offered = None
 
-    def open(self, startup: StartupPick | None = None) -> None:
-        """Let the user pick a session or start a new one, unless the picker is shown already; at
-        ``startup``, opened as it says, escape quits."""
+    def open(self, startup: StartupPick | None = None, workspace: str | None = None) -> None:
+        """Let the user pick a session of the ``workspace``, by default the one this frontend is
+        on, or start a new one, unless the picker is shown already; at ``startup``, opened as it
+        says, escape quits. Picking in another workspace moves this frontend there."""
         if self.shown is not None:
             return
+        viewing, sessions = self._viewing(workspace)
 
         async def chosen(choice: tuple[SessionChoice, ...] | None) -> None:
             self.shown = None
-            # Before sending, as the view may come back before sending returns.
-            self._offering = viewed_only(choice or (), self.sessions)
-            # Refusals come back as errors, shown like any other.
-            for command in choice or ():
-                if not await self._send(command):
-                    self._offering = None
-                    return
+            if choice and not viewing.joined:
+                self.join(viewing.workspace)
+            await self._send_choice(choice or (), sessions)
 
-        # No session is listed, so none is picked, until a catalog names the workspace.
-        viewing = Viewing(workspace=self.workspace or "", attached=self.attached)
-        self.shown = SessionsScreen(self.sessions, viewing, self._send, startup)
+        self.shown = SessionsScreen(sessions, viewing, self._send, startup)
         self._push(self.shown, chosen)
 
+    async def _send_choice(
+        self, choice: Sequence[SessionChoice], sessions: Sequence[SessionSummary]
+    ) -> None:
+        """Send the commands of the user's ``choice`` among ``sessions``, until one fails to
+        send."""
+        # Before sending, as the view may come back before sending returns.
+        self._offering = viewed_only(choice, sessions)
+        # Refusals come back as errors, shown like any other.
+        for command in choice:
+            if not await self._send(command):
+                self._offering = None
+                return
+
+    def _viewing(self, workspace: str | None) -> tuple[Viewing, tuple[SessionSummary, ...]]:
+        """What this frontend views of the ``workspace``, the one it's on by default, and its
+        sessions."""
+        if workspace is None or workspace == self.workspace:
+            # No session is listed, so none is picked, until a catalog names the workspace.
+            return Viewing(workspace=self.workspace or "", attached=self.attached), self.sessions
+        sessions = workspace_sessions(self._workspaces, workspace)
+        return Viewing(workspace, active_id(sessions), joined=False), sessions
+
     def _refresh(self) -> None:
-        """Show the sessions in the picker, if it's shown."""
-        if self.shown is not None:
-            self.shown.show(self.sessions, self.attached)
+        """Show the sessions in the picker, if it's shown: of the workspace it lists, with its
+        active one to resume if this frontend isn't on it."""
+        shown = self.shown
+        if shown is None:
+            return
+        if shown.joined:
+            shown.show(self.sessions, self.attached)
+            return
+        sessions = workspace_sessions(self._workspaces, shown.workspace)
+        shown.show(sessions, active_id(sessions))

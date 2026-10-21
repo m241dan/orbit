@@ -88,8 +88,8 @@ def chat(
 
     At startup, pick a saved session or start a new one (or start one with --new); ctrl+p
     picks again later. With --connect, or when an orbit serve is running (unless --local), join
-    it instead, opening on the workspace here if it serves it, the picker offering to resume the
-    session it has open.
+    it instead, first picking one of the workspaces it serves, or adding the one here (ctrl+w
+    picks again later), then a session, the picker offering to resume the one it has open.
     --remote NAME joins the one [remotes.NAME] in your config.toml names.
     A control plane serving mutual TLS is shown a client certificate, with --cert and --key,
     rather than the token.
@@ -214,9 +214,9 @@ def _remote_files(remote: RemoteSettings) -> _ClientFiles:
 class _Joining:
     """How a chat joins a running control plane: with the flags in ``ctx``, showing the token
     in ``token_file``, or without one the client certificate at ``cert`` with its key at
-    ``key``, verifying a ``wss://`` one by the CA in ``ca``, if given, opening on the
-    workspace at the ``repository`` it runs in, if the control plane serves it, and sending
-    ``opening``, if any, once attached."""
+    ``key``, verifying a ``wss://`` one by the CA in ``ca``, if given, its workspace picker
+    preselecting, or offering to add, the workspace at the ``repository`` it runs in, and
+    sending ``opening``, if any, once attached."""
 
     ctx: typer.Context
     token_file: Path | None

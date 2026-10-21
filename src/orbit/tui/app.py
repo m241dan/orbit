@@ -119,6 +119,7 @@ from orbit.tui.view.events import coalesce
 from orbit.tui.view.outcomes import Awaited
 from orbit.tui.view.proposals import decision_entry
 from orbit.tui.view.rules import planner_reset_entry
+from orbit.tui.view.sessions import chosen_workspace
 from orbit.tui.view.settings import (
     model_choices,
     model_options,
@@ -136,12 +137,14 @@ from orbit.tui.widgets import (
     StatusLine,
     mark_selected,
 )
+from orbit.tui.workspaces import WorkspacesHost
 
 
 @dataclass(frozen=True)
 class Opening:
     """How the app opens: on the workspace at the ``repository`` it runs in, if there's one,
-    sending ``command``, if given, once attached, and with the session picker if ``pick``."""
+    which a linked app's workspace picker preselects or offers to add, sending ``command``, if
+    given, once attached, and with the session picker if ``pick``."""
 
     command: Command | None = None
     pick: bool = False
@@ -195,6 +198,8 @@ class OrbitApp(App[None], inherit_bindings=False):
         Binding("ctrl+o", "pick_model", "Model"),
         Binding("ctrl+l", "pick_tool_access", "Tools"),
         Binding("ctrl+p", "list_sessions", "Sessions"),
+        # check_action keeps it to a control plane in another process, which serves several.
+        Binding("ctrl+w", "list_workspaces", "Workspaces"),
         # check_action keeps it from the prompt while typing, which may want ctrl+b itself.
         Binding("ctrl+b", "toggle_sidebar", "Sidebar"),
     ]
@@ -206,11 +211,12 @@ class OrbitApp(App[None], inherit_bindings=False):
         opening: Opening = _PLAIN_OPENING,
     ) -> None:
         """The app over ``session``, showing how its ``link`` to a control plane in another
-        process stands, if it has one. The first catalog chooses the workspace it opens on, the
-        one at the ``opening``'s repository if there's one, and the app attaches to its active
-        session, then sends the ``opening``'s command, if any. If the ``opening`` says to pick,
-        that catalog also opens the session picker, offering to resume the session viewed only
-        over a ``link``, as a session opened in process isn't one picked yet."""
+        process stands, if it has one. Over a ``link``, the first catalog opens the workspace
+        picker, the workspace at the ``opening``'s repository preselected; otherwise it chooses
+        that workspace, or the first. The app attaches to the active session of the workspace
+        opened on, then sends the ``opening``'s command, if any; or, if the ``opening`` says to
+        pick, opens the session picker, offering to resume the active session only over a
+        ``link``, as a session opened in process isn't one picked yet."""
         super().__init__()
         self._session = session
         self._link = link
@@ -225,8 +231,16 @@ class OrbitApp(App[None], inherit_bindings=False):
         self._settings: Settings | None = None
         self._model_choices: tuple[str, ...] = ()
         self._proposals = ProposalHost(self.push_screen, self._decide)
+        repository = opening.repository
         self._sessions = SessionsHost(
-            self.push_screen, self._send, lambda: self._task_list.numbers_by_id, opening.repository
+            self.push_screen,
+            self._send,
+            lambda: self._task_list.numbers_by_id,
+            # Over a link the user picks the workspace.
+            lambda workspaces: None if link else chosen_workspace(workspaces, repository),
+        )
+        self._workspaces = WorkspacesHost(
+            self.push_screen, self._send, self._open_workspace, repository
         )
         # The feed shows answers once mounted, before any event arrives.
         self._desk = CommandDesk(session.send, self._render_event, lambda e: self._feed.render(e))
@@ -334,6 +348,7 @@ class OrbitApp(App[None], inherit_bindings=False):
             "configure_checks": self._on_main_screen,
             "reset_planner": self._on_main_screen,
             "list_sessions": self._on_main_screen,
+            "list_workspaces": lambda: self._link is not None and self._on_main_screen(),
             "toggle_sidebar": lambda: self._on_main_screen() and self.focused is not self._prompt,
         }
         if action in self._missing_triggers:
@@ -511,6 +526,20 @@ class OrbitApp(App[None], inherit_bindings=False):
         """Show the session picker, the session viewed first."""
         self._sessions.open()
 
+    def action_list_workspaces(self) -> None:
+        """Show the workspace picker."""
+        self._workspaces.open()
+
+    async def _open_workspace(self, workspace: str, startup: bool) -> None:
+        """Open the session picker of the ``workspace`` picked; at ``startup``, unless the app
+        picks a session, attach to its active session and send the command to open with."""
+        if startup and not self._pick:
+            attach = self._sessions.join(workspace)
+            if attach is not None and await self._send(attach):
+                await self._send_opening()
+            return
+        self._sessions.open("resume" if startup else None, workspace)
+
     async def action_cancel_turn(self) -> None:
         # The planner has its own lane, stopped with ctrl+x; ctrl+s stops the task run.
         await self._send(CancelTurn(lane=WORK_LANE))
@@ -565,14 +594,25 @@ class OrbitApp(App[None], inherit_bindings=False):
         )
 
     async def _open_once_listed(self, batch: list[Event]) -> None:
-        """Attach to the active session of the workspace opened on, once ``batch`` has the first
-        catalog, then send the command to open with, if there's one, once that's sent."""
-        if not self._attaching or not any(isinstance(event, Catalog) for event in batch):
+        """Once ``batch`` has the first catalog, open the workspace picker over a link; else
+        attach to the active session of the workspace opened on, then send the command to open
+        with, if there's one, once that's sent."""
+        if not self._first_listed(batch):
             return
-        self._attaching = False
+        if self._link is not None:
+            self._workspaces.open(startup=True)
+            return
         attach = self._sessions.opening
         if attach is not None and await self._send(attach):
             await self._send_opening()
+
+    def _first_listed(self, batch: list[Event]) -> bool:
+        """Whether ``batch`` has the first catalog, after which the app no longer waits for
+        one."""
+        if not self._attaching or not any(isinstance(event, Catalog) for event in batch):
+            return False
+        self._attaching = False
+        return True
 
     async def _send_opening(self) -> None:
         """Send the command to open with, if there's one, only once."""
@@ -699,18 +739,28 @@ class OrbitApp(App[None], inherit_bindings=False):
             self._feed.append(*planner_reset_entry(), PLANNER)
 
     def _render_catalog(self, catalog: Catalog) -> None:
-        """Label the trigger keys from ``catalog`` and list its sessions, titling the
-        conversation with the name of the session viewed, renamed perhaps; the first catalog
-        opens the session picker, if the app picks one."""
+        """Label the trigger keys from ``catalog`` and list its workspaces and sessions, titling
+        the conversation with the name of the session viewed, renamed perhaps; one that no
+        longer lists the workspace the app is on opens the workspace picker. In process, the
+        first catalog opens the session picker, if the app picks one."""
         self._label_triggers(trigger_key_labels(catalog.triggers))
-        self._sessions.follow(catalog)
+        self._workspaces.follow(catalog)
+        self._follow_sessions(catalog)
         attached = self._sessions.attached_session
         if attached is not None:
             self._transcript.show_session(attached.name)
         self._show_viewing()
-        if self._pick:
+        if self._pick and self._link is None:
             self._pick = False
-            self._sessions.open("resume" if self._link is not None else "pick")
+            self._sessions.open("pick")
+
+    def _follow_sessions(self, catalog: Catalog) -> None:
+        """List ``catalog``'s sessions of the workspace the app is on, letting the user pick
+        another once ``catalog`` no longer lists it."""
+        was_on = self._sessions.workspace
+        self._sessions.follow(catalog)
+        if was_on is not None and self._sessions.workspace is None:
+            self._workspaces.open()
 
     def _label_triggers(self, labels: dict[str, str | None]) -> None:
         """Label each trigger's key in the footer with its label in ``labels``, hiding those
@@ -817,6 +867,7 @@ class OrbitApp(App[None], inherit_bindings=False):
             self._usage.show(event)
         else:
             self._sessions.follow_state(event)
+            self._workspaces.follow_state(event)
             self._show_viewing()
 
     async def _decide(self, proposal: ChecksProposed, decision: DecideProposal) -> None:

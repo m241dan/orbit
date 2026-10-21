@@ -22,6 +22,7 @@ from orbit.tui.sessions import (
     SessionsHost,
     SessionsScreen,
 )
+from orbit.tui.view.sessions import chosen_workspace
 from orbit.tui.widgets import ConfirmScreen
 from tests.test_tui import opened
 
@@ -43,7 +44,11 @@ class Host(App[None]):
         super().__init__()
         self.sent: list[SessionChoice | SessionChange] = []
         self.failing: set[str] = set()
-        self.host = SessionsHost(self.push_screen, self._sent, repository=repository)
+        self.host = SessionsHost(
+            self.push_screen,
+            self._sent,
+            opens_on=lambda workspaces: chosen_workspace(workspaces, repository),
+        )
 
     async def _sent(self, command: SessionChoice | SessionChange) -> bool:
         self.sent.append(command)
