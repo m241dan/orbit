@@ -107,7 +107,7 @@ class SessionSwitcher:
             case ActivateSession() | NewSession():
                 await self.activate(command)
             case RenameSession() | DeleteSession():
-                await self._change_saved(command)
+                await self.change_saved(command)
             case _:
                 assert_never(command)
 
@@ -156,28 +156,30 @@ class SessionSwitcher:
         """Save the session, if it's used, as it is now."""
         await self._keeper.save(self.contents)
 
-    async def _change_saved(self, command: RenameSession | DeleteSession) -> None:
-        """Rename or delete a session and publish the catalog."""
+    async def change_saved(self, command: RenameSession | DeleteSession) -> bool:
+        """Rename or delete a session and publish the catalog; returns whether the session was
+        renamed or deleted."""
         match command:
             case RenameSession(session_id=session_id, name=name):
-                await self._rename_session(session_id, name)
+                changed = await self._rename_session(session_id, name)
             case DeleteSession(session_id=session_id):
-                await self._keeper.delete_saved(session_id)
+                changed = await self._keeper.delete_saved(session_id)
             case _:
                 assert_never(command)
         await self.publish_catalog()
+        return changed
 
-    async def _rename_session(self, session_id: str, name: str) -> None:
-        """Name the session ``session_id`` ``name``, saving it if it's saved; refused for an
-        empty name."""
+    async def _rename_session(self, session_id: str, name: str) -> bool:
+        """Name the session ``session_id`` ``name``, saving it if it's saved; returns whether
+        it was renamed. Refused for an empty name."""
         named = session_name(name)
         if named is None:
             raise Refused(INVALID, EMPTY_NAME)
-        if session_id == self._keeper.id:
-            self._keeper.rename(named)
-            await self.save()
-        else:
-            await self._keeper.rename_saved(session_id, named)
+        if session_id != self._keeper.id:
+            return await self._keeper.rename_saved(session_id, named)
+        self._keeper.rename(named)
+        await self.save()
+        return True
 
     async def _open_session(self, session_id: str) -> str | None:
         """Open the saved session ``session_id`` in place of this one, without running

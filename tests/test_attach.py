@@ -1,6 +1,7 @@
 """Attaching connections to sessions: the open one, live, or a saved one as a read-only view."""
 
 import asyncio
+from collections.abc import Callable
 from datetime import UTC, datetime
 
 from orbit.agent import WorkspaceHost
@@ -10,6 +11,7 @@ from orbit.protocol import (
     BUSY,
     INVALID,
     NOT_ACTIVE,
+    SAVE_FAILED,
     UNKNOWN,
     WRONG_SESSION,
     AddTask,
@@ -21,6 +23,7 @@ from orbit.protocol import (
     CommandEnvelope,
     CommandRefused,
     DeleteSession,
+    ErrorOccurred,
     Event,
     EventEnvelope,
     History,
@@ -464,3 +467,74 @@ async def test_a_viewed_session_gone_from_the_list_is_named_by_its_id() -> None:
 
     message = f'Can\'t delete "{EARLIER}": 1 other frontend views it.'
     assert outcome(events) == CommandRefused(command_id="delete", code=BUSY, message=message)
+
+
+async def failed_change(
+    store: FakeStore, command: RenameSession | DeleteSession, breaking: Callable[[], None]
+) -> tuple[list[Event], list[Event], list[Event]]:
+    """What a connection viewing ``earlier`` in a session saved in ``store`` gets as it sends
+    ``command`` once ``breaking`` breaks the store, and then as it runs tasks, and what one
+    viewing the open session gets meanwhile."""
+    session = workspace(store)
+    viewer = await viewing(session, "viewer")
+    watcher = await joined(session, "watcher")
+    breaking()
+    await say(viewer, "change", command)
+    changed = await taken(viewer)
+    await say(viewer, "run", RunTasks())
+    ran = await taken(viewer)
+    watched = await taken(watcher)
+    await session.close()
+    return changed, ran, watched
+
+
+async def test_a_failed_delete_leaves_the_connection_viewing_the_session() -> None:
+    store = stored()
+
+    def failing() -> None:
+        store.delete_failure = "disk full"
+
+    deleted, ran, watched = await failed_change(store, DeleteSession(session_id=EARLIER), failing)
+
+    assert store.saved
+    assert not any(isinstance(e, Snapshot) for e in deleted)
+    assert ErrorOccurred(code=SAVE_FAILED, message="disk full") in watched
+    assert ran == [CommandRefused(command_id="run", code=NOT_ACTIVE, message=NOT_ACTIVE_MESSAGE)]
+
+
+async def test_a_delete_that_cant_list_the_sessions_leaves_the_connection_viewing_it() -> None:
+    store = stored()
+
+    def unlistable() -> None:
+        store.list_failure = RuntimeError("store gone")
+
+    deleted, ran, watched = await failed_change(
+        store, DeleteSession(session_id=EARLIER), unlistable
+    )
+
+    assert store.deleted == []
+    assert not any(isinstance(e, Snapshot) for e in deleted)
+    assert any(isinstance(e, ErrorOccurred) for e in watched)
+    assert ran == [CommandRefused(command_id="run", code=NOT_ACTIVE, message=NOT_ACTIVE_MESSAGE)]
+
+
+async def test_a_rename_whose_save_fails_leaves_the_view_naming_the_old_name() -> None:
+    store = stored()
+
+    def failing() -> None:
+        store.failure = "disk full"
+
+    _, ran, _ = await failed_change(store, RenameSession(session_id=EARLIER, name="older"), failing)
+
+    assert ran == [CommandRefused(command_id="run", code=NOT_ACTIVE, message=NOT_ACTIVE_MESSAGE)]
+
+
+async def test_a_rename_that_cant_claim_the_session_leaves_the_view_naming_the_old_name() -> None:
+    store = stored()
+
+    def failing() -> None:
+        store.lock_failure = "lock broken"
+
+    _, ran, _ = await failed_change(store, RenameSession(session_id=EARLIER, name="older"), failing)
+
+    assert ran == [CommandRefused(command_id="run", code=NOT_ACTIVE, message=NOT_ACTIVE_MESSAGE)]

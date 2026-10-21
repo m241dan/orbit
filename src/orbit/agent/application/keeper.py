@@ -227,10 +227,11 @@ class SessionKeeper:
             return error
         renaming, self._renaming = self._renaming, None
         try:
-            return await self._rename(renaming)
+            renamed = await self._rename(renaming)
         except Refused as refused:
             await self._publish(ErrorOccurred(code=refused.code, message=refused.message))
             return None
+        return renamed if isinstance(renamed, RuntimeError) else None
 
     async def _save(self, contents: Callable[[], Contents], retrying: bool) -> RuntimeError | None:
         """Save the session as :meth:`save` does, halted or not if ``retrying``; returns the
@@ -313,20 +314,23 @@ class SessionKeeper:
         found = await self._found(session_id, _VIEW)
         return None if found is None else found[1]
 
-    async def rename_saved(self, session_id: str, name: str) -> None:
+    async def rename_saved(self, session_id: str, name: str) -> bool:
         """Name the saved session ``session_id``, not the one open here, ``name``, holding its
-        lock while it's rewritten. Refused (raising :class:`Refused`) if it can't be renamed;
-        a failing save halts the session, and other store problems are reported."""
-        error = await self._rename(_Renaming(session_id, name))
-        if error is not None:
-            self._halt.fail(FailedWrite.SESSION_RECORD, error)
+        lock while it's rewritten; returns whether it was renamed. Refused (raising
+        :class:`Refused`) if it can't be renamed; a failing save halts the session, and other
+        store problems are reported."""
+        renamed = await self._rename(_Renaming(session_id, name))
+        if isinstance(renamed, RuntimeError):
+            self._halt.fail(FailedWrite.SESSION_RECORD, renamed)
+            return False
+        return renamed
 
-    async def _rename(self, renaming: _Renaming) -> RuntimeError | None:
-        """Carry out ``renaming`` as :meth:`rename_saved` does; returns the error when its save
-        fails, keeping it to :meth:`retry`."""
+    async def _rename(self, renaming: _Renaming) -> RuntimeError | bool:
+        """Carry out ``renaming`` as :meth:`rename_saved` does; returns whether it was renamed,
+        or the error when its save fails, keeping it to :meth:`retry`."""
         found = await self._claimed(renaming.session_id, _RENAME)
         if found is None:
-            return None
+            return False
         assert self._store is not None  # Only a store holds saved sessions.
         try:
             error = await outcome(
@@ -335,30 +339,32 @@ class SessionKeeper:
         finally:
             await self._release(self._store, renaming.session_id)
         if not isinstance(error, RuntimeError):
-            return None
+            return True
         self._renaming = renaming
         return error
 
-    async def delete_saved(self, session_id: str) -> None:
+    async def delete_saved(self, session_id: str) -> bool:
         """Delete the saved session ``session_id``, lock and all, unless it's the one open here
-        or another orbit has it open: then raises :class:`Refused`. Store problems are
-        reported."""
+        or another orbit has it open: then raises :class:`Refused`; returns whether it was
+        deleted. Store problems are reported."""
         if session_id == self.id:
             raise Refused(INVALID, OPEN_UNDELETABLE)
-        if await self._claimed(session_id, _DELETE) is not None:
-            assert self._store is not None  # Only a store holds saved sessions.
-            await self._delete(self._store, session_id)
+        if await self._claimed(session_id, _DELETE) is None:
+            return False
+        assert self._store is not None  # Only a store holds saved sessions.
+        return await self._delete(self._store, session_id)
 
-    async def _delete(self, store: SessionStore, session_id: str) -> None:
+    async def _delete(self, store: SessionStore, session_id: str) -> bool:
         """Delete the session ``session_id`` from ``store``, whose lock this orbit took to, and
-        then its events still to be logged; reports it, letting go of the lock, if it can't be
-        deleted."""
+        then its events still to be logged; returns whether it was deleted, reporting it and
+        letting go of the lock if it can't be."""
         error = await outcome(store.delete(session_id))
         if isinstance(error, RuntimeError):
             await self._release(store, session_id)
             await self._publish(ErrorOccurred(code=SAVE_FAILED, message=str(error)))
-            return
+            return False
         self._forget(session_id)
+        return True
 
     async def open(self, session_id: str, load: Load) -> Opened | None:
         """Make the saved session ``session_id`` the one open here, locked, if ``load`` switches

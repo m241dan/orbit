@@ -604,18 +604,24 @@ class WorkspaceHost:
     ) -> None:
         if isinstance(command, History):
             await self._events.put(await self._history.page(command))
-        elif isinstance(command, DeleteSession):
-            await self._views.check_deletable(command.session_id)
-            await self._switcher.handle(command)
-            await self._views.deleted(command.session_id)
-        elif isinstance(command, RenameSession):
-            await self._switcher.handle(command)
-            self._views.renamed(command.session_id, command.name)
+        elif isinstance(command, RenameSession | DeleteSession):
+            await self._change_saved(command)
         elif isinstance(command, TakeOwnership):
             await self._take_ownership(command, command_id)
         else:
             self._switcher.stay()
             await self._commands.handle(command, command_id)
+
+    async def _change_saved(self, command: RenameSession | DeleteSession) -> None:
+        """Rename or delete the session ``command`` names, and only once it's done, have the
+        connections attached to it name it so, or view the open session in its place."""
+        if isinstance(command, RenameSession):
+            if await self._switcher.change_saved(command):
+                self._views.renamed(command.session_id, command.name)
+            return
+        await self._views.check_deletable(command.session_id)
+        if await self._switcher.change_saved(command):
+            await self._views.deleted(command.session_id)
 
     async def _take_ownership(self, command: TakeOwnership, command_id: str) -> None:
         """Answer the offer of the repository: own it, if ``command`` takes it, and run the work
