@@ -9,9 +9,10 @@ import asyncio
 from collections.abc import Awaitable, Callable, Collection
 from functools import partial
 
-from orbit.agent.application.agent_run import AgentRun, Outcome, UserStop, run_task_to_end
+from orbit.agent.application.agent_run import AgentRun
 from orbit.agent.application.desk import AgentDesk
-from orbit.agent.application.lanes import Background, being_cancelled
+from orbit.agent.application.lanes import Background
+from orbit.agent.application.outcomes import Outcome, UserStop, cancelling, run_task_to_end
 from orbit.agent.application.ports import CoderTree, Reply
 from orbit.agent.application.tasks import Changed, Tasks, unchanged
 from orbit.agent.domain.board import TaskBoard
@@ -294,7 +295,7 @@ class ReviewLane:
         try:  # Even a bug ends the review, or its batch would stay open.
             await run_task_to_end(self._tasks, task_id, run, stop, self._publish)
         finally:
-            if not being_cancelled():  # The lane stopping leaves its batches as they are.
+            if not cancelling():  # The lane stopping leaves its batches as they are.
                 await self._after(self._batches.get(task_id))
 
     async def _reviewed(self, task_id: str) -> Outcome:

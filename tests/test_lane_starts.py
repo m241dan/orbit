@@ -12,7 +12,14 @@ from orbit.agent.application.work_lane import WorkLane
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.endings import CANCELLED, STOPPED_BY_YOU
 from orbit.agent.domain.reviews import ReviewLimits, ReviewPlanner
-from orbit.protocol import REVIEWER, Event, TasksChanged, TaskSpec, VerificationChanged
+from orbit.protocol import (
+    REVIEWER,
+    Event,
+    TasksChanged,
+    TaskSpec,
+    TaskStarted,
+    VerificationChanged,
+)
 from tests.agent_fakes import ROLES, FakeHost, FakeTree, ScriptedLauncher, Steps, verified
 
 
@@ -55,12 +62,29 @@ def ended_and_free(tasks: Tasks, task_id: str, reason: str) -> None:
     tasks.board.remove(task_id)
 
 
-async def cancel_work(gate: Gate, stopped: bool = False) -> tuple[Tasks, str]:
-    """Run a work lane publishing through ``gate``, and cancel it once ``gate`` holds, as the
-    user does if ``stopped``; returns its tasks and the task it ran."""
-    tasks = Tasks(TaskBoard(), gate)
+class Hearing(ReviewLane):
+    """A review lane that notes each task it hears ended, landed or not, and reviews none."""
+
+    def __init__(self, desk: AgentDesk, tasks: Tasks) -> None:
+        super().__init__(desk, tasks, ReviewPlanner(ReviewLimits()), no_work)
+        self.tasks = tasks
+        self.heard: list[str] = []
+
+    async def landed(self, task_id: str, commit: str) -> None:
+        self.heard.append(task_id)
+
+    async def ended(self, task_id: str) -> None:
+        self.heard.append(task_id)
+
+
+async def cancel_work(
+    gate: Gate, stopped: bool = False, review: Hearing | None = None
+) -> tuple[Tasks, str]:
+    """Run a work lane publishing through ``gate``, beside ``review`` if any, and cancel it once
+    ``gate`` holds, as the user does if ``stopped``; returns its tasks and the task it ran."""
+    tasks = review.tasks if review is not None else Tasks(TaskBoard(), gate)
     task_id = tasks.board.add(TaskSpec(prompt="a"))
-    lane = WorkLane(desk_for(gate), tasks, Verifier(verified(Steps()), tasks, gate), None)
+    lane = WorkLane(desk_for(gate), tasks, Verifier(verified(Steps()), tasks, gate), review)
     run = asyncio.create_task(lane.run())
     await gate.reached.wait()
     if stopped:
@@ -112,3 +136,24 @@ async def test_a_work_lane_cancelled_again_as_it_cancels_a_task_just_cancels_it(
     run.cancel()
     await asyncio.gather(run, return_exceptions=True)
     ended_and_free(tasks, task_id, CANCELLED)
+
+
+def hearing(gate: Gate) -> Hearing:
+    """A review lane hearing of the tasks on a new board publishing through ``gate``."""
+    return Hearing(desk_for(gate), Tasks(TaskBoard(), gate))
+
+
+async def test_a_work_lane_closed_while_running_a_task_tells_the_review_lane_nothing() -> None:
+    gate = Gate(lambda event: isinstance(event, TaskStarted))
+    review = hearing(gate)
+    tasks, task_id = await cancel_work(gate, review=review)
+    ended_and_free(tasks, task_id, CANCELLED)
+    assert review.heard == []
+
+
+async def test_a_task_the_user_stops_is_still_reported_to_the_review_lane() -> None:
+    gate = Gate(lambda event: isinstance(event, TaskStarted))
+    review = hearing(gate)
+    tasks, task_id = await cancel_work(gate, stopped=True, review=review)
+    ended_and_free(tasks, task_id, STOPPED_BY_YOU)
+    assert review.heard == [task_id]

@@ -11,9 +11,10 @@ from collections.abc import Collection
 from functools import partial
 from typing import Literal
 
-from orbit.agent.application.agent_run import AgentRun, Outcome, UserStop, ended, run_task_to_end
+from orbit.agent.application.agent_run import AgentRun
 from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.landing import Lander
+from orbit.agent.application.outcomes import Outcome, UserStop, ended, run_task_to_end
 from orbit.agent.application.review_lane import ReviewLane
 from orbit.agent.application.startup_check import StartupCheck
 from orbit.agent.application.tasks import Tasks

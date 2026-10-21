@@ -9,15 +9,16 @@ user what they make of it, which a :class:`ProposalTrial` does.
 """
 
 import asyncio
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Sequence
 from contextlib import suppress
 from dataclasses import dataclass
 from functools import partial
 from typing import Any, Literal
 
 from orbit.agent.application.desk import AgentDesk, Tool, dispatch, report_progress
-from orbit.agent.application.lanes import being_cancelled, stop
-from orbit.agent.application.ports import Publish, Reply
+from orbit.agent.application.lanes import stop
+from orbit.agent.application.outcomes import Outcome, cancelling, ended
+from orbit.agent.application.ports import Reply
 from orbit.agent.application.proposal_trial import ProposalTrial
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.application.verifier import Failure, Verifier, first_failure
@@ -26,7 +27,7 @@ from orbit.agent.domain.agents import Agent, bootstrap_prompt
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.checks import ChecksProposal, parse_proposal
 from orbit.agent.domain.config_errors import ConfigError
-from orbit.agent.domain.endings import CANCELLED, Ending, bug, error, run_ending, unaccepted
+from orbit.agent.domain.endings import Ending, error, run_ending, unaccepted
 from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.roles import (
     COMPLETE_TASK,
@@ -48,7 +49,6 @@ from orbit.agent.domain.verification import (
 )
 from orbit.protocol import (
     AGENT_FAILED,
-    GIT_FAILED,
     NOT_CONFIGURED,
     TIMED_OUT,
     AgentExited,
@@ -74,100 +74,6 @@ STATUSES: dict[Phase, TaskStatus] = {
     "gave_up": "gave_up",
     "ended": "cancelled",
 }
-
-
-@dataclass(frozen=True)
-class Outcome:
-    """How a task ended: its status, the failure to hand a fresh agent if it fell back, the
-    agent's summaries of what it did, one per claim, the checks the user accepted from it, and
-    why it ended badly, in a line (``reason``) and in full (``detail``)."""
-
-    status: TaskStatus
-    failure: Failure | None = None
-    summaries: tuple[str, ...] = ()
-    checks: ChecksProposal | None = None
-    reason: str = ""
-    detail: str = ""
-
-
-def ended(status: TaskStatus, why: Ending) -> Outcome:
-    """A task's ending as ``status``, with nothing to show for it, for the reason ``why``."""
-    reason, detail = why
-    return Outcome(status, reason=reason, detail=detail)
-
-
-async def see_to_end(
-    tasks: Tasks, task_id: str, default: Outcome, outcome: Awaitable[Outcome]
-) -> Outcome:
-    """The ``outcome`` task ``task_id`` of ``tasks`` reached, recorded as its end. It ends as
-    ``default`` if ``outcome`` is cancelled, and in error, re-raised, if ``outcome`` breaks on a
-    bug: a task left running could never be run or dropped. So ``outcome`` is what starts the
-    task, leaving no await between its start and this guard."""
-    reached = default
-    try:
-        reached = await outcome
-    except Exception as exc:
-        reached = ended("error", bug(exc))
-        raise
-    finally:
-        await tasks.finish(task_id, reached.status, reached.reason, reached.detail)
-    return reached
-
-
-async def tree_failed(publish: Publish, exc: RuntimeError) -> Outcome:
-    """A task's ending in error because git or its tree failed with ``exc``, published with
-    ``publish``."""
-    await publish(ErrorOccurred(code=GIT_FAILED, message=str(exc)))
-    return ended("error", error(str(exc)))
-
-
-async def _nothing() -> None:
-    """Clean up nothing."""
-
-
-@dataclass(frozen=True)
-class UserStop:
-    """How a lane's task the user stops ends: cancelled for ``reason``, once ``cleanup`` has
-    run. ``cleanup`` runs however the task is cancelled."""
-
-    reason: str
-    cleanup: Callable[[], Awaitable[None]] = _nothing
-
-
-async def run_task_to_end(
-    tasks: Tasks,
-    task_id: str,
-    run: Callable[[], Awaitable[Outcome]],
-    stop: UserStop,
-    publish: Publish,
-) -> Outcome:
-    """How task ``task_id`` of ``tasks``, started and then ``run``, ended, recorded as its end.
-    Stopped on its own, it ends as ``stop`` says; when the lane itself is stopping, it ends as
-    cancelled and the cancellation goes on. A tree failure is published with ``publish``."""
-    default = ended("cancelled", (CANCELLED, ""))  # What the lane stopping leaves it as.
-    return await see_to_end(
-        tasks, task_id, default, _run_from_start(tasks, task_id, run, stop, publish)
-    )
-
-
-async def _run_from_start(
-    tasks: Tasks,
-    task_id: str,
-    run: Callable[[], Awaitable[Outcome]],
-    stop: UserStop,
-    publish: Publish,
-) -> Outcome:
-    """How task ``task_id`` of ``tasks``, from its start, ended; anything unexpected escapes."""
-    try:
-        await tasks.start(task_id)
-        return await run()
-    except asyncio.CancelledError:
-        await stop.cleanup()
-        if being_cancelled():  # The lane itself is stopping, not just this task.
-            raise
-        return ended("cancelled", (stop.reason, ""))
-    except RuntimeError as exc:  # Git or the tree failed.
-        return await tree_failed(publish, exc)
 
 
 @dataclass(frozen=True)
@@ -510,7 +416,7 @@ class AgentRun:
         try:
             passed, output = await check
         except asyncio.CancelledError:
-            if being_cancelled():  # The call was cancelled, not the run ended.
+            if cancelling():  # The call was cancelled, not the run ended.
                 raise
             return Reply("The run ended before the check finished.", is_error=True)
         finally:

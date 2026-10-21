@@ -5,6 +5,7 @@ import asyncio
 from collections.abc import Callable, Coroutine
 from typing import Any
 
+from orbit.agent.application.outcomes import cancelling
 from orbit.agent.application.ports import Publish
 from orbit.agent.domain.refusals import Refused
 from orbit.protocol import BUSY, INTERNAL, BusyChanged, BusyLane, ErrorOccurred, Event
@@ -23,12 +24,6 @@ def crash_report(lane: str, exc: BaseException) -> ErrorOccurred:
     return ErrorOccurred(code=INTERNAL, message=message)
 
 
-def being_cancelled() -> bool:
-    """Whether the task running now is being cancelled."""
-    task = asyncio.current_task()
-    return task is not None and task.cancelling() > 0
-
-
 async def stop(task: "asyncio.Task[Any]") -> None:
     """Cancel ``task`` and wait for it to end; cancelled meanwhile, this is cancelled once it
     has."""
@@ -37,7 +32,7 @@ async def stop(task: "asyncio.Task[Any]") -> None:
         await task
     except asyncio.CancelledError:
         # The task's own cancel ends here; one meant for the caller goes on.
-        if being_cancelled():
+        if cancelling():
             raise
 
 

@@ -7,8 +7,9 @@ from typing import Any
 import pytest
 
 from orbit.agent import Verification, VerificationStep
-from orbit.agent.application.agent_run import AgentRun, Outcome, see_to_end, tree_failed
+from orbit.agent.application.agent_run import AgentRun
 from orbit.agent.application.desk import NOTE_LIMIT, AgentDesk, Agents, progress_note
+from orbit.agent.application.outcomes import Outcome, see_to_end, tree_failed
 from orbit.agent.application.ports import CallHandler, ProposalDecision, Reply
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.application.verifier import Verifier
@@ -947,7 +948,9 @@ def started_task() -> tuple[Tasks, str]:
         pass
 
     tasks = Tasks(TaskBoard(), publish)
-    return tasks, tasks.board.add(TaskSpec(prompt="a"))
+    task_id = tasks.board.add(TaskSpec(prompt="a"))
+    tasks.board.set_status(task_id, "running")
+    return tasks, task_id
 
 
 def ending(tasks: Tasks, task_id: str) -> tuple[str, str, str]:
@@ -988,6 +991,17 @@ async def test_see_to_end_records_the_default_when_cancelled() -> None:
     with pytest.raises(asyncio.CancelledError):
         await see_to_end(tasks, task_id, DEFAULT, cancelled())
     assert ending(tasks, task_id) == ("cancelled", "Cancelled", "")
+
+
+async def test_see_to_end_leaves_a_task_it_never_started_as_it_was() -> None:
+    tasks, task_id = started_task()
+    tasks.board.set_status(task_id, "pending")
+
+    async def unstarted() -> Outcome:
+        return Outcome("completed")
+
+    assert await see_to_end(tasks, task_id, DEFAULT, unstarted()) == Outcome("completed")
+    assert ending(tasks, task_id) == ("pending", "", "")
 
 
 async def test_tree_failed_publishes_the_error_and_ends_in_it() -> None:
