@@ -59,6 +59,7 @@ from tests.agent_fakes import (
     ATTACH_ID,
     COMMAND_ID,
     ROLES,
+    STEP,
     Call,
     FakeHost,
     FakeStore,
@@ -332,6 +333,32 @@ async def test_a_fix_completes_after_the_task_it_fixed_is_removed() -> None:
     assert [(t.id, t.status) for t in board(events)] == [("3", "completed"), ("2", "completed")]
 
 
+async def test_a_fix_whose_work_is_gone_from_the_tree_gives_up_before_an_agent_starts() -> None:
+    tree = FakeTree()
+
+    async def loses_its_work(call: Call) -> TurnEndReason:
+        reason = await keeps_claiming(call)
+        tree.holding = False  # As if a task between it and its fix put its work aside.
+        return reason
+
+    session, _, launcher = session_for(
+        loses_its_work,
+        claims_done,
+        verification=verified(Steps(False, False, True)),
+        limits=Limits(max_attempts=1),
+        tree=tree,
+    )
+    events = await asyncio.wait_for(run(session, TaskSpec(prompt="one")), 5)
+
+    one, fix = board(events)
+    assert [launch.agent.task_id for launch in launcher.launches] == [one.id]
+    assert (one.status, fix.status) == ("unverified", "gave_up")
+    assert fix.reason == (
+        "Gave up: The work it fixes isn't in the coder's tree any more; look for it in git "
+        "stash list."
+    )
+
+
 def file_step(path: Path, name: str) -> VerificationStep:
     code = f"import os, sys; sys.exit(0 if os.path.exists({str(path)!r}) else 1)"
     return VerificationStep(name=name, command=(sys.executable, "-c", code))
@@ -428,6 +455,32 @@ async def test_tasks_that_change_no_files_skip_verification() -> None:
     assert VerificationSkipped(task_id="1", reason="no_changes") in events
     assert steps.runs == []
     assert statuses(events) == ["completed"]
+
+
+async def test_a_fix_that_changes_no_files_is_verified_before_its_task_completes() -> None:
+    tree = {"state": "clean"}
+
+    async def fingerprint(root: str) -> object:
+        return tree["state"]
+
+    async def edits_and_keeps_claiming(call: Call) -> TurnEndReason:
+        tree["state"] = "edited"
+        return await keeps_claiming(call)
+
+    steps = Steps(False, False, True)
+    session, _, _ = session_for(
+        edits_and_keeps_claiming,
+        claims_done,
+        verification=Verification((STEP,), steps, fingerprint),
+        limits=Limits(max_attempts=1),
+    )
+    events = await asyncio.wait_for(run(session), 5)
+
+    one, fix = board(events)
+    assert fix.fixes == one.id
+    assert not any(isinstance(e, VerificationSkipped) for e in events)
+    assert len(steps.runs) == 3
+    assert statuses(events) == ["completed", "completed"]
 
 
 async def test_without_steps_tasks_skip_verification_and_say_so() -> None:

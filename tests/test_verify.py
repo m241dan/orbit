@@ -62,6 +62,14 @@ def test_tasks_are_verified_when_the_tree_cannot_be_read() -> None:
     assert skip_reason(task(), None, None) is None
 
 
+def test_a_fix_that_leaves_the_tree_alone_is_still_verified() -> None:
+    assert skip_reason(task(), "tree", "tree", fixing=True) is None
+
+
+def test_a_fix_with_tools_off_skips_verification() -> None:
+    assert skip_reason(task("off"), None, None, fixing=True) == "tools_off"
+
+
 def test_fallback_fixes_follow_the_chain_per_step() -> None:
     attempts = FallbackFixes()
     assert not attempts.exhausted("1", "lint", 1)

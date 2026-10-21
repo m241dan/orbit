@@ -105,6 +105,7 @@ class ControlPlane:
         host.outbox.seqs = self._seqs
         host.outbox.deliver = lambda envelope: self._deliver(host, envelope)
         host.catalog_changed = self._publish_catalog
+        host.latest_usage = self._latest_usage
 
     @property
     def hosts(self) -> tuple[WorkspaceHost, ...]:

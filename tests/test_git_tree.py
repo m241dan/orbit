@@ -84,6 +84,29 @@ async def test_leftover_changes_are_stashed_unless_kept(repo: Path) -> None:
     assert "orbit: unverified work" in git(repo, "stash", "list")
 
 
+async def test_the_tree_holds_work_while_it_has_changes_or_commits_the_base_lacks(
+    repo: Path,
+) -> None:
+    tree = GitCoderTree(str(repo))
+    path = Path(await tree.prepare(keep=False))
+    assert not await tree.holds_work()
+
+    (path / "b.txt").write_text("two\n")
+    assert await tree.holds_work()
+    await tree.commit("Add b")
+    assert await tree.holds_work()
+
+    await tree.integrate()
+    assert not await tree.holds_work()
+
+
+async def test_a_tree_behind_a_base_that_moved_on_holds_no_work(repo: Path) -> None:
+    tree = GitCoderTree(str(repo))
+    await tree.prepare(keep=False)
+    commit_file(repo, "c.txt", "three\n", "user's commit")
+    assert not await tree.holds_work()
+
+
 async def test_commit_records_the_work_or_reports_there_was_none(repo: Path) -> None:
     tree = GitCoderTree(str(repo))
     path = Path(await tree.prepare(keep=False))

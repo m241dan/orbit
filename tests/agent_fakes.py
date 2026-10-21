@@ -478,6 +478,7 @@ class FakeTree:
         self.notes = list(leftovers)
         self.broken = broken
         self.prepared: list[bool] = []
+        self.holding = True  # What holds_work() says: whether the tree holds work.
         self.commits: list[str] = []
         self.snapshots: list[str] = []
         self.dropped: list[str] = []
@@ -500,6 +501,9 @@ class FakeTree:
 
     async def integrate(self) -> Merge:
         return self.merges.pop(0) if self.merges else Merge("merged")
+
+    async def holds_work(self) -> bool:
+        return self.holding
 
     async def head(self) -> str:
         if not self.prepared:  # Like git in a worktree that doesn't exist yet.

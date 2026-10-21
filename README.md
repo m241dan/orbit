@@ -409,10 +409,25 @@ spent (`1.2M tok · $0.84`), and the task list's subtitle shows the open session
 (`session: 1.2M tok · $0.84`): everything the session's agents have spent, the planner's turns and
 tasks since removed included. It's saved with the session, so a session opened again (or listed
 with `ctrl+p`) shows the same total; a new session starts with none, and shows no total. Token
-counts are rounded as in a turn's rule (see above). A failed task doesn't stop the rest; `ctrl+s` cancels the running task (stopping
+counts are rounded as in a turn's rule (see above). A failed task doesn't stop the rest, but for
+two: a fix task that ends in error stops the run, so the work it fixes stays in the coder's tree
+until the fix runs again, and so does a task whose agent hit Claude's usage limit (see below);
+`ctrl+s` cancels the running task (stopping
 its agent) and skips the remaining ones. Running again skips tasks that completed, failed
 verification or were given up on, and editing a task makes it pending again. Tasks added while a
 run is going join it; the running task can't be edited.
+
+**Usage limits.** When an agent's error says it hit Claude's session or weekly limit (`You've hit
+your session limit · resets 6pm (UTC)`), the run stops there rather than failing every task after
+it, and starts again by itself: a minute after the reset time the usage monitor last fetched for
+the limits used up, or, without one (as with `--no-usage`, or before the usage caught up), 15
+minutes later, when a limit still reached stops it again at once. The conversation says when
+(`Claude's usage limit is reached, so the run stopped. It starts again by itself at Wed 21 Oct
+18:01 UTC; ctrl+r starts it now and ctrl+s cancels that.`) and again as it starts. The task that
+hit the limit runs again first, afresh, as any rerun does. While the run waits, `ctrl+r` starts it
+at once, `ctrl+s` cancels the wait (`The run won't start again by itself.`), and switching sessions
+or quitting drops it. [docs/00016-bugfix-fix-chains-and-usage-limits.md](docs/00016-bugfix-fix-chains-and-usage-limits.md)
+records the requirements.
 
 Edge cases:
 
@@ -479,9 +494,13 @@ Failures go back to the same agent, which keeps the context of what it just did.
 it (`1.1`, `1.2`, …), with the same model and tool access, for a fresh agent. A task's chain of
 fallbacks gets up to `fallback_fixes` per step (default 3, also set in `.orbit/config.toml`); once a
 step has used them, orbit reports the failure and moves on to the next task. Once a fix passes, the task it fixed turns ✅, along with any earlier fixes in the
-chain.
+chain. A fix carries on in the tree the task it fixes left; if that work is gone from the tree (no
+changes, and no commits the base branch lacks, as when it was put aside), the fix gives up before
+an agent starts (`Gave up: The work it fixes isn't in the coder's tree any more; look for it in git
+stash list.`) and the task it fixes stays ❗.
 
-Verification is skipped for tasks run with tools `off`, for tasks that changed no files, and for an
+Verification is skipped for tasks run with tools `off`, for tasks that changed no files (but for a
+fix task, whose passing completes the task it fixes, so it's always verified), and for an
 agent that stopped without changing anything since its last failed check (that one falls back
 instead). Orbit compares the files git sees (tracked, plus untracked ones that aren't ignored, by
 size and modification time). Outside a git work tree it can't tell, so it verifies. A skipped task
@@ -1448,8 +1467,9 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     publishes the board, whole, once its callers have changed it. `WorkLane` (in `work_lane`) is
     the work lane: it runs the board's tasks one at a time, queues a fix after each failed step
     and lands work that passes, and `WorkTurns` (in `work_turns`) decides when it runs: when the
-    user asks (`ctrl+r`), when a review queues work unless the user held it, and first for a
-    configurator. `AgentRun` (in `agent_run`) sees one task through one agent, and a
+    user asks (`ctrl+r`), when a review queues work unless the user held it, first for a
+    configurator, and again by itself once the usage limit that stopped it resets, timed by a
+    `LimitPause` (in `limit_pause`). `AgentRun` (in `agent_run`) sees one task through one agent, and a
     `ProposalTrial` (in `proposal_trial`) tries the checks a configurator proposes and has the
     user decide on them; `AgentDesk` (in `desk`) launches agents and routes their calls by token;
     `Verifier` (in `verifier`) runs the steps; `Lander` (in `landing`) commits and merges
@@ -1489,7 +1509,9 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     other than completed: a line for the board and the full text), `refusals` (`Refused`, a
     command the rules won't carry out, and why), `verification` (`StepProgress`, each
     verification step's status, kept by the `Verifier` and the startup check; when a task needs
-    verifying, how many fixes to try per step, and the fix prompt), `AgentTask` (in `agent_task`:
+    verifying, how many fixes to try per step, and the fix prompt), `usage_limits` (whether an
+    agent's error says it hit Claude's usage limit, and when a run it stopped starts again),
+    `AgentTask` (in `agent_task`:
     what orbit replies to an agent, and when its work is verified), the `AgentRegistry` (in
     `agents`: agent ids and tokens), `roles` (built-in roles, given their instructions, and the
     tasks orbit queues in them), `config` (`OrbitConfig`: the limits, roles, verification steps

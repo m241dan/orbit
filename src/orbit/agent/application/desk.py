@@ -12,6 +12,7 @@ from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field, replace
 from typing import Any, Protocol
 
+from orbit.agent.application.limit_pause import LimitPause
 from orbit.agent.application.ports import (
     AgentHost,
     AgentLaunch,
@@ -101,7 +102,8 @@ class Agents:
     user accepts into the project's config; without it, they're used but not saved.
     ``planner_role`` reads the planner's role from the project's config again when the planner
     is reset; without it, the planner keeps its role. ``root`` is the workspace's directory,
-    where agents work without a tree, the planner always.
+    where agents work without a tree, the planner always. ``pause`` times a run that Claude's
+    usage limit stopped, until it starts again.
     """
 
     host: AgentHost
@@ -117,6 +119,7 @@ class Agents:
     write_config: ConfigWriter | None = None
     planner_role: PlannerRoleReader | None = None
     root: str = "."
+    pause: LimitPause = field(default_factory=LimitPause)
 
 
 class CallTarget(Protocol):

@@ -115,9 +115,9 @@ class Verifier:
 
         ``before`` is what :meth:`state_before` returned when the task started.
         """
-        task = self._board.get(task_id).task
+        state = self._board.get(task_id)
         after = None if before is None else await self.fingerprint(root)
-        reason = skip_reason(task, before, after)
+        reason = skip_reason(state.task, before, after, fixing=state.fixes is not None)
         if reason is None and not self.verification.steps:
             reason = "no_steps"
         if reason is not None:

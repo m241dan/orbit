@@ -22,6 +22,8 @@ BUG = "Error: orbit hit a bug running this task"
 """Why a task whose run broke on something orbit didn't expect ends in error."""
 INTERRUPTED = "Interrupted: orbit stopped while it ran"
 """Why a task that was running when orbit stopped is cancelled."""
+WORK_GONE = "The work it fixes isn't in the coder's tree any more; look for it in git stash list."
+"""Why a fix whose tree no longer holds the work it fixes gives up before an agent starts."""
 NO_PROPOSAL = "Ended without an accepted proposal"
 """Why a task whose agent's proposal of checks was never accepted, nor last failed, is
 unverified."""

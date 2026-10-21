@@ -144,6 +144,12 @@ class GitCoderTree:
             return await self._rebase(await self._path(), base)
         return await self._fast_forward(base, coder)
 
+    async def holds_work(self) -> bool:
+        path = await self._path()
+        if await self._dirty(path):
+            return True
+        return not await self._is_ancestor("HEAD", await self.base_commit(), path)
+
     async def head(self) -> str:
         return await self._git(await self._path(), "rev-parse", "HEAD")
 

@@ -156,6 +156,10 @@ class CoderTree(Protocol):
         """Merge the tree's commits into the base branch, fast-forward only."""
         ...
 
+    async def holds_work(self) -> bool:
+        """Whether the tree holds work: changes, or commits the base branch doesn't have."""
+        ...
+
     async def head(self) -> str:
         """The tree's latest commit."""
         ...

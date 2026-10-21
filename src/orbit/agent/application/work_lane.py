@@ -2,11 +2,13 @@
 
 After each task that completes, the verification steps run until one fails; a failure adds a
 task to fix it right after the failed one. Work that passes lands, and the review lane, if any,
-hears how each task ended.
+hears how each task ended. A run stops at a task its agent couldn't do for Claude's usage limit,
+and at a fix that ends in error, which must run before anything puts its work aside.
 """
 
 import asyncio
 from collections.abc import Collection
+from typing import Literal
 
 from orbit.agent.application.agent_run import AgentRun, Outcome, ended, see_to_end, tree_failed
 from orbit.agent.application.desk import AgentDesk
@@ -18,16 +20,27 @@ from orbit.agent.application.verifier import Failure, Verifier
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.checks import ChecksProposal
 from orbit.agent.domain.commits import commit_message, configure_message
-from orbit.agent.domain.endings import BUG, CANCELLED, STOPPED_BY_YOU
+from orbit.agent.domain.endings import (
+    BUG,
+    CANCELLED,
+    STOPPED_BY_YOU,
+    WORK_GONE,
+    gave_up,
+)
 from orbit.agent.domain.roles import REVIEW_ROLES
+from orbit.agent.domain.usage_limits import FIX_ERROR_NOTE, limit_hit
 from orbit.agent.domain.verification import FallbackFixes, failure_reason, fix_prompt
 from orbit.protocol import (
     CHECKS_EXHAUSTED,
     ErrorOccurred,
+    Notice,
     TaskSpec,
     TaskStarted,
-    TaskStatus,
 )
+
+RunEnd = Literal["finished", "cancelled", "limited", "fix_failed"]
+"""Why a run ended: no task was left to run, one was cancelled, an agent hit Claude's usage
+limit, or a fix ended in error."""
 
 
 class WorkLane:
@@ -79,26 +92,42 @@ class WorkLane:
         exclude = REVIEW_ROLES if self._review is not None else ()
         return self._board.next_runnable(skip=tried, exclude=exclude)
 
-    async def run(self) -> None:
-        """Run the tasks waiting, in order, until none are left or one is cancelled."""
+    async def run(self) -> RunEnd:
+        """Run the tasks waiting, in order, until none are left, one is cancelled, or one ends
+        in error for the usage limit or as a fix; returns which."""
         tried: set[str] = set()
         self._stopped = False
         while (task_id := self.next_work(tried)) is not None:
             tried.add(task_id)
-            if await self._run_task(task_id) == "cancelled":
-                return
+            fixing = self._board.get(task_id).fixes is not None
+            outcome = await self._run_task(task_id)
+            if outcome.status == "cancelled":
+                return "cancelled"
+            if outcome.status == "error" and (end := await self._stop_at(outcome, fixing)):
+                return end
+        return "finished"
 
-    async def _run_task(self, task_id: str) -> TaskStatus:
-        """Run one task through a new agent, as the :attr:`current` one; returns its final
-        status."""
+    async def _stop_at(self, error: Outcome, fixing: bool) -> RunEnd | None:
+        """Why the run stops at a task that ended in ``error``: its agent hit the usage limit,
+        or it was ``fixing`` another, said so; none if the run goes on."""
+        if limit_hit(error.detail):
+            return "limited"
+        if not fixing:
+            return None
+        await self._publish(Notice(message=FIX_ERROR_NOTE))
+        return "fix_failed"
+
+    async def _run_task(self, task_id: str) -> Outcome:
+        """Run one task through a new agent, as the :attr:`current` one; returns how it
+        ended."""
         self._current = task_id
         try:
             return await self._run_current(task_id)
         finally:
             self._current = None
 
-    async def _run_current(self, task_id: str) -> TaskStatus:
-        """Run task ``task_id`` through a new agent; returns its final status."""
+    async def _run_current(self, task_id: str) -> Outcome:
+        """Run task ``task_id`` through a new agent; returns how it ended."""
         await self._tasks.start(task_id)
         if self.startup is not None:
             self.startup.release_panel()
@@ -108,7 +137,7 @@ class WorkLane:
         default = Outcome("error", reason=BUG)  # What a bug in the run leaves the task as.
         outcome = await see_to_end(self._tasks, task_id, default, self._outcome(task_id))
         await self._report_to_review(task_id)
-        return outcome.status
+        return outcome
 
     async def _outcome(self, task_id: str) -> Outcome:
         """How task ``task_id``'s run through an agent ended; anything unexpected escapes."""
@@ -136,10 +165,19 @@ class WorkLane:
         """Run task ``task_id`` through a new agent and land its work; a fallback queues a fix
         for a fresh one."""
         root = await self._prepare(task_id)
+        if not await self._holds_fixed_work(task_id):
+            self._starts.pop(task_id)
+            return ended("gave_up", gave_up(WORK_GONE))
         task = self._board.get(task_id).task
         verifier = self._verifier
         before = await verifier.state_before(task, root) if verifier is not None else None
         outcome = await AgentRun(task_id, self._tasks, verifier, self._desk).run(before, root)
+        return await self._settle(task_id, outcome, root)
+
+    async def _settle(self, task_id: str, outcome: Outcome, root: str) -> Outcome:
+        """What task ``task_id``'s run ending in ``outcome`` at ``root`` comes to: the checks
+        accepted from it are used, its completed work lands, and a fallback queues a fix."""
+        verifier = self._verifier
         if outcome.checks is not None:
             assert verifier is not None  # Checks are only proposed to a verifier.
             await self._configure(verifier, outcome.checks, root)
@@ -190,6 +228,15 @@ class WorkLane:
         root = await tree.prepare(keep=self._board.get(task_id).fixes is not None)
         self._starts[task_id] = await tree.head()
         return root
+
+    async def _holds_fixed_work(self, task_id: str) -> bool:
+        """Whether the coder's tree, if there is one, still holds the work task ``task_id``
+        fixes, if it's a fix: work put aside since is in a stash, and its checks would pass on
+        the base without it."""
+        tree = self._desk.agents.tree
+        if tree is None or self._board.get(task_id).fixes is None:
+            return True
+        return await tree.holds_work()
 
     async def _queue_fix(self, verifier: Verifier, task_id: str, failure: Failure) -> None:
         """Add a task fixing ``failure``'s step right after ``task_id``, unless its attempts

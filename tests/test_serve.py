@@ -88,7 +88,9 @@ def config_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
 class Frontend:
     """A frontend run on a thread of its own against the ``orbit serve`` whose run file is in
     ``state``, showing the token in ``config_dir``: it says Hello and attaches as ``greet``
-    does, does ``work`` and stops the server with SIGTERM, noting what it saw."""
+    does, does ``work`` and stops the server with SIGTERM, noting what it saw. It stops the
+    server however its work ends, so a failure on its thread fails the test rather than leaving
+    the server running."""
 
     state: Path
     config_dir: Path
@@ -99,6 +101,7 @@ class Frontend:
     events: list[Event] = field(default_factory=list)
     close: tuple[int | None, str | None] = (None, None)
     trust: ssl.SSLContext | None = None
+    stopped: bool = False  # Whether it sent the server SIGTERM.
 
     def start(self) -> threading.Thread:
         thread = threading.Thread(target=self._run, daemon=True)
@@ -106,6 +109,18 @@ class Frontend:
         return thread
 
     def _run(self) -> None:
+        try:
+            self._talk()
+        finally:
+            self._stop()
+
+    def _stop(self) -> None:
+        """Stop the server, once."""
+        if not self.stopped:
+            self.stopped = True
+            os.kill(os.getpid(), signal.SIGTERM)
+
+    def _talk(self) -> None:
         self.run_file = self.listening(self.state)
         token = (self.config_dir / "token").read_text().strip()
         # A server listening on every address is reached on the one its certificate names.
@@ -113,7 +128,7 @@ class Frontend:
         headers = {"Authorization": f"Bearer {token}"}
         with connect(url, additional_headers=headers, ssl=self.trust) as ws:
             self.events = self.greet(ws) + self.work(ws)
-            os.kill(os.getpid(), signal.SIGTERM)
+            self._stop()
             self.close = closed(ws)
 
 
@@ -181,6 +196,18 @@ def served(frontend: Frontend, *args: str, added: tuple[str, ...] = (".",)) -> s
     thread.join(10)
     assert result.exit_code == 0, result.output
     return result.output
+
+
+@pytest.mark.filterwarnings("ignore::pytest.PytestUnhandledThreadExceptionWarning")
+def test_a_frontend_failing_on_its_thread_still_stops_serve(state: Path, config_dir: Path) -> None:
+    def breaks(websocket: ClientConnection) -> list[Event]:
+        raise RuntimeError("the frontend broke")
+
+    frontend = Frontend(state, config_dir, breaks)
+    served(frontend, "--port", "0")
+
+    assert frontend.stopped
+    assert frontend.close == (None, None)  # It never got as far as the close.
 
 
 def test_serve_welcomes_a_frontend_with_the_token_until_stopped(

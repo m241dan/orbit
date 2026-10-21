@@ -94,6 +94,7 @@ from orbit.protocol import (
     TakeOwnership,
     TaskSpec,
     TurnFinished,
+    UsageChanged,
     WorkspaceEntry,
 )
 
@@ -233,6 +234,8 @@ class WorkspaceHost:
         lock_declined_retry: float = DECLINED_RETRY_SECONDS,
     ) -> None:
         self.owned: Callable[[], None] = lambda: None
+        # The usage limits fetched last, which the control plane serving this host knows.
+        self.latest_usage: Callable[[], UsageChanged | None] = lambda: None
         self.catalog_changed: Callable[[WorkspaceEntry], Awaitable[None]] = _unannounced
         self._takeover = Takeover(
             owner is not None,
@@ -354,9 +357,15 @@ class WorkspaceHost:
             self._snapshot,
             self._entry,
             lambda entry: self.catalog_changed(entry),
-            lambda kept: self._views.switching(kept),
+            self._switching,
         )
         return SessionSwitcher(parts, self._settings, self._events, picking)
+
+    def _switching(self, kept: bool) -> None:
+        """A switch is under way, with whether the session left stays ``kept``: its views
+        follow, and its run, if the usage limit stopped one, no longer starts again."""
+        self._views.switching(kept)
+        self._turns.forget_wait()
 
     def _work_commands(self) -> WorkCommands:
         """What handles the work commands on this session."""
@@ -400,6 +409,7 @@ class WorkspaceHost:
             self._desk,
             self._events.put_nowait,
             lambda: self._halt.halted,
+            lambda: self.latest_usage(),
         )
         return WorkTurns(parts)
 
