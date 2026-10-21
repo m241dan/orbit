@@ -19,6 +19,7 @@ from typing import Any
 from orbit.agent.application.ports import AgentLaunch, ResumeFailed
 from orbit.agent.domain.agents import Agent
 from orbit.agent.domain.roles import ORBIT_TOOLS
+from orbit.agent.external.processes import spawned
 from orbit.protocol import (
     AGENT_FAILED,
     AssistantMessage,
@@ -295,26 +296,25 @@ class _Turn:
 
     async def _run(self, turn_id: str, prompt: str) -> AsyncIterator[Event]:
         yield TurnStarted(turn_id=turn_id)
-        process = await self._start()
-        try:
+        # Cancelled, or the CLI failed: leaving the stack stops it and whatever it started.
+        async with contextlib.AsyncExitStack() as stack:
+            process = await self._start(stack)
             async for event in self._converse(turn_id, process, prompt):
                 yield event
-        finally:
-            # Cancelled, or the CLI failed: don't leave it running.
-            if process.returncode is None:
-                process.kill()
-                await process.wait()
 
-    async def _start(self) -> asyncio.subprocess.Process:
+    async def _start(self, stack: contextlib.AsyncExitStack) -> asyncio.subprocess.Process:
+        """The running CLI, stopped when ``stack`` closes."""
         try:
-            return await asyncio.create_subprocess_exec(
-                *self._args,
-                env=self._env,
-                cwd=self._cwd,
-                stdin=asyncio.subprocess.PIPE,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                limit=LINE_LIMIT,
+            return await stack.enter_async_context(
+                spawned(
+                    self._args,
+                    env=self._env,
+                    cwd=self._cwd,
+                    stdin=asyncio.subprocess.PIPE,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    limit=LINE_LIMIT,
+                )
             )
         except FileNotFoundError:
             raise RuntimeError(

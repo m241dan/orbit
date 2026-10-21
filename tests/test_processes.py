@@ -6,7 +6,9 @@ from pathlib import Path
 
 import pytest
 
+from orbit.agent.external import processes
 from orbit.agent.external.processes import process_alive, run_process
+from tests.process_checks import gone
 
 
 async def test_returns_exit_status_and_combined_output(tmp_path: Path) -> None:
@@ -58,6 +60,34 @@ async def test_cancelling_kills_the_child(tmp_path: Path) -> None:
     assert task.cancelled()
     with pytest.raises(ProcessLookupError):  # Killed and reaped: the pid is gone.
         os.kill(pid, 0)
+
+
+async def cancelled_grandchild(tmp_path: Path, script: str) -> int:
+    """The pid of the grandchild ``script`` records in ``$PID_FILE``, once ``run_process``
+    running it under ``sh`` has been cancelled."""
+    pid_file = tmp_path / "pid"
+    env = {**os.environ, "PID_FILE": str(pid_file)}
+    task = asyncio.create_task(run_process(("sh", "-c", script), tmp_path, env=env))
+    while not (pid_file.exists() and pid_file.read_text().endswith("\n")):
+        await asyncio.sleep(0.01)
+    task.cancel()
+    await asyncio.wait_for(asyncio.gather(task, return_exceptions=True), timeout=5)
+    assert task.cancelled()
+    return int(pid_file.read_text())
+
+
+async def test_cancelling_stops_what_the_child_started(tmp_path: Path) -> None:
+    grandchild = await cancelled_grandchild(tmp_path, 'sleep 30 & echo $! > "$PID_FILE"; wait')
+    assert await gone(grandchild)
+
+
+async def test_a_group_ignoring_sigterm_is_killed_after_the_grace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(processes, "STOP_GRACE_SECONDS", 0.1)
+    script = 'trap "" TERM; sleep 30 & echo $! > "$PID_FILE"; wait'
+    grandchild = await cancelled_grandchild(tmp_path, script)
+    assert await gone(grandchild)
 
 
 def test_this_process_is_alive() -> None:

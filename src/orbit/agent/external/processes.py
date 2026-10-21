@@ -1,9 +1,51 @@
-"""Running a program to completion, and never leaving it behind."""
+"""Running a program to completion, and never leaving it, or what it started, behind."""
 
 import asyncio
+import contextlib
 import os
-from collections.abc import Mapping, Sequence
+import signal
+from collections.abc import AsyncIterator, Mapping, Sequence
 from pathlib import Path
+from typing import Any
+
+# How long a stopped program's process group has to exit after SIGTERM before it's SIGKILLed.
+STOP_GRACE_SECONDS = 2.0
+
+
+@contextlib.asynccontextmanager
+async def spawned(
+    command: Sequence[str], **options: Any
+) -> AsyncIterator[asyncio.subprocess.Process]:
+    """Start ``command`` in a session of its own, passing ``options`` to
+    ``asyncio.create_subprocess_exec``, and yield it. If it's still running on exit (cancelled,
+    say), its whole process group is stopped and it's reaped before this exits.
+
+    Raises ``OSError`` (such as ``FileNotFoundError``) when the program can't be started.
+    """
+    process = await asyncio.create_subprocess_exec(*command, start_new_session=True, **options)
+    try:
+        yield process
+    finally:
+        if process.returncode is None:
+            await _stop_group(process)
+
+
+async def _stop_group(process: asyncio.subprocess.Process) -> None:
+    """Ask ``process``'s group to stop, kill it after a grace period, and reap ``process``."""
+    _signal_group(process.pid, signal.SIGTERM)
+    try:
+        # wait() also waits for the pipes to close, which a lingering grandchild holds open.
+        with contextlib.suppress(TimeoutError):
+            await asyncio.wait_for(process.wait(), STOP_GRACE_SECONDS)
+    finally:
+        _signal_group(process.pid, signal.SIGKILL)
+        await process.wait()
+
+
+def _signal_group(group: int, signal_number: int) -> None:
+    """Send ``signal_number`` to process group ``group``, if it still has any processes."""
+    with contextlib.suppress(ProcessLookupError):
+        os.killpg(group, signal_number)
 
 
 async def run_process(
@@ -15,24 +57,19 @@ async def run_process(
 ) -> tuple[int, bytes]:
     """Run ``command`` in ``cwd`` with no input, in this process's environment or ``env``;
     returns its exit status and its stdout (with stderr, by default). If cancelled, the
-    process is killed before this returns.
+    process and those it started are stopped before this returns.
 
     Raises ``OSError`` (such as ``FileNotFoundError``) when the program can't be started.
     """
-    process = await asyncio.create_subprocess_exec(
-        *command,
+    async with spawned(
+        command,
         cwd=cwd,
         env=env,
         stdin=asyncio.subprocess.DEVNULL,
         stdout=asyncio.subprocess.PIPE,
         stderr=stderr,
-    )
-    try:
+    ) as process:
         output, _ = await process.communicate()
-    finally:
-        if process.returncode is None:
-            process.kill()
-            await process.wait()
     assert process.returncode is not None
     return process.returncode, output
 

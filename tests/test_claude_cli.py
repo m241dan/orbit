@@ -25,6 +25,7 @@ from orbit.protocol import (
     TurnStarted,
     Usage,
 )
+from tests.process_checks import gone
 
 FAKE_CLAUDE = Path(__file__).parent / "fake_claude.py"
 SESSION_ID = "49782958-d074-475d-9aaa-54d462f567dc"
@@ -430,6 +431,19 @@ async def test_cancel_kills_the_cli_process(tmp_path: Path) -> None:
     [call] = calls(scenario)
     with pytest.raises(ProcessLookupError):
         os.kill(call["pid"], 0)
+
+
+async def test_cancel_stops_what_the_cli_started(tmp_path: Path) -> None:
+    runner, scenario = make_runner(tmp_path, stdout=lines(INIT), hang=True, spawn=True)
+    turn = asyncio.create_task(run(runner, "hi"))
+    recorded = Path(f"{scenario}.calls")
+    while not (recorded.exists() and recorded.read_text().endswith("\n")):
+        await asyncio.sleep(0.01)
+    turn.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await turn
+    [call] = calls(scenario)
+    assert await gone(call["child"])
 
 
 # Agents: a CLI connected to orbit's MCP server
