@@ -6,7 +6,7 @@
 **/*-key.pem
 **/*.key
 **/token
-.git/orbit
+.git
 .venv
 **/__pycache__
 .mypy_cache

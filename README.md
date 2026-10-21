@@ -1328,7 +1328,7 @@ own files: `deploy/Dockerfile` makes an image of `orbit serve` (Python 3.13, git
 the Claude Code CLI pinned by the `CLAUDE_CODE_VERSION` build argument, and orbit installed from
 the checkout with `uv sync --frozen --no-dev`), and `deploy/compose.yaml` runs it over TLS. The
 image holds no credential: Claude's login, the token, the certificates and their keys live in
-volumes, and `.dockerignore` keeps `.env`, `orbit-config`, keys and `.git/orbit` out of the build.
+volumes, and `.dockerignore` keeps `.env`, `orbit-config`, keys and `.git` out of the build.
 
 The compose file runs one service, `orbit`, as your user (`user: "${UID:-1000}:${GID:-1000}"`,
 so the commits it makes in your checkout are yours), with these mounts:

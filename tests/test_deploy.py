@@ -187,7 +187,7 @@ def test_a_copied_credential_is_caught(line: str) -> None:
     assert secret_lines(f"{DOCKERFILE}{line}\n") == [line]
 
 
-@pytest.mark.parametrize("pattern", ["**/.env", "**/orbit-config", "**/*.pem", ".git/orbit"])
+@pytest.mark.parametrize("pattern", ["**/.env", "**/orbit-config", "**/*.pem", ".git"])
 def test_the_build_context_leaves_out_secrets(pattern: str) -> None:
     assert pattern in DOCKERIGNORE.splitlines()
 
