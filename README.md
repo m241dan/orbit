@@ -1229,7 +1229,7 @@ workspace picker highlighting the workspace of the repository it runs in, or off
 printing nothing extra: the backend flags stop
 it with status 2, saying they belong on `orbit serve` or call for `--local`, and `--new` and
 `--name` open a new session in the workspace picked. A run file whose process is gone, or a server that
-can't be reached, is ignored, and the chat runs in-process as usual. A server found is never
+can't be reached at all, is ignored, and the chat runs in-process as usual. A server found is never
 bypassed: if it refuses the token, or the token file can't be read, the chat stops with status 2,
 naming the token file. Only servers of the same account on the same machine are found this way; for
 any other, give `--connect` its URL, or name it in `[remotes]`. `--local` skips the search and
@@ -1245,7 +1245,12 @@ in-process unless given `--connect`. Under mTLS the chat shows the client certif
 `local_client_cert` and `local_client_key` in `[server]` name, from the same `config.toml`, rather
 than the token: make one with the client CA as in **Client certificates** above. Without them it
 stops with status 2, naming the two keys, rather than running in-process; a key others can read
-stops it with status 2 and the `chmod 600` that fixes it, as do files that can't be read.
+stops it with status 2 and the `chmod 600` that fixes it, as do files that can't be read. A
+server found whose TLS handshake fails in a way that would fail again stops it with status 2 too,
+saying why, rather than running in-process: the recorded CA didn't sign its certificate (as when
+`client_ca` stands in for a missing `ca`), the certificate has expired, or under mTLS the local
+client certificate is revoked or wasn't signed by the client CA. Only a server that can't be
+reached at all leaves the chat in-process.
 
 **Named remotes.** Each `[remotes.<name>]` table in your `config.toml` names a control plane, and
 `orbit chat --remote <name>` connects to it as `--connect` would with its settings:

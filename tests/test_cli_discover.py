@@ -15,7 +15,7 @@ from typer.testing import CliRunner
 
 from orbit.agent import LocalTls, RunFile
 from orbit.cli import app
-from orbit.client import TokenRejected
+from orbit.client import HandshakeRefused, TokenRejected, messages
 from orbit.protocol import NewSession
 from orbit.tui import Opening
 from tests.tls_certs import ServerFiles, make_ca, make_client
@@ -56,17 +56,28 @@ class FakeApp:
 @dataclass
 class Plane:
     """What the control plane asked says of the token: ``answer`` takes it if true, can't be
-    reached if false, and turns it away if ``None``; and the tokens it was shown."""
+    reached if false, and turns it away if ``None``; its handshake fails saying ``refusal``, if
+    given, to a strict probe; and the tokens it was shown."""
 
     answer: bool | None = True
+    refusal: str | None = None
     shown: list[tuple[str, str | None]] = field(default_factory=list)
     contexts: list[ssl.SSLContext | None] = field(default_factory=list)
 
     async def accepts(
-        self, url: str, token: str | None, ssl_context: ssl.SSLContext | None = None
+        self,
+        url: str,
+        token: str | None,
+        ssl_context: ssl.SSLContext | None = None,
+        *,
+        strict: bool = False,
     ) -> bool:
         self.shown.append((url, token))
         self.contexts.append(ssl_context)
+        if self.refusal is not None:
+            if strict:
+                raise HandshakeRefused(self.refusal)
+            return False
         if self.answer is None:
             raise TokenRejected()
         return self.answer
@@ -359,4 +370,32 @@ def test_an_invalid_config_under_mtls_stops_chat_naming_it(
     result = runner.invoke(app, ["chat"])
     assert result.exit_code == 2
     assert "server.local_client_cert" in result.stderr
+    assert in_process.built == [] and FakeApp.built == []
+
+
+@pytest.mark.usefixtures("token_file")
+def test_a_tls_server_whose_recorded_ca_didnt_sign_its_certificate_stops_chat(
+    serving_tls: Callable[[bool], None], plane: Plane, in_process: InProcess
+) -> None:
+    serving_tls(False)
+    plane.refusal = messages.UNKNOWN_CA.format(url=LOCAL_URL)
+    result = runner.invoke(app, ["chat"])
+    assert result.exit_code == 2
+    assert result.stderr.startswith("The server's certificate isn't signed by a trusted CA.")
+    assert in_process.built == [] and FakeApp.built == []
+
+
+def test_a_revoked_local_client_certificate_stops_chat(
+    token_file: Path,
+    client: ServerFiles,
+    serving_tls: Callable[[bool], None],
+    plane: Plane,
+    in_process: InProcess,
+) -> None:
+    _local_client(token_file, client.cert, client.key)
+    serving_tls(True)
+    plane.refusal = messages.REVOKED.format(url=LOCAL_URL)
+    result = runner.invoke(app, ["chat"])
+    assert result.exit_code == 2
+    assert result.stderr.startswith("The server has revoked the client certificate.")
     assert in_process.built == [] and FakeApp.built == []

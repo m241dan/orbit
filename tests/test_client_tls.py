@@ -418,3 +418,12 @@ async def test_the_probe_takes_a_failed_handshake_as_unreachable(
 
     monkeypatch.setattr(probe, "open_connection", refusing)
     assert not await accepts("wss://127.0.0.1:1/", TOKEN)
+
+
+async def test_a_strict_probe_raises_a_failed_handshake(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def refusing(url: str, token: str, **options: object) -> None:
+        raise HandshakeRefused(messages.UNKNOWN_CA.format(url=url))
+
+    monkeypatch.setattr(probe, "open_connection", refusing)
+    with pytest.raises(HandshakeRefused, match="isn't signed by a trusted CA"):
+        await accepts("wss://127.0.0.1:1/", TOKEN, strict=True)

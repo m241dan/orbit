@@ -9,18 +9,23 @@ PROBE_SECONDS = 5
 """How long the upgrade may take before the control plane is taken as unreachable."""
 
 
-async def accepts(url: str, token: str | None, ssl_context: ssl.SSLContext | None = None) -> bool:
+async def accepts(
+    url: str, token: str | None, ssl_context: ssl.SSLContext | None = None, *, strict: bool = False
+) -> bool:
     """Whether the control plane at ``url`` takes a connection showing ``token``, or without
     one the client certificate in ``ssl_context``, verified with ``ssl_context`` if given;
-    ``False`` if it can't be reached, safely or at all.
+    ``False`` if it can't be reached at all, or, unless ``strict``, safely.
 
-    Raises :class:`TokenRejected` if it turns the token away.
+    Raises :class:`TokenRejected` if it turns the token away, and, if ``strict``,
+    :class:`HandshakeRefused` if it can't be reached safely.
     """
     try:
         websocket = await open_connection(
             url, token, ssl_context=ssl_context, open_timeout=PROBE_SECONDS
         )
     except HandshakeRefused:
+        if strict:
+            raise
         return False
     if websocket is None:
         return False

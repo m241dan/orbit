@@ -9,13 +9,14 @@ from orbit.client.tls import (
     client_ssl_context,
 )
 from orbit.client.token import TokenUnreadable, read_token
-from orbit.client.upgrade import TokenRejected
+from orbit.client.upgrade import HandshakeRefused, TokenRejected
 
 __all__ = [
     "BACKOFF",
     "Backoff",
     "CaUnreadable",
     "ClientCertUnusable",
+    "HandshakeRefused",
     "PlaintextRefused",
     "TokenRejected",
     "TokenUnreadable",

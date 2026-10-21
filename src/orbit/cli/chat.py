@@ -48,6 +48,7 @@ from orbit.cli.options import (
 from orbit.client import (
     CaUnreadable,
     ClientCertUnusable,
+    HandshakeRefused,
     PlaintextRefused,
     TokenRejected,
     TokenUnreadable,
@@ -302,13 +303,14 @@ def discover_control_plane(state: Path, token_file: Path, config_dir: Path) -> D
     """The control plane running on the ``state`` directory, as its run file there says, if
     the process it names is alive and it takes the token in
     ``token_file``, or under mutual TLS the client certificate the user config in
-    ``config_dir`` names; ``None`` if there's none, or it can't be reached.
+    ``config_dir`` names; ``None`` if there's none, or it can't be reached at all.
 
     Raises :class:`TokenUnreadable` if the token can't be read, :class:`TokenRejected` if the
     control plane turns it away, :class:`ConfigError` if the user config is invalid,
     :class:`LocalCertMissing` if it names no client certificate under mutual TLS, and
     :class:`CaUnreadable` or :class:`ClientCertUnusable` if the CA or the client certificate
-    can't be used.
+    can't be used, and :class:`HandshakeRefused` if it can't be reached safely, as its TLS
+    handshake fails in a way that would fail again.
     """
     server = running_server(state)
     if server is None:
@@ -317,7 +319,8 @@ def discover_control_plane(state: Path, token_file: Path, config_dir: Path) -> D
     url = server.local_url
     context = None if server.tls is None else client_ssl_context(files.ca, files.cert, files.key)
     token = None if files.token_file is None else read_token(files.token_file)
-    return Discovered(url, files) if asyncio.run(accepts(url, token, context)) else None
+    found = asyncio.run(accepts(url, token, context, strict=True))
+    return Discovered(url, files) if found else None
 
 
 def _local_files(server: RunningServer, token_file: Path, config_dir: Path) -> _ClientFiles:
@@ -345,7 +348,7 @@ def _discovered(state: Path, token_file: Path, config_dir: Path) -> Discovered |
     """What :func:`discover_control_plane` finds; a control plane found is never bypassed.
 
     Exits with status 2 if the token, the user config, the CA or the client certificate can't
-    be used, or the control plane turns the token away.
+    be used, the control plane turns the token away, or its TLS handshake fails.
     """
     refused = (
         f"The orbit serve running here refused the token from {token_file}; give it the token"
@@ -355,7 +358,13 @@ def _discovered(state: Path, token_file: Path, config_dir: Path) -> Discovered |
         return _configured(lambda: discover_control_plane(state, token_file, config_dir))
 
 
-_LOCAL_ERRORS = (TokenUnreadable, LocalCertMissing, CaUnreadable, ClientCertUnusable)
+_LOCAL_ERRORS = (
+    TokenUnreadable,
+    LocalCertMissing,
+    CaUnreadable,
+    ClientCertUnusable,
+    HandshakeRefused,
+)
 """What stops a chat finding a control plane on this machine, said as it is."""
 
 
