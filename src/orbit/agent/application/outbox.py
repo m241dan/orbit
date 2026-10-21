@@ -38,16 +38,33 @@ class EventSink(Protocol):
     def put_nowait(self, item: Event) -> None: ...
 
 
+SEQ_BLOCK = 100
+"""How many ``seq`` are reserved at a time, ahead of being stamped."""
+
+
+def _reserved_nowhere(seq: int) -> None:
+    """Reserve the ``seq`` up to ``seq`` nowhere."""
+
+
 class Seqs:
     """The ``seq`` events are stamped with, counted on from ``last``: one count for every
-    workspace's events, so no two of them share a ``seq``."""
+    workspace's events, so no two of them share a ``seq``. As the count passes those reserved,
+    the next :data:`SEQ_BLOCK` are reserved with ``reserve``, so that a log reopened counts on
+    past them, though the events stamped with them were never logged."""
 
-    def __init__(self, last: int = 0) -> None:
+    def __init__(self, last: int = 0, reserve: Callable[[int], None] = _reserved_nowhere) -> None:
         self.last = last
+        # The highest seq reserved: at first, the last stamped before, which the log counts.
+        self.reserved = last
+        self._reserve = reserve
 
     def next(self) -> int:
-        """The next ``seq``, counted as stamped."""
+        """The next ``seq``, counted as stamped, reserving the next block once it's past those
+        reserved."""
         self.last += 1
+        if self.last > self.reserved:
+            self.reserved = self.last + SEQ_BLOCK - 1
+            self._reserve(self.reserved)
         return self.last
 
     def catch_up(self, latest: int) -> None:
@@ -66,7 +83,8 @@ class Outbox:
     the events answering one connection; :meth:`catch_up` counts on from its highest ``seq``
     now, :meth:`transcript` reads a session's latest back, :meth:`history` those before them,
     :meth:`missed` those after a ``seq``, :meth:`forget` deletes a session's after those
-    queued, and :meth:`close` writes those still queued. The copies written have their text
+    queued, :meth:`reserve` reserves ``seq`` in it ahead of their being stamped, and
+    :meth:`close` writes those still queued. The copies written have their text
     fields cut and each session's log is trimmed as the ``storage`` settings say; those
     delivered are whole. A failed append is told to the
     ``overflow``'s ``failed``; from then on, or once :meth:`stop_log` is called, the envelopes
@@ -84,7 +102,7 @@ class Outbox:
         self.workspace: str | None = None
         self._cut_bytes = storage.tool_output_bytes
         # The last event's place in the stream, counted across sessions and workspaces.
-        self.seqs = Seqs(log.max_seq() if log else 0)
+        self.seqs = Seqs(log.max_seq() if log else 0, self.reserve)
         self._event_log = log
         self.deliver: Callable[[EventEnvelope], None] = _drop
         log_bytes = storage.session_log_bytes
@@ -110,6 +128,12 @@ class Outbox:
         if session is not None and viewed is None and logged:
             self._log(session, envelope)
         return envelope
+
+    def reserve(self, seq: int) -> None:
+        """Have the log, if there is one, reserve every ``seq`` up to ``seq`` once what's queued
+        for it is written, so that none is stamped again once it's reopened."""
+        if self._writer is not None:
+            self._writer.reserve(seq)
 
     def _place(self, item: Event, viewed: str | None) -> tuple[str | None, str | None]:
         """The workspace and session ``item`` is stamped as: the session ``viewed``, if given,

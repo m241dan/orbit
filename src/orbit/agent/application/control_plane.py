@@ -154,7 +154,8 @@ class ControlPlane:
         self._hosts = {host.workspace_id: host for host in hosts}
         self._workspaces = workspaces
         self._changing = asyncio.Lock()
-        self._seqs = Seqs(max((host.outbox.last_seq for host in self._hosts.values()), default=0))
+        last = max((host.outbox.last_seq for host in self._hosts.values()), default=0)
+        self._seqs = Seqs(last, self._reserve)
         self._lobby = Connections(lambda: None, lambda: "")  # Those attached to no workspace.
         self._events = _ControlEvents(self._seqs, self._everywhere)
         self._place = Place(self._events, self._events.stamp, self._lobby)
@@ -166,12 +167,20 @@ class ControlPlane:
 
     def _serve(self, host: WorkspaceHost) -> None:
         """Have ``host`` stamp its events with the ``seq`` shared, deliver them to the
-        connections attached to its workspace, and tell this of changes to its sessions."""
+        connections attached to its workspace, and tell this of changes to its sessions; the
+        ``seq`` reserved before, as when none was served, are reserved in its log too."""
+        if self._seqs.reserved > host.outbox.last_seq:
+            host.outbox.reserve(self._seqs.reserved)
         self._seqs.catch_up(host.outbox.last_seq)
         host.outbox.seqs = self._seqs
         host.outbox.deliver = lambda envelope: self._deliver(host, envelope)
         host.catalog_changed = self._publish_catalog
         host.latest_usage = self._latest_usage
+
+    def _reserve(self, seq: int) -> None:
+        """Have the log of every workspace served reserve every ``seq`` up to ``seq``."""
+        for host in self._hosts.values():
+            host.outbox.reserve(seq)
 
     @property
     def hosts(self) -> tuple[WorkspaceHost, ...]:

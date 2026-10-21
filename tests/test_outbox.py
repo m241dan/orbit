@@ -1,6 +1,6 @@
 """The outbox the session publishes into, stamping each event as it's put in."""
 
-from orbit.agent.application.outbox import Outbox
+from orbit.agent.application.outbox import SEQ_BLOCK, Outbox, Seqs
 from orbit.agent.domain.storage import StorageSettings
 from orbit.protocol import EventEnvelope, Notice, ToolCallFinished, UsageChanged, Welcome
 from tests.agent_fakes import FakeStore
@@ -99,6 +99,7 @@ def test_an_outbox_delivers_events_only_in_their_envelopes() -> None:
         "history",
         "missed",
         "forget",
+        "reserve",
         "stop_log",
         "resume_log",
         "close",
@@ -228,3 +229,46 @@ async def test_by_default_the_logged_copy_is_whole() -> None:
     await outbox.close()
 
     assert log.logged == [EventEnvelope(seq=1, session="a", payload=event)]
+
+
+# Reserving seqs
+
+
+def test_seqs_reserve_the_next_block_as_the_count_passes_those_reserved() -> None:
+    reserved: list[int] = []
+    seqs = Seqs(41, reserved.append)
+    stamped = [seqs.next() for _ in range(SEQ_BLOCK)]
+
+    assert stamped == list(range(42, 42 + SEQ_BLOCK))
+    assert reserved == [41 + SEQ_BLOCK]
+    assert seqs.next() == 42 + SEQ_BLOCK
+    assert reserved == [41 + SEQ_BLOCK, 41 + 2 * SEQ_BLOCK]
+
+
+def test_seqs_caught_up_past_those_reserved_reserve_on_from_there() -> None:
+    reserved: list[int] = []
+    seqs = Seqs(0, reserved.append)
+    seqs.next()
+    seqs.catch_up(500)
+
+    assert seqs.next() == 501
+    assert reserved == [SEQ_BLOCK, 500 + SEQ_BLOCK]
+
+
+async def test_an_outbox_reserves_the_seqs_it_stamps_in_its_log_though_none_is_logged() -> None:
+    log = FakeStore()
+    log.seq = 41
+    outbox = Outbox(Open(), log)
+    outbox.stamp(UsageChanged())
+    outbox.stamp(ONE, logged=False)
+    await outbox.close()
+
+    assert log.logged == []
+    assert log.reservations == [41 + SEQ_BLOCK]
+
+
+def test_an_outbox_without_a_log_reserves_nowhere() -> None:
+    outbox = Outbox(Open())
+    outbox.reserve(SEQ_BLOCK)
+
+    assert outbox.stamp(ONE).seq == 1

@@ -40,9 +40,12 @@ An event travels in an `EventEnvelope`:
 - `seq`: the event's place in the backend's stream, counted from 1. There's one counter per
   control plane, shared by every workspace and session, so one session's events can have gaps
   between them.
-  With a store, it carries on from the highest `seq` the store has ever logged, and again
-  when a saved session is opened, past any events another orbit logged since, so a `seq` is
-  never handed out twice, even once the events that had it are deleted.
+  With a store, it carries on past the highest `seq` the store has ever logged or reserved,
+  and again when a saved session is opened, past any another orbit logged or reserved since.
+  The store reserves them a block at a time, ahead of their being handed out, so a `seq` is
+  never handed out twice, even once the events that had it are deleted, or when they were
+  never logged, as the control plane's own aren't. While the store is halted, the block is
+  reserved once it resumes.
 - `session`: the session the event belongs to. The event's type decides it: the types in
   `SESSIONLESS_EVENTS` (`UsageChanged`, `Catalog` and `SessionStateChanged`)
   belong to no session, carry `null` and are never logged, and every other event carries the

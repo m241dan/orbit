@@ -285,12 +285,18 @@ class EventLog(Protocol):
     """Where sessions' events are kept, each session's in ``seq`` order."""
 
     def max_seq(self) -> int:
-        """The highest ``seq`` logged; 0 when nothing is."""
+        """The highest ``seq`` logged or reserved; 0 when none is."""
         ...
 
     async def latest_seq(self) -> int | None:
-        """The highest ``seq`` logged now, by this orbit or another; 0 when nothing is, and
-        ``None`` when it can't be read."""
+        """The highest ``seq`` logged or reserved now, by this orbit or another; 0 when none is,
+        and ``None`` when it can't be read."""
+        ...
+
+    async def reserve(self, seq: int) -> None:
+        """Note that every ``seq`` up to ``seq`` may be handed out, logged or not, so that the
+        highest ``seq`` logged counts it from now on and none of them is handed out again. Raises
+        ``RuntimeError``, a :class:`StorageFailed` when the database failed, when it can't."""
         ...
 
     async def append(self, session_id: str, envelopes: Sequence[EventEnvelope]) -> int:

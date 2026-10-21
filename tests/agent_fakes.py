@@ -302,7 +302,9 @@ class FakeStore:
     logged before; ``append_failure``, while set, is the error every append raises. Each trim
     asked for is in ``trims``, as the session's id, the limit and the target, and the sessions
     in ``trimmed_logs`` have had events trimmed. Each session whose events were forgotten is in
-    ``forgotten``; ``forget_failure``, while set, is the error forgetting raises.
+    ``forgotten``; ``forget_failure``, while set, is the error forgetting raises. Each ``seq``
+    reserved is in ``reservations``, which ``seq`` doesn't count; ``reserve_failure``, while
+    set, is the error reserving raises.
     """
 
     def __init__(self, count: int = 0) -> None:
@@ -336,6 +338,8 @@ class FakeStore:
         self.trimmed_logs: set[str] = set()
         self.forgotten: list[str] = []
         self.forget_failure: str | None = None
+        self.reservations: list[int] = []
+        self.reserve_failure: str | None = None
 
     @property
     def last(self) -> SessionRecord:
@@ -397,6 +401,12 @@ class FakeStore:
     async def latest_seq(self) -> int | None:
         await asyncio.sleep(0)  # Reading takes a while.
         return self.max_seq()
+
+    async def reserve(self, seq: int) -> None:
+        if self.reserve_failure is not None:
+            raise RuntimeError(self.reserve_failure)
+        await asyncio.sleep(0)  # Writing takes a while.
+        self.reservations.append(seq)
 
     async def append(self, session_id: str, envelopes: Sequence[EventEnvelope]) -> int:
         if self.append_failure is not None:

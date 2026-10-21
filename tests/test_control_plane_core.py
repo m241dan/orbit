@@ -5,6 +5,7 @@ import asyncio
 from orbit import __version__
 from orbit.agent import ControlPlane, WorkspaceHost, WorkspaceOwner
 from orbit.agent.application.connection import SessionConnection
+from orbit.agent.application.outbox import SEQ_BLOCK
 from orbit.agent.domain.usage import UsageReport
 from orbit.protocol import (
     AddTask,
@@ -19,7 +20,7 @@ from orbit.protocol import (
     UsageChanged,
     Welcome,
 )
-from tests.agent_fakes import HELLO, LIMITS, Source, attach_to
+from tests.agent_fakes import HELLO, LIMITS, FakeStore, Source, attach_to
 
 NOTE = Notice(message="From the host.")
 
@@ -122,3 +123,17 @@ def test_it_reads_the_hosts_ownership_and_storage() -> None:
     assert plane.hosts == (host,)
     assert plane.read_only
     assert not plane.storage_halted
+
+
+async def test_the_seqs_stamped_are_reserved_in_the_log_of_every_workspace_served() -> None:
+    first, second = FakeStore(), FakeStore()
+    hosts = [
+        WorkspaceHost(workspace_id=name, store=store)
+        for name, store in [("a", first), ("b", second)]
+    ]
+    plane = ControlPlane(hosts)
+    connection = plane.connect()
+    await connection.send(CommandEnvelope(command_id="hello", payload=HELLO))
+    await plane.close()
+
+    assert first.reservations == second.reservations == [SEQ_BLOCK]

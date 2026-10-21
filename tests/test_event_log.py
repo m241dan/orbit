@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from orbit.agent.application.ports import EventLog
+from orbit.agent.application.ports import EventLog, StorageFailed
 from orbit.agent.domain.replay import LogBounds, can_replay
 from orbit.agent.external import sqlite_schema
 from orbit.agent.external.workspace_registry import register
@@ -698,6 +698,30 @@ async def test_the_mark_never_counts_down_from_the_highest_seq_stored(
     await store.close()
 
     assert (await open_store(workspace)).max_seq() == 4
+
+
+async def test_a_reserved_seq_raises_the_mark_counted_from_then_on_and_once_reopened(
+    open_store: Opener, state: Path, workspace: Path
+) -> None:
+    store = await open_store(workspace)
+    await store.append("abc", [notice(5)])
+    await store.reserve(100)
+    await store.reserve(50)
+    assert store.max_seq() == 100
+    await store.close()
+
+    assert marks(state)[0] == 100
+    assert (await open_store(workspace)).max_seq() == 100
+
+
+async def test_a_reservation_that_fails_is_a_storage_failure_naming_the_database(
+    open_store: Opener, workspace: Path
+) -> None:
+    store = await open_store(workspace)
+    await store.close()
+
+    with pytest.raises(StorageFailed, match=r"Couldn't reserve the seq numbers up to 100 in "):
+        await store.reserve(100)
 
 
 @pytest.mark.parametrize("drop", DROPS, ids=["forget", "delete"])

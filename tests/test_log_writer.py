@@ -591,6 +591,100 @@ async def test_a_cancelled_close_stops_the_writer_at_once() -> None:
     assert asyncio.all_tasks() == {asyncio.current_task()}
 
 
+# Reserving seqs
+
+
+class GatedReserve(FakeStore):
+    """A log whose reservations wait for ``gate``, with ``waiting`` set while one does."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.gate = asyncio.Event()
+        self.waiting = asyncio.Event()
+
+    async def reserve(self, seq: int) -> None:
+        self.waiting.set()
+        await self.gate.wait()
+        await super().reserve(seq)
+
+
+async def test_the_highest_seq_asked_for_is_reserved_once_with_what_queued() -> None:
+    log = FakeStore()
+    writer = LogWriter(log, Published())
+    writer.add("a", notice(1))
+    writer.reserve(200)
+    writer.reserve(100)
+    await writer.close()
+
+    assert log.logged == [notice(1)]
+    assert log.reservations == [200]
+
+
+async def test_a_reservation_asked_for_while_one_is_written_is_written_before_closing() -> None:
+    log = GatedReserve()
+    writer = LogWriter(log, Published())
+    writer.reserve(100)
+    await log.waiting.wait()
+    writer.reserve(200)
+    closing = asyncio.create_task(writer.close())
+    log.gate.set()
+    await closing
+
+    assert log.reservations == [100, 200]
+
+
+async def test_a_writer_closed_reserves_nothing() -> None:
+    log = FakeStore()
+    writer = LogWriter(log, Published())
+    await writer.close()
+    writer.reserve(100)
+    await asyncio.sleep(0.01)
+
+    assert log.reservations == []
+
+
+async def test_a_stopped_writer_reserves_nothing_until_it_resumes() -> None:
+    log = FakeStore()
+    writer = LogWriter(log, Published(), overflow=Overflow(FakeFallback()))
+    await writer.stop("a")
+    writer.reserve(100)
+    await asyncio.sleep(0.01)
+    assert log.reservations == []
+
+    assert await writer.resume() == []
+    await asyncio.sleep(0.01)
+    assert log.reservations == [100]
+    await writer.close()
+
+
+async def test_closing_a_stopped_writer_reserves_nothing() -> None:
+    log = FakeStore()
+    writer = LogWriter(log, Published(), overflow=Overflow(FakeFallback()))
+    await writer.stop("a")
+    writer.reserve(100)
+    await writer.close()
+
+    assert log.reservations == []
+
+
+async def test_a_failed_reservation_stops_the_appending_and_is_reserved_once_resumed() -> None:
+    log, fallback, failures = FakeStore(), FakeFallback(), list[str]()
+    log.reserve_failure = "disk full"
+    overflow = Overflow(fallback, lambda error: failures.append(str(error)))
+    writer = LogWriter(log, Published(), overflow=overflow)
+    writer.reserve(100)
+    await asyncio.sleep(0.01)
+    log.reserve_failure = None
+    writer.add("a", notice(1))
+    await asyncio.sleep(0.01)
+
+    assert failures == ["disk full"]
+    assert (log.logged, fallback.files) == ([], {"a": [notice(1)]})
+    assert await writer.resume() == []
+    await writer.close()
+    assert (log.logged, log.reservations) == ([notice(1)], [100])
+
+
 async def test_recent_events_are_the_logged_ones_then_those_still_queued() -> None:
     log = GatedLog()
     log.logged = [notice(1), notice(2, "b")]

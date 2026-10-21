@@ -1,10 +1,11 @@
 """Catching a reconnecting frontend up on the events it missed: when it can, and what it gets."""
 
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 
-from orbit.agent import WorkspaceHost
+from orbit.agent import ControlPlane, WorkspaceHost
 from orbit.agent.domain.replay import LogBounds, can_replay
 from orbit.agent.domain.sessions import SessionRecord
 from orbit.protocol import (
@@ -29,8 +30,12 @@ from tests.agent_fakes import (
     delivered,
     frontend,
     notice,
+    publish,
+    served,
 )
+from tests.plane_fakes import taken
 from tests.session_builders import OPEN, store_logging
+from tests.store_views import OwnView, database, open_view
 
 WHEN = datetime(2026, 10, 1, 9, 0, tzinfo=UTC)
 
@@ -199,4 +204,86 @@ async def test_a_frontend_whose_missed_events_cant_be_read_gets_a_snapshot() -> 
     store = Unreadable()
     store.logged = [notice(1, OPEN)]
     sent = await reconnected(store, 1)
+    assert kinds(sent[:3]) == [Welcome, Catalog, Snapshot]
+
+
+# After a restart
+
+
+async def greeted(
+    plane: ControlPlane, host: WorkspaceHost, since: int | None
+) -> list[EventEnvelope]:
+    """What a new connection to ``plane`` gets for its Hello giving ``since`` and, when it gives
+    one, its Attach to ``host``'s open session."""
+    connection = plane.connect()
+    hello = Hello(client="orbit-tests", protocol_version=PROTOCOL_VERSION, since=since)
+    await connection.send(CommandEnvelope(command_id=HELLO_ID, payload=hello))
+    if since is not None:
+        attach = CommandEnvelope(command_id=ATTACH_ID, payload=attach_to(host))
+        await connection.send(attach)
+    return taken(connection)
+
+
+def highest_logged(state: Path) -> int:
+    """The highest ``seq`` the store in ``state`` logged, kept or forgotten since."""
+    with database(state) as connection:
+        (seq,) = connection.execute(
+            """SELECT max(coalesce((SELECT max(seq) FROM events), 0),
+                (SELECT max(forgotten_seq) FROM workspaces))"""
+        ).fetchone()
+        return int(seq)
+
+
+async def ran_unlogged(state: Path, workspace: Path) -> int:
+    """The highest ``seq`` an orbit over a store in ``state`` handed out, having logged an event
+    and then stamped the control plane's own, never logged, for frontends saying Hello, after
+    which it closed."""
+    store = await open_view(state, workspace)
+    first = WorkspaceHost(store=store, clock=Ticks(), new_id=lambda: "session-1")
+    await publish(first, Notice(message="logged"))
+    plane = served(first)
+    seqs = [envelope.seq for _ in range(3) for envelope in await greeted(plane, first, None)]
+    await plane.close()
+    await store.close()
+    assert highest_logged(state) < max(seqs)  # The last seqs handed out were never logged.
+    return max(seqs)
+
+
+async def restarted(state: Path, workspace: Path) -> tuple[OwnView, WorkspaceHost, ControlPlane]:
+    """An orbit over the store in ``state`` opened again, its open session new."""
+    store = await open_view(state, workspace)
+    host = WorkspaceHost(store=store, clock=Ticks(), new_id=lambda: "session-2")
+    return store, host, served(host)
+
+
+@pytest.fixture
+def workspace(tmp_path: Path) -> Path:
+    path = tmp_path / "project"
+    path.mkdir()
+    return path
+
+
+async def test_a_restarted_orbit_stamps_past_every_seq_handed_out_though_never_logged(
+    tmp_path: Path, workspace: Path
+) -> None:
+    handed_out = await ran_unlogged(tmp_path / "state", workspace)
+    store, host, plane = await restarted(tmp_path / "state", workspace)
+    sent = await greeted(plane, host, None)
+    await plane.close()
+    await store.close()
+
+    assert min(envelope.seq for envelope in sent) > handed_out
+
+
+async def test_a_frontend_that_saw_unlogged_events_before_a_restart_gets_a_snapshot(
+    tmp_path: Path, workspace: Path
+) -> None:
+    since = await ran_unlogged(tmp_path / "state", workspace)
+    store, host, plane = await restarted(tmp_path / "state", workspace)
+    for seq in range(20):  # Past the seqs handed out before, if they were handed out again.
+        await publish(host, Notice(message=f"n{seq}"))
+    sent = await greeted(plane, host, since)
+    await plane.close()
+    await store.close()
+
     assert kinds(sent[:3]) == [Welcome, Catalog, Snapshot]

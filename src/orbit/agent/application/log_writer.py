@@ -95,14 +95,16 @@ class LogWriter:
     append, unless ``log_bytes`` is 0, a session's log over it is trimmed to under
     :func:`trim_target` of it; a failed trim is reported with ``publish`` once, until one works
     again. :meth:`forget` has a session's events deleted from the log once those added before it
-    are written, a failed one reported so too. Adding never waits for the log.
+    are written, a failed one reported so too, and :meth:`reserve` has the log reserve the
+    ``seq`` up to one once they're written. Adding never waits for the log.
 
-    A failed append, or :meth:`stop`, stops the appending: the envelopes not appended, and every
-    one added from then on, go to the ``overflow``'s fallback instead (nowhere without one), and
-    a failed append is told to its ``failed``. Those envelopes are still read back as still to
-    be written, until :meth:`resume` appends them and appending carries on. A session forgotten
-    meanwhile has its envelopes not in the log dropped instead, and its events deleted from the
-    log then, or, when that fails, once it resumes."""
+    A failed append or reservation, or :meth:`stop`, stops the appending and the reserving: the
+    envelopes not appended, and every one added from then on, go to the ``overflow``'s fallback
+    instead (nowhere without one), and a failed append or reservation is told to its ``failed``.
+    Those envelopes are still read back as still to be written, until :meth:`resume` appends them
+    and appending carries on. A session forgotten meanwhile has its envelopes not in the log
+    dropped instead, and its events deleted from the log then, or, when that fails, once it
+    resumes. The ``seq`` asked to be reserved meanwhile are reserved once it resumes."""
 
     def __init__(
         self, log: EventLog, publish: Publish, log_bytes: int = 0, overflow: Overflow = _NO_OVERFLOW
@@ -119,6 +121,8 @@ class LogWriter:
         self._writing: Queued = []  # Taken from the queue to write.
         self._diverted: Queued = []  # Sent to the fallback, as the log can't take them.
         self._places: dict[str, str | None] = {}  # Each session's fallback file, if written.
+        self._reserving = 0  # The highest seq to reserve in the log.
+        self._reserved = 0  # The highest seq the log reserved.
         self._parked: set[int] = set()  # The seqs written to a fallback file.
         self._lost: set[int] = set()  # The seqs no fallback file could take.
         self._diverting = asyncio.Lock()  # One fallback write at a time, so lines stay whole.
@@ -143,6 +147,15 @@ class LogWriter:
         if self._closed:
             return
         self._forgetting.append(session_id)
+        self._wake()
+
+    def reserve(self, seq: int) -> None:
+        """Have the log reserve every ``seq`` up to ``seq`` once what's added so far is written,
+        starting the writer if it isn't yet; once the writer is closed, nothing more is
+        reserved."""
+        if self._closed:
+            return
+        self._reserving = max(self._reserving, seq)
         self._wake()
 
     def _wake(self) -> None:
@@ -288,6 +301,7 @@ class LogWriter:
         self._places, self._parked, self._lost = {}, set(), set()
         self._stopped = False
         self._release()
+        self._ready.set()  # For the seqs reserved meanwhile.
 
     async def close(self) -> None:
         """Write what's queued, then stop the writer; cancelled, it stops at once, an append in
@@ -302,14 +316,19 @@ class LogWriter:
 
     async def _run(self) -> None:
         """Write what's queued as it queues, until closing leaves nothing queued."""
-        while not self._closing or self._queued or self._forgetting:
+        while not self._closing or self._queued or self._forgetting or self._unreserved:
             await self._ready.wait()
             self._ready.clear()
             await self._write()
 
+    @property
+    def _unreserved(self) -> bool:
+        """Whether a ``seq`` is still to be reserved, and can be, the writer not stopped."""
+        return self._reserving > self._reserved and not self._stopped
+
     async def _write(self) -> None:
         """Write what's queued, then delete the events of the sessions to forget, whose events
-        added before that are written by then."""
+        added before that are written by then, and reserve the ``seq`` asked to be."""
         self._writing, self._queued = self._queued, []
         forgetting, self._forgetting = self._forgetting, []
         if self._stopped:
@@ -320,6 +339,20 @@ class LogWriter:
         self._writing = []
         for session_id in forgetting:
             await self._forget(session_id)
+        await self._reserve()
+
+    async def _reserve(self) -> None:
+        """Have the log reserve the ``seq`` asked to be, if it can be; a failed reservation stops
+        the appending, as a failed append does, and is told to ``failed``."""
+        if not self._unreserved:
+            return
+        seq = self._reserving
+        error = await outcome(self._log.reserve(seq))
+        if isinstance(error, RuntimeError):
+            self._stopped = True
+            self._failed(error)
+            return
+        self._reserved = max(self._reserved, seq)
 
     async def _forget(self, session_id: str) -> None:
         """Delete the events of the session ``session_id`` from the log; once stopped, drop

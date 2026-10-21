@@ -8,8 +8,9 @@ and opening it are :mod:`sqlite_schema`'s, and copying it to a backup :mod:`sqli
 
 Each session's log has a row in ``logs`` with the size of its events, kept as they're appended
 and trimmed, and the highest ``seq`` trimmed from it. ``high_water`` holds the highest ``seq`` ever
-appended, so that none is handed out again once its event is deleted, and each workspace's
-``forgotten_seq`` the highest deleted with a session's log, which counts as another session's.
+appended or reserved, so that none is handed out again once its event is deleted, or when it was
+never logged, and each workspace's ``forgotten_seq`` the highest deleted with a session's log,
+which counts as another session's.
 
 Session locks are :class:`SessionLocks` lock files in ``locks/<workspace id>`` in the state
 directory, so that a crash leaves no stale lock behind.
@@ -124,7 +125,7 @@ class SqliteStore:
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix=THREAD_PREFIX)
         self._connection: sqlite3.Connection | None = None
         self._closed = False
-        # The highest seq ever logged when it opened or was last read, or appended since.
+        # The highest seq ever logged or reserved when it opened or was last read, or since.
         self._max_seq = 0
         # Each workspace's session locks, by its id, made as they're first used.
         self._locks: dict[str, SessionLocks] = {}
@@ -212,12 +213,17 @@ class SqliteStore:
         await self._locks_of(workspace).remove(session_id)
 
     def max_seq(self) -> int:
-        """The highest ``seq`` ever logged, across workspaces, when the store opened or
-        :meth:`latest_seq` last read it, or appended by it since; 0 when there's none."""
+        """The highest ``seq`` ever logged or reserved, across workspaces, when the store opened
+        or :meth:`latest_seq` last read it, or appended or reserved by it since; 0 when there's
+        none."""
         return self._max_seq
 
     async def latest_seq(self) -> int | None:
         return await self._read_or(lambda _: None, self._latest_seq)
+
+    async def reserve(self, seq: int) -> None:
+        message = f"Couldn't reserve the seq numbers up to {seq} in"
+        await self._or_raise(message, self._reserve, seq, failed=True)
 
     async def append(
         self, workspace: str, session_id: str, envelopes: Sequence[EventEnvelope]
@@ -484,6 +490,11 @@ class SqliteStore:
         self._max_seq = max(self._max_seq, highest)
         return len(inserted)
 
+    def _reserve(self, seq: int) -> None:
+        """Raise the mark to ``seq``, counted in :meth:`max_seq` from then on."""
+        self._db.execute("UPDATE high_water SET seq = max(seq, ?)", (seq,))
+        self._max_seq = max(self._max_seq, seq)
+
     def _latest_seq(self) -> int:
         """The highest ``seq`` ever logged now, counted in :meth:`max_seq` from then on."""
         self._max_seq = max(self._max_seq, _max_seq(self._db))
@@ -697,6 +708,9 @@ class WorkspaceStore:
 
     async def latest_seq(self) -> int | None:
         return await self._store.latest_seq()
+
+    async def reserve(self, seq: int) -> None:
+        await self._store.reserve(seq)
 
     async def append(self, session_id: str, envelopes: Sequence[EventEnvelope]) -> int:
         return await self._store.append(self._id, session_id, envelopes)

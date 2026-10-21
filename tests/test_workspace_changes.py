@@ -15,6 +15,7 @@ from orbit.agent import (
     WorkspaceUnavailable,
 )
 from orbit.agent.application.connection import SessionConnection
+from orbit.agent.application.outbox import SEQ_BLOCK
 from orbit.agent.domain.workspaces import LOCAL_ONLY
 from orbit.protocol import (
     BUSY,
@@ -35,7 +36,7 @@ from orbit.protocol import (
     RunTasks,
     Snapshot,
 )
-from tests.agent_fakes import HELLO, STEP, Steps
+from tests.agent_fakes import HELLO, STEP, FakeStore, Steps
 from tests.plane_fakes import TASK, idle, joined, payloads, say, taken, working, workspace
 
 
@@ -176,6 +177,21 @@ async def test_a_workspace_added_opens_its_latest_session_and_runs_its_startup_c
 
     await asyncio.wait_for(checked(), 5)
     await plane.close()
+
+
+async def test_a_workspace_added_reserves_the_seqs_stamped_while_none_was_served() -> None:
+    store = FakeStore()
+
+    class Stored(FakeSource):
+        def make(self, name: str) -> WorkspaceHost:
+            return WorkspaceHost(workspace=f"/src/{name}", workspace_id=name, store=store)
+
+    plane = ControlPlane(workspaces=Stored())
+    connection = await welcomed(plane)
+    await say(connection, "add", AddWorkspace(path="/src/c"))
+    await plane.close()
+
+    assert store.reservations == [SEQ_BLOCK]
 
 
 async def test_adding_a_workspace_served_already_is_accepted_changing_nothing() -> None:
