@@ -300,7 +300,12 @@ class _Workspaces:
         its host, its lock taken if it's free and held until it's removed or the stack closes.
         Raises :class:`WorkspaceUnavailable` as :meth:`open` says."""
         # Git, the configuration file and the lock would stall every served workspace.
-        served, make = await asyncio.to_thread(self._prepared, root)
+        preparing = asyncio.ensure_future(asyncio.to_thread(self._prepared, root))
+        try:
+            served, make = await asyncio.shield(preparing)
+        except asyncio.CancelledError:
+            preparing.add_done_callback(_let_go_prepared)
+            raise
         try:
             opened = await _flagged_view(self._store, root, owned=served.owner is None)
         except BaseException:
@@ -335,6 +340,17 @@ class _Workspaces:
         for lock in self._locks.values():
             lock.close()
         self._locks.clear()
+
+
+def _let_go_prepared(
+    preparing: asyncio.Future[tuple[_ServedWorkspace, Callable[[OpenedStore], WorkspaceHost]]],
+) -> None:
+    """Let go of the lock of the workspace ``preparing`` prepared for an add that was cancelled
+    meanwhile, if it was prepared."""
+    if preparing.cancelled() or preparing.exception() is not None:
+        return
+    served, _ = preparing.result()
+    served.lock.close()
 
 
 def _kind(path: Path) -> PathKind:

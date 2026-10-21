@@ -1,15 +1,19 @@
 """The workspace registry: finding or registering workspaces by path, and which are served."""
 
+import sqlite3
+import subprocess
 import threading
 from collections.abc import AsyncIterator
 from pathlib import Path
 
 import pytest
 
-from orbit.agent.external import sqlite_store, workspace_registry
+from orbit.agent.external import repository, sqlite_store, workspace_registry
+from orbit.agent.external.git import GitResult, git_sync
+from orbit.agent.external.repository import workspace_fingerprint
 from orbit.agent.external.sqlite_schema import StoreError
 from orbit.agent.external.sqlite_store import SqliteStore
-from orbit.agent.external.workspace_registry import WorkspaceRegistry
+from orbit.agent.external.workspace_registry import WorkspaceRegistry, register
 
 
 @pytest.fixture
@@ -108,6 +112,36 @@ async def test_the_fingerprint_is_worked_out_off_the_database_thread(
     await WorkspaceRegistry(store).find_or_register(str(directory(tmp_path, "project")))
     assert len(threads) == 1
     assert not threads[0].startswith(sqlite_store.THREAD_PREFIX)
+
+
+async def test_register_is_given_the_fingerprint_and_no_git_runs_on_the_database_thread(
+    monkeypatch: pytest.MonkeyPatch, store: SqliteStore, tmp_path: Path
+) -> None:
+    workspace = directory(tmp_path, "project")
+    subprocess.run(["git", "init", "-q", str(workspace)], check=True)
+    commit = ["git", "-C", str(workspace), "-c", "user.name=t", "-c", "user.email=t@t"]
+    subprocess.run([*commit, "commit", "-q", "--allow-empty", "-m", "root"], check=True)
+    expected = workspace_fingerprint(str(workspace))
+    git_threads: list[str] = []
+    given: list[str | None] = []
+
+    def recorded_git(path: str, *args: str, stderr: bool) -> GitResult:
+        git_threads.append(threading.current_thread().name)
+        return git_sync(path, *args, stderr=stderr)
+
+    def recorded_register(
+        connection: sqlite3.Connection, path: Path, fingerprint: str | None
+    ) -> str:
+        given.append(fingerprint)
+        return register(connection, path, fingerprint)
+
+    monkeypatch.setattr(repository, "git_sync", recorded_git)
+    monkeypatch.setattr(workspace_registry, "register", recorded_register)
+    await WorkspaceRegistry(store).find_or_register(str(workspace))
+
+    assert expected is not None and given == [expected]
+    assert git_threads
+    assert not any(name.startswith(sqlite_store.THREAD_PREFIX) for name in git_threads)
 
 
 async def test_a_closed_store_fails_each_call_naming_the_database(

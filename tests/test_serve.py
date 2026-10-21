@@ -35,7 +35,8 @@ from orbit.agent import (
     WorkspaceOwner,
 )
 from orbit.agent.domain.server import client_fingerprint, is_revoked
-from orbit.cli import app, chat, serve
+from orbit.agent.external.repository import in_git_work_tree
+from orbit.cli import app, backend, chat, serve
 from orbit.cli.backend import _Workspaces
 from orbit.protocol import (
     PROTOCOL_VERSION,
@@ -646,6 +647,46 @@ def test_a_frontend_adding_a_relative_path_is_refused(state: Path, config_dir: P
 
     [refusal] = [e for e in frontend.events if isinstance(e, CommandRefused)]
     assert refusal.code == "invalid"
+
+
+def _second_connection(frontend: Frontend) -> ClientConnection:
+    """Another connection to the server ``frontend`` talks to, with its token."""
+    token = frontend.config_dir / "token"
+    headers = {"Authorization": f"Bearer {token.read_text().strip()}"}
+    return connect(str(frontend.run_file["url"]), additional_headers=headers)
+
+
+def test_a_frontend_is_served_while_another_adds_a_workspace_whose_git_is_slow(
+    state: Path, config_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    [other] = _workspace_dirs(tmp_path, "other")
+    entered, gate = threading.Event(), threading.Event()
+    seen: dict[str, object] = {}
+
+    def slow(path: str) -> bool:
+        if path == str(other):
+            entered.set()
+            assert gate.wait(30)
+        return in_git_work_tree(path)
+
+    monkeypatch.setattr(backend, "in_git_work_tree", slow)
+
+    def adds_while_another_says_hello(websocket: ClientConnection) -> list[Event]:
+        say(websocket, "add", AddWorkspace(path=str(other)))
+        assert entered.wait(10)
+        with _second_connection(frontend) as second:
+            seen["catalog"] = welcomed(second)[-1]
+        gate.set()
+        seen["added"] = until(websocket, CommandAccepted)[-1]
+        return []
+
+    frontend = Frontend(state, config_dir, adds_while_another_says_hello, greet=welcomed)
+    served(frontend, "--port", "0")
+
+    catalog = seen["catalog"]
+    assert isinstance(catalog, Catalog)
+    assert [w.path for w in catalog.workspaces] == [str(Path.cwd())]
+    assert seen["added"] == CommandAccepted(command_id="add")
 
 
 def test_serve_takes_its_port_from_the_config_file(state: Path, config_dir: Path) -> None:

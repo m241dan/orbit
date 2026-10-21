@@ -1,6 +1,7 @@
 """The workspaces ``orbit serve`` serves as frontends add and remove them: each found or
 registered in the store, flagged served and locked while it's served."""
 
+import asyncio
 import re
 import subprocess
 import threading
@@ -249,3 +250,56 @@ async def test_a_failure_making_the_host_lets_the_lock_go(
     with pytest.raises(RuntimeError, match="A bug"):
         await workspaces(stack, store).open(str(root))
     assert free(root) and await WorkspaceRegistry(store).served() == []
+
+
+def gated(monkeypatch: pytest.MonkeyPatch, gate: threading.Event, fails: bool = False) -> None:
+    """Have opening a workspace wait on ``gate`` as it reads the configuration, then fail if
+    ``fails``."""
+
+    def waits(path: str) -> OrbitConfig:
+        assert gate.wait(10)
+        if fails:
+            raise RuntimeError("A bug.")
+        return read_config(path)
+
+    monkeypatch.setattr(backend, "read_config", waits)
+
+
+async def cancelled_while_preparing(source: _Workspaces, root: Path, gate: threading.Event) -> None:
+    """Open the workspace at ``root`` with ``source``, cancel it while it's being prepared, then
+    let the preparation finish."""
+    opening = asyncio.create_task(source.open(str(root)))
+    await asyncio.sleep(0.05)
+    opening.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await opening
+    gate.set()
+    for _ in range(200):
+        await asyncio.sleep(0.01)
+
+
+async def test_an_add_cancelled_while_preparing_lets_the_lock_go_once_prepared(
+    stack: ExitStack, store: SqliteStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = directory(tmp_path)
+    gate = threading.Event()
+    gated(monkeypatch, gate)
+    source = workspaces(stack, store)
+
+    await cancelled_while_preparing(source, root, gate)
+
+    assert free(root) and source.locks == ()
+    assert await WorkspaceRegistry(store).served() == []
+
+
+async def test_an_add_cancelled_while_preparing_that_then_fails_takes_no_lock(
+    stack: ExitStack, store: SqliteStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = directory(tmp_path)
+    gate = threading.Event()
+    gated(monkeypatch, gate, fails=True)
+    source = workspaces(stack, store)
+
+    await cancelled_while_preparing(source, root, gate)
+
+    assert free(root) and source.locks == ()
