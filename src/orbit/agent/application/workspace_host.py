@@ -736,11 +736,13 @@ class WorkspaceHost:
         return self._verifier.step_names if self._verifier else ()
 
     async def close(self) -> None:
-        """Stop a storage halt under way and the tries of the repository's lock, the startup
-        check and the review lane, cancel the work in progress, which stops its agent, then
-        stop the planner, the agents' host, the saving of the session, releasing its lock, and the
-        writing of its events to the store, then end every connection's stream, in that order.
-        Each is stopped even if one before it fails; the first failure is raised after."""
+        """Stop a storage halt under way and the tries of the repository's lock, then the work,
+        as :meth:`_stop_work` does: the review lane and the startup check, so that nothing wakes
+        the work lane, then the work in progress, which stops its agent, and the planner's turn;
+        then stop the retired planners, the planner, the agents' host, the saving of the
+        session, releasing its lock, and the writing of its events to the store, then end every
+        connection's stream, in that order. Each is stopped even if one before it fails; the
+        first failure is raised after."""
         self._closing = True
         failure: Exception | None = None
         for stop in self._stops():
@@ -755,8 +757,8 @@ class WorkspaceHost:
         """What :meth:`close` awaits, in order: nothing that could wake the work lane runs once
         its turn is cancelled, as in :meth:`_stop_work`."""
         stops: list[Callable[[], Awaitable[None]]] = [self._halt.close, self._takeover.close]
-        stops += [part.close for part in (self._startup, self._lane) if part is not None]
-        stops += [self._stop_turns, self._seat.close_retired, self._seat.close]
+        stops += self._work_stops()
+        stops += [self._seat.close_retired, self._seat.close]
         if self._desk is not None:
             stops.append(self._desk.stop)
         stops += [self._keeper.close, self._events.close, self._end_connections]
@@ -775,10 +777,15 @@ class WorkspaceHost:
         """Cancel the reviews and the startup check, then the work lane's and the planner's
         turns, as the session halts, and wait for them to end; nothing that could wake the work
         lane runs once its turn is cancelled."""
-        for part in (self._lane, self._startup):
-            if part is not None:
-                await part.close()
-        await self._stop_turns()
+        for stop in self._work_stops():
+            await stop()
+
+    def _work_stops(self) -> list[Callable[[], Awaitable[None]]]:
+        """What :meth:`_stop_work` awaits, in order: the review lane, the startup check, then
+        the work lane's and the planner's turns."""
+        parts = (self._lane, self._startup)
+        stops: list[Callable[[], Awaitable[None]]] = [p.close for p in parts if p is not None]
+        return [*stops, self._stop_turns]
 
     def check_state(self) -> None:
         """Publish the open session's state, if that changed."""
