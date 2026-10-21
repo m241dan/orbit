@@ -17,6 +17,7 @@ from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.reviews import LaneSnapshot
 from orbit.agent.domain.sessions import (
     OPEN_UNDELETABLE,
+    OPEN_UNRENAMABLE,
     SessionRecord,
     Unreadable,
     default_name,
@@ -351,17 +352,21 @@ class SessionKeeper:
     async def _rename(self, renaming: _Renaming) -> RuntimeError | bool:
         """Carry out ``renaming`` as :meth:`rename_saved` does; returns whether it was renamed,
         not if a store problem kept it from being claimed, or the error when its save fails,
-        keeping it to :meth:`retry`."""
-        found = await self._claimed(renaming.session_id, _RENAME)
-        if found is None:
-            return False
-        assert self._store is not None  # Only a store holds saved sessions.
-        try:
-            error = await outcome(
-                self._store.save(found.model_copy(update={"name": renaming.name}))
-            )
-        finally:
-            await self._release(self._store, renaming.session_id)
+        keeping it to :meth:`retry`. Refused if it's the session open here by then."""
+        async with self._saving:
+            # A switch may have opened it while this one waited.
+            if renaming.session_id == self.id:
+                raise Refused(INVALID, OPEN_UNRENAMABLE)
+            found = await self._claimed(renaming.session_id, _RENAME)
+            if found is None:
+                return False
+            assert self._store is not None  # Only a store holds saved sessions.
+            try:
+                error = await outcome(
+                    self._store.save(found.model_copy(update={"name": renaming.name}))
+                )
+            finally:
+                await self._release(self._store, renaming.session_id)
         if not isinstance(error, RuntimeError):
             return True
         self._renaming = renaming
@@ -371,12 +376,14 @@ class SessionKeeper:
         """Delete the saved session ``session_id``, lock and all, unless it's the one open here
         or another orbit has it open: then raises :class:`Refused`; returns whether it was
         deleted. Store problems are reported."""
-        if session_id == self.id:
-            raise Refused(INVALID, OPEN_UNDELETABLE)
-        if await self._claimed(session_id, _DELETE) is None:
-            return False
-        assert self._store is not None  # Only a store holds saved sessions.
-        return await self._delete(self._store, session_id)
+        async with self._saving:
+            # A switch may have opened it while this one waited.
+            if session_id == self.id:
+                raise Refused(INVALID, OPEN_UNDELETABLE)
+            if await self._claimed(session_id, _DELETE) is None:
+                return False
+            assert self._store is not None  # Only a store holds saved sessions.
+            return await self._delete(self._store, session_id)
 
     async def _delete(self, store: SessionStore, session_id: str) -> bool:
         """Delete the session ``session_id`` from ``store``, whose lock this orbit took to, and

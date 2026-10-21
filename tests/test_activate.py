@@ -6,15 +6,19 @@ from dataclasses import dataclass
 
 from orbit.agent import WorkspaceHost
 from orbit.agent.application.connection import SessionConnection
-from orbit.agent.domain.sessions import SessionRecord
+from orbit.agent.domain.sessions import OPEN_UNDELETABLE, OPEN_UNRENAMABLE, SessionRecord
 from orbit.protocol import (
+    INVALID,
     ActivateSession,
     AddTask,
     Attach,
     Catalog,
     CommandAccepted,
+    CommandRefused,
+    DeleteSession,
     Event,
     NewSession,
+    RenameSession,
     SessionRef,
     Snapshot,
     TasksChanged,
@@ -361,3 +365,62 @@ async def test_a_viewer_attaching_elsewhere_meanwhile_gets_no_view_of_the_sessio
     live = last_snapshot(seen)
     assert (live.session.id, live.active) == (EARLIER, True)
     assert other.viewing is None
+
+
+@dataclass(frozen=True)
+class Managed:
+    """What ``seen`` reached the connection that renamed or deleted ``earlier`` while another
+    opened it, the ``store`` the sessions are saved in, whether ``earlier`` was still
+    ``locked`` once both were done, and the name of the session then open, ``open_name``."""
+
+    seen: list[Event]
+    store: FakeStore
+    locked: bool
+    open_name: str
+
+
+async def managed_meanwhile(command: RenameSession | DeleteSession) -> Managed:
+    """Two connections, the second sending ``command`` about ``earlier`` while the first's
+    switch to ``earlier`` was taking its lock."""
+    store = stored()
+    session = workspace(store)
+    first = await used(session, "first")
+    second = await joined(session, "second")
+    await taken(first)
+    managing: list[asyncio.Task[None]] = []
+
+    async def manage() -> None:
+        store.on_acquire = None
+        managing.append(asyncio.create_task(say(second, "manage", command)))
+
+    store.on_acquire = manage
+    await say(first, "activate", ActivateSession(session=EARLIER))
+    await asyncio.gather(*managing)
+    await taken(first)
+    seen = await taken(second)
+    managed = Managed(seen, store, EARLIER in store.locked, session.saved_session.name)
+    await session.close()
+    return managed
+
+
+async def test_deleting_a_session_opened_meanwhile_is_refused_and_keeps_it() -> None:
+    managed = await managed_meanwhile(DeleteSession(session_id=EARLIER))
+
+    refused = outcome(managed.seen)
+    assert isinstance(refused, CommandRefused)
+    assert (refused.code, refused.message) == (INVALID, OPEN_UNDELETABLE)
+    assert managed.store.deleted == [] and managed.locked
+    assert any(r.id == EARLIER for r in managed.store.saved)
+    assert EARLIER not in managed.store.forgotten
+    assert any(envelope.session == EARLIER for envelope in managed.store.logged)
+
+
+async def test_renaming_a_session_opened_meanwhile_is_refused_and_keeps_its_lock() -> None:
+    managed = await managed_meanwhile(RenameSession(session_id=EARLIER, name="renamed"))
+
+    refused = outcome(managed.seen)
+    assert isinstance(refused, CommandRefused)
+    assert (refused.code, refused.message) == (INVALID, OPEN_UNRENAMABLE)
+    assert managed.locked
+    assert managed.open_name == "old work"
+    assert all(r.name == "old work" for r in managed.store.saved if r.id == EARLIER)

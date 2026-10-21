@@ -73,6 +73,7 @@ _MIGRATIONS: dict[int, Migration] = {
 
 EMPTY_NAME = "A session needs a name."
 OPEN_UNDELETABLE = "Can't delete the open session."
+OPEN_UNRENAMABLE = "Can't rename the session as a saved one: it was opened meanwhile."
 
 
 class SessionRecord(BaseModel):
