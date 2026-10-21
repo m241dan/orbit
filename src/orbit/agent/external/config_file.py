@@ -11,6 +11,7 @@ from orbit.agent.domain.checks import ChecksProposal
 from orbit.agent.domain.config import OrbitConfig, load_config
 from orbit.agent.domain.config_errors import ConfigError
 from orbit.agent.external.built_in_roles import read_built_in_roles
+from orbit.agent.external.whole_files import write_whole
 
 CONFIG_PATH = ".orbit/config.toml"
 
@@ -58,7 +59,7 @@ def _write_checks(path: Path, checks: ChecksProposal) -> None:
         if checks.setup.watch:
             setup["watch"] = list(checks.setup.watch)
         document["setup"] = setup
-    path.write_text(tomlkit.dumps(document))
+    write_whole(path, tomlkit.dumps(document))
 
 
 def _steps(checks: ChecksProposal) -> AoT:

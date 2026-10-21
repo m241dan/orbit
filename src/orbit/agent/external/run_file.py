@@ -7,8 +7,8 @@ import json
 from pathlib import Path
 
 from orbit.agent.domain.server import LocalTls, RunningServer, parse_running
-from orbit.agent.external.private_files import write_private
 from orbit.agent.external.processes import process_alive
+from orbit.agent.external.whole_files import write_private
 
 RUN = "run"
 SERVER_FILE = "server.json"

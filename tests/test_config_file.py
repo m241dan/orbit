@@ -1,4 +1,6 @@
+import os
 import re
+import stat
 from pathlib import Path
 
 import pytest
@@ -247,3 +249,25 @@ def test_writing_checks_into_a_non_utf8_file_raises_runtime_error(tmp_path: Path
     path.write_bytes(b"fix_attempts = 3 # \xff\n")
     with pytest.raises(RuntimeError, match=re.escape(f"Couldn't save the checks to {path}")):
         write_checks(str(tmp_path), ChecksProposal(steps=(LINT,)))
+
+
+def test_writing_checks_that_fails_leaves_the_old_file_and_no_temporary_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = write(tmp_path, "fix_attempts = 3\n")
+
+    def full(source: Path, target: Path) -> None:
+        raise OSError("No space left on device")
+
+    monkeypatch.setattr(os, "replace", full)
+    with pytest.raises(RuntimeError, match="No space left on device"):
+        write_checks(str(tmp_path), ChecksProposal(steps=(LINT,)))
+    assert path.read_text() == "fix_attempts = 3\n"
+    assert [p.name for p in path.parent.iterdir()] == ["config.toml"]
+
+
+def test_writing_checks_keeps_the_files_mode(tmp_path: Path) -> None:
+    path = write(tmp_path, "fix_attempts = 3\n")
+    path.chmod(0o664)
+    write_checks(str(tmp_path), ChecksProposal(steps=(LINT,)))
+    assert stat.S_IMODE(path.stat().st_mode) == 0o664

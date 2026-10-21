@@ -10,7 +10,7 @@ from typing import Any
 import pytest
 
 from orbit.agent.domain.checks import Setup
-from orbit.agent.external import git_tree
+from orbit.agent.external import git_tree, whole_files
 from orbit.agent.external.git import GitResult, GitUnavailable
 from orbit.agent.external.git import git as run_git
 from orbit.agent.external.git_tree import GitCoderTree
@@ -480,7 +480,7 @@ async def test_setup_checks_its_files_off_the_event_loops_thread(
     real_fingerprint, real_read, real_write = (
         git_tree._fingerprint,
         Path.read_text,
-        Path.write_text,
+        whole_files.write_whole,
     )
 
     def fingerprint(setup: Setup, path: Path) -> str:
@@ -492,14 +492,14 @@ async def test_setup_checks_its_files_off_the_event_loops_thread(
             threads.append(threading.current_thread())
         return real_read(self, *args, **kwargs)
 
-    def write_text(self: Path, *args: Any, **kwargs: Any) -> int:
-        if self.name == "coder.synced":
+    def write_whole(path: Path, text: str) -> None:
+        if path.name == "coder.synced":
             threads.append(threading.current_thread())
-        return real_write(self, *args, **kwargs)
+        real_write(path, text)
 
     monkeypatch.setattr(git_tree, "_fingerprint", fingerprint)
     monkeypatch.setattr(Path, "read_text", read_text)
-    monkeypatch.setattr(Path, "write_text", write_text)
+    monkeypatch.setattr(git_tree, "write_whole", write_whole)
     tree = GitCoderTree(str(repo), setup=setup)
     await tree.prepare(keep=False)
     await tree.prepare(keep=False)
@@ -886,6 +886,16 @@ async def test_ignored_paths_are_no_longer_committed_stashed_or_listed(repo: Pat
     assert "orbit" in exclude
 
 
+async def test_ignoring_paths_keeps_the_exclude_files_mode(repo: Path) -> None:
+    tree = GitCoderTree(str(repo))
+    await tree.prepare(keep=False)
+    exclude = repo / ".git" / "info" / "exclude"
+    exclude.chmod(0o664)
+    await tree.ignore({"__pycache__/"})
+    assert "__pycache__/" in exclude.read_text()
+    assert exclude.stat().st_mode & 0o777 == 0o664
+
+
 async def test_ignoring_paths_that_cant_be_written_raises_runtime_error(repo: Path) -> None:
     tree = GitCoderTree(str(repo))
     await tree.prepare(keep=False)
@@ -963,14 +973,14 @@ async def test_a_setup_that_cant_be_recorded_raises_runtime_error(
     repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     setup, _ = counting_setup(repo)
-    real_write = Path.write_text
+    real_write = whole_files.write_whole
 
-    def write_text(self: Path, *args: Any, **kwargs: Any) -> int:
-        if self.name == "coder.synced":
+    def write_whole(path: Path, text: str) -> None:
+        if path.name == "coder.synced":
             raise PermissionError("denied")
-        return real_write(self, *args, **kwargs)
+        real_write(path, text)
 
-    monkeypatch.setattr(Path, "write_text", write_text)
+    monkeypatch.setattr(git_tree, "write_whole", write_whole)
     with pytest.raises(RuntimeError, match=r"Couldn't record the setup in .*coder\.synced: denied"):
         await GitCoderTree(str(repo), setup=setup).prepare(keep=False)
 

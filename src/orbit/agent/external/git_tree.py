@@ -20,6 +20,7 @@ from orbit.agent.domain.checks import Setup
 from orbit.agent.external.git import git
 from orbit.agent.external.processes import run_process
 from orbit.agent.external.repository import ORBIT_DIR, find_git_common_dir
+from orbit.agent.external.whole_files import write_whole
 
 BRANCH = "orbit/coder"
 STASH_MESSAGE = "orbit: unverified work"
@@ -78,7 +79,7 @@ def _add_ignores(exclude: Path, paths: Collection[str]) -> None:
         new = sorted(set(paths) - set(lines))
         if IGNORE_HEADER not in lines:
             new.insert(0, IGNORE_HEADER)
-        exclude.write_text("\n".join([*lines, *new]) + "\n")
+        write_whole(exclude, "\n".join([*lines, *new]) + "\n")
     except (OSError, UnicodeDecodeError) as error:
         raise RuntimeError(f"Couldn't ignore files in {exclude}: {error}") from error
 
@@ -288,7 +289,7 @@ class GitCoderTree:
         if not ok:
             raise RuntimeError(f"Setting up the coder's tree failed: {output}")
         try:
-            await asyncio.to_thread(stamp.write_text, digest)
+            await asyncio.to_thread(write_whole, stamp, digest)
         except OSError as error:
             raise RuntimeError(f"Couldn't record the setup in {stamp}: {error}") from error
 

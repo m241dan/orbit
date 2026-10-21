@@ -2,9 +2,10 @@
 
 import os
 import sqlite3
-import tempfile
 from contextlib import closing
 from pathlib import Path
+
+from orbit.agent.external.whole_files import PRIVATE, replacing
 
 WAL_FILES = ("-wal", "-shm")  # The endings of the files SQLite keeps beside the database.
 
@@ -25,16 +26,5 @@ def _same_file(target: Path, path: Path) -> bool:
 def copy_to(source: sqlite3.Connection, target: Path) -> None:
     """Back ``source`` up to ``target``, owner read-write, through a temporary file beside it
     that replaces ``target`` only once the copy is whole, and is removed if it fails."""
-    descriptor, name = tempfile.mkstemp(prefix=f".{target.name}.", dir=target.parent)
-    temporary = Path(name)
-    try:
-        try:
-            os.fchmod(descriptor, 0o600)
-        finally:
-            os.close(descriptor)
-        with closing(sqlite3.connect(temporary)) as copy:
-            source.backup(copy)
-        os.replace(temporary, target)
-    except BaseException:
-        temporary.unlink(missing_ok=True)
-        raise
+    with replacing(target, PRIVATE) as temporary, closing(sqlite3.connect(temporary)) as copy:
+        source.backup(copy)

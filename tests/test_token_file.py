@@ -5,7 +5,6 @@ from pathlib import Path
 
 import pytest
 
-from orbit.agent.external.private_files import create_private, write_private
 from orbit.agent.external.token_file import TokenError, TokenFile
 
 
@@ -105,15 +104,6 @@ def test_a_rotation_that_cant_be_written_is_refused(
         TokenFile(tmp_path).rotate()
 
 
-def test_a_private_file_that_cant_replace_its_target_leaves_no_temporary_file(
-    tmp_path: Path,
-) -> None:
-    (tmp_path / "target").mkdir()
-    with pytest.raises(IsADirectoryError):
-        write_private(tmp_path / "target", "text")
-    assert [p.name for p in tmp_path.iterdir()] == ["target"]
-
-
 @pytest.mark.parametrize("directory_mode", [0o770, 0o707, 0o777])
 def test_a_token_in_a_directory_others_can_write_is_refused_with_the_fix(
     tmp_path: Path, directory_mode: int
@@ -186,26 +176,3 @@ def test_the_first_token_written_wins(tmp_path: Path, monkeypatch: pytest.Monkey
     assert TokenFile(tmp_path).token() == "theirs"
     assert path.read_text() == "theirs\n"
     assert [p.name for p in tmp_path.iterdir()] == ["token"]
-
-
-def test_a_private_file_that_exists_is_not_replaced_by_creating_it(tmp_path: Path) -> None:
-    path = tmp_path / "target"
-    path.write_text("first")
-    with pytest.raises(FileExistsError):
-        create_private(path, "second")
-    assert path.read_text() == "first"
-    assert [p.name for p in tmp_path.iterdir()] == ["target"]
-
-
-def test_a_private_file_is_created_owner_only_in_an_owner_only_directory(tmp_path: Path) -> None:
-    path = tmp_path / "private" / "target"
-    create_private(path, "text")
-    assert path.read_text() == "text"
-    assert (mode(path), mode(path.parent)) == (0o600, 0o700)
-    assert [p.name for p in path.parent.iterdir()] == ["target"]
-
-
-def test_a_private_file_that_cant_be_written_leaves_no_temporary_file(tmp_path: Path) -> None:
-    with pytest.raises(UnicodeEncodeError):
-        write_private(tmp_path / "target", "\ud800")
-    assert list(tmp_path.iterdir()) == []

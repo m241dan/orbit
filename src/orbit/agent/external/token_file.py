@@ -5,7 +5,7 @@ import secrets
 import stat
 from pathlib import Path
 
-from orbit.agent.external.private_files import create_private, write_private
+from orbit.agent.external.whole_files import create_private, write_private
 from orbit.protocol.transport import too_open
 
 TOKEN_FILE = "token"
