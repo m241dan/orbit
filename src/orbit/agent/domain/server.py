@@ -145,8 +145,9 @@ def load_server(data: dict[str, Any]) -> ServerSettings:
         raise ConfigError(validation_problems(exc)) from None
 
 
-_WILDCARDS = frozenset({"0.0.0.0", "::"})
-"""The hosts that listen on every address."""
+_WILDCARDS = {"0.0.0.0": (LOCALHOST, "127.0.0.1"), "::": (LOCALHOST, "::1", "127.0.0.1")}
+"""The hosts that listen on every address, each with the names reaching it here: ``0.0.0.0``
+listens on IPv4 only, and ``::`` is dual-stack."""
 
 
 def local_hostname(host: str, names: Iterable[str]) -> str | None:
@@ -160,7 +161,7 @@ def local_candidates(host: str) -> tuple[str, ...]:
     """The names a frontend on this machine may reach a server listening on ``host`` by, the
     first preferred."""
     if host in _WILDCARDS:
-        return (LOCALHOST, "127.0.0.1", "::1")
+        return _WILDCARDS[host]
     if is_loopback(host):
         return (host, LOCALHOST)
     return (host,)

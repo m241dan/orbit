@@ -166,7 +166,9 @@ def test_a_certificate_naming_no_local_name_leaves_local_discovery_unavailable(
 ) -> None:
     files = make_server(make_ca(tmp_path), tmp_path, hosts=("orbit.example.lan",))
     settings = _tls(files, ca="ca.pem", host="0.0.0.0")
-    message = r"^Local discovery won't work with this certificate\..*localhost, 127\.0\.0\.1, ::1"
+    message = (
+        r"^Local discovery won't work with this certificate\..*none of localhost, 127\.0\.0\.1, by"
+    )
     with pytest.raises(LocalDiscoveryUnavailable, match=message):
         local_tls(settings, tmp_path)
 

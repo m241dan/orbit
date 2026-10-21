@@ -11,6 +11,7 @@ from orbit.agent.domain.server import (
     RunningServer,
     ServerSettings,
     is_loopback,
+    local_candidates,
     local_hostname,
 )
 from orbit.agent.external.user_config import read_server
@@ -143,6 +144,19 @@ def test_other_hosts_are_not_loopback(host: str) -> None:
 
 
 @pytest.mark.parametrize(
+    ("host", "candidates"),
+    [
+        ("0.0.0.0", ("localhost", "127.0.0.1")),
+        ("::", ("localhost", "::1", "127.0.0.1")),
+    ],
+)
+def test_a_wildcard_host_is_reached_by_the_loopback_addresses_it_listens_on(
+    host: str, candidates: tuple[str, ...]
+) -> None:
+    assert local_candidates(host) == candidates
+
+
+@pytest.mark.parametrize(
     ("host", "names", "hostname"),
     [
         ("127.0.0.1", ("localhost", "127.0.0.1"), "127.0.0.1"),
@@ -151,6 +165,8 @@ def test_other_hosts_are_not_loopback(host: str) -> None:
         ("0.0.0.0", ("orbit.example.lan", "localhost"), "localhost"),
         ("0.0.0.0", ("127.0.0.1",), "127.0.0.1"),
         ("::", ("::1",), "::1"),
+        ("::", ("127.0.0.1", "::1"), "::1"),
+        ("::", ("127.0.0.1",), "127.0.0.1"),
         ("orbit.example.lan", ("Orbit.Example.Lan",), "orbit.example.lan"),
         ("orbit.example.lan", ("*.example.lan",), "orbit.example.lan"),
         ("192.168.1.20", ("localhost", "192.168.1.20"), "192.168.1.20"),
@@ -166,6 +182,7 @@ def test_a_local_client_connects_by_a_name_the_certificate_gives(
     ("host", "names"),
     [
         ("0.0.0.0", ("orbit.example.lan",)),
+        ("0.0.0.0", ("::1",)),
         ("192.168.1.20", ("localhost", "127.0.0.1")),
         ("orbit.example.lan", ("*.lan", "*.other.lan")),
         ("example.lan", ("*.example.lan",)),

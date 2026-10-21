@@ -1237,20 +1237,20 @@ always runs in-process, taking the backend flags; it can't go with `--connect` o
 
 A server serving TLS is found too. Its run file records the CA to trust, `ca` in `[server]`, or
 `client_ca` without one, and the hostname to connect by: one its certificate gives as a subject
-alternative name, `localhost` first for a server listening on every address (`0.0.0.0` or `::`),
-then `127.0.0.1` and `::1`; the host itself first for one on loopback, then `localhost`; and the
-host itself otherwise. With no CA set, or a certificate that names none of these, `orbit serve`
-starts anyway with a warning that local discovery won't work, saying why, and chats here run
-in-process unless given `--connect`. Under mTLS the chat shows the client certificate
-`local_client_cert` and `local_client_key` in `[server]` name, from the same `config.toml`, rather
-than the token: make one with the client CA as in **Client certificates** above. Without them it
-stops with status 2, naming the two keys, rather than running in-process; a key others can read
-stops it with status 2 and the `chmod 600` that fixes it, as do files that can't be read. A
-server found whose TLS handshake fails in a way that would fail again stops it with status 2 too,
-saying why, rather than running in-process: the recorded CA didn't sign its certificate (as when
-`client_ca` stands in for a missing `ca`), the certificate has expired, or under mTLS the local
-client certificate is revoked or wasn't signed by the client CA. Only a server that can't be
-reached at all leaves the chat in-process.
+alternative name, `localhost` first for a server listening on every address, then `127.0.0.1` for
+`0.0.0.0`, or `::1` and then `127.0.0.1` for `::`; the host itself first for one on loopback,
+then `localhost`; and the host itself otherwise. With no CA set, or a certificate that names none
+of these, `orbit serve` starts anyway with a warning that local discovery won't work, saying why,
+and chats here run in-process unless given `--connect`. Under mTLS the chat shows the client
+certificate `local_client_cert` and `local_client_key` in `[server]` name, from the same
+`config.toml`, rather than the token: make one with the client CA as in **Client certificates**
+above. Without them it stops with status 2, naming the two keys, rather than running in-process;
+a key others can read stops it with status 2 and the `chmod 600` that fixes it, as do files that
+can't be read. A server found whose TLS handshake fails in a way that would fail again stops it with
+status 2 too, saying why, rather than running in-process: the recorded CA didn't sign its
+certificate (as when `client_ca` stands in for a missing `ca`), the certificate has expired, or
+under mTLS the local client certificate is revoked or wasn't signed by the client CA. Only a server
+that can't be reached at all leaves the chat in-process.
 
 **Named remotes.** Each `[remotes.<name>]` table in your `config.toml` names a control plane, and
 `orbit chat --remote <name>` connects to it as `--connect` would with its settings:
