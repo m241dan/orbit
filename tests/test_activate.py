@@ -334,3 +334,30 @@ async def test_activating_the_session_being_opened_meanwhile_attaches_to_it_live
     assert states(meanwhile.events) == [(OPEN, False, 0), (EARLIER, True, 2)]
     reloads = [e for e in meanwhile.events if isinstance(e, Snapshot) and e.active]
     assert len(reloads) == 1
+
+
+async def test_a_viewer_attaching_elsewhere_meanwhile_gets_no_view_of_the_session_left() -> None:
+    store = stored()
+    session = workspace(store)
+    activating = await used(session, "activating")
+    other = await joined(session, "other")
+    await taken(activating)
+
+    async def attach_elsewhere(session_id: str) -> None:
+        if session_id != OPEN:
+            return
+        store.on_recent = None
+        await say(other, "attach", Attach(workspace=WORKSPACE, session=EARLIER))
+        while other.attached is not None:
+            await asyncio.sleep(0)
+
+    store.on_recent = attach_elsewhere
+    await say(activating, "activate", ActivateSession(session=EARLIER))
+    await taken(activating)
+    seen = await taken(other)
+    await session.close()
+
+    assert store.on_recent is None
+    live = last_snapshot(seen)
+    assert (live.session.id, live.active) == (EARLIER, True)
+    assert other.viewing is None

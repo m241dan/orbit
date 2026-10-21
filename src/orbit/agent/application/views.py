@@ -85,20 +85,25 @@ class SessionViews:
         self._parts.connections.activate(self.open_session() if kept else None)
 
     async def activated(self, left: str) -> None:
-        """Publish its read-only view to each connection, but the one asking, attached to the
-        session ``left``; the switch gave those viewing the one open in its place its live
-        snapshot. Nothing if ``left`` is open again by then, or if it can't be read, which is
-        reported."""
+        """Publish its read-only view to each connection, but the one asking, still attached
+        to the session ``left``; the switch gave those viewing the one open in its place its
+        live snapshot. Nothing if ``left`` is open again by then, or if it can't be read, which
+        is reported."""
         parts = self._parts
         viewers = parts.connections.others_attached(left)
         record = await parts.keeper.saved(left) if viewers else None
-        if record is None:
-            return
+        if record is not None:
+            await self._show(record, viewers)
+
+    async def _show(self, record: SessionRecord, viewers: list[SessionConnection]) -> None:
+        """Publish the read-only view of the session saved as ``record`` to each of the
+        ``viewers`` still attached to it once it's read, unless it's open again by then."""
         view = await self._view(record)
         # Another switch may have opened it again meanwhile, whose live snapshot they get.
-        if left == parts.keeper.id:
+        if record.id == self._parts.keeper.id:
             return
-        for connection in viewers:
+        # One may have attached elsewhere while the view was read.
+        for connection in [c for c in viewers if c.attached_id == record.id]:
             await connection.publish_here(view)
 
     def open_session(self) -> SessionRef:
