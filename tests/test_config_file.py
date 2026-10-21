@@ -180,6 +180,15 @@ model = "sonnet"
     assert config.setup is None
 
 
+def test_writing_checks_keeps_a_utf8_comment(tmp_path: Path) -> None:
+    path = tmp_path / CONFIG_PATH
+    path.parent.mkdir(parents=True)
+    path.write_text("# Réglages — orbit.\n", encoding="utf-8")
+    write_checks(str(tmp_path), ChecksProposal(steps=(LINT,)))
+    assert path.read_text(encoding="utf-8").startswith("# Réglages — orbit.\n")
+    assert read_config(str(tmp_path)).verification.steps == (LINT,)
+
+
 def test_writing_checks_replaces_the_steps_and_setup_configured_before(tmp_path: Path) -> None:
     path = write(
         tmp_path,

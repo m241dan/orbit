@@ -62,6 +62,6 @@ def _read[T](config_dir: Path, load: Callable[[dict[str, Any]], T], default: T) 
     if not path.exists():
         return default
     try:
-        return load(tomllib.loads(path.read_text()))
+        return load(tomllib.loads(path.read_text(encoding="utf-8")))
     except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError, ConfigError) as exc:
         raise ConfigError(f"{path}: {exc}") from None

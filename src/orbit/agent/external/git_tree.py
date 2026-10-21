@@ -75,7 +75,7 @@ def _add_ignores(exclude: Path, paths: Collection[str]) -> None:
     """
     try:
         exclude.parent.mkdir(exist_ok=True)
-        lines = exclude.read_text().splitlines() if exclude.exists() else []
+        lines = exclude.read_text(encoding="utf-8").splitlines() if exclude.exists() else []
         new = sorted(set(paths) - set(lines))
         if IGNORE_HEADER not in lines:
             new.insert(0, IGNORE_HEADER)

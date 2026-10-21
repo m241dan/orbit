@@ -27,7 +27,7 @@ def read_config(root: str = ".") -> OrbitConfig:
     if not path.exists():
         return load_config({}, built_in)
     try:
-        return load_config(tomllib.loads(path.read_text()), built_in)
+        return load_config(tomllib.loads(path.read_text(encoding="utf-8")), built_in)
     except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError, ConfigError) as exc:
         raise ConfigError(f"{path}: {exc}") from None
 
@@ -47,7 +47,9 @@ def write_checks(root: str, checks: ChecksProposal) -> None:
 
 def _write_checks(path: Path, checks: ChecksProposal) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    document = tomlkit.parse(path.read_text()) if path.exists() else tomlkit.document()
+    document = (
+        tomlkit.parse(path.read_text(encoding="utf-8")) if path.exists() else tomlkit.document()
+    )
     verification = tomlkit.table(is_super_table=True)
     verification["steps"] = _steps(checks)
     document["verification"] = verification
