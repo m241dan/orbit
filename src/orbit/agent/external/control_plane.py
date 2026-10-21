@@ -39,6 +39,7 @@ from orbit.agent.domain.health import Readiness, readiness, ready_answer
 from orbit.agent.domain.server import ServerSettings, client_fingerprint, is_revoked
 from orbit.agent.external import tls_messages
 from orbit.agent.external.client_certs import (
+    CertifiedHttpProtocol,
     CertifiedWebSocketProtocol,
     certificate_subject,
     client_certificate,
@@ -337,7 +338,7 @@ class ControlPlaneServer:
         """How uvicorn serves the app: logging left to the program, messages kept under the
         limit, over TLS with the settings' certificate and key if it's secure, and if it's
         mutual asking for a client certificate, which must be one the client CA signed, without
-        requiring one, so health checks need none."""
+        requiring one, so health checks need none, and passing it to the app with each request."""
         return uvicorn.Config(
             self.app(),
             ssl_certfile=self._settings.cert if self._secure else None,
@@ -347,10 +348,16 @@ class ControlPlaneServer:
             ssl_context_factory=self._ssl_context if self._mutual else None,
             log_config=None,
             lifespan="off",
+            http=self._http_protocol(),
             ws=CertifiedWebSocketProtocol,
             ws_max_size=self._settings.max_message_bytes,
             timeout_graceful_shutdown=GRACE_SECONDS,
         )
+
+    def _http_protocol(self) -> type[asyncio.Protocol] | str:
+        """The protocol uvicorn serves HTTP with: one passing each request's client certificate
+        to the app if it's mutual, and otherwise uvicorn's own."""
+        return CertifiedHttpProtocol if self._mutual else "auto"
 
     def _ssl_context(
         self, config: uvicorn.Config, default: Callable[[], ssl.SSLContext]

@@ -1,13 +1,17 @@
-"""Client certificates under mutual TLS: each WebSocket's certificate passed to the app in its
-ASGI scope, as the TLS extension's ``client_cert_chain``, and each handshake refused for an
-untrusted one told to the user, as the TLS layer refuses it before any WebSocket opens."""
+"""Client certificates under mutual TLS: each request's and WebSocket's certificate passed to
+the app in its ASGI scope, as the TLS extension's ``client_cert_chain``, and each handshake
+refused for an untrusted one told to the user, as the TLS layer refuses it before any WebSocket
+opens."""
 
+import asyncio
 import ssl
 from collections.abc import Callable
-from typing import cast
+from typing import Any, cast
 
 from cryptography import x509
-from starlette.types import Scope
+from starlette.types import Receive, Scope, Send
+from uvicorn.config import Config
+from uvicorn.protocols.http.h11_impl import H11Protocol
 from uvicorn.protocols.websockets.websockets_sansio_impl import WebSocketsSansIOProtocol
 from websockets.http11 import Request
 
@@ -17,6 +21,21 @@ from orbit.agent.external import tls_messages
 _UNTRUSTED = frozenset({2, 18, 19, 20, 21})
 
 
+class CertifiedHttpProtocol(H11Protocol):
+    """uvicorn's HTTP protocol, with the client's certificate, if it showed one, in each scope
+    it gives the app."""
+
+    def __init__(self, config: Config, *args: Any, **kwargs: Any) -> None:
+        super().__init__(config, *args, **kwargs)
+        app = self.app
+
+        async def certified(scope: Scope, receive: Receive, send: Send) -> None:
+            _certify(scope, self.transport)
+            await app(scope, receive, send)
+
+        self.app = certified
+
+
 class CertifiedWebSocketProtocol(WebSocketsSansIOProtocol):
     """uvicorn's WebSocket protocol, with the client's certificate, if it showed one, in each
     scope it gives the app."""
@@ -24,21 +43,29 @@ class CertifiedWebSocketProtocol(WebSocketsSansIOProtocol):
     def handle_connect(self, event: Request) -> None:
         super().handle_connect(event)
         scope = getattr(self, "scope", None)  # None for an upgrade that was refused.
-        der = self._peer_certificate()
-        if scope is not None and der is not None:
-            chain = [ssl.DER_cert_to_PEM_cert(der)]
-            scope.setdefault("extensions", {})["tls"] = {"client_cert_chain": chain}
+        if scope is not None:
+            _certify(scope, self.transport)
 
-    def _peer_certificate(self) -> bytes | None:
-        """The certificate the client showed, in DER; none if it showed none."""
-        ssl_object = self.transport.get_extra_info("ssl_object")
-        if ssl_object is None:
-            return None
-        return cast(bytes | None, ssl_object.getpeercert(binary_form=True))
+
+def _certify(scope: Scope, transport: asyncio.Transport) -> None:
+    """Put the certificate the client of ``transport`` showed, if it showed one, into
+    ``scope``."""
+    der = _peer_certificate(transport)
+    if der is not None:
+        chain = [ssl.DER_cert_to_PEM_cert(der)]
+        scope.setdefault("extensions", {})["tls"] = {"client_cert_chain": chain}
+
+
+def _peer_certificate(transport: asyncio.Transport) -> bytes | None:
+    """The certificate the client of ``transport`` showed, in DER; none if it showed none."""
+    ssl_object = transport.get_extra_info("ssl_object")
+    if ssl_object is None:
+        return None
+    return cast(bytes | None, ssl_object.getpeercert(binary_form=True))
 
 
 def client_certificate(scope: Scope) -> bytes | None:
-    """The client certificate, in DER, that the WebSocket of ``scope`` showed; none if it
+    """The client certificate, in DER, that the request or WebSocket of ``scope`` showed; none if it
     showed none."""
     chain = scope.get("extensions", {}).get("tls", {}).get("client_cert_chain") or []
     return ssl.PEM_cert_to_DER_cert(chain[0]) if chain else None

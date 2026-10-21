@@ -137,6 +137,48 @@ async def test_the_health_checks_answer_without_a_certificate(
     assert response.status_code == 200
 
 
+@pytest.mark.parametrize(("path", "status"), [("/", 404), ("/healthz/", 307)])
+async def test_a_request_showing_a_certificate_is_let_through_to_the_routes(
+    ca: Ca, settings: ServerSettings, tmp_path: Path, path: str, status: int
+) -> None:
+    client = make_client(ca, tmp_path)
+    lines = Lines()
+    async with serving(settings, lines) as (url, _):
+        base = url.replace("wss://", "https://")
+        async with httpx.AsyncClient(base_url=base, verify=_context(ca, client)) as http:
+            response = await http.get(path)
+    assert response.status_code == status
+    assert lines.said == []
+
+
+@pytest.mark.parametrize("path", ["/", "/healthz/"])
+async def test_a_request_showing_no_certificate_is_turned_away_with_401_and_said_once(
+    ca: Ca, settings: ServerSettings, path: str
+) -> None:
+    lines = Lines()
+    async with serving(settings, lines) as (url, _):
+        base = url.replace("wss://", "https://")
+        async with httpx.AsyncClient(base_url=base, verify=_context(ca, None)) as http:
+            response = await http.get(path)
+    message = tls_messages.CLIENT_CERT_REQUIRED.format(client_ca=ca.path)
+    assert response.status_code == 401
+    assert response.text == message
+    assert response.headers["WWW-Authenticate"] == CERTIFICATE_CHALLENGE
+    assert lines.said == [message]
+
+
+async def test_an_upgrade_the_websocket_handshake_refuses_is_answered_400(
+    ca: Ca, settings: ServerSettings, tmp_path: Path
+) -> None:
+    client = make_client(ca, tmp_path)
+    upgrade = {"Upgrade": "websocket", "Connection": "Upgrade"}  # No key, so not a handshake.
+    async with serving(settings, Lines()) as (url, _):
+        base = url.replace("wss://", "https://")
+        async with httpx.AsyncClient(base_url=base, verify=_context(ca, client)) as http:
+            response = await http.get("/", headers=upgrade)
+    assert response.status_code == 400
+
+
 def _status_without_certificate(client: TestClient, route: BaseRoute) -> int:
     """The status ``client``, showing no certificate, is answered with at ``route``."""
     if isinstance(route, WebSocketRoute):
