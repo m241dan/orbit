@@ -355,7 +355,8 @@ class WorkspaceHost:
 
     def _watch_background(self) -> None:
         """Have the open session's state checked whenever the reviews or the startup check stop,
-        as nothing is published then."""
+        as nothing is published then: the reviews make it running, and the startup check is
+        among the activity it reports."""
         for part in (self._lane, self._startup):
             if part is not None:
                 part.on_stopped(self._states.check)
@@ -448,12 +449,15 @@ class WorkspaceHost:
         return check
 
     async def _add_startup_fix(self, step: VerificationStep, output: str) -> None:
-        """Add a draft task to fix ``step``, which failed at startup with ``output``."""
+        """Add a draft task to fix ``step``, which failed at startup with ``output``, to the
+        session open once no switch is under way."""
         settings = Settings()
         if self._desk is not None:
             settings = self._desk.agents.roles[CODER].settings
         task = TaskSpec(prompt=startup_fix_prompt(step, output), settings=settings)
-        await self._tasks.change(lambda board: board.add_draft(task))
+        await self._switcher.between_switches(
+            lambda: self._tasks.change(lambda board: board.add_draft(task))
+        )
 
     @property
     def workspace_id(self) -> str:

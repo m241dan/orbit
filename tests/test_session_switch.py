@@ -43,6 +43,7 @@ from orbit.protocol import (
     TurnEndReason,
     TurnFinished,
     Usage,
+    VerificationChanged,
 )
 from tests.agent_fakes import (
     ROLES,
@@ -646,9 +647,11 @@ async def test_the_sessions_list_shows_what_a_session_spent() -> None:
     await session.close()
 
 
-def failing_startup(store: FakeStore, gate: asyncio.Event | None = None) -> WorkspaceHost:
-    """A session for the user to pick, whose startup check fails, once ``gate`` opens if given,
-    adding a draft to fix it."""
+def failing_startup(
+    store: FakeStore, gate: asyncio.Event | None = None, picking: bool = True
+) -> WorkspaceHost:
+    """A session, for the user to pick if ``picking``, whose startup check fails, once ``gate``
+    opens if given, adding a draft to fix it."""
     lint = VerificationStep(name="Lint", command=("ruff", "check"))
     steps = Steps(False)
     steps.gate = gate
@@ -657,7 +660,7 @@ def failing_startup(store: FakeStore, gate: asyncio.Event | None = None) -> Work
         reviews=False,
         verification=Verification((lint,), steps),
         check_at_startup=True,
-        pick_session=True,
+        pick_session=picking,
     )
     return session
 
@@ -690,6 +693,103 @@ async def test_a_session_picked_while_the_startup_check_runs_gets_its_fix_draft(
         "completed",
         "draft",
     ]
+    await session.close()
+
+
+class Holding:
+    """A store call held, once it's ``entered``, until ``released``."""
+
+    def __init__(self) -> None:
+        self.entered = asyncio.Event()
+        self.released = asyncio.Event()
+
+    async def __call__(self) -> None:
+        self.entered.set()
+        await self.released.wait()
+
+
+class HeldSaves(FakeStore):
+    """A store whose saves wait for ``hold``, while it's set."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.hold: Holding | None = None
+
+    async def save(self, record: SessionRecord) -> None:
+        if self.hold is not None:
+            await self.hold()
+        await super().save(record)
+
+
+def latest(store: FakeStore) -> dict[str, SessionRecord]:
+    """The record each session in ``store`` was saved as last, by its id."""
+    return {record.id: record for record in store.saved}
+
+
+def drafts(store: FakeStore) -> dict[str, int]:
+    """How many drafts each session in ``store`` was saved with last, by its id."""
+    return {i: sum(t.status == "draft" for t in r.tasks) for i, r in latest(store).items()}
+
+
+async def saved_and_checking(store: FakeStore, gate: asyncio.Event) -> WorkspaceHost:
+    """A session picked and saved in ``store`` as ``session-1``, its startup check running until
+    ``gate`` opens, then failing."""
+    session = failing_startup(store, gate, picking=False)
+    await events_until(session, of_type(AgentStarted))
+    await send(session, AddTask(task=TASK))
+    await until_marked(session)
+    assert store.last.id == "session-1"
+    return session
+
+
+async def fail_check_while(session: WorkspaceHost, gate: asyncio.Event, hold: Holding) -> None:
+    """Fail ``session``'s startup check while ``hold`` holds the store, then release it."""
+    await hold.entered.wait()
+    gate.set()
+    failed = Stop(
+        "the step failed",
+        lambda e: (
+            isinstance(e, VerificationChanged) and any(step.status == "failed" for step in e.steps)
+        ),
+    )
+    await events_until(session, failed)
+    for _ in range(20):  # Let the fix's draft go as far as it can while the store is held.
+        await asyncio.sleep(0)
+    hold.released.set()
+
+
+async def test_a_check_failing_while_a_saved_session_opens_drafts_its_fix_there() -> None:
+    store, gate = store_with(saved("auth", state("4", "completed"))), asyncio.Event()
+    session = await saved_and_checking(store, gate)
+    hold = Holding()
+    store.on_acquire = hold
+    sent = asyncio.create_task(send(session, ActivateSession(session="auth")))
+    await fail_check_while(session, gate, hold)
+    await sent
+    events = await events_until(session, agent_exited("startup-check"))
+    events += await until_marked(session)
+
+    assert last_of(Snapshot, events).session.id == "auth"
+    assert [(t.id, t.status) for t in board(events)] == [("4", "completed"), ("5", "draft")]
+    assert drafts(store) == {"auth": 1, "session-1": 0}
+    await session.close()
+
+
+async def test_a_check_failing_while_a_new_session_waits_on_a_save_drafts_its_fix_there() -> None:
+    store, gate = HeldSaves(), asyncio.Event()
+    session = await saved_and_checking(store, gate)
+    hold = store.hold = Holding()
+    added = asyncio.create_task(send(session, AddTask(task=TASK)))
+    await hold.entered.wait()
+    sent = asyncio.create_task(send(session, NewSession(name="fresh")))
+    await fail_check_while(session, gate, hold)
+    await asyncio.gather(added, sent)
+    events = await events_until(session, agent_exited("startup-check"))
+    events += await until_marked(session)
+
+    assert last_of(Snapshot, events).session.id == "session-2"
+    assert [t.status for t in board(events)] == ["draft"]
+    assert drafts(store) == {"session-1": 0, "session-2": 1}
     await session.close()
 
 

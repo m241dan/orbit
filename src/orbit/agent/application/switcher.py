@@ -1,7 +1,9 @@
 """Switching a session between saved ones: listing, renaming and deleting them, and activating
 another, or a new one, in place of the one open."""
 
-from collections.abc import Awaitable, Callable, Collection, Sequence
+import asyncio
+from collections.abc import AsyncIterator, Awaitable, Callable, Collection, Sequence
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from typing import assert_never
@@ -104,6 +106,12 @@ class SessionSwitcher:
         self.spent = Usage()  # What the session's agents have spent, the planner's included.
         # What the opened session saved that no review lane here holds, kept to save back.
         self._kept_reviews: LaneSnapshot | None = None
+        # What orbit adds between switches waits for those under way, keeping new ones waiting,
+        # so it lands in exactly one session.
+        self._adding = asyncio.Lock()
+        self._under_way = 0
+        self._settled = asyncio.Event()
+        self._settled.set()
 
     def stay(self) -> None:
         """Note that the user works on in this session, so what orbit added stays in it."""
@@ -123,9 +131,31 @@ class SessionSwitcher:
         the id of the session the switch left if its lock was held, then let go of or, if no
         session was picked yet, deleted; :data:`ALREADY_OPEN` if the session named is the one
         open; or none."""
-        if isinstance(command, ActivateSession):
-            return await self._open_session(command.session)
-        return await self._new_session(command.name)
+        async with self._switch():
+            if isinstance(command, ActivateSession):
+                return await self._open_session(command.session)
+            return await self._new_session(command.name)
+
+    @asynccontextmanager
+    async def _switch(self) -> AsyncIterator[None]:
+        """Have a switch under way, once what orbit adds between switches is added."""
+        async with self._adding:
+            self._under_way += 1
+            self._settled.clear()
+        try:
+            yield
+        finally:
+            self._under_way -= 1
+            if not self._under_way:
+                self._settled.set()
+
+    async def between_switches[T](self, change: Callable[[], Awaitable[T]]) -> T:
+        """Make ``change`` to the session open once no switch is under way, no other starting
+        until it's made, so what it adds lands in the session open when it's made, the one a
+        switch under way opens; returns what ``change`` returned."""
+        async with self._adding:
+            await self._settled.wait()
+            return await change()
 
     async def entry(self) -> WorkspaceEntry:
         """The workspace's entry in the catalog, holding the sessions as they are now."""
