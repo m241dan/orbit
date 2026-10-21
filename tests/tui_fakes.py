@@ -17,6 +17,7 @@ from orbit.protocol import (
     AssistantMessage,
     Attach,
     Command,
+    CommandAccepted,
     CommandEnvelope,
     Event,
     EventEnvelope,
@@ -122,6 +123,11 @@ async def feed_events(session: FakeSession, pilot: Pilot[None], *events: Event) 
     for event in events:
         await session.queue.put(event)
     await pilot.pause()
+
+
+async def accept_last(session: FakeSession, pilot: Pilot[None]) -> None:
+    """Have ``session`` accept the last command sent, and let the app take that in."""
+    await feed_events(session, pilot, CommandAccepted(command_id=session.envelopes[-1].command_id))
 
 
 PINNED = ["planner", "coder", "reviewer", "super-reviewer", "configurator"]

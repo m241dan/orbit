@@ -320,23 +320,24 @@ class OrbitApp(App[None], inherit_bindings=False):
             # Keep the draft for when the planner is free; the user sends it again then.
             self.notify(PLANNER_BUSY, severity="warning")
             return
-        message.prompt.clear()
-        prompt = self._prompt
-        prompt.action_normal_mode()
+        self._prompt.action_normal_mode()
         # Busy from now, not from TurnStarted, so a second prompt can't race the turn.
         self._set_busy(PLANNER_LANE, True)
         entry = self._feed.append(text, "prompt", PLANNER)
-        unsent = Awaited(refused=lambda: self._unsend(text, entry))
-        await self._send(SendMessage(agent=PLANNER, text=text), unsent)
+        outcome = Awaited(accepted=lambda: self._sent(text), refused=lambda: self._unsend(entry))
+        await self._send(SendMessage(agent=PLANNER, text=text), outcome)
 
-    def _unsend(self, text: str, entry: Entry) -> None:
-        """Undo sending ``text`` to the planner, refused or not sent: its prompt ``entry`` is
-        dropped, the planner freed, and ``text`` put back in the prompt unless the user has
-        typed another draft since."""
+    def _sent(self, text: str) -> None:
+        """Clear the prompt once the planner accepted ``text``, unless the user has edited the
+        draft since."""
+        if self._prompt.text.strip() == text:
+            self._prompt.clear()
+
+    def _unsend(self, entry: Entry) -> None:
+        """Undo sending a prompt to the planner, refused or not sent: its prompt ``entry`` is
+        dropped and the planner freed, its text still in the prompt."""
         self._set_busy(PLANNER_LANE, False)
         self._transcript.drop_entry(entry)
-        if not self._prompt.text.strip():
-            self._prompt.load_text(text)
 
     # Window navigation only applies at the top level, when no window is active.
 

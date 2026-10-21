@@ -65,6 +65,7 @@ from tests.tui_fakes import (
     PINNED,
     STRIP,
     FakeSession,
+    accept_last,
     active_tab,
     entries,
     feed_events,
@@ -216,17 +217,27 @@ async def test_a_message_refused_as_not_active_is_withdrawn_and_its_draft_restor
         assert prompt.border_title == "Prompt · planner"
 
 
-async def test_a_refusal_keeps_a_new_draft_typed_since_sending() -> None:
+async def test_a_refusal_keeps_the_draft_as_edited_since_sending() -> None:
     session = FakeSession()
     app = OrbitApp(session)
     async with app.run_test() as pilot:
         prompt = app.query_one("#prompt", ChatPrompt)
-        await pilot.press("i", *"hi", "enter", "i", *"new")
+        await pilot.press("i", *"hi", "enter", "i", *" more")
         [sent] = session.envelopes
         refused = CommandRefused(command_id=sent.command_id, code=NOT_ACTIVE, message="Not here.")
         await feed_events(session, pilot, refused)
         assert entries(app) == [("Not here.", "error")]
-        assert prompt.text == "new"
+        assert prompt.text == "hi more"
+
+
+async def test_a_sent_message_keeps_its_text_in_the_prompt_until_accepted() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        prompt = app.query_one("#prompt", ChatPrompt)
+        await pilot.press("i", *"hi", "enter")
+        assert prompt.text == "hi"
+        assert prompt.border_title == "Prompt · planner · busy"
 
 
 async def test_an_accepted_message_stays_a_prompt_and_leaves_the_prompt_empty() -> None:
@@ -235,11 +246,21 @@ async def test_an_accepted_message_stays_a_prompt_and_leaves_the_prompt_empty() 
     async with app.run_test() as pilot:
         prompt = app.query_one("#prompt", ChatPrompt)
         await pilot.press("i", *"hi", "enter")
-        [sent] = session.envelopes
-        await feed_events(session, pilot, CommandAccepted(command_id=sent.command_id))
+        await accept_last(session, pilot)
         assert entries(app) == [("hi", "prompt")]
         assert prompt.text == ""
         assert prompt.border_title == "Prompt · planner · busy"
+
+
+async def test_an_accepted_message_keeps_a_draft_edited_since_sending() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        prompt = app.query_one("#prompt", ChatPrompt)
+        await pilot.press("i", *"hi", "enter", "i", *" more")
+        await accept_last(session, pilot)
+        assert entries(app) == [("hi", "prompt")]
+        assert prompt.text == "hi more"
 
 
 async def test_a_refusal_of_an_earlier_message_leaves_the_planner_busy() -> None:
@@ -383,6 +404,7 @@ async def test_enter_sends_the_kept_draft_once_the_planner_is_free() -> None:
         # Still in insert mode, so enter alone sends it.
         await pilot.press("enter")
         assert session.commands == [SendMessage(agent=PLANNER, text="hi")]
+        await accept_last(session, pilot)
         assert prompt.text == ""
 
 
@@ -392,7 +414,7 @@ async def test_a_rapid_second_enter_sends_nothing() -> None:
     async with app.run_test() as pilot:
         await pilot.press("i", *"a", "enter", "i", *"b", "enter")
         assert session.commands == [SendMessage(agent=PLANNER, text="a")]
-        assert app.query_one(ChatPrompt).text == "b"
+        assert app.query_one(ChatPrompt).text == "ab"
 
 
 async def test_ctrl_s_sends_cancel() -> None:
@@ -430,6 +452,7 @@ async def test_a_pasted_multi_line_prompt_is_sent_whole_and_the_box_shrinks() ->
         await pilot.press("enter")
         await pilot.pause()
         assert session.commands == [SendMessage(agent=PLANNER, text="first\nsecond")]
+        await accept_last(session, pilot)
         assert prompt.text == ""
         assert prompt.region.height == 3
 
@@ -1370,8 +1393,9 @@ async def test_prompt_talks_to_the_planner_ctrl_s_stops_the_run_and_ctrl_x_the_p
         await pilot.press("tab")
         assert prompt.border_title == "Prompt · planner"
         # ctrl+s stops the task run, even on the planner tab; ctrl+x stops the planner.
-        await pilot.press("i", *"plan", "enter", "ctrl+s", "ctrl+x")
-        await pilot.press("shift+tab")
+        await pilot.press("i", *"plan", "enter")
+        await accept_last(session, pilot)
+        await pilot.press("ctrl+s", "ctrl+x", "shift+tab")
         assert prompt.border_title == "Prompt · planner · busy"
         await feed_events(session, pilot, BusyChanged(busy=False, lane="planner"))
         await pilot.press("i", *"hi", "enter", "ctrl+s", "ctrl+x")
