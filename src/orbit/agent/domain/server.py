@@ -14,8 +14,8 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 
 from orbit.agent.domain.config_errors import ConfigError, validation_problems
 from orbit.protocol import DEFAULT_MAX_MESSAGE_MB
-
-LOCALHOST = "localhost"
+from orbit.protocol.transport import LOCALHOST
+from orbit.protocol.transport import is_loopback as is_loopback
 
 EXPIRY_WARNING = timedelta(days=14)
 """How long before a server certificate expires ``orbit serve`` warns of it."""
@@ -232,14 +232,3 @@ def parse_running(text: str) -> RunningServer | None:
         return RunningServer.model_validate_json(text)
     except ValidationError:
         return None
-
-
-def is_loopback(host: str) -> bool:
-    """Whether ``host`` is ``localhost`` or a loopback address, reachable from this machine
-    alone."""
-    if host.lower() == LOCALHOST:
-        return True
-    try:
-        return ipaddress.ip_address(host).is_loopback
-    except ValueError:
-        return False

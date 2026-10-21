@@ -1,6 +1,7 @@
 """The WebSocket transport's numbers, which the control plane and its frontends share, as
 described in ``docs/protocol.md``."""
 
+import ipaddress
 from collections.abc import Mapping
 
 NORMAL = 1000
@@ -23,6 +24,9 @@ control plane shuts down."""
 UNAUTHORIZED = 401
 """The HTTP status of an upgrade turned away for its token."""
 
+FORBIDDEN = 403
+"""The HTTP status of an upgrade turned away, under mutual TLS, for a revoked certificate."""
+
 UNAVAILABLE = 503
 """The HTTP status of an upgrade turned away as the control plane shuts down."""
 
@@ -32,6 +36,15 @@ that showed no certificate, which tells it from a token turned away."""
 
 DEFAULT_MAX_MESSAGE_MB = 64
 """The largest message either way, in MiB, unless the server settings say otherwise."""
+
+LOCALHOST = "localhost"
+"""The hostname of this machine's loopback interface."""
+
+KEY_READABLE = (
+    "The private key can be read by others. {path} must be readable by you alone: run"
+    " chmod 600 {path}."
+)
+"""A private key at ``path`` others can read, which neither side will use."""
 
 
 def bearer_header(token: str) -> dict[str, str]:
@@ -43,3 +56,20 @@ def bearer_token(headers: Mapping[str, str] | None) -> str:
     """The token in a ``Bearer`` authorization header; empty when there isn't one."""
     scheme, _, token = (headers or {}).get("authorization", "").partition(" ")
     return token.strip() if scheme.lower() == "bearer" else ""
+
+
+def is_loopback(host: str) -> bool:
+    """Whether ``host`` is ``localhost`` or a loopback address, reachable from this machine
+    alone."""
+    if host.lower() == LOCALHOST:
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def too_open(mode: int) -> bool:
+    """Whether a file of ``mode`` lets its group or others in, as a private key or token file
+    mustn't."""
+    return bool(mode & 0o077)

@@ -47,6 +47,7 @@ from orbit.agent.external.client_certs import (
 from orbit.agent.external.embedded_server import EmbeddedServer
 from orbit.protocol import (
     CERTIFICATE_CHALLENGE,
+    FORBIDDEN,
     GOING_AWAY,
     INVALID,
     MESSAGE_TOO_BIG,
@@ -419,7 +420,8 @@ class ControlPlaneServer:
             return self._no_certificate()
         fingerprint = client_fingerprint(der)
         if is_revoked(fingerprint, self.revoked()):
-            return PlainTextResponse(tls_messages.REVOKED.format(fingerprint=fingerprint), 403)
+            refusal = tls_messages.REVOKED.format(fingerprint=fingerprint)
+            return PlainTextResponse(refusal, FORBIDDEN)
         return None
 
     async def _websocket(self, websocket: WebSocket) -> None:

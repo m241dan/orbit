@@ -3,7 +3,6 @@ TLS a private key readable by its owner alone, matching a certificate that's val
 under mutual TLS a client CA that can be read; and how a frontend on this machine reaches it."""
 
 import ssl
-import stat
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -15,12 +14,12 @@ from orbit.agent.domain.server import (
     LocalTls,
     ServerSettings,
     certificate_dates,
-    is_loopback,
     local_candidates,
     local_hostname,
     missing_tls_key,
 )
 from orbit.agent.external import tls_messages
+from orbit.protocol.transport import is_loopback, too_open
 
 
 class TlsError(Exception):
@@ -78,7 +77,7 @@ def _check_key(path: Path) -> None:
         data = path.read_bytes()
     except OSError as exc:
         raise TlsError(_unreadable(path, exc.strerror or str(exc))) from None
-    if stat.S_IMODE(mode) & 0o077:
+    if too_open(mode):
         raise TlsError(tls_messages.KEY_READABLE.format(path=path))
     try:
         load_pem_private_key(data, password=None)

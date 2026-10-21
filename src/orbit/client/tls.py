@@ -1,15 +1,12 @@
 """How a frontend secures its connection: TLS that always verifies the control plane, showing
 a client certificate if it has one, and plaintext only to this machine."""
 
-import ipaddress
 import ssl
-import stat
 from pathlib import Path
 from urllib.parse import urlsplit
 
 from orbit.client import messages
-
-_LOCALHOST = "localhost"
+from orbit.protocol.transport import is_loopback, too_open
 
 
 class CaUnreadable(Exception):
@@ -67,7 +64,7 @@ def _load_client_certificate(context: ssl.SSLContext, cert: Path | None, key: Pa
 def _check_key(path: Path) -> None:
     """Raises :class:`ClientCertUnusable` if others can read the private key at ``path``, and
     ``OSError`` if it can't be found."""
-    if stat.S_IMODE(path.stat().st_mode) & 0o077:
+    if too_open(path.stat().st_mode):
         raise ClientCertUnusable(messages.KEY_READABLE.format(path=path))
 
 
@@ -76,16 +73,5 @@ def refuse_plaintext(url: str) -> None:
     loopback, which would carry the token unencrypted."""
     parts = urlsplit(url)
     host = parts.hostname or ""
-    if parts.scheme == "ws" and not _is_loopback(host):
+    if parts.scheme == "ws" and not is_loopback(host):
         raise PlaintextRefused(messages.PLAINTEXT_NOT_LOOPBACK.format(url=url, host=host))
-
-
-def _is_loopback(host: str) -> bool:
-    """Whether ``host`` is ``localhost`` or a loopback address, reachable from this machine
-    alone."""
-    if host.lower() == _LOCALHOST:
-        return True
-    try:
-        return ipaddress.ip_address(host).is_loopback
-    except ValueError:
-        return False

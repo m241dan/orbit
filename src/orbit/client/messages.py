@@ -2,6 +2,8 @@
 says what's wrong, the rest names the URL or file and the fix. README.md's table of TLS and
 connection errors lists each first sentence."""
 
+from orbit.protocol.transport import KEY_READABLE as KEY_READABLE
+
 UNKNOWN_CA = (
     "The server's certificate isn't signed by a trusted CA. {url} showed a certificate this"
     " machine doesn't trust: pass --ca with the CA file that signed it, or set the remote's ca."
@@ -84,12 +86,6 @@ TOKEN_EXPECTED = (
     " --token-file rather than --cert and --key."
 )
 """A server at ``url`` that turned away a client showing a certificate rather than a token."""
-
-KEY_READABLE = (
-    "The private key can be read by others. {path} must be readable by you alone: run"
-    " chmod 600 {path}."
-)
-"""A client certificate's private key at ``path`` others can read."""
 
 CLIENT_CERT_UNREADABLE = (
     "The client certificate can't be used. {cert} with the key {key}: {reason}; check the paths"

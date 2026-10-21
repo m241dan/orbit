@@ -10,9 +10,7 @@ from websockets.http11 import Response
 
 from orbit.client import messages
 from orbit.client.handshake import handshake_failure
-from orbit.protocol import CERTIFICATE_CHALLENGE, UNAUTHORIZED, bearer_header
-
-_FORBIDDEN = 403  # As a control plane under mutual TLS refuses a revoked certificate.
+from orbit.protocol import CERTIFICATE_CHALLENGE, FORBIDDEN, UNAUTHORIZED, bearer_header
 
 
 class TokenRejected(Exception):
@@ -61,7 +59,7 @@ def _check_refusal(url: str, response: Response, token: str | None) -> None:
     if it wants a token, not a certificate, or a certificate the client didn't show, or the
     certificate is revoked.
     """
-    if response.status_code == _FORBIDDEN:
+    if response.status_code == FORBIDDEN:
         raise HandshakeRefused(messages.REVOKED.format(url=url))
     if response.status_code != UNAUTHORIZED:
         return

@@ -6,6 +6,7 @@ import stat
 from pathlib import Path
 
 from orbit.agent.external.private_files import create_private, write_private
+from orbit.protocol.transport import too_open
 
 TOKEN_FILE = "token"
 TOKEN_BYTES = 32
@@ -34,7 +35,7 @@ class TokenFile:
             return self._created()
         except OSError as exc:
             raise TokenError(f"Can't read the token file {self.path}: {exc}") from None
-        if stat.S_IMODE(mode) & 0o077:
+        if too_open(mode):
             raise TokenError(
                 f"The token file {self.path} can be read by others; run chmod 600 {self.path}."
             )

@@ -168,6 +168,7 @@ from orbit.protocol.threaded import ThreadedSession
 from orbit.protocol.transport import (
     CERTIFICATE_CHALLENGE,
     DEFAULT_MAX_MESSAGE_MB,
+    FORBIDDEN,
     GOING_AWAY,
     MESSAGE_TOO_BIG,
     NORMAL,
@@ -195,6 +196,7 @@ __all__ = [
     "DEFAULT_MAX_MESSAGE_MB",
     "DEPRECATED_MESSAGES",
     "ERROR_CODES",
+    "FORBIDDEN",
     "GIT_FAILED",
     "GOING_AWAY",
     "INCOMPATIBLE",

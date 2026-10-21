@@ -2,6 +2,8 @@
 sentence says what's wrong, the rest names the setting or file and the fix. README.md's table
 of TLS and connection errors lists each first sentence."""
 
+from orbit.protocol.transport import KEY_READABLE as KEY_READABLE
+
 MISSING_FILE = (
     "The TLS mode is missing a file. tls = {mode!r} needs {key}: set {key} in [server] or pass"
     " --{flag}."
@@ -17,12 +19,6 @@ NOT_LOOPBACK = (
 
 UNREADABLE = "A TLS file can't be read. {path}: {reason}; check the path in [server] or the flag."
 """A certificate or key at ``path`` that can't be read, or isn't PEM, for ``reason``."""
-
-KEY_READABLE = (
-    "The private key can be read by others. {path} must be readable by you alone: run"
-    " chmod 600 {path}."
-)
-"""A private key at ``path`` others can read."""
 
 KEY_MISMATCH = (
     "The certificate and key don't match. {key} isn't the private key of {cert}: give the key"
