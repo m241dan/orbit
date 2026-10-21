@@ -8,9 +8,10 @@ and at a fix that ends in error, which must run before anything puts its work as
 
 import asyncio
 from collections.abc import Collection
+from functools import partial
 from typing import Literal
 
-from orbit.agent.application.agent_run import AgentRun, Outcome, ended, see_to_end, tree_failed
+from orbit.agent.application.agent_run import AgentRun, Outcome, UserStop, ended, run_task_to_end
 from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.landing import Lander
 from orbit.agent.application.review_lane import ReviewLane
@@ -21,8 +22,6 @@ from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.checks import ChecksProposal
 from orbit.agent.domain.commits import commit_message, configure_message
 from orbit.agent.domain.endings import (
-    BUG,
-    CANCELLED,
     STOPPED_BY_YOU,
     WORK_GONE,
     gave_up,
@@ -93,8 +92,9 @@ class WorkLane:
         return self._board.next_runnable(skip=tried, exclude=exclude)
 
     async def run(self) -> RunEnd:
-        """Run the tasks waiting, in order, until none are left, one is cancelled, or one ends
-        in error for the usage limit or as a fix; returns which."""
+        """Run the tasks waiting, in order, until none are left, the user stops one, or one
+        ends in error for the usage limit or as a fix; returns which. Any other cancel goes on
+        once the task running has ended."""
         tried: set[str] = set()
         self._stopped = False
         while (task_id := self.next_work(tried)) is not None:
@@ -127,30 +127,34 @@ class WorkLane:
             self._current = None
 
     async def _run_current(self, task_id: str) -> Outcome:
-        """Run task ``task_id`` through a new agent; returns how it ended."""
-        default = Outcome("error", reason=BUG)  # What a bug in the run leaves the task as.
-        outcome = await see_to_end(self._tasks, task_id, default, self._outcome(task_id))
+        """Run task ``task_id`` through a new agent, then tell the review lane how it ended;
+        returns how it did. The lane stopping leaves the review lane as it is."""
+        run = partial(self._run_started, task_id)
+        stop = UserStop(STOPPED_BY_YOU, self._cancelled)
+        outcome = await run_task_to_end(self._tasks, task_id, run, stop, self._publish)
         await self._report_to_review(task_id)
         return outcome
 
-    async def _outcome(self, task_id: str) -> Outcome:
-        """How task ``task_id``'s run through an agent, from its start, ended; anything
-        unexpected escapes."""
-        try:
-            await self._start(task_id)
-            return await self._run_agent(task_id)
-        except asyncio.CancelledError:
-            if self._verifier is not None:
-                await self._verifier.cancel()
-            # Read after the await: the user may have stopped the run meanwhile.
-            return ended("cancelled", (STOPPED_BY_YOU if self._stopped else CANCELLED, ""))
-        except RuntimeError as exc:  # Git or the tree's setup failed.
-            return await tree_failed(self._publish, exc)
+    async def _run_started(self, task_id: str) -> Outcome:
+        """How started task ``task_id``'s run through an agent ended; anything unexpected
+        escapes."""
+        await self._start(task_id)
+        return await self._run_agent(task_id)
+
+    async def _cancelled(self) -> None:
+        """The task running was cancelled: mark the step in progress cancelled. The user's stop
+        ends with the task, so the run is no longer being cancelled; any other cancel goes on."""
+        if self._verifier is not None:
+            await self._verifier.cancel()
+        # Read after the await: the user may have stopped the run meanwhile.
+        if self._stopped:
+            run = asyncio.current_task()
+            assert run is not None  # Cancelled, so a task runs.
+            run.uncancel()
 
     async def _start(self, task_id: str) -> None:
-        """Mark task ``task_id`` running, with every verification step pending again, and say
-        it started."""
-        await self._tasks.start(task_id)
+        """Say task ``task_id``, marked running, started, with every verification step pending
+        again."""
         if self.startup is not None:
             self.startup.release_panel()
         if self._verifier is not None:

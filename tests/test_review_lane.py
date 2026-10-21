@@ -891,3 +891,25 @@ async def test_a_task_edited_back_to_pending_is_reviewed_with_its_batch() -> Non
     assert prompt.startswith("Review the 2 commits made for review batch-1")
     assert "ended without a commit" not in prompt
     assert [e for e in events if isinstance(e, ReviewStatus)][-1].open_batches == 0
+
+
+async def test_closing_the_session_mid_suggestion_leaves_its_batch_as_it_was() -> None:
+    working = asyncio.Event()
+
+    async def works_forever(call: Call) -> TurnEndReason:
+        await call("get_task")
+        working.set()
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+    session, _, _ = session_for(
+        claims_done, works_forever, reviewers=(suggests("Add tests"),), tree=FakeTree(), review=True
+    )
+    await start(session)
+    await asyncio.wait_for(working.wait(), 10)
+    lane = lane_of(session)
+    before = lane.planner.snapshot()
+    await session.close()
+    assert lane.planner.snapshot() == before
+    roles = [t.task.role for t in board_of(session).tasks]
+    assert roles == ["coder", "reviewer", "coder"]

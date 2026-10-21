@@ -64,6 +64,7 @@ from tests.agent_fakes import (
     desk_of,
     frontend,
     greet,
+    lane_of,
     payloads,
     planner_turn,
     publish,
@@ -436,7 +437,7 @@ async def test_a_review_ending_while_halted_starts_no_work_on_its_fixes() -> Non
     assert len(coders) == 1  # The user's task, but none for the fix.
 
 
-async def test_a_fix_cancelled_by_the_halt_leaves_its_batchs_review_waiting() -> None:
+async def test_a_fix_cancelled_by_the_halt_leaves_its_batch_waiting_for_it() -> None:
     started = asyncio.Event()
     session, _, launcher = session_for(
         claims_done,
@@ -450,16 +451,25 @@ async def test_a_fix_cancelled_by_the_halt_leaves_its_batchs_review_waiting() ->
     )
     await send(session, AddTask(task=TASK))
     await send(session, RunTasks())
-    await asyncio.wait_for(started.wait(), 5)  # The last fix runs; its end makes a review due.
+    await asyncio.wait_for(started.wait(), 5)  # The last fix runs; its end would make a review due.
+    planned = lane_of(session).planner.snapshot()
     session._halt.fail(FailedWrite.EVENT_LOG, RuntimeError("disk full"))
     await envelopes_until(session, work_stopped_after_halt)
     await asyncio.sleep(0.05)
     reviewers = [la for la in launcher.launches if la.agent.role == "reviewer"]
-    reviews = [t for t in tasks_of(session).board.tasks if t.task.role == "reviewer"]
+    board = tasks_of(session).board
+    after = lane_of(session).planner.snapshot()
     await session.close()
 
     assert len(reviewers) == 1  # The first review, but none of the fixes.
-    assert [t.status for t in reviews] == ["completed", "pending"]
+    assert [(t.task.role, t.status) for t in board.tasks] == [
+        ("coder", "completed"),
+        ("reviewer", "completed"),
+        ("coder", "completed"),
+        ("coder", "cancelled"),
+    ]
+    assert after == planned  # The batch still waits for its fix, which runs again next.
+    assert board.next_runnable() == board.tasks[-1].id
 
 
 # The halt itself

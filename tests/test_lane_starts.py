@@ -96,3 +96,19 @@ async def test_a_review_lane_cancelled_while_starting_a_review_cancels_it() -> N
     await gate.reached.wait()
     await lane.close()
     ended_and_free(tasks, task_id, CANCELLED)
+
+
+async def test_a_work_lane_cancelled_again_as_it_cancels_a_task_just_cancels_it() -> None:
+    gate = Gate(running)
+    tasks = Tasks(TaskBoard(), gate)
+    task_id = tasks.board.add(TaskSpec(prompt="a"))
+    lane = WorkLane(desk_for(gate), tasks, Verifier(verified(Steps()), tasks, gate), None)
+    run = asyncio.create_task(lane.run())
+    await gate.reached.wait()
+    gate.reached.clear()  # Hold again as the verification is marked cancelled.
+    gate.holds = lambda event: isinstance(event, VerificationChanged)
+    run.cancel()
+    await gate.reached.wait()
+    run.cancel()
+    await asyncio.gather(run, return_exceptions=True)
+    ended_and_free(tasks, task_id, CANCELLED)

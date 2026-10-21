@@ -9,14 +9,14 @@ user what they make of it, which a :class:`ProposalTrial` does.
 """
 
 import asyncio
-from collections.abc import Awaitable, Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from contextlib import suppress
 from dataclasses import dataclass
 from functools import partial
 from typing import Any, Literal
 
 from orbit.agent.application.desk import AgentDesk, Tool, dispatch, report_progress
-from orbit.agent.application.lanes import stop
+from orbit.agent.application.lanes import being_cancelled, stop
 from orbit.agent.application.ports import Publish, Reply
 from orbit.agent.application.proposal_trial import ProposalTrial
 from orbit.agent.application.tasks import Tasks
@@ -26,7 +26,7 @@ from orbit.agent.domain.agents import Agent, bootstrap_prompt
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.checks import ChecksProposal, parse_proposal
 from orbit.agent.domain.config_errors import ConfigError
-from orbit.agent.domain.endings import Ending, bug, error, run_ending, unaccepted
+from orbit.agent.domain.endings import CANCELLED, Ending, bug, error, run_ending, unaccepted
 from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.roles import (
     COMPLETE_TASK,
@@ -121,6 +121,55 @@ async def tree_failed(publish: Publish, exc: RuntimeError) -> Outcome:
     return ended("error", error(str(exc)))
 
 
+async def _nothing() -> None:
+    """Clean up nothing."""
+
+
+@dataclass(frozen=True)
+class UserStop:
+    """How a lane's task the user stops ends: cancelled for ``reason``, once ``cleanup`` has
+    run. ``cleanup`` runs however the task is cancelled."""
+
+    reason: str
+    cleanup: Callable[[], Awaitable[None]] = _nothing
+
+
+async def run_task_to_end(
+    tasks: Tasks,
+    task_id: str,
+    run: Callable[[], Awaitable[Outcome]],
+    stop: UserStop,
+    publish: Publish,
+) -> Outcome:
+    """How task ``task_id`` of ``tasks``, started and then ``run``, ended, recorded as its end.
+    Stopped on its own, it ends as ``stop`` says; when the lane itself is stopping, it ends as
+    cancelled and the cancellation goes on. A tree failure is published with ``publish``."""
+    default = ended("cancelled", (CANCELLED, ""))  # What the lane stopping leaves it as.
+    return await see_to_end(
+        tasks, task_id, default, _run_from_start(tasks, task_id, run, stop, publish)
+    )
+
+
+async def _run_from_start(
+    tasks: Tasks,
+    task_id: str,
+    run: Callable[[], Awaitable[Outcome]],
+    stop: UserStop,
+    publish: Publish,
+) -> Outcome:
+    """How task ``task_id`` of ``tasks``, from its start, ended; anything unexpected escapes."""
+    try:
+        await tasks.start(task_id)
+        return await run()
+    except asyncio.CancelledError:
+        await stop.cleanup()
+        if being_cancelled():  # The lane itself is stopping, not just this task.
+            raise
+        return ended("cancelled", (stop.reason, ""))
+    except RuntimeError as exc:  # Git or the tree failed.
+        return await tree_failed(publish, exc)
+
+
 @dataclass(frozen=True)
 class _Proposal:
     """Checks the agent proposed, and the call waiting for orbit's answer."""
@@ -138,12 +187,6 @@ def _answer(claim: "asyncio.Future[Reply] | None", reply: Reply) -> None:
 def _cancel(claim: "asyncio.Future[Reply] | None") -> None:
     """Answer ``claim``, if it's still waiting, with the reply that the task was cancelled."""
     _answer(claim, Reply("The task was cancelled.", is_error=True))
-
-
-def _cancelling() -> bool:
-    """Whether the task running now is being cancelled."""
-    task = asyncio.current_task()
-    return task is not None and task.cancelling() > 0
 
 
 def _fail(claim: "asyncio.Future[Reply] | None", exc: BaseException) -> None:
@@ -467,7 +510,7 @@ class AgentRun:
         try:
             passed, output = await check
         except asyncio.CancelledError:
-            if _cancelling():  # The call was cancelled, not the run ended.
+            if being_cancelled():  # The call was cancelled, not the run ended.
                 raise
             return Reply("The run ended before the check finished.", is_error=True)
         finally:
