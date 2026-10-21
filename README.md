@@ -1011,7 +1011,7 @@ serve` makes it on first start, 32 random bytes, in a file readable by you alone
 after, making its directory readable by you alone if it has to make it. The directory must not
 be writable by others, who could replace the token with one they know: a token file in a directory
 others can write, or a token file others can read, stops it with status 2 and the `chmod 700` or
-`chmod 600` that fixes it. Two `orbit serve`s making the token at once agree on it: the first to
+`chmod 600` that fixes it (under mTLS, which asks for no token, it's never read or made). Two `orbit serve`s making the token at once agree on it: the first to
 write it wins, and the other uses that one. The
 token grants full control of the control plane: anyone who has it can run agents in your
 repository with the access you give them. It's never printed or logged; don't share it. To connect
@@ -1106,7 +1106,8 @@ needs `client_ca` too, the CA that signs client certificates. The TLS handshake 
 certificate and refuses one that CA didn't sign before any WebSocket opens; a client that shows
 none is let through the handshake, for the health checks, but turned away from the WebSocket,
 and every other path, with HTTP 401. Either way `orbit serve` prints a line saying why. The
-certificate is the client's identity: the token isn't asked for, and any sent is ignored. Each
+certificate is the client's identity: the token isn't asked for, and any sent is ignored, so
+`orbit serve` neither reads nor makes the token file, and its directory's permissions don't matter. Each
 connect line names the certificate's subject and SHA-256 fingerprint, such as `orbit-chat
 connected from 192.168.1.30:51234 as CN=laptop (3F:A2:…:9C)`.
 

@@ -97,14 +97,14 @@ def serve(
     given = {"host": host, "port": port, "tls": tls, "cert": cert, "key": key}
     settings = _server_settings(user_config, {**given, "client_ca": client_ca})
     token_file = TokenFile(user_config)
-    _token(token_file)
+    token = _frontend_token(token_file, settings)
     flags = _Backend(model, tools, verify, worktree, review, usage, new=False, name=None)
     with _serving(flags, added, state, user_config) as serving:
         logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
         parts = _ServeParts(
             serving.build,
             settings,
-            _current_token(token_file),
+            token,
             _current_revoked(user_config, settings.revoked),
             RunFile(state),
             _local_tls(settings, Path.cwd()),
@@ -207,6 +207,24 @@ def _local_tls(settings: ServerSettings, root: Path) -> LocalTls | None:
     except LocalDiscoveryUnavailable as exc:
         typer.echo(f"Warning: {exc}", err=True)
         return None
+
+
+def _frontend_token(token_file: TokenFile, settings: ServerSettings) -> Callable[[], str]:
+    """What gives the token frontends show the server ``settings`` serve, from ``token_file``,
+    made if there's none; under mutual TLS, which ignores any token, an empty one, leaving the
+    file alone.
+
+    Exits with status 2 if the token file is needed and can't be used.
+    """
+    if settings.tls == "mtls":
+        return _no_token
+    _token(token_file)
+    return _current_token(token_file)
+
+
+def _no_token() -> str:
+    """No token, for a server under mutual TLS, where none is asked for."""
+    return ""
 
 
 def _token(token_file: TokenFile) -> str:

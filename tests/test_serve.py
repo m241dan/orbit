@@ -26,6 +26,7 @@ from websockets.sync.client import ClientConnection, connect
 
 from orbit.agent import (
     RunFile,
+    ServerSettings,
     TokenFile,
     WorkspaceHost,
     WorkspaceLock,
@@ -92,10 +93,10 @@ def config_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
 @dataclass
 class Frontend:
     """A frontend run on a thread of its own against the ``orbit serve`` whose run file is in
-    ``state``, showing the token in ``config_dir``: it says Hello and attaches as ``greet``
-    does, does ``work`` and stops the server with SIGTERM, noting what it saw. It stops the
-    server however its work ends, so a failure on its thread fails the test rather than leaving
-    the server running."""
+    ``state``, showing the token in ``config_dir`` if there is one: it says Hello and attaches
+    as ``greet`` does, does ``work`` and stops the server with SIGTERM, noting what it saw. It
+    stops the server however its work ends, so a failure on its thread fails the test rather
+    than leaving the server running."""
 
     state: Path
     config_dir: Path
@@ -127,10 +128,10 @@ class Frontend:
 
     def _talk(self) -> None:
         self.run_file = self.listening(self.state)
-        token = (self.config_dir / "token").read_text().strip()
+        token = self.config_dir / "token"
         # A server listening on every address is reached on the one its certificate names.
         url = str(self.run_file["url"]).replace("//0.0.0.0:", "//localhost:")
-        headers = {"Authorization": f"Bearer {token}"}
+        headers = {"Authorization": f"Bearer {token.read_text().strip()}"} if token.exists() else {}
         with connect(url, additional_headers=headers, ssl=self.trust) as ws:
             self.events = self.greet(ws) + self.work(ws)
             self._stop()
@@ -732,6 +733,45 @@ def test_serve_over_mtls_names_the_client_certificate_and_revokes_it_without_res
     assert statuses == [403]
     assert f"as CN=laptop ({fingerprint})." in output
     assert f"Frontends show a client certificate {ca.path} signed." in output
+
+
+def test_serve_over_mtls_neither_needs_nor_makes_a_token_file(
+    state: Path, config_dir: Path, tmp_path: Path
+) -> None:
+    ca = make_ca(tmp_path)
+    files = make_server(ca, tmp_path)
+    client = make_client(ca, tmp_path)
+    _mtls_config(config_dir, ca, files)
+    config_dir.chmod(0o777)  # Where a token file would be refused.
+    frontend = Frontend(state, config_dir, trust=_trusting(ca, client))
+    served(frontend)
+
+    assert [type(e) for e in frontend.events] == ATTACHED
+    assert not (config_dir / "token").exists()
+
+
+def test_under_mtls_frontends_are_given_no_token_and_the_token_file_is_left_alone(
+    config_dir: Path,
+) -> None:
+    settings = ServerSettings(tls="mtls", cert="c.pem", key="k.pem", client_ca="ca.pem")
+    token = serve._frontend_token(TokenFile(config_dir), settings)
+
+    assert token() == ""
+    assert not config_dir.exists()
+
+
+def test_serve_over_tls_still_refuses_a_token_file_it_cant_use(
+    config_dir: Path, tmp_path: Path
+) -> None:
+    files = make_server(make_ca(tmp_path), tmp_path)
+    config_dir.mkdir(mode=0o777)
+    config_dir.chmod(0o777)
+    flags = ["--tls", "tls", "--cert", str(files.cert), "--key", str(files.key), "--port", "0"]
+    result = runner.invoke(app, ["serve", *QUIET, *flags])
+
+    assert result.exit_code == 2
+    assert f"chmod 700 {config_dir}" in result.output
+    assert not (config_dir / "token").exists()
 
 
 def test_a_chat_discovers_a_control_plane_serving_mtls_showing_the_local_client_certificate(
