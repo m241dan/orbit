@@ -5,6 +5,7 @@ from dataclasses import fields
 from orbit.agent.domain.reviews import (
     DIFF_LIMIT,
     BatchSnapshot,
+    LaneSnapshot,
     PlannerSnapshot,
     ReviewJob,
     ReviewLimits,
@@ -38,7 +39,7 @@ def planner(rounds: int = 3, cap: int = 5) -> ReviewPlanner:
 def test_a_commit_from_the_users_task_is_reviewed_in_round_zero() -> None:
     reviews = planner()
     job = reviews.landed(state("1"), "abc123")
-    assert job == ReviewJob(commits=("abc123",), round=0, batch=None)
+    assert job == ReviewJob(commits=("abc123",), round=0, batch=None, reviewed=("1",))
 
 
 def test_a_review_opens_a_batch_its_suggestions_join_one_round_on() -> None:
@@ -63,7 +64,7 @@ def test_a_batch_is_reviewed_once_all_its_tasks_have_finished() -> None:
     batch = filled(reviews, "2", "3")
     assert reviews.landed(state("2", origin="review", batch=batch), "c2") is None
     job = reviews.landed(state("3", origin="review", batch=batch), "c3")
-    assert job == ReviewJob(commits=("c2", "c3"), round=1, batch=batch)
+    assert job == ReviewJob(commits=("c2", "c3"), round=1, batch=batch, reviewed=("2", "3"))
 
 
 def test_batch_tasks_that_end_without_a_commit_still_finish_the_batch() -> None:
@@ -71,7 +72,7 @@ def test_batch_tasks_that_end_without_a_commit_still_finish_the_batch() -> None:
     batch = filled(reviews, "2", "3")
     assert reviews.ended(state("2", status="gave_up", origin="review", batch=batch)) is None
     job = reviews.landed(state("3", origin="review", batch=batch), "c3")
-    assert job == ReviewJob(commits=("c3",), round=1, batch=batch, missing=("2",))
+    assert job == ReviewJob(commits=("c3",), round=1, batch=batch, missing=("2",), reviewed=("3",))
 
 
 def test_a_batch_whose_tasks_all_failed_is_not_reviewed() -> None:
@@ -148,7 +149,26 @@ def test_a_task_whose_fix_carries_its_work_on_is_not_missing() -> None:
     batch = filled(reviews, "2", "3")  # Task 3 fixes task 2.
     assert reviews.ended(state("2", status="unverified", origin="review", batch=batch)) is None
     job = reviews.landed(state("3", origin="review", batch=batch), "c3")
-    assert job == ReviewJob(commits=("c3",), round=1, batch=batch)
+    assert job == ReviewJob(commits=("c3",), round=1, batch=batch, reviewed=("3",))
+
+
+def test_a_batch_review_names_the_tasks_that_landed_in_task_order() -> None:
+    reviews = planner()
+    batch = filled(reviews, "2", "3", "4")
+    assert reviews.landed(state("4", origin="review", batch=batch), "c4") is None
+    assert reviews.ended(state("3", status="unverified", origin="review", batch=batch)) is None
+    job = reviews.landed(state("2", origin="review", batch=batch), "c2")
+    assert job is not None and job.reviewed == ("2", "4")
+
+
+def test_a_super_review_reviews_no_particular_task() -> None:
+    assert planner().super_review("abc").reviewed == ()
+
+
+def test_a_lane_snapshot_saved_before_jobs_named_their_tasks_still_loads() -> None:
+    saved = {"planner": {}, "jobs": {"2": {"commits": ["c1"], "round": 0, "batch": None}}}
+    snapshot = LaneSnapshot.model_validate(saved)
+    assert snapshot.jobs["2"] == ReviewJob(commits=("c1",), round=0, batch=None)
 
 
 def test_landing_after_its_batch_closed_is_not_reviewed_again() -> None:
@@ -241,7 +261,7 @@ def test_a_batch_is_not_reviewed_while_its_review_is_still_suggesting() -> None:
     reviews.added(batch, "3")
     assert reviews.landed(state("3", origin="review", batch=batch), "c3") is None
     job = reviews.review_ended(batch)
-    assert job == ReviewJob(commits=("c2", "c3"), round=1, batch=batch)
+    assert job == ReviewJob(commits=("c2", "c3"), round=1, batch=batch, reviewed=("2", "3"))
     assert batch not in reviews.open_batches
 
 
@@ -252,7 +272,7 @@ def test_a_batch_still_working_when_its_review_ends_is_reviewed_later() -> None:
     assert reviews.review_ended(batch) is None
     assert batch in reviews.open_batches
     job = reviews.landed(state("2", origin="review", batch=batch), "c2")
-    assert job == ReviewJob(commits=("c2",), round=1, batch=batch)
+    assert job == ReviewJob(commits=("c2",), round=1, batch=batch, reviewed=("2",))
 
 
 def test_suggesting_into_a_closed_batch_is_refused() -> None:
@@ -285,7 +305,7 @@ def test_removing_a_batchs_last_unfinished_task_has_the_batch_reviewed_without_i
     batch = filled(reviews, "2", "3")
     assert reviews.landed(state("2", origin="review", batch=batch), "c2") is None
     job = reviews.removed(state("3", status="pending", origin="review", batch=batch))
-    assert job == ReviewJob(commits=("c2",), round=1, batch=batch)
+    assert job == ReviewJob(commits=("c2",), round=1, batch=batch, reviewed=("2",))
     assert reviews.open_batches == ()
 
 
@@ -294,7 +314,7 @@ def test_after_a_removal_the_batch_is_reviewed_once_the_rest_finish() -> None:
     batch = filled(reviews, "2", "3")
     assert reviews.removed(state("2", status="pending", origin="review", batch=batch)) is None
     job = reviews.landed(state("3", origin="review", batch=batch), "c3")
-    assert job == ReviewJob(commits=("c3",), round=1, batch=batch)
+    assert job == ReviewJob(commits=("c3",), round=1, batch=batch, reviewed=("3",))
 
 
 def test_removing_a_batchs_only_task_closes_it_with_nothing_to_review() -> None:
@@ -330,7 +350,7 @@ def test_a_reopened_task_holds_its_batch_open_until_it_finishes_again() -> None:
     reviews.reopened(state("2", status="pending", origin="review", batch=batch))
     assert reviews.landed(state("3", origin="review", batch=batch), "c3") is None
     job = reviews.landed(state("2", origin="review", batch=batch), "c2")
-    assert job == ReviewJob(commits=("c3", "c2"), round=1, batch=batch)
+    assert job == ReviewJob(commits=("c3", "c2"), round=1, batch=batch, reviewed=("2", "3"))
 
 
 def test_a_reopened_task_that_had_landed_is_waited_for_again() -> None:
@@ -348,7 +368,7 @@ def test_reopening_a_task_outside_any_open_batch_changes_nothing() -> None:
     reviews.reopened(state("1", status="pending"))
     reviews.reopened(state("9", status="pending", origin="review", batch="batch-7"))
     job = reviews.landed(state("2", origin="review", batch=batch), "c2")
-    assert job == ReviewJob(commits=("c2",), round=1, batch=batch)
+    assert job == ReviewJob(commits=("c2",), round=1, batch=batch, reviewed=("2",))
 
 
 def busy() -> ReviewPlanner:
@@ -399,6 +419,7 @@ def test_a_batch_thawed_from_a_snapshot_freezes_back_to_it() -> None:
         finished=frozenset({"5"}),
         commits=("c5",),
         missing=("6",),
+        landed=("5",),
         filling=False,
     )
     assert _Batch.thawed(snapshot).frozen() == snapshot

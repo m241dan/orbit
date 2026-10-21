@@ -236,9 +236,11 @@ Each session in a `Catalog` carries its state as it is when the Catalog is sent:
 - `viewers`: how many welcomed connections view it: the open session's, and, for another
   session, those attached to it (see [Attaching](#attaching)).
 - `activity`: what's in progress in the open session, in this order, each an
-  `Activity(kind, task_id)`: a `task_run` of task `task_id`, a `review` by review task
-  `task_id`, a `planner` turn and the `startup_check`, whose `task_id` is null. It's empty for
-  any other session. The startup check shows here though it leaves the state `idle`.
+  `Activity(kind, task_id)`: a `task_run` of task `task_id`, a `review` of task `task_id`, the
+  task whose work it reviews, a `planner` turn and the `startup_check`, whose `task_id` is null.
+  A review of several tasks' work, such as a batch's, is one `review` per task, in task order;
+  a super review reviews no particular task, so it's one `review` whose `task_id` is null. It's
+  empty for any other session. The startup check shows here though it leaves the state `idle`.
 
 Whenever one of them changes for a session, every welcomed connection gets
 `SessionStateChanged(session, active, state, viewers, activity)` with the new values: a task run,

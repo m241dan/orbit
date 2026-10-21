@@ -10,6 +10,7 @@ from orbit.agent.application.connection import SessionConnection
 from orbit.agent.domain.sessions import SessionRecord
 from orbit.protocol import (
     PLANNER,
+    SUPER_REVIEW,
     ActivateSession,
     Activity,
     AddTask,
@@ -17,6 +18,7 @@ from orbit.protocol import (
     Command,
     CommandEnvelope,
     Event,
+    FireTrigger,
     RunTasks,
     SendMessage,
     Session,
@@ -180,10 +182,33 @@ async def test_a_review_keeps_the_open_session_running_its_review_until_it_ends(
     await session.close()
 
     work = Activity(kind="task_run", task_id="1")
-    review = Activity(kind="review", task_id="2")
+    review = Activity(kind="review", task_id="1")
     assert (changes(started), changes(during), changes(ended)) == (
         [running(work)],
         [running(review)],
+        [state("idle")],
+    )
+
+
+async def test_a_super_review_runs_as_one_review_of_no_particular_task() -> None:
+    gate = asyncio.Event()
+
+    async def gated_review(call: Call) -> TurnEndReason:
+        await call("get_task")
+        await gate.wait()
+        await call("complete_task", summary="Reviewed")
+        return "completed"
+
+    session, _, _ = session_for(reviewers=(gated_review,), tree=FakeTree(), review=True)
+    await greeted_and_counted(session)
+    await send(session, FireTrigger(trigger=SUPER_REVIEW))
+    started = await asyncio.wait_for(until(session, running_now), 5)
+    gate.set()
+    ended = await asyncio.wait_for(until(session, idle_again), 5)
+    await session.close()
+
+    assert (changes(started), changes(ended)) == (
+        [running(Activity(kind="review"))],
         [state("idle")],
     )
 

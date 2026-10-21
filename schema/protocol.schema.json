@@ -43,7 +43,7 @@
       "type": "object"
     },
     "Activity": {
-      "description": "Something in progress in a session, of ``kind``; ``task_id`` is the task a task run runs\nor a review reviews as, and none otherwise.",
+      "description": "Something in progress in a session, of ``kind``; ``task_id`` is the task a task run runs\nor the task whose work a review reviews, and none otherwise, such as for a super review.",
       "properties": {
         "kind": {
           "enum": [

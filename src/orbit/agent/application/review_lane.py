@@ -84,10 +84,15 @@ class ReviewLane:
         return self._background.running
 
     @property
-    def reviewing(self) -> str | None:
-        """The review task running or, before the lane picks one, the one it will pick; none
-        when there's none."""
-        return self._reviewing or self._next_review(self._spent())
+    def reviewing(self) -> tuple[str, ...] | None:
+        """The tasks whose work the review running or, before the lane picks one, the one it
+        will pick reviews, in task order; none when there's no review, and no tasks for a
+        review of no particular task."""
+        review = self._reviewing or self._next_review(self._spent())
+        if review is None:
+            return None
+        job = self._jobs.get(review)
+        return job.reviewed if job else ()
 
     def on_stopped(self, stopped: Callable[[], None]) -> None:
         """Have ``stopped`` called whenever the reviews stop running."""

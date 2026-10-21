@@ -51,7 +51,7 @@ def test_the_startup_check_alone_refuses_nothing_and_is_idle() -> None:
 
 def test_everything_in_progress_is_reported_in_order_with_its_task() -> None:
     activity = Activity(
-        tasks=True, review=True, planner=True, startup_check=True, task_id="t1", reviewing="t2"
+        tasks=True, review=True, planner=True, startup_check=True, task_id="t1", reviewing=("t2",)
     )
 
     assert reported(activity) == (
@@ -63,7 +63,7 @@ def test_everything_in_progress_is_reported_in_order_with_its_task() -> None:
 
 
 def test_only_what_is_in_progress_is_reported() -> None:
-    activity = Activity(planner=True, task_id="t1", reviewing="t2")
+    activity = Activity(planner=True, task_id="t1", reviewing=("t2",))
 
     assert reported(activity) == (Reported(kind="planner"),)
 
@@ -74,3 +74,16 @@ def test_nothing_in_progress_reports_nothing() -> None:
 
 def test_a_task_run_or_review_whose_task_is_not_known_yet_is_not_reported() -> None:
     assert reported(Activity(tasks=True, review=True)) == ()
+
+
+def test_a_review_of_several_tasks_is_reported_once_per_task_in_order() -> None:
+    activity = Activity(review=True, reviewing=("3", "5"))
+
+    assert reported(activity) == (
+        Reported(kind="review", task_id="3"),
+        Reported(kind="review", task_id="5"),
+    )
+
+
+def test_a_review_of_no_particular_task_is_reported_once_without_one() -> None:
+    assert reported(Activity(review=True, reviewing=())) == (Reported(kind="review"),)

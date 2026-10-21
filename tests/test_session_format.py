@@ -23,13 +23,14 @@ BUMP = (
     "and a test that the old fixture migrates to it."
 )
 
-# Never edit these for a format change: they're what orbits at versions 1 to 4 wrote, and
-# they still need to read. A new version gets its own fixture (session-v5.json) and a
+# Never edit these for a format change: they're what orbits at versions 1 to 5 wrote, and
+# they still need to read. A new version gets its own fixture (session-v6.json) and a
 # migration test from the last one.
 SESSION_V1 = FIXTURES / "session-v1.json"
 SESSION_V2 = FIXTURES / "session-v2.json"
 SESSION_V3 = FIXTURES / "session-v3.json"
 SESSION_V4 = FIXTURES / "session-v4.json"
+SESSION_V5 = FIXTURES / "session-v5.json"
 
 COUNT_CHANGED = (
     "The saved review count format changed. Don't edit REVIEW_COUNT_V1: the counts orbits "
@@ -99,7 +100,9 @@ def tasks() -> tuple[TaskState, ...]:
     )
 
 
-def reviews() -> LaneSnapshot:
+def reviews(landed: tuple[str, ...] = (), reviewed: tuple[str, ...] = ()) -> LaneSnapshot:
+    """The review lane's state, its batch's ``landed`` tasks and its job's ``reviewed`` ones
+    as version 5 keeps them."""
     batch = BatchSnapshot(
         round=2,
         cap=4,
@@ -107,13 +110,15 @@ def reviews() -> LaneSnapshot:
         finished=frozenset({"2"}),
         commits=("c3",),
         missing=("2",),
+        landed=landed,
         filling=False,
+    )
+    job = ReviewJob(
+        commits=("c1", "c2"), round=1, batch="b1", missing=("6",), whole=True, reviewed=reviewed
     )
     return LaneSnapshot(
         planner=PlannerSnapshot(paused=True, next_batch=3, batches={"b2": batch}),
-        jobs={
-            "3": ReviewJob(commits=("c1", "c2"), round=1, batch="b1", missing=("6",), whole=True)
-        },
+        jobs={"3": job},
         batches={"3": "b2"},
     )
 
@@ -127,9 +132,13 @@ def ended() -> tuple[TaskState, ...]:
     return tuple(state.model_copy(update=reasons.get(state.id, {})) for state in tasks())
 
 
-def expected(spent: Usage = SPENT, states: tuple[TaskState, ...] | None = None) -> SessionRecord:
+def expected(
+    spent: Usage = SPENT,
+    states: tuple[TaskState, ...] | None = None,
+    lane: LaneSnapshot | None = None,
+) -> SessionRecord:
     return SessionRecord(
-        version=4,
+        version=5,
         id="s-golden",
         name="Golden session",
         created=datetime(2026, 10, 7, 9, 5, tzinfo=UTC),
@@ -137,7 +146,7 @@ def expected(spent: Usage = SPENT, states: tuple[TaskState, ...] | None = None) 
         settings=Settings(model="opus", tool_access="full"),
         planner_conversation="conversation-1",
         tasks=tasks() if states is None else states,
-        reviews=reviews(),
+        reviews=reviews() if lane is None else lane,
         spent=spent,
     )
 
@@ -154,14 +163,23 @@ def test_a_version_3_session_file_migrates_to_tasks_without_reasons() -> None:
     assert parse_record(SESSION_V3.read_text(encoding="utf-8")) == expected()
 
 
-def test_a_version_4_session_file_reads_as_its_record() -> None:
+def test_a_version_4_session_file_migrates_to_reviews_without_their_tasks() -> None:
     assert parse_record(SESSION_V4.read_text(encoding="utf-8")) == expected(states=ended())
 
 
-def test_a_session_record_is_written_in_the_version_4_format() -> None:
-    written = json.loads(record_json(expected(states=ended())))
-    golden = json.loads(SESSION_V4.read_text(encoding="utf-8"))
-    assert written == golden, BUMP.format(fixture=SESSION_V4.name)
+def reviewing() -> SessionRecord:
+    """The golden record as version 5 keeps it, its reviews naming their tasks."""
+    return expected(states=ended(), lane=reviews(landed=("5",), reviewed=("1", "2")))
+
+
+def test_a_version_5_session_file_reads_as_its_record() -> None:
+    assert parse_record(SESSION_V5.read_text(encoding="utf-8")) == reviewing()
+
+
+def test_a_session_record_is_written_in_the_version_5_format() -> None:
+    written = json.loads(record_json(reviewing()))
+    golden = json.loads(SESSION_V5.read_text(encoding="utf-8"))
+    assert written == golden, BUMP.format(fixture=SESSION_V5.name)
 
 
 def test_a_version_1_review_count_reads_as_its_count() -> None:

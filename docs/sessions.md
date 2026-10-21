@@ -42,9 +42,9 @@ one row per workspace, or anything from `.orbit/config.toml`, which is read at s
 - **When.** A session is saved after every change, but only once it's used: once it has a task
   or you prompt the planner. Starting orbit and quitting leaves nothing behind.
 - **Format.** Each record carries a format version. Older versions are upgraded as they're read
-  (version 2 added what the session spent, version 3 dropped the review planner's rounds, and
-  version 4 added why each task ended badly); a newer one, or a record that isn't valid JSON or
-  doesn't fit the record, is unreadable. Records are kept as raw JSON text in their `sessions`
+  (version 2 added what the session spent, version 3 dropped the review planner's rounds,
+  version 4 added why each task ended badly, and version 5 the tasks each review reviews); a
+  newer one, or a record that isn't valid JSON or doesn't fit the record, is unreadable. Records are kept as raw JSON text in their `sessions`
   row, so an unreadable one stays as it was: it is listed with the reason, can be deleted, and is
   never opened, renamed or overwritten.
 - **Lifetime.** Sessions are kept until you delete one; no session is pruned, but a session's

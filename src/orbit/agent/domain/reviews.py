@@ -23,9 +23,10 @@ DIFF_LIMIT = 30000
 class ReviewJob:
     """A review to run: of ``commits``, which are work at ``round``.
 
-    ``batch`` is the batch whose work it is (``None`` for a commit of the user's task), and
-    ``missing`` the batch's tasks that ended without a commit. A ``whole`` review is a super
-    review: of the whole codebase at its one commit.
+    ``batch`` is the batch whose work it is (``None`` for a commit of the user's task),
+    ``missing`` the batch's tasks that ended without a commit, and ``reviewed`` the tasks that
+    landed the commits, in task order. A ``whole`` review is a super review: of the whole
+    codebase at its one commit, reviewing no particular task.
     """
 
     commits: tuple[str, ...]
@@ -33,6 +34,7 @@ class ReviewJob:
     batch: str | None
     missing: tuple[str, ...] = ()
     whole: bool = False
+    reviewed: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -58,6 +60,7 @@ class BatchSnapshot(BaseModel):
     finished: frozenset[str] = frozenset()
     commits: tuple[str, ...] = ()
     missing: tuple[str, ...] = ()
+    landed: tuple[str, ...] = ()
     filling: bool = True
 
 
@@ -69,7 +72,12 @@ class _Batch:
     finished: set[str] = field(default_factory=set)
     commits: list[str] = field(default_factory=list)
     missing: list[str] = field(default_factory=list)
+    landed: list[str] = field(default_factory=list)
     filling: bool = True  # Its review is still running, and may suggest more.
+
+    def reviewed(self) -> tuple[str, ...]:
+        """The batch's tasks that landed commits, in task order."""
+        return tuple(task for task in self.tasks if task in self.landed)
 
     def frozen(self) -> BatchSnapshot:
         """The batch as it stands, to save."""
@@ -80,6 +88,7 @@ class _Batch:
             finished=frozenset(self.finished),
             commits=tuple(self.commits),
             missing=tuple(self.missing),
+            landed=tuple(self.landed),
             filling=self.filling,
         )
 
@@ -93,6 +102,7 @@ class _Batch:
             finished=set(snapshot.finished),
             commits=list(snapshot.commits),
             missing=list(snapshot.missing),
+            landed=list(snapshot.landed),
             filling=snapshot.filling,
         )
 
@@ -222,11 +232,12 @@ class ReviewPlanner:
             if state.origin not in (MANUAL_ORIGIN, PLANNER_ORIGIN):
                 return None
             self.paused = False
-            return ReviewJob(commits=(commit,), round=0, batch=None)
+            return ReviewJob(commits=(commit,), round=0, batch=None, reviewed=(state.id,))
         batch = self._open.get(state.batch)
         if batch is None:
             return None
         batch.commits.append(commit)
+        batch.landed.append(state.id)
         batch.finished.add(state.id)
         return self._due(state.batch)
 
@@ -270,7 +281,13 @@ class ReviewPlanner:
         if batch.round >= self.limits.rounds:
             self.paused = True
             return None
-        return ReviewJob(tuple(batch.commits), batch.round, batch_id, tuple(batch.missing))
+        return ReviewJob(
+            tuple(batch.commits),
+            batch.round,
+            batch_id,
+            tuple(batch.missing),
+            reviewed=batch.reviewed(),
+        )
 
 
 def _normalized(text: str) -> str:

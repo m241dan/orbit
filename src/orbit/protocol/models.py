@@ -150,7 +150,7 @@ ActivityKind = Literal["task_run", "review", "planner", "startup_check"]
 
 class Activity(_Message):
     """Something in progress in a session, of ``kind``; ``task_id`` is the task a task run runs
-    or a review reviews as, and none otherwise."""
+    or the task whose work a review reviews, and none otherwise, such as for a super review."""
 
     kind: ActivityKind
     task_id: str | None = None
