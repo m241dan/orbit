@@ -69,9 +69,37 @@ def test_the_files_local_client_certificate_is_read(tmp_path: Path) -> None:
     )
 
 
+SHA256 = ":".join(["3F"] * 31 + ["9C"])
+"""A SHA-256 fingerprint, as ``orbit serve``'s connect line shows it."""
+
+
 def test_the_files_revoked_fingerprints_are_read(tmp_path: Path) -> None:
-    (tmp_path / "config.toml").write_text('[server]\nrevoked = ["AB:CD", "EF:01"]\n')
-    assert read_server(tmp_path).revoked == ("AB:CD", "EF:01")
+    other = "AB" * 32
+    (tmp_path / "config.toml").write_text(f'[server]\nrevoked = ["{SHA256}", "{other}"]\n')
+    assert read_server(tmp_path).revoked == (SHA256, other)
+
+
+@pytest.mark.parametrize(
+    "entry", [SHA256, SHA256.lower(), SHA256.replace(":", ""), SHA256.replace(":", " ")]
+)
+def test_a_full_sha256_fingerprint_is_revoked_in_any_accepted_form(entry: str) -> None:
+    assert ServerSettings(revoked=(entry,)).revoked == (entry,)
+
+
+@pytest.mark.parametrize(
+    "entry",
+    ["3F:A2:9C", SHA256[:-1] + "G", ":".join(["3F"] * 20)],
+    ids=["truncated", "not hex", "sha-1"],
+)
+def test_a_revoked_entry_that_isnt_a_sha256_fingerprint_is_refused_by_name(
+    tmp_path: Path, entry: str
+) -> None:
+    (tmp_path / "config.toml").write_text(f'[server]\nrevoked = ["{SHA256}", "{entry}"]\n')
+    with pytest.raises(ConfigError) as refused:
+        read_server(tmp_path)
+    message = str(refused.value)
+    assert "server.revoked" in message and repr(entry) in message
+    assert "SHA-256 fingerprint" in message and "-fingerprint -sha256" in message
 
 
 def test_revoked_must_hold_fingerprints(tmp_path: Path) -> None:

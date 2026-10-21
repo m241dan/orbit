@@ -1040,7 +1040,7 @@ cert = "/home/me/.config/orbit/tls/server.pem"      # the server certificate (--
 key = "/home/me/.config/orbit/tls/server-key.pem"   # its private key, chmod 600 (--key)
 client_ca = "/home/me/.config/orbit/tls/ca.pem"     # signs client certificates, for mtls (--client-ca)
 ca = "/home/me/.config/orbit/tls/ca.pem"            # the CA that signed cert
-revoked = []         # client certificate fingerprints refused under mtls
+revoked = []         # SHA-256 fingerprints of client certificates refused under mtls
 local_client_cert = "/home/me/.config/orbit/tls/local.pem"      # shown by chats here, under mtls
 local_client_key = "/home/me/.config/orbit/tls/local-key.pem"   # its private key, chmod 600
 ```
@@ -1136,7 +1136,10 @@ don't go with `--token-file`; one without the other, a key others can read (`chm
 files that can't be read or don't match stop it with status 2.
 
 To revoke a lost machine's certificate, add its fingerprint, as its connect line shows it (in
-either case, with or without colons), to `revoked` in `[server]`:
+either case, with or without colons), to `revoked` in `[server]`. Each entry must be a full
+SHA-256 fingerprint, all 64 hex digits, as the connect line or `openssl x509 -noout -fingerprint
+-sha256` shows it; one cut short, with a stray character or from SHA-1 could never match, so it's
+refused as invalid, naming the entry:
 
 ```toml
 [server]

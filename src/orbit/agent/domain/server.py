@@ -3,13 +3,14 @@ serves TLS, and what its run file says while it does."""
 
 import hashlib
 import ipaddress
+import re
 from collections.abc import Iterable
 from datetime import datetime, timedelta
 from enum import StrEnum
 from typing import Any, Literal
 from urllib.parse import urlsplit
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from orbit.agent.domain.config_errors import ConfigError, validation_problems
 from orbit.protocol import DEFAULT_MAX_MESSAGE_MB
@@ -87,9 +88,24 @@ class ServerSettings(TlsSettings):
     local_client_cert: str | None = None
     local_client_key: str | None = None
 
+    @field_validator("revoked")
+    @classmethod
+    def _sha256_fingerprints(cls, revoked: tuple[str, ...]) -> tuple[str, ...]:
+        for entry in revoked:
+            if not _SHA256.fullmatch(_bare(entry)):
+                raise ValueError(
+                    f"{entry!r} isn't a SHA-256 fingerprint: give all 64 hex digits, as orbit "
+                    "serve's connect line or `openssl x509 -noout -fingerprint -sha256` shows it"
+                )
+        return revoked
+
     @property
     def max_message_bytes(self) -> int:
         return self.max_message_mb * 1024 * 1024
+
+
+_SHA256 = re.compile(r"[0-9A-F]{64}")
+"""A SHA-256 fingerprint without colons or spaces, in uppercase."""
 
 
 def client_fingerprint(der: bytes) -> str:

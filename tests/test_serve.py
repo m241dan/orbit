@@ -31,7 +31,7 @@ from orbit.agent import (
     WorkspaceLock,
     WorkspaceOwner,
 )
-from orbit.agent.domain.server import client_fingerprint
+from orbit.agent.domain.server import client_fingerprint, is_revoked
 from orbit.cli import app, chat, serve
 from orbit.protocol import (
     PROTOCOL_VERSION,
@@ -729,12 +729,27 @@ def test_while_the_config_is_invalid_the_last_revoked_fingerprints_stay(
 ) -> None:
     config_dir.mkdir()
     path = config_dir / "config.toml"
-    path.write_text('[server]\nrevoked = ["AB:CD"]\n')
+    fingerprint = "AB" * 32
+    path.write_text(f'[server]\nrevoked = ["{fingerprint}"]\n')
     revoked = serve._current_revoked(config_dir, ())
-    assert revoked() == ("AB:CD",)
+    assert revoked() == (fingerprint,)
     path.write_text("[server]\nrevoked = 'all'\n")
-    assert revoked() == ("AB:CD",)
+    assert revoked() == (fingerprint,)
     assert "server.revoked" in caplog.text
+
+
+def test_a_revoked_entry_cut_short_while_serving_warns_and_keeps_the_last_fingerprints(
+    config_dir: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    config_dir.mkdir()
+    path = config_dir / "config.toml"
+    fingerprint = "AB" * 32
+    path.write_text(f'[server]\nrevoked = ["{fingerprint}"]\n')
+    revoked = serve._current_revoked(config_dir, ())
+    assert revoked() == (fingerprint,)
+    path.write_text(f'[server]\nrevoked = ["{fingerprint}", "3F:A2:9C"]\n')
+    assert is_revoked(fingerprint, revoked())
+    assert "server.revoked" in caplog.text and "'3F:A2:9C'" in caplog.text
 
 
 def test_serve_takes_its_tls_settings_from_the_config_file(
@@ -890,6 +905,15 @@ def test_serve_refuses_an_invalid_server_setting(config_dir: Path) -> None:
     result = runner.invoke(app, ["serve", *QUIET, "--add", "."])
     assert result.exit_code == 2
     assert f"{path}: server.port: " in result.output
+
+
+def test_serve_refuses_a_revoked_entry_that_isnt_a_sha256_fingerprint(config_dir: Path) -> None:
+    config_dir.mkdir()
+    path = config_dir / "config.toml"
+    path.write_text('[server]\nrevoked = ["3F:A2:9C"]\n')
+    result = runner.invoke(app, ["serve", *QUIET, "--add", "."])
+    assert result.exit_code == 2
+    assert f"{path}: server.revoked" in result.output and "'3F:A2:9C'" in result.output
 
 
 def test_a_rotated_token_admits_new_frontends_at_once_and_keeps_open_ones(
