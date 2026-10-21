@@ -50,6 +50,13 @@ TOKEN_REFUSED = (
 )
 """A token, read from the file at ``path``, the control plane turned away."""
 
+LOCAL_TOKEN_REFUSED = (
+    "The orbit serve running here refused the token. It came from {path}: give it the token"
+    " orbit serve uses, or pass --local to run one here."
+)
+"""A token, read from the file at ``path``, the control plane found on this machine turned
+away."""
+
 CLIENT_CERT_REQUIRED = (
     "The server requires a client certificate. {url} refused the connection, as a server under"
     " mutual TLS does for a client showing none: pass --cert and --key with a certificate its"
@@ -114,6 +121,7 @@ ALL = (
     PLAINTEXT_NOT_LOOPBACK,
     CA_UNREADABLE,
     TOKEN_REFUSED,
+    LOCAL_TOKEN_REFUSED,
     CLIENT_CERT_REQUIRED,
     CLIENT_CERT_REJECTED,
     REVOKED,

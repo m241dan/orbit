@@ -1176,6 +1176,7 @@ setting, file or URL:
 | Plaintext is refused beyond loopback. | Connect with `wss://` to a server serving TLS, or through an SSH tunnel to a loopback address. |
 | The CA file can't be read. | Check the path given to `--ca`, or the remote's `ca`, and that the file is a PEM certificate. |
 | The control plane refused the token. | Give it the token `orbit serve` uses: copy it to the file named, or name another with `--token-file`. |
+| The orbit serve running here refused the token. | Give it the token `orbit serve` uses, or pass `--local` to run one here. |
 | The server requires a client certificate. | The server serves mTLS: pass `--cert` and `--key` with a certificate its client CA signed. |
 | The server rejected the client certificate. | Use a certificate signed by the CA the server has as `client_ca`. |
 | The server has revoked the client certificate. | Ask the server's operator for a new certificate, or to remove its fingerprint from `revoked`. |
@@ -1231,7 +1232,9 @@ it with status 2, saying they belong on `orbit serve` or call for `--local`, and
 `--name` open a new session in the workspace picked. A run file whose process is gone, or a server that
 can't be reached at all, is ignored, and the chat runs in-process as usual. A server found is never
 bypassed: if it refuses the token, or the token file can't be read, the chat stops with status 2,
-naming the token file. Only servers of the same account on the same machine are found this way; for
+naming the token file, and if it refuses the handshake, such as a revoked client certificate or
+one its client CA didn't sign, the chat stops with status 2 saying what's wrong, as listed in
+**TLS and connection errors** above. Only servers of the same account on the same machine are found this way; for
 any other, give `--connect` its URL, or name it in `[remotes]`. `--local` skips the search and
 always runs in-process, taking the backend flags; it can't go with `--connect` or `--remote`.
 

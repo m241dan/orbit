@@ -57,7 +57,7 @@ class FakeApp:
 class Plane:
     """What the control plane asked says of the token: ``answer`` takes it if true, can't be
     reached if false, and turns it away if ``None``; its handshake fails saying ``refusal``, if
-    given, to a strict probe; and the tokens it was shown."""
+    given; and the tokens it was shown."""
 
     answer: bool | None = True
     refusal: str | None = None
@@ -69,15 +69,11 @@ class Plane:
         url: str,
         token: str | None,
         ssl_context: ssl.SSLContext | None = None,
-        *,
-        strict: bool = False,
     ) -> bool:
         self.shown.append((url, token))
         self.contexts.append(ssl_context)
         if self.refusal is not None:
-            if strict:
-                raise HandshakeRefused(self.refusal)
-            return False
+            raise HandshakeRefused(self.refusal)
         if self.answer is None:
             raise TokenRejected()
         return self.answer
@@ -192,8 +188,7 @@ def test_a_refused_token_stops_chat_naming_the_token_file(
     plane.answer = None
     result = runner.invoke(app, ["chat"])
     assert result.exit_code == 2
-    assert f"The orbit serve running here refused the token from {token_file}" in result.stderr
-    assert "--local" in result.stderr
+    assert result.stderr.strip() == messages.LOCAL_TOKEN_REFUSED.format(path=token_file)
     assert in_process.built == [] and FakeApp.built == []
 
 

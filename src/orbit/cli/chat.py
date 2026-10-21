@@ -319,7 +319,7 @@ def discover_control_plane(state: Path, token_file: Path, config_dir: Path) -> D
     url = server.local_url
     context = None if server.tls is None else client_ssl_context(files.ca, files.cert, files.key)
     token = None if files.token_file is None else read_token(files.token_file)
-    found = asyncio.run(accepts(url, token, context, strict=True))
+    found = asyncio.run(accepts(url, token, context))
     return Discovered(url, files) if found else None
 
 
@@ -350,10 +350,7 @@ def _discovered(state: Path, token_file: Path, config_dir: Path) -> Discovered |
     Exits with status 2 if the token, the user config, the CA or the client certificate can't
     be used, the control plane turns the token away, or its TLS handshake fails.
     """
-    refused = (
-        f"The orbit serve running here refused the token from {token_file}; give it the token"
-        " orbit serve uses, or pass --local to run one here."
-    )
+    refused = messages.LOCAL_TOKEN_REFUSED.format(path=token_file)
     with _exit_on(TokenRejected, message=lambda _: refused), _exit_on(*_LOCAL_ERRORS):
         return _configured(lambda: discover_control_plane(state, token_file, config_dir))
 

@@ -410,20 +410,31 @@ def test_an_answer_that_isnt_http_may_pass() -> None:
     assert handshake_failure("ws://localhost/", error) is None
 
 
-async def test_the_probe_takes_a_failed_handshake_as_unreachable(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    async def refusing(url: str, token: str, **options: object) -> None:
-        raise HandshakeRefused(messages.UNKNOWN_CA.format(url=url))
-
-    monkeypatch.setattr(probe, "open_connection", refusing)
-    assert not await accepts("wss://127.0.0.1:1/", TOKEN)
-
-
-async def test_a_strict_probe_raises_a_failed_handshake(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_the_probe_raises_a_failed_handshake(monkeypatch: pytest.MonkeyPatch) -> None:
     async def refusing(url: str, token: str, **options: object) -> None:
         raise HandshakeRefused(messages.UNKNOWN_CA.format(url=url))
 
     monkeypatch.setattr(probe, "open_connection", refusing)
     with pytest.raises(HandshakeRefused, match="isn't signed by a trusted CA"):
-        await accepts("wss://127.0.0.1:1/", TOKEN, strict=True)
+        await accepts("wss://127.0.0.1:1/", TOKEN)
+
+
+async def test_the_probe_raises_a_revoked_client_certificate(ca: Ca, tmp_path: Path) -> None:
+    client = make_client(ca, tmp_path)
+    fingerprint = client_fingerprint(ssl.PEM_cert_to_DER_cert(client.cert.read_text()))
+    async with control_plane(_mtls(make_server(ca, tmp_path), ca, (fingerprint,))) as port:
+        url = f"wss://localhost:{port}/"
+        context = client_ssl_context(ca.path, client.cert, client.key)
+        with pytest.raises(HandshakeRefused) as raised:
+            await accepts(url, None, context)
+    assert str(raised.value) == messages.REVOKED.format(url=url)
+
+
+async def test_the_probe_raises_a_token_shown_to_a_mutual_tls_control_plane(
+    ca: Ca, tmp_path: Path
+) -> None:
+    async with control_plane(_mtls(make_server(ca, tmp_path), ca)) as port:
+        url = f"wss://localhost:{port}/"
+        with pytest.raises(HandshakeRefused) as raised:
+            await accepts(url, TOKEN, client_ssl_context(ca.path))
+    assert str(raised.value) == messages.CLIENT_CERT_REQUIRED.format(url=url)
