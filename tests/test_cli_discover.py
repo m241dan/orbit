@@ -394,3 +394,87 @@ def test_a_revoked_local_client_certificate_stops_chat(
     assert result.exit_code == 2
     assert result.stderr.startswith("The server has revoked the client certificate.")
     assert in_process.built == [] and FakeApp.built == []
+
+
+@pytest.mark.usefixtures("token_file")
+def test_a_server_requiring_a_client_certificate_stops_chat_offering_local(
+    serving_tls: Callable[[bool], None], plane: Plane, in_process: InProcess
+) -> None:
+    serving_tls(False)
+    plane.refusal = messages.CLIENT_CERT_REQUIRED.format(url=LOCAL_URL)
+    result = runner.invoke(app, ["chat"])
+    assert result.exit_code == 2
+    refusal = messages.CLIENT_CERT_REQUIRED.format(url=LOCAL_URL).removesuffix(".")
+    assert result.stderr.strip() == f"{refusal}; or pass --local to run one here."
+    assert in_process.built == [] and FakeApp.built == []
+
+
+@pytest.fixture
+def contexts(monkeypatch: pytest.MonkeyPatch) -> list[tuple[Path | None, ...]]:
+    """The CA, client certificate and key each SSL context chat made was made with."""
+    made: list[tuple[Path | None, ...]] = []
+
+    def record(
+        ca: Path | None, cert: Path | None = None, key: Path | None = None
+    ) -> ssl.SSLContext:
+        made.append((ca, cert, key))
+        return ssl.create_default_context()
+
+    monkeypatch.setattr("orbit.cli.chat.client_ssl_context", record)
+    return made
+
+
+@pytest.mark.usefixtures("token_file", "in_process")
+def test_a_client_certificate_given_is_shown_to_a_control_plane_found(
+    tmp_path: Path,
+    serving_tls: Callable[[bool], None],
+    plane: Plane,
+    contexts: list[tuple[Path | None, ...]],
+) -> None:
+    serving_tls(True)
+    cert, key, ca = tmp_path / "laptop.pem", tmp_path / "laptop-key.pem", tmp_path / "given-ca.pem"
+    args = ["--cert", str(cert), "--key", str(key), "--ca", str(ca)]
+    result = runner.invoke(app, ["chat", *args])
+    assert result.exit_code == 0, result.output
+    (tui,) = FakeApp.built
+    assert isinstance(tui.session, FakeClient)
+    assert (tui.session.url, tui.session.token_file) == (LOCAL_URL, None)
+    assert plane.shown == [(LOCAL_URL, None)]
+    assert contexts == [(ca, cert, key)] * 2
+
+
+@pytest.mark.usefixtures("in_process", "plane")
+def test_a_ca_given_verifies_a_control_plane_found_showing_the_local_client_certificate(
+    tmp_path: Path,
+    token_file: Path,
+    client: ServerFiles,
+    serving_tls: Callable[[bool], None],
+    contexts: list[tuple[Path | None, ...]],
+) -> None:
+    _local_client(token_file, client.cert, client.key)
+    serving_tls(True)
+    ca = tmp_path / "given-ca.pem"
+    result = runner.invoke(app, ["chat", "--ca", str(ca)])
+    assert result.exit_code == 0, result.output
+    assert contexts == [(ca, client.cert, client.key)] * 2
+    assert len(FakeApp.built) == 1
+
+
+@pytest.mark.usefixtures("in_process", "plane")
+def test_a_token_file_given_is_shown_to_a_control_plane_found_in_place_of_the_certificate(
+    token_file: Path,
+    ca_path: Path,
+    client: ServerFiles,
+    serving_tls: Callable[[bool], None],
+    contexts: list[tuple[Path | None, ...]],
+) -> None:
+    _local_client(token_file, client.cert, client.key)
+    serving_tls(True)
+    other = token_file.parent / "other-token"
+    other.write_text("other-token\n")
+    result = runner.invoke(app, ["chat", "--token-file", str(other)])
+    assert result.exit_code == 0, result.output
+    (tui,) = FakeApp.built
+    assert isinstance(tui.session, FakeClient)
+    assert tui.session.token_file == other
+    assert contexts == [(ca_path, None, None)] * 2

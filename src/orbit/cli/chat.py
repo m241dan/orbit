@@ -111,13 +111,11 @@ def chat(
         where = f"not orbit chat {target.flag}"
         _join(replace(joining, repository=str(_workspace(workspace))), target.url, where)
         return
-    token_path = token_file or TokenFile(user_config).path
-    joining = _Joining(ctx, token_path, ca, _opening(new, name))
     state = resolve_state_dir(state, os.environ)
     root = _workspace(workspace)
-    found = None if local else _discovered(state, token_path, user_config)
+    found = None if local else _discovered(state, given, user_config)
     if found is not None:
-        joining = _joining(ctx, found.files, user_config, joining.opening)
+        joining = _joining(ctx, found.files, user_config, _opening(new, name))
         joining = replace(joining, repository=str(root))
         where = f"which runs at {found.url}; or pass --local to run one here"
         _join(joining, found.url, where)
@@ -149,8 +147,12 @@ class _ClientFiles:
     def over(self, configured: "_ClientFiles") -> "_ClientFiles":
         """These files over the ``configured`` ones: the token or client certificate given, if
         any, in place of the configured one, and the CA given, if any."""
-        given = (self.token_file, self.cert, self.key) != (None, None, None)
-        return replace(self if given else configured, ca=self.ca or configured.ca)
+        return replace(self if self.identified else configured, ca=self.ca or configured.ca)
+
+    @property
+    def identified(self) -> bool:
+        """Whether these files name a token or a client certificate to show."""
+        return (self.token_file, self.cert, self.key) != (None, None, None)
 
 
 @dataclass(frozen=True)
@@ -299,11 +301,12 @@ class Discovered:
     files: _ClientFiles
 
 
-def discover_control_plane(state: Path, token_file: Path, config_dir: Path) -> Discovered | None:
+def discover_control_plane(state: Path, given: _ClientFiles, config_dir: Path) -> Discovered | None:
     """The control plane running on the ``state`` directory, as its run file there says, if
-    the process it names is alive and it takes the token in
-    ``token_file``, or under mutual TLS the client certificate the user config in
-    ``config_dir`` names; ``None`` if there's none, or it can't be reached at all.
+    the process it names is alive and it takes the files ``given`` over those it would be shown
+    otherwise: the token in the config directory ``config_dir``, or under mutual TLS the client
+    certificate the user config there names; ``None`` if there's none, or it can't be reached
+    at all.
 
     Raises :class:`TokenUnreadable` if the token can't be read, :class:`TokenRejected` if the
     control plane turns it away, :class:`ConfigError` if the user config is invalid,
@@ -315,7 +318,7 @@ def discover_control_plane(state: Path, token_file: Path, config_dir: Path) -> D
     server = running_server(state)
     if server is None:
         return None
-    files = _local_files(server, token_file, config_dir)
+    files = _local_files(server, given, config_dir)
     url = server.local_url
     context = None if server.tls is None else client_ssl_context(files.ca, files.cert, files.key)
     token = None if files.token_file is None else read_token(files.token_file)
@@ -323,36 +326,58 @@ def discover_control_plane(state: Path, token_file: Path, config_dir: Path) -> D
     return Discovered(url, files) if found else None
 
 
-def _local_files(server: RunningServer, token_file: Path, config_dir: Path) -> _ClientFiles:
-    """The files a frontend on this machine shows ``server``: the token in ``token_file``,
-    verifying it by the CA its run file names over TLS, or under mutual TLS the client
-    certificate in the user config in ``config_dir`` instead of the token.
+def _local_files(server: RunningServer, given: _ClientFiles, config_dir: Path) -> _ClientFiles:
+    """The files a frontend on this machine shows ``server``: those ``given`` over the token in
+    the config directory ``config_dir``, verifying it by the CA its run file names over TLS, or
+    under mutual TLS the client certificate in the user config there instead of the token.
 
     Raises :class:`ConfigError` if the user config is invalid, and :class:`LocalCertMissing`
-    if it names no client certificate under mutual TLS.
+    if it names no client certificate under mutual TLS, and none is given.
     """
-    if server.tls is None:
-        return _ClientFiles(token_file)
-    ca = Path(server.tls.ca)
-    if not server.tls.mutual:
-        return _ClientFiles(token_file, ca)
+    ca = None if server.tls is None else Path(server.tls.ca)
+    if given.identified:
+        return given.over(_ClientFiles(ca=ca))
+    if server.tls is None or not server.tls.mutual:
+        return given.over(_ClientFiles(TokenFile(config_dir).path, ca))
+    return given.over(replace(_local_cert(server, config_dir), ca=ca))
+
+
+def _local_cert(server: RunningServer, config_dir: Path) -> _ClientFiles:
+    """The client certificate the user config in ``config_dir`` names for frontends on this
+    machine to show ``server``.
+
+    Raises :class:`ConfigError` if the user config is invalid, and :class:`LocalCertMissing`
+    if it names no client certificate.
+    """
     settings = read_server(config_dir)
     cert, key = settings.local_client_cert, settings.local_client_key
     if cert is None or key is None:
         path = config_dir / USER_CONFIG_FILE
         raise LocalCertMissing(messages.LOCAL_CLIENT_CERT_MISSING.format(url=server.url, path=path))
-    return _ClientFiles(None, ca, Path(cert), Path(key))
+    return _ClientFiles(cert=Path(cert), key=Path(key))
 
 
-def _discovered(state: Path, token_file: Path, config_dir: Path) -> Discovered | None:
-    """What :func:`discover_control_plane` finds; a control plane found is never bypassed.
+def _discovered(state: Path, given: _ClientFiles, config_dir: Path) -> Discovered | None:
+    """What :func:`discover_control_plane` finds, shown the files ``given``; a control plane
+    found is never bypassed.
 
     Exits with status 2 if the token, the user config, the CA or the client certificate can't
-    be used, the control plane turns the token away, or its TLS handshake fails.
+    be used, the control plane turns the token away, or refuses the handshake.
     """
+    token_file = given.token_file or TokenFile(config_dir).path
     refused = messages.LOCAL_TOKEN_REFUSED.format(path=token_file)
-    with _exit_on(TokenRejected, message=lambda _: refused), _exit_on(*_LOCAL_ERRORS):
-        return _configured(lambda: discover_control_plane(state, token_file, config_dir))
+    with (
+        _exit_on(TokenRejected, message=lambda _: refused),
+        _exit_on(HandshakeRefused, message=_offering_local),
+        _exit_on(*_LOCAL_ERRORS),
+    ):
+        return _configured(lambda: discover_control_plane(state, given, config_dir))
+
+
+def _offering_local(refusal: HandshakeRefused) -> str:
+    """What says the control plane found here refused the handshake, as ``refusal`` says,
+    offering --local instead."""
+    return f"{str(refusal).removesuffix('.')}; or pass --local to run one here."
 
 
 _LOCAL_ERRORS = (
@@ -360,7 +385,6 @@ _LOCAL_ERRORS = (
     LocalCertMissing,
     CaUnreadable,
     ClientCertUnusable,
-    HandshakeRefused,
 )
 """What stops a chat finding a control plane on this machine, said as it is."""
 

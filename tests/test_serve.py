@@ -573,7 +573,7 @@ def test_a_chat_discovers_the_orbit_serve_running(
     found: list[chat.Discovered | None] = []
 
     def discovers(websocket: ClientConnection) -> list[Event]:
-        found.append(chat.discover_control_plane(state, config_dir / "token", config_dir))
+        found.append(chat.discover_control_plane(state, chat._ClientFiles(), config_dir))
         return []
 
     frontend = Frontend(state, config_dir, discovers)
@@ -619,7 +619,7 @@ def _discovering(
     ``found``."""
 
     def discovers(websocket: ClientConnection) -> list[Event]:
-        found.append(chat.discover_control_plane(state, config_dir / "token", config_dir))
+        found.append(chat.discover_control_plane(state, chat._ClientFiles(), config_dir))
         return []
 
     return discovers
