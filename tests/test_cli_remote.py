@@ -147,7 +147,8 @@ def test_remote_cant_go_with_local(config: Path) -> None:
     _remotes(config, f'[remotes.work]\nurl = "{URL}"\n')
     result = runner.invoke(app, ["chat", "--remote", "work", "--local"])
     assert result.exit_code == 2
-    assert "--local runs the control plane here" in result.stderr
+    assert "--local runs the control plane here, so it can't go with --remote." in result.stderr
+    assert FakeApp.built == []
 
 
 def test_a_backend_flag_with_remote_exits_saying_it_belongs_on_serve(config: Path) -> None:

@@ -105,9 +105,10 @@ def chat(
     given = _ClientFiles(token_file, ca, cert, key)
     target = _target(connect, remote, user_config, given)
     if target is not None:
-        _refuse_local(local)
+        _refuse_local(local, target.flag)
         joining = _joining(ctx, target.files, user_config, _opening(new, name))
-        _join(replace(joining, repository=str(_workspace(workspace))), target.url, target.where)
+        where = f"not orbit chat {target.flag}"
+        _join(replace(joining, repository=str(_workspace(workspace))), target.url, where)
         return
     token_path = token_file or TokenFile(user_config).path
     joining = _Joining(ctx, token_path, ca, _opening(new, name))
@@ -153,12 +154,12 @@ class _ClientFiles:
 
 @dataclass(frozen=True)
 class _Target:
-    """The control plane at ``url`` a chat was asked to join, showing it ``files``; ``where``
-    says, after "belong on orbit serve", how it was asked."""
+    """The control plane at ``url`` a chat was asked to join, showing it ``files``; ``flag``
+    is how it was asked, --connect or --remote."""
 
     url: str
     files: _ClientFiles
-    where: str
+    flag: str
 
 
 def _target(
@@ -171,7 +172,7 @@ def _target(
     Exits with status 2 if both were given, or the remote isn't configured.
     """
     if remote is None:
-        return None if connect is None else _Target(connect, given, "not orbit chat --connect")
+        return None if connect is None else _Target(connect, given, "--connect")
     if connect is not None:
         typer.echo(
             "--remote names the control plane to connect to, so it can't go with --connect.",
@@ -179,7 +180,7 @@ def _target(
         )
         raise typer.Exit(2)
     configured = _remote(config_dir, remote)
-    return _Target(configured.url, given.over(_remote_files(configured)), "not orbit chat --remote")
+    return _Target(configured.url, given.over(_remote_files(configured)), "--remote")
 
 
 def _remote(config_dir: Path, name: str) -> RemoteSettings:
@@ -265,10 +266,11 @@ def _opening(new: bool, name: str | None) -> NewSession | None:
     return NewSession(name=name) if new or name is not None else None
 
 
-def _refuse_local(local: bool) -> None:
-    """Exit with status 2 if ``local`` was asked for along with --connect."""
+def _refuse_local(local: bool, flag: str) -> None:
+    """Exit with status 2 if ``local`` was asked for along with ``flag``, --connect or
+    --remote."""
     if local:
-        typer.echo("--local runs the control plane here, so it can't go with --connect.", err=True)
+        typer.echo(f"--local runs the control plane here, so it can't go with {flag}.", err=True)
         raise typer.Exit(2)
 
 
