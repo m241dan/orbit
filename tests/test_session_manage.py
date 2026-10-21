@@ -187,6 +187,22 @@ async def test_resuming_while_a_rename_still_fails_is_refused_and_stays_halted()
     await session.close()
 
 
+async def test_resuming_while_the_sessions_cannot_be_listed_keeps_the_halt_and_the_rename() -> None:
+    store = store_with(saved("old"))
+    session = await halted_by_a_rename(store)
+    store.failure, store.list_failure = None, RuntimeError("Couldn't list the sessions.")
+
+    refusal = (await outcome_of(session, ResumeStorage()))[-1].payload
+    assert isinstance(refusal, CommandRefused) and refusal.code == STORAGE_FAILED
+    assert (await session._snapshot()).storage_halt == refusal.message
+    assert store.last == saved("old")
+    store.list_failure = None
+    assert (await outcome_of(session, ResumeStorage()))[-1].payload == ACCEPTED
+    assert store.last == saved("old", name="new") and store.locked == set()
+    assert (await session._snapshot()).storage_halt is None
+    await session.close()
+
+
 async def test_a_rename_renames_the_record_saved_by_the_time_the_lock_is_taken() -> None:
     store = store_with(saved("old"))
     newer = saved("old", last_active=EARLIER)
