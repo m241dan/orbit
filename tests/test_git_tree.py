@@ -192,6 +192,25 @@ async def test_a_rebase_failing_without_conflicts_raises_with_gits_message(repo:
     assert (path / "c.txt").read_text() == "in the way\n"
 
 
+async def test_a_rebase_refused_before_it_starts_raises_with_gits_message(repo: Path) -> None:
+    tree = GitCoderTree(str(repo))
+    path = Path(await tree.prepare(keep=False))
+    (path / "b.txt").write_text("two\n")
+    await tree.commit("Add b")
+    before = git(path, "rev-parse", "HEAD")
+    commit_file(repo, "c.txt", "three\n", "user's commit")
+    hook = repo / ".git" / "hooks" / "pre-rebase"
+    hook.write_text("#!/bin/sh\necho refused by the hook\nexit 1\n")
+    hook.chmod(0o755)
+
+    refused = r"(?s)git rebase failed: .*refused by the hook"
+    with pytest.raises(RuntimeError, match=refused) as raised:
+        await tree.integrate()
+    assert "no rebase in progress" not in str(raised.value).lower()
+    assert git(path, "rev-parse", "HEAD") == before
+    assert git(path, "branch", "--show-current") == "orbit/coder"
+
+
 async def test_a_rebase_is_aborted_even_when_listing_its_conflicts_fails(
     monkeypatch: pytest.MonkeyPatch, repo: Path
 ) -> None:
@@ -505,6 +524,18 @@ async def test_a_snapshot_is_a_detached_tree_at_the_commit_until_dropped(repo: P
     await tree.drop(str(snapshot))
     assert not snapshot.exists()
     assert str(snapshot) not in git(repo, "worktree", "list")
+
+
+async def test_a_locked_snapshot_is_dropped(repo: Path) -> None:
+    tree = GitCoderTree(str(repo))
+    await tree.prepare(keep=False)
+    snapshot = Path(await tree.snapshot("HEAD"))
+    git(repo, "worktree", "lock", str(snapshot))
+
+    await tree.drop(str(snapshot))
+    assert not snapshot.exists()
+    assert str(snapshot) not in git(repo, "worktree", "list")
+    assert await tree.leftovers() == []
 
 
 async def test_two_snapshots_of_one_commit_are_separate(repo: Path) -> None:

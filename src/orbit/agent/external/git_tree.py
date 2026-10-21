@@ -127,8 +127,8 @@ class GitCoderTree:
     async def commit(self, message: str) -> bool:
         path = await self._path()
         await self._git(path, "add", "-A")
-        changed, _ = await _run(("git", "diff", "--cached", "--quiet"), path)
-        if changed:  # Exit status 0: nothing staged.
+        nothing_staged, _ = await _run(("git", "diff", "--cached", "--quiet"), path)
+        if nothing_staged:
             return False
         await self._git(path, "commit", "-q", "-m", message)
         return True
@@ -173,7 +173,8 @@ class GitCoderTree:
         return str(path)
 
     async def drop(self, path: str) -> None:
-        await self._git(self._root, "worktree", "remove", "--force", path)
+        # Twice forced: a snapshot may be locked, as a killed ``git worktree add`` leaves it.
+        await self._git(self._root, "worktree", "remove", "--force", "--force", path)
         self._snapshots.discard(Path(path))
 
     async def _new_snapshot_dir(self, parent: Path, sha: str) -> Path:
