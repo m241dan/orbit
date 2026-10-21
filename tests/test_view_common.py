@@ -5,7 +5,15 @@ import pytest
 from orbit.protocol import (
     TaskStatus,
 )
-from orbit.tui.view.common import STATUS_ICONS, counted, kept_highlight, text_lines, token_text
+from orbit.tui.view.common import (
+    STATUS_ICONS,
+    ListHints,
+    counted,
+    kept_highlight,
+    picker_hint,
+    text_lines,
+    token_text,
+)
 
 
 def test_every_task_status_has_an_icon_except_running_which_spins() -> None:
@@ -92,3 +100,26 @@ def test_a_highlighted_trailing_row_that_went_leaves_nothing_highlighted() -> No
 
 def test_nothing_highlighted_stays_so() -> None:
     assert kept_highlight(SHOWN, None, ("a", "b", None)) is None
+
+
+def test_a_gone_last_row_moves_the_highlight_onto_the_trailing_action_row() -> None:
+    assert kept_highlight(SHOWN, 2, ("a", "b", None)) == 2
+
+
+def test_no_rows_left_leave_nothing_highlighted() -> None:
+    assert kept_highlight(SHOWN, 1, ()) is None
+
+
+HINTS = ListHints(closing="enter open · esc close", quitting="enter open · esc quit")
+
+
+def test_a_picker_shows_its_lists_keys_where_escape_closes_it() -> None:
+    assert picker_hint(HINTS, startup=False, box=None) == "enter open · esc close"
+
+
+def test_at_startup_a_picker_shows_escape_quits() -> None:
+    assert picker_hint(HINTS, startup=True, box=None) == "enter open · esc quit"
+
+
+def test_a_picker_shows_its_text_boxs_keys_while_typing() -> None:
+    assert picker_hint(HINTS, startup=True, box="enter add · esc back") == "enter add · esc back"

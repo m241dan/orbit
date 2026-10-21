@@ -5,6 +5,7 @@ from pathlib import PurePosixPath
 from typing import Literal
 
 from orbit.protocol import AddWorkspace, SessionStateChanged, WorkspaceEntry, with_state
+from orbit.tui.view.common import ListHints
 
 WORKSPACES_TITLE = "Workspaces"
 ADD_PATH: Literal["add_path"] = "add_path"
@@ -16,6 +17,7 @@ REMOVE_YES = "remove"
 LIST_HINT = "j/k move · enter open · x remove · esc close"
 STARTUP_HINT = "j/k move · enter open · x remove · esc quit"
 PATH_HINT = "enter add · esc back"
+WORKSPACES_HINTS = ListHints(closing=LIST_HINT, quitting=STARTUP_HINT)
 
 WorkspaceRow = WorkspaceEntry | AddWorkspace | Literal["add_path"]
 """A row of the picker: a workspace served, adding the repository the frontend runs in, or
@@ -115,11 +117,3 @@ def with_states(
         )
         for entry in workspaces
     )
-
-
-def workspaces_hint(*, startup: bool, adding: bool) -> str:
-    """The keys the workspace picker shows: the path box's while ``adding``, or else the
-    list's, where escape quits at ``startup``."""
-    if adding:
-        return PATH_HINT
-    return STARTUP_HINT if startup else LIST_HINT

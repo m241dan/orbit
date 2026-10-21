@@ -34,6 +34,7 @@ from orbit.tui.view.sessions import (
     DELETE_YES,
     NAME_PLACEHOLDER,
     NEW_SESSION_LABEL,
+    SESSIONS_HINTS,
     SESSIONS_TITLE,
     Viewing,
     activation_choices,
@@ -44,19 +45,19 @@ from orbit.tui.view.sessions import (
     can_open,
     delete_message,
     idle_now_message,
+    name_hint,
     opening_attach,
     picked_commands,
     picker_sessions,
     running_words,
     session_label,
-    sessions_hint,
     starting_commands,
     viewed_only,
     viewing_mark,
     workspace_sessions,
 )
 from orbit.tui.view.workspaces import with_states
-from orbit.tui.widgets import ConfirmScreen, ListScreen
+from orbit.tui.widgets import ListScreen, TypingListScreen, confirm
 
 SessionChoice = Attach | ActivateSession | NewSession
 """What the user chose: a saved session to view, and perhaps activate, or a new one to start."""
@@ -72,7 +73,7 @@ Manage = Callable[[SessionChange], Awaitable[object]]
 whatever it returns is ignored."""
 
 
-class SessionsScreen(ListScreen[tuple[SessionChoice, ...]]):
+class SessionsScreen(TypingListScreen[tuple[SessionChoice, ...]]):
     """Lists ``sessions`` of the workspace ``viewing`` names before ``New session``: the one it
     has attached first (as ``Resume`` if ``startup`` is ``resume`` or it hasn't joined the
     workspace, and not at all if ``startup`` is ``pick``), then the others; dismisses with the
@@ -84,23 +85,8 @@ class SessionsScreen(ListScreen[tuple[SessionChoice, ...]]):
     none, or quits orbit at ``startup``, where there's no session to go back to.
     """
 
-    AUTO_FOCUS = "OptionList"
-    DEFAULT_CSS = """
-    SessionsScreen { align: center middle; }
-    SessionsScreen > Vertical {
-        width: 90;
-        max-width: 90%;
-        height: auto;
-        max-height: 80%;
-        border: round $accent;
-        padding: 0 1;
-    }
-    SessionsScreen OptionList { height: auto; max-height: 30; border: none; }
-    SessionsScreen Input { border: round $secondary; }
-    SessionsScreen Input:focus { border: heavy $accent; }
-    """
+    HINTS = SESSIONS_HINTS
     BINDINGS: ClassVar[list[BindingType]] = [
-        Binding("escape", "back", show=False),
         Binding("r", "rename", show=False),
         Binding("x", "delete", show=False),
     ]
@@ -112,12 +98,11 @@ class SessionsScreen(ListScreen[tuple[SessionChoice, ...]]):
         manage: Manage,
         startup: StartupPick | None = None,
     ) -> None:
-        super().__init__()
+        super().__init__((), startup is not None)
         self.workspace = viewing.workspace
         self.joined = viewing.joined
         self.sessions = tuple(sessions)
         self.attached = viewing.attached
-        self.startup = startup is not None
         self.resume = startup == "resume"
         self._manage = manage
         self._renaming: SessionSummary | None = None  # The session being renamed, if any.
@@ -131,7 +116,7 @@ class SessionsScreen(ListScreen[tuple[SessionChoice, ...]]):
     def compose(self) -> ComposeResult:
         with Vertical() as box:
             box.border_title = SESSIONS_TITLE
-            box.border_subtitle = self._hint(naming=False)
+            box.border_subtitle = self.hint
             yield OptionList(*self._labels())
             # Typing goes on from the end of a name being changed, rather than replacing it.
             name = Input(placeholder=NAME_PLACEHOLDER, id="session-name", select_on_focus=False)
@@ -218,39 +203,19 @@ class SessionsScreen(ListScreen[tuple[SessionChoice, ...]]):
         if not can_delete(summary):
             await self._manage(deleting)
             return
-
-        async def answered(confirmed: bool | None) -> None:
-            if confirmed:
-                await self._manage(deleting)
-
-        confirm = ConfirmScreen(DELETE_TITLE, delete_message(summary), DELETE_YES)
-        self.app.push_screen(confirm, answered)
-
-    def action_back(self) -> None:
-        if self.query_one(Input).display:
-            self._naming(False)
-        elif self.startup:
-            self.app.exit()
-        else:
-            self.dismiss(())
+        message = delete_message(summary)
+        confirm(
+            self.app.push_screen, DELETE_TITLE, message, DELETE_YES, lambda: self._manage(deleting)
+        )
 
     def _naming(self, on: bool, renaming: SessionSummary | None = None) -> None:
         """Show the box for the name of a new session, or the new name of the session
         ``renaming``, and type in it; or go back to the list."""
-        name = self.query_one(Input)
-        name.display = on
         self._renaming = renaming
-        self.query_one(Vertical).border_subtitle = self._hint(naming=on, renaming=renaming)
-        if on:
-            name.value = renaming.name if renaming else ""
-            name.focus()
-        else:
-            name.clear()
-            self.query_one(OptionList).focus()
-
-    def _hint(self, *, naming: bool, renaming: SessionSummary | None = None) -> str:
-        """The keys shown: the name box's while ``naming``, or the list's."""
-        return sessions_hint(startup=self.startup, naming=naming, renaming=renaming is not None)
+        if not on:
+            self._typing(None)
+            return
+        self._typing(name_hint(renaming=renaming is not None), renaming.name if renaming else "")
 
 
 class ActivationScreen(ListScreen[bool]):

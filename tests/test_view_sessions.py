@@ -9,12 +9,14 @@ from orbit.protocol import (
     Usage,
     WorkspaceEntry,
 )
+from orbit.tui.view.common import picker_hint
 from orbit.tui.view.sessions import (
     ACTIVATE_CHOICE,
     JUST_LOOK_CHOICE,
     LIST_HINT,
     NAME_HINT,
     RENAME_HINT,
+    SESSIONS_HINTS,
     STARTUP_HINT,
     activation_choices,
     activation_message,
@@ -26,12 +28,12 @@ from orbit.tui.view.sessions import (
     delete_message,
     idle_now_message,
     local_time,
+    name_hint,
     opening_attach,
     picked_commands,
     picker_sessions,
     running_words,
     session_label,
-    sessions_hint,
     state_notes,
     task_counts,
     viewed_only,
@@ -160,24 +162,24 @@ def test_no_tasks_count_nothing() -> None:
 
 
 def test_the_list_hint_says_escape_closes_it() -> None:
-    hint = sessions_hint(startup=False, naming=False, renaming=False)
+    hint = picker_hint(SESSIONS_HINTS, startup=False, box=None)
     assert hint == LIST_HINT
     assert hint.endswith("esc close")
 
 
 def test_at_startup_the_list_hint_says_escape_quits() -> None:
-    hint = sessions_hint(startup=True, naming=False, renaming=False)
+    hint = picker_hint(SESSIONS_HINTS, startup=True, box=None)
     assert hint == STARTUP_HINT
     assert hint.endswith("esc quit")
 
 
 def test_naming_a_new_session_hints_enter_starts_it() -> None:
-    assert sessions_hint(startup=True, naming=True, renaming=False) == NAME_HINT
+    assert name_hint(renaming=False) == NAME_HINT
     assert NAME_HINT.startswith("enter start")
 
 
 def test_renaming_a_session_hints_enter_renames_it() -> None:
-    assert sessions_hint(startup=False, naming=True, renaming=True) == RENAME_HINT
+    assert name_hint(renaming=True) == RENAME_HINT
     assert RENAME_HINT.startswith("enter rename")
 
 

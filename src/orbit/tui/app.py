@@ -133,9 +133,9 @@ from orbit.tui.view.triggers import trigger_key_labels
 from orbit.tui.view.windows import SIDEBAR_WINDOWS, neighbors
 from orbit.tui.widgets import (
     ChatPrompt,
-    ConfirmScreen,
     PickerScreen,
     StatusLine,
+    confirm,
     mark_selected,
 )
 from orbit.tui.workspaces import WorkspacesHost
@@ -524,12 +524,7 @@ class OrbitApp(App[None], inherit_bindings=False):
 
     def _confirm_then_send(self, title: str, message: str, yes: str, command: Command) -> None:
         """Ask ``title`` and ``message``, sending ``command`` if the user answers ``yes``."""
-
-        async def answered(confirmed: bool | None) -> None:
-            if confirmed:
-                await self._send(command)
-
-        self.push_screen(ConfirmScreen(title, message, yes), answered)
+        confirm(self.push_screen, title, message, yes, lambda: self._send(command))
 
     def action_list_sessions(self) -> None:
         """Show the session picker, the session viewed first."""

@@ -7,7 +7,7 @@ from rich.text import Text
 from textual import on
 from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
-from textual.containers import VerticalScroll
+from textual.containers import Vertical, VerticalScroll
 from textual.message import Message
 from textual.screen import ModalScreen
 from textual.timer import Timer
@@ -15,7 +15,7 @@ from textual.widget import Widget
 from textual.widgets import Input, OptionList, Static, TextArea
 
 from orbit.protocol import Settings
-from orbit.tui.view.common import SPINNER_FPS
+from orbit.tui.view.common import SPINNER_FPS, ListHints, picker_hint
 from orbit.tui.view.confirm import confirm_hint
 from orbit.tui.view.settings import settings_summary
 from orbit.tui.view.transcript import prompt_title
@@ -248,6 +248,74 @@ class ListScreen[T](ModalScreen[T]):
             options.action_cursor_up()
 
 
+class TypingListScreen[T](ListScreen[T]):
+    """List modal in a bordered box, with a text box under the list that's hidden until the
+    user types in it, and the keys ``HINTS`` names shown under the box: the text box's while
+    it's shown, or else the list's, where escape quits at ``startup``.
+
+    Escape leaves the text box, or else dismisses with ``nothing``, or quits orbit at
+    ``startup``, where there's nothing to go back to.
+    """
+
+    AUTO_FOCUS = "OptionList"
+    DEFAULT_CSS = """
+    TypingListScreen { align: center middle; }
+    TypingListScreen > Vertical {
+        width: 90;
+        max-width: 90%;
+        height: auto;
+        max-height: 80%;
+        border: round $accent;
+        padding: 0 1;
+    }
+    TypingListScreen OptionList { height: auto; max-height: 30; border: none; }
+    TypingListScreen Input { border: round $secondary; }
+    TypingListScreen Input:focus { border: heavy $accent; }
+    """
+    BINDINGS: ClassVar[list[BindingType]] = [
+        Binding("escape", "back", show=False),
+    ]
+    HINTS: ClassVar[ListHints]
+
+    def __init__(self, nothing: T, startup: bool) -> None:
+        super().__init__()
+        self.startup = startup
+        self._nothing = nothing
+        self._box_hint: str | None = None  # The text box's keys, while it's shown.
+
+    @property
+    def hint(self) -> str:
+        """The keys shown under the box."""
+        return picker_hint(self.HINTS, startup=self.startup, box=self._box_hint)
+
+    def action_back(self) -> None:
+        if self.query_one(Input).display:
+            self._typing(None)
+        elif self.startup:
+            self.app.exit()
+        else:
+            self.dismiss(self._nothing)
+
+    def _typing(self, box_hint: str | None, text: str = "") -> None:
+        """Show the text box, starting from ``text``, with ``box_hint`` its keys, and type in
+        it; or, with no keys, go back to the list. Either way, the box's own note is cleared."""
+        box = self.query_one(Input)
+        box.display = box_hint is not None
+        box.border_subtitle = ""
+        self._box_hint = box_hint
+        self._show_hint()
+        if box_hint is None:
+            box.clear()
+            self.query_one(OptionList).focus()
+        else:
+            box.value = text
+            box.focus()
+
+    def _show_hint(self) -> None:
+        """Show the keys under the box."""
+        self.query_one(Vertical).border_subtitle = self.hint
+
+
 class PickerScreen(ListScreen[int | None]):
     """Pop-up list of options. Dismisses with the chosen index, or None on escape.
 
@@ -357,3 +425,22 @@ class ConfirmScreen(ModalScreen[bool]):
 
     def action_answer(self, confirmed: bool) -> None:
         self.dismiss(confirmed)
+
+
+Answered = Callable[[bool | None], Awaitable[None]]
+"""Takes the user's answer to a confirmation: True on yes."""
+PushConfirm = Callable[[ConfirmScreen, Answered], object]
+"""Shows a confirmation, calling back with the user's answer."""
+
+
+def confirm(
+    push: PushConfirm, title: str, message: str, yes: str, then: Callable[[], Awaitable[object]]
+) -> None:
+    """Ask ``title`` with ``message`` with ``push``, ``yes`` naming what ``y`` does, and await
+    ``then`` only if the user answers yes."""
+
+    async def answered(confirmed: bool | None) -> None:
+        if confirmed:
+            await then()
+
+    push(ConfirmScreen(title, message, yes), answered)

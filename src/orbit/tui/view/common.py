@@ -1,7 +1,9 @@
 """What the other view modules share: entry kinds, the spinner, status icons, model labels,
-token counts, counted nouns, the lines of text and where a list's highlight goes."""
+token counts, counted nouns, the lines of text, where a list's highlight goes and the keys a
+picker shows."""
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import Literal
 
 from rich.cells import cell_len, set_cell_size
@@ -102,12 +104,30 @@ def kept_highlight(
     shown_keys: Sequence[str | None], highlighted: int | None, keys: Sequence[str | None]
 ) -> int | None:
     """Where the highlight on row ``highlighted`` of rows with ``shown_keys`` goes once rows
-    with ``keys`` are shown, a trailing row's key being None: on the row with its key, or the
-    nearest one when that's gone, or nowhere when nothing was highlighted or the trailing row
-    has gone."""
-    if highlighted is None:
+    with ``keys`` are shown, a trailing action row's key being None: on the row with its key,
+    or, when that's gone, on the row where it was, kept within the rows, which may be the
+    trailing action row; nowhere when nothing was highlighted, the trailing row it was on has
+    gone or no rows are left."""
+    if highlighted is None or not keys:
         return None
     key = shown_keys[highlighted]
     if key in keys:
         return list(keys).index(key)
     return None if key is None else min(highlighted, len(keys) - 1)
+
+
+@dataclass(frozen=True)
+class ListHints:
+    """The keys a picker's list shows: ``closing`` where escape closes it, and ``quitting`` at
+    startup, where escape quits orbit."""
+
+    closing: str
+    quitting: str
+
+
+def picker_hint(hints: ListHints, *, startup: bool, box: str | None) -> str:
+    """The keys a picker shows: its text box's, ``box``, while that's shown, or else its list's
+    ``hints``, where escape quits at ``startup``."""
+    if box is not None:
+        return box
+    return hints.quitting if startup else hints.closing

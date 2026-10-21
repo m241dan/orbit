@@ -18,11 +18,14 @@ from orbit.protocol import (
     WorkspaceEntry,
 )
 from orbit.tui.sessions import Push
+from orbit.tui.view.common import kept_highlight
 from orbit.tui.view.outcomes import Awaited
 from orbit.tui.view.workspaces import (
+    PATH_HINT,
     PATH_PLACEHOLDER,
     REMOVE_TITLE,
     REMOVE_YES,
+    WORKSPACES_HINTS,
     WORKSPACES_TITLE,
     WorkspaceRow,
     added_workspace,
@@ -32,9 +35,8 @@ from orbit.tui.view.workspaces import (
     row_label,
     with_states,
     workspace_rows,
-    workspaces_hint,
 )
-from orbit.tui.widgets import ConfirmScreen, ListScreen
+from orbit.tui.widgets import TypingListScreen, confirm
 
 Change = Callable[[AddWorkspace | RemoveWorkspace, Awaited], Awaitable[object]]
 """Sends adding or removing a workspace to the backend, awaiting its outcome as told; whatever
@@ -43,7 +45,7 @@ Chosen = Callable[[str, bool], Awaitable[None]]
 """Takes the id of the workspace picked, and whether it was picked at startup."""
 
 
-class WorkspacesScreen(ListScreen[str | None]):
+class WorkspacesScreen(TypingListScreen[str | None]):
     """Lists ``workspaces``, offering first to add the ``repository`` the frontend runs in while
     none is at it, then to add a path; dismisses with the id of the workspace picked.
 
@@ -55,24 +57,11 @@ class WorkspacesScreen(ListScreen[str | None]):
     dismisses with none, or quits orbit at ``startup``, where there's nothing to go back to.
     """
 
-    AUTO_FOCUS = "OptionList"
     DEFAULT_CSS = """
-    WorkspacesScreen { align: center middle; }
-    WorkspacesScreen > Vertical {
-        width: 90;
-        max-width: 90%;
-        height: auto;
-        max-height: 80%;
-        border: round $accent;
-        padding: 0 1;
-    }
-    WorkspacesScreen OptionList { height: auto; max-height: 30; border: none; }
     WorkspacesScreen #workspace-note { color: $error; }
-    WorkspacesScreen Input { border: round $secondary; }
-    WorkspacesScreen Input:focus { border: heavy $accent; }
     """
+    HINTS = WORKSPACES_HINTS
     BINDINGS: ClassVar[list[BindingType]] = [
-        Binding("escape", "back", show=False),
         Binding("x", "remove", show=False),
     ]
 
@@ -83,10 +72,9 @@ class WorkspacesScreen(ListScreen[str | None]):
         change: Change,
         startup: bool = False,
     ) -> None:
-        super().__init__()
+        super().__init__(None, startup)
         self.workspaces = tuple(workspaces)
         self.repository = repository
-        self.startup = startup
         self._change = change
         self._adding: str | None = None  # The path added, until its workspace is listed.
 
@@ -98,7 +86,7 @@ class WorkspacesScreen(ListScreen[str | None]):
     def compose(self) -> ComposeResult:
         with Vertical() as box:
             box.border_title = WORKSPACES_TITLE
-            box.border_subtitle = workspaces_hint(startup=self.startup, adding=False)
+            box.border_subtitle = self.hint
             yield OptionList(*map(row_label, self.rows))
             note = Static("", id="workspace-note")
             note.display = False
@@ -119,25 +107,24 @@ class WorkspacesScreen(ListScreen[str | None]):
     def show(self, workspaces: Sequence[WorkspaceEntry]) -> None:
         """List ``workspaces`` in place of those listed, keeping the highlight on the row it was
         on, or where it was if that one's gone; picks the workspace being added once listed."""
-        kept = self._highlighted if self.is_mounted else None
+        shown = self._keys
         self.workspaces = tuple(workspaces)
-        if not self._pick_added() and kept is not None:
-            self._relist(kept)
+        if not self._pick_added() and self.is_mounted:
+            self._relist(shown)
 
-    def _relist(self, kept: str) -> None:
-        """List the rows again, highlighting the one whose key is ``kept``, or the row where
-        the highlight was if that one's gone."""
+    def _relist(self, shown: Sequence[str]) -> None:
+        """List the rows again in place of rows with keys ``shown``, keeping the highlight on
+        the row it was on, or where it was if that one's gone."""
         options = self.query_one(OptionList)
-        highlighted, rows = options.highlighted or 0, self.rows
+        highlighted = options.highlighted
         options.clear_options()
-        options.add_options(map(row_label, rows))
-        keys = [row_key(row) for row in rows]
-        options.highlighted = keys.index(kept) if kept in keys else min(highlighted, len(rows) - 1)
+        options.add_options(map(row_label, self.rows))
+        options.highlighted = kept_highlight(shown, highlighted, self._keys)
 
     @property
-    def _highlighted(self) -> str:
-        """The key of the row highlighted."""
-        return row_key(self.rows[self.query_one(OptionList).highlighted or 0])
+    def _keys(self) -> tuple[str, ...]:
+        """The rows' keys."""
+        return tuple(map(row_key, self.rows))
 
     def _pick_added(self) -> bool:
         """Whether the workspace being added is listed, and picked, unless another screen is
@@ -160,7 +147,7 @@ class WorkspacesScreen(ListScreen[str | None]):
         elif isinstance(row, AddWorkspace):
             await self._add(row.path)
         else:
-            self._typing(True)
+            self._typing(PATH_HINT)
 
     @on(Input.Submitted, "#workspace-path")
     async def _typed(self, event: Input.Submitted) -> None:
@@ -180,7 +167,7 @@ class WorkspacesScreen(ListScreen[str | None]):
         screen is gone."""
         if not self.is_attached:
             return
-        self._typing(False)
+        self._typing(None)
         self._adding = path
         self._pick_added()
 
@@ -195,7 +182,7 @@ class WorkspacesScreen(ListScreen[str | None]):
         else:
             self._show_note(why)
 
-    async def action_remove(self) -> None:
+    def action_remove(self) -> None:
         """Remove the highlighted workspace once the user confirms; other rows remove
         nothing."""
         row = self.rows[self.query_one(OptionList).highlighted or 0]
@@ -203,39 +190,16 @@ class WorkspacesScreen(ListScreen[str | None]):
             return
         removing = RemoveWorkspace(workspace=row.id)
 
-        async def answered(confirmed: bool | None) -> None:
-            if confirmed:
-                self._show_note(None)
-                await self._change(removing, Awaited(why=self._refused))
+        async def remove() -> None:
+            self._show_note(None)
+            await self._change(removing, Awaited(why=self._refused))
 
-        confirm = ConfirmScreen(REMOVE_TITLE, remove_message(row), REMOVE_YES)
-        self.app.push_screen(confirm, answered)
+        confirm(self.app.push_screen, REMOVE_TITLE, remove_message(row), REMOVE_YES, remove)
 
     def must_pick(self) -> None:
         """Have escape quit orbit, as at startup, now there's nothing to go back to."""
         self.startup = True
-        adding = self.query_one(Input).display
-        self.query_one(Vertical).border_subtitle = workspaces_hint(startup=True, adding=adding)
-
-    def action_back(self) -> None:
-        if self.query_one(Input).display:
-            self._typing(False)
-        elif self.startup:
-            self.app.exit()
-        else:
-            self.dismiss(None)
-
-    def _typing(self, on: bool) -> None:
-        """Show the box for a path to add, and type in it; or go back to the list."""
-        path = self.query_one(Input)
-        path.display = on
-        path.border_subtitle = ""
-        self.query_one(Vertical).border_subtitle = workspaces_hint(startup=self.startup, adding=on)
-        if on:
-            path.focus()
-        else:
-            path.clear()
-            self.query_one(OptionList).focus()
+        self._show_hint()
 
     def _show_note(self, note: str | None) -> None:
         """Show ``note`` under the list, or hide it while it's none."""

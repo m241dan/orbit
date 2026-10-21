@@ -1,11 +1,13 @@
 """The workspace picker's rows, labels and hints."""
 
 from orbit.protocol import AddWorkspace, SessionStateChanged, SessionSummary, WorkspaceEntry
+from orbit.tui.view.common import picker_hint
 from orbit.tui.view.workspaces import (
     ADD_PATH,
     LIST_HINT,
     PATH_HINT,
     STARTUP_HINT,
+    WORKSPACES_HINTS,
     added_workspace,
     preselected,
     remove_message,
@@ -15,7 +17,6 @@ from orbit.tui.view.workspaces import (
     workspace_at,
     workspace_label,
     workspace_rows,
-    workspaces_hint,
 )
 
 TODAY = SessionSummary(id="s", name="today", active=True)
@@ -131,9 +132,9 @@ def test_session_states_change_in_every_workspace() -> None:
 
 
 def test_hints() -> None:
-    assert workspaces_hint(startup=False, adding=False) == LIST_HINT
-    assert workspaces_hint(startup=True, adding=False) == STARTUP_HINT
-    assert workspaces_hint(startup=True, adding=True) == PATH_HINT
+    assert picker_hint(WORKSPACES_HINTS, startup=False, box=None) == LIST_HINT
+    assert picker_hint(WORKSPACES_HINTS, startup=True, box=None) == STARTUP_HINT
+    assert PATH_HINT == "enter add · esc back"
 
 
 def test_row_keys_tell_rows_apart_by_workspace_or_path() -> None:

@@ -17,7 +17,7 @@ from orbit.protocol import (
     Usage,
     WorkspaceEntry,
 )
-from orbit.tui.view.common import SPINNER_FRAMES, STATUS_ICONS
+from orbit.tui.view.common import SPINNER_FRAMES, STATUS_ICONS, ListHints
 from orbit.tui.view.tasks import usage_label
 from orbit.tui.view.workspaces import workspace_at
 
@@ -35,6 +35,7 @@ LIST_HINT = "j/k move · enter open · r rename · x delete · esc close"
 STARTUP_HINT = "j/k move · enter open · r rename · x delete · esc quit"
 NAME_HINT = "enter start · esc back"
 RENAME_HINT = "enter rename · esc back"
+SESSIONS_HINTS = ListHints(closing=LIST_HINT, quitting=STARTUP_HINT)
 ACTIVATION_TITLE = "Not the active session"
 ACTIVATE_CHOICE = "Make this the active session"
 JUST_LOOK_CHOICE = "Just look"
@@ -238,12 +239,10 @@ def task_counts(counts: dict[TaskStatus, int]) -> str:
     )
 
 
-def sessions_hint(*, startup: bool, naming: bool, renaming: bool) -> str:
-    """The keys the sessions modal shows: the name box's while ``naming`` (a new name for a
-    session when ``renaming``), or else the list's, where escape quits at ``startup``."""
-    if naming:
-        return RENAME_HINT if renaming else NAME_HINT
-    return STARTUP_HINT if startup else LIST_HINT
+def name_hint(*, renaming: bool) -> str:
+    """The keys the sessions modal's name box shows: for a new name for a session when
+    ``renaming``, or else for a new session's name."""
+    return RENAME_HINT if renaming else NAME_HINT
 
 
 def viewing_mark(name: str, active: str | None, running: str | None) -> str:
