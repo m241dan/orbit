@@ -87,7 +87,7 @@ async def opened_notes(state: Path, root: Path) -> list[str]:
     the store is closed after."""
     store = await SqliteStore.open(state)
     try:
-        return (await open_workspace_store(store, root)).notes
+        return (await open_workspace_store(store, root, owned=True)).notes
     finally:
         await store.close()
 
@@ -106,7 +106,7 @@ async def test_the_store_is_opened_with_the_workspaces_fallback_files(
 ) -> None:
     store = await SqliteStore.open(state)
     try:
-        opened = await open_workspace_store(store, root)
+        opened = await open_workspace_store(store, root, owned=True)
         assert isinstance(opened, OpenedStore)
         assert opened.notes == []
         workspace_id = opened.store.workspace_id
@@ -203,8 +203,8 @@ async def test_a_failed_import_leaves_the_shared_store_open_for_other_workspaces
     store = await SqliteStore.open(state)
     try:
         with held(sessions / "abc.lock"), pytest.raises(ImportBlocked):
-            await open_workspace_store(store, root)
-        opened = await open_workspace_store(store, other)
+            await open_workspace_store(store, root, owned=True)
+        opened = await open_workspace_store(store, other, owned=True)
         assert await opened.store.sessions() == []
     finally:
         await store.close()
@@ -230,3 +230,48 @@ async def test_a_failed_recovery_keeps_the_fallback_file(state: Path, root: Path
         await opened_notes(state, root)
 
     assert path.exists()
+
+
+async def opened_unowned(state: Path, root: Path) -> list[str]:
+    """The notes on what opening ``root``'s view of a store of its own in ``state`` imported,
+    another orbit owning the workspace; the store is closed after."""
+    store = await SqliteStore.open(state)
+    try:
+        return (await open_workspace_store(store, root, owned=False)).notes
+    finally:
+        await store.close()
+
+
+async def test_an_orbit_not_owning_the_workspace_leaves_its_fallback_files(
+    state: Path, root: Path
+) -> None:
+    outside = await park_in_state(state, root, 1)
+    inside = park(root / ".orbit" / "fallback" / "s2.jsonl", 2)
+
+    assert await opened_unowned(state, root) == []
+    assert outside.exists() and inside.exists()
+    assert await logged(state, root) == []
+
+
+async def test_an_orbit_not_owning_the_workspace_still_imports_old_session_files(
+    state: Path, root: Path
+) -> None:
+    legacy_sessions(root)
+    assert await opened_unowned(state, root) == [IMPORT_NOTE]
+
+
+async def test_recovering_later_imports_and_deletes_the_fallback_files_with_notes(
+    state: Path, root: Path
+) -> None:
+    path = park(root / ".orbit" / "fallback" / "s1.jsonl", 2, 1)
+    store = await SqliteStore.open(state)
+    try:
+        opened = await open_workspace_store(store, root, owned=False)
+        assert await opened.recover() == [
+            "Recovered 2 events from .orbit/fallback/s1.jsonl into the session's log."
+        ]
+    finally:
+        await store.close()
+
+    assert not path.exists()
+    assert await logged(state, root) == [parked_notice(1), parked_notice(2)]

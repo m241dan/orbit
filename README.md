@@ -733,14 +733,17 @@ paging back through it, shows in their place as a line such as "Events 1204–12
 If a write still fails, or the store still can't list, lock or read the session a rename is
 retried on, the session stays halted and the explanation is given again for the failure now.
 
-Restarting orbit recovers the events too. On every start, once the database is open, orbit
-imports each of the repository's fallback files, from both places, into the log the same way,
-skipping events already stored, deletes it, and says in the conversation how many events it
-recovered from which file, as in "Recovered 37 events from .git/orbit/fallback/<session
-id>.jsonl into the session's log.", counting only the events it newly stored; a file whose events
-were all stored already is deleted without a word. A fallback file that can't be read or imported stops orbit
-before the app starts, with status 2 and a message naming the file and the error, leaving the
-file as it was.
+Restarting orbit recovers the events too. The orbit that owns the repository, once the
+database is open as it starts, imports each of the repository's fallback files, from both places,
+into the log the same way, skipping events already stored, deletes it, and says in the
+conversation how many events it recovered from which file, as in "Recovered 37 events from
+.git/orbit/fallback/<session id>.jsonl into the session's log.", counting only the events it
+newly stored; a file whose events were all stored already is deleted without a word. A fallback
+file that can't be read or imported stops orbit before the app starts, with status 2 and a
+message naming the file and the error, leaving the file as it was. A read-only orbit leaves the
+fallback files alone, as the owner may still be writing them, and recovers them the same way
+once it takes the repository over, before running the work queued; a file it can't recover then
+is reported as an error and left for the next start.
 
 ### Planning with the planner
 

@@ -34,6 +34,7 @@ from orbit.agent.application.ports import (
     SessionStore,
 )
 from orbit.agent.application.proposals import FrontendReview
+from orbit.agent.application.recovery import RecoveryFailed
 from orbit.agent.application.review_count import ReviewCount
 from orbit.agent.application.review_lane import ReviewLane
 from orbit.agent.application.session_state import SessionStates, StateParts
@@ -73,11 +74,13 @@ from orbit.agent.domain.storage_halt import FailedWrite
 from orbit.agent.domain.verification import VerificationStep, startup_fix_prompt
 from orbit.protocol import (
     CODER,
+    INTERNAL,
     PLANNER_LANE,
     WORK_LANE,
     ActivateSession,
     Attach,
     DeleteSession,
+    ErrorOccurred,
     Event,
     History,
     LogGap,
@@ -136,6 +139,11 @@ UNREGISTERED_WORKSPACE = "unregistered"
 
 async def _unannounced(entry: WorkspaceEntry) -> None:
     """Tell no one of ``entry``, as a host no control plane serves has no one to tell."""
+
+
+async def _nothing_parked() -> Sequence[str]:
+    """No notes, as a host given no fallback files to recover recovers none."""
+    return ()
 
 
 class WorkspaceHost:
@@ -205,7 +213,11 @@ class WorkspaceHost:
     once it's free, it's held and offered with ``OwnershipOffered``. ``TakeOwnership`` answers:
     taking it publishes ``OwnershipTaken`` and a notice, then runs the work queued, in order;
     declining it publishes ``OwnershipDeclined``, lets the lock go and offers it again once
-    another orbit has held it since, or after ``lock_declined_retry`` seconds.
+    another orbit has held it since, or after ``lock_declined_retry`` seconds. Taking it first
+    runs ``recover``, which imports the fallback files the owner left into the log, as the
+    owner's startup does, and publishes a notice for each of the notes it returns; one that
+    fails is reported as an ``ErrorOccurred`` coded ``internal``, its files left for the next
+    owner's start.
     While the offer is open, ``Snapshot`` says so. ``owned`` is called as it's taken, before
     ``OwnershipTaken`` is published.
     """
@@ -229,6 +241,7 @@ class WorkspaceHost:
         startup_notes: Sequence[str] = (),
         storage: StorageSettings = _DEFAULT_STORAGE,
         fallback: Fallback | None = None,
+        recover: Callable[[], Awaitable[Sequence[str]]] = _nothing_parked,
         owner: WorkspaceOwner | None = None,
         lock: RepositoryLock | None = None,
         lock_retry: float = RETRY_SECONDS,
@@ -266,6 +279,7 @@ class WorkspaceHost:
         self._verifier = _verifier(verification, self._tasks, self._events, agents)
         self._desk = AgentDesk(agents, self._publish_agents) if agents else None
         self._workspace = workspace
+        self._recover = recover
         owner_notes = () if owner is None else (read_only_note(owner),)
         self._startup_notes = (*owner_notes, *startup_notes)
         self._closing = False
@@ -624,8 +638,9 @@ class WorkspaceHost:
             await self._views.deleted(command.session_id)
 
     async def _take_ownership(self, command: TakeOwnership, command_id: str) -> None:
-        """Answer the offer of the repository: own it, if ``command`` takes it, and run the work
-        queued for ``command_id`` and the reviews waiting; refused when no offer is open."""
+        """Answer the offer of the repository: own it, if ``command`` takes it, recover the
+        fallback files the owner left, and run the work queued for ``command_id`` and the
+        reviews waiting; refused when no offer is open."""
         self._takeover.answer(command.take)
         if not command.take:
             await self._events.put(OwnershipDeclined())
@@ -633,9 +648,21 @@ class WorkspaceHost:
         self.owned()
         await self._events.put(OwnershipTaken())
         await self._events.put(Notice(message=OWNED_NOTE))
+        await self._recover_parked()
         await self._commands.own(command_id)
         if self._lane is not None:  # After the queued work, so its tasks get agents first.
             self._lane.kick()
+
+    async def _recover_parked(self) -> None:
+        """Recover the fallback files the owner left, now this orbit owns the repository,
+        publishing a notice for each recovered or an error if that failed."""
+        try:
+            notes = await self._recover()
+        except RecoveryFailed as exc:
+            await self._events.put(ErrorOccurred(code=INTERNAL, message=str(exc)))
+            return
+        for note in notes:
+            await self._events.put(Notice(message=note))
 
     def _agent_on(self, task_id: str) -> str:
         """The agent working on task ``task_id``; only asked while one is."""

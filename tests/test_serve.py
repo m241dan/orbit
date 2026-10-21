@@ -44,6 +44,7 @@ from orbit.protocol import (
     CommandEnvelope,
     CommandRefused,
     Event,
+    EventEnvelope,
     Hello,
     Notice,
     OwnershipOffered,
@@ -349,6 +350,36 @@ def test_a_read_only_workspace_taken_over_names_the_servers_url_in_its_lock(
 
     assert owners == [WorkspaceOwner(pid=os.getpid(), url=str(frontend.run_file["url"]))]
     assert isinstance(frontend.events[-1], CommandAccepted)
+
+
+@pytest.mark.usefixtures("quick_retries")
+def test_a_read_only_workspace_recovers_the_parked_events_only_once_taken_over(
+    project: Path, state: Path, config_dir: Path
+) -> None:
+    parked = project / ".orbit" / "fallback" / "s1.jsonl"
+    parked.parent.mkdir(parents=True)
+    notice = EventEnvelope(seq=1, session="s1", payload=Notice(message="parked"))
+    parked.write_text(f"{encode(notice)}\n")
+    owner = WorkspaceLock(project / ".orbit")
+    owner.take()
+    left: list[bool] = []
+
+    def takes_over(websocket: ClientConnection) -> list[Event]:
+        left.append(parked.exists())
+        owner.close()
+        events = until(websocket, OwnershipOffered)
+        say(websocket, "take", TakeOwnership(take=True))
+        events += until(websocket, CommandAccepted)
+        left.append(parked.exists())
+        return events
+
+    frontend = Frontend(state, config_dir, takes_over)
+    served(frontend, "--port", "0")
+
+    note = "Recovered 1 event from .orbit/fallback/s1.jsonl into the session's log."
+    assert Notice(message=note) not in frontend.events[: len(ATTACHED)]
+    assert Notice(message=note) in frontend.events
+    assert left == [True, False]
 
 
 def _workspace_dirs(tmp_path: Path, *names: str) -> list[Path]:

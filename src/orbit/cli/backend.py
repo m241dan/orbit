@@ -191,7 +191,7 @@ def _backend(backend: _Backend, directories: _Directories, *, pick_session: bool
     root = directories.root
     make = _host_maker(backend, root, _config(root), storage, pick_session=pick_session)
     usage_source = UsageApi() if backend.usage else None
-    store, opened = _open_store(directories.state, directories.root)
+    store, opened = _open_store(directories.state, root, owned=backend.owner is None)
     return _Made(
         lambda: ControlPlane([make(opened)], usage_source), store, opened.store.workspace_id
     )
@@ -228,6 +228,7 @@ def _host_maker(
             startup_notes=opened.notes,
             storage=storage,
             fallback=opened.fallback,
+            recover=opened.recover,
             owner=backend.owner,
             lock=backend.lock,
         )
@@ -278,7 +279,7 @@ class _Workspaces:
         lock, owner = self._stack.enter_context(_repository_lock(root))
         backend = replace(self._flags, owner=owner, lock=lock)
         make = _host_maker(backend, root, _config(root), self._storage, pick_session=False)
-        opened = _open_view(self._store, root)
+        opened = _open_view(self._store, root, owned=owner is None)
         self._locks[opened.store.workspace_id] = lock
         return _ServedWorkspace(root, owner, lock), lambda: make(opened)
 
@@ -303,7 +304,7 @@ class _Workspaces:
         config = _workspace_config(directory, worktree=self._flags.worktree)
         lock, owner = _locked(directory, self.url)
         try:
-            opened = await _flagged_view(self._store, directory)
+            opened = await _flagged_view(self._store, directory, owned=owner is None)
         except BaseException:
             lock.close()
             raise
@@ -346,11 +347,12 @@ def _locked(root: Path, url: str | None) -> tuple[WorkspaceLock, WorkspaceOwner 
         ) from None
 
 
-async def _flagged_view(store: SqliteStore, root: Path) -> OpenedStore:
+async def _flagged_view(store: SqliteStore, root: Path, *, owned: bool) -> OpenedStore:
     """The workspace at ``root``'s view of ``store``, as :func:`open_workspace_store` opens it,
-    flagged as served. Raises :class:`WorkspaceUnavailable` if that fails."""
+    recovering its fallback files if this orbit ``owned`` it, flagged as served. Raises
+    :class:`WorkspaceUnavailable` if that fails."""
     try:
-        opened = await open_workspace_store(store, root)
+        opened = await open_workspace_store(store, root, owned=owned)
         await WorkspaceRegistry(store).set_served(opened.store.workspace_id, True)
     except (StoreError, ImportBlocked, RecoveryFailed) as exc:
         raise WorkspaceUnavailable(str(exc)) from None
@@ -462,17 +464,18 @@ def _storage(config_dir: Path) -> StorageSettings:
     return _configured(lambda: read_storage(config_dir))
 
 
-def _open_store(state: Path, root: Path) -> tuple[SqliteStore, OpenedStore]:
+def _open_store(state: Path, root: Path, *, owned: bool) -> tuple[SqliteStore, OpenedStore]:
     """The store in the ``state`` directory and the workspace at ``root``'s view of it, with the
-    sessions an older orbit saved as files and the events an earlier run parked in fallback files
-    imported, the notes on what was imported, and the fallback files.
+    sessions an older orbit saved as files imported and, if this orbit ``owned`` the workspace,
+    the events an earlier run parked in fallback files too, the notes on what was imported, and
+    the fallback files.
 
     Exits with status 2 if the store can't be opened, the old sessions can't be imported or a
     fallback file can't be recovered.
     """
     store = _open(state)
     try:
-        return store, _open_view(store, root)
+        return store, _open_view(store, root, owned=owned)
     except BaseException:
         asyncio.run(store.close())
         raise
@@ -487,14 +490,15 @@ def _open(state: Path) -> SqliteStore:
         return asyncio.run(SqliteStore.open(state))
 
 
-def _open_view(store: SqliteStore, root: Path) -> OpenedStore:
-    """The workspace at ``root``'s view of ``store``, as :func:`open_workspace_store` opens it.
+def _open_view(store: SqliteStore, root: Path, *, owned: bool) -> OpenedStore:
+    """The workspace at ``root``'s view of ``store``, as :func:`open_workspace_store` opens it,
+    recovering its fallback files if this orbit ``owned`` it.
 
     Exits with status 2 if it can't be registered, its old sessions can't be imported or a
     fallback file can't be recovered.
     """
     with _exit_on(StoreError, ImportBlocked, RecoveryFailed):
-        return asyncio.run(open_workspace_store(store, root))
+        return asyncio.run(open_workspace_store(store, root, owned=owned))
 
 
 def _verification(config: OrbitConfig) -> Verification:

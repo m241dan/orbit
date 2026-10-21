@@ -1322,6 +1322,23 @@ def test_a_chat_on_a_repository_another_orbit_owns_is_read_only_naming_it(
     assert read_only_note(WorkspaceOwner(pid=os.getpid())) in standing.notices
 
 
+def test_a_chat_on_a_repository_another_orbit_owns_leaves_its_parked_events(
+    standings: list[Standing], state: Path, tmp_path: Path
+) -> None:
+    path = park(state, tmp_path, 1)
+    owner = WorkspaceLock(tmp_path / ".orbit")
+    owner.take()
+    try:
+        assert runner.invoke(app, ["chat", "-C", str(tmp_path)]).exit_code == 0
+    finally:
+        owner.close()
+
+    assert path.exists()
+    assert asyncio.run(logged_in(state, tmp_path.resolve())) == []
+    [standing] = standings
+    assert not any(note.startswith("Recovered") for note in standing.notices)
+
+
 def test_a_chat_owns_a_repository_no_other_orbit_holds_until_it_ends(
     launched: list[WorkspaceHost], tmp_path: Path
 ) -> None:

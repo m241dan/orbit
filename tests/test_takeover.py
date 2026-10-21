@@ -1,14 +1,17 @@
 """Taking over a freed repository: a read-only orbit offers to own it once its owner goes."""
 
 import asyncio
+from collections.abc import Sequence
 
 from orbit.agent import WorkspaceHost
+from orbit.agent.application.recovery import RecoveryFailed
 from orbit.agent.application.takeover import NO_OFFER, RetryTimes, Takeover
 from orbit.agent.application.work_turns import TASKS_RUNNING_MESSAGE
 from orbit.agent.application.workspace_host import OWNED_NOTE
 from orbit.agent.domain.ownership import WorkspaceOwner
 from orbit.protocol import (
     BUSY,
+    INTERNAL,
     INVALID,
     AddTask,
     Catalog,
@@ -417,4 +420,84 @@ async def test_an_owner_from_the_start_never_calls_owned() -> None:
     await send(session, TakeOwnership(take=True))
     await events_until(session, refused)
     assert calls == []
+    await session.close()
+
+
+RECOVERED_NOTE = "Recovered 2 events from .orbit/fallback/s1.jsonl into the session's log."
+
+
+class FakeRecovery:
+    """Recovers the fallback files the owner left, noting ``notes``, or fails with ``failure``;
+    counts its ``runs``."""
+
+    def __init__(self, *notes: str, failure: RecoveryFailed | None = None) -> None:
+        self.notes = notes
+        self.failure = failure
+        self.runs = 0
+
+    async def __call__(self) -> Sequence[str]:
+        self.runs += 1
+        if self.failure is not None:
+            raise self.failure
+        return self.notes
+
+
+async def test_taking_over_recovers_the_parked_events_before_running_queued_work() -> None:
+    lock, recovery = FakeLock(), FakeRecovery(RECOVERED_NOTE)
+    session, _, _ = session_for(claims_done, owner=OWNER, lock=lock, recover=recovery)
+    await send(session, AddTask(task=TaskSpec(prompt="Add a flag.")))
+    await send(session, RunTasks())
+    lock.free = True
+    await events_until(session, offered)
+    assert recovery.runs == 0
+
+    await send(session, TakeOwnership(take=True))
+    events = await events_until(session, idle())
+
+    owned_at = events.index(Notice(message=OWNED_NOTE))
+    recovered_at = events.index(Notice(message=RECOVERED_NOTE))
+    assert owned_at < recovered_at < events.index(ACCEPTED)
+    assert recovery.runs == 1
+    await session.close()
+
+
+async def test_a_recovery_that_fails_on_taking_over_is_reported_and_work_still_runs() -> None:
+    failure = RecoveryFailed(".orbit/fallback/s1.jsonl", "Not JSON")
+    lock, recovery = FakeLock(), FakeRecovery(failure=failure)
+    session, _, launcher = session_for(claims_done, owner=OWNER, lock=lock, recover=recovery)
+    await send(session, AddTask(task=TaskSpec(prompt="Add a flag.")))
+    await send(session, RunTasks())
+    lock.free = True
+    await events_until(session, offered)
+
+    await send(session, TakeOwnership(take=True))
+    events = await events_until(session, idle())
+
+    assert ErrorOccurred(code=INTERNAL, message=str(failure)) in events
+    assert len(launcher.launches) == 1 and not session.read_only
+    await session.close()
+
+
+async def test_declining_the_offer_recovers_nothing() -> None:
+    lock, recovery = FakeLock(free=True), FakeRecovery(RECOVERED_NOTE)
+    session, _, _ = session_for(owner=OWNER, lock=lock, recover=recovery)
+
+    events = await declined(session)
+
+    assert Notice(message=RECOVERED_NOTE) not in events
+    assert recovery.runs == 0
+    await session.close()
+
+
+async def test_a_host_given_nothing_to_recover_takes_over_with_no_recovered_note() -> None:
+    session = WorkspaceHost(owner=OWNER, lock=FakeLock(free=True), lock_retry=LOCK_RETRY)
+    await greeted(session)
+    await events_until(session, offered)
+
+    await send(session, TakeOwnership(take=True))
+    events = await events_until(session, lambda event: event == ACCEPTED)
+
+    notices = [event.message for event in events if isinstance(event, Notice)]
+    assert notices == [OWNED_NOTE]
+    assert not session.read_only
     await session.close()

@@ -178,7 +178,7 @@ async def test_a_failure_opening_the_store_lets_the_lock_go(
 ) -> None:
     root = directory(tmp_path)
 
-    async def fails(store: SqliteStore, root: Path) -> None:
+    async def fails(store: SqliteStore, root: Path, *, owned: bool) -> None:
         raise RuntimeError("A bug.")
 
     monkeypatch.setattr(backend, "open_workspace_store", fails)

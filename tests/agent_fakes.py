@@ -565,6 +565,11 @@ LOCK_DECLINED_RETRY = 60.0
 than any test runs."""
 
 
+async def nothing_parked() -> Sequence[str]:
+    """No notes, as no fallback files are parked."""
+    return ()
+
+
 def session_for(
     *scripts: Script,
     verification: Verification | None = None,
@@ -573,6 +578,7 @@ def session_for(
     usage: UsageSource | None = None,
     store: SessionStore | None = None,
     fallback: Fallback | None = None,
+    recover: Callable[[], Awaitable[Sequence[str]]] | None = None,
     owner: WorkspaceOwner | None = None,
     lock: RepositoryLock | None = None,
     lock_declined_retry: float = LOCK_DECLINED_RETRY,
@@ -581,7 +587,8 @@ def session_for(
     """A session whose tasks run through agents playing ``scripts``, one per launch, and
     whose reviews run through agents playing ``reviewers``, with usage from ``usage``. It's
     saved in ``store``, if given, as ``session-1``, on a :class:`Ticks` clock, its unsaved
-    events going to ``fallback``, if given, and read-only if another ``owner`` owns the
+    events going to ``fallback``, if given, recovering parked ones with ``recover``, if given,
+    and read-only if another ``owner`` owns the
     repository, trying its ``lock``, if given, every :data:`LOCK_RETRY` seconds and offering it
     again ``lock_declined_retry`` seconds after a decline.
 
@@ -601,6 +608,7 @@ def session_for(
         clock=Ticks(),
         new_id=lambda: "session-1",
         fallback=fallback,
+        recover=recover or nothing_parked,
         owner=owner,
         lock=lock,
         lock_retry=LOCK_RETRY,
