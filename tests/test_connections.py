@@ -43,6 +43,7 @@ from orbit.protocol import (
     TaskSpec,
     UsageChanged,
     Welcome,
+    WorkspaceEntry,
 )
 from tests.agent_fakes import (
     HELLO,
@@ -55,6 +56,7 @@ from tests.agent_fakes import (
     attach_to,
     close,
     connect,
+    control_plane,
     events_until,
     publish,
     served,
@@ -308,11 +310,9 @@ async def test_closing_the_session_ends_every_connections_stream() -> None:
     assert welcomes(await everything(second)) == [welcome("second")]
 
 
-async def test_a_connection_made_after_the_session_closed_ends_at_once_and_ignores_commands() -> (
-    None
-):
+async def test_a_connection_made_once_the_control_plane_closed_ends_and_ignores_commands() -> None:
     session = WorkspaceHost()
-    await session.close()
+    await control_plane(session).close()
     connection = connect(session)
 
     await say(connection, "late", HELLO)
@@ -495,7 +495,7 @@ async def test_a_catalog_from_a_task_a_command_started_reaches_every_connection(
     async def spawned(*args: object) -> None:
         started.append(asyncio.create_task(later()))
 
-    asker._parts = replace(asker._parts, answer=spawned)
+    asker._answer = spawned
     await say(asker, "spawn", AddTask(task=TASK))
     await asker.close()
     go.set()
@@ -550,13 +550,13 @@ async def test_a_connection_not_yet_welcomed_gets_only_its_greetings_catalog() -
     asker = await welcomed(session, "asker")
     await taken(asker)
     go = asyncio.Event()
-    fetch = session.catalog
+    fetch = session.entry
 
-    async def slow() -> Catalog:
+    async def slow() -> WorkspaceEntry:
         await go.wait()
         return await fetch()
 
-    session.catalog = slow  # type: ignore[method-assign]
+    session.entry = slow  # type: ignore[method-assign]
     joining = connect(session)
     greeting = asyncio.create_task(say(joining, "joining", HELLO))
     await asyncio.sleep(0.01)

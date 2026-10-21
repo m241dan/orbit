@@ -184,7 +184,7 @@ class WorkLane:
     async def _prepare(self, task_id: str) -> str:
         """Where task ``task_id`` is worked on: the coder's tree, readied for it."""
         if self._desk.agents.tree is None:
-            return "."
+            return self._desk.agents.root
         # A fix carries on from the work it fixes.
         tree = self._desk.agents.tree
         root = await tree.prepare(keep=self._board.get(task_id).fixes is not None)

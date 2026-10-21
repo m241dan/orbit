@@ -2,8 +2,8 @@
 
 import asyncio
 import secrets
-from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Protocol
@@ -31,7 +31,9 @@ from orbit.agent import (
     WorkspaceHost,
     WorkspaceLock,
     WorkspaceOwner,
+    WorkspaceRegistry,
     git_top_level,
+    has_git_identity,
     in_git_work_tree,
     open_workspace_store,
     orbit_dir,
@@ -173,17 +175,31 @@ def _backend(backend: _Backend, directories: _Directories, *, pick_session: bool
 
     Exits with status 2 if a configuration is invalid or the store can't be opened.
     """
-    root = directories.root
-    config = _config()
     storage = _storage(directories.user_config)
-    verification = _verification(config) if backend.verify else None
-    agents = _agents(config, worktree=backend.worktree, review=backend.review)
-    settings, pinned = _settings(backend.model, backend.tools)
+    make = _host_maker(backend, directories.root, storage, pick_session=pick_session)
     usage_source = UsageApi() if backend.usage else None
-    store, opened = _open_store(directories.state, root)
+    store, opened = _open_store(directories.state, directories.root)
+    return _Made(
+        lambda: ControlPlane([make(opened)], usage_source), store, opened.store.workspace_id
+    )
 
-    def build() -> ControlPlane:
-        host = WorkspaceHost(
+
+def _host_maker(
+    backend: _Backend, root: Path, storage: StorageSettings, *, pick_session: bool
+) -> Callable[[OpenedStore], WorkspaceHost]:
+    """What builds the host of the workspace at ``root`` over its view of the store, as
+    ``backend`` asks, keeping its sessions as ``storage`` says, listing the saved sessions to
+    pick from if ``pick_session``.
+
+    Exits with status 2 if the workspace's configuration is invalid.
+    """
+    config = _config(root)
+    verification = _verification(config) if backend.verify else None
+    agents = _agents(config, root, worktree=backend.worktree, review=backend.review)
+    settings, pinned = _settings(backend.model, backend.tools)
+
+    def make(opened: OpenedStore) -> WorkspaceHost:
+        return WorkspaceHost(
             settings,
             model_choices=MODEL_ALIASES,
             verification=verification,
@@ -201,17 +217,118 @@ def _backend(backend: _Backend, directories: _Directories, *, pick_session: bool
             owner=backend.owner,
             lock=backend.lock,
         )
-        return ControlPlane(host, usage_source)
 
-    return _Made(build, store, opened.store.workspace_id)
+    return make
 
 
-def _config() -> OrbitConfig:
-    """The project file's configuration.
+@dataclass(frozen=True)
+class _ServedWorkspace:
+    """A workspace ``orbit serve`` serves: the one at ``root``, with the repository's ``owner``
+    if another orbit owns it, making it read-only, and its workspace ``lock``."""
+
+    root: Path
+    owner: WorkspaceOwner | None
+    lock: WorkspaceLock
+
+
+@dataclass(frozen=True)
+class _Serving:
+    """What ``orbit serve`` serves: what ``build``s its control plane, and the ``workspaces`` it
+    serves."""
+
+    build: Callable[[], ControlPlane]
+    workspaces: tuple[_ServedWorkspace, ...]
+
+
+@contextmanager
+def _serving(
+    flags: _Backend, added: Sequence[Path], state: Path, user_config: Path
+) -> Iterator[_Serving]:
+    """Run the block serving the workspaces flagged as served in the store in ``state``, the
+    ``added`` ones flagged first, with the backend ``flags`` ask for and the user config in
+    ``user_config``, holding each one's workspace lock if no other orbit does; yields what's
+    served, then lets the locks go and closes the store. A workspace flagged whose directory is
+    gone is skipped, with a warning.
+
+    Exits with status 2 if the store can't be opened, a workspace can't be registered, locked
+    or opened, git has no identity for a repository the coder commits in, or a configuration is
+    invalid.
+    """
+    storage = _storage(user_config)
+    usage_source = UsageApi() if flags.usage else None
+    with ExitStack() as stack:
+        store = _open(state)
+        stack.callback(lambda: asyncio.run(store.close()))
+        roots = _flagged(store, added)
+        served = [_served(stack, flags, store, root, storage) for root in roots]
+        workspaces = tuple(workspace for workspace, _ in served)
+        makers = [make for _, make in served]
+        yield _Serving(lambda: ControlPlane([make() for make in makers], usage_source), workspaces)
+
+
+def _served(
+    stack: ExitStack, flags: _Backend, store: SqliteStore, root: Path, storage: StorageSettings
+) -> tuple[_ServedWorkspace, Callable[[], WorkspaceHost]]:
+    """The workspace at ``root`` served, with what builds its host as ``flags`` ask over its view
+    of ``store``, keeping sessions as ``storage`` says, its lock held, if it's free, until
+    ``stack`` closes.
+
+    Exits with status 2 as :func:`_serving` says.
+    """
+    if flags.worktree:
+        _require_git_identity(root)
+    lock, owner = stack.enter_context(_repository_lock(root))
+    make = _host_maker(replace(flags, owner=owner, lock=lock), root, storage, pick_session=False)
+    opened = _open_view(store, root)
+    return _ServedWorkspace(root, owner, lock), lambda: make(opened)
+
+
+def _require_git_identity(root: Path) -> None:
+    """Exit with status 2 if the workspace at ``root`` is a git repository that git has no
+    identity for commits in, as the coder's worktree commits there."""
+    if not in_git_work_tree(str(root)) or has_git_identity(str(root)):
+        return
+    typer.echo(
+        f"Git has no identity for commits in {root}: set user.name and user.email"
+        ' (git config --global user.name "…"), or mount your ~/.gitconfig into the container.',
+        err=True,
+    )
+    raise typer.Exit(2)
+
+
+def _flagged(store: SqliteStore, added: Sequence[Path]) -> list[Path]:
+    """The directories of the workspaces flagged as served in ``store``, the ``added`` ones
+    registered and flagged first, but for those that are gone, warning of each.
+
+    Exits with status 2 if the store fails.
+    """
+    with _exit_on(StoreError):
+        served = asyncio.run(_flag(WorkspaceRegistry(store), added))
+    return [Path(path) for _, path in served if _present(Path(path))]
+
+
+def _present(root: Path) -> bool:
+    """Whether the workspace at ``root`` is still there, warning that it isn't served if not."""
+    if root.is_dir():
+        return True
+    typer.echo(f"Warning: The workspace {root} is gone, so it isn't served.", err=True)
+    return False
+
+
+async def _flag(registry: WorkspaceRegistry, added: Sequence[Path]) -> list[tuple[str, str]]:
+    """The id and path of each workspace ``registry`` serves, the ``added`` ones registered and
+    flagged first."""
+    for root in added:
+        await registry.set_served(await registry.find_or_register(str(root)), True)
+    return await registry.served()
+
+
+def _config(root: Path) -> OrbitConfig:
+    """The configuration in the project file of the workspace at ``root``.
 
     Exits with status 2 if the file is invalid.
     """
-    return _configured(read_config)
+    return _configured(lambda: read_config(str(root)))
 
 
 def _storage(config_dir: Path) -> StorageSettings:
@@ -230,19 +347,31 @@ def _open_store(state: Path, root: Path) -> tuple[SqliteStore, OpenedStore]:
     Exits with status 2 if the store can't be opened, the old sessions can't be imported or a
     fallback file can't be recovered.
     """
-    with _exit_on(StoreError, ImportBlocked, RecoveryFailed):
-        return asyncio.run(_opened(state, root))
-
-
-async def _opened(state: Path, root: Path) -> tuple[SqliteStore, OpenedStore]:
-    """The store in the ``state`` directory and the workspace at ``root``'s view of it, as
-    :func:`open_workspace_store` opens it; the store is closed if that fails."""
-    store = await SqliteStore.open(state)
+    store = _open(state)
     try:
-        return store, await open_workspace_store(store, root)
+        return store, _open_view(store, root)
     except BaseException:
-        await store.close()
+        asyncio.run(store.close())
         raise
+
+
+def _open(state: Path) -> SqliteStore:
+    """The store in the ``state`` directory.
+
+    Exits with status 2 if it can't be opened.
+    """
+    with _exit_on(StoreError):
+        return asyncio.run(SqliteStore.open(state))
+
+
+def _open_view(store: SqliteStore, root: Path) -> OpenedStore:
+    """The workspace at ``root``'s view of ``store``, as :func:`open_workspace_store` opens it.
+
+    Exits with status 2 if it can't be registered, its old sessions can't be imported or a
+    fallback file can't be recovered.
+    """
+    with _exit_on(StoreError, ImportBlocked, RecoveryFailed):
+        return asyncio.run(open_workspace_store(store, root))
 
 
 def _verification(config: OrbitConfig) -> Verification:
@@ -258,10 +387,12 @@ def _settings(model: str | None, tools: ToolAccess | None) -> tuple[Settings, li
     return settings, [name for name, given in (("model", model), ("tool_access", tools)) if given]
 
 
-def _agents(config: OrbitConfig, *, worktree: bool, review: bool) -> Agents:
-    """The agents that run tasks as ``config`` says, in the coder tree if ``worktree`` and
-    the workspace is a git work tree, reviewing landed work if ``review``."""
-    tree = GitCoderTree(".", config.setup) if worktree and in_git_work_tree(".") else None
+def _agents(config: OrbitConfig, root: Path, *, worktree: bool, review: bool) -> Agents:
+    """The agents that run tasks as ``config`` says in the workspace at ``root``, in the coder
+    tree if ``worktree`` and the workspace is a git work tree, reviewing landed work if
+    ``review``."""
+    where = str(root)
+    tree = GitCoderTree(where, config.setup) if worktree and in_git_work_tree(where) else None
     return Agents(
         McpHost(),
         ClaudeCliRunner(),
@@ -272,13 +403,15 @@ def _agents(config: OrbitConfig, *, worktree: bool, review: bool) -> Agents:
         review=review,
         review_limits=config.review_limits,
         write_config=write_checks,
-        planner_role=_planner_role,
+        planner_role=lambda: _planner_role(where),
+        root=where,
     )
 
 
-def _planner_role() -> Role | ConfigError:
-    """The planner's role as the project file says now, or why the file is invalid."""
+def _planner_role(root: str) -> Role | ConfigError:
+    """The planner's role as the project file of the workspace at ``root`` says now, or why the
+    file is invalid."""
     try:
-        return read_config().roles[PLANNER]
+        return read_config(root).roles[PLANNER]
     except ConfigError as exc:
         return exc

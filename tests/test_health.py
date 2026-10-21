@@ -24,7 +24,7 @@ class Standing:
     """A session whose ``read_only`` and ``storage_halted`` the test sets."""
 
     def __init__(self) -> None:
-        self.session = ControlPlane(WorkspaceHost())
+        self.session = ControlPlane([WorkspaceHost()])
         self.read_only = False
         self.storage_halted = False
 

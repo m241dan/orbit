@@ -631,7 +631,10 @@ ATTACH_ID = "attach"
 
 def host_of(session: Backend) -> WorkspaceHost:
     """``session``, if it's a workspace host, else the one the control plane serves."""
-    return session.host if isinstance(session, ControlPlane) else session
+    if isinstance(session, ControlPlane):
+        [host] = session.hosts
+        return host
+    return session
 
 
 def attach_to(session: Backend, session_id: str | None = None) -> Attach:
@@ -812,7 +815,7 @@ _PLANES: WeakKeyDictionary[WorkspaceHost, ControlPlane] = WeakKeyDictionary()
 def served(host: WorkspaceHost, usage: UsageSource | None = None) -> ControlPlane:
     """A control plane around ``host``, fetching usage from ``usage``, if given, which the
     helpers here drive ``host`` through from now on."""
-    _PLANES[host] = ControlPlane(host, usage)
+    _PLANES[host] = ControlPlane([host], usage)
     return _PLANES[host]
 
 

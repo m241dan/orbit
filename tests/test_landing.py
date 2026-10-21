@@ -281,12 +281,14 @@ async def test_listening_first_after_close_doesnt_start_the_background(
     assert started == []
 
 
-async def test_without_a_tree_tasks_work_in_the_current_directory() -> None:
+async def test_without_a_tree_tasks_work_in_the_workspaces_directory() -> None:
     steps = Steps(True)
-    session, _, launcher = session_for(claims_done, verification=verified(steps))
+    session, _, launcher = session_for(
+        claims_done, verification=verified(steps), root="/src/project"
+    )
     await asyncio.wait_for(run(session), 5)
-    assert launcher.launches[0].cwd == "."
-    assert steps.roots == ["."]
+    assert launcher.launches[0].cwd == "/src/project"
+    assert steps.roots == ["/src/project"]
 
 
 async def test_a_base_that_keeps_moving_leaves_the_work_unmerged() -> None:

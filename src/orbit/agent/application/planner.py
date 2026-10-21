@@ -200,7 +200,9 @@ class PlannerChat:
         role = self._desk.agents.roles[PLANNER]
         own = Settings(model=settings.model or role.model, tool_access=role.tool_access)
         steps = self._step_names()
-        launch = await self._desk.launch(self._agent, self._with_steps(prompt, steps), own, ".")
+        launch = await self._desk.launch(
+            self._agent, self._with_steps(prompt, steps), own, self._desk.agents.root
+        )
         async for event in self._desk.agents.launcher.converse(turn_id, launch):
             # Only a completed turn surely delivered the note; otherwise the next prompt repeats it.
             if isinstance(event, TurnFinished) and event.reason == "completed":

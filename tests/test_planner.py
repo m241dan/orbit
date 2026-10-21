@@ -79,7 +79,7 @@ async def plan(session: WorkspaceHost, text: str) -> list[Event]:
 
 
 async def test_prompts_to_the_planner_go_to_it_and_proposals_become_drafts() -> None:
-    session, _, launcher = session_for()
+    session, _, launcher = session_for(root="/src/project")
     launcher.planner_turns = [proposes_two, chats]
     events = await plan(session, "I want a --fast flag.")
     await plan(session, "Thanks.")
@@ -91,7 +91,7 @@ async def test_prompts_to_the_planner_go_to_it_and_proposals_become_drafts() -> 
     assert first.prompt == f"{steps_note(())}\n\nI want a --fast flag."
     assert second.agent.id == "agent-1"  # The same conversation, resumed.
     assert second.prompt == "Thanks."
-    assert first.tools == ROLES["planner"].tools and first.cwd == "."
+    assert first.tools == ROLES["planner"].tools and first.cwd == "/src/project"
     drafts = board(events)
     assert [(t.status, t.origin, t.task.prompt) for t in drafts] == [
         ("draft", "planner", "Add the flag\n\nAdd --fast to the CLI."),

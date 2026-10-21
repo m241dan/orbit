@@ -312,7 +312,7 @@ class ReviewLane:
 
     async def _run_reviewer(self, task_id: str, commit: str | None) -> Outcome:
         """Run the reviewer in a snapshot of ``commit``; a review the user queued works in place."""
-        root = await self._tree.snapshot(commit) if commit else "."
+        root = await self._tree.snapshot(commit) if commit else self._desk.agents.root
         try:
             return await AgentRun(task_id, self._tasks, None, self._desk).run(None, root)
         finally:

@@ -38,10 +38,28 @@ class EventSink(Protocol):
     def put_nowait(self, item: Event) -> None: ...
 
 
+class Seqs:
+    """The ``seq`` events are stamped with, counted on from ``last``: one count for every
+    workspace's events, so no two of them share a ``seq``."""
+
+    def __init__(self, last: int = 0) -> None:
+        self.last = last
+
+    def next(self) -> int:
+        """The next ``seq``, counted as stamped."""
+        self.last += 1
+        return self.last
+
+    def catch_up(self, latest: int) -> None:
+        """Count on from ``latest``, if it's higher; the count never goes down."""
+        self.last = max(self.last, latest)
+
+
 class Outbox:
     """Events published here, each handed to :attr:`deliver` (which drops it until set) in an
-    envelope stamped when it was put in: the next ``seq``, counted on from the highest in
-    ``log`` (if there is one) else from one, the session ``open_session`` names then, unless
+    envelope stamped when it was put in: the next of the :attr:`seqs`, counted on from the
+    highest in ``log`` (if there is one) else from one, and shared with the outboxes of other
+    workspaces once they're given the same, the session ``open_session`` names then, unless
     the event belongs to none, and the :attr:`workspace`, unless it belongs to the control plane.
 
     With a ``log``, each envelope of a session is also written to it in the background, but for
@@ -65,8 +83,8 @@ class Outbox:
         # Stamped on every event but the control plane's own, once set.
         self.workspace: str | None = None
         self._cut_bytes = storage.tool_output_bytes
-        # The last event's place in the stream, counted across sessions.
-        self._seq = log.max_seq() if log else 0
+        # The last event's place in the stream, counted across sessions and workspaces.
+        self.seqs = Seqs(log.max_seq() if log else 0)
         self._event_log = log
         self.deliver: Callable[[EventEnvelope], None] = _drop
         log_bytes = storage.session_log_bytes
@@ -86,9 +104,9 @@ class Outbox:
         """``item`` in its envelope, stamped now, and logged as if published, unless not
         ``logged``, but not delivered; with ``viewed``, it's stamped as that session's, a
         session that isn't open, and never logged, as it answers a connection viewing it."""
-        self._seq += 1
+        seq = self.seqs.next()
         workspace, session = self._place(item, viewed)
-        envelope = EventEnvelope(seq=self._seq, workspace=workspace, session=session, payload=item)
+        envelope = EventEnvelope(seq=seq, workspace=workspace, session=session, payload=item)
         if session is not None and viewed is None and logged:
             self._log(session, envelope)
         return envelope
@@ -103,14 +121,14 @@ class Outbox:
     @property
     def last_seq(self) -> int:
         """The ``seq`` of the last event stamped; 0 before any is."""
-        return self._seq
+        return self.seqs.last
 
     async def catch_up(self) -> None:
         """Count on from the highest ``seq`` in the log now, if there is one and it's higher, as
         another orbit may have logged events since this one opened; the count never goes
         down."""
         latest = await self._event_log.latest_seq() if self._event_log else None
-        self._seq = max(self._seq, latest or 0)
+        self.seqs.catch_up(latest or 0)
 
     async def transcript(self, session_id: str) -> tuple[EventEnvelope, ...]:
         """The last :data:`TRANSCRIPT_LENGTH` events of the session ``session_id``, oldest
@@ -137,7 +155,7 @@ class Outbox:
         oldest first, logged or still to be, when a frontend that saw those up to ``since``
         catches up on them alone; ``None`` when it can't, or the log can't be read, or there's
         no log."""
-        last = self._seq  # Those stamped from now on reach the frontend anyway.
+        last = self.seqs.last  # Those stamped from now on reach the frontend anyway.
         if self._writer is None or not await self._replayable(session_id, since, last):
             return None
         events = await self._writer.after(session_id, since)

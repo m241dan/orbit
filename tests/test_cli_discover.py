@@ -1,6 +1,5 @@
 """``orbit chat`` finding the ``orbit serve`` running for its workspace, and ``--local``."""
 
-import asyncio
 import os
 import ssl
 import subprocess
@@ -19,7 +18,6 @@ from orbit.cli import app
 from orbit.client import TokenRejected
 from orbit.protocol import NewSession
 from orbit.tui import Opening
-from tests.store_views import open_view
 from tests.tls_certs import ServerFiles, make_ca, make_client
 
 runner = CliRunner()
@@ -129,27 +127,17 @@ def in_process(monkeypatch: pytest.MonkeyPatch) -> InProcess:
 
 
 def serving(
-    state: Path,
-    workspace: Path,
-    pid: int | None = None,
-    url: str = URL,
-    local: LocalTls | None = None,
+    state: Path, pid: int | None = None, url: str = URL, local: LocalTls | None = None
 ) -> None:
-    """Say, in a run file in ``state``, that an orbit serve in process ``pid`` (this one, by
-    default) serves ``workspace`` at ``url``, verified as ``local`` says if given."""
-
-    async def registered() -> str:
-        store = await open_view(state, workspace)
-        await store.close()
-        return store.workspace_id
-
-    RunFile(state, asyncio.run(registered())).write(url, pid or os.getpid(), local)
+    """Say, in the run file in ``state``, that an orbit serve in process ``pid`` (this one, by
+    default) runs at ``url``, verified as ``local`` says if given."""
+    RunFile(state).write(url, pid or os.getpid(), local)
 
 
-def test_chat_connects_to_the_control_plane_serving_the_workspace(
+def test_chat_connects_to_the_orbit_serve_running_opening_on_its_repository(
     project: Path, state: Path, token_file: Path, in_process: InProcess, plane: Plane
 ) -> None:
-    serving(state, project)
+    serving(state)
     result = runner.invoke(app, ["chat"])
     assert result.exit_code == 0, result.output
     assert result.output == ""
@@ -169,7 +157,7 @@ def test_chat_connects_to_the_control_plane_serving_the_workspace(
 def test_new_and_name_open_a_new_session_once_joined(
     project: Path, state: Path, args: list[str], opening: NewSession, in_process: InProcess
 ) -> None:
-    serving(state, project)
+    serving(state)
     assert runner.invoke(app, ["chat", *args]).exit_code == 0
     assert FakeApp.built[0].opening.command == opening
 
@@ -178,7 +166,7 @@ def test_new_and_name_open_a_new_session_once_joined(
 def test_local_runs_in_process_with_the_backend_flags(
     project: Path, state: Path, in_process: InProcess
 ) -> None:
-    serving(state, project)
+    serving(state)
     result = runner.invoke(app, ["chat", "--local", "--model", "opus"])
     assert result.exit_code == 0, result.output
     assert [backend.model for backend in in_process.built] == ["opus"]
@@ -189,13 +177,11 @@ def test_local_runs_in_process_with_the_backend_flags(
 def test_a_refused_token_stops_chat_naming_the_token_file(
     project: Path, state: Path, plane: Plane, token_file: Path, in_process: InProcess
 ) -> None:
-    serving(state, project)
+    serving(state)
     plane.answer = None
     result = runner.invoke(app, ["chat"])
     assert result.exit_code == 2
-    assert f"The control plane serving {project} refused the token from {token_file}" in (
-        result.stderr
-    )
+    assert f"The orbit serve running here refused the token from {token_file}" in result.stderr
     assert "--local" in result.stderr
     assert in_process.built == [] and FakeApp.built == []
 
@@ -204,7 +190,7 @@ def test_a_refused_token_stops_chat_naming_the_token_file(
 def test_an_unreadable_token_file_stops_chat_naming_it(
     project: Path, state: Path, tmp_path: Path, in_process: InProcess
 ) -> None:
-    serving(state, project)
+    serving(state)
     missing = tmp_path / "missing"
     result = runner.invoke(app, ["chat", "--token-file", str(missing)])
     assert result.exit_code == 2
@@ -216,21 +202,20 @@ def test_an_unreadable_token_file_stops_chat_naming_it(
 def test_a_backend_flag_with_a_control_plane_found_says_it_belongs_on_serve_or_local(
     project: Path, state: Path, in_process: InProcess
 ) -> None:
-    serving(state, project)
+    serving(state)
     result = runner.invoke(app, ["chat", "--model", "opus"])
     assert result.exit_code == 2
     assert result.stderr.startswith(
-        f"--model configure the control plane, so they belong on orbit serve, which serves"
-        f" {project} at {URL}; or pass --local"
+        f"--model configure the control plane, so they belong on orbit serve, which runs at"
+        f" {URL}; or pass --local"
     )
     assert in_process.built == [] and FakeApp.built == []
 
 
-@pytest.mark.usefixtures("token_file")
-def test_only_another_workspaces_control_plane_leaves_chat_in_process(
-    project: Path, state: Path, tmp_path: Path, plane: Plane, in_process: InProcess
+@pytest.mark.usefixtures("project", "token_file")
+def test_without_an_orbit_serve_running_chat_runs_in_process(
+    plane: Plane, in_process: InProcess
 ) -> None:
-    serving(state, tmp_path)
     assert runner.invoke(app, ["chat"]).exit_code == 0
     assert len(in_process.built) == 1
     assert plane.shown == []
@@ -242,7 +227,7 @@ def test_a_run_file_whose_process_is_gone_leaves_chat_in_process(
 ) -> None:
     process = subprocess.Popen([sys.executable, "-c", ""])
     process.wait()
-    serving(state, project, process.pid)
+    serving(state, process.pid)
     assert runner.invoke(app, ["chat"]).exit_code == 0
     assert len(in_process.built) == 1
     assert plane.shown == []
@@ -252,7 +237,7 @@ def test_a_run_file_whose_process_is_gone_leaves_chat_in_process(
 def test_a_control_plane_that_cant_be_reached_leaves_chat_in_process(
     project: Path, state: Path, plane: Plane, in_process: InProcess
 ) -> None:
-    serving(state, project)
+    serving(state)
     plane.answer = False
     assert runner.invoke(app, ["chat", "--model", "opus"]).exit_code == 0
     assert [backend.model for backend in in_process.built] == ["opus"]
@@ -290,7 +275,7 @@ def serving_tls(project: Path, state: Path, ca_path: Path) -> Callable[[bool], N
 
     def serve(mutual: bool) -> None:
         local = LocalTls(mutual=mutual, ca=str(ca_path), hostname="localhost")
-        serving(state, project, url=TLS_URL, local=local)
+        serving(state, url=TLS_URL, local=local)
 
     return serve
 

@@ -153,6 +153,18 @@ async def test_without_a_tree_it_runs_in_the_current_directory() -> None:
     await session.close()
 
 
+async def test_with_agents_but_no_tree_it_runs_in_the_workspaces_directory() -> None:
+    steps = Steps(True, True)
+    session, _, _ = session_for(
+        verification=checked(steps), check_at_startup=True, root="/src/project"
+    )
+
+    await until_checked(session)
+
+    assert steps.roots == ["/src/project", "/src/project"]
+    await session.close()
+
+
 async def test_it_is_skipped_without_verification_or_steps_or_when_not_asked() -> None:
     sessions = [
         WorkspaceHost(check_at_startup=True),

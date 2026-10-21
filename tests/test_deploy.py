@@ -79,7 +79,7 @@ def test_without_a_healthcheck_there_is_no_command() -> None:
 
 def test_the_repository_is_mounted_at_the_workspace_the_entrypoint_serves() -> None:
     assert mounts(COMPOSE)["/workspace"] == ("..", False)
-    assert 'ENTRYPOINT ["orbit", "serve", "-C", "/workspace"]' in DOCKERFILE
+    assert 'ENTRYPOINT ["orbit", "serve", "--add", "/workspace"]' in DOCKERFILE
 
 
 @pytest.mark.parametrize(

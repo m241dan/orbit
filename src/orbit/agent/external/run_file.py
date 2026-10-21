@@ -1,6 +1,7 @@
-"""Where a running ``orbit serve`` says it is: ``run/<workspace id>.json`` in the state
-directory, holding its URL and process id, and over TLS how a frontend on this machine reaches
-it, readable by its owner alone, while it listens."""
+"""Where a running ``orbit serve`` says it is: ``run/server.json`` in the state directory,
+holding its URL and process id, and over TLS how a frontend on this machine reaches it, readable
+by its owner alone, while it listens. There's one per state directory, as one ``orbit serve``
+serves every workspace registered there."""
 
 import json
 from pathlib import Path
@@ -8,16 +9,16 @@ from pathlib import Path
 from orbit.agent.domain.server import LocalTls, RunningServer, parse_running
 from orbit.agent.external.private_files import write_private
 from orbit.agent.external.processes import process_alive
-from orbit.agent.external.sqlite_store import find_workspace_id
 
 RUN = "run"
+SERVER_FILE = "server.json"
 
 
 class RunFile:
-    """The run file of the workspace ``workspace_id`` in the ``state`` directory."""
+    """The run file in the ``state`` directory."""
 
-    def __init__(self, state: Path, workspace_id: str) -> None:
-        self.path = state / RUN / f"{workspace_id}.json"
+    def __init__(self, state: Path) -> None:
+        self.path = state / RUN / SERVER_FILE
 
     def write(self, url: str, pid: int, tls: LocalTls | None = None) -> None:
         """Say the server at ``url``, in process ``pid``, is listening, reached from this
@@ -38,13 +39,10 @@ class RunFile:
         self.path.unlink(missing_ok=True)
 
 
-def running_server(state: Path, workspace: str) -> RunningServer | None:
-    """The ``orbit serve`` running for the workspace at ``workspace``, as its run file in the
-    ``state`` directory says; ``None`` if there's no file, or the process it names is gone."""
-    workspace_id = find_workspace_id(state, workspace)
-    if workspace_id is None:
-        return None
-    server = RunFile(state, workspace_id).read()
+def running_server(state: Path) -> RunningServer | None:
+    """The ``orbit serve`` running on the ``state`` directory, as its run file there says;
+    ``None`` if there's no file, or the process it names is gone."""
+    server = RunFile(state).read()
     if server is None or not process_alive(server.pid):
         return None
     return server

@@ -296,12 +296,13 @@ EVENTS: tuple[EventEnvelope, ...] = (
     event(
         Catalog(
             workspaces=(
-                WorkspaceEntry(id="w1", label="Orbit", path="/src/orbit", sessions=(SUMMARY,)),
+                WorkspaceEntry(
+                    id="w1", label="Orbit", path="/src/orbit", read_only=True, sessions=(SUMMARY,)
+                ),
             ),
             agents=(AgentEntry(name=PLANNER, label="Planner", conversational=True),),
             triggers=(TriggerEntry(name="super-review", label="Super review", manual=True),),
             lanes=("work", PLANNER_LANE),
-            read_only=True,
         )
     ),
     event(Welcome(command_id="c1", server_version="0.1.0")),

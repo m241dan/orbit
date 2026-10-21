@@ -11,7 +11,7 @@ from dataclasses import replace
 from datetime import datetime
 from pathlib import PurePath
 
-from orbit.agent.application.connection import Connections, SessionConnection
+from orbit.agent.application.connection import Connections, Place, SessionConnection
 from orbit.agent.application.desk import AgentDesk, Agents
 from orbit.agent.application.handshake import HostGreeting
 from orbit.agent.application.history import SessionHistory
@@ -63,7 +63,7 @@ from orbit.agent.application.work_lane import WorkLane
 from orbit.agent.application.work_turns import WorkParts, WorkTurns
 from orbit.agent.domain.activity import Activity
 from orbit.agent.domain.board import TaskBoard
-from orbit.agent.domain.catalog import catalog
+from orbit.agent.domain.catalog import workspace_entry
 from orbit.agent.domain.ownership import WorkspaceOwner, read_only_note
 from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.reviews import ReviewPlanner
@@ -76,7 +76,6 @@ from orbit.protocol import (
     WORK_LANE,
     ActivateSession,
     Attach,
-    Catalog,
     DeleteSession,
     Event,
     History,
@@ -95,6 +94,7 @@ from orbit.protocol import (
     TakeOwnership,
     TaskSpec,
     TurnFinished,
+    WorkspaceEntry,
 )
 
 
@@ -132,6 +132,10 @@ UNREGISTERED_WORKSPACE = "unregistered"
 """The id of a host's workspace when it's given none, as one with no store isn't registered."""
 
 
+async def _unannounced(entry: WorkspaceEntry) -> None:
+    """Tell no one of ``entry``, as a host no control plane serves has no one to tell."""
+
+
 class WorkspaceHost:
     """One workspace's backend: takes the commands the control plane routes to it, runs work in
     the background and publishes its events.
@@ -156,7 +160,8 @@ class WorkspaceHost:
     only the connection whose first ``Attach`` they answer, as a ``HistoryPage`` does the one
     asking.
     Every switch of session ends with a ``Catalog`` and a
-    ``Snapshot`` too, and a rename or delete sends a ``Catalog``; each such ``Catalog`` reaches
+    ``Snapshot`` too, and a rename or delete sends a ``Catalog``: :attr:`catalog_changed` is
+    given the workspace's entry in it, and the control plane sends the ``Catalog`` to
     every listening connection, so every frontend's picker follows new, renamed and deleted
     sessions, and the ``Snapshot``, the session's new state, every connection viewing it.
     Every connection gets a ``SessionStateChanged`` whenever whether the open session runs
@@ -228,6 +233,7 @@ class WorkspaceHost:
         lock_declined_retry: float = DECLINED_RETRY_SECONDS,
     ) -> None:
         self.owned: Callable[[], None] = lambda: None
+        self.catalog_changed: Callable[[WorkspaceEntry], Awaitable[None]] = _unannounced
         self._takeover = Takeover(
             owner is not None,
             lock,
@@ -346,8 +352,8 @@ class WorkspaceHost:
             self._work,
             self._activity,
             self._snapshot,
-            self._catalog,
-            lambda catalog: self._connections.broadcast(self._events.stamp(catalog)),
+            self._entry,
+            lambda entry: self.catalog_changed(entry),
             lambda kept: self._views.switching(kept),
         )
         return SessionSwitcher(parts, self._settings, self._events, picking)
@@ -411,7 +417,10 @@ class WorkspaceHost:
         if not wanted or verification is None or not verification.steps:
             return None
         tree = self._desk.agents.tree if self._desk else None
-        return StartupCheck(verification, tree, self._events.put, self._add_startup_fix)
+        check = StartupCheck(verification, tree, self._events.put, self._add_startup_fix)
+        if self._desk is not None:
+            check.root = self._desk.agents.root
+        return check
 
     async def _add_startup_fix(self, step: VerificationStep, output: str) -> None:
         """Add a draft task to fix ``step``, which failed at startup with ``output``."""
@@ -478,13 +487,23 @@ class WorkspaceHost:
         return self._connections
 
     @property
+    def place(self) -> Place:
+        """Where a connection attached to this workspace is."""
+        return Place(self._events, self._events.stamp, self._connections)
+
+    @property
     def greeting(self) -> HostGreeting:
         """What the handshake of a connection publishes of this host as it first attaches."""
         return self._greeting
 
-    async def catalog(self) -> Catalog:
-        """What exists in this workspace: its sessions as they are now, and its agents."""
-        return await self._switcher.catalog()
+    async def entry(self) -> WorkspaceEntry:
+        """This workspace's entry in the catalog: its sessions as they are now."""
+        return await self._switcher.entry()
+
+    @property
+    def roles(self) -> tuple[str, ...]:
+        """The roles of this workspace's agents; none without agents."""
+        return tuple(self._desk.agents.roles) if self._desk else ()
 
     async def attach(self, connection: SessionConnection, session: str) -> None:
         """Have ``connection`` view the session ``session`` and publish its snapshot to it;
@@ -748,13 +767,12 @@ class WorkspaceHost:
             viewers=self._states.of(self._keeper.id).viewers,
         )
 
-    def _catalog(self, sessions: tuple[SessionSummary, ...]) -> Catalog:
-        """What exists: the workspace holding ``sessions``, the open one's state as a connection
-        joining would see it, and the agents' roles, if any."""
-        roles = self._desk.agents.roles if self._desk else ()
+    def _entry(self, sessions: tuple[SessionSummary, ...]) -> WorkspaceEntry:
+        """This workspace's entry in the catalog, holding ``sessions``, the open one's state as
+        a connection joining would see it."""
         live = self._states.current(joining=True).values()
         workspace = (self._workspace_id, _workspace_label(self._workspace), self._workspace)
-        return catalog(workspace, sessions, roles, read_only=self._takeover.read_only, live=live)
+        return workspace_entry(workspace, sessions, read_only=self._takeover.read_only, live=live)
 
     def _steps_shown(self) -> tuple[tuple[StepState, ...], str]:
         """The verification steps the panel shows, and their title: the startup check's while

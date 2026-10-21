@@ -63,7 +63,8 @@ async def test_a_read_only_session_says_so_in_its_catalog_and_snapshot_then_name
     events = queued(session)
 
     snapshot = sole(events, Snapshot)
-    assert sole(events, Catalog).read_only and snapshot.read_only and session.read_only
+    [workspace] = sole(events, Catalog).workspaces
+    assert workspace.read_only and snapshot.read_only and session.read_only
     note = Notice(message=read_only_note(OWNER))
     assert events.index(note) > events.index(snapshot)
     await session.close()
@@ -74,7 +75,8 @@ async def test_a_session_owning_the_repository_isnt_read_only() -> None:
     await greeted(session)
     events = queued(session)
 
-    assert not any(e.read_only for e in events if isinstance(e, Catalog | Snapshot))
+    assert not any(w.read_only for w in sole(events, Catalog).workspaces)
+    assert not sole(events, Snapshot).read_only
     assert not any(isinstance(e, Notice) and e.message.startswith("Read-only") for e in events)
     assert not session.read_only
     await session.close()

@@ -100,7 +100,8 @@ class Agents:
     proposed checks; without it, proposals are refused. ``write_config`` saves the checks the
     user accepts into the project's config; without it, they're used but not saved.
     ``planner_role`` reads the planner's role from the project's config again when the planner
-    is reset; without it, the planner keeps its role.
+    is reset; without it, the planner keeps its role. ``root`` is the workspace's directory,
+    where agents work without a tree, the planner always.
     """
 
     host: AgentHost
@@ -115,6 +116,7 @@ class Agents:
     proposal_review: ProposalReview | None = None
     write_config: ConfigWriter | None = None
     planner_role: PlannerRoleReader | None = None
+    root: str = "."
 
 
 class CallTarget(Protocol):

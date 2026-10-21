@@ -63,7 +63,7 @@ def _settings(files: ServerFiles) -> ServerSettings:
 @asynccontextmanager
 async def control_plane(settings: ServerSettings) -> AsyncIterator[int]:
     """A control plane serving as ``settings`` say, and its port."""
-    served = ControlPlane(WorkspaceHost())
+    served = ControlPlane([WorkspaceHost()])
     server = ControlPlaneServer(served, lambda: TOKEN, settings, lambda line: None)
     url = await server.start()
     try:

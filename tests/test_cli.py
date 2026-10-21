@@ -171,9 +171,9 @@ def launched(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> list[WorkspaceH
         FakeApp.threads.append(threading.current_thread().name)
         return built
 
-    def plane(host: WorkspaceHost, usage: UsageSource | None = None) -> ControlPlane:
+    def plane(hosts: list[WorkspaceHost], usage: UsageSource | None = None) -> ControlPlane:
         FakeApp.usage_sources.append(usage)
-        return ControlPlane(host, usage)
+        return ControlPlane(hosts, usage)
 
     monkeypatch.setattr("orbit.cli.chat.OrbitApp", FakeApp)
     monkeypatch.setattr("orbit.cli.backend.WorkspaceHost", session)
@@ -1300,7 +1300,8 @@ def standings(launched: list[WorkspaceHost]) -> list[Standing]:
         events = queued(session)
         notices = [e.message for e in events if isinstance(e, Notice)]
         catalog, snapshot = sole(events, Catalog), sole(events, Snapshot)
-        seen.append(Standing(catalog.read_only, snapshot.read_only, notices))
+        [workspace] = catalog.workspaces
+        seen.append(Standing(workspace.read_only, snapshot.read_only, notices))
 
     FakeApp.during = greet_it
     return seen

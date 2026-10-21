@@ -7,16 +7,15 @@ from orbit.cli import app
 
 runner = CliRunner()
 
+_CHAT = ("--workspace", "--new", "--name", "--connect", "--token-file", "--local")
+
 _BACKEND = (
-    "--workspace",
     "--model",
     "--tools",
     "--verify",
     "--worktree",
     "--review",
     "--usage",
-    "--new",
-    "--name",
     "--profile",
     "--state-dir",
     "--config-dir",
@@ -27,8 +26,11 @@ _BACKEND = (
     ("args", "listed"),
     [
         ([], ("chat", "serve", "version", "db", "token")),
-        (["chat"], (*_BACKEND, "--connect", "--token-file", "--local")),
-        (["serve"], (*_BACKEND, "--host", "--port")),
+        (
+            ["chat"],
+            (*_BACKEND, *_CHAT),
+        ),
+        (["serve"], (*_BACKEND, "--add", "--host", "--port")),
         (["db"], ("backup",)),
         (["db", "backup"], ("PATH", "--force", "--state-dir")),
         (["token"], ("rotate",)),
@@ -46,5 +48,5 @@ def test_help_lists_the_commands_and_options(args: list[str], listed: tuple[str,
 def test_serve_help_leaves_out_the_flags_only_chat_takes() -> None:
     result = runner.invoke(app, ["serve", "--help"], env={"COLUMNS": "200"})
 
-    for name in ("--connect", "--token-file", "--local"):
+    for name in _CHAT:
         assert name not in result.output

@@ -477,11 +477,13 @@ def with_state(summary: SessionSummary, changed: SessionStateChanged) -> Session
 
 class WorkspaceEntry(_Message):
     """Workspace ``id``, shown as ``label``, at ``path`` on the backend's host, if it has one,
-    and its ``sessions`` as the list of sessions shows them."""
+    whether it's ``read_only``, as another orbit owns its repository, and its ``sessions`` as
+    the list of sessions shows them."""
 
     id: str
     label: str
     path: str | None = None
+    read_only: bool = False
     sessions: tuple[SessionSummary, ...]
 
 
@@ -503,17 +505,15 @@ class TriggerEntry(_Message):
 
 
 class Catalog(_Message):
-    """What exists: the ``workspaces`` and their sessions, the ``agents``' roles, the
-    ``triggers`` and the ``lanes``, and whether this orbit is ``read_only``, as another owns
-    the repository; sent after ``Welcome`` and, to the connections attached, whenever the
-    sessions change."""
+    """What exists: the ``workspaces`` served and their sessions, the ``agents``' roles, the
+    ``triggers`` and the ``lanes``; sent after ``Welcome`` and, to the connections attached,
+    whenever the sessions change."""
 
     type: Literal["catalog"] = "catalog"
     workspaces: tuple[WorkspaceEntry, ...]
     agents: tuple[AgentEntry, ...]
     triggers: tuple[TriggerEntry, ...]
     lanes: tuple[str, ...]
-    read_only: bool = False
 
 
 Event = Annotated[

@@ -4,7 +4,7 @@ import asyncio
 from collections.abc import Mapping
 
 from orbit.agent import Agents, WorkspaceHost
-from orbit.agent.domain.catalog import catalog
+from orbit.agent.domain.catalog import catalog, workspace_entry
 from orbit.agent.domain.roles import Role
 from orbit.protocol import (
     CONFIGURE_CHECKS,
@@ -148,7 +148,9 @@ async def test_a_refused_rename_sends_no_catalog() -> None:
 
 def test_a_catalog_round_trips() -> None:
     sessions = (SessionSummary(id="s1", name="auth", current=True),)
-    made = catalog(("w1", "proj", "/x/proj"), sessions, ("planner", "security-reviewer"))
+    entry = workspace_entry(("w1", "proj", "/x/proj"), sessions, read_only=True)
+    made = catalog((entry,), ("planner", "security-reviewer", "planner"))
+    assert [agent.name for agent in made.agents] == ["planner", "security-reviewer"]
     assert event_adapter.validate_json(made.model_dump_json()) == made
 
 

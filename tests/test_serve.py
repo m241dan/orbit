@@ -3,15 +3,17 @@
 import asyncio
 import json
 import os
-import queue
 import re
+import shutil
 import signal
 import socket
 import ssl
 import stat
 import subprocess
+import sys
 import threading
 import time
+import urllib.request
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -22,7 +24,6 @@ from websockets.exceptions import ConnectionClosed, InvalidStatus
 from websockets.sync.client import ClientConnection, connect
 
 from orbit.agent import (
-    ControlPlaneServer,
     RunFile,
     TokenFile,
     WorkspaceHost,
@@ -30,7 +31,6 @@ from orbit.agent import (
     WorkspaceOwner,
 )
 from orbit.agent.domain.server import client_fingerprint
-from orbit.agent.external.sqlite_store import find_workspace_id
 from orbit.cli import app, chat, serve
 from orbit.protocol import (
     PROTOCOL_VERSION,
@@ -43,7 +43,6 @@ from orbit.protocol import (
     Event,
     Hello,
     Notice,
-    OwnershipDeclined,
     OwnershipOffered,
     OwnershipTaken,
     Snapshot,
@@ -88,12 +87,13 @@ def config_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
 @dataclass
 class Frontend:
     """A frontend run on a thread of its own against the ``orbit serve`` whose run file is in
-    ``state``, showing the token in ``config_dir``: it says Hello, does ``work`` and stops the
-    server with SIGTERM, noting what it saw."""
+    ``state``, showing the token in ``config_dir``: it says Hello and attaches as ``greet``
+    does, does ``work`` and stops the server with SIGTERM, noting what it saw."""
 
     state: Path
     config_dir: Path
     work: Callable[[ClientConnection], list[Event]] = lambda websocket: []
+    greet: Callable[[ClientConnection], list[Event]] = lambda websocket: attached(websocket)
     listening: Callable[[Path], dict[str, object]] = lambda state: _run_file(state)
     run_file: dict[str, object] = field(default_factory=dict)
     events: list[Event] = field(default_factory=list)
@@ -112,7 +112,7 @@ class Frontend:
         url = str(self.run_file["url"]).replace("//0.0.0.0:", "//localhost:")
         headers = {"Authorization": f"Bearer {token}"}
         with connect(url, additional_headers=headers, ssl=self.trust) as ws:
-            self.events = attached(ws) + self.work(ws)
+            self.events = self.greet(ws) + self.work(ws)
             os.kill(os.getpid(), signal.SIGTERM)
             self.close = closed(ws)
 
@@ -142,11 +142,16 @@ def until(websocket: ClientConnection, kind: type[Event]) -> list[Event]:
     return events
 
 
+def welcomed(websocket: ClientConnection) -> list[Event]:
+    """Say Hello on ``websocket``; what it received, up to the Catalog."""
+    say(websocket, "hello", Hello(client="orbit-tests", protocol_version=PROTOCOL_VERSION))
+    return until(websocket, Catalog)
+
+
 def attached(websocket: ClientConnection) -> list[Event]:
     """Say Hello on ``websocket``, then attach to the active session of the first workspace its
     catalog lists; what it received, up to the Attach's acceptance."""
-    say(websocket, "hello", Hello(client="orbit-tests", protocol_version=PROTOCOL_VERSION))
-    greeting = until(websocket, Catalog)
+    greeting = welcomed(websocket)
     catalog = greeting[-1]
     assert isinstance(catalog, Catalog)
     [workspace, *_] = catalog.workspaces
@@ -167,10 +172,12 @@ def adds_a_task(websocket: ClientConnection) -> list[Event]:
     return until(websocket, CommandAccepted)
 
 
-def served(frontend: Frontend, *args: str) -> str:
-    """What ``orbit serve`` with ``args`` printed, serving ``frontend`` until it stops it."""
+def served(frontend: Frontend, *args: str, added: tuple[str, ...] = (".",)) -> str:
+    """What ``orbit serve`` with ``args`` printed, adding the workspaces at the paths ``added``
+    (the current directory, by default), serving ``frontend`` until it stops it."""
     thread = frontend.start()
-    result = runner.invoke(app, ["serve", *QUIET, *args])
+    adding = [flag for path in added for flag in ("--add", path)]
+    result = runner.invoke(app, ["serve", *QUIET, *adding, *args])
     thread.join(10)
     assert result.exit_code == 0, result.output
     return result.output
@@ -192,7 +199,7 @@ def test_serve_welcomes_a_frontend_with_the_token_until_stopped(
     assert stat.S_IMODE(token.stat().st_mode) == 0o600
     lines = output.splitlines()
     assert lines[0] == (
-        f"Serving {project} at {url} as its owner; frontends show the token in {token}."
+        f"Serving at {url}: {project} as its owner. Frontends show the token in {token}."
     )
     assert lines[1].startswith("orbit-tests connected from 127.0.0.1:")
     assert lines[2].startswith("orbit-tests disconnected from 127.0.0.1:")
@@ -208,12 +215,12 @@ def test_serve_names_paths_with_braces_verbatim(
     config = tmp_path / "{x}"
     monkeypatch.setenv("ORBIT_CONFIG_DIR", str(config))
     frontend = Frontend(state, config)
-    output = served(frontend, "--port", "0", "-C", str(project))
+    output = served(frontend, "--port", "0", added=(str(project),))
 
     assert [type(e) for e in frontend.events] == ATTACHED
     url = frontend.run_file["url"]
     assert output.splitlines()[0] == (
-        f"Serving {project} at {url} as its owner; frontends show the token in {config / 'token'}."
+        f"Serving at {url}: {project} as its owner. Frontends show the token in {config / 'token'}."
     )
 
 
@@ -235,7 +242,7 @@ def test_serve_stops_if_it_cant_name_its_url_in_the_workspace_lock_naming_it(
         raise OSError("disk full")
 
     monkeypatch.setattr(WorkspaceLock, "announce", unwritable)
-    result = runner.invoke(app, ["serve", *QUIET, "--port", "0"])
+    result = runner.invoke(app, ["serve", *QUIET, "--add", ".", "--port", "0"])
 
     lock = project / ".orbit" / "workspace.lock"
     assert result.exit_code == 2
@@ -262,28 +269,13 @@ def test_serve_names_its_url_in_the_workspace_lock_while_it_owns_the_repository(
     after.close()
 
 
-def _listening_urls(monkeypatch: pytest.MonkeyPatch) -> Callable[[Path], dict[str, object]]:
-    """What gives, once ``orbit serve`` listens, its URL as a run file would, for a serve that
-    writes none."""
-    urls: queue.Queue[str] = queue.Queue()
-    start = ControlPlaneServer.start
-
-    async def recording(server: ControlPlaneServer) -> str:
-        url = await start(server)
-        urls.put(url)
-        return url
-
-    monkeypatch.setattr(ControlPlaneServer, "start", recording)
-    return lambda state: {"url": urls.get(timeout=30)}
-
-
 def test_serve_on_a_repository_another_orbit_owns_is_read_only_naming_it(
     monkeypatch: pytest.MonkeyPatch, project: Path, state: Path, config_dir: Path
 ) -> None:
     owner = WorkspaceLock(project / ".orbit")
     owner.take()
     try:
-        frontend = Frontend(state, config_dir, listening=_listening_urls(monkeypatch))
+        frontend = Frontend(state, config_dir)
         output = served(frontend, "--port", "0")
     finally:
         owner.close()
@@ -292,37 +284,9 @@ def test_serve_on_a_repository_another_orbit_owns_is_read_only_naming_it(
     assert snapshot.read_only
     url, token = frontend.run_file["url"], config_dir / "token"
     assert output.splitlines()[0] == (
-        f"Serving {project} at {url} read-only, as an orbit chat, pid {os.getpid()} owns it;"
-        f" frontends show the token in {token}."
+        f"Serving at {url}: {project} read-only, as an orbit chat, pid {os.getpid()} owns it."
+        f" Frontends show the token in {token}."
     )
-
-
-def test_a_read_only_serve_leaves_the_owners_run_file_as_it_was(
-    monkeypatch: pytest.MonkeyPatch, project: Path, state: Path, config_dir: Path
-) -> None:
-    served(Frontend(state, config_dir), "--port", "0")
-    workspace_id = find_workspace_id(state, str(project))
-    assert workspace_id is not None
-    owners_file = RunFile(state, workspace_id)
-    owners_file.write("ws://127.0.0.1:7433/", 1)
-    before = owners_file.path.read_text()
-    seen: list[str] = []
-
-    def reads_the_run_files(websocket: ClientConnection) -> list[Event]:
-        seen.extend(path.read_text() for path in (state / "run").iterdir())
-        return []
-
-    owner = WorkspaceLock(project / ".orbit")
-    owner.take()
-    try:
-        frontend = Frontend(state, config_dir, reads_the_run_files, _listening_urls(monkeypatch))
-        served(frontend, "--port", "0")
-    finally:
-        owner.close()
-
-    assert seen == [before]
-    assert list((state / "run").iterdir()) == [owners_file.path]
-    assert owners_file.path.read_text() == before
 
 
 @pytest.fixture
@@ -333,103 +297,153 @@ def quick_retries(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setitem(defaults, "lock_retry", 0.05)
 
 
-def _answers_the_offer(
-    owner: WorkspaceLock, take: bool, state: Path, seen: list[list[str]]
-) -> Callable[[ClientConnection], list[Event]]:
-    """What lets ``owner`` go, answers the offer of the repository with ``take`` once made, and
-    then notes in ``seen`` the run files in ``state``, then adds a task."""
-
-    def answers(websocket: ClientConnection) -> list[Event]:
-        owner.close()
-        events = until(websocket, OwnershipOffered)
-        say(websocket, "take", TakeOwnership(take=take))
-        events += until(websocket, OwnershipTaken if take else OwnershipDeclined)
-        found = (state / "run").glob("*.json") if (state / "run").is_dir() else []
-        seen.append([path.read_text() for path in found])
-        return events + adds_a_task(websocket)
-
-    return answers
-
-
 @pytest.mark.usefixtures("quick_retries")
-def test_a_read_only_serve_that_takes_the_repository_over_writes_its_run_file_until_stopped(
-    monkeypatch: pytest.MonkeyPatch, project: Path, state: Path, config_dir: Path
+def test_a_read_only_workspace_taken_over_names_the_servers_url_in_its_lock(
+    project: Path, state: Path, config_dir: Path
 ) -> None:
     owner = WorkspaceLock(project / ".orbit")
     owner.take()
-    seen: list[list[str]] = []
-    work = _answers_the_offer(owner, True, state, seen)
-    frontend = Frontend(state, config_dir, work, _listening_urls(monkeypatch))
-    served(frontend, "--port", "0")
-
-    [[written]] = seen
-    assert json.loads(written) == {"url": frontend.run_file["url"], "pid": os.getpid()}
-    assert not list((state / "run").iterdir())
-
-
-@pytest.mark.usefixtures("quick_retries")
-def test_a_chat_discovers_a_read_only_serve_once_it_takes_the_repository_over(
-    monkeypatch: pytest.MonkeyPatch, project: Path, state: Path, config_dir: Path
-) -> None:
-    owner = WorkspaceLock(project / ".orbit")
-    owner.take()
-    answers = _answers_the_offer(owner, True, state, [])
-    found: list[chat.Discovered | None] = []
-
-    def discovers(websocket: ClientConnection) -> list[Event]:
-        events = answers(websocket)
-        found.append(chat.discover_control_plane(state, project, config_dir / "token", config_dir))
-        return events
-
-    frontend = Frontend(state, config_dir, discovers, _listening_urls(monkeypatch))
-    served(frontend, "--port", "0")
-    [discovered] = found
-    assert discovered is not None and discovered.url == frontend.run_file["url"]
-
-
-@pytest.mark.usefixtures("quick_retries")
-def test_a_read_only_serve_that_declines_the_repository_writes_no_run_file(
-    monkeypatch: pytest.MonkeyPatch, project: Path, state: Path, config_dir: Path
-) -> None:
-    owner = WorkspaceLock(project / ".orbit")
-    owner.take()
-    seen: list[list[str]] = []
-    work = _answers_the_offer(owner, False, state, seen)
-    frontend = Frontend(state, config_dir, work, _listening_urls(monkeypatch))
-    served(frontend, "--port", "0")
-
-    assert seen == [[]]
-    assert not (state / "run").exists() or not list((state / "run").iterdir())
-
-
-@pytest.mark.usefixtures("quick_retries")
-def test_a_serve_that_cant_write_its_run_file_on_taking_over_warns_and_owns_the_repository(
-    monkeypatch: pytest.MonkeyPatch,
-    project: Path,
-    state: Path,
-    config_dir: Path,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    state.mkdir()
-    (state / "run").write_text("not a directory\n")
-    owner = WorkspaceLock(project / ".orbit")
-    owner.take()
-    answers = _answers_the_offer(owner, True, state, [])
     owners: list[WorkspaceOwner] = []
 
-    def reads_the_lock(websocket: ClientConnection) -> list[Event]:
-        events = answers(websocket)
+    def takes_over(websocket: ClientConnection) -> list[Event]:
+        owner.close()
+        events = until(websocket, OwnershipOffered)
+        say(websocket, "take", TakeOwnership(take=True))
+        events += until(websocket, OwnershipTaken)
         owners.append(WorkspaceLock(project / ".orbit").owner())
-        return events
+        return events + adds_a_task(websocket)
 
-    frontend = Frontend(state, config_dir, reads_the_lock, _listening_urls(monkeypatch))
-    output = served(frontend, "--port", "0")
+    frontend = Frontend(state, config_dir, takes_over)
+    served(frontend, "--port", "0")
 
-    assert f"Can't write the run file {state / 'run'}" in caplog.text
-    assert "Traceback" not in output
     assert owners == [WorkspaceOwner(pid=os.getpid(), url=str(frontend.run_file["url"]))]
     assert isinstance(frontend.events[-1], CommandAccepted)
-    assert (state / "run").read_text() == "not a directory\n"
+
+
+def _workspace_dirs(tmp_path: Path, *names: str) -> list[Path]:
+    """New directories in ``tmp_path`` named ``names``, to serve as workspaces."""
+    paths = [tmp_path / name for name in names]
+    for path in paths:
+        path.mkdir()
+    return paths
+
+
+def _ready(url: object) -> dict[str, object]:
+    """What ``/readyz`` answers on the server at the WebSocket ``url``."""
+    health = str(url).replace("ws://", "http://") + "readyz"
+    with urllib.request.urlopen(health, timeout=10) as response:
+        answer: dict[str, object] = json.loads(response.read())
+        return answer
+
+
+def _checking_readiness(
+    frontend: Frontend, readiness: list[dict[str, object]]
+) -> Callable[[ClientConnection], list[Event]]:
+    """What notes in ``readiness`` what ``/readyz`` answers on the server ``frontend`` is
+    connected to."""
+
+    def checks(websocket: ClientConnection) -> list[Event]:
+        readiness.append(_ready(frontend.run_file["url"]))
+        return []
+
+    return checks
+
+
+def test_serve_with_two_workspaces_added_lists_both_and_is_ready(
+    state: Path, config_dir: Path, tmp_path: Path
+) -> None:
+    first, second = _workspace_dirs(tmp_path, "a", "b")
+    readiness: list[dict[str, object]] = []
+    frontend = Frontend(state, config_dir)
+    frontend.work = _checking_readiness(frontend, readiness)
+    output = served(frontend, "--port", "0", added=(str(first), str(second)))
+
+    [catalog] = [e for e in frontend.events if isinstance(e, Catalog)]
+    assert [(w.path, w.read_only) for w in catalog.workspaces] == [
+        (str(first), False),
+        (str(second), False),
+    ]
+    assert readiness == [{"status": "pass"}]
+    assert f": {first} as its owner; {second} as its owner. Frontends" in output
+
+
+def test_a_workspace_another_orbit_owns_is_read_only_and_serve_warns_it_is(
+    state: Path, config_dir: Path, tmp_path: Path
+) -> None:
+    first, second = _workspace_dirs(tmp_path, "a", "b")
+    owner = WorkspaceLock(second / ".orbit")
+    owner.take()
+    readiness: list[dict[str, object]] = []
+    frontend = Frontend(state, config_dir)
+    frontend.work = _checking_readiness(frontend, readiness)
+    try:
+        served(frontend, "--port", "0", added=(str(first), str(second)))
+    finally:
+        owner.close()
+
+    [catalog] = [e for e in frontend.events if isinstance(e, Catalog)]
+    assert [w.read_only for w in catalog.workspaces] == [False, True]
+    assert readiness == [{"status": "warn", "output": "read_only"}]
+
+
+def test_serve_with_no_workspace_flagged_starts_empty_and_says_so(
+    state: Path, config_dir: Path
+) -> None:
+    frontend = Frontend(state, config_dir, greet=welcomed)
+    output = served(frontend, "--port", "0", added=())
+
+    [catalog] = [e for e in frontend.events if isinstance(e, Catalog)]
+    assert catalog.workspaces == ()
+    url = frontend.run_file["url"]
+    assert output.splitlines()[0] == (
+        f"Serving at {url}: no workspaces yet; add one with orbit serve --add PATH. Frontends"
+        f" show the token in {config_dir / 'token'}."
+    )
+
+
+def test_a_second_serve_exits_naming_the_first(state: Path) -> None:
+    RunFile(state).write("ws://127.0.0.1:7433/", os.getpid())
+    result = runner.invoke(app, ["serve", *QUIET, "--add", ".", "--port", "0"])
+
+    assert result.exit_code == 2
+    assert result.stderr == (
+        f"orbit serve is already running at ws://127.0.0.1:7433/ (pid {os.getpid()}); use"
+        " --state-dir for a separate one.\n"
+    )
+
+
+def test_a_stale_run_file_is_replaced(state: Path, config_dir: Path) -> None:
+    process = subprocess.Popen([sys.executable, "-c", ""])
+    process.wait()
+    RunFile(state).write("ws://127.0.0.1:1/", process.pid)
+
+    def ours(state: Path) -> dict[str, object]:
+        while (found := _run_file(state))["pid"] != os.getpid():
+            time.sleep(0.02)
+        return found
+
+    frontend = Frontend(state, config_dir, listening=ours)
+    served(frontend, "--port", "0")
+    assert [type(e) for e in frontend.events] == ATTACHED
+    assert not RunFile(state).path.exists()
+
+
+def test_a_workspace_whose_directory_is_gone_is_not_served(
+    state: Path, config_dir: Path, tmp_path: Path
+) -> None:
+    [gone] = _workspace_dirs(tmp_path, "gone")
+    served(Frontend(state, config_dir), "--port", "0", added=(str(gone),))
+    shutil.rmtree(gone)
+
+    output = served(Frontend(state, config_dir), "--port", "0")
+    assert f"Warning: The workspace {gone} is gone, so it isn't served." in output
+    assert str(gone) not in output.splitlines()[-4]
+
+
+def test_adding_a_missing_workspace_exits_naming_it(tmp_path: Path) -> None:
+    result = runner.invoke(app, ["serve", *QUIET, "--add", str(tmp_path / "missing")])
+    assert result.exit_code == 2
+    assert f"Workspace {tmp_path / 'missing'} doesn't exist." in result.stderr
 
 
 def test_serve_takes_its_port_from_the_config_file(state: Path, config_dir: Path) -> None:
@@ -440,29 +454,26 @@ def test_serve_takes_its_port_from_the_config_file(state: Path, config_dir: Path
     assert not str(frontend.run_file["url"]).endswith(":7433/")
 
 
-def test_serve_opens_the_most_recently_active_session_unless_told_to_start_anew(
-    state: Path, config_dir: Path
+def test_serve_with_no_flags_serves_the_workspaces_added_before_resuming_their_sessions(
+    project: Path, state: Path, config_dir: Path
 ) -> None:
     served(Frontend(state, config_dir, adds_a_task), "--port", "0")
 
     resumed = Frontend(state, config_dir)
-    served(resumed, "--port", "0")
-    fresh = Frontend(state, config_dir)
-    served(fresh, "--port", "0", "--new")
+    output = served(resumed, "--port", "0", added=())
 
     [snapshot] = [e for e in resumed.events if isinstance(e, Snapshot)]
     assert [t.task for t in snapshot.tasks] == [TASK]
-    [snapshot] = [e for e in fresh.events if isinstance(e, Snapshot)]
-    assert snapshot.tasks == ()
+    assert f": {project} as its owner." in output.splitlines()[0]
 
 
-def test_a_chat_discovers_the_control_plane_serving_its_workspace(
+def test_a_chat_discovers_the_orbit_serve_running(
     project: Path, state: Path, config_dir: Path
 ) -> None:
     found: list[chat.Discovered | None] = []
 
     def discovers(websocket: ClientConnection) -> list[Event]:
-        found.append(chat.discover_control_plane(state, project, config_dir / "token", config_dir))
+        found.append(chat.discover_control_plane(state, config_dir / "token", config_dir))
         return []
 
     frontend = Frontend(state, config_dir, discovers)
@@ -502,13 +513,13 @@ def test_serve_over_tls_welcomes_a_frontend_trusting_its_ca_beyond_loopback(
 
 
 def _discovering(
-    state: Path, project: Path, config_dir: Path, found: list[chat.Discovered | None]
+    state: Path, config_dir: Path, found: list[chat.Discovered | None]
 ) -> Callable[[ClientConnection], list[Event]]:
-    """What has a chat in ``project`` discover the control plane serving it, noting what it found
-    in ``found``."""
+    """What has a chat discover the control plane running, noting what it found in
+    ``found``."""
 
     def discovers(websocket: ClientConnection) -> list[Event]:
-        found.append(chat.discover_control_plane(state, project, config_dir / "token", config_dir))
+        found.append(chat.discover_control_plane(state, config_dir / "token", config_dir))
         return []
 
     return discovers
@@ -523,9 +534,7 @@ def test_a_chat_discovers_a_control_plane_serving_tls_trusting_the_ca_in_its_run
     (config_dir / "config.toml").write_text(f'[server]\nca = "{ca.path}"\n')
     found: list[chat.Discovered | None] = []
     trust = ssl.create_default_context(cafile=ca.path)
-    frontend = Frontend(
-        state, config_dir, _discovering(state, project, config_dir, found), trust=trust
-    )
+    frontend = Frontend(state, config_dir, _discovering(state, config_dir, found), trust=trust)
     output = served(frontend, *_tls_flags(files), "--host", "0.0.0.0", "--port", "0")
 
     port = str(frontend.run_file["url"]).rsplit(":", 1)[1]
@@ -591,7 +600,7 @@ def test_serve_over_mtls_names_the_client_certificate_and_revokes_it_without_res
 
     assert statuses == [403]
     assert f"as CN=laptop ({fingerprint})." in output
-    assert f"frontends show a client certificate {ca.path} signed." in output
+    assert f"Frontends show a client certificate {ca.path} signed." in output
 
 
 def test_a_chat_discovers_a_control_plane_serving_mtls_showing_the_local_client_certificate(
@@ -604,7 +613,7 @@ def test_a_chat_discovers_a_control_plane_serving_mtls_showing_the_local_client_
     with (config_dir / "config.toml").open("a") as config:
         config.write(f'local_client_cert = "{client.cert}"\nlocal_client_key = "{client.key}"\n')
     found: list[chat.Discovered | None] = []
-    discovers = _discovering(state, project, config_dir, found)
+    discovers = _discovering(state, config_dir, found)
     frontend = Frontend(state, config_dir, discovers, trust=_trusting(ca, client))
     served(frontend)
 
@@ -639,7 +648,7 @@ def test_serve_takes_its_tls_settings_from_the_config_file(
     )
     frontend = Frontend(state, config_dir, trust=ssl.create_default_context(cafile=ca.path))
     thread = frontend.start()
-    result = runner.invoke(app, ["serve", *QUIET])
+    result = runner.invoke(app, ["serve", *QUIET, "--add", "."])
     thread.join(10)
 
     assert result.exit_code == 0, result.output
@@ -706,7 +715,7 @@ def no_identity(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, project: Path) 
 
 
 def test_serve_refuses_a_repository_git_has_no_identity_for(no_identity: Path) -> None:
-    result = runner.invoke(app, ["serve", *QUIET, "--port", "0"])
+    result = runner.invoke(app, ["serve", *QUIET, "--add", ".", "--port", "0"])
     assert result.exit_code == 2
     assert result.stderr == (
         f"Git has no identity for commits in {no_identity}: set user.name and user.email"
@@ -721,7 +730,7 @@ def test_serve_takes_the_identity_from_the_environment(
     monkeypatch.setenv("GIT_AUTHOR_EMAIL", "author@example.com")
     monkeypatch.setenv("GIT_COMMITTER_EMAIL", "committer@example.com")
     output = served(Frontend(state, config_dir), "--port", "0")
-    assert output.startswith(f"Serving {no_identity} at ")
+    assert f": {no_identity} as its owner." in output
 
 
 def test_serve_takes_the_identity_from_the_repositorys_config(
@@ -729,21 +738,21 @@ def test_serve_takes_the_identity_from_the_repositorys_config(
 ) -> None:
     subprocess.run(["git", "config", "user.email", "t@example.com"], cwd=no_identity, check=True)
     output = served(Frontend(state, config_dir), "--port", "0")
-    assert output.startswith(f"Serving {no_identity} at ")
+    assert f": {no_identity} as its owner." in output
 
 
 def test_serve_without_a_worktree_needs_no_identity(
     no_identity: Path, state: Path, config_dir: Path
 ) -> None:
     output = served(Frontend(state, config_dir), "--port", "0", "--no-worktree")
-    assert output.startswith(f"Serving {no_identity} at ")
+    assert f": {no_identity} as its owner." in output
 
 
 def test_serve_refuses_an_invalid_server_setting(config_dir: Path) -> None:
     config_dir.mkdir()
     path = config_dir / "config.toml"
     path.write_text("[server]\nport = 'high'\n")
-    result = runner.invoke(app, ["serve", *QUIET])
+    result = runner.invoke(app, ["serve", *QUIET, "--add", "."])
     assert result.exit_code == 2
     assert f"{path}: server.port: " in result.output
 

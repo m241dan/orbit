@@ -36,7 +36,8 @@ A command travels in a `CommandEnvelope`:
 An event travels in an `EventEnvelope`:
 
 - `seq`: the event's place in the backend's stream, counted from 1. There's one counter per
-  control plane, shared by every session, so one session's events can have gaps between them.
+  control plane, shared by every workspace and session, so one session's events can have gaps
+  between them.
   With a store, it carries on from the highest `seq` the store has ever logged, and again
   when a saved session is opened, past any events another orbit logged since, so a `seq` is
   never handed out twice, even once the events that had it are deleted.
@@ -76,10 +77,9 @@ sent on that stream.
 Otherwise the backend answers `Hello` with `Welcome`, which carries the Hello's `command_id`
 and the backend's `server_version`. `Welcome` is Hello's outcome: it takes the place of
 `CommandAccepted`. A `Catalog` follows it: what exists, namely the workspaces served, each with
-its id, label, path and sessions, the agents' roles, the triggers and the lanes, and
-`read_only`, true when another orbit owns the repository (see
-[Read-only orbits](#read-only-orbits)). Each session carries its state (see
-[Session state](#session-state)).
+its id, label, path, sessions and `read_only`, true when another orbit owns its repository (see
+[Read-only orbits](#read-only-orbits)), then the agents' roles, the triggers and the lanes. Each
+session carries its state (see [Session state](#session-state)).
 
 `Hello` attaches the connection to nothing, and nothing more reaches it until its first
 `Attach(workspace, session)` (see [Attaching](#attaching)); every command but `Attach` sent
@@ -91,7 +91,7 @@ before then is refused with `invalid`. The first `Attach` is answered in this or
    envelopes they were sent in, their `seq`s included (none without a store), and, while the
    session is halted because a write to the store failed, its `storage_halt`: the explanation
    the halting `ErrorOccurred` carried (see `storage_failed` under [Codes](#codes)), and
-   `read_only`, as the Catalog has it, with `ownership_offered`, true while an offer of the
+   `read_only`, as the Catalog has it for the session's workspace, with `ownership_offered`, true while an offer of the
    repository is open (see [Read-only orbits](#read-only-orbits)). Attaching to the open
    session after a `Hello` whose `since` orbit can catch up from gets the open session's events
    after it here instead, in their original envelopes (see
@@ -105,8 +105,8 @@ before then is refused with `invalid`. The first `Attach` is answered in this or
 `Welcome`, the `Catalog`, steps 1 to 3, and an `ErrorOccurred` coded `internal` for any of them
 that fails, are the connection's greeting: they reach that connection alone, never the others
 already connected, and aren't logged, so another frontend reconnecting isn't sent them again.
-The first connection to attach starts the workspace's background work, such as the startup
-check.
+The first connection to attach to a workspace starts that workspace's background work, such as
+its startup check.
 
 Each frontend shows its own session picker from the Catalog, kept current by
 `SessionStateChanged`, and attaches to the workspace it opens on: the TUI picks the one at the
@@ -133,11 +133,13 @@ A connection views one session at a time, of the workspace it's attached to. Its
 `session` there, answered as [The handshake](#the-handshake) says; a later one views another
 session of that workspace, answered with that session's `Snapshot`, then `CommandAccepted`. An
 `Attach` for a workspace that isn't served, or a session there's none of, is refused with
-`unknown`, and one for a saved session that can't be read with `invalid`. A connection viewing
+`unknown`, one for a saved session that can't be read with `invalid`, and one for another
+workspace than the one the connection is attached to with `wrong_session`, naming both. A connection viewing
 the open session keeps viewing it, whichever that is, until another session is activated in its
 place. From then on the connection gets the events
-of the session it views, the events that belong to no session, and the answers to its own
-commands; another session's events don't reach it. `Attach` with the open session's id views
+of the session it views, its workspace's events that belong to no session, the control plane's
+own (the `Catalog`s and `UsageChanged`), and the answers to its own commands; another session's
+events don't reach it, nor do another workspace's. `Attach` with the open session's id views
 the open session again, live.
 
 Every `Snapshot` says which session is the workspace's open one, the one that runs work:
@@ -218,8 +220,8 @@ Catalog isn't re-sent for it.
 ## Read-only orbits
 
 The first orbit to reach a repository, an `orbit serve` or an `orbit chat` running in-process,
-owns it, and runs its work. Any other orbit on it is read-only: its `Catalog` and `Snapshot` have
-`read_only` true, and a `Notice` after the Snapshot names the owner. A read-only orbit accepts
+owns it, and runs its work. Any other orbit on it is read-only: the workspace's entry in its
+`Catalog`, and its `Snapshot`, have `read_only` true, and a `Notice` after the Snapshot names the owner. A read-only orbit accepts
 `RunTasks` and `FireTrigger` with `CommandAccepted` and queues them, in order, rather than running
 them, after refusing, as an owning orbit would, those that couldn't run here (an unknown trigger,
 input to one, or work without the agents, reviews or verification it needs), and starts no work by itself, such as reviews or the startup check; the planner, sessions,
@@ -230,8 +232,8 @@ owner has gone, it takes the lock, holds it and publishes `OwnershipOffered()`, 
 open session, once until it's answered. `TakeOwnership(take)` answers it: with `take` true this
 orbit owns the repository from then on, publishing `OwnershipTaken()` and a `Notice` ("This orbit
 now owns the repository; queued work is running."), then running the work queued, in order, a
-command refused now reported as an `ErrorOccurred` with the refusal's code; later `Catalog`s and
-`Snapshot`s have `read_only` false. With `take` false it lets the lock go, so another orbit can
+command refused now reported as an `ErrorOccurred` with the refusal's code; the workspace's entry
+in later `Catalog`s, and later `Snapshot`s, have `read_only` false. With `take` false it lets the lock go, so another orbit can
 take it, publishing `OwnershipDeclined()`, stays read-only and offers the repository again once
 it has found another orbit holding the lock since and then finds it free, or, if it stays free,
 after 5 minutes. While an offer is open, a `Snapshot` has `ownership_offered` true,
@@ -410,9 +412,9 @@ outcomes of other connections' commands included, but for the events answering o
 - **Health checks**: `GET /healthz` and `GET /readyz` answer on the same port without the token,
   in `application/health+json`, the IETF health-check draft's minimal form; the status code is
   the contract. `/healthz` answers 200 `{"status": "pass"}` while the server runs. `/readyz`
-  answers 200 `{"status": "pass"}` once the store is open, the workspace loaded and frontends
+  answers 200 `{"status": "pass"}` once the store is open, the workspaces loaded and frontends
   accepted, with storage working; 200 `{"status": "warn", "output": "read_only"}` while another
-  orbit owns the repository; and otherwise 503 `{"status": "fail", "output": <reason>}`, the
+  orbit owns the repository of any workspace served; and otherwise 503 `{"status": "fail", "output": <reason>}`, the
   reason `starting`, `shutting_down` or `storage_halted`. Neither says more: no version, paths or
   checks. Under mutual TLS neither needs a client certificate.
 

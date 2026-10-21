@@ -12,7 +12,7 @@ from orbit.agent.application import usage_monitor
 from orbit.agent.application.usage_monitor import UsageMonitor
 from orbit.agent.domain.usage import UsageFetch, UsageRateLimited, UsageReport, UsageUnavailable
 from orbit.protocol import Event, TurnFinished, UsageChanged, UsageLimit
-from tests.agent_fakes import payloads, publish, served
+from tests.agent_fakes import host_of, payloads, publish, served
 
 NOW = datetime(2026, 10, 16, 12, 0, tzinfo=UTC)
 LIMITS = (UsageLimit(label="Session", percent=52.0),)
@@ -276,7 +276,9 @@ async def test_an_agents_finished_turn_nudges_the_usage_monitor() -> None:
     session = served(WorkspaceHost(), Source(UsageReport(LIMITS), UsageReport(LATER)))
     stream = payloads(session)
     await usage_events(stream, 1)
-    await publish(session.host, TurnFinished(turn_id="t", agent_id="agent-1", reason="completed"))
+    await publish(
+        host_of(session), TurnFinished(turn_id="t", agent_id="agent-1", reason="completed")
+    )
     assert await usage_events(stream, 1) == [UsageChanged(limits=LATER)]
     await session.close()
 
@@ -286,6 +288,6 @@ async def test_a_turn_finished_without_an_agent_does_not_nudge() -> None:
     session = served(WorkspaceHost(), Source(UsageReport(LIMITS), UsageReport(LATER)))
     stream = payloads(session)
     await usage_events(stream, 1)
-    await publish(session.host, TurnFinished(turn_id="t", reason="completed"))
+    await publish(host_of(session), TurnFinished(turn_id="t", reason="completed"))
     assert await quiet_of_usage(stream)
     await session.close()

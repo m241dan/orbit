@@ -1,5 +1,5 @@
-"""The connections frontends make to one session, each with its own handshake and its own
-stream of the session's events."""
+"""The connections frontends make to the control plane, each with its own handshake and its own
+stream of the events of the workspace it's attached to."""
 
 import asyncio
 from collections import Counter
@@ -115,8 +115,6 @@ class Connections:
         open session keep viewing that one once another is open in its place."""
         asker = _asker()
         for connection in tuple(self._open):
-            if connection.workspace is None:
-                continue
             if connection is asker:
                 connection.attach(None)
             elif left is not None and self.viewing(connection) is None:
@@ -204,24 +202,33 @@ def to_everyone() -> Iterator[None]:
 
 
 @dataclass(frozen=True)
-class ConnectionParts:
-    """What a connection to a session uses: the ``handshake`` parts, the ``events`` the session
-    publishes into, ``stamp``, which stamps an event without publishing it, as the session it's
-    given if one is, the ``connections`` open to the session, and ``answer``, which handles a
-    command and publishes its outcome."""
+class Place:
+    """Where a connection is: the ``events`` the workspace there publishes into, ``stamp``,
+    which stamps an event without publishing it, as the session it's given if one is, and the
+    ``connections`` open there."""
 
-    handshake: HandshakeParts
     events: EventSink
     stamp: Stamp
     connections: Connections
+
+
+@dataclass(frozen=True)
+class ConnectionParts:
+    """What a connection to the control plane uses: the ``handshake`` parts, the ``place`` it
+    starts in, before it's attached to a workspace, and ``answer``, which handles a command and
+    publishes its outcome."""
+
+    handshake: HandshakeParts
+    place: Place
     answer: Answer
 
 
 class SessionConnection:
-    """A frontend's connection to a session, from ``parts``: a ``Session`` with its own
-    handshake and its own stream.
+    """A frontend's connection to the control plane, from ``parts``: a ``Session`` with its own
+    handshake and its own stream. It starts in the ``place`` its parts give, and :meth:`move`\s
+    to the workspace its first ``Attach`` attaches it to.
 
-    Once it's attached, the stream gets every event the session publishes of the session it
+    Once it's attached, the stream gets every event the workspace publishes of the session it
     views and of none, but for the ``CONNECTION_EVENTS`` answering another connection's command;
     those published :func:`to_everyone`, as a switch's ``Snapshot``, and the ``Catalog`` a change
     to the sessions broadcasts reach it too.
@@ -235,14 +242,23 @@ class SessionConnection:
     """
 
     def __init__(self, parts: ConnectionParts) -> None:
-        self._parts = parts
+        self._answer = parts.answer
+        self._place = parts.place
         self._handshake = Handshake(parts.handshake, self._greet, self.receive)
         self._queue: asyncio.Queue[EventEnvelope] = asyncio.Queue(QUEUE_LIMIT)
         self._dropped: ConnectionDropped | None = None
         self._ended = False
         self.attached: SessionRef | None = None  # None while it views the open session.
         self.workspace: str | None = None  # The id of the workspace attached to, once it is.
-        parts.connections.add(self)
+        self._place.connections.add(self)
+
+    def move(self, place: Place) -> None:
+        """Leave the connections where this connection is for those at ``place``, viewing the
+        open session there."""
+        self._place.connections.discard(self)
+        self._place = place
+        self.attached = None
+        place.connections.add(self)
 
     @property
     def handshake(self) -> Handshake:
@@ -252,7 +268,7 @@ class SessionConnection:
     @property
     def viewing(self) -> SessionRef | None:
         """The session this connection views, if it isn't the open one."""
-        return self._parts.connections.viewing(self)
+        return self._place.connections.viewing(self)
 
     @property
     def attached_id(self) -> str | None:
@@ -285,13 +301,13 @@ class SessionConnection:
             return
         token = _answering.set((self, asyncio.current_task()))
         try:
-            await self._parts.answer(envelope, self, self._outcome_publisher(envelope.payload))
+            await self._answer(envelope, self, self._outcome_publisher(envelope.payload))
         finally:
             _answering.reset(token)
         if self._handshake.ended:
             self.end()
         elif isinstance(envelope.payload, Attach):
-            self._parts.connections.viewers_changed()
+            self._place.connections.viewers_changed()
 
     def _outcome_publisher(self, command: Command) -> Publish:
         """What publishes the outcome of ``command``: the greeting for the first ``Attach``,
@@ -318,7 +334,7 @@ class SessionConnection:
             if private or self.workspace is None or self.viewing is not None:
                 await self.publish_here(event)
             else:
-                await self._parts.events.put(event)
+                await self._place.events.put(event)
 
         return publish
 
@@ -326,12 +342,12 @@ class SessionConnection:
         """Stamp ``event``, as the session this connection views if it isn't the open one, and
         queue it for this connection alone."""
         viewing = self.viewing
-        self.receive(self._parts.stamp(event, None if viewing is None else viewing.id))
+        self.receive(self._place.stamp(event, None if viewing is None else viewing.id))
 
     async def _greet(self, event: Event) -> None:
         """Stamp ``event``, a part of this connection's greeting, and queue it for this
         connection alone, unlogged, as another connection replaying the log mustn't get it."""
-        self.receive(self._parts.stamp(event, logged=False))
+        self.receive(self._place.stamp(event, logged=False))
 
     def deliver(self, envelope: EventEnvelope) -> None:
         """Queue ``envelope``, a live event of the session, for the stream, or have the
@@ -378,10 +394,10 @@ class SessionConnection:
         """End this connection and its stream; the session and its other connections carry
         on."""
         self._finish(immediate=True)
-        self._parts.connections.viewers_changed()
+        self._place.connections.viewers_changed()
 
     def _finish(self, immediate: bool) -> None:
         """End the stream, at once if ``immediate``, and leave the session's connections."""
         self._ended = True
-        self._parts.connections.discard(self)
+        self._place.connections.discard(self)
         self._queue.shutdown(immediate)

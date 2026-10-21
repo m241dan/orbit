@@ -45,7 +45,7 @@ async def until(connection: SessionConnection, kind: type[Event]) -> list[Event]
 
 
 async def test_a_connection_is_welcomed_with_the_catalog_and_snapshot_of_the_host() -> None:
-    plane = ControlPlane(WorkspaceHost())
+    plane = ControlPlane([WorkspaceHost()])
     connection = await welcomed(plane, "first")
     events = await until(connection, Snapshot)
     await plane.close()
@@ -56,7 +56,7 @@ async def test_a_connection_is_welcomed_with_the_catalog_and_snapshot_of_the_hos
 
 async def test_the_hosts_events_reach_every_connection() -> None:
     host = WorkspaceHost()
-    plane = ControlPlane(host)
+    plane = ControlPlane([host])
     first, second = await welcomed(plane, "first"), await welcomed(plane, "second")
     await until(first, Snapshot)
     await until(second, Snapshot)
@@ -69,7 +69,7 @@ async def test_the_hosts_events_reach_every_connection() -> None:
 
 
 async def test_a_command_is_routed_to_the_host_and_answered() -> None:
-    plane = ControlPlane(WorkspaceHost())
+    plane = ControlPlane([WorkspaceHost()])
     connection = await welcomed(plane, "first")
     await until(connection, CommandAccepted)  # The Attach's.
 
@@ -84,7 +84,7 @@ async def test_a_command_is_routed_to_the_host_and_answered() -> None:
 
 async def test_the_usage_monitor_runs_once_however_many_connect() -> None:
     source = Source(UsageReport(LIMITS))
-    plane = ControlPlane(WorkspaceHost(), source)
+    plane = ControlPlane([WorkspaceHost()], source)
     first, second = await welcomed(plane, "first"), await welcomed(plane, "second")
 
     assert (await until(first, UsageChanged))[-1] == UsageChanged(limits=LIMITS)
@@ -95,7 +95,7 @@ async def test_the_usage_monitor_runs_once_however_many_connect() -> None:
 
 async def test_closing_stops_the_usage_monitor_and_ends_every_stream() -> None:
     source = Source(UsageReport(LIMITS))
-    plane = ControlPlane(WorkspaceHost(), source)
+    plane = ControlPlane([WorkspaceHost()], source)
     connection = await welcomed(plane, "first")
     await until(connection, UsageChanged)
 
@@ -107,7 +107,7 @@ async def test_closing_stops_the_usage_monitor_and_ends_every_stream() -> None:
 
 async def test_a_connection_after_closing_starts_no_usage_monitor() -> None:
     source = Source(UsageReport(LIMITS))
-    plane = ControlPlane(WorkspaceHost(), source)
+    plane = ControlPlane([WorkspaceHost()], source)
     await plane.close()
 
     connection = plane.connect()
@@ -118,8 +118,8 @@ async def test_a_connection_after_closing_starts_no_usage_monitor() -> None:
 
 def test_it_reads_the_hosts_ownership_and_storage() -> None:
     host = WorkspaceHost(owner=WorkspaceOwner(pid=1))
-    plane = ControlPlane(host)
+    plane = ControlPlane([host])
 
-    assert plane.host is host
+    assert plane.hosts == (host,)
     assert plane.read_only
     assert not plane.storage_halted

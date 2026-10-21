@@ -385,7 +385,7 @@
       "type": "object"
     },
     "Catalog": {
-      "description": "What exists: the ``workspaces`` and their sessions, the ``agents``' roles, the\n``triggers`` and the ``lanes``, and whether this orbit is ``read_only``, as another owns\nthe repository; sent after ``Welcome`` and, to the connections attached, whenever the\nsessions change.",
+      "description": "What exists: the ``workspaces`` served and their sessions, the ``agents``' roles, the\n``triggers`` and the ``lanes``; sent after ``Welcome`` and, to the connections attached,\nwhenever the sessions change.",
       "properties": {
         "agents": {
           "items": {
@@ -400,11 +400,6 @@
           },
           "title": "Lanes",
           "type": "array"
-        },
-        "read_only": {
-          "default": false,
-          "title": "Read Only",
-          "type": "boolean"
         },
         "triggers": {
           "items": {
@@ -2919,7 +2914,7 @@
       "type": "object"
     },
     "WorkspaceEntry": {
-      "description": "Workspace ``id``, shown as ``label``, at ``path`` on the backend's host, if it has one,\nand its ``sessions`` as the list of sessions shows them.",
+      "description": "Workspace ``id``, shown as ``label``, at ``path`` on the backend's host, if it has one,\nwhether it's ``read_only``, as another orbit owns its repository, and its ``sessions`` as\nthe list of sessions shows them.",
       "properties": {
         "id": {
           "title": "Id",
@@ -2940,6 +2935,11 @@
           ],
           "default": null,
           "title": "Path"
+        },
+        "read_only": {
+          "default": false,
+          "title": "Read Only",
+          "type": "boolean"
         },
         "sessions": {
           "items": {

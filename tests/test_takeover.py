@@ -176,7 +176,8 @@ async def test_taking_over_clears_read_only_from_the_catalog_and_snapshot() -> N
     await send(session, TakeOwnership(take=True))
     events = await views_on_joining(session)
 
-    assert not sole(events, Catalog).read_only and not sole(events, Snapshot).read_only
+    [workspace] = sole(events, Catalog).workspaces
+    assert not workspace.read_only and not sole(events, Snapshot).read_only
     await session.close()
 
 

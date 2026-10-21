@@ -568,7 +568,7 @@ async def test_a_connection_dropped_without_a_close_frame_is_reconnected_after()
 
 
 async def test_an_incompatible_hello_ends_the_link_to_the_control_plane_server() -> None:
-    served = ControlPlane(WorkspaceHost())
+    served = ControlPlane([WorkspaceHost()])
     server = ControlPlaneServer(served, lambda: TOKEN, ServerSettings(port=0), lambda line: None)
     url = await server.start()
     session, states = client(url)
@@ -665,7 +665,7 @@ async def test_the_backoff_doubles_up_to_its_most_and_jitters() -> None:
 
 async def test_it_talks_to_the_control_plane_server() -> None:
     host = WorkspaceHost()
-    served = ControlPlane(host)
+    served = ControlPlane([host])
     server = ControlPlaneServer(served, lambda: TOKEN, ServerSettings(port=0), lambda line: None)
     url = await server.start()
     session, _ = client(url)
@@ -684,7 +684,7 @@ async def test_it_talks_to_the_control_plane_server() -> None:
 
 async def test_a_rotated_token_file_is_shown_on_reconnecting() -> None:
     tokens = [TOKEN]
-    served = ControlPlane(WorkspaceHost())
+    served = ControlPlane([WorkspaceHost()])
     server = ControlPlaneServer(
         served, lambda: tokens[-1], ServerSettings(port=0), lambda line: None
     )

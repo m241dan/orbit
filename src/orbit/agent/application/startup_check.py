@@ -40,8 +40,8 @@ AddFix = Callable[[VerificationStep, str], Awaitable[None]]
 
 class StartupCheck:
     """Runs ``verification``'s steps once, in a snapshot of ``tree``'s base set up with its
-    setup (or in place without a tree), publishing progress and the result. A failure goes to
-    ``add_fix``."""
+    setup (or in place, in :attr:`root`, without a tree), publishing progress and the result. A
+    failure goes to ``add_fix``."""
 
     def __init__(
         self,
@@ -54,6 +54,7 @@ class StartupCheck:
         self._tree = tree
         self._publish = publish
         self._add_fix = add_fix
+        self.root = "."  # The workspace's directory, where the steps run without a tree.
         self._progress = StepProgress.of(step.name for step in verification.steps)
         self._shown = True  # Whether it still has the verification panel.
         self._started = False
@@ -124,7 +125,7 @@ class StartupCheck:
 
     async def _in_snapshot(self) -> Failure | None:
         if self._tree is None:
-            return await self._verify(".")
+            return await self._verify(self.root)
         root = await self._tree.snapshot(BASE)
         try:
             return await self._verify(root)

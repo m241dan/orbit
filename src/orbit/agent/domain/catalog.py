@@ -1,7 +1,7 @@
-"""The catalog of what exists: the workspace and its sessions, the agents' roles, the triggers
-and the lanes."""
+"""The catalog of what exists: the workspaces served and their sessions, the agents' roles, the
+triggers and the lanes."""
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 
 from orbit.protocol import (
     CODER,
@@ -56,17 +56,16 @@ def agent_entry(role: str) -> AgentEntry:
     return AgentEntry(name=role, label=label, conversational=role in CONVERSATIONAL_ROLES)
 
 
-def catalog(
+def workspace_entry(
     workspace: tuple[str, str | None, str | None],
     sessions: tuple[SessionSummary, ...],
-    roles: Iterable[str],
     *,
     read_only: bool = False,
     live: Iterable[SessionStateChanged] = (),
-) -> Catalog:
-    """The catalog of the ``workspace``, its id, then the name and path of its directory, if it
-    has one, holding ``sessions``, those ``live`` is about in those states, with agents in
-    ``roles``, for an orbit that's ``read_only`` if so."""
+) -> WorkspaceEntry:
+    """The catalog's entry for the ``workspace``, its id, then the name and path of its
+    directory, if it has one, holding ``sessions``, those ``live`` is about in those states,
+    ``read_only`` if another orbit owns its repository."""
     workspace_id, name, path = workspace
     label = name or NO_WORKSPACE_LABEL
     states = {state.session: state for state in live}
@@ -74,11 +73,16 @@ def catalog(
         with_state(summary, states[summary.id]) if summary.id in states else summary
         for summary in sessions
     )
-    entry = WorkspaceEntry(id=workspace_id, label=label, path=path, sessions=shown)
+    return WorkspaceEntry(
+        id=workspace_id, label=label, path=path, read_only=read_only, sessions=shown
+    )
+
+
+def catalog(workspaces: Sequence[WorkspaceEntry], roles: Iterable[str]) -> Catalog:
+    """The catalog of the ``workspaces`` served, with agents in ``roles``, each listed once."""
     return Catalog(
-        workspaces=(entry,),
-        agents=tuple(agent_entry(role) for role in roles),
+        workspaces=tuple(workspaces),
+        agents=tuple(agent_entry(role) for role in dict.fromkeys(roles)),
         triggers=TRIGGERS,
         lanes=LANES,
-        read_only=read_only,
     )

@@ -43,7 +43,8 @@ uv run orbit chat --no-usage                   # don't show usage limits
 uv run orbit chat --profile /tmp/orbit-prof    # record what slows orbit down
 uv run orbit chat --state-dir /tmp/orbit-state # keep saved sessions somewhere else
 uv run orbit db backup ~/orbit-backup.db       # back up the saved sessions (--force replaces)
-uv run orbit serve                             # run the control plane on its own, for frontends
+uv run orbit serve --add . --add ~/code/other  # run the control plane on its own, serving both
+uv run orbit serve                             # serve the projects added before again
 uv run orbit serve --port 0                    # on a port the system chooses
 uv run orbit serve --tls tls --cert server.pem --key server-key.pem --host 0.0.0.0  # over TLS
 uv run orbit chat --connect ws://127.0.0.1:7433/  # show the session orbit serve runs
@@ -581,7 +582,7 @@ your checkout out of its way, it doesn't sandbox it.
 | Config files | `.orbit/config.toml` in the repository | the verification steps, setup, roles and limits, committed with your code |
 | User config | `config.toml` in the config directory | your own settings for every repository, such as `[storage]`, `[server]` and `[remotes]` |
 | The token | `token` in the config directory | what frontends show `orbit serve` to connect (see [Serving the control plane](#serving-the-control-plane)) |
-| Run files | `run/` in the state directory | where the `orbit serve` that owns each repository listens |
+| The run file | `run/server.json` in the state directory | where the `orbit serve` running on that state directory listens |
 | Runtime-owned | `~/.claude` | Claude Code's own: your login, read for usage limits, and the agents' conversations |
 
 The state directory is `--state-dir`, else `$ORBIT_STATE_DIR`, else `$XDG_STATE_HOME/orbit`, else
@@ -881,9 +882,17 @@ affected. The panel is display only.
 `orbit serve` runs orbit's backend, the control plane, on its own: it serves the protocol (see
 [docs/protocol.md](docs/protocol.md#transport)) over a WebSocket, and the work goes on with no
 frontend connected (to host it in a container, see
-[Hosting in a container](#hosting-in-a-container)). It takes `-C` and the backend flags `chat` has (`--model`, `--tools`,
-`--verify`, `--worktree`, `--review`, `--usage`, `--new`, `--name`, `--profile`, which writes
-`serve.prof` and `serve-blocked.log`), `--state-dir` and `--config-dir`, and:
+[Hosting in a container](#hosting-in-a-container)). One server serves many projects, its
+workspaces, each with its own sessions, open session, work and lock, and it isn't tied to the
+directory it starts in: it serves every workspace added with `--add PATH` (repeatable), now or by
+an earlier `orbit serve` on the same state directory, so a plain `orbit serve` serves them all
+again, and with none added yet it starts empty and says so. `--add` takes a project's directory, or
+any directory in a git repository for the repository's top level; a path that doesn't exist, or
+isn't a directory, stops it with status 2. A workspace added whose directory has gone since is
+skipped, with a warning. It takes the backend flags `chat` has (`--model`, `--tools`, `--verify`,
+`--worktree`, `--review`, `--usage`, `--profile`, which writes `serve.prof` and
+`serve-blocked.log`), which apply to every workspace it serves, each reading its own
+`.orbit/config.toml`, `--state-dir` and `--config-dir`, and:
 
 - `--host`: the address to listen on, by default `127.0.0.1`. Without TLS only loopback is
   allowed (`127.0.0.1`, `::1`, `localhost`); another host stops it with status 2, pointing at
@@ -893,22 +902,29 @@ frontend connected (to host it in a container, see
 - `--tls`, `--cert`, `--key` and `--client-ca`: how it serves TLS (see **TLS** below).
 
 In a git repository, unless `--no-worktree` is given, orbit commits the coder's work, so `orbit
-serve` checks as it starts that git has an identity for commits there: `user.name` and
+serve` checks as it starts that git has an identity for commits in each workspace's repository: `user.name` and
 `user.email` from the repository's, your global or the system git config, or the
 `GIT_AUTHOR_*` and `GIT_COMMITTER_*` environment variables. Without one it stops with status 2,
 saying to set them (`git config --global user.name "Your Name"` and `git config --global
 user.email you@example.com`) or, in a container, to mount your `~/.gitconfig` into it.
 
-It opens the repository's most recently active saved session that no other orbit has open, or a
-new one when there's none; `--new` or `--name` start a new one. Once listening it prints one line
-with the repository, its URL, whether it owns the repository or is read-only (naming the owner)
-and the token file (under mTLS, the client CA), then one line as each frontend connects (with the
-name its `Hello` gives and its address, and under mTLS its certificate's subject and SHA-256
-fingerprint) and disconnects, and one as it stops; a connection closed without a `Hello`, like the
-probe `orbit chat` makes to find a server, gets no line. Warnings and errors go to stderr. While it runs, `run/<workspace id>.json` in the state directory, readable by you
-alone, holds its URL and process id, and over TLS the CA a frontend on the same machine trusts and
-the hostname it connects by (see **Finding the server** below); it's removed as it stops. A
-read-only `orbit serve` writes it only once it takes the repository over.
+Each workspace opens its most recently active saved session that no other orbit has open, or a
+new one when there's none; frontends pick another in their session picker. Once listening it
+prints one line with its URL, each workspace it serves and whether it owns its repository or is
+read-only there (naming the owner), or that it serves none yet, and the token file (under mTLS,
+the client CA), such as `Serving at ws://127.0.0.1:7433/: /home/me/code/orbit as its owner;
+/home/me/code/other read-only, as an orbit chat, pid 4242 owns it. Frontends show the token in
+/home/me/.config/orbit/token.`, then one line as each frontend connects (with the name its
+`Hello` gives and its address, and under mTLS its certificate's subject and SHA-256 fingerprint)
+and disconnects, and one as it stops; a connection closed without a `Hello`, like the probe `orbit
+chat` makes to find a server, gets no line. Warnings and errors go to stderr.
+
+One `orbit serve` runs per account and machine, or rather per state directory: while it runs,
+`run/server.json` in the state directory, readable by you alone, holds its URL and process id,
+and over TLS the CA a frontend on the same machine trusts and the hostname it connects by (see
+**Finding the server** below); it's removed as it stops. A second `orbit serve` on the same state
+directory stops with status 2, saying `orbit serve is already running at <url> (pid N); use
+--state-dir for a separate one.`; a run file whose process is gone is replaced.
 
 The first `ctrl+c` (or SIGTERM) stops it: it stops accepting frontends (one that arrives then is
 refused with HTTP 503), cancels the work in progress (stopping the agents and revoking their
@@ -922,8 +938,8 @@ main port, without the token, with `GET /healthz` and `GET /readyz`; both answer
 | Path | Answer | When |
 | --- | --- | --- |
 | `/healthz` | 200 `{"status": "pass"}` | the server is running |
-| `/readyz` | 200 `{"status": "pass"}` | it's serving, with the store open, the workspace loaded and storage working |
-| `/readyz` | 200 `{"status": "warn", "output": "read_only"}` | another orbit owns the repository, so this one is read-only |
+| `/readyz` | 200 `{"status": "pass"}` | it's serving, with the store open, the workspaces loaded and storage working |
+| `/readyz` | 200 `{"status": "warn", "output": "read_only"}` | another orbit owns the repository of a workspace served, so it's read-only there |
 | `/readyz` | 503 `{"status": "fail", "output": "starting"}` | it isn't accepting frontends yet |
 | `/readyz` | 503 `{"status": "fail", "output": "shutting_down"}` | it's stopping |
 | `/readyz` | 503 `{"status": "fail", "output": "storage_halted"}` | storage is halted until resumed |
@@ -1141,9 +1157,10 @@ reconnecting would only repeat: a message over the size limit, sent either way, 
 refusing the chat's `Hello` as incompatible (a chat and a serve speaking different protocol
 versions, as after upgrading one of them), or an event from the server the chat can't read.
 
-**Finding the server.** Without `--connect`, `orbit chat` looks for the `orbit serve` that owns its
-repository (see [Owning the repository](#owning-the-repository)), from the run file in the state
-directory, which a serve that takes the repository over writes then, and connects to it as `--connect` does, printing nothing extra: the backend flags stop
+**Finding the server.** Without `--connect`, `orbit chat` looks for the `orbit serve` running on
+its state directory, from the run file there, and connects to it as `--connect` does, opening on
+the workspace of the repository it runs in if the server serves it, else the first it lists,
+printing nothing extra: the backend flags stop
 it with status 2, saying they belong on `orbit serve` or call for `--local`, and `--new` and
 `--name` open a new session once connected. A run file whose process is gone, or a server that
 can't be reached, is ignored, and the chat runs in-process as usual. A server found is never
@@ -1243,7 +1260,7 @@ so the commits it makes in your checkout are yours), with these mounts:
 
 | Mount | In the container | What |
 | --- | --- | --- |
-| the repository (`..`) | `/workspace` | the checkout `orbit serve -C /workspace` works on; git trusts it through `safe.directory` |
+| the repository (`..`) | `/workspace` | the checkout `orbit serve --add /workspace` serves; git trusts it through `safe.directory` |
 | `deploy/orbit-config` | `/home/orbit/.config/orbit` (`ORBIT_CONFIG_DIR`) | `config.toml`, the token and the certificates |
 | the volume `orbit-state` | `/home/orbit/.local/state/orbit` (`ORBIT_STATE_DIR`) | the store and run files |
 | the volume `claude-login` | `/home/orbit/.claude` (`CLAUDE_CONFIG_DIR`) | Claude Code's login |
@@ -1338,7 +1355,8 @@ lock of its own: the server does.
 Any other orbit started on the repository meanwhile is read-only. It opens with a note naming the
 owner, such as "Read-only: an orbit chat, pid 4242 owns this repository. Tasks you run are queued
 until this orbit owns it.", and the prompt's title carries a "read-only" mark. `orbit serve`'s
-first line says so too, and it writes no run file until it takes the repository over, leaving the owner's for chats to find. Running
+first line says so too, for each workspace it's read-only in, and the workspace's entry in its
+catalog is marked read-only. Running
 tasks (`ctrl+r`) and the triggers (`ctrl+g`, `ctrl+e`) are accepted and queued, in order, but
 nothing runs: no task, review or startup check. Those an owning orbit would refuse, such as a super
 review with reviews off, are refused just the same. It notes no work left in `.git/orbit` by
@@ -1347,9 +1365,8 @@ and settings work as usual. The queue is dropped when the orbit exits.
 
 A read-only orbit tries the lock every 5 seconds. Once the owner has gone, it takes the lock and
 asks, once, in a modal: "The repository is free". `y` takes it over: the orbit owns the
-repository from then on, the "read-only" mark goes, `orbit serve` writes its run file so chats
-find it (a run file it can't write is logged as a warning, and it serves on, owning the repository), a note says "This orbit now owns the
-repository; queued work is running." and the work queued runs, in order. `n` or `esc` stays
+repository from then on, the "read-only" mark goes, `orbit serve` names its URL in the lock, a
+note says "This orbit now owns the repository; queued work is running." and the work queued runs, in order. `n` or `esc` stays
 read-only: the orbit lets the lock go again, so another orbit can take it, and asks again once
 another orbit has owned the repository and gone, or after 5 minutes if it's still free. Under `orbit serve`, every frontend connected asks, as does
 one that connects while the question is open; once one answers, the others close the modal. An

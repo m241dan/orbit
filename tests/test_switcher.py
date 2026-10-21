@@ -29,6 +29,7 @@ from orbit.protocol import (
     Snapshot,
     TaskSpec,
     Usage,
+    WorkspaceEntry,
 )
 from tests.agent_fakes import FakeHalt, FakeStore, Ticks
 
@@ -66,9 +67,14 @@ class Held:
             agents=(),
         )
 
-    def catalog(self, sessions: tuple[SessionSummary, ...]) -> Catalog:
+    def entry(self, sessions: tuple[SessionSummary, ...]) -> WorkspaceEntry:
         self.catalogs.append(sessions)
-        return Catalog(workspaces=(), agents=(), triggers=(), lanes=())
+        return WorkspaceEntry(id="workspace", label="workspace", sessions=sessions)
+
+
+def in_catalog(entry: WorkspaceEntry) -> Catalog:
+    """The catalog listing ``entry`` alone."""
+    return Catalog(workspaces=(entry,), agents=(), triggers=(), lanes=())
 
 
 async def nothing() -> None:
@@ -92,8 +98,8 @@ def switcher_for(
         None,
         lambda: held.activity,
         held.snapshot,
-        held.catalog,
-        events.put_nowait,
+        held.entry,
+        lambda entry: events.put(in_catalog(entry)),
         held.switches.append,
     )
     held.owned = SessionSettings(held.owned.given, pinned)

@@ -18,6 +18,14 @@ WorkspaceOption = Annotated[
         " repository, its top level.",
     ),
 ]
+AddOption = Annotated[
+    list[Path] | None,
+    typer.Option(
+        "--add",
+        help="Serve the project at this path from now on, here and in every later orbit serve"
+        " (repeatable). Inside a git repository, its top level.",
+    ),
+]
 NewOption = Annotated[
     bool,
     typer.Option(

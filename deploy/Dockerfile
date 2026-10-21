@@ -50,4 +50,4 @@ ENV HOME=/home/orbit \
 USER orbit
 WORKDIR /workspace
 EXPOSE 7433
-ENTRYPOINT ["orbit", "serve", "-C", "/workspace"]
+ENTRYPOINT ["orbit", "serve", "--add", "/workspace"]

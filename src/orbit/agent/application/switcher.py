@@ -28,7 +28,6 @@ from orbit.protocol import (
     BUSY,
     INVALID,
     ActivateSession,
-    Catalog,
     DeleteSession,
     Event,
     NewSession,
@@ -38,6 +37,7 @@ from orbit.protocol import (
     Snapshot,
     TaskState,
     Usage,
+    WorkspaceEntry,
 )
 
 NO_REVIEWS = LaneSnapshot(planner=PlannerSnapshot())
@@ -56,8 +56,9 @@ class SwitchParts:
     """What a switch replaces the contents of: the ``keeper`` saving the session, its ``tasks``,
     its planner ``seat``, its review ``lane`` and ``work`` lane, if any, and the ``activity``
     now in progress there; the ``snapshot`` of the session
-    open, last active then, that follows a switch; the ``catalog`` holding the sessions given,
-    which ``broadcast`` sends every listening connection whenever they change; and
+    open, last active then, that follows a switch; the workspace's ``entry`` in the catalog,
+    holding the sessions given, which ``broadcast`` sends every listening connection, in the
+    catalog, whenever they change; and
     ``switching``, called as a switch is no longer refused, just before the session open is
     another, with whether the session left stays saved."""
 
@@ -68,8 +69,8 @@ class SwitchParts:
     work: WorkLane | None
     activity: Callable[[], Activity]
     snapshot: Callable[[datetime | None], Awaitable[Snapshot]]
-    catalog: Callable[[tuple[SessionSummary, ...]], Catalog]
-    broadcast: Callable[[Catalog], None]
+    entry: Callable[[tuple[SessionSummary, ...]], WorkspaceEntry]
+    broadcast: Callable[[WorkspaceEntry], Awaitable[None]]
     switching: Callable[[bool], None]
 
 
@@ -117,14 +118,14 @@ class SessionSwitcher:
             return await self._open_session(command.session)
         return await self._new_session(command.name)
 
-    async def catalog(self) -> Catalog:
-        """The catalog, holding the sessions as they are now."""
-        return self._parts.catalog(await self._sessions())
+    async def entry(self) -> WorkspaceEntry:
+        """The workspace's entry in the catalog, holding the sessions as they are now."""
+        return self._parts.entry(await self._sessions())
 
     async def publish_catalog(self) -> None:
         """Send the catalog, holding the sessions as they are now, to every listening
         connection, whichever session it views."""
-        self._parts.broadcast(await self.catalog())
+        await self._parts.broadcast(await self.entry())
 
     async def _to_everyone(self, event: Event) -> None:
         """Publish ``event``, the session's new state, to every connection that views it."""

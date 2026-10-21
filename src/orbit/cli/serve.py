@@ -4,7 +4,7 @@ import asyncio
 import logging
 import os
 import signal
-from collections.abc import Callable, Collection, Mapping
+from collections.abc import Callable, Collection, Mapping, Sequence
 from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
@@ -25,26 +25,23 @@ from orbit.agent import (
     TokenError,
     TokenFile,
     WorkspaceLock,
-    WorkspaceOwner,
-    has_git_identity,
-    in_git_work_tree,
     local_tls,
     read_server,
     resolve_config_dir,
     resolve_state_dir,
+    running_server,
     tls_warnings,
 )
-from orbit.cli.backend import _Backend, _backend, _Directories, _in_process, _workspace
+from orbit.cli.backend import _Backend, _ServedWorkspace, _serving, _workspace
 from orbit.cli.errors import INVALID_CONFIG, _configured, _exit_on
 from orbit.cli.options import (
+    AddOption,
     CertOption,
     ClientCaOption,
     ConfigDirOption,
     HostOption,
     KeyOption,
     ModelOption,
-    NameOption,
-    NewOption,
     PortOption,
     ProfileOption,
     ReviewOption,
@@ -53,7 +50,6 @@ from orbit.cli.options import (
     ToolsOption,
     UsageOption,
     VerifyOption,
-    WorkspaceOption,
     WorktreeOption,
 )
 from orbit.profiling import profiled
@@ -62,15 +58,13 @@ logger = logging.getLogger(__name__)
 
 
 def serve(
-    workspace: WorkspaceOption = Path("."),
+    add: AddOption = None,
     model: ModelOption = None,
     tools: ToolsOption = None,
     verify: VerifyOption = True,
     worktree: WorktreeOption = True,
     review: ReviewOption = True,
     usage: UsageOption = True,
-    new: NewOption = False,
-    name: NameOption = None,
     profile: ProfileOption = None,
     state: StateDirOption = None,
     config_dir: ConfigDirOption = None,
@@ -83,74 +77,83 @@ def serve(
 ) -> None:
     """Run the control plane on its own, for frontends to connect to over a WebSocket.
 
-    It opens the workspace's most recently active session (or a new one with --new or
-    --name), and its work goes on with no frontend connected. Frontends show the token in
-    the token file in your config directory. The first orbit on a repository owns it; while
-    another does, this one is read-only, queueing the work it's asked to run. The first ctrl+c
-    stops it, cancelling the work in progress; a second exits at once. Beyond loopback it
-    serves over TLS alone, with --tls tls and a certificate and key; with --tls mtls and
-    --client-ca, frontends show a client certificate that CA signed rather than the token.
+    It serves every workspace added with --add, now or by an earlier orbit serve, wherever it's
+    started, each opening its most recently active session, and their work goes on with no
+    frontend connected; the backend flags apply to every workspace it serves. One runs per
+    state directory. Frontends show the token in the token file in your config directory. The
+    first orbit on a repository owns it; while another does, the workspace is read-only here,
+    queueing the work it's asked to run. The first ctrl+c stops it, cancelling the work in
+    progress; a second exits at once. Beyond loopback it serves over TLS alone, with --tls tls
+    and a certificate and key; with --tls mtls and --client-ca, frontends show a client
+    certificate that CA signed rather than the token.
     """
+    # #lizard forgives(parameter_count): Typer takes each of the command's options as a parameter.
     profile = profile.expanduser().resolve() if profile else None
     state = resolve_state_dir(state, os.environ)
     user_config = resolve_config_dir(config_dir, os.environ)
-    root = _workspace(workspace)
-    if worktree:
-        _require_git_identity(root)
-    os.chdir(root)
+    _refuse_second(state)
+    added = [_workspace(path) for path in add or ()]
     given = {"host": host, "port": port, "tls": tls, "cert": cert, "key": key}
     settings = _server_settings(user_config, {**given, "client_ca": client_ca})
     token_file = TokenFile(user_config)
     _token(token_file)
-    flags = _Backend(model, tools, verify, worktree, review, usage, new, name)
-    directories = _Directories(root, state, user_config)
-    with _in_process(flags, directories, pick_session=False, make=_backend) as backend:
+    flags = _Backend(model, tools, verify, worktree, review, usage, new=False, name=None)
+    with _serving(flags, added, state, user_config) as serving:
         logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
         parts = _ServeParts(
-            backend.build,
-            not flags.fresh,
+            serving.build,
             settings,
             _current_token(token_file),
             _current_revoked(user_config, settings.revoked),
-            RunFile(state, backend.workspace_id),
-            _local_tls(settings, root),
-            _banner(root, token_file, backend.owner, settings),
-            backend.lock,
+            RunFile(state),
+            _local_tls(settings, Path.cwd()),
+            _banner(serving.workspaces, token_file, settings),
+            tuple(workspace.lock for workspace in serving.workspaces),
         )
         _serve_until_stopped(parts, profile, user_config)
     typer.echo("orbit serve stopped.")
 
 
-def _require_git_identity(root: Path) -> None:
-    """Exit with status 2 if the workspace at ``root`` is a git repository that git has no
-    identity for commits in, as the coder's worktree commits there."""
-    if not in_git_work_tree(str(root)) or has_git_identity(str(root)):
+def _refuse_second(state: Path) -> None:
+    """Exit with status 2 if an ``orbit serve`` is already running on the ``state``
+    directory, naming it."""
+    running = running_server(state)
+    if running is None:
         return
     typer.echo(
-        f"Git has no identity for commits in {root}: set user.name and user.email"
-        ' (git config --global user.name "…"), or mount your ~/.gitconfig into the container.',
+        f"orbit serve is already running at {running.url} (pid {running.pid}); use --state-dir"
+        " for a separate one.",
         err=True,
     )
     raise typer.Exit(2)
 
 
 def _banner(
-    root: Path, token_file: TokenFile, owner: WorkspaceOwner | None, settings: ServerSettings
+    workspaces: Sequence[_ServedWorkspace], token_file: TokenFile, settings: ServerSettings
 ) -> Callable[[str], str]:
-    """What gives the line ``orbit serve`` prints once listening at a URL, serving the
-    repository at ``root`` as its owner, or read-only while another orbit, ``owner``, owns it,
-    saying what frontends show it: where ``token_file`` is, or under mutual TLS the client CA
-    in ``settings``."""
-    standing = "as its owner" if owner is None else f"read-only, as {owner.described} owns it"
+    """What gives the line ``orbit serve`` prints once listening at a URL, listing the
+    ``workspaces`` it serves, each as its owner, or read-only while another orbit owns it, or
+    saying it serves none yet, and what frontends show it: where ``token_file`` is, or under
+    mutual TLS the client CA in ``settings``."""
     if settings.tls == "mtls":
         shown = f"a client certificate {settings.client_ca} signed"
     else:
         shown = f"the token in {token_file.path}"
+    listed = "; ".join(_standing(workspace) for workspace in workspaces)
+    served = listed or "no workspaces yet; add one with orbit serve --add PATH"
 
     def banner(url: str) -> str:
-        return f"Serving {root} at {url} {standing}; frontends show {shown}."
+        return f"Serving at {url}: {served}. Frontends show {shown}."
 
     return banner
+
+
+def _standing(workspace: _ServedWorkspace) -> str:
+    """How ``orbit serve`` serves ``workspace``: as its owner, or read-only, naming the owner."""
+    owner = workspace.owner
+    if owner is None:
+        return f"{workspace.root} as its owner"
+    return f"{workspace.root} read-only, as {owner.described} owns it"
 
 
 def _serve_until_stopped(parts: "_ServeParts", profile: Path | None, user_config: Path) -> None:
@@ -188,8 +191,8 @@ def _server_settings(config_dir: Path, given: Mapping[str, object]) -> ServerSet
 
 def _local_tls(settings: ServerSettings, root: Path) -> LocalTls | None:
     """How a frontend on this machine reaches the server ``settings`` serve with TLS, relative
-    paths taken from ``root``; ``None`` for plaintext, or, with a warning saying why, when it
-    can't find it on its own."""
+    paths taken from ``root``, the directory it started in; ``None`` for plaintext, or, with a
+    warning saying why, when it can't find it on its own."""
     if settings.tls == "off":
         return None
     try:
@@ -240,23 +243,22 @@ def _current_revoked(config_dir: Path, first: Collection[str]) -> Callable[[], C
 
 @dataclass(frozen=True)
 class _ServeParts:
-    """What ``orbit serve`` serves: the control plane ``build`` makes, with its workspace's most
-    recently active saved session opened if ``latest``, on the server ``settings`` say, to
-    frontends showing the token ``token`` gives as they connect, or under mutual TLS a
-    certificate not among those ``revoked`` gives then, saying where it is in ``run_file``
-    while it owns the repository, and how frontends here reach it over TLS, ``local``, the
-    ``banner`` it prints once listening, given the server's URL, and the workspace ``lock``,
-    which names the server's URL while it's held."""
+    """What ``orbit serve`` serves: the control plane ``build`` makes, each workspace's most
+    recently active saved session opened, on the server ``settings`` say, to frontends showing
+    the token ``token`` gives as they connect, or under mutual TLS a certificate not among those
+    ``revoked`` gives then, saying where it is in ``run_file`` while it listens, and how
+    frontends here reach it over TLS, ``local``, the ``banner`` it prints once listening, given
+    the server's URL, and the workspaces' ``locks``, which name the server's URL while they're
+    held."""
 
     build: Callable[[], ControlPlane]
-    latest: bool
     settings: ServerSettings
     token: Callable[[], str]
     revoked: Callable[[], Collection[str]]
     run_file: RunFile
     local: LocalTls | None
     banner: Callable[[str], str]
-    lock: WorkspaceLock
+    locks: tuple[WorkspaceLock, ...]
 
 
 async def _served(parts: _ServeParts, profile: Path | None) -> None:
@@ -270,8 +272,8 @@ async def _served(parts: _ServeParts, profile: Path | None) -> None:
         server = ControlPlaneServer(plane, parts.token, parts.settings, typer.echo)
         server.revoked = parts.revoked
         try:
-            if parts.latest:
-                await plane.host.open_latest()
+            for host in plane.hosts:
+                await host.open_latest()
             url = await server.start()
         except BaseException:
             await plane.close()
@@ -283,62 +285,36 @@ async def _until_stopped(
     plane: ControlPlane, server: ControlPlaneServer, parts: _ServeParts, url: str
 ) -> None:
     """Serve ``plane`` on ``server``, listening at ``url``, until the first ctrl+c or
-    SIGTERM, then stop it, removing the run file it wrote: at once if it owns the repository,
-    else once it takes the repository over.
+    SIGTERM, then stop it, removing the run file it wrote.
 
-    Exits with status 2 if the workspace lock, or the run file at once, can't be written.
+    Exits with status 2 if the run file or a workspace lock can't be written.
     """
     stopping = asyncio.Event()
     _on_signals(stopping)
-    written: list[RunFile] = []
-    plane.host.owned = _taking_over(parts.run_file, url, parts.local, written)
+    written = False
     try:
-        if not plane.read_only:
-            _write_run_file(parts.run_file, url, parts.local)
-            written.append(parts.run_file)
-        _announce(parts.lock, url)
+        _write_run_file(parts.run_file, url, parts.local)
+        written = True
+        for lock in parts.locks:
+            _announce(lock, url)
         typer.echo(parts.banner(url))
         await stopping.wait()
     finally:
         try:
             await server.stop(plane.close)
         finally:
-            # One that couldn't be written may not be removable either.
-            for run_file in written:
-                run_file.remove()
+            if written:  # One that couldn't be written may not be removable either.
+                parts.run_file.remove()
 
 
 def _write_run_file(run_file: RunFile, url: str, local: LocalTls | None) -> None:
     """Say in ``run_file`` that this process is serving at ``url``, reached from this machine
-    as ``local`` says.
+    as ``local`` says, in place of a stale one.
 
     Exits with status 2 if it can't.
     """
-    with _exit_on(OSError, message=lambda exc: _unwritable(run_file, exc)):
+    with _exit_on(OSError, message=lambda exc: f"Can't write the run file {run_file.path}: {exc}"):
         run_file.write(url, os.getpid(), local)
-
-
-def _taking_over(
-    run_file: RunFile, url: str, local: LocalTls | None, written: list[RunFile]
-) -> Callable[[], None]:
-    """What says in ``run_file`` that this process is serving at ``url``, reached from this
-    machine as ``local`` says, as it takes the repository over, adding it to ``written``; if it
-    can't, it logs a warning saying why and serves on."""
-
-    def owned() -> None:
-        try:
-            run_file.write(url, os.getpid(), local)
-        except OSError as exc:
-            logger.warning("%s", _unwritable(run_file, exc))
-            return
-        written.append(run_file)
-
-    return owned
-
-
-def _unwritable(run_file: RunFile, exc: OSError) -> str:
-    """What says ``run_file`` can't be written, as ``exc`` says."""
-    return f"Can't write the run file {run_file.path}: {exc}"
 
 
 def _announce(lock: WorkspaceLock, url: str) -> None:

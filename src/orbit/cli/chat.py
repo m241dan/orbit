@@ -87,8 +87,9 @@ def chat(
     """Start an interactive agent session.
 
     At startup, pick a saved session or start a new one (or start one with --new); ctrl+p
-    picks again later. With --connect, or when an orbit serve is running for the workspace
-    (unless --local), join it instead, the picker offering to resume the session it has open.
+    picks again later. With --connect, or when an orbit serve is running (unless --local), join
+    it instead, opening on the workspace here if it serves it, the picker offering to resume the
+    session it has open.
     --remote NAME joins the one [remotes.NAME] in your config.toml names.
     A control plane serving mutual TLS is shown a client certificate, with --cert and --key,
     rather than the token.
@@ -112,11 +113,11 @@ def chat(
     joining = _Joining(ctx, token_path, ca, _opening(new, name))
     state = resolve_state_dir(state, os.environ)
     root = _workspace(workspace)
-    found = None if local else _discovered(state, root, token_path, user_config)
+    found = None if local else _discovered(state, token_path, user_config)
     if found is not None:
         joining = _joining(ctx, found.files, user_config, joining.opening)
         joining = replace(joining, repository=str(root))
-        where = f"which serves {root} at {found.url}; or pass --local to run one here"
+        where = f"which runs at {found.url}; or pass --local to run one here"
         _join(joining, found.url, where)
         return
     # The only place the backend and frontend meet, and where the backend's external
@@ -288,18 +289,16 @@ class LocalCertMissing(Exception):
 
 @dataclass(frozen=True)
 class Discovered:
-    """A control plane found serving the workspace: the ``url`` a frontend here connects to,
-    showing it ``files``."""
+    """A control plane found running here: the ``url`` a frontend here connects to, showing it
+    ``files``."""
 
     url: str
     files: _ClientFiles
 
 
-def discover_control_plane(
-    state: Path, workspace: Path, token_file: Path, config_dir: Path
-) -> Discovered | None:
-    """The control plane serving the workspace at ``workspace``, as its run file in the
-    ``state`` directory says, if the process it names is alive and it takes the token in
+def discover_control_plane(state: Path, token_file: Path, config_dir: Path) -> Discovered | None:
+    """The control plane running on the ``state`` directory, as its run file there says, if
+    the process it names is alive and it takes the token in
     ``token_file``, or under mutual TLS the client certificate the user config in
     ``config_dir`` names; ``None`` if there's none, or it can't be reached.
 
@@ -309,7 +308,7 @@ def discover_control_plane(
     :class:`CaUnreadable` or :class:`ClientCertUnusable` if the CA or the client certificate
     can't be used.
     """
-    server = running_server(state, str(workspace))
+    server = running_server(state)
     if server is None:
         return None
     files = _local_files(server, token_file, config_dir)
@@ -340,20 +339,18 @@ def _local_files(server: RunningServer, token_file: Path, config_dir: Path) -> _
     return _ClientFiles(None, ca, Path(cert), Path(key))
 
 
-def _discovered(
-    state: Path, workspace: Path, token_file: Path, config_dir: Path
-) -> Discovered | None:
+def _discovered(state: Path, token_file: Path, config_dir: Path) -> Discovered | None:
     """What :func:`discover_control_plane` finds; a control plane found is never bypassed.
 
     Exits with status 2 if the token, the user config, the CA or the client certificate can't
     be used, or the control plane turns the token away.
     """
     refused = (
-        f"The control plane serving {workspace} refused the token from {token_file}; give it"
-        " the token orbit serve uses, or pass --local to run one here."
+        f"The orbit serve running here refused the token from {token_file}; give it the token"
+        " orbit serve uses, or pass --local to run one here."
     )
     with _exit_on(TokenRejected, message=lambda _: refused), _exit_on(*_LOCAL_ERRORS):
-        return _configured(lambda: discover_control_plane(state, workspace, token_file, config_dir))
+        return _configured(lambda: discover_control_plane(state, token_file, config_dir))
 
 
 _LOCAL_ERRORS = (TokenUnreadable, LocalCertMissing, CaUnreadable, ClientCertUnusable)

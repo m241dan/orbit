@@ -172,7 +172,7 @@ class AgentRun:
         # How the last proposal failed when tried; never a fix task's failure, so kept apart.
         self._proposal_failure: Failure | None = None
         self._agent: Agent | None = None
-        self._root = "."
+        self._root = desk.agents.root
         self._tools: dict[str, Tool] = {
             GET_TASK: self._get_task,
             COMPLETE_TASK: self._complete_task,
