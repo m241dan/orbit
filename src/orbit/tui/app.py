@@ -116,6 +116,7 @@ from orbit.tui.view.confirm import (
     RESET_YES,
 )
 from orbit.tui.view.events import coalesce
+from orbit.tui.view.log import Entry
 from orbit.tui.view.outcomes import Awaited
 from orbit.tui.view.proposals import decision_entry
 from orbit.tui.view.rules import planner_reset_entry
@@ -325,9 +326,18 @@ class OrbitApp(App[None], inherit_bindings=False):
         prompt.action_normal_mode()
         # Busy from now, not from TurnStarted, so a second prompt can't race the turn.
         self._set_busy(PLANNER_LANE, True)
-        self._feed.append(text, "prompt", PLANNER)
-        freed = Awaited(refused=lambda: self._set_busy(PLANNER_LANE, False))
-        await self._send(SendMessage(agent=PLANNER, text=text), freed)
+        entry = self._feed.append(text, "prompt", PLANNER)
+        unsent = Awaited(refused=lambda: self._unsend(text, entry))
+        await self._send(SendMessage(agent=PLANNER, text=text), unsent)
+
+    def _unsend(self, text: str, entry: Entry) -> None:
+        """Undo sending ``text`` to the planner, refused or not sent: its prompt ``entry`` is
+        dropped, the planner freed, and ``text`` put back in the prompt unless the user has
+        typed another draft since."""
+        self._set_busy(PLANNER_LANE, False)
+        self._transcript.drop_entry(entry)
+        if not self._prompt.text.strip():
+            self._prompt.load_text(text)
 
     # Window navigation only applies at the top level, when no window is active.
 

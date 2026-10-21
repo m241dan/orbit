@@ -184,11 +184,12 @@ class ConversationFeed:
         elif _is_feed_event(event):
             self.render(event)
 
-    def append(self, text: str, kind: EntryKind, agent: str | None = None) -> None:
-        """Add an entry of ``text`` by ``agent``, if any, under its tab and All."""
+    def append(self, text: str, kind: EntryKind, agent: str | None = None) -> Entry:
+        """The entry of ``text`` by ``agent``, if any, added under its tab and All."""
         # Entries are kept by tab: a pinned role's agents' under its tab.
         entry = Entry(text, kind, agent, speaker=self._speaker(agent))
         self.transcript.add_entry(entry, self.tabs.key_of(agent))
+        return entry
 
     def _render_conversation(self, event: ConversationEvent) -> None:
         match event:

@@ -13,13 +13,16 @@ from orbit.tui.entries import GutteredEntry
 from orbit.tui.transcript_log import TranscriptLog
 from orbit.tui.view.common import EntryKind
 from orbit.tui.view.log import Entry
+from orbit.tui.view.tool_calls import tool_call_started
 from orbit.tui.view.transcript import GUTTER_BAR, GUTTER_MARKER, PROMPT_LINES_SHOWN, PROMPT_MARKER
 from tests.test_transcript import (
     LONG,
+    call,
     entry,
     entry_lines,
     entry_rows,
     label_style,
+    result,
     scrolled_to_end,
 )
 
@@ -307,3 +310,54 @@ async def test_replacing_a_rule_in_a_log_without_one_leaves_it() -> None:
         log.append(Entry("hi", "agent", "agent-3"))
         log.replace_rule("agent-3", "agent-3 stopped", "rule")
         assert log.entries == (Entry("hi", "agent", "agent-3"),)
+
+
+async def test_dropping_an_entry_keeps_the_cursor_on_its_own_entry() -> None:
+    app = LogApp()
+    async with app.run_test() as pilot:
+        log = app.query_one(TranscriptLog)
+        first, second, third = (Entry(text, "agent") for text in ("a", "b", "c"))
+        for added in (first, second, third):
+            log.append(added)
+        log.highlighted = 2
+        log.drop(first)
+        await pilot.pause()
+        assert log.entries == (second, third)
+        assert log.option_count == 2
+        assert log.highlighted == 1
+
+
+async def test_dropping_the_held_entry_moves_the_cursor_to_the_one_before() -> None:
+    app = LogApp()
+    async with app.run_test():
+        log = app.query_one(TranscriptLog)
+        first, second = Entry("a", "agent"), Entry("b", "agent")
+        log.append(first)
+        log.append(second)
+        log.highlighted = 1
+        log.drop(second)
+        assert log.entries == (first,)
+        assert log.highlighted == 0
+
+
+async def test_a_call_after_a_dropped_entry_still_finishes() -> None:
+    app = LogApp()
+    async with app.run_test():
+        log = app.query_one(TranscriptLog)
+        removed = Entry("hi", "prompt")
+        log.append(removed)
+        log.append_call(tool_call_started(call("agent-1", "c1")), "agent-1", None)
+        log.drop(removed)
+        assert log.finish_call(result("agent-1", "c1", "done"))
+        [finished] = log.entries
+        assert finished.call is not None and finished.call.status != "running"
+        assert not log.running
+
+
+async def test_dropping_an_entry_the_log_lacks_leaves_it() -> None:
+    app = LogApp()
+    async with app.run_test():
+        log = app.query_one(TranscriptLog)
+        log.append(Entry("hi", "prompt"))
+        log.drop(Entry("hi", "prompt"))  # Equal, but not the one added.
+        assert log.entries == (Entry("hi", "prompt"),)

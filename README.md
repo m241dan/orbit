@@ -175,7 +175,9 @@ left keeps it, read-only.
 A read-only view shows the session as it was last saved, with its conversation's last events. You
 can browse it, rename or delete it from the picker and page back through its history, but anything
 that would change it or run work, such as a prompt, `ctrl+r` or editing a task, is refused with an
-error naming the active session and how to switch. While you view one, the line above the prompt
+error naming the active session and how to switch. A refused prompt leaves the conversation, and
+its text goes back in the prompt box unless you've typed something else there since; the same goes
+for a prompt sent while disconnected. While you view one, the line above the prompt
 says what the active session is doing: `viewing <name>; <active> is running <what> (enter to switch
 when it's idle)` while it runs work, where `<what>` names it by the task list's numbers (`task 3`,
 `the review of task 5`, `the planner`, joined when several, and `a task` for one the list lacks),

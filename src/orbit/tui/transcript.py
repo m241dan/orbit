@@ -153,6 +153,11 @@ class Transcript(Vertical):
         for tab in {None, key}:
             self._log(tab).append(entry)
 
+    def drop_entry(self, entry: Entry) -> None:
+        """Drop ``entry`` from every log holding it."""
+        for log in self._logs.values():
+            log.drop(entry)
+
     def clear(self) -> None:
         """Drop every entry, under All and every tab, closing the detail pane."""
         self.close_detail()

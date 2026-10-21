@@ -216,6 +216,19 @@ class TranscriptLog(ListPane):
         self._calls = {index + offset: call for index, call in calls.items()}
         self._show_rows_holding(None if held is None else held + offset)
 
+    def drop(self, entry: Entry) -> None:
+        """Drop ``entry``, this very one rather than an equal one, the cursor kept on its own
+        entry, or moved to the nearest one shown if it held ``entry``; a log without it is left
+        as it is."""
+        index = next((i for i, held in enumerate(self._entries) if held is entry), None)
+        if index is None:
+            return
+        cursor = self.inspected
+        del self._entries[index]
+        del self._collapsed[index]
+        self._calls = {i - (i > index): call for i, call in self._calls.items()}
+        self._show_rows_holding(None if cursor is None else cursor - (cursor > index))
+
     def _show_after(self, index: int) -> None:
         """Add the entry at ``index``, which comes after every entry shown, as the last option,
         the view pinned to it unless the list is active or holds a cursor."""

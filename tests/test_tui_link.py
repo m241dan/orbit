@@ -27,6 +27,7 @@ from orbit.protocol import (
 from orbit.tui import Opening, OrbitApp
 from orbit.tui.link import LinkScreen
 from orbit.tui.view.link import LOST_AFTER, ended_message, lost_delay
+from orbit.tui.widgets import ChatPrompt
 from tests.test_tui import FakeSession, entries, feed_events
 
 URL = "ws://127.0.0.1:7433/"
@@ -98,10 +99,13 @@ async def test_a_command_sent_while_disconnected_is_refused_as_not_connected() -
     async with app.run_test() as pilot:
         await pilot.press("i", *"hi", "enter")
         await pilot.pause()
-        assert entries(app)[-2:] == [("hi", "prompt"), ("Not connected", "error")]
+        assert entries(app) == [("Not connected", "error")]
+        prompt = app.query_one(ChatPrompt)
+        assert prompt.text == "hi"
+        assert prompt.border_title == "Prompt · planner"
         session.send_error = None
-        await pilot.press("i", *"again", "enter")
-        assert session.commands[-1] == SendMessage(agent=PLANNER, text="again")
+        await pilot.press("i", "enter")
+        assert session.commands[-1] == SendMessage(agent=PLANNER, text="hi")
 
 
 async def test_after_two_minutes_of_reconnecting_a_modal_offers_to_keep_trying() -> None:

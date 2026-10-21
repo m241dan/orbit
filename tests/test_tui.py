@@ -11,6 +11,7 @@ from textual.worker import WorkerFailed
 from orbit.protocol import (
     AGENT_FAILED,
     INTERNAL,
+    NOT_ACTIVE,
     PLANNER,
     PROTOCOL_VERSION,
     STARTUP_TASK,
@@ -232,8 +233,49 @@ async def test_a_refused_message_shows_why_and_frees_the_prompt() -> None:
         await feed_events(session, pilot, refused)
         assert entries(app)[-1] == ("Not now.", "error")
         assert prompt.border_title == "Prompt · planner"
-        await pilot.press("i", *"again", "enter")
-    assert session.commands[-1] == SendMessage(agent=PLANNER, text="again")
+        await pilot.press("i", "enter")  # The draft is back, to send again.
+    assert session.commands[-1] == SendMessage(agent=PLANNER, text="hi")
+
+
+async def test_a_message_refused_as_not_active_is_withdrawn_and_its_draft_restored() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        prompt = app.query_one("#prompt", ChatPrompt)
+        await pilot.press("i", *"hi", "enter")
+        [sent] = session.envelopes
+        refused = CommandRefused(command_id=sent.command_id, code=NOT_ACTIVE, message="Not here.")
+        await feed_events(session, pilot, refused)
+        assert entries(app) == [("Not here.", "error")]
+        assert app.query_one(Transcript).entries(PLANNER) == ()
+        assert prompt.text == "hi"
+        assert prompt.border_title == "Prompt · planner"
+
+
+async def test_a_refusal_keeps_a_new_draft_typed_since_sending() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        prompt = app.query_one("#prompt", ChatPrompt)
+        await pilot.press("i", *"hi", "enter", "i", *"new")
+        [sent] = session.envelopes
+        refused = CommandRefused(command_id=sent.command_id, code=NOT_ACTIVE, message="Not here.")
+        await feed_events(session, pilot, refused)
+        assert entries(app) == [("Not here.", "error")]
+        assert prompt.text == "new"
+
+
+async def test_an_accepted_message_stays_a_prompt_and_leaves_the_prompt_empty() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        prompt = app.query_one("#prompt", ChatPrompt)
+        await pilot.press("i", *"hi", "enter")
+        [sent] = session.envelopes
+        await feed_events(session, pilot, CommandAccepted(command_id=sent.command_id))
+        assert entries(app) == [("hi", "prompt")]
+        assert prompt.text == ""
+        assert prompt.border_title == "Prompt · planner · busy"
 
 
 async def test_a_refusal_of_an_earlier_message_leaves_the_planner_busy() -> None:
@@ -303,7 +345,9 @@ async def test_a_message_that_failed_to_send_lets_the_next_enter_send_again() ->
     app = OrbitApp(session)
     async with app.run_test() as pilot:
         await pilot.press("i", *"hi", "enter")
-        await pilot.press("i", *"hi", "enter")
+        await pilot.pause()
+        assert app.query_one("#prompt", ChatPrompt).text == "hi"  # The draft is back.
+        await pilot.press("i", "enter")
         await pilot.pause()
         assert session.commands == [SendMessage(agent=PLANNER, text="hi")] * 2
 
