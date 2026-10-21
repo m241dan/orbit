@@ -101,8 +101,10 @@ class Handshake:
 
     def leave(self) -> None:
         """Count the frontend attached to no session again, as the workspace it was attached
-        to is no longer served; its next ``Attach`` greets it anew."""
+        to is no longer served; its next ``Attach`` greets it anew, with a snapshot, as the
+        ``seq`` its Hello gave was of that workspace's events."""
         self._greeted = False
+        self._since = None
 
     @property
     def listening(self) -> bool:

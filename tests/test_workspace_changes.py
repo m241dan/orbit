@@ -3,6 +3,8 @@ stops a workspace's host, leaves the others alone and sends the Catalog; a local
 both."""
 
 import asyncio
+from collections.abc import Sequence
+from dataclasses import replace
 from pathlib import PurePath
 
 from orbit.agent import (
@@ -27,6 +29,8 @@ from orbit.protocol import (
     CommandEnvelope,
     CommandRefused,
     Event,
+    EventEnvelope,
+    Notice,
     RemoveWorkspace,
     RunTasks,
     Snapshot,
@@ -355,6 +359,28 @@ async def test_removing_the_workspace_attached_to_leaves_the_connection_free_to_
     assert in_c.workspace == "a"
     assert any(isinstance(event, Snapshot) for event in attached)
     assert CommandAccepted(command_id="attach") in attached
+
+
+async def test_an_attach_after_removing_the_workspace_attached_to_gets_a_snapshot() -> None:
+    first, second = workspace("a"), workspace("c")
+    stale = EventEnvelope(seq=1, session="a-1", payload=Notice(message="stale"))
+
+    async def missed(since: int) -> Sequence[EventEnvelope] | None:
+        return [stale]
+
+    first._greeting = replace(first._greeting, missed=missed)
+    plane = ControlPlane([first, second], workspaces=FakeSource())
+    connection = plane.connect()
+    await say(connection, "hello", HELLO.model_copy(update={"since": 0}))
+    await say(connection, "attach-c", Attach(workspace="c", session="c-1"))
+    await say(connection, "remove", RemoveWorkspace(workspace="c"))
+    taken(connection)
+    await say(connection, "attach-a", Attach(workspace="a", session="a-1"))
+    attached = payloads(taken(connection))
+    await plane.close()
+
+    assert any(isinstance(event, Snapshot) for event in attached)
+    assert stale.payload not in attached
 
 
 async def test_a_workspace_being_added_as_the_control_plane_closes_is_closed_with_it() -> None:

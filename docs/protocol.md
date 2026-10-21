@@ -196,10 +196,11 @@ check. Adding a workspace already served is accepted with nothing more done. It'
 `RemoveWorkspace(workspace)` stops serving the workspace whose id is `workspace`: its host
 closes, its lock is let go and its sessions are kept, so adding it again finds them. The
 connection removing it, if it was attached there, is attached to no workspace again, and its
-next `Attach` is answered as a first one is. It's refused with `unknown` for a workspace that
-isn't served, and with `busy` while the workspace runs work, its message naming what runs, such
-as `Can't remove /home/me/src/orbit: tasks are running.`, or while another connection views one
-of its sessions, its message naming them.
+next `Attach` is answered as a first one is, with a snapshot, as the `since` its `Hello` gave
+was of the workspace removed. It's refused with `unknown` for a workspace that isn't served, and
+with `busy` while the workspace runs work, its message naming what runs, such as
+`Can't remove /home/me/src/orbit: tasks are running.`, or while another connection views one of
+its sessions, its message naming them.
 
 A local `orbit chat` serves its own repository alone, and refuses both with `invalid`: `A local
 orbit works on one repository; run orbit serve to work on several.`

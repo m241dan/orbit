@@ -250,6 +250,17 @@ async def test_joining_the_open_session_after_a_hello_that_can_catch_up_replays_
     ]
 
 
+async def test_a_join_after_leaving_gets_the_snapshot_without_asking() -> None:
+    parts = Parts()
+    parts.missing = [missed(16)]
+    handshake = await parts.joined(since=15)
+    handshake.leave()
+    parts.log.clear()
+    await handshake.join(parts.greeting(), OPEN, parts.view)
+    assert parts.log == [f"view {OPEN}", "review count", "leftovers", "start"]
+    assert handshake.greeted
+
+
 async def test_a_hello_ahead_of_the_last_seq_stamped_gets_the_snapshot_without_asking() -> None:
     parts = Parts()
     parts.missing = []
