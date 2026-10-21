@@ -38,6 +38,7 @@ from tests.agent_fakes import (
     FakeLock,
     FakeTree,
     claims_done,
+    commands_of,
     events_until,
     greeted,
     idle,
@@ -46,6 +47,7 @@ from tests.agent_fakes import (
     send,
     session_for,
     sole,
+    turns_of,
     views_on_joining,
 )
 
@@ -366,6 +368,47 @@ async def test_the_review_lane_and_work_commands_follow_the_takeover_once_taken(
     await send(session, RunTasks())
     await events_until(session, idle())
     assert session.queued_work == () and len(launcher.launches) == 1
+    await session.close()
+
+
+async def test_a_queued_run_that_fails_on_taking_over_is_reported_and_reviews_still_start() -> None:
+    lock = FakeLock(free=True)
+    session, _, launcher = session_for(
+        claims_done, owner=OWNER, lock=lock, tree=FakeTree(), review=True
+    )
+    await greeted(session)
+    await events_until(session, offered)
+    await send(session, RunTasks())
+
+    async def failing() -> None:
+        raise RuntimeError("disk gone")
+
+    turns_of(session).run_tasks = failing  # type: ignore[method-assign]
+    await send(session, TakeOwnership(take=True))
+
+    message = "Orbit failed to handle RunTasks: disk gone"
+    await events_until(
+        session, lambda event: event == ErrorOccurred(code=INTERNAL, message=message)
+    )
+    await events_until(session, lambda event: event == ACCEPTED)
+    assert lane_of(session).running and launcher.launches == []
+    await session.close()
+
+
+async def test_reviews_still_start_when_running_the_queued_work_fails() -> None:
+    lock = FakeLock(free=True)
+    session, _, _ = session_for(claims_done, owner=OWNER, lock=lock, tree=FakeTree(), review=True)
+    await greeted(session)
+    await events_until(session, offered)
+
+    async def failing(command_id: str) -> None:
+        raise RuntimeError("outbox closed")
+
+    commands_of(session).own = failing  # type: ignore[method-assign]
+    await send(session, TakeOwnership(take=True))
+    await events_until(session, refused)
+
+    assert lane_of(session).running
     await session.close()
 
 

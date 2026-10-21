@@ -649,7 +649,8 @@ class WorkspaceHost:
     async def _take_ownership(self, command: TakeOwnership, command_id: str) -> None:
         """Answer the offer of the repository: own it, if ``command`` takes it, send the catalog
         saying so, recover the fallback files the owner left, and run the work queued for
-        ``command_id`` and the reviews waiting; refused when no offer is open."""
+        ``command_id`` and the reviews waiting, even if running the queued work fails; refused
+        when no offer is open."""
         self._takeover.answer(command.take)
         if not command.take:
             await self._events.put(OwnershipDeclined())
@@ -659,9 +660,11 @@ class WorkspaceHost:
         await self._events.put(Notice(message=OWNED_NOTE))
         await self._switcher.publish_catalog()  # Other workspaces' connections learn it here.
         await self._recover_parked()
-        await self._commands.own(command_id)
-        if self._lane is not None:  # After the queued work, so its tasks get agents first.
-            self._lane.kick()
+        try:
+            await self._commands.own(command_id)
+        finally:  # After the queued work, so its tasks get agents first, even if it fails.
+            if self._lane is not None:
+                self._lane.kick()
 
     async def _recover_parked(self) -> None:
         """Recover the fallback files the owner left, now this orbit owns the repository,

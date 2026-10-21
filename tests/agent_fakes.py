@@ -27,6 +27,8 @@ from orbit.agent.application.ports import (
 from orbit.agent.application.review_lane import ReviewLane
 from orbit.agent.application.startup_check import StartupCheck
 from orbit.agent.application.tasks import Tasks
+from orbit.agent.application.work_commands import WorkCommands
+from orbit.agent.application.work_turns import WorkTurns
 from orbit.agent.application.workspace_host import UNREGISTERED_WORKSPACE
 from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.board import TaskBoard
@@ -971,6 +973,16 @@ def lane_of(session: WorkspaceHost) -> ReviewLane:
     """The session's review lane, which it must have."""
     assert session._lane is not None
     return session._lane
+
+
+def commands_of(session: WorkspaceHost) -> WorkCommands:
+    """The session's work commands, which queue work while it's read-only."""
+    return session._commands
+
+
+def turns_of(session: WorkspaceHost) -> WorkTurns:
+    """The session's work lane turns, which start runs."""
+    return session._turns
 
 
 def tasks_of(session: WorkspaceHost) -> Tasks:
