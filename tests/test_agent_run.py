@@ -559,10 +559,14 @@ class Undecided:
 
 
 async def started(
-    role: str, publish: Publish = ignore, timeout_minutes: float | None = None
+    role: str,
+    publish: Publish = ignore,
+    timeout_minutes: float | None = None,
+    verification: Verification | None = None,
 ) -> tuple[AgentRun, "asyncio.Task[Outcome]"]:
     """A run of a task in ``role``, timing out after ``timeout_minutes``, whose agent has
-    fetched its task and is working on it; the run publishes to ``publish``."""
+    fetched its task and is working on it; the run publishes to ``publish`` and verifies with
+    ``verification``, or a step that passes."""
     fetched = asyncio.Event()
 
     async def works(call: Call) -> TurnEndReason:
@@ -579,7 +583,7 @@ async def started(
     tasks = TaskBoard()
     task_id = tasks.add(TaskSpec(prompt="a", role=role))
     board = Tasks(tasks, publish)
-    verifier = Verifier(verified(Steps()), board, publish)
+    verifier = Verifier(verification or verified(Steps()), board, publish)
     agent_run = AgentRun(task_id, board, verifier, AgentDesk(agents, publish))
     running = asyncio.create_task(agent_run.run(None, "."))
     await asyncio.wait_for(fetched.wait(), 5)
@@ -618,6 +622,69 @@ async def test_a_claim_left_queued_when_the_run_times_out_is_answered() -> None:
     outcome = await asyncio.wait_for(running, 5)
     assert outcome.status == "error"
     assert await asyncio.wait_for(calls[0], 5) == CANCELLED
+
+
+RUN_ENDED = Reply("The run ended before the check finished.", is_error=True)
+
+
+class HangingStep:
+    """A step runner whose step runs until it's stopped; ``began`` is set once it's running."""
+
+    def __init__(self) -> None:
+        self.began = asyncio.Event()
+        self.stopped = False
+
+    async def __call__(self, step: VerificationStep, root: str) -> tuple[bool, str]:
+        self.began.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            self.stopped = True
+        raise AssertionError("unreachable")
+
+
+async def checking(
+    step: HangingStep, timeout_minutes: float | None = None
+) -> tuple["asyncio.Task[Outcome]", "asyncio.Future[Reply]"]:
+    """A coder's run, timing out after ``timeout_minutes``, and its agent's call to run a
+    check whose ``step`` is now running."""
+    verification = Verification((STEP,), step)
+    agent_run, running = await started(
+        "coder", timeout_minutes=timeout_minutes, verification=verification
+    )
+    call = asyncio.ensure_future(agent_run.handle("run_check", {"step": STEP.name}))
+    await asyncio.wait_for(step.began.wait(), 5)
+    return running, call
+
+
+async def test_a_check_still_running_when_the_run_times_out_is_stopped() -> None:
+    step = HangingStep()
+    running, call = await checking(step, timeout_minutes=0.005)
+    outcome = await asyncio.wait_for(running, 5)
+    assert step.stopped and outcome.status == "error"
+    assert await asyncio.wait_for(call, 5) == RUN_ENDED
+
+
+async def test_a_check_still_running_when_the_run_is_stopped_is_stopped() -> None:
+    step = HangingStep()
+    running, call = await checking(step)
+    running.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(running, 5)
+    assert step.stopped
+    assert await asyncio.wait_for(call, 5) == RUN_ENDED
+
+
+async def test_a_check_whose_call_is_cancelled_is_stopped() -> None:
+    step = HangingStep()
+    running, call = await checking(step)
+    call.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(call, 5)
+    assert step.stopped and not running.done()
+    running.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await running
 
 
 class Target:

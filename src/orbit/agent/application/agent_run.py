@@ -138,6 +138,12 @@ def _cancel(claim: "asyncio.Future[Reply] | None") -> None:
     _answer(claim, Reply("The task was cancelled.", is_error=True))
 
 
+def _cancelling() -> bool:
+    """Whether the task running now is being cancelled."""
+    task = asyncio.current_task()
+    return task is not None and task.cancelling() > 0
+
+
 def _fail(claim: "asyncio.Future[Reply] | None", exc: BaseException) -> None:
     """Answer ``claim``, if it's still waiting, with why orbit stopped checking: it was
     cancelled, or ``exc`` went wrong."""
@@ -166,6 +172,7 @@ class AgentRun:
         self._stream_task: asyncio.Task[None] | None = None  # The agent's process, once launched.
         self._inbox: asyncio.Queue[asyncio.Future[Reply] | _Proposal | Wake] = asyncio.Queue()
         self._checking = asyncio.Lock()  # One verification step at a time.
+        self._checks: set[asyncio.Task[tuple[bool, str]]] = set()  # The agent's, in flight.
         self._failure: Failure | None = None
         self._failed_state: object = None  # The tree when verification last failed.
         self._accepted: ChecksProposal | None = None
@@ -208,6 +215,7 @@ class AgentRun:
         finally:
             self._desk.close(self.agent)  # Even if the agent never got as far as starting.
             self._drain()
+            await self._end_checks()
         status = STATUSES[self._work.phase]
         reason, detail = self._why(status)
         summaries = tuple(self._work.summaries)
@@ -331,6 +339,13 @@ class AgentRun:
             elif isinstance(item, _Proposal):
                 await self._consider(item)
 
+    async def _end_checks(self) -> None:
+        """Stop the checks the agent's calls are still running: once the run is over, its tree
+        is the next task's."""
+        for check in self._checks:
+            check.cancel()
+        await asyncio.gather(*self._checks, return_exceptions=True)
+
     def _drain(self) -> None:
         """Answer the calls left in the inbox once the run loop has stopped taking them."""
         while not self._inbox.empty():
@@ -445,9 +460,27 @@ class AgentRun:
         refusal = self._work.request_check()
         if refusal is not None:
             return Reply(refusal, is_error=True)
-        async with self._checking:
-            passed, output = await self._verifier.run_one(step, self._root)
+        return await self._checked(step)
+
+    async def _checked(self, step: VerificationStep) -> Reply:
+        """The result of running ``step`` for the agent, in a task the run stops if it ends
+        first."""
+        check = asyncio.create_task(self._run_one(step))
+        self._checks.add(check)
+        try:
+            passed, output = await check
+        except asyncio.CancelledError:
+            if _cancelling():  # The call was cancelled, not the run ended.
+                raise
+            return Reply("The run ended before the check finished.", is_error=True)
+        finally:
+            self._checks.discard(check)
         return Reply(check_reply(step, passed, output))
+
+    async def _run_one(self, step: VerificationStep) -> tuple[bool, str]:
+        assert self._verifier is not None  # Checks are refused without one.
+        async with self._checking:
+            return await self._verifier.run_one(step, self._root)
 
     async def _report_progress(self, arguments: dict[str, Any]) -> Reply:
         return await report_progress(self._publish, self.agent.id, self._task_id, arguments)
