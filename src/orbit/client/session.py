@@ -211,11 +211,16 @@ class WebSocketSession:
 
     async def _run(self) -> None:
         """Keep connected as :meth:`_link` does, ending the events with any error it didn't
-        expect, such as a watcher's, so they don't wait for ones that won't come."""
+        expect, such as a watcher's, so they don't wait for ones that won't come, and the link
+        with it, unless it had ended already."""
         try:
             await self._link()
         except Exception as error:
             self._events.put_nowait(error)
+            if not isinstance(self.state, Ended):
+                # The events already carry the error, so a watcher's failing again is dropped.
+                with suppress(Exception):
+                    self._report(Ended(self.url, str(error)))
 
     async def _link(self) -> None:
         """Keep connected until the session closes, the token is turned away or can't be read,

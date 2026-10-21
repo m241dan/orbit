@@ -713,8 +713,35 @@ async def test_a_failure_connecting_ends_the_events_with_its_error(
     session, states = client("ws://127.0.0.1:9/")
     with pytest.raises(Broken, match="connect"):
         await next_event(session.events())
-    assert states.seen == []
+    assert states.seen == [Ended("ws://127.0.0.1:9/", "connect")]
+    assert session.state == Ended("ws://127.0.0.1:9/", "connect")
     await session.close()
+
+
+async def test_a_watcher_raising_on_the_ending_of_a_failure_still_ends_the_events(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def failing(*args: object, **kwargs: object) -> None:
+        raise Broken("connect")
+
+    monkeypatch.setattr("orbit.client.session.open_connection", failing)
+    session, _ = client("ws://127.0.0.1:9/")
+    session.watch(break_on(Ended))
+    with pytest.raises(Broken, match="connect"):
+        await next_event(session.events())
+    await asyncio.wait_for(session.close(), 5)
+
+
+async def test_a_watcher_raising_on_an_ending_reports_it_only_once() -> None:
+    async with plane() as (fake, url):
+        session, states = client(url)
+        session.watch(break_on(Ended))
+        events = session.events()
+        await (await fake.connection()).send("not json")
+        with pytest.raises(ProtocolError):
+            await next_event(events)
+        await asyncio.wait_for(session.close(), 5)
+        assert [type(state) for state in states.seen] == [Connected, Ended]
 
 
 async def test_closing_after_a_failure_returns_and_ends_the_events() -> None:
