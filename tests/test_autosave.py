@@ -2,15 +2,18 @@
 
 import asyncio
 
-from orbit.agent import Verification, VerificationStep
+from orbit.agent import Verification, VerificationStep, WorkspaceHost
 from orbit.agent.domain.reviews import ReviewLimits
+from orbit.agent.domain.storage_halt import FailedWrite
 from orbit.protocol import (
     PLANNER,
     STORAGE_FAILED,
     AddTask,
+    CommandEnvelope,
     EditTask,
     ErrorOccurred,
     Event,
+    Notice,
     SendMessage,
     Settings,
     Snapshot,
@@ -20,15 +23,18 @@ from orbit.protocol import (
     UpdateSettings,
 )
 from tests.agent_fakes import (
+    HELLO,
     START,
     Call,
     FakeStore,
     FakeTree,
     Steps,
     agent_exited,
+    attach_to,
     board,
     chats,
     claims_done,
+    connect,
     events_until,
     idle,
     lane_of,
@@ -195,3 +201,76 @@ async def test_without_reviews_the_saved_super_count_is_left_alone() -> None:
     await events_until(session, of_type(TasksChanged))
     await session.close()
     assert store.counts == [] and store.last.reviews is None
+
+
+LEFTOVER = "Leftover work."
+
+
+def reviewed(store: FakeStore) -> WorkspaceHost:
+    """A session with reviews, saved in ``store``, whose tree has :data:`LEFTOVER` to report
+    last as a connection joins."""
+    session, _, _ = session_for(tree=FakeTree(leftovers=(LEFTOVER,)), review=True, store=store)
+    return session
+
+
+async def joined(session: WorkspaceHost) -> None:
+    """Have a new connection join ``session``, until it's been greeted to the end."""
+    connection = connect(session)
+    await connection.send(CommandEnvelope(command_id="join", payload=HELLO))
+    await connection.send(CommandEnvelope(command_id="attach", payload=attach_to(session)))
+    async for envelope in connection.events():
+        if envelope.payload == Notice(message=LEFTOVER):
+            return
+
+
+async def test_the_super_count_is_loaded_from_the_store_on_the_first_join() -> None:
+    session = reviewed(FakeStore(count=7))
+    await asyncio.wait_for(joined(session), 5)
+
+    assert lane_of(session).planner.since_super == 7
+    await session.close()
+
+
+async def test_a_join_while_halted_keeps_the_super_count_the_store_has_not_saved() -> None:
+    store = FakeStore(count=7)
+    session = reviewed(store)
+    await asyncio.wait_for(joined(session), 5)
+    session._halt.fail(FailedWrite.EVENT_LOG, RuntimeError("disk full"))
+    lane_of(session).planner.since_super = 8
+    await session._review_count.save(8)
+    await asyncio.wait_for(joined(session), 5)
+
+    assert lane_of(session).planner.since_super == 8 and store.count == 7
+    await session.close()
+
+
+class MovingStore(FakeStore):
+    """A store whose count, as it's read, sees the planner of ``session`` count on to 9."""
+
+    session: WorkspaceHost | None = None
+
+    async def review_count(self) -> int:
+        assert self.session is not None
+        lane_of(self.session).planner.since_super = 9
+        return await super().review_count()
+
+
+async def test_a_super_count_moved_while_it_was_read_is_kept() -> None:
+    store = MovingStore(count=7)
+    store.session = reviewed(store)
+    await asyncio.wait_for(joined(store.session), 5)
+
+    assert lane_of(store.session).planner.since_super == 9
+    await store.session.close()
+
+
+async def test_a_super_count_that_could_not_be_read_is_read_on_the_next_join() -> None:
+    store = FakeStore(count=7)
+    store.count_load_failure = "busy"
+    session = reviewed(store)
+    await asyncio.wait_for(joined(session), 5)
+    store.count_load_failure = None
+    await asyncio.wait_for(joined(session), 5)
+
+    assert lane_of(session).planner.since_super == 7
+    await session.close()

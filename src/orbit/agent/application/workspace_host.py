@@ -5,6 +5,7 @@ It takes commands from the frontends, asks the domain what follows from them, dr
 ports to do it, and reports what happened as events.
 """
 
+import asyncio
 from collections.abc import Awaitable, Callable, Collection, Sequence
 from contextlib import suppress
 from dataclasses import replace
@@ -273,6 +274,8 @@ class WorkspaceHost:
         self._keeper = SessionKeeper(store, self._events.put, self._halt, new_sessions)
         self._keeper.rename(name)
         self._review_count = ReviewCount(store, self._halt, self._events.put)
+        self._count_loaded = False  # Whether the review count has been read from the store.
+        self._count_loading = asyncio.Lock()  # Reads it one join at a time.
         self._tasks = Tasks(TaskBoard(), self._events.put, self._save)
         self._board = self._tasks.board
         self._proposals = FrontendReview(self._events.put, self._agent_on)
@@ -696,10 +699,25 @@ class WorkspaceHost:
         await self._save()
 
     async def _load_review_count(self) -> None:
-        """Have the review planner count on from the repository's saved super review count."""
+        """Have the review planner count on from the repository's saved super review count, read
+        once: the planner's own count is never replaced once it's been, so a frontend joining
+        while the count can't be saved, or as it's saved, doesn't roll it back."""
+        if self._lane is None:
+            return
+        async with self._count_loading:
+            if not self._count_loaded:
+                self._count_loaded = await self._count_on(self._lane.planner)
+
+    async def _count_on(self, planner: ReviewPlanner) -> bool:
+        """Have ``planner`` count on from the repository's saved super review count, unless it
+        counted on itself while that was read; returns whether it was read."""
+        before = planner.since_super
         count = await self._review_count.load()
-        if self._lane is not None and count is not None:
-            self._lane.planner.since_super = count
+        if count is None:
+            return False
+        if planner.since_super == before:
+            planner.since_super = count
+        return True
 
     async def _save(self) -> None:
         """Save the session, if it's used, as it is now."""
