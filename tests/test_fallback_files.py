@@ -1,5 +1,7 @@
 """Fallback files: a session's events parked on disk while the store can't take them."""
 
+import errno
+import os
 import stat
 from collections.abc import Iterator
 from pathlib import Path
@@ -96,6 +98,33 @@ async def test_when_the_file_used_fails_the_next_place_is_tried(
     assert written == str(tmp_path / "repo" / ".git" / "orbit" / "fallback" / "s1.jsonl")
 
 
+async def test_an_append_that_fails_midway_leaves_the_file_as_it_was_and_moves_on(
+    files: FallbackFiles, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await files.write("s1", [notice(1)])
+    real_write = os.write
+    calls: list[int] = []
+
+    def full_disk(descriptor: int, data: bytes) -> int:
+        """Writes half of the first chunk, then finds the disk full, then writes as usual."""
+        calls.append(descriptor)
+        if len(calls) == 1:
+            return real_write(descriptor, bytes(data)[: len(data) // 2])
+        if len(calls) == 2:
+            raise OSError(errno.ENOSPC, "No space left on device")
+        return real_write(descriptor, data)
+
+    monkeypatch.setattr(os, "write", full_disk)
+    written = await files.write("s1", [notice(2), notice(3)])
+    monkeypatch.undo()
+
+    state = tmp_path / "state" / "fallback" / "w1-s1.jsonl"
+    repository = tmp_path / "repo" / ".git" / "orbit" / "fallback" / "s1.jsonl"
+    assert written == str(repository)
+    assert decoded(state) == [notice(1)]
+    assert decoded(repository) == [notice(2), notice(3)]
+
+
 async def test_when_neither_place_can_be_written_there_is_no_file(tmp_path: Path) -> None:
     blocked = tmp_path / "blocked"
     blocked.write_text("a file, so nothing can be made under it")
@@ -188,6 +217,42 @@ async def test_a_parked_file_that_isnt_envelopes_cant_be_read(
 
     with pytest.raises(RuntimeError):
         await files.read(ParkedFile(str(path), "s1"))
+
+
+@pytest.mark.parametrize("torn", ['{"seq": 3, "sess', '{"seq": 3}', b"\xe2\x82"])
+async def test_a_parked_file_ending_in_a_torn_line_is_read_without_it(
+    files: FallbackFiles, torn: str | bytes
+) -> None:
+    await files.write("s1", [notice(1), notice(2)])
+    [file] = await files.parked()
+    with open(file.path, "ab") as appended:
+        appended.write(torn.encode() if isinstance(torn, str) else torn)
+
+    assert await files.read(file) == [notice(1), notice(2)]
+
+
+async def test_a_parked_file_ending_in_a_whole_line_without_a_newline_reads_it(
+    files: FallbackFiles,
+) -> None:
+    await files.write("s1", [notice(1), notice(2)])
+    [file] = await files.parked()
+    path = Path(file.path)
+    path.write_text(path.read_text().removesuffix("\n"))
+
+    assert await files.read(file) == [notice(1), notice(2)]
+
+
+async def test_a_parked_file_with_a_bad_line_before_good_ones_cant_be_read(
+    files: FallbackFiles,
+) -> None:
+    await files.write("s1", [notice(1)])
+    [file] = await files.parked()
+    with open(file.path, "a") as appended:
+        appended.write('{"seq": 2, "sess\n')
+    await files.write("s1", [notice(3)])
+
+    with pytest.raises(RuntimeError):
+        await files.read(file)
 
 
 async def test_a_missing_parked_file_cant_be_read(files: FallbackFiles, tmp_path: Path) -> None:

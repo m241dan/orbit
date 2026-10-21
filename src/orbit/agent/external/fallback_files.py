@@ -21,23 +21,50 @@ SUFFIX = ".jsonl"
 
 def _append(path: Path, lines: str) -> None:
     """Add ``lines`` to the file at ``path``, making it, and its directory, owner-only as
-    needed; raises ``OSError`` when it can't."""
+    needed; raises ``OSError`` when it can't, leaving the file as it was if it can."""
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
-    with open(descriptor, "a", encoding="utf-8") as file:
+    try:
         os.fchmod(descriptor, 0o600)
-        file.write(lines)
+        size = os.fstat(descriptor).st_size
+        try:
+            _write_all(descriptor, lines.encode("utf-8"))
+        except OSError:
+            with suppress(OSError):  # A torn last line is skipped on reading anyway.
+                os.ftruncate(descriptor, size)
+            raise
+    finally:
+        os.close(descriptor)
+
+
+def _write_all(descriptor: int, data: bytes) -> None:
+    """Write all of ``data`` to the file open as ``descriptor``; raises ``OSError`` when it
+    can't."""
+    while data:
+        data = data[os.write(descriptor, data) :]
 
 
 def _read(path: Path) -> list[EventEnvelope]:
     """The envelopes in the file at ``path``, one per line, but for those of types this orbit
-    doesn't know; raises ``RuntimeError`` when it can't be read or a line isn't an envelope."""
+    doesn't know and a last line, without a newline, that isn't one: the write that failed.
+    Raises ``RuntimeError`` when it can't be read or another line isn't an envelope."""
     try:
-        lines = path.read_text(encoding="utf-8").splitlines()
-        decoded = [decode_event(line) for line in lines if line.strip()]
-    except (OSError, UnicodeDecodeError, ProtocolError) as error:
+        *lines, last = path.read_bytes().split(b"\n")
+    except OSError as error:
         raise RuntimeError(str(error)) from error
+    decoded = [_decode(line) for line in lines if line.strip()]
+    with suppress(RuntimeError):
+        decoded.append(_decode(last))
     return [envelope for envelope in decoded if envelope is not None]
+
+
+def _decode(line: bytes) -> EventEnvelope | None:
+    """The envelope ``line`` holds, or ``None`` for one of a type this orbit doesn't know;
+    raises ``RuntimeError`` if it holds neither."""
+    try:
+        return decode_event(line.decode("utf-8"))
+    except (UnicodeDecodeError, ProtocolError) as error:
+        raise RuntimeError(str(error)) from error
 
 
 def _delete(path: Path) -> None:
