@@ -218,6 +218,7 @@ async def test_a_rebase_is_aborted_even_when_listing_its_conflicts_fails(
     path = Path(await tree.prepare(keep=False))
     (path / "a.txt").write_text("orbit\n")
     await tree.commit("Orbit edits a")
+    before = git(path, "rev-parse", "HEAD")
     commit_file(repo, "a.txt", "user\n", "user edits a")
     real = GitCoderTree._git
 
@@ -230,7 +231,39 @@ async def test_a_rebase_is_aborted_even_when_listing_its_conflicts_fails(
     with pytest.raises(RuntimeError, match="out of memory"):
         await tree.integrate()
     assert not (repo / ".git" / "worktrees" / "coder" / "rebase-merge").exists()
-    assert log(path)[0] == "Orbit edits a"
+    assert git(path, "rev-parse", "HEAD") == before
+    assert git(path, "branch", "--show-current") == "orbit/coder"
+
+
+async def test_a_rebase_cancelled_while_running_is_aborted(
+    monkeypatch: pytest.MonkeyPatch, repo: Path
+) -> None:
+    tree = GitCoderTree(str(repo))
+    path = Path(await tree.prepare(keep=False))
+    (path / "a.txt").write_text("orbit\n")
+    await tree.commit("Orbit edits a")
+    before = git(path, "rev-parse", "HEAD")
+    commit_file(repo, "a.txt", "user\n", "user edits a")
+    real = git_tree._run
+    rebasing = asyncio.Event()
+
+    async def hanging_rebase(command: Sequence[str], cwd: Path) -> tuple[bool, str]:
+        result = await real(command, cwd)
+        if command[:2] == ("git", "rebase") and "--abort" not in command:
+            rebasing.set()  # Stopped at its conflict, as if still running when cancelled.
+            await asyncio.Event().wait()
+        return result
+
+    monkeypatch.setattr(git_tree, "_run", hanging_rebase)
+    task = asyncio.create_task(tree.integrate())
+    await rebasing.wait()
+    assert (repo / ".git" / "worktrees" / "coder" / "rebase-merge").exists()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert not (repo / ".git" / "worktrees" / "coder" / "rebase-merge").exists()
+    assert git(path, "rev-parse", "HEAD") == before
+    assert git(path, "status", "--porcelain") == ""
 
 
 async def test_prepare_aborts_a_rebase_an_earlier_run_left_in_progress(repo: Path) -> None:
@@ -247,6 +280,7 @@ async def test_prepare_aborts_a_rebase_an_earlier_run_left_in_progress(repo: Pat
     assert not (repo / ".git" / "worktrees" / "coder" / "rebase-merge").exists()
     assert git(path, "branch", "--show-current") == "orbit/coder"
     assert git(path, "rev-parse", "HEAD") == before
+    assert log(path)[:2] == ["Orbit edits a", "start"]
     assert git(path, "status", "--porcelain") == ""
     assert git(repo, "stash", "list") == ""
 

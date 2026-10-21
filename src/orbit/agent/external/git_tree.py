@@ -272,7 +272,8 @@ class GitCoderTree:
         if await self._is_ancestor("HEAD", base, path):
             await self._git(path, "merge", "-q", "--ff-only", base)
         else:
-            await self._rebase(path, base)  # A conflict leaves the work as it was.
+            # A conflict leaves the work as it was, for integrate to report once it's verified.
+            _ = await self._rebase(path, base)
 
     async def _set_up(self, path: Path) -> None:
         if self.setup is None:
