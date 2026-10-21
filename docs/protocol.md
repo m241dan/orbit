@@ -25,7 +25,8 @@ A command travels in a `CommandEnvelope`:
 - `workspace`: the id of the workspace the command is for, as the `Catalog` gives it. It's
   optional: `null` means the workspace the connection is attached to. A command naming a
   workspace that isn't served is refused with `unknown`, and one naming a workspace served but
-  not the one attached with `wrong_session`, naming both. The control plane's own commands,
+  not the one attached with `wrong_session`, naming both, but for `Attach`, which moves the
+  connection there (see [Attaching](#attaching)). The control plane's own commands,
   `AddWorkspace` and `RemoveWorkspace`, are for no workspace, and carry `null`.
 - `traceparent` and `tracestate`: W3C trace context. They're optional, aren't checked, and
   aren't set yet.
@@ -111,9 +112,9 @@ The first connection to attach to a workspace starts that workspace's background
 its startup check.
 
 Each frontend shows its own session picker from the Catalog, kept current by
-`SessionStateChanged`, and attaches to the workspace it opens on: the TUI picks the one at the
-repository it runs in, if the Catalog lists it, else the first, and attaches to its active
-session.
+`SessionStateChanged`, and attaches to the workspace it opens on: connected to an `orbit serve`,
+the TUI opens its workspace picker, highlighting the workspace of the repository it runs in, and
+attaches to the session picked in the workspace chosen.
 
 `Welcome` only says the Hello was accepted; it's the `Snapshot` that marks the frontend's state
 as current.
@@ -136,8 +137,11 @@ A connection views one session at a time, of the workspace it's attached to. Its
 `session` there, answered as [The handshake](#the-handshake) says; a later one views another
 session of that workspace, answered with that session's `Snapshot`, then `CommandAccepted`. An
 `Attach` for a workspace that isn't served, or a session there's none of, is refused with
-`unknown`, one for a saved session that can't be read with `invalid`, and one for another
-workspace than the one the connection is attached to with `wrong_session`, naming both. A connection viewing
+`unknown`, and one for a saved session that can't be read with `invalid`. One for another
+workspace served moves the connection there: it leaves the workspace it was attached to, whose
+sessions' `viewers` count it no longer, and is answered as a first `Attach` is, with that
+workspace's `Snapshot` and one-off notices; if the session is refused, the connection is
+attached to no workspace, as before its first `Attach`. A connection viewing
 the open session keeps viewing it, whichever that is, until another session is activated in its
 place. From then on the connection gets the events
 of the session it views, its workspace's events that belong to no session, the control plane's

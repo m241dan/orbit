@@ -122,13 +122,15 @@ class ControlPlane:
     Every stream opens with ``Hello``: nothing is published to it, and every other command is
     refused, until it's answered with ``Welcome``. A ``Catalog`` of every workspace served
     follows it, and nothing more until the connection's first ``Attach`` names a workspace
-    served and a session there: that attaches the connection to the workspace, for good, and is
-    answered with a ``Snapshot`` of the session (or, for the open session and a ``Hello`` whose
-    ``since`` it can catch up from, its events after it), the latest usage if any was fetched,
-    and the host's one-off notices; these reach only the connection they answer. Every other
+    served and a session there: that attaches the connection to the workspace and is answered
+    with a ``Snapshot`` of the session (or, for the open session and a ``Hello`` whose ``since``
+    it can catch up from, its events after it), the latest usage if any was fetched, and the
+    host's one-off notices; these reach only the connection they answer. A later ``Attach``
+    naming another workspace served moves the connection there, leaving the one it was attached
+    to and greeting it anew, or leaving it attached to none if that's refused. Every other
     command goes to the workspace attached, which its envelope may name; one before the
-    connection is attached is refused as ``invalid``, and one naming another workspace, an
-    ``Attach`` too, as ``wrong_session``, or ``unknown`` if it isn't served. A connection gets
+    connection is attached is refused as ``invalid``, and one naming another workspace as
+    ``wrong_session``, or ``unknown`` if it isn't served. A connection gets
     the events of its workspace's session it views and those of its workspace that belong to
     no session, never another workspace's, and the control plane's own: the ``Catalog`` sent
     whenever a workspace's sessions change, and the usage. Once the first connection attaches
@@ -374,9 +376,13 @@ class ControlPlane:
 
     async def _attach(self, attach: Attach, command_id: str, connection: SessionConnection) -> None:
         """Have ``connection`` view the session ``attach`` names, sent as ``command_id``: in the
-        workspace it's attached to, as the host does, or else greeting it there; refused for a
-        workspace not served, or another than the one it's attached to."""
+        workspace it's attached to, as the host does, or else greeting it there, having it
+        leave the workspace it's attached to, if any; refused for a workspace not served."""
         workspace = served_workspace(attach.workspace, self._served)
+        left = connection.workspace
+        if left is not None and left != workspace:
+            self._detach(connection)
+            self._hosts[left].check_state()  # Its sessions' viewers count one fewer.
         if connection.workspace is None:
             await self._join(self._hosts[workspace], attach.session, connection)
             return

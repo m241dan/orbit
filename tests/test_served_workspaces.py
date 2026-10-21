@@ -5,17 +5,23 @@ import asyncio
 
 from orbit.agent import ControlPlane, WorkspaceOwner
 from orbit.agent.application.connection import SessionConnection
+from orbit.agent.domain.workspaces import ATTACH_FIRST
 from orbit.protocol import (
+    INVALID,
     UNKNOWN,
     WRONG_SESSION,
     AddTask,
     Attach,
     Catalog,
+    CommandAccepted,
+    CommandEnvelope,
     CommandRefused,
     EventEnvelope,
     OwnershipOffered,
     RenameSession,
     RunTasks,
+    SessionStateChanged,
+    Snapshot,
     TakeOwnership,
     TasksChanged,
     Welcome,
@@ -65,21 +71,93 @@ async def test_a_command_goes_to_the_workspace_its_connection_is_attached_to() -
     assert [state.task for state in board_of(second).tasks] == [TASK]
 
 
-async def test_attaching_to_another_workspace_once_attached_is_refused_naming_both() -> None:
+async def test_attaching_to_another_workspace_moves_the_connection_there_greeting_it() -> None:
     first, second = workspace("a"), workspace("b")
     plane = ControlPlane([first, second])
     in_a = await joined(plane, first)
     taken(in_a)
 
     await say(in_a, "attach", Attach(workspace="b", session="b-1"))
+    moved = taken(in_a)
+    await plane.close()
+
+    [snapshot] = [e for e in payloads(moved) if isinstance(e, Snapshot)]
+    assert in_a.workspace == "b" and snapshot.session.id == "b-1"
+    assert {envelope.workspace for envelope in moved if envelope.workspace} == {"b"}
+    assert CommandAccepted(command_id="attach") in payloads(moved)
+
+
+async def test_a_connection_moved_gets_its_new_workspaces_events_alone() -> None:
+    first, second = workspace("a"), workspace("b")
+    plane = ControlPlane([first, second])
+    moving, staying = await joined(plane, first), await joined(plane, first)
+    await say(moving, "attach", Attach(workspace="b", session="b-1"))
+    taken(moving)
+
+    await say(staying, "add-a", AddTask(task=TASK))
+    seen_from_a = taken(moving)
+    in_b = await joined(plane, second)
+    await say(in_b, "add-b", AddTask(task=TASK))
+    seen_from_b = taken(moving)
+    await plane.close()
+
+    assert [e for e in payloads(seen_from_a) if not isinstance(e, Catalog)] == []
+    assert TasksChanged in [type(event) for event in payloads(seen_from_b)]
+    assert {envelope.workspace for envelope in seen_from_b if envelope.workspace} == {"b"}
+
+
+async def test_moving_to_another_workspace_drops_the_old_sessions_viewers() -> None:
+    first, second = workspace("a"), workspace("b")
+    plane = ControlPlane([first, second])
+    moving, staying = await joined(plane, first), await joined(plane, first)
+    taken(staying)
+
+    await say(moving, "attach", Attach(workspace="b", session="b-1"))
+    seen = payloads(taken(staying))
+    await plane.close()
+
+    changes = [e for e in seen if isinstance(e, SessionStateChanged)]
+    assert [(e.session, e.viewers) for e in changes] == [("a-1", 1)]
+
+
+async def test_a_refused_move_leaves_the_connection_attached_to_none() -> None:
+    first, second = workspace("a"), workspace("b")
+    plane = ControlPlane([first, second])
+    in_a = await joined(plane, first)
+    taken(in_a)
+
+    await say(in_a, "attach", Attach(workspace="b", session="b-9"))
+    refused = payloads(taken(in_a))
+    await say(in_a, "add", AddTask(task=TASK))
+    unattached = payloads(taken(in_a))
+    await say(in_a, "again", Attach(workspace="a", session="a-1"))
+    attached = payloads(taken(in_a))
+    await plane.close()
+
+    assert [(e.command_id, e.code) for e in refused if isinstance(e, CommandRefused)] == [
+        ("attach", UNKNOWN)
+    ]
+    assert unattached == [CommandRefused(command_id="add", code=INVALID, message=ATTACH_FIRST)]
+    assert in_a.workspace == "a" and any(isinstance(e, Snapshot) for e in attached)
+
+
+async def test_another_command_for_another_workspace_is_refused_naming_both() -> None:
+    first, second = workspace("a"), workspace("b")
+    plane = ControlPlane([first, second])
+    in_a = await joined(plane, first)
+    taken(in_a)
+
+    envelope = CommandEnvelope(command_id="add", workspace="b", payload=AddTask(task=TASK))
+    await in_a.send(envelope)
     [refusal] = payloads(taken(in_a))
     await plane.close()
 
     assert refusal == CommandRefused(
-        command_id="attach",
+        command_id="add",
         code=WRONG_SESSION,
         message="Workspace 'b' isn't the one attached; this connection is attached to a.",
     )
+    assert board_of(second).tasks == ()
 
 
 async def test_a_change_to_one_workspaces_sessions_sends_everyone_the_whole_catalog() -> None:
