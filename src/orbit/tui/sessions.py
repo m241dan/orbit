@@ -1,6 +1,6 @@
 """The modal where the user picks a saved session to view or activate, or starts a new one."""
 
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from typing import Any, ClassVar, Literal
 
 from rich.text import Text
@@ -301,8 +301,6 @@ Push = Callable[[ModalScreen[Any], Callable[[Any], Awaitable[None]]], object]
 """Shows a modal screen, calling back with what it dismisses with."""
 Send = Callable[[SessionChoice | SessionChange], Awaitable[bool]]
 """Sends a session command to the backend, returning whether it was sent."""
-Numbers = Callable[[], Mapping[str, str]]
-"""The task list's numbers, by task id."""
 OpensOn = Callable[[Sequence[WorkspaceEntry]], WorkspaceEntry | None]
 """The workspace a frontend opens on by itself, among those a catalog lists; none while the
 user is to pick one."""
@@ -318,19 +316,17 @@ class SessionsHost:
     which it ``opens_on`` by itself or the user picks, as ``SessionStateChanged`` changes them,
     and the one this frontend views, live or read-only; shows them with ``push`` when asked,
     refreshing the picker while it's shown, and offers to make a session viewed read-only the
-    active one, naming what the active one runs by the task ``numbers``. ``send`` takes the
-    user's choice and their changes to saved sessions."""
+    active one, saying what the active one runs. ``send`` takes the user's choice and their
+    changes to saved sessions."""
 
     def __init__(
         self,
         push: Push,
         send: Send,
-        numbers: Numbers = lambda: {},
         opens_on: OpensOn = _first,
     ) -> None:
         self._push = push
         self._send = send
-        self._numbers = numbers
         self._opens_on = opens_on
         self._workspaces: tuple[WorkspaceEntry, ...] = ()  # As the latest catalog lists them.
         self.workspace: str | None = None  # The id of the workspace it's on, once there.
@@ -362,7 +358,7 @@ class SessionsHost:
     @property
     def running(self) -> str | None:
         """What the active session runs, in words; none while it's idle or isn't known."""
-        return running_words(self.sessions, self._numbers())
+        return running_words(self.sessions)
 
     @property
     def viewed_name(self) -> str:

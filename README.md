@@ -179,10 +179,10 @@ error naming the active session and how to switch. A refused prompt leaves the c
 its text goes back in the prompt box unless you've typed something else there since; the same goes
 for a prompt sent while disconnected. While you view one, the line above the prompt
 says what the active session is doing: `viewing <name>; <active> is running <what> (enter to switch
-when it's idle)` while it runs work, where `<what>` names it by the task list's numbers (`task 3`,
-`the review of task 5`, `the planner`, joined when several, and `a task` for one the list lacks),
-and `viewing <name>; <active> is idle (enter to switch)` otherwise. The startup check doesn't count
-as running: it never keeps you from switching. This is not the prompt title's
+when it's idle)` while it runs work, where `<what>` names it (`a task`, `the review of a task`,
+`the planner`, joined when several; tasks go unnumbered, since the task list shows the session
+viewed, not the active one's), and `viewing <name>; <active> is idle (enter to switch)`
+otherwise. The startup check doesn't count as running: it never keeps you from switching. This is not the prompt title's
 `read-only` mark, which means another orbit owns the repository (see [Owning the
 repository](#owning-the-repository)): each has its own fix, and both can show at once. Picking a
 session that opens read-only asks, in a modal, whether to "Make this the active session" or "Just

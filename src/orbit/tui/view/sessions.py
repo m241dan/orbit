@@ -1,6 +1,6 @@
 """The list of saved sessions, to pick one from."""
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, tzinfo
 
@@ -255,11 +255,12 @@ def viewing_mark(name: str, active: str | None, running: str | None) -> str:
     return f"viewing {name}; {active} is running {running} (enter to switch when it's idle)"
 
 
-def activity_words(activity: Sequence[Activity], numbers: Mapping[str, str]) -> str:
-    """What ``activity`` is, in words, its tasks named by their ``numbers``: ``task 3``,
-    ``the review of task 5``, ``the planner`` or ``the startup check``, several joined as
-    ``the planner and task 3``; ``work`` when there's none."""
-    words = [_activity_word(each, numbers) for each in activity]
+def activity_words(activity: Sequence[Activity]) -> str:
+    """What ``activity`` is, in words: ``a task``, ``the review of a task``, ``the planner`` or
+    ``the startup check``, several joined as ``the planner and a task``; ``work`` when there's
+    none. Tasks go unnumbered: their ids are the active session's, and the task list numbers
+    the session viewed's."""
+    words = [_activity_word(each) for each in activity]
     if not words:
         return "work"
     if len(words) == 1:
@@ -267,14 +268,11 @@ def activity_words(activity: Sequence[Activity], numbers: Mapping[str, str]) -> 
     return f"{', '.join(words[:-1])} and {words[-1]}"
 
 
-def _activity_word(activity: Activity, numbers: Mapping[str, str]) -> str:
-    """What ``activity`` is, in words, its task named by its number in ``numbers``, or as
-    ``a task`` without one."""
-    number = numbers.get(activity.task_id or "")
-    task = "a task" if number is None else f"task {number}"
+def _activity_word(activity: Activity) -> str:
+    """What ``activity`` is, in words."""
     words: dict[ActivityKind, str] = {
-        "task_run": task,
-        "review": f"the review of {task}",
+        "task_run": "a task",
+        "review": "the review of a task",
         "planner": "the planner",
         "startup_check": "the startup check",
     }
@@ -286,13 +284,13 @@ def active_name(sessions: Sequence[SessionSummary]) -> str | None:
     return next((summary.name for summary in sessions if summary.active), None)
 
 
-def running_words(sessions: Sequence[SessionSummary], numbers: Mapping[str, str]) -> str | None:
-    """What the active session among ``sessions`` runs, in words, its tasks named by their
-    ``numbers``; none while it's idle or none is active."""
+def running_words(sessions: Sequence[SessionSummary]) -> str | None:
+    """What the active session among ``sessions`` runs, in words; none while it's idle or none
+    is active."""
     active = next((summary for summary in sessions if summary.active), None)
     if active is None or active.state != "running":
         return None
-    return activity_words(active.activity, numbers)
+    return activity_words(active.activity)
 
 
 def activation_message(viewed: str, open_name: str, *, running: str | None) -> str:

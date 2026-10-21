@@ -236,7 +236,6 @@ class OrbitApp(App[None], inherit_bindings=False):
         self._sessions = SessionsHost(
             self.push_screen,
             self._send,
-            lambda: self._task_list.numbers_by_id,
             # Over a link the user picks the workspace.
             lambda workspaces: None if link else chosen_workspace(workspaces, repository),
         )
@@ -855,7 +854,6 @@ class OrbitApp(App[None], inherit_bindings=False):
     def _show_tasks(self, tasks: tuple[TaskState, ...]) -> None:
         self._task_list.show(tasks)
         self._agents.number_tasks(self._task_list.numbers_by_id)
-        self._show_viewing()  # Its mark names tasks by their numbers.
 
     def _show_progress(
         self,

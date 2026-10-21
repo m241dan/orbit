@@ -263,13 +263,13 @@ def test_the_viewing_mark_without_a_known_active_session_says_how_to_switch() ->
     )
 
 
-def test_a_task_run_is_named_by_its_number() -> None:
-    assert activity_words((Activity(kind="task_run", task_id="t1"),), {"t1": "3"}) == "task 3"
+def test_a_task_run_is_a_task() -> None:
+    assert activity_words((Activity(kind="task_run", task_id="t1"),)) == "a task"
 
 
 def test_several_activities_are_joined() -> None:
     activity = (Activity(kind="planner"), Activity(kind="review", task_id="t5"))
-    assert activity_words(activity, {"t5": "5"}) == "the planner and the review of task 5"
+    assert activity_words(activity) == "the planner and the review of a task"
 
 
 def test_more_than_two_activities_are_joined_by_commas_then_and() -> None:
@@ -278,16 +278,11 @@ def test_more_than_two_activities_are_joined_by_commas_then_and() -> None:
         Activity(kind="task_run", task_id="t1"),
         Activity(kind="planner"),
     )
-    assert activity_words(activity, {"t1": "3"}) == "the startup check, task 3 and the planner"
-
-
-def test_a_task_without_a_number_is_a_task() -> None:
-    activity = (Activity(kind="task_run", task_id="gone"), Activity(kind="review"))
-    assert activity_words(activity, {}) == "a task and the review of a task"
+    assert activity_words(activity) == "the startup check, a task and the planner"
 
 
 def test_no_activity_is_work() -> None:
-    assert activity_words((), {}) == "work"
+    assert activity_words(()) == "work"
 
 
 def test_with_the_active_session_idle_the_prompt_offers_to_activate_or_just_look() -> None:
@@ -315,9 +310,9 @@ def test_what_the_active_session_runs_is_worded_while_its_state_says_it_runs() -
     idle = SessionSummary(id="s", name="today", active=True, activity=task)
     running = idle.model_copy(update={"state": "running"})
     other = SessionSummary(id="o", name="auth rework", state="running")
-    assert running_words((other, running), {"t1": "3"}) == "task 3"
-    assert running_words((other, idle), {"t1": "3"}) is None
-    assert running_words((), {}) is None
+    assert running_words((other, running)) == "a task"
+    assert running_words((other, idle)) is None
+    assert running_words(()) is None
 
 
 def test_attaching_alone_to_an_inactive_session_views_it_only() -> None:

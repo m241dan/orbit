@@ -301,15 +301,15 @@ async def test_a_live_snapshot_dismisses_the_offer_shown() -> None:
         assert app.sent == []
 
 
-def test_the_mark_names_the_tasks_the_active_session_runs_by_their_numbers() -> None:
+def test_the_mark_names_the_tasks_the_active_session_runs_without_numbers() -> None:
     app = Host()
-    host = SessionsHost(app.push_screen, app._sent, lambda: {"t1": "3"})
+    host = SessionsHost(app.push_screen, app._sent)  # Opens on the first workspace listed.
     host.follow(catalog(NOW, OLD))
     host.view(view(OLD))
     run = (Activity(kind="task_run", task_id="t1"),)
     host.follow_state(RUNNING.model_copy(update={"activity": run}))
     assert host.mark == (
-        "viewing auth rework; today is running task 3 (enter to switch when it's idle)"
+        "viewing auth rework; today is running a task (enter to switch when it's idle)"
     )
 
 

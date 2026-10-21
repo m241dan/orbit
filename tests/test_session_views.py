@@ -32,7 +32,9 @@ LEFT = SessionStateChanged(session="now", active=False, state="idle", viewers=0)
 VIEWED = RUNNING.model_copy(update={"state": "idle", "viewers": 2})
 """The active session idle, but viewed by another frontend."""
 RUNNING_T3 = RUNNING.model_copy(update={"activity": (Activity(kind="task_run", task_id="t3"),)})
-"""The active session running the task numbered 3 in the session viewed."""
+"""The active session running its task ``t3``, an id the session viewed also numbers 3."""
+REVIEWING_T3 = RUNNING.model_copy(update={"activity": (Activity(kind="review", task_id="t3"),)})
+"""The active session reviewing its task ``t3``."""
 IDLE = RUNNING.model_copy(update={"state": "idle"})
 THREE_TASKS = TasksChanged(
     tasks=tuple(TaskState(id=f"t{n}", task=TaskSpec(prompt=f"task {n}")) for n in (1, 2, 3))
@@ -286,10 +288,28 @@ async def test_the_viewing_mark_names_what_the_active_session_runs_until_it_is_i
     async with app.run_test() as pilot:
         await feed_events(session, pilot, CATALOG, view(OLD), THREE_TASKS, RUNNING_T3)
         assert mark(app) == (
-            "viewing auth rework; today is running task 3 (enter to switch when it's idle)"
+            "viewing auth rework; today is running a task (enter to switch when it's idle)"
         )
         await feed_events(session, pilot, IDLE)
         assert mark(app) == VIEWING_OLD
+
+
+async def test_the_viewing_mark_names_a_review_without_the_viewed_sessions_numbers() -> None:
+    app, session = started()
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, CATALOG, view(OLD), THREE_TASKS, REVIEWING_T3)
+        assert mark(app) == (
+            "viewing auth rework; today is running the review of a task"
+            " (enter to switch when it's idle)"
+        )
+
+
+async def test_the_prompt_names_a_task_without_the_viewed_sessions_numbers() -> None:
+    app, session = started()
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, CATALOG, view(OLD), THREE_TASKS, RUNNING_T3)
+        await pilot.press("enter")
+        assert message(prompt(app)) == "today is running a task; you can switch once it's idle."
 
 
 async def test_a_pick_held_back_by_a_running_session_is_offered_again_once_it_is_idle() -> None:
