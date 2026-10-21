@@ -152,7 +152,8 @@ class WebSocketSession:
 
     def events(self) -> AsyncIterator[EventEnvelope]:
         """The events the control plane sends, across reconnections, until the session closes;
-        raises :class:`ProtocolError` if it sends one that can't be read."""
+        raises :class:`ProtocolError` if it sends one that can't be read, and any error keeping
+        connected didn't expect, such as a watcher's."""
         self._start()
         return self._received()
 
@@ -161,11 +162,13 @@ class WebSocketSession:
         self._closed = True
         if self._websocket is not None:
             await self._websocket.close()
-        if self._running is not None:
-            self._running.cancel()
-            with suppress(asyncio.CancelledError):
-                await self._running
-        self._events.put_nowait(None)
+        try:
+            if self._running is not None:
+                self._running.cancel()
+                with suppress(asyncio.CancelledError):
+                    await self._running
+        finally:
+            self._events.put_nowait(None)
 
     def _start(self) -> None:
         """Start connecting, unless it's started or the session is closed."""
@@ -207,6 +210,14 @@ class WebSocketSession:
         return hello.model_copy(update={"payload": payload})
 
     async def _run(self) -> None:
+        """Keep connected as :meth:`_link` does, ending the events with any error it didn't
+        expect, such as a watcher's, so they don't wait for ones that won't come."""
+        try:
+            await self._link()
+        except Exception as error:
+            self._events.put_nowait(error)
+
+    async def _link(self) -> None:
         """Keep connected until the session closes, the token is turned away or can't be read,
         the connection can't be made safely, or it closes in a way that would recur, as it would
         for an event that can't be read, which also ends the events with its error."""

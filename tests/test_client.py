@@ -670,6 +670,64 @@ async def test_closing_before_using_it_ends_the_events_without_connecting() -> N
     assert states.seen == [] and session.state is None
 
 
+class Broken(Exception):
+    """A failure the session doesn't expect."""
+
+
+def break_on(kind: type[LinkState]) -> Callable[[LinkState], None]:
+    """A watcher that raises :class:`Broken` on a state of ``kind``."""
+
+    def changed(state: LinkState) -> None:
+        if isinstance(state, kind):
+            raise Broken(type(state).__name__)
+
+    return changed
+
+
+async def test_a_watcher_raising_ends_the_events_with_its_error() -> None:
+    async with plane() as (_, url):
+        session, _ = client(url)
+        session.watch(break_on(Connected))
+        with pytest.raises(Broken, match="Connected"):
+            await next_event(session.events())
+        await session.close()
+
+
+async def test_a_watcher_raising_on_a_known_ending_ends_the_events_with_its_error() -> None:
+    async with plane() as (fake, url):
+        fake.status = 401
+        session, _ = client(url, "wrong")
+        session.watch(break_on(TokenRefused))
+        with pytest.raises(Broken, match="TokenRefused"):
+            await next_event(session.events())
+        await session.close()
+
+
+async def test_a_failure_connecting_ends_the_events_with_its_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def failing(*args: object, **kwargs: object) -> None:
+        raise Broken("connect")
+
+    monkeypatch.setattr("orbit.client.session.open_connection", failing)
+    session, states = client("ws://127.0.0.1:9/")
+    with pytest.raises(Broken, match="connect"):
+        await next_event(session.events())
+    assert states.seen == []
+    await session.close()
+
+
+async def test_closing_after_a_failure_returns_and_ends_the_events() -> None:
+    async with plane() as (_, url):
+        session, _ = client(url)
+        session.watch(break_on(Connected))
+        events = session.events()
+        with pytest.raises(Broken):
+            await next_event(events)
+        await asyncio.wait_for(session.close(), 5)
+        assert [envelope async for envelope in session.events()] == []
+
+
 async def test_the_backoff_doubles_up_to_its_most_and_jitters() -> None:
     backoff = Backoff()
     assert [backoff.delay(failures, 0) for failures in range(7)] == [
