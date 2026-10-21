@@ -93,6 +93,7 @@ class StorageHalt:
         self._fault: StorageFault | None = None
         self._explanation: str | None = None
         self._halting = False  # The halt is under way in the background.
+        self._resuming = False  # A resume is under way.
         self._lifting: list[Failure] | None = None  # The failures while the halt is lifted.
         self._background = Background("storage halt", publish)
         self._closed = False
@@ -140,6 +141,18 @@ class StorageHalt:
             return
         if self._under_way:
             raise Refused(STORAGE_FAILED, self._message(self._fault))
+        self._resuming = True
+        try:
+            failed = await self._lift()
+        finally:
+            self._resuming = False
+        self._fault, self._explanation = None, None
+        if failed:
+            self.fail(*failed[0])
+
+    async def _lift(self) -> list[Failure]:
+        """Retry the writes that failed; returns the failures while they were retried, or
+        raises :class:`Refused`, the halt explained afresh, when a write still fails."""
         self._lifting = []
         try:
             failure = await self._retry()
@@ -148,14 +161,13 @@ class StorageHalt:
         if failure is not None:
             fault = fault_of(*failure)
             raise Refused(STORAGE_FAILED, await self._explain(fault))
-        self._fault, self._explanation = None, None
-        if failed:
-            self.fail(*failed[0])
+        return failed
 
     @property
     def _under_way(self) -> bool:
-        """Whether halting, or lifting the halt, is under way."""
-        return self._halting or self._lifting is not None
+        """Whether halting, or a resume, is under way: a resume is until its outcome is known,
+        its failure explained."""
+        return self._halting or self._resuming
 
     async def close(self) -> None:
         """Stop halting, if it's under way; a failure from now on only marks the session

@@ -824,3 +824,52 @@ async def test_a_failure_during_a_resume_refused_a_second_time_halts_again() -> 
     errors = [event.message for event in published if isinstance(event, ErrorOccurred)]
     [_, again] = errors
     assert "again" in again
+
+
+@dataclass
+class BlockedDivert:
+    """A divert that, after the halt's own, waits for :attr:`release`."""
+
+    started: asyncio.Event
+    release: asyncio.Event
+    runs: int = 0
+
+    async def __call__(self) -> tuple[Sequence[EventEnvelope], str | None]:
+        self.runs += 1
+        if self.runs > 1:
+            self.started.set()
+            await self.release.wait()
+        return (), None
+
+
+async def test_a_resume_while_one_is_explaining_its_failed_retry_is_refused() -> None:
+    retries = 0
+
+    async def retry() -> tuple[FailedWrite, RuntimeError] | None:
+        nonlocal retries
+        retries += 1
+        return FailedWrite.SESSION_RECORD, RuntimeError("still full")
+
+    divert = BlockedDivert(asyncio.Event(), asyncio.Event())
+    halt = StorageHalt(lambda event: asyncio.sleep(0), HaltHooks(divert=divert, retry=retry))
+    halt.fail(FailedWrite.EVENT_LOG, RuntimeError("first"))
+    while halt.message == halting_message(FailedWrite.EVENT_LOG):
+        await asyncio.sleep(0)
+    await asyncio.sleep(0.01)
+    first = asyncio.create_task(halt.resume())
+    await divert.started.wait()
+    with pytest.raises(Refused) as second:
+        await asyncio.wait_for(halt.resume(), 1)
+    assert second.value.code == STORAGE_FAILED
+    assert retries == 1
+
+    divert.release.set()
+    with pytest.raises(Refused) as refusal:
+        await first
+    assert "still full" in str(refusal.value)
+    assert halt.halted
+    assert halt.message == str(refusal.value)
+    with pytest.raises(Refused):
+        await halt.resume()
+    assert retries == 2
+    await halt.close()
