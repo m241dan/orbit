@@ -6,12 +6,13 @@ from datetime import UTC, datetime
 
 from orbit.agent import WorkspaceHost
 from orbit.agent.application.connection import SessionConnection
-from orbit.agent.domain.sessions import SessionRecord, missing_message
+from orbit.agent.domain.sessions import SessionRecord, missing_message, summarize
 from orbit.protocol import (
     BUSY,
     INVALID,
     NOT_ACTIVE,
     SAVE_FAILED,
+    STORAGE_FAILED,
     UNKNOWN,
     WRONG_SESSION,
     ActivateSession,
@@ -29,16 +30,27 @@ from orbit.protocol import (
     EventEnvelope,
     History,
     HistoryPage,
+    OwnershipOffered,
     RenameSession,
     RunTasks,
     SessionRef,
     SessionStateChanged,
+    Settings,
     Snapshot,
     TasksChanged,
     TaskSpec,
     TaskState,
 )
-from tests.agent_fakes import HELLO, WORKSPACE, FakeStore, Ticks, attach_to, connect
+from tests.agent_fakes import (
+    HELLO,
+    LOCK_RETRY,
+    WORKSPACE,
+    FakeStore,
+    Ticks,
+    attach_to,
+    connect,
+)
+from tests.test_takeover import OWNER, FakeLock
 
 OPEN = "today-id"
 """The id of the workspace's open session."""
@@ -149,6 +161,76 @@ async def test_attaching_to_a_saved_session_answers_with_its_read_only_view() ->
     assert snapshot.transcript == LOGGED
     assert snapshot.busy == {"work": False, "planner": False}
     assert events[-1] == CommandAccepted(command_id="attach")
+
+
+async def attached_view(session: WorkspaceHost, viewer: SessionConnection) -> Snapshot:
+    """The read-only view of ``earlier`` that ``viewer`` gets for attaching to it."""
+    await say(viewer, "attach", Attach(workspace=WORKSPACE, session=EARLIER))
+    return snapshot_in(await taken(viewer))
+
+
+async def test_a_saved_sessions_view_carries_the_same_fields_as_ever() -> None:
+    store = stored()
+    session = workspace(store)
+    viewer = await joined(session, "viewer")
+    snapshot = await attached_view(session, viewer)
+    await session.close()
+
+    [record] = store.saved
+    assert snapshot == Snapshot(
+        session=summarize(record),
+        settings=Settings(),
+        model_choices=(),
+        busy={"work": False, "planner": False},
+        tasks=(SAVED_TASK,),
+        steps=(),
+        review=None,
+        proposals=(),
+        agents=(),
+        transcript=LOGGED,
+        active=False,
+        open_session=SessionRef(id=OPEN, name="today"),
+        viewers=1,
+    )
+
+
+async def test_a_saved_sessions_view_taken_while_storage_is_halted_carries_the_halt() -> None:
+    store = stored()
+    session = workspace(store)
+    first = await joined(session, "first")
+    store.failure = "Disk full."
+    await say(first, "add", AddTask(task=TASK))
+    errors = [e for e in await taken(first) if isinstance(e, ErrorOccurred)]
+    viewer = connect(session)
+    await say(viewer, "viewer", HELLO)
+    snapshot = await attached_view(session, viewer)
+    halt = (await session._snapshot()).storage_halt
+    await session.close()
+
+    assert [e.code for e in errors] == [STORAGE_FAILED]
+    assert halt is not None and "Disk full." in halt
+    assert snapshot.storage_halt == halt
+
+
+async def test_a_saved_sessions_view_taken_while_ownership_is_offered_says_so() -> None:
+    lock = FakeLock()
+    session = WorkspaceHost(
+        store=stored(),
+        clock=Ticks(),
+        new_id=lambda: OPEN,
+        name="today",
+        owner=OWNER,
+        lock=lock,
+        lock_retry=LOCK_RETRY,
+    )
+    viewer = await joined(session, "viewer")
+    lock.free = True
+    offers = [e for e in await taken(viewer) if isinstance(e, OwnershipOffered)]
+    snapshot = await attached_view(session, viewer)
+    await session.close()
+
+    assert len(offers) == 1
+    assert (snapshot.read_only, snapshot.ownership_offered) == (True, True)
 
 
 async def test_a_views_answers_belong_to_the_viewed_session_and_are_never_logged() -> None:

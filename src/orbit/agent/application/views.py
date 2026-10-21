@@ -3,12 +3,15 @@ view, and what a connection viewing one may do there."""
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from typing import NotRequired, TypedDict, Unpack
 
 from orbit.agent.application.connection import Connections, SessionConnection
 from orbit.agent.application.keeper import SessionKeeper
 from orbit.agent.application.outbox import Outbox
 from orbit.agent.application.session_state import SessionStates
 from orbit.agent.application.settings import SessionSettings
+from orbit.agent.application.storage_halt import StorageHalt
+from orbit.agent.application.takeover import Takeover
 from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.sessions import (
     SessionRecord,
@@ -26,13 +29,22 @@ from orbit.protocol import (
     WRONG_SESSION,
     ActivateSession,
     Attach,
+    BusyLane,
+    ChecksProposed,
     Command,
     DeleteSession,
+    EventEnvelope,
     History,
     NewSession,
     RenameSession,
+    ReviewStatus,
+    RunningAgent,
     SessionRef,
+    SessionSummary,
+    Settings,
     Snapshot,
+    StepState,
+    TaskState,
 )
 
 VIEW_COMMANDS = (Attach, ActivateSession, NewSession, History, RenameSession, DeleteSession)
@@ -40,12 +52,31 @@ VIEW_COMMANDS = (Attach, ActivateSession, NewSession, History, RenameSession, De
 refused as ``not_active``."""
 
 
+class SessionParts(TypedDict):
+    """The parts of a :class:`Snapshot` that are the session's own, rather than the
+    workspace's."""
+
+    session: SessionSummary
+    settings: Settings
+    busy: dict[BusyLane, bool]
+    tasks: tuple[TaskState, ...]
+    steps: tuple[StepState, ...]
+    steps_title: NotRequired[str]
+    review: ReviewStatus | None
+    proposals: tuple[ChecksProposed, ...]
+    agents: tuple[RunningAgent, ...]
+    transcript: tuple[EventEnvelope, ...]
+    active: NotRequired[bool]
+    viewers: int
+
+
 @dataclass(frozen=True)
 class ViewParts:
     """What attaching uses: the ``keeper`` of the open session and the saved ones, the
     ``events`` it publishes into and reads the logged ones back from, the ``connections``, the
-    sessions' ``states``, the ``settings``, the ``live`` snapshot of the open session, and
-    ``read_only`` saying whether the orbit is read-only."""
+    sessions' ``states``, the ``settings``, the ``live`` snapshot of the open session, the
+    storage ``halt`` and the ``takeover`` saying whether the orbit is read-only and the
+    repository offered."""
 
     keeper: SessionKeeper
     events: Outbox
@@ -53,7 +84,8 @@ class ViewParts:
     states: SessionStates
     settings: SessionSettings
     live: Callable[[], Awaitable[Snapshot]]
-    read_only: Callable[[], bool]
+    halt: StorageHalt
+    takeover: Takeover
 
 
 class SessionViews:
@@ -172,15 +204,28 @@ class SessionViews:
         assert named is not None  # An empty name is refused.
         self._parts.connections.renamed(SessionRef(id=session_id, name=named))
 
+    def snapshot(self, **session: Unpack[SessionParts]) -> Snapshot:
+        """The snapshot of a session made of its own parts, ``session``, and the workspace's as
+        they stand: the storage halt, whether it's read-only and the repository offered, its
+        open session and the model choices."""
+        parts = self._parts
+        return Snapshot(
+            model_choices=parts.settings.model_choices,
+            storage_halt=parts.halt.message,
+            read_only=parts.takeover.read_only,
+            ownership_offered=parts.takeover.offered,
+            open_session=self.open_session(),
+            **session,
+        )
+
     async def _view(self, record: SessionRecord) -> Snapshot:
         """The read-only view of the session saved as ``record``: as it was saved, with its last
         logged events, nothing running in it."""
         parts = self._parts
         transcript = await parts.events.transcript(record.id)
-        return Snapshot(
+        return self.snapshot(
             session=summarize(record),
             settings=record.settings,
-            model_choices=parts.settings.model_choices,
             busy={WORK_LANE: False, PLANNER_LANE: False},
             tasks=record.tasks,
             steps=(),
@@ -188,8 +233,6 @@ class SessionViews:
             proposals=(),
             agents=(),
             transcript=transcript,
-            read_only=parts.read_only(),
             active=False,
-            open_session=self.open_session(),
             viewers=parts.states.of(record.id).viewers,
         )

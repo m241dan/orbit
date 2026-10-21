@@ -349,7 +349,8 @@ class WorkspaceHost:
             self._states,
             self._settings,
             self._snapshot,
-            lambda: self._takeover.read_only,
+            self._halt,
+            self._takeover,
         )
         return SessionViews(parts)
 
@@ -805,10 +806,9 @@ class WorkspaceHost:
         transcript = await self._events.transcript(self._keeper.id)
         # Read after the transcript, so the state is as it stands once that's read.
         steps, title = self._steps_shown()
-        return Snapshot(
+        return self._views.snapshot(
             session=self._switcher.summary(last_active),
             settings=self._settings.current,
-            model_choices=self._settings.model_choices,
             busy={WORK_LANE: self._turns.running, PLANNER_LANE: self._seat.running},
             tasks=self._board.tasks,
             steps=steps,
@@ -817,10 +817,6 @@ class WorkspaceHost:
             proposals=self._proposals.waiting,
             agents=self._running_agents(),
             transcript=transcript,
-            storage_halt=self._halt.message,
-            read_only=self._takeover.read_only,
-            ownership_offered=self._takeover.offered,
-            open_session=self._views.open_session(),
             viewers=self._states.of(self._keeper.id).viewers,
         )
 
