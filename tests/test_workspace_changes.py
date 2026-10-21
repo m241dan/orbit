@@ -16,6 +16,7 @@ from orbit.agent.application.connection import SessionConnection
 from orbit.agent.domain.workspaces import LOCAL_ONLY
 from orbit.protocol import (
     BUSY,
+    INTERNAL,
     INVALID,
     UNKNOWN,
     AddTask,
@@ -32,6 +33,34 @@ from orbit.protocol import (
 )
 from tests.agent_fakes import HELLO, STEP, Steps
 from tests.plane_fakes import TASK, idle, joined, payloads, say, taken, working, workspace
+
+
+class Slow(WorkspaceHost):
+    """The host of the workspace ``name`` that waits for ``gate``, if given, before opening its
+    latest session, and then fails to if it ``fails``."""
+
+    def __init__(self, name: str, gate: asyncio.Event | None = None, *, fails: bool) -> None:
+        super().__init__(workspace=f"/src/{name}", workspace_id=name, new_id=lambda: f"{name}-1")
+        self.gate = gate
+        self.fails = fails
+
+    async def open_latest(self) -> None:
+        if self.gate is not None:
+            await self.gate.wait()
+        if self.fails:
+            raise OSError("The store is gone.")
+        await super().open_latest()
+
+
+class Unclosable(WorkspaceHost):
+    """The host of the workspace ``name`` that fails once it has closed."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__(workspace=f"/src/{name}", workspace_id=name, new_id=lambda: f"{name}-1")
+
+    async def close(self) -> None:
+        await super().close()
+        raise OSError("The store won't close.")
 
 
 class FakeSource:
@@ -74,6 +103,19 @@ class FakeSource:
 
     async def close(self, workspace_id: str) -> None:
         self.closed.append(workspace_id)
+
+
+class SlowSource(FakeSource):
+    """Workspaces whose hosts wait for ``gate``, if given, before opening their latest session,
+    and then fail to if they ``fail``."""
+
+    def __init__(self, gate: asyncio.Event | None = None, *, fail: bool = True) -> None:
+        super().__init__()
+        self.latest_gate = gate
+        self.fail = fail
+
+    def make(self, name: str) -> WorkspaceHost:
+        return Slow(name, self.latest_gate, fails=self.fail)
 
 
 async def welcomed(plane: ControlPlane) -> SessionConnection:
@@ -346,3 +388,82 @@ async def test_a_change_once_closed_is_refused() -> None:
     await plane._answer(envelope, connection, publish)
 
     assert outcomes == [refused("add", INVALID, "Orbit is stopping.")]
+
+
+async def test_a_workspace_whose_latest_session_fails_to_open_is_let_go() -> None:
+    source = SlowSource()
+    plane = ControlPlane(workspaces=source)
+    connection = await welcomed(plane)
+
+    await say(connection, "add", AddWorkspace(path="/src/c"))
+    outcome = payloads(taken(connection))
+    served = plane.hosts
+    await say(connection, "again", AddWorkspace(path="/src/c"))
+    await plane.close()
+
+    message = "Orbit failed to handle AddWorkspace: The store is gone."
+    assert outcome == [refused("add", INTERNAL, message)]
+    assert served == ()
+    assert source.closed == ["c", "c"]
+    assert source.opened == ["/src/c", "/src/c"]
+    assert source.hosts[0].closing
+
+
+async def test_an_add_cancelled_as_its_latest_session_opens_lets_the_workspace_go() -> None:
+    gate = asyncio.Event()
+    source = SlowSource(gate)
+    plane = ControlPlane(workspaces=source)
+    connection = await welcomed(plane)
+    adding = asyncio.create_task(say(connection, "add", AddWorkspace(path="/src/c")))
+    while not source.hosts:
+        await asyncio.sleep(0.01)
+    await asyncio.sleep(0.01)
+
+    adding.cancel()
+    await asyncio.gather(adding, return_exceptions=True)
+    served = plane.hosts
+    await plane.close()
+
+    assert adding.cancelled()
+    assert served == ()
+    assert source.closed == ["c"]
+    assert source.hosts[0].closing
+
+
+async def test_a_workspace_added_is_not_served_until_its_latest_session_is_open() -> None:
+    gate = asyncio.Event()
+    source = SlowSource(gate, fail=False)
+    plane = ControlPlane(workspaces=source)
+    connection = await welcomed(plane)
+    adding = asyncio.create_task(say(connection, "add", AddWorkspace(path="/src/c")))
+    while not source.hosts:
+        await asyncio.sleep(0.01)
+    await asyncio.sleep(0.01)
+
+    served = plane.hosts
+    gate.set()
+    await adding
+    added = [host.workspace_id for host in plane.hosts]
+    await plane.close()
+
+    assert served == () and added == ["c"]
+
+
+async def test_a_workspace_that_fails_to_close_is_still_removed_from_the_catalog() -> None:
+    first, second = workspace("a"), Unclosable("c")
+    source = FakeSource()
+    plane = ControlPlane([first, second], workspaces=source)
+    in_a = await joined(plane, first)
+    connection = await welcomed(plane)
+    taken(in_a)
+
+    await say(connection, "remove", RemoveWorkspace(workspace="c"))
+    catalog, outcome = payloads(taken(connection))
+    seen_in_a = payloads(taken(in_a))
+    await plane.close()
+
+    assert ids(catalog) == ["a"]
+    message = "Orbit failed to handle RemoveWorkspace: The store won't close."
+    assert outcome == refused("remove", INTERNAL, message)
+    assert [ids(event) for event in seen_in_a] == [["a"]]
+    assert source.closed == ["c"]

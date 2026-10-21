@@ -281,9 +281,9 @@ class ControlPlane:
     ) -> None:
         """Serve the workspace at ``path``, from ``workspaces``, unless it's served already:
         start its host, opening its most recently active session and its background work, and
-        send the catalog to ``connection``, which asked, and every listening connection; refused
-        unless ``path`` is the absolute path to a directory, or as ``invalid`` if it can't be
-        served."""
+        send the catalog to ``connection``, which asked, and every listening connection, or let it
+        go again if that fails or is cancelled; refused unless ``path`` is the absolute path to
+        a directory, or as ``invalid`` if it can't be served."""
         check_addable(path, absolute=PurePath(path).is_absolute())
         check_directory(path, workspaces.kind(path))
         root = await workspaces.top_level(path)
@@ -293,9 +293,20 @@ class ControlPlane:
             host = await workspaces.open(root)
         except WorkspaceUnavailable as exc:
             raise Refused(INVALID, f"Can't add {root}: {exc}") from None
-        self._hosts[host.workspace_id] = host
+        try:
+            await self._start(host, connection)
+        except BaseException:
+            await self._let_go(host, workspaces)
+            raise
+
+    async def _start(self, host: WorkspaceHost, connection: SessionConnection) -> None:
+        """Serve ``host``, once its most recently active session is open, start its background
+        work and send the catalog to ``connection`` and every listening connection. Its events
+        are stamped and delivered as it opens that session, but no ``Attach`` reaches it till
+        it's open."""
         self._serve(host)
         await self._open_latest(host)
+        self._hosts[host.workspace_id] = host
         self._start_background(host)
         await self._changed(connection)
 
@@ -313,20 +324,27 @@ class ControlPlane:
     ) -> None:
         """Stop serving the workspace ``workspace``: close its host, having ``connection``, if
         it's attached there, attached to none, have ``workspaces`` let it go, and send the
-        catalog to ``connection`` and every listening connection; refused for a workspace not
-        served, or as ``busy`` while it runs work or another connection views one of its
-        sessions."""
+        catalog to ``connection`` and every listening connection, even if closing the host
+        fails; refused for a workspace not served, or as ``busy`` while it runs work or another
+        connection views one of its sessions."""
         host = self._hosts[served_workspace(workspace, self._served)]
         viewed = host.connections.others_view()
         check_removable(host.path or workspace, host.activity, viewed)
         if connection.workspace == workspace:
             self._detach(connection)
-        del self._hosts[workspace]
+        try:
+            await self._let_go(host, workspaces)
+        finally:
+            await self._changed(connection)
+
+    async def _let_go(self, host: WorkspaceHost, workspaces: WorkspaceSource) -> None:
+        """Stop serving ``host``'s workspace: close ``host``, then have ``workspaces`` let it
+        go, even if closing ``host`` fails."""
+        self._hosts.pop(host.workspace_id, None)
         try:
             await host.close()
         finally:
-            await workspaces.close(workspace)
-        await self._changed(connection)
+            await workspaces.close(host.workspace_id)
 
     async def _changed(self, connection: SessionConnection) -> None:
         """Send every listening connection the catalog, as the workspaces served changed, and
