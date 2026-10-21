@@ -269,19 +269,14 @@ class _Workspaces:
         return tuple(self._locks.values())
 
     def served(self, root: Path) -> tuple[_ServedWorkspace, Callable[[], WorkspaceHost]]:
-        """The workspace at ``root`` served from the start, with what builds its host, its lock
-        held, if it's free.
+        """The workspace at ``root`` served from the start, flagged served, with what builds its
+        host, its lock held, if it's free. Raises :class:`WorkspaceUnavailable` as :meth:`open`
+        says."""
+        return asyncio.run(self._taken(root))
 
-        Exits with status 2 as :func:`_serving` says.
-        """
-        if self._flags.worktree:
-            _require_git_identity(root)
-        lock, owner = self._stack.enter_context(_repository_lock(root))
-        backend = replace(self._flags, owner=owner, lock=lock)
-        make = _host_maker(backend, root, _config(root), self._storage, pick_session=False)
-        opened = _open_view(self._store, root, owned=owner is None)
-        self._locks[opened.store.workspace_id] = lock
-        return _ServedWorkspace(root, owner, lock), lambda: make(opened)
+    def serves(self, workspace_id: str) -> bool:
+        """Whether the workspace ``workspace_id`` is served."""
+        return workspace_id in self._locks
 
     def kind(self, path: str) -> PathKind:
         """What there is at ``path``."""
@@ -300,19 +295,25 @@ class _Workspaces:
         lock taken if it's free. Raises :class:`WorkspaceUnavailable` if git has no identity for
         the coder's commits there, its configuration is invalid, its lock can't be made or the
         store fails."""
-        directory = Path(root)
-        config = _workspace_config(directory, worktree=self._flags.worktree)
-        lock, owner = _locked(directory, self.url)
+        _, make = await self._taken(Path(root))
+        return make()
+
+    async def _taken(self, root: Path) -> tuple[_ServedWorkspace, Callable[[], WorkspaceHost]]:
+        """The workspace at ``root``, registered or found and flagged served, with what builds
+        its host, its lock taken if it's free and held until it's removed or the stack closes.
+        Raises :class:`WorkspaceUnavailable` as :meth:`open` says."""
+        config = _workspace_config(root, worktree=self._flags.worktree)
+        lock, owner = _locked(root, self.url)
         try:
-            opened = await _flagged_view(self._store, directory, owned=owner is None)
+            opened = await _flagged_view(self._store, root, owned=owner is None)
         except BaseException:
             lock.close()
             raise
         self._locks[opened.store.workspace_id] = lock
         self._stack.callback(lock.close)
         backend = replace(self._flags, owner=owner, lock=lock)
-        make = _host_maker(backend, directory, config, self._storage, pick_session=False)
-        return make(opened)
+        make = _host_maker(backend, root, config, self._storage, pick_session=False)
+        return _ServedWorkspace(root, owner, lock), lambda: make(opened)
 
     async def close(self, workspace_id: str) -> None:
         """Let go of the lock on the workspace ``workspace_id`` and stop serving it."""
@@ -373,15 +374,16 @@ class _Serving:
 def _serving(
     flags: _Backend, added: Sequence[Path], state: Path, user_config: Path
 ) -> Iterator[_Serving]:
-    """Run the block serving the workspaces flagged as served in the store in ``state``, the
-    ``added`` ones flagged first, with the backend ``flags`` ask for and the user config in
-    ``user_config``, holding each one's workspace lock if no other orbit does; yields what's
-    served, then lets the locks go and closes the store. A workspace flagged whose directory is
-    gone is skipped, with a warning.
+    """Run the block serving the ``added`` workspaces, flagged as served in the store in
+    ``state`` once each is found to be servable, and those flagged before, with the backend
+    ``flags`` ask for and the user config in ``user_config``, holding each one's workspace lock
+    if no other orbit does; yields what's served, then lets the locks go and closes the store.
+    A workspace flagged before whose directory is gone, or that can't be served, is skipped,
+    with a warning.
 
-    Exits with status 2 if the store can't be opened, a workspace can't be registered, locked
-    or opened, git has no identity for a repository the coder commits in, or a configuration is
-    invalid.
+    Exits with status 2 if the store can't be opened, or an ``added`` workspace can't be
+    registered, locked or opened, git has no identity for its repository with the coder
+    committing there, or its configuration is invalid.
     """
     storage = _storage(user_config)
     usage_source = UsageApi() if flags.usage else None
@@ -389,8 +391,8 @@ def _serving(
         store = _open(state)
         stack.callback(lambda: asyncio.run(store.close()))
         source = _Workspaces(stack, flags, store, storage)
-        roots = _flagged(store, added)
-        served = [source.served(root) for root in roots]
+        served = [_added(source, root) for root in dict.fromkeys(added)]
+        served += _earlier(source, store)
         workspaces = tuple(workspace for workspace, _ in served)
         makers = [make for _, make in served]
 
@@ -400,14 +402,32 @@ def _serving(
         yield _Serving(build, workspaces, source)
 
 
-def _require_git_identity(root: Path) -> None:
-    """Exit with status 2 if the workspace at ``root`` is a git repository that git has no
-    identity for commits in, as the coder's worktree commits there."""
-    problem = _identity_problem(root)
-    if problem is None:
-        return
-    typer.echo(problem, err=True)
-    raise typer.Exit(2)
+def _added(source: _Workspaces, root: Path) -> tuple[_ServedWorkspace, Callable[[], WorkspaceHost]]:
+    """The workspace at ``root``, added with ``--add``, served by ``source`` and flagged served.
+
+    Exits with status 2 if it can't be served, leaving it unflagged.
+    """
+    with _exit_on(WorkspaceUnavailable):
+        return source.served(root)
+
+
+def _earlier(
+    source: _Workspaces, store: SqliteStore
+) -> list[tuple[_ServedWorkspace, Callable[[], WorkspaceHost]]]:
+    """The workspaces flagged as served in ``store`` by an earlier run that ``source`` doesn't
+    serve yet, served by it, but for those that are gone or can't be served, warning of each.
+
+    Exits with status 2 if the store fails.
+    """
+    served: list[tuple[_ServedWorkspace, Callable[[], WorkspaceHost]]] = []
+    for workspace_id, root in _flagged(store):
+        if source.serves(workspace_id):
+            continue
+        try:
+            served.append(source.served(root))
+        except WorkspaceUnavailable as exc:
+            typer.echo(f"Warning: The workspace {root} isn't served: {exc}", err=True)
+    return served
 
 
 def _identity_problem(root: Path) -> str | None:
@@ -421,15 +441,15 @@ def _identity_problem(root: Path) -> str | None:
     )
 
 
-def _flagged(store: SqliteStore, added: Sequence[Path]) -> list[Path]:
-    """The directories of the workspaces flagged as served in ``store``, the ``added`` ones
-    registered and flagged first, but for those that are gone, warning of each.
+def _flagged(store: SqliteStore) -> list[tuple[str, Path]]:
+    """The id and directory of each workspace flagged as served in ``store``, but for those
+    that are gone, warning of each.
 
     Exits with status 2 if the store fails.
     """
     with _exit_on(StoreError):
-        served = asyncio.run(_flag(WorkspaceRegistry(store), added))
-    return [Path(path) for _, path in served if _present(Path(path))]
+        served = asyncio.run(WorkspaceRegistry(store).served())
+    return [(workspace_id, Path(path)) for workspace_id, path in served if _present(Path(path))]
 
 
 def _present(root: Path) -> bool:
@@ -438,14 +458,6 @@ def _present(root: Path) -> bool:
         return True
     typer.echo(f"Warning: The workspace {root} is gone, so it isn't served.", err=True)
     return False
-
-
-async def _flag(registry: WorkspaceRegistry, added: Sequence[Path]) -> list[tuple[str, str]]:
-    """The id and path of each workspace ``registry`` serves, the ``added`` ones registered and
-    flagged first."""
-    for root in added:
-        await registry.set_served(await registry.find_or_register(str(root)), True)
-    return await registry.served()
 
 
 def _config(root: Path) -> OrbitConfig:

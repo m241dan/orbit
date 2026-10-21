@@ -510,6 +510,66 @@ def test_a_workspace_whose_directory_is_gone_is_not_served(
     assert str(gone) not in output.splitlines()[-4]
 
 
+def _break_config(root: Path) -> None:
+    """Make the project file of the workspace at ``root`` invalid."""
+    (root / ".orbit").mkdir(exist_ok=True)
+    (root / ".orbit" / "config.toml").write_text("not = [toml\n")
+
+
+def test_a_workspace_flagged_before_with_an_invalid_config_is_skipped_with_a_warning(
+    state: Path, config_dir: Path, tmp_path: Path
+) -> None:
+    broken, fine = _workspace_dirs(tmp_path, "broken", "fine")
+    served(Frontend(state, config_dir), "--port", "0", added=(str(broken), str(fine)))
+    _break_config(broken)
+
+    frontend = Frontend(state, config_dir)
+    output = served(frontend, "--port", "0", added=())
+
+    assert f"Warning: The workspace {broken} isn't served: Invalid orbit configuration" in output
+    [catalog] = [e for e in frontend.events if isinstance(e, Catalog)]
+    assert [w.path for w in catalog.workspaces] == [str(fine)]
+    assert f": {fine} as its owner. Frontends" in output
+
+
+def test_a_workspace_flagged_before_that_git_has_no_identity_for_is_skipped_with_a_warning(
+    no_identity: Path, state: Path, config_dir: Path, tmp_path: Path
+) -> None:
+    [fine] = _workspace_dirs(tmp_path, "fine")
+    added = (str(no_identity), str(fine))
+    served(Frontend(state, config_dir), "--port", "0", "--no-worktree", added=added)
+
+    frontend = Frontend(state, config_dir)
+    output = served(frontend, "--port", "0", added=())
+
+    assert f"Warning: The workspace {no_identity} isn't served: Git has no identity" in output
+    [catalog] = [e for e in frontend.events if isinstance(e, Catalog)]
+    assert [w.path for w in catalog.workspaces] == [str(fine)]
+
+
+def test_adding_a_workspace_with_an_invalid_config_exits_and_leaves_it_unflagged(
+    project: Path, state: Path, config_dir: Path
+) -> None:
+    _break_config(project)
+    result = runner.invoke(app, ["serve", *QUIET, "--add", ".", "--port", "0"])
+    assert result.exit_code == 2
+    assert result.stderr.startswith("Invalid orbit configuration: ")
+
+    frontend = Frontend(state, config_dir, greet=welcomed)
+    served(frontend, "--port", "0", added=())
+    [catalog] = [e for e in frontend.events if isinstance(e, Catalog)]
+    assert catalog.workspaces == ()
+
+
+def test_adding_a_workspace_twice_serves_it_once(
+    project: Path, state: Path, config_dir: Path
+) -> None:
+    frontend = Frontend(state, config_dir)
+    served(frontend, "--port", "0", added=(".", str(project)))
+    [catalog] = [e for e in frontend.events if isinstance(e, Catalog)]
+    assert [w.path for w in catalog.workspaces] == [str(project)]
+
+
 def test_adding_a_missing_workspace_exits_naming_it(tmp_path: Path) -> None:
     result = runner.invoke(app, ["serve", *QUIET, "--add", str(tmp_path / "missing")])
     assert result.exit_code == 2

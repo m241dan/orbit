@@ -940,8 +940,11 @@ directory it starts in: it serves every workspace added with `--add PATH` (repea
 an earlier `orbit serve` on the same state directory, so a plain `orbit serve` serves them all
 again, and with none added yet it starts empty and says so. `--add` takes a project's directory, or
 any directory in a git repository for the repository's top level; a path that doesn't exist, or
-isn't a directory, stops it with status 2. A workspace added whose directory has gone since is
-skipped, with a warning. Frontends add and remove workspaces as it runs, with the protocol's
+isn't a directory, stops it with status 2, as does one added now that can't be served (an
+invalid `.orbit/config.toml`, no git identity for commits, a lock that can't be made or sessions
+that can't be opened or imported), which is left as it was rather than added. A workspace added
+earlier whose directory has gone since, or that can't be served for any of those reasons, is
+skipped, with a warning naming it and why, and the rest are served. Frontends add and remove workspaces as it runs, with the protocol's
 `AddWorkspace` and `RemoveWorkspace` (see
 [docs/protocol.md](docs/protocol.md#workspaces)): adding takes an absolute path on the server's
 host, a repository's top level stands for any directory in it, and the workspace opens its
@@ -964,8 +967,8 @@ chat` works on its own repository alone and refuses both. It takes the backend f
 In a git repository, unless `--no-worktree` is given, orbit commits the coder's work, so `orbit
 serve` checks as it starts that git has an identity for commits in each workspace's repository: `user.name` and
 `user.email` from the repository's, your global or the system git config, or the
-`GIT_AUTHOR_*` and `GIT_COMMITTER_*` environment variables. Without one it stops with status 2,
-saying to set them (`git config --global user.name "Your Name"` and `git config --global
+`GIT_AUTHOR_*` and `GIT_COMMITTER_*` environment variables. Without one it stops with status 2
+for a workspace added with `--add`, and skips one added earlier with a warning, saying to set them (`git config --global user.name "Your Name"` and `git config --global
 user.email you@example.com`) or, in a container, to mount your `~/.gitconfig` into it.
 
 Each workspace opens its most recently active saved session that no other orbit has open, or a
