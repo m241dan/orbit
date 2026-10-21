@@ -20,14 +20,17 @@ _WRONG_NAME = frozenset({62, 64})
 _PLAINTEXT = frozenset({"WRONG_VERSION_NUMBER", "RECORD_LAYER_FAILURE", "HTTP_REQUEST"})
 
 
-def handshake_failure(url: str, error: Exception, certified: bool = False) -> str | None:
+def handshake_failure(
+    url: str, error: Exception, certified: bool = False, linked: bool = False
+) -> str | None:
     """What to tell the user about ``error``, raised opening a connection to ``url``, showing a
-    client certificate if ``certified``, if it would recur on retrying; none if it may pass."""
+    client certificate if ``certified``, having linked to it before if ``linked``, if it would
+    recur on retrying; none if it may pass."""
     if isinstance(error, ssl.SSLCertVerificationError):
         return _unverified(url, error)
     if isinstance(error, ssl.SSLError):
         return messages.NOT_TLS.format(url=url) if error.reason in _PLAINTEXT else None
-    return _unanswered(url, certified) if _closed_unanswered(error) else None
+    return _unanswered(url, certified, linked) if _closed_unanswered(error) else None
 
 
 def _unverified(url: str, error: ssl.SSLCertVerificationError) -> str:
@@ -40,11 +43,12 @@ def _unverified(url: str, error: ssl.SSLCertVerificationError) -> str:
     return messages.CERTIFICATE_INVALID.format(url=url, reason=error.verify_message)
 
 
-def _unanswered(url: str, certified: bool) -> str:
+def _unanswered(url: str, certified: bool, linked: bool) -> str | None:
     """What to tell the user about ``url`` closing the connection unanswered, showing a client
-    certificate if ``certified``."""
+    certificate if ``certified``; none over ``ws://`` once ``linked``, as a plaintext server
+    that answered before may close one unanswered while it shuts down or restarts."""
     if urlsplit(url).scheme == "ws":
-        return messages.SPEAKS_TLS.format(url=url)
+        return None if linked else messages.SPEAKS_TLS.format(url=url)
     refused = messages.CLIENT_CERT_REJECTED if certified else messages.CLIENT_CERT_REQUIRED
     return refused.format(url=url)
 

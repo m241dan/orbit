@@ -25,12 +25,16 @@ class HandshakeRefused(Exception):
 
 
 async def open_connection(
-    url: str, token: str | None, ssl_context: ssl.SSLContext | None = None, **options: Any
+    url: str,
+    token: str | None,
+    ssl_context: ssl.SSLContext | None = None,
+    linked: bool = False,
+    **options: Any,
 ) -> ClientConnection | None:
     """A connection to the control plane at ``url`` showing ``token``, or without one the
     client certificate in ``ssl_context``, verified with ``ssl_context``, if given, for a
     ``wss://`` URL, opened with the other ``options`` websockets' ``connect`` takes, or none if
-    it can't be made.
+    it can't be made; ``linked`` if a connection to it was made before.
 
     Raises :class:`TokenRejected` if the control plane turns the token away, and
     :class:`HandshakeRefused` if the connection fails in a way that would recur.
@@ -43,7 +47,7 @@ async def open_connection(
         _check_refusal(url, error.response, token)
         return None
     except (OSError, TimeoutError, WebSocketException) as error:
-        message = handshake_failure(url, error, certified=token is None)
+        message = handshake_failure(url, error, certified=token is None, linked=linked)
         if message is not None:
             raise HandshakeRefused(message) from None
         return None

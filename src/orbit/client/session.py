@@ -126,6 +126,7 @@ class WebSocketSession:
         self._attach: CommandEnvelope | None = None  # The last Attach sent.
         self._viewed: Attach | None = None  # The session the last Snapshot received showed.
         self._seq: int | None = None  # The last seq received.
+        self._ever_linked = False  # Whether a connection was ever made.
         self._watchers: list[Callable[[LinkState], None]] = []
         self.state: LinkState | None = None  # None until the first attempt to connect ends.
         self._running: asyncio.Task[None] | None = None
@@ -225,8 +226,9 @@ class WebSocketSession:
     async def _keep_connected(self) -> None:
         """Connect, and connect again each time the connection fails or is lost, until the
         session closes, waiting the backoff before each attempt again; raises
-        :class:`_TurnedAway` if the token is, or can't be read, and :class:`_Ended` if the
-        connection closes in a way that would recur. Only a connection that received
+        :class:`_TurnedAway` if the token is, or can't be read, :class:`HandshakeRefused` if
+        the connection can't be made safely, and :class:`_Ended` if it closes in a way that
+        would recur. Only a connection that received
         something resets the backoff, so one dropped as soon as it opens counts as a failure."""
         failures = 0
         while True:
@@ -243,13 +245,14 @@ class WebSocketSession:
         """A new connection to the control plane, shown the token in the token file as it is
         now, if there's one, or none if it can't be made; raises :class:`_TurnedAway` if the
         token is, or can't be read, and :class:`HandshakeRefused` if it can't be made
-        safely."""
+        safely, as judged knowing whether one was made before."""
         token = self._token()
         try:
             return await open_connection(
                 self.url,
                 token,
                 ssl_context=self._ssl_context,
+                linked=self._ever_linked,
                 ping_interval=PING_SECONDS,
                 ping_timeout=PING_SECONDS,
                 # Unlimited: the control plane, shown the token, enforces its own limit.
@@ -277,6 +280,7 @@ class WebSocketSession:
         that would recur, unless the session closed it."""
         async with websocket:
             self._websocket = websocket
+            self._ever_linked = True
             try:
                 self._report(Connected(self.url))
                 with suppress(ConnectionClosed):

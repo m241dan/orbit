@@ -238,6 +238,12 @@ def test_a_connection_closed_unanswered_over_tls_says_a_client_certificate_is_wa
     assert handshake_failure(url, error, certified=True) == rejected
 
 
+def test_a_plaintext_connection_closed_unanswered_after_linking_may_pass() -> None:
+    error = InvalidMessage("did not receive a valid HTTP response")
+    error.__cause__ = EOFError("connection closed while reading HTTP status line")
+    assert handshake_failure("ws://localhost/", error, linked=True) is None
+
+
 def test_the_context_shows_the_client_certificate_given(ca: Ca, tmp_path: Path) -> None:
     client = make_client(ca, tmp_path)
     context = client_ssl_context(ca.path, client.cert, client.key)

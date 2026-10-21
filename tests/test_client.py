@@ -98,11 +98,11 @@ class FakePlane:
 
 
 @asynccontextmanager
-async def plane() -> AsyncIterator[tuple[FakePlane, str]]:
-    """A fake control plane and its URL."""
+async def plane(port: int = 0) -> AsyncIterator[tuple[FakePlane, str]]:
+    """A fake control plane and its URL, on ``port``, or any free one."""
     fake = FakePlane()
     server: Server
-    async with serve(fake.handle, "127.0.0.1", 0, process_request=fake.check) as server:
+    async with serve(fake.handle, "127.0.0.1", port, process_request=fake.check) as server:
         port = next(iter(server.sockets)).getsockname()[1]
         yield fake, f"ws://127.0.0.1:{port}/"
 
@@ -498,6 +498,28 @@ async def test_failing_to_connect_is_retried_and_reported_once() -> None:
     await asyncio.sleep(0.1)  # Long enough for several attempts.
     assert len(states.seen) == 1
     await session.close()
+
+
+async def test_a_connection_closed_unanswered_after_linking_is_retried() -> None:
+    hung_up = asyncio.Queue[None]()
+
+    async def hang_up(_: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        writer.close()
+        hung_up.put_nowait(None)
+
+    async with plane() as (fake, url):
+        session, states = client(url)
+        await session.send(HELLO)
+        await fake.command()
+    port = int(url.rsplit(":", 1)[1].rstrip("/"))
+    async with await asyncio.start_server(hang_up, "127.0.0.1", port):
+        for _ in range(3):  # Each an attempt closed before any HTTP answer.
+            await asyncio.wait_for(hung_up.get(), 5)
+    assert isinstance(session.state, Reconnecting)
+    async with plane(port) as (fake, _):
+        assert await fake.command() == HELLO
+        assert [type(state) for state in states.seen][-2:] == [Reconnecting, Connected]
+        await session.close()
 
 
 async def test_a_control_plane_shutting_down_is_reported_and_retried() -> None:
