@@ -6,6 +6,7 @@ from contextlib import contextmanager
 
 import pytest
 
+from orbit.cli.threaded import ThreadedSession
 from orbit.protocol import (
     PLANNER,
     CommandEnvelope,
@@ -14,7 +15,6 @@ from orbit.protocol import (
     SendMessage,
     Session,
     SharedSession,
-    ThreadedSession,
 )
 
 

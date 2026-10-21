@@ -11,7 +11,7 @@ import pytest
 
 from orbit.agent import WorkspaceHost
 from orbit.agent.application.ports import UsageSource
-from orbit.protocol import ThreadedSession
+from orbit.cli.threaded import ThreadedSession
 from orbit.tui import Opening
 
 

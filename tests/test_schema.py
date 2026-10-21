@@ -9,7 +9,8 @@ from typing import Any
 import pytest
 from jsonschema import Draft202012Validator, ValidationError
 
-from orbit.protocol import PROTOCOL_VERSION, encode, protocol_schema
+from orbit.protocol import PROTOCOL_VERSION, encode
+from orbit.protocol.schema import protocol_schema
 from tests.protocol_examples import EXAMPLES
 
 SCHEMA_FILE = Path(__file__).parent.parent / "schema" / "protocol.schema.json"

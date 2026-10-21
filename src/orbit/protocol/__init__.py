@@ -162,9 +162,7 @@ from orbit.protocol.names import (
     BusyLane,
     TaskOrigin,
 )
-from orbit.protocol.schema import protocol_schema
 from orbit.protocol.session import Session, SharedSession
-from orbit.protocol.threaded import ThreadedSession
 from orbit.protocol.transport import (
     CERTIFICATE_CHALLENGE,
     DEFAULT_MAX_MESSAGE_MB,
@@ -321,7 +319,6 @@ __all__ = [
     "TaskState",
     "TaskStatus",
     "TasksChanged",
-    "ThreadedSession",
     "TokenRefused",
     "ToolAccess",
     "ToolCallFinished",
@@ -348,6 +345,5 @@ __all__ = [
     "decode_event",
     "encode",
     "event_adapter",
-    "protocol_schema",
     "with_state",
 ]

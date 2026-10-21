@@ -1512,8 +1512,7 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
   interface, the `Link` a session to a control plane elsewhere reports its state through (in
   `link`, with `NotConnected`), the WebSocket transport's close codes, 401 status, default
   message limit, `bearer_header` and its reader `bearer_token` (in `transport`), which the
-  control plane, the MCP host and `orbit.client` share, and `ThreadedSession`, which runs a
-  session on a thread of its own. It imports no other orbit package. `docs/protocol.md` describes the protocol, its conversation rules and
+  control plane, the MCP host and `orbit.client` share. It imports no other orbit package. `docs/protocol.md` describes the protocol, its conversation rules and
   codes, and `schema/protocol.schema.json` is its JSON Schema.
 - `orbit.client`: the frontends' side of a control plane in another process. `WebSocketSession`
   (in `session`) is a `Session` over a WebSocket (the `websockets` library) that reconnects with
@@ -1650,7 +1649,7 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
 - `orbit.cli`: the composition root, and the only place the two sides are wired together: it
   plugs the external adapters into a `WorkspaceHost`, builds a `ControlPlane` around it and
   hands that to the TUI. It runs the backend on its own thread and event loop through
-  `orbit.protocol.ThreadedSession`, so neither side's work stalls the other. `orbit serve`
+  `ThreadedSession` (in `threaded`), so neither side's work stalls the other. `orbit serve`
   plugs them in the same way but hands the `ControlPlane` to `ControlPlaneServer` instead, on the main thread's event loop. `orbit chat --connect` builds no
   backend: it hands the TUI an `orbit.client.WebSocketSession`, which runs on the TUI's own event
   loop; neither does a chat that `discover_control_plane` finds a running `orbit serve` for.

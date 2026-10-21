@@ -7,8 +7,7 @@ from contextlib import AbstractContextManager, nullcontext, suppress
 from dataclasses import dataclass
 from typing import Any
 
-from orbit.protocol.envelope import CommandEnvelope, EventEnvelope
-from orbit.protocol.session import Session, SharedSession
+from orbit.protocol import CommandEnvelope, EventEnvelope, Session, SharedSession
 
 _Item = EventEnvelope | Exception | None
 """What a pump hands over: an event, the failure that ended the stream, or ``None`` for its

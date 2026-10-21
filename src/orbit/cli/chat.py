@@ -45,6 +45,7 @@ from orbit.cli.options import (
     WorkspaceOption,
     WorktreeOption,
 )
+from orbit.cli.threaded import ThreadedSession
 from orbit.client import (
     CaUnreadable,
     ClientCertUnusable,
@@ -59,7 +60,7 @@ from orbit.client import (
     read_token,
 )
 from orbit.profiling import profiled
-from orbit.protocol import NewSession, ThreadedSession
+from orbit.protocol import NewSession
 from orbit.tui import Opening, OrbitApp
 
 
