@@ -259,7 +259,7 @@ class ReviewPlanner:
             return None
         batch = self._open[batch_id]
         batch.tasks.remove(state.id)
-        batch.finished.discard(state.id)
+        _forget_finish(batch, state.id)
         return self._due(batch_id)
 
     def reopened(self, state: TaskState) -> None:
@@ -267,9 +267,7 @@ class ReviewPlanner:
         batch = self._open.get(state.batch) if state.batch is not None else None
         if batch is None:
             return
-        batch.finished.discard(state.id)
-        if state.id in batch.missing:
-            batch.missing.remove(state.id)
+        _forget_finish(batch, state.id)
 
     def _due(self, batch_id: str) -> ReviewJob | None:
         batch = self._open[batch_id]
@@ -288,6 +286,13 @@ class ReviewPlanner:
             tuple(batch.missing),
             reviewed=batch.reviewed(),
         )
+
+
+def _forget_finish(batch: _Batch, task_id: str) -> None:
+    """Forget that task ``task_id`` of ``batch`` finished, and whether it ended without a commit."""
+    batch.finished.discard(task_id)
+    if task_id in batch.missing:
+        batch.missing.remove(task_id)
 
 
 def _normalized(text: str) -> str:

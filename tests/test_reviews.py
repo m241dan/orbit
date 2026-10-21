@@ -317,6 +317,16 @@ def test_after_a_removal_the_batch_is_reviewed_once_the_rest_finish() -> None:
     assert job == ReviewJob(commits=("c3",), round=1, batch=batch, reviewed=("3",))
 
 
+def test_a_removed_task_that_ended_without_a_commit_is_not_reported_missing() -> None:
+    reviews = planner()
+    batch = filled(reviews, "2", "3")
+    assert reviews.ended(state("2", status="gave_up", origin="review", batch=batch)) is None
+    assert reviews.removed(state("2", status="gave_up", origin="review", batch=batch)) is None
+    job = reviews.landed(state("3", origin="review", batch=batch), "c3")
+    assert job == ReviewJob(commits=("c3",), round=1, batch=batch, reviewed=("3",))
+    assert "ended without a commit" not in review_prompt(job, "", 5)
+
+
 def test_removing_a_batchs_only_task_closes_it_with_nothing_to_review() -> None:
     reviews = planner()
     batch = filled(reviews, "2")
