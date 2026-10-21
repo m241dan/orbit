@@ -64,8 +64,9 @@ class WorkTurns:
     and keeps :meth:`wake`, a review's request, from starting another until the user asks
     again. While the session is halted, :meth:`wake` starts nothing either. A run Claude's
     usage limit stopped starts again by itself once the limit resets, unless the user runs or
-    holds the work first, or :meth:`forget_wait` is called as the session is left. Once
-    :meth:`close` is called, nothing starts.
+    holds the work first, or :meth:`forget_wait` is called as the session is left; a halt's
+    :meth:`stop_turn` keeps the wait, and one ending while halted starts the run once
+    :meth:`lifted` is called. Once :meth:`close` is called, nothing starts.
     """
 
     def __init__(self, parts: WorkParts) -> None:
@@ -76,6 +77,7 @@ class WorkTurns:
         self._turns = TurnSlot(WORK_LANE, TASKS_RUNNING_MESSAGE, parts.post)
         # A run the usage limit stopped, waiting to start again.
         self._waiting: asyncio.Task[None] | None = None
+        self._due = False  # Its wait ended while the session was halted.
 
     @property
     def running(self) -> bool:
@@ -133,21 +135,33 @@ class WorkTurns:
         await self._start(asked=False)
 
     def forget_wait(self) -> bool:
-        """Cancel the wait to start again of a run the usage limit stopped; returns whether
-        there was one."""
+        """Cancel the wait to start again of a run the usage limit stopped, or its start once a
+        halt lifts; returns whether there was one."""
         waiting, self._waiting = self._waiting, None
-        if waiting is None:
-            return False
-        waiting.cancel()
-        return True
+        due, self._due = self._due, False
+        if waiting is not None:
+            waiting.cancel()
+        return due or waiting is not None
+
+    async def stop_turn(self) -> None:
+        """Cancel the run, if any, as the session halts, and wait for it to end, keeping its
+        wait to start again."""
+        await self._turns.close()
+
+    async def lifted(self) -> None:
+        """Start the run again whose wait ended while the session was halted, now the halt is
+        lifted."""
+        if self._due:
+            self._due = False
+            await self._start_now()
 
     async def close(self) -> None:
         """Cancel the run, if any, or its wait to start again, wait for it to end, and start
         nothing from then on."""
         self._closed = True
         waiting = self._waiting
-        if self.forget_wait():
-            assert waiting is not None  # There was a wait to forget.
+        self.forget_wait()
+        if waiting is not None:
             with suppress(asyncio.CancelledError):
                 await waiting
         await self._turns.close()
@@ -188,11 +202,19 @@ class WorkTurns:
         self._waiting = asyncio.create_task(self._start_again(stopped, at))
 
     async def _start_again(self, stopped: "asyncio.Task[object]", at: datetime) -> None:
-        """Once the ``stopped`` turn has ended, wait until ``at``, then start the run again."""
+        """Once the ``stopped`` turn has ended, wait until ``at``, then start the run again, or
+        once the halt lifts if the session is halted then."""
         await asyncio.wait([stopped])
         pause = self._pause
         await pause.sleep(max(0.0, (at - pause.now()).total_seconds()))
         self._waiting = None
+        if self._parts.halted():
+            self._due = True
+            return
+        await self._start_now()
+
+    async def _start_now(self) -> None:
+        """Say the run the usage limit stopped starts again, and start it."""
         self._parts.post(Notice(message=RESUMING_NOTE))
         await self._start(asked=False)
 

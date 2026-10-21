@@ -597,7 +597,7 @@ class WorkspaceHost:
         done: refused while the session is halted, but for ``ResumeStorage``, which resumes
         it."""
         if isinstance(command, ResumeStorage):
-            await self._halt.resume()
+            await self._resume_storage()
             return
         self._halt.check()
         if isinstance(command, Attach):
@@ -646,6 +646,13 @@ class WorkspaceHost:
         await self._views.check_deletable(command.session_id)
         if await self._switcher.change_saved(command):
             await self._views.deleted(command.session_id)
+
+    async def _resume_storage(self) -> None:
+        """Lift the halt, if the writes that failed now work, and start the run whose wait to
+        start again ended while halted."""
+        await self._halt.resume()
+        if not self._halt.halted:
+            await self._turns.lifted()
 
     async def _take_ownership(self, command: TakeOwnership, command_id: str) -> None:
         """Answer the offer of the repository: own it, if ``command`` takes it, send the catalog
@@ -754,7 +761,7 @@ class WorkspaceHost:
         """What :meth:`close` awaits, in order: nothing that could wake the work lane runs once
         its turn is cancelled, as in :meth:`_stop_work`."""
         stops: list[Callable[[], Awaitable[None]]] = [self._halt.close, self._takeover.close]
-        stops += self._work_stops()
+        stops += self._work_stops(self._stop_turns)
         stops += [self._seat.close_retired, self._seat.close]
         if self._desk is not None:
             stops.append(self._desk.stop)
@@ -766,23 +773,33 @@ class WorkspaceHost:
         self._connections.end()
 
     async def _stop_turns(self) -> None:
-        """Cancel the work lane's and the planner's turns, and wait for them to end."""
+        """Cancel the work lane's and the planner's turns, and wait for them to end; the work
+        lane's turns stop for good."""
         await self._turns.close()
+        await self._seat.stop_turn()
+
+    async def _halt_turns(self) -> None:
+        """Cancel the work lane's and the planner's turns as the session halts, and wait for
+        them to end; a run the usage limit stopped still starts again."""
+        await self._turns.stop_turn()
         await self._seat.stop_turn()
 
     async def _stop_work(self) -> None:
         """Cancel the reviews and the startup check, then the work lane's and the planner's
         turns, as the session halts, and wait for them to end; nothing that could wake the work
-        lane runs once its turn is cancelled."""
-        for stop in self._work_stops():
+        lane runs once its turn is cancelled, but a run the usage limit stopped still waits to
+        start again."""
+        for stop in self._work_stops(self._halt_turns):
             await stop()
 
-    def _work_stops(self) -> list[Callable[[], Awaitable[None]]]:
+    def _work_stops(
+        self, stop_turns: Callable[[], Awaitable[None]]
+    ) -> list[Callable[[], Awaitable[None]]]:
         """What :meth:`_stop_work` awaits, in order: the review lane, the startup check, then
-        the work lane's and the planner's turns."""
+        ``stop_turns``, which stops the work lane's and the planner's turns."""
         parts = (self._lane, self._startup)
         stops: list[Callable[[], Awaitable[None]]] = [p.close for p in parts if p is not None]
-        return [*stops, self._stop_turns]
+        return [*stops, stop_turns]
 
     def check_state(self) -> None:
         """Publish the open session's state, if that changed."""

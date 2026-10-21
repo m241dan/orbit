@@ -7,7 +7,9 @@ from datetime import UTC, datetime, timedelta
 from orbit.agent import WorkspaceHost
 from orbit.agent.application.limit_pause import LimitPause
 from orbit.agent.application.ports import UsageSource
+from orbit.agent.application.storage_halt import Failure
 from orbit.agent.domain.agent_task import Limits
+from orbit.agent.domain.storage_halt import FailedWrite
 from orbit.agent.domain.usage import UsageReport
 from orbit.agent.domain.usage_limits import (
     FIX_ERROR_NOTE,
@@ -20,6 +22,7 @@ from orbit.protocol import (
     Event,
     NewSession,
     Notice,
+    ResumeStorage,
     RunTasks,
     TaskSpec,
     TurnEndReason,
@@ -40,6 +43,7 @@ from tests.agent_fakes import (
     idle,
     keeps_claiming,
     payloads,
+    publish,
     run,
     send,
     session_for,
@@ -182,6 +186,98 @@ async def test_closing_while_waiting_ends_the_wait() -> None:
     await asyncio.wait_for(session.close(), 5)
 
     assert not waits.release.is_set()
+
+
+async def halt(session: WorkspaceHost, store: FakeStore) -> list[Event]:
+    """Halt the session with a failing append to ``store``, and its events until it settles."""
+    store.append_failure = "disk full"
+    await publish(session, Notice(message="n"))
+    return await drained(session)
+
+
+async def resume(session: WorkspaceHost, store: FakeStore) -> list[Event]:
+    """Lift the session's halt, appends to ``store`` working again, and its events until it
+    settles."""
+    store.append_failure = None
+    await send(session, ResumeStorage())
+    return await drained(session)
+
+
+async def test_a_wait_kept_through_a_halt_starts_the_run_at_the_reset() -> None:
+    waits, store = Waits(), FakeStore()
+    session, launcher = limited(claims_done, waits=waits, store=store)
+    await asyncio.wait_for(run(session), 5)
+    await halt(session, store)
+    await resume(session, store)
+    events = await asyncio.wait_for(resumed(session, waits), 5)
+    await session.close()
+
+    assert RESUMING_NOTE in notes(events)
+    assert statuses(events) == ["completed"]
+    assert len(launcher.launches) == 2
+
+
+async def test_a_wait_ending_while_halted_starts_the_run_once_the_halt_lifts() -> None:
+    waits, store = Waits(), FakeStore()
+    session, launcher = limited(claims_done, waits=waits, store=store)
+    await asyncio.wait_for(run(session), 5)
+    await halt(session, store)
+    waits.release.set()
+    halted = await drained(session)
+    assert RESUMING_NOTE not in notes(halted)
+    assert len(launcher.launches) == 1
+
+    store.append_failure = None
+    await send(session, ResumeStorage())
+    events = await asyncio.wait_for(events_until(session, idle()), 5)
+    await session.close()
+
+    assert RESUMING_NOTE in notes(events)
+    assert statuses(events) == ["completed"]
+    assert len(launcher.launches) == 2
+
+
+def fails_as_lifted(session: WorkspaceHost) -> None:
+    """Have a write fail while the session's next resume retries the writes that failed."""
+    retry = session._halt._retry
+
+    async def failing() -> Failure | None:
+        session._halt.fail(FailedWrite.EVENT_LOG, RuntimeError("full again"))
+        return await retry()
+
+    session._halt._retry = failing
+
+
+async def test_a_wait_ended_while_halted_starts_nothing_while_a_resume_halts_again() -> None:
+    waits, store = Waits(), FakeStore()
+    session, launcher = limited(claims_done, waits=waits, store=store)
+    await asyncio.wait_for(run(session), 5)
+    await halt(session, store)
+    waits.release.set()
+    await drained(session)
+    fails_as_lifted(session)
+    events = await resume(session, store)
+
+    assert session.storage_halted
+    assert RESUMING_NOTE not in notes(events)
+    assert len(launcher.launches) == 1
+    await session.close()
+
+
+async def test_stopping_a_wait_kept_through_a_halt_cancels_its_restart() -> None:
+    waits, store = Waits(), FakeStore()
+    session, launcher = limited(waits=waits, store=store)
+    await asyncio.wait_for(run(session), 5)
+    await halt(session, store)
+    await resume(session, store)
+    await send(session, CancelTurn())
+    waits.release.set()
+    events = await drained(session)
+    await session.close()
+
+    assert WAIT_CANCELLED_NOTE in notes(events)
+    assert RESUMING_NOTE not in notes(events)
+    assert len(launcher.launches) == 1
 
 
 def test_a_pause_tells_the_time_in_utc_by_default() -> None:
