@@ -1,5 +1,6 @@
 """Where orbit keeps its state and the user's config."""
 
+import os
 from pathlib import Path
 
 import pytest
@@ -64,3 +65,22 @@ def test_the_state_directory_is_expanded_and_made_absolute(
     monkeypatch.chdir(tmp_path)
     assert resolve_state_dir(Path("state"), {}) == tmp_path / "state"
     assert resolve_state_dir(None, {"ORBIT_STATE_DIR": "~/state"}) == Path.home() / "state"
+
+
+# Every test's own directories
+
+
+def test_every_test_has_its_own_state_directory(tmp_path: Path) -> None:
+    assert resolve_state_dir(None, os.environ).is_relative_to(tmp_path)
+
+
+def test_every_test_has_its_own_config_directory(tmp_path: Path) -> None:
+    assert resolve_config_dir(None, os.environ).is_relative_to(tmp_path)
+
+
+def test_every_test_has_its_own_xdg_homes(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.delenv("ORBIT_STATE_DIR")
+    monkeypatch.delenv("ORBIT_CONFIG_DIR")
+
+    assert resolve_state_dir(None, os.environ).is_relative_to(tmp_path)
+    assert resolve_config_dir(None, os.environ).is_relative_to(tmp_path)

@@ -201,22 +201,6 @@ def restore_cwd(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.chdir(start)
 
 
-@pytest.fixture(autouse=True)
-def state(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
-    """The state directory chat keeps its store in, unless told otherwise."""
-    path = tmp_path / "state"
-    monkeypatch.setenv("ORBIT_STATE_DIR", str(path))
-    return path
-
-
-@pytest.fixture(autouse=True)
-def config_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
-    """The config directory chat reads the user's config from, unless told otherwise."""
-    path = tmp_path / "config"
-    monkeypatch.setenv("ORBIT_CONFIG_DIR", str(path))
-    return path
-
-
 @dataclass(frozen=True)
 class Greeted:
     """What a chat's session publishes once greeted, before anything runs: its ``notices``."""

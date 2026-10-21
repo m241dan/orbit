@@ -76,20 +76,6 @@ def project(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[Path]:
     yield path
 
 
-@pytest.fixture(autouse=True)
-def state(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
-    path = tmp_path / "state"
-    monkeypatch.setenv("ORBIT_STATE_DIR", str(path))
-    return path
-
-
-@pytest.fixture(autouse=True)
-def config_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
-    path = tmp_path / "config"
-    monkeypatch.setenv("ORBIT_CONFIG_DIR", str(path))
-    return path
-
-
 @dataclass
 class Frontend:
     """A frontend run on a thread of its own against the ``orbit serve`` whose run file is in

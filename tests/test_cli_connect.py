@@ -48,21 +48,20 @@ class FakeApp:
 
 
 @pytest.fixture(autouse=True)
-def fakes(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def fakes(monkeypatch: pytest.MonkeyPatch) -> None:
     def no_backend(*args: Any, **kwargs: Any) -> None:
         raise AssertionError("A connected chat builds no backend.")
 
     monkeypatch.setattr("orbit.cli.chat.OrbitApp", FakeApp)
     monkeypatch.setattr("orbit.cli.chat.WebSocketSession", FakeClient)
     monkeypatch.setattr("orbit.cli.chat._backend", no_backend)
-    monkeypatch.setenv("ORBIT_CONFIG_DIR", str(tmp_path / "config"))
     FakeApp.built = []
 
 
 @pytest.fixture
-def token_file(tmp_path: Path) -> Path:
+def token_file(config_dir: Path) -> Path:
     """The token file in the config directory."""
-    path = tmp_path / "config" / "token"
+    path = config_dir / "token"
     path.parent.mkdir()
     path.write_text("the-token\n")
     return path

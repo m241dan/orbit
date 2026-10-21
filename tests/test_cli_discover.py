@@ -99,18 +99,10 @@ def project(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[Path]:
     yield path
 
 
-@pytest.fixture(autouse=True)
-def state(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
-    path = tmp_path / "state"
-    monkeypatch.setenv("ORBIT_STATE_DIR", str(path))
-    return path
-
-
 @pytest.fixture
-def token_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+def token_file(config_dir: Path) -> Path:
     """The token file in the config directory."""
-    monkeypatch.setenv("ORBIT_CONFIG_DIR", str(tmp_path / "config"))
-    path = tmp_path / "config" / "token"
+    path = config_dir / "token"
     path.parent.mkdir()
     path.write_text("the-token\n")
     return path

@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from orbit.agent.domain.usage import UsageFetch, UsageUnavailable
+from orbit.agent.external.directories import CONFIG_DIR_VARIABLE, STATE_DIR_VARIABLE
 from orbit.agent.external.usage_api import UsageApi
 
 # The tab strip's underline slides for 0.3 s on each activation, and the pilot waits for it;
@@ -42,6 +43,29 @@ class OfflineUsageApi(UsageApi):
 def offline_usage(monkeypatch: pytest.MonkeyPatch) -> None:
     """Have the CLI fetch its usage limits with :class:`OfflineUsageApi`."""
     monkeypatch.setattr("orbit.cli.backend.UsageApi", OfflineUsageApi)
+
+
+@pytest.fixture(autouse=True)
+def orbit_directories(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Point orbit's state and config directories, and the XDG homes they fall back to, into
+    ``tmp_path``, so no test reads or writes the real user's. A test can still set or unset
+    each variable itself."""
+    monkeypatch.setenv(STATE_DIR_VARIABLE, str(tmp_path / "state"))
+    monkeypatch.setenv(CONFIG_DIR_VARIABLE, str(tmp_path / "config"))
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "xdg-state"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg-config"))
+
+
+@pytest.fixture
+def state(tmp_path: Path) -> Path:
+    """The state directory every test has, unless it sets its own."""
+    return tmp_path / "state"
+
+
+@pytest.fixture
+def config_dir(tmp_path: Path) -> Path:
+    """The config directory every test has, unless it sets its own."""
+    return tmp_path / "config"
 
 
 @pytest.fixture
