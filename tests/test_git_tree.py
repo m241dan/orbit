@@ -13,6 +13,7 @@ import pytest
 from orbit.agent.domain.checks import Setup
 from orbit.agent.external import git_tree
 from orbit.agent.external.git_tree import GitCoderTree
+from orbit.agent.external.processes import run_process
 from tests.git_repo import commit_file, git
 
 
@@ -108,6 +109,20 @@ async def test_a_failing_commit_raises_with_gits_message(repo: Path) -> None:
         await tree.commit("Add b")
 
 
+async def test_commit_raises_when_git_cant_tell_whats_staged(repo: Path) -> None:
+    tree = GitCoderTree(str(repo))
+    path = Path(await tree.prepare(keep=False))
+    commit_file(path, "b.txt", "two\n", "Add b")
+    before = git(path, "rev-parse", "HEAD")
+    tree_id = git(path, "rev-parse", "HEAD^{tree}")
+    (repo / ".git" / "objects" / tree_id[:2] / tree_id[2:]).unlink()  # HEAD can't be read.
+    (path / "c.txt").write_text("three\n")
+
+    with pytest.raises(RuntimeError, match=r"git diff failed: .*bad tree object"):
+        await tree.commit("Add c")
+    assert git(path, "rev-parse", "HEAD") == before
+
+
 async def test_integrate_fast_forwards_the_checked_out_base(repo: Path) -> None:
     tree = GitCoderTree(str(repo))
     path = Path(await tree.prepare(keep=False))
@@ -167,6 +182,7 @@ async def test_a_rebase_failing_without_conflicts_raises_with_gits_message(repo:
     with pytest.raises(RuntimeError, match=r"(?s)git rebase failed: .*c\.txt") as raised:
         await tree.integrate()
     assert "no rebase in progress" not in str(raised.value)
+    assert not (repo / ".git" / "worktrees" / "coder" / "rebase-merge").exists()
     assert log(path)[0] == "Add b"
     assert (path / "c.txt").read_text() == "in the way\n"
 
@@ -243,6 +259,64 @@ async def test_a_rebase_cancelled_while_running_is_aborted(
     assert not (repo / ".git" / "worktrees" / "coder" / "rebase-merge").exists()
     assert git(path, "rev-parse", "HEAD") == before
     assert git(path, "status", "--porcelain") == ""
+
+
+async def test_a_rebase_cancelled_while_handling_its_conflict_is_still_aborted(
+    monkeypatch: pytest.MonkeyPatch, repo: Path
+) -> None:
+    tree = GitCoderTree(str(repo))
+    path = Path(await tree.prepare(keep=False))
+    (path / "a.txt").write_text("orbit\n")
+    await tree.commit("Orbit edits a")
+    before = git(path, "rev-parse", "HEAD")
+    commit_file(repo, "a.txt", "user\n", "user edits a")
+    real = run_process
+    listing, aborting, release = asyncio.Event(), asyncio.Event(), asyncio.Event()
+
+    async def slow_conflict_handling(command: Sequence[str], cwd: Path | str) -> tuple[int, bytes]:
+        if command[1] == "diff":
+            listing.set()
+            await asyncio.Event().wait()
+        if tuple(command[1:]) == ("rebase", "--abort"):
+            aborting.set()
+            await release.wait()
+        return await real(command, cwd)
+
+    monkeypatch.setattr(git_tree, "run_process", slow_conflict_handling)
+    task = asyncio.create_task(tree.integrate())
+    await listing.wait()
+    task.cancel()
+    await aborting.wait()
+    task.cancel()  # Again, while it aborts: the abort still finishes.
+    await asyncio.sleep(0)
+    release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert not (repo / ".git" / "worktrees" / "coder" / "rebase-merge").exists()
+    assert git(path, "rev-parse", "HEAD") == before
+    assert git(path, "status", "--porcelain") == ""
+
+
+async def test_a_failing_abort_doesnt_hide_why_the_rebase_failed(
+    monkeypatch: pytest.MonkeyPatch, repo: Path
+) -> None:
+    tree = GitCoderTree(str(repo))
+    path = Path(await tree.prepare(keep=False))
+    (path / "a.txt").write_text("orbit\n")
+    await tree.commit("Orbit edits a")
+    commit_file(repo, "a.txt", "user\n", "user edits a")
+    real = run_process
+
+    async def failing(command: Sequence[str], cwd: Path | str) -> tuple[int, bytes]:
+        if command[1] == "diff":
+            return 128, b"out of memory"
+        if tuple(command[1:]) == ("rebase", "--abort"):
+            return 128, b"abort failed too"
+        return await real(command, cwd)
+
+    monkeypatch.setattr(git_tree, "run_process", failing)
+    with pytest.raises(RuntimeError, match="out of memory"):
+        await tree.integrate()
 
 
 async def test_prepare_aborts_a_rebase_an_earlier_run_left_in_progress(repo: Path) -> None:

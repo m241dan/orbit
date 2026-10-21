@@ -27,8 +27,8 @@ IGNORE_HEADER = "# Created by orbit's verification checks:"
 SNAPSHOT_PREFIXES = ("snapshot-", "review-")
 
 
-async def _run(command: Sequence[str], cwd: Path) -> tuple[bool, str]:
-    """Run ``command`` in ``cwd``; returns whether it succeeded and its combined output.
+async def _run_status(command: Sequence[str], cwd: Path) -> tuple[int, str]:
+    """Run ``command`` in ``cwd``; returns its exit status and its combined output.
 
     Raises ``RuntimeError`` when it can't be started, such as in a directory that isn't there.
     """
@@ -36,7 +36,16 @@ async def _run(command: Sequence[str], cwd: Path) -> tuple[bool, str]:
         returncode, output = await run_process(command, cwd)
     except OSError as error:
         raise RuntimeError(f"{' '.join(command[:2])} failed to start in {cwd}: {error}") from error
-    return returncode == 0, output.decode(errors="replace").strip()
+    return returncode, output.decode(errors="replace").strip()
+
+
+async def _run(command: Sequence[str], cwd: Path) -> tuple[bool, str]:
+    """Run ``command`` in ``cwd``; returns whether it succeeded and its combined output.
+
+    Raises ``RuntimeError`` when it can't be started, such as in a directory that isn't there.
+    """
+    returncode, output = await _run_status(command, cwd)
+    return returncode == 0, output
 
 
 def _fingerprint(setup: Setup, path: Path) -> str:
@@ -127,8 +136,10 @@ class GitCoderTree:
     async def commit(self, message: str) -> bool:
         path = await self._path()
         await self._git(path, "add", "-A")
-        nothing_staged, _ = await _run(("git", "diff", "--cached", "--quiet"), path)
-        if nothing_staged:
+        status, output = await _run_status(("git", "diff", "--cached", "--quiet"), path)
+        if status not in (0, 1):  # 0: nothing staged, 1: something is.
+            raise RuntimeError(f"git diff failed: {output}")
+        if status == 0:
             return False
         await self._git(path, "commit", "-q", "-m", message)
         return True
@@ -303,11 +314,26 @@ class GitCoderTree:
                 return Merge("rebased")
             conflicts = await self._git(path, "diff", "--name-only", "--diff-filter=U")
         finally:  # Cancelled or failed too: never leave the tree mid-rebase.
-            await self._abort_rebase(path)
+            await self._abort_rebase_shielded(path)
         if not conflicts:
             raise RuntimeError(f"git rebase failed: {output}")
         files = ", ".join(conflicts.splitlines())
         return Merge("conflict", f"The work on {BRANCH} conflicts with {self._base}: {files}.")
+
+    async def _abort_rebase_shielded(self, path: Path) -> None:
+        """Abort the rebase in progress in ``path``, if there is one, finishing even when
+        cancelled, and ignoring failures so the error that stopped it is the one raised."""
+        aborting = asyncio.ensure_future(self._try_abort_rebase(path))
+        try:
+            await asyncio.shield(aborting)
+        except asyncio.CancelledError:
+            await asyncio.wait([aborting])
+            raise
+
+    async def _try_abort_rebase(self, path: Path) -> None:
+        """Abort the rebase in progress in ``path``, if there is one, ignoring failures."""
+        with contextlib.suppress(RuntimeError):
+            await self._abort_rebase(path)
 
     async def _abort_rebase(self, path: Path) -> None:
         """Abort the rebase in progress in ``path``, if there is one."""
