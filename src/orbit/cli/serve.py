@@ -178,7 +178,7 @@ def _serve_until_stopped(parts: "_ServeParts", profile: Path | None, user_config
 def _absolute(path: Path | None) -> Path | None:
     """``path`` with ``~`` expanded, taken from the directory ``orbit serve`` started in if
     relative; ``None`` if not given."""
-    return path.expanduser().absolute() if path else None
+    return path.expanduser().resolve() if path else None
 
 
 def _server_settings(config_dir: Path, given: Mapping[str, object]) -> ServerSettings:

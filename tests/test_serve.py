@@ -788,6 +788,30 @@ def test_serve_takes_relative_tls_flags_from_where_it_was_started(
     assert str(frontend.run_file["url"]).startswith("wss://127.0.0.1:")
 
 
+def test_serve_takes_a_relative_client_ca_flag_from_where_it_was_started_and_expands_home(
+    monkeypatch: pytest.MonkeyPatch, project: Path, state: Path, config_dir: Path, tmp_path: Path
+) -> None:
+    home = tmp_path / "home"
+    certs = home / "certs"
+    certs.mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home))
+    ca = make_ca(certs)
+    make_server(ca, certs)
+    client = make_client(ca, certs)
+    monkeypatch.chdir(certs)
+    frontend = Frontend(state, config_dir, trust=_trusting(ca, client))
+    flags = ["--tls", "mtls", "--cert", "~/certs/server.pem", "--key", "server-key.pem"]
+    output = served(frontend, *flags, "--client-ca", "ca.pem", "--port", "0", added=(str(project),))
+
+    assert [type(e) for e in frontend.events] == ATTACHED
+    assert f"Frontends show a client certificate {certs / 'ca.pem'} signed." in output
+    assert frontend.run_file["tls"] == {
+        "mutual": True,
+        "ca": str(certs / "ca.pem"),
+        "hostname": "127.0.0.1",
+    }
+
+
 def test_serve_takes_tls_files_in_the_config_file_from_home_and_the_config_directory(
     monkeypatch: pytest.MonkeyPatch, state: Path, config_dir: Path, tmp_path: Path
 ) -> None:
