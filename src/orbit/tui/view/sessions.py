@@ -19,6 +19,7 @@ from orbit.protocol import (
 )
 from orbit.tui.view.common import SPINNER_FRAMES, STATUS_ICONS
 from orbit.tui.view.tasks import usage_label
+from orbit.tui.view.workspaces import workspace_at
 
 SESSIONS_TITLE = "Sessions"
 NEW_SESSION_LABEL = "New session"
@@ -70,8 +71,8 @@ def chosen_workspace(
 ) -> WorkspaceEntry | None:
     """The workspace among ``workspaces`` a frontend opens on: the one at the ``repository`` it
     runs in, if any is, else the first; none if there are none."""
-    at_repository = (entry for entry in workspaces if repository and entry.path == repository)
-    return next(at_repository, next(iter(workspaces), None))
+    at_repository = workspace_at(workspaces, repository)
+    return at_repository or next(iter(workspaces), None)
 
 
 def workspace_sessions(

@@ -1,6 +1,6 @@
 """The list of workspaces a control plane serves, to pick one from, add one or remove one."""
 
-from collections.abc import Collection, Sequence
+from collections.abc import Sequence
 from pathlib import PurePosixPath
 from typing import Literal
 
@@ -27,20 +27,27 @@ def workspace_rows(
 ) -> tuple[WorkspaceRow, ...]:
     """The rows the picker lists: adding the ``repository`` the frontend runs in first, if
     there's one and none of ``workspaces`` is at it, then ``workspaces``, then adding a path."""
-    served = any(entry.path == repository for entry in workspaces)
+    served = workspace_at(workspaces, repository) is not None
     first = [] if repository is None or served else [AddWorkspace(path=repository)]
     return (*first, *workspaces, ADD_PATH)
+
+
+def workspace_at(
+    workspaces: Sequence[WorkspaceEntry], repository: str | None
+) -> WorkspaceEntry | None:
+    """The workspace among ``workspaces`` at the ``repository`` the frontend runs in; none
+    without a repository, even for a workspace without a path."""
+    if repository is None:
+        return None
+    return next((entry for entry in workspaces if entry.path == repository), None)
 
 
 def preselected(rows: Sequence[WorkspaceRow], repository: str | None) -> int:
     """The index of the row of the workspace at the ``repository`` the frontend runs in among
     ``rows``, else the first's."""
-    at_repository = (
-        index
-        for index, row in enumerate(rows)
-        if isinstance(row, WorkspaceEntry) and row.path == repository
-    )
-    return next(at_repository, 0)
+    entries = [row for row in rows if isinstance(row, WorkspaceEntry)]
+    entry = workspace_at(entries, repository)
+    return 0 if entry is None else rows.index(entry)
 
 
 def row_key(row: WorkspaceRow) -> str:
@@ -77,17 +84,15 @@ def remove_message(entry: WorkspaceEntry) -> str:
     return f'Stop serving "{entry.label}"? Its sessions are kept, for when it\'s added again.'
 
 
-def added_workspace(
-    workspaces: Sequence[WorkspaceEntry], path: str, before: Collection[str]
-) -> WorkspaceEntry | None:
+def added_workspace(workspaces: Sequence[WorkspaceEntry], path: str) -> WorkspaceEntry | None:
     """The workspace among ``workspaces`` that adding ``path`` added: the deepest whose path is
-    ``path`` or contains it, as a server takes a path inside a repository for its top level,
-    else the first whose id isn't among those listed ``before``; none if neither is listed
-    yet."""
+    ``path`` or contains it, as a server takes a path inside a repository for its top level;
+    none if it isn't listed yet. A workspace new since then elsewhere, as another frontend
+    adds, isn't it."""
     deepest = max(workspaces, key=lambda entry: _depth_in(entry.path, path), default=None)
     if deepest is not None and _depth_in(deepest.path, path):
         return deepest
-    return next((entry for entry in workspaces if entry.id not in before), None)
+    return None
 
 
 def _depth_in(workspace: str | None, path: str) -> int:

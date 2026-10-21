@@ -12,6 +12,7 @@ from orbit.tui.view.workspaces import (
     row_key,
     row_label,
     with_states,
+    workspace_at,
     workspace_label,
     workspace_rows,
     workspaces_hint,
@@ -44,6 +45,21 @@ def test_without_one_at_the_repository_the_first_row_is_preselected() -> None:
     assert preselected((A, B, ADD_PATH), None) == 0
 
 
+def test_without_a_repository_a_workspace_without_a_path_is_not_preselected() -> None:
+    pathless = WorkspaceEntry(id="p", label="local", path=None, sessions=())
+    assert preselected((A, pathless, ADD_PATH), None) == 0
+
+
+def test_the_workspace_at_a_repository_is_the_one_at_its_path() -> None:
+    assert workspace_at((A, B), "/src/repoB") == B
+    assert workspace_at((A, B), "/src/repoC") is None
+
+
+def test_no_workspace_is_at_no_repository_even_one_without_a_path() -> None:
+    pathless = WorkspaceEntry(id="p", label="local", path=None, sessions=())
+    assert workspace_at((pathless, A), None) is None
+
+
 def test_a_workspace_row_names_its_path_and_active_session_with_its_state() -> None:
     assert workspace_label(A) == "repoA · /src/repoA · today, idle"
 
@@ -71,40 +87,40 @@ def test_removing_asks_about_the_workspace_by_its_label() -> None:
 
 
 def test_the_workspace_added_is_the_one_at_its_path() -> None:
-    assert added_workspace((A, B), "/src/repoB", {"a", "b"}) == B
+    assert added_workspace((A, B), "/src/repoB") == B
 
 
-def test_the_workspace_added_is_else_the_new_one() -> None:
-    assert added_workspace((A, B), "/src/repoC/sub", {"a"}) == B
+def test_a_new_workspace_elsewhere_is_not_the_one_added() -> None:
+    assert added_workspace((A, B), "/src/repoC/sub") is None
 
 
 def test_no_workspace_is_added_until_one_is_listed() -> None:
-    assert added_workspace((A,), "/src/repoB/sub", {"a"}) is None
+    assert added_workspace((A,), "/src/repoB/sub") is None
 
 
 def test_the_workspace_added_is_the_one_containing_the_path() -> None:
-    assert added_workspace((B, A), "/src/repoA/sub", {"a", "b"}) == A
-    assert added_workspace((B, A), "/src/repoA/", {"a", "b"}) == A
+    assert added_workspace((B, A), "/src/repoA/sub") == A
+    assert added_workspace((B, A), "/src/repoA/") == A
 
 
 def test_the_deepest_workspace_containing_the_path_is_added() -> None:
     inner = WorkspaceEntry(id="i", label="inner", path="/src/repoA/inner", sessions=())
-    assert added_workspace((A, inner), "/src/repoA/inner/sub", {"a", "i"}) == inner
+    assert added_workspace((A, inner), "/src/repoA/inner/sub") == inner
 
 
 def test_a_sibling_with_a_longer_name_does_not_contain_the_path() -> None:
     sibling = WorkspaceEntry(id="ab", label="repoAB", path="/src/repoAB", sessions=())
-    assert added_workspace((A, sibling), "/src/repoAB/sub", {"a", "ab"}) == sibling
-    assert added_workspace((A,), "/src/repoAB", {"a"}) is None
+    assert added_workspace((A, sibling), "/src/repoAB/sub") == sibling
+    assert added_workspace((A,), "/src/repoAB") is None
 
 
 def test_the_new_workspace_containing_the_path_is_added_over_another_new_one() -> None:
-    assert added_workspace((A, B), "/src/repoB/sub", set()) == B
+    assert added_workspace((A, B), "/src/repoB/sub") == B
 
 
 def test_a_workspace_without_a_path_contains_none() -> None:
     pathless = WorkspaceEntry(id="p", label="local", path=None, sessions=())
-    assert added_workspace((pathless,), "/src/repoA", {"p"}) is None
+    assert added_workspace((pathless,), "/src/repoA") is None
 
 
 def test_session_states_change_in_every_workspace() -> None:

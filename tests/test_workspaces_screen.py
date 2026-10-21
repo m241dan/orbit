@@ -1,6 +1,7 @@
 """Picking a workspace: the picker shown at startup over a link and on ctrl+w, adding the
 repository or a path, removing a workspace, and moving to another workspace's sessions."""
 
+from textual.containers import Vertical
 from textual.pilot import Pilot
 from textual.widgets import Input, OptionList
 
@@ -20,6 +21,7 @@ from orbit.protocol import (
 )
 from orbit.tui import Opening, OrbitApp
 from orbit.tui.sessions import SessionsScreen
+from orbit.tui.view.workspaces import STARTUP_HINT
 from orbit.tui.widgets import ConfirmScreen
 from orbit.tui.workspaces import WorkspacesScreen
 from tests.tui_fakes import FakeLink, FakeSession, feed_events
@@ -461,3 +463,29 @@ async def test_removing_the_workspace_viewed_from_the_picker_keeps_one_picker() 
         await feed_events(session_of(app), pilot, catalog(B))
         assert [type(s) for s in app.screen_stack[1:]] == [WorkspacesScreen]
         assert session_of(app).commands[-1] == RemoveWorkspace(workspace="A")
+
+
+async def test_removing_the_workspace_viewed_from_the_picker_leaves_one_escape_quits() -> None:
+    app = connected()
+    async with app.run_test() as pilot:
+        await feed_events(session_of(app), pilot, SERVED)
+        await pilot.press("enter", "enter", "ctrl+w", "x", "y")
+        await feed_events(session_of(app), pilot, catalog(B))
+        screen = workspaces(app)
+        assert screen.startup
+        assert screen.query_one(Vertical).border_subtitle == STARTUP_HINT
+        await pilot.press("escape")
+        await pilot.pause()
+    assert app.return_code == 0
+
+
+async def test_another_workspace_listed_after_adding_one_served_is_not_picked() -> None:
+    app = connected()
+    async with app.run_test() as pilot:
+        session = session_of(app)
+        await feed_events(session, pilot, SERVED)
+        # The server serves /src/repoA already, reached here through a link.
+        await pilot.press("j", "enter", *"/home/me/repoA", "enter")
+        await accept_last(app, pilot)
+        await feed_events(session, pilot, catalog(B, A, C))
+        assert rows(workspaces(app))[-2] == "repoC · /src/repoC · new, idle"

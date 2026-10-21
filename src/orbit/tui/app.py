@@ -769,7 +769,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         was_on = self._sessions.workspace
         self._sessions.follow(catalog)
         if was_on is not None and self._sessions.workspace is None:
-            self._workspaces.open()
+            self._workspaces.lost()
 
     def _label_triggers(self, labels: dict[str, str | None]) -> None:
         """Label each trigger's key in the footer with its label in ``labels``, hiding those

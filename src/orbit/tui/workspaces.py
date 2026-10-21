@@ -2,7 +2,6 @@
 one."""
 
 from collections.abc import Awaitable, Callable, Sequence
-from dataclasses import dataclass
 from typing import ClassVar
 
 from textual import on
@@ -42,15 +41,6 @@ Change = Callable[[AddWorkspace | RemoveWorkspace, Awaited], Awaitable[object]]
 it returns is ignored."""
 Chosen = Callable[[str, bool], Awaitable[None]]
 """Takes the id of the workspace picked, and whether it was picked at startup."""
-
-
-@dataclass(frozen=True)
-class _Adding:
-    """Adding the workspace at ``path``, while the workspaces with the ids ``before`` were
-    listed."""
-
-    path: str
-    before: frozenset[str]
 
 
 class WorkspacesScreen(ListScreen[str | None]):
@@ -98,7 +88,7 @@ class WorkspacesScreen(ListScreen[str | None]):
         self.repository = repository
         self.startup = startup
         self._change = change
-        self._adding: _Adding | None = None  # The workspace added, until it's listed.
+        self._adding: str | None = None  # The path added, until its workspace is listed.
 
     @property
     def rows(self) -> tuple[WorkspaceRow, ...]:
@@ -155,7 +145,7 @@ class WorkspacesScreen(ListScreen[str | None]):
         adding = self._adding
         if adding is None or not self.is_active:
             return False
-        entry = added_workspace(self.workspaces, adding.path, adding.before)
+        entry = added_workspace(self.workspaces, adding)
         if entry is None:
             return False
         self._adding = None
@@ -182,17 +172,16 @@ class WorkspacesScreen(ListScreen[str | None]):
     async def _add(self, path: str) -> None:
         """Send adding the workspace at ``path``, picking it once it's accepted and listed."""
         self._show_note(None)
-        adding = _Adding(path, frozenset(entry.id for entry in self.workspaces))
-        awaited = Awaited(accepted=lambda: self._added(adding), why=self._refused)
+        awaited = Awaited(accepted=lambda: self._added(path), why=self._refused)
         await self._change(AddWorkspace(path=path), awaited)
 
-    def _added(self, adding: _Adding) -> None:
-        """Pick the workspace ``adding`` adds, now accepted, once it's listed, unless this
+    def _added(self, path: str) -> None:
+        """Pick the workspace adding ``path`` adds, now accepted, once it's listed, unless this
         screen is gone."""
         if not self.is_attached:
             return
         self._typing(False)
-        self._adding = adding
+        self._adding = path
         self._pick_added()
 
     def _refused(self, why: str) -> None:
@@ -221,6 +210,12 @@ class WorkspacesScreen(ListScreen[str | None]):
 
         confirm = ConfirmScreen(REMOVE_TITLE, remove_message(row), REMOVE_YES)
         self.app.push_screen(confirm, answered)
+
+    def must_pick(self) -> None:
+        """Have escape quit orbit, as at startup, now there's nothing to go back to."""
+        self.startup = True
+        adding = self.query_one(Input).display
+        self.query_one(Vertical).border_subtitle = workspaces_hint(startup=True, adding=adding)
 
     def action_back(self) -> None:
         if self.query_one(Input).display:
@@ -288,6 +283,13 @@ class WorkspacesHost:
 
         self.shown = WorkspacesScreen(self.workspaces, self._repository, self._change, startup)
         self._push(self.shown, picked)
+
+    def lost(self) -> None:
+        """Let the user pick a workspace now the app is on none: open the picker, or have
+        escape quit the one shown, as closing it would leave the app on none."""
+        if self.shown is not None:
+            self.shown.must_pick()
+        self.open()
 
     def _refresh(self) -> None:
         """Show the workspaces in the picker, if it's shown."""
