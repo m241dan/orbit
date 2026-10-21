@@ -1440,3 +1440,16 @@ def test_the_in_process_setup_closes_the_store_after_its_block(
         raise RuntimeError("broken")
     [store] = made.stores
     assert store._closed
+
+
+def test_chat_closes_the_store_when_the_app_fails(
+    launched: list[WorkspaceHost], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fails(tui: object, profile: Path | None) -> None:
+        raise RuntimeError("broken")
+
+    monkeypatch.setattr("orbit.cli.chat._launch", fails)
+    result = runner.invoke(app, ["chat", "-C", str(tmp_path)])
+
+    assert isinstance(result.exception, RuntimeError)
+    assert store_threads() == []

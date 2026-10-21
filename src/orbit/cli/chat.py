@@ -104,10 +104,11 @@ def chat(
     """
     user_config = resolve_config_dir(config_dir, os.environ)
     given = _ClientFiles(token_file, ca, cert, key)
+    flags = _Backend(model, tools, verify, worktree, review, usage, new, name)
     target = _target(connect, remote, user_config, given)
     if target is not None:
         _refuse_local(local, target.flag)
-        joining = _joining(ctx, target.files, user_config, _opening(new, name))
+        joining = _joining(ctx, target.files, user_config, _opening(flags))
         where = f"not orbit chat {target.flag}"
         _join(replace(joining, repository=str(_workspace(workspace))), target.url, where)
         return
@@ -115,17 +116,14 @@ def chat(
     root = _workspace(workspace)
     found = None if local else _discovered(state, given, user_config)
     if found is not None:
-        joining = _joining(ctx, found.files, user_config, _opening(new, name))
+        joining = _joining(ctx, found.files, user_config, _opening(flags))
         joining = replace(joining, repository=str(root))
         where = f"which runs at {found.url}; or pass --local to run one here"
         _join(joining, found.url, where)
         return
     # The only place the backend and frontend meet, and where the backend's external
-    # adapters are plugged into its ports. Every adapter works relative to the current
-    # directory, so move into the workspace before anything reads the filesystem.
+    # adapters are plugged into its ports.
     profile = profile.expanduser().resolve() if profile else None
-    os.chdir(root)
-    flags = _Backend(model, tools, verify, worktree, review, usage, new, name)
     directories = _Directories(root, state, user_config)
     picking = not flags.fresh
     with _in_process(flags, directories, pick_session=picking, make=_backend) as backend:
@@ -264,9 +262,9 @@ def _joining(
     return _certified(joining, files.cert, files.key, files.token_file)
 
 
-def _opening(new: bool, name: str | None) -> NewSession | None:
-    """The new session ``new`` or ``name`` ask a joining chat to open, if any."""
-    return NewSession(name=name) if new or name is not None else None
+def _opening(flags: _Backend) -> NewSession | None:
+    """The new session the backend ``flags`` ask a joining chat to open, if any."""
+    return NewSession(name=flags.name) if flags.fresh else None
 
 
 def _refuse_local(local: bool, flag: str) -> None:

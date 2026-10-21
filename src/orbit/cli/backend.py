@@ -1,6 +1,7 @@
 """Wiring the backend's external adapters into its ports, for chat and serve."""
 
 import asyncio
+import os
 import secrets
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import ExitStack, contextmanager
@@ -141,14 +142,17 @@ class _InProcess:
 def _in_process(
     flags: _Backend, directories: _Directories, *, pick_session: bool, make: _MakeBackend
 ) -> Iterator[_InProcess]:
-    """Run the block with the backend ``flags`` ask for, made by ``make`` in ``directories``,
-    holding the workspace lock if no other orbit does, and listing the saved sessions to pick
-    from if ``pick_session``; yields the backend set up, then closes its store and lets the
-    lock go.
+    """Run the block in the workspace, with the backend ``flags`` ask for, made by ``make`` in
+    ``directories``, holding the workspace lock if no other orbit does, and listing the saved
+    sessions to pick from if ``pick_session``; yields the backend set up, then closes its store
+    and lets the lock go.
 
     Exits with status 2 if the lock can't be made, a configuration is invalid or the store
     can't be opened.
     """
+    # Every adapter works relative to the current directory, so move into the workspace
+    # before anything reads the filesystem.
+    os.chdir(directories.root)
     with _repository_lock(directories.root) as (lock, owner):
         backend = replace(flags, owner=owner, lock=lock)
         made = make(backend, directories, pick_session=pick_session)

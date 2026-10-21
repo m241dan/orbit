@@ -990,3 +990,21 @@ async def test_the_first_signal_stops_serving_and_a_second_ctrl_c_exits_at_once(
         for number in (signal.SIGINT, signal.SIGTERM):
             loop.remove_signal_handler(number)
     assert exits == [130]
+
+
+def test_serve_closes_the_store_when_a_workspace_it_adds_cant_be_served(project: Path) -> None:
+    (project / ".orbit").mkdir()
+    (project / ".orbit" / "config.toml").write_text("not = [toml\n")
+    result = runner.invoke(app, ["serve", *QUIET, "--add", ".", "--port", "0"])
+
+    assert result.exit_code == 2
+    assert "Invalid orbit configuration" in result.stderr
+    assert not [t for t in threading.enumerate() if t.name.startswith("orbit-sqlite")]
+
+
+def test_serve_closes_the_store_when_it_cant_listen() -> None:
+    with socket.create_server(("127.0.0.1", 0)) as taken:
+        port = taken.getsockname()[1]
+        result = runner.invoke(app, ["serve", *QUIET, "--port", str(port)])
+    assert result.exit_code == 2
+    assert not [t for t in threading.enumerate() if t.name.startswith("orbit-sqlite")]
