@@ -158,14 +158,19 @@ class TaskBoard:
         skip: Collection[str] = (),
         roles: Collection[str] | None = None,
         exclude: Collection[str] = (),
+        first: str | None = None,
     ) -> str | None:
         """The first task that isn't settled or in ``skip``, if any: only in ``roles`` if
-        given, and never in ``exclude``."""
-        for state in self._tasks:
-            unsettled = state.status not in SETTLED and state.id not in skip
-            if unsettled and _in_roles(state.task.role, roles, exclude):
-                return state.id
-        return None
+        given, and never in ``exclude``. Task ``first``, if given, comes before the others
+        while it's one of them."""
+        runnable = [
+            state.id
+            for state in self._tasks
+            if state.status not in SETTLED
+            and state.id not in skip
+            and _in_roles(state.task.role, roles, exclude)
+        ]
+        return first if first in runnable else next(iter(runnable), None)
 
     def has_waiting(self, role: str) -> bool:
         """Whether a task in ``role`` is still to run, or running."""

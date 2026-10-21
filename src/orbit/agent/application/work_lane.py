@@ -70,10 +70,15 @@ class WorkLane:
         self._fallbacks = FallbackFixes()
         self._stopped = False  # The user stopped the run going now.
         self._current: str | None = None  # The task running, until the review lane hears of it.
+        # The task a run stopped at, which the next one runs first: a fix must run before
+        # another task puts its work aside.
+        self._resume: str | None = None
 
     def reset(self) -> None:
-        """Forget the fix counts of the session left, whose task ids the next one reuses."""
+        """Forget the fix counts and the task a run stopped at of the session left, whose task
+        ids the next one reuses."""
         self._fallbacks = FallbackFixes()
+        self._resume = None
 
     def stopped_by_user(self) -> None:
         """The run going now is being cancelled because the user stopped it, which the task it
@@ -87,23 +92,26 @@ class WorkLane:
         return self._current or self.next_work()
 
     def next_work(self, tried: Collection[str] = ()) -> str | None:
-        """The next task for the work lane; reviews have their own lane, if there is one."""
+        """The next task for the work lane, the one a run stopped at first; reviews have their
+        own lane, if there is one."""
         exclude = REVIEW_ROLES if self._review is not None else ()
-        return self._board.next_runnable(skip=tried, exclude=exclude)
+        return self._board.next_runnable(skip=tried, exclude=exclude, first=self._resume)
 
     async def run(self) -> RunEnd:
-        """Run the tasks waiting, in order, until none are left, the user stops one, or one
-        ends in error for the usage limit or as a fix; returns which. Any other cancel goes on
-        once the task running has ended."""
+        """Run the tasks waiting, in order but the one the last run stopped at first, until
+        none are left, the user stops one, or one ends in error for the usage limit or as a fix;
+        returns which. Any other cancel goes on once the task running has ended."""
         tried: set[str] = set()
         self._stopped = False
         while (task_id := self.next_work(tried)) is not None:
             tried.add(task_id)
+            self._resume = None
             fixing = self._board.get(task_id).fixes is not None
             outcome = await self._run_task(task_id)
             if outcome.status == "cancelled":
                 return "cancelled"
             if outcome.status == "error" and (end := await self._stop_at(outcome, fixing)):
+                self._resume = task_id
                 return end
         return "finished"
 

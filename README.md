@@ -443,6 +443,7 @@ with `ctrl+p`) shows the same total; a new session starts with none, and shows n
 counts are rounded as in a turn's rule (see above). A failed task doesn't stop the rest, but for
 two: a fix task that ends in error stops the run, so the work it fixes stays in the coder's tree
 until the fix runs again, and so does a task whose agent hit Claude's usage limit (see below);
+the next run starts with the task it stopped at, ahead of any that failed before it;
 `ctrl+s` cancels the running task (stopping
 its agent) and skips the remaining ones. Running again skips tasks that completed, failed
 verification or were given up on, and editing a task makes it pending again. Tasks added while a

@@ -29,6 +29,7 @@ from tests.agent_fakes import (
     START,
     Call,
     FakeStore,
+    FakeTree,
     Script,
     ScriptedLauncher,
     Source,
@@ -204,3 +205,52 @@ async def test_a_fix_that_ends_in_error_stops_the_run_before_later_tasks() -> No
     assert (one.status, fix.status, two.status) == ("unverified", "error", "pending")
     assert [launch.agent.task_id for launch in launcher.launches] == [one.id, fix.id]
     assert FIX_ERROR_NOTE in notes(events)
+
+
+async def test_the_next_run_starts_with_a_fix_that_stopped_one_on_the_tree_holding_its_work() -> (
+    None
+):
+    tree = FakeTree()
+    session, _, launcher = session_for(
+        errs,
+        keeps_claiming,
+        errs,
+        errs,
+        verification=verified(Steps(False, False)),
+        limits=Limits(max_attempts=1),
+        tree=tree,
+    )
+    launcher.turn_errors.append("boom")
+    first = await asyncio.wait_for(run(session, TaskSpec(prompt="zero"), TaskSpec(prompt="one")), 5)
+    zero, one, fix = board(first)
+    assert (zero.status, one.status, fix.status) == ("error", "unverified", "error")
+
+    await send(session, RunTasks())
+    await asyncio.wait_for(events_until(session, idle()), 5)
+    await session.close()
+
+    assert [launch.agent.task_id for launch in launcher.launches] == [
+        zero.id,
+        one.id,
+        fix.id,
+        fix.id,
+    ]
+    assert tree.prepared == [False, False, True, True]
+
+
+async def test_the_next_run_starts_with_the_task_at_the_limit_then_keeps_board_order() -> None:
+    waits = Waits()
+    session, _, launcher = session_for(
+        errs, errs, claims_done, claims_done, pause=waits.pause, tree=FakeTree()
+    )
+    launcher.turn_errors.extend(["boom", LIMIT])
+    first = await asyncio.wait_for(run(session, TaskSpec(prompt="a"), TaskSpec(prompt="b")), 5)
+    a, b = board(first)
+    assert (a.status, b.status) == ("error", "error")
+
+    await send(session, RunTasks())
+    events = await asyncio.wait_for(events_until(session, idle()), 5)
+    await session.close()
+
+    assert [launch.agent.task_id for launch in launcher.launches] == [a.id, b.id, b.id, a.id]
+    assert statuses(events) == ["completed", "completed"]

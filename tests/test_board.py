@@ -96,6 +96,18 @@ def test_next_runnable_skips_done_running_and_already_tried_tasks() -> None:
     assert board.next_runnable(skip=set(ids[4:])) is None
 
 
+def test_next_runnable_takes_first_before_board_order_while_it_is_runnable() -> None:
+    board = TaskBoard()
+    ids = [board.add(TaskSpec(prompt=str(i))) for i in range(3)]
+    board.set_status(ids[0], "error")
+    board.set_status(ids[2], "error")
+    assert board.next_runnable(first=ids[2]) == ids[2]
+    assert board.next_runnable(skip={ids[2]}, first=ids[2]) == ids[0]
+    board.set_status(ids[2], "completed")
+    assert board.next_runnable(first=ids[2]) == ids[0]
+    assert board.next_runnable(first="gone") == ids[0]
+
+
 def test_a_passing_fix_completes_the_tasks_it_fixed() -> None:
     board = TaskBoard()
     first = board.add(ONE)
