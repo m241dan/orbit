@@ -111,10 +111,10 @@ class WorkCommands:
     async def own(self, command_id: str) -> None:
         """Run the commands queued while read-only, in order, for ``command_id``, as this orbit
         owns the repository now; one that fails is reported as an error, and the rest still
-        run."""
-        queued, self._queued = self._queued, []
-        for command in queued:
-            await self._run_queued(command, command_id)
+        run. Each is taken off the queue as it's run, so those not yet run stay queued if
+        this stops early."""
+        while self._queued:
+            await self._run_queued(self._queued.pop(0), command_id)
 
     async def _run_queued(self, command: QueuedWork, command_id: str) -> None:
         """Run the queued ``command`` for ``command_id``, reporting a refusal, or any other

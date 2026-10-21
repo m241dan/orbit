@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 
 from orbit.agent import WorkspaceHost
 from orbit.agent.application.connection import SessionConnection
-from orbit.agent.domain.sessions import SessionRecord
+from orbit.agent.domain.sessions import SessionRecord, missing_message
 from orbit.protocol import (
     BUSY,
     INVALID,
@@ -14,6 +14,7 @@ from orbit.protocol import (
     SAVE_FAILED,
     UNKNOWN,
     WRONG_SESSION,
+    ActivateSession,
     AddTask,
     AssistantMessage,
     Attach,
@@ -453,6 +454,55 @@ async def test_a_connection_attaching_while_its_session_is_deleted_views_the_ope
     assert attaching.viewing is None
     snapshots = [e for e in events if isinstance(e, Snapshot)]
     assert [(s.session.id, s.active) for s in snapshots] == [(EARLIER, False), (OPEN, True)]
+
+
+async def attached_meanwhile(meanwhile: Command) -> tuple[SessionConnection, list[Event]]:
+    """A connection attaching to ``earlier`` while another sends ``meanwhile`` as the saved
+    sessions are listed for it, and what reached it."""
+    store = stored()
+    session = workspace(store)
+    other = await joined(session, "other")
+    attaching = await joined(session, "attaching")
+
+    async def sent() -> None:
+        store.on_list = None
+        await say(other, "meanwhile", meanwhile)
+
+    store.on_list = sent
+    await say(attaching, "attach", Attach(workspace=WORKSPACE, session=EARLIER))
+    events = await taken(attaching)
+    await session.close()
+    assert store.on_list is None
+    return attaching, events
+
+
+def answer(events: list[Event]) -> CommandAccepted | CommandRefused:
+    """The answer to the command sent as ``attach`` among ``events``."""
+    [answered] = [
+        e
+        for e in events
+        if isinstance(e, CommandAccepted | CommandRefused) and e.command_id == "attach"
+    ]
+    return answered
+
+
+async def test_attaching_to_a_session_deleted_while_it_is_read_is_refused_as_unknown() -> None:
+    attaching, events = await attached_meanwhile(DeleteSession(session_id=EARLIER))
+
+    refused = CommandRefused(command_id="attach", code=UNKNOWN, message=missing_message(EARLIER))
+    assert answer(events) == refused
+    assert attaching.viewing is None
+    assert [e for e in events if isinstance(e, Snapshot)] == []
+
+
+async def test_attaching_to_a_session_opened_while_it_is_read_attaches_live() -> None:
+    attaching, events = await attached_meanwhile(ActivateSession(session=EARLIER))
+
+    assert answer(events) == CommandAccepted(command_id="attach")
+    assert attaching.viewing is None
+    snapshots = [e for e in events if isinstance(e, Snapshot)]
+    assert (snapshots[-1].session.id, snapshots[-1].active) == (EARLIER, True)
+    assert all(s.active for s in snapshots)
 
 
 async def test_a_viewed_session_gone_from_the_list_is_named_by_its_id() -> None:

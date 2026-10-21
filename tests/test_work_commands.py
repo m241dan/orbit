@@ -1,5 +1,6 @@
 """Tests for the work commands on their own, in a session without agents."""
 
+import asyncio
 from dataclasses import dataclass, field
 
 import pytest
@@ -69,7 +70,7 @@ class ScriptedTurns(WorkTurns):
     """A work lane whose runs take, in turn, the first of ``outcomes``: raising it, or
     succeeding for None."""
 
-    def __init__(self, parts: WorkParts, outcomes: list[Exception | None]) -> None:
+    def __init__(self, parts: WorkParts, outcomes: list[BaseException | None]) -> None:
         super().__init__(parts)
         self.outcomes = outcomes
 
@@ -83,7 +84,7 @@ class ScriptedTurns(WorkTurns):
 
 
 def commands_for(
-    recorded: Recorded, outcomes: list[Exception | None] | None = None
+    recorded: Recorded, outcomes: list[BaseException | None] | None = None
 ) -> tuple[WorkCommands, Tasks]:
     """The work commands of a session without agents, its effects ``recorded``; given
     ``outcomes``, it's read-only and its runs are scripted by them."""
@@ -201,18 +202,24 @@ async def test_deciding_on_no_waiting_proposal_is_refused() -> None:
     assert recorded.effects == []
 
 
-async def own_queued(recorded: Recorded, outcomes: list[Exception | None]) -> WorkCommands:
-    """Commands that queued one run per outcome while read-only, then owned the repository."""
+async def queued_runs(recorded: Recorded, outcomes: list[BaseException | None]) -> WorkCommands:
+    """Commands that queued one run per outcome while read-only."""
     commands, _ = commands_for(recorded, outcomes)
     for _ in outcomes:
         await commands.handle(RunTasks(), COMMAND_ID)
+    return commands
+
+
+async def own_queued(recorded: Recorded, outcomes: list[BaseException | None]) -> WorkCommands:
+    """Commands that queued one run per outcome while read-only, then owned the repository."""
+    commands = await queued_runs(recorded, outcomes)
     await commands.own(COMMAND_ID)
     return commands
 
 
 async def test_a_queued_command_that_fails_reports_an_error_and_the_rest_still_run() -> None:
     recorded = Recorded()
-    outcomes: list[Exception | None] = [None, RuntimeError("disk gone"), None]
+    outcomes: list[BaseException | None] = [None, RuntimeError("disk gone"), None]
     commands = await own_queued(recorded, outcomes)
     assert outcomes == []
     message = "Orbit failed to handle RunTasks: disk gone"
@@ -223,8 +230,33 @@ async def test_a_queued_command_that_fails_reports_an_error_and_the_rest_still_r
 async def test_a_queued_command_refused_reports_its_refusal_and_the_rest_still_run() -> None:
     recorded = Recorded()
     refused = Refused(NOT_CONFIGURED, "No agents.")
-    outcomes: list[Exception | None] = [refused, None]
+    outcomes: list[BaseException | None] = [refused, None]
     commands = await own_queued(recorded, outcomes)
     assert outcomes == []
     assert recorded.effects == [ErrorOccurred(code=NOT_CONFIGURED, message="No agents.")]
     assert commands.queued == ()
+
+
+async def test_owning_cancelled_midway_keeps_the_commands_not_yet_run_queued() -> None:
+    recorded = Recorded()
+    outcomes: list[BaseException | None] = [None, asyncio.CancelledError(), None, None]
+    commands = await queued_runs(recorded, outcomes)
+    with pytest.raises(asyncio.CancelledError):
+        await commands.own(COMMAND_ID)
+    assert outcomes == [None, None]
+    assert commands.queued == (RunTasks(), RunTasks())
+
+
+async def test_a_queued_command_whose_failure_cant_be_reported_keeps_the_rest_queued() -> None:
+    recorded = Recorded()
+    outcomes: list[BaseException | None] = [RuntimeError("disk gone"), None]
+    commands = await queued_runs(recorded, outcomes)
+
+    async def unreported(event: Event) -> None:
+        raise RuntimeError("outbox closed")
+
+    recorded.put = unreported  # type: ignore[method-assign]
+    with pytest.raises(RuntimeError, match="outbox closed"):
+        await commands.own(COMMAND_ID)
+    assert outcomes == [None]
+    assert commands.queued == (RunTasks(),)

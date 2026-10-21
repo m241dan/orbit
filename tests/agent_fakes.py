@@ -288,8 +288,8 @@ class FakeStore:
     set, is the error deleting one raises, and ``release_failure`` the error letting go of a
     lock raises, and ``load_failure`` the error loading one raises, and ``list_failure`` the
     error listing them raises. ``on_acquire``, if set, is awaited as a lock is taken,
-    ``on_delete`` as a session is deleted, and ``on_recent`` with a session's id as its recent
-    events are read.
+    ``on_delete`` as a session is deleted, ``on_list`` once the sessions are listed but before
+    they're returned, and ``on_recent`` with a session's id as its recent events are read.
 
     The events appended are ``logged``, each append's in ``appends``, with ``seq`` the highest
     logged before; ``append_failure``, while set, is the error every append raises. Each trim
@@ -319,6 +319,7 @@ class FakeStore:
         self.list_failure: BaseException | None = None
         self.on_acquire: Callable[[], Awaitable[None]] | None = None
         self.on_delete: Callable[[], Awaitable[None]] | None = None
+        self.on_list: Callable[[], Awaitable[None]] | None = None
         self.on_recent: Callable[[str], Awaitable[None]] | None = None
         self.seq = 0
         self.logged: list[EventEnvelope] = []
@@ -352,7 +353,10 @@ class FakeStore:
             raise self.list_failure
         latest: dict[str, SessionRecord | Unreadable] = {r.id: r for r in self.saved}
         latest |= {i: Unreadable(reason) for i, reason in self.broken.items()}
-        return [StoredSession(i, r, i in self.elsewhere) for i, r in sorted(latest.items())]
+        listed = [StoredSession(i, r, i in self.elsewhere) for i, r in sorted(latest.items())]
+        if self.on_list is not None:
+            await self.on_list()
+        return listed
 
     async def delete(self, session_id: str) -> None:
         if self.on_delete is not None:

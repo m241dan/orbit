@@ -12,6 +12,7 @@ from orbit.agent.application.settings import SessionSettings
 from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.sessions import (
     SessionRecord,
+    missing_message,
     not_active_message,
     session_name,
     summarize,
@@ -20,6 +21,7 @@ from orbit.agent.domain.sessions import (
 from orbit.protocol import (
     NOT_ACTIVE,
     PLANNER_LANE,
+    UNKNOWN,
     WORK_LANE,
     WRONG_SESSION,
     ActivateSession,
@@ -60,6 +62,7 @@ class SessionViews:
 
     def __init__(self, parts: ViewParts) -> None:
         self._parts = parts
+        self._deleted: set[str] = set()
 
     async def attach(self, connection: SessionConnection, session_id: str) -> None:
         """Have ``connection`` view the session ``session_id`` and publish its snapshot to it:
@@ -67,11 +70,14 @@ class SessionViews:
         events. Refused (raising :class:`Refused`) for a session there's none of or that's
         unreadable; nothing changes if the saved sessions can't be listed, which is reported."""
         parts = self._parts
+        record = None if session_id == parts.keeper.id else await parts.keeper.saved(session_id)
+        # It may have been deleted, or opened, while it was read.
+        if session_id in self._deleted:
+            raise Refused(UNKNOWN, missing_message(session_id))
         if session_id == parts.keeper.id:
             connection.attach(None)
             await parts.events.put(await parts.live())
             return
-        record = await parts.keeper.saved(session_id)
         if record is None:
             return
         connection.attach(SessionRef(id=record.id, name=record.name))
@@ -148,6 +154,7 @@ class SessionViews:
         the open session, publishing its live snapshot to each of them alone, and publish that
         the deleted session has no viewers left."""
         parts = self._parts
+        self._deleted.add(session_id)
         moved = parts.connections.attached(session_id)
         for connection in moved:
             connection.attach(None)
