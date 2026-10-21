@@ -1183,6 +1183,8 @@ setting, file or URL:
 | The server is speaking TLS. | Connect with `wss://` rather than `ws://`. |
 | Plaintext is refused beyond loopback. | Connect with `wss://` to a server serving TLS, or through an SSH tunnel to a loopback address. |
 | The CA file can't be read. | Check the path given to `--ca`, or the remote's `ca`, and that the file is a PEM certificate. |
+| The token file can't be read. | Check the path given to `--token-file`, or the remote's `token_file`, and that it holds the token `orbit serve` uses. |
+| The token file is empty. | Copy into it the token `orbit serve` uses, or name another with `--token-file`. |
 | The control plane refused the token. | Give it the token `orbit serve` uses: copy it to the file named, or name another with `--token-file`. |
 | The orbit serve running here refused the token. | Give it the token `orbit serve` uses, or pass `--local` to run one here. |
 | The server requires a client certificate. | The server serves mTLS: pass `--cert` and `--key` with a certificate its client CA signed. |
@@ -1248,6 +1250,8 @@ stops with status 2 saying what's wrong, as listed in **TLS and connection error
 with `--remote`. Only servers of the same account on the same machine are found this way; for
 any other, give `--connect` its URL, or name it in `[remotes]`. `--local` skips the search and
 always runs in-process, taking the backend flags; it can't go with `--connect` or `--remote`.
+A chat running in-process, with `--local` or with no server found, has nothing to show `--ca`,
+`--cert` or `--key`, so they stop it with status 2 rather than being ignored.
 
 A server serving TLS is found too. Its run file records the CA to trust, `ca` in `[server]`, or
 `client_ca` without one, and the hostname to connect by: one its certificate gives as a subject

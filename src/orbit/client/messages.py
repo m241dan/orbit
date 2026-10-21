@@ -52,6 +52,18 @@ TOKEN_REFUSED = (
 )
 """A token, read from the file at ``path``, the control plane turned away."""
 
+TOKEN_UNREADABLE = (
+    "The token file can't be read. {path}: {reason}; check the path given to --token-file, or"
+    " the remote's token_file, and that it holds the token orbit serve uses."
+)
+"""A token file at ``path`` that can't be read, for ``reason``."""
+
+TOKEN_EMPTY = (
+    "The token file is empty. {path} holds no token: copy into it the token orbit serve uses,"
+    " or name another with --token-file."
+)
+"""A token file at ``path`` that holds no token."""
+
 LOCAL_TOKEN_REFUSED = (
     "The orbit serve running here refused the token. It came from {path}: give it the token"
     " orbit serve uses, or pass --local to run one here."
@@ -116,6 +128,8 @@ ALL = (
     SPEAKS_TLS,
     PLAINTEXT_NOT_LOOPBACK,
     CA_UNREADABLE,
+    TOKEN_UNREADABLE,
+    TOKEN_EMPTY,
     TOKEN_REFUSED,
     LOCAL_TOKEN_REFUSED,
     CLIENT_CERT_REQUIRED,

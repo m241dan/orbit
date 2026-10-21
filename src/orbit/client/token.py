@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+from orbit.client import messages
+
 
 class TokenUnreadable(Exception):
     """The token file can't be used; the message names it and says why."""
@@ -15,7 +17,7 @@ def read_token(path: Path) -> str:
     try:
         token = path.read_text(encoding="utf-8").strip()
     except (OSError, UnicodeDecodeError) as exc:
-        raise TokenUnreadable(f"Can't read the token file {path}: {exc}") from None
+        raise TokenUnreadable(messages.TOKEN_UNREADABLE.format(path=path, reason=exc)) from None
     if not token:
-        raise TokenUnreadable(f"The token file {path} is empty.")
+        raise TokenUnreadable(messages.TOKEN_EMPTY.format(path=path))
     return token

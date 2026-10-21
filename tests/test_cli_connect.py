@@ -162,7 +162,7 @@ def test_plaintext_beyond_loopback_exits_before_connecting(
 def test_a_missing_token_file_exits_naming_it(tmp_path: Path) -> None:
     result = runner.invoke(app, ["chat", "--connect", URL])
     assert result.exit_code == 2
-    assert f"Can't read the token file {tmp_path / 'config' / 'token'}: " in result.stderr
+    assert f"The token file can't be read. {tmp_path / 'config' / 'token'}: " in result.stderr
     assert FakeApp.built == []
 
 

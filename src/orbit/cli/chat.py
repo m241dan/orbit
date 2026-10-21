@@ -121,6 +121,7 @@ def chat(
         where = f"which runs at {found.url}; or pass --local to run one here"
         _join(joining, found.url, where)
         return
+    _refuse_tls_files(given, "--local runs one here" if local else "no orbit serve was found here")
     # The only place the backend and frontend meet, and where the backend's external
     # adapters are plugged into its ports.
     profile = profile.expanduser().resolve() if profile else None
@@ -173,7 +174,7 @@ def _target(
     Exits with status 2 if both were given, or the remote isn't configured.
     """
     if remote is None:
-        return None if connect is None else _Target(connect, given, "--connect")
+        return None if connect is None else _Target(_connect_url(connect), given, "--connect")
     if connect is not None:
         typer.echo(
             "--remote names the control plane to connect to, so it can't go with --connect.",
@@ -182,6 +183,17 @@ def _target(
         raise typer.Exit(2)
     configured = _remote(config_dir, remote)
     return _Target(configured.url, given.over(_remote_files(configured)), "--remote")
+
+
+def _connect_url(url: str) -> str:
+    """The URL --connect gives, ``url``.
+
+    Exits with status 2 if it isn't a ws:// or wss:// URL.
+    """
+    if not url.startswith(("ws://", "wss://")):
+        typer.echo(f"orbit chat --connect takes a wss:// or ws:// URL, not {url}.", err=True)
+        raise typer.Exit(2)
+    return url
 
 
 def _remote(config_dir: Path, name: str) -> RemoteSettings:
@@ -265,6 +277,24 @@ def _joining(
 def _opening(flags: _Backend) -> NewSession | None:
     """The new session the backend ``flags`` ask a joining chat to open, if any."""
     return NewSession(name=flags.name) if flags.fresh else None
+
+
+def _refuse_tls_files(given: _ClientFiles, reason: str) -> None:
+    """Exit with status 2 if --ca, --cert or --key were ``given`` to a chat running the control
+    plane here, which would ignore them, ``reason`` saying why it runs here."""
+    named = [flag for flag, path in _TLS_FLAGS.items() if getattr(given, path) is not None]
+    if named:
+        typer.echo(
+            f"The TLS files given ({', '.join(named)}) say how to join a control plane, and"
+            f" {reason}: pass --connect or --remote with them, or leave them out.",
+            err=True,
+        )
+        raise typer.Exit(2)
+
+
+_TLS_FLAGS = {"--ca": "ca", "--cert": "cert", "--key": "key"}
+"""The flags naming TLS files a joining chat uses, and the fields of :class:`_ClientFiles` they
+set."""
 
 
 def _refuse_local(local: bool, flag: str) -> None:
@@ -409,12 +439,9 @@ def _given(ctx: typer.Context, name: str) -> bool:
 def _connected_app(url: str, joining: _Joining) -> OrbitApp:
     """The TUI over the control plane at ``url``, joined as ``joining`` says.
 
-    Exits with status 2 if ``url`` isn't a ws:// or wss:// URL, is a ws:// one beyond loopback,
-    or the token, the CA or the client certificate can't be read.
+    Exits with status 2 if ``url`` is a ws:// one beyond loopback, or the token, the CA or the
+    client certificate can't be read.
     """
-    if not url.startswith(("ws://", "wss://")):
-        typer.echo(f"orbit chat --connect takes a wss:// or ws:// URL, not {url}.", err=True)
-        raise typer.Exit(2)
     with _exit_on(TokenUnreadable, CaUnreadable, ClientCertUnusable, PlaintextRefused):
         if joining.token_file is not None:
             read_token(joining.token_file)  # The session reads it again for each connection.

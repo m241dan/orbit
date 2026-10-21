@@ -161,7 +161,7 @@ def test_an_unreadable_token_file_stops_chat_naming_it(
     missing = tmp_path / "missing"
     result = runner.invoke(app, ["chat", "--token-file", str(missing)])
     assert result.exit_code == 2
-    assert f"Can't read the token file {missing}: " in result.stderr
+    assert f"The token file can't be read. {missing}: " in result.stderr
     assert in_process.built == [] and FakeApp.built == []
 
 
@@ -439,3 +439,38 @@ def test_a_token_file_given_is_shown_to_a_control_plane_found_in_place_of_the_ce
     assert isinstance(tui.session, FakeClient)
     assert tui.session.token_file == other
     assert contexts == [(ca_path, None, None)] * 2
+
+
+@pytest.mark.usefixtures("project", "token_file", "plane")
+@pytest.mark.parametrize(
+    ("args", "named"),
+    [
+        (["--ca", "ca.pem"], "--ca"),
+        (["--cert", "c.pem", "--key", "k.pem"], "--cert, --key"),
+        (["--ca", "ca.pem", "--key", "k.pem"], "--ca, --key"),
+    ],
+)
+def test_tls_files_with_no_control_plane_found_stop_chat_rather_than_being_ignored(
+    args: list[str], named: str, in_process: InProcess
+) -> None:
+    result = runner.invoke(app, ["chat", *args])
+    assert result.exit_code == 2
+    assert result.stderr.startswith(
+        f"The TLS files given ({named}) say how to join a control plane, and no orbit serve was"
+        " found here: pass --connect or --remote with them, or leave them out."
+    )
+    assert in_process.built == [] and FakeApp.built == []
+
+
+@pytest.mark.usefixtures("token_file", "plane")
+def test_tls_files_with_local_stop_chat_rather_than_being_ignored(
+    state: Path, in_process: InProcess
+) -> None:
+    serving(state)
+    result = runner.invoke(app, ["chat", "--local", "--cert", "c.pem"])
+    assert result.exit_code == 2
+    assert result.stderr.startswith(
+        "The TLS files given (--cert) say how to join a control plane, and --local runs one"
+        " here: pass --connect or --remote with them, or leave them out."
+    )
+    assert in_process.built == [] and FakeApp.built == []

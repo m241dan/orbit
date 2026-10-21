@@ -631,8 +631,8 @@ async def test_a_token_still_refused_on_reconnecting_is_reported_naming_its_file
 @pytest.mark.parametrize(
     ("spoil", "message"),
     [
-        (lambda path: path.unlink(), f"Can't read the token file {TOKEN_FILE}: "),
-        (lambda path: path.write_text("\n"), f"The token file {TOKEN_FILE} is empty."),
+        (lambda path: path.unlink(), f"The token file can't be read. {TOKEN_FILE}: "),
+        (lambda path: path.write_text("\n"), messages.TOKEN_EMPTY.format(path=TOKEN_FILE)),
     ],
 )
 async def test_a_token_file_unreadable_on_reconnecting_is_reported_naming_it(
@@ -821,12 +821,12 @@ def test_the_token_is_read_from_its_file(tmp_path: Path) -> None:
 
 def test_a_missing_token_file_is_named(tmp_path: Path) -> None:
     path = tmp_path / "token"
-    with pytest.raises(TokenUnreadable, match=f"Can't read the token file {path}: "):
+    with pytest.raises(TokenUnreadable, match=f"The token file can't be read. {path}: "):
         read_token(path)
 
 
 def test_an_empty_token_file_is_named(tmp_path: Path) -> None:
     path = tmp_path / "token"
     path.write_text("\n")
-    with pytest.raises(TokenUnreadable, match=f"The token file {path} is empty."):
+    with pytest.raises(TokenUnreadable, match=f"The token file is empty. {path} holds no token"):
         read_token(path)
