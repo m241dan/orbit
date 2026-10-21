@@ -38,13 +38,11 @@ from orbit.protocol import (
     Hello,
     History,
     HistoryPage,
-    ListSessions,
     LogGap,
     MessageSent,
     NewSession,
     Notice,
     OpenRequest,
-    OpenSession,
     OwnershipDeclined,
     OwnershipOffered,
     OwnershipTaken,
@@ -61,7 +59,6 @@ from orbit.protocol import (
     RunTasks,
     SendMessage,
     SessionRef,
-    SessionsListed,
     SessionStateChanged,
     SessionSummary,
     Settings,
@@ -168,7 +165,7 @@ def event(payload: Event) -> EventEnvelope:
 
 
 COMMANDS: tuple[CommandEnvelope, ...] = (
-    command(Hello(client="tui", protocol_version=1, since=4)),
+    command(Hello(client="tui", protocol_version=2, since=4)),
     command(SendMessage(agent=PLANNER, text="hello")),
     command(CancelTurn(lane=PLANNER_LANE)),
     command(UpdateSettings(settings=SETTINGS)),
@@ -180,9 +177,7 @@ COMMANDS: tuple[CommandEnvelope, ...] = (
     command(RemoveTask(task_id="t1")),
     command(CancelAgent(agent_id="agent-1")),
     command(DecideProposal(task_id="t1", action="revise", feedback="Add mypy")),
-    command(ListSessions()),
-    command(Attach(session="s1")),
-    command(OpenSession(session_id="s1")),
+    command(Attach(workspace="w1", session="s1")),
     command(ActivateSession(session="s1")),
     command(NewSession(name="Evening")),
     command(RenameSession(session_id="s1", name="Night")),
@@ -248,7 +243,6 @@ EVENTS: tuple[EventEnvelope, ...] = (
             retry_at=WHEN,
         )
     ),
-    event(SessionsListed(sessions=(SUMMARY,), reason="refreshed")),
     event(MessageSent(command_id="c1", agent=PLANNER, text="hello")),
     event(ConversationReset(agent=PLANNER)),
     event(LogGap(first_seq=1204, last_seq=1210)),
@@ -301,7 +295,9 @@ EVENTS: tuple[EventEnvelope, ...] = (
     ),
     event(
         Catalog(
-            workspaces=(WorkspaceEntry(id="w1", label="Orbit", sessions=(SUMMARY,)),),
+            workspaces=(
+                WorkspaceEntry(id="w1", label="Orbit", path="/src/orbit", sessions=(SUMMARY,)),
+            ),
             agents=(AgentEntry(name=PLANNER, label="Planner", conversational=True),),
             triggers=(TriggerEntry(name="super-review", label="Super review", manual=True),),
             lanes=("work", PLANNER_LANE),

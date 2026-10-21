@@ -22,6 +22,7 @@ from orbit.protocol import (
     PROTOCOL_VERSION,
     UNKNOWN,
     Attach,
+    Catalog,
     CommandAccepted,
     CommandEnvelope,
     CommandRefused,
@@ -52,7 +53,7 @@ HELLO = CommandEnvelope(
     command_id="hello", payload=Hello(client="tests", protocol_version=PROTOCOL_VERSION)
 )
 RUN = CommandEnvelope(command_id="run", payload=RunTasks())
-ATTACH = CommandEnvelope(command_id="attach", payload=Attach(session="earlier"))
+ATTACH = CommandEnvelope(command_id="attach", payload=Attach(workspace="w1", session="earlier"))
 
 
 @pytest.fixture(autouse=True)
@@ -144,10 +145,11 @@ async def next_event(events: AsyncIterator[EventEnvelope]) -> EventEnvelope:
     return await asyncio.wait_for(anext(events), 5)
 
 
-def snapshot(seq: int, active: bool) -> str:
-    """A Snapshot of the session ``earlier``, the open one if ``active``, else a view."""
+def snapshot(seq: int, active: bool, session: str = "earlier", workspace: str | None = "w1") -> str:
+    """A Snapshot of the session ``session`` of the workspace ``workspace``, the open one if
+    ``active``, else a view."""
     shown = Snapshot(
-        session=SessionSummary(id="earlier", name="Earlier"),
+        session=SessionSummary(id=session, name=session.title()),
         settings=Settings(),
         model_choices=(),
         busy={},
@@ -158,7 +160,8 @@ def snapshot(seq: int, active: bool) -> str:
         agents=(),
         active=active,
     )
-    return encode(EventEnvelope(seq=seq, session="earlier", payload=shown))
+    envelope = EventEnvelope(seq=seq, workspace=workspace, session=session, payload=shown)
+    return encode(envelope)
 
 
 def answer(seq: int, command: CommandEnvelope, refused: bool = False) -> str:
@@ -365,29 +368,80 @@ async def test_a_link_lost_before_the_view_is_shown_again_attaches_on_the_next()
     assert [type(c.payload) for c in again] == [Hello, Attach]
 
 
-async def test_a_refused_attach_is_not_sent_again_on_reconnecting() -> None:
+def attaching(session: str, workspace: str = "w1") -> CommandEnvelope:
+    """The last Attach sent again, for the session ``session`` of the workspace ``workspace``."""
+    return ATTACH.model_copy(update={"payload": Attach(workspace=workspace, session=session)})
+
+
+async def test_a_reconnecting_client_attaches_to_the_session_the_last_snapshot_showed() -> None:
     async with viewing() as (fake, session, events, first):
         await drop_after(first, events)
         second, _ = await reconnecting(fake, session)
-        await drop_after(second, events, snapshot(5, active=True), answer(6, ATTACH, True))
+        await drop_after(second, events, snapshot(5, active=True, session="today"))
         _, again = await reconnecting(fake, session)
 
-    assert [type(c.payload) for c in again] == [Hello]
+    assert again[1:] == [attaching("today")]
 
 
-async def test_a_reconnecting_client_back_on_the_open_session_only_says_hello() -> None:
-    back = CommandEnvelope(command_id="back", payload=Attach(session="today"))
+async def test_a_refused_attach_leaves_the_session_shown_to_attach_to_again() -> None:
+    back = CommandEnvelope(command_id="back", payload=Attach(workspace="w1", session="gone"))
     async with viewing() as (fake, session, events, first):
         await session.send(back)
         await fake.command()
-        await drop_after(first, events, snapshot(5, active=True), answer(6, back))
+        await drop_after(first, events, answer(5, back, refused=True))
         _, again = await reconnecting(fake, session)
+
+    assert again[1:] == [back.model_copy(update={"payload": ATTACH.payload})]
+
+
+async def test_the_workspace_a_snapshot_names_is_the_one_attached_to_again() -> None:
+    async with viewing() as (fake, session, events, first):
+        await drop_after(first, events, snapshot(5, active=True, session="s", workspace="w2"))
+        _, again = await reconnecting(fake, session)
+
+    assert again[1:] == [attaching("s", "w2")]
+
+
+async def test_a_snapshot_naming_no_workspace_keeps_the_one_attached() -> None:
+    async with viewing() as (fake, session, events, first):
+        await drop_after(first, events, snapshot(5, active=True, session="s", workspace=None))
+        _, again = await reconnecting(fake, session)
+
+    assert again[1:] == [attaching("s")]
+
+
+async def test_an_attach_dropped_before_its_snapshot_is_sent_again_as_it_was() -> None:
+    async with plane() as (fake, url):
+        session, _ = client(url)
+        events = session.events()
+        await session.send(HELLO)
+        first = await fake.connection()
+        await fake.command()
+        await session.send(ATTACH)
+        await fake.command()
+        await drop_after(first, events)
+        _, again = await reconnecting(fake, session)
+        await session.close()
+
+    assert again[1:] == [ATTACH]
+
+
+async def test_a_snapshot_before_any_attach_leaves_nothing_to_attach_to() -> None:
+    async with plane() as (fake, url):
+        session, _ = client(url)
+        events = session.events()
+        await session.send(HELLO)
+        first = await fake.connection()
+        await fake.command()
+        await drop_after(first, events, snapshot(1, active=True))
+        _, again = await reconnecting(fake, session)
+        await session.close()
 
     assert [type(c.payload) for c in again] == [Hello]
 
 
 async def test_an_attach_that_couldnt_be_sent_is_not_sent_on_reconnecting() -> None:
-    back = CommandEnvelope(command_id="back", payload=Attach(session="today"))
+    back = CommandEnvelope(command_id="back", payload=Attach(workspace="w1", session="today"))
     async with viewing() as (fake, session, events, first):
         fake.status = 503
         await drop_after(first, events)
@@ -610,15 +664,19 @@ async def test_the_backoff_doubles_up_to_its_most_and_jitters() -> None:
 
 
 async def test_it_talks_to_the_control_plane_server() -> None:
-    served = ControlPlane(WorkspaceHost())
+    host = WorkspaceHost()
+    served = ControlPlane(host)
     server = ControlPlaneServer(served, lambda: TOKEN, ServerSettings(port=0), lambda line: None)
     url = await server.start()
     session, _ = client(url)
     events = session.events()
+    attach = Attach(workspace=host.workspace_id, session=host.saved_session.id)
     try:
         await session.send(HELLO)
-        kinds = [type((await next_event(events)).payload) for _ in range(3)]
-        assert kinds[0] is Welcome and Snapshot in kinds
+        greeting = [type((await next_event(events)).payload) for _ in range(2)]
+        await session.send(CommandEnvelope(command_id="attach", payload=attach))
+        attached = (await next_event(events)).payload
+        assert greeting == [Welcome, Catalog] and isinstance(attached, Snapshot)
     finally:
         await session.close()
         await server.stop(served.close)

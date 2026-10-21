@@ -19,6 +19,7 @@ from orbit.protocol import (
     AgentReply,
     AgentStarted,
     AssistantMessage,
+    Attach,
     BusyChanged,
     CancelTurn,
     Command,
@@ -73,7 +74,8 @@ class FakeSession:
     """Stands in for the backend: records commands, and the envelopes they came in, and
     replays scripted events in envelopes; an exception queued fails the stream. ``sent`` has
     every envelope; ``envelopes`` and ``commands`` leave out the Hello opening the stream, which
-    raises ``hello_error`` when one is set, as every other command raises ``send_error``."""
+    raises ``hello_error`` when one is set, as every other command raises ``send_error``, and
+    the first Attach, which attaches the app as it opens."""
 
     def __init__(self) -> None:
         self.sent: list[CommandEnvelope] = []
@@ -83,12 +85,16 @@ class FakeSession:
         self.closed = False
         self.hello_error: Exception | None = None
         self.send_error: Exception | None = None
+        self.attached = False  # Whether the first Attach was sent.
 
     async def send(self, envelope: CommandEnvelope) -> None:
         self.sent.append(envelope)
         if isinstance(envelope.payload, Hello):
             if self.hello_error is not None:
                 raise self.hello_error
+            return
+        if isinstance(envelope.payload, Attach) and not self.attached:
+            self.attached = True
             return
         self.envelopes.append(envelope)
         self.commands.append(envelope.payload)
@@ -125,7 +131,7 @@ async def test_the_first_command_is_a_hello_from_the_tui() -> None:
     first, second = session.sent
     assert isinstance(first.payload, Hello)
     assert first.payload.client.startswith("orbit-tui ")
-    assert first.payload.protocol_version == PROTOCOL_VERSION == 1
+    assert first.payload.protocol_version == PROTOCOL_VERSION == 2
     assert first.payload.since is None
     assert second.payload == SendMessage(agent=PLANNER, text="hi")
 
@@ -209,7 +215,7 @@ async def test_each_command_goes_in_an_envelope_with_a_fresh_id() -> None:
     for envelope in (first, second):
         assert len(envelope.command_id) == 32
         int(envelope.command_id, 16)  # Hex.
-        assert (envelope.workspace, envelope.session) == ("default", None)
+        assert (envelope.workspace, envelope.session) == (None, None)
     assert first.command_id != second.command_id
 
 

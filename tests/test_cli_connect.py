@@ -10,7 +10,8 @@ from typer.testing import CliRunner
 
 from orbit.cli import app
 from orbit.client import WebSocketSession, messages
-from orbit.protocol import Command, NewSession
+from orbit.protocol import NewSession
+from orbit.tui import Opening
 from tests.tls_certs import make_ca, make_client
 
 runner = CliRunner()
@@ -35,8 +36,7 @@ class FakeApp:
 
     session: object
     link: object = None
-    opening: Command | None = None
-    pick: bool = False
+    opening: Opening = field(default_factory=Opening)
     storage_halt: str | None = None
     ran: bool = field(default=False)
 
@@ -75,8 +75,17 @@ def test_connect_runs_the_tui_over_the_control_plane_with_the_config_dirs_token(
     assert result.exit_code == 0, result.output
     (tui,) = FakeApp.built
     assert tui.session == FakeClient(URL, token_file)
-    assert tui.link is tui.session and tui.opening is None and tui.ran
-    assert tui.pick  # The user picks a session once joined.
+    assert tui.link is tui.session and tui.opening.command is None and tui.ran
+    assert tui.opening.pick  # The user picks a session once joined.
+
+
+@pytest.mark.usefixtures("token_file")
+def test_connect_opens_on_the_workspace_of_the_repository_it_runs_in(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    result = runner.invoke(app, ["chat", "--connect", URL, "-C", str(project)])
+    assert result.exit_code == 0, result.output
+    assert FakeApp.built[0].opening.repository == str(project.resolve())
 
 
 def test_the_token_file_option_names_another_file(tmp_path: Path) -> None:
@@ -90,14 +99,14 @@ def test_the_token_file_option_names_another_file(tmp_path: Path) -> None:
 @pytest.mark.usefixtures("token_file")
 def test_new_opens_a_new_session_once_welcomed() -> None:
     assert runner.invoke(app, ["chat", "--connect", URL, "--new"]).exit_code == 0
-    assert FakeApp.built[0].opening == NewSession()
-    assert not FakeApp.built[0].pick
+    assert FakeApp.built[0].opening.command == NewSession()
+    assert not FakeApp.built[0].opening.pick
 
 
 @pytest.mark.usefixtures("token_file")
 def test_name_opens_a_new_session_with_that_name() -> None:
     assert runner.invoke(app, ["chat", "--connect", URL, "--name", "auth"]).exit_code == 0
-    assert FakeApp.built[0].opening == NewSession(name="auth")
+    assert FakeApp.built[0].opening.command == NewSession(name="auth")
 
 
 @pytest.mark.usefixtures("token_file")

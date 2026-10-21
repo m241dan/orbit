@@ -46,11 +46,13 @@ from orbit.protocol import (
 )
 from tests.agent_fakes import (
     HELLO,
+    WORKSPACE,
     FakeStore,
     FakeTree,
     Steps,
     Ticks,
     agent_exited,
+    attach_to,
     close,
     connect,
     events_until,
@@ -72,9 +74,11 @@ async def say(connection: SessionConnection, command_id: str, command: Command) 
 
 
 async def welcomed(session: WorkspaceHost, name: str) -> SessionConnection:
-    """A new connection to ``session`` that has said Hello as ``name``."""
+    """A new connection to ``session`` that has said Hello as ``name`` and attached to the open
+    session."""
     connection = connect(session)
     await say(connection, name, HELLO)
+    await say(connection, f"{name}-attach", attach_to(session))
     return connection
 
 
@@ -410,9 +414,9 @@ async def rejoined(
     live: Sequence[Event],
     check: Callable[[SessionConnection], None] = unchecked,
 ) -> SessionConnection:
-    """A connection to a session over ``store`` that has said Hello with ``since``, the ``live``
-    events published while what it missed was being read, after which it had ``check`` see the
-    connection, before what it missed was returned."""
+    """A connection to a session over ``store`` that has said Hello with ``since`` and attached
+    to the open session, the ``live`` events published while what it missed was being read,
+    after which it had ``check`` see the connection, before what it missed was returned."""
     session = WorkspaceHost(store=store, clock=Ticks(), new_id=lambda: OPEN)
     read = session._greeting.missed
 
@@ -427,6 +431,7 @@ async def rejoined(
     connection = connect(session)
     hello = Hello(client="orbit-tests", protocol_version=HELLO.protocol_version, since=since)
     await say(connection, "rejoin", hello)
+    await say(connection, "rejoin-attach", attach_to(session))
     return connection
 
 
@@ -469,7 +474,7 @@ async def test_a_connection_whose_held_events_overflow_is_closed_as_too_far_behi
 
     connection = await rejoined(store, 15, live, check)
 
-    assert while_held == [(True, QUEUE_LIMIT)]
+    assert while_held == [(True, QUEUE_LIMIT - 2)]  # The Welcome and the Catalog, unread.
     with pytest.raises(ConnectionDropped, match=TOO_FAR_BEHIND):
         await everything(connection)
 
@@ -545,13 +550,13 @@ async def test_a_connection_not_yet_welcomed_gets_only_its_greetings_catalog() -
     asker = await welcomed(session, "asker")
     await taken(asker)
     go = asyncio.Event()
-    fetch = session._greeting.catalog
+    fetch = session.catalog
 
     async def slow() -> Catalog:
         await go.wait()
         return await fetch()
 
-    session._greeting = replace(session._greeting, catalog=slow)
+    session.catalog = slow  # type: ignore[method-assign]
     joining = connect(session)
     greeting = asyncio.create_task(say(joining, "joining", HELLO))
     await asyncio.sleep(0.01)
@@ -568,7 +573,7 @@ async def test_attaching_to_the_open_session_gives_only_the_asker_a_snapshot() -
     asker = await joined(session, "asker")
     other = await joined(session, "other")
 
-    await say(asker, "attach", Attach(session=session.saved_session.id))
+    await say(asker, "attach", Attach(workspace=WORKSPACE, session=session.saved_session.id))
     asked, seen = await taken(asker), await taken(other)
     await session.close()
 

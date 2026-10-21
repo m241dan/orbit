@@ -56,6 +56,7 @@ from orbit.protocol import (
 )
 from tests.agent_fakes import (
     ACCEPTED,
+    ATTACH_ID,
     COMMAND_ID,
     ROLES,
     Call,
@@ -147,7 +148,7 @@ async def test_running_does_nothing_when_nothing_is_runnable() -> None:
     await send(session, RunTasks())
     await asyncio.sleep(0.01)
     counted = SessionStateChanged(session="session-1", active=True, state="idle", viewers=1)
-    assert queued(session) == [counted, ACCEPTED]
+    assert queued(session) == [CommandAccepted(command_id=ATTACH_ID), counted, ACCEPTED]
     assert launcher.launches == []
 
 

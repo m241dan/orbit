@@ -1,6 +1,7 @@
 """The list of saved sessions, to pick one from."""
 
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from datetime import datetime, tzinfo
 
 from rich.text import Text
@@ -14,6 +15,7 @@ from orbit.protocol import (
     SessionSummary,
     TaskStatus,
     Usage,
+    WorkspaceEntry,
 )
 from orbit.tui.view.common import SPINNER_FRAMES, STATUS_ICONS
 from orbit.tui.view.tasks import usage_label
@@ -52,6 +54,42 @@ COUNT_ORDER: tuple[TaskStatus, ...] = (
 COUNT_ICONS: dict[TaskStatus, str] = STATUS_ICONS | {"running": SPINNER_FRAMES[0]}
 
 
+@dataclass(frozen=True)
+class Viewing:
+    """Which session, ``attached``, of the workspace ``workspace`` a frontend views; none
+    while it views none."""
+
+    workspace: str
+    attached: str | None
+
+
+def chosen_workspace(
+    workspaces: Sequence[WorkspaceEntry], repository: str | None
+) -> WorkspaceEntry | None:
+    """The workspace among ``workspaces`` a frontend opens on: the one at the ``repository`` it
+    runs in, if any is, else the first; none if there are none."""
+    at_repository = (entry for entry in workspaces if repository and entry.path == repository)
+    return next(at_repository, next(iter(workspaces), None))
+
+
+def workspace_sessions(
+    workspaces: Sequence[WorkspaceEntry], workspace: str | None
+) -> tuple[SessionSummary, ...]:
+    """The sessions of the workspace ``workspace`` among ``workspaces``; none if it isn't
+    listed."""
+    entry = next((entry for entry in workspaces if entry.id == workspace), None)
+    return entry.sessions if entry else ()
+
+
+def opening_attach(workspace: str | None, sessions: Sequence[SessionSummary]) -> Attach | None:
+    """What a frontend opening on the workspace ``workspace`` sends to view its active session
+    among ``sessions``; none without either."""
+    active = next((summary for summary in sessions if summary.active), None)
+    if workspace is None or active is None:
+        return None
+    return Attach(workspace=workspace, session=active.id)
+
+
 def picker_sessions(
     sessions: Sequence[SessionSummary], attached: str | None, *, with_attached: bool
 ) -> tuple[SessionSummary, ...]:
@@ -79,14 +117,18 @@ def session_label(
 
 
 def picked_commands(
-    picked: SessionSummary, sessions: Sequence[SessionSummary], attached: str | None
+    picked: SessionSummary,
+    sessions: Sequence[SessionSummary],
+    attached: str | None,
+    workspace: str,
 ) -> tuple[Attach | ActivateSession, ...]:
-    """What picking ``picked`` among ``sessions`` sends: nothing for the session ``attached``;
-    else ``Attach``, then ``ActivateSession`` too unless ``picked`` is the active session already
-    or the active one runs or is viewed by another frontend."""
+    """What picking ``picked`` among ``sessions`` of the workspace ``workspace`` sends: nothing
+    for the session ``attached``; else ``Attach``, then ``ActivateSession`` too unless
+    ``picked`` is the active session already or the active one runs or is viewed by another
+    frontend."""
     if picked.id == attached:
         return ()
-    attach = Attach(session=picked.id)
+    attach = Attach(workspace=workspace, session=picked.id)
     if picked.active or not _free(sessions, attached):
         return (attach,)
     return (attach, ActivateSession(session=picked.id))

@@ -26,6 +26,7 @@ from orbit.agent.application.ports import (
 from orbit.agent.application.review_lane import ReviewLane
 from orbit.agent.application.startup_check import StartupCheck
 from orbit.agent.application.tasks import Tasks
+from orbit.agent.application.workspace_host import UNREGISTERED_WORKSPACE
 from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.checks import Setup
@@ -42,6 +43,7 @@ from orbit.protocol import (
     AgentExited,
     AgentReply,
     AssistantMessage,
+    Attach,
     BusyChanged,
     BusyLane,
     Catalog,
@@ -53,9 +55,12 @@ from orbit.protocol import (
     Event,
     EventEnvelope,
     Hello,
+    History,
+    HistoryPage,
     RunTasks,
     Session,
     SessionStateChanged,
+    SessionSummary,
     Settings,
     SettingsChanged,
     Snapshot,
@@ -617,10 +622,32 @@ HELLO_ID = "hello"
 HELLO = Hello(client="orbit-tests", protocol_version=PROTOCOL_VERSION)
 """The Hello :func:`greet` sends."""
 
+WORKSPACE = UNREGISTERED_WORKSPACE
+"""The id of the workspace a test's host serves, as it's given none."""
+
+ATTACH_ID = "attach"
+"""The id :func:`greet` sends Attach under."""
+
+
+def host_of(session: Backend) -> WorkspaceHost:
+    """``session``, if it's a workspace host, else the one the control plane serves."""
+    return session.host if isinstance(session, ControlPlane) else session
+
+
+def attach_to(session: Backend, session_id: str | None = None) -> Attach:
+    """The Attach to the session ``session_id`` of ``session``'s workspace, or to its open one
+    if that's none."""
+    host = host_of(session)
+    return Attach(workspace=host.workspace_id, session=session_id or host.saved_session.id)
+
 
 async def greet(session: Session | Backend) -> None:
-    """Open ``session``'s stream with Hello, as a frontend does before anything else."""
+    """Open ``session``'s stream with Hello, then, for a :data:`Backend`, attach to its open
+    session, as a frontend does before anything else."""
     await frontend(session).send(CommandEnvelope(command_id=HELLO_ID, payload=HELLO))
+    if isinstance(session, WorkspaceHost | ControlPlane):
+        attach = CommandEnvelope(command_id=ATTACH_ID, payload=attach_to(session))
+        await frontend(session).send(attach)
 
 
 async def send(session: Session | Backend, command: Command) -> None:
@@ -631,12 +658,19 @@ async def send(session: Session | Backend, command: Command) -> None:
 
 
 async def payloads(session: Session | Backend) -> AsyncIterator[Event]:
-    """The events in ``session``'s envelopes but for its ``Welcome``, its catalogs and its
-    sessions' state changes, greeting a :data:`Backend` first if it hasn't been."""
+    """The events in ``session``'s envelopes but for its ``Welcome``, its catalogs, its
+    sessions' state changes and the acceptance of the Attach :func:`greet` sends, greeting a
+    :data:`Backend` first if it hasn't been."""
     await greeted(session)
     async for envelope in frontend(session).events():
-        if not isinstance(envelope.payload, Welcome | Catalog | SessionStateChanged):
+        if not greeting_only(envelope.payload):
             yield envelope.payload
+
+
+def greeting_only(event: Event) -> bool:
+    """Whether :func:`payloads` leaves ``event`` out."""
+    attached = isinstance(event, CommandAccepted) and event.command_id == ATTACH_ID
+    return attached or isinstance(event, Welcome | Catalog | SessionStateChanged)
 
 
 async def run(session: WorkspaceHost, *tasks: TaskSpec) -> list[Event]:
@@ -717,6 +751,31 @@ async def events_until(
     except TimeoutError:
         raise AssertionError(f"no event matched {done!r} within {timeout}s") from None
     return events
+
+
+MARK_ID = "mark"
+"""The id :func:`until_marked` sends its ``History`` under."""
+
+
+def _marks(event: Event) -> bool:
+    """Whether ``event`` answers the ``History`` :func:`until_marked` sends."""
+    refused = isinstance(event, CommandRefused) and event.command_id == MARK_ID
+    return refused or isinstance(event, HistoryPage)
+
+
+async def until_marked(session: WorkspaceHost) -> list[Event]:
+    """The session's events up to the answer to a ``History`` sent now, which marks the end of
+    those published before it: its page, or its refusal while the session is halted."""
+    await greeted(session)
+    mark = History(session=session.saved_session.id, before_seq=1, limit=1)
+    await frontend(session).send(CommandEnvelope(command_id=MARK_ID, payload=mark))
+    return await events_until(session, Stop("marked", _marks))
+
+
+async def listed(session: WorkspaceHost) -> tuple[SessionSummary, ...]:
+    """The saved sessions, as ``session``'s catalog lists them now, but for the open one if it
+    isn't saved."""
+    return await session.saved_session.summaries()
 
 
 def sole[E: Event](events: list[Event], kind: type[E]) -> E:
@@ -830,9 +889,11 @@ async def greeted(session: Session | Backend) -> None:
 
 
 async def views_on_joining(session: Backend) -> list[Event]:
-    """The events a new connection to ``session`` gets for its Hello, up to its Snapshot."""
+    """The events a new connection to ``session`` gets for its Hello and its Attach to the open
+    session, up to its Snapshot."""
     connection = connect(session)
     await connection.send(CommandEnvelope(command_id="join", payload=HELLO))
+    await connection.send(CommandEnvelope(command_id="join-attach", payload=attach_to(session)))
     stream = connection.events()
     events = [(await asyncio.wait_for(anext(stream), 5)).payload]
     while not isinstance(events[-1], Snapshot):

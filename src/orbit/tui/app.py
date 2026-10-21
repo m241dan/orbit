@@ -3,7 +3,7 @@
 import time
 from collections.abc import AsyncIterator, Callable
 from contextlib import aclosing
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from typing import ClassVar, assert_never
 
 from textual import on, work
@@ -63,7 +63,6 @@ from orbit.protocol import (
     RunTasks,
     SendMessage,
     Session,
-    SessionsListed,
     SessionStateChanged,
     SessionSummary,
     Settings,
@@ -139,6 +138,19 @@ from orbit.tui.widgets import (
 )
 
 
+@dataclass(frozen=True)
+class Opening:
+    """How the app opens: on the workspace at the ``repository`` it runs in, if there's one,
+    sending ``command``, if given, once attached, and with the session picker if ``pick``."""
+
+    command: Command | None = None
+    pick: bool = False
+    repository: str | None = None
+
+
+_PLAIN_OPENING = Opening()
+
+
 # Not inheriting App's bindings drops its ctrl+q quit and ctrl+c "how to quit" hint.
 class OrbitApp(App[None], inherit_bindings=False):
     TITLE = "orbit"
@@ -191,19 +203,20 @@ class OrbitApp(App[None], inherit_bindings=False):
         self,
         session: Session,
         link: Link | None = None,
-        opening: Command | None = None,
-        *,
-        pick: bool = False,
+        opening: Opening = _PLAIN_OPENING,
     ) -> None:
         """The app over ``session``, showing how its ``link`` to a control plane in another
-        process stands, if it has one, and sending ``opening``, if given, once welcomed. With
-        ``pick``, the first catalog opens the session picker, offering to resume the session
-        viewed only over a ``link``, as a session opened in process isn't one picked yet."""
+        process stands, if it has one. The first catalog chooses the workspace it opens on, the
+        one at the ``opening``'s repository if there's one, and the app attaches to its active
+        session, then sends the ``opening``'s command, if any. If the ``opening`` says to pick,
+        that catalog also opens the session picker, offering to resume the session viewed only
+        over a ``link``, as a session opened in process isn't one picked yet."""
         super().__init__()
         self._session = session
         self._link = link
-        self._opening = opening
-        self._pick = pick
+        self._opening = opening.command
+        self._pick = opening.pick
+        self._attaching = True  # Until the first catalog has the app attach.
         # Id of the window h/j/k/l last moved to.
         self._selected = "prompt"
         # Which lanes have work in progress, as last reported (or just requested).
@@ -213,7 +226,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         self._model_choices: tuple[str, ...] = ()
         self._proposals = ProposalHost(self.push_screen, self._decide)
         self._sessions = SessionsHost(
-            self.push_screen, self._send, lambda: self._task_list.numbers_by_id
+            self.push_screen, self._send, lambda: self._task_list.numbers_by_id, opening.repository
         )
         # The feed shows answers once mounted, before any event arrives.
         self._desk = CommandDesk(session.send, self._render_event, lambda e: self._feed.render(e))
@@ -542,7 +555,7 @@ class OrbitApp(App[None], inherit_bindings=False):
                 with self.batch_update():
                     for event in coalesce(batch):
                         self._render_event(event)
-                await self._open_once_welcomed(batch)
+                await self._open_once_listed(batch)
 
     async def _hello(self) -> bool:
         """Whether the Hello opening the session was sent; a failure to send it is shown."""
@@ -551,10 +564,19 @@ class OrbitApp(App[None], inherit_bindings=False):
             failure="The backend failed to start the session",
         )
 
-    async def _open_once_welcomed(self, batch: list[Event]) -> None:
-        """Send the command to open with, if there's one still to send and ``batch`` has the
-        Welcome."""
-        if self._opening is not None and any(isinstance(event, Welcome) for event in batch):
+    async def _open_once_listed(self, batch: list[Event]) -> None:
+        """Attach to the active session of the workspace opened on, once ``batch`` has the first
+        catalog, then send the command to open with, if there's one, once that's sent."""
+        if not self._attaching or not any(isinstance(event, Catalog) for event in batch):
+            return
+        self._attaching = False
+        attach = self._sessions.opening
+        if attach is not None and await self._send(attach):
+            await self._send_opening()
+
+    async def _send_opening(self) -> None:
+        """Send the command to open with, if there's one, only once."""
+        if self._opening is not None:
             command, self._opening = self._opening, None
             await self._send(command)
 
@@ -607,8 +629,7 @@ class OrbitApp(App[None], inherit_bindings=False):
             ):
                 self._feed.render(event)
             case (
-                SessionsListed()
-                | ConversationReset()
+                ConversationReset()
                 | Snapshot()
                 | Catalog()
                 | HistoryPage()
@@ -655,8 +676,7 @@ class OrbitApp(App[None], inherit_bindings=False):
 
     def _render_session(
         self,
-        event: SessionsListed
-        | ConversationReset
+        event: ConversationReset
         | Snapshot
         | Catalog
         | HistoryPage
@@ -666,9 +686,7 @@ class OrbitApp(App[None], inherit_bindings=False):
     ) -> None:
         """Rule off the planner's conversation where it was reset, show a snapshot of the session
         viewed or a page of its history, follow a catalog, or follow the session's hold on the
-        repository. Sessions listed are left alone: the catalog lists them."""
-        if isinstance(event, SessionsListed):  # Deprecated.
-            return
+        repository."""
         if isinstance(event, Snapshot):
             self._render_snapshot(event)
         elif isinstance(event, Catalog):

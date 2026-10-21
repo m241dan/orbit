@@ -8,7 +8,13 @@ from orbit.agent.application.ports import EventLog
 from orbit.agent.domain.replay import can_replay
 from orbit.agent.domain.storage import StorageSettings, cut_fields
 from orbit.agent.domain.storage_halt import SeqSpan
-from orbit.protocol import CONNECTION_EVENTS, SESSIONLESS_EVENTS, Event, EventEnvelope
+from orbit.protocol import (
+    CONNECTION_EVENTS,
+    CONTROL_PLANE_EVENTS,
+    SESSIONLESS_EVENTS,
+    Event,
+    EventEnvelope,
+)
 
 TRANSCRIPT_LENGTH = 500
 """How many of a session's latest events its transcript holds."""
@@ -35,8 +41,8 @@ class EventSink(Protocol):
 class Outbox:
     """Events published here, each handed to :attr:`deliver` (which drops it until set) in an
     envelope stamped when it was put in: the next ``seq``, counted on from the highest in
-    ``log`` (if there is one) else from one, and the session ``open_session`` names then,
-    unless the event belongs to none.
+    ``log`` (if there is one) else from one, the session ``open_session`` names then, unless
+    the event belongs to none, and the :attr:`workspace`, unless it belongs to the control plane.
 
     With a ``log``, each envelope of a session is also written to it in the background, but for
     the events answering one connection; :meth:`catch_up` counts on from its highest ``seq``
@@ -56,6 +62,8 @@ class Outbox:
         overflow: Overflow = _NO_OVERFLOW,
     ) -> None:
         self._open = open_session
+        # Stamped on every event but the control plane's own, once set.
+        self.workspace: str | None = None
         self._cut_bytes = storage.tool_output_bytes
         # The last event's place in the stream, counted across sessions.
         self._seq = log.max_seq() if log else 0
@@ -79,11 +87,23 @@ class Outbox:
         ``logged``, but not delivered; with ``viewed``, it's stamped as that session's, a
         session that isn't open, and never logged, as it answers a connection viewing it."""
         self._seq += 1
-        session = None if isinstance(item, SESSIONLESS_EVENTS) else viewed or self._open()
-        envelope = EventEnvelope(seq=self._seq, session=session, payload=item)
+        workspace, session = self._place(item, viewed)
+        envelope = EventEnvelope(seq=self._seq, workspace=workspace, session=session, payload=item)
         if session is not None and viewed is None and logged:
             self._log(session, envelope)
         return envelope
+
+    def _place(self, item: Event, viewed: str | None) -> tuple[str | None, str | None]:
+        """The workspace and session ``item`` is stamped as: the session ``viewed``, if given,
+        else the open one, unless it belongs to none."""
+        session = None if isinstance(item, SESSIONLESS_EVENTS) else viewed or self._open()
+        workspace = None if isinstance(item, CONTROL_PLANE_EVENTS) else self.workspace
+        return workspace, session
+
+    @property
+    def last_seq(self) -> int:
+        """The ``seq`` of the last event stamped; 0 before any is."""
+        return self._seq
 
     async def catch_up(self) -> None:
         """Count on from the highest ``seq`` in the log now, if there is one and it's higher, as

@@ -31,29 +31,19 @@ from orbit.protocol import (
     Catalog,
     DeleteSession,
     Event,
-    ListingReason,
-    ListSessions,
     NewSession,
     Notice,
-    OpenSession,
     RenameSession,
-    SessionsListed,
     SessionSummary,
     Snapshot,
     TaskState,
     Usage,
 )
 
-OPEN_RETIRED = (
-    "OpenSession is retired: send Attach to view a session, or ActivateSession to make it the "
-    "active one."
-)
 NO_REVIEWS = LaneSnapshot(planner=PlannerSnapshot())
 """The review state of a session that has had none."""
 
-SessionCommand = (
-    ListSessions | OpenSession | ActivateSession | NewSession | RenameSession | DeleteSession
-)
+SessionCommand = ActivateSession | NewSession | RenameSession | DeleteSession
 
 
 def _stopped(saved: Sequence[TaskState], now: Sequence[TaskState]) -> list[str]:
@@ -113,10 +103,6 @@ class SessionSwitcher:
 
     async def handle(self, command: SessionCommand) -> None:
         match command:
-            case ListSessions():
-                await self.list_sessions("asked")
-            case OpenSession():
-                raise Refused(INVALID, OPEN_RETIRED)
             case ActivateSession() | NewSession():
                 await self.activate(command)
             case RenameSession() | DeleteSession():
@@ -130,11 +116,6 @@ class SessionSwitcher:
         if isinstance(command, ActivateSession):
             return await self._open_session(command.session)
         return await self._new_session(command.name)
-
-    async def list_sessions(self, reason: ListingReason) -> None:
-        """Publish the saved sessions, listed for ``reason``."""
-        summaries = await self._keeper.summaries()
-        await self._events.put(SessionsListed(sessions=summaries, reason=reason))
 
     async def catalog(self) -> Catalog:
         """The catalog, holding the sessions as they are now."""
@@ -175,19 +156,15 @@ class SessionSwitcher:
         await self._keeper.save(self.contents)
 
     async def _change_saved(self, command: RenameSession | DeleteSession) -> None:
-        """Rename or delete a session and publish the catalog, then list the sessions as they
-        are after, refused or not."""
-        try:
-            match command:
-                case RenameSession(session_id=session_id, name=name):
-                    await self._rename_session(session_id, name)
-                case DeleteSession(session_id=session_id):
-                    await self._keeper.delete_saved(session_id)
-                case _:
-                    assert_never(command)
-            await self.publish_catalog()
-        finally:
-            await self.list_sessions("refreshed")
+        """Rename or delete a session and publish the catalog."""
+        match command:
+            case RenameSession(session_id=session_id, name=name):
+                await self._rename_session(session_id, name)
+            case DeleteSession(session_id=session_id):
+                await self._keeper.delete_saved(session_id)
+            case _:
+                assert_never(command)
+        await self.publish_catalog()
 
     async def _rename_session(self, session_id: str, name: str) -> None:
         """Name the session ``session_id`` ``name``, saving it if it's saved; refused for an

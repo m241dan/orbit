@@ -2,7 +2,7 @@
 
 from orbit.agent.application.outbox import Outbox
 from orbit.agent.domain.storage import StorageSettings
-from orbit.protocol import EventEnvelope, Notice, SessionsListed, ToolCallFinished, Welcome
+from orbit.protocol import EventEnvelope, Notice, ToolCallFinished, UsageChanged, Welcome
 from tests.agent_fakes import FakeStore
 
 ONE = Notice(message="one")
@@ -48,9 +48,21 @@ async def test_a_sessionless_event_belongs_to_no_session() -> None:
     sent: list[EventEnvelope] = []
     outbox = Outbox(Open())
     outbox.deliver = sent.append
-    await outbox.put(SessionsListed(sessions=(), reason="asked"))
+    await outbox.put(UsageChanged())
 
     assert sent[0].session is None
+
+
+async def test_an_event_names_the_workspace_but_for_the_control_planes_own() -> None:
+    sent: list[EventEnvelope] = []
+    outbox = Outbox(Open())
+    outbox.workspace = "w1"
+    outbox.deliver = sent.append
+    await outbox.put(ONE)
+    await outbox.put(UsageChanged())
+    await outbox.put(Welcome(command_id="hello", server_version="1"))
+
+    assert [envelope.workspace for envelope in sent] == ["w1", None, None]
 
 
 async def test_a_stamped_event_is_logged_but_not_delivered() -> None:
@@ -81,6 +93,7 @@ def test_an_outbox_delivers_events_only_in_their_envelopes() -> None:
         "put",
         "put_nowait",
         "stamp",
+        "last_seq",
         "catch_up",
         "transcript",
         "history",
@@ -168,7 +181,7 @@ async def test_the_log_gets_a_sessions_events_but_for_those_answering_one_connec
     outbox = Outbox(Open(), log)
     outbox.deliver = sent.append
     outbox.put_nowait(Welcome(command_id="hello", server_version="1"))
-    outbox.put_nowait(SessionsListed(sessions=(), reason="asked"))
+    outbox.put_nowait(UsageChanged())
     outbox.put_nowait(ONE)
     await outbox.close()
 

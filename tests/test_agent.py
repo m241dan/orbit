@@ -34,7 +34,6 @@ from orbit.protocol import (
     Event,
     Notice,
     SendMessage,
-    SessionStateChanged,
     Settings,
     SettingsChanged,
     Snapshot,
@@ -57,6 +56,7 @@ from tests.agent_fakes import (
     Steps,
     close,
     events_until,
+    greeting_only,
     idle,
     nothing_queued,
     payloads,
@@ -108,8 +108,9 @@ async def test_a_prompt_starts_a_turn_of_the_planner() -> None:
 
 
 def only_state_queued(session: WorkspaceHost) -> bool:
-    """Whether the session has nothing but changes of its state queued for its frontend."""
-    return all(isinstance(event, SessionStateChanged) for event in queued(session))
+    """Whether the session has nothing but changes of its state and what else answers its
+    greeting queued for its frontend."""
+    return all(greeting_only(event) for event in queued(session))
 
 
 async def test_a_prompt_without_a_planner_is_refused() -> None:

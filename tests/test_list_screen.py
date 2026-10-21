@@ -8,6 +8,7 @@ from textual.widgets import Input, OptionList
 
 from orbit.protocol import SessionSummary
 from orbit.tui.sessions import ActivationScreen, SessionChange, SessionsScreen
+from orbit.tui.view.sessions import Viewing
 from orbit.tui.widgets import ListScreen, PickerScreen, StatusLine
 
 SESSIONS = (SessionSummary(id="a", name="first"), SessionSummary(id="b", name="second"))
@@ -21,7 +22,7 @@ def screens() -> list[ListScreen[Any]]:
     """One of each list modal, with at least three rows."""
     return [
         PickerScreen("Pick", ["one", "two", "three"]),
-        SessionsScreen(SESSIONS, None, ignore),
+        SessionsScreen(SESSIONS, Viewing(workspace="w", attached=None), ignore),
         ActivationScreen("Look or activate?", ["one", "two", "three"]),
     ]
 
@@ -41,7 +42,7 @@ async def test_j_and_k_move_the_highlight_in_each_list_modal() -> None:
 
 
 async def test_j_and_k_type_in_the_session_name_box() -> None:
-    screen = SessionsScreen(SESSIONS, None, ignore)
+    screen = SessionsScreen(SESSIONS, Viewing(workspace="w", attached=None), ignore)
     app: App[None] = App()
     async with app.run_test() as pilot:
         app.push_screen(screen)

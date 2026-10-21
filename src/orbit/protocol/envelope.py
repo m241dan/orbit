@@ -11,7 +11,6 @@ from orbit.protocol.events import (
     Catalog,
     Event,
     HistoryPage,
-    SessionsListed,
     SessionStateChanged,
     Snapshot,
     UsageChanged,
@@ -19,33 +18,30 @@ from orbit.protocol.events import (
 )
 from orbit.protocol.models import WireTolerant
 
-DEFAULT_WORKSPACE = "default"
-"""The one workspace's id, until there are workspaces."""
-
-SESSIONLESS_EVENTS: tuple[type[Event], ...] = (
-    UsageChanged,
-    SessionsListed,
-    Catalog,
-    SessionStateChanged,
-)
+SESSIONLESS_EVENTS: tuple[type[Event], ...] = (UsageChanged, Catalog, SessionStateChanged)
 """The event types that belong to no session: their envelopes carry ``session=None``."""
 
 CONNECTION_EVENTS: tuple[type[Event], ...] = (Welcome, Catalog, Snapshot, HistoryPage)
 """The event types that answer one connection, and so are never kept in a session's log."""
 
+CONTROL_PLANE_EVENTS: tuple[type[Event], ...] = (Welcome, Catalog, UsageChanged)
+"""The event types that belong to no workspace: their envelopes carry ``workspace=None``."""
+
 
 class _Envelope(WireTolerant):
-    """What commands' and events' envelopes share: the ``workspace`` they belong to, and the
-    trace context, which isn't checked and isn't set yet."""
+    """What commands' and events' envelopes share: the id of the ``workspace`` they belong to,
+    none for the control plane's own, and the trace context, which isn't checked and isn't set
+    yet."""
 
-    workspace: str = DEFAULT_WORKSPACE
+    workspace: str | None = None
     traceparent: str | None = None
     tracestate: str | None = None
 
 
 class CommandEnvelope(_Envelope):
     """A command, ``payload``, with the ``command_id`` its sender chose for it, and the
-    ``session`` it's for: ``None`` means the open session."""
+    ``workspace`` and ``session`` it's for: ``None`` means the one the connection is attached
+    to and the session it views."""
 
     command_id: str = Field(min_length=1)
     session: str | None = None

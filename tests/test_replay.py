@@ -1,12 +1,16 @@
 """Catching a reconnecting frontend up on the events it missed: when it can, and what it gets."""
 
+from datetime import UTC, datetime
+
 import pytest
 
 from orbit.agent import WorkspaceHost
 from orbit.agent.domain.replay import LogBounds, can_replay
+from orbit.agent.domain.sessions import SessionRecord
 from orbit.protocol import (
     PROTOCOL_VERSION,
     Catalog,
+    CommandAccepted,
     CommandEnvelope,
     EventEnvelope,
     Hello,
@@ -15,10 +19,11 @@ from orbit.protocol import (
     Snapshot,
     Welcome,
 )
-from tests.agent_fakes import HELLO_ID, FakeStore, Ticks, frontend
+from tests.agent_fakes import ATTACH_ID, HELLO_ID, FakeStore, Ticks, attach_to, frontend
 from tests.test_log_writer import GatedLog, delivered
 
 OPEN = "session-1"
+WHEN = datetime(2026, 10, 1, 9, 0, tzinfo=UTC)
 
 # The rule
 
@@ -70,11 +75,21 @@ def store_with(*logged: EventEnvelope) -> FakeStore:
     return store
 
 
-async def reconnected(store: FakeStore | None, since: int | None) -> list[EventEnvelope]:
-    """What a session over ``store`` sends a frontend greeting it with ``since``."""
-    session = WorkspaceHost(store=store, clock=Ticks(), new_id=lambda: OPEN, workspace="/work")
+async def rejoin(session: WorkspaceHost, since: int | None, attach: str = OPEN) -> None:
+    """Greet ``session`` with ``since``, then attach to its session ``attach``."""
     hello = Hello(client="orbit-tests", protocol_version=PROTOCOL_VERSION, since=since)
     await frontend(session).send(CommandEnvelope(command_id=HELLO_ID, payload=hello))
+    attaching = attach_to(session, attach)
+    await frontend(session).send(CommandEnvelope(command_id=ATTACH_ID, payload=attaching))
+
+
+async def reconnected(
+    store: FakeStore | None, since: int | None, attach: str = OPEN
+) -> list[EventEnvelope]:
+    """What a session over ``store`` sends a frontend greeting it with ``since``, then
+    attaching to its session ``attach``."""
+    session = WorkspaceHost(store=store, clock=Ticks(), new_id=lambda: OPEN, workspace="/work")
+    await rejoin(session, since, attach)
     await session.close()
     return delivered(session)
 
@@ -90,6 +105,7 @@ async def test_a_reconnecting_frontend_gets_what_it_missed_in_place_of_a_snapsho
     assert kinds(sent[:2]) == [Welcome, Catalog]
     assert sent[2:7] == notices(16, 21)
     assert sent[7].payload == Notice(message="Workspace: /work")
+    assert sent[8].payload == CommandAccepted(command_id=ATTACH_ID)
     assert Snapshot not in kinds(sent)
     assert isinstance(sent[-1].payload, SessionStateChanged)  # Counting the frontend, unlogged.
     assert store.appends == []  # Neither the events resent nor the greeting are logged again.
@@ -103,8 +119,7 @@ async def test_events_still_to_be_written_are_caught_up_on_once() -> None:
     await session._events.put(Notice(message="b"))
     await session._events.put(Notice(message="c"))
     delivered(session)  # Sent before the frontend went away.
-    hello = Hello(client="orbit-tests", protocol_version=PROTOCOL_VERSION, since=1)
-    await frontend(session).send(CommandEnvelope(command_id=HELLO_ID, payload=hello))
+    await rejoin(session, 1)
     store.gate.set()
     await session.close()
 
@@ -137,6 +152,26 @@ async def test_a_frontend_that_cant_catch_up_gets_a_snapshot(logged: list[EventE
 
     assert kinds(sent[:3]) == [Welcome, Catalog, Snapshot]
     assert not [envelope for envelope in sent if envelope.payload == Notice(message="n16")]
+
+
+async def test_a_frontend_attaching_to_a_saved_session_gets_its_view_not_a_replay() -> None:
+    store = store_with(*(notice(seq) for seq in range(10, 21)), notice(9, "earlier"))
+    store.saved.append(SessionRecord(id="earlier", name="earlier", created=WHEN, last_active=WHEN))
+    sent = await reconnected(store, 15, attach="earlier")
+
+    [snapshot] = [e.payload for e in sent if isinstance(e.payload, Snapshot)]
+    assert (snapshot.session.id, snapshot.active) == ("earlier", False)
+    assert not [envelope for envelope in sent if envelope.payload == Notice(message="n16")]
+
+
+async def test_a_hello_gets_nothing_it_missed_until_it_attaches() -> None:
+    store = store_with(*(notice(seq) for seq in range(10, 21)))
+    session = WorkspaceHost(store=store, clock=Ticks(), new_id=lambda: OPEN)
+    hello = Hello(client="orbit-tests", protocol_version=PROTOCOL_VERSION, since=15)
+    await frontend(session).send(CommandEnvelope(command_id=HELLO_ID, payload=hello))
+    await session.close()
+
+    assert kinds(delivered(session)) == [Welcome, Catalog]
 
 
 async def test_a_frontend_ahead_of_the_log_gets_a_snapshot() -> None:

@@ -7,7 +7,6 @@ from orbit.protocol import (
     CODER,
     CONFIGURATOR,
     CONFIGURE_CHECKS,
-    DEFAULT_WORKSPACE,
     PLANNER,
     PLANNER_LANE,
     REVIEWER,
@@ -58,23 +57,24 @@ def agent_entry(role: str) -> AgentEntry:
 
 
 def catalog(
-    directory: str | None,
+    workspace: tuple[str, str | None, str | None],
     sessions: tuple[SessionSummary, ...],
     roles: Iterable[str],
     *,
     read_only: bool = False,
     live: Iterable[SessionStateChanged] = (),
 ) -> Catalog:
-    """The catalog of the repository in the ``directory`` named so, if any, holding
-    ``sessions``, those ``live`` is about in those states, with agents in ``roles``, for an
-    orbit that's ``read_only`` if so."""
-    label = directory or NO_WORKSPACE_LABEL
+    """The catalog of the ``workspace``, its id, then the name and path of its directory, if it
+    has one, holding ``sessions``, those ``live`` is about in those states, with agents in
+    ``roles``, for an orbit that's ``read_only`` if so."""
+    workspace_id, name, path = workspace
+    label = name or NO_WORKSPACE_LABEL
     states = {state.session: state for state in live}
     shown = tuple(
         with_state(summary, states[summary.id]) if summary.id in states else summary
         for summary in sessions
     )
-    entry = WorkspaceEntry(id=DEFAULT_WORKSPACE, label=label, sessions=shown)
+    entry = WorkspaceEntry(id=workspace_id, label=label, path=path, sessions=shown)
     return Catalog(
         workspaces=(entry,),
         agents=tuple(agent_entry(role) for role in roles),

@@ -28,7 +28,6 @@ from orbit.protocol import (
     History,
     HistoryPage,
     Notice,
-    SessionsListed,
     Snapshot,
     TasksChanged,
     TaskSpec,
@@ -37,11 +36,13 @@ from orbit.protocol import (
     decode_event,
 )
 from tests.agent_fakes import (
+    ATTACH_ID,
     COMMAND_ID,
     FakeFallback,
     FakeStore,
     Ticks,
     agent_exited,
+    attach_to,
     events_until,
     frontend,
     greet,
@@ -116,9 +117,14 @@ def delivered(session: WorkspaceHost) -> list[EventEnvelope]:
 
 def kept(sent: Sequence[EventEnvelope]) -> list[EventEnvelope]:
     """The envelopes of ``sent`` the log keeps: a session's, but for those answering one
-    connection."""
+    connection, the acceptance of the Attach greeting it among them."""
     connection = Welcome | Catalog | Snapshot
-    return [e for e in sent if e.session is not None and not isinstance(e.payload, connection)]
+    attached = CommandAccepted(command_id=ATTACH_ID)
+    return [
+        e
+        for e in sent
+        if e.session is not None and not isinstance(e.payload, connection) and e.payload != attached
+    ]
 
 
 def payloads_of[T](kind: type[T], sent: Sequence[EventEnvelope]) -> list[T]:
@@ -771,6 +777,7 @@ async def test_a_session_whose_log_cant_be_read_answers_since_with_a_snapshot() 
     session = stored_session(Unreadable())
     hello = Hello(client="orbit-tests", protocol_version=PROTOCOL_VERSION, since=0)
     await frontend(session).send(CommandEnvelope(command_id=COMMAND_ID, payload=hello))
+    await frontend(session).send(CommandEnvelope(command_id=ATTACH_ID, payload=attach_to(session)))
     await session.close()
 
     assert payloads_of(Snapshot, delivered(session))
@@ -795,11 +802,10 @@ async def test_a_sessions_events_are_logged_but_for_those_answering_one_connecti
     await send(session, AddTask(task=TaskSpec(prompt="Add a flag.")))
     await publish(session, Notice(message="hi"))
     await publish(session, UsageChanged())
-    await publish(session, SessionsListed(sessions=(), reason="asked"))
     await session.close()
 
     stored, sent = read_log(tmp_path / "state"), delivered(session)
-    for kind in (Welcome, Catalog, Snapshot, UsageChanged, SessionsListed):
+    for kind in (Welcome, Catalog, Snapshot, UsageChanged):
         assert payloads_of(kind, sent)
     assert stored == kept(sent)
     assert [type(envelope.payload) for envelope in kept(sent)] == [
@@ -1240,6 +1246,7 @@ async def hello_since(store: OwnView, since: int) -> list[EventEnvelope]:
     session = trimming_session(store, 1)
     hello = Hello(client="orbit-tests", protocol_version=PROTOCOL_VERSION, since=since)
     await frontend(session).send(CommandEnvelope(command_id=COMMAND_ID, payload=hello))
+    await frontend(session).send(CommandEnvelope(command_id=ATTACH_ID, payload=attach_to(session)))
     await session.close()
     return delivered(session)
 

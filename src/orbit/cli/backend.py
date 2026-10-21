@@ -190,6 +190,7 @@ def _backend(backend: _Backend, directories: _Directories, *, pick_session: bool
             agents=agents,
             workspace=str(root),
             check_at_startup=True,
+            workspace_id=opened.store.workspace_id,
             store=opened.store,
             pinned=pinned,
             pick_session=pick_session,

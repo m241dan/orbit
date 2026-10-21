@@ -1,4 +1,5 @@
-"""Renaming and deleting saved sessions from the list of sessions, which is listed again after."""
+"""Renaming and deleting saved sessions from the list of sessions, which a catalog lists again
+after."""
 
 from orbit.agent import WorkspaceHost
 from orbit.protocol import (
@@ -13,11 +14,10 @@ from orbit.protocol import (
     Event,
     RenameSession,
     ResumeStorage,
-    SessionsListed,
     SessionSummary,
 )
-from tests.agent_fakes import FakeStore, events_until, of_type, send
-from tests.test_session_switch import EARLIER, TASK, last_of, messages, saved, store_with, switching
+from tests.agent_fakes import FakeStore, events_until, listed, of_type, send, until_marked
+from tests.test_session_switch import EARLIER, TASK, messages, saved, store_with, switching
 from tests.test_storage_halt import ACCEPTED, outcome_of
 
 Managing = RenameSession | DeleteSession
@@ -26,13 +26,14 @@ Managing = RenameSession | DeleteSession
 async def listed_after(session: WorkspaceHost, command: Managing) -> tuple[SessionSummary, ...]:
     """The sessions listed after sending ``command``."""
     await send(session, command)
-    return last_of(SessionsListed, await events_until(session, of_type(SessionsListed))).sessions
+    await until_marked(session)
+    return await listed(session)
 
 
 async def errors_of(session: WorkspaceHost, command: Managing) -> list[str]:
-    """The errors sending ``command`` reports before the sessions are listed again."""
+    """The errors sending ``command`` reports."""
     await send(session, command)
-    return messages(ErrorOccurred, await events_until(session, of_type(SessionsListed)))
+    return messages(ErrorOccurred, await until_marked(session))
 
 
 def halted(event: Event) -> bool:
@@ -41,28 +42,17 @@ def halted(event: Event) -> bool:
 
 
 async def refusal_of(session: WorkspaceHost, command: Managing) -> tuple[str, str]:
-    """The code and message ``command`` is refused with, once the sessions are listed again
-    before it, and with no error reported."""
+    """The code and message ``command`` is refused with, with no error reported."""
     await send(session, command)
     events = await events_until(session, of_type(CommandRefused))
     refused = events[-1]
     assert isinstance(refused, CommandRefused)
-    assert last_of(SessionsListed, events).reason == "refreshed"
     assert messages(ErrorOccurred, events) == []
     return refused.code, refused.message
 
 
 def names(sessions: tuple[SessionSummary, ...]) -> dict[str, str]:
     return {s.id: s.name for s in sessions}
-
-
-async def test_the_sessions_listed_after_a_rename_or_delete_are_refreshed() -> None:
-    session, _ = switching(store_with(saved("old"), saved("gone")))
-    for command in (RenameSession(session_id="old", name="new"), DeleteSession(session_id="gone")):
-        await send(session, command)
-        listed = last_of(SessionsListed, await events_until(session, of_type(SessionsListed)))
-        assert listed.reason == "refreshed"
-    await session.close()
 
 
 async def test_a_saved_session_is_renamed_under_its_lock() -> None:
@@ -244,7 +234,7 @@ async def test_an_unreadable_session_can_be_deleted() -> None:
     store.broken["bad"] = "it isn't JSON"
     session, _ = switching(store)
     await send(session, DeleteSession(session_id="bad"))
-    await events_until(session, of_type(SessionsListed))
+    await until_marked(session)
 
     assert store.deleted == ["bad"]
     await session.close()

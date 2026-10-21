@@ -3,10 +3,11 @@ envelope, the token sent as ``Authorization: Bearer`` on the upgrade.
 
 A lost connection is retried with backoff until the session is closed, but for one closed as
 its stream ended (1000), for a message over the limit (1009) or for an event that can't be read,
-which reconnecting would only repeat; on reconnecting, the last ``Hello``
-sent again with ``since`` the last ``seq`` received, so the control plane resends what was
-missed, then, if the connection viewed a session that isn't open, the last ``Attach`` sent, so
-it views that session again. How the link stands is reported to whoever watches it.
+which reconnecting would only repeat; on reconnecting, the last ``Hello`` is sent again with
+``since`` the last ``seq`` received, then, once an ``Attach`` was sent, one for the workspace
+and session the last ``Snapshot`` showed, so the connection views that session again and the
+control plane resends what was missed of it. How the link stands is reported to whoever watches
+it.
 """
 
 import asyncio
@@ -31,12 +32,9 @@ from orbit.protocol import (
     MESSAGE_TOO_BIG,
     NORMAL,
     Attach,
-    CommandAccepted,
     CommandEnvelope,
-    CommandRefused,
     Connected,
     Ended,
-    Event,
     EventEnvelope,
     HandshakeFailed,
     Hello,
@@ -126,8 +124,7 @@ class WebSocketSession:
         self._websocket: ClientConnection | None = None  # While connected.
         self._hello: CommandEnvelope | None = None  # The last Hello sent.
         self._attach: CommandEnvelope | None = None  # The last Attach sent.
-        self._viewing = False  # Whether the last Attach answered left a read-only view.
-        self._shown_view = False  # Whether the last Snapshot received was of one.
+        self._viewed: Attach | None = None  # The session the last Snapshot received showed.
         self._seq: int | None = None  # The last seq received.
         self._watchers: list[Callable[[LinkState], None]] = []
         self.state: LinkState | None = None  # None until the first attempt to connect ends.
@@ -302,14 +299,20 @@ class WebSocketSession:
             raise _Ended(close.reason)
 
     async def _greet(self, websocket: ClientConnection) -> None:
-        """Send the last ``Hello`` on ``websocket``, if any, then the last ``Attach``, if its
-        answer left the connection viewing a session that isn't open, as ``Hello`` attaches it
-        to the open one."""
+        """Send the last ``Hello`` on ``websocket``, if any, then, if an ``Attach`` was sent,
+        the one attaching the connection again to what it viewed."""
         if self._hello is None:
             return
         await websocket.send(encode(self._greeting(self._hello)))
-        if self._viewing and self._attach is not None:
-            await websocket.send(encode(self._attach))
+        if self._attach is not None:
+            await websocket.send(encode(self._reattach(self._attach)))
+
+    def _reattach(self, attach: CommandEnvelope) -> CommandEnvelope:
+        """``attach``, the last ``Attach`` sent, for the session the last ``Snapshot`` received
+        showed, if any was, as switches and deletions change what the connection views."""
+        if self._viewed is None:
+            return attach
+        return attach.model_copy(update={"payload": self._viewed})
 
     async def _read(self, websocket: ClientConnection) -> bool:
         """Queue the events ``websocket`` brings, skipping those of unknown types, until it
@@ -322,25 +325,20 @@ class WebSocketSession:
                 received = True
                 if envelope is not None:
                     self._seq = envelope.seq
-                    self._note(envelope.payload)
+                    self._note(envelope)
                     self._events.put_nowait(envelope)
         return received
 
-    def _note(self, event: Event) -> None:
-        """Note what ``event`` says of the session the connection views: a Snapshot whether
-        it's a view, and the answer to the last ``Attach`` whether that left one, as the
-        Snapshot before an acceptance answered it, and a refusal, such as of one sent again
-        for a session deleted since, leaves the open one."""
-        if isinstance(event, Snapshot):
-            self._shown_view = not event.active
-        elif isinstance(event, CommandAccepted | CommandRefused) and self._answers_attach(
-            event.command_id
-        ):
-            self._viewing = isinstance(event, CommandAccepted) and self._shown_view
-
-    def _answers_attach(self, command_id: str) -> bool:
-        """Whether ``command_id`` is the last ``Attach``'s."""
-        return self._attach is not None and self._attach.command_id == command_id
+    def _note(self, envelope: EventEnvelope) -> None:
+        """Note the session ``envelope`` shows, if it holds a ``Snapshot``, in the workspace it
+        names, or else that of the last ``Attach`` sent."""
+        snapshot = envelope.payload
+        if not isinstance(snapshot, Snapshot) or self._attach is None:
+            return
+        attached = self._attach.payload
+        assert isinstance(attached, Attach)  # Only an Attach is kept as one.
+        workspace = envelope.workspace or attached.workspace
+        self._viewed = Attach(workspace=workspace, session=snapshot.session.id)
 
     def _lost(self) -> None:
         """Report that the connection is down, from now unless it already was."""

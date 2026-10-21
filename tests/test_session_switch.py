@@ -26,14 +26,13 @@ from orbit.protocol import (
     CommandRefused,
     ErrorOccurred,
     Event,
-    ListSessions,
+    HistoryPage,
     NewSession,
     Notice,
     RemoveTask,
     ReviewStatus,
     RunTasks,
     SendMessage,
-    SessionsListed,
     SessionSummary,
     Settings,
     Snapshot,
@@ -61,9 +60,11 @@ from tests.agent_fakes import (
     board,
     events_until,
     idle,
+    listed,
     of_type,
     send,
     session_for,
+    until_marked,
     verified,
 )
 from tests.test_agent_run import keeps_claiming
@@ -127,8 +128,7 @@ def errors(events: list[Event]) -> list[tuple[str, str]]:
 async def opened(session: WorkspaceHost, command: ActivateSession | NewSession) -> list[Event]:
     """The events from sending ``command`` until its session is opened, and its notes."""
     await send(session, command)
-    await send(session, ListSessions())  # Marks the end of the notes that follow.
-    return await events_until(session, of_type(SessionsListed))
+    return await until_marked(session)  # Marks the end of the notes that follow.
 
 
 async def refused(
@@ -136,8 +136,7 @@ async def refused(
 ) -> list[tuple[str, str]]:
     """The codes and messages ``command`` is refused with, reporting no error."""
     await send(session, command)
-    await send(session, ListSessions())
-    events = await events_until(session, of_type(SessionsListed))
+    events = await until_marked(session)
     assert messages(ErrorOccurred, events) == []
     return [(e.code, e.message) for e in events if isinstance(e, CommandRefused)]
 
@@ -161,11 +160,9 @@ async def test_sessions_list_newest_first_marking_the_current_locked_and_unreada
     store.broken["broken"] = "it isn't JSON"
     session, _ = switching(store)
     await send(session, AddTask(task=TASK))
-    await send(session, ListSessions())
-    listed = last_of(SessionsListed, await events_until(session, of_type(SessionsListed)))
+    await until_marked(session)
 
-    assert listed.reason == "asked"
-    flags = [(s.id, s.current, s.locked, s.unreadable) for s in listed.sessions]
+    flags = [(s.id, s.current, s.locked, s.unreadable) for s in await listed(session)]
     assert flags == [
         ("session-1", True, False, None),
         ("taken", False, True, None),
@@ -177,17 +174,7 @@ async def test_sessions_list_newest_first_marking_the_current_locked_and_unreada
 
 async def test_without_a_store_no_sessions_are_listed() -> None:
     session = WorkspaceHost()
-    await send(session, ListSessions())
-    listed = last_of(SessionsListed, await events_until(session, of_type(SessionsListed)))
-    assert listed.sessions == ()
-    await session.close()
-
-
-async def test_a_session_picking_at_startup_lists_no_sessions_unasked() -> None:
-    session, _ = switching(store_with(saved("old")), pick_session=True)
-    await send(session, ListSessions())
-    events = await events_until(session, of_type(SessionsListed))
-    assert [e.reason for e in events if isinstance(e, SessionsListed)] == ["asked"]
+    assert await listed(session) == ()
     await session.close()
 
 
@@ -268,7 +255,7 @@ async def test_opening_a_session_publishes_its_snapshot_then_the_resumed_notes()
         Notice,
         Notice,
         CommandAccepted,
-        SessionsListed,  # Listed for ListSessions, which marks the end.
+        HistoryPage,  # The answer to History, which marks the end.
     ]
     await session.close()
 
@@ -417,8 +404,7 @@ async def test_a_store_that_cant_lock_the_session_leaves_the_open_one_as_it_was(
     await send(session, AddTask(task=TASK))
     store.lock_failure = "Couldn't lock the session: disk full"
     await send(session, ActivateSession(session="auth"))
-    await send(session, ListSessions())
-    events = await events_until(session, of_type(SessionsListed))
+    events = await until_marked(session)
     assert errors(events) == [(SAVE_FAILED, "Couldn't lock the session: disk full")]
     assert session.saved_session.id == "session-1"
     assert [t.task for t in board(events)] == [TASK]  # Its last board is the one it had.
@@ -656,9 +642,7 @@ async def test_the_sessions_list_shows_what_a_session_spent() -> None:
     session, launcher = switching(FakeStore(), claims_done, reviews=False)
     spent = await spent_on_a_removed_task(session, launcher)
     await opened(session, NewSession())
-    await send(session, ListSessions())
-    listed = last_of(SessionsListed, await events_until(session, of_type(SessionsListed)))
-    assert {s.id: s.usage for s in listed.sessions} == {"session-1": spent}
+    assert {s.id: s.usage for s in await listed(session)} == {"session-1": spent}
     await session.close()
 
 

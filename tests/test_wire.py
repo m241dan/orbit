@@ -59,7 +59,7 @@ def test_encode_writes_nulls_compactly() -> None:
 def test_encode_writes_defaults() -> None:
     text = encode(EventEnvelope(seq=1, payload=Notice(message="hi")))
 
-    assert '"workspace":"default"' in text
+    assert '"workspace":null' in text and '"session":null' in text
 
 
 TASK_LIST = (

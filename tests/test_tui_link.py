@@ -8,6 +8,8 @@ from textual.widgets import OptionList, Static
 
 from orbit.protocol import (
     PLANNER,
+    Attach,
+    Catalog,
     Connected,
     Ended,
     HandshakeFailed,
@@ -16,11 +18,13 @@ from orbit.protocol import (
     NotConnected,
     Reconnecting,
     SendMessage,
+    SessionSummary,
     Stopped,
     TokenRefused,
     Welcome,
+    WorkspaceEntry,
 )
-from orbit.tui import OrbitApp
+from orbit.tui import Opening, OrbitApp
 from orbit.tui.link import LinkScreen
 from orbit.tui.view.link import LOST_AFTER, ended_message, lost_delay
 from tests.test_tui import FakeSession, entries, feed_events
@@ -28,6 +32,15 @@ from tests.test_tui import FakeSession, entries, feed_events
 URL = "ws://127.0.0.1:7433/"
 NOW = 1000.0
 WELCOME = Welcome(command_id="hello", server_version="1.0")
+OLD = SessionSummary(id="old", name="earlier")
+
+
+def catalog(*sessions: SessionSummary) -> Catalog:
+    workspace = WorkspaceEntry(id="w", label="project", sessions=sessions)
+    return Catalog(workspaces=(workspace,), agents=(), triggers=(), lanes=())
+
+
+CATALOG = catalog(SessionSummary(id="now", name="today", active=True), OLD)
 
 
 class FakeLink:
@@ -234,14 +247,37 @@ def test_an_ended_link_without_a_reason_says_so_plainly() -> None:
     )
 
 
-async def test_the_opening_command_is_sent_once_welcomed_and_only_once() -> None:
+async def test_the_opening_command_is_sent_once_attached_and_only_once() -> None:
     session = FakeSession()
-    app = OrbitApp(session, opening=NewSession(name="auth"))
+    app = OrbitApp(session, opening=Opening(NewSession(name="auth")))
     async with app.run_test() as pilot:
+        await feed_events(session, pilot, WELCOME)
         assert session.commands == []
-        await feed_events(session, pilot, WELCOME)
-        await feed_events(session, pilot, WELCOME)
+        await feed_events(session, pilot, CATALOG)
+        await feed_events(session, pilot, WELCOME, CATALOG)
         assert session.commands == [NewSession(name="auth")]
+        assert [e.payload for e in session.sent[1:]] == [
+            Attach(workspace="w", session="now"),
+            NewSession(name="auth"),
+        ]
+
+
+async def test_an_opening_attach_that_fails_to_send_sends_no_opening_command() -> None:
+    session = FakeSession()
+    session.send_error = RuntimeError("the backend is gone")
+    app = OrbitApp(session, opening=Opening(NewSession(name="auth")))
+    async with app.run_test() as pilot:
+        session.attached = True  # So the Attach is sent as any command, and fails.
+        await feed_events(session, pilot, CATALOG)
+        assert session.commands == [Attach(workspace="w", session="now")]
+
+
+async def test_a_catalog_with_no_active_session_attaches_to_nothing() -> None:
+    session = FakeSession()
+    app = OrbitApp(session, opening=Opening(NewSession(name="auth")))
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, catalog(OLD))
+        assert [e.payload for e in session.sent[1:]] == []
 
 
 def test_the_lost_modal_waits_out_what_is_left_of_two_minutes() -> None:

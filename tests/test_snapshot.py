@@ -111,14 +111,14 @@ async def test_with_reviews_on_the_snapshot_has_the_review_status() -> None:
     assert snapshot.review == ReviewStatus(paused=False, open_batches=0)
 
 
-async def test_usage_fetched_before_hello_comes_after_the_catalog_before_the_snapshot() -> None:
+async def test_usage_fetched_before_attaching_comes_after_the_snapshot() -> None:
     session, _, _ = session_for(usage=Source(UsageReport(LIMITS)))
     await fetch_usage_unseen(session)
     events = await opening(session, 4)
     await session.close()
 
     kinds = [type(e).__name__ for e in events]
-    assert kinds == ["Welcome", "Catalog", "UsageChanged", "Snapshot"]
+    assert kinds == ["Welcome", "Catalog", "Snapshot", "UsageChanged"]
 
 
 async def test_with_no_usage_fetched_the_catalog_is_followed_by_the_snapshot() -> None:

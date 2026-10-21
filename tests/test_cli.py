@@ -52,7 +52,6 @@ from orbit.protocol import (
     Catalog,
     EventEnvelope,
     Notice,
-    SessionsListed,
     Settings,
     Snapshot,
     TasksChanged,
@@ -61,6 +60,7 @@ from orbit.protocol import (
     decode_event,
     encode,
 )
+from orbit.tui import Opening
 from tests.agent_fakes import greeted, queued, send, sole, startup_of, store_of
 from tests.conftest import OFFLINE
 from tests.store_views import open_view
@@ -133,11 +133,14 @@ class FakeApp:
     halted: ClassVar[str | None] = None
     # Whether each app was to have the user pick a session at startup.
     picks: ClassVar[list[bool]] = []
+    # The repository each app was to open on the workspace of.
+    repositories: ClassVar[list[str | None]] = []
 
-    def __init__(self, session: ThreadedSession, *, pick: bool = False) -> None:
+    def __init__(self, session: ThreadedSession, *, opening: Opening) -> None:
         self.session = session
         self.storage_halt = FakeApp.halted
-        FakeApp.picks.append(pick)
+        FakeApp.picks.append(opening.pick)
+        FakeApp.repositories.append(opening.repository)
 
     def run(self) -> None:
         asyncio.run(self._open_and_close())
@@ -183,6 +186,7 @@ def launched(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> list[WorkspaceH
     FakeApp.during = None
     FakeApp.halted = None
     FakeApp.picks = []
+    FakeApp.repositories = []
     return FakeApp.launched
 
 
@@ -215,11 +219,9 @@ def config_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
 
 @dataclass(frozen=True)
 class Greeted:
-    """What a chat's session publishes once greeted, before anything runs: its ``notices``, and
-    whether it ``listed`` the saved sessions, which it never does unasked."""
+    """What a chat's session publishes once greeted, before anything runs: its ``notices``."""
 
     notices: list[str]
-    listed: bool
 
 
 @pytest.fixture
@@ -231,7 +233,7 @@ def greetings(launched: list[WorkspaceHost]) -> list[Greeted]:
         await greeted(session)
         events = queued(session)
         notices = [e.message for e in events if isinstance(e, Notice)]
-        seen.append(Greeted(notices, any(isinstance(e, SessionsListed) for e in events)))
+        seen.append(Greeted(notices))
 
     FakeApp.during = greet_it
     return seen
@@ -766,9 +768,9 @@ def test_chat_has_the_user_pick_a_session_at_startup(
     monkeypatch.chdir(tmp_path)
     assert runner.invoke(app, ["chat"]).exit_code == 0
 
-    [greeting] = greetings
-    assert not greeting.listed
+    assert len(greetings) == 1
     assert FakeApp.picks == [True]
+    assert FakeApp.repositories == [str(tmp_path.resolve())]
 
 
 def test_chat_new_starts_a_new_session_named_for_the_time(
@@ -781,8 +783,7 @@ def test_chat_new_starts_a_new_session_named_for_the_time(
     assert runner.invoke(app, ["chat", "--new"]).exit_code == 0
 
     [session] = launched
-    [greeting] = greetings
-    assert not greeting.listed
+    assert len(greetings) == 1
     assert FakeApp.picks == [False]
     assert session.saved_session.name == default_name(session.saved_session.created)
 
@@ -797,8 +798,7 @@ def test_chat_name_starts_a_new_session_with_that_name(
     assert runner.invoke(app, ["chat", "--name", "auth rework"]).exit_code == 0
 
     [session] = launched
-    [greeting] = greetings
-    assert not greeting.listed
+    assert len(greetings) == 1
     assert FakeApp.picks == [False]
     assert session.saved_session.name == "auth rework"
 

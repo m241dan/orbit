@@ -36,6 +36,7 @@ from orbit.protocol import (
     UNAVAILABLE,
     UNKNOWN,
     AddTask,
+    Attach,
     Catalog,
     Command,
     CommandAccepted,
@@ -95,8 +96,17 @@ async def say(websocket: ClientConnection, command_id: str, command: Command) ->
     await websocket.send(encode(CommandEnvelope(command_id=command_id, payload=command)))
 
 
-async def hello(websocket: ClientConnection, client: str = "tests") -> None:
+async def hello(websocket: ClientConnection, client: str = "tests") -> list[Event]:
+    """Say Hello on ``websocket`` as ``client``, then attach to the active session of the first
+    workspace its catalog lists; what it received, up to the Attach's acceptance."""
     await say(websocket, "hello", Hello(client=client, protocol_version=PROTOCOL_VERSION))
+    greeting = await until(websocket, Catalog)
+    catalog = greeting[-1]
+    assert isinstance(catalog, Catalog)
+    [workspace, *_] = catalog.workspaces
+    [active] = [summary for summary in workspace.sessions if summary.active]
+    await say(websocket, "attach", Attach(workspace=workspace.id, session=active.id))
+    return greeting + await until(websocket, CommandAccepted)
 
 
 async def received(websocket: ClientConnection) -> Event:
@@ -124,9 +134,8 @@ async def closed(websocket: ClientConnection) -> tuple[int | None, str | None]:
 async def test_a_frontend_with_the_token_is_welcomed_with_the_catalog_and_snapshot() -> None:
     async with serving() as url, frontend(url) as websocket:
         assert url.startswith("ws://127.0.0.1:") and not url.endswith(":0/")
-        await hello(websocket)
-        events = await until(websocket, Snapshot)
-        assert [type(e) for e in events] == [Welcome, Catalog, Snapshot]
+        events = await hello(websocket)
+        assert [type(e) for e in events] == [Welcome, Catalog, Snapshot, CommandAccepted]
 
 
 @pytest.mark.parametrize("token", [None, "wrong"])
@@ -146,7 +155,6 @@ async def test_a_new_token_admits_new_frontends_at_once_and_keeps_open_ones() ->
     try:
         async with frontend(url) as before:
             await hello(before)
-            await until(before, Snapshot)
             tokens.append("the-new-token")
             with pytest.raises(InvalidStatus) as refused:
                 async with frontend(url, TOKEN):
@@ -154,7 +162,6 @@ async def test_a_new_token_admits_new_frontends_at_once_and_keeps_open_ones() ->
             assert refused.value.response.status_code == 401
             async with frontend(url, "the-new-token") as after:
                 await hello(after)
-                await until(after, Snapshot)
             await say(before, "add", AddTask(task=TASK))
             await until(before, CommandAccepted)
     finally:
@@ -178,7 +185,6 @@ async def test_every_frontend_sees_a_change_one_of_them_makes() -> None:
     async with serving() as url, frontend(url) as first, frontend(url) as second:
         for websocket in (first, second):
             await hello(websocket)
-            await until(websocket, Snapshot)
         await say(first, "add", AddTask(task=TASK))
         for websocket in (first, second):
             events = await until(websocket, CommandAccepted)
@@ -189,7 +195,6 @@ async def test_every_frontend_sees_a_change_one_of_them_makes() -> None:
 async def test_a_command_of_an_unknown_type_is_refused_as_unknown() -> None:
     async with serving() as url, frontend(url) as websocket:
         await hello(websocket)
-        await until(websocket, Snapshot)
         await websocket.send('{"command_id":"c1","payload":{"type":"nope"}}')
         *_, refusal = await until(websocket, CommandRefused)
         assert isinstance(refusal, CommandRefused)
@@ -240,7 +245,6 @@ async def test_an_event_over_the_limit_closes_the_websocket() -> None:
     limited = ServerSettings(port=0, max_message_mb=1)
     async with serving(settings=limited) as url, frontend(url) as websocket:
         await hello(websocket)
-        await until(websocket, Snapshot)
         await say(websocket, "one", AddTask(task=big))
         await until(websocket, CommandAccepted)
         await say(websocket, "two", AddTask(task=big))
@@ -254,7 +258,7 @@ async def test_a_frontend_too_far_behind_is_closed_saying_so(
 ) -> None:
     monkeypatch.setattr(connection_module, "QUEUE_LIMIT", 1)
     async with serving() as url, frontend(url) as websocket:
-        await hello(websocket)
+        await say(websocket, "hello", Hello(client="tests", protocol_version=PROTOCOL_VERSION))
         assert await closed(websocket) == (POLICY_VIOLATION, "too far behind")
 
 
@@ -264,7 +268,6 @@ async def test_shutting_down_closes_every_websocket_saying_so() -> None:
     url = await server.start()
     async with frontend(url) as greeted, frontend(url) as silent:
         await hello(greeted)
-        await until(greeted, Snapshot)
         await server.stop(session.close)
         for websocket in (greeted, silent):
             assert await closed(websocket) == (GOING_AWAY, SHUTTING_DOWN)
@@ -278,7 +281,6 @@ async def test_the_server_says_as_frontends_connect_and_disconnect() -> None:
     async with serving(lines=lines) as url:
         async with frontend(url) as websocket:
             await hello(websocket, "orbit-tui")
-            await until(websocket, Snapshot)
             port = websocket.local_address[1]
         while len(lines.said) < 2:
             await asyncio.sleep(0.01)
@@ -293,7 +295,6 @@ async def test_the_server_says_as_an_unnamed_frontend_connects_and_disconnects()
     async with serving(lines=lines) as url:
         async with frontend(url) as websocket:
             await hello(websocket, "")
-            await until(websocket, Snapshot)
             port = websocket.local_address[1]
         while len(lines.said) < 2:
             await asyncio.sleep(0.01)
@@ -328,7 +329,6 @@ async def test_queued_work_runs_to_the_end_with_no_frontend_connected() -> None:
     async with serving(session) as url:
         async with frontend(url) as websocket:
             await hello(websocket)
-            await until(websocket, Snapshot)
             await say(websocket, "add", AddTask(task=TASK))
             await until(websocket, CommandAccepted)
             await say(websocket, "run", RunTasks())

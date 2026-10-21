@@ -1,7 +1,7 @@
 """The protocol's names: its version, and the lanes, triggers, roles, task origins and
 pseudo-tasks both sides refer to."""
 
-PROTOCOL_VERSION = 1
+PROTOCOL_VERSION = 2
 """The protocol's major version, which a ``Hello`` must name to be welcomed."""
 
 

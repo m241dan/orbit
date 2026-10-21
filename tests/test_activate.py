@@ -7,21 +7,18 @@ from orbit.agent import WorkspaceHost
 from orbit.agent.application.connection import SessionConnection
 from orbit.agent.domain.sessions import SessionRecord
 from orbit.protocol import (
-    INVALID,
     ActivateSession,
     AddTask,
     Attach,
     Catalog,
     CommandAccepted,
-    CommandRefused,
     Event,
     NewSession,
-    OpenSession,
     SessionRef,
     Snapshot,
     TasksChanged,
 )
-from tests.agent_fakes import Ticks
+from tests.agent_fakes import HELLO, WORKSPACE, Ticks, connect
 from tests.test_attach import (
     EARLIER,
     OPEN,
@@ -37,11 +34,6 @@ from tests.test_attach import (
     taken,
     viewing,
     workspace,
-)
-
-OPEN_RETIRED = (
-    "OpenSession is retired: send Attach to view a session, or ActivateSession to make it the "
-    "active one."
 )
 
 
@@ -86,6 +78,21 @@ async def test_another_connection_keeps_the_old_session_as_a_read_only_view() ->
     assert snapshot.open_session == SessionRef(id=EARLIER, name="old work")
     assert snapshot.tasks[0].task == TASK
     assert states(seen) == [(OPEN, False, 1), (EARLIER, True, 1)]
+
+
+async def test_a_connection_not_yet_attached_stays_unattached_through_an_activation() -> None:
+    session = workspace(stored())
+    activating = await used(session, "activating")
+    greeted = connect(session)
+    await say(greeted, "hello", HELLO)
+    await taken(greeted)
+    await say(activating, "activate", ActivateSession(session=EARLIER))
+    await taken(activating)
+    seen = await taken(greeted)
+    await session.close()
+
+    assert greeted.workspace is None
+    assert not any(isinstance(e, Snapshot) for e in seen)
 
 
 async def test_a_connection_viewing_the_activated_session_gets_it_live() -> None:
@@ -195,21 +202,10 @@ async def test_activating_after_a_failed_switch_leaves_the_others_live() -> None
     assert outcome(added) == CommandAccepted(command_id="add")
 
 
-async def test_open_session_is_refused_as_invalid_naming_attach_and_activate() -> None:
-    session = workspace(stored())
-    connection = await joined(session, "first")
-    await say(connection, "open", OpenSession(session_id=EARLIER))
-    events = await taken(connection)
-    await session.close()
-
-    assert events == [CommandRefused(command_id="open", code=INVALID, message=OPEN_RETIRED)]
-    assert session.saved_session.id == OPEN
-
-
 async def test_attach_then_activate_counts_one_viewer_of_the_activated_session() -> None:
     session = workspace(stored())
     activating = await used(session, "activating")
-    await say(activating, "attach", Attach(session=EARLIER))
+    await say(activating, "attach", Attach(workspace=WORKSPACE, session=EARLIER))
     await taken(activating)
     await say(activating, "activate", ActivateSession(session=EARLIER))
     events = await taken(activating)

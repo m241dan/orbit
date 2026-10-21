@@ -35,12 +35,14 @@ from orbit.cli import app, chat, serve
 from orbit.protocol import (
     PROTOCOL_VERSION,
     AddTask,
+    Attach,
     Catalog,
     Command,
     CommandAccepted,
     CommandEnvelope,
     Event,
     Hello,
+    Notice,
     OwnershipDeclined,
     OwnershipOffered,
     OwnershipTaken,
@@ -56,6 +58,8 @@ from tests.tls_certs import DAY, Ca, ServerFiles, make_ca, make_client, make_ser
 runner = CliRunner()
 TASK = TaskSpec(prompt="Add a flag.")
 QUIET = ["--no-usage", "--no-verify"]
+# What a frontend receives saying Hello and attaching, up to its Attach's acceptance.
+ATTACHED = [Welcome, Catalog, Snapshot, Notice, CommandAccepted]
 
 
 @pytest.fixture(autouse=True)
@@ -108,8 +112,7 @@ class Frontend:
         url = str(self.run_file["url"]).replace("//0.0.0.0:", "//localhost:")
         headers = {"Authorization": f"Bearer {token}"}
         with connect(url, additional_headers=headers, ssl=self.trust) as ws:
-            say(ws, "hello", Hello(client="orbit-tests", protocol_version=PROTOCOL_VERSION))
-            self.events = until(ws, Snapshot) + self.work(ws)
+            self.events = attached(ws) + self.work(ws)
             os.kill(os.getpid(), signal.SIGTERM)
             self.close = closed(ws)
 
@@ -139,6 +142,19 @@ def until(websocket: ClientConnection, kind: type[Event]) -> list[Event]:
     return events
 
 
+def attached(websocket: ClientConnection) -> list[Event]:
+    """Say Hello on ``websocket``, then attach to the active session of the first workspace its
+    catalog lists; what it received, up to the Attach's acceptance."""
+    say(websocket, "hello", Hello(client="orbit-tests", protocol_version=PROTOCOL_VERSION))
+    greeting = until(websocket, Catalog)
+    catalog = greeting[-1]
+    assert isinstance(catalog, Catalog)
+    [workspace, *_] = catalog.workspaces
+    [active] = [summary for summary in workspace.sessions if summary.active]
+    say(websocket, "attach", Attach(workspace=workspace.id, session=active.id))
+    return greeting + until(websocket, CommandAccepted)
+
+
 def closed(websocket: ClientConnection) -> tuple[int | None, str | None]:
     with pytest.raises(ConnectionClosed):
         while True:
@@ -166,7 +182,7 @@ def test_serve_welcomes_a_frontend_with_the_token_until_stopped(
     frontend = Frontend(state, config_dir)
     output = served(frontend, "--port", "0")
 
-    assert [type(e) for e in frontend.events] == [Welcome, Catalog, Snapshot]
+    assert [type(e) for e in frontend.events] == ATTACHED
     url = str(frontend.run_file["url"])
     assert url.startswith("ws://127.0.0.1:") and not url.endswith(":0/")
     assert frontend.run_file["pid"] == os.getpid()
@@ -194,7 +210,7 @@ def test_serve_names_paths_with_braces_verbatim(
     frontend = Frontend(state, config)
     output = served(frontend, "--port", "0", "-C", str(project))
 
-    assert [type(e) for e in frontend.events] == [Welcome, Catalog, Snapshot]
+    assert [type(e) for e in frontend.events] == ATTACHED
     url = frontend.run_file["url"]
     assert output.splitlines()[0] == (
         f"Serving {project} at {url} as its owner; frontends show the token in {config / 'token'}."
@@ -480,7 +496,7 @@ def test_serve_over_tls_welcomes_a_frontend_trusting_its_ca_beyond_loopback(
     frontend = Frontend(state, config_dir, trust=ssl.create_default_context(cafile=ca.path))
     output = served(frontend, *_tls_flags(files), "--host", "0.0.0.0", "--port", "0")
 
-    assert [type(e) for e in frontend.events] == [Welcome, Catalog, Snapshot]
+    assert [type(e) for e in frontend.events] == ATTACHED
     assert str(frontend.run_file["url"]).startswith("wss://0.0.0.0:")
     assert "orbit-tests connected from" in output
 
@@ -627,7 +643,7 @@ def test_serve_takes_its_tls_settings_from_the_config_file(
     thread.join(10)
 
     assert result.exit_code == 0, result.output
-    assert [type(e) for e in frontend.events] == [Welcome, Catalog, Snapshot]
+    assert [type(e) for e in frontend.events] == ATTACHED
     assert str(frontend.run_file["url"]).startswith("wss://127.0.0.1:")
     assert result.stderr.startswith("Warning: The server certificate expires soon.")
 
@@ -747,8 +763,7 @@ def test_a_rotated_token_admits_new_frontends_at_once_and_keeps_open_ones(
             connect(url, additional_headers={"Authorization": f"Bearer {old}"})
         statuses.append(refused.value.response.status_code)
         with connect(url, additional_headers={"Authorization": f"Bearer {new}"}) as other:
-            say(other, "hello", Hello(client="orbit-tests", protocol_version=PROTOCOL_VERSION))
-            until(other, Snapshot)
+            attached(other)
         return adds_a_task(websocket)
 
     frontend.work = rotates

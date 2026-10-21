@@ -8,7 +8,6 @@ from orbit.agent.domain.catalog import catalog
 from orbit.agent.domain.roles import Role
 from orbit.protocol import (
     CONFIGURE_CHECKS,
-    DEFAULT_WORKSPACE,
     PLANNER_LANE,
     SUPER_REVIEW,
     WORK_LANE,
@@ -26,6 +25,7 @@ from orbit.protocol import (
 )
 from tests.agent_fakes import (
     ROLES,
+    WORKSPACE,
     FakeHost,
     FakeStore,
     ScriptedLauncher,
@@ -57,9 +57,10 @@ async def published(session: WorkspaceHost, count: int) -> list[Event]:
 
 async def after(session: WorkspaceHost, command: Command, count: int) -> list[Event]:
     """The first ``count`` events ``session`` publishes for ``command``, once greeted and
-    past its Welcome, Catalog, Snapshot, workspace note and the change counting its viewer."""
+    past its Welcome, Catalog, Snapshot, workspace note, the Attach's acceptance and the change
+    counting its viewer."""
     await greet(session)
-    await published(session, 5)
+    await published(session, 6)
     await frontend(session).send(CommandEnvelope(command_id="c", payload=command))
     return await published(session, count)
 
@@ -80,9 +81,9 @@ async def test_the_catalog_after_welcome_lists_the_workspace_agents_triggers_and
     assert isinstance(catalog, Catalog)
     assert isinstance(snapshot, Snapshot)
     [workspace] = catalog.workspaces
-    assert (workspace.id, workspace.label) == (DEFAULT_WORKSPACE, "proj")
-    viewed = snapshot.session.model_copy(update={"active": True, "viewers": 1})
-    assert workspace.sessions == (viewed,)
+    assert (workspace.id, workspace.label, workspace.path) == (WORKSPACE, "proj", "/x/proj")
+    unviewed = snapshot.session.model_copy(update={"active": True, "viewers": 0})
+    assert workspace.sessions == (unviewed,)
     assert [(a.label, a.conversational) for a in catalog.agents] == [
         ("Planner", True),
         ("Coder", False),
@@ -117,7 +118,7 @@ async def test_a_session_without_agents_catalogs_none_in_the_default_workspace()
 
     assert isinstance(catalog, Catalog)
     assert catalog.agents == ()
-    assert catalog.workspaces[0].label == "default"
+    assert (catalog.workspaces[0].label, catalog.workspaces[0].path) == ("default", None)
 
 
 async def test_a_new_session_is_in_a_catalog_before_its_snapshot() -> None:
@@ -139,15 +140,15 @@ async def test_renaming_the_open_session_sends_a_catalog_with_the_new_name() -> 
 
 async def test_a_refused_rename_sends_no_catalog() -> None:
     session = session_in("/x/proj", store=FakeStore())
-    events = await after(session, RenameSession(session_id="s1", name=" "), 2)
+    events = await after(session, RenameSession(session_id="s1", name=" "), 1)
     await session.close()
 
-    assert [type(e).__name__ for e in events] == ["SessionsListed", "CommandRefused"]
+    assert [type(e).__name__ for e in events] == ["CommandRefused"]
 
 
 def test_a_catalog_round_trips() -> None:
     sessions = (SessionSummary(id="s1", name="auth", current=True),)
-    made = catalog("proj", sessions, ("planner", "security-reviewer"))
+    made = catalog(("w1", "proj", "/x/proj"), sessions, ("planner", "security-reviewer"))
     assert event_adapter.validate_json(made.model_dump_json()) == made
 
 

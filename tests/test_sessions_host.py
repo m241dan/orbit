@@ -39,11 +39,11 @@ class Host(App[None]):
     """An app holding a SessionsHost, recording the commands it sends; those in ``failing``
     fail to send."""
 
-    def __init__(self) -> None:
+    def __init__(self, repository: str | None = None) -> None:
         super().__init__()
         self.sent: list[SessionChoice | SessionChange] = []
         self.failing: set[str] = set()
-        self.host = SessionsHost(self.push_screen, self._sent)
+        self.host = SessionsHost(self.push_screen, self._sent, repository=repository)
 
     async def _sent(self, command: SessionChoice | SessionChange) -> bool:
         self.sent.append(command)
@@ -62,6 +62,45 @@ def test_a_catalog_lists_its_sessions_the_active_one_viewed() -> None:
     assert host.sessions == (NOW, OLD)
     assert host.attached == "now"
     assert host.attached_session == NOW
+
+
+ELSEWHERE = SessionSummary(id="far", name="elsewhere", active=True)
+TWO = Catalog(
+    workspaces=(
+        WorkspaceEntry(id="w1", label="one", path="/src/one", sessions=(ELSEWHERE,)),
+        WorkspaceEntry(id="w2", label="two", path="/src/two", sessions=(NOW, OLD)),
+    ),
+    agents=(),
+    triggers=(),
+    lanes=(),
+)
+
+
+def test_the_workspace_at_the_repository_is_opened_on_listing_its_sessions_alone() -> None:
+    host = Host("/src/two").host
+    host.follow(TWO)
+    assert (host.workspace, host.sessions) == ("w2", (NOW, OLD))
+    assert host.opening == Attach(workspace="w2", session="now")
+
+
+def test_without_a_workspace_at_the_repository_the_first_is_opened_on() -> None:
+    host = Host("/src/three").host
+    host.follow(TWO)
+    assert (host.workspace, host.sessions) == ("w1", (ELSEWHERE,))
+    assert host.opening == Attach(workspace="w1", session="far")
+
+
+def test_a_later_catalog_keeps_the_workspace_opened_on() -> None:
+    host = Host("/src/two").host
+    host.follow(TWO)
+    host.follow(TWO.model_copy(update={"workspaces": TWO.workspaces[::-1]}))
+    assert host.workspace == "w2"
+
+
+def test_a_catalog_listing_no_workspace_has_nothing_to_open_on() -> None:
+    host = Host().host
+    host.follow(Catalog(workspaces=(), agents=(), triggers=(), lanes=()))
+    assert (host.workspace, host.sessions, host.opening) == (None, (), None)
 
 
 def test_a_snapshot_says_which_session_is_viewed_over_the_catalog() -> None:
@@ -175,9 +214,9 @@ async def test_a_command_that_fails_to_send_stops_those_after_it() -> None:
     async with app.run_test() as pilot:
         app.host.open()
         await pilot.pause()
-        app.screen.dismiss((Attach(session="old"), ActivateSession(session="old")))
+        app.screen.dismiss((Attach(workspace="w", session="old"), ActivateSession(session="old")))
         await pilot.pause()
-        assert app.sent == [Attach(session="old")]
+        assert app.sent == [Attach(workspace="w", session="old")]
 
 
 def view(summary: SessionSummary) -> Snapshot:
@@ -237,7 +276,7 @@ async def test_a_view_picked_that_failed_to_send_is_offered_nothing() -> None:
         app.host.follow(catalog(NOW, OLD))
         app.host.open()
         await pilot.pause()
-        app.screen.dismiss((Attach(session="old"),))
+        app.screen.dismiss((Attach(workspace="w", session="old"),))
         await pilot.pause()
         app.host.view(view(OLD))
         await pilot.pause()
@@ -276,7 +315,7 @@ async def test_a_held_pick_made_active_itself_is_not_offered_again() -> None:
         app.host.follow_state(RUNNING)
         app.host.open()
         await pilot.pause()
-        app.screen.dismiss((Attach(session="old"),))
+        app.screen.dismiss((Attach(workspace="w", session="old"),))
         await pilot.pause()
         app.host.view(view(OLD))
         await pilot.pause()

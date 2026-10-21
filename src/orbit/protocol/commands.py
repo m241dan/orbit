@@ -14,9 +14,11 @@ from orbit.protocol.names import WORK_LANE, BusyLane
 
 class Hello(_Message):
     """Open the stream as ``client``, speaking ``protocol_version`` of the protocol; it must
-    come before any other command. ``since`` is the last ``seq`` the client saw, if any; the
-    open session's events after it are sent again in place of a ``Snapshot`` when they're all it
-    missed. Answered with ``Welcome``, or refused."""
+    come before any other command. Answered with ``Welcome``, then a ``Catalog``, or refused;
+    it attaches the connection to no session, which ``Attach`` does. ``since`` is the last
+    ``seq`` the client saw, if any; once the connection attaches to a workspace's open session,
+    that session's events after it are sent again in place of a ``Snapshot`` when they're all
+    it missed."""
 
     type: Literal["hello"] = "hello"
     client: str
@@ -117,28 +119,18 @@ class DecideProposal(_Message):
     feedback: str = ""
 
 
-class ListSessions(_Message):
-    """Ask for the saved sessions, answered with ``SessionsListed``."""
-
-    type: Literal["list_sessions"] = "list_sessions"
-
-
 class Attach(_Message):
-    """View the session ``session``: the connection gets its ``Snapshot``, then its events from
-    then on, in place of those of the session it viewed. A session other than the workspace's
-    open one is a read-only view. Refused with ``unknown`` for a session there's none of."""
+    """View the session ``session`` of the workspace ``workspace``: the connection gets its
+    ``Snapshot``, then its events from then on, in place of those of the session it viewed. A
+    session other than the workspace's open one is a read-only view. A connection's first
+    ``Attach`` after ``Hello`` is answered, for a ``Hello`` whose ``since`` it can catch up from
+    on the workspace's open session, by that session's events after it in place of the
+    ``Snapshot``. Refused with ``unknown`` for a workspace not served or a session there's none
+    of."""
 
     type: Literal["attach"] = "attach"
+    workspace: str
     session: str
-
-
-class OpenSession(_Message):
-    """Retired, and always refused with ``invalid``: ``Attach`` views a session, and
-    ``ActivateSession`` makes it the open one. Deprecated, to be removed at the next major
-    ``PROTOCOL_VERSION``."""
-
-    type: Literal["open_session"] = "open_session"
-    session_id: str
 
 
 class ActivateSession(_Message):
@@ -161,7 +153,7 @@ class NewSession(_Message):
 
 class RenameSession(_Message):
     """Name the session ``session_id`` ``name``; refused for an empty name, or a session that's
-    unreadable or open in another orbit. The sessions are listed again after."""
+    unreadable or open in another orbit. A ``Catalog`` follows."""
 
     type: Literal["rename_session"] = "rename_session"
     session_id: str
@@ -170,7 +162,7 @@ class RenameSession(_Message):
 
 class DeleteSession(_Message):
     """Delete the saved session ``session_id``; refused for the open session, or one open in
-    another orbit. The sessions are listed again after."""
+    another orbit. A ``Catalog`` follows."""
 
     type: Literal["delete_session"] = "delete_session"
     session_id: str
@@ -226,9 +218,7 @@ Command = Annotated[
     | RemoveTask
     | CancelAgent
     | DecideProposal
-    | ListSessions
     | Attach
-    | OpenSession
     | ActivateSession
     | NewSession
     | RenameSession

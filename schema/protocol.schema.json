@@ -291,7 +291,7 @@
       "type": "object"
     },
     "Attach": {
-      "description": "View the session ``session``: the connection gets its ``Snapshot``, then its events from\nthen on, in place of those of the session it viewed. A session other than the workspace's\nopen one is a read-only view. Refused with ``unknown`` for a session there's none of.",
+      "description": "View the session ``session`` of the workspace ``workspace``: the connection gets its\n``Snapshot``, then its events from then on, in place of those of the session it viewed. A\nsession other than the workspace's open one is a read-only view. A connection's first\n``Attach`` after ``Hello`` is answered, for a ``Hello`` whose ``since`` it can catch up from\non the workspace's open session, by that session's events after it in place of the\n``Snapshot``. Refused with ``unknown`` for a workspace not served or a session there's none\nof.",
       "properties": {
         "session": {
           "title": "Session",
@@ -302,9 +302,14 @@
           "default": "attach",
           "title": "Type",
           "type": "string"
+        },
+        "workspace": {
+          "title": "Workspace",
+          "type": "string"
         }
       },
       "required": [
+        "workspace",
         "session",
         "type"
       ],
@@ -380,7 +385,7 @@
       "type": "object"
     },
     "Catalog": {
-      "description": "What exists: the ``workspaces`` and their sessions, the ``agents``' roles, the\n``triggers`` and the ``lanes``, and whether this orbit is ``read_only``, as another owns\nthe repository; sent after ``Welcome`` and whenever the sessions change.",
+      "description": "What exists: the ``workspaces`` and their sessions, the ``agents``' roles, the\n``triggers`` and the ``lanes``, and whether this orbit is ``read_only``, as another owns\nthe repository; sent after ``Welcome`` and, to the connections attached, whenever the\nsessions change.",
       "properties": {
         "agents": {
           "items": {
@@ -499,7 +504,7 @@
       "type": "object"
     },
     "CommandEnvelope": {
-      "description": "A command, ``payload``, with the ``command_id`` its sender chose for it, and the\n``session`` it's for: ``None`` means the open session.",
+      "description": "A command, ``payload``, with the ``command_id`` its sender chose for it, and the\n``workspace`` and ``session`` it's for: ``None`` means the one the connection is attached\nto and the session it views.",
       "properties": {
         "command_id": {
           "minLength": 1,
@@ -521,9 +526,7 @@
               "fire_trigger": "#/$defs/FireTrigger",
               "hello": "#/$defs/Hello",
               "history": "#/$defs/History",
-              "list_sessions": "#/$defs/ListSessions",
               "new_session": "#/$defs/NewSession",
-              "open_session": "#/$defs/OpenSession",
               "remove_task": "#/$defs/RemoveTask",
               "rename_session": "#/$defs/RenameSession",
               "reset_conversation": "#/$defs/ResetConversation",
@@ -573,13 +576,7 @@
               "$ref": "#/$defs/DecideProposal"
             },
             {
-              "$ref": "#/$defs/ListSessions"
-            },
-            {
               "$ref": "#/$defs/Attach"
-            },
-            {
-              "$ref": "#/$defs/OpenSession"
             },
             {
               "$ref": "#/$defs/ActivateSession"
@@ -645,9 +642,16 @@
           "title": "Tracestate"
         },
         "workspace": {
-          "default": "default",
-          "title": "Workspace",
-          "type": "string"
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Workspace"
         }
       },
       "required": [
@@ -746,7 +750,7 @@
       "type": "object"
     },
     "DeleteSession": {
-      "description": "Delete the saved session ``session_id``; refused for the open session, or one open in\nanother orbit. The sessions are listed again after.",
+      "description": "Delete the saved session ``session_id``; refused for the open session, or one open in\nanother orbit. A ``Catalog`` follows.",
       "properties": {
         "session_id": {
           "title": "Session Id",
@@ -870,7 +874,6 @@
               "proposal_decided": "#/$defs/ProposalDecided",
               "review_status": "#/$defs/ReviewStatus",
               "session_state_changed": "#/$defs/SessionStateChanged",
-              "sessions_listed": "#/$defs/SessionsListed",
               "settings_changed": "#/$defs/SettingsChanged",
               "snapshot": "#/$defs/Snapshot",
               "startup_checked": "#/$defs/StartupChecked",
@@ -974,9 +977,6 @@
               "$ref": "#/$defs/UsageChanged"
             },
             {
-              "$ref": "#/$defs/SessionsListed"
-            },
-            {
               "$ref": "#/$defs/MessageSent"
             },
             {
@@ -1060,9 +1060,16 @@
           "title": "Tracestate"
         },
         "workspace": {
-          "default": "default",
-          "title": "Workspace",
-          "type": "string"
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Workspace"
         }
       },
       "required": [
@@ -1103,7 +1110,7 @@
       "type": "object"
     },
     "Hello": {
-      "description": "Open the stream as ``client``, speaking ``protocol_version`` of the protocol; it must\ncome before any other command. ``since`` is the last ``seq`` the client saw, if any; the\nopen session's events after it are sent again in place of a ``Snapshot`` when they're all it\nmissed. Answered with ``Welcome``, or refused.",
+      "description": "Open the stream as ``client``, speaking ``protocol_version`` of the protocol; it must\ncome before any other command. Answered with ``Welcome``, then a ``Catalog``, or refused;\nit attaches the connection to no session, which ``Attach`` does. ``since`` is the last\n``seq`` the client saw, if any; once the connection attaches to a workspace's open session,\nthat session's events after it are sent again in place of a ``Snapshot`` when they're all\nit missed.",
       "properties": {
         "client": {
           "title": "Client",
@@ -1211,22 +1218,6 @@
         "type"
       ],
       "title": "HistoryPage",
-      "type": "object"
-    },
-    "ListSessions": {
-      "description": "Ask for the saved sessions, answered with ``SessionsListed``.",
-      "properties": {
-        "type": {
-          "const": "list_sessions",
-          "default": "list_sessions",
-          "title": "Type",
-          "type": "string"
-        }
-      },
-      "required": [
-        "type"
-      ],
-      "title": "ListSessions",
       "type": "object"
     },
     "LogGap": {
@@ -1352,27 +1343,6 @@
         "tool"
       ],
       "title": "OpenRequest",
-      "type": "object"
-    },
-    "OpenSession": {
-      "description": "Retired, and always refused with ``invalid``: ``Attach`` views a session, and\n``ActivateSession`` makes it the open one. Deprecated, to be removed at the next major\n``PROTOCOL_VERSION``.",
-      "properties": {
-        "session_id": {
-          "title": "Session Id",
-          "type": "string"
-        },
-        "type": {
-          "const": "open_session",
-          "default": "open_session",
-          "title": "Type",
-          "type": "string"
-        }
-      },
-      "required": [
-        "session_id",
-        "type"
-      ],
-      "title": "OpenSession",
       "type": "object"
     },
     "OwnershipDeclined": {
@@ -1569,7 +1539,7 @@
       "type": "object"
     },
     "RenameSession": {
-      "description": "Name the session ``session_id`` ``name``; refused for an empty name, or a session that's\nunreadable or open in another orbit. The sessions are listed again after.",
+      "description": "Name the session ``session_id`` ``name``; refused for an empty name, or a session that's\nunreadable or open in another orbit. A ``Catalog`` follows.",
       "properties": {
         "name": {
           "title": "Name",
@@ -1917,40 +1887,6 @@
       "title": "SessionSummary",
       "type": "object"
     },
-    "SessionsListed": {
-      "description": "The saved sessions, the most recently active first; those that can't be read come last.\n\nThe ``reason`` says what the listing answers.",
-      "properties": {
-        "reason": {
-          "enum": [
-            "startup",
-            "asked",
-            "refreshed"
-          ],
-          "title": "Reason",
-          "type": "string"
-        },
-        "sessions": {
-          "items": {
-            "$ref": "#/$defs/SessionSummary"
-          },
-          "title": "Sessions",
-          "type": "array"
-        },
-        "type": {
-          "const": "sessions_listed",
-          "default": "sessions_listed",
-          "title": "Type",
-          "type": "string"
-        }
-      },
-      "required": [
-        "sessions",
-        "reason",
-        "type"
-      ],
-      "title": "SessionsListed",
-      "type": "object"
-    },
     "Settings": {
       "description": "Per-session agent configuration. ``model=None`` means the backend's default.",
       "properties": {
@@ -2009,7 +1945,7 @@
       "type": "object"
     },
     "Snapshot": {
-      "description": "The session a connection views as it stands, sent after ``Welcome``, after every switch\nand in answer to ``Attach``; its envelope's ``seq`` is the point it's current to.\n\nIt holds the ``session``'s summary, its ``settings`` and ``model_choices``, whether each\nlane is ``busy``, its ``tasks``, the verification ``steps`` and the ``steps_title`` they\nshow under, the ``review`` status (none when reviews are off), the checks ``proposals``\nwaiting for a decision, the ``agents`` running, the ``transcript``: the session's\nlast logged events, at most 500, oldest first, in the envelopes they were sent in, and,\nwhile the session is halted because storage failed, ``storage_halt``: why, and how to\nresume; ``read_only`` says another orbit owns the repository, so the work this one is\nasked to run waits, and ``ownership_offered`` that the repository is offered, as\n``OwnershipOffered`` said, until the offer is settled. ``active`` says whether the session\nis the workspace's open one, which runs work; one that isn't is a read-only view, from its\nsaved record and its last logged events. ``open_session`` names the workspace's open\nsession, and ``viewers`` counts the connections viewing this one.",
+      "description": "The session a connection views as it stands, sent in answer to ``Attach`` and after every\nswitch; its envelope's ``seq`` is the point it's current to.\n\nIt holds the ``session``'s summary, its ``settings`` and ``model_choices``, whether each\nlane is ``busy``, its ``tasks``, the verification ``steps`` and the ``steps_title`` they\nshow under, the ``review`` status (none when reviews are off), the checks ``proposals``\nwaiting for a decision, the ``agents`` running, the ``transcript``: the session's\nlast logged events, at most 500, oldest first, in the envelopes they were sent in, and,\nwhile the session is halted because storage failed, ``storage_halt``: why, and how to\nresume; ``read_only`` says another orbit owns the repository, so the work this one is\nasked to run waits, and ``ownership_offered`` that the repository is offered, as\n``OwnershipOffered`` said, until the offer is settled. ``active`` says whether the session\nis the workspace's open one, which runs work; one that isn't is a read-only view, from its\nsaved record and its last logged events. ``open_session`` names the workspace's open\nsession, and ``viewers`` counts the connections viewing this one.",
       "properties": {
         "active": {
           "default": true,
@@ -2983,7 +2919,7 @@
       "type": "object"
     },
     "WorkspaceEntry": {
-      "description": "Workspace ``id``, shown as ``label``, and its ``sessions`` as the list of sessions shows\nthem.",
+      "description": "Workspace ``id``, shown as ``label``, at ``path`` on the backend's host, if it has one,\nand its ``sessions`` as the list of sessions shows them.",
       "properties": {
         "id": {
           "title": "Id",
@@ -2992,6 +2928,18 @@
         "label": {
           "title": "Label",
           "type": "string"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Path"
         },
         "sessions": {
           "items": {
@@ -3020,5 +2968,5 @@
     }
   ],
   "title": "Orbit protocol",
-  "x-protocol-version": 1
+  "x-protocol-version": 2
 }

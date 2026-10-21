@@ -17,7 +17,8 @@ from typer.testing import CliRunner
 from orbit.agent import LocalTls, RunFile
 from orbit.cli import app
 from orbit.client import TokenRejected
-from orbit.protocol import Command, NewSession
+from orbit.protocol import NewSession
+from orbit.tui import Opening
 from tests.store_views import open_view
 from tests.tls_certs import ServerFiles, make_ca, make_client
 
@@ -43,8 +44,7 @@ class FakeApp:
 
     session: object
     link: object = None
-    opening: Command | None = None
-    pick: bool = False
+    opening: Opening = field(default_factory=Opening)
     storage_halt: str | None = None
     ran: bool = field(default=False)
 
@@ -155,7 +155,8 @@ def test_chat_connects_to_the_control_plane_serving_the_workspace(
     assert result.output == ""
     (tui,) = FakeApp.built
     assert tui.session == FakeClient(URL, token_file)
-    assert tui.opening is None and tui.ran
+    assert tui.opening.command is None and tui.ran
+    assert tui.opening.repository == str(project.resolve())
     assert plane.shown == [(URL, "the-token")]
     assert in_process.built == []
 
@@ -170,7 +171,7 @@ def test_new_and_name_open_a_new_session_once_joined(
 ) -> None:
     serving(state, project)
     assert runner.invoke(app, ["chat", *args]).exit_code == 0
-    assert FakeApp.built[0].opening == opening
+    assert FakeApp.built[0].opening.command == opening
 
 
 @pytest.mark.usefixtures("plane", "token_file")

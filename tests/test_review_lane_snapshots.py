@@ -10,10 +10,10 @@ from orbit.protocol import (
     ActivateSession,
     CommandAccepted,
     Event,
+    HistoryPage,
     Notice,
     ReviewStatus,
     RunTasks,
-    SessionsListed,
     Snapshot,
     TaskOrigin,
     TasksChanged,
@@ -230,7 +230,7 @@ async def test_opening_a_paused_session_notes_its_pause_after_the_snapshot() -> 
         Notice,  # The resumption.
         Notice,  # The interruption.
         CommandAccepted,
-        SessionsListed,
+        HistoryPage,
     ]
     assert pause_notes(events) == [messages(Notice, events)[0]]
     await session.close()

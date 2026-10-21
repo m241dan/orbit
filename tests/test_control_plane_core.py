@@ -19,16 +19,19 @@ from orbit.protocol import (
     UsageChanged,
     Welcome,
 )
-from tests.agent_fakes import HELLO
+from tests.agent_fakes import HELLO, attach_to
 from tests.test_usage_monitor import LIMITS, Source
 
 NOTE = Notice(message="From the host.")
 
 
 async def welcomed(plane: ControlPlane, name: str) -> SessionConnection:
-    """A new connection to ``plane`` that has said Hello as ``name``."""
+    """A new connection to ``plane`` that has said Hello as ``name`` and attached to the open
+    session of its host."""
     connection = plane.connect()
     await connection.send(CommandEnvelope(command_id=name, payload=HELLO))
+    attach = CommandEnvelope(command_id=f"{name}-attach", payload=attach_to(plane))
+    await connection.send(attach)
     return connection
 
 
@@ -68,7 +71,7 @@ async def test_the_hosts_events_reach_every_connection() -> None:
 async def test_a_command_is_routed_to_the_host_and_answered() -> None:
     plane = ControlPlane(WorkspaceHost())
     connection = await welcomed(plane, "first")
-    await until(connection, Snapshot)
+    await until(connection, CommandAccepted)  # The Attach's.
 
     add = AddTask(task=TaskSpec(prompt="Add a flag."))
     await connection.send(CommandEnvelope(command_id="add", payload=add))

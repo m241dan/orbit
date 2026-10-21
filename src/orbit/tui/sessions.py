@@ -32,13 +32,16 @@ from orbit.tui.view.sessions import (
     NAME_PLACEHOLDER,
     NEW_SESSION_LABEL,
     SESSIONS_TITLE,
+    Viewing,
     activation_choices,
     activation_message,
     active_name,
     can_delete,
     can_open,
+    chosen_workspace,
     delete_message,
     idle_now_message,
+    opening_attach,
     picked_commands,
     picker_sessions,
     running_words,
@@ -46,6 +49,7 @@ from orbit.tui.view.sessions import (
     sessions_hint,
     viewed_only,
     viewing_mark,
+    workspace_sessions,
 )
 from orbit.tui.widgets import ConfirmScreen, ListScreen
 
@@ -64,9 +68,9 @@ whatever it returns is ignored."""
 
 
 class SessionsScreen(ListScreen[tuple[SessionChoice, ...]]):
-    """Lists ``sessions`` before ``New session``: the one ``attached`` first (as ``Resume`` if
-    ``startup`` is ``resume``, and not at all if it's ``pick``), then the others; dismisses with
-    the commands the user's choice sends.
+    """Lists ``sessions`` of the workspace ``viewing`` names before ``New session``: the one it
+    has attached first (as ``Resume`` if ``startup`` is ``resume``, and not at all if it's
+    ``pick``), then the others; dismisses with the commands the user's choice sends.
 
     ``j``/``k`` (and the arrows) move and enter picks the highlighted session, unless it can't
     be opened; the attached session dismisses with none, keeping it. Enter on ``New session``
@@ -98,13 +102,14 @@ class SessionsScreen(ListScreen[tuple[SessionChoice, ...]]):
     def __init__(
         self,
         sessions: Sequence[SessionSummary],
-        attached: str | None,
+        viewing: Viewing,
         manage: Manage,
         startup: StartupPick | None = None,
     ) -> None:
         super().__init__()
+        self.workspace = viewing.workspace
         self.sessions = tuple(sessions)
-        self.attached = attached
+        self.attached = viewing.attached
         self.startup = startup is not None
         self.resume = startup == "resume"
         self._manage = manage
@@ -177,7 +182,7 @@ class SessionsScreen(ListScreen[tuple[SessionChoice, ...]]):
             return
         summary = rows[event.option_index]
         if can_open(summary):
-            self.dismiss(picked_commands(summary, self.sessions, self.attached))
+            self.dismiss(picked_commands(summary, self.sessions, self.attached, self.workspace))
 
     @on(Input.Submitted, "#session-name")
     async def _named(self, event: Input.Submitted) -> None:
@@ -296,16 +301,25 @@ Numbers = Callable[[], Mapping[str, str]]
 
 
 class SessionsHost:
-    """Keeps the sessions the latest ``Catalog`` lists, as ``SessionStateChanged`` changes them,
-    and the one this frontend views, live or read-only; shows them with ``push`` when asked,
-    refreshing the picker while it's shown, and offers to make a session viewed read-only the
-    active one, naming what the active one runs by the task ``numbers``. ``send`` takes the
+    """Keeps the sessions the latest ``Catalog`` lists of the workspace this frontend opens on,
+    the one at the ``repository`` it runs in if there's one, as ``SessionStateChanged`` changes
+    them, and the one this frontend views, live or read-only; shows them with ``push`` when
+    asked, refreshing the picker while it's shown, and offers to make a session viewed read-only
+    the active one, naming what the active one runs by the task ``numbers``. ``send`` takes the
     user's choice and their changes to saved sessions."""
 
-    def __init__(self, push: Push, send: Send, numbers: Numbers = lambda: {}) -> None:
+    def __init__(
+        self,
+        push: Push,
+        send: Send,
+        numbers: Numbers = lambda: {},
+        repository: str | None = None,
+    ) -> None:
         self._push = push
         self._send = send
         self._numbers = numbers
+        self._repository = repository
+        self.workspace: str | None = None  # The id of the workspace opened on, once listed.
         self.sessions: tuple[SessionSummary, ...] = ()
         self.attached: str | None = None  # The session this frontend views, once known.
         self.live = True  # Whether the session viewed is the active one.
@@ -352,9 +366,13 @@ class SessionsHost:
         return active_name(self.sessions) or self.open_session.name
 
     def follow(self, catalog: Catalog) -> None:
-        """List the sessions in ``catalog``; until a snapshot says which one this frontend views,
-        it's the active one, which a frontend views as it joins."""
-        self.sessions = tuple(s for workspace in catalog.workspaces for s in workspace.sessions)
+        """List the sessions in ``catalog`` of the workspace opened on, which the first catalog
+        chooses; until a snapshot says which one this frontend views, it's the active one, which
+        a frontend attaches to as it opens."""
+        if self.workspace is None:
+            chosen = chosen_workspace(catalog.workspaces, self._repository)
+            self.workspace = chosen.id if chosen else None
+        self.sessions = workspace_sessions(catalog.workspaces, self.workspace)
         if self.attached is None:
             self.attached = next((s.id for s in self.sessions if s.active), None)
         self._refresh()
@@ -370,6 +388,12 @@ class SessionsHost:
             self._held = None
             self._withdraw()
             self._show_offer(held, idle_now_message(active), activation_choices(running=False))
+
+    @property
+    def opening(self) -> Attach | None:
+        """What this frontend sends to view the active session of the workspace it opens on;
+        none until a catalog lists it."""
+        return opening_attach(self.workspace, self.sessions)
 
     def view(self, snapshot: Snapshot) -> None:
         """Note this frontend views ``snapshot``'s session, live or read-only; a read-only view
@@ -443,7 +467,9 @@ class SessionsHost:
                     self._offering = None
                     return
 
-        self.shown = SessionsScreen(self.sessions, self.attached, self._send, startup)
+        # No session is listed, so none is picked, until a catalog names the workspace.
+        viewing = Viewing(workspace=self.workspace or "", attached=self.attached)
+        self.shown = SessionsScreen(self.sessions, viewing, self._send, startup)
         self._push(self.shown, chosen)
 
     def _refresh(self) -> None:

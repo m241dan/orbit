@@ -36,26 +36,25 @@ from orbit.protocol import (
     ErrorOccurred,
     Event,
     FireTrigger,
-    ListSessions,
     Notice,
     RemoveTask,
     RenameSession,
     ResetConversation,
     RunTasks,
     SendMessage,
-    SessionsListed,
     TasksChanged,
     TaskSpec,
     TurnEndReason,
 )
 from tests.agent_fakes import (
+    HELLO,
     HELLO_ID,
     START,
+    WORKSPACE,
     Call,
     FakeStore,
     events_until,
     frontend,
-    greet,
     greeted,
     queued,
     session_for,
@@ -155,7 +154,7 @@ async def test_a_command_for_another_workspace_is_refused_unhandled() -> None:
     events = await outcome(session)
     await session.close()
 
-    message = "No workspace 'other'; the workspace is default."
+    message = f"No workspace 'other'; the workspace served is {WORKSPACE}."
     assert events[-1] == CommandRefused(command_id="c6", code=UNKNOWN, message=message)
     assert not any(isinstance(event, TasksChanged) for event in events)
 
@@ -278,30 +277,15 @@ async def test_a_handler_that_fails_is_refused_as_internal_and_the_session_goes_
     session = WorkspaceHost(store=store, new_id=lambda: "session-1")
     await greeted(session)
     store.list_failure = ValueError("the disk is gone")
-    refused = await refusal(session, "c15", ListSessions())
+    refused = await refusal(session, "c15", DeleteSession(session_id="other"))
     store.list_failure = None
     await send_as(session, "c16", AddTask(task=TASK))
     events = await outcome(session)
     await session.close()
 
-    message = "Orbit failed to handle ListSessions: the disk is gone"
+    message = "Orbit failed to handle DeleteSession: the disk is gone"
     assert (refused.code, refused.message) == (INTERNAL, message)
     assert events[-1] == CommandAccepted(command_id="c16")
-
-
-async def test_sessions_that_cannot_be_listed_are_reported_and_listed_as_none() -> None:
-    store = FakeStore()
-    session = WorkspaceHost(store=store, new_id=lambda: "session-1")
-    await greeted(session)
-    store.list_failure = RuntimeError("Couldn't list the sessions in orbit.db: busy")
-    await send_as(session, "c19", ListSessions())
-    events = await outcome(session)
-    await session.close()
-
-    message = "Couldn't list the sessions in orbit.db: busy"
-    assert ErrorOccurred(code=SAVE_FAILED, message=message) in events
-    assert [e.sessions for e in events if isinstance(e, SessionsListed)] == [()]
-    assert events[-1] == CommandAccepted(command_id="c19")
 
 
 @pytest.mark.parametrize(
@@ -323,7 +307,6 @@ async def test_a_change_while_sessions_cannot_be_listed_reports_it_once_and_is_a
     message = "Couldn't list the sessions in orbit.db: busy"
     errors = [e for e in events if isinstance(e, ErrorOccurred)]
     assert errors == [ErrorOccurred(code=SAVE_FAILED, message=message)]
-    assert [e.sessions for e in events if isinstance(e, SessionsListed)] == [()]
     assert events[-1] == CommandAccepted(command_id="c20")
 
 
@@ -331,7 +314,7 @@ async def test_a_hello_whose_catalog_fails_is_refused_as_internal_with_no_welcom
     store = FakeStore()
     store.list_failure = ValueError("the disk is gone")
     session = WorkspaceHost(store=store, new_id=lambda: "session-1")
-    await greet(session)
+    await frontend(session).send(CommandEnvelope(command_id=HELLO_ID, payload=HELLO))
     events = queued(session)
     await session.close()
 
@@ -343,9 +326,10 @@ async def test_a_cancelled_handler_is_cancelled_with_no_outcome() -> None:
     store = FakeStore()
     session = WorkspaceHost(store=store, new_id=lambda: "session-1")
     await greeted(session)
+    queued(session)  # The greeting's.
     store.list_failure = asyncio.CancelledError()
     with pytest.raises(asyncio.CancelledError):
-        await send_as(session, "c17", ListSessions())
+        await send_as(session, "c17", DeleteSession(session_id="other"))
     store.list_failure = None
     queue = queued(session)
     await session.close()

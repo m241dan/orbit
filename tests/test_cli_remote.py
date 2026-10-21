@@ -52,7 +52,7 @@ def test_a_remote_is_connected_to_with_its_url_and_the_default_token(config: Pat
     assert result.exit_code == 0, result.output
     (tui,) = FakeApp.built
     assert tui.session == FakeClient(URL, config / "token")
-    assert tui.opening == NewSession() and tui.ran
+    assert tui.opening.command == NewSession() and tui.ran
 
 
 def test_a_remotes_token_file_is_shown(config: Path) -> None:

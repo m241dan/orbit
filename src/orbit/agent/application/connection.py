@@ -13,6 +13,8 @@ from orbit.agent.application.handshake import Handshake, HandshakeParts
 from orbit.agent.application.outbox import EventSink
 from orbit.protocol import (
     CONNECTION_EVENTS,
+    Attach,
+    Command,
     CommandEnvelope,
     CommandRefused,
     Event,
@@ -79,9 +81,9 @@ class Connections:
 
     def viewed(self, *, joining: bool = False) -> Counter[str]:
         """How many connections view each session they view: those greeted, and, if
-        ``joining``, the one whose ``Hello`` is being answered."""
-        asker = _asker() if joining else None
-        return Counter(self._viewed_by(c) for c in self._open if c.greeted or c is asker)
+        ``joining``, the one whose command is being answered, if it's attached or attaching."""
+        joined = _joiner() if joining else None
+        return Counter(self._viewed_by(c) for c in self._open if c.greeted or c is joined)
 
     def others_viewing(self, session_id: str) -> int:
         """How many greeted connections view the session ``session_id``, but for the one whose
@@ -109,10 +111,12 @@ class Connections:
 
     def activate(self, left: SessionRef | None) -> None:
         """Have the connection whose command is being answered, if any, view the open session,
-        whichever that is, and, given the session ``left``, the others viewing the open session
-        keep viewing that one once another is open in its place."""
+        whichever that is, and, given the session ``left``, the others attached and viewing the
+        open session keep viewing that one once another is open in its place."""
         asker = _asker()
         for connection in tuple(self._open):
+            if connection.workspace is None:
+                continue
             if connection is asker:
                 connection.attach(None)
             elif left is not None and self.viewing(connection) is None:
@@ -171,6 +175,13 @@ def _asker() -> "SessionConnection | None":
     return answering[0]
 
 
+def _joiner() -> "SessionConnection | None":
+    """The connection whose command the current task is answering, if it's attached or
+    attaching."""
+    asker = _asker()
+    return asker if asker is not None and asker.workspace is not None else None
+
+
 _to_everyone: ContextVar[bool] = ContextVar("to_everyone", default=False)
 """Whether the events published now reach every connection, as the session's new state."""
 
@@ -210,13 +221,14 @@ class SessionConnection:
     """A frontend's connection to a session, from ``parts``: a ``Session`` with its own
     handshake and its own stream.
 
-    Once it's welcomed, the stream gets every event the session publishes of the session it
+    Once it's attached, the stream gets every event the session publishes of the session it
     views and of none, but for the ``CONNECTION_EVENTS`` answering another connection's command;
     those published :func:`to_everyone`, as a switch's ``Snapshot``, and the ``Catalog`` a change
     to the sessions broadcasts reach it too.
-    It views the open session, whichever that is, until :meth:`attach` attaches it to another.
-    What answers a ``Hello``, its greeting unlogged, and the outcome of any command before one
-    is welcomed, or while it views a session that isn't open, reaches this connection alone. The
+    Once its first ``Attach`` attaches it to a ``workspace``, it views the open session there,
+    whichever that is, until :meth:`attach` attaches it to another. What answers a ``Hello``,
+    its greeting unlogged, and the outcome of any command before it's attached, or while it
+    views a session that isn't open, reaches this connection alone. The
     stream, with the live events held while it's being caught up, holds at most
     :data:`QUEUE_LIMIT` events unread; one more closes the connection as
     :data:`TOO_FAR_BEHIND`, and the session and its other connections carry on.
@@ -229,6 +241,7 @@ class SessionConnection:
         self._dropped: ConnectionDropped | None = None
         self._ended = False
         self.attached: SessionRef | None = None  # None while it views the open session.
+        self.workspace: str | None = None  # The id of the workspace attached to, once it is.
         parts.connections.add(self)
 
     @property
@@ -253,31 +266,39 @@ class SessionConnection:
 
     @property
     def greeted(self) -> bool:
-        """Whether this connection's ``Hello`` was welcomed and all that follows it published."""
+        """Whether this connection attached to a session and all that follows its first
+        ``Attach`` was published."""
         return self._handshake.greeted
 
     @property
     def listening(self) -> bool:
-        """Whether the session's events reach this connection: once it's being welcomed, until
-        its stream ends."""
+        """Whether the session's events reach this connection: once it's attaching, until its
+        stream ends."""
         return self._handshake.listening and not self._ended
 
     async def send(self, envelope: CommandEnvelope) -> None:
         """Have the session handle the command in ``envelope`` and publish its outcome, to this
-        connection alone for a ``Hello`` or a command before one is welcomed. Nothing is handled
-        once the stream has ended; an incompatible ``Hello``'s refusal ends it."""
+        connection alone for a ``Hello`` or a command before it's attached, and, unlogged, as
+        part of its greeting, for its first ``Attach``. Nothing is handled once the stream has
+        ended; an incompatible ``Hello``'s refusal ends it."""
         if self._ended:
             return
-        publish = self._publisher(private=isinstance(envelope.payload, Hello))
         token = _answering.set((self, asyncio.current_task()))
         try:
-            await self._parts.answer(envelope, self, publish)
+            await self._parts.answer(envelope, self, self._outcome_publisher(envelope.payload))
         finally:
             _answering.reset(token)
         if self._handshake.ended:
             self.end()
-        elif isinstance(envelope.payload, Hello):
+        elif isinstance(envelope.payload, Attach):
             self._parts.connections.viewers_changed()
+
+    def _outcome_publisher(self, command: Command) -> Publish:
+        """What publishes the outcome of ``command``: the greeting for the first ``Attach``,
+        else as :meth:`_publisher` says, privately for a ``Hello``."""
+        if isinstance(command, Attach) and self.workspace is None:
+            return self._greet
+        return self._publisher(isinstance(command, Hello))
 
     async def refuse(self, command_id: str, code: str, message: str) -> None:
         """Publish ``CommandRefused`` with ``code`` and ``message`` for a command sent as
@@ -290,11 +311,11 @@ class SessionConnection:
 
     def _publisher(self, private: bool) -> Publish:
         """What publishes a command's outcome: to this connection alone if ``private``, before
-        one is welcomed or while it views a session that isn't open, else to every connection;
+        it's attached or while it views a session that isn't open, else to every connection;
         which is decided as it's published, as the command may change what it views."""
 
         async def publish(event: Event) -> None:
-            if private or not self._handshake.welcomed or self.viewing is not None:
+            if private or self.workspace is None or self.viewing is not None:
                 await self.publish_here(event)
             else:
                 await self._parts.events.put(event)

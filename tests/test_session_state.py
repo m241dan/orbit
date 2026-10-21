@@ -35,6 +35,7 @@ from tests.agent_fakes import (
     FakeTree,
     Steps,
     Ticks,
+    attach_to,
     connect,
     frontend,
     greet,
@@ -120,9 +121,11 @@ async def taken(connection: Session) -> list[Event]:
 
 
 async def joined(session: WorkspaceHost, name: str) -> SessionConnection:
-    """A new connection to ``session`` that has said Hello as ``name``."""
+    """A new connection to ``session`` that has said Hello as ``name`` and attached to the open
+    session."""
     connection = connect(session)
     await say(connection, name, HELLO)
+    await say(connection, f"{name}-attach", attach_to(session))
     return connection
 
 
@@ -230,7 +233,7 @@ async def test_a_second_hello_and_its_closing_change_the_viewers_for_every_conne
     assert (changes(joining), changes(leaving)) == ([state(viewers=2)], [state(viewers=1)])
 
 
-async def test_a_joining_connections_catalog_counts_it_and_has_the_open_sessions_state() -> None:
+async def test_a_joining_connections_catalog_has_the_open_sessions_state_but_not_it() -> None:
     gate = asyncio.Event()
     session, _, launcher = session_for()
     launcher.planner_turns = [gated_planner(gate)]
@@ -246,7 +249,7 @@ async def test_a_joining_connections_catalog_counts_it_and_has_the_open_sessions
         OPEN,
         True,
         "running",
-        2,
+        1,  # The first frontend's: the second's Hello attached it to nothing yet.
         (Activity(kind="planner"),),
     )
 
@@ -266,7 +269,7 @@ async def test_the_catalog_shows_other_sessions_inactive_idle_and_unviewed() -> 
     await session.close()
 
     states = {s.id: (s.active, s.state, s.viewers) for s in sessions}
-    assert states == {OPEN: (True, "idle", 1), "earlier": (False, "idle", 0)}
+    assert states == {OPEN: (True, "idle", 0), "earlier": (False, "idle", 0)}
 
 
 async def test_opening_another_session_publishes_both_sessions_states() -> None:

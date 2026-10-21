@@ -12,7 +12,6 @@ from orbit.protocol import (
     INVALID,
     AddTask,
     Catalog,
-    CommandEnvelope,
     CommandRefused,
     ErrorOccurred,
     Event,
@@ -30,11 +29,9 @@ from orbit.protocol import (
 from tests.agent_fakes import (
     ACCEPTED,
     COMMAND_ID,
-    HELLO,
     LOCK_RETRY,
     Call,
     FakeTree,
-    connect,
     events_until,
     greeted,
     idle,
@@ -88,13 +85,10 @@ def refused(event: Event) -> bool:
 
 
 async def snapshot_on_joining(session: WorkspaceHost) -> Snapshot:
-    """The Snapshot a new connection to ``session`` gets for its Hello."""
-    connection = connect(session)
-    await connection.send(CommandEnvelope(command_id="join", payload=HELLO))
-    stream = connection.events()
-    while not isinstance(payload := (await asyncio.wait_for(anext(stream), 5)).payload, Snapshot):
-        pass
-    return payload
+    """The Snapshot a new connection to ``session`` gets for its Hello and its Attach."""
+    snapshot = (await views_on_joining(session))[-1]
+    assert isinstance(snapshot, Snapshot)
+    return snapshot
 
 
 async def test_a_read_only_session_offers_the_repository_once_its_owner_goes() -> None:

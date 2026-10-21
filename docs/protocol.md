@@ -6,7 +6,8 @@ generated JSON Schema in `schema/protocol.schema.json` says what each one looks 
 wire. The decisions behind all this are recorded in `docs/00002-feature-envelope-and-outcomes.md`,
 `docs/00003-feature-join-handshake.md`, `docs/00004-feature-wire-contract.md`, for the
 transport, `docs/00009-feature-serve-and-connect.md` and, for attaching to sessions,
-`docs/00010-feature-attach-and-lifecycle.md`.
+`docs/00010-feature-attach-and-lifecycle.md` and, for workspaces and version 2,
+`docs/00015-feature-many-workspaces.md`.
 
 ## Envelopes
 
@@ -21,13 +22,15 @@ A command travels in a `CommandEnvelope`:
 - `session`: the session the command is for. It's optional: `null` means the session the
   connection views (see [Attaching](#attaching)), the open session unless it attached to
   another. A command naming any other session is refused with `wrong_session`.
-- `workspace`: the workspace the command is for. There's one workspace for now, `"default"`
-  (`DEFAULT_WORKSPACE`); a command naming another is refused with `unknown`.
+- `workspace`: the id of the workspace the command is for, as the `Catalog` gives it. It's
+  optional: `null` means the workspace the connection is attached to. A command naming a
+  workspace that isn't served is refused with `unknown`, and one naming a workspace served but
+  not the one attached with `wrong_session`, naming both.
 - `traceparent` and `tracestate`: W3C trace context. They're optional, aren't checked, and
   aren't set yet.
 
 ```json
-{"workspace":"default","traceparent":null,"tracestate":null,"command_id":"9c41e7","session":null,"payload":{"type":"remove_task","task_id":"t3"}}
+{"workspace":null,"traceparent":null,"tracestate":null,"command_id":"9c41e7","session":null,"payload":{"type":"remove_task","task_id":"t3"}}
 ```
 
 An event travels in an `EventEnvelope`:
@@ -38,17 +41,20 @@ An event travels in an `EventEnvelope`:
   when a saved session is opened, past any events another orbit logged since, so a `seq` is
   never handed out twice, even once the events that had it are deleted.
 - `session`: the session the event belongs to. The event's type decides it: the types in
-  `SESSIONLESS_EVENTS` (`UsageChanged`, `SessionsListed`, `Catalog` and `SessionStateChanged`)
+  `SESSIONLESS_EVENTS` (`UsageChanged`, `Catalog` and `SessionStateChanged`)
   belong to no session, carry `null` and are never logged, and every other event carries the
   open session's id, but for the answers to a connection viewing another session (its
   `Snapshot`, `CommandAccepted` and `CommandRefused`), which carry that session's id and are
   never logged. Every event of a session is kept in the store's event log but for
   `CONNECTION_EVENTS` (`Welcome`, `Catalog`, `Snapshot` and `HistoryPage`), which answer one
   connection, and a connection's greeting (see [The handshake](#the-handshake)).
-- `workspace`, `traceparent` and `tracestate`, as on commands.
+- `workspace`: the id of the workspace the event belongs to, but for the control plane's own
+  events, the types in `CONTROL_PLANE_EVENTS` (`Welcome`, `Catalog` and `UsageChanged`), which
+  carry `null`.
+- `traceparent` and `tracestate`, as on commands.
 
 ```json
-{"workspace":"default","traceparent":null,"tracestate":null,"seq":42,"session":"20261018-0801","payload":{"type":"command_refused","command_id":"9c41e7","code":"busy","message":"Task t3 is running."}}
+{"workspace":"4f1c2a9e","traceparent":null,"tracestate":null,"seq":42,"session":"20261018-0801","payload":{"type":"command_refused","command_id":"9c41e7","code":"busy","message":"Task t3 is running."}}
 ```
 
 ## The handshake
@@ -56,55 +62,59 @@ An event travels in an `EventEnvelope`:
 Every stream opens with a `Hello` command:
 
 ```json
-{"workspace":"default","traceparent":null,"tracestate":null,"command_id":"3f2a90","session":null,"payload":{"type":"hello","client":"orbit-tui 0.1.0","protocol_version":1,"since":null}}
+{"workspace":null,"traceparent":null,"tracestate":null,"command_id":"3f2a90","session":null,"payload":{"type":"hello","client":"orbit-tui 0.1.0","protocol_version":2,"since":null}}
 ```
 
 `client` names the frontend, `protocol_version` is the major version it speaks
-(`PROTOCOL_VERSION`, now `1`), and `since` is the last `seq` it saw, if it's reconnecting.
+(`PROTOCOL_VERSION`, now `2`), and `since` is the last `seq` it saw, if it's reconnecting.
 
-The backend publishes nothing but refusals before `Hello`. Every command, `Hello` included, is
-first checked for its address: one naming another workspace is refused with `unknown`, and one
-naming a session other than the one the connection views with `wrong_session`. Only then is a command other
-than `Hello` sent before it refused with `invalid`. A second `Hello` is refused with `invalid`
-too. A `Hello` naming another major
+The backend publishes nothing but refusals before `Hello`: a command other than `Hello` sent
+before it is refused with `invalid`, and so is a second `Hello`. A `Hello` naming another major
 version is refused with `incompatible`, its message naming both versions, and nothing more is
 sent on that stream.
 
 Otherwise the backend answers `Hello` with `Welcome`, which carries the Hello's `command_id`
 and the backend's `server_version`. `Welcome` is Hello's outcome: it takes the place of
-`CommandAccepted`. What follows comes in this order:
+`CommandAccepted`. A `Catalog` follows it: what exists, namely the workspaces served, each with
+its id, label, path and sessions, the agents' roles, the triggers and the lanes, and
+`read_only`, true when another orbit owns the repository (see
+[Read-only orbits](#read-only-orbits)). Each session carries its state (see
+[Session state](#session-state)).
 
-1. `Catalog`: what exists, namely the workspaces with their sessions, the agents' roles, the
-   triggers and the lanes, and `read_only`, true when another orbit owns the repository (see
-   [Read-only orbits](#read-only-orbits)). Each session carries its state (see
-   [Session state](#session-state)), the joining frontend counted among the open session's
-   viewers.
-2. The latest `UsageChanged`, if usage was fetched yet.
-3. `Snapshot`: the open session as it stands, with its settings, busy lanes, tasks,
+`Hello` attaches the connection to nothing, and nothing more reaches it until its first
+`Attach(workspace, session)` (see [Attaching](#attaching)); every command but `Attach` sent
+before then is refused with `invalid`. The first `Attach` is answered in this order:
+
+1. `Snapshot`: the session as it stands, with its settings, busy lanes, tasks,
    verification steps, review status, checks proposals waiting for a decision, running
    agents and its `transcript`: the session's last 500 logged events, oldest first, in the
    envelopes they were sent in, their `seq`s included (none without a store), and, while the
    session is halted because a write to the store failed, its `storage_halt`: the explanation
    the halting `ErrorOccurred` carried (see `storage_failed` under [Codes](#codes)), and
    `read_only`, as the Catalog has it, with `ownership_offered`, true while an offer of the
-   repository is open (see [Read-only orbits](#read-only-orbits)). A `Hello`
-   whose `since` orbit can catch up from gets the open session's events after it here
-   instead, in their original envelopes (see
+   repository is open (see [Read-only orbits](#read-only-orbits)). Attaching to the open
+   session after a `Hello` whose `since` orbit can catch up from gets the open session's events
+   after it here instead, in their original envelopes (see
    [Sequencing and reconnecting](#sequencing-and-reconnecting)).
-4. One-off notices, such as the workspace note, a missing verification setup, leftover work or
+2. The latest `UsageChanged`, if usage was fetched yet.
+3. One-off notices, such as the workspace note, a missing verification setup, leftover work or
    notes on a resumed session.
+4. The Attach's `CommandAccepted`.
 5. Live events, as things happen.
 
-Steps 1 to 4, and an `ErrorOccurred` coded `internal` for any of them that fails, are the
-connection's greeting: they reach the connection that said `Hello` alone, never the others
+`Welcome`, the `Catalog`, steps 1 to 3, and an `ErrorOccurred` coded `internal` for any of them
+that fails, are the connection's greeting: they reach that connection alone, never the others
 already connected, and aren't logged, so another frontend reconnecting isn't sent them again.
+The first connection to attach starts the workspace's background work, such as the startup
+check.
 
 Each frontend shows its own session picker from the Catalog, kept current by
-`SessionStateChanged`; orbit no longer sends `SessionsListed` with `reason="startup"`.
+`SessionStateChanged`, and attaches to the workspace it opens on: the TUI picks the one at the
+repository it runs in, if the Catalog lists it, else the first, and attaches to its active
+session.
 
 `Welcome` only says the Hello was accepted; it's the `Snapshot` that marks the frontend's state
-as current. `Hello` attaches the connection to the workspace's open session (see
-[Attaching](#attaching)).
+as current.
 
 Switching sessions works the way joining does: activating, starting or picking a session sends
 a `Catalog` and then a `Snapshot` of the session now open (see [Activation](#activation)). A
@@ -115,15 +125,17 @@ asked gets it once, before its `Snapshot`. Orbit sends no Catalog when only a se
 changes.
 A frontend replaces the conversation it shows with every Snapshot's transcript, so joining
 shows where the session left off and a switch shows the session switched to.
-`SessionsListed` only answers `ListSessions`, and after a rename or delete.
 
 ## Attaching
 
-A connection views one session at a time: from its `Hello`, the workspace's open session,
-whichever that is, until another session is activated in its place. `Attach(session)`
-points it at the session `session` instead, and is answered with that session's `Snapshot`,
-then `CommandAccepted`; one for a session there's none of is refused with `unknown`, and one for
-a saved session that can't be read with `invalid`. From then on the connection gets the events
+A connection views one session at a time, of the workspace it's attached to. Its first
+`Attach(workspace, session)` attaches it to the workspace `workspace` and views the session
+`session` there, answered as [The handshake](#the-handshake) says; a later one views another
+session of that workspace, answered with that session's `Snapshot`, then `CommandAccepted`. An
+`Attach` for a workspace that isn't served, or a session there's none of, is refused with
+`unknown`, and one for a saved session that can't be read with `invalid`. A connection viewing
+the open session keeps viewing it, whichever that is, until another session is activated in its
+place. From then on the connection gets the events
 of the session it views, the events that belong to no session, and the answers to its own
 commands; another session's events don't reach it. `Attach` with the open session's id views
 the open session again, live.
@@ -152,8 +164,9 @@ it was being deleted, views the open session again and gets the open session's l
 to it alone, as `Attach` does; a `SessionStateChanged` reports the deleted session with no
 viewers. The delete's `CommandAccepted` follows.
 
-A reconnecting `orbit.client.WebSocketSession` that was viewing a session other than the open
-one sends its last `Attach` again after its `Hello`, so it views that session again.
+A reconnecting `orbit.client.WebSocketSession` sends its `Hello` again and, if it had attached,
+its last `Attach`, for the workspace and session the last `Snapshot` it got showed, if it got
+one since, so it views that session again.
 
 ## Activation
 
@@ -176,9 +189,6 @@ both sessions (see [Session state](#session-state)).
 
 `NewSession(name)` creates a session, `name`d so or by the time it started, and activates it in
 the same way, under the same rule; the creating connection views it.
-
-`OpenSession` is retired: it's refused with `invalid`, its message pointing to `Attach`, to view a
-session, and `ActivateSession`, to make it the active one.
 
 ## Session state
 
@@ -306,13 +316,14 @@ missed when the open session's logged events are all it missed: the last logged 
 before `since` belongs to the open session (it has one there, newer than every other session's),
 every logged event with a `seq` after `since` belongs to the open session, and `since` is no older
 than that session's oldest kept event (`since` is at least that event's `seq` minus one). Events
-still waiting to be written count as logged. Then `Welcome`, the `Catalog` and
-the latest usage, if any, are followed by the open session's events after `since`, oldest first
-and in their original envelopes, `seq` and all, with no `Snapshot`; the one-off notices and the
-rest of the handshake follow, then live events. Events no session owns, such as usage, aren't
+still waiting to be written count as logged. Then, once the connection attaches to the open
+session, its events after `since` are sent, oldest first and in their original envelopes, `seq`
+and all, with no `Snapshot`; the latest usage, the one-off notices and the rest of the greeting
+follow, then live events. Events no session owns, such as usage, aren't
 logged, so aren't replayed.
 
-Otherwise orbit sends a fresh Snapshot, as if `since` weren't given, and the frontend replaces
+Otherwise, or when the connection attaches to another session, orbit sends a fresh Snapshot, as
+if `since` weren't given, and the frontend replaces
 its state from it: when another session's events came after `since` (the user switched
 sessions), when the open session has no event at or before `since` newer than every other
 session's (the frontend's state is of another session, as when a new orbit opens a new or other
@@ -323,13 +334,11 @@ last saw them gets a fresh Snapshot.
 
 ## Deprecated
 
-These messages are deprecated, listed in `DEPRECATED_MESSAGES` in `orbit.protocol`, and will be
-removed at the next major `PROTOCOL_VERSION`; a test fails if that version is above 1 while any
-of them is still in the protocol:
-
-- `OpenSession`: refused with `invalid`; use `Attach` and `ActivateSession`.
-- `ListSessions` and `SessionsListed`: still work; the `Catalog` and `SessionStateChanged` say
-  the same.
+Deprecated messages are listed in `DEPRECATED_MESSAGES` in `orbit.protocol`, to be removed at
+the next major `PROTOCOL_VERSION`. There are none: version 2 removed `OpenSession`,
+`ListSessions` and `SessionsListed`, which version 1 deprecated, along with the `"default"`
+workspace id; `Attach` and `ActivateSession` replace `OpenSession`, and the `Catalog` and
+`SessionStateChanged` say what `SessionsListed` did.
 
 ## Compatibility
 
@@ -437,9 +446,9 @@ Refusals, in `CommandRefused`:
 | `not_configured` | What the command needs isn't set up, such as agents or verification. |
 | `unknown` | The command names something there's none of, such as a task, a lane or a workspace. |
 | `busy` | What the command acts on is running, so it can't be done now. |
-| `invalid` | The command can't be done as given, such as a command before `Hello`, input to a trigger that takes none or `TakeOwnership` with no offer open. |
+| `invalid` | The command can't be done as given, such as a command before `Hello`, a command but `Attach` before the connection is attached, input to a trigger that takes none or `TakeOwnership` with no offer open. |
 | `locked` | Another orbit holds what the command acts on, such as a session. |
-| `wrong_session` | The command is for a session other than the one its connection views. |
+| `wrong_session` | The command is for a session other than the one its connection views, or a workspace other than the one it's attached to. |
 | `not_active` | The connection views a session that isn't the workspace's open one, and the command would change or run something there (see [Read-only views](#read-only-views)). |
 | `incompatible` | A `Hello` named a protocol version this orbit doesn't speak; nothing more is sent on that stream. |
 | `storage_failed` | The session is halted because a write to the store failed; the message is the halt's explanation. Every command but `Hello` and `ResumeStorage` is refused so until storage is resumed; `ResumeStorage` is refused so while the writes still fail (see [Resuming storage](#resuming-storage)). |

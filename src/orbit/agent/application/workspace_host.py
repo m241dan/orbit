@@ -7,12 +7,13 @@ ports to do it, and reports what happened as events.
 
 from collections.abc import Awaitable, Callable, Collection, Sequence
 from contextlib import suppress
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from datetime import datetime
 from pathlib import PurePath
 
 from orbit.agent.application.connection import Connections, SessionConnection
 from orbit.agent.application.desk import AgentDesk, Agents
+from orbit.agent.application.handshake import HostGreeting
 from orbit.agent.application.history import SessionHistory
 from orbit.agent.application.keeper import (
     Clock,
@@ -78,7 +79,6 @@ from orbit.protocol import (
     Catalog,
     DeleteSession,
     Event,
-    EventEnvelope,
     History,
     LogGap,
     NewSession,
@@ -128,23 +128,8 @@ _DEFAULT_STORAGE = StorageSettings()
 OWNED_NOTE = "This orbit now owns the repository; queued work is running."
 """The notice once a read-only orbit takes the repository over."""
 
-
-@dataclass(frozen=True)
-class HostGreeting:
-    """What a host gives the handshake of a connection viewing it: the ``catalog`` of what
-    exists, the ``snapshot`` of the session open, the events of it a frontend ``missed`` since a
-    ``seq``, what loads the review count (``load_review_count``) and the one-off notices: the
-    ``workspace``, if any, whether there are ``no_steps``, the ``startup_notes`` and the
-    ``leftovers`` of earlier runs."""
-
-    catalog: Callable[[], Awaitable[Catalog]]
-    snapshot: Callable[[], Awaitable[Snapshot]]
-    missed: Callable[[int], Awaitable[Sequence[EventEnvelope] | None]]
-    load_review_count: Callable[[], Awaitable[None]]
-    workspace: str | None
-    no_steps: Callable[[], bool]
-    startup_notes: Sequence[str]
-    leftovers: Callable[[], Awaitable[Sequence[str]]]
+UNREGISTERED_WORKSPACE = "unregistered"
+"""The id of a host's workspace when it's given none, as one with no store isn't registered."""
 
 
 class WorkspaceHost:
@@ -157,24 +142,26 @@ class WorkspaceHost:
     task run: verification and fixes; ``WorkTurns`` decides when it runs; ``ReviewLane`` runs
     the reviews; ``SessionSwitcher`` switches between saved sessions; ``WorkCommands`` handles
     the other commands; ``SessionHistory`` answers ``History``. Its ``Outbox`` stamps its
-    events and its ``Connections`` route them among the connections the control plane makes,
-    whose ``Handshake`` greets each with the :attr:`greeting`. Commands from every connection
-    are handled as they arrive.
+    events, in envelopes naming the workspace by ``workspace_id``, and its ``Connections`` route
+    them among the connections the control plane makes, whose ``Handshake`` greets each with
+    the :attr:`greeting` as it first attaches here. Commands from every connection are handled
+    as they arrive.
 
     With ``check_at_startup``, the ``verification`` steps also run once in the background as
-    the session welcomes its first frontend, on the base commit; a failure adds a draft task to
+    the first frontend attaches, on the base commit; a failure adds a draft task to
     fix it.
 
     The one-off notices of a greeting are the workspace, no verification steps, the
     ``startup_notes`` and work left by earlier runs; like the rest of a greeting, they reach
-    only the connection whose ``Hello`` they answer, as a ``HistoryPage`` does the one asking.
+    only the connection whose first ``Attach`` they answer, as a ``HistoryPage`` does the one
+    asking.
     Every switch of session ends with a ``Catalog`` and a
     ``Snapshot`` too, and a rename or delete sends a ``Catalog``; each such ``Catalog`` reaches
     every listening connection, so every frontend's picker follows new, renamed and deleted
     sessions, and the ``Snapshot``, the session's new state, every connection viewing it.
     Every connection gets a ``SessionStateChanged`` whenever whether the open session runs
-    work, or how many connections view a session, changes: a connection views the open
-    session once its greeting is sent, until it closes or ``Attach``\\es to another.
+    work, or how many connections view a session, changes: a connection views the session it
+    attaches to once its greeting is sent, until it closes or ``Attach``\\es to another.
     ``SessionViews`` attaches connections: to a saved session that isn't open, as a read-only
     view whose ``Snapshot`` comes from its record and its log, and where only ``History``,
     ``RenameSession``, ``DeleteSession`` and ``Attach`` work. A connection gets the events of
@@ -196,18 +183,18 @@ class WorkspaceHost:
 
     When a write to the store fails, the session halts: the agents running, the planner's turn,
     the reviews and the startup check are cancelled, an ``ErrorOccurred`` coded
-    ``storage_failed`` explains why, and every command but ``Hello`` and ``ResumeStorage`` is
-    refused so. Nothing is written to the store from then on: the events not logged go to the
-    ``fallback`` instead. ``ResumeStorage`` retries the writes; once they work, the events
-    parked are logged, a ``LogGap`` is logged for each span of those lost, and the halt is
-    lifted.
+    ``storage_failed`` explains why, and every command but ``Hello``, a connection's first
+    ``Attach`` and ``ResumeStorage`` is refused so. Nothing is written to the store from then
+    on: the events not logged go to the ``fallback`` instead. ``ResumeStorage`` retries the
+    writes; once they work, the events parked are logged, a ``LogGap`` is logged for each span
+    of those lost, and the halt is lifted.
 
     With an ``owner``, another orbit owns the repository and this one is read-only: its
     ``Catalog`` and ``Snapshot`` say so, a notice naming the owner comes first among the
     startup notes, ``RunTasks`` and ``FireTrigger`` are accepted and queued rather than run, and
     no work starts by itself: neither the startup check nor reviews run. It notes no leftovers,
     since only the owner can tell its own running work from what earlier runs left. Given the
-    repository's ``lock``, it's tried every ``lock_retry`` seconds from the first ``Welcome``;
+    repository's ``lock``, it's tried every ``lock_retry`` seconds from the first attach;
     once it's free, it's held and offered with ``OwnershipOffered``. ``TakeOwnership`` answers:
     taking it publishes ``OwnershipTaken`` and a notice, then runs the work queued, in order;
     declining it publishes ``OwnershipDeclined``, lets the lock go and offers it again once
@@ -225,6 +212,7 @@ class WorkspaceHost:
         workspace: str | None = None,
         check_at_startup: bool = False,
         *,
+        workspace_id: str = UNREGISTERED_WORKSPACE,
         store: SessionStore | None = None,
         clock: Clock = local_now,
         new_id: IdMaker = new_session_id,
@@ -254,7 +242,9 @@ class WorkspaceHost:
         self._halt = StorageHalt(lambda event: self._events.put(event), halt_hooks)
         overflow = Overflow(fallback, self._log_failed)
         self._connections = Connections(lambda: self._states.check(), lambda: self._keeper.id)
+        self._workspace_id = workspace_id
         self._events = Outbox(lambda: self._keeper.id, store, storage, overflow)
+        self._events.workspace = workspace_id
         new_sessions = NewSessions(clock, new_id, self._events.forget, self._events.catch_up)
         self._keeper = SessionKeeper(store, self._events.put, self._halt, new_sessions)
         self._keeper.rename(name)
@@ -381,16 +371,17 @@ class WorkspaceHost:
         return WorkCommands(parts)
 
     def _host_greeting(self) -> HostGreeting:
-        """What the handshake of a connection publishes of this host after ``Welcome``."""
+        """What the handshake of a connection publishes of this host as it first attaches."""
         return HostGreeting(
-            self._switcher.catalog,
-            self._snapshot,
+            lambda: self._keeper.id,
             lambda since: self._events.missed(self._keeper.id, since),
             self._load_review_count,
             self._workspace,
             self._no_steps,
             self._startup_notes,
             self._leftovers,
+            self.start_background,
+            lambda: self._closing,
         )
 
     def _work_turns(self) -> WorkTurns:
@@ -429,6 +420,11 @@ class WorkspaceHost:
             settings = self._desk.agents.roles[CODER].settings
         task = TaskSpec(prompt=startup_fix_prompt(step, output), settings=settings)
         await self._tasks.change(lambda board: board.add_draft(task))
+
+    @property
+    def workspace_id(self) -> str:
+        """The id of the workspace this host serves."""
+        return self._workspace_id
 
     @property
     def settings(self) -> Settings:
@@ -483,8 +479,17 @@ class WorkspaceHost:
 
     @property
     def greeting(self) -> HostGreeting:
-        """What the handshake of a connection publishes of this host after ``Welcome``."""
+        """What the handshake of a connection publishes of this host as it first attaches."""
         return self._greeting
+
+    async def catalog(self) -> Catalog:
+        """What exists in this workspace: its sessions as they are now, and its agents."""
+        return await self._switcher.catalog()
+
+    async def attach(self, connection: SessionConnection, session: str) -> None:
+        """Have ``connection`` view the session ``session`` and publish its snapshot to it;
+        refused for a session there's none of."""
+        await self._views.attach(connection, session)
 
     @property
     def closing(self) -> bool:
@@ -554,7 +559,9 @@ class WorkspaceHost:
             await self._views.activated(left)
 
     async def _handle(
-        self, command: SessionCommand | WorkCommand | History | TakeOwnership, command_id: str
+        self,
+        command: RenameSession | DeleteSession | WorkCommand | History | TakeOwnership,
+        command_id: str,
     ) -> None:
         if isinstance(command, History):
             await self._events.put(await self._history.page(command))
@@ -567,8 +574,6 @@ class WorkspaceHost:
             self._views.renamed(command.session_id, command.name)
         elif isinstance(command, TakeOwnership):
             await self._take_ownership(command, command_id)
-        elif isinstance(command, SessionCommand):
-            await self._switcher.handle(command)
         else:
             self._switcher.stay()
             await self._commands.handle(command, command_id)
@@ -700,7 +705,7 @@ class WorkspaceHost:
 
     def start_background(self) -> None:
         """Start the startup check, if there is one, and the tries of the repository's lock,
-        unless they were started for an earlier connection."""
+        unless they were started for an earlier connection attaching here."""
         if self._started:
             return
         self._started = True
@@ -747,9 +752,9 @@ class WorkspaceHost:
         """What exists: the workspace holding ``sessions``, the open one's state as a connection
         joining would see it, and the agents' roles, if any."""
         roles = self._desk.agents.roles if self._desk else ()
-        label = _workspace_label(self._workspace)
         live = self._states.current(joining=True).values()
-        return catalog(label, sessions, roles, read_only=self._takeover.read_only, live=live)
+        workspace = (self._workspace_id, _workspace_label(self._workspace), self._workspace)
+        return catalog(workspace, sessions, roles, read_only=self._takeover.read_only, live=live)
 
     def _steps_shown(self) -> tuple[tuple[StepState, ...], str]:
         """The verification steps the panel shows, and their title: the startup check's while

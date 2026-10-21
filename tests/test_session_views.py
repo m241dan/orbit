@@ -108,7 +108,10 @@ async def test_picking_a_session_viewed_read_only_offers_to_make_it_active() -> 
             "auth rework is a read-only view; today is the active session, which runs work."
         )
         await pilot.press("enter")
-        assert session.commands == [Attach(session="old"), ActivateSession(session="old")]
+        assert session.commands == [
+            Attach(workspace="w", session="old"),
+            ActivateSession(session="old"),
+        ]
         assert not isinstance(app.screen, ActivationScreen)
 
 
@@ -120,7 +123,7 @@ async def test_just_look_closes_the_prompt_and_keeps_the_view() -> None:
         await feed_events(session, pilot, view(OLD))
         await pilot.press("j", "enter")
 
-        assert session.commands == [Attach(session="old")]
+        assert session.commands == [Attach(workspace="w", session="old")]
         assert not isinstance(app.screen, ActivationScreen)
         assert mark(app) == VIEWING_OLD
 
@@ -133,7 +136,7 @@ async def test_escape_just_looks() -> None:
         await feed_events(session, pilot, view(OLD))
         await pilot.press("escape")
 
-        assert session.commands == [Attach(session="old")]
+        assert session.commands == [Attach(workspace="w", session="old")]
         assert not isinstance(app.screen, ActivationScreen)
 
 
@@ -148,7 +151,7 @@ async def test_with_the_active_session_running_the_prompt_only_offers_to_just_lo
         assert choices(screen) == ["Just look"]
         assert message(screen) == "today is running a task; you can switch once it's idle."
         await pilot.press("enter")
-        assert session.commands == [Attach(session="old")]
+        assert session.commands == [Attach(workspace="w", session="old")]
         assert not isinstance(app.screen, ActivationScreen)
 
 
@@ -302,7 +305,10 @@ async def test_a_pick_held_back_by_a_running_session_is_offered_again_once_it_is
         assert message(screen) == "today is idle now."
         assert choices(screen) == ["Make this the active session", "Just look"]
         await pilot.press("enter")
-        assert session.commands == [Attach(session="old"), ActivateSession(session="old")]
+        assert session.commands == [
+            Attach(workspace="w", session="old"),
+            ActivateSession(session="old"),
+        ]
 
 
 async def test_the_offer_again_replaces_the_one_still_shown_and_comes_once() -> None:
@@ -317,7 +323,7 @@ async def test_the_offer_again_replaces_the_one_still_shown_and_comes_once() -> 
         await pilot.press("escape")
         await feed_events(session, pilot, RUNNING_T3, IDLE)
         assert not isinstance(app.screen, ActivationScreen)
-        assert session.commands == [Attach(session="old")]
+        assert session.commands == [Attach(workspace="w", session="old")]
 
 
 async def test_a_view_not_picked_here_is_not_offered_again_when_the_active_one_is_idle() -> None:

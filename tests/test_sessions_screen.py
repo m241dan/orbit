@@ -14,16 +14,14 @@ from orbit.protocol import (
     Catalog,
     DeleteSession,
     ErrorOccurred,
-    ListSessions,
     NewSession,
     RenameSession,
-    SessionsListed,
     SessionStateChanged,
     SessionSummary,
     Usage,
     WorkspaceEntry,
 )
-from orbit.tui import OrbitApp
+from orbit.tui import Opening, OrbitApp
 from orbit.tui.sessions import SessionsScreen
 from orbit.tui.tasks import TaskList
 from orbit.tui.transcript import Transcript
@@ -43,7 +41,7 @@ BROKEN = SessionSummary(id="bad", name="bad.json", unreadable="not JSON")
 OLD_ROW = "  auth rework · Oct 16 18:02"
 SAVED_ROWS = [OLD_ROW, "  elsewhere · open in another orbit", "  bad.json · unreadable: not JSON"]
 RUNNING = SessionStateChanged(session="now", active=True, state="running", viewers=1)
-SWITCH_TO_OLD = [Attach(session="old"), ActivateSession(session="old")]
+SWITCH_TO_OLD = [Attach(workspace="w", session="old"), ActivateSession(session="old")]
 
 
 def catalog(*sessions: SessionSummary) -> Catalog:
@@ -72,13 +70,13 @@ def no_picker(app: OrbitApp) -> bool:
 def in_process() -> tuple[OrbitApp, FakeSession]:
     """An app picking a session at startup over a backend in this process."""
     session = FakeSession()
-    return OrbitApp(session, pick=True), session
+    return OrbitApp(session, opening=Opening(pick=True)), session
 
 
 def joined() -> tuple[OrbitApp, FakeSession]:
     """An app picking a session at startup over a control plane it's linked to."""
     session = FakeSession()
-    return OrbitApp(session, FakeLink(), pick=True), session
+    return OrbitApp(session, FakeLink(), Opening(pick=True)), session
 
 
 def started() -> tuple[OrbitApp, FakeSession]:
@@ -125,7 +123,7 @@ async def test_with_no_saved_sessions_the_picker_offers_only_a_new_session() -> 
 
 async def test_a_backend_picking_at_startup_shows_the_picker_without_its_new_session() -> None:
     backend = WorkspaceHost(store=store_with(saved("old")), pick_session=True)
-    app = OrbitApp(frontend(backend), pick=True)
+    app = OrbitApp(frontend(backend), opening=Opening(pick=True))
     async with app.run_test() as pilot:
         await pilot.pause()
         assert [s.id for s in picker(app).rows] == ["old"]
@@ -162,7 +160,7 @@ async def test_picking_while_a_task_runs_only_views_the_session() -> None:
     async with app.run_test() as pilot:
         await feed_events(session, pilot, CATALOG, RUNNING)
         await pilot.press("j", "enter")
-        assert session.commands == [Attach(session="old")]
+        assert session.commands == [Attach(workspace="w", session="old")]
 
 
 async def test_picking_while_another_frontend_views_the_active_session_only_views() -> None:
@@ -172,7 +170,7 @@ async def test_picking_while_another_frontend_views_the_active_session_only_view
         await feed_events(session, pilot, CATALOG, viewed)
         assert options(picker(app))[0] == "● Resume today · Oct 16 18:02 · active · viewed by 1"
         await pilot.press("j", "enter")
-        assert session.commands == [Attach(session="old")]
+        assert session.commands == [Attach(workspace="w", session="old")]
 
 
 async def test_picking_a_session_that_fails_to_send_shows_why_and_activates_nothing() -> None:
@@ -184,7 +182,7 @@ async def test_picking_a_session_that_fails_to_send_shows_why_and_activates_noth
         await pilot.pause()
 
         assert app.is_running
-        assert session.commands == [Attach(session="old")]
+        assert session.commands == [Attach(workspace="w", session="old")]
         assert entries(app)[-1] == ("Couldn't send the command: the backend is gone", "error")
 
 
@@ -271,7 +269,6 @@ async def test_ctrl_p_shows_the_picker_with_the_session_viewed_first() -> None:
         assert options(screen)[:2] == ["● today · Oct 16 18:02 · active", OLD_ROW]
         await pilot.press("j", "enter")
         assert session.commands == SWITCH_TO_OLD
-        assert not any(isinstance(command, ListSessions) for command in session.commands)
 
 
 async def test_choosing_the_session_viewed_just_closes_the_picker() -> None:
@@ -312,16 +309,6 @@ async def test_a_catalog_opens_no_picker_in_an_app_not_picking() -> None:
     async with app.run_test() as pilot:
         await feed_events(session, pilot, CATALOG)
         assert no_picker(app)
-
-
-async def test_sessions_listed_are_ignored() -> None:
-    app, session = started()
-    async with app.run_test() as pilot:
-        await feed_events(session, pilot, opened(OLD))
-        renamed = OLD.model_copy(update={"name": "flags", "current": True})
-        await feed_events(session, pilot, SessionsListed(sessions=(renamed,), reason="startup"))
-        assert no_picker(app)
-        assert conversation_title(app) == "Conversation — auth rework"
 
 
 async def test_ctrl_p_does_nothing_over_another_modal() -> None:
@@ -550,7 +537,7 @@ async def test_a_catalog_dropping_the_highlighted_session_keeps_the_highlight_in
 async def test_renaming_and_deleting_through_the_backend_refresh_the_picker() -> None:
     store = store_with(saved("old"), saved("gone"))
     backend = WorkspaceHost(store=store, pick_session=True)
-    app = OrbitApp(frontend(backend), pick=True)
+    app = OrbitApp(frontend(backend), opening=Opening(pick=True))
     async with app.run_test() as pilot:
         await pilot.pause()
         screen = picker(app)

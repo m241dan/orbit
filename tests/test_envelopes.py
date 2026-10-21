@@ -8,22 +8,21 @@ from pydantic import ValidationError
 from orbit.agent import WorkspaceHost
 from orbit.agent.domain.usage import UsageReport
 from orbit.protocol import (
-    DEFAULT_WORKSPACE,
     PLANNER,
     AddTask,
+    Catalog,
     CommandEnvelope,
     EventEnvelope,
-    ListSessions,
     NewSession,
     Notice,
     SendMessage,
-    SessionsListed,
     Snapshot,
     TasksChanged,
     TaskSpec,
     UsageChanged,
+    Welcome,
 )
-from tests.agent_fakes import FakeStore, Ticks, frontend, greeted, send, served
+from tests.agent_fakes import WORKSPACE, FakeStore, Ticks, frontend, greeted, send, served
 from tests.test_usage_monitor import LIMITS, Source
 
 HELLO = SendMessage(agent=PLANNER, text="hello")
@@ -33,7 +32,7 @@ def test_a_command_envelope_nests_its_command_under_payload_with_its_type() -> N
     envelope = CommandEnvelope(command_id="c1", payload=HELLO)
 
     assert envelope.model_dump() == {
-        "workspace": "default",
+        "workspace": None,
         "traceparent": None,
         "tracestate": None,
         "command_id": "c1",
@@ -109,27 +108,35 @@ async def test_events_are_numbered_from_one_across_a_session_switch() -> None:
     assert after[-1].session == "session-2"
 
 
-async def test_events_carry_the_open_session_unless_they_belong_to_none() -> None:
+async def test_events_carry_the_open_session_and_its_workspace_unless_they_belong_to_none() -> None:
     session = saved_session()
-    await envelopes_until(session, Snapshot)
+    snapshot = await envelopes_until(session, Snapshot)
     await send(session, AddTask(task=TaskSpec(prompt="Add a flag.")))
     tasks = await envelopes_until(session, TasksChanged)
-    await send(session, ListSessions())
-    listed = await envelopes_until(session, SessionsListed)
+    await send(session, NewSession(name="other"))
+    listed = await envelopes_until(session, Catalog)
     await session.close()
 
     assert tasks[-1].session == "session-1"
-    assert listed[-1].session is None
-    assert {e.workspace for e in tasks + listed} == {DEFAULT_WORKSPACE}
+    assert (listed[-1].session, listed[-1].workspace) == (None, None)
+    assert {e.workspace for e in tasks + snapshot[-1:]} == {WORKSPACE}
 
 
-async def test_usage_belongs_to_no_session() -> None:
+async def test_the_welcome_and_the_catalog_belong_to_no_workspace() -> None:
+    session = saved_session()
+    greeting = await envelopes_until(session, Catalog)
+    await session.close()
+
+    assert [type(e.payload) for e in greeting] == [Welcome, Catalog]
+    assert {e.workspace for e in greeting} == {None}
+
+
+async def test_usage_belongs_to_no_session_nor_workspace() -> None:
     session = saved_session(Source(UsageReport(LIMITS)))
     [*_, usage] = await envelopes_until(session, UsageChanged)
     await session.close()
 
-    assert usage.session is None
-    assert usage.workspace == DEFAULT_WORKSPACE
+    assert (usage.session, usage.workspace) == (None, None)
 
 
 async def test_an_event_keeps_the_session_it_was_published_in_when_read_after_a_switch() -> None:

@@ -16,6 +16,7 @@ from orbit.protocol import (
     SUPER_REVIEW_ORIGIN,
     WORK_LANE,
     AcceptTask,
+    ActivateSession,
     Activity,
     AddTask,
     AgentExited,
@@ -23,19 +24,19 @@ from orbit.protocol import (
     AgentRequest,
     AgentStarted,
     AssistantMessage,
+    Attach,
     BusyChanged,
     CancelAgent,
     CancelTurn,
+    Catalog,
     ChecksProposed,
     ConversationReset,
     EditTask,
     ErrorOccurred,
     FireTrigger,
     History,
-    ListSessions,
     NewSession,
     OpenRequest,
-    OpenSession,
     ProgressNoted,
     RemoveTask,
     ResetConversation,
@@ -43,7 +44,6 @@ from orbit.protocol import (
     RunningAgent,
     RunTasks,
     SendMessage,
-    SessionsListed,
     SessionStateChanged,
     SessionSummary,
     Settings,
@@ -68,6 +68,7 @@ from orbit.protocol import (
     VerificationFinished,
     VerificationSkipped,
     VerificationStarted,
+    WorkspaceEntry,
     command_adapter,
     event_adapter,
     with_state,
@@ -130,10 +131,12 @@ def test_task_commands_round_trip() -> None:
 
 
 def test_session_commands_and_events_round_trip() -> None:
-    for command in (ListSessions(), OpenSession(session_id="s1"), NewSession(name="auth")):
+    attach = Attach(workspace="w1", session="s1")
+    for command in (attach, ActivateSession(session="s1"), NewSession(name="auth")):
         assert command_adapter.validate_json(command.model_dump_json()) == command
     summary = SessionSummary(id="s1", name="auth", counts={"pending": 2}, current=True)
-    listed = SessionsListed(sessions=(summary,), reason="asked")
+    entry = WorkspaceEntry(id="w1", label="auth", path="/src/auth", sessions=(summary,))
+    listed = Catalog(workspaces=(entry,), agents=(), triggers=(), lanes=())
     assert event_adapter.validate_json(listed.model_dump_json()) == listed
 
 

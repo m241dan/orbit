@@ -7,6 +7,7 @@ from orbit.protocol import (
     NewSession,
     SessionSummary,
     Usage,
+    WorkspaceEntry,
 )
 from orbit.tui.view.sessions import (
     ACTIVATE_CHOICE,
@@ -21,9 +22,11 @@ from orbit.tui.view.sessions import (
     activity_words,
     can_delete,
     can_open,
+    chosen_workspace,
     delete_message,
     idle_now_message,
     local_time,
+    opening_attach,
     picked_commands,
     picker_sessions,
     running_words,
@@ -33,6 +36,7 @@ from orbit.tui.view.sessions import (
     task_counts,
     viewed_only,
     viewing_mark,
+    workspace_sessions,
 )
 
 ACTIVE = datetime(2026, 10, 16, 18, 2, tzinfo=UTC)
@@ -197,42 +201,48 @@ def test_with_no_session_viewed_the_picker_lists_them_all() -> None:
 
 
 def test_picking_the_session_viewed_sends_nothing() -> None:
-    assert picked_commands(NOW, (NOW, OLD), "now") == ()
+    assert picked_commands(NOW, (NOW, OLD), "now", "w") == ()
 
 
 def test_picking_with_the_active_session_idle_and_viewed_only_here_activates() -> None:
-    assert picked_commands(OLD, (NOW, OLD), "now") == (
-        Attach(session="old"),
+    assert picked_commands(OLD, (NOW, OLD), "now", "w") == (
+        Attach(workspace="w", session="old"),
         ActivateSession(session="old"),
     )
 
 
 def test_picking_while_the_active_session_runs_only_attaches() -> None:
     running = NOW.model_copy(update={"state": "running"})
-    assert picked_commands(OLD, (running, OLD), "now") == (Attach(session="old"),)
+    assert picked_commands(OLD, (running, OLD), "now", "w") == (
+        Attach(workspace="w", session="old"),
+    )
 
 
 def test_picking_while_another_frontend_views_the_active_session_only_attaches() -> None:
     viewed = NOW.model_copy(update={"viewers": 2})
-    assert picked_commands(OLD, (viewed, OLD), "now") == (Attach(session="old"),)
+    assert picked_commands(OLD, (viewed, OLD), "now", "w") == (
+        Attach(workspace="w", session="old"),
+    )
 
 
 def test_a_frontend_viewing_another_session_counts_every_viewer_of_the_active_one() -> None:
-    assert picked_commands(OTHER, (NOW, OLD, OTHER), "old") == (Attach(session="other"),)
+    assert picked_commands(OTHER, (NOW, OLD, OTHER), "old", "w") == (
+        Attach(workspace="w", session="other"),
+    )
     unviewed = NOW.model_copy(update={"viewers": 0})
-    assert picked_commands(OTHER, (unviewed, OLD, OTHER), "old") == (
-        Attach(session="other"),
+    assert picked_commands(OTHER, (unviewed, OLD, OTHER), "old", "w") == (
+        Attach(workspace="w", session="other"),
         ActivateSession(session="other"),
     )
 
 
 def test_picking_the_active_session_from_another_only_attaches() -> None:
-    assert picked_commands(NOW, (NOW, OLD), "old") == (Attach(session="now"),)
+    assert picked_commands(NOW, (NOW, OLD), "old", "w") == (Attach(workspace="w", session="now"),)
 
 
 def test_with_no_active_session_picking_activates() -> None:
-    assert picked_commands(OLD, (OLD,), None) == (
-        Attach(session="old"),
+    assert picked_commands(OLD, (OLD,), None, "w") == (
+        Attach(workspace="w", session="old"),
         ActivateSession(session="old"),
     )
 
@@ -315,9 +325,12 @@ def test_attaching_alone_to_an_inactive_session_views_it_only() -> None:
         SessionSummary(id="now", name="today", active=True),
         SessionSummary(id="o", name="x"),
     )
-    assert viewed_only((Attach(session="o"),), sessions) == "o"
-    assert viewed_only((Attach(session="now"),), sessions) is None
-    assert viewed_only((Attach(session="o"), ActivateSession(session="o")), sessions) is None
+    assert viewed_only((Attach(workspace="w", session="o"),), sessions) == "o"
+    assert viewed_only((Attach(workspace="w", session="now"),), sessions) is None
+    assert (
+        viewed_only((Attach(workspace="w", session="o"), ActivateSession(session="o")), sessions)
+        is None
+    )
     assert viewed_only((NewSession(),), sessions) is None
     assert viewed_only((), sessions) is None
 
@@ -327,3 +340,33 @@ def test_the_active_session_is_named_as_the_sessions_name_it() -> None:
     other = SessionSummary(id="o", name="auth rework")
     assert active_name((other, idle)) == "today"
     assert active_name((other,)) is None
+
+
+ONE = WorkspaceEntry(id="w1", label="one", path="/src/one", sessions=())
+TWO = WorkspaceEntry(
+    id="w2", label="two", path="/src/two", sessions=(SessionSummary(id="s", name="s"),)
+)
+
+
+def test_the_workspace_opened_on_is_the_one_at_the_repository() -> None:
+    assert chosen_workspace((ONE, TWO), "/src/two") == TWO
+
+
+def test_the_workspace_opened_on_is_else_the_first() -> None:
+    assert chosen_workspace((ONE, TWO), "/src/three") == ONE
+    assert chosen_workspace((ONE, TWO), None) == ONE
+    assert chosen_workspace((), "/src/one") is None
+
+
+def test_a_workspaces_sessions_are_those_its_entry_lists() -> None:
+    assert workspace_sessions((ONE, TWO), "w2") == TWO.sessions
+    assert workspace_sessions((ONE, TWO), "w3") == ()
+    assert workspace_sessions((ONE, TWO), None) == ()
+
+
+def test_opening_attaches_to_the_active_session_of_the_workspace() -> None:
+    active = SessionSummary(id="a", name="a", active=True)
+    others = (SessionSummary(id="s", name="s"), active)
+    assert opening_attach("w1", others) == Attach(workspace="w1", session="a")
+    assert opening_attach(None, others) is None
+    assert opening_attach("w1", others[:1]) is None

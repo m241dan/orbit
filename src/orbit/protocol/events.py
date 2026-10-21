@@ -333,22 +333,6 @@ class UsageChanged(_Message):
     retry_at: AwareDatetime | None = None
 
 
-ListingReason = Literal["startup", "asked", "refreshed"]
-"""Why sessions are listed: for the user to pick one at startup, in answer to
-``ListSessions``, or because a rename or delete changed them."""
-
-
-class SessionsListed(_Message):
-    """The saved sessions, the most recently active first; those that can't be read come last.
-
-    The ``reason`` says what the listing answers.
-    """
-
-    type: Literal["sessions_listed"] = "sessions_listed"
-    sessions: tuple[SessionSummary, ...]
-    reason: ListingReason
-
-
 class MessageSent(_Message):
     """The user's message ``text`` to the agent ``agent``, sent as command ``command_id``, was
     accepted; the agent's turn on it follows."""
@@ -385,8 +369,8 @@ class RunningAgent(_Message):
 
 
 class Snapshot(_Message):
-    """The session a connection views as it stands, sent after ``Welcome``, after every switch
-    and in answer to ``Attach``; its envelope's ``seq`` is the point it's current to.
+    """The session a connection views as it stands, sent in answer to ``Attach`` and after every
+    switch; its envelope's ``seq`` is the point it's current to.
 
     It holds the ``session``'s summary, its ``settings`` and ``model_choices``, whether each
     lane is ``busy``, its ``tasks``, the verification ``steps`` and the ``steps_title`` they
@@ -492,11 +476,12 @@ def with_state(summary: SessionSummary, changed: SessionStateChanged) -> Session
 
 
 class WorkspaceEntry(_Message):
-    """Workspace ``id``, shown as ``label``, and its ``sessions`` as the list of sessions shows
-    them."""
+    """Workspace ``id``, shown as ``label``, at ``path`` on the backend's host, if it has one,
+    and its ``sessions`` as the list of sessions shows them."""
 
     id: str
     label: str
+    path: str | None = None
     sessions: tuple[SessionSummary, ...]
 
 
@@ -520,7 +505,8 @@ class TriggerEntry(_Message):
 class Catalog(_Message):
     """What exists: the ``workspaces`` and their sessions, the ``agents``' roles, the
     ``triggers`` and the ``lanes``, and whether this orbit is ``read_only``, as another owns
-    the repository; sent after ``Welcome`` and whenever the sessions change."""
+    the repository; sent after ``Welcome`` and, to the connections attached, whenever the
+    sessions change."""
 
     type: Literal["catalog"] = "catalog"
     workspaces: tuple[WorkspaceEntry, ...]
@@ -558,7 +544,6 @@ Event = Annotated[
     | ChecksProposed
     | ProposalDecided
     | UsageChanged
-    | SessionsListed
     | MessageSent
     | ConversationReset
     | LogGap

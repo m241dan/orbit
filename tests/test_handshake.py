@@ -1,4 +1,5 @@
-"""The handshake every stream opens with: Hello from the frontend, Welcome from the session."""
+"""The handshake every stream opens with: Hello from the frontend, Welcome and the catalog from
+the control plane, then the first Attach, answered with the session."""
 
 import asyncio
 
@@ -6,6 +7,7 @@ from orbit import __version__
 from orbit.agent import Verification, WorkspaceHost
 from orbit.agent.application.handshake import HELLO_AGAIN_MESSAGE, HELLO_FIRST_MESSAGE
 from orbit.agent.domain.usage import UsageReport
+from orbit.agent.domain.workspaces import ATTACH_FIRST
 from orbit.protocol import (
     INCOMPATIBLE,
     INTERNAL,
@@ -14,6 +16,7 @@ from orbit.protocol import (
     UNKNOWN,
     WRONG_SESSION,
     AddTask,
+    Attach,
     Catalog,
     Command,
     CommandAccepted,
@@ -31,11 +34,15 @@ from orbit.protocol import (
     Welcome,
 )
 from tests.agent_fakes import (
+    ATTACH_ID,
     HELLO,
     HELLO_ID,
     STEP,
+    WORKSPACE,
+    FakeStore,
     FakeTree,
     Steps,
+    attach_to,
     board,
     events_until,
     frontend,
@@ -82,22 +89,33 @@ async def test_nothing_is_published_before_hello() -> None:
     await session.close()
 
 
-async def test_hello_is_welcomed_then_a_catalog_a_snapshot_the_workspace_note_and_a_viewer() -> (
-    None
-):
-    session = WorkspaceHost(
-        workspace="/work", verification=Verification((STEP,), Steps()), new_id=lambda: "s1"
+async def test_hello_is_welcomed_with_a_catalog_and_nothing_else() -> None:
+    session, _, _ = session_for(
+        verification=Verification((STEP,), Steps()), usage=Source(UsageReport(LIMITS))
     )
-    await greet(session)
-    events = await published(session, 5)
+    await send_as(session, HELLO_ID, HELLO)
+    events = await published(session, 2)
+    quiet = await silent(session)
     await session.close()
 
     assert events[0] == Welcome(command_id=HELLO_ID, server_version=__version__)
     assert isinstance(events[1], Catalog)
+    assert quiet
+
+
+async def test_attaching_after_hello_gets_the_snapshot_the_workspace_note_and_a_viewer() -> None:
+    session = WorkspaceHost(
+        workspace="/work", verification=Verification((STEP,), Steps()), new_id=lambda: "s1"
+    )
+    await greet(session)
+    events = await published(session, 6)
+    await session.close()
+
     assert isinstance(events[2], Snapshot)
     assert [step.name for step in events[2].steps] == [STEP.name]
     assert events[3] == Notice(message="Workspace: /work")
-    assert events[4] == SessionStateChanged(session="s1", active=True, state="idle", viewers=1)
+    assert events[4] == CommandAccepted(command_id=ATTACH_ID)
+    assert events[5] == SessionStateChanged(session="s1", active=True, state="idle", viewers=1)
     assert nothing_queued(session)
 
 
@@ -132,49 +150,74 @@ async def test_a_command_before_hello_is_refused_as_invalid_and_changes_nothing(
     assert launcher.launches == []
 
 
-OTHER_WORKSPACE = "No workspace 'other'; the workspace is default."
+async def test_a_command_before_attaching_is_refused_as_invalid_and_runs_nothing() -> None:
+    session, _, launcher = session_for()
+    await send_as(session, HELLO_ID, HELLO)
+    await published(session, 2)
+    await send_as(session, "run", RunTasks())
+    refused = await published(session, 1)
+    quiet = await silent(session)
+    await session.close()
+
+    assert refused == [CommandRefused(command_id="run", code=INVALID, message=ATTACH_FIRST)]
+    assert quiet
+    assert launcher.launches == []
+
+
+OTHER_WORKSPACE = f"No workspace 'other'; the workspace served is {WORKSPACE}."
 OTHER_SESSION = "Session 'other' isn't open; the open session is session-1."
 
 
-async def test_a_misaddressed_command_before_hello_is_refused_for_its_address() -> None:
+async def test_a_misaddressed_command_is_refused_for_its_address() -> None:
     session = WorkspaceHost(new_id=lambda: "session-1")
+    await greet(session)
+    await published(session, 5)
     await send_as(session, "c1", AddTask(task=TaskSpec(prompt="Add a flag.")), workspace="other")
     await send_as(session, "c2", AddTask(task=TaskSpec(prompt="Add a flag.")), session="other")
-    refusals = await published(session, 2)
+    await send_as(session, "c3", AddTask(task=TaskSpec(prompt="Add a flag.")), workspace=WORKSPACE)
+    outcomes = [e for e in await published(session, 4) if not isinstance(e, TasksChanged)]
     await session.close()
 
-    assert refusals == [
+    assert outcomes == [
         CommandRefused(command_id="c1", code=UNKNOWN, message=OTHER_WORKSPACE),
         CommandRefused(command_id="c2", code=WRONG_SESSION, message=OTHER_SESSION),
+        CommandAccepted(command_id="c3"),
     ]
 
 
-async def test_a_misaddressed_hello_is_refused_unwelcomed_and_a_proper_one_is_welcomed() -> None:
-    session = WorkspaceHost(workspace="/work", new_id=lambda: "session-1")
-    await send_as(session, "h1", HELLO, workspace="other")
-    await send_as(session, "h2", HELLO, session="other")
-    refusals = await published(session, 2)
+async def test_an_attach_to_a_workspace_not_served_is_refused_as_unknown() -> None:
+    session = WorkspaceHost(new_id=lambda: "session-1")
+    await send_as(session, HELLO_ID, HELLO)
+    await published(session, 2)
+    await send_as(session, "a1", Attach(workspace="other", session="session-1"))
+    refused = await published(session, 1)
     quiet = await silent(session)
-    await greet(session)
-    events = await published(session, 5)
     await session.close()
 
-    assert refusals == [
-        CommandRefused(command_id="h1", code=UNKNOWN, message=OTHER_WORKSPACE),
-        CommandRefused(command_id="h2", code=WRONG_SESSION, message=OTHER_SESSION),
-    ]
+    assert refused == [CommandRefused(command_id="a1", code=UNKNOWN, message=OTHER_WORKSPACE)]
     assert quiet
-    assert events[0] == Welcome(command_id=HELLO_ID, server_version=__version__)
-    kinds = [type(event) for event in events[1:]]
-    assert kinds == [Catalog, Snapshot, Notice, SessionStateChanged]
-    assert nothing_queued(session)
+
+
+async def test_an_attach_to_a_session_there_is_none_of_is_refused_and_leaves_it_unattached() -> (
+    None
+):
+    session = WorkspaceHost(store=FakeStore(), new_id=lambda: "session-1")
+    await send_as(session, HELLO_ID, HELLO)
+    await published(session, 2)
+    await send_as(session, "a1", Attach(workspace=WORKSPACE, session="gone"))
+    await send_as(session, "run", RunTasks())
+    events = await published(session, 2)
+    await session.close()
+
+    assert isinstance(events[0], CommandRefused) and events[0].code == UNKNOWN
+    assert events[1] == CommandRefused(command_id="run", code=INVALID, message=ATTACH_FIRST)
 
 
 async def test_a_second_hello_is_refused_as_invalid() -> None:
     session = WorkspaceHost()
     await greet(session)
     await send_as(session, "again", HELLO)
-    events = await published(session, 5)
+    events = await published(session, 6)
     await session.close()
 
     assert events[-1] == CommandRefused(
@@ -182,28 +225,29 @@ async def test_a_second_hello_is_refused_as_invalid() -> None:
     )
 
 
-async def test_another_protocol_version_is_refused_and_ends_the_stream() -> None:
+async def test_a_version_1_hello_is_refused_and_ends_the_stream() -> None:
     session = WorkspaceHost()
-    await send_as(session, "hello", version(PROTOCOL_VERSION + 1))
+    await send_as(session, "hello", version(1))
     await send_as(session, "add", AddTask(task=TaskSpec(prompt="Add a flag.")))
     await send_as(session, "again", HELLO)
     events = [envelope.payload async for envelope in frontend(session).events()]
     await session.close()
 
-    message = "Protocol version 2 isn't supported; this orbit speaks version 1."
+    message = f"Protocol version 1 isn't supported; this orbit speaks version {PROTOCOL_VERSION}."
     assert events == [CommandRefused(command_id="hello", code=INCOMPATIBLE, message=message)]
     assert nothing_queued(session)
 
 
-async def test_the_startup_check_and_usage_monitor_wait_for_hello() -> None:
+async def test_the_startup_check_and_usage_monitor_wait_for_the_first_attach() -> None:
     steps, source = Steps(True), Source(UsageReport(LIMITS))
     session, _, _ = session_for(
         verification=Verification((STEP,), steps), check_at_startup=True, usage=source
     )
-    assert await silent(session)
+    await send_as(session, HELLO_ID, HELLO)
+    await asyncio.sleep(0.05)
     assert (steps.runs, source.calls) == ([], 0)
 
-    await greet(session)
+    await send_as(session, ATTACH_ID, attach_to(session))
     await asyncio.sleep(0.05)
     await session.close()
     assert (steps.runs, source.calls) == ([STEP.name], 1)
@@ -220,7 +264,7 @@ async def test_closing_a_session_never_greeted_stops_cleanly() -> None:
     assert host.starts == host.stops
 
 
-async def test_a_hello_whose_leftovers_fail_is_welcomed_once_and_reports_an_error() -> None:
+async def test_an_attach_whose_leftovers_fail_is_accepted_once_and_reports_an_error() -> None:
     tree = FakeTree()
     tree.failures["leftovers"] = RuntimeError("git stash list failed")
     session, _, _ = session_for(tree=tree)
@@ -232,6 +276,9 @@ async def test_a_hello_whose_leftovers_fail_is_welcomed_once_and_reports_an_erro
 
     message = "Orbit failed to finish greeting the frontend: git stash list failed"
     outcomes = [e for e in events if isinstance(e, Welcome | CommandAccepted | CommandRefused)]
-    assert outcomes == [Welcome(command_id=HELLO_ID, server_version=__version__)]
+    assert outcomes == [
+        Welcome(command_id=HELLO_ID, server_version=__version__),
+        CommandAccepted(command_id=ATTACH_ID),
+    ]
     assert ErrorOccurred(code=INTERNAL, message=message) in events
     assert accepted[-1] == CommandAccepted(command_id="add")

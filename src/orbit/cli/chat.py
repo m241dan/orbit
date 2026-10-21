@@ -59,7 +59,7 @@ from orbit.client import (
 )
 from orbit.profiling import profiled
 from orbit.protocol import NewSession, ThreadedSession
-from orbit.tui import OrbitApp
+from orbit.tui import Opening, OrbitApp
 
 
 def chat(
@@ -105,9 +105,8 @@ def chat(
     target = _target(connect, remote, user_config, given)
     if target is not None:
         _refuse_local(local)
-        _join(
-            _joining(ctx, target.files, user_config, _opening(new, name)), target.url, target.where
-        )
+        joining = _joining(ctx, target.files, user_config, _opening(new, name))
+        _join(replace(joining, repository=str(_workspace(workspace))), target.url, target.where)
         return
     token_path = token_file or TokenFile(user_config).path
     joining = _Joining(ctx, token_path, ca, _opening(new, name))
@@ -116,6 +115,7 @@ def chat(
     found = None if local else _discovered(state, root, token_path, user_config)
     if found is not None:
         joining = _joining(ctx, found.files, user_config, joining.opening)
+        joining = replace(joining, repository=str(root))
         where = f"which serves {root} at {found.url}; or pass --local to run one here"
         _join(joining, found.url, where)
         return
@@ -129,7 +129,7 @@ def chat(
     picking = not flags.fresh
     with _in_process(flags, directories, pick_session=picking, make=_backend) as backend:
         session = ThreadedSession(backend.build, _thread_context(profile))
-        _launch(OrbitApp(session, pick=picking), profile)
+        _launch(OrbitApp(session, opening=Opening(pick=picking, repository=str(root))), profile)
 
 
 @dataclass(frozen=True)
@@ -213,8 +213,9 @@ def _remote_files(remote: RemoteSettings) -> _ClientFiles:
 class _Joining:
     """How a chat joins a running control plane: with the flags in ``ctx``, showing the token
     in ``token_file``, or without one the client certificate at ``cert`` with its key at
-    ``key``, verifying a ``wss://`` one by the CA in ``ca``, if given, and sending
-    ``opening``, if any, once welcomed."""
+    ``key``, verifying a ``wss://`` one by the CA in ``ca``, if given, opening on the
+    workspace at the ``repository`` it runs in, if the control plane serves it, and sending
+    ``opening``, if any, once attached."""
 
     ctx: typer.Context
     token_file: Path | None
@@ -222,6 +223,7 @@ class _Joining:
     opening: NewSession | None
     cert: Path | None = None
     key: Path | None = None
+    repository: str | None = None
 
 
 def _certified(
@@ -391,7 +393,8 @@ def _connected_app(url: str, joining: _Joining) -> OrbitApp:
             read_token(joining.token_file)  # The session reads it again for each connection.
         context = _ssl_context(url, joining)
         client = WebSocketSession(url, joining.token_file, ssl_context=context)
-    return OrbitApp(client, client, joining.opening, pick=joining.opening is None)
+    opening = Opening(joining.opening, joining.opening is None, joining.repository)
+    return OrbitApp(client, client, opening)
 
 
 def _ssl_context(url: str, joining: _Joining) -> ssl.SSLContext | None:
