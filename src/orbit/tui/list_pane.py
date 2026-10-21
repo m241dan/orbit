@@ -10,6 +10,7 @@ from textual.visual import VisualType
 from textual.widgets import OptionList
 from textual.widgets.option_list import Option
 
+from orbit.tui.view.common import kept_highlight
 from orbit.tui.widgets import ModalFocus
 
 Row = tuple[str, VisualType]
@@ -49,7 +50,7 @@ class ListPane(ModalFocus, OptionList):
         if keys == self._shown_keys:
             self._relabel_rows(rows)
             return
-        highlight = self._kept_highlight(keys)
+        highlight = kept_highlight(self._shown_keys, self.highlighted, keys)
         self._shown_rows, self._shown_keys = rows, keys
         self.clear_options()
         self.add_options([label for _, label in rows] + ([] if trailing is None else [trailing]))
@@ -61,17 +62,6 @@ class ListPane(ModalFocus, OptionList):
         for index, ((_, label), (_, old)) in enumerate(zip(rows, before, strict=True)):
             if label != old:
                 self.replace_prompt(index, label)
-
-    def _kept_highlight(self, keys: tuple[str | None, ...]) -> int | None:
-        """Where the highlight goes once rows with ``keys`` are shown: on the row with its
-        key, or the nearest one when that's gone, or nowhere when the trailing row has gone."""
-        index = self.highlighted
-        if index is None:
-            return None
-        key = self._shown_keys[index]
-        if key in keys:
-            return keys.index(key)
-        return None if key is None else min(index, len(keys) - 1)
 
     def replace_prompt(self, index: int, prompt: VisualType) -> None:
         """Replace the prompt of the option at ``index``, redrawing only that option and, if

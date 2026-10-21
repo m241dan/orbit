@@ -518,7 +518,7 @@ async def test_a_catalog_reordering_the_rows_keeps_the_highlighted_session() -> 
 
         screen = picker(app)
         assert screen.query_one(OptionList).highlighted == 0
-        assert screen.rows[0] == BROKEN
+        assert screen.rows[0].id == BROKEN.id  # Still the session highlighted.
 
 
 async def test_a_catalog_adding_a_session_keeps_new_session_highlighted() -> None:
@@ -537,7 +537,9 @@ async def test_a_catalog_dropping_the_highlighted_session_keeps_the_highlight_in
         await feed_events(session, pilot, CATALOG)
         await feed_events(session, pilot, catalog(CURRENT, LOCKED, BROKEN))
 
-        assert picker(app).query_one(OptionList).highlighted == 0
+        screen = picker(app)
+        assert screen.query_one(OptionList).highlighted == 0
+        assert screen.rows[0].id == LOCKED.id  # The deleted session's neighbour.
         await pilot.press("enter")
         assert session.commands == []  # Now on the locked session.
 

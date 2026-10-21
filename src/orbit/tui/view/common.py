@@ -1,6 +1,7 @@
 """What the other view modules share: entry kinds, the spinner, status icons, model labels,
-token counts, counted nouns and the lines of text."""
+token counts, counted nouns, the lines of text and where a list's highlight goes."""
 
+from collections.abc import Sequence
 from typing import Literal
 
 from rich.cells import cell_len, set_cell_size
@@ -95,3 +96,18 @@ def _in_unit(count: int, unit: int) -> str:
     if tenths >= 100 or tenths % 10 == 0:
         return str(count // unit)
     return f"{tenths // 10}.{tenths % 10}"
+
+
+def kept_highlight(
+    shown_keys: Sequence[str | None], highlighted: int | None, keys: Sequence[str | None]
+) -> int | None:
+    """Where the highlight on row ``highlighted`` of rows with ``shown_keys`` goes once rows
+    with ``keys`` are shown, a trailing row's key being None: on the row with its key, or the
+    nearest one when that's gone, or nowhere when nothing was highlighted or the trailing row
+    has gone."""
+    if highlighted is None:
+        return None
+    key = shown_keys[highlighted]
+    if key in keys:
+        return list(keys).index(key)
+    return None if key is None else min(highlighted, len(keys) - 1)

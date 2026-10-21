@@ -5,7 +5,7 @@ import pytest
 from orbit.protocol import (
     TaskStatus,
 )
-from orbit.tui.view.common import STATUS_ICONS, counted, text_lines, token_text
+from orbit.tui.view.common import STATUS_ICONS, counted, kept_highlight, text_lines, token_text
 
 
 def test_every_task_status_has_an_icon_except_running_which_spins() -> None:
@@ -62,3 +62,33 @@ def test_counted_takes_an_irregular_plural() -> None:
         "1 match",
         "3 matches",
     )
+
+
+SHOWN = ("a", "b", "c", None)
+
+
+@pytest.mark.parametrize(
+    ("keys", "highlight"),
+    [
+        (("c", "b", "a", None), 1),  # Reordered: it follows its key.
+        (("x", "a", "b", "c", None), 2),  # One appeared above it.
+        (("a", "c", None), 1),  # Its own row went: the nearest one.
+        (("a", None), 1),  # And kept within the rows.
+    ],
+)
+def test_the_highlight_follows_its_key_or_goes_to_the_nearest_row(
+    keys: tuple[str | None, ...], highlight: int
+) -> None:
+    assert kept_highlight(SHOWN, 1, keys) == highlight
+
+
+def test_a_highlighted_trailing_row_stays_highlighted() -> None:
+    assert kept_highlight(SHOWN, 3, ("x", "a", None)) == 2
+
+
+def test_a_highlighted_trailing_row_that_went_leaves_nothing_highlighted() -> None:
+    assert kept_highlight(SHOWN, 3, ("a", "b")) is None
+
+
+def test_nothing_highlighted_stays_so() -> None:
+    assert kept_highlight(SHOWN, None, ("a", "b", None)) is None

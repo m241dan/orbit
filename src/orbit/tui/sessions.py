@@ -25,6 +25,7 @@ from orbit.protocol import (
     WorkspaceEntry,
     with_state,
 )
+from orbit.tui.view.common import kept_highlight
 from orbit.tui.view.sessions import (
     ACTIVATE_CHOICE,
     ACTIVATION_TITLE,
@@ -146,19 +147,16 @@ class SessionsScreen(ListScreen[tuple[SessionChoice, ...]]):
             self.sessions, self.attached = tuple(sessions), attached
             return
         options = self.query_one(OptionList)
-        kept, highlighted = self._highlighted, options.highlighted or 0
+        shown, highlighted = self._keys, options.highlighted
         self.sessions, self.attached = tuple(sessions), attached
         options.clear_options()
         options.add_options(self._labels())
-        options.highlighted = self._row_of(kept, highlighted)
+        options.highlighted = kept_highlight(shown, highlighted, self._keys)
 
-    def _row_of(self, summary: SessionSummary | None, fallback: int) -> int:
-        """The index of ``summary``'s row, or ``New session``'s if it's none; ``fallback``,
-        kept within the list, once ``summary`` isn't listed."""
-        ids = [row.id for row in self.rows]
-        if summary is None:
-            return len(ids)
-        return ids.index(summary.id) if summary.id in ids else min(fallback, len(ids))
+    @property
+    def _keys(self) -> tuple[str | None, ...]:
+        """The rows' session ids, then None for ``New session``."""
+        return (*(row.id for row in self.rows), None)
 
     def _labels(self) -> list[Text | str]:
         """The rows' labels, then ``New session``'s."""
