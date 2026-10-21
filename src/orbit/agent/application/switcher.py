@@ -7,7 +7,14 @@ from datetime import datetime
 from typing import assert_never
 
 from orbit.agent.application.connection import to_everyone
-from orbit.agent.application.keeper import Contents, Left, SessionKeeper
+from orbit.agent.application.keeper import (
+    ALREADY_OPEN,
+    AlreadyOpen,
+    Contents,
+    Left,
+    Opened,
+    SessionKeeper,
+)
 from orbit.agent.application.outbox import EventSink
 from orbit.agent.application.planner_seat import PlannerSeat
 from orbit.agent.application.review_lane import ReviewLane
@@ -111,9 +118,11 @@ class SessionSwitcher:
             case _:
                 assert_never(command)
 
-    async def activate(self, command: ActivateSession | NewSession) -> str | None:
+    async def activate(self, command: ActivateSession | NewSession) -> str | AlreadyOpen | None:
         """Make the saved session ``command`` names, or a new one, the one open here; returns
-        the id of the session the switch left, if it stays saved, or none."""
+        the id of the session the switch left if its lock was held, then let go of or, if no
+        session was picked yet, deleted; :data:`ALREADY_OPEN` if the session named is the one
+        open; or none."""
         if isinstance(command, ActivateSession):
             return await self._open_session(command.session)
         return await self._new_session(command.name)
@@ -181,17 +190,18 @@ class SessionSwitcher:
         await self.save()
         return True
 
-    async def _open_session(self, session_id: str) -> str | None:
+    async def _open_session(self, session_id: str) -> str | AlreadyOpen | None:
         """Open the saved session ``session_id`` in place of this one, without running
         anything: what was running when it was saved is cancelled; returns the id of the
-        session left, if it stays saved. Refused while anything runs, or if it can't be opened;
-        opening this session does nothing."""
+        session left if its lock was held, then let go of or deleted, or none, as
+        :meth:`activate` does. Refused while anything runs, or if it can't be opened; opening
+        this session does nothing, returning :data:`ALREADY_OPEN`."""
         if session_id == self._keeper.id:
-            return None
+            return ALREADY_OPEN
         self._may_switch()
         opened = await self._keeper.open(session_id, self._load)
-        if opened is None:
-            return None
+        if not isinstance(opened, Opened):
+            return opened
         record = opened.record
         tasks, count = interrupted(record.tasks)
         await self._switched(opened.left, _stopped(record.tasks, tasks), record.last_active)
@@ -201,7 +211,8 @@ class SessionSwitcher:
 
     async def _new_session(self, name: str | None) -> str | None:
         """Start a new session ``name``d so in place of this one; returns the id of the session
-        left, if it stays saved. Refused while anything runs."""
+        left if its lock was held, then let go of or deleted, or none, as :meth:`activate`
+        does. Refused while anything runs."""
         left = await self._keeper.renew(name, self._clear)
         await self._switched(left, (), None)
         return left.id

@@ -112,6 +112,15 @@ class Opened:
     record: SessionRecord
 
 
+@dataclass(frozen=True)
+class AlreadyOpen:
+    """A saved session asked to open that was the one open already, so nothing was opened."""
+
+
+ALREADY_OPEN = AlreadyOpen()
+"""The session asked to open was the one open already."""
+
+
 def local_now() -> datetime:
     """The time now, in the local timezone."""
     return datetime.now().astimezone()
@@ -366,13 +375,16 @@ class SessionKeeper:
         self._forget(session_id)
         return True
 
-    async def open(self, session_id: str, load: Load) -> Opened | None:
+    async def open(self, session_id: str, load: Load) -> Opened | AlreadyOpen | None:
         """Make the saved session ``session_id`` the one open here, locked, if ``load`` switches
-        to its record as read once it's locked; returns what was opened, or none if a store
-        problem, reported, kept it from opening. A refusal, its own or ``load``'s, raises
-        :class:`Refused`, with the session's lock let go of, as it is if catching up fails or is
-        cancelled."""
+        to its record as read once it's locked; returns what was opened, :data:`ALREADY_OPEN`
+        if it's the one open already, or none if a store problem, reported, kept it from
+        opening. A refusal, its own or ``load``'s, raises :class:`Refused`, with the session's
+        lock let go of, as it is if catching up fails or is cancelled."""
         async with self._saving:
+            # Another switch may have opened it while this one waited.
+            if session_id == self.id:
+                return ALREADY_OPEN
             record = await self._claimed(session_id, _OPEN)
             if record is None:
                 return None

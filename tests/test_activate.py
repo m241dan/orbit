@@ -2,6 +2,7 @@
 the activating connection then views live while the others keep viewing what they viewed."""
 
 import asyncio
+from dataclasses import dataclass
 
 from orbit.agent import WorkspaceHost
 from orbit.agent.application.connection import SessionConnection
@@ -18,7 +19,7 @@ from orbit.protocol import (
     Snapshot,
     TasksChanged,
 )
-from tests.agent_fakes import HELLO, WORKSPACE, Ticks, connect
+from tests.agent_fakes import HELLO, WORKSPACE, FakeStore, Ticks, connect
 from tests.test_attach import (
     EARLIER,
     OPEN,
@@ -249,12 +250,22 @@ async def test_a_left_session_that_cant_be_read_back_sends_its_viewers_no_view()
     assert session.saved_session.id == EARLIER
 
 
-async def activated_meanwhile(
-    session_id: str, once_switched: bool = False
-) -> tuple[SessionConnection, list[Event], list[Event]]:
-    """The first of two connections, which activated ``earlier``, with what reached it and the
-    second, which activated the session ``session_id`` while that switch was under way, before
-    ``earlier`` was open unless ``once_switched``."""
+@dataclass(frozen=True)
+class Meanwhile:
+    """Two connections activating: the ``first``, which activated ``earlier``, with the
+    ``events`` that reached it, and the ``second``, which activated another session while that
+    switch was under way, with what it ``saw``; the ``store`` the sessions are saved in."""
+
+    first: SessionConnection
+    events: list[Event]
+    second: SessionConnection
+    seen: list[Event]
+    store: FakeStore
+
+
+async def activated_meanwhile(session_id: str, once_switched: bool = False) -> Meanwhile:
+    """Two connections, the second activating the session ``session_id`` while the first's
+    switch to ``earlier`` was under way, before ``earlier`` was open unless ``once_switched``."""
     store = stored()
     store.saved.append(SessionRecord(id="later", name="later work", created=WHEN, last_active=WHEN))
     session = workspace(store)
@@ -278,7 +289,7 @@ async def activated_meanwhile(
     events = await taken(first)
     seen = await taken(second)
     await session.close()
-    return first, events, seen
+    return Meanwhile(first, events, second, seen, store)
 
 
 def last_snapshot(events: list[Event]) -> Snapshot:
@@ -286,23 +297,40 @@ def last_snapshot(events: list[Event]) -> Snapshot:
 
 
 async def test_a_switch_away_meanwhile_leaves_the_first_asker_a_view_of_its_session() -> None:
-    first, events, seen = await activated_meanwhile("later")
+    meanwhile = await activated_meanwhile("later")
 
-    view = last_snapshot(events)
+    view = last_snapshot(meanwhile.events)
     assert (view.session.id, view.active) == (EARLIER, False)
     assert view.open_session == SessionRef(id="later", name="later work")
-    live = last_snapshot(seen)
+    live = last_snapshot(meanwhile.seen)
     assert (live.session.id, live.active) == ("later", True)
-    assert first.viewing == SessionRef(id=EARLIER, name="old work")
+    assert meanwhile.first.viewing == SessionRef(id=EARLIER, name="old work")
 
 
 async def test_a_switch_back_meanwhile_sends_no_view_of_the_session_open_again() -> None:
-    first, events, seen = await activated_meanwhile(OPEN, once_switched=True)
+    meanwhile = await activated_meanwhile(OPEN, once_switched=True)
 
-    views = [e for e in events + seen if isinstance(e, Snapshot) and not e.active]
+    snapshots = meanwhile.events + meanwhile.seen
+    views = [e for e in snapshots if isinstance(e, Snapshot) and not e.active]
     assert [(v.session.id, v.open_session) for v in views] == [
         (EARLIER, SessionRef(id=OPEN, name="today"))
     ]
-    live = last_snapshot(seen)
+    live = last_snapshot(meanwhile.seen)
     assert (live.session.id, live.active) == (OPEN, True)
-    assert first.viewing == SessionRef(id=EARLIER, name="old work")
+    assert meanwhile.first.viewing == SessionRef(id=EARLIER, name="old work")
+
+
+async def test_activating_the_session_being_opened_meanwhile_attaches_to_it_live() -> None:
+    meanwhile = await activated_meanwhile(EARLIER)
+
+    asked = ((meanwhile.first, meanwhile.events), (meanwhile.second, meanwhile.seen))
+    for connection, events in asked:
+        live = last_snapshot(events)
+        assert (live.session.id, live.active) == (EARLIER, True)
+        assert connection.viewing is None
+    assert CommandAccepted(command_id="activate") in meanwhile.seen
+    # Only closing the workspace lets go of it.
+    assert meanwhile.store.released == [OPEN, EARLIER]
+    assert states(meanwhile.events) == [(OPEN, False, 0), (EARLIER, True, 2)]
+    reloads = [e for e in meanwhile.events if isinstance(e, Snapshot) and e.active]
+    assert len(reloads) == 1

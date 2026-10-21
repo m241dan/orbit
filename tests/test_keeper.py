@@ -7,6 +7,7 @@ from datetime import timedelta
 import pytest
 
 from orbit.agent.application.keeper import (
+    ALREADY_OPEN,
     Contents,
     Left,
     NewSessions,
@@ -482,6 +483,16 @@ async def test_an_open_whose_reread_fails_is_reported_and_lets_go_of_its_lock() 
     assert published.errors == ["Couldn't read the session: permission denied"]
     assert keeper.id == "session-1"
     assert store.released == ["other"] and store.locked == set()
+
+
+async def test_opening_the_session_open_already_takes_no_lock_and_loads_nothing() -> None:
+    store = FakeStore()
+    store.saved = [SessionRecord(id="session-1", name="today", created=START, last_active=START)]
+    keeper, published = keeper_for(store)
+    loaded: list[SessionRecord] = []
+    assert await keeper.open("session-1", loaded.append) is ALREADY_OPEN
+    assert loaded == [] and published.errors == []
+    assert store.locked == set() and store.released == []
 
 
 LISTING_FAILED = "Couldn't list the sessions in orbit.db: busy"

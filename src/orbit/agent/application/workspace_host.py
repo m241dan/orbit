@@ -16,6 +16,7 @@ from orbit.agent.application.desk import AgentDesk, Agents
 from orbit.agent.application.handshake import HostGreeting
 from orbit.agent.application.history import SessionHistory
 from orbit.agent.application.keeper import (
+    AlreadyOpen,
     Clock,
     IdMaker,
     NewSessions,
@@ -589,12 +590,11 @@ class WorkspaceHost:
         """Make the session ``command`` names, or a new one, the open one, viewed live by
         ``connection``, then give the other connections the snapshots of what they view now:
         the session left a read-only view. Activating the open session attaches to it."""
-        if isinstance(command, ActivateSession) and command.session == self._keeper.id:
-            await self._views.attach(connection, command.session)
-            return
         # The session left is the one the switch left, as others' switches may run meanwhile.
         left = await self._switcher.activate(command)
-        if left is not None:
+        if isinstance(left, AlreadyOpen):
+            await self._views.attach(connection, self._keeper.id)
+        elif left is not None:
             await self._views.activated(left)
 
     async def _handle(
