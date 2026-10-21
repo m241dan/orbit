@@ -81,6 +81,13 @@ async def test_cancelling_stops_what_the_child_started(tmp_path: Path) -> None:
     assert await gone(grandchild)
 
 
+async def test_cancelling_lets_the_child_exit_cleanly_on_sigterm(tmp_path: Path) -> None:
+    script = 'trap "echo stopped > stopped; exit 0" TERM; sleep 30 & echo $! > "$PID_FILE"; wait'
+    grandchild = await cancelled_grandchild(tmp_path, script)
+    assert (tmp_path / "stopped").read_text() == "stopped\n"
+    assert await gone(grandchild)
+
+
 async def test_a_group_ignoring_sigterm_is_killed_after_the_grace(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

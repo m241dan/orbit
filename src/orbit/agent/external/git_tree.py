@@ -86,20 +86,32 @@ def _add_ignores(exclude: Path, paths: Collection[str]) -> None:
 
 def _make_snapshot_dir(parent: Path, commit: str) -> Path:
     """A new, empty directory in ``parent`` for a snapshot of ``commit``, named so it can't
-    collide with any other, from this process or another."""
-    parent.mkdir(parents=True, exist_ok=True)
-    return Path(tempfile.mkdtemp(prefix=f"snapshot-{commit[:12]}-", dir=parent))
+    collide with any other, from this process or another.
+
+    Raises ``RuntimeError`` when it can't be made.
+    """
+    try:
+        parent.mkdir(parents=True, exist_ok=True)
+        return Path(tempfile.mkdtemp(prefix=f"snapshot-{commit[:12]}-", dir=parent))
+    except OSError as error:
+        raise RuntimeError(f"Couldn't make a snapshot directory in {parent}: {error}") from error
 
 
 def _snapshot_dirs(parent: Path) -> set[Path]:
-    """The snapshot directories in ``parent``, by whoever made them; none when it's missing."""
-    if not parent.is_dir():
-        return set()
-    return {
-        path
-        for path in parent.iterdir()
-        if path.is_dir() and path.name.startswith(SNAPSHOT_PREFIXES)
-    }
+    """The snapshot directories in ``parent``, by whoever made them; none when it's missing.
+
+    Raises ``RuntimeError`` when ``parent`` can't be listed.
+    """
+    try:
+        if not parent.is_dir():
+            return set()
+        return {
+            path
+            for path in parent.iterdir()
+            if path.is_dir() and path.name.startswith(SNAPSHOT_PREFIXES)
+        }
+    except OSError as error:
+        raise RuntimeError(f"Couldn't list the snapshots in {parent}: {error}") from error
 
 
 class GitCoderTree:
@@ -190,7 +202,7 @@ class GitCoderTree:
             return await asyncio.shield(making)
         except asyncio.CancelledError:
             await asyncio.wait([making])
-            with contextlib.suppress(OSError):  # It failed to make one: nothing to remove.
+            with contextlib.suppress(RuntimeError):  # It failed to make one: nothing to remove.
                 await asyncio.to_thread(shutil.rmtree, making.result(), ignore_errors=True)
             raise
 

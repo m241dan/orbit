@@ -298,6 +298,32 @@ async def test_a_rebase_cancelled_while_handling_its_conflict_is_still_aborted(
     assert git(path, "status", "--porcelain") == ""
 
 
+async def test_a_failing_abort_doesnt_hide_a_cancelled_rebase(
+    monkeypatch: pytest.MonkeyPatch, repo: Path
+) -> None:
+    tree = GitCoderTree(str(repo))
+    path = Path(await tree.prepare(keep=False))
+    (path / "a.txt").write_text("orbit\n")
+    await tree.commit("Orbit edits a")
+    commit_file(repo, "a.txt", "user\n", "user edits a")
+    rebasing = asyncio.Event()
+
+    async def failing_abort(cwd: Path | str, *args: str) -> GitResult:
+        if args == ("rebase", "--abort"):
+            return GitResult(128, b"abort failed")
+        if args[0] == "rebase":
+            rebasing.set()
+            await asyncio.Event().wait()
+        return await run_git(cwd, *args)
+
+    monkeypatch.setattr(git_tree, "git", failing_abort)
+    task = asyncio.create_task(tree.integrate())
+    await rebasing.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+
 async def test_a_failing_abort_doesnt_hide_why_the_rebase_failed(
     monkeypatch: pytest.MonkeyPatch, repo: Path
 ) -> None:
@@ -741,6 +767,30 @@ async def test_an_unremovable_snapshot_directory_doesnt_hide_why_the_snapshot_fa
     finally:
         (repo / ".git" / "orbit").chmod(0o755)
     assert len(snapshot_dirs(repo)) == 1 and tree._snapshots == set()
+
+
+async def test_a_snapshot_whose_directory_cant_be_made_raises(repo: Path) -> None:
+    orbit = repo / ".git" / "orbit"
+    orbit.mkdir()
+    orbit.chmod(0o555)
+    tree = GitCoderTree(str(repo))
+    try:
+        with pytest.raises(RuntimeError, match="Couldn't make a snapshot directory"):
+            await tree.snapshot("HEAD")
+    finally:
+        orbit.chmod(0o755)
+    assert tree._snapshots == set()
+
+
+async def test_snapshots_that_cant_be_listed_raise(repo: Path) -> None:
+    orbit = repo / ".git" / "orbit"
+    orbit.mkdir()
+    orbit.chmod(0o000)
+    try:
+        with pytest.raises(RuntimeError, match="Couldn't list the snapshots"):
+            await GitCoderTree(str(repo)).leftovers()
+    finally:
+        orbit.chmod(0o755)
 
 
 async def test_a_snapshot_cancelled_while_being_added_leaves_nothing(
