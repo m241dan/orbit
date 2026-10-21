@@ -12,6 +12,7 @@ from textual.screen import ModalScreen
 from textual.widgets import Input, Static
 
 from orbit.protocol import AgentExited, ChecksProposed, DecideProposal, Event, ProposalAction
+from orbit.tui.modal import ModalSlot
 from orbit.tui.view.proposals import (
     FEEDBACK_HINT,
     FEEDBACK_PLACEHOLDER,
@@ -100,10 +101,14 @@ class ProposalHost:
     a proposal."""
 
     def __init__(self, push: Push, decide: Decide) -> None:
-        self._push = push
+        self._slot = ModalSlot[ProposalScreen, DecideProposal](push)
         self._decide = decide
-        self.shown: ProposalScreen | None = None  # The proposal being shown, if any.
-        self._waiting: list[ChecksProposed] = []  # Those to show after it, in order.
+        self._waiting: list[ChecksProposed] = []  # Those to show after the one shown, in order.
+
+    @property
+    def shown(self) -> ProposalScreen | None:
+        """The proposal being shown, if any."""
+        return self._slot.showing
 
     def show(self, event: ChecksProposed) -> None:
         """Ask the user about ``event``'s proposal, or once the one shown is done with, unless
@@ -111,28 +116,24 @@ class ProposalHost:
         if self.shown is not None:
             self._wait(event)
             return  # A snapshot showed it before its event arrived, or another is shown.
-        screen = self.shown = ProposalScreen(event)
 
         async def decided(decision: DecideProposal | None) -> None:
-            if self.shown is screen:  # Not closed from here since.
-                self.shown = None
-                self._show_next()
+            self._show_next()
             if decision is not None:
                 await self._decide(event, decision)
 
-        self._push(screen, decided)
+        self._slot.open(ProposalScreen(event), decided)
 
     def follow(self, proposals: tuple[ChecksProposed, ...]) -> None:
         """Close the proposal shown unless it's among ``proposals``, still waiting, and wait on
         the rest of them; with none shown, show the first."""
         screen = self.shown
         if screen is not None and screen.proposal not in proposals:
-            self._close(screen)
-            screen = None
+            self._slot.close(None)
         self._waiting = []
         for proposal in proposals:
             self._wait(proposal)
-        if screen is None:
+        if self.shown is None:
             self._show_next()
 
     def withdraw(self, event: Event) -> None:
@@ -143,7 +144,7 @@ class ProposalHost:
         self._waiting = [p for p in self._waiting if p.agent_id != event.agent_id]
         screen = self.shown
         if screen is not None and screen.proposal.agent_id == event.agent_id:
-            self._close(screen)
+            self._slot.close(None)
             self._show_next()
 
     def _wait(self, proposal: ChecksProposed) -> None:
@@ -151,11 +152,6 @@ class ProposalHost:
         shown = self.shown is not None and self.shown.proposal == proposal
         if not shown and proposal not in self._waiting:
             self._waiting.append(proposal)
-
-    def _close(self, screen: ProposalScreen) -> None:
-        """Close ``screen`` undecided, no longer tracking it as shown."""
-        self.shown = None  # Its callback runs later, after any snapshot that follows.
-        screen.dismiss(None)
 
     def _show_next(self) -> None:
         """Show the first proposal waiting, if any."""

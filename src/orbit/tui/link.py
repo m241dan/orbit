@@ -22,6 +22,7 @@ from orbit.protocol import (
     Stopped,
     TokenRefused,
 )
+from orbit.tui.modal import Closed, ModalSlot
 from orbit.tui.view.link import (
     CHOICES,
     QUIT,
@@ -78,7 +79,7 @@ class LinkScreen(ModalScreen[int]):
 
 _SOONEST = 0.01  # Textual's timers can't wait no time at all.
 
-Push = Callable[[LinkScreen, Callable[[int | None], None]], object]
+Push = Callable[[LinkScreen, Closed[int]], object]
 ShowStatus = Callable[[str | None], None]
 After = Callable[[float, Callable[[], None]], Timer]
 
@@ -96,7 +97,12 @@ class LinkHost:
         self._show_status = show_status
         self._after = after
         self._timer: Timer | None = None  # Until the user is asked whether to keep trying.
-        self.shown: LinkScreen | None = None  # The modal asking, if open.
+        self._slot = ModalSlot[LinkScreen, int](push)
+
+    @property
+    def shown(self) -> LinkScreen | None:
+        """The modal asking whether to keep trying, if open."""
+        return self._slot.showing
 
     def follow(self, state: LinkState, now: float) -> None:
         """Show ``state``, the link's, as of ``now``, a ``time.monotonic()`` reading."""
@@ -116,9 +122,7 @@ class LinkHost:
         """Hide the status line and stop waiting to ask, closing the modal if it's open."""
         self._show_status(None)
         self._stop_timer()
-        if self.shown is not None:
-            self.shown.dismiss(0)
-            self.shown = None  # Its close callback runs later, after any stop that follows.
+        self._slot.close(0)
 
     def _reconnecting(self, url: str, delay: float) -> None:
         """Show that the link to ``url`` is being retried, asking whether to keep trying in
@@ -133,21 +137,22 @@ class LinkHost:
         it's closed."""
         self._show_status(None)
         self._stop_timer()
-        self._push(LinkScreen(title, message, (QUIT,)), lambda _: self._quit())
+        self._push(LinkScreen(title, message, (QUIT,)), self._quit_now)
 
     def _ask(self, title: str, message: str) -> None:
         """Ask ``title`` with ``message`` whether to keep trying, unless that's being asked."""
         if self.shown is not None:
             return
-        screen = self.shown = LinkScreen(title, message, CHOICES)
+        self._slot.open(LinkScreen(title, message, CHOICES), self._answered)
 
-        def answered(index: int | None) -> None:
-            if self.shown is screen:  # Not one shown since.
-                self.shown = None
-            if index is not None and CHOICES[index] == QUIT:
-                self._quit()
+    async def _answered(self, index: int | None) -> None:
+        """Quit if the choice at ``index`` is to."""
+        if index is not None and CHOICES[index] == QUIT:
+            self._quit()
 
-        self._push(screen, answered)
+    async def _quit_now(self, _: int | None) -> None:
+        """Quit, whatever was picked."""
+        self._quit()
 
     def _stop_timer(self) -> None:
         if self._timer is not None:

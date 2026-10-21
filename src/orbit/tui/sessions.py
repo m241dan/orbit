@@ -25,6 +25,7 @@ from orbit.protocol import (
     WorkspaceEntry,
     with_state,
 )
+from orbit.tui.modal import ModalSlot
 from orbit.tui.view.common import kept_highlight
 from orbit.tui.view.sessions import (
     ACTIVATE_CHOICE,
@@ -339,7 +340,12 @@ class SessionsHost:
         # The session picked and viewed only as the active one ran, until that one turns idle.
         self._held: str | None = None
         self.shown: SessionsScreen | None = None  # The picker shown, if any.
-        self.offered: ActivationScreen | None = None  # The offer to activate shown, if any.
+        self._offer = ModalSlot[ActivationScreen, bool](push)  # The offer to activate.
+
+    @property
+    def offered(self) -> ActivationScreen | None:
+        """The offer to make the session viewed the active one, if shown."""
+        return self._offer.showing
 
     @property
     def attached_session(self) -> SessionSummary | None:
@@ -465,20 +471,14 @@ class SessionsHost:
         offering ``choices``."""
 
         async def answered(activate: bool | None) -> None:
-            if self.offered is screen:
-                self.offered = None
             if activate:
                 await self._send(ActivateSession(session=viewed))
 
-        screen = ActivationScreen(message, choices)
-        self.offered = screen
-        self._push(screen, answered)
+        self._offer.open(ActivationScreen(message, choices), answered)
 
     def _withdraw(self) -> None:
         """Close the offer shown, if any."""
-        if self.offered is not None:
-            self.offered.dismiss(False)
-            self.offered = None
+        self._offer.close(False)
 
     def open(self, startup: StartupPick | None = None, workspace: str | None = None) -> None:
         """Let the user pick a session of the ``workspace``, by default the one this frontend is
