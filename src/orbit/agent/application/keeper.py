@@ -232,7 +232,8 @@ class SessionKeeper:
     async def retry(self, contents: Callable[[], Contents]) -> RuntimeError | None:
         """Save the session as :meth:`save` does, though it's halted, as resuming does, and then
         redo the rename of a saved session whose save failed; returns the error when a save
-        fails. A rename whose session can't be claimed any more is dropped, reported."""
+        fails, or when a store problem keeps the rename from being redone, keeping it to retry.
+        A rename whose session can't be claimed any more is dropped, reported."""
         error = await self._save(contents, retrying=True)
         if error is not None or self._renaming is None:
             return error
@@ -242,6 +243,11 @@ class SessionKeeper:
         except Refused as refused:
             await self._publish(ErrorOccurred(code=refused.code, message=refused.message))
             return None
+        if renamed is False:
+            self._renaming = renaming
+            return RuntimeError(
+                f"Couldn't claim the saved session {renaming.session_id} to rename it."
+            )
         return renamed if isinstance(renamed, RuntimeError) else None
 
     async def _save(self, contents: Callable[[], Contents], retrying: bool) -> RuntimeError | None:
@@ -344,7 +350,8 @@ class SessionKeeper:
 
     async def _rename(self, renaming: _Renaming) -> RuntimeError | bool:
         """Carry out ``renaming`` as :meth:`rename_saved` does; returns whether it was renamed,
-        or the error when its save fails, keeping it to :meth:`retry`."""
+        not if a store problem kept it from being claimed, or the error when its save fails,
+        keeping it to :meth:`retry`."""
         found = await self._claimed(renaming.session_id, _RENAME)
         if found is None:
             return False

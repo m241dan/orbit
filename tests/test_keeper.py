@@ -452,6 +452,39 @@ async def test_a_pending_rename_of_a_session_open_elsewhere_is_dropped_and_repor
     assert store.last.name == "other"
 
 
+async def retried_through(store: FakeStore, keeper: SessionKeeper) -> None:
+    """Check that retrying ``keeper``'s pending rename while ``store`` has a problem fails,
+    keeping it, and that it's renamed once ``store`` works, every lock taken let go of."""
+    error = await keeper.retry(lambda: EMPTY)
+    assert isinstance(error, RuntimeError) and "other" in str(error)
+    assert store.last.name == "other" and store.locked == set()
+    store.list_failure = store.lock_failure = store.load_failure = None
+    assert await keeper.retry(lambda: EMPTY) is None
+    assert store.last.name == "Renamed" and store.locked == set()
+
+
+async def test_a_pending_rename_retried_while_the_sessions_cannot_be_listed_is_kept() -> None:
+    keeper, _, store = failed_rename()
+    await keeper.rename_saved("other", "Renamed")
+    store.failure, store.list_failure = None, RuntimeError(LISTING_FAILED)
+    await retried_through(store, keeper)
+
+
+async def test_a_pending_rename_retried_while_its_lock_cannot_be_taken_is_kept() -> None:
+    keeper, _, store = failed_rename()
+    await keeper.rename_saved("other", "Renamed")
+    store.failure, store.lock_failure = None, "Couldn't lock the session: read-only"
+    await retried_through(store, keeper)
+
+
+async def test_a_pending_rename_retried_while_its_session_cannot_be_read_is_kept() -> None:
+    keeper, _, store = failed_rename()
+    await keeper.rename_saved("other", "Renamed")
+    store.failure, store.load_failure = None, "Couldn't read the session: permission denied"
+    await retried_through(store, keeper)
+    assert store.released == ["other"] * 3
+
+
 async def test_a_rename_that_works_tells_the_halt_nothing() -> None:
     store = FakeStore()
     store.saved = [SessionRecord(id="other", name="other", created=START, last_active=START)]
