@@ -246,6 +246,7 @@ class GitCoderTree:
     async def _ensure(self) -> Path:
         path = await self._path()
         if await asyncio.to_thread((path / ".git").exists):
+            await self._abort_rebase(path)  # One an interrupted run left, so its work survives.
             return path
         await self._git(self._root, "worktree", "prune")
         if await self._exists(BRANCH):
@@ -290,13 +291,31 @@ class GitCoderTree:
     # Merging
 
     async def _rebase(self, path: Path, base: str) -> Merge:
-        ok, _ = await _run(("git", "rebase", "-q", base), path)
-        if ok:
-            return Merge("rebased")
-        conflicts = await self._git(path, "diff", "--name-only", "--diff-filter=U")
-        await self._git(path, "rebase", "--abort")
+        """Replay the tree's work onto ``base``; a conflict leaves it as it was.
+
+        Raises ``RuntimeError`` with git's own message when the rebase fails without one.
+        """
+        try:
+            ok, output = await _run(("git", "rebase", "-q", base), path)
+            if ok:
+                return Merge("rebased")
+            conflicts = await self._git(path, "diff", "--name-only", "--diff-filter=U")
+        finally:  # Cancelled or failed too: never leave the tree mid-rebase.
+            await self._abort_rebase(path)
+        if not conflicts:
+            raise RuntimeError(f"git rebase failed: {output}")
         files = ", ".join(conflicts.splitlines())
         return Merge("conflict", f"The work on {BRANCH} conflicts with {self._base}: {files}.")
+
+    async def _abort_rebase(self, path: Path) -> None:
+        """Abort the rebase in progress in ``path``, if there is one."""
+        states = await self._git(
+            path, "rev-parse", "--git-path", "rebase-merge", "--git-path", "rebase-apply"
+        )
+        for state in states.splitlines():
+            if await asyncio.to_thread((path / state).exists):
+                await self._git(path, "rebase", "--abort")
+                return
 
     async def _fast_forward(self, base: str, coder: str) -> Merge:
         assert self._base is not None

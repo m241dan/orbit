@@ -177,6 +177,61 @@ async def test_a_conflicting_base_is_left_alone(repo: Path) -> None:
     assert git(path, "status", "--porcelain") == ""
 
 
+async def test_a_rebase_failing_without_conflicts_raises_with_gits_message(repo: Path) -> None:
+    tree = GitCoderTree(str(repo))
+    path = Path(await tree.prepare(keep=False))
+    (path / "b.txt").write_text("two\n")
+    await tree.commit("Add b")
+    commit_file(repo, "c.txt", "three\n", "user's commit")
+    (path / "c.txt").write_text("in the way\n")
+
+    with pytest.raises(RuntimeError, match=r"(?s)git rebase failed: .*c\.txt") as raised:
+        await tree.integrate()
+    assert "no rebase in progress" not in str(raised.value)
+    assert log(path)[0] == "Add b"
+    assert (path / "c.txt").read_text() == "in the way\n"
+
+
+async def test_a_rebase_is_aborted_even_when_listing_its_conflicts_fails(
+    monkeypatch: pytest.MonkeyPatch, repo: Path
+) -> None:
+    tree = GitCoderTree(str(repo))
+    path = Path(await tree.prepare(keep=False))
+    (path / "a.txt").write_text("orbit\n")
+    await tree.commit("Orbit edits a")
+    commit_file(repo, "a.txt", "user\n", "user edits a")
+    real = GitCoderTree._git
+
+    async def failing_diff(self: GitCoderTree, cwd: Path, *args: str) -> str:
+        if args[0] == "diff":
+            raise RuntimeError("git diff failed: out of memory")
+        return await real(self, cwd, *args)
+
+    monkeypatch.setattr(GitCoderTree, "_git", failing_diff)
+    with pytest.raises(RuntimeError, match="out of memory"):
+        await tree.integrate()
+    assert not (repo / ".git" / "worktrees" / "coder" / "rebase-merge").exists()
+    assert log(path)[0] == "Orbit edits a"
+
+
+async def test_prepare_aborts_a_rebase_an_earlier_run_left_in_progress(repo: Path) -> None:
+    path = Path(await GitCoderTree(str(repo)).prepare(keep=False))
+    (path / "a.txt").write_text("orbit\n")
+    git(path, "commit", "-q", "-am", "Orbit edits a")
+    before = git(path, "rev-parse", "HEAD")
+    commit_file(repo, "a.txt", "user\n", "user edits a")
+    interrupted = subprocess.run(["git", "rebase", "-q", "main"], cwd=path, capture_output=True)
+    assert interrupted.returncode != 0
+    assert (repo / ".git" / "worktrees" / "coder" / "rebase-merge").exists()
+
+    assert Path(await GitCoderTree(str(repo)).prepare(keep=False)) == path
+    assert not (repo / ".git" / "worktrees" / "coder" / "rebase-merge").exists()
+    assert git(path, "branch", "--show-current") == "orbit/coder"
+    assert git(path, "rev-parse", "HEAD") == before
+    assert git(path, "status", "--porcelain") == ""
+    assert git(repo, "stash", "list") == ""
+
+
 async def test_a_checkout_with_changes_in_the_way_blocks_the_merge(repo: Path) -> None:
     tree = GitCoderTree(str(repo))
     path = Path(await tree.prepare(keep=False))
