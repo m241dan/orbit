@@ -2,10 +2,13 @@
 
 import asyncio
 
+import pytest
+
 from orbit import __version__
 from orbit.agent import ControlPlane, WorkspaceHost, WorkspaceOwner
 from orbit.agent.application.connection import SessionConnection
 from orbit.agent.application.outbox import SEQ_BLOCK
+from orbit.agent.application.work_turns import WorkTurns
 from orbit.agent.domain.usage import UsageReport
 from orbit.protocol import (
     AddTask,
@@ -42,6 +45,11 @@ async def until(connection: SessionConnection, kind: type[Event]) -> list[Event]
     while not events or not isinstance(events[-1], kind):
         events.append((await asyncio.wait_for(anext(stream), 5)).payload)
     return events
+
+
+async def drained(connection: SessionConnection) -> list[Event]:
+    """What's left to reach ``connection``, once its stream ends."""
+    return [envelope.payload async for envelope in connection.events()]
 
 
 async def test_a_connection_is_welcomed_with_the_catalog_and_snapshot_of_the_host() -> None:
@@ -137,3 +145,32 @@ async def test_the_seqs_stamped_are_reserved_in_the_log_of_every_workspace_serve
     await plane.close()
 
     assert first.reservations == second.reservations == [SEQ_BLOCK]
+
+
+async def test_a_host_whose_close_is_cancelled_still_lets_go_of_its_lock_and_ends_streams(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = FakeStore()
+    host = WorkspaceHost(workspace_id="a", store=store)
+    plane = ControlPlane([host])
+    connection = await welcomed(plane, "first")
+    add = AddTask(task=TaskSpec(prompt="Add a flag."))
+    await connection.send(CommandEnvelope(command_id="add", payload=add))
+    await until(connection, CommandAccepted)
+    await until(connection, CommandAccepted)  # The AddTask's, saving the session, locked.
+    [session] = store.locked
+    stopping = asyncio.Event()
+
+    async def blocked(self: WorkTurns) -> None:
+        stopping.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(WorkTurns, "close", blocked)
+    closing = asyncio.create_task(host.close())
+    await stopping.wait()
+    closing.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await closing
+    assert store.released == [session]
+    await asyncio.wait_for(drained(connection), 5)  # Its stream ended.

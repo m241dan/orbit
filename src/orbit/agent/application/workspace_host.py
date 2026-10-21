@@ -12,6 +12,7 @@ from dataclasses import replace
 from datetime import datetime
 from pathlib import PurePath
 
+from orbit.agent.application.closing import close_all
 from orbit.agent.application.connection import Connections, Place, SessionConnection
 from orbit.agent.application.desk import AgentDesk, Agents
 from orbit.agent.application.handshake import HostGreeting
@@ -744,17 +745,10 @@ class WorkspaceHost:
         the work lane, then the work in progress, which stops its agent, and the planner's turn;
         then stop the retired planners, the planner, the agents' host, the saving of the
         session, releasing its lock, and the writing of its events to the store, then end every
-        connection's stream, in that order. Each is stopped even if one before it fails; the
-        first failure is raised after."""
+        connection's stream, in that order. Each is stopped even if one before it fails or the
+        close is cancelled, as :func:`close_all` does."""
         self._closing = True
-        failure: Exception | None = None
-        for stop in self._stops():
-            try:
-                await stop()
-            except Exception as exc:  # A bug; the rest must still stop.
-                failure = failure or exc
-        if failure is not None:
-            raise failure
+        await close_all(self._stops())
 
     def _stops(self) -> list[Callable[[], Awaitable[None]]]:
         """What :meth:`close` awaits, in order: nothing that could wake the work lane runs once

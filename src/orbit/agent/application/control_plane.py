@@ -7,6 +7,7 @@ from dataclasses import replace
 from pathlib import PurePath
 from typing import Protocol
 
+from orbit.agent.application.closing import close_all
 from orbit.agent.application.connection import (
     ConnectionParts,
     Connections,
@@ -460,17 +461,11 @@ class ControlPlane:
     async def close(self) -> None:
         """Stop the usage monitor, if there is one, then close every host, which ends the
         streams of the connections attached to its workspace, then end the others'; each is
-        closed even if stopping one before it fails, whose failure is raised after."""
+        closed even if stopping one before it fails or the close is cancelled, as
+        :func:`close_all` does."""
         self._closing = True
-        failure: Exception | None = None
         async with self._changing:  # A workspace being added is closed with the rest.
-            for stop in self._stops():
-                try:
-                    await stop()
-                except Exception as exc:  # A bug; the rest must still stop.
-                    failure = failure or exc
-        if failure is not None:
-            raise failure
+            await close_all(self._stops())
 
     def _stops(self) -> list[Callable[[], Awaitable[None]]]:
         """What :meth:`close` awaits, in order."""
