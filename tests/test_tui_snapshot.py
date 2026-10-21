@@ -27,6 +27,7 @@ from orbit.protocol import (
     Snapshot,
     StepState,
     TaskSpec,
+    TaskStarted,
     TaskState,
     ToolCallFinished,
     ToolCallStarted,
@@ -208,7 +209,7 @@ async def test_a_snapshots_agents_started_but_not_running_get_no_tab_or_marker()
     )
     async with app.run_test() as pilot:
         await feed_events(session, pilot, crashed)
-        assert tab_strip(app) == ["All", "planner", "coder *", *PINNED[2:]]
+        assert tab_strip(app) == STRIP
         assert "Read" in "".join(texts(app, "coder"))
 
 
@@ -221,10 +222,39 @@ async def test_a_running_agent_started_before_the_transcript_gets_its_roles_tab(
     )
     async with app.run_test() as pilot:
         await feed_events(session, pilot, cut)
-        assert tab_strip(app) == ["All", "● planner", "● coder *", *PINNED[2:], "checker"]
+        assert tab_strip(app) == ["All", "● planner", "● coder", *PINNED[2:], "checker"]
         [call] = [entry for entry in app.query_one(Transcript).entries("coder") if entry.call]
         assert call.call is not None and call.call.status == "passed"
         assert texts(app, "agent-3") == []
+
+
+REVIEWER_TURN = (
+    AgentStarted(agent_id="agent-5", role="reviewer", task_id="2"),
+    AssistantMessage(turn_id="r1", agent_id="agent-5", text="Looks good."),
+    TurnFinished(turn_id="r1", agent_id="agent-5", reason="completed"),
+)
+
+
+async def test_a_snapshots_transcript_marks_no_tab_unread() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    transcript = logged(TaskStarted(task_id="1"), *PLANNER_TURN, *CODER_CALL, *REVIEWER_TURN)
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, SNAPSHOT.model_copy(update={"transcript": transcript}))
+        assert tab_strip(app) == ["All", "● planner", "● coder", *PINNED[2:]]
+        assert "Looks good." in texts(app, "reviewer")
+
+
+async def test_a_live_event_after_a_snapshot_marks_its_tab_unread() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    said = AssistantMessage(turn_id="c2", agent_id="agent-3", text="Done.")
+    async with app.run_test() as pilot:
+        await feed_events(
+            session, pilot, SNAPSHOT.model_copy(update={"transcript": logged(*CODER_CALL)})
+        )
+        await feed_events(session, pilot, said, TaskStarted(task_id="1"))
+        assert tab_strip(app) == ["All", "● planner", "● coder *", *PINNED[2:]]
 
 
 CRASHED_CALL = CODER_CALL[:2]

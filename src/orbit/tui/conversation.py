@@ -101,6 +101,8 @@ class ConversationFeed:
     _turns: Turns = field(default_factory=Turns, init=False)
     # Whether the events shown came before those shown already.
     _earlier: bool = field(default=False, init=False)
+    # Whether the events shown were logged before, so none of their tabs' output is new.
+    _replaying: bool = field(default=False, init=False)
 
     def render(self, event: FeedEvent) -> None:
         """Show ``event`` in the conversation."""
@@ -150,9 +152,11 @@ class ConversationFeed:
         self.tabs.reset(running)
         self._turns = Turns()
         logged = tuple(events)
+        self._replaying = True
         for event in logged:
-            self.tabs.track(event)
+            self.tabs.replay(event)
             self._show_logged(event)
+        self._replaying = False
         # The log may end with agents that never exited, or start after some still running.
         self.tabs.follow(running)
         for agent in stopped_callers(logged, running):
@@ -163,9 +167,9 @@ class ConversationFeed:
         shown when they happened, leaving the tabs, the running turns and the usage counted
         as they are."""
         live, self._turns = self._turns, Turns()
-        self._earlier = True
+        self._earlier = self._replaying = True
         self.transcript.prepend(lambda: self._show_earlier(events))
-        self._turns, self._earlier = live, False
+        self._turns, self._earlier, self._replaying = live, False, False
 
     def _show_earlier(self, events: Iterable[Event]) -> None:
         """Show ``events``, earlier ones, placing their agents in the pinned roles' tabs."""
@@ -209,11 +213,11 @@ class ConversationFeed:
 
     def _render_progress(self, event: TaskProgress) -> None:
         """Note a task run's progress in the transcript: under its role's tab, and All,
-        marking that tab unread when it isn't being shown, unless it came before what is."""
+        marking that tab unread when it isn't being shown, unless it was logged before."""
         state = self.task_list.find(event.task_id)
         number = self.task_list.numbers_by_id.get(event.task_id)
         (text, kind), key = task_note(event, state, number, self.verification.steps)
-        if not self._earlier:
+        if not self._replaying:
             self.tabs.mark_unread(key)
         self.transcript.add_entry(Entry(text, kind), key)
 

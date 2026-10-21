@@ -172,12 +172,23 @@ def track_tabs(
     """The open conversation tabs after ``event``; output for a tab other than ``active``,
     the one being shown, marks it unread. Agents in a pinned role share its tab, and
     ``roles`` says which role those agents are in."""
+    if _is_tab_output(event):
+        return mark_tab_unread(tabs, tab_key(event.agent_id, roles), active)
+    return replay_tabs(tabs, event, roles)
+
+
+def replay_tabs(
+    tabs: tuple[ConversationTab, ...],
+    event: Event,
+    roles: Mapping[str, str] = MappingProxyType({}),
+) -> tuple[ConversationTab, ...]:
+    """The open conversation tabs after ``event``, replayed from the session's log: agents'
+    tabs open and close as with ``track_tabs``, but no output marks one unread, as it isn't
+    new."""
     if isinstance(event, AgentStarted):
         return _open_tab(tabs, event)
     if isinstance(event, AgentExited):
         return _close_tab(tabs, event.agent_id, roles)
-    if _is_tab_output(event):
-        return mark_tab_unread(tabs, tab_key(event.agent_id, roles), active)
     return tabs
 
 

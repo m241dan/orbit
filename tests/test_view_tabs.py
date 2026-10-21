@@ -30,6 +30,7 @@ from orbit.tui.view.tabs import (
     mark_planner_busy,
     mark_tab_read,
     mark_tab_unread,
+    replay_tabs,
     reset_tabs,
     running_roles,
     stopped_callers,
@@ -84,6 +85,17 @@ def test_output_from_a_background_agent_marks_its_tab_unread() -> None:
         assert tab_labels(marked) == ["coder", "coder 2 *"]
         # Output for the tab being looked at isn't unread.
         assert track_tabs(tabs, event, active="agent-2") == tabs
+
+
+def test_replayed_events_open_and_close_tabs_but_mark_none_unread() -> None:
+    roles = {"agent-2": "reviewer"}
+    tabs = replay_tabs(PINNED_TABS, AgentStarted(agent_id="agent-1", role="checker", task_id="1"))
+    assert tabs == (*PINNED_TABS, ConversationTab("agent-1", "checker"))
+    said = AssistantMessage(turn_id="t", text="hi", agent_id="agent-1")
+    assert replay_tabs(tabs, said) is tabs
+    reviewed = TurnFinished(turn_id="t", agent_id="agent-2", reason="completed")
+    assert replay_tabs(tabs, reviewed, roles) is tabs
+    assert replay_tabs(tabs, AgentExited(agent_id="agent-1", reason="finished")) == PINNED_TABS
 
 
 def test_events_with_no_agent_mark_nothing() -> None:

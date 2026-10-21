@@ -14,6 +14,7 @@ from orbit.tui.view.tabs import (
     mark_planner_busy,
     mark_tab_read,
     mark_tab_unread,
+    replay_tabs,
     reset_tabs,
     running_roles,
     tab_key,
@@ -73,6 +74,12 @@ class ConversationTabs(Tabs):
         agent exits, and mark a tab not being shown when one of its agents has new output."""
         self.roles = track_roles(self.roles, event)
         self._update(track_tabs(self.tabs, event, self.agent_of(self.active), self.roles))
+
+    def replay(self, event: Event) -> None:
+        """Add and remove agents' tabs as :meth:`track` does for ``event``, one replayed from
+        the session's log, marking none unread."""
+        self.roles = track_roles(self.roles, event)
+        self._update(replay_tabs(self.tabs, event, self.roles))
 
     def learn_roles(self, event: Event) -> None:
         """Note the pinned role an agent started in by ``event``, an earlier one, leaving the
