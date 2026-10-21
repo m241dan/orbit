@@ -117,11 +117,16 @@ async def turn_ended(lane: Lane) -> None:
 
 async def held(lane: Lane) -> None:
     """Run a task, then hold the lane and wait for the run to end, leaving a task waiting."""
+    await stopped(lane)
+    await add(lane)
+
+
+async def stopped(lane: Lane) -> None:
+    """Run a task, then hold the lane and wait for the run to end."""
     await add(lane)
     await lane.turns.run_tasks()
     lane.turns.hold()
-    await lane.turns.close()
-    await add(lane)
+    await turn_ended(lane)
 
 
 async def test_a_run_for_the_user_starts_the_lane(lane: Lane) -> None:
@@ -204,9 +209,11 @@ async def test_a_hold_keeps_a_wake_from_starting_work(lane: Lane) -> None:
 
 
 async def test_a_run_for_the_user_lifts_a_hold(lane: Lane) -> None:
-    await held(lane)
+    await stopped(lane)
+    [stopped_task] = lane.tasks.board.tasks
+    await lane.tasks.change(lambda board: board.finish(stopped_task.id, "completed"))
     await lane.turns.run_tasks()
-    await lane.turns.close()
+    assert not lane.turns.running
     await add(lane)
     await lane.turns.wake()
     assert lane.turns.running
@@ -265,3 +272,19 @@ async def test_without_agents_runs_and_configuring_are_refused() -> None:
         with pytest.raises(Refused) as refused:
             await attempt()
         assert (refused.value.code, str(refused.value)) == (NOT_CONFIGURED, NO_AGENTS_MESSAGE)
+
+
+async def test_a_wake_once_closed_starts_no_work(lane: Lane) -> None:
+    await lane.turns.close()
+    await add(lane)
+    await lane.turns.wake()
+    assert not lane.turns.running
+    assert BusyChanged(busy=True, lane=WORK_LANE) not in lane.posted
+
+
+async def test_a_run_for_the_user_once_closed_starts_no_work(lane: Lane) -> None:
+    await lane.turns.close()
+    await add(lane)
+    await lane.turns.run_tasks()
+    assert not lane.turns.running
+    assert BusyChanged(busy=True, lane=WORK_LANE) not in lane.posted

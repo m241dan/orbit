@@ -19,6 +19,7 @@ from orbit.agent.application.planner import PlannerChat
 from orbit.agent.application.review_lane import ReviewLane
 from orbit.agent.application.startup_check import StartupCheck
 from orbit.agent.application.usage_monitor import UsageMonitor
+from orbit.agent.application.work_turns import WorkTurns
 from orbit.agent.domain.usage import UsageFetch, UsageUnavailable
 from orbit.agent.domain.verification import MAX_FALLBACK_FIXES
 from orbit.protocol import (
@@ -281,6 +282,7 @@ def record_stops(monkeypatch: pytest.MonkeyPatch, failing: str = "") -> list[str
         "startup": StartupCheck,
         "usage": UsageMonitor,
         "review": ReviewLane,
+        "turns": WorkTurns,
         "planner": PlannerChat,
         "host": AgentDesk,
     }
@@ -308,14 +310,14 @@ def full_session() -> WorkspaceHost:
     return session
 
 
-async def test_closing_stops_the_background_then_the_planner_then_the_host(
+async def test_closing_stops_the_background_then_the_turns_then_the_planner_then_the_host(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     stopped = record_stops(monkeypatch)
 
     await close(full_session())
 
-    assert stopped == ["usage", "startup", "review", "planner", "host"]
+    assert stopped == ["usage", "startup", "review", "turns", "planner", "host"]
 
 
 async def test_closing_stops_every_part_even_if_one_fails_then_raises_it(
@@ -326,7 +328,7 @@ async def test_closing_stops_every_part_even_if_one_fails_then_raises_it(
     with pytest.raises(ValueError, match="startup broke"):
         await close(full_session())
 
-    assert stopped == ["usage", "startup", "review", "planner", "host"]
+    assert stopped == ["usage", "startup", "review", "turns", "planner", "host"]
 
 
 async def test_closing_closes_the_host_even_if_the_usage_monitor_fails_then_raises_it(
@@ -337,4 +339,4 @@ async def test_closing_closes_the_host_even_if_the_usage_monitor_fails_then_rais
     with pytest.raises(ValueError, match="usage broke"):
         await close(full_session())
 
-    assert stopped == ["usage", "startup", "review", "planner", "host"]
+    assert stopped == ["usage", "startup", "review", "turns", "planner", "host"]

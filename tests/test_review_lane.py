@@ -3,8 +3,11 @@
 import asyncio
 import itertools
 
+import pytest
+
 from orbit.agent import WorkspaceHost
 from orbit.agent.application.ports import Reply
+from orbit.agent.application.work_turns import WorkTurns
 from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.endings import BUG, CANCELLED, REVIEW_STOPPED_BY_YOU, STOPPED_BY_YOU
 from orbit.agent.domain.reviews import ReviewLimits
@@ -516,6 +519,35 @@ async def test_a_review_cancelled_as_the_session_closes_is_just_cancelled() -> N
     await session.close()
     [review] = [t for t in board(queued(session)) if t.task.role == "reviewer"]
     assert (review.status, review.reason, review.reason_detail) == ("cancelled", CANCELLED, "")
+
+
+async def test_a_review_ending_as_the_session_closes_starts_no_work(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reviewing, release = asyncio.Event(), asyncio.Event()
+
+    async def waits_then_suggests(call: Call) -> TurnEndReason:
+        await call("get_task")
+        reviewing.set()
+        await release.wait()
+        return await suggests("Add tests")(call)
+
+    close_turns = WorkTurns.close
+
+    async def close_then_release(turns: WorkTurns) -> None:
+        await close_turns(turns)
+        release.set()
+        await asyncio.sleep(0.05)
+
+    monkeypatch.setattr(WorkTurns, "close", close_then_release)
+    session, _, launcher = session_for(
+        claims_done, claims_done, reviewers=(waits_then_suggests,), tree=FakeTree(), review=True
+    )
+    await start(session)
+    await asyncio.wait_for(reviewing.wait(), 10)
+    await session.close()
+    assert [la.agent.role for la in launcher.launches] == ["coder", "reviewer"]
+    assert {t for t in asyncio.all_tasks() if not t.done()} == {asyncio.current_task()}
 
 
 async def test_a_cancelled_reviewer_that_suggested_is_not_run_again() -> None:

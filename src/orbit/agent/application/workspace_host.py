@@ -718,9 +718,9 @@ class WorkspaceHost:
         return self._verifier.step_names if self._verifier else ()
 
     async def close(self) -> None:
-        """Stop a storage halt under way and the tries of the repository's lock, cancel the
-        work in progress, which stops its agent, then stop the startup check, the review lane,
-        the planner, the agents' host, the saving of the session, releasing its lock, and the
+        """Stop a storage halt under way and the tries of the repository's lock, the startup
+        check and the review lane, cancel the work in progress, which stops its agent, then
+        stop the planner, the agents' host, the saving of the session, releasing its lock, and the
         writing of its events to the store, then end every connection's stream, in that order.
         Each is stopped even if one before it fails; the first failure is raised after."""
         self._closing = True
@@ -734,15 +734,11 @@ class WorkspaceHost:
             raise failure
 
     def _stops(self) -> list[Callable[[], Awaitable[None]]]:
-        """What :meth:`close` awaits, in order."""
-        parts = (self._startup, self._lane, self._seat)
-        stops: list[Callable[[], Awaitable[None]]] = [
-            self._halt.close,
-            self._takeover.close,
-            self._stop_turns,
-            self._seat.close_retired,
-        ]
-        stops += [part.close for part in parts if part is not None]
+        """What :meth:`close` awaits, in order: nothing that could wake the work lane runs once
+        its turn is cancelled, as in :meth:`_stop_work`."""
+        stops: list[Callable[[], Awaitable[None]]] = [self._halt.close, self._takeover.close]
+        stops += [part.close for part in (self._startup, self._lane) if part is not None]
+        stops += [self._stop_turns, self._seat.close_retired, self._seat.close]
         if self._desk is not None:
             stops.append(self._desk.stop)
         stops += [self._keeper.close, self._events.close, self._end_connections]

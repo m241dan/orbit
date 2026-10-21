@@ -64,13 +64,15 @@ class WorkTurns:
     and keeps :meth:`wake`, a review's request, from starting another until the user asks
     again. While the session is halted, :meth:`wake` starts nothing either. A run Claude's
     usage limit stopped starts again by itself once the limit resets, unless the user runs or
-    holds the work first, or :meth:`forget_wait` is called as the session is left.
+    holds the work first, or :meth:`forget_wait` is called as the session is left. Once
+    :meth:`close` is called, nothing starts.
     """
 
     def __init__(self, parts: WorkParts) -> None:
         self._parts = parts
         self._board = parts.tasks.board
         self._held = False  # The user cancelled: don't start work by itself.
+        self._closed = False  # The host is going away: start nothing.
         self._turns = TurnSlot(WORK_LANE, TASKS_RUNNING_MESSAGE, parts.post)
         # A run the usage limit stopped, waiting to start again.
         self._waiting: asyncio.Task[None] | None = None
@@ -140,7 +142,9 @@ class WorkTurns:
         return True
 
     async def close(self) -> None:
-        """Cancel the run, if any, or its wait to start again, and wait for it to end."""
+        """Cancel the run, if any, or its wait to start again, wait for it to end, and start
+        nothing from then on."""
+        self._closed = True
         waiting = self._waiting
         if self.forget_wait():
             assert waiting is not None  # There was a wait to forget.
@@ -155,11 +159,13 @@ class WorkTurns:
         return self._held or self.running or self._waiting is not None or self._parts.halted()
 
     async def _start(self, *, asked: bool) -> None:
-        """Start the work lane's turn if there is work. The user ``asked`` lifts a hold, and a
-        run already running refuses them; otherwise a hold, a running run or a halt keeps it
-        waiting."""
+        """Start the work lane's turn if there is work, unless closed. The user ``asked`` lifts a
+        hold, and a run already running refuses them; otherwise a hold, a running run or a halt
+        keeps it waiting."""
         work = self._parts.work
         assert work is not None  # Work needs agents.
+        if self._closed:
+            return
         if asked:
             self._held = False
         elif self._waits:
