@@ -1341,6 +1341,20 @@ so the commits it makes in your checkout are yours), with these mounts:
 | the volume `claude-login` | `/home/orbit/.claude` (`CLAUDE_CONFIG_DIR`) | Claude Code's login |
 | `~/.gitconfig`, read-only | `/home/orbit/.gitconfig` | your commit identity |
 
+The `deploy/orbit-config` and `~/.gitconfig` mounts are binds in compose's long syntax with
+`create_host_path: false`, so a missing source stops `docker compose up` with an error, rather
+than Docker making it an empty root-owned directory on the host (which `orbit serve` can't write
+its token to, and which at `~/.gitconfig` breaks git on the host too). So make
+`deploy/orbit-config` before you start (step 1 below), and have a file at `~/.gitconfig`. If your
+identity lives elsewhere, such as in `~/.config/git/config`, either make `~/.gitconfig` or point
+the gitconfig mount's `source:` at another file, such as one holding just your identity:
+
+```ini
+[user]
+	name = Your Name
+	email = you@example.com
+```
+
 Bash doesn't export `UID` or `GID`, so unless your ids are 1000, run `export UID; export GID=$(id
 -g)` first, or put both in `deploy/.env`; the image is built with the same ids.
 

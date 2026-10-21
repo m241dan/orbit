@@ -29,10 +29,21 @@ services:
         required: false
     volumes:
       - ..:/workspace
-      - ./orbit-config:/home/orbit/.config/orbit
+      # The long syntax, so a missing source stops compose rather than becoming a root-owned
+      # directory on the host: orbit-config/ must be made first, and ~/.gitconfig must exist.
+      - type: bind
+        source: ./orbit-config
+        target: /home/orbit/.config/orbit
+        bind:
+          create_host_path: false
       - orbit-state:/home/orbit/.local/state/orbit
       - claude-login:/home/orbit/.claude
-      - ~/.gitconfig:/home/orbit/.gitconfig:ro
+      - type: bind
+        source: ~/.gitconfig
+        target: /home/orbit/.gitconfig
+        read_only: true
+        bind:
+          create_host_path: false
     ports:
       - "7433:7433"
     healthcheck:
