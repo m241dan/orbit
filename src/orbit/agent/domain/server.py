@@ -69,6 +69,10 @@ def certificate_dates(not_before: datetime, not_after: datetime, now: datetime) 
     return CertificateDates.VALID
 
 
+SERVER_PATHS = ("cert", "key", "client_ca", "ca", "local_client_cert", "local_client_key")
+"""The server settings that name files."""
+
+
 class ServerSettings(TlsSettings):
     """The user config's ``[server]``: the ``host`` and ``port`` ``orbit serve`` listens on (0
     lets the system choose one), ``max_message_mb``, the largest message either way, its TLS

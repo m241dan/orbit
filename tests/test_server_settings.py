@@ -33,8 +33,29 @@ def test_the_files_tls_settings_are_read(tmp_path: Path) -> None:
         '[server]\ntls = "tls"\ncert = "s.pem"\nkey = "k.pem"\nclient_ca = "c.pem"\nca = "a.pem"\n'
     )
     assert read_server(tmp_path) == ServerSettings(
-        tls="tls", cert="s.pem", key="k.pem", client_ca="c.pem", ca="a.pem"
+        tls="tls",
+        cert=str(tmp_path / "s.pem"),
+        key=str(tmp_path / "k.pem"),
+        client_ca=str(tmp_path / "c.pem"),
+        ca=str(tmp_path / "a.pem"),
     )
+
+
+def test_the_files_relative_tls_paths_are_read_from_the_config_directory(tmp_path: Path) -> None:
+    (tmp_path / "config.toml").write_text('[server]\ncert = "tls/server.pem"\n')
+    assert read_server(tmp_path).cert == str(tmp_path / "tls" / "server.pem")
+
+
+def test_the_files_absolute_tls_paths_are_kept_and_home_is_expanded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    (tmp_path / "config.toml").write_text(
+        '[server]\ncert = "/etc/server.pem"\nkey = "~/.config/orbit/tls/server-key.pem"\n'
+    )
+    settings = read_server(tmp_path)
+    home_key = tmp_path / "home" / ".config" / "orbit" / "tls" / "server-key.pem"
+    assert (settings.cert, settings.key) == ("/etc/server.pem", str(home_key))
 
 
 def test_the_files_local_client_certificate_is_read(tmp_path: Path) -> None:
@@ -42,7 +63,10 @@ def test_the_files_local_client_certificate_is_read(tmp_path: Path) -> None:
         '[server]\nlocal_client_cert = "me.pem"\nlocal_client_key = "me-key.pem"\n'
     )
     settings = read_server(tmp_path)
-    assert (settings.local_client_cert, settings.local_client_key) == ("me.pem", "me-key.pem")
+    assert (settings.local_client_cert, settings.local_client_key) == (
+        str(tmp_path / "me.pem"),
+        str(tmp_path / "me-key.pem"),
+    )
 
 
 def test_the_files_revoked_fingerprints_are_read(tmp_path: Path) -> None:

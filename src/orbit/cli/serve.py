@@ -93,6 +93,7 @@ def serve(
     user_config = resolve_config_dir(config_dir, os.environ)
     _refuse_second(state)
     added = [_workspace(path) for path in add or ()]
+    cert, key, client_ca = (_absolute(path) for path in (cert, key, client_ca))
     given = {"host": host, "port": port, "tls": tls, "cert": cert, "key": key}
     settings = _server_settings(user_config, {**given, "client_ca": client_ca})
     token_file = TokenFile(user_config)
@@ -172,6 +173,12 @@ def _serve_until_stopped(parts: "_ServeParts", profile: Path | None, user_config
 
     with _exit_on(ListenFailed, message=unable):
         asyncio.run(_served(parts, profile))
+
+
+def _absolute(path: Path | None) -> Path | None:
+    """``path`` with ``~`` expanded, taken from the directory ``orbit serve`` started in if
+    relative; ``None`` if not given."""
+    return path.expanduser().absolute() if path else None
 
 
 def _server_settings(config_dir: Path, given: Mapping[str, object]) -> ServerSettings:

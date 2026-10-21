@@ -1045,6 +1045,10 @@ local_client_cert = "/home/me/.config/orbit/tls/local.pem"      # shown by chats
 local_client_key = "/home/me/.config/orbit/tls/local-key.pem"   # its private key, chmod 600
 ```
 
+Paths in `[server]` may start with `~`, and a relative one is taken from the config directory,
+so `cert = "tls/server.pem"` names `~/.config/orbit/tls/server.pem`; relative `--cert`, `--key`
+and `--client-ca` are taken from the directory `orbit serve` starts in.
+
 An unknown key in `[server]`, or a value of the wrong type or out of range, stops `orbit serve`
 with status 2 and a message naming the file and the key.
 
@@ -1079,7 +1083,9 @@ openssl req -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes \
 openssl x509 -req -in server.csr -CA ca.pem -CAkey ca-key.pem -days 365 -out server.pem \
   -extfile <(printf "subjectAltName=DNS:orbit.example.lan,IP:192.168.1.20")
 chmod 600 ca-key.pem server-key.pem
-orbit serve --tls tls --cert server.pem --key server-key.pem --host 0.0.0.0
+cd -
+orbit serve --tls tls --cert ~/.config/orbit/tls/server.pem \
+  --key ~/.config/orbit/tls/server-key.pem --host 0.0.0.0
 ```
 
 `server.pem` and `server-key.pem` stay on the server; copy `ca.pem` and the token to each client
