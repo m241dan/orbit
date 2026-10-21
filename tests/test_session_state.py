@@ -158,6 +158,22 @@ async def test_a_task_run_makes_the_open_session_running_its_task_until_it_ends(
     assert changes(events) == [running(Activity(kind="task_run", task_id="1")), state("idle")]
 
 
+async def test_a_run_moving_to_its_next_task_republishes_the_open_sessions_activity() -> None:
+    session, _, _ = session_for(claims_done, claims_done)
+    await greeted_and_counted(session)
+    await send(session, AddTask(task=TASK))
+    await send(session, AddTask(task=TASK))
+    await send(session, RunTasks())
+    events = await asyncio.wait_for(until(session, idle_again), 5)
+    await session.close()
+
+    assert changes(events) == [
+        running(Activity(kind="task_run", task_id="1")),
+        running(Activity(kind="task_run", task_id="2")),
+        state("idle"),
+    ]
+
+
 async def test_a_review_keeps_the_open_session_running_its_review_until_it_ends() -> None:
     reviewing, gate = asyncio.Event(), asyncio.Event()
 
