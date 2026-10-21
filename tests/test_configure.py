@@ -1,7 +1,6 @@
 """Accepted checks: orbit saves them to the project config, lands them, and uses them live."""
 
 import asyncio
-import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -48,6 +47,7 @@ from tests.agent_fakes import (
     session_for,
     verified,
 )
+from tests.git_repo import git, init_repo
 from tests.test_proposals import CONFIGURE, LINT, SETUP, TESTS, Review, proposes
 
 CHECKS = ChecksProposal(
@@ -206,17 +206,9 @@ async def test_coders_cannot_change_their_own_checks() -> None:
     assert steps.runs == [STEP.name, STEP.name]
 
 
-def git(cwd: Path, *args: str) -> str:
-    result = subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True)
-    return result.stdout.strip()
-
-
 async def test_in_a_real_repository_the_config_lands_on_the_base(tmp_path: Path) -> None:
-    repo = tmp_path / "repo"
-    (repo / ".orbit").mkdir(parents=True)
-    git(repo, "init", "-q", "-b", "main")
-    git(repo, "config", "user.name", "Test")
-    git(repo, "config", "user.email", "test@example.com")
+    repo = init_repo(tmp_path / "repo")
+    (repo / ".orbit").mkdir()
     (repo / CONFIG_PATH).write_text("# Ours.\nfix_attempts = 2\n")
     git(repo, "add", "-A")
     git(repo, "commit", "-q", "-m", "start")

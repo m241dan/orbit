@@ -5,7 +5,7 @@ from textual.pilot import Pilot
 
 from orbit.protocol import ToolCallFinished, ToolCallStarted
 from orbit.tui import OrbitApp
-from tests.test_tui import FakeSession, feed_events, said
+from tests.tui_fakes import FakeSession, feed_events, said
 
 LONG = "\n".join(f"line {n}" for n in range(250))
 

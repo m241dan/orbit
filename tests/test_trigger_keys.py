@@ -13,7 +13,7 @@ from orbit.protocol import (
 from orbit.tui import OrbitApp
 from orbit.tui.view.triggers import TRIGGER_KEYS, trigger_key_labels
 from orbit.tui.widgets import ConfirmScreen
-from tests.test_tui import FakeSession, feed_events
+from tests.tui_fakes import FakeSession, feed_events
 
 SUPER = TriggerEntry(name=SUPER_REVIEW, label="Super review", manual=True)
 CONFIGURE = TriggerEntry(name=CONFIGURE_CHECKS, label="Set up checks", manual=True)

@@ -35,7 +35,7 @@ from orbit.tui.transcript import Transcript
 from orbit.tui.transcript_log import TranscriptLog
 from orbit.tui.view.transcript import activity_entry
 from tests.test_transcript import visible_log
-from tests.test_tui import FakeSession, feed_events, tab_strip
+from tests.tui_fakes import FakeSession, feed_events, tab_strip
 
 
 def logged(first: int, *events: Event) -> tuple[EventEnvelope, ...]:

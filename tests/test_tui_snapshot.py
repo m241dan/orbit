@@ -43,7 +43,7 @@ from orbit.tui.tasks import TaskList
 from orbit.tui.transcript import Transcript
 from orbit.tui.view.agents import AgentRow
 from orbit.tui.widgets import ChatPrompt
-from tests.test_tui import PINNED, STRIP, FakeSession, entries, feed_events, opened, tab_strip
+from tests.tui_fakes import PINNED, STRIP, FakeSession, entries, feed_events, opened, tab_strip
 
 TASKS = (
     TaskState(id="1", task=TaskSpec(prompt="Add a flag."), status="running"),

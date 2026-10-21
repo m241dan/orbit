@@ -14,8 +14,7 @@ from orbit.tui import OrbitApp
 from orbit.tui.panels import VerificationPanel
 from orbit.tui.view.common import spinner_frame
 from orbit.tui.view.panels import step_lines
-from tests.test_task_list import feed
-from tests.test_tui import FakeSession, entries
+from tests.tui_fakes import FakeSession, entries, feed_events
 
 
 def steps(app: OrbitApp) -> str:
@@ -44,7 +43,7 @@ async def test_panel_shows_the_steps_the_backend_reports() -> None:
     app = OrbitApp(session)
     async with app.run_test() as pilot:
         app.query_one(VerificationPanel).clock = lambda: 0.0
-        await feed(
+        await feed_events(
             session,
             pilot,
             report("pending", "running", "passed", "failed", "cancelled", "skipped"),
@@ -59,23 +58,23 @@ async def test_running_step_shows_how_long_it_has_been_running() -> None:
         panel = app.query_one(VerificationPanel)
         now = [100.0]
         panel.clock = lambda: now[0]
-        await feed(session, pilot, report("running", "pending"))
+        await feed_events(session, pilot, report("running", "pending"))
         now[0] = 112.625  # frame 901: the arc moves 8 frames a second, 6 to a turn
         panel.tick()
         assert steps(app) == "◠  Unit tests · 12s\n⏳ Lint"
 
         # Another report while the same step runs keeps its clock going.
-        await feed(session, pilot, report("running", "pending"))
+        await feed_events(session, pilot, report("running", "pending"))
         assert steps(app).startswith("◠  Unit tests · 12s")
 
         # The next step starts its own clock.
-        await feed(session, pilot, report("passed", "running"))
+        await feed_events(session, pilot, report("passed", "running"))
         now[0] = 114.75  # frame 918, back to the start of the arc
         panel.tick()
         assert steps(app) == "✅ Unit tests\n◜  Lint · 2s"
 
         # With nothing running, ticking changes nothing.
-        await feed(session, pilot, report("passed", "passed"))
+        await feed_events(session, pilot, report("passed", "passed"))
         panel.tick()
         assert steps(app) == "✅ Unit tests\n✅ Lint"
 
@@ -84,7 +83,7 @@ async def test_verification_progress_is_reported_in_the_transcript() -> None:
     session = FakeSession()
     app = OrbitApp(session)
     async with app.run_test() as pilot:
-        await feed(
+        await feed_events(
             session,
             pilot,
             report("pending", "pending"),
@@ -105,7 +104,7 @@ async def test_skipped_verification_says_why_in_the_transcript() -> None:
     session = FakeSession()
     app = OrbitApp(session)
     async with app.run_test() as pilot:
-        await feed(
+        await feed_events(
             session,
             pilot,
             VerificationSkipped(task_id="1", reason="tools_off"),
@@ -123,10 +122,10 @@ async def test_the_startup_check_shows_under_its_heading_until_a_task_takes_over
     async with app.run_test() as pilot:
         app.query_one(VerificationPanel).clock = lambda: 0.0
         startup = report("passed", "running")
-        await feed(session, pilot, startup.model_copy(update={"title": "Startup check"}))
+        await feed_events(session, pilot, startup.model_copy(update={"title": "Startup check"}))
         assert steps(app) == "Startup check\n✅ Unit tests\n◜  Lint · 0s"
         # A task's verification reports without a title, and the heading goes.
-        await feed(session, pilot, report("pending", "pending"))
+        await feed_events(session, pilot, report("pending", "pending"))
         assert steps(app) == "⏳ Unit tests\n⏳ Lint"
 
 
@@ -135,7 +134,7 @@ async def test_the_startup_checks_result_is_noted_in_the_transcript() -> None:
     app = OrbitApp(session)
     output = "\n".join(f"line {n}" for n in range(1, 31))
     async with app.run_test() as pilot:
-        await feed(
+        await feed_events(
             session,
             pilot,
             StartupChecked(passed=True),
@@ -161,7 +160,7 @@ async def test_the_panel_is_redrawn_only_when_its_text_changes(
         panel = app.query_one(VerificationPanel)
         now = [100.0]
         panel.clock = lambda: now[0]
-        await feed(session, pilot, report("passed", "passed"))
+        await feed_events(session, pilot, report("passed", "passed"))
         updates: list[object] = []
 
         def update(content: object, *, layout: bool = True) -> None:
@@ -172,7 +171,7 @@ async def test_the_panel_is_redrawn_only_when_its_text_changes(
             now[0] += 1 / 8
             panel.tick()
         assert updates == []  # Nothing runs, so the ticks have nothing to redraw.
-        await feed(session, pilot, report("passed", "running"))
+        await feed_events(session, pilot, report("passed", "running"))
         now[0] += 1 / 8
         panel.tick()
         assert len(updates) == 2  # The report, then the spinner's next frame.
@@ -187,7 +186,7 @@ async def test_a_spinner_frame_redraws_the_panel_without_a_layout(
         panel = app.query_one(VerificationPanel)
         now = [100.0]
         panel.clock = lambda: now[0]
-        await feed(session, pilot, report("running", "pending"))
+        await feed_events(session, pilot, report("running", "pending"))
         layouts: list[bool] = []
 
         def update(content: object, *, layout: bool = True) -> None:
@@ -213,9 +212,9 @@ async def test_a_change_in_the_number_of_lines_lays_the_panel_out(
             layouts.append(layout)
 
         monkeypatch.setattr(panel.query_one(Static), "update", update)
-        await feed(session, pilot, report("running", "pending"))
+        await feed_events(session, pilot, report("running", "pending"))
         startup = report("running", "pending").model_copy(update={"title": "Startup check"})
-        await feed(session, pilot, startup)
+        await feed_events(session, pilot, startup)
         assert layouts == [True, True]
 
 
@@ -247,7 +246,7 @@ async def test_a_line_that_wraps_as_its_time_grows_lays_the_panel_out(
         name = "x" * (width - fixed)
         now = [0.0]
         panel.clock = lambda: now[0]
-        await feed(session, pilot, running(name))
+        await feed_events(session, pilot, running(name))
         # Records the panel's height for the line at 9s before the spy goes in.
         now[0] = 9.0
         panel.tick()
@@ -264,7 +263,7 @@ async def test_a_report_with_longer_names_that_wrap_lays_the_panel_out(
     app = OrbitApp(session)
     async with app.run_test(size=(60, 24)) as pilot:
         panel = app.query_one(VerificationPanel)
-        await feed(session, pilot, report("passed", "pending"))
+        await feed_events(session, pilot, report("passed", "pending"))
         layouts = spy_layouts(panel, monkeypatch)
         long = VerificationChanged(
             steps=(
@@ -272,7 +271,7 @@ async def test_a_report_with_longer_names_that_wrap_lays_the_panel_out(
                 StepState(name="A step whose name is far too long to fit", status="pending"),
             )
         )
-        await feed(session, pilot, long)
+        await feed_events(session, pilot, long)
         assert layouts == [True]
 
 
@@ -288,7 +287,7 @@ async def test_a_panel_without_a_width_yet_lays_out_every_change(
         panel.query_one(Static).styles.width = 0
         await pilot.pause()
         layouts = spy_layouts(panel, monkeypatch)
-        await feed(session, pilot, report("running", "pending"))
+        await feed_events(session, pilot, report("running", "pending"))
         now[0] += 1 / 8
         panel.tick()
         assert layouts == [True, True]  # The spinner's frame too, as its wrapping is unknown.
@@ -300,11 +299,11 @@ async def test_panel_ticks_only_while_a_step_runs() -> None:
     async with app.run_test() as pilot:
         panel = app.query_one(VerificationPanel)
         assert not panel.ticking
-        await feed(session, pilot, report("pending", "pending"))
+        await feed_events(session, pilot, report("pending", "pending"))
         assert not panel.ticking
-        await feed(session, pilot, report("running", "pending"))
+        await feed_events(session, pilot, report("running", "pending"))
         assert panel.ticking
-        await feed(session, pilot, report("passed", "running"))
+        await feed_events(session, pilot, report("passed", "running"))
         assert panel.ticking
-        await feed(session, pilot, report("passed", "passed"))
+        await feed_events(session, pilot, report("passed", "passed"))
         assert not panel.ticking

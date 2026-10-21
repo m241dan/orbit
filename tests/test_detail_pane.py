@@ -22,7 +22,7 @@ from orbit.tui.transcript_log import TranscriptLog
 from orbit.tui.view.detail import DETAIL_COVER_BELOW, DETAIL_HEIGHT, NO_DETAILS, WAITING
 from orbit.tui.widgets import ChatPrompt, ConfirmScreen
 from orbit.tui.working import WorkingRow
-from tests.test_tui import FakeSession, feed_events, said, started
+from tests.tui_fakes import FakeSession, feed_events, said, started
 
 
 def read(call_id: str, path: str = "a.py") -> ToolCallStarted:

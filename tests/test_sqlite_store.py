@@ -2,7 +2,6 @@
 
 import asyncio
 import sqlite3
-import subprocess
 import threading
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 from contextlib import closing, contextmanager
@@ -18,6 +17,7 @@ from orbit.agent.external import sqlite_store
 from orbit.agent.external.sqlite_schema import StoreError
 from orbit.agent.external.sqlite_store import THREAD_PREFIX, SqliteStore, find_workspace_id
 from orbit.protocol import EventEnvelope, Notice
+from tests.git_repo import git
 from tests.store_views import OwnView, open_view
 
 WHEN = datetime(2026, 10, 17, 14, 30, tzinfo=UTC)
@@ -27,11 +27,6 @@ type Opener = Callable[[Path], Awaitable[OwnView]]
 
 def record(session_id: str = "abc") -> SessionRecord:
     return SessionRecord(id=session_id, name="Oct 17 14:30", created=WHEN, last_active=WHEN)
-
-
-def git(cwd: Path, *args: str) -> str:
-    result = subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True)
-    return result.stdout.strip()
 
 
 @pytest.fixture

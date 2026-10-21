@@ -4,8 +4,7 @@ from contextlib import contextmanager
 
 import pytest
 from textual import events
-from textual.pilot import Pilot
-from textual.widgets import Footer, OptionList, Tab
+from textual.widgets import Footer, Tab
 from textual.worker import WorkerFailed
 
 from orbit.protocol import (
@@ -20,12 +19,9 @@ from orbit.protocol import (
     AgentReply,
     AgentStarted,
     AssistantMessage,
-    Attach,
     BusyChanged,
     CancelTurn,
-    Command,
     CommandAccepted,
-    CommandEnvelope,
     CommandRefused,
     ErrorOccurred,
     Event,
@@ -36,16 +32,12 @@ from orbit.protocol import (
     RunTasks,
     SendMessage,
     SessionStateChanged,
-    SessionSummary,
     Settings,
     SettingsChanged,
-    Snapshot,
     StepState,
     TaskMerged,
     TasksChanged,
-    TaskSpec,
     TaskStarted,
-    TaskState,
     ToolCallFinished,
     ToolCallStarted,
     TurnFinished,
@@ -66,53 +58,25 @@ from orbit.tui.tabs import ConversationTabs
 from orbit.tui.tasks import TaskList
 from orbit.tui.transcript import Transcript
 from orbit.tui.transcript_log import TranscriptLog
-from orbit.tui.view.common import EntryKind, spinner_frame
+from orbit.tui.view.common import spinner_frame
 from orbit.tui.view.events import coalesce
 from orbit.tui.widgets import ChatPrompt, PickerScreen, SidePanel
-
-
-class FakeSession:
-    """Stands in for the backend: records commands, and the envelopes they came in, and
-    replays scripted events in envelopes; an exception queued fails the stream. ``sent`` has
-    every envelope; ``envelopes`` and ``commands`` leave out the Hello opening the stream, which
-    raises ``hello_error`` when one is set, as every other command raises ``send_error``, and
-    the first Attach, which attaches the app as it opens."""
-
-    def __init__(self) -> None:
-        self.sent: list[CommandEnvelope] = []
-        self.envelopes: list[CommandEnvelope] = []
-        self.commands: list[Command] = []
-        self.queue: asyncio.Queue[Event | Exception] = asyncio.Queue()
-        self.closed = False
-        self.hello_error: Exception | None = None
-        self.send_error: Exception | None = None
-        self.attached = False  # Whether the first Attach was sent.
-
-    async def send(self, envelope: CommandEnvelope) -> None:
-        self.sent.append(envelope)
-        if isinstance(envelope.payload, Hello):
-            if self.hello_error is not None:
-                raise self.hello_error
-            return
-        if isinstance(envelope.payload, Attach) and not self.attached:
-            self.attached = True
-            return
-        self.envelopes.append(envelope)
-        self.commands.append(envelope.payload)
-        if self.send_error is not None:
-            raise self.send_error
-
-    async def events(self) -> AsyncIterator[EventEnvelope]:
-        seq = 0
-        while True:
-            event = await self.queue.get()
-            if isinstance(event, Exception):
-                raise event
-            seq += 1
-            yield EventEnvelope(seq=seq, payload=event)
-
-    async def close(self) -> None:
-        self.closed = True
+from tests.tui_fakes import (
+    PINNED,
+    STRIP,
+    FakeSession,
+    active_tab,
+    entries,
+    feed_events,
+    picker,
+    said,
+    selected,
+    show_settings,
+    shown,
+    started,
+    tab_strip,
+    task,
+)
 
 
 async def test_quitting_closes_the_session() -> None:
@@ -633,14 +597,6 @@ async def test_display_follows_latest_output() -> None:
         assert log.scroll_y == log.max_scroll_y
 
 
-CHOICES = ("opus", "sonnet")
-
-
-async def show_settings(session: FakeSession, pilot: Pilot[None], settings: Settings) -> None:
-    await session.queue.put(SettingsChanged(settings=settings, model_choices=CHOICES))
-    await pilot.pause()
-
-
 async def test_settings_shown_under_prompt() -> None:
     session = FakeSession()
     app = OrbitApp(session)
@@ -686,15 +642,6 @@ async def test_display_waits_for_backend_to_confirm_settings() -> None:
             prompt.border_subtitle
             == "planner's model: default · new tasks' tools: full (auto-approved)"
         )
-
-
-def picker(app: OrbitApp) -> tuple[str, list[str], int | None]:
-    """The open picker's title, option labels and highlighted index."""
-    screen = app.screen
-    assert isinstance(screen, PickerScreen)
-    options = screen.query_one(OptionList)
-    labels = [str(options.get_option_at_index(i).prompt) for i in range(options.option_count)]
-    return screen.title_text, labels, options.highlighted
 
 
 async def test_ctrl_o_lists_models_with_current_highlighted() -> None:
@@ -852,10 +799,6 @@ async def test_side_panels_fill_right_third_top_and_bottom() -> None:
         assert prompt.bottom == 40
 
 
-def selected(app: OrbitApp) -> list[str | None]:
-    return [w.id for w in app.query(".selected")]
-
-
 async def test_prompt_window_is_selected_on_start_and_highlighted() -> None:
     app = OrbitApp(FakeSession())
     async with app.run_test():
@@ -993,54 +936,6 @@ def test_spinner_cycles_the_arc_eight_frames_a_second() -> None:
     frames = [spinner_frame(i / 8) for i in range(7)]
     # Padded to two columns, like the emoji it stands beside.
     assert frames == ["◜ ", "◠ ", "◝ ", "◞ ", "◡ ", "◟ ", "◜ "]
-
-
-async def feed_events(session: FakeSession, pilot: Pilot[None], *events: Event) -> None:
-    for event in events:
-        await session.queue.put(event)
-    await pilot.pause()
-
-
-PINNED = ["planner", "coder", "reviewer", "super-reviewer", "configurator"]
-STRIP = ["All", *PINNED]
-
-
-def opened(summary: SessionSummary) -> Snapshot:
-    """A snapshot of ``summary``'s session opened with nothing in it, as a switch sends."""
-    return Snapshot(
-        session=summary,
-        settings=Settings(),
-        model_choices=(),
-        busy={},
-        tasks=(),
-        steps=(),
-        review=None,
-        proposals=(),
-        agents=(),
-    )
-
-
-def tab_strip(app: OrbitApp) -> list[str]:
-    return [tab.label_text for tab in app.query_one(ConversationTabs).query(Tab)]
-
-
-def shown(app: OrbitApp) -> list[str]:
-    """The texts of the entries on the tab being shown."""
-    transcript = app.query_one(Transcript)
-    return [entry.text for entry in transcript.entries(transcript.only)]
-
-
-def entries(app: OrbitApp) -> list[tuple[str, EntryKind]]:
-    """Every entry, with its kind, as the All tab has them."""
-    return [(entry.text, entry.kind) for entry in app.query_one(Transcript).entries(None)]
-
-
-def started(agent_id: str, role: str = "coder") -> AgentStarted:
-    return AgentStarted(agent_id=agent_id, role=role, task_id="1")
-
-
-def said(agent_id: str, text: str) -> AssistantMessage:
-    return AssistantMessage(turn_id="t", text=text, agent_id=agent_id)
 
 
 async def test_the_tab_strip_starts_with_all_and_the_pinned_roles_and_never_takes_focus() -> None:
@@ -1273,12 +1168,6 @@ async def test_background_output_marks_a_tab_until_it_is_shown() -> None:
         await pilot.pause()
         await feed_events(session, pilot, said("agent-1", "again"))
         assert tab_strip(app) == ["All", "planner", "● coder *", "● reviewer *", *rest]
-
-
-def active_tab(app: OrbitApp) -> str:
-    tab = app.query_one(ConversationTabs).active_tab
-    assert tab is not None
-    return tab.label_text
 
 
 async def test_tab_and_shift_tab_cycle_the_conversation_tabs_and_wrap() -> None:
@@ -1592,10 +1481,6 @@ async def test_the_planner_tab_shows_a_running_marker_while_it_answers() -> None
         # The work lane is the task run's, not the planner's.
         await feed_events(session, pilot, BusyChanged(busy=True, lane="work"))
         assert tab_strip(app) == STRIP
-
-
-def task(task_id: str, role: str = "coder") -> TaskState:
-    return TaskState(id=task_id, task=TaskSpec(prompt=f"do {task_id}", role=role))
 
 
 LINT_STEP = VerificationChanged(steps=(StepState(name="Lint"),))

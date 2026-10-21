@@ -7,7 +7,7 @@ import pytest
 
 from orbit.protocol import Event, EventEnvelope, Notice
 from orbit.tui.event_stream import event_batches
-from tests.test_tui import FakeSession
+from tests.tui_fakes import FakeSession
 
 
 async def finite(*events: Event) -> AsyncIterator[EventEnvelope]:

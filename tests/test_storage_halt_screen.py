@@ -19,7 +19,7 @@ from orbit.tui import OrbitApp
 from orbit.tui.storage_halt import StorageHaltScreen
 from orbit.tui.view.storage import HALT_HINT, HALT_TITLE
 from orbit.tui.widgets import ConfirmScreen
-from tests.test_tui import FakeSession, entries, feed_events, opened
+from tests.tui_fakes import FakeSession, entries, feed_events, opened
 
 EXPLANATION = (
     "Orbit stopped this session: saving the event log to /s/orbit.db failed.\n"

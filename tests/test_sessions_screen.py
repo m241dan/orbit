@@ -28,8 +28,8 @@ from orbit.tui.transcript import Transcript
 from orbit.tui.widgets import ConfirmScreen
 from tests.agent_fakes import frontend
 from tests.test_session_switch import saved, store_with
-from tests.test_tui import FakeSession, entries, feed_events, opened
 from tests.test_tui_link import FakeLink
+from tests.tui_fakes import FakeSession, entries, feed_events, opened
 
 ACTIVE = datetime(2026, 10, 16, 18, 2, tzinfo=UTC)
 OLD = SessionSummary(id="old", name="auth rework", last_active=ACTIVE)

@@ -28,7 +28,7 @@ from orbit.tui import Opening, OrbitApp
 from orbit.tui.link import LinkScreen
 from orbit.tui.view.link import LOST_AFTER, ended_message, lost_delay
 from orbit.tui.widgets import ChatPrompt
-from tests.test_tui import FakeSession, entries, feed_events
+from tests.tui_fakes import FakeSession, entries, feed_events
 
 URL = "ws://127.0.0.1:7433/"
 NOW = 1000.0

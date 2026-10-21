@@ -7,7 +7,7 @@ import sys
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import Any
 
 import pytest
 import typer
@@ -17,40 +17,11 @@ from orbit.agent import LocalTls, RunFile
 from orbit.cli import app
 from orbit.client import HandshakeRefused, TokenRejected, messages
 from orbit.protocol import NewSession
-from orbit.tui import Opening
+from tests.cli_fakes import FakeApp, FakeClient, fake_tui
 from tests.tls_certs import ServerFiles, make_ca, make_client
 
 runner = CliRunner()
 URL = "ws://127.0.0.1:7433/"
-
-
-@dataclass
-class FakeClient:
-    """The WebSocket session built: where to, shown the token read from which file, verified
-    with which context."""
-
-    url: str
-    token_file: Path | None
-    ssl_context: ssl.SSLContext | None = None
-
-
-@dataclass
-class FakeApp:
-    """The TUI built over a control plane, run once."""
-
-    built: ClassVar[list["FakeApp"]] = []
-
-    session: object
-    link: object = None
-    opening: Opening = field(default_factory=Opening)
-    storage_halt: str | None = None
-    ran: bool = field(default=False)
-
-    def __post_init__(self) -> None:
-        FakeApp.built.append(self)
-
-    def run(self) -> None:
-        self.ran = True
 
 
 @dataclass
@@ -119,9 +90,7 @@ def plane(monkeypatch: pytest.MonkeyPatch) -> Plane:
 def in_process(monkeypatch: pytest.MonkeyPatch) -> InProcess:
     fake = InProcess()
     monkeypatch.setattr("orbit.cli.chat._backend", fake)
-    monkeypatch.setattr("orbit.cli.chat.OrbitApp", FakeApp)
-    monkeypatch.setattr("orbit.cli.chat.WebSocketSession", FakeClient)
-    FakeApp.built = []
+    fake_tui(monkeypatch)
     return fake
 
 

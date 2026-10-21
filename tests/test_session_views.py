@@ -23,7 +23,7 @@ from orbit.tui import OrbitApp
 from orbit.tui.sessions import ActivationScreen
 from orbit.tui.widgets import ChatPrompt
 from tests.test_sessions_screen import CATALOG, CURRENT, OLD, RUNNING, catalog, joined, started
-from tests.test_tui import entries, feed_events, opened
+from tests.tui_fakes import entries, feed_events, opened
 
 VIEWING_OLD = "viewing auth rework; today is idle (enter to switch)"
 TODAY = SessionRef(id="now", name="today")

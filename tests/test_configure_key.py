@@ -46,7 +46,7 @@ from tests.agent_fakes import (
     session_for,
     verified,
 )
-from tests.test_tui import FakeSession, shown
+from tests.tui_fakes import FakeSession, shown
 
 CODE = TaskSpec(prompt="Add a flag.")
 SETUP = Setup(command=("uv", "sync"), watch=("uv.lock",))

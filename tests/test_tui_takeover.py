@@ -15,8 +15,8 @@ from orbit.protocol import (
 from orbit.tui import OrbitApp
 from orbit.tui.view.confirm import TAKE_OVER_MESSAGE, TAKE_OVER_TITLE
 from orbit.tui.widgets import ChatPrompt, ConfirmScreen
-from tests.test_tui import FakeSession, feed_events
 from tests.test_tui_snapshot import SNAPSHOT
+from tests.tui_fakes import FakeSession, feed_events
 
 OFFERING = SNAPSHOT.model_copy(update={"read_only": True, "ownership_offered": True})
 

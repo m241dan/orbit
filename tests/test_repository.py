@@ -13,28 +13,7 @@ from orbit.agent.external.repository import (
     orbit_dir,
     workspace_fingerprint,
 )
-
-
-def git(cwd: Path, *args: str) -> str:
-    result = subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True)
-    return result.stdout.strip()
-
-
-def commit_file(cwd: Path, name: str, text: str, message: str) -> None:
-    (cwd / name).write_text(text)
-    git(cwd, "add", name)
-    git(cwd, "commit", "-q", "-m", message)
-
-
-@pytest.fixture
-def repo(tmp_path: Path) -> Path:
-    root = tmp_path / "repo"
-    root.mkdir()
-    git(root, "init", "-q", "-b", "main")
-    git(root, "config", "user.name", "Test")
-    git(root, "config", "user.email", "test@example.com")
-    commit_file(root, "a.txt", "one\n", "start")
-    return root
+from tests.git_repo import commit_file, git
 
 
 @pytest.fixture

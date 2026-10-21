@@ -8,7 +8,7 @@ from orbit.tui.tasks import TaskList
 from orbit.tui.transcript import Transcript
 from orbit.tui.view.common import SPINNER_FPS, spinner_frame
 from orbit.tui.widgets import ChatPrompt
-from tests.test_tui import FakeSession, feed_events, selected, task
+from tests.tui_fakes import FakeSession, feed_events, selected, task
 
 
 def sidebar_shown(app: OrbitApp) -> bool:

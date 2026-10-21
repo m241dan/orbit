@@ -14,8 +14,16 @@ from orbit.tui import OrbitApp
 from orbit.tui.task_editor import TaskEditorScreen
 from orbit.tui.tasks import TaskList
 from orbit.tui.widgets import PickerScreen, PromptBox, PromptInput
-from tests.test_task_list import board, editor, feed, open_task_list, rows
-from tests.test_tui import FakeSession, picker, show_settings
+from tests.tui_fakes import (
+    FakeSession,
+    board,
+    editor,
+    feed_events,
+    open_task_list,
+    picker,
+    rows,
+    show_settings,
+)
 
 
 def editor_fields(app: OrbitApp) -> tuple[str, str, str, str]:
@@ -119,7 +127,7 @@ async def test_editor_shows_a_prompts_title_and_body_and_edits_the_body() -> Non
     app = OrbitApp(session)
     async with app.run_test() as pilot:
         await show_settings(session, pilot, Settings())
-        await feed(session, pilot, board("Add a widget\n\nPut it in widgets.py.\nTest it."))
+        await feed_events(session, pilot, board("Add a widget\n\nPut it in widgets.py.\nTest it."))
         await open_task_list(pilot)
         await pilot.press("enter")
         screen = editor(app)
@@ -168,7 +176,7 @@ async def test_ctrl_s_saves_an_edited_task_while_typing_in_the_title() -> None:
     app = OrbitApp(session)
     async with app.run_test() as pilot:
         await show_settings(session, pilot, Settings())
-        await feed(session, pilot, board("one"))
+        await feed_events(session, pilot, board("one"))
         await open_task_list(pilot)
         await pilot.press("enter", "i", "!", "ctrl+s")
         assert not isinstance(app.screen, TaskEditorScreen)
@@ -184,7 +192,7 @@ async def test_a_fix_task_round_trips_through_the_editor_unchanged() -> None:
     )
     async with app.run_test() as pilot:
         await show_settings(session, pilot, Settings())
-        await feed(session, pilot, board(prompt))
+        await feed_events(session, pilot, board(prompt))
         await open_task_list(pilot)
         await pilot.press("enter", "ctrl+s")
         assert session.commands == [EditTask(task_id="1", task=TaskSpec(prompt=prompt))]
@@ -222,7 +230,9 @@ async def test_editor_model_picker_uses_choices_that_arrive_while_open() -> None
         await pilot.press("enter", "i")
         await pilot.press(*"Add a widget", "escape")
         choices = ("opus", "sonnet", "haiku")
-        await feed(session, pilot, SettingsChanged(settings=Settings(), model_choices=choices))
+        await feed_events(
+            session, pilot, SettingsChanged(settings=Settings(), model_choices=choices)
+        )
         await pilot.press("j", "j", "enter", "j", "j", "j", "enter", "ctrl+s")
         task = TaskSpec(prompt="Add a widget", settings=Settings(model="haiku"))
         assert session.commands == [AddTask(task=task)]
@@ -258,7 +268,7 @@ async def test_enter_on_existing_task_edits_it() -> None:
     app = OrbitApp(session)
     async with app.run_test() as pilot:
         await show_settings(session, pilot, Settings())
-        await feed(session, pilot, board("one", "two"))
+        await feed_events(session, pilot, board("one", "two"))
         await open_task_list(pilot)
         await pilot.press("j", "enter")
         assert editor(app).title_text == "Edit task"
@@ -274,7 +284,7 @@ async def test_editing_a_task_keeps_its_role() -> None:
     writer = TaskSpec(prompt="write it", role="writer")
     async with app.run_test() as pilot:
         await show_settings(session, pilot, Settings())
-        await feed(session, pilot, TasksChanged(tasks=(TaskState(id="1", task=writer),)))
+        await feed_events(session, pilot, TasksChanged(tasks=(TaskState(id="1", task=writer),)))
         await open_task_list(pilot)
         await pilot.press("enter", "i", "!", "escape", "ctrl+s")
         edited = TaskSpec(prompt="write it!", role="writer")
@@ -286,7 +296,7 @@ async def test_editor_scrolls_every_field_into_view_in_a_small_terminal() -> Non
     app = OrbitApp(session)
     async with app.run_test(size=(80, 24)) as pilot:
         await show_settings(session, pilot, Settings())
-        await feed(session, pilot, board("Add a widget\n\n" + "\n".join(["line"] * 20)))
+        await feed_events(session, pilot, board("Add a widget\n\n" + "\n".join(["line"] * 20)))
         await open_task_list(pilot)
         await pilot.press("enter")
         screen = editor(app)
@@ -307,7 +317,7 @@ async def test_tab_does_not_focus_the_editor_scroll_container() -> None:
     app = OrbitApp(session)
     async with app.run_test() as pilot:
         await show_settings(session, pilot, Settings())
-        await feed(session, pilot, board("Add a widget"))
+        await feed_events(session, pilot, board("Add a widget"))
         await open_task_list(pilot)
         await pilot.press("enter")
 
@@ -322,7 +332,7 @@ LONG_PROMPT = "Add a widget\n\n" + "\n".join(f"line {n}" for n in range(40))
 async def open_editor_on(session: FakeSession, pilot: Pilot[None], prompt: str) -> PromptBox:
     """Open the editor on a task with ``prompt``, and return its prompt box."""
     await show_settings(session, pilot, Settings())
-    await feed(session, pilot, board(prompt))
+    await feed_events(session, pilot, board(prompt))
     await open_task_list(pilot)
     await pilot.press("enter")
     assert isinstance(pilot.app.screen, TaskEditorScreen)

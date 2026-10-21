@@ -8,8 +8,7 @@ from orbit.protocol import TasksChanged, TaskSpec, TaskState, TaskStatus
 from orbit.tui import OrbitApp
 from orbit.tui.reason import ReasonScreen
 from orbit.tui.view.tasks import REASON_HINT, reason_text, reason_title
-from tests.test_task_list import feed, open_task_list
-from tests.test_tui import FakeSession
+from tests.tui_fakes import FakeSession, feed_events, open_task_list
 
 LONG = "\n".join(f"line {n}" for n in range(100))
 
@@ -53,7 +52,7 @@ def shown(app: OrbitApp) -> tuple[str, str, str]:
 
 async def opened(session: FakeSession, pilot: Pilot[None], *tasks: TaskState) -> None:
     """Show ``tasks``, activate the list and press f on the first one."""
-    await feed(session, pilot, TasksChanged(tasks=tasks))
+    await feed_events(session, pilot, TasksChanged(tasks=tasks))
     await open_task_list(pilot)
     await pilot.press("f")
 
@@ -92,7 +91,7 @@ async def test_f_on_a_cancelled_fix_says_it_stopped_with_its_number() -> None:
     app = OrbitApp(session)
     async with app.run_test() as pilot:
         stopped = task("2", status="cancelled", reason="Cancelled by the user", fixes="1")
-        await feed(session, pilot, TasksChanged(tasks=(task("1"), stopped)))
+        await feed_events(session, pilot, TasksChanged(tasks=(task("1"), stopped)))
         await open_task_list(pilot)
         await pilot.press("j", "f")
         assert shown(app)[0] == "Why task 1.1 stopped"
@@ -145,5 +144,5 @@ async def test_it_keeps_the_task_as_opened_when_the_board_changes() -> None:
     app = OrbitApp(session)
     async with app.run_test() as pilot:
         await opened(session, pilot, task())
-        await feed(session, pilot, TasksChanged(tasks=()))
+        await feed_events(session, pilot, TasksChanged(tasks=()))
         assert shown(app)[2] == "Unit tests failed"

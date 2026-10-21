@@ -1,9 +1,7 @@
 """``orbit chat --connect``: the TUI over a control plane ``orbit serve`` runs."""
 
 import ssl
-from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, ClassVar
 
 import pytest
 from typer.testing import CliRunner
@@ -11,51 +9,14 @@ from typer.testing import CliRunner
 from orbit.cli import app
 from orbit.client import WebSocketSession, messages
 from orbit.protocol import NewSession
-from orbit.tui import Opening
+from tests.cli_fakes import FakeApp, FakeClient
 from tests.tls_certs import make_ca, make_client
 
 runner = CliRunner()
 URL = "ws://127.0.0.1:7433/"
 
 
-@dataclass
-class FakeClient:
-    """The WebSocket session built: where to, shown the token read from which file, verified
-    with which context."""
-
-    url: str
-    token_file: Path | None
-    ssl_context: ssl.SSLContext | None = None
-
-
-@dataclass
-class FakeApp:
-    """The TUI built, run once."""
-
-    built: ClassVar[list["FakeApp"]] = []
-
-    session: object
-    link: object = None
-    opening: Opening = field(default_factory=Opening)
-    storage_halt: str | None = None
-    ran: bool = field(default=False)
-
-    def __post_init__(self) -> None:
-        FakeApp.built.append(self)
-
-    def run(self) -> None:
-        self.ran = True
-
-
-@pytest.fixture(autouse=True)
-def fakes(monkeypatch: pytest.MonkeyPatch) -> None:
-    def no_backend(*args: Any, **kwargs: Any) -> None:
-        raise AssertionError("A connected chat builds no backend.")
-
-    monkeypatch.setattr("orbit.cli.chat.OrbitApp", FakeApp)
-    monkeypatch.setattr("orbit.cli.chat.WebSocketSession", FakeClient)
-    monkeypatch.setattr("orbit.cli.chat._backend", no_backend)
-    FakeApp.built = []
+pytestmark = pytest.mark.usefixtures("fakes")
 
 
 @pytest.fixture

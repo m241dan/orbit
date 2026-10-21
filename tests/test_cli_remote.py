@@ -2,7 +2,6 @@
 
 import asyncio
 from pathlib import Path
-from typing import Any
 
 import pytest
 from typer.testing import CliRunner
@@ -11,7 +10,7 @@ from orbit.agent.domain.server import ServerSettings
 from orbit.cli import app
 from orbit.client import WebSocketSession
 from orbit.protocol import NewSession, Welcome
-from tests.test_cli_connect import FakeApp, FakeClient
+from tests.cli_fakes import FakeApp, FakeClient
 from tests.test_client_tls import HELLO, control_plane
 from tests.tls_certs import make_ca, make_client, make_server
 
@@ -19,16 +18,7 @@ runner = CliRunner()
 URL = "ws://127.0.0.1:7433/"
 
 
-@pytest.fixture(autouse=True)
-def fakes(monkeypatch: pytest.MonkeyPatch, config: Path) -> None:
-    def no_backend(*args: Any, **kwargs: Any) -> None:
-        raise AssertionError("A connected chat builds no backend.")
-
-    monkeypatch.setattr("orbit.cli.chat.OrbitApp", FakeApp)
-    monkeypatch.setattr("orbit.cli.chat.WebSocketSession", FakeClient)
-    monkeypatch.setattr("orbit.cli.chat._backend", no_backend)
-    monkeypatch.setenv("ORBIT_CONFIG_DIR", str(config))
-    FakeApp.built = []
+pytestmark = pytest.mark.usefixtures("fakes", "config")
 
 
 @pytest.fixture

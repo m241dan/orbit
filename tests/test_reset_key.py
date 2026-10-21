@@ -10,7 +10,7 @@ from orbit.tui.view.common import EntryKind
 from orbit.tui.view.confirm import RESET_MESSAGE, RESET_TITLE
 from orbit.tui.view.rules import planner_reset_entry
 from orbit.tui.widgets import ConfirmScreen, PickerScreen
-from tests.test_tui import FakeSession, entries
+from tests.tui_fakes import FakeSession, entries
 
 
 async def test_ctrl_n_asks_then_resets_the_planner() -> None:

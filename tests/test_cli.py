@@ -6,12 +6,12 @@ import sqlite3
 import subprocess
 import sys
 import threading
-from collections.abc import Callable, Coroutine, Iterator
+from collections.abc import Callable, Iterator
 from contextlib import closing, contextmanager
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import Any
 
 import pytest
 import typer
@@ -56,12 +56,11 @@ from orbit.protocol import (
     Snapshot,
     TasksChanged,
     TaskSpec,
-    ThreadedSession,
     decode_event,
     encode,
 )
-from orbit.tui import Opening
 from tests.agent_fakes import greeted, queued, send, sole, startup_of, store_of
+from tests.cli_fakes import LocalApp
 from tests.conftest import OFFLINE
 from tests.store_views import open_view
 
@@ -117,77 +116,31 @@ def test_exit_on_does_nothing_without_an_error() -> None:
         pass
 
 
-class FakeApp:
-    """Starts its session, which builds the backend on its thread, and closes it."""
-
-    # The backend sessions built, the threads they were built on and their usage sources.
-    launched: ClassVar[list[WorkspaceHost]] = []
-    threads: ClassVar[list[str]] = []
-    usage_sources: ClassVar[list[UsageSource | None]] = []
-    # The files in profile_dir while each app ran async.
-    profile_dir: ClassVar[Path] = Path()
-    profiling: ClassVar[list[list[str]]] = []
-    # What each app does with the backend session while it runs, if anything.
-    during: ClassVar[Callable[[WorkspaceHost], Coroutine[Any, Any, None]] | None] = None
-    # Why each app's session is halted as it exits, if it is.
-    halted: ClassVar[str | None] = None
-    # Whether each app was to have the user pick a session at startup.
-    picks: ClassVar[list[bool]] = []
-    # The repository each app was to open on the workspace of.
-    repositories: ClassVar[list[str | None]] = []
-
-    def __init__(self, session: ThreadedSession, *, opening: Opening) -> None:
-        self.session = session
-        self.storage_halt = FakeApp.halted
-        FakeApp.picks.append(opening.pick)
-        FakeApp.repositories.append(opening.repository)
-
-    def run(self) -> None:
-        asyncio.run(self._open_and_close())
-
-    async def run_async(self) -> None:
-        await self._open_and_close()
-
-    async def _open_and_close(self) -> None:
-        self.session.start()
-        if FakeApp.profile_dir.exists():
-            FakeApp.profiling.append(sorted(p.name for p in FakeApp.profile_dir.iterdir()))
-        if FakeApp.during is not None:
-            await self._on_backend(FakeApp.during(FakeApp.launched[-1]))
-        await self.session.close()
-
-    async def _on_backend(self, work: Coroutine[Any, Any, None]) -> None:
-        """Run ``work`` on the backend's loop, where its session lives, and wait for it."""
-        backend = self.session._backend
-        assert backend is not None
-        await asyncio.wrap_future(asyncio.run_coroutine_threadsafe(work, backend.loop))
-
-
 @pytest.fixture
 def launched(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> list[WorkspaceHost]:
     def session(*args: Any, **kwargs: Any) -> WorkspaceHost:
         built = WorkspaceHost(*args, **kwargs)
-        FakeApp.launched.append(built)
-        FakeApp.threads.append(threading.current_thread().name)
+        LocalApp.launched.append(built)
+        LocalApp.threads.append(threading.current_thread().name)
         return built
 
     def plane(hosts: list[WorkspaceHost], usage: UsageSource | None = None) -> ControlPlane:
-        FakeApp.usage_sources.append(usage)
+        LocalApp.usage_sources.append(usage)
         return ControlPlane(hosts, usage)
 
-    monkeypatch.setattr("orbit.cli.chat.OrbitApp", FakeApp)
+    monkeypatch.setattr("orbit.cli.chat.OrbitApp", LocalApp)
     monkeypatch.setattr("orbit.cli.backend.WorkspaceHost", session)
     monkeypatch.setattr("orbit.cli.backend.ControlPlane", plane)
-    FakeApp.launched = []
-    FakeApp.threads = []
-    FakeApp.usage_sources = []
-    FakeApp.profile_dir = tmp_path / "profile"
-    FakeApp.profiling = []
-    FakeApp.during = None
-    FakeApp.halted = None
-    FakeApp.picks = []
-    FakeApp.repositories = []
-    return FakeApp.launched
+    LocalApp.launched = []
+    LocalApp.threads = []
+    LocalApp.usage_sources = []
+    LocalApp.profile_dir = tmp_path / "profile"
+    LocalApp.profiling = []
+    LocalApp.during = None
+    LocalApp.halted = None
+    LocalApp.picks = []
+    LocalApp.repositories = []
+    return LocalApp.launched
 
 
 @pytest.fixture(autouse=True)
@@ -219,7 +172,7 @@ def greetings(launched: list[WorkspaceHost]) -> list[Greeted]:
         notices = [e.message for e in events if isinstance(e, Notice)]
         seen.append(Greeted(notices))
 
-    FakeApp.during = greet_it
+    LocalApp.during = greet_it
     return seen
 
 
@@ -292,31 +245,6 @@ def test_a_workspace_outside_git_is_used_as_given(
     assert session.agents is not None and session.agents.tree is None
 
 
-def git(cwd: Path, *args: str) -> None:
-    subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True)
-
-
-@pytest.fixture
-def repo(tmp_path: Path) -> Path:
-    """A git repository with a commit."""
-    path = tmp_path / "repo"
-    path.mkdir()
-    git(path, "init", "-q", "-b", "main")
-    git(
-        path,
-        "-c",
-        "user.name=T",
-        "-c",
-        "user.email=t@e",
-        "commit",
-        "-q",
-        "--allow-empty",
-        "-m",
-        "x",
-    )
-    return path
-
-
 WHEN = datetime(2026, 10, 17, 14, 30, tzinfo=UTC)
 SAVED = SessionRecord(id="abc", name="auth rework", created=WHEN, last_active=WHEN)
 
@@ -376,7 +304,7 @@ def adds_tasks(*prompts: str, before_last: Callable[[], None] = lambda: None) ->
             queued(session)
         ids.append(session.saved_session.id)
 
-    FakeApp.during = add
+    LocalApp.during = add
     return ids
 
 
@@ -597,7 +525,7 @@ def orders(launched: list[WorkspaceHost]) -> list[Order]:
         notices = {e.message: n for n, e in enumerate(events) if isinstance(e, Notice)}
         seen.append(Order(snapshot, notices))
 
-    FakeApp.during = greet_it
+    LocalApp.during = greet_it
     return seen
 
 
@@ -683,7 +611,7 @@ def test_two_orbits_with_one_state_directory_cant_open_one_session_at_once(
         finally:
             await other.close()
 
-    FakeApp.during = open_twice
+    LocalApp.during = open_twice
     assert runner.invoke(app, ["chat", "-C", str(tmp_path)]).exit_code == 0
     assert taken == [True, False]
 
@@ -700,7 +628,7 @@ def test_a_session_saved_opens_again_after_a_restart(
         loaded.append(await store_in(session).load("abc"))
 
     for during in (save, load):
-        FakeApp.during = during
+        LocalApp.during = during
         assert runner.invoke(app, ["chat", "-C", str(tmp_path)]).exit_code == 0
     assert loaded == [SAVED]
 
@@ -731,7 +659,7 @@ def test_chat_builds_the_backend_on_its_own_thread(launched: list[WorkspaceHost]
     assert runner.invoke(app, ["chat"]).exit_code == 0
 
     assert len(launched) == 1
-    assert FakeApp.threads == ["orbit-backend"]
+    assert LocalApp.threads == ["orbit-backend"]
 
 
 def test_chat_runs_tui_against_claude_cli(launched: list[WorkspaceHost]) -> None:
@@ -753,8 +681,8 @@ def test_chat_has_the_user_pick_a_session_at_startup(
     assert runner.invoke(app, ["chat"]).exit_code == 0
 
     assert len(greetings) == 1
-    assert FakeApp.picks == [True]
-    assert FakeApp.repositories == [str(tmp_path.resolve())]
+    assert LocalApp.picks == [True]
+    assert LocalApp.repositories == [str(tmp_path.resolve())]
 
 
 def test_chat_new_starts_a_new_session_named_for_the_time(
@@ -768,7 +696,7 @@ def test_chat_new_starts_a_new_session_named_for_the_time(
 
     [session] = launched
     assert len(greetings) == 1
-    assert FakeApp.picks == [False]
+    assert LocalApp.picks == [False]
     assert session.saved_session.name == default_name(session.saved_session.created)
 
 
@@ -783,7 +711,7 @@ def test_chat_name_starts_a_new_session_with_that_name(
 
     [session] = launched
     assert len(greetings) == 1
-    assert FakeApp.picks == [False]
+    assert LocalApp.picks == [False]
     assert session.saved_session.name == "auth rework"
 
 
@@ -1048,7 +976,7 @@ def test_chat_checks_the_steps_at_startup(
 @pytest.fixture
 def usage_sources(launched: list[WorkspaceHost]) -> list[UsageSource | None]:
     """The usage sources chat gives its sessions."""
-    return FakeApp.usage_sources
+    return LocalApp.usage_sources
 
 
 def test_chat_shows_usage_limits_from_the_claude_login(
@@ -1091,8 +1019,8 @@ def test_chat_can_profile_the_app(
     # The directory is relative to where chat started, not the workspace. The app and the
     # backend ran while their loops were watched, and the profile, which sees both threads,
     # was written when the app ended.
-    assert FakeApp.profiling == [["backend-blocked.log", "ui-blocked.log"]]
-    assert sorted(p.name for p in FakeApp.profile_dir.iterdir()) == [
+    assert LocalApp.profiling == [["backend-blocked.log", "ui-blocked.log"]]
+    assert sorted(p.name for p in LocalApp.profile_dir.iterdir()) == [
         "backend-blocked.log",
         "ui-blocked.log",
         "ui.prof",
@@ -1108,15 +1036,15 @@ def test_chat_runs_the_app_unprofiled_by_default(
     assert runner.invoke(app, ["chat"]).exit_code == 0
 
     assert len(launched) == 1
-    assert FakeApp.profiling == []
-    assert not FakeApp.profile_dir.exists()
+    assert LocalApp.profiling == []
+    assert not LocalApp.profile_dir.exists()
 
 
 def test_exiting_while_halted_prints_why_to_stderr(
     launched: list[WorkspaceHost], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.chdir(tmp_path)
-    FakeApp.halted = "Orbit stopped this session: saving the event log failed."
+    LocalApp.halted = "Orbit stopped this session: saving the event log failed."
     result = runner.invoke(app, ["chat"])
 
     assert result.exit_code == 0
@@ -1127,7 +1055,7 @@ def test_exiting_while_halted_after_profiling_prints_why_too(
     launched: list[WorkspaceHost], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.chdir(tmp_path)
-    FakeApp.halted = "Halted."
+    LocalApp.halted = "Halted."
     result = runner.invoke(app, ["chat", "--profile", "profile"])
 
     assert result.stderr == "Halted.\n"
@@ -1287,7 +1215,7 @@ def standings(launched: list[WorkspaceHost]) -> list[Standing]:
         [workspace] = catalog.workspaces
         seen.append(Standing(workspace.read_only, snapshot.read_only, notices))
 
-    FakeApp.during = greet_it
+    LocalApp.during = greet_it
     return seen
 
 
@@ -1331,7 +1259,7 @@ def test_a_chat_owns_a_repository_no_other_orbit_holds_until_it_ends(
     async def try_to_take(session: WorkspaceHost) -> None:
         refused.append(WorkspaceLock(tmp_path / ".orbit").take())
 
-    FakeApp.during = try_to_take
+    LocalApp.during = try_to_take
     assert runner.invoke(app, ["chat", "-C", str(tmp_path)]).exit_code == 0
 
     [session] = launched

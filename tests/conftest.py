@@ -13,6 +13,9 @@ from orbit.agent.external.usage_api import UsageApi
 # tests check where it lands, not the slide. Set before Textual is imported, which reads it then.
 os.environ.setdefault("TEXTUAL_ANIMATIONS", "none")
 
+# Fixtures more than one test module uses.
+pytest_plugins = ["tests.cli_fakes", "tests.git_repo"]
+
 
 def pytest_xdist_auto_num_workers(config: pytest.Config) -> int | None:
     """Twice as many workers as CPUs for ``-n auto``, unless

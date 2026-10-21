@@ -36,7 +36,7 @@ from orbit.tui.view.log import Entry
 from orbit.tui.view.tool_calls import REPLY_LIMIT
 from orbit.tui.view.transcript import GUTTER_BAR, GUTTER_MARKER, PROMPT_MARKER
 from orbit.tui.widgets import ChatPrompt
-from tests.test_tui import STRIP, FakeSession, feed_events, said, started, tab_strip
+from tests.tui_fakes import STRIP, FakeSession, feed_events, said, started, tab_strip
 
 # Wraps in any window a test opens. At 40 columns a row beside the gutter holds two words but
 # would hold three if wrapped at the full width, so cropping a row would lose text.

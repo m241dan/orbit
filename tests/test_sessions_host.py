@@ -24,7 +24,7 @@ from orbit.tui.sessions import (
 )
 from orbit.tui.view.sessions import chosen_workspace
 from orbit.tui.widgets import ConfirmScreen
-from tests.test_tui import opened
+from tests.tui_fakes import opened
 
 OLD = SessionSummary(id="old", name="auth rework")
 NOW = SessionSummary(id="now", name="today", current=True, active=True, viewers=1)

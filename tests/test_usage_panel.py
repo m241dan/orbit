@@ -5,8 +5,7 @@ from textual.widgets import Static
 from orbit.protocol import UsageChanged, UsageLimit
 from orbit.tui import OrbitApp
 from orbit.tui.panels import UsagePanel
-from tests.test_task_list import feed
-from tests.test_tui import FakeSession
+from tests.tui_fakes import FakeSession, feed_events
 
 NOW = datetime(2026, 10, 16, 9, 0, tzinfo=UTC)
 USAGE = UsageChanged(
@@ -41,7 +40,7 @@ async def test_panel_shows_usage_once_reported() -> None:
     async with app.run_test(size=(120, 30)) as pilot:
         panel = app.query_one(UsagePanel)
         panel.now = lambda: NOW
-        await feed(session, pilot, USAGE)
+        await feed_events(session, pilot, USAGE)
         assert panel.display
         header, bar = rows(app)
         assert header == "Session  50%  resets 3:40pm"
@@ -62,7 +61,7 @@ async def test_panel_redraws_its_bar_to_fit_a_resize() -> None:
     app = OrbitApp(session)
     async with app.run_test(size=(90, 30)) as pilot:
         app.query_one(UsagePanel).now = lambda: NOW
-        await feed(session, pilot, USAGE)
+        await feed_events(session, pilot, USAGE)
         narrow = len(rows(app)[1])
         await pilot.resize_terminal(150, 30)
         await pilot.pause()
@@ -78,7 +77,7 @@ async def test_panel_redraws_its_reset_times_as_the_clock_moves() -> None:
         panel = app.query_one(UsagePanel)
         now = [NOW]
         panel.now = lambda: now[0]
-        await feed(session, pilot, USAGE)
+        await feed_events(session, pilot, USAGE)
         now[0] = datetime(2026, 10, 15, 9, 0, tzinfo=UTC)
         panel.tick()
         assert rows(app)[0] == "Session  50%  resets Fri 3:40pm"
