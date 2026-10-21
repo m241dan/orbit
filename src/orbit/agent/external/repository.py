@@ -1,24 +1,28 @@
 """The git repository a workspace is in: its top level, its shared git directory, what
 identifies it, whether git has an identity for commits in it, and orbit's directory in it."""
 
-import subprocess
 from pathlib import Path
+
+from orbit.agent.external.git import GitResult, GitUnavailable, git, git_sync
 
 # Orbit's directory in the repository's shared git directory: the coder's worktree, review
 # snapshots, leftovers and fallback files live in it, and older orbits' session files until
 # they are imported.
 ORBIT_DIR = "orbit"
+_COMMON_DIR = ("rev-parse", "--path-format=absolute", "--git-common-dir")
+
+
+def _answer(result: GitResult) -> str | None:
+    """What ``result``'s git printed, stripped; ``None`` when it failed."""
+    return result.text if result.ok else None
 
 
 def _git_query(path: str, *args: str) -> str | None:
-    """What ``git args`` prints in ``path``, stripped; ``None`` when it fails or git is missing."""
+    """What ``git args`` prints in ``path``, stripped; ``None`` when it fails or can't be run."""
     try:
-        result = subprocess.run(
-            ("git", *args), cwd=path, capture_output=True, text=True, check=False
-        )
-    except FileNotFoundError:
+        return _answer(git_sync(path, *args, stderr=False))
+    except GitUnavailable:
         return None
-    return result.stdout.strip() if result.returncode == 0 else None
 
 
 def in_git_work_tree(path: str) -> bool:
@@ -34,7 +38,15 @@ def git_top_level(path: str) -> str | None:
 def git_common_dir(path: str) -> str | None:
     """The git directory the repository ``path`` is in shares among its worktrees; none outside
     one (or without git)."""
-    return _git_query(path, "rev-parse", "--path-format=absolute", "--git-common-dir")
+    return _git_query(path, *_COMMON_DIR)
+
+
+async def find_git_common_dir(path: str) -> str | None:
+    """:func:`git_common_dir`, without blocking."""
+    try:
+        return _answer(await git(path, *_COMMON_DIR, stderr=False))
+    except GitUnavailable:
+        return None
 
 
 def has_git_identity(path: str) -> bool:

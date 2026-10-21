@@ -2,6 +2,7 @@
 saved as files, then, if this orbit owns the workspace, recovering the events an earlier run
 parked in fallback files."""
 
+import asyncio
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -44,17 +45,17 @@ async def open_workspace_store(store: SqliteStore, root: Path, *, owned: bool) -
     """
     workspace_id = await WorkspaceRegistry(store).find_or_register(str(root))
     view = store.workspace_view(workspace_id)
-    fallback = FallbackFiles(store.state_dir, workspace_id, orbit_dir(str(root)))
-    opened = OpenedStore(view, await _imported(view, root), fallback, root)
+    orbit = await asyncio.to_thread(orbit_dir, str(root))
+    fallback = FallbackFiles(store.state_dir, workspace_id, orbit)
+    opened = OpenedStore(view, await _imported(view, orbit, root), fallback, root)
     if not owned:
         return opened
     return replace(opened, notes=opened.notes + await opened.recover())
 
 
-async def _imported(store: WorkspaceStore, root: Path) -> list[str]:
-    """Import into ``store`` the old session files of the workspace at ``root``; returns the
-    notes on what was imported."""
-    legacy = orbit_dir(str(root))
+async def _imported(store: WorkspaceStore, legacy: Path, root: Path) -> list[str]:
+    """Import into ``store`` the old session files in ``legacy``, orbit's directory for the
+    workspace at ``root``; returns the notes on what was imported."""
     imported = await import_session_files(store, legacy)
     return [] if imported is None else [imported_note(imported, _shown(legacy, root))]
 

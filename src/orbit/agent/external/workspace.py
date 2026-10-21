@@ -4,7 +4,7 @@ import asyncio
 import os
 from pathlib import Path
 
-from orbit.agent.external.processes import run_process
+from orbit.agent.external.git import GitUnavailable, git
 
 WorkspaceState = frozenset[tuple[str, int, int]]
 
@@ -17,16 +17,14 @@ async def workspace_state(root: Path | str = ".") -> WorkspaceState | None:
     can't tell whether anything changed.
     """
     try:
-        returncode, output = await run_process(
-            ("git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"),
-            root,
-            stderr=asyncio.subprocess.DEVNULL,
+        result = await git(
+            root, "ls-files", "-z", "--cached", "--others", "--exclude-standard", stderr=False
         )
-    except FileNotFoundError:
+    except GitUnavailable:
         return None
-    if returncode != 0:
+    if not result.ok:
         return None
-    paths = {p for p in output.decode(errors="surrogateescape").split("\0") if p}
+    paths = {p for p in result.output.decode(errors="surrogateescape").split("\0") if p}
     return await asyncio.to_thread(_fingerprints, Path(root), paths)
 
 

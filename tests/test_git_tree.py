@@ -4,7 +4,6 @@ import asyncio
 import subprocess
 import sys
 import threading
-from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -12,8 +11,10 @@ import pytest
 
 from orbit.agent.domain.checks import Setup
 from orbit.agent.external import git_tree
+from orbit.agent.external.git import GitResult, GitUnavailable
+from orbit.agent.external.git import git as run_git
 from orbit.agent.external.git_tree import GitCoderTree
-from orbit.agent.external.processes import run_process
+from orbit.agent.external.repository import find_git_common_dir
 from tests.git_repo import commit_file, git
 
 
@@ -239,17 +240,17 @@ async def test_a_rebase_cancelled_while_running_is_aborted(
     await tree.commit("Orbit edits a")
     before = git(path, "rev-parse", "HEAD")
     commit_file(repo, "a.txt", "user\n", "user edits a")
-    real = git_tree._run
+    real = run_git
     rebasing = asyncio.Event()
 
-    async def hanging_rebase(command: Sequence[str], cwd: Path) -> tuple[bool, str]:
-        result = await real(command, cwd)
-        if command[:2] == ("git", "rebase") and "--abort" not in command:
+    async def hanging_rebase(cwd: Path | str, *args: str) -> GitResult:
+        result = await real(cwd, *args)
+        if args[0] == "rebase" and "--abort" not in args:
             rebasing.set()  # Stopped at its conflict, as if still running when cancelled.
             await asyncio.Event().wait()
         return result
 
-    monkeypatch.setattr(git_tree, "_run", hanging_rebase)
+    monkeypatch.setattr(git_tree, "git", hanging_rebase)
     task = asyncio.create_task(tree.integrate())
     await rebasing.wait()
     assert (repo / ".git" / "worktrees" / "coder" / "rebase-merge").exists()
@@ -270,19 +271,19 @@ async def test_a_rebase_cancelled_while_handling_its_conflict_is_still_aborted(
     await tree.commit("Orbit edits a")
     before = git(path, "rev-parse", "HEAD")
     commit_file(repo, "a.txt", "user\n", "user edits a")
-    real = run_process
+    real = run_git
     listing, aborting, release = asyncio.Event(), asyncio.Event(), asyncio.Event()
 
-    async def slow_conflict_handling(command: Sequence[str], cwd: Path | str) -> tuple[int, bytes]:
-        if command[1] == "diff":
+    async def slow_conflict_handling(cwd: Path | str, *args: str) -> GitResult:
+        if args[0] == "diff":
             listing.set()
             await asyncio.Event().wait()
-        if tuple(command[1:]) == ("rebase", "--abort"):
+        if args == ("rebase", "--abort"):
             aborting.set()
             await release.wait()
-        return await real(command, cwd)
+        return await real(cwd, *args)
 
-    monkeypatch.setattr(git_tree, "run_process", slow_conflict_handling)
+    monkeypatch.setattr(git_tree, "git", slow_conflict_handling)
     task = asyncio.create_task(tree.integrate())
     await listing.wait()
     task.cancel()
@@ -305,16 +306,16 @@ async def test_a_failing_abort_doesnt_hide_why_the_rebase_failed(
     (path / "a.txt").write_text("orbit\n")
     await tree.commit("Orbit edits a")
     commit_file(repo, "a.txt", "user\n", "user edits a")
-    real = run_process
+    real = run_git
 
-    async def failing(command: Sequence[str], cwd: Path | str) -> tuple[int, bytes]:
-        if command[1] == "diff":
-            return 128, b"out of memory"
-        if tuple(command[1:]) == ("rebase", "--abort"):
-            return 128, b"abort failed too"
-        return await real(command, cwd)
+    async def failing(cwd: Path | str, *args: str) -> GitResult:
+        if args[0] == "diff":
+            return GitResult(128, b"out of memory")
+        if args == ("rebase", "--abort"):
+            return GitResult(128, b"abort failed too")
+        return await real(cwd, *args)
 
-    monkeypatch.setattr(git_tree, "run_process", failing)
+    monkeypatch.setattr(git_tree, "git", failing)
     with pytest.raises(RuntimeError, match="out of memory"):
         await tree.integrate()
 
@@ -707,14 +708,14 @@ async def test_a_failing_cleanup_doesnt_hide_why_the_snapshot_failed(
     monkeypatch: pytest.MonkeyPatch, repo: Path
 ) -> None:
     failing_add(monkeypatch, after=False)
-    real_run = git_tree._run
+    real = run_git
 
-    async def no_remove(command: Sequence[str], cwd: Path) -> tuple[bool, str]:
-        if tuple(command[1:3]) == ("worktree", "remove"):
-            raise RuntimeError("git worktree failed to start")
-        return await real_run(command, cwd)
+    async def no_remove(cwd: Path | str, *args: str) -> GitResult:
+        if args[:2] == ("worktree", "remove"):
+            raise GitUnavailable("git worktree failed to start")
+        return await real(cwd, *args)
 
-    monkeypatch.setattr(git_tree, "_run", no_remove)
+    monkeypatch.setattr(git_tree, "git", no_remove)
     tree = GitCoderTree(str(repo))
     with pytest.raises(RuntimeError, match=r"index\.lock"):
         await tree.snapshot("HEAD")
@@ -984,3 +985,33 @@ async def test_a_setup_swapped_in_runs_at_the_next_prepare(repo: Path) -> None:
     tree.use_setup(None)
     await tree.prepare(keep=False)
     assert runs.read_text() == "x"
+
+
+async def test_a_missing_root_isnt_in_a_repository(tmp_path: Path) -> None:
+    missing = tmp_path / "missing"
+    with pytest.raises(RuntimeError, match=f"{missing} isn't in a git repository"):
+        await GitCoderTree(str(missing)).head()
+
+
+async def test_the_repositorys_git_directory_is_found_once(
+    monkeypatch: pytest.MonkeyPatch, repo: Path
+) -> None:
+    found: list[str] = []
+    real = find_git_common_dir
+
+    async def counting(path: str) -> str | None:
+        found.append(path)
+        return await real(path)
+
+    monkeypatch.setattr(git_tree, "find_git_common_dir", counting)
+    tree = GitCoderTree(str(repo))
+    await tree.prepare(keep=False)
+    await tree.head()
+    await tree.leftovers()
+    assert found == [str(repo)]
+
+
+async def test_a_setup_that_cant_start_raises_runtime_error(repo: Path) -> None:
+    tree = GitCoderTree(str(repo), Setup(command=("orbit-no-such-command", "--sync")))
+    with pytest.raises(RuntimeError, match="orbit-no-such-command --sync failed to start"):
+        await tree.prepare(keep=False)

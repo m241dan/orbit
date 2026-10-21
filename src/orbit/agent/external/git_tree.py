@@ -17,8 +17,9 @@ from pathlib import Path
 
 from orbit.agent.application.ports import Merge
 from orbit.agent.domain.checks import Setup
+from orbit.agent.external.git import git
 from orbit.agent.external.processes import run_process
-from orbit.agent.external.repository import ORBIT_DIR, git_common_dir
+from orbit.agent.external.repository import ORBIT_DIR, find_git_common_dir
 
 BRANCH = "orbit/coder"
 STASH_MESSAGE = "orbit: unverified work"
@@ -27,8 +28,9 @@ IGNORE_HEADER = "# Created by orbit's verification checks:"
 SNAPSHOT_PREFIXES = ("snapshot-", "review-")
 
 
-async def _run_status(command: Sequence[str], cwd: Path) -> tuple[int, str]:
-    """Run ``command`` in ``cwd``; returns its exit status and its combined output.
+async def _run_setup(command: Sequence[str], cwd: Path) -> tuple[bool, str]:
+    """Run the setup ``command`` in ``cwd``; returns whether it succeeded and its combined
+    output.
 
     Raises ``RuntimeError`` when it can't be started, such as in a directory that isn't there.
     """
@@ -36,16 +38,7 @@ async def _run_status(command: Sequence[str], cwd: Path) -> tuple[int, str]:
         returncode, output = await run_process(command, cwd)
     except OSError as error:
         raise RuntimeError(f"{' '.join(command[:2])} failed to start in {cwd}: {error}") from error
-    return returncode, output.decode(errors="replace").strip()
-
-
-async def _run(command: Sequence[str], cwd: Path) -> tuple[bool, str]:
-    """Run ``command`` in ``cwd``; returns whether it succeeded and its combined output.
-
-    Raises ``RuntimeError`` when it can't be started, such as in a directory that isn't there.
-    """
-    returncode, output = await _run_status(command, cwd)
-    return returncode == 0, output
+    return returncode == 0, output.decode(errors="replace").strip()
 
 
 def _fingerprint(setup: Setup, path: Path) -> str:
@@ -121,6 +114,7 @@ class GitCoderTree:
         self._started = False
         self._base: str | None = None
         self._snapshots: set[Path] = set()
+        self._common: Path | None = None
 
     async def prepare(self, keep: bool) -> str:
         if not self._started:
@@ -134,12 +128,12 @@ class GitCoderTree:
         return str(path)
 
     async def commit(self, message: str) -> bool:
-        path = await self._path()
+        path = await self._coder()
         await self._git(path, "add", "-A")
-        status, output = await _run_status(("git", "diff", "--cached", "--quiet"), path)
-        if status not in (0, 1):  # 0: nothing staged, 1: something is.
-            raise RuntimeError(f"git diff failed: {output}")
-        if status == 0:
+        staged = await git(path, "diff", "--cached", "--quiet")
+        if staged.status not in (0, 1):  # 0: nothing staged, 1: something is.
+            raise RuntimeError(f"git diff failed: {staged.text}")
+        if staged.ok:
             return False
         await self._git(path, "commit", "-q", "-m", message)
         return True
@@ -152,17 +146,17 @@ class GitCoderTree:
         if await self._is_ancestor(coder, base):
             return Merge("merged")
         if not await self._is_ancestor(base, coder):
-            return await self._rebase(await self._path(), base)
+            return await self._rebase(await self._coder(), base)
         return await self._fast_forward(base, coder)
 
     async def holds_work(self) -> bool:
-        path = await self._path()
+        path = await self._coder()
         if await self._dirty(path):
             return True
         return not await self._is_ancestor("HEAD", await self.base_commit(), path)
 
     async def head(self) -> str:
-        return await self._git(await self._path(), "rev-parse", "HEAD")
+        return await self._git(await self._coder(), "rev-parse", "HEAD")
 
     async def base_commit(self) -> str:
         base = await self._base_branch()
@@ -173,8 +167,7 @@ class GitCoderTree:
 
     async def snapshot(self, commit: str) -> str:
         sha = await self._git(self._root, "rev-parse", "--verify", "-q", f"{commit}^{{commit}}")
-        parent = (await self._path()).parent
-        path = await self._new_snapshot_dir(parent, sha)
+        path = await self._new_snapshot_dir(await self._snapshots_dir(), sha)
         self._snapshots.add(path)
         try:
             await self._git(self._root, "worktree", "add", "-q", "--detach", str(path), sha)
@@ -206,21 +199,19 @@ class GitCoderTree:
         stopped it is the one raised."""
         try:
             with contextlib.suppress(RuntimeError):
-                remove = ("git", "worktree", "remove", "--force", "--force", str(path))
-                await _run(remove, self._root)
+                await git(self._root, "worktree", "remove", "--force", "--force", str(path))
             await asyncio.to_thread(shutil.rmtree, path, ignore_errors=True)
         finally:
             self._snapshots.discard(path)
 
     async def untracked(self) -> frozenset[str]:
         listed = await self._git(
-            await self._path(), "ls-files", "--others", "--exclude-standard", "--directory"
+            await self._coder(), "ls-files", "--others", "--exclude-standard", "--directory"
         )
         return frozenset(listed.splitlines())
 
     async def ignore(self, paths: Collection[str]) -> None:
-        exclude = (await self._path()).parent.parent / "info" / "exclude"
-        await asyncio.to_thread(_add_ignores, exclude, paths)
+        await asyncio.to_thread(_add_ignores, await self._exclude(), paths)
 
     def use_setup(self, setup: Setup | None) -> None:
         self.setup = setup
@@ -244,8 +235,8 @@ class GitCoderTree:
         return f"{count} stash(es) of unverified orbit work; see git stash list." if count else None
 
     async def _stale_snapshots(self) -> str | None:
-        parent = (await self._path()).parent
-        count = len(await asyncio.to_thread(_snapshot_dirs, parent) - self._snapshots)
+        snapshots = await asyncio.to_thread(_snapshot_dirs, await self._snapshots_dir())
+        count = len(snapshots - self._snapshots)
         if not count:
             return None
         return (
@@ -256,7 +247,7 @@ class GitCoderTree:
     # Steps of prepare
 
     async def _ensure(self) -> Path:
-        path = await self._path()
+        path = await self._coder()
         if await asyncio.to_thread((path / ".git").exists):
             await self._abort_rebase(path)  # One an interrupted run left, so its work survives.
             return path
@@ -290,10 +281,10 @@ class GitCoderTree:
         if self.setup is None:
             return
         digest = await asyncio.to_thread(_fingerprint, self.setup, path)
-        stamp = path.parent / "coder.synced"
+        stamp = await self._stamp()
         if await asyncio.to_thread(_read_stamp, stamp) == digest:
             return
-        ok, output = await _run(self.setup.command, path)
+        ok, output = await _run_setup(self.setup.command, path)
         if not ok:
             raise RuntimeError(f"Setting up the coder's tree failed: {output}")
         try:
@@ -309,14 +300,14 @@ class GitCoderTree:
         Raises ``RuntimeError`` with git's own message when the rebase fails without one.
         """
         try:
-            ok, output = await _run(("git", "rebase", "-q", base), path)
-            if ok:
+            rebase = await git(path, "rebase", "-q", base)
+            if rebase.ok:
                 return Merge("rebased")
             conflicts = await self._git(path, "diff", "--name-only", "--diff-filter=U")
         finally:  # Cancelled or failed too: never leave the tree mid-rebase.
             await self._abort_rebase_shielded(path)
         if not conflicts:
-            raise RuntimeError(f"git rebase failed: {output}")
+            raise RuntimeError(f"git rebase failed: {rebase.text}")
         files = ", ".join(conflicts.splitlines())
         return Merge("conflict", f"The work on {BRANCH} conflicts with {self._base}: {files}.")
 
@@ -348,8 +339,8 @@ class GitCoderTree:
     async def _fast_forward(self, base: str, coder: str) -> Merge:
         assert self._base is not None
         if await self._checked_out() == self._base:
-            ok, output = await _run(("git", "merge", "-q", "--ff-only", BRANCH), self._root)
-            return Merge("merged") if ok else Merge("blocked", output)
+            merge = await git(self._root, "merge", "-q", "--ff-only", BRANCH)
+            return Merge("merged") if merge.ok else Merge("blocked", merge.text)
         # Not checked out any more: move the branch, only if nobody else has.
         await self._git(self._root, "update-ref", f"refs/heads/{self._base}", coder, base)
         return Merge("merged")
@@ -357,16 +348,39 @@ class GitCoderTree:
     # Git
 
     async def _git(self, cwd: Path, *args: str) -> str:
-        ok, output = await _run(("git", *args), cwd)
-        if not ok:
-            raise RuntimeError(f"git {args[0]} failed: {output}")
-        return output
+        result = await git(cwd, *args)
+        if not result.ok:
+            raise RuntimeError(f"git {args[0]} failed: {result.text}")
+        return result.text
 
-    async def _path(self) -> Path:
-        common = await asyncio.to_thread(git_common_dir, str(self._root))
-        if common is None:
-            raise RuntimeError(f"{self._root} isn't in a git repository, or git can't be run.")
-        return Path(common) / ORBIT_DIR / "coder"
+    # Paths
+
+    async def _common_dir(self) -> Path:
+        """The repository's shared git directory, found once."""
+        if self._common is None:
+            common = await find_git_common_dir(str(self._root))
+            if common is None:
+                raise RuntimeError(f"{self._root} isn't in a git repository, or git can't be run.")
+            self._common = Path(common)
+        return self._common
+
+    async def _snapshots_dir(self) -> Path:
+        """Orbit's directory in the repository, where the coder's tree and snapshots live."""
+        return await self._common_dir() / ORBIT_DIR
+
+    async def _coder(self) -> Path:
+        """The coder's tree."""
+        return await self._snapshots_dir() / "coder"
+
+    async def _stamp(self) -> Path:
+        """The record of the setup last run in the coder's tree."""
+        return await self._snapshots_dir() / "coder.synced"
+
+    async def _exclude(self) -> Path:
+        """The repository's git exclude file."""
+        return await self._common_dir() / "info" / "exclude"
+
+    # Refs
 
     async def _base_branch(self) -> str | None:
         """The base branch: the one checked out when the tree started, or now, before it has."""
@@ -374,21 +388,17 @@ class GitCoderTree:
 
     async def _checked_out(self) -> str | None:
         """The branch the main checkout is on; ``None`` on a detached HEAD."""
-        ok, output = await _run(("git", "symbolic-ref", "--short", "-q", "HEAD"), self._root)
-        return output if ok else None
+        result = await git(self._root, "symbolic-ref", "--short", "-q", "HEAD")
+        return result.text if result.ok else None
 
     async def _tip(self, branch: str) -> str:
         return await self._git(self._root, "rev-parse", f"refs/heads/{branch}")
 
     async def _exists(self, branch: str) -> bool:
-        ok, _ = await _run(
-            ("git", "rev-parse", "--verify", "-q", f"refs/heads/{branch}"), self._root
-        )
-        return ok
+        return (await git(self._root, "rev-parse", "--verify", "-q", f"refs/heads/{branch}")).ok
 
     async def _is_ancestor(self, older: str, newer: str, cwd: Path | None = None) -> bool:
-        ok, _ = await _run(("git", "merge-base", "--is-ancestor", older, newer), cwd or self._root)
-        return ok
+        return (await git(cwd or self._root, "merge-base", "--is-ancestor", older, newer)).ok
 
     async def _dirty(self, path: Path) -> bool:
         return bool(await self._git(path, "status", "--porcelain"))

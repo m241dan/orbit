@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from orbit.agent.external.repository import (
+    find_git_common_dir,
     git_common_dir,
     git_top_level,
     has_git_identity,
@@ -132,3 +133,16 @@ def test_orbits_directory_without_git_is_in_the_workspace(
 
     monkeypatch.setattr(subprocess, "run", missing)
     assert orbit_dir(str(repo)) == repo / ".orbit"
+
+
+async def test_the_common_dir_is_found_without_blocking(repo: Path, outside: Path) -> None:
+    assert await find_git_common_dir(str(repo)) == str(repo.resolve() / ".git")
+    assert await find_git_common_dir(str(outside)) is None
+    assert await find_git_common_dir(str(outside / "missing")) is None
+
+
+def test_a_missing_directory_is_not_in_a_repository(outside: Path) -> None:
+    missing = outside / "missing"
+    assert not in_git_work_tree(str(missing))
+    assert git_common_dir(str(missing)) is None
+    assert orbit_dir(str(missing)) == missing / ".orbit"
