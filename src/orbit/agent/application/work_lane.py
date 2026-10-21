@@ -128,20 +128,16 @@ class WorkLane:
 
     async def _run_current(self, task_id: str) -> Outcome:
         """Run task ``task_id`` through a new agent; returns how it ended."""
-        await self._tasks.start(task_id)
-        if self.startup is not None:
-            self.startup.release_panel()
-        if self._verifier is not None:
-            await self._verifier.reset()
-        await self._publish(TaskStarted(task_id=task_id))
         default = Outcome("error", reason=BUG)  # What a bug in the run leaves the task as.
         outcome = await see_to_end(self._tasks, task_id, default, self._outcome(task_id))
         await self._report_to_review(task_id)
         return outcome
 
     async def _outcome(self, task_id: str) -> Outcome:
-        """How task ``task_id``'s run through an agent ended; anything unexpected escapes."""
+        """How task ``task_id``'s run through an agent, from its start, ended; anything
+        unexpected escapes."""
         try:
+            await self._start(task_id)
             return await self._run_agent(task_id)
         except asyncio.CancelledError:
             if self._verifier is not None:
@@ -150,6 +146,16 @@ class WorkLane:
             return ended("cancelled", (STOPPED_BY_YOU if self._stopped else CANCELLED, ""))
         except RuntimeError as exc:  # Git or the tree's setup failed.
             return await tree_failed(self._publish, exc)
+
+    async def _start(self, task_id: str) -> None:
+        """Mark task ``task_id`` running, with every verification step pending again, and say
+        it started."""
+        await self._tasks.start(task_id)
+        if self.startup is not None:
+            self.startup.release_panel()
+        if self._verifier is not None:
+            await self._verifier.reset()
+        await self._publish(TaskStarted(task_id=task_id))
 
     async def _report_to_review(self, task_id: str) -> None:
         """Tell the review lane how task ``task_id`` ended."""

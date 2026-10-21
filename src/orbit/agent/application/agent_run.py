@@ -101,7 +101,8 @@ async def see_to_end(
 ) -> Outcome:
     """The ``outcome`` task ``task_id`` of ``tasks`` reached, recorded as its end. It ends as
     ``default`` if ``outcome`` is cancelled, and in error, re-raised, if ``outcome`` breaks on a
-    bug: a task left running could never be run or dropped."""
+    bug: a task left running could never be run or dropped. So ``outcome`` is what starts the
+    task, leaving no await between its start and this guard."""
     reached = default
     try:
         reached = await outcome

@@ -282,23 +282,23 @@ class ReviewLane:
         return {t for t, b in self._batches.items() if not self.planner.filling(b)}
 
     async def _review(self, task_id: str) -> None:
-        job = self._jobs.get(task_id)
-        await self._tasks.start(task_id)
         default = ended("cancelled", (CANCELLED, ""))  # What the lane stopping leaves it as.
-        reviewer = asyncio.create_task(
-            self._run_reviewer(task_id, job.commits[-1] if job else None)
-        )
-        self._current = (task_id, reviewer)
         try:  # Even a bug ends the review, or its batch would stay open.
-            await see_to_end(self._tasks, task_id, default, self._outcome(reviewer))
+            await see_to_end(self._tasks, task_id, default, self._outcome(task_id))
         finally:
             if not _being_cancelled():  # The lane stopping leaves its batches as they are.
                 await self._after(self._batches.get(task_id))
 
-    async def _outcome(self, reviewer: asyncio.Task[Outcome]) -> Outcome:
-        """How the review ``reviewer`` ended, which is no longer the current one; anything
-        unexpected escapes."""
+    async def _outcome(self, task_id: str) -> Outcome:
+        """How review ``task_id``, from its start, ended, after which it's no longer the
+        current one; anything unexpected escapes."""
         try:
+            await self._tasks.start(task_id)
+            job = self._jobs.get(task_id)
+            reviewer = asyncio.create_task(
+                self._run_reviewer(task_id, job.commits[-1] if job else None)
+            )
+            self._current = (task_id, reviewer)
             return await reviewer
         except asyncio.CancelledError:
             if _being_cancelled():  # The lane itself is stopping, not just this review.
