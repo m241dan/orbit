@@ -3,7 +3,7 @@ handshake that would fail the same way again reported with what's wrong and the 
 
 import asyncio
 import ssl
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -15,6 +15,7 @@ from orbit.agent import ControlPlane, WorkspaceHost
 from orbit.agent.domain.server import ServerSettings, client_fingerprint
 from orbit.agent.external.control_plane import ControlPlaneServer
 from orbit.client import (
+    Backoff,
     CaUnreadable,
     ClientCertUnusable,
     PlaintextRefused,
@@ -34,6 +35,7 @@ from orbit.protocol import (
     HandshakeFailed,
     Hello,
     LinkState,
+    Reconnecting,
     Welcome,
 )
 from tests.tls_certs import DAY, Ca, ServerFiles, make_ca, make_client, make_server, other_key
@@ -73,16 +75,23 @@ async def control_plane(settings: ServerSettings) -> AsyncIterator[int]:
 
 
 @asynccontextmanager
-async def tls_server(files: ServerFiles) -> AsyncIterator[int]:
-    """A WebSocket server showing the certificate in ``files``, and its port."""
-    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-    context.load_cert_chain(files.cert, files.key)
+async def tls_server(files: ServerFiles, port: int = 0) -> AsyncIterator[int]:
+    """A WebSocket server showing the certificate in ``files``, on ``port``, or any free one,
+    and its port."""
+    context = _server_context(files)
 
     async def handle(connection: ServerConnection) -> None:
         await connection.wait_closed()
 
-    async with serve(handle, "127.0.0.1", 0, ssl=context) as server:
+    async with serve(handle, "127.0.0.1", port, ssl=context) as server:
         yield next(iter(server.sockets)).getsockname()[1]
+
+
+def _server_context(files: ServerFiles) -> ssl.SSLContext:
+    """A server's TLS context showing the certificate in ``files``."""
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.load_cert_chain(files.cert, files.key)
+    return context
 
 
 def _mtls(files: ServerFiles, ca: Ca, revoked: tuple[str, ...] = ()) -> ServerSettings:
@@ -160,7 +169,9 @@ async def test_it_connects_to_a_tls_control_plane_trusting_its_ca(
 ) -> None:
     async with control_plane(_settings(make_server(ca, tmp_path))) as port:
         url = f"wss://localhost:{port}/"
-        session = WebSocketSession(url, token_file, ssl_context=client_ssl_context(ca.path))
+        session = WebSocketSession(
+            url, token_file, Backoff(first=0.01, most=0.02), client_ssl_context(ca.path)
+        )
         states: list[LinkState] = []
         session.watch(states.append)
         events = session.events()
@@ -242,6 +253,51 @@ def test_a_plaintext_connection_closed_unanswered_after_linking_may_pass() -> No
     error = InvalidMessage("did not receive a valid HTTP response")
     error.__cause__ = EOFError("connection closed while reading HTTP status line")
     assert handshake_failure("ws://localhost/", error, linked=True) is None
+
+
+def test_a_tls_connection_closed_unanswered_after_linking_may_pass() -> None:
+    error = InvalidMessage("did not receive a valid HTTP response")
+    error.__cause__ = EOFError("connection closed while reading HTTP status line")
+    assert handshake_failure("wss://localhost/", error, linked=True) is None
+    assert handshake_failure("wss://localhost/", error, certified=True, linked=True) is None
+
+
+async def test_a_tls_connection_closed_unanswered_after_linking_is_retried(
+    ca: Ca, tmp_path: Path, token_file: Path
+) -> None:
+    files = make_server(ca, tmp_path)
+    hung_up = asyncio.Queue[None]()
+
+    async def hang_up(_: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        writer.close()  # After the TLS handshake, before any HTTP answer.
+        hung_up.put_nowait(None)
+
+    states: list[LinkState] = []
+    async with tls_server(files) as port:
+        url = f"wss://localhost:{port}/"
+        session = WebSocketSession(
+            url, token_file, Backoff(first=0.01, most=0.02), client_ssl_context(ca.path)
+        )
+        session.watch(states.append)
+        await session.send(HELLO)
+        await asyncio.wait_for(_until(lambda: Connected(url) in states), 5)
+    context = _server_context(files)
+    async with await asyncio.start_server(hang_up, "127.0.0.1", port, ssl=context):
+        for _ in range(3):  # Each an attempt closed before any HTTP answer.
+            await asyncio.wait_for(hung_up.get(), 5)
+    assert isinstance(session.state, Reconnecting)
+    try:
+        async with tls_server(files, port):
+            await asyncio.wait_for(_until(lambda: session.state == Connected(url)), 5)
+        assert not any(isinstance(state, HandshakeFailed) for state in states)
+    finally:
+        await session.close()
+
+
+async def _until(holds: Callable[[], bool]) -> None:
+    """Return once ``holds`` does."""
+    while not holds():
+        await asyncio.sleep(0.01)
 
 
 def test_the_context_shows_the_client_certificate_given(ca: Ca, tmp_path: Path) -> None:

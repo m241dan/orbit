@@ -1215,7 +1215,10 @@ refuses shows a message naming the token file, and the chat quits once it's clos
 retrying; so does a connection that can't be made safely as asked: a server certificate that
 isn't trusted, doesn't name the host or fails verification otherwise, a server speaking TLS to
 a `ws://` URL or plaintext to a `wss://` one, or under mTLS a client certificate missing,
-rejected or revoked, each shown with its message from the table above. Likewise "Disconnected", giving the reason, shows when the connection closes in a way
+rejected or revoked, each shown with its message from the table above. A server closing the
+connection before answering is taken as speaking TLS, or as refusing the client certificate, only
+until the chat first connects; after that it's retried, as a server restarting, or a proxy whose
+backend is down, closes connections that way too. Likewise "Disconnected", giving the reason, shows when the connection closes in a way
 reconnecting would only repeat: a message over the size limit, sent either way, the server
 refusing the chat's `Hello` as incompatible (a chat and a serve speaking different protocol
 versions, as after upgrading one of them), or an event from the server the chat can't read.

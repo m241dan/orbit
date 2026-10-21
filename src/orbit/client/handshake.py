@@ -45,10 +45,13 @@ def _unverified(url: str, error: ssl.SSLCertVerificationError) -> str:
 
 def _unanswered(url: str, certified: bool, linked: bool) -> str | None:
     """What to tell the user about ``url`` closing the connection unanswered, showing a client
-    certificate if ``certified``; none over ``ws://`` once ``linked``, as a plaintext server
-    that answered before may close one unanswered while it shuts down or restarts."""
+    certificate if ``certified``; none once ``linked``, as the server then took the same
+    certificate or token, and may close one unanswered while it shuts down or restarts, or
+    behind a TLS-terminating proxy while its backend is down."""
+    if linked:
+        return None
     if urlsplit(url).scheme == "ws":
-        return None if linked else messages.SPEAKS_TLS.format(url=url)
+        return messages.SPEAKS_TLS.format(url=url)
     refused = messages.CLIENT_CERT_REJECTED if certified else messages.CLIENT_CERT_REQUIRED
     return refused.format(url=url)
 
@@ -56,5 +59,6 @@ def _unanswered(url: str, certified: bool, linked: bool) -> str | None:
 def _closed_unanswered(error: Exception) -> bool:
     """Whether ``error`` is a connection closed before any HTTP answer: over ``ws://``, as a
     server serving TLS closes one that doesn't start with a TLS handshake, and over
-    ``wss://``, as one under mutual TLS closes one showing a certificate its CA didn't sign."""
+    ``wss://``, as one under mutual TLS closes one showing no certificate, or one its CA didn't
+    sign."""
     return isinstance(error, InvalidMessage) and isinstance(error.__cause__, EOFError)
