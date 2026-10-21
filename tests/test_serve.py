@@ -14,17 +14,19 @@ import sys
 import threading
 import time
 import urllib.request
-from collections.abc import Callable, Iterator
+from collections.abc import Awaitable, Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import cast
 
 import pytest
+import typer
 from typer.testing import CliRunner
 from websockets.exceptions import ConnectionClosed, InvalidStatus
 from websockets.sync.client import ClientConnection, connect
 
 from orbit.agent import (
+    ControlPlane,
     RunFile,
     ServerSettings,
     TokenFile,
@@ -34,6 +36,7 @@ from orbit.agent import (
 )
 from orbit.agent.domain.server import client_fingerprint, is_revoked
 from orbit.cli import app, chat, serve
+from orbit.cli.backend import _Workspaces
 from orbit.protocol import (
     PROTOCOL_VERSION,
     AddTask,
@@ -1146,3 +1149,79 @@ def test_serve_closes_the_store_when_it_cant_listen() -> None:
         result = runner.invoke(app, ["serve", *QUIET, "--port", str(port)])
     assert result.exit_code == 2
     assert not [t for t in threading.enumerate() if t.name.startswith("orbit-sqlite")]
+
+
+class Unstarted:
+    """A server whose start never finishes, noting once it's started and whether it's
+    stopped."""
+
+    def __init__(self, *args: object) -> None:
+        self.starting = asyncio.Event()
+        self.stopped = False
+        self.revoked: object = None
+
+    async def start(self) -> str:
+        self.starting.set()
+        await asyncio.Event().wait()
+        raise AssertionError("never")
+
+    async def stop(self, close_session: Callable[[], Awaitable[None]]) -> None:
+        self.stopped = True
+
+
+class StoreGone(WorkspaceHost):
+    """A host whose store fails as it opens its latest session."""
+
+    async def open_latest(self) -> None:
+        raise RuntimeError("The store is gone.")
+
+
+def serve_parts(plane: ControlPlane, state: Path) -> serve._ServeParts:
+    """What serves ``plane`` on a port the system picks, writing its run file in ``state``."""
+    return serve._ServeParts(
+        build=lambda: plane,
+        settings=ServerSettings(port=0),
+        token=lambda: "",
+        revoked=lambda: (),
+        run_file=RunFile(state),
+        local=None,
+        banner=lambda url: url,
+        served=cast(_Workspaces, None),  # Never reached: serving stops before listening.
+    )
+
+
+async def test_cancelling_serve_as_its_server_starts_stops_the_server_and_closes_the_plane(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    servers: list[Unstarted] = []
+
+    def made(*args: object) -> Unstarted:
+        servers.append(Unstarted(*args))
+        return servers[-1]
+
+    monkeypatch.setattr(serve, "ControlPlaneServer", made)
+    host = WorkspaceHost(workspace="/src/a", workspace_id="a")
+    serving = asyncio.create_task(serve._served(serve_parts(ControlPlane([host]), tmp_path), None))
+    while not servers:
+        await asyncio.sleep(0.01)
+    await asyncio.wait_for(servers[0].starting.wait(), 5)
+
+    serving.cancel()
+    await asyncio.gather(serving, return_exceptions=True)
+
+    assert serving.cancelled()
+    assert servers[0].stopped
+    assert host.closing
+
+
+async def test_a_store_failing_as_serve_opens_a_latest_session_exits_with_status_2(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    host = StoreGone(workspace="/src/a", workspace_id="a")
+
+    with pytest.raises(typer.Exit) as exited:
+        await serve._served(serve_parts(ControlPlane([host]), tmp_path), None)
+
+    assert exited.value.exit_code == 2
+    assert "The store is gone." in capsys.readouterr().err
+    assert host.closing

@@ -133,9 +133,10 @@ class ControlPlane:
     ``wrong_session``, or ``unknown`` if it isn't served. A connection gets
     the events of its workspace's session it views and those of its workspace that belong to
     no session, never another workspace's, and the control plane's own: the ``Catalog`` sent
-    whenever a workspace's sessions change, and the usage. Once the first connection attaches
-    to a workspace, its host's background work starts, and the usage limits are fetched in the
-    background from then on, each ``UsageChanged`` reaching every connection attached.
+    whenever a workspace's sessions change, and the usage. :meth:`start` opens each host's most
+    recently active session and starts its background work, with the usage limits fetched in
+    the background from then on, each ``UsageChanged`` reaching every connection attached; one
+    not started, as for a local orbit, starts them once the first connection attaches.
 
     Given the ``workspaces`` source, ``AddWorkspace`` and ``RemoveWorkspace``, from any
     connection welcomed, attached or not, add a workspace to those served, starting its host,
@@ -302,15 +303,26 @@ class ControlPlane:
             raise
 
     async def _start(self, host: WorkspaceHost, connection: SessionConnection) -> None:
-        """Serve ``host``, once its most recently active session is open, start its background
-        work and send the catalog to ``connection`` and every listening connection. Its events
-        are stamped and delivered as it opens that session, but no ``Attach`` reaches it till
-        it's open."""
+        """Serve ``host``, as :meth:`_begin` does, and send the catalog to ``connection`` and
+        every listening connection. Its events are stamped and delivered as it opens its most
+        recently active session, but no ``Attach`` reaches it till it's open."""
         self._serve(host)
+        await self._begin(host)
+        await self._changed(connection)
+
+    async def start(self) -> None:
+        """Start serving the hosts this was built with, as :meth:`_begin` does, one by one, with
+        no frontend connected; raises what opening a session raises, such as ``RuntimeError``
+        when a store fails."""
+        for host in self.hosts:
+            await self._begin(host)
+
+    async def _begin(self, host: WorkspaceHost) -> None:
+        """Have ``host`` open its most recently active session, then serve it and start its
+        background work."""
         await self._open_latest(host)
         self._hosts[host.workspace_id] = host
         self._start_background(host)
-        await self._changed(connection)
 
     async def _open_latest(self, host: WorkspaceHost) -> None:
         """Have ``host`` open its most recently active session, telling no one of the change to

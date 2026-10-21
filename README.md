@@ -947,7 +947,9 @@ isn't a directory, stops it with status 2, as does one added now that can't be s
 invalid `.orbit/config.toml`, no git identity for commits, a lock that can't be made or sessions
 that can't be opened or imported), which is left as it was rather than added. A workspace added
 earlier whose directory has gone since, or that can't be served for any of those reasons, is
-skipped, with a warning naming it and why, and the rest are served. Frontends add and remove workspaces as it runs, with the protocol's
+skipped, with a warning naming it and why, and the rest are served. Before it listens, each
+workspace served opens its latest session and starts its startup check and its tries of the
+lock, with no frontend needed; a store that fails as one opens stops it with status 2. Frontends add and remove workspaces as it runs, with the protocol's
 `AddWorkspace` and `RemoveWorkspace` (see
 [docs/protocol.md](docs/protocol.md#workspaces)): adding takes an absolute path on the server's
 host, a repository's top level stands for any directory in it, and the workspace opens its

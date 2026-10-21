@@ -162,7 +162,7 @@ class WorkspaceHost:
     as they arrive.
 
     With ``check_at_startup``, the ``verification`` steps also run once in the background as
-    the first frontend attaches, on the base commit; a failure adds a draft task to
+    its background work starts, on the base commit; a failure adds a draft task to
     fix it.
 
     The one-off notices of a greeting are the workspace, no verification steps, the
@@ -209,7 +209,7 @@ class WorkspaceHost:
     startup notes, ``RunTasks`` and ``FireTrigger`` are accepted and queued rather than run, and
     no work starts by itself: neither the startup check nor reviews run. It notes no leftovers,
     since only the owner can tell its own running work from what earlier runs left. Given the
-    repository's ``lock``, it's tried every ``lock_retry`` seconds from the first attach;
+    repository's ``lock``, it's tried every ``lock_retry`` seconds once its background work starts;
     once it's free, it's held and offered with ``OwnershipOffered``. ``TakeOwnership`` answers:
     taking it publishes ``OwnershipTaken``, a notice and a ``Catalog`` with this workspace no
     longer read-only, then runs the work queued, in order; declining it publishes

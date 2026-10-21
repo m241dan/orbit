@@ -52,7 +52,7 @@ class Slow(WorkspaceHost):
         if self.gate is not None:
             await self.gate.wait()
         if self.fails:
-            raise OSError("The store is gone.")
+            raise RuntimeError("The store is gone.")
         await super().open_latest()
 
 

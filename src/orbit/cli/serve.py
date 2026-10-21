@@ -55,6 +55,7 @@ from orbit.cli.options import (
 from orbit.profiling import profiled
 
 logger = logging.getLogger(__name__)
+CANT_OPEN = "Orbit couldn't open a workspace's latest session: "
 
 
 def serve(
@@ -270,12 +271,12 @@ def _current_revoked(config_dir: Path, first: Collection[str]) -> Callable[[], C
 @dataclass(frozen=True)
 class _ServeParts:
     """What ``orbit serve`` serves: the control plane ``build`` makes, each workspace's most
-    recently active saved session opened, on the server ``settings`` say, to frontends showing
-    the token ``token`` gives as they connect, or under mutual TLS a certificate not among those
-    ``revoked`` gives then, saying where it is in ``run_file`` while it listens, and how
-    frontends here reach it over TLS, ``local``, the ``banner`` it prints once listening, given
-    the server's URL, and the workspaces ``served``, whose locks name the server's URL while
-    they're held."""
+    recently active saved session opened and its background work started, on the server
+    ``settings`` say, to frontends showing the token ``token`` gives as they connect, or under
+    mutual TLS a certificate not among those ``revoked`` gives then, saying where it is in
+    ``run_file`` while it listens, and how frontends here reach it over TLS, ``local``, the
+    ``banner`` it prints once listening, given the server's URL, and the workspaces ``served``,
+    whose locks name the server's URL while they're held."""
 
     build: Callable[[], ControlPlane]
     settings: ServerSettings
@@ -291,15 +292,16 @@ async def _served(parts: _ServeParts, profile: Path | None) -> None:
     """Serve as ``parts`` say, profiled into ``profile`` if given, until the first ctrl+c or
     SIGTERM, then stop.
 
-    Raises :class:`ListenFailed` if the server can't listen.
+    Raises :class:`ListenFailed` if the server can't listen, and exits with status 2 if a store
+    fails as a workspace's latest session opens.
     """
     with profiled(profile, "serve") if profile else nullcontext():
         plane = parts.build()
         server = ControlPlaneServer(plane, parts.token, parts.settings, typer.echo)
         server.revoked = parts.revoked
         try:
-            for host in plane.hosts:
-                await host.open_latest()
+            with _exit_on(RuntimeError, message=lambda exc: f"{CANT_OPEN}{exc}"):
+                await plane.start()
             url = await server.start()
         except BaseException:
             try:

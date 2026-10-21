@@ -108,8 +108,9 @@ before then is refused with `invalid`. The first `Attach` is answered in this or
 `Welcome`, the `Catalog`, steps 1 to 3, and an `ErrorOccurred` coded `internal` for any of them
 that fails, are the connection's greeting: they reach that connection alone, never the others
 already connected, and aren't logged, so another frontend reconnecting isn't sent them again.
-The first connection to attach to a workspace starts that workspace's background work, such as
-its startup check.
+An `orbit serve` starts each workspace's background work, such as its startup check, as it
+serves it, at start or once it's added, with no connection needed; a local `orbit chat` starts
+it as the first connection attaches.
 
 Each frontend shows its own session picker from the Catalog, kept current by
 `SessionStateChanged`, and attaches to the workspace it opens on: connected to an `orbit serve`,
