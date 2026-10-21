@@ -96,6 +96,12 @@ async def test_an_agent_gets_its_task_claims_done_and_passes() -> None:
     assert "Add a flag." in replies(events)[0]
 
 
+async def revoked(host: FakeHost, token: str = "token-1") -> bool:
+    """Whether ``token`` no longer authenticates with ``host``."""
+    reply = await host.call(token, "get_task")
+    return reply.is_error and "token" in reply.text
+
+
 async def test_the_token_stops_working_once_the_agent_is_done() -> None:
     session, host, _ = session_for(claims_done, verification=verified(Steps(True)))
     await asyncio.wait_for(run(session), 5)
@@ -383,10 +389,11 @@ async def test_an_agent_that_lingers_after_finishing_is_stopped() -> None:
         await asyncio.Event().wait()
         raise AssertionError("unreachable")
 
-    session, _, _ = session_for(lingers)
+    session, host, _ = session_for(lingers)
     events = await asyncio.wait_for(run(session), 5)
     assert AgentExited(agent_id="agent-1", reason="killed") in events
     assert [t.status for t in board(events)] == ["completed"]
+    assert await revoked(host)
 
 
 async def test_cancelling_during_verification_stops_the_agent_and_the_run() -> None:
@@ -398,7 +405,7 @@ async def test_cancelling_during_verification_stops_the_agent_and_the_run() -> N
         await call("complete_task", summary="done")
         return "completed"
 
-    session, _, launcher = session_for(waits, claims_done, verification=verified(steps))
+    session, host, launcher = session_for(waits, claims_done, verification=verified(steps))
     for prompt in ("one", "two"):
         await send(session, AddTask(task=TaskSpec(prompt=prompt)))
     await send(session, RunTasks())
@@ -414,6 +421,7 @@ async def test_cancelling_during_verification_stops_the_agent_and_the_run() -> N
     assert [t.status for t in board(events)] == ["cancelled", "pending"]
     assert AgentExited(agent_id="agent-1", reason="killed") in events
     assert len(launcher.launches) == 1
+    assert await revoked(host)
 
 
 async def test_the_host_is_started_once_for_all_tasks() -> None:
@@ -431,10 +439,11 @@ async def test_an_agent_whose_turn_errors_counts_as_crashed() -> None:
         await call("get_task")
         return "error"
 
-    session, _, _ = session_for(errors)
+    session, host, _ = session_for(errors)
     events = await asyncio.wait_for(run(session), 5)
     assert AgentExited(agent_id="agent-1", reason="crashed") in events
     assert [t.status for t in board(events)] == ["completed"]
+    assert await revoked(host)
 
 
 async def test_cancelling_a_working_agent_without_verification() -> None:
@@ -446,7 +455,7 @@ async def test_cancelling_a_working_agent_without_verification() -> None:
         await asyncio.Event().wait()
         raise AssertionError("unreachable")
 
-    session, _, _ = session_for(works_forever)
+    session, host, _ = session_for(works_forever)
     await send(session, AddTask(task=TaskSpec(prompt="one")))
     await send(session, RunTasks())
     await asyncio.wait_for(fetched.wait(), 5)
@@ -459,6 +468,39 @@ async def test_cancelling_a_working_agent_without_verification() -> None:
     [task] = board(events)
     assert (task.status, task.reason, task.reason_detail) == ("cancelled", STOPPED_BY_YOU, "")
     assert AgentExited(agent_id="agent-1", reason="killed") in events
+    assert await revoked(host)
+
+
+async def test_cancelling_while_the_agent_is_stopped_ends_the_run_as_cancelled() -> None:
+    stopping, gate = asyncio.Event(), asyncio.Event()
+
+    async def slow_to_stop(call: Call) -> TurnEndReason:
+        await call("get_task")
+        await call("complete_task", summary="done")
+        try:
+            await asyncio.Event().wait()
+        finally:
+            stopping.set()
+            await gate.wait()
+        raise AssertionError("unreachable")
+
+    session, host, launcher = session_for(slow_to_stop, claims_done, exit_grace=0.01)
+    for prompt in ("one", "two"):
+        await send(session, AddTask(task=TaskSpec(prompt=prompt)))
+    await send(session, RunTasks())
+    await asyncio.wait_for(stopping.wait(), 5)
+    await send(session, CancelTurn())
+    gate.set()
+    events: list[Event] = []
+    async for event in payloads(session):
+        events.append(event)
+        if event == BusyChanged(busy=False):
+            break
+
+    assert [t.status for t in board(events)] == ["cancelled", "pending"]
+    assert AgentExited(agent_id="agent-1", reason="killed") in events
+    assert len(launcher.launches) == 1
+    assert await revoked(host)
 
 
 async def stops_after_a_fix_request(call: Call) -> TurnEndReason:
@@ -528,6 +570,7 @@ async def test_closing_stops_the_running_agent_and_the_host() -> None:
     assert host.stops == 1
     events = queued(session)
     assert AgentExited(agent_id="agent-1", reason="killed") in events
+    assert await revoked(host)
 
 
 async def test_closing_a_session_that_never_ran_a_task_starts_nothing() -> None:

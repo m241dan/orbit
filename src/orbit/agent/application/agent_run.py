@@ -16,6 +16,7 @@ from functools import partial
 from typing import Any, Literal
 
 from orbit.agent.application.desk import AgentDesk, Tool, dispatch, report_progress
+from orbit.agent.application.lanes import stop
 from orbit.agent.application.ports import Publish, Reply
 from orbit.agent.application.proposal_trial import ProposalTrial
 from orbit.agent.application.tasks import Tasks
@@ -245,7 +246,7 @@ class AgentRun:
             if self._work.phase in FINISHED:
                 await self._await_exit(stream)
         finally:
-            await self._stop(stream)
+            await stop(stream)
 
     async def _launch(self) -> "asyncio.Task[None]":
         await self._desk.url()  # Started before the agent is announced.
@@ -319,11 +320,6 @@ class AgentRun:
         """Give a finished agent ``exit_grace`` seconds to exit on its own."""
         with suppress(TimeoutError):
             await asyncio.wait_for(asyncio.shield(stream), self._desk.agents.exit_grace)
-
-    async def _stop(self, stream: "asyncio.Task[None]") -> None:
-        stream.cancel()
-        with suppress(asyncio.CancelledError):
-            await stream
 
     # The run loop
 

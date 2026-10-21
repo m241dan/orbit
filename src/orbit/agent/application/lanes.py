@@ -3,7 +3,6 @@ background task that ran it, and a busy lane's turns are run one at a time."""
 
 import asyncio
 from collections.abc import Callable, Coroutine
-from contextlib import suppress
 from typing import Any
 
 from orbit.agent.application.ports import Publish
@@ -22,6 +21,19 @@ def crash_report(lane: str, exc: BaseException) -> ErrorOccurred:
     """The event telling the user that ``lane`` stopped on ``exc``, which nothing expected."""
     message = f"The {lane} lane stopped on an unexpected error: {exc!r}"
     return ErrorOccurred(code=INTERNAL, message=message)
+
+
+async def stop(task: "asyncio.Task[Any]") -> None:
+    """Cancel ``task`` and wait for it to end; cancelled meanwhile, this is cancelled once it
+    has."""
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        # The task's own cancel ends here; one meant for the caller goes on.
+        current = asyncio.current_task()
+        if current is not None and current.cancelling():
+            raise
 
 
 def _unwatched() -> None:
@@ -60,16 +72,8 @@ class Background:
     async def close(self) -> None:
         """Cancel the work, if any, and wait for it to stop; cancelled meanwhile, this is
         cancelled once it has."""
-        self.cancel()
-        if self._task is None:
-            return
-        try:
-            await self._task
-        except asyncio.CancelledError:
-            # The work's own cancel ends here; one meant for this close goes on.
-            task = asyncio.current_task()
-            if task is not None and task.cancelling():
-                raise
+        if self._task is not None:
+            await stop(self._task)
 
     async def _guarded(self, work: Coroutine[Any, Any, object]) -> None:
         try:
@@ -118,11 +122,11 @@ class TurnSlot:
         return True
 
     async def close(self) -> None:
-        """Cancel the turn, if it runs, and wait for it to end."""
+        """Cancel the turn, if it runs, and wait for it to end; cancelled meanwhile, this is
+        cancelled once it has."""
         turn = self._turn
-        if turn is not None and self.cancel():
-            with suppress(asyncio.CancelledError):
-                await turn
+        if turn is not None and not turn.done():
+            await stop(turn)
 
     def _ended(self, turn: "asyncio.Task[object]") -> None:
         crash = crash_of(turn)
