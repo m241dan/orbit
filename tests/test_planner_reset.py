@@ -37,15 +37,19 @@ from tests.agent_fakes import (
     ScriptedLauncher,
     Stop,
     board,
+    chats,
     events_until,
+    hangs,
     idle,
     of_type,
+    plan,
+    proposes_two,
     refused,
     send,
     session_for,
+    steps_chat,
 )
-from tests.test_planner import chats, hangs, plan, proposes_two, steps_chat
-from tests.test_session_switch import opened, saved, store_with, switching
+from tests.session_builders import opened, saved, store_with, switching
 
 NEW_ROLE = ROLES["planner"].model_copy(
     update={"instructions": "Plan small.", "tools": ("propose_task",)}

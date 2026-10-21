@@ -5,7 +5,7 @@ import asyncio
 import pytest
 from textual.widgets import Static
 
-from orbit.agent import NO_STEPS_NOTE, Verification, WorkspaceHost
+from orbit.agent import NO_STEPS_NOTE, WorkspaceHost
 from orbit.agent.application.work_turns import CONFIGURING_NOTE, NO_VERIFY_MESSAGE
 from orbit.agent.domain.checks import Setup, configure_prompt
 from orbit.agent.domain.verification import VerificationStep
@@ -34,48 +34,25 @@ from orbit.tui.widgets import ConfirmScreen, PickerScreen
 from tests.agent_fakes import (
     STEP,
     Call,
+    Configurator,
     FakeTree,
     Steps,
     board,
+    claims_done,
     events_until,
     frontend,
-    idle,
+    no_steps,
     of_type,
     refused,
     send,
     session_for,
+    until_idle,
     verified,
 )
 from tests.tui_fakes import FakeSession, shown
 
 CODE = TaskSpec(prompt="Add a flag.")
 SETUP = Setup(command=("uv", "sync"), watch=("uv.lock",))
-
-
-def no_steps() -> Verification:
-    """Verification turned on with no steps configured."""
-    return Verification((), Steps())
-
-
-class Configurator:
-    """A configurator that fetches its task, records it, and stops without proposing."""
-
-    def __init__(self) -> None:
-        self.tasks: list[str] = []
-
-    async def __call__(self, call: Call) -> TurnEndReason:
-        self.tasks.append((await call("get_task")).text)
-        return "completed"
-
-
-async def claims_done(call: Call) -> TurnEndReason:
-    await call("get_task")
-    await call("complete_task", summary="Added the flag")
-    return "completed"
-
-
-async def until_idle(session: WorkspaceHost) -> list[Event]:
-    return await events_until(session, idle())
 
 
 def test_the_startup_note_says_how_to_set_steps_up() -> None:

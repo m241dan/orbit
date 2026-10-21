@@ -31,16 +31,7 @@ from orbit.protocol import (
     Snapshot,
 )
 from tests.agent_fakes import HELLO, STEP, Steps
-from tests.test_served_workspaces import (
-    TASK,
-    idle,
-    joined,
-    payloads,
-    say,
-    taken,
-    working,
-    workspace,
-)
+from tests.plane_fakes import TASK, idle, joined, payloads, say, taken, working, workspace
 
 
 class FakeSource:

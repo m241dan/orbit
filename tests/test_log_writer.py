@@ -40,26 +40,23 @@ from tests.agent_fakes import (
     COMMAND_ID,
     FakeFallback,
     FakeStore,
+    GatedLog,
     Ticks,
     agent_exited,
     attach_to,
+    delivered,
     events_until,
     frontend,
     greet,
+    notice,
+    payloads_of,
     publish,
-    queued_envelopes,
     refused,
     save_used,
     send,
 )
-from tests.store_views import OwnView, open_view
-from tests.test_event_log import big
-from tests.test_session_switch import failing_startup, opened, saved, store_with, switching
-from tests.test_sqlite_store import database
-
-
-def notice(seq: int, session: str = "a") -> EventEnvelope:
-    return EventEnvelope(seq=seq, session=session, payload=Notice(message=f"n{seq}"))
+from tests.session_builders import failing_startup, opened, saved, store_with, switching
+from tests.store_views import OwnView, big, database, open_view
 
 
 class Published:
@@ -92,27 +89,8 @@ class FailingTrims(FakeStore):
         raise RuntimeError("trim failed")
 
 
-class GatedLog(FakeStore):
-    """A log whose appends wait for ``gate``, with ``waiting`` set while one does."""
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.gate = asyncio.Event()
-        self.waiting = asyncio.Event()
-
-    async def append(self, session_id: str, envelopes: Sequence[EventEnvelope]) -> int:
-        self.waiting.set()
-        await self.gate.wait()
-        return await super().append(session_id, envelopes)
-
-
 def stored_session(store: FakeStore | OwnView) -> WorkspaceHost:
     return WorkspaceHost(store=store, clock=Ticks(), new_id=lambda: "session-1")
-
-
-def delivered(session: WorkspaceHost) -> list[EventEnvelope]:
-    """The envelopes the session has queued for the frontend, taken from its queue."""
-    return queued_envelopes(session)
 
 
 def kept(sent: Sequence[EventEnvelope]) -> list[EventEnvelope]:
@@ -125,11 +103,6 @@ def kept(sent: Sequence[EventEnvelope]) -> list[EventEnvelope]:
         for e in sent
         if e.session is not None and not isinstance(e.payload, connection) and e.payload != attached
     ]
-
-
-def payloads_of[T](kind: type[T], sent: Sequence[EventEnvelope]) -> list[T]:
-    """The payloads of ``sent`` that are ``kind``s, in order."""
-    return [envelope.payload for envelope in sent if isinstance(envelope.payload, kind)]
 
 
 def read_log(state: Path) -> list[EventEnvelope | None]:

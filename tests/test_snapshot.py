@@ -36,11 +36,13 @@ from orbit.protocol import (
     Welcome,
 )
 from tests.agent_fakes import (
+    LIMITS,
     ROLES,
     STEP,
     FakeHost,
     FakeTree,
     ScriptedLauncher,
+    Source,
     Steps,
     events_until,
     fetch_usage_unseen,
@@ -53,8 +55,7 @@ from tests.agent_fakes import (
     snapshot_of,
     verified,
 )
-from tests.test_proposals import CONFIGURE, LINT, proposes
-from tests.test_usage_monitor import LIMITS, Source
+from tests.proposal_fakes import CONFIGURE, LINT, proposes
 
 
 def last_of[E](kind: type[E], events: list[Event]) -> E:

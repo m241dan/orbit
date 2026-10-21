@@ -11,15 +11,11 @@ from orbit.agent.application.ports import EventLog
 from orbit.agent.domain.replay import LogBounds, can_replay
 from orbit.agent.external import sqlite_schema
 from orbit.agent.external.workspace_registry import register
-from orbit.protocol import EventEnvelope, Notice, TasksChanged, decode_event, encode
-from tests.store_views import OwnView, open_view
-from tests.test_sqlite_store import database, record
+from orbit.protocol import EventEnvelope, TasksChanged, decode_event, encode
+from tests.agent_fakes import notice
+from tests.store_views import OwnView, big, database, open_view, record
 
 type Opener = Callable[[Path], Awaitable[OwnView]]
-
-
-def notice(seq: int, session: str = "abc", message: str = "hi") -> EventEnvelope:
-    return EventEnvelope(seq=seq, session=session, payload=Notice(message=message))
 
 
 @pytest.fixture
@@ -391,11 +387,6 @@ async def test_reading_after_a_seq_under_an_id_that_isnt_a_plain_file_name_is_re
 # Trimming
 
 MB = 1024 * 1024
-
-
-def big(seq: int, session: str = "abc") -> EventEnvelope:
-    """An event of the session ``session`` of about 10 KB."""
-    return notice(seq, session, "x" * 10_000)
 
 
 def old_database(

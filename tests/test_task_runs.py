@@ -69,32 +69,22 @@ from tests.agent_fakes import (
     Steps,
     board,
     board_of,
+    claims_done,
     desk_of,
+    keeps_claiming,
     payloads,
     queued,
     refused,
     run,
     send,
     session_for,
+    statuses,
     tasks_of,
     verified,
 )
 
 
-async def claims_done(call: Call) -> TurnEndReason:
-    await call("get_task")
-    await call("complete_task", summary="done")
-    return "completed"
-
-
 async def never_starts(call: Call) -> TurnEndReason:
-    return "completed"
-
-
-async def keeps_claiming(call: Call) -> TurnEndReason:
-    await call("get_task")
-    while "another agent" not in (await call("complete_task", summary="try")).text:
-        pass
     return "completed"
 
 
@@ -106,10 +96,6 @@ async def idle(session: WorkspaceHost) -> list[Event]:
         if event == BusyChanged(busy=False):
             return events
     raise AssertionError("unreachable")
-
-
-def statuses(events: list[Event]) -> list[str]:
-    return [t.status for t in board(events)]
 
 
 async def test_each_task_gets_its_own_agent_with_its_settings() -> None:

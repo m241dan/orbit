@@ -36,7 +36,6 @@ from orbit.protocol import (
     STORAGE_FAILED,
     AddTask,
     BusyChanged,
-    CommandAccepted,
     CommandRefused,
     ErrorOccurred,
     Event,
@@ -53,33 +52,35 @@ from orbit.protocol import (
     decode_event,
 )
 from tests.agent_fakes import (
-    COMMAND_ID,
+    ACCEPTED,
     START,
     Call,
     FakeFallback,
     FakeStore,
     FakeTree,
+    GatedLog,
     Script,
     Steps,
+    checked,
+    claims_done,
     desk_of,
     frontend,
+    gated_planner,
     greet,
     lane_of,
+    outcome_of,
     payloads,
+    payloads_of,
     planner_turn,
     publish,
     refused,
     send,
     session_for,
     startup_of,
+    suggests,
     tasks_of,
 )
-from tests.store_views import open_view
-from tests.test_log_writer import GatedLog, payloads_of
-from tests.test_planner_lane import gated_planner
-from tests.test_review_lane import claims_done, suggests
-from tests.test_sqlite_store import fill_up
-from tests.test_startup_check import checked
+from tests.store_views import fill_up, open_view
 
 TASK = TaskSpec(prompt="Add a flag.")
 BIG = Notice(message="x" * 100_000)  # Too big for a database that can't grow.
@@ -538,29 +539,6 @@ async def test_an_outbox_without_a_log_diverts_and_loses_nothing() -> None:
 
 
 # Resuming
-
-
-async def outcome_of(
-    session: WorkspaceHost, command: ResumeStorage | RunTasks | History
-) -> list[EventEnvelope]:
-    """The envelopes the session sends once ``command`` is sent, up to its outcome."""
-    await send(session, command)
-    sent: list[EventEnvelope] = []
-
-    async def collect() -> None:
-        async for envelope in frontend(session).events():
-            sent.append(envelope)
-            payload = envelope.payload
-            if isinstance(payload, CommandAccepted | CommandRefused) and (
-                payload.command_id == COMMAND_ID
-            ):
-                return
-
-    await asyncio.wait_for(collect(), 5)
-    return sent
-
-
-ACCEPTED = CommandAccepted(command_id=COMMAND_ID)
 
 
 async def halted_session(store: FakeStore, fallback: FakeFallback) -> WorkspaceHost:

@@ -2,10 +2,8 @@
 
 import asyncio
 import sqlite3
-import threading
-from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
-from contextlib import closing, contextmanager
-from datetime import UTC, datetime
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import closing
 from pathlib import Path
 
 import pytest
@@ -15,18 +13,12 @@ from orbit.agent.domain.sessions import SessionRecord, Unreadable
 from orbit.agent.domain.storage_halt import StorageErrorKind
 from orbit.agent.external import sqlite_store
 from orbit.agent.external.sqlite_schema import StoreError
-from orbit.agent.external.sqlite_store import THREAD_PREFIX, SqliteStore, find_workspace_id
+from orbit.agent.external.sqlite_store import SqliteStore, find_workspace_id
 from orbit.protocol import EventEnvelope, Notice
 from tests.git_repo import git
-from tests.store_views import OwnView, open_view
-
-WHEN = datetime(2026, 10, 17, 14, 30, tzinfo=UTC)
+from tests.store_views import WHEN, OwnView, database, fill_up, open_view, record, store_threads
 
 type Opener = Callable[[Path], Awaitable[OwnView]]
-
-
-def record(session_id: str = "abc") -> SessionRecord:
-    return SessionRecord(id=session_id, name="Oct 17 14:30", created=WHEN, last_active=WHEN)
 
 
 @pytest.fixture
@@ -53,17 +45,6 @@ async def open_store(state: Path) -> AsyncIterator[Opener]:
     yield open_at
     for store in opened:
         await store.close()
-
-
-@contextmanager
-def database(state: Path) -> Iterator[sqlite3.Connection]:
-    """Another connection to the store's database, in autocommit mode."""
-    with closing(sqlite3.connect(state / "orbit.db", isolation_level=None)) as connection:
-        yield connection
-
-
-def store_threads() -> list[threading.Thread]:
-    return [thread for thread in threading.enumerate() if thread.name.startswith(THREAD_PREFIX)]
 
 
 async def test_the_sqlite_store_is_a_session_store(open_store: Opener, workspace: Path) -> None:
@@ -587,16 +568,6 @@ async def test_a_failed_backup_leaves_no_file_behind(
 
 
 # Failed writes, described for the storage halt
-
-
-async def fill_up(store: OwnView) -> None:
-    """Have ``store``'s database refuse to grow, as a full disk does."""
-
-    def cap() -> None:
-        (pages,) = store.store._db.execute("PRAGMA page_count").fetchone()
-        store.store._db.execute(f"PRAGMA max_page_count = {pages}")
-
-    await store.store._call(cap)
 
 
 async def test_a_full_database_fails_its_writes_as_disk_full(

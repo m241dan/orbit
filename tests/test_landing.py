@@ -2,6 +2,7 @@
 
 import asyncio
 from collections.abc import AsyncIterator, Callable
+from functools import partial
 from typing import Any
 
 import pytest
@@ -30,25 +31,16 @@ from tests.agent_fakes import (
     FakeTree,
     Steps,
     board,
+    claims_done,
     ended_unverified,
+    keeps_claiming,
     payloads,
     run,
     session_for,
     verified,
 )
 
-
-async def claims_done(call: Call) -> TurnEndReason:
-    await call("get_task")
-    await call("complete_task", summary="Add the --fast flag")
-    return "completed"
-
-
-async def keeps_claiming(call: Call) -> TurnEndReason:
-    await call("get_task")
-    while "another agent" not in (await call("complete_task", summary="try")).text:
-        pass
-    return "completed"
+adds_the_flag = partial(claims_done, summary="Add the --fast flag")
 
 
 async def gives_up(call: Call) -> TurnEndReason:
@@ -64,7 +56,7 @@ def statuses(events: list[Event]) -> list[str]:
 async def test_finished_work_is_done_in_the_tree_then_committed_and_merged() -> None:
     tree = FakeTree()
     steps = Steps(True)
-    session, _, launcher = session_for(claims_done, verification=verified(steps), tree=tree)
+    session, _, launcher = session_for(adds_the_flag, verification=verified(steps), tree=tree)
     events = await asyncio.wait_for(run(session, TaskSpec(prompt="Make it faster.")), 5)
 
     assert tree.prepared == [False]
@@ -90,7 +82,7 @@ async def test_a_fallback_fix_continues_from_the_failed_work() -> None:
     tree = FakeTree()
     session, _, _ = session_for(
         keeps_claiming,
-        claims_done,
+        adds_the_flag,
         verification=verified(Steps(False, False, True)),
         limits=Limits(max_attempts=1),
         tree=tree,
@@ -107,7 +99,7 @@ async def test_a_fallback_fix_continues_from_the_failed_work() -> None:
 async def test_work_rebased_onto_a_moved_base_is_verified_again_before_merging() -> None:
     tree = FakeTree(Merge("rebased"), Merge("merged"))
     steps = Steps(True, True)
-    session, _, _ = session_for(claims_done, verification=verified(steps), tree=tree)
+    session, _, _ = session_for(adds_the_flag, verification=verified(steps), tree=tree)
     events = await asyncio.wait_for(run(session), 5)
     assert steps.runs == ["Unit tests", "Unit tests"]
     assert TaskMerged(task_id="1", result="merged", commit="c1") in events
@@ -118,7 +110,7 @@ async def test_rebased_work_in_a_role_that_is_not_verified_lands_without_checks(
     tree = FakeTree(Merge("rebased"), Merge("merged"))
     steps = Steps()
     roles = {**ROLES, "docs-writer": ROLES["coder"].model_copy(update={"verify": False})}
-    session, _, _ = session_for(claims_done, verification=verified(steps), tree=tree, roles=roles)
+    session, _, _ = session_for(adds_the_flag, verification=verified(steps), tree=tree, roles=roles)
     events = await asyncio.wait_for(run(session, TaskSpec(prompt="Docs.", role="docs-writer")), 5)
     assert steps.runs == []
     assert not any(isinstance(e, VerificationStarted) for e in events)
@@ -129,7 +121,7 @@ async def test_rebased_work_in_a_role_that_is_not_verified_lands_without_checks(
 async def test_rebased_work_that_fails_verification_falls_back() -> None:
     tree = FakeTree(Merge("rebased"))
     session, _, launcher = session_for(
-        claims_done, claims_done, verification=verified(Steps(True, False, True)), tree=tree
+        adds_the_flag, adds_the_flag, verification=verified(Steps(True, False, True)), tree=tree
     )
     events = await asyncio.wait_for(run(session), 5)
     first, fix = board(events)
@@ -142,7 +134,7 @@ async def test_rebased_work_that_fails_verification_falls_back() -> None:
 async def test_rebased_work_that_fails_verification_says_it_failed_after_rebasing() -> None:
     tree = FakeTree(Merge("rebased"))
     session, _, _ = session_for(
-        claims_done, claims_done, verification=verified(Steps(True, False, True)), tree=tree
+        adds_the_flag, adds_the_flag, verification=verified(Steps(True, False, True)), tree=tree
     )
     events = await asyncio.wait_for(run(session), 5)
 
@@ -155,7 +147,7 @@ async def test_work_that_cannot_be_merged_stays_completed_with_the_reason() -> N
     results: tuple[MergeResult, ...] = ("conflict", "blocked", "detached")
     for result in results:
         tree = FakeTree(Merge(result, "why it didn't merge"))
-        session, _, _ = session_for(claims_done, tree=tree)
+        session, _, _ = session_for(adds_the_flag, tree=tree)
         events = await asyncio.wait_for(run(session), 5)
         merged = TaskMerged(task_id="1", result=result, detail="why it didn't merge", commit="c1")
         assert merged in events
@@ -164,7 +156,7 @@ async def test_work_that_cannot_be_merged_stays_completed_with_the_reason() -> N
 
 async def test_a_tree_that_cannot_be_prepared_fails_the_task() -> None:
     tree = FakeTree(broken="Setting up the coder's tree failed: no network")
-    session, _, launcher = session_for(claims_done, claims_done, tree=tree)
+    session, _, launcher = session_for(adds_the_flag, adds_the_flag, tree=tree)
     events = await asyncio.wait_for(run(session, TaskSpec(prompt="a"), TaskSpec(prompt="b")), 5)
     assert launcher.launches == []
     assert statuses(events) == ["error", "error"]
@@ -284,7 +276,7 @@ async def test_listening_first_after_close_doesnt_start_the_background(
 async def test_without_a_tree_tasks_work_in_the_workspaces_directory() -> None:
     steps = Steps(True)
     session, _, launcher = session_for(
-        claims_done, verification=verified(steps), root="/src/project"
+        adds_the_flag, verification=verified(steps), root="/src/project"
     )
     await asyncio.wait_for(run(session), 5)
     assert launcher.launches[0].cwd == "/src/project"
@@ -294,7 +286,7 @@ async def test_without_a_tree_tasks_work_in_the_workspaces_directory() -> None:
 async def test_a_base_that_keeps_moving_leaves_the_work_unmerged() -> None:
     tree = FakeTree(*[Merge("rebased")] * 4)
     steps = Steps(True, True, True, True)
-    session, _, _ = session_for(claims_done, verification=verified(steps), tree=tree)
+    session, _, _ = session_for(adds_the_flag, verification=verified(steps), tree=tree)
     events = await asyncio.wait_for(run(session), 5)
     [merged] = [e for e in events if isinstance(e, TaskMerged)]
     assert merged.result == "rebased" and "kept moving" in merged.detail
@@ -305,7 +297,7 @@ async def test_a_base_that_keeps_moving_leaves_the_work_unmerged() -> None:
 async def test_work_merged_on_the_last_allowed_rebase_is_reported_merged() -> None:
     tree = FakeTree(*[Merge("rebased")] * 3, Merge("merged"))
     steps = Steps(True, True, True, True)
-    session, _, _ = session_for(claims_done, verification=verified(steps), tree=tree)
+    session, _, _ = session_for(adds_the_flag, verification=verified(steps), tree=tree)
     events = await asyncio.wait_for(run(session), 5)
     [merged] = [e for e in events if isinstance(e, TaskMerged)]
     assert merged.result == "merged" and merged.detail == ""
@@ -314,7 +306,7 @@ async def test_work_merged_on_the_last_allowed_rebase_is_reported_merged() -> No
 
 async def test_without_verification_rebased_work_is_merged_straight_away() -> None:
     tree = FakeTree(Merge("rebased"), Merge("merged"))
-    session, _, _ = session_for(claims_done, tree=tree)
+    session, _, _ = session_for(adds_the_flag, tree=tree)
     events = await asyncio.wait_for(run(session), 5)
     assert TaskMerged(task_id="1", result="merged", commit="c1") in events
 
@@ -350,7 +342,7 @@ async def test_commits_an_agent_made_itself_count_as_its_work() -> None:
 
 async def test_no_new_commit_means_nothing_landed() -> None:
     tree = FakeTree(empty=True)
-    session, _, _ = session_for(claims_done, tree=tree)
+    session, _, _ = session_for(adds_the_flag, tree=tree)
     events = await asyncio.wait_for(run(session), 5)
     assert TaskMerged(task_id="1", result="merged", commit="") in events
 
@@ -358,7 +350,7 @@ async def test_no_new_commit_means_nothing_landed() -> None:
 async def test_files_the_checks_create_are_ignored_with_a_notice() -> None:
     tree = FakeTree()
     tree.untracked_sets = [frozenset({"notes.md"}), frozenset({"notes.md", "__pycache__/"})]
-    session, _, _ = session_for(claims_done, verification=verified(Steps(True)), tree=tree)
+    session, _, _ = session_for(adds_the_flag, verification=verified(Steps(True)), tree=tree)
     events = await asyncio.wait_for(run(session), 5)
     assert tree.ignored == [{"__pycache__/"}]
     notices = [e.message for e in events if isinstance(e, Notice)]
@@ -367,7 +359,7 @@ async def test_files_the_checks_create_are_ignored_with_a_notice() -> None:
 
 async def test_checks_that_create_nothing_need_no_notice() -> None:
     tree = FakeTree()
-    session, _, _ = session_for(claims_done, verification=verified(Steps(True)), tree=tree)
+    session, _, _ = session_for(adds_the_flag, verification=verified(Steps(True)), tree=tree)
     events = await asyncio.wait_for(run(session), 5)
     assert tree.ignored == []
     assert not any(isinstance(e, Notice) for e in events)

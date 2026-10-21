@@ -42,13 +42,14 @@ from tests.agent_fakes import (
     Script,
     Steps,
     board,
+    claims_done,
     payloads,
     send,
     session_for,
     verified,
 )
 from tests.git_repo import git, init_repo
-from tests.test_proposals import CONFIGURE, LINT, SETUP, TESTS, Review, proposes
+from tests.proposal_fakes import CONFIGURE, LINT, SETUP, TESTS, Review, proposes
 
 CHECKS = ChecksProposal(
     steps=(VerificationStep("Lint", ("ruff", "check")), VerificationStep("Tests", ("pytest",))),
@@ -69,12 +70,6 @@ class Writer:
 
 def unsaveable(root: str, checks: ChecksProposal) -> None:
     raise RuntimeError("Couldn't save the checks to .orbit/config.toml: read-only")
-
-
-async def claims_done(call: Call) -> TurnEndReason:
-    await call("get_task")
-    await call("complete_task", summary="Added the flag")
-    return "completed"
 
 
 async def everything(session: WorkspaceHost, *tasks: TaskSpec) -> list[Event]:

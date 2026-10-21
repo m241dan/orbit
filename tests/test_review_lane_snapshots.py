@@ -27,13 +27,14 @@ from tests.agent_fakes import (
     FakeStore,
     FakeTree,
     ScriptedLauncher,
+    claims_done,
     events_until,
     of_type,
     send,
     session_for,
+    start,
 )
-from tests.test_review_lane import claims_done, start
-from tests.test_session_switch import last_of, messages, opened, saved, store_with, switching
+from tests.session_builders import last_of, messages, opened, saved, store_with, switching
 
 
 async def suggesting() -> tuple[WorkspaceHost, FakeStore]:

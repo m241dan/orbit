@@ -37,10 +37,12 @@ from tests.agent_fakes import (
     ATTACH_ID,
     HELLO,
     HELLO_ID,
+    LIMITS,
     STEP,
     WORKSPACE,
     FakeStore,
     FakeTree,
+    Source,
     Steps,
     attach_to,
     board,
@@ -53,7 +55,6 @@ from tests.agent_fakes import (
     send,
     session_for,
 )
-from tests.test_usage_monitor import LIMITS, Source
 
 
 async def send_as(

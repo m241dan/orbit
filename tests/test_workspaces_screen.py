@@ -22,8 +22,7 @@ from orbit.tui import Opening, OrbitApp
 from orbit.tui.sessions import SessionsScreen
 from orbit.tui.widgets import ConfirmScreen
 from orbit.tui.workspaces import WorkspacesScreen
-from tests.test_tui_link import FakeLink
-from tests.tui_fakes import FakeSession, feed_events
+from tests.tui_fakes import FakeLink, FakeSession, feed_events
 
 TODAY_A = SessionSummary(id="a1", name="today", active=True)
 EARLIER_A = SessionSummary(id="a0", name="earlier")

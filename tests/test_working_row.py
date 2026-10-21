@@ -15,9 +15,8 @@ from orbit.tui import OrbitApp
 from orbit.tui.tabs import ConversationTabs
 from orbit.tui.transcript import Transcript
 from orbit.tui.working import WorkingRow
-from tests.test_sessions_screen import CATALOG, OLD, RUNNING, SWITCH_TO_OLD, in_process, joined
-from tests.test_transcript import labels
-from tests.tui_fakes import FakeSession, feed_events, started
+from tests.session_apps import CATALOG, OLD, RUNNING, SWITCH_TO_OLD, in_process, joined
+from tests.tui_fakes import FakeSession, feed_events, labels, started
 from tests.tui_fakes import opened as snapshot_of
 
 NOW = 222.0  # Shows the spinner's first frame.

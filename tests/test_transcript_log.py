@@ -15,7 +15,7 @@ from orbit.tui.view.common import EntryKind
 from orbit.tui.view.log import Entry
 from orbit.tui.view.tool_calls import tool_call_started
 from orbit.tui.view.transcript import GUTTER_BAR, GUTTER_MARKER, PROMPT_LINES_SHOWN, PROMPT_MARKER
-from tests.test_transcript import (
+from tests.tui_fakes import (
     LONG,
     call,
     entry,

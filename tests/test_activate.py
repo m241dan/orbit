@@ -20,7 +20,7 @@ from orbit.protocol import (
     TasksChanged,
 )
 from tests.agent_fakes import HELLO, WORKSPACE, FakeStore, Ticks, connect
-from tests.test_attach import (
+from tests.attach_fakes import (
     EARLIER,
     OPEN,
     SAVED_TASK,

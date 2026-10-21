@@ -2,12 +2,8 @@
 
 import pytest
 
-from orbit.protocol import PLANNER, BusyChanged, SendMessage, SettingsChanged, TurnEndReason
-from tests.agent_fakes import Call, agent_exited, events_until, idle, send, session_for
-
-
-async def chats(call: Call) -> TurnEndReason:
-    return "completed"
+from orbit.protocol import PLANNER, BusyChanged, SendMessage, SettingsChanged
+from tests.agent_fakes import agent_exited, chats, events_until, idle, send, session_for
 
 
 async def test_events_until_fails_naming_the_event_when_it_never_comes() -> None:

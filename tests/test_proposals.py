@@ -28,7 +28,6 @@ from orbit.protocol import (
     ProposedSetup,
     ProposedStep,
     RunTasks,
-    TaskSpec,
     TurnEndReason,
 )
 from tests.agent_fakes import (
@@ -47,23 +46,7 @@ from tests.agent_fakes import (
     session_for,
     verified,
 )
-
-LINT = {"name": "Lint", "command": ["ruff", "check"]}
-TESTS = {"name": "Tests", "command": ["pytest"]}
-SETUP = {"command": ["uv", "sync"], "watch": ["uv.lock"]}
-CONFIGURE = TaskSpec(prompt="Work out this project's checks.", role="configurator")
-
-
-class Review:
-    """Decides on proposals as scripted, recording what it was shown."""
-
-    def __init__(self, *decisions: ProposalDecision) -> None:
-        self.decisions = list(decisions)
-        self.proposals: list[tuple[str, ChecksProposal]] = []
-
-    async def review(self, task_id: str, proposal: ChecksProposal) -> ProposalDecision:
-        self.proposals.append((task_id, proposal))
-        return self.decisions.pop(0)
+from tests.proposal_fakes import CONFIGURE, LINT, SETUP, TESTS, Review, proposes
 
 
 def status(events: list[Event]) -> str:
@@ -81,19 +64,6 @@ LINT_FAILED = (
     "Proposed check Lint failed",
     failure_report(VerificationStep("Lint", ("ruff", "check")), "1 test failed"),
 )
-
-
-def proposes(*arguments: dict[str, Any], replies: list[str]) -> Any:
-    """A configurator that proposes each of ``arguments`` in turn, recording orbit's replies."""
-
-    async def script(call: Call) -> TurnEndReason:
-        await call("get_task")
-        for proposal in arguments:
-            reply = await call("propose_checks", **proposal)
-            replies.append(reply.text)
-        return "completed"
-
-    return script
 
 
 async def configure(

@@ -12,32 +12,10 @@ from orbit.agent.application import usage_monitor
 from orbit.agent.application.usage_monitor import UsageMonitor
 from orbit.agent.domain.usage import UsageFetch, UsageRateLimited, UsageReport, UsageUnavailable
 from orbit.protocol import Event, TurnFinished, UsageChanged, UsageLimit
-from tests.agent_fakes import host_of, payloads, publish, served
+from tests.agent_fakes import LIMITS, Source, host_of, payloads, publish, served
 
 NOW = datetime(2026, 10, 16, 12, 0, tzinfo=UTC)
-LIMITS = (UsageLimit(label="Session", percent=52.0),)
 LATER = (UsageLimit(label="Session", percent=60.0),)
-
-
-class Source:
-    """Returns (or raises) ``outcomes`` in turn, waiting for ``gate`` first if set; once
-    they run out, a fetch never ends."""
-
-    def __init__(self, *outcomes: UsageFetch | Exception) -> None:
-        self.outcomes = list(outcomes)
-        self.calls = 0
-        self.gate: asyncio.Event | None = None
-
-    async def __call__(self) -> UsageFetch:
-        self.calls += 1
-        if self.gate is not None:
-            await self.gate.wait()
-        if not self.outcomes:
-            await asyncio.Event().wait()
-        outcome = self.outcomes.pop(0)
-        if isinstance(outcome, Exception):
-            raise outcome
-        return outcome
 
 
 class Clock:

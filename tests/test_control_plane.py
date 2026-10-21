@@ -51,12 +51,11 @@ from orbit.protocol import (
     Snapshot,
     TasksChanged,
     TaskSpec,
-    TurnEndReason,
     Welcome,
     decode_event,
     encode,
 )
-from tests.agent_fakes import Call, board_of, control_plane, session_for
+from tests.agent_fakes import board_of, claims_done, control_plane, session_for
 
 TOKEN = "the-token"
 LOOPBACK = ServerSettings(port=0)
@@ -318,12 +317,6 @@ async def test_discoverys_probe_is_accepted_without_the_server_saying_anything()
     async with serving(lines=lines) as url:
         assert await accepts(url, TOKEN)
     assert lines.said == []
-
-
-async def claims_done(call: Call) -> TurnEndReason:
-    await call("get_task")
-    await call("complete_task", summary="done")
-    return "completed"
 
 
 async def test_queued_work_runs_to_the_end_with_no_frontend_connected() -> None:

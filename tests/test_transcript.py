@@ -3,7 +3,6 @@ and collapsed."""
 
 import pytest
 from rich.console import Console
-from rich.segment import Segment
 from rich.style import Style
 from textual.pilot import Pilot
 
@@ -36,42 +35,30 @@ from orbit.tui.view.log import Entry
 from orbit.tui.view.tool_calls import REPLY_LIMIT
 from orbit.tui.view.transcript import GUTTER_BAR, GUTTER_MARKER, PROMPT_MARKER
 from orbit.tui.widgets import ChatPrompt
-from tests.tui_fakes import STRIP, FakeSession, feed_events, said, started, tab_strip
-
-# Wraps in any window a test opens. At 40 columns a row beside the gutter holds two words but
-# would hold three if wrapped at the full width, so cropping a row would lose text.
-LONG = " ".join(["gutter"] * 20)
-
-
-def visible_log(app: OrbitApp) -> TranscriptLog:
-    return app.query_one("Transcript > TranscriptLog.-shown", TranscriptLog)
-
-
-def entry(log: TranscriptLog, index: int) -> GutteredEntry:
-    """The entry at ``index`` as the log draws it."""
-    prompt = log.get_option_at_index(index).prompt
-    assert isinstance(prompt, GutteredEntry)
-    return prompt
-
-
-def prompts(app: OrbitApp) -> list[GutteredEntry]:
-    log = visible_log(app)
-    return [entry(log, index) for index in range(log.option_count)]
-
-
-def labels(app: OrbitApp) -> list[str]:
-    """The shown log's entries as they're labelled, without their gutter."""
-    return [prompt.label.plain for prompt in prompts(app)]
+from tests.tui_fakes import (
+    LONG,
+    STRIP,
+    FakeSession,
+    call,
+    entry,
+    entry_lines,
+    entry_rows,
+    feed_events,
+    label_style,
+    labels,
+    prompts,
+    result,
+    said,
+    scrolled_to_end,
+    started,
+    tab_strip,
+    visible_log,
+)
 
 
 def gutters(app: OrbitApp) -> list[str]:
     """The gutter symbol of each of the shown log's entries."""
     return [prompt.gutter.strip() for prompt in prompts(app)]
-
-
-def label_style(prompt: GutteredEntry) -> Style:
-    """The style of an entry's label."""
-    return prompt.label.get_style_at_offset(Console(), 0)
 
 
 def rendered(log: TranscriptLog, rows: int) -> list[str]:
@@ -382,15 +369,6 @@ async def test_lines_are_wrapped_again_for_a_new_window_size() -> None:
         assert visible_log(app).max_scroll_y < narrow
 
 
-async def scrolled_to_end(pilot: Pilot[None], log: TranscriptLog) -> bool:
-    """Whether ``log`` reaches its end, waiting out a scroll that lags a refresh."""
-    for _ in range(100):
-        if log.scroll_y == log.max_scroll_y:
-            return True
-        await pilot.pause()
-    return False
-
-
 async def test_escape_holds_the_cursor_and_the_conversation_stops_following() -> None:
     session = FakeSession()
     app = OrbitApp(session)
@@ -521,17 +499,6 @@ async def test_switching_tabs_keeps_a_held_place() -> None:
         for _ in range(5):
             await pilot.pause()
         assert log.scroll_y == 0 and log.max_scroll_y > 0
-
-
-def entry_lines(log: TranscriptLog, index: int) -> list[list[Segment]]:
-    """The rows of the entry at ``index`` as drawn at the log's width, gutter and all."""
-    console = Console(width=log.size.width)
-    return console.render_lines(entry(log, index), console.options, pad=False)
-
-
-def entry_rows(log: TranscriptLog, index: int) -> list[str]:
-    """The text of the rows of the entry at ``index``, gutter and all."""
-    return ["".join(segment.text for segment in line) for line in entry_lines(log, index)]
 
 
 async def test_an_agents_message_of_several_lines_hangs_its_marker_beside_its_markdown() -> None:
@@ -1356,18 +1323,6 @@ async def test_a_temporary_tab_agents_exit_rule_lands_in_its_tab() -> None:
         assert texts(app, "agent-3")[-1] == rule
         assert texts(app, None)[-1] == rule
         assert tab_strip(app) == STRIP
-
-
-def call(agent_id: str, call_id: str, path: str = "a.py") -> ToolCallStarted:
-    return ToolCallStarted(
-        turn_id="t", call_id=call_id, name="Read", arguments={"file_path": path}, agent_id=agent_id
-    )
-
-
-def result(agent_id: str, call_id: str, output: str, is_error: bool = False) -> ToolCallFinished:
-    return ToolCallFinished(
-        turn_id="t", call_id=call_id, output=output, is_error=is_error, agent_id=agent_id
-    )
 
 
 def still(app: OrbitApp, at: float = 0.0) -> Transcript:

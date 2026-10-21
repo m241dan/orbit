@@ -1,25 +1,19 @@
 """Picking a session: the picker shown at startup and on ctrl+p, viewing or activating a saved
 session or starting a new one, and renaming or deleting saved ones."""
 
-from datetime import UTC, datetime
-
 from textual.containers import Vertical
 from textual.widgets import Input, OptionList
 
 from orbit.agent import WorkspaceHost
 from orbit.protocol import (
     BUSY,
-    ActivateSession,
     Attach,
-    Catalog,
     DeleteSession,
     ErrorOccurred,
     NewSession,
     RenameSession,
-    SessionStateChanged,
     SessionSummary,
     Usage,
-    WorkspaceEntry,
 )
 from orbit.tui import Opening, OrbitApp
 from orbit.tui.sessions import SessionsScreen
@@ -27,29 +21,25 @@ from orbit.tui.tasks import TaskList
 from orbit.tui.transcript import Transcript
 from orbit.tui.widgets import ConfirmScreen
 from tests.agent_fakes import frontend
-from tests.test_session_switch import saved, store_with
-from tests.test_tui_link import FakeLink
+from tests.session_apps import (
+    ACTIVE,
+    BROKEN,
+    CATALOG,
+    CURRENT,
+    LOCKED,
+    OLD,
+    RUNNING,
+    SWITCH_TO_OLD,
+    catalog,
+    in_process,
+    joined,
+    started,
+)
+from tests.session_builders import saved, store_with
 from tests.tui_fakes import FakeSession, entries, feed_events, opened
 
-ACTIVE = datetime(2026, 10, 16, 18, 2, tzinfo=UTC)
-OLD = SessionSummary(id="old", name="auth rework", last_active=ACTIVE)
-CURRENT = SessionSummary(
-    id="now", name="today", last_active=ACTIVE, current=True, active=True, viewers=1
-)
-LOCKED = SessionSummary(id="busy", name="elsewhere", locked=True)
-BROKEN = SessionSummary(id="bad", name="bad.json", unreadable="not JSON")
 OLD_ROW = "  auth rework · Oct 16 18:02"
 SAVED_ROWS = [OLD_ROW, "  elsewhere · open in another orbit", "  bad.json · unreadable: not JSON"]
-RUNNING = SessionStateChanged(session="now", active=True, state="running", viewers=1)
-SWITCH_TO_OLD = [Attach(workspace="w", session="old"), ActivateSession(session="old")]
-
-
-def catalog(*sessions: SessionSummary) -> Catalog:
-    workspace = WorkspaceEntry(id="w", label="project", sessions=sessions)
-    return Catalog(workspaces=(workspace,), agents=(), triggers=(), lanes=())
-
-
-CATALOG = catalog(CURRENT, OLD, LOCKED, BROKEN)
 
 
 def options(screen: SessionsScreen) -> list[str]:
@@ -65,26 +55,6 @@ def picker(app: OrbitApp) -> SessionsScreen:
 
 def no_picker(app: OrbitApp) -> bool:
     return not any(isinstance(screen, SessionsScreen) for screen in app.screen_stack)
-
-
-def in_process() -> tuple[OrbitApp, FakeSession]:
-    """An app picking a session at startup over a backend in this process."""
-    session = FakeSession()
-    return OrbitApp(session, opening=Opening(pick=True)), session
-
-
-def joined() -> tuple[OrbitApp, FakeSession]:
-    """An app picking a session at startup over a control plane it's linked to, once the user
-    picks the workspace, which it attaches to only then."""
-    session = FakeSession()
-    session.attached = True  # The user's pick attaches, so its Attach is one of the commands.
-    return OrbitApp(session, FakeLink(), Opening(pick=True)), session
-
-
-def started() -> tuple[OrbitApp, FakeSession]:
-    """An app that picks no session at startup."""
-    session = FakeSession()
-    return OrbitApp(session), session
 
 
 async def test_in_process_the_startup_picker_lists_the_saved_sessions_then_new_session() -> None:

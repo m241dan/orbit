@@ -31,16 +31,10 @@ from orbit.protocol import (
     Notice,
     Settings,
     TaskSpec,
-    TurnEndReason,
 )
-from tests.agent_fakes import ROLES, Call, FakeHost, ScriptedLauncher, Steps, verified
+from tests.agent_fakes import ROLES, FakeHost, ScriptedLauncher, Steps, hangs, verified
 
 TASK = TaskSpec(prompt="Add a flag.", settings=Settings(model="opus"))
-
-
-async def hangs(call: Call) -> TurnEndReason:
-    await asyncio.Event().wait()
-    raise AssertionError("unreachable")
 
 
 class StopsCounted(WorkLane):

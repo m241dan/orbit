@@ -11,21 +11,16 @@ from orbit.protocol import (
     PLANNER,
     CommandEnvelope,
     EventEnvelope,
-    Notice,
     SendMessage,
     Session,
     SharedSession,
 )
+from tests.agent_fakes import notice
 
 
 def command(text: str) -> CommandEnvelope:
     """A message to the planner saying ``text``, in an envelope."""
     return CommandEnvelope(command_id=text, payload=SendMessage(agent=PLANNER, text=text))
-
-
-def notice(seq: int, message: str) -> EventEnvelope:
-    """A notice saying ``message``, in an envelope at ``seq``."""
-    return EventEnvelope(seq=seq, payload=Notice(message=message))
 
 
 class FakeSession:
@@ -70,7 +65,7 @@ class FakeSession:
                 yield event
             if self.hold is not None:
                 self.hold.wait()
-                yield notice(len(self._events) + 1, "after the hold")
+                yield notice(len(self._events) + 1, None, "after the hold")
             if self._crash:
                 raise RuntimeError("the queue broke")
             if self._endless:
@@ -101,7 +96,7 @@ class EchoSession:
 
     async def send(self, envelope: CommandEnvelope) -> None:
         self._seq += 1
-        await self._queue.put(notice(self._seq, envelope.command_id))
+        await self._queue.put(notice(self._seq, None, envelope.command_id))
 
     async def events(self) -> AsyncIterator[EventEnvelope]:
         while True:
@@ -134,7 +129,7 @@ async def collect(session: Session) -> list[EventEnvelope]:
 
 
 async def test_commands_and_events_cross_threads_in_order() -> None:
-    notices = [notice(n, str(n)) for n in range(1, 21)]
+    notices = [notice(n, None, str(n)) for n in range(1, 21)]
     session, built = threaded(FakeSession(notices))
     commands = [command(str(n)) for n in range(20)]
     for envelope in commands:
@@ -169,10 +164,10 @@ async def test_an_error_from_the_inner_send_re_raises_in_the_caller() -> None:
 
 
 async def test_a_crashing_inner_event_stream_raises_after_the_events_before_it() -> None:
-    session, _ = threaded(FakeSession([notice(1, "first")], crash=True))
+    session, _ = threaded(FakeSession([notice(1, None, "first")], crash=True))
     events = session.events()
 
-    assert await anext(events) == notice(1, "first")
+    assert await anext(events) == notice(1, None, "first")
     with pytest.raises(RuntimeError, match="the queue broke"):
         await anext(events)
     await session.close()
@@ -208,9 +203,9 @@ async def test_close_before_start_builds_nothing() -> None:
 
 
 async def test_close_ends_an_endless_event_stream() -> None:
-    session, _ = threaded(FakeSession([notice(1, "one")], endless=True))
+    session, _ = threaded(FakeSession([notice(1, None, "one")], endless=True))
     events = session.events()
-    assert await anext(events) == notice(1, "one")
+    assert await anext(events) == notice(1, None, "one")
     await session.close()
 
     with pytest.raises(StopAsyncIteration):
@@ -283,10 +278,10 @@ async def test_a_blocked_backend_does_not_stop_the_callers_loop() -> None:
 
 
 async def test_abandoning_events_stops_its_pump_before_close() -> None:
-    inner = FakeSession([notice(1, "one")], endless=True)
+    inner = FakeSession([notice(1, None, "one")], endless=True)
     session, _ = threaded(inner)
     events = session.events()
-    assert await anext(events) == notice(1, "one")
+    assert await anext(events) == notice(1, None, "one")
     await events.aclose()
 
     assert await asyncio.to_thread(inner.stream_closed.wait, 5)
@@ -298,7 +293,7 @@ async def test_events_after_an_abandoned_iterator_receive_every_event() -> None:
     session = ThreadedSession(EchoSession)
     first = session.events()
     await session.send(command("first"))
-    assert await anext(first) == notice(1, "first")
+    assert await anext(first) == notice(1, None, "first")
     await first.aclose()
 
     second = session.events()
@@ -307,11 +302,11 @@ async def test_events_after_an_abandoned_iterator_receive_every_event() -> None:
     received = [await asyncio.wait_for(anext(second), 5) for _ in range(10)]
     await session.close()
 
-    assert received == [notice(n + 2, str(n)) for n in range(10)]
+    assert received == [notice(n + 2, None, str(n)) for n in range(10)]
 
 
 async def test_a_pump_whose_callers_loop_has_closed_ends_quietly() -> None:
-    inner = FakeSession([notice(1, "one")])
+    inner = FakeSession([notice(1, None, "one")])
     inner.hold = threading.Event()
     session, _ = threaded(inner)
 
@@ -319,7 +314,7 @@ async def test_a_pump_whose_callers_loop_has_closed_ends_quietly() -> None:
         return await anext(session.events())
 
     # The backend's loop is held after "one" until the caller's loop has closed.
-    assert await asyncio.to_thread(asyncio.run, take_one()) == notice(1, "one")
+    assert await asyncio.to_thread(asyncio.run, take_one()) == notice(1, None, "one")
     inner.hold.set()
     await session.close()
 

@@ -19,10 +19,19 @@ from orbit.protocol import (
     Snapshot,
     Welcome,
 )
-from tests.agent_fakes import ATTACH_ID, HELLO_ID, FakeStore, Ticks, attach_to, frontend
-from tests.test_log_writer import GatedLog, delivered
+from tests.agent_fakes import (
+    ATTACH_ID,
+    HELLO_ID,
+    FakeStore,
+    GatedLog,
+    Ticks,
+    attach_to,
+    delivered,
+    frontend,
+    notice,
+)
+from tests.session_builders import OPEN, store_logging
 
-OPEN = "session-1"
 WHEN = datetime(2026, 10, 1, 9, 0, tzinfo=UTC)
 
 # The rule
@@ -61,18 +70,8 @@ def test_a_frontend_cant_catch_up_otherwise(since: int, bounds: LogBounds) -> No
 # What the session sends
 
 
-def notice(seq: int, session: str = OPEN) -> EventEnvelope:
-    return EventEnvelope(seq=seq, session=session, payload=Notice(message=f"n{seq}"))
-
-
 def notices(first: int, end: int) -> list[EventEnvelope]:
-    return [notice(seq) for seq in range(first, end)]
-
-
-def store_with(*logged: EventEnvelope) -> FakeStore:
-    store = FakeStore()
-    store.logged = list(logged)
-    return store
+    return [notice(seq, OPEN) for seq in range(first, end)]
 
 
 async def rejoin(session: WorkspaceHost, since: int | None, attach: str = OPEN) -> None:
@@ -99,7 +98,7 @@ def kinds(sent: list[EventEnvelope]) -> list[type]:
 
 
 async def test_a_reconnecting_frontend_gets_what_it_missed_in_place_of_a_snapshot() -> None:
-    store = store_with(*(notice(seq) for seq in range(10, 21)))
+    store = store_logging(*(notice(seq, OPEN) for seq in range(10, 21)))
     sent = await reconnected(store, 15)
 
     assert kinds(sent[:2]) == [Welcome, Catalog]
@@ -133,11 +132,11 @@ async def test_events_still_to_be_written_are_caught_up_on_once() -> None:
 @pytest.mark.parametrize(
     "logged",
     [
-        [notice(seq) for seq in range(10, 18)] + [notice(18, "other")],
-        [notice(seq) for seq in range(17, 21)],
+        [notice(seq, OPEN) for seq in range(10, 18)] + [notice(18, "other")],
+        [notice(seq, OPEN) for seq in range(17, 21)],
         [notice(seq, "other") for seq in range(1, 16)],
-        [notice(seq) for seq in range(1, 6)] + [notice(seq, "other") for seq in range(6, 16)],
-        [notice(seq) for seq in range(16, 21)],
+        [notice(seq, OPEN) for seq in range(1, 6)] + [notice(seq, "other") for seq in range(6, 16)],
+        [notice(seq, OPEN) for seq in range(16, 21)],
     ],
     ids=[
         "another session came after it",
@@ -148,14 +147,14 @@ async def test_events_still_to_be_written_are_caught_up_on_once() -> None:
     ],
 )
 async def test_a_frontend_that_cant_catch_up_gets_a_snapshot(logged: list[EventEnvelope]) -> None:
-    sent = await reconnected(store_with(*logged), 15)
+    sent = await reconnected(store_logging(*logged), 15)
 
     assert kinds(sent[:3]) == [Welcome, Catalog, Snapshot]
     assert not [envelope for envelope in sent if envelope.payload == Notice(message="n16")]
 
 
 async def test_a_frontend_attaching_to_a_saved_session_gets_its_view_not_a_replay() -> None:
-    store = store_with(*(notice(seq) for seq in range(10, 21)), notice(9, "earlier"))
+    store = store_logging(*(notice(seq, OPEN) for seq in range(10, 21)), notice(9, "earlier"))
     store.saved.append(SessionRecord(id="earlier", name="earlier", created=WHEN, last_active=WHEN))
     sent = await reconnected(store, 15, attach="earlier")
 
@@ -165,7 +164,7 @@ async def test_a_frontend_attaching_to_a_saved_session_gets_its_view_not_a_repla
 
 
 async def test_a_hello_gets_nothing_it_missed_until_it_attaches() -> None:
-    store = store_with(*(notice(seq) for seq in range(10, 21)))
+    store = store_logging(*(notice(seq, OPEN) for seq in range(10, 21)))
     session = WorkspaceHost(store=store, clock=Ticks(), new_id=lambda: OPEN)
     hello = Hello(client="orbit-tests", protocol_version=PROTOCOL_VERSION, since=15)
     await frontend(session).send(CommandEnvelope(command_id=HELLO_ID, payload=hello))
@@ -175,7 +174,7 @@ async def test_a_hello_gets_nothing_it_missed_until_it_attaches() -> None:
 
 
 async def test_a_frontend_ahead_of_the_log_gets_a_snapshot() -> None:
-    sent = await reconnected(store_with(*(notice(seq) for seq in range(10, 21))), 21)
+    sent = await reconnected(store_logging(*(notice(seq, OPEN) for seq in range(10, 21))), 21)
     assert kinds(sent[:3]) == [Welcome, Catalog, Snapshot]
 
 
@@ -185,7 +184,7 @@ async def test_a_frontend_with_no_store_to_catch_up_from_gets_a_snapshot() -> No
 
 
 async def test_a_frontend_that_gave_no_seq_gets_a_snapshot() -> None:
-    sent = await reconnected(store_with(*(notice(seq) for seq in range(10, 21))), None)
+    sent = await reconnected(store_logging(*(notice(seq, OPEN) for seq in range(10, 21))), None)
     assert kinds(sent[:3]) == [Welcome, Catalog, Snapshot]
 
 
@@ -198,6 +197,6 @@ class Unreadable(FakeStore):
 
 async def test_a_frontend_whose_missed_events_cant_be_read_gets_a_snapshot() -> None:
     store = Unreadable()
-    store.logged = [notice(1)]
+    store.logged = [notice(1, OPEN)]
     sent = await reconnected(store, 1)
     assert kinds(sent[:3]) == [Welcome, Catalog, Snapshot]

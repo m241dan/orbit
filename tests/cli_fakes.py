@@ -2,16 +2,20 @@
 
 import asyncio
 import ssl
-from collections.abc import Callable, Coroutine
+from collections.abc import AsyncIterator, Callable, Coroutine
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, ClassVar
 
 import pytest
 
-from orbit.agent import WorkspaceHost
+from orbit.agent import ControlPlane, WorkspaceHost
 from orbit.agent.application.ports import UsageSource
+from orbit.agent.domain.server import ServerSettings
+from orbit.agent.external.control_plane import ControlPlaneServer
 from orbit.cli.threaded import ThreadedSession
+from orbit.protocol import PROTOCOL_VERSION, CommandEnvelope, Hello
 from orbit.tui import Opening
 
 
@@ -106,3 +110,23 @@ class LocalApp:
         backend = self.session._backend
         assert backend is not None
         await asyncio.wrap_future(asyncio.run_coroutine_threadsafe(work, backend.loop))
+
+
+TOKEN = "the-token"
+
+
+HELLO = CommandEnvelope(
+    command_id="hello", payload=Hello(client="tests", protocol_version=PROTOCOL_VERSION)
+)
+
+
+@asynccontextmanager
+async def control_plane(settings: ServerSettings) -> AsyncIterator[int]:
+    """A control plane serving as ``settings`` say, and its port."""
+    served = ControlPlane([WorkspaceHost()])
+    server = ControlPlaneServer(served, lambda: TOKEN, settings, lambda line: None)
+    url = await server.start()
+    try:
+        yield int(url.rstrip("/").rsplit(":", 1)[1])
+    finally:
+        await server.stop(served.close)

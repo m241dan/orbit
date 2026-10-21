@@ -54,6 +54,7 @@ from tests.agent_fakes import (
     Steps,
     board,
     ended_unverified,
+    keeps_claiming,
     payloads,
     queued,
     replies,
@@ -130,13 +131,6 @@ async def test_failed_checks_go_back_to_the_same_agent_to_fix() -> None:
     ]
     assert ("running", 1, 5) in shown
     assert [t.status for t in board(events)] == ["completed"]
-
-
-async def keeps_claiming(call: Call) -> TurnEndReason:
-    await call("get_task")
-    while "another agent" not in (await call("complete_task", summary="try")).text:
-        pass
-    return "completed"
 
 
 async def test_once_its_fixes_run_out_a_fresh_agent_takes_over() -> None:

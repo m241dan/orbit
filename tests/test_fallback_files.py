@@ -10,11 +10,8 @@ import pytest
 
 from orbit.agent.application.ports import ParkedFile
 from orbit.agent.external.fallback_files import FallbackFiles
-from orbit.protocol import EventEnvelope, Notice, decode_event
-
-
-def notice(seq: int) -> EventEnvelope:
-    return EventEnvelope(seq=seq, session="s1", payload=Notice(message=f"n{seq}"))
+from orbit.protocol import EventEnvelope, decode_event
+from tests.agent_fakes import notice
 
 
 @pytest.fixture

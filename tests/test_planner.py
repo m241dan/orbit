@@ -1,7 +1,6 @@
 """Planning in conversation: prompts go to the planner, whose proposals become draft tasks."""
 
 import asyncio
-from collections.abc import Mapping
 
 import pytest
 
@@ -46,36 +45,20 @@ from tests.agent_fakes import (
     ROLES,
     Call,
     FakeHost,
-    Script,
     ScriptedLauncher,
     board,
+    chats,
     events_until,
-    idle,
+    hangs,
     payloads,
+    plan,
+    proposes_two,
     refused,
     send,
     session_for,
+    steps_chat,
+    until_idle,
 )
-
-
-async def until_idle(session: WorkspaceHost) -> list[Event]:
-    return await events_until(session, idle(lane=None))
-
-
-async def proposes_two(call: Call) -> TurnEndReason:
-    first = await call("propose_task", title="Add the flag", prompt="Add --fast to the CLI.")
-    assert "draft" in first.text
-    await call("propose_task", title="Document it", prompt="Mention --fast in the README.")
-    return "completed"
-
-
-async def chats(call: Call) -> TurnEndReason:
-    return "completed"
-
-
-async def plan(session: WorkspaceHost, text: str) -> list[Event]:
-    await send(session, SendMessage(agent=PLANNER, text=text))
-    return await until_idle(session)
 
 
 async def test_prompts_to_the_planner_go_to_it_and_proposals_become_drafts() -> None:
@@ -161,7 +144,7 @@ async def test_accepted_drafts_run_and_dropped_ones_go() -> None:
     await send(session, AcceptTask(task_id="1"))
     await send(session, RemoveTask(task_id="2"))
     await send(session, RunTasks())
-    events = await until_idle(session)
+    events = await until_idle(session, None)
     assert [(t.id, t.status) for t in board(events)] == [("1", "completed")]
 
 
@@ -262,24 +245,6 @@ async def test_the_planner_uses_the_default_model_when_neither_names_one() -> No
     assert await planner_model(None, None) is None
 
 
-def steps_chat(
-    *turns: Script, published: list[Event] | None = None, roles: Mapping[str, Role] = ROLES
-) -> tuple[PlannerChat, ScriptedLauncher, list[tuple[str, ...]]]:
-    """A planner chat playing ``turns`` with ``roles``, whose steps are the last in the list it
-    returns; what it publishes goes to ``published``."""
-    host = FakeHost()
-    launcher = ScriptedLauncher(host)
-    launcher.planner_turns = list(turns)
-    sink = published if published is not None else []
-
-    async def publish(event: Event) -> None:
-        sink.append(event)
-
-    desk = AgentDesk(Agents(host, launcher, lambda: "token-1", roles), publish)
-    steps: list[tuple[str, ...]] = [("Ruff lint",)]
-    return PlannerChat(desk, Tasks(TaskBoard(), publish), lambda: steps[-1]), launcher, steps
-
-
 async def turn(chat: PlannerChat, launcher: ScriptedLauncher, text: str) -> str:
     async for _ in chat.run_turn("turn", text, Settings()):
         pass
@@ -292,11 +257,6 @@ async def fails(call: Call) -> TurnEndReason:
 
 async def errs(call: Call) -> TurnEndReason:
     return "error"
-
-
-async def hangs(call: Call) -> TurnEndReason:
-    await asyncio.Event().wait()
-    raise AssertionError("unreachable")
 
 
 async def test_the_planner_hears_the_steps_on_its_first_turn_and_when_they_change() -> None:

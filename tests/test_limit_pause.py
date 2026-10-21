@@ -31,18 +31,20 @@ from tests.agent_fakes import (
     FakeStore,
     Script,
     ScriptedLauncher,
+    Source,
     Steps,
     board,
+    claims_done,
     events_until,
     idle,
+    keeps_claiming,
     payloads,
     run,
     send,
     session_for,
+    statuses,
     verified,
 )
-from tests.test_task_runs import claims_done, keeps_claiming, statuses
-from tests.test_usage_monitor import Source
 
 LIMIT = "You've hit your session limit · resets 6pm (UTC)"
 

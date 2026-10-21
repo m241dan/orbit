@@ -2,12 +2,17 @@
 what the app shows."""
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 
+from rich.console import Console
+from rich.segment import Segment
+from rich.style import Style
 from textual.pilot import Pilot
 from textual.widgets import OptionList, Tab
 
 from orbit.protocol import (
+    PLANNER_LANE,
+    WORK_LANE,
     AgentStarted,
     AssistantMessage,
     Attach,
@@ -16,20 +21,30 @@ from orbit.protocol import (
     Event,
     EventEnvelope,
     Hello,
+    LinkState,
+    OpenRequest,
+    ReviewStatus,
+    RunningAgent,
     SessionSummary,
     Settings,
     SettingsChanged,
     Snapshot,
+    StepState,
     TasksChanged,
     TaskSpec,
     TaskState,
     TaskStatus,
+    ToolCallFinished,
+    ToolCallStarted,
+    Usage,
 )
 from orbit.tui import OrbitApp
+from orbit.tui.entries import GutteredEntry
 from orbit.tui.tabs import ConversationTabs
 from orbit.tui.task_editor import TaskEditorScreen
 from orbit.tui.tasks import TaskList
 from orbit.tui.transcript import Transcript
+from orbit.tui.transcript_log import TranscriptLog
 from orbit.tui.view.common import EntryKind
 from orbit.tui.widgets import PickerScreen
 
@@ -192,3 +207,111 @@ def board(*prompts: str, status: TaskStatus = "pending") -> TasksChanged:
 async def open_task_list(pilot: Pilot[None]) -> None:
     """From the default selection (prompt), go to the task list and activate it."""
     await pilot.press("l", "k", "enter")
+
+
+# Wraps in any window a test opens. At 40 columns a row beside the gutter holds two words but
+# would hold three if wrapped at the full width, so cropping a row would lose text.
+LONG = " ".join(["gutter"] * 20)
+
+
+def visible_log(app: OrbitApp) -> TranscriptLog:
+    return app.query_one("Transcript > TranscriptLog.-shown", TranscriptLog)
+
+
+def entry(log: TranscriptLog, index: int) -> GutteredEntry:
+    """The entry at ``index`` as the log draws it."""
+    prompt = log.get_option_at_index(index).prompt
+    assert isinstance(prompt, GutteredEntry)
+    return prompt
+
+
+def prompts(app: OrbitApp) -> list[GutteredEntry]:
+    log = visible_log(app)
+    return [entry(log, index) for index in range(log.option_count)]
+
+
+def labels(app: OrbitApp) -> list[str]:
+    """The shown log's entries as they're labelled, without their gutter."""
+    return [prompt.label.plain for prompt in prompts(app)]
+
+
+def label_style(prompt: GutteredEntry) -> Style:
+    """The style of an entry's label."""
+    return prompt.label.get_style_at_offset(Console(), 0)
+
+
+async def scrolled_to_end(pilot: Pilot[None], log: TranscriptLog) -> bool:
+    """Whether ``log`` reaches its end, waiting out a scroll that lags a refresh."""
+    for _ in range(100):
+        if log.scroll_y == log.max_scroll_y:
+            return True
+        await pilot.pause()
+    return False
+
+
+def entry_lines(log: TranscriptLog, index: int) -> list[list[Segment]]:
+    """The rows of the entry at ``index`` as drawn at the log's width, gutter and all."""
+    console = Console(width=log.size.width)
+    return console.render_lines(entry(log, index), console.options, pad=False)
+
+
+def entry_rows(log: TranscriptLog, index: int) -> list[str]:
+    """The text of the rows of the entry at ``index``, gutter and all."""
+    return ["".join(segment.text for segment in line) for line in entry_lines(log, index)]
+
+
+def call(agent_id: str, call_id: str, path: str = "a.py") -> ToolCallStarted:
+    return ToolCallStarted(
+        turn_id="t", call_id=call_id, name="Read", arguments={"file_path": path}, agent_id=agent_id
+    )
+
+
+def result(agent_id: str, call_id: str, output: str, is_error: bool = False) -> ToolCallFinished:
+    return ToolCallFinished(
+        turn_id="t", call_id=call_id, output=output, is_error=is_error, agent_id=agent_id
+    )
+
+
+class FakeLink:
+    """A link whose states a test moves it to."""
+
+    def __init__(self) -> None:
+        self.watchers: list[Callable[[LinkState], None]] = []
+
+    def watch(self, changed: Callable[[LinkState], None]) -> None:
+        self.watchers.append(changed)
+
+    async def move(self, pilot: Pilot[None], state: LinkState) -> None:
+        for changed in self.watchers:
+            changed(state)
+        await pilot.pause()
+
+
+TASKS = (
+    TaskState(id="1", task=TaskSpec(prompt="Add a flag."), status="running"),
+    TaskState(id="2", task=TaskSpec(prompt="Document it.")),
+)
+
+
+CODER = RunningAgent(
+    agent_id="agent-3",
+    role="coder",
+    task_id="1",
+    open_requests=(OpenRequest(request_id="r1", tool="propose_checks"),),
+)
+
+
+SNAPSHOT = Snapshot(
+    session=SessionSummary(
+        id="s1", name="auth rework", usage=Usage(input_tokens=2_000, cost_usd=2.0)
+    ),
+    settings=Settings(model="opus"),
+    model_choices=("opus", "sonnet"),
+    busy={WORK_LANE: True, PLANNER_LANE: True},
+    tasks=TASKS,
+    steps=(StepState(name="Unit tests", status="running"),),
+    steps_title="Startup check",
+    review=ReviewStatus(paused=True, open_batches=0),
+    proposals=(),
+    agents=(CODER,),
+)

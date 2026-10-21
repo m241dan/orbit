@@ -27,20 +27,20 @@ from tests.agent_fakes import (
     Steps,
     agent_exited,
     board,
+    chats,
+    claims_done,
     events_until,
     idle,
     lane_of,
     of_type,
     send,
     session_for,
+    settle,
+    start,
+    suggests,
 )
-from tests.test_review_lane import claims_done, settle, start, suggests
 
 TASK = TaskSpec(prompt="Add a flag.")
-
-
-async def chats(call: Call) -> TurnEndReason:
-    return "completed"
 
 
 async def proposes(call: Call) -> TurnEndReason:

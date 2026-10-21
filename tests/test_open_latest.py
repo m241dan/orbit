@@ -4,7 +4,7 @@ does at startup."""
 from datetime import timedelta
 
 from tests.agent_fakes import FakeStore
-from tests.test_session_switch import YESTERDAY, saved, store_with, switching
+from tests.session_builders import YESTERDAY, saved, store_with, switching
 
 LATER = YESTERDAY + timedelta(hours=1)
 

@@ -19,8 +19,7 @@ from orbit.protocol import (
     UsageChanged,
     Welcome,
 )
-from tests.agent_fakes import HELLO, attach_to
-from tests.test_usage_monitor import LIMITS, Source
+from tests.agent_fakes import HELLO, LIMITS, Source, attach_to
 
 NOTE = Notice(message="From the host.")
 

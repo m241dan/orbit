@@ -31,12 +31,15 @@ from tests.agent_fakes import (
     FakeStore,
     Script,
     board,
+    chats,
+    claims_done,
     events_until,
+    gated_planner,
+    hangs,
     refused,
     send,
     session_for,
 )
-from tests.test_task_runs import claims_done
 
 PLANNER_IDLE = BusyChanged(busy=False, lane="planner")
 WORK_IDLE = BusyChanged(busy=False)
@@ -50,18 +53,6 @@ def gated_task(gate: asyncio.Event) -> Script:
         return "completed"
 
     return waits
-
-
-def gated_planner(gate: asyncio.Event) -> Script:
-    async def ponders(call: Call) -> TurnEndReason:
-        await gate.wait()
-        return "completed"
-
-    return ponders
-
-
-async def chats(call: Call) -> TurnEndReason:
-    return "completed"
 
 
 def errors(events: list[Event]) -> list[str]:
@@ -251,11 +242,6 @@ async def test_the_planner_calling_an_unknown_tool_is_refused() -> None:
     await send(session, SendMessage(agent=PLANNER, text="Plan."))
     await events_until(session, lambda e: e == PLANNER_IDLE)
     assert replies == [Reply("Orbit has no tool 'no_such_tool'.", is_error=True)]
-
-
-async def hangs(call: Call) -> TurnEndReason:
-    await asyncio.Event().wait()
-    raise AssertionError("unreachable")
 
 
 def finishes(events: list[Event]) -> list[TurnEndReason]:

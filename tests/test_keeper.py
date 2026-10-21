@@ -24,40 +24,14 @@ from orbit.protocol import (
     LOCKED,
     SAVE_FAILED,
     UNKNOWN,
-    ErrorOccurred,
-    Event,
     Settings,
-    TaskSpec,
-    TaskState,
     Usage,
 )
 from tests.agent_fakes import START, FakeHalt, FakeStore, Ticks
+from tests.keeper_fakes import EMPTY, TASK, WITH_TASK, Published, save
 
-TASK = TaskState(id="1", task=TaskSpec(prompt="Add a flag."))
-EMPTY = Contents(
-    settings=Settings(), planner_conversation=None, tasks=(), reviews=None, spent=Usage()
-)
 SPENT = Usage(input_tokens=500, cost_usd=1.4, turns=3)
 UNLOCKABLE = "Couldn't unlock the session x.lock: read-only"
-WITH_TASK = replace(EMPTY, tasks=(TASK,))
-
-
-class Published:
-    """Collects what a keeper publishes."""
-
-    def __init__(self) -> None:
-        self.events: list[Event] = []
-
-    async def __call__(self, event: Event) -> None:
-        self.events.append(event)
-
-    @property
-    def errors(self) -> list[str]:
-        return [e.message for e in self.events if isinstance(e, ErrorOccurred)]
-
-    @property
-    def codes(self) -> list[str]:
-        return [e.code for e in self.events if isinstance(e, ErrorOccurred)]
 
 
 def keeper_for(store: FakeStore | None) -> tuple[SessionKeeper, Published]:
@@ -71,10 +45,6 @@ def halting_keeper(store: FakeStore) -> tuple[SessionKeeper, FakeHalt]:
     """A keeper over ``store``, and the halt its failing saves are told to."""
     halt = FakeHalt()
     return SessionKeeper(store, Published(), halt, NewSessions(Ticks(), lambda: "session-1")), halt
-
-
-async def save(keeper: SessionKeeper, contents: Contents) -> None:
-    await keeper.save(lambda: contents)
 
 
 def test_a_new_session_is_named_for_when_it_was_opened() -> None:

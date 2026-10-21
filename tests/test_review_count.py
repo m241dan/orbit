@@ -7,7 +7,7 @@ from orbit.agent.application.review_count import ReviewCount
 from orbit.agent.domain.storage_halt import FailedWrite
 from orbit.protocol import SAVE_FAILED, ErrorOccurred
 from tests.agent_fakes import FakeHalt, FakeStore, Ticks
-from tests.test_keeper import EMPTY, WITH_TASK, Published, save
+from tests.keeper_fakes import EMPTY, WITH_TASK, Published, save
 
 
 def both_for(store: FakeStore | None) -> tuple[SessionKeeper, ReviewCount, FakeHalt]:

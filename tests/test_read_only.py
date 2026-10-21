@@ -22,13 +22,13 @@ from orbit.protocol import (
     SendMessage,
     Snapshot,
     TaskSpec,
-    TurnEndReason,
 )
 from tests.agent_fakes import (
     ACCEPTED,
-    Call,
     FakeTree,
     Steps,
+    chats,
+    claims_done,
     events_until,
     greeted,
     idle,
@@ -43,16 +43,6 @@ from tests.agent_fakes import (
 )
 
 OWNER = WorkspaceOwner(pid=42)
-
-
-async def claims_done(call: Call) -> TurnEndReason:
-    await call("get_task")
-    await call("complete_task", summary="Done")
-    return "completed"
-
-
-async def chats(call: Call) -> TurnEndReason:
-    return "completed"
 
 
 async def test_a_read_only_session_says_so_in_its_catalog_and_snapshot_then_names_the_owner() -> (

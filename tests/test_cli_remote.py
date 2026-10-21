@@ -10,8 +10,7 @@ from orbit.agent.domain.server import ServerSettings
 from orbit.cli import app
 from orbit.client import WebSocketSession
 from orbit.protocol import NewSession, Welcome
-from tests.cli_fakes import FakeApp, FakeClient
-from tests.test_client_tls import HELLO, control_plane
+from tests.cli_fakes import HELLO, FakeApp, FakeClient, control_plane
 from tests.tls_certs import make_ca, make_client, make_server
 
 runner = CliRunner()

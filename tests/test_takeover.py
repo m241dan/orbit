@@ -8,7 +8,6 @@ from orbit.agent.application.recovery import RecoveryFailed
 from orbit.agent.application.takeover import NO_OFFER, RetryTimes, Takeover
 from orbit.agent.application.work_turns import TASKS_RUNNING_MESSAGE
 from orbit.agent.application.workspace_host import OWNED_NOTE
-from orbit.agent.domain.ownership import WorkspaceOwner
 from orbit.protocol import (
     BUSY,
     INTERNAL,
@@ -33,8 +32,11 @@ from tests.agent_fakes import (
     ACCEPTED,
     COMMAND_ID,
     LOCK_RETRY,
+    OWNER,
     Call,
+    FakeLock,
     FakeTree,
+    claims_done,
     events_until,
     greeted,
     idle,
@@ -45,38 +47,6 @@ from tests.agent_fakes import (
     sole,
     views_on_joining,
 )
-
-OWNER = WorkspaceOwner(pid=42)
-
-
-class FakeLock:
-    """A repository's lock, held by another orbit until it's ``free``; ``failing`` makes
-    taking it fail."""
-
-    def __init__(self, *, free: bool = False) -> None:
-        self.free = free
-        self.held = False
-        self.failing = False
-        self.tries = 0
-
-    def take(self) -> WorkspaceOwner | None:
-        self.tries += 1
-        if self.failing:
-            raise OSError("No space left on device")
-        if not self.free:
-            return OWNER
-        self.free, self.held = False, True
-        return None
-
-    def close(self) -> None:
-        if self.held:
-            self.free, self.held = True, False
-
-
-async def claims_done(call: Call) -> TurnEndReason:
-    await call("get_task")
-    await call("complete_task", summary="Done")
-    return "completed"
 
 
 def offered(event: Event) -> bool:

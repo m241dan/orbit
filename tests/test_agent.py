@@ -54,6 +54,7 @@ from tests.agent_fakes import (
     Call,
     FakeTree,
     Steps,
+    chats,
     close,
     events_until,
     greeting_only,
@@ -68,10 +69,6 @@ from tests.agent_fakes import (
 )
 
 PLANNER_IDLE = BusyChanged(busy=False, lane="planner")
-
-
-async def chats(call: Call) -> TurnEndReason:
-    return "completed"
 
 
 async def fails(call: Call) -> TurnEndReason:

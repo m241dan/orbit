@@ -12,8 +12,7 @@ from orbit.agent.external import sqlite_schema
 from orbit.agent.external.sqlite_schema import MIGRATIONS, StoreError, transaction
 from orbit.agent.external.sqlite_store import SqliteStore
 from orbit.agent.external.workspace_registry import register
-from tests.store_views import OwnView, open_view
-from tests.test_sqlite_store import database, store_threads
+from tests.store_views import OwnView, database, open_view, store_threads
 
 type Opener = Callable[[Path], Awaitable[OwnView]]
 

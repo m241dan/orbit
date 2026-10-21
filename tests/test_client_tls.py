@@ -11,9 +11,7 @@ import pytest
 from websockets.asyncio.server import ServerConnection, serve
 from websockets.exceptions import InvalidMessage
 
-from orbit.agent import ControlPlane, WorkspaceHost
 from orbit.agent.domain.server import ServerSettings, client_fingerprint
-from orbit.agent.external.control_plane import ControlPlaneServer
 from orbit.client import (
     Backoff,
     CaUnreadable,
@@ -29,21 +27,14 @@ from orbit.client.handshake import handshake_failure
 from orbit.client.tls import refuse_plaintext
 from orbit.client.upgrade import HandshakeRefused
 from orbit.protocol import (
-    PROTOCOL_VERSION,
-    CommandEnvelope,
     Connected,
     HandshakeFailed,
-    Hello,
     LinkState,
     Reconnecting,
     Welcome,
 )
+from tests.cli_fakes import HELLO, TOKEN, control_plane
 from tests.tls_certs import DAY, Ca, ServerFiles, make_ca, make_client, make_server, other_key
-
-TOKEN = "the-token"
-HELLO = CommandEnvelope(
-    command_id="hello", payload=Hello(client="tests", protocol_version=PROTOCOL_VERSION)
-)
 
 
 @pytest.fixture
@@ -60,18 +51,6 @@ def token_file(tmp_path: Path) -> Path:
 
 def _settings(files: ServerFiles) -> ServerSettings:
     return ServerSettings(port=0, tls="tls", cert=str(files.cert), key=str(files.key))
-
-
-@asynccontextmanager
-async def control_plane(settings: ServerSettings) -> AsyncIterator[int]:
-    """A control plane serving as ``settings`` say, and its port."""
-    served = ControlPlane([WorkspaceHost()])
-    server = ControlPlaneServer(served, lambda: TOKEN, settings, lambda line: None)
-    url = await server.start()
-    try:
-        yield int(url.rstrip("/").rsplit(":", 1)[1])
-    finally:
-        await server.stop(served.close)
 
 
 @asynccontextmanager

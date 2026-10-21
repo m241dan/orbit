@@ -2,7 +2,6 @@
 
 import asyncio
 import itertools
-from collections.abc import Callable
 
 from orbit.agent import WorkspaceHost
 from orbit.agent.application.ports import Reply
@@ -38,77 +37,24 @@ from orbit.protocol import (
 from tests.agent_fakes import (
     Call,
     FakeTree,
-    Script,
     ScriptedLauncher,
     Steps,
     Stop,
     board,
     board_of,
+    claims_done,
     events_until,
     lane_of,
     of_type,
-    payloads,
     queued,
     refused,
     send,
     session_for,
+    settle,
+    start,
+    suggests,
     verified,
 )
-
-SETTLED = {"completed", "unverified", "gave_up", "error", "cancelled"}
-
-
-async def claims_done(call: Call) -> TurnEndReason:
-    await call("get_task")
-    await call("complete_task", summary="Did it")
-    return "completed"
-
-
-def suggests(*titles: str, replies: list[Reply] | None = None) -> Script:
-    async def review(call: Call) -> TurnEndReason:
-        await call("get_task")
-        for title in titles:
-            reply = await call("suggest_task", title=title, prompt=f"Please {title.lower()}.")
-            if replies is not None:
-                replies.append(reply)
-        await call("complete_task", summary="Reviewed")
-        return "completed"
-
-    return review
-
-
-async def settle(
-    session: WorkspaceHost,
-    events: list[Event] | None = None,
-    until: Callable[[list[Event]], bool] | None = None,
-) -> list[Event]:
-    """Events until ``until`` holds (by default, every task has finished) and nothing has
-    happened for a moment."""
-    events = [] if events is None else events
-
-    async def pump() -> None:
-        async for event in payloads(session):
-            events.append(event)
-
-    pumping = asyncio.ensure_future(pump())
-    try:
-        await _quiet(events, until or _finished)
-        return events
-    finally:
-        pumping.cancel()
-
-
-async def _quiet(events: list[Event], done: Callable[[list[Event]], bool]) -> None:
-    seen, quiet = -1, 0
-    while quiet < 3:
-        await asyncio.sleep(0.05)
-        quiet = quiet + 1 if len(events) == seen and done(events) else 0
-        seen = len(events)
-
-
-def _finished(events: list[Event]) -> bool:
-    tasks = [e for e in events if isinstance(e, TasksChanged)]
-    return bool(tasks) and all(t.status in SETTLED for t in tasks[-1].tasks)
 
 
 def _errored(events: list[Event]) -> bool:
@@ -154,12 +100,6 @@ def task_is(task_id: str, status: TaskStatus) -> Stop:
 def latest_board(events: list[Event]) -> tuple[TaskState, ...]:
     """The tasks last published in ``events``, or none if none were."""
     return board(events) if any(isinstance(e, TasksChanged) for e in events) else ()
-
-
-async def start(session: WorkspaceHost, *prompts: str) -> None:
-    for prompt in prompts or ("Make it faster.",):
-        await send(session, AddTask(task=TaskSpec(prompt=prompt)))
-    await send(session, RunTasks())
 
 
 async def test_landed_work_is_reviewed_and_suggestions_run_and_are_reviewed_in_turn() -> None:

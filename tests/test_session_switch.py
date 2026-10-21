@@ -2,10 +2,9 @@
 starting a new one; refused while anything runs."""
 
 import asyncio
-from datetime import UTC, datetime
 from typing import Any
 
-from orbit.agent import Agents, Verification, VerificationStep, WorkspaceHost
+from orbit.agent import Agents, WorkspaceHost
 from orbit.agent.domain.activity import PLANNER_ANSWERING, REVIEW_RUNNING, TASKS_RUNNING
 from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.reviews import LaneSnapshot, PlannerSnapshot
@@ -40,14 +39,12 @@ from orbit.protocol import (
     TaskSpec,
     TaskState,
     TaskStatus,
-    TurnEndReason,
     TurnFinished,
     Usage,
     VerificationChanged,
 )
 from tests.agent_fakes import (
     ROLES,
-    Call,
     FakeHost,
     FakeStore,
     FakeTree,
@@ -59,8 +56,12 @@ from tests.agent_fakes import (
     agent_exited,
     all_of,
     board,
+    chats,
+    claims_done,
     events_until,
+    hangs,
     idle,
+    keeps_claiming,
     listed,
     of_type,
     send,
@@ -68,68 +69,26 @@ from tests.agent_fakes import (
     until_marked,
     verified,
 )
-from tests.test_agent_run import keeps_claiming
-from tests.test_review_lane import claims_done
-
-YESTERDAY = datetime(2026, 10, 16, 18, 2, tzinfo=UTC)
-EARLIER = datetime(2026, 10, 15, 9, 0, tzinfo=UTC)
-TASK = TaskSpec(prompt="Add a flag.")
+from tests.session_builders import (
+    EARLIER,
+    TASK,
+    YESTERDAY,
+    failing_startup,
+    last_of,
+    messages,
+    opened,
+    saved,
+    store_with,
+    switching,
+)
 
 
 def state(task_id: str, status: TaskStatus) -> TaskState:
     return TaskState(id=task_id, task=TaskSpec(prompt=f"Task {task_id}."), status=status)
 
 
-def saved(session_id: str, *tasks: TaskState, **fields: Any) -> SessionRecord:
-    """A record saved as ``session_id`` holding ``tasks``; ``fields`` override the rest."""
-    record = SessionRecord(
-        id=session_id, name=session_id, created=EARLIER, last_active=YESTERDAY, tasks=tasks
-    )
-    return record.model_copy(update=fields)
-
-
-def store_with(*records: SessionRecord) -> FakeStore:
-    store = FakeStore()
-    store.saved = list(records)
-    return store
-
-
-def switching(
-    store: FakeStore, *scripts: Script, reviews: bool = True, **session: Any
-) -> tuple[WorkspaceHost, ScriptedLauncher]:
-    """A session saved in ``store``, as ``session-1`` then ``session-2`` and so on, whose tasks
-    run through agents playing ``scripts``, reviewing them if ``reviews``; ``session`` goes to
-    :class:`WorkspaceHost`."""
-    host = FakeHost()
-    launcher = ScriptedLauncher(host, *scripts)
-    tokens = iter(f"token-{n}" for n in range(1, 100))
-    tree = FakeTree() if reviews else None
-    agents = Agents(
-        host, launcher, lambda: next(tokens), ROLES, Limits(), tree=tree, review=reviews
-    )
-    ids = iter(f"session-{n}" for n in range(1, 100))
-    built = WorkspaceHost(
-        agents=agents, store=store, clock=Ticks(), new_id=lambda: next(ids), **session
-    )
-    return built, launcher
-
-
-def last_of[E](kind: type[E], events: list[Event]) -> E:
-    return [e for e in events if isinstance(e, kind)][-1]
-
-
-def messages(kind: type[Notice] | type[ErrorOccurred], events: list[Event]) -> list[str]:
-    return [e.message for e in events if isinstance(e, kind)]
-
-
 def errors(events: list[Event]) -> list[tuple[str, str]]:
     return [(e.code, e.message) for e in events if isinstance(e, ErrorOccurred)]
-
-
-async def opened(session: WorkspaceHost, command: ActivateSession | NewSession) -> list[Event]:
-    """The events from sending ``command`` until its session is opened, and its notes."""
-    await send(session, command)
-    return await until_marked(session)  # Marks the end of the notes that follow.
 
 
 async def refused(
@@ -142,17 +101,8 @@ async def refused(
     return [(e.code, e.message) for e in events if isinstance(e, CommandRefused)]
 
 
-async def chats(call: Call) -> TurnEndReason:
-    return "completed"
-
-
 async def hangs_after() -> None:
     await asyncio.Event().wait()
-
-
-async def hangs(call: Call) -> TurnEndReason:
-    await asyncio.Event().wait()
-    raise AssertionError("unreachable")
 
 
 async def test_sessions_list_newest_first_marking_the_current_locked_and_unreadable() -> None:
@@ -645,24 +595,6 @@ async def test_the_sessions_list_shows_what_a_session_spent() -> None:
     await opened(session, NewSession())
     assert {s.id: s.usage for s in await listed(session)} == {"session-1": spent}
     await session.close()
-
-
-def failing_startup(
-    store: FakeStore, gate: asyncio.Event | None = None, picking: bool = True
-) -> WorkspaceHost:
-    """A session, for the user to pick if ``picking``, whose startup check fails, once ``gate``
-    opens if given, adding a draft to fix it."""
-    lint = VerificationStep(name="Lint", command=("ruff", "check"))
-    steps = Steps(False)
-    steps.gate = gate
-    session, _ = switching(
-        store,
-        reviews=False,
-        verification=Verification((lint,), steps),
-        check_at_startup=True,
-        pick_session=picking,
-    )
-    return session
 
 
 async def test_tasks_orbit_added_before_a_session_was_picked_carry_over_into_it() -> None:

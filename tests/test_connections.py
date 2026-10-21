@@ -47,25 +47,27 @@ from orbit.protocol import (
 )
 from tests.agent_fakes import (
     HELLO,
+    LIMITS,
     WORKSPACE,
     FakeStore,
     FakeTree,
+    Source,
     Steps,
     Ticks,
     agent_exited,
     attach_to,
+    checked,
     close,
     connect,
     control_plane,
     events_until,
+    notice,
     publish,
     served,
     session_for,
 )
-from tests.test_attach import EARLIER, joined, stored, workspace
-from tests.test_replay import OPEN, notice, store_with
-from tests.test_startup_check import checked
-from tests.test_usage_monitor import LIMITS, Source
+from tests.attach_fakes import EARLIER, joined, stored, workspace
+from tests.session_builders import OPEN, store_logging
 
 TASK = TaskSpec(prompt="Add a flag.", settings=Settings(model="opus"))
 
@@ -442,7 +444,7 @@ def after_catalog(envelopes: list[EventEnvelope]) -> list[EventEnvelope]:
 
 
 async def test_events_published_while_catching_up_follow_the_ones_resent() -> None:
-    store = store_with(*(notice(seq) for seq in range(10, 21)))
+    store = store_logging(*(notice(seq, OPEN) for seq in range(10, 21)))
     connection = await rejoined(store, 15, [LIVE])
 
     envelopes = await taken_envelopes(connection)
@@ -455,7 +457,7 @@ async def test_events_published_while_catching_up_follow_the_ones_resent() -> No
 
 
 async def test_events_published_while_finding_a_snapshot_is_needed_follow_welcome() -> None:
-    store = store_with(*(notice(seq, "other") for seq in range(1, 16)))
+    store = store_logging(*(notice(seq, "other") for seq in range(1, 16)))
     connection = await rejoined(store, 15, [LIVE])
 
     events = await taken(connection)
@@ -465,7 +467,7 @@ async def test_events_published_while_finding_a_snapshot_is_needed_follow_welcom
 
 
 async def test_a_connection_whose_held_events_overflow_is_closed_as_too_far_behind() -> None:
-    store = store_with(*(notice(seq) for seq in range(10, 21)))
+    store = store_logging(*(notice(seq, OPEN) for seq in range(10, 21)))
     live = [Notice(message=str(n)) for n in range(QUEUE_LIMIT + 1)]
     while_held: list[tuple[bool, int]] = []
 

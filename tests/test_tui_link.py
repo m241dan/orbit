@@ -1,9 +1,6 @@
 """How the TUI shows its link to a control plane in another process."""
 
-from collections.abc import Callable
-
 import pytest
-from textual.pilot import Pilot
 from textual.widgets import OptionList, Static
 
 from orbit.protocol import (
@@ -13,7 +10,6 @@ from orbit.protocol import (
     Connected,
     Ended,
     HandshakeFailed,
-    LinkState,
     NewSession,
     NotConnected,
     Reconnecting,
@@ -28,7 +24,7 @@ from orbit.tui import Opening, OrbitApp
 from orbit.tui.link import LinkScreen
 from orbit.tui.view.link import LOST_AFTER, ended_message, lost_delay
 from orbit.tui.widgets import ChatPrompt
-from tests.tui_fakes import FakeSession, entries, feed_events
+from tests.tui_fakes import FakeLink, FakeSession, entries, feed_events
 
 URL = "ws://127.0.0.1:7433/"
 NOW = 1000.0
@@ -42,21 +38,6 @@ def catalog(*sessions: SessionSummary) -> Catalog:
 
 
 CATALOG = catalog(SessionSummary(id="now", name="today", active=True), OLD)
-
-
-class FakeLink:
-    """A link whose states a test moves it to."""
-
-    def __init__(self) -> None:
-        self.watchers: list[Callable[[LinkState], None]] = []
-
-    def watch(self, changed: Callable[[LinkState], None]) -> None:
-        self.watchers.append(changed)
-
-    async def move(self, pilot: Pilot[None], state: LinkState) -> None:
-        for changed in self.watchers:
-            changed(state)
-        await pilot.pause()
 
 
 def linked() -> tuple[OrbitApp, FakeSession, FakeLink]:

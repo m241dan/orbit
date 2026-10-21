@@ -34,8 +34,7 @@ from orbit.protocol import (
     Settings,
     TurnFinished,
 )
-from tests.agent_fakes import ROLES, FakeHost, ScriptedLauncher
-from tests.test_planner import chats, hangs
+from tests.agent_fakes import ROLES, FakeHost, ScriptedLauncher, chats, hangs
 
 EXITED = AgentExited(agent_id="agent-1", reason="finished")
 

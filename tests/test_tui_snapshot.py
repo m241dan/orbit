@@ -3,7 +3,6 @@
 from orbit.protocol import (
     PLANNER,
     PLANNER_LANE,
-    WORK_LANE,
     AgentRequest,
     AgentStarted,
     AssistantMessage,
@@ -17,23 +16,15 @@ from orbit.protocol import (
     EventEnvelope,
     MessageSent,
     Notice,
-    OpenRequest,
     ProposalDecided,
     ProposedStep,
-    ReviewStatus,
     RunningAgent,
     SessionSummary,
-    Settings,
-    Snapshot,
-    StepState,
-    TaskSpec,
     TaskStarted,
-    TaskState,
     ToolCallFinished,
     ToolCallStarted,
     TurnFinished,
     TurnStarted,
-    Usage,
 )
 from orbit.tui import OrbitApp
 from orbit.tui.agents import AgentsPane
@@ -43,34 +34,21 @@ from orbit.tui.tasks import TaskList
 from orbit.tui.transcript import Transcript
 from orbit.tui.view.agents import AgentRow
 from orbit.tui.widgets import ChatPrompt
-from tests.tui_fakes import PINNED, STRIP, FakeSession, entries, feed_events, opened, tab_strip
-
-TASKS = (
-    TaskState(id="1", task=TaskSpec(prompt="Add a flag."), status="running"),
-    TaskState(id="2", task=TaskSpec(prompt="Document it.")),
+from tests.tui_fakes import (
+    CODER,
+    PINNED,
+    SNAPSHOT,
+    STRIP,
+    TASKS,
+    FakeSession,
+    entries,
+    feed_events,
+    opened,
+    tab_strip,
 )
+
 PROPOSAL = ChecksProposed(
     agent_id="agent-3", task_id="1", steps=(ProposedStep(name="Lint", command=("ruff",)),)
-)
-CODER = RunningAgent(
-    agent_id="agent-3",
-    role="coder",
-    task_id="1",
-    open_requests=(OpenRequest(request_id="r1", tool="propose_checks"),),
-)
-SNAPSHOT = Snapshot(
-    session=SessionSummary(
-        id="s1", name="auth rework", usage=Usage(input_tokens=2_000, cost_usd=2.0)
-    ),
-    settings=Settings(model="opus"),
-    model_choices=("opus", "sonnet"),
-    busy={WORK_LANE: True, PLANNER_LANE: True},
-    tasks=TASKS,
-    steps=(StepState(name="Unit tests", status="running"),),
-    steps_title="Startup check",
-    review=ReviewStatus(paused=True, open_batches=0),
-    proposals=(),
-    agents=(CODER,),
 )
 
 

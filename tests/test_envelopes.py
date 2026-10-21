@@ -22,8 +22,17 @@ from orbit.protocol import (
     UsageChanged,
     Welcome,
 )
-from tests.agent_fakes import WORKSPACE, FakeStore, Ticks, frontend, greeted, send, served
-from tests.test_usage_monitor import LIMITS, Source
+from tests.agent_fakes import (
+    LIMITS,
+    WORKSPACE,
+    FakeStore,
+    Source,
+    Ticks,
+    frontend,
+    greeted,
+    send,
+    served,
+)
 
 HELLO = SendMessage(agent=PLANNER, text="hello")
 

@@ -52,15 +52,16 @@ from tests.agent_fakes import (
     START,
     WORKSPACE,
     Call,
+    Configurator,
     FakeStore,
     events_until,
     frontend,
     greeted,
+    hangs,
+    no_steps,
     queued,
     session_for,
 )
-from tests.test_configure_key import Configurator, no_steps
-from tests.test_planner import hangs
 
 TASK = TaskSpec(prompt="Add a flag.")
 OUTCOMES = (CommandAccepted, CommandRefused)

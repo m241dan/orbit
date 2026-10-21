@@ -28,12 +28,15 @@ from orbit.protocol import (
 )
 from tests.agent_fakes import (
     ACCEPTED,
+    LINT,
     STEP,
     Call,
     FakeTree,
     Steps,
     agent_exited,
     board,
+    checked,
+    claims_done,
     events_until,
     payloads,
     refused,
@@ -42,12 +45,7 @@ from tests.agent_fakes import (
     session_for,
 )
 
-LINT = VerificationStep(name="Lint", command=("ruff", "check"))
 SNAPSHOT = "/work/review-HEAD"
-
-
-def checked(steps: Steps) -> Verification:
-    return Verification((LINT, STEP), steps)
 
 
 def titled(*statuses: str) -> VerificationChanged:
@@ -72,12 +70,6 @@ async def quiet(session: WorkspaceHost) -> list[Event]:
             events.append(await asyncio.wait_for(anext(stream), 0.05))
     except TimeoutError:
         return events
-
-
-async def claims_done(call: Call) -> TurnEndReason:
-    await call("get_task")
-    await call("complete_task", summary="done")
-    return "completed"
 
 
 async def test_the_steps_run_in_a_set_up_snapshot_of_the_base_and_pass() -> None:

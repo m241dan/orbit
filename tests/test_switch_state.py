@@ -33,15 +33,15 @@ from tests.agent_fakes import (
     Steps,
     Stop,
     all_of,
+    checked,
+    claims_done,
     frontend,
+    gated_planner,
     greet,
     idle,
     send,
     session_for,
 )
-from tests.test_planner_lane import gated_planner
-from tests.test_startup_check import checked
-from tests.test_task_runs import claims_done
 
 OPEN = "session-1"
 """The id of the session :func:`session_for` opens."""

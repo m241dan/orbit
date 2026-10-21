@@ -2,7 +2,7 @@
 CLI, and a step runner and workspace for verification."""
 
 import asyncio
-from collections.abc import AsyncIterator, Awaitable, Callable, Collection, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -12,6 +12,7 @@ from orbit.agent import Agents, ControlPlane, Verification, VerificationStep, Wo
 from orbit.agent.application.connection import SessionConnection
 from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.handshake import Handshake
+from orbit.agent.application.planner import PlannerChat
 from orbit.agent.application.ports import (
     AgentLaunch,
     CallHandler,
@@ -32,12 +33,14 @@ from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.checks import Setup
 from orbit.agent.domain.ownership import WorkspaceOwner
 from orbit.agent.domain.replay import LogBounds
-from orbit.agent.domain.roles import REVIEW_ROLES, built_in_roles
+from orbit.agent.domain.roles import REVIEW_ROLES, Role, built_in_roles
 from orbit.agent.domain.sessions import SessionRecord, Unreadable
 from orbit.agent.domain.storage_halt import FailedWrite
+from orbit.agent.domain.usage import UsageFetch
 from orbit.protocol import (
     AGENT_FAILED,
     BUILT_IN_ROLE_NAMES,
+    PLANNER,
     PROTOCOL_VERSION,
     AddTask,
     AgentExited,
@@ -57,7 +60,10 @@ from orbit.protocol import (
     Hello,
     History,
     HistoryPage,
+    Notice,
+    ResumeStorage,
     RunTasks,
+    SendMessage,
     Session,
     SessionStateChanged,
     SessionSummary,
@@ -71,6 +77,7 @@ from orbit.protocol import (
     TurnFinished,
     TurnStarted,
     Usage,
+    UsageLimit,
     VerificationChanged,
     Welcome,
 )
@@ -1005,3 +1012,255 @@ async def fetch_usage_unseen(session: Backend) -> None:
     while monitor.latest is None:
         await asyncio.sleep(0)
     queued(session)
+
+
+def notice(seq: int, session: str | None = "a", message: str | None = None) -> EventEnvelope:
+    """A notice saying ``message``, by default ``n<seq>``, in an envelope at ``seq`` of
+    ``session``."""
+    return EventEnvelope(
+        seq=seq, session=session, payload=Notice(message=f"n{seq}" if message is None else message)
+    )
+
+
+async def claims_done(call: Call, summary: str = "done") -> TurnEndReason:
+    """Fetches the task and claims it done with ``summary``."""
+    await call("get_task")
+    await call("complete_task", summary=summary)
+    return "completed"
+
+
+async def keeps_claiming(call: Call) -> TurnEndReason:
+    await call("get_task")
+    while "another agent" not in (await call("complete_task", summary="try")).text:
+        pass
+    return "completed"
+
+
+def no_steps() -> Verification:
+    """Verification turned on with no steps configured."""
+    return Verification((), Steps())
+
+
+class Configurator:
+    """A configurator that fetches its task, records it, and stops without proposing."""
+
+    def __init__(self) -> None:
+        self.tasks: list[str] = []
+
+    async def __call__(self, call: Call) -> TurnEndReason:
+        self.tasks.append((await call("get_task")).text)
+        return "completed"
+
+
+async def until_idle(session: WorkspaceHost, lane: BusyLane | None = "work") -> list[Event]:
+    """The events ``session`` sends until ``lane`` goes idle, or any lane if it's None."""
+    return await events_until(session, idle(lane))
+
+
+class GatedLog(FakeStore):
+    """A log whose appends wait for ``gate``, with ``waiting`` set while one does."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.gate = asyncio.Event()
+        self.waiting = asyncio.Event()
+
+    async def append(self, session_id: str, envelopes: Sequence[EventEnvelope]) -> int:
+        self.waiting.set()
+        await self.gate.wait()
+        return await super().append(session_id, envelopes)
+
+
+def delivered(session: WorkspaceHost) -> list[EventEnvelope]:
+    """The envelopes the session has queued for the frontend, taken from its queue."""
+    return queued_envelopes(session)
+
+
+def payloads_of[T](kind: type[T], sent: Sequence[EventEnvelope]) -> list[T]:
+    """The payloads of ``sent`` that are ``kind``s, in order."""
+    return [envelope.payload for envelope in sent if isinstance(envelope.payload, kind)]
+
+
+async def proposes_two(call: Call) -> TurnEndReason:
+    first = await call("propose_task", title="Add the flag", prompt="Add --fast to the CLI.")
+    assert "draft" in first.text
+    await call("propose_task", title="Document it", prompt="Mention --fast in the README.")
+    return "completed"
+
+
+async def chats(call: Call) -> TurnEndReason:
+    return "completed"
+
+
+async def plan(session: WorkspaceHost, text: str) -> list[Event]:
+    await send(session, SendMessage(agent=PLANNER, text=text))
+    return await until_idle(session, None)
+
+
+def steps_chat(
+    *turns: Script, published: list[Event] | None = None, roles: Mapping[str, Role] = ROLES
+) -> tuple[PlannerChat, ScriptedLauncher, list[tuple[str, ...]]]:
+    """A planner chat playing ``turns`` with ``roles``, whose steps are the last in the list it
+    returns; what it publishes goes to ``published``."""
+    host = FakeHost()
+    launcher = ScriptedLauncher(host)
+    launcher.planner_turns = list(turns)
+    sink = published if published is not None else []
+
+    async def publish(event: Event) -> None:
+        sink.append(event)
+
+    desk = AgentDesk(Agents(host, launcher, lambda: "token-1", roles), publish)
+    steps: list[tuple[str, ...]] = [("Ruff lint",)]
+    return PlannerChat(desk, Tasks(TaskBoard(), publish), lambda: steps[-1]), launcher, steps
+
+
+async def hangs(call: Call) -> TurnEndReason:
+    await asyncio.Event().wait()
+    raise AssertionError("unreachable")
+
+
+def gated_planner(gate: asyncio.Event) -> Script:
+    async def ponders(call: Call) -> TurnEndReason:
+        await gate.wait()
+        return "completed"
+
+    return ponders
+
+
+SETTLED = {"completed", "unverified", "gave_up", "error", "cancelled"}
+
+
+def suggests(*titles: str, replies: list[Reply] | None = None) -> Script:
+    async def review(call: Call) -> TurnEndReason:
+        await call("get_task")
+        for title in titles:
+            reply = await call("suggest_task", title=title, prompt=f"Please {title.lower()}.")
+            if replies is not None:
+                replies.append(reply)
+        await call("complete_task", summary="Reviewed")
+        return "completed"
+
+    return review
+
+
+async def settle(
+    session: WorkspaceHost,
+    events: list[Event] | None = None,
+    until: Callable[[list[Event]], bool] | None = None,
+) -> list[Event]:
+    """Events until ``until`` holds (by default, every task has finished) and nothing has
+    happened for a moment."""
+    events = [] if events is None else events
+
+    async def pump() -> None:
+        async for event in payloads(session):
+            events.append(event)
+
+    pumping = asyncio.ensure_future(pump())
+    try:
+        await _quiet(events, until or _finished)
+        return events
+    finally:
+        pumping.cancel()
+
+
+async def _quiet(events: list[Event], done: Callable[[list[Event]], bool]) -> None:
+    seen, quiet = -1, 0
+    while quiet < 3:
+        await asyncio.sleep(0.05)
+        quiet = quiet + 1 if len(events) == seen and done(events) else 0
+        seen = len(events)
+
+
+def _finished(events: list[Event]) -> bool:
+    tasks = [e for e in events if isinstance(e, TasksChanged)]
+    return bool(tasks) and all(t.status in SETTLED for t in tasks[-1].tasks)
+
+
+async def start(session: WorkspaceHost, *prompts: str) -> None:
+    for prompt in prompts or ("Make it faster.",):
+        await send(session, AddTask(task=TaskSpec(prompt=prompt)))
+    await send(session, RunTasks())
+
+
+LINT = VerificationStep(name="Lint", command=("ruff", "check"))
+
+
+def checked(steps: Steps) -> Verification:
+    return Verification((LINT, STEP), steps)
+
+
+async def outcome_of(
+    session: WorkspaceHost, command: ResumeStorage | RunTasks | History
+) -> list[EventEnvelope]:
+    """The envelopes the session sends once ``command`` is sent, up to its outcome."""
+    await send(session, command)
+    sent: list[EventEnvelope] = []
+
+    async def collect() -> None:
+        async for envelope in frontend(session).events():
+            sent.append(envelope)
+            payload = envelope.payload
+            if isinstance(payload, CommandAccepted | CommandRefused) and (
+                payload.command_id == COMMAND_ID
+            ):
+                return
+
+    await asyncio.wait_for(collect(), 5)
+    return sent
+
+
+OWNER = WorkspaceOwner(pid=42)
+
+
+class FakeLock:
+    """A repository's lock, held by another orbit until it's ``free``; ``failing`` makes
+    taking it fail."""
+
+    def __init__(self, *, free: bool = False) -> None:
+        self.free = free
+        self.held = False
+        self.failing = False
+        self.tries = 0
+
+    def take(self) -> WorkspaceOwner | None:
+        self.tries += 1
+        if self.failing:
+            raise OSError("No space left on device")
+        if not self.free:
+            return OWNER
+        self.free, self.held = False, True
+        return None
+
+    def close(self) -> None:
+        if self.held:
+            self.free, self.held = True, False
+
+
+def statuses(events: list[Event]) -> list[str]:
+    return [t.status for t in board(events)]
+
+
+LIMITS = (UsageLimit(label="Session", percent=52.0),)
+
+
+class Source:
+    """Returns (or raises) ``outcomes`` in turn, waiting for ``gate`` first if set; once
+    they run out, a fetch never ends."""
+
+    def __init__(self, *outcomes: UsageFetch | Exception) -> None:
+        self.outcomes = list(outcomes)
+        self.calls = 0
+        self.gate: asyncio.Event | None = None
+
+    async def __call__(self) -> UsageFetch:
+        self.calls += 1
+        if self.gate is not None:
+            await self.gate.wait()
+        if not self.outcomes:
+            await asyncio.Event().wait()
+        outcome = self.outcomes.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome

@@ -1,3 +1,4 @@
+import ast
 import pkgutil
 import re
 import tomllib
@@ -6,7 +7,8 @@ from typing import Any
 
 import orbit.tui
 
-PYPROJECT = Path(__file__).parent.parent / "pyproject.toml"
+TESTS = Path(__file__).parent
+PYPROJECT = TESTS.parent / "pyproject.toml"
 VIEW_CONTRACT = "TUI view is independent of Textual"
 
 
@@ -54,3 +56,42 @@ def test_contract_patterns_name_modules_as_import_linter_does() -> None:
     assert _forbids(["orbit.tui.*"], "orbit.tui.sessions")
     assert not _forbids(["orbit.tui.*"], "orbit.tui.a.b")
     assert _forbids(["orbit.tui.**"], "orbit.tui.a.b")
+
+
+def _imported(node: ast.AST) -> list[str]:
+    """What ``node`` imports, as dotted names, if it's an import."""
+    if isinstance(node, ast.ImportFrom):
+        return [f"{node.module}.{alias.name}" for alias in node.names]
+    if isinstance(node, ast.Import):
+        return [alias.name for alias in node.names]
+    return []
+
+
+def _test_module_imports(source: str) -> list[str]:
+    """What the Python ``source`` imports from test modules, as dotted names."""
+    imported = [name for node in ast.walk(ast.parse(source)) for name in _imported(node)]
+    return [name for name in imported if name.startswith("tests.test_")]
+
+
+def test_no_test_module_imports_from_another() -> None:
+    importing = [
+        path.name for path in sorted(TESTS.glob("*.py")) if _test_module_imports(path.read_text())
+    ]
+    assert not importing, (
+        f"{', '.join(importing)} import from test modules; share helpers through helper modules"
+    )
+
+
+def test_imports_from_test_modules_are_found_however_they_are_written() -> None:
+    source = (
+        "import os\n"
+        "import tests.test_tui\n"
+        "from tests import test_cli, cli_fakes\n"
+        "from tests.test_replay import notice\n"
+        "from tests.agent_fakes import notice\n"
+    )
+    assert _test_module_imports(source) == [
+        "tests.test_tui",
+        "tests.test_cli",
+        "tests.test_replay.notice",
+    ]

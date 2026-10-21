@@ -16,9 +16,17 @@ from orbit.protocol import (
     ResumeStorage,
     SessionSummary,
 )
-from tests.agent_fakes import FakeStore, events_until, listed, of_type, send, until_marked
-from tests.test_session_switch import EARLIER, TASK, messages, saved, store_with, switching
-from tests.test_storage_halt import ACCEPTED, outcome_of
+from tests.agent_fakes import (
+    ACCEPTED,
+    FakeStore,
+    events_until,
+    listed,
+    of_type,
+    outcome_of,
+    send,
+    until_marked,
+)
+from tests.session_builders import EARLIER, TASK, messages, saved, store_with, switching
 
 Managing = RenameSession | DeleteSession
 
