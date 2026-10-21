@@ -1,6 +1,7 @@
 """The list of workspaces a control plane serves, to pick one from, add one or remove one."""
 
 from collections.abc import Collection, Sequence
+from pathlib import PurePosixPath
 from typing import Literal
 
 from orbit.protocol import AddWorkspace, SessionStateChanged, WorkspaceEntry, with_state
@@ -79,11 +80,24 @@ def remove_message(entry: WorkspaceEntry) -> str:
 def added_workspace(
     workspaces: Sequence[WorkspaceEntry], path: str, before: Collection[str]
 ) -> WorkspaceEntry | None:
-    """The workspace among ``workspaces`` that adding ``path`` added: the one at ``path``, else
-    the first whose id isn't among those listed ``before``; none if neither is listed yet."""
-    at_path = (entry for entry in workspaces if entry.path == path)
-    new = (entry for entry in workspaces if entry.id not in before)
-    return next(at_path, next(new, None))
+    """The workspace among ``workspaces`` that adding ``path`` added: the deepest whose path is
+    ``path`` or contains it, as a server takes a path inside a repository for its top level,
+    else the first whose id isn't among those listed ``before``; none if neither is listed
+    yet."""
+    deepest = max(workspaces, key=lambda entry: _depth_in(entry.path, path), default=None)
+    if deepest is not None and _depth_in(deepest.path, path):
+        return deepest
+    return next((entry for entry in workspaces if entry.id not in before), None)
+
+
+def _depth_in(workspace: str | None, path: str) -> int:
+    """How many components the ``workspace`` path has if it's ``path`` or contains it,
+    compared component by component, so ``/src/repoA/`` and ``/src/repoA/sub`` are in
+    ``/src/repoA`` but ``/src/repoAB`` isn't; else 0."""
+    if workspace is None:
+        return 0
+    parts = PurePosixPath(workspace).parts
+    return len(parts) if PurePosixPath(path).parts[: len(parts)] == parts else 0
 
 
 def with_states(

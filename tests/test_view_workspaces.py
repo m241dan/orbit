@@ -75,11 +75,36 @@ def test_the_workspace_added_is_the_one_at_its_path() -> None:
 
 
 def test_the_workspace_added_is_else_the_new_one() -> None:
-    assert added_workspace((A, B), "/src/repoB/sub", {"a"}) == B
+    assert added_workspace((A, B), "/src/repoC/sub", {"a"}) == B
 
 
 def test_no_workspace_is_added_until_one_is_listed() -> None:
     assert added_workspace((A,), "/src/repoB/sub", {"a"}) is None
+
+
+def test_the_workspace_added_is_the_one_containing_the_path() -> None:
+    assert added_workspace((B, A), "/src/repoA/sub", {"a", "b"}) == A
+    assert added_workspace((B, A), "/src/repoA/", {"a", "b"}) == A
+
+
+def test_the_deepest_workspace_containing_the_path_is_added() -> None:
+    inner = WorkspaceEntry(id="i", label="inner", path="/src/repoA/inner", sessions=())
+    assert added_workspace((A, inner), "/src/repoA/inner/sub", {"a", "i"}) == inner
+
+
+def test_a_sibling_with_a_longer_name_does_not_contain_the_path() -> None:
+    sibling = WorkspaceEntry(id="ab", label="repoAB", path="/src/repoAB", sessions=())
+    assert added_workspace((A, sibling), "/src/repoAB/sub", {"a", "ab"}) == sibling
+    assert added_workspace((A,), "/src/repoAB", {"a"}) is None
+
+
+def test_the_new_workspace_containing_the_path_is_added_over_another_new_one() -> None:
+    assert added_workspace((A, B), "/src/repoB/sub", set()) == B
+
+
+def test_a_workspace_without_a_path_contains_none() -> None:
+    pathless = WorkspaceEntry(id="p", label="local", path=None, sessions=())
+    assert added_workspace((pathless,), "/src/repoA", {"p"}) is None
 
 
 def test_session_states_change_in_every_workspace() -> None:

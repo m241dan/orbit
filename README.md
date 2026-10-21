@@ -109,7 +109,9 @@ workspace picker and opens on that repository. The picker lists:
   that one is `running` or `idle`, and `read-only` while another orbit owns its repository. The
   workspace of the repository the chat runs in is highlighted, else the first.
 - `Add a path…`: `enter` asks for a path on the server's host, which `enter` adds and `esc`
-  leaves; a path that's refused, such as one that doesn't exist, shows why under the box.
+  leaves, opening the added workspace's session picker; a path in a workspace already served
+  opens that one's. A path that's refused, such as one that doesn't exist, shows why under the
+  box.
 
 `enter` on a workspace opens its session picker, `Resume <name>` first (see
 [Sessions](#sessions)), and picking a session there moves the chat to that workspace. `x` removes

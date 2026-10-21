@@ -197,17 +197,28 @@ async def test_an_empty_path_sends_nothing_and_escape_goes_back_to_the_list() ->
         assert app.return_code is None
 
 
-async def test_an_add_accepted_but_never_listed_keeps_the_picker_open() -> None:
+async def test_a_path_in_a_workspace_served_picks_it_once_accepted() -> None:
+    for path in ("/src/repoA/sub", "/src/repoA/"):
+        app = connected()
+        async with app.run_test() as pilot:
+            session = session_of(app)
+            await feed_events(session, pilot, SERVED)
+            await pilot.press("j", "enter", *path, "enter")
+            assert session.commands == [AddWorkspace(path=path)]
+            await accept_last(app, pilot)
+            await pilot.pause()
+            assert sessions(app).workspace == "A"
+
+
+async def test_a_path_added_picks_the_new_workspace_containing_it_over_another_new_one() -> None:
     app = connected()
     async with app.run_test() as pilot:
         session = session_of(app)
-        await feed_events(session, pilot, SERVED)
-        await pilot.press("j", "enter", *"/src/repoA/sub", "enter")
+        await feed_events(session, pilot, catalog(A))
+        await pilot.press("j", "enter", *"/src/repoC/sub", "enter")
         await accept_last(app, pilot)
-        await pilot.pause()
-        screen = workspaces(app)
-        assert not screen.query_one(Input).display
-        assert rows(screen) == [B_ROW, A_ROW, "Add a path…"]
+        await feed_events(session, pilot, catalog(B, A, C))
+        assert sessions(app).workspace == "C"
 
 
 async def test_x_removes_a_workspace_once_confirmed_and_a_busy_refusal_shows() -> None:
