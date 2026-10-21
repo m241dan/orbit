@@ -3,6 +3,7 @@ registered in the store, flagged served and locked while it's served."""
 
 import re
 import subprocess
+import threading
 from collections.abc import AsyncIterator
 from contextlib import ExitStack
 from pathlib import Path
@@ -10,12 +11,14 @@ from pathlib import Path
 import pytest
 
 from orbit.agent import (
+    OrbitConfig,
     PathKind,
     SqliteStore,
     StorageSettings,
     WorkspaceLock,
     WorkspaceRegistry,
     WorkspaceUnavailable,
+    read_config,
 )
 from orbit.cli import backend
 from orbit.cli.backend import _Backend, _Workspaces
@@ -59,9 +62,9 @@ async def test_a_directory_a_file_and_nothing_are_told_apart(
     source = workspaces(stack, store)
     (tmp_path / "notes.txt").write_text("")
 
-    assert source.kind(str(directory(tmp_path))) == PathKind.DIRECTORY
-    assert source.kind(str(tmp_path / "notes.txt")) == PathKind.FILE
-    assert source.kind(str(tmp_path / "gone")) == PathKind.MISSING
+    assert await source.kind(str(directory(tmp_path))) == PathKind.DIRECTORY
+    assert await source.kind(str(tmp_path / "notes.txt")) == PathKind.FILE
+    assert await source.kind(str(tmp_path / "gone")) == PathKind.MISSING
 
 
 async def test_a_directory_inside_a_repository_stands_for_its_top_level(
@@ -186,3 +189,36 @@ async def test_a_failure_opening_the_store_lets_the_lock_go(
     with pytest.raises(RuntimeError, match="A bug"):
         await workspaces(stack, store).open(str(root))
     assert free(root)
+
+
+async def test_the_configuration_is_read_off_the_event_loop(
+    stack: ExitStack, store: SqliteStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = directory(tmp_path)
+    threads: list[threading.Thread] = []
+
+    def recorded(path: str) -> OrbitConfig:
+        threads.append(threading.current_thread())
+        return read_config(path)
+
+    monkeypatch.setattr(backend, "read_config", recorded)
+
+    host = await workspaces(stack, store).open(str(root))
+    await host.close()
+
+    assert threads and threads[0] is not threading.main_thread()
+
+
+async def test_a_failure_making_the_host_lets_the_lock_go(
+    stack: ExitStack, store: SqliteStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = directory(tmp_path)
+
+    def fails(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("A bug.")
+
+    monkeypatch.setattr(backend, "_agents", fails)
+
+    with pytest.raises(RuntimeError, match="A bug"):
+        await workspaces(stack, store).open(str(root))
+    assert free(root) and await WorkspaceRegistry(store).served() == []

@@ -85,7 +85,7 @@ class FakeSource:
         self.gate: asyncio.Event | None = None
         self.unavailable: str | None = None
 
-    def kind(self, path: str) -> PathKind:
+    async def kind(self, path: str) -> PathKind:
         return self.kinds.get(path, PathKind.DIRECTORY)
 
     async def top_level(self, path: str) -> str:

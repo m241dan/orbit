@@ -61,7 +61,7 @@ class WorkspaceSource(Protocol):
     """Where the workspaces a control plane serves come from as frontends add them, and where
     they go as they're removed."""
 
-    def kind(self, path: str) -> PathKind:
+    async def kind(self, path: str) -> PathKind:
         """What there is at ``path``."""
         ...
 
@@ -285,7 +285,7 @@ class ControlPlane:
         go again if that fails or is cancelled; refused unless ``path`` is the absolute path to
         a directory, or as ``invalid`` if it can't be served."""
         check_addable(path, absolute=PurePath(path).is_absolute())
-        check_directory(path, workspaces.kind(path))
+        check_directory(path, await workspaces.kind(path))
         root = await workspaces.top_level(path)
         if any(host.path == root for host in self._hosts.values()):
             return

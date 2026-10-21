@@ -278,12 +278,9 @@ class _Workspaces:
         """Whether the workspace ``workspace_id`` is served."""
         return workspace_id in self._locks
 
-    def kind(self, path: str) -> PathKind:
+    async def kind(self, path: str) -> PathKind:
         """What there is at ``path``."""
-        directory = Path(path)
-        if directory.is_dir():
-            return PathKind.DIRECTORY
-        return PathKind.FILE if directory.exists() else PathKind.MISSING
+        return await asyncio.to_thread(_kind, Path(path))
 
     async def top_level(self, path: str) -> str:
         """The path of the workspace the directory at ``path`` stands for, as :func:`_workspace`
@@ -302,23 +299,44 @@ class _Workspaces:
         """The workspace at ``root``, registered or found and flagged served, with what builds
         its host, its lock taken if it's free and held until it's removed or the stack closes.
         Raises :class:`WorkspaceUnavailable` as :meth:`open` says."""
+        # Git, the configuration file and the lock would stall every served workspace.
+        served, make = await asyncio.to_thread(self._prepared, root)
+        try:
+            opened = await _flagged_view(self._store, root, owned=served.owner is None)
+        except BaseException:
+            served.lock.close()
+            raise
+        self._locks[opened.store.workspace_id] = served.lock
+        self._stack.callback(served.lock.close)
+        return served, lambda: make(opened)
+
+    def _prepared(
+        self, root: Path
+    ) -> tuple[_ServedWorkspace, Callable[[OpenedStore], WorkspaceHost]]:
+        """The workspace at ``root``, its lock taken if it's free, with what builds its host
+        over its view of the store. Raises :class:`WorkspaceUnavailable` as :meth:`open` says,
+        and lets the lock go if building fails."""
         config = _workspace_config(root, worktree=self._flags.worktree)
         lock, owner = _locked(root, self.url)
         try:
-            opened = await _flagged_view(self._store, root, owned=owner is None)
+            backend = replace(self._flags, owner=owner, lock=lock)
+            make = _host_maker(backend, root, config, self._storage, pick_session=False)
         except BaseException:
             lock.close()
             raise
-        self._locks[opened.store.workspace_id] = lock
-        self._stack.callback(lock.close)
-        backend = replace(self._flags, owner=owner, lock=lock)
-        make = _host_maker(backend, root, config, self._storage, pick_session=False)
-        return _ServedWorkspace(root, owner, lock), lambda: make(opened)
+        return _ServedWorkspace(root, owner, lock), make
 
     async def close(self, workspace_id: str) -> None:
         """Let go of the lock on the workspace ``workspace_id`` and stop serving it."""
         self._locks.pop(workspace_id).close()
         await WorkspaceRegistry(self._store).set_served(workspace_id, False)
+
+
+def _kind(path: Path) -> PathKind:
+    """What there is at ``path``."""
+    if path.is_dir():
+        return PathKind.DIRECTORY
+    return PathKind.FILE if path.exists() else PathKind.MISSING
 
 
 def _workspace_config(root: Path, *, worktree: bool) -> OrbitConfig:
