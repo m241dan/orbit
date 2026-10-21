@@ -514,6 +514,18 @@ async def test_a_catalog_dropping_the_highlighted_session_keeps_the_highlight_in
         assert session.commands == []  # Now on the locked session.
 
 
+async def test_a_catalog_dropping_the_highlighted_last_session_moves_onto_new_session() -> None:
+    app, session = in_process()
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, CATALOG)
+        await pilot.press("j", "j")
+        await feed_events(session, pilot, catalog(CURRENT, OLD, LOCKED))
+
+        screen = picker(app)
+        assert screen.rows == (OLD, LOCKED)
+        assert screen.query_one(OptionList).highlighted == 2  # New session, where it was.
+
+
 async def test_renaming_and_deleting_through_the_backend_refresh_the_picker() -> None:
     store = store_with(saved("old"), saved("gone"))
     backend = WorkspaceHost(store=store, pick_session=True)

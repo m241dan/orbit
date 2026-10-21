@@ -110,6 +110,10 @@ def test_no_rows_left_leave_nothing_highlighted() -> None:
     assert kept_highlight(SHOWN, 1, ()) is None
 
 
+def test_rows_listed_after_none_leave_nothing_highlighted() -> None:
+    assert kept_highlight((), None, ("a", "b", None)) is None
+
+
 HINTS = ListHints(closing="enter open · esc close", quitting="enter open · esc quit")
 
 
