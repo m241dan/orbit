@@ -25,7 +25,8 @@ UNAUTHORIZED = 401
 """The HTTP status of an upgrade turned away for its token."""
 
 FORBIDDEN = 403
-"""The HTTP status of an upgrade turned away, under mutual TLS, for a revoked certificate."""
+"""The HTTP status of an upgrade turned away, under mutual TLS, for a revoked client
+certificate."""
 
 UNAVAILABLE = 503
 """The HTTP status of an upgrade turned away as the control plane shuts down."""

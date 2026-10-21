@@ -9,6 +9,7 @@ from orbit.protocol import (
     BUSY,
     CHECKS_EXHAUSTED,
     ERROR_CODES,
+    FORBIDDEN,
     GIT_FAILED,
     GOING_AWAY,
     INCOMPATIBLE,
@@ -36,7 +37,7 @@ PROTOCOL_DOC = Path(__file__).parent.parent / "docs" / "protocol.md"
 CODE_ROW = re.compile(r"^\| `(\w+)` \|", re.MULTILINE)
 TRANSPORT_PHRASES = (
     *(f"code {code}" for code in (NORMAL, GOING_AWAY, POLICY_VIOLATION, MESSAGE_TOO_BIG)),
-    *(f"HTTP {status}" for status in (UNAUTHORIZED, UNAVAILABLE)),
+    *(f"HTTP {status}" for status in (UNAUTHORIZED, FORBIDDEN, UNAVAILABLE)),
     f"the reason `{SHUTTING_DOWN}`",
     *(f"`{name}: {value}`" for name, value in bearer_header("<token>").items()),
 )
