@@ -211,9 +211,10 @@ class WorkspaceHost:
     since only the owner can tell its own running work from what earlier runs left. Given the
     repository's ``lock``, it's tried every ``lock_retry`` seconds from the first attach;
     once it's free, it's held and offered with ``OwnershipOffered``. ``TakeOwnership`` answers:
-    taking it publishes ``OwnershipTaken`` and a notice, then runs the work queued, in order;
-    declining it publishes ``OwnershipDeclined``, lets the lock go and offers it again once
-    another orbit has held it since, or after ``lock_declined_retry`` seconds. Taking it first
+    taking it publishes ``OwnershipTaken``, a notice and a ``Catalog`` with this workspace no
+    longer read-only, then runs the work queued, in order; declining it publishes
+    ``OwnershipDeclined``, lets the lock go and offers it again once another orbit has held it
+    since, or after ``lock_declined_retry`` seconds. Taking it first
     runs ``recover``, which imports the fallback files the owner left into the log, as the
     owner's startup does, and publishes a notice for each of the notes it returns; one that
     fails is reported as an ``ErrorOccurred`` coded ``internal``, its files left for the next
@@ -643,9 +644,9 @@ class WorkspaceHost:
             await self._views.deleted(command.session_id)
 
     async def _take_ownership(self, command: TakeOwnership, command_id: str) -> None:
-        """Answer the offer of the repository: own it, if ``command`` takes it, recover the
-        fallback files the owner left, and run the work queued for ``command_id`` and the
-        reviews waiting; refused when no offer is open."""
+        """Answer the offer of the repository: own it, if ``command`` takes it, send the catalog
+        saying so, recover the fallback files the owner left, and run the work queued for
+        ``command_id`` and the reviews waiting; refused when no offer is open."""
         self._takeover.answer(command.take)
         if not command.take:
             await self._events.put(OwnershipDeclined())
@@ -653,6 +654,7 @@ class WorkspaceHost:
         self.owned()
         await self._events.put(OwnershipTaken())
         await self._events.put(Notice(message=OWNED_NOTE))
+        await self._switcher.publish_catalog()  # Other workspaces' connections learn it here.
         await self._recover_parked()
         await self._commands.own(command_id)
         if self._lane is not None:  # After the queued work, so its tasks get agents first.

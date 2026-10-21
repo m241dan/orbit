@@ -27,6 +27,7 @@ from orbit.protocol import (
     TakeOwnership,
     TaskSpec,
     TurnEndReason,
+    WorkspaceEntry,
 )
 from tests.agent_fakes import (
     ACCEPTED,
@@ -151,6 +152,38 @@ async def test_taking_over_clears_read_only_from_the_catalog_and_snapshot() -> N
 
     [workspace] = sole(events, Catalog).workspaces
     assert not workspace.read_only and not sole(events, Snapshot).read_only
+    await session.close()
+
+
+async def test_taking_over_announces_the_workspace_no_longer_read_only() -> None:
+    lock = FakeLock(free=True)
+    session, _, _ = session_for(owner=OWNER, lock=lock)
+    told: list[WorkspaceEntry] = []
+
+    async def tell(entry: WorkspaceEntry) -> None:
+        told.append(entry)
+
+    await greeted(session)
+    await events_until(session, offered)
+    session.catalog_changed = tell
+    await send(session, TakeOwnership(take=True))
+    await events_until(session, lambda event: event == ACCEPTED)
+
+    assert told == [await session.entry()] and not told[0].read_only
+    await session.close()
+
+
+async def test_declining_the_offer_announces_nothing() -> None:
+    session, _, _ = session_for(owner=OWNER, lock=FakeLock(free=True))
+    told: list[WorkspaceEntry] = []
+
+    async def tell(entry: WorkspaceEntry) -> None:
+        told.append(entry)
+
+    session.catalog_changed = tell
+    await declined(session)
+
+    assert told == []
     await session.close()
 
 

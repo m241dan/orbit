@@ -120,7 +120,8 @@ as current.
 
 Switching sessions works the way joining does: activating, starting or picking a session sends
 a `Catalog` and then a `Snapshot` of the session now open (see [Activation](#activation)). A
-rename or delete sends a `Catalog`. Each of these Catalogs, after a new session, an activation, a
+rename or delete sends a `Catalog`, as does taking over a read-only workspace (see
+[Read-only orbits](#read-only-orbits)). Each of these Catalogs, after a new session, an activation, a
 rename or a delete, reaches every listening connection, not just the one whose command made the
 change, so every frontend's picker follows new, renamed and deleted sessions; the connection that
 asked gets it once, before its `Snapshot`. Orbit sends no Catalog when only a session's state
@@ -266,9 +267,11 @@ A read-only orbit tries the repository's lock every 5 seconds from its first `We
 owner has gone, it takes the lock, holds it and publishes `OwnershipOffered()`, logged in the
 open session, once until it's answered. `TakeOwnership(take)` answers it: with `take` true this
 orbit owns the repository from then on, publishing `OwnershipTaken()` and a `Notice` ("This orbit
-now owns the repository; queued work is running."), then running the work queued, in order, a
-command refused now reported as an `ErrorOccurred` with the refusal's code; the workspace's entry
-in later `Catalog`s, and later `Snapshot`s, have `read_only` false. With `take` false it lets the lock go, so another orbit can
+now owns the repository; queued work is running."), then a `Catalog` to every listening
+connection, whatever workspace it's attached to, whose entry for the workspace has `read_only`
+false, then running the work queued, in order, a command refused now reported as an
+`ErrorOccurred` with the refusal's code; the workspace's entry in later `Catalog`s, and later
+`Snapshot`s, have `read_only` false too. Declining sends no `Catalog`, as nothing in it changes. With `take` false it lets the lock go, so another orbit can
 take it, publishing `OwnershipDeclined()`, stays read-only and offers the repository again once
 it has found another orbit holding the lock since and then finds it free, or, if it stays free,
 after 5 minutes. While an offer is open, a `Snapshot` has `ownership_offered` true,

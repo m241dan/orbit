@@ -5,6 +5,7 @@ from collections.abc import Sequence
 
 from orbit.agent import Agents, ControlPlane, WorkspaceHost, WorkspaceOwner
 from orbit.agent.application.connection import SessionConnection
+from orbit.agent.application.ports import RepositoryLock
 from orbit.protocol import (
     Attach,
     BusyChanged,
@@ -15,16 +16,23 @@ from orbit.protocol import (
     TaskSpec,
     TurnEndReason,
 )
-from tests.agent_fakes import HELLO, ROLES, Call, FakeHost, ScriptedLauncher
+from tests.agent_fakes import HELLO, LOCK_RETRY, ROLES, Call, FakeHost, ScriptedLauncher
 
 TASK = TaskSpec(prompt="Add a flag.")
 
 
-def workspace(name: str, *, owner: WorkspaceOwner | None = None) -> WorkspaceHost:
+def workspace(
+    name: str, *, owner: WorkspaceOwner | None = None, lock: RepositoryLock | None = None
+) -> WorkspaceHost:
     """The host of the workspace ``name``, at ``/src/<name>``, its id ``name``, read-only if
-    another ``owner`` owns it."""
+    another ``owner`` owns it, trying the repository's ``lock``, if given, to take it over."""
     return WorkspaceHost(
-        workspace=f"/src/{name}", workspace_id=name, new_id=lambda: f"{name}-1", owner=owner
+        workspace=f"/src/{name}",
+        workspace_id=name,
+        new_id=lambda: f"{name}-1",
+        owner=owner,
+        lock=lock,
+        lock_retry=LOCK_RETRY,
     )
 
 

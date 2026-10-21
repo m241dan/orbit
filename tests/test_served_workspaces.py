@@ -4,6 +4,7 @@ the events of the workspace it's attached to alone, and its commands go there.""
 import asyncio
 
 from orbit.agent import ControlPlane, WorkspaceOwner
+from orbit.agent.application.connection import SessionConnection
 from orbit.protocol import (
     UNKNOWN,
     WRONG_SESSION,
@@ -11,13 +12,16 @@ from orbit.protocol import (
     Attach,
     Catalog,
     CommandRefused,
+    EventEnvelope,
+    OwnershipOffered,
     RenameSession,
     RunTasks,
+    TakeOwnership,
     TasksChanged,
     Welcome,
     WorkspaceEntry,
 )
-from tests.agent_fakes import HELLO, board_of
+from tests.agent_fakes import HELLO, FakeLock, board_of
 from tests.plane_fakes import TASK, idle, joined, payloads, say, taken, working, workspace
 
 
@@ -91,6 +95,49 @@ async def test_a_change_to_one_workspaces_sessions_sends_everyone_the_whole_cata
     in_first, in_second = catalog.workspaces
     assert [s.name for s in in_first.sessions] == ["Renamed"]
     assert [s.id for s in in_second.sessions] == ["b-1"]
+
+
+async def offered(connection: SessionConnection) -> None:
+    """Wait until ``connection``'s workspace offers it the repository."""
+    async for envelope in connection.events():
+        if isinstance(envelope.payload, OwnershipOffered):
+            return
+
+
+def read_only_in(envelopes: list[EventEnvelope]) -> list[dict[str, bool]]:
+    """Which workspaces are read-only in each Catalog among ``envelopes``."""
+    catalogs = [e for e in payloads(envelopes) if isinstance(e, Catalog)]
+    return [{w.id: w.read_only for w in catalog.workspaces} for catalog in catalogs]
+
+
+async def test_taking_over_a_workspace_sends_everyone_a_catalog_saying_so() -> None:
+    lock = FakeLock(free=True)
+    first, second = workspace("a"), workspace("b", owner=WorkspaceOwner(pid=1), lock=lock)
+    plane = ControlPlane([first, second])
+    in_a, in_b = await joined(plane, first), await joined(plane, second)
+    await asyncio.wait_for(offered(in_b), 5)
+    taken(in_a), taken(in_b)
+
+    await say(in_b, "take", TakeOwnership(take=True))
+    seen_in_a, seen_in_b = read_only_in(taken(in_a)), read_only_in(taken(in_b))
+    await plane.close()
+
+    assert seen_in_a == seen_in_b == [{"a": False, "b": False}]
+
+
+async def test_declining_a_workspace_sends_no_catalog() -> None:
+    lock = FakeLock(free=True)
+    first, second = workspace("a"), workspace("b", owner=WorkspaceOwner(pid=1), lock=lock)
+    plane = ControlPlane([first, second])
+    in_a, in_b = await joined(plane, first), await joined(plane, second)
+    await asyncio.wait_for(offered(in_b), 5)
+    taken(in_a)
+
+    await say(in_b, "decline", TakeOwnership(take=False))
+    seen_in_a = read_only_in(taken(in_a))
+    await plane.close()
+
+    assert seen_in_a == []
 
 
 async def test_every_workspaces_events_share_one_count_of_seqs() -> None:
