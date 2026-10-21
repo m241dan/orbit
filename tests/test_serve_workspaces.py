@@ -128,6 +128,33 @@ async def test_the_locks_still_held_are_let_go_as_the_stack_closes(
     assert held and free(root)
 
 
+class CountedLock(WorkspaceLock):
+    """A workspace lock that counts how often it's let go."""
+
+    closes = 0
+
+    def close(self) -> None:
+        CountedLock.closes += 1
+        super().close()
+
+
+async def test_a_lock_closed_with_its_workspace_isnt_let_go_again_as_the_stack_closes(
+    stack: ExitStack, store: SqliteStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(backend, "WorkspaceLock", CountedLock)
+    monkeypatch.setattr(CountedLock, "closes", 0)
+    root = directory(tmp_path)
+    source = workspaces(stack, store)
+    for _ in range(3):
+        host = await source.open(str(root))
+        await host.close()
+        await source.close(host.workspace_id)
+
+    stack.close()
+
+    assert CountedLock.closes == 3
+
+
 async def test_an_invalid_configuration_is_unavailable_saying_why(
     stack: ExitStack, store: SqliteStore, tmp_path: Path
 ) -> None:

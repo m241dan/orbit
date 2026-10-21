@@ -256,12 +256,12 @@ class _Workspaces:
     def __init__(
         self, stack: ExitStack, flags: _Backend, store: SqliteStore, storage: StorageSettings
     ) -> None:
-        self._stack = stack
         self._flags = flags
         self._store = store
         self._storage = storage
         self._locks: dict[str, WorkspaceLock] = {}
         self.url: str | None = None
+        stack.callback(self._let_go)
 
     @property
     def locks(self) -> tuple[WorkspaceLock, ...]:
@@ -307,7 +307,6 @@ class _Workspaces:
             served.lock.close()
             raise
         self._locks[opened.store.workspace_id] = served.lock
-        self._stack.callback(served.lock.close)
         return served, lambda: make(opened)
 
     def _prepared(
@@ -330,6 +329,12 @@ class _Workspaces:
         """Let go of the lock on the workspace ``workspace_id`` and stop serving it."""
         self._locks.pop(workspace_id).close()
         await WorkspaceRegistry(self._store).set_served(workspace_id, False)
+
+    def _let_go(self) -> None:
+        """Let go of the locks of the workspaces still served."""
+        for lock in self._locks.values():
+            lock.close()
+        self._locks.clear()
 
 
 def _kind(path: Path) -> PathKind:
