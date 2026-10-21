@@ -100,7 +100,9 @@ class SessionViews:
         """Have ``connection`` view the session ``session_id`` and publish its snapshot to it:
         the open session's as it stands, or a saved one's from its record and its last logged
         events. Refused (raising :class:`Refused`) for a session there's none of or that's
-        unreadable; nothing changes if the saved sessions can't be listed, which is reported."""
+        unreadable; nothing changes if the saved sessions can't be listed, which is reported.
+        If the saved one is deleted or opened while its events are read, :meth:`_publish_view`
+        says what's published instead."""
         parts = self._parts
         record = None if session_id == parts.keeper.id else await parts.keeper.saved(session_id)
         # It may have been deleted, or opened, while it was read.
@@ -113,8 +115,23 @@ class SessionViews:
         if record is None:
             return
         connection.attach(SessionRef(id=record.id, name=record.name))
-        await connection.publish_here(await self._view(record))
+        await self._publish_view(connection, record.id, await self._view(record))
         parts.states.check()
+
+    async def _publish_view(
+        self, connection: SessionConnection, session_id: str, view: Snapshot
+    ) -> None:
+        """Publish ``view``, the read-only view of the session ``session_id``, to ``connection``
+        if it's still attached to it; nothing if it was deleted meanwhile, which moved
+        ``connection`` to the open session and sent it the live snapshot, and the live snapshot
+        if it was opened meanwhile. The switch leaves those attached to the session it opens
+        attached, and so viewing it live, but publishes its snapshot only to connections already
+        listening, which one attaching first isn't yet."""
+        if connection.attached_id != session_id:
+            return
+        if session_id == self._parts.keeper.id:
+            view = await self._parts.live()
+        await connection.publish_here(view)
 
     def switching(self, kept: bool) -> None:
         """Have the connection whose command switches the open session view the session it

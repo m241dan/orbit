@@ -510,6 +510,42 @@ async def test_attaching_to_a_session_opened_while_it_is_read_attaches_live() ->
     assert all(s.active for s in snapshots)
 
 
+async def attached_while_read(meanwhile: Command) -> tuple[SessionConnection, list[Snapshot]]:
+    """A connection attaching first to ``earlier`` while another sends ``meanwhile`` as its
+    transcript is read for the view, and the snapshots that reached it."""
+    store = stored()
+    session = workspace(store)
+    other = await joined(session, "other")
+    attaching = connect(session)
+    await say(attaching, "attaching", HELLO)
+
+    async def sent(session_id: str) -> None:
+        store.on_recent = None
+        await say(other, "meanwhile", meanwhile)
+
+    store.on_recent = sent
+    await say(attaching, "attach", Attach(workspace=WORKSPACE, session=EARLIER))
+    events = await taken(attaching)
+    await session.close()
+    assert store.on_recent is None
+    return attaching, [e for e in events if isinstance(e, Snapshot)]
+
+
+async def test_attaching_to_a_session_deleted_while_its_transcript_is_read_ends_live() -> None:
+    attaching, snapshots = await attached_while_read(DeleteSession(session_id=EARLIER))
+
+    assert attaching.attached is None
+    assert (snapshots[-1].session.id, snapshots[-1].active) == (OPEN, True)
+
+
+async def test_attaching_to_a_session_opened_while_its_transcript_is_read_sends_no_view() -> None:
+    attaching, snapshots = await attached_while_read(ActivateSession(session=EARLIER))
+
+    assert attaching.viewing is None
+    assert (snapshots[-1].session.id, snapshots[-1].active) == (EARLIER, True)
+    assert all(s.active for s in snapshots)
+
+
 async def test_a_viewed_session_gone_from_the_list_is_named_by_its_id() -> None:
     store = stored()
     session = workspace(store)
