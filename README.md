@@ -1358,7 +1358,8 @@ the gitconfig mount's `source:` at another file, such as one holding just your i
 Bash doesn't export `UID` or `GID`, so unless your ids are 1000, run `export UID; export GID=$(id
 -g)` first, or put both in `deploy/.env`; the image is built with the same ids.
 
-To set it up, from the repository's top level:
+To set it up, from the repository's top level, with no orbit work left from the host (see
+**Switching between host and container** below):
 
 1. Make the CA and the server's certificate as in **TLS** above, naming the host clients reach
    the server by, and put `server.pem` and `server-key.pem` in `deploy/orbit-config/tls`:
@@ -1430,6 +1431,16 @@ they can read and change the control plane's own files, the token, the certifica
 store and Claude's login, like the rest of the container; the container keeps them from your host,
 not from orbit's agents. And one container serves one repository: run workspaces that trust each
 other differently in containers of their own, each with its own config, token and volumes.
+
+**Switching between host and container.** Git records a worktree by its absolute path, and the
+container sees your checkout at `/workspace`, not where it lives on the host, such as
+`/home/me/code/orbit`. So the worktrees an `orbit chat` or `orbit serve` on the host made under
+`.git/orbit` point at host paths the container doesn't have, and those the container makes point
+at `/workspace`, which the host doesn't have: on the other side, git commands in them fail, and
+a `git worktree prune` there drops their records as stale. Before you switch, either way, finish
+or clean up orbit's work: no tasks running and nothing left in `.git/orbit`. And while the
+container is working, don't run `git worktree prune` on the host, which would delete the records
+of the container's live worktrees.
 
 ### Owning the repository
 

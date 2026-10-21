@@ -12,6 +12,11 @@
 #   key = "/home/orbit/.config/orbit/tls/server-key.pem"   # chmod 600
 #
 # orbit serve makes the token there, in orbit-config/token, on first start.
+#
+# Git records worktrees by absolute path, and the checkout is /workspace in here but elsewhere
+# on the host, so host and container can't use each other's worktrees: before switching
+# between them, leave nothing running or left in .git/orbit, and don't run `git worktree
+# prune` on the host while the container works.
 services:
   orbit:
     build:
