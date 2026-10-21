@@ -334,3 +334,36 @@ async def test_a_held_pick_made_active_itself_is_not_offered_again() -> None:
         )
         await pilot.pause()
         assert app.activation_screens() == [held]
+
+
+async def offered_message(app: Host, *catalogs: Catalog) -> str:
+    """The message of the offer ``app`` shows for a view of ``auth rework``, once it has
+    followed ``catalogs``."""
+    async with app.run_test() as pilot:
+        for listed in catalogs:
+            app.host.follow(listed)
+        app.host.view(view(OLD))
+        app.host.offer()
+        await pilot.pause()
+        [screen] = app.activation_screens()
+        return screen.message
+
+
+async def test_without_a_catalog_the_offer_names_the_active_session_as_the_snapshot_does() -> None:
+    assert await offered_message(Host()) == (
+        "auth rework is a read-only view; today is the active session, which runs work."
+    )
+
+
+async def test_a_catalog_naming_no_active_session_leaves_the_snapshot_naming_it() -> None:
+    idle = NOW.model_copy(update={"active": False})
+    assert await offered_message(Host(), catalog(idle, OLD)) == (
+        "auth rework is a read-only view; today is the active session, which runs work."
+    )
+
+
+async def test_the_offer_names_the_active_session_as_the_catalog_does_over_the_snapshot() -> None:
+    flags = SessionSummary(id="flags", name="flags", active=True)
+    assert await offered_message(Host(), catalog(OLD, flags)) == (
+        "auth rework is a read-only view; flags is the active session, which runs work."
+    )
