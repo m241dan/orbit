@@ -1,6 +1,7 @@
 """Settings for every test."""
 
 import os
+from pathlib import Path
 
 import pytest
 
@@ -41,3 +42,17 @@ class OfflineUsageApi(UsageApi):
 def offline_usage(monkeypatch: pytest.MonkeyPatch) -> None:
     """Have the CLI fetch its usage limits with :class:`OfflineUsageApi`."""
     monkeypatch.setattr("orbit.cli.backend.UsageApi", OfflineUsageApi)
+
+
+@pytest.fixture
+def no_git_identity(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Git configured with no identity beyond a repository's own config."""
+    empty = tmp_path / "empty-gitconfig"
+    empty.write_text("")
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(empty))
+    monkeypatch.setenv("GIT_CONFIG_SYSTEM", str(empty))
+    monkeypatch.setenv("EMAIL", "")
+    for name in ("AUTHOR", "COMMITTER"):
+        for part in ("NAME", "EMAIL"):
+            monkeypatch.delenv(f"GIT_{name}_{part}", raising=False)

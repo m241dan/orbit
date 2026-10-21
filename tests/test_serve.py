@@ -872,17 +872,8 @@ def test_serve_refuses_a_port_in_use_naming_it(config_dir: Path) -> None:
 
 
 @pytest.fixture
-def no_identity(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, project: Path) -> Path:
+def no_identity(no_git_identity: None, project: Path) -> Path:
     """The project made a git repository, with git configured with no identity."""
-    empty = tmp_path / "empty-gitconfig"
-    empty.write_text("")
-    monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(empty))
-    monkeypatch.setenv("GIT_CONFIG_SYSTEM", str(empty))
-    monkeypatch.setenv("EMAIL", "")
-    for name in ("AUTHOR", "COMMITTER"):
-        for part in ("NAME", "EMAIL"):
-            monkeypatch.delenv(f"GIT_{name}_{part}", raising=False)
     subprocess.run(["git", "init", "-q", "-b", "main"], cwd=project, check=True)
     subprocess.run(["git", "config", "user.name", "Test"], cwd=project, check=True)
     return project
@@ -920,6 +911,12 @@ def test_serve_without_a_worktree_needs_no_identity(
 ) -> None:
     output = served(Frontend(state, config_dir), "--port", "0", "--no-worktree")
     assert f": {no_identity} as its owner." in output
+
+
+@pytest.mark.usefixtures("no_git_identity")
+def test_serve_outside_git_needs_no_identity(project: Path, state: Path, config_dir: Path) -> None:
+    output = served(Frontend(state, config_dir), "--port", "0")
+    assert f": {project} as its owner." in output
 
 
 def test_serve_refuses_an_invalid_server_setting(config_dir: Path) -> None:
