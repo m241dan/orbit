@@ -134,18 +134,16 @@ class McpHost:
 
     async def start(self, handler: CallHandler) -> str:
         sock = socket.socket()
-        sock.bind(("127.0.0.1", 0))
-        port = sock.getsockname()[1]
-        app = build_server(handler).streamable_http_app()
-        self._server = EmbeddedServer(uvicorn.Config(app, log_level="warning", lifespan="on"))
-        self._serving = asyncio.create_task(self._server.serve(sockets=[sock]))
-        while not self._server.started:
-            if self._serving.done():
-                sock.close()
-                raise RuntimeError("Orbit's MCP server failed to start.") from (
-                    self._serving.exception()
-                )
-            await asyncio.sleep(0.01)
+        try:
+            sock.bind(("127.0.0.1", 0))
+            port = sock.getsockname()[1]
+            app = build_server(handler).streamable_http_app()
+            server = EmbeddedServer(uvicorn.Config(app, log_level="warning", lifespan="on"))
+        except BaseException:
+            sock.close()
+            raise
+        self._serving = await server.start_serving(sock, "Orbit's MCP server failed to start.")
+        self._server = server
         return f"http://127.0.0.1:{port}/mcp"
 
     async def stop(self) -> None:

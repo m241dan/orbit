@@ -283,9 +283,16 @@ async def _served(parts: _ServeParts, profile: Path | None) -> None:
                 await host.open_latest()
             url = await server.start()
         except BaseException:
-            await plane.close()
+            try:
+                await server.stop(_nothing)
+            finally:
+                await plane.close()
             raise
         await _until_stopped(plane, server, parts, url)
+
+
+async def _nothing() -> None:
+    """Do nothing, for a server stopped before its control plane is closed."""
 
 
 async def _until_stopped(

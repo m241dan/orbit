@@ -1,5 +1,7 @@
 """The MCP host over real HTTP on localhost, called the way an agent's CLI calls it."""
 
+import asyncio
+import socket
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
@@ -12,9 +14,22 @@ from mcp.types import TextContent
 
 from orbit.agent.application.ports import Reply
 from orbit.agent.domain.roles import ORBIT_TOOLS
+from orbit.agent.external import mcp_host
 from orbit.agent.external.mcp_host import PROMPT_RECIPE, McpHost
 
 OK = Reply("ok")
+
+
+class Sockets:
+    """Stands in for the socket module, keeping each socket it makes."""
+
+    def __init__(self) -> None:
+        self.made: list[socket.socket] = []
+
+    def socket(self) -> socket.socket:
+        made = socket.socket()
+        self.made.append(made)
+        return made
 
 
 class RecordingHandler:
@@ -159,3 +174,52 @@ async def test_a_server_that_fails_to_start_is_reported(monkeypatch: pytest.Monk
     with pytest.raises(RuntimeError, match="failed to start") as raised:
         await McpHost().start(RecordingHandler())
     assert isinstance(raised.value.__cause__, OSError)
+
+
+async def test_a_server_that_fails_to_start_closes_its_socket(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def broken(self: object, sockets: object = None) -> None:
+        raise OSError("no sockets for you")
+
+    sockets = Sockets()
+    monkeypatch.setattr(mcp_host, "socket", sockets)
+    monkeypatch.setattr("uvicorn.Server.serve", broken)
+    with pytest.raises(RuntimeError, match=r"^Orbit's MCP server failed to start\.$"):
+        await McpHost().start(RecordingHandler())
+    [made] = sockets.made
+    assert made.fileno() == -1
+
+
+async def test_a_server_that_cant_be_built_closes_its_socket(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def unbuildable(handler: object) -> None:
+        raise ValueError("no server for you")
+
+    sockets = Sockets()
+    monkeypatch.setattr(mcp_host, "socket", sockets)
+    monkeypatch.setattr(mcp_host, "build_server", unbuildable)
+    with pytest.raises(ValueError, match="no server for you"):
+        await McpHost().start(RecordingHandler())
+    [made] = sockets.made
+    assert made.fileno() == -1
+
+
+async def test_starting_cancelled_leaves_nothing_serving(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def hang(self: object, sockets: object = None) -> None:
+        await asyncio.Event().wait()
+
+    sockets = Sockets()
+    monkeypatch.setattr(mcp_host, "socket", sockets)
+    monkeypatch.setattr("uvicorn.Server.serve", hang)
+    host = McpHost()
+    starting = asyncio.create_task(host.start(RecordingHandler()))
+    await asyncio.sleep(0.05)
+    starting.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await starting
+    assert asyncio.all_tasks() == {asyncio.current_task()}
+    [made] = sockets.made
+    assert made.fileno() == -1
+    await host.stop()

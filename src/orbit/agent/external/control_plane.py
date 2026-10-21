@@ -290,16 +290,14 @@ class ControlPlaneServer:
             sock = socket.create_server((host, port), family=family)
         except OSError as exc:
             raise ListenFailed(host, port, exc.strerror or str(exc)) from None
-        url = ws_url(host, sock.getsockname()[1], self._secure)
-        self._server = EmbeddedServer(self._config())
-        self._serving = asyncio.create_task(self._server.serve(sockets=[sock]))
-        while not self._server.started:
-            if self._serving.done():
-                sock.close()
-                raise RuntimeError("Orbit's control plane failed to start.") from (
-                    self._serving.exception()
-                )
-            await asyncio.sleep(0.01)
+        try:
+            url = ws_url(host, sock.getsockname()[1], self._secure)
+            server = EmbeddedServer(self._config())
+        except BaseException:
+            sock.close()
+            raise
+        self._serving = await server.start_serving(sock, "Orbit's control plane failed to start.")
+        self._server = server
         self._accepting = True
         return url
 

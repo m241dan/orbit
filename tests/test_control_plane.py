@@ -1,6 +1,7 @@
 """The control plane's server over a real WebSocket on loopback, as a frontend uses it."""
 
 import asyncio
+import socket
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from typing import cast
@@ -15,6 +16,7 @@ from orbit.agent import ControlPlane, WorkspaceHost
 from orbit.agent.application import connection as connection_module
 from orbit.agent.application.connection import SessionConnection
 from orbit.agent.domain.server import ServerSettings
+from orbit.agent.external import control_plane as control_plane_module
 from orbit.agent.external.control_plane import (
     UNAUTHORIZED_BODY,
     ControlPlaneServer,
@@ -357,6 +359,77 @@ async def test_a_server_that_fails_to_start_is_reported(monkeypatch: pytest.Monk
     with pytest.raises(RuntimeError, match="failed to start") as raised:
         await server.start()
     assert isinstance(raised.value.__cause__, OSError)
+
+
+class Sockets:
+    """Stands in for the socket module, keeping each server socket it makes."""
+
+    AF_INET = socket.AF_INET
+    AF_INET6 = socket.AF_INET6
+
+    def __init__(self) -> None:
+        self.made: list[socket.socket] = []
+
+    def create_server(
+        self, address: tuple[str, int], family: socket.AddressFamily
+    ) -> socket.socket:
+        made = socket.create_server(address, family=family)
+        self.made.append(made)
+        return made
+
+
+async def test_a_server_that_fails_to_start_closes_its_socket(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def broken(self: object, sockets: object = None) -> None:
+        raise OSError("no sockets for you")
+
+    sockets = Sockets()
+    monkeypatch.setattr(control_plane_module, "socket", sockets)
+    monkeypatch.setattr("uvicorn.Server.serve", broken)
+    server = ControlPlaneServer(ControlPlane([WorkspaceHost()]), lambda: TOKEN, LOOPBACK, Lines())
+    with pytest.raises(RuntimeError, match=r"^Orbit's control plane failed to start\.$"):
+        await server.start()
+    [made] = sockets.made
+    assert made.fileno() == -1
+
+
+async def test_a_server_whose_app_cant_be_made_closes_its_socket(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def unmakeable(self: object) -> None:
+        raise ValueError("no app for you")
+
+    sockets = Sockets()
+    monkeypatch.setattr(control_plane_module, "socket", sockets)
+    monkeypatch.setattr(ControlPlaneServer, "app", unmakeable)
+    server = ControlPlaneServer(ControlPlane([WorkspaceHost()]), lambda: TOKEN, LOOPBACK, Lines())
+    with pytest.raises(ValueError, match="no app for you"):
+        await server.start()
+    [made] = sockets.made
+    assert made.fileno() == -1
+
+
+async def test_starting_cancelled_leaves_nothing_serving(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def hang(self: object, sockets: object = None) -> None:
+        await asyncio.Event().wait()
+
+    sockets = Sockets()
+    monkeypatch.setattr(control_plane_module, "socket", sockets)
+    monkeypatch.setattr("uvicorn.Server.serve", hang)
+    session = ControlPlane([WorkspaceHost()])
+    server = ControlPlaneServer(session, lambda: TOKEN, LOOPBACK, Lines())
+    starting = asyncio.create_task(server.start())
+    await asyncio.sleep(0.05)
+    starting.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await starting
+    assert asyncio.all_tasks() == {asyncio.current_task()}
+    [made] = sockets.made
+    assert made.fileno() == -1
+    assert server.readiness() == "starting"
+    await server.stop(session.close)
+    await session.close()
 
 
 async def test_stopping_a_server_that_never_started_is_harmless() -> None:
