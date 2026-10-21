@@ -1,5 +1,6 @@
 """The ProposalHost tracking which proposal's modal is shown, and when to close it."""
 
+import pytest
 from textual.app import App
 
 from orbit.protocol import AgentExited, ChecksProposed, DecideProposal, ProposedStep
@@ -76,21 +77,105 @@ async def test_its_agent_exiting_closes_it_and_others_leave_it() -> None:
         app.host.withdraw(AgentExited(agent_id="agent-3", reason="finished"))
 
 
-async def test_a_superseded_screens_late_decision_leaves_the_newer_tracked() -> None:
+def recording_host() -> tuple[ProposalHost, list[tuple[ProposalScreen, Decided]]]:
+    """A ProposalHost recording what it pushes, deciding nothing."""
     pushed: list[tuple[ProposalScreen, Decided]] = []
-    decisions: list[tuple[ChecksProposed, DecideProposal]] = []
 
     async def decide(proposal: ChecksProposed, decision: DecideProposal) -> None:
-        decisions.append((proposal, decision))
+        pass
 
-    host = ProposalHost(lambda screen, decided: pushed.append((screen, decided)), decide)
+    return ProposalHost(lambda screen, decided: pushed.append((screen, decided)), decide), pushed
+
+
+async def test_a_second_proposal_waits_until_the_first_is_decided() -> None:
+    app = Host()
+    async with app.run_test() as pilot:
+        app.host.show(PROPOSAL)
+        app.host.show(OTHER)
+        app.host.show(OTHER)
+        await pilot.pause()
+        [first] = app.proposal_screens()
+        assert first.proposal == PROPOSAL
+        accept = DecideProposal(task_id="1", action="accept")
+        first.dismiss(accept)
+        await pilot.pause()
+        [second] = app.proposal_screens()
+        assert second.proposal == OTHER
+        assert app.host.shown is second
+        assert app.decisions == [(PROPOSAL, accept)]
+        second.dismiss(None)
+        await pilot.pause()
+        assert app.proposal_screens() == []
+        assert app.host.shown is None
+
+
+async def test_withdrawing_the_shown_proposal_clears_it_before_its_screen_closes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    host, pushed = recording_host()
+    host.show(PROPOSAL)
+    [(screen, _)] = pushed
+    dismissed: list[object] = []
+    monkeypatch.setattr(screen, "dismiss", dismissed.append)
+    host.withdraw(AgentExited(agent_id="agent-3", reason="finished"))
+    assert host.shown is None
+    host.follow(())
+    assert dismissed == [None]
+
+
+async def test_withdrawing_the_shown_proposal_shows_the_next_waiting() -> None:
+    app = Host()
+    async with app.run_test() as pilot:
+        app.host.show(PROPOSAL)
+        app.host.show(OTHER)
+        await pilot.pause()
+        app.host.withdraw(AgentExited(agent_id="agent-3", reason="finished"))
+        await pilot.pause()
+        [screen] = app.proposal_screens()
+        assert screen.proposal == OTHER
+        assert app.host.shown is screen
+
+
+async def test_an_agent_exiting_drops_its_waiting_proposal() -> None:
+    app = Host()
+    async with app.run_test() as pilot:
+        app.host.show(PROPOSAL)
+        app.host.show(OTHER)
+        await pilot.pause()
+        app.host.withdraw(AgentExited(agent_id="agent-4", reason="finished"))
+        [first] = app.proposal_screens()
+        first.dismiss(None)
+        await pilot.pause()
+        assert app.proposal_screens() == []
+        assert app.host.shown is None
+
+
+async def test_a_snapshot_replaces_the_waiting_proposals() -> None:
+    third = PROPOSAL.model_copy(update={"agent_id": "agent-5", "task_id": "3"})
+    host, pushed = recording_host()
     host.show(PROPOSAL)
     host.show(OTHER)
-    (_, first_decided), (second, _) = pushed
-    accept = DecideProposal(task_id="1", action="accept")
-    await first_decided(accept)
+    host.follow((PROPOSAL, third, third))
+    ((_, first_decided),) = pushed
+    await first_decided(None)
+    (_, _), (second, second_decided) = pushed
+    assert second.proposal == third
+    await second_decided(None)
+    assert len(pushed) == 2
+    assert host.shown is None
+
+
+async def test_a_superseded_screens_late_decision_leaves_the_newer_tracked(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    host, pushed = recording_host()
+    host.show(PROPOSAL)
+    [(first, first_decided)] = pushed
+    monkeypatch.setattr(first, "dismiss", lambda result: None)
+    host.follow((OTHER,))
+    (_, _), (second, _) = pushed
+    await first_decided(None)
     assert host.shown is second
-    assert decisions == [(PROPOSAL, accept)]
 
 
 async def test_a_decision_clears_the_shown_proposal() -> None:

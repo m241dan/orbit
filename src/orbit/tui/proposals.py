@@ -95,40 +95,69 @@ Decide = Callable[[ChecksProposed, DecideProposal], Awaitable[object]]
 
 
 class ProposalHost:
-    """Shows each proposal waiting on the user once, with ``push``, and closes it when it's
-    no longer waiting; ``decide`` takes the user's decision on a proposal."""
+    """Shows the proposals waiting on the user one at a time, each once, with ``push``, and
+    closes the one shown when it's no longer waiting; ``decide`` takes the user's decision on
+    a proposal."""
 
     def __init__(self, push: Push, decide: Decide) -> None:
         self._push = push
         self._decide = decide
         self.shown: ProposalScreen | None = None  # The proposal being shown, if any.
+        self._waiting: list[ChecksProposed] = []  # Those to show after it, in order.
 
     def show(self, event: ChecksProposed) -> None:
-        """Ask the user about ``event``'s proposal, unless it's the one shown."""
-        if self.shown is not None and self.shown.proposal == event:
-            return  # A snapshot showed it before its event arrived.
+        """Ask the user about ``event``'s proposal, or once the one shown is done with, unless
+        it's the one shown or waiting already."""
+        if self.shown is not None:
+            self._wait(event)
+            return  # A snapshot showed it before its event arrived, or another is shown.
         screen = self.shown = ProposalScreen(event)
 
         async def decided(decision: DecideProposal | None) -> None:
-            if self.shown is screen:  # Not one shown since.
+            if self.shown is screen:  # Not closed from here since.
                 self.shown = None
+                self._show_next()
             if decision is not None:
                 await self._decide(event, decision)
 
         self._push(screen, decided)
 
     def follow(self, proposals: tuple[ChecksProposed, ...]) -> None:
-        """Close the proposal shown unless it's among ``proposals``, still waiting; then, with
-        none shown, show the first of them."""
+        """Close the proposal shown unless it's among ``proposals``, still waiting, and wait on
+        the rest of them; with none shown, show the first."""
         screen = self.shown
         if screen is not None and screen.proposal not in proposals:
-            screen.dismiss(None)
-            screen = self.shown = None
-        if screen is None and proposals:
-            self.show(proposals[0])
+            self._close(screen)
+            screen = None
+        self._waiting = []
+        for proposal in proposals:
+            self._wait(proposal)
+        if screen is None:
+            self._show_next()
 
     def withdraw(self, event: Event) -> None:
-        """Close the proposal shown, if ``event`` is its agent exiting."""
+        """Drop the proposals of ``event``'s agent, if it's an agent exiting, closing the one
+        shown and showing the next."""
+        if not isinstance(event, AgentExited):
+            return
+        self._waiting = [p for p in self._waiting if p.agent_id != event.agent_id]
         screen = self.shown
-        if isinstance(event, AgentExited) and screen and screen.proposal.agent_id == event.agent_id:
-            screen.dismiss(None)
+        if screen is not None and screen.proposal.agent_id == event.agent_id:
+            self._close(screen)
+            self._show_next()
+
+    def _wait(self, proposal: ChecksProposed) -> None:
+        """Show ``proposal`` after those waiting, unless it's shown or waiting already."""
+        shown = self.shown is not None and self.shown.proposal == proposal
+        if not shown and proposal not in self._waiting:
+            self._waiting.append(proposal)
+
+    def _close(self, screen: ProposalScreen) -> None:
+        """Close ``screen`` undecided, no longer tracking it as shown."""
+        self.shown = None  # Its callback runs later, after any snapshot that follows.
+        screen.dismiss(None)
+
+    def _show_next(self) -> None:
+        """Show the first proposal waiting, if any."""
+        if self._waiting:
+            self.show(self._waiting.pop(0))

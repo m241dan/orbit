@@ -406,11 +406,13 @@ async def test_the_proposal_event_after_a_snapshot_showing_it_adds_no_second_scr
         assert proposal_screens(app) == []
 
 
-async def test_another_proposal_event_while_one_is_shown_shows_its_own_screen() -> None:
+async def test_another_proposal_event_while_one_is_shown_waits_for_it() -> None:
     session = FakeSession()
     app = OrbitApp(session)
     other = PROPOSAL.model_copy(update={"task_id": "2"})
     async with app.run_test() as pilot:
         await feed_events(session, pilot, SNAPSHOT.model_copy(update={"proposals": (PROPOSAL,)}))
         await feed_events(session, pilot, other)
-        assert [screen.proposal for screen in proposal_screens(app)] == [PROPOSAL, other]
+        assert [screen.proposal for screen in proposal_screens(app)] == [PROPOSAL]
+        await pilot.press("a")
+        assert [screen.proposal for screen in proposal_screens(app)] == [other]

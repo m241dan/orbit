@@ -569,7 +569,8 @@ Your decision is noted in the conversation (`orbit → agent-3: proposal accepte
 asked for: add mypy`, `… task ended`), and orbit's reply to the agent completes its request's
 line above. The agent revises
 up to `fix_attempts` times. If it's cancelled or exits while its proposal is showing, the window
-closes and the task is cancelled.
+closes and the task is cancelled. When several agents propose checks, their windows come one at a
+time, in the order they proposed.
 
 Accepted checks take effect at once. Orbit itself (not the agent) writes them into
 `.orbit/config.toml`, replacing its `[[verification.steps]]` and `[setup]` and keeping every other
@@ -1599,7 +1600,8 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
   why a task ended, `link` for the status line and modals showing a lost or stopped control
   plane, `agents`, `panels`,
   `detail` for the detail pane, `working` for the working row, `proposals`, the proposal modal
-  and the `ProposalHost` that shows each waiting proposal once and closes it when it's withdrawn,
+  and the `ProposalHost` that shows the waiting proposals one at a time, each once, and closes
+  the one shown when it's withdrawn,
   `sessions`, the modal listing the sessions and the `SessionsHost` that shows it and refreshes
   it while it's open, `workspaces`, the modal listing the workspaces served and the
   `WorkspacesHost` that shows it, `list_pane` for the list pane the lists share, `footer` for the key footer,
