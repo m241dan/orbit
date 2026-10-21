@@ -94,6 +94,28 @@
       "title": "AddTask",
       "type": "object"
     },
+    "AddWorkspace": {
+      "description": "Serve the workspace at ``path``, an absolute path on the server's host to a directory: a\nrepository's top level, which a path inside it stands for, or a plain directory. It's\nregistered, or found by its path, opens its most recently active session, takes its lock and\nruns its startup check, and a ``Catalog`` listing it follows. A control-plane command: its\nenvelope's ``workspace`` is ``null``. Accepted, changing nothing, for a workspace already\nserved; refused with ``invalid`` for a relative path or a file, ``unknown`` for a path\nthere's nothing at, and ``invalid`` by a local orbit, which serves its own repository\nalone.",
+      "properties": {
+        "path": {
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        },
+        "type": {
+          "const": "add_workspace",
+          "default": "add_workspace",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "type"
+      ],
+      "title": "AddWorkspace",
+      "type": "object"
+    },
     "AgentEntry": {
       "description": "An agent role ``name``, shown as ``label``; ``conversational`` if the user can message\nit.",
       "properties": {
@@ -512,6 +534,7 @@
               "accept_task": "#/$defs/AcceptTask",
               "activate_session": "#/$defs/ActivateSession",
               "add_task": "#/$defs/AddTask",
+              "add_workspace": "#/$defs/AddWorkspace",
               "attach": "#/$defs/Attach",
               "cancel_agent": "#/$defs/CancelAgent",
               "cancel_turn": "#/$defs/CancelTurn",
@@ -523,6 +546,7 @@
               "history": "#/$defs/History",
               "new_session": "#/$defs/NewSession",
               "remove_task": "#/$defs/RemoveTask",
+              "remove_workspace": "#/$defs/RemoveWorkspace",
               "rename_session": "#/$defs/RenameSession",
               "reset_conversation": "#/$defs/ResetConversation",
               "resume_storage": "#/$defs/ResumeStorage",
@@ -596,6 +620,12 @@
             },
             {
               "$ref": "#/$defs/TakeOwnership"
+            },
+            {
+              "$ref": "#/$defs/AddWorkspace"
+            },
+            {
+              "$ref": "#/$defs/RemoveWorkspace"
             }
           ],
           "title": "Payload"
@@ -1531,6 +1561,27 @@
         "type"
       ],
       "title": "RemoveTask",
+      "type": "object"
+    },
+    "RemoveWorkspace": {
+      "description": "Stop serving the workspace ``workspace``, by its id: its lock is let go, its sessions are\nkept for when it's added again, and a ``Catalog`` without it follows; the connection sending\nit, if attached there, is attached to no workspace again. A control-plane command: its\nenvelope's ``workspace`` is ``null``. Refused with ``unknown`` for a workspace not served,\n``busy`` while it runs work or another connection views one of its sessions, and\n``invalid`` by a local orbit.",
+      "properties": {
+        "type": {
+          "const": "remove_workspace",
+          "default": "remove_workspace",
+          "title": "Type",
+          "type": "string"
+        },
+        "workspace": {
+          "title": "Workspace",
+          "type": "string"
+        }
+      },
+      "required": [
+        "workspace",
+        "type"
+      ],
+      "title": "RemoveWorkspace",
       "type": "object"
     },
     "RenameSession": {

@@ -908,7 +908,15 @@ an earlier `orbit serve` on the same state directory, so a plain `orbit serve` s
 again, and with none added yet it starts empty and says so. `--add` takes a project's directory, or
 any directory in a git repository for the repository's top level; a path that doesn't exist, or
 isn't a directory, stops it with status 2. A workspace added whose directory has gone since is
-skipped, with a warning. It takes the backend flags `chat` has (`--model`, `--tools`, `--verify`,
+skipped, with a warning. Frontends add and remove workspaces as it runs, with the protocol's
+`AddWorkspace` and `RemoveWorkspace` (see
+[docs/protocol.md](docs/protocol.md#workspaces)): adding takes an absolute path on the server's
+host, a repository's top level stands for any directory in it, and the workspace opens its
+latest session, takes its lock and runs its startup check, as at start; adding one already
+served changes nothing. Removing one lets its lock go and keeps its sessions for when it's added
+again; it's refused while the workspace runs work or another frontend views one of its
+sessions. A plain `orbit serve` later serves those added, not those removed. A local `orbit
+chat` works on its own repository alone and refuses both. It takes the backend flags `chat` has (`--model`, `--tools`, `--verify`,
 `--worktree`, `--review`, `--usage`, `--profile`, which writes `serve.prof` and
 `serve-blocked.log`), which apply to every workspace it serves, each reading its own
 `.orbit/config.toml`, `--state-dir` and `--config-dir`, and:
@@ -1459,8 +1467,9 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     `SessionConnection` (in `connection`) from its `connect()` implements `Session`. It owns
     what's shared: the connections, the `Outbox` (in `outbox`), which stamps each event with its
     `seq` and the session it belongs to, every stream's `Handshake` and the `UsageMonitor`; it
-    routes every command to the `WorkspaceHost` it holds (one for now) and passes the host's
-    events to the connections. `WorkspaceHost` (in `workspace_host`) is one workspace's
+    routes every command to the `WorkspaceHost` of the workspace it's for and passes each host's
+    events to the connections; frontends add and remove workspaces through its
+    `WorkspaceSource` port, which `orbit serve` fills and a local orbit doesn't. `WorkspaceHost` (in `workspace_host`) is one workspace's
     backend: its open session, lanes, agents and workspace lock; it takes the commands routed
     to it, asks the domain what follows, drives the ports and publishes its events. `Tasks` (in
     `tasks`) holds the `TaskBoard`, marks tasks running and finished, and is the one place that

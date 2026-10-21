@@ -32,7 +32,7 @@ from orbit.agent import (
     running_server,
     tls_warnings,
 )
-from orbit.cli.backend import _Backend, _ServedWorkspace, _serving, _workspace
+from orbit.cli.backend import _Backend, _ServedWorkspace, _serving, _workspace, _Workspaces
 from orbit.cli.errors import INVALID_CONFIG, _configured, _exit_on
 from orbit.cli.options import (
     AddOption,
@@ -77,15 +77,15 @@ def serve(
 ) -> None:
     """Run the control plane on its own, for frontends to connect to over a WebSocket.
 
-    It serves every workspace added with --add, now or by an earlier orbit serve, wherever it's
-    started, each opening its most recently active session, and their work goes on with no
-    frontend connected; the backend flags apply to every workspace it serves. One runs per
-    state directory. Frontends show the token in the token file in your config directory. The
-    first orbit on a repository owns it; while another does, the workspace is read-only here,
-    queueing the work it's asked to run. The first ctrl+c stops it, cancelling the work in
-    progress; a second exits at once. Beyond loopback it serves over TLS alone, with --tls tls
-    and a certificate and key; with --tls mtls and --client-ca, frontends show a client
-    certificate that CA signed rather than the token.
+    It serves every workspace added with --add, now or by an earlier orbit serve, or from a
+    frontend, wherever it's started, each opening its most recently active session, and their
+    work goes on with no frontend connected; the backend flags apply to every workspace it
+    serves. One runs per state directory. Frontends show the token in the token file in your
+    config directory. The first orbit on a repository owns it; while another does, the
+    workspace is read-only here, queueing the work it's asked to run. The first ctrl+c stops
+    it, cancelling the work in progress; a second exits at once. Beyond loopback it serves over
+    TLS alone, with --tls tls and a certificate and key; with --tls mtls and --client-ca,
+    frontends show a client certificate that CA signed rather than the token.
     """
     # #lizard forgives(parameter_count): Typer takes each of the command's options as a parameter.
     profile = profile.expanduser().resolve() if profile else None
@@ -108,7 +108,7 @@ def serve(
             RunFile(state),
             _local_tls(settings, Path.cwd()),
             _banner(serving.workspaces, token_file, settings),
-            tuple(workspace.lock for workspace in serving.workspaces),
+            serving.served,
         )
         _serve_until_stopped(parts, profile, user_config)
     typer.echo("orbit serve stopped.")
@@ -248,8 +248,8 @@ class _ServeParts:
     the token ``token`` gives as they connect, or under mutual TLS a certificate not among those
     ``revoked`` gives then, saying where it is in ``run_file`` while it listens, and how
     frontends here reach it over TLS, ``local``, the ``banner`` it prints once listening, given
-    the server's URL, and the workspaces' ``locks``, which name the server's URL while they're
-    held."""
+    the server's URL, and the workspaces ``served``, whose locks name the server's URL while
+    they're held."""
 
     build: Callable[[], ControlPlane]
     settings: ServerSettings
@@ -258,7 +258,7 @@ class _ServeParts:
     run_file: RunFile
     local: LocalTls | None
     banner: Callable[[str], str]
-    locks: tuple[WorkspaceLock, ...]
+    served: _Workspaces
 
 
 async def _served(parts: _ServeParts, profile: Path | None) -> None:
@@ -295,8 +295,9 @@ async def _until_stopped(
     try:
         _write_run_file(parts.run_file, url, parts.local)
         written = True
-        for lock in parts.locks:
+        for lock in parts.served.locks:
             _announce(lock, url)
+        parts.served.url = url
         typer.echo(parts.banner(url))
         await stopping.wait()
     finally:

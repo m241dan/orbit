@@ -99,6 +99,11 @@ class Handshake:
         """Whether the frontend attached to a session and the steps after that have run."""
         return self._greeted
 
+    def leave(self) -> None:
+        """Count the frontend attached to no session again, as the workspace it was attached
+        to is no longer served; its next ``Attach`` greets it anew."""
+        self._greeted = False
+
     @property
     def listening(self) -> bool:
         """Whether the session's events are delivered to the frontend: from the moment it's

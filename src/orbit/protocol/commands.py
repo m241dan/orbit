@@ -205,6 +205,32 @@ class TakeOwnership(_Message):
     take: bool
 
 
+class AddWorkspace(_Message):
+    """Serve the workspace at ``path``, an absolute path on the server's host to a directory: a
+    repository's top level, which a path inside it stands for, or a plain directory. It's
+    registered, or found by its path, opens its most recently active session, takes its lock and
+    runs its startup check, and a ``Catalog`` listing it follows. A control-plane command: its
+    envelope's ``workspace`` is ``null``. Accepted, changing nothing, for a workspace already
+    served; refused with ``invalid`` for a relative path or a file, ``unknown`` for a path
+    there's nothing at, and ``invalid`` by a local orbit, which serves its own repository
+    alone."""
+
+    type: Literal["add_workspace"] = "add_workspace"
+    path: str = Field(min_length=1)
+
+
+class RemoveWorkspace(_Message):
+    """Stop serving the workspace ``workspace``, by its id: its lock is let go, its sessions are
+    kept for when it's added again, and a ``Catalog`` without it follows; the connection sending
+    it, if attached there, is attached to no workspace again. A control-plane command: its
+    envelope's ``workspace`` is ``null``. Refused with ``unknown`` for a workspace not served,
+    ``busy`` while it runs work or another connection views one of its sessions, and
+    ``invalid`` by a local orbit."""
+
+    type: Literal["remove_workspace"] = "remove_workspace"
+    workspace: str
+
+
 Command = Annotated[
     Hello
     | SendMessage
@@ -226,7 +252,9 @@ Command = Annotated[
     | ResetConversation
     | History
     | ResumeStorage
-    | TakeOwnership,
+    | TakeOwnership
+    | AddWorkspace
+    | RemoveWorkspace,
     Field(discriminator="type"),
 ]
 

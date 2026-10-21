@@ -25,7 +25,8 @@ A command travels in a `CommandEnvelope`:
 - `workspace`: the id of the workspace the command is for, as the `Catalog` gives it. It's
   optional: `null` means the workspace the connection is attached to. A command naming a
   workspace that isn't served is refused with `unknown`, and one naming a workspace served but
-  not the one attached with `wrong_session`, naming both.
+  not the one attached with `wrong_session`, naming both. The control plane's own commands,
+  `AddWorkspace` and `RemoveWorkspace`, are for no workspace, and carry `null`.
 - `traceparent` and `tracestate`: W3C trace context. They're optional, aren't checked, and
   aren't set yet.
 
@@ -82,7 +83,8 @@ its id, label, path, sessions and `read_only`, true when another orbit owns its 
 session carries its state (see [Session state](#session-state)).
 
 `Hello` attaches the connection to nothing, and nothing more reaches it until its first
-`Attach(workspace, session)` (see [Attaching](#attaching)); every command but `Attach` sent
+`Attach(workspace, session)` (see [Attaching](#attaching)); every command but `Attach` and the
+control plane's own, `AddWorkspace` and `RemoveWorkspace` (see [Workspaces](#workspaces)), sent
 before then is refused with `invalid`. The first `Attach` is answered in this order:
 
 1. `Snapshot`: the session as it stands, with its settings, busy lanes, tasks,
@@ -169,6 +171,37 @@ viewers. The delete's `CommandAccepted` follows.
 A reconnecting `orbit.client.WebSocketSession` sends its `Hello` again and, if it had attached,
 its last `Attach`, for the workspace and session the last `Snapshot` it got showed, if it got
 one since, so it views that session again.
+
+## Workspaces
+
+An `orbit serve` serves the workspaces added to it, and any connection, attached or not, can add
+and remove them; each answer is a `Catalog` of the workspaces served now, to every listening
+connection and the one that asked, then `CommandAccepted`. The other workspaces carry on as they
+were.
+
+`AddWorkspace(path)` serves the workspace at `path`, an absolute path on the server's host to a
+directory: a repository's top level, which a path inside the repository stands for, or a plain
+directory. It's registered, or found by its path with the sessions it had, opens its most
+recently active session, takes its lock (or is read-only while another orbit holds it, see
+[Read-only orbits](#read-only-orbits)) and starts its background work, such as its startup
+check. Adding a workspace already served is accepted with nothing more done. It's refused with
+`invalid` for a relative path or a file, or a workspace whose configuration is invalid, and with
+`unknown` for a path there's nothing at.
+
+```json
+{"workspace":null,"traceparent":null,"tracestate":null,"command_id":"a71c03","session":null,"payload":{"type":"add_workspace","path":"/home/me/src/orbit"}}
+```
+
+`RemoveWorkspace(workspace)` stops serving the workspace whose id is `workspace`: its host
+closes, its lock is let go and its sessions are kept, so adding it again finds them. The
+connection removing it, if it was attached there, is attached to no workspace again, and its
+next `Attach` is answered as a first one is. It's refused with `unknown` for a workspace that
+isn't served, and with `busy` while the workspace runs work, its message naming what runs, such
+as `Can't remove /home/me/src/orbit: tasks are running.`, or while another connection views one
+of its sessions, its message naming them.
+
+A local `orbit chat` serves its own repository alone, and refuses both with `invalid`: `A local
+orbit works on one repository; run orbit serve to work on several.`
 
 ## Activation
 
@@ -448,7 +481,7 @@ Refusals, in `CommandRefused`:
 | `not_configured` | What the command needs isn't set up, such as agents or verification. |
 | `unknown` | The command names something there's none of, such as a task, a lane or a workspace. |
 | `busy` | What the command acts on is running, so it can't be done now. |
-| `invalid` | The command can't be done as given, such as a command before `Hello`, a command but `Attach` before the connection is attached, input to a trigger that takes none or `TakeOwnership` with no offer open. |
+| `invalid` | The command can't be done as given, such as a command before `Hello`, a command for a workspace before the connection is attached, a relative path to `AddWorkspace`, adding or removing a workspace on a local orbit, input to a trigger that takes none or `TakeOwnership` with no offer open. |
 | `locked` | Another orbit holds what the command acts on, such as a session. |
 | `wrong_session` | The command is for a session other than the one its connection views, or a workspace other than the one it's attached to. |
 | `not_active` | The connection views a session that isn't the workspace's open one, and the command would change or run something there (see [Read-only views](#read-only-views)). |

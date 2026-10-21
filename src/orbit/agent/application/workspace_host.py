@@ -446,6 +446,16 @@ class WorkspaceHost:
         return self._workspace_id
 
     @property
+    def path(self) -> str | None:
+        """The path of the workspace this host serves, if it's given one."""
+        return self._workspace
+
+    @property
+    def activity(self) -> Activity:
+        """What's in progress in the open session now."""
+        return self._activity()
+
+    @property
     def settings(self) -> Settings:
         return self._settings.current
 

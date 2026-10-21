@@ -99,6 +99,12 @@ class Connections:
         others = (c for c in self._open if c.greeted and c is not asker)
         return [c for c in others if c.attached_id == session_id]
 
+    def others_view(self) -> list[str]:
+        """The ids of the sessions the connections here view, each once, by id, but for the one
+        whose command is being answered."""
+        asker = _asker()
+        return sorted({self._viewed_by(c) for c in self._open if c is not asker})
+
     def attached(self, session_id: str) -> list["SessionConnection"]:
         """The connections attached to the session ``session_id``."""
         return [c for c in self._open if c.attached_id == session_id]

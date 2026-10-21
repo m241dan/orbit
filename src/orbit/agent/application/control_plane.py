@@ -1,8 +1,11 @@
 """The control plane the frontends connect to, each connection an in-process implementation of
 :class:`orbit.protocol.Session`, over the workspace hosts it routes their commands to."""
 
+import asyncio
 from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import replace
+from pathlib import PurePath
+from typing import Protocol
 
 from orbit.agent.application.connection import (
     ConnectionParts,
@@ -18,9 +21,19 @@ from orbit.agent.application.usage_monitor import UsageMonitor
 from orbit.agent.application.workspace_host import WorkspaceHost
 from orbit.agent.domain.catalog import catalog
 from orbit.agent.domain.refusals import Refused
-from orbit.agent.domain.workspaces import addressed_workspace, served_workspace
+from orbit.agent.domain.workspaces import (
+    LOCAL_ONLY,
+    PathKind,
+    addressed_workspace,
+    check_addable,
+    check_directory,
+    check_removable,
+    served_workspace,
+)
 from orbit.protocol import (
     INTERNAL,
+    INVALID,
+    AddWorkspace,
     Attach,
     Catalog,
     CommandAccepted,
@@ -29,10 +42,48 @@ from orbit.protocol import (
     Event,
     EventEnvelope,
     Hello,
+    RemoveWorkspace,
     TurnFinished,
     UsageChanged,
     WorkspaceEntry,
 )
+
+STOPPING = "Orbit is stopping."
+"""Why adding or removing a workspace is refused once the control plane is closing."""
+
+
+class WorkspaceUnavailable(Exception):
+    """A workspace can't be served, for the reason its message gives, such as an invalid
+    configuration."""
+
+
+class WorkspaceSource(Protocol):
+    """Where the workspaces a control plane serves come from as frontends add them, and where
+    they go as they're removed."""
+
+    def kind(self, path: str) -> PathKind:
+        """What there is at ``path``."""
+        ...
+
+    async def top_level(self, path: str) -> str:
+        """The path of the workspace the directory at ``path`` stands for: its repository's top
+        level, if it's in one, else itself, resolved."""
+        ...
+
+    async def open(self, root: str) -> WorkspaceHost:
+        """The host of the workspace at ``root``, registered or found by its path and flagged
+        served, with its lock taken if no other orbit holds it, making it read-only otherwise.
+        Raises :class:`WorkspaceUnavailable` if it can't be served."""
+        ...
+
+    async def close(self, workspace_id: str) -> None:
+        """Let go of the lock on the workspace ``workspace_id``, whose host is closed, and stop
+        serving it, keeping its records."""
+        ...
+
+
+async def _untold(entry: WorkspaceEntry) -> None:
+    """Tell no one of ``entry``."""
 
 
 class _ControlEvents:
@@ -83,12 +134,23 @@ class ControlPlane:
     whenever a workspace's sessions change, and the usage. Once the first connection attaches
     to a workspace, its host's background work starts, and the usage limits are fetched in the
     background from then on, each ``UsageChanged`` reaching every connection attached.
+
+    Given the ``workspaces`` source, ``AddWorkspace`` and ``RemoveWorkspace``, from any
+    connection welcomed, attached or not, add a workspace to those served, starting its host,
+    and remove one, closing its host, each followed by the ``Catalog``; one at a time, as each
+    changes what's served across its awaits. Without one, as for a local orbit serving its own
+    repository alone, they're refused as ``invalid``.
     """
 
     def __init__(
-        self, hosts: Iterable[WorkspaceHost] = (), usage: UsageSource | None = None
+        self,
+        hosts: Iterable[WorkspaceHost] = (),
+        usage: UsageSource | None = None,
+        workspaces: WorkspaceSource | None = None,
     ) -> None:
         self._hosts = {host.workspace_id: host for host in hosts}
+        self._workspaces = workspaces
+        self._changing = asyncio.Lock()
         self._seqs = Seqs(max((host.outbox.last_seq for host in self._hosts.values()), default=0))
         self._lobby = Connections(lambda: None, lambda: "")  # Those attached to no workspace.
         self._events = _ControlEvents(self._seqs, self._everywhere)
@@ -102,6 +164,7 @@ class ControlPlane:
     def _serve(self, host: WorkspaceHost) -> None:
         """Have ``host`` stamp its events with the ``seq`` shared, deliver them to the
         connections attached to its workspace, and tell this of changes to its sessions."""
+        self._seqs.catch_up(host.outbox.last_seq)
         host.outbox.seqs = self._seqs
         host.outbox.deliver = lambda envelope: self._deliver(host, envelope)
         host.catalog_changed = self._publish_catalog
@@ -172,11 +235,7 @@ class ControlPlane:
                 await connection.handshake.hello(command, command_id)
                 return
             connection.handshake.admit()
-            if isinstance(command, Attach):
-                await self._attach(command, command_id, connection)
-            else:
-                host = self._addressed(envelope.workspace, envelope.session, connection)
-                await host.handle(command, command_id, connection)
+            await self._route(envelope, connection)
         except Refused as refusal:
             await publish(
                 CommandRefused(command_id=command_id, code=refusal.code, message=str(refusal))
@@ -187,6 +246,102 @@ class ControlPlane:
             await publish(CommandRefused(command_id=command_id, code=INTERNAL, message=message))
             return
         await publish(CommandAccepted(command_id=command_id))
+
+    async def _route(self, envelope: CommandEnvelope, connection: SessionConnection) -> None:
+        """Handle the command in ``envelope``, from ``connection`` once it's welcomed: the
+        control plane's own here, the others in the workspace they're for."""
+        command = envelope.payload
+        assert not isinstance(command, Hello)  # The handshake answers it.
+        if isinstance(command, AddWorkspace | RemoveWorkspace):
+            await self._change(command, connection)
+        elif isinstance(command, Attach):
+            await self._attach(command, envelope.command_id, connection)
+        else:
+            host = self._addressed(envelope.workspace, envelope.session, connection)
+            await host.handle(command, envelope.command_id, connection)
+
+    async def _change(
+        self, command: AddWorkspace | RemoveWorkspace, connection: SessionConnection
+    ) -> None:
+        """Add or remove the workspace ``command`` names, as ``connection`` asks, once no other
+        change is under way; refused without a source of workspaces, or once closing."""
+        workspaces = self._workspaces
+        if workspaces is None:
+            raise Refused(INVALID, LOCAL_ONLY)
+        async with self._changing:
+            if self._closing:
+                raise Refused(INVALID, STOPPING)
+            if isinstance(command, AddWorkspace):
+                await self._add(command.path, connection, workspaces)
+            else:
+                await self._remove(command.workspace, connection, workspaces)
+
+    async def _add(
+        self, path: str, connection: SessionConnection, workspaces: WorkspaceSource
+    ) -> None:
+        """Serve the workspace at ``path``, from ``workspaces``, unless it's served already:
+        start its host, opening its most recently active session and its background work, and
+        send the catalog to ``connection``, which asked, and every listening connection; refused
+        unless ``path`` is the absolute path to a directory, or as ``invalid`` if it can't be
+        served."""
+        check_addable(path, absolute=PurePath(path).is_absolute())
+        check_directory(path, workspaces.kind(path))
+        root = await workspaces.top_level(path)
+        if any(host.path == root for host in self._hosts.values()):
+            return
+        try:
+            host = await workspaces.open(root)
+        except WorkspaceUnavailable as exc:
+            raise Refused(INVALID, f"Can't add {root}: {exc}") from None
+        self._hosts[host.workspace_id] = host
+        self._serve(host)
+        await self._open_latest(host)
+        self._start_background(host)
+        await self._changed(connection)
+
+    async def _open_latest(self, host: WorkspaceHost) -> None:
+        """Have ``host`` open its most recently active session, telling no one of the change to
+        its sessions, as the catalog follows once it's started."""
+        host.catalog_changed = _untold
+        try:
+            await host.open_latest()
+        finally:
+            host.catalog_changed = self._publish_catalog
+
+    async def _remove(
+        self, workspace: str, connection: SessionConnection, workspaces: WorkspaceSource
+    ) -> None:
+        """Stop serving the workspace ``workspace``: close its host, having ``connection``, if
+        it's attached there, attached to none, have ``workspaces`` let it go, and send the
+        catalog to ``connection`` and every listening connection; refused for a workspace not
+        served, or as ``busy`` while it runs work or another connection views one of its
+        sessions."""
+        host = self._hosts[served_workspace(workspace, self._served)]
+        viewed = host.connections.others_view()
+        check_removable(host.path or workspace, host.activity, viewed)
+        if connection.workspace == workspace:
+            self._detach(connection)
+        del self._hosts[workspace]
+        try:
+            await host.close()
+        finally:
+            await workspaces.close(workspace)
+        await self._changed(connection)
+
+    async def _changed(self, connection: SessionConnection) -> None:
+        """Send every listening connection the catalog, as the workspaces served changed, and
+        ``connection``, which changed them, even if it isn't listening yet."""
+        catalog = await self._catalog()
+        await self._events.put(catalog)
+        if not connection.listening:
+            await connection.publish_here(catalog)
+
+    def _detach(self, connection: SessionConnection) -> None:
+        """Have ``connection`` attached to no workspace again, as one that's welcomed; its next
+        ``Attach`` greets it anew."""
+        connection.move(self._place)
+        connection.workspace = None
+        connection.handshake.leave()
 
     def _addressed(
         self, workspace: str | None, session: str | None, connection: SessionConnection
@@ -263,11 +418,12 @@ class ControlPlane:
         closed even if stopping one before it fails, whose failure is raised after."""
         self._closing = True
         failure: Exception | None = None
-        for stop in self._stops():
-            try:
-                await stop()
-            except Exception as exc:  # A bug; the rest must still stop.
-                failure = failure or exc
+        async with self._changing:  # A workspace being added is closed with the rest.
+            for stop in self._stops():
+                try:
+                    await stop()
+                except Exception as exc:  # A bug; the rest must still stop.
+                    failure = failure or exc
         if failure is not None:
             raise failure
 

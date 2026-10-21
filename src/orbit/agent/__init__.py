@@ -8,7 +8,11 @@ Layered, outermost first; each layer may import only the ones below it:
 - ``domain``: the rules the application decides by. Pure.
 """
 
-from orbit.agent.application.control_plane import ControlPlane
+from orbit.agent.application.control_plane import (
+    ControlPlane,
+    WorkspaceSource,
+    WorkspaceUnavailable,
+)
 from orbit.agent.application.desk import Agents
 from orbit.agent.application.handshake import NO_STEPS_NOTE
 from orbit.agent.application.ports import (
@@ -33,6 +37,7 @@ from orbit.agent.domain.roles import Role
 from orbit.agent.domain.server import LocalTls, RunningServer, ServerSettings, TlsMode
 from orbit.agent.domain.storage import StorageSettings
 from orbit.agent.domain.verification import VerificationStep
+from orbit.agent.domain.workspaces import PathKind
 from orbit.agent.external.checks import run_step
 from orbit.agent.external.claude_cli import MODEL_ALIASES, ClaudeCliRunner
 from orbit.agent.external.config_file import read_config, write_checks
@@ -86,6 +91,7 @@ __all__ = [
     "McpHost",
     "OpenedStore",
     "OrbitConfig",
+    "PathKind",
     "ProposalDecision",
     "ProposalReview",
     "RecoveryFailed",
@@ -113,7 +119,9 @@ __all__ = [
     "WorkspaceLock",
     "WorkspaceOwner",
     "WorkspaceRegistry",
+    "WorkspaceSource",
     "WorkspaceStore",
+    "WorkspaceUnavailable",
     "git_top_level",
     "has_git_identity",
     "in_git_work_tree",

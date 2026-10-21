@@ -11,6 +11,7 @@ from orbit.protocol import (
     ActivateSession,
     Activity,
     AddTask,
+    AddWorkspace,
     AgentEntry,
     AgentExited,
     AgentReply,
@@ -51,6 +52,7 @@ from orbit.protocol import (
     ProposedSetup,
     ProposedStep,
     RemoveTask,
+    RemoveWorkspace,
     RenameSession,
     ResetConversation,
     ResumeStorage,
@@ -186,6 +188,8 @@ COMMANDS: tuple[CommandEnvelope, ...] = (
     command(History(session="s1", before_seq=101, limit=50)),
     command(ResumeStorage()),
     command(TakeOwnership(take=True)),
+    command(AddWorkspace(path="/src/orbit")),
+    command(RemoveWorkspace(workspace="w1")),
 )
 
 EVENTS: tuple[EventEnvelope, ...] = (

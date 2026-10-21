@@ -17,6 +17,7 @@ import urllib.request
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import cast
 
 import pytest
 from typer.testing import CliRunner
@@ -35,16 +36,19 @@ from orbit.cli import app, chat, serve
 from orbit.protocol import (
     PROTOCOL_VERSION,
     AddTask,
+    AddWorkspace,
     Attach,
     Catalog,
     Command,
     CommandAccepted,
     CommandEnvelope,
+    CommandRefused,
     Event,
     Hello,
     Notice,
     OwnershipOffered,
     OwnershipTaken,
+    RemoveWorkspace,
     Snapshot,
     TakeOwnership,
     TaskSpec,
@@ -471,6 +475,75 @@ def test_adding_a_missing_workspace_exits_naming_it(tmp_path: Path) -> None:
     result = runner.invoke(app, ["serve", *QUIET, "--add", str(tmp_path / "missing")])
     assert result.exit_code == 2
     assert f"Workspace {tmp_path / 'missing'} doesn't exist." in result.stderr
+
+
+def _changes(websocket: ClientConnection, command_id: str, command: Command) -> list[Event]:
+    """Send ``command`` on ``websocket``; what it received, up to the command's outcome."""
+    say(websocket, command_id, command)
+    events: list[Event] = []
+    while not events or not isinstance(events[-1], CommandAccepted | CommandRefused):
+        events += until(websocket, CommandAccepted | CommandRefused)  # type: ignore[arg-type]
+    return events
+
+
+def _lock_free(root: Path) -> bool:
+    """Whether no orbit holds the workspace lock on the repository at ``root``."""
+    lock = WorkspaceLock(root / ".orbit")
+    owner = lock.take()
+    lock.close()
+    return owner is None
+
+
+def _catalogs(events: list[Event]) -> list[Catalog]:
+    return [event for event in events if isinstance(event, Catalog)]
+
+
+def test_a_frontend_adds_and_removes_a_workspace_which_keeps_its_sessions(
+    state: Path, config_dir: Path, tmp_path: Path
+) -> None:
+    [other] = _workspace_dirs(tmp_path, "other")
+    seen: dict[str, object] = {}
+
+    def adds_and_removes(websocket: ClientConnection) -> list[Event]:
+        [added] = _catalogs(_changes(websocket, "add", AddWorkspace(path=str(other))))
+        seen["held"] = WorkspaceLock(other / ".orbit").owner()
+        seen["again"] = _changes(websocket, "again", AddWorkspace(path=str(other)))
+        entry = added.workspaces[-1]
+        [session] = entry.sessions
+        say(websocket, "attach", Attach(workspace=entry.id, session=session.id))
+        until(websocket, CommandAccepted)
+        adds_a_task(websocket)
+        [removed] = _catalogs(_changes(websocket, "remove", RemoveWorkspace(workspace=entry.id)))
+        seen["free"] = _lock_free(other)
+        [readded] = _catalogs(_changes(websocket, "readd", AddWorkspace(path=str(other))))
+        seen["catalogs"] = [added, removed, readded]
+        return []
+
+    frontend = Frontend(state, config_dir, adds_and_removes, greet=welcomed)
+    served(frontend, "--port", "0")
+
+    assert seen["held"] == WorkspaceOwner(pid=os.getpid(), url=str(frontend.run_file["url"]))
+    assert seen["again"] == [CommandAccepted(command_id="again")]
+    assert seen["free"] is True
+    added, removed, readded = cast(list[Catalog], seen["catalogs"])
+    project = str(Path.cwd())
+    listed = [[w.path for w in catalog.workspaces] for catalog in (added, removed, readded)]
+    assert listed == [[project, str(other)], [project], [project, str(other)]]
+    first, again = added.workspaces[-1], readded.workspaces[-1]
+    assert again.id == first.id
+    assert [s.id for s in again.sessions] == [s.id for s in first.sessions]
+    assert _lock_free(other)
+
+
+def test_a_frontend_adding_a_relative_path_is_refused(state: Path, config_dir: Path) -> None:
+    def adds(websocket: ClientConnection) -> list[Event]:
+        return _changes(websocket, "add", AddWorkspace(path="relative"))
+
+    frontend = Frontend(state, config_dir, adds)
+    served(frontend, "--port", "0")
+
+    [refusal] = [e for e in frontend.events if isinstance(e, CommandRefused)]
+    assert refusal.code == "invalid"
 
 
 def test_serve_takes_its_port_from_the_config_file(state: Path, config_dir: Path) -> None:
