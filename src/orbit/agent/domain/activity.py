@@ -2,8 +2,19 @@
 it may be switched for another, and of what connections are told is in progress."""
 
 from dataclasses import dataclass
+from enum import Enum, auto
 
 from orbit.protocol import Activity as Reported
+
+
+class Running(Enum):
+    """What may run in a session that keeps it from being idle, in the order it's told: a task
+    run, a review and a planner turn."""
+
+    TASKS = auto()
+    REVIEW = auto()
+    PLANNER = auto()
+
 
 TASKS_RUNNING = "Can't switch: tasks are running. Press ctrl+s to stop them."
 REVIEW_RUNNING = "Can't switch: a review is running. Press c on it in the agents pane to stop it."
@@ -29,18 +40,32 @@ class Activity:
     def running(self) -> bool:
         """Whether anything but the startup check is in progress; the session is idle
         otherwise."""
-        return switch_refusal(self) is not None
+        return first_running(self) is not None
+
+
+def first_running(activity: Activity) -> Running | None:
+    """What runs first of a task run, a review and a planner turn in ``activity``; none when
+    nothing does."""
+    kinds = (
+        (activity.tasks, Running.TASKS),
+        (activity.review, Running.REVIEW),
+        (activity.planner, Running.PLANNER),
+    )
+    return next((kind for runs, kind in kinds if runs), None)
+
+
+_SWITCH_REFUSALS = {
+    Running.TASKS: TASKS_RUNNING,
+    Running.REVIEW: REVIEW_RUNNING,
+    Running.PLANNER: PLANNER_ANSWERING,
+}
 
 
 def switch_refusal(activity: Activity) -> str | None:
     """Why a switch is refused while ``activity`` is in progress, saying what runs first of a
     task run, a review and a planner turn; none when nothing runs."""
-    refusals = (
-        (activity.tasks, TASKS_RUNNING),
-        (activity.review, REVIEW_RUNNING),
-        (activity.planner, PLANNER_ANSWERING),
-    )
-    return next((refusal for runs, refusal in refusals if runs), None)
+    kind = first_running(activity)
+    return None if kind is None else _SWITCH_REFUSALS[kind]
 
 
 def reported(activity: Activity) -> tuple[Reported, ...]:

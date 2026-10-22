@@ -7,6 +7,8 @@ from orbit.agent.domain.activity import (
     REVIEW_RUNNING,
     TASKS_RUNNING,
     Activity,
+    Running,
+    first_running,
     reported,
     switch_refusal,
 )
@@ -37,6 +39,21 @@ def test_each_activity_alone_refuses_a_switch_saying_so_and_is_running(
 )
 def test_several_at_once_refuse_with_the_first_in_order(activity: Activity, refusal: str) -> None:
     assert switch_refusal(activity) == refusal
+
+
+@pytest.mark.parametrize(
+    ("activity", "kind"),
+    [
+        (Activity(tasks=True, review=True, planner=True), Running.TASKS),
+        (Activity(review=True, planner=True), Running.REVIEW),
+        (Activity(planner=True), Running.PLANNER),
+        (Activity(startup_check=True), None),
+    ],
+)
+def test_the_first_running_kind_is_in_order_and_ignores_the_startup_check(
+    activity: Activity, kind: Running | None
+) -> None:
+    assert first_running(activity) is kind
 
 
 def test_nothing_in_progress_refuses_nothing_and_is_idle() -> None:

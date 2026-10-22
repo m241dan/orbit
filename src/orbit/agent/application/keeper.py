@@ -28,6 +28,7 @@ from orbit.agent.domain.sessions import (
     openable,
     record_name,
     renamable,
+    session_name,
     stored_summary,
     tasks_summary,
     viewable,
@@ -211,7 +212,7 @@ class SessionKeeper:
     def rename(self, name: str | None) -> None:
         """Name the session ``name``, unless it's none or blank; once used, it's saved again
         under that name."""
-        self.name = (name or "").strip() or self.name
+        self.name = session_name(name) or self.name
         self._saved = None
 
     @property
@@ -486,7 +487,7 @@ class SessionKeeper:
             self._check_open()
             commit()
             created = self._clock()
-            named = (name or "").strip() or default_name(created)
+            named = session_name(name) or default_name(created)
             return self._become(self._new_id(), named, created)
 
     def _check_open(self) -> None:

@@ -279,9 +279,10 @@ def record_name(session_id: str, record: SessionRecord | Unreadable) -> str:
     return record.name if isinstance(record, SessionRecord) else session_id
 
 
-def session_name(name: str) -> str | None:
-    """``name`` as a session is named, without the spaces around it; none when it's empty."""
-    return name.strip() or None
+def session_name(name: str | None) -> str | None:
+    """``name`` as a session is named, without the spaces around it; none when it's none or
+    empty."""
+    return (name or "").strip() or None
 
 
 def locked_message(name: str, action: str = "open") -> str:

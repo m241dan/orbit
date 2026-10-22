@@ -416,6 +416,7 @@ def test_a_session_name_loses_the_spaces_around_it() -> None:
 
 def test_an_empty_session_name_is_none() -> None:
     assert session_name("  ") is None
+    assert session_name(None) is None
     assert EMPTY_NAME == "A session needs a name."
 
 

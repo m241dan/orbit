@@ -71,6 +71,21 @@ def test_a_blank_or_missing_name_keeps_the_sessions_name() -> None:
     assert keeper.name == "Oct 17 14:30"
 
 
+@pytest.mark.parametrize("name", [None, "", "  "])
+async def test_a_new_session_given_a_blank_or_missing_name_is_named_for_when_it_was_made(
+    name: str | None,
+) -> None:
+    keeper, _ = keeper_for(FakeStore())
+    await keeper.renew(name, no_commit)
+    assert (keeper.id, keeper.name) == ("session-1", "Oct 17 14:31")
+
+
+async def test_a_new_session_given_a_name_is_named_so_without_its_spaces() -> None:
+    keeper, _ = keeper_for(FakeStore())
+    await keeper.renew(" auth rework ", no_commit)
+    assert keeper.name == "auth rework"
+
+
 def test_by_default_sessions_get_fresh_ids_and_the_local_time() -> None:
     assert new_session_id() != new_session_id()
     assert local_now().utcoffset() is not None
