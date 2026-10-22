@@ -75,11 +75,12 @@ def test_everything_in_progress_is_reported_in_order_with_its_task() -> None:
         task_id="t1",
         reviewing=("t2",),
         waiting_for_coder=2,
+        coders_busy=3,
     )
 
     assert reported(activity) == (
         Reported(kind="task_run", task_id="t1"),
-        Reported(kind="waiting_for_coder", position=2),
+        Reported(kind="waiting_for_coder", position=2, busy=3),
         Reported(kind="review", task_id="t2"),
         Reported(kind="planner"),
         Reported(kind="startup_check"),
@@ -114,9 +115,9 @@ def test_a_review_of_no_particular_task_is_reported_once_without_one() -> None:
 
 
 def test_a_task_run_waiting_for_a_coder_is_reported_with_its_position() -> None:
-    activity = Activity(tasks=True, task_id="t1", waiting_for_coder=1)
+    activity = Activity(tasks=True, task_id="t1", waiting_for_coder=1, coders_busy=4)
 
     assert reported(activity) == (
         Reported(kind="task_run", task_id="t1"),
-        Reported(kind="waiting_for_coder", position=1),
+        Reported(kind="waiting_for_coder", position=1, busy=4),
     )

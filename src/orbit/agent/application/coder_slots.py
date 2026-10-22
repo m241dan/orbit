@@ -130,6 +130,11 @@ class CoderSeat:
         self.slots().drop(self.workspace, self.session())
 
     @property
+    def busy(self) -> int:
+        """How many coders' slots are taken."""
+        return self.slots().taken
+
+    @property
     def position(self) -> int | None:
         """Where the open session waits in line, 1 next; none if it doesn't."""
         return self.slots().position(self.workspace, self.session())

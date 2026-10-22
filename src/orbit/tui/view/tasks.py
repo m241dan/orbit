@@ -6,8 +6,8 @@ from collections.abc import Sequence
 from rich.cells import cell_len
 from rich.text import Text
 
-from orbit.protocol import ACTIVE_STATUSES, REVIEWER, SUPER_REVIEWER, TaskState, Usage
-from orbit.tui.view.common import STATUS_ICONS, model_label, token_text
+from orbit.protocol import ACTIVE_STATUSES, REVIEWER, SUPER_REVIEWER, Activity, TaskState, Usage
+from orbit.tui.view.common import STATUS_ICONS, counted, model_label, token_text
 from orbit.tui.view.detail_views import ERROR
 
 TASK_EDITOR_HINT = "j/k move · J/K scroll · i type · enter choose · ctrl+s save · esc cancel"
@@ -39,30 +39,46 @@ def task_numbers(tasks: Sequence[TaskState]) -> list[str]:
     return numbers
 
 
-def task_label(state: TaskState, number: str, frame: str, *, width: int | None = None) -> Text:
+def task_label(
+    state: TaskState,
+    number: str,
+    frame: str,
+    *,
+    width: int | None = None,
+    waiting: str | None = None,
+) -> Text:
     """A row: number, status and title, with the settings lined up under the title, and
     under them why the task ended, if it has a reason.
 
     Fix tasks are indented under the task they belong to. A running task shows the
-    spinner ``frame``. The reason's line is cut to ``width`` cells with an ellipsis, if given.
+    spinner ``frame``. A pending task about to run says it's ``waiting`` for a coder, if
+    given. The reason's line is cut to ``width`` cells with an ellipsis, if given.
     """
-    settings = state.task.settings
     head = f"{number}. " if state.fixes is None else f"   {number} "
     icon = frame if state.status == "running" else STATUS_ICONS[state.status]
     # Long prompts (like fix tasks) are titled by their first line.
     title = split_prompt(state.task.prompt)[0]
     label = Text(f"{head}{icon} {title}\n")
     indent = " " * (len(head) + cell_len(icon) + 1)
-    details = f"{indent}{model_label(settings)} · {settings.tool_access}"
-    if state.attempt:
-        details += f" · fix {state.attempt}/{state.max_attempts}"
-    if state.usage != Usage():
-        details += f" · {usage_label(state.usage)}"
-    label.append(details, style="dim")
+    label.append(indent + _details(state, waiting), style="dim")
     if state.reason:
         label.append("\n")
         label.append_text(_reason_line(f"{indent}↳ {state.reason}", width))
     return label
+
+
+def _details(state: TaskState, waiting: str | None) -> str:
+    """What a row says under its title: the settings, the fix it's on, what it spent, and that
+    it's ``waiting`` for a coder, if pending and given."""
+    settings = state.task.settings
+    details = f"{model_label(settings)} · {settings.tool_access}"
+    if state.attempt:
+        details += f" · fix {state.attempt}/{state.max_attempts}"
+    if state.usage != Usage():
+        details += f" · {usage_label(state.usage)}"
+    if waiting is not None and state.status == "pending":
+        details += f" · {waiting}"
+    return details
 
 
 def _reason_line(line: str, width: int | None) -> Text:
@@ -116,6 +132,30 @@ def _trim_body(body: str) -> str:
     while lines and not lines[0].strip():
         del lines[0]
     return "\n".join(lines).rstrip()
+
+
+def coder_wait(activity: Sequence[Activity]) -> Activity | None:
+    """The wait for a coder in ``activity``, if its task run waits for one."""
+    return next((each for each in activity if each.kind == "waiting_for_coder"), None)
+
+
+def coder_wait_row(activity: Sequence[Activity]) -> tuple[str, str] | None:
+    """The task about to run while ``activity``'s task run waits for a coder, and what its row
+    says: ``⏳ waiting: 3 coders busy``, or ``⏳ waiting for a coder`` while how many are busy
+    isn't known; none while it doesn't wait or its task isn't known."""
+    wait = coder_wait(activity)
+    task_id = next((each.task_id for each in activity if each.kind == "task_run"), None)
+    if wait is None or task_id is None:
+        return None
+    return task_id, _wait_note(wait.busy)
+
+
+def _wait_note(busy: int | None) -> str:
+    """What the row of the task waiting for a coder says while ``busy`` coders hold the slots:
+    ``⏳ waiting: 3 coders busy``, or ``⏳ waiting for a coder`` while that isn't known."""
+    if busy is None:
+        return "⏳ waiting for a coder"
+    return f"⏳ waiting: {counted(busy, 'coder')} busy"
 
 
 def usage_label(usage: Usage) -> str:

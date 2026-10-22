@@ -33,7 +33,7 @@ from tests.agent_fakes import (
 )
 from tests.plane_fakes import idle, joined, payloads, say, taken
 
-WAITING_FIRST = Activity(kind="waiting_for_coder", position=1)
+WAITING_FIRST = Activity(kind="waiting_for_coder", position=1, busy=1)
 
 
 class Gates:

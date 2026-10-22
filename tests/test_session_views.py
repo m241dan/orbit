@@ -22,7 +22,7 @@ from orbit.protocol import (
 from orbit.tui import OrbitApp
 from orbit.tui.widgets import ChatPrompt, ChoiceScreen
 from tests.session_apps import CATALOG, CURRENT, OLD, RUNNING, catalog, joined, started
-from tests.tui_fakes import entries, feed_events, opened
+from tests.tui_fakes import entries, feed_events, opened, rows
 
 VIEWING_OLD = "viewing auth rework; today is idle (enter to switch)"
 TODAY = SessionRef(id="now", name="today")
@@ -351,3 +351,19 @@ async def test_a_view_not_picked_here_is_not_offered_again_when_the_active_one_i
         await feed_events(session, pilot, CATALOG, RUNNING_T3, view(OLD), IDLE)
         assert not isinstance(app.screen, ChoiceScreen)
         assert mark(app) == VIEWING_OLD
+
+
+async def test_the_viewing_mark_says_the_active_session_waits_for_a_coder() -> None:
+    waiting = (
+        Activity(kind="task_run", task_id="t3"),
+        Activity(kind="waiting_for_coder", position=2, busy=4),
+    )
+    app, session = started()
+    async with app.run_test() as pilot:
+        state = RUNNING.model_copy(update={"activity": waiting})
+        await feed_events(session, pilot, CATALOG, view(OLD), THREE_TASKS, state)
+        assert mark(app) == (
+            "viewing auth rework; today is waiting for a coder: 2nd in line"
+            " (enter to switch when it's idle)"
+        )
+        assert all("waiting" not in row for row in rows(app))

@@ -28,8 +28,8 @@ class Activity:
     task run's task and the reviewed tasks are none while they aren't known; a review of no
     particular task, such as a super review, reviews no tasks. The startup check runs on the
     base commit rather than in a session, so it leaves the session idle. A task run waiting in
-    line for a coder's slot waits at position ``waiting_for_coder``, 1 next, and none
-    otherwise."""
+    line for a coder's slot waits at position ``waiting_for_coder``, 1 next, while
+    ``coders_busy`` coders hold the slots, and both are none otherwise."""
 
     tasks: bool = False
     review: bool = False
@@ -38,6 +38,7 @@ class Activity:
     task_id: str | None = None
     reviewing: tuple[str, ...] | None = None
     waiting_for_coder: int | None = None
+    coders_busy: int | None = None
 
     @property
     def running(self) -> bool:
@@ -77,10 +78,11 @@ def reported(activity: Activity) -> tuple[Reported, ...]:
     review once its tasks are known. A review is told once per task it reviews, in order, or
     once without a task if it reviews no particular one."""
     task_run = activity.tasks and activity.task_id is not None
-    position = activity.waiting_for_coder
+    position, busy = activity.waiting_for_coder, activity.coders_busy
+    waiting = Reported(kind="waiting_for_coder", position=position, busy=busy)
     entries = (
         (task_run, (Reported(kind="task_run", task_id=activity.task_id),)),
-        (position is not None, (Reported(kind="waiting_for_coder", position=position),)),
+        (position is not None, (waiting,)),
         (activity.review, _reviews(activity.reviewing)),
         (activity.planner, (Reported(kind="planner"),)),
         (activity.startup_check, (Reported(kind="startup_check"),)),

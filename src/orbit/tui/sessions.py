@@ -62,6 +62,7 @@ from orbit.tui.view.sessions import (
     viewing_mark,
     workspace_sessions,
 )
+from orbit.tui.view.tasks import coder_wait_row
 from orbit.tui.view.workspaces import with_states
 from orbit.tui.widgets import ChoiceScreen, TypingListScreen, confirm
 
@@ -294,6 +295,13 @@ class SessionsHost:
     def running(self) -> str | None:
         """What the active session runs, in words; none while it's idle or isn't known."""
         return running_words(self.sessions)
+
+    @property
+    def coder_wait(self) -> tuple[str, str] | None:
+        """The task about to run in the session viewed while it waits for a coder, and what its
+        row says; none while it doesn't wait."""
+        attached = self.attached_session
+        return None if attached is None else coder_wait_row(attached.activity)
 
     @property
     def viewed_name(self) -> str:

@@ -152,12 +152,13 @@ coder's slot across the workspaces served is taken, a ``review``, a ``planner`` 
 class Activity(_Message):
     """Something in progress in a session, of ``kind``; ``task_id`` is the task a task run runs
     or the task whose work a review reviews, and none otherwise, such as for a super review;
-    ``position`` is where a task run ``waiting_for_coder`` waits in line, 1 next, and none
-    otherwise."""
+    ``position`` is where a task run ``waiting_for_coder`` waits in line, 1 next, and ``busy``
+    how many coders run meanwhile, taking the slots it waits for; both are none otherwise."""
 
     kind: ActivityKind
     task_id: str | None = None
     position: int | None = Field(default=None, ge=1)
+    busy: int | None = Field(default=None, ge=0)
 
 
 class SessionSummary(_Message):

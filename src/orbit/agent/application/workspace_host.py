@@ -832,16 +832,27 @@ class WorkspaceHost:
 
     def _activity(self) -> Activity:
         """What's in progress now: a task run, a review, a planner turn and the startup check,
-        with the tasks the run and the review are on, and where the run waits for a coder."""
+        with the tasks the run and the review are on, and where the run waits for a coder, behind
+        how many busy."""
+        task_id, waiting, busy = self._work_activity()
         return Activity(
             tasks=self._turns.running,
             review=self._lane is not None and self._lane.running,
             planner=self._seat.running,
             startup_check=self._startup is not None and self._startup.running,
-            task_id=self._work.current if self._work else None,
+            task_id=task_id,
             reviewing=self._lane.reviewing if self._lane else None,
-            waiting_for_coder=self._work.waiting_for_coder if self._work else None,
+            waiting_for_coder=waiting,
+            coders_busy=busy,
         )
+
+    def _work_activity(self) -> tuple[str | None, int | None, int | None]:
+        """The task the run is on, where it waits for a coder and behind how many busy; none
+        of them without a work lane."""
+        work = self._work
+        if work is None:
+            return None, None, None
+        return work.current, work.waiting_for_coder, work.coders_busy
 
     def start_background(self) -> None:
         """Start loading the super review count, the startup check, if there is one, and the

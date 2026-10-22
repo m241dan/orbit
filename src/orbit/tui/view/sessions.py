@@ -18,7 +18,7 @@ from orbit.protocol import (
     WorkspaceEntry,
 )
 from orbit.tui.view.common import SPINNER_FRAMES, STATUS_ICONS, ListHints, active_session
-from orbit.tui.view.tasks import usage_label
+from orbit.tui.view.tasks import coder_wait, usage_label
 from orbit.tui.view.workspaces import workspace_at
 
 SESSIONS_TITLE = "Sessions"
@@ -284,11 +284,13 @@ def _details(summary: SessionSummary, zone: tzinfo | None, attached: bool) -> li
 
 
 def state_notes(summary: SessionSummary, attached: bool = False) -> list[str]:
-    """Whether ``summary``'s session is the active one, whether it runs work and how many other
-    frontends view it, besides this one if ``attached``: ``active · running · viewed by 2``."""
+    """Whether ``summary``'s session is the active one, whether it runs work or waits for a
+    coder, and how many other frontends view it, besides this one if ``attached``: ``active ·
+    running · viewed by 2``."""
     notes = [ACTIVE_NOTE] if summary.active else []
     if summary.state == "running":
-        notes.append(RUNNING_NOTE)
+        wait = coder_wait(summary.activity)
+        notes.append(RUNNING_NOTE if wait is None else waiting_words(wait.position))
     others = _others(summary, attached)
     if others:
         notes.append(f"viewed by {others}")
@@ -317,12 +319,13 @@ def name_hint(*, renaming: bool) -> str:
 
 def viewing_mark(name: str, active: str | None, running: str | None) -> str:
     """The mark by the prompt while this frontend views the session ``name``, which isn't the
-    active one: what the session ``active`` is ``running``, or that it's idle while that's none."""
+    active one: what the session ``active`` is doing, ``running``, or that it's idle while
+    that's none."""
     if active is None:
         return f"viewing {name}, not the active session (enter to switch)"
     if running is None:
         return f"viewing {name}; {active} is idle (enter to switch)"
-    return f"viewing {name}; {active} is running {running} (enter to switch when it's idle)"
+    return f"viewing {name}; {active} is {running} (enter to switch when it's idle)"
 
 
 def activity_words(activity: Sequence[Activity]) -> str:
@@ -336,6 +339,35 @@ def activity_words(activity: Sequence[Activity]) -> str:
     if len(words) == 1:
         return words[0]
     return f"{', '.join(words[:-1])} and {words[-1]}"
+
+
+def state_words(activity: Sequence[Activity]) -> str:
+    """What a session running ``activity`` is doing, in words: ``running a task``, or
+    ``waiting for a coder: 2nd in line`` while its task run waits for one, after what else
+    runs: ``running the planner and waiting for a coder: 2nd in line``."""
+    wait = coder_wait(activity)
+    if wait is None:
+        return f"running {activity_words(activity)}"
+    others = [each for each in activity if each.kind not in ("task_run", "waiting_for_coder")]
+    waiting = waiting_words(wait.position)
+    return f"running {activity_words(others)} and {waiting}" if others else waiting
+
+
+def waiting_words(position: int | None) -> str:
+    """A wait for a coder at ``position`` in line, in words: ``waiting for a coder: 2nd in
+    line``, ``next in line`` at 1, and just ``waiting for a coder`` without a position."""
+    if position is None:
+        return "waiting for a coder"
+    place = "next" if position == 1 else ordinal(position)
+    return f"waiting for a coder: {place} in line"
+
+
+def ordinal(number: int) -> str:
+    """``number`` as an ordinal: ``1st``, ``2nd``, ``3rd``, ``4th``, ``11th``, ``21st``."""
+    suffixes = {1: "st", 2: "nd", 3: "rd"}
+    teen = number % 100 in (11, 12, 13)
+    suffix = "th" if teen else suffixes.get(number % 10, "th")
+    return f"{number}{suffix}"
 
 
 def _activity_word(activity: Activity) -> str:
@@ -356,19 +388,19 @@ def active_name(sessions: Sequence[SessionSummary]) -> str | None:
 
 
 def running_words(sessions: Sequence[SessionSummary]) -> str | None:
-    """What the active session among ``sessions`` runs, in words; none while it's idle or none
-    is active."""
+    """What the active session among ``sessions`` is doing, in words, as :func:`state_words`
+    says it; none while it's idle or none is active."""
     active = active_session(sessions)
     if active is None or active.state != "running":
         return None
-    return activity_words(active.activity)
+    return state_words(active.activity)
 
 
 def activation_message(viewed: str, open_name: str, *, running: str | None) -> str:
     """What the prompt to make the session ``viewed`` the active one says, while the session
-    ``open_name`` is, and is ``running`` what it says, or idle while that's none."""
+    ``open_name`` is, and is doing what ``running`` says, or idle while that's none."""
     if running is not None:
-        return f"{open_name} is running {running}; you can switch once it's idle."
+        return f"{open_name} is {running}; you can switch once it's idle."
     return f"{viewed} is a read-only view; {open_name} is the active session, which runs work."
 
 

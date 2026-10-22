@@ -32,7 +32,8 @@ class TaskList(ListPane):
     Like the prompt, it only takes focus once activated (``enter_list_mode``);
     then j/k move, enter picks a row, ``a`` accepts a draft, ``x`` removes a task, ``f`` shows
     why a task ended and escape returns to window navigation. Its border shows what the
-    session's turns cost. While following, it scrolls to keep the active task
+    session's turns cost, and the task about to run says when it waits for a coder. While
+    following, it scrolls to keep the active task
     (``active_task``) in view; activating it or scrolling it with the mouse wheel holds it
     where it is, until ``let_go``.
     """
@@ -79,6 +80,7 @@ class TaskList(ListPane):
         self.numbers_by_id: dict[str, str] = {}
         self.clock: Callable[[], float] = time.monotonic
         self.session_usage = Usage()
+        self.waiting: tuple[str, str] | None = None  # The task waiting for a coder, and its note.
         self._ticker = Ticker(self, self.tick)
         self.following = True
 
@@ -164,6 +166,13 @@ class TaskList(ListPane):
         self._ticker.keep(ticking(tasks))
         self._follow()
 
+    def show_waiting(self, waiting: tuple[str, str] | None) -> None:
+        """Have the task ``waiting`` names say it waits for a coder as it says, or none do."""
+        if waiting == self.waiting:
+            return
+        self.waiting = waiting
+        self._redraw()
+
     def _follow(self) -> None:
         """Scroll just enough to bring the active task into view, if following; the
         highlight stays where it is."""
@@ -204,8 +213,12 @@ class TaskList(ListPane):
     def _redraw(self) -> None:
         """Show the tasks, relabelling in place the rows whose label changed."""
         frame, width = spinner_frame(self.clock()), self._row_width()
+        waiting_id, note = self.waiting or (None, None)
         rows = [
-            (t.id, task_label(t, n, frame, width=width))
+            (
+                t.id,
+                task_label(t, n, frame, width=width, waiting=note if t.id == waiting_id else None),
+            )
             for t, n in zip(self.tasks, self.numbers, strict=True)
         ]
         self.show_rows(rows, Option(new_task_row()))

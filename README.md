@@ -168,7 +168,8 @@ running its own control plane has no session to resume, so it has no `Resume`. T
 sessions follow, the most recently active first, then `New session`; with none saved, the picker
 offers only `New session`. Each row shows the session's name, when it was last active (local time),
 `active` on the workspace's active session, `running` while it runs work (a task run, a review or a
-planner turn), `viewed by N` when N other frontends view it, how many of its
+planner turn), or `waiting for a coder: 2nd in line` while its task run waits for a coder (see
+[Taking turns](#serving-the-control-plane); `next in line` when it's next), `viewed by N` when N other frontends view it, how many of its
 tasks stand at each status, by the task list's icons (`3 ✅ 2 ⏳ 1 📝`), and what they cost
 (`1.2M tok · $0.84`); `●` marks the session this chat views. The marks follow the sessions live while
 the picker is open, as do sessions another frontend starts, renames or deletes. `j`/`k` (or the arrow keys) move and `enter` picks the highlighted session. On
@@ -198,15 +199,18 @@ haven't edited it since); the same goes for a prompt sent while disconnected. Wh
 says what the active session is doing: `viewing <name>; <active> is running <what> (enter to switch
 when it's idle)` while it runs work, where `<what>` names it (`a task`, `the review of a task`,
 `the planner`, joined when several; tasks go unnumbered, since the task list shows the session
-viewed, not the active one's), and `viewing <name>; <active> is idle (enter to switch)`
-otherwise. The startup check doesn't count as running: it never keeps you from switching. This is not the prompt title's
+viewed, not the active one's), `viewing <name>; <active> is waiting for a coder: 2nd in line
+(enter to switch when it's idle)` while its task run waits for a coder, after what else runs
+(`is running the planner and waiting for a coder: next in line`), and `viewing <name>; <active>
+is idle (enter to switch)` otherwise. The startup check doesn't count as running: it never keeps you from switching. This is not the prompt title's
 `read-only` mark, which means another orbit owns the repository (see [Owning the
 repository](#owning-the-repository)): each has its own fix, and both can show at once. Picking a
 session that opens read-only asks, in a modal, whether to "Make this the active session" or "Just
 look"; `enter` on the prompt, while it's selected, asks the same. Making it the active one switches
 as picking does, and is refused, with an error, if work started meanwhile; "Just look" or `esc`
 keeps the view. While the active session runs work, the modal says `<name> is running <what>;
-you can switch once it's idle.` and offers only "Just look". If you picked the session and were held
+you can switch once it's idle.` (or `<name> is waiting for a coder: …` as the line above the
+prompt says it) and offers only "Just look". If you picked the session and were held
 back so, the modal comes back once when the active session turns idle, saying `<name> is idle now.`,
 with "Make this the active session" highlighted and "Just look"; a frontend that only views the
 session without having picked it just sees the line above the prompt change. If the session you view becomes the active one
@@ -454,7 +458,10 @@ spent (`1.2M tok · $0.84`), and the task list's subtitle shows the open session
 (`session: 1.2M tok · $0.84`): everything the session's agents have spent, the planner's turns and
 tasks since removed included. It's saved with the session, so a session opened again (or listed
 with `ctrl+p`) shows the same total; a new session starts with none, and shows no total. Token
-counts are rounded as in a turn's rule (see above). A failed task doesn't stop the rest, but for
+counts are rounded as in a turn's rule (see above). While the session's run waits for a coder
+(see [Taking turns](#serving-the-control-plane)), the task about to run says so after its settings,
+with how many coders hold the slots: `⏳ waiting: 3 coders busy`, or `⏳ waiting for a coder` if
+that isn't known; it goes once the task gets a coder. A failed task doesn't stop the rest, but for
 two: a fix task that ends in error stops the run, so the work it fixes stays in the coder's tree
 until the fix runs again, and so does a task whose agent hit Claude's usage limit (see below);
 the next run starts with the task it stopped at, ahead of any that failed before it, and any
@@ -1158,7 +1165,9 @@ fixes alike. Each task takes a coder's slot as its agent starts and gives it bac
 ended, its verification and merge included, however it ends; while every slot is taken, it
 waits in line behind those that asked before it, and a workspace's next task joins the back, so
 workspaces take turns. A run waiting stays running, and its session's state says where it is
-in line (`waiting_for_coder`, see [docs/protocol.md](docs/protocol.md#session-state));
+in line (`waiting_for_coder`, see [docs/protocol.md](docs/protocol.md#session-state)), which the
+session picker, the line above the prompt of a session viewed read-only and the task list show
+(`waiting for a coder: 2nd in line`, `⏳ waiting: 4 coders busy`);
 `ctrl+s` takes it out of line and holds it, as it stops any run. Reviews, super reviews and the
 planner don't count and never wait, and a run stopped at the usage limit holds no slot until it
 starts again. A local `orbit chat` serves one workspace and has no cap.

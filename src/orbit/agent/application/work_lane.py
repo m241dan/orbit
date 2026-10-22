@@ -132,6 +132,14 @@ class WorkLane:
         """Where the run waits in line for a coder's slot, 1 next; none if it doesn't."""
         return None if self._coders is None else self._coders.position
 
+    @property
+    def coders_busy(self) -> int | None:
+        """How many coders hold the slots the run waits in line for; none if it doesn't wait."""
+        coders = self._coders
+        if coders is None or coders.position is None:
+            return None
+        return coders.busy
+
     def next_work(self, tried: Collection[str] = ()) -> str | None:
         """The next task for the work lane, the one a run stopped at first; reviews have their
         own lane, if there is one."""

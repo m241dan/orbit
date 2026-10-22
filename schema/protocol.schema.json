@@ -43,8 +43,21 @@
       "type": "object"
     },
     "Activity": {
-      "description": "Something in progress in a session, of ``kind``; ``task_id`` is the task a task run runs\nor the task whose work a review reviews, and none otherwise, such as for a super review;\n``position`` is where a task run ``waiting_for_coder`` waits in line, 1 next, and none\notherwise.",
+      "description": "Something in progress in a session, of ``kind``; ``task_id`` is the task a task run runs\nor the task whose work a review reviews, and none otherwise, such as for a super review;\n``position`` is where a task run ``waiting_for_coder`` waits in line, 1 next, and ``busy``\nhow many coders run meanwhile, taking the slots it waits for; both are none otherwise.",
       "properties": {
+        "busy": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Busy"
+        },
         "kind": {
           "enum": [
             "task_run",

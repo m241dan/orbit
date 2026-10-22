@@ -744,8 +744,10 @@ class OrbitApp(App[None], inherit_bindings=False):
             self._halt.halted(snapshot.storage_halt)
 
     def _show_viewing(self) -> None:
-        """Mark the prompt while the session viewed isn't the active one, or hide the mark."""
+        """Mark the prompt while the session viewed isn't the active one, or hide the mark, and
+        have the task about to run say when the session viewed waits for a coder."""
         self._viewing.show(self._sessions.mark)
+        self._task_list.show_waiting(self._sessions.coder_wait)
 
     def _render_state(self, event: StateEvent) -> None:
         """Show a snapshot of backend state, or a decision it waits for."""

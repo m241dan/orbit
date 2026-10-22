@@ -8,12 +8,14 @@ from orbit.protocol import (
     SUPER_REVIEW,
     AcceptTask,
     ActivateSession,
+    Activity,
     BusyChanged,
     Catalog,
     ErrorOccurred,
     FireTrigger,
     RemoveTask,
     RunTasks,
+    SessionStateChanged,
     SessionSummary,
     Settings,
     TasksChanged,
@@ -29,9 +31,10 @@ from orbit.tui.sessions import SessionsScreen
 from orbit.tui.tasks import TaskList
 from orbit.tui.transcript import Transcript
 from orbit.tui.view.common import spinner_frame
-from orbit.tui.view.tasks import task_label, task_numbers, usage_label
+from orbit.tui.view.tasks import coder_wait_row, task_label, task_numbers, usage_label
 from orbit.tui.widgets import ChatPrompt
 from tests.agent_fakes import frontend
+from tests.session_apps import CATALOG
 from tests.tui_fakes import (
     FakeSession,
     board,
@@ -134,6 +137,40 @@ def test_a_long_reason_is_cut_to_the_width_with_an_ellipsis() -> None:
     reason_line = str(task_label(state, "1", "◠ ", width=20)).split("\n")[2]
     assert reason_line == "      ↳ word word w…"
     assert cell_len(reason_line) == 20
+
+
+def test_a_pending_task_waiting_for_a_coder_says_so_after_its_settings() -> None:
+    state = TaskState(id="1", task=TaskSpec(prompt="go"))
+    label = task_label(state, "2", "◠ ", waiting="⏳ waiting: 3 coders busy")
+    assert str(label) == "2. ⏳ go\n      default · restricted · ⏳ waiting: 3 coders busy"
+
+
+def test_a_task_that_started_no_longer_says_it_waits() -> None:
+    state = TaskState(id="1", task=TaskSpec(prompt="go"), status="running")
+    label = task_label(state, "2", "◠ ", waiting="⏳ waiting: 3 coders busy")
+    assert str(label) == "2. ◠  go\n      default · restricted"
+
+
+def waiting(busy: int | None) -> tuple[Activity, ...]:
+    """A task run whose task ``t1`` waits next in line for a coder while ``busy`` run."""
+    return (
+        Activity(kind="task_run", task_id="t1"),
+        Activity(kind="waiting_for_coder", position=1, busy=busy),
+    )
+
+
+def test_the_task_about_to_run_says_how_many_coders_are_busy() -> None:
+    assert coder_wait_row(waiting(3)) == ("t1", "⏳ waiting: 3 coders busy")
+    assert coder_wait_row(waiting(1)) == ("t1", "⏳ waiting: 1 coder busy")
+
+
+def test_the_task_about_to_run_just_waits_when_the_busy_coders_are_not_known() -> None:
+    assert coder_wait_row(waiting(None)) == ("t1", "⏳ waiting for a coder")
+
+
+def test_no_task_waits_without_a_wait_or_a_task_run() -> None:
+    assert coder_wait_row(waiting(3)[:1]) is None
+    assert coder_wait_row(waiting(3)[1:]) is None
 
 
 def test_tasks_are_numbered_and_every_fix_in_a_chain_under_the_first_task() -> None:
@@ -946,3 +983,26 @@ async def test_opening_a_new_session_clears_the_total() -> None:
         await feed_events(session, pilot, opened(SessionSummary(id="n", name="n")))
         assert not task_list.border_subtitle
         assert task_list.session_usage == Usage()
+
+
+def waiting_state(*activity: Activity) -> SessionStateChanged:
+    """The active session ``now`` running ``activity``."""
+    return SessionStateChanged(
+        session="now", active=True, state="running", viewers=1, activity=activity
+    )
+
+
+async def test_the_next_task_shows_the_wait_for_a_coder_until_it_starts() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        tasks = TasksChanged(
+            tasks=tuple(TaskState(id=f"t{n}", task=TaskSpec(prompt=f"task {n}")) for n in (1, 2))
+        )
+        await feed_events(session, pilot, CATALOG, tasks, waiting_state(*waiting(2)))
+        assert rows(app)[:2] == [
+            "1. ⏳ task 1\n      default · restricted · ⏳ waiting: 2 coders busy",
+            "2. ⏳ task 2\n      default · restricted",
+        ]
+        await feed_events(session, pilot, waiting_state(waiting(2)[0]))
+        assert rows(app)[0] == "1. ⏳ task 1\n      default · restricted"

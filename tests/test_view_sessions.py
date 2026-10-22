@@ -45,6 +45,7 @@ from orbit.tui.view.sessions import (
     unjoined_view,
     viewed_only,
     viewing_mark,
+    waiting_words,
     workspace_sessions,
 )
 
@@ -99,6 +100,23 @@ def test_the_session_viewed_counts_only_the_other_viewers() -> None:
 
 def test_an_idle_session_viewed_by_none_has_no_state_notes() -> None:
     assert state_notes(SessionSummary(id="s", name="a")) == []
+
+
+WAITING_SECOND = (
+    Activity(kind="task_run", task_id="t1"),
+    Activity(kind="waiting_for_coder", position=2, busy=4),
+)
+"""A task run whose task waits second in line for a coder."""
+
+
+def test_a_session_waiting_for_a_coder_says_so_rather_than_running() -> None:
+    summary = SessionSummary(
+        id="s", name="today", active=True, state="running", activity=WAITING_SECOND
+    )
+    assert state_notes(summary) == ["active", "waiting for a coder: 2nd in line"]
+    assert session_label(summary, UTC).plain == (
+        "  today · active · waiting for a coder: 2nd in line"
+    )
 
 
 def test_a_session_never_active_shows_only_its_name() -> None:
@@ -257,7 +275,7 @@ def test_with_no_active_session_picking_activates() -> None:
 
 
 def test_the_viewing_mark_names_what_the_active_session_runs() -> None:
-    assert viewing_mark("old", "today", "task 3") == (
+    assert viewing_mark("old", "today", "running task 3") == (
         "viewing old; today is running task 3 (enter to switch when it's idle)"
     )
 
@@ -305,7 +323,7 @@ def test_with_the_active_session_idle_the_prompt_offers_to_activate_or_just_look
 
 def test_with_the_active_session_running_the_prompt_only_offers_to_just_look() -> None:
     assert activation_choices(running=True) == (JUST_LOOK_CHOICE,)
-    assert activation_message("auth rework", "today", running="task 3") == (
+    assert activation_message("auth rework", "today", running="running task 3") == (
         "today is running task 3; you can switch once it's idle."
     )
 
@@ -319,9 +337,35 @@ def test_what_the_active_session_runs_is_worded_while_its_state_says_it_runs() -
     idle = SessionSummary(id="s", name="today", active=True, activity=task)
     running = idle.model_copy(update={"state": "running"})
     other = SessionSummary(id="o", name="auth rework", state="running")
-    assert running_words((other, running)) == "a task"
+    assert running_words((other, running)) == "running a task"
     assert running_words((other, idle)) is None
     assert running_words(()) is None
+
+
+def test_a_wait_for_a_coder_is_worded_with_its_place_in_line() -> None:
+    assert waiting_words(1) == "waiting for a coder: next in line"
+    assert waiting_words(2) == "waiting for a coder: 2nd in line"
+    assert waiting_words(3) == "waiting for a coder: 3rd in line"
+    assert waiting_words(4) == "waiting for a coder: 4th in line"
+    assert waiting_words(11) == "waiting for a coder: 11th in line"
+    assert waiting_words(12) == "waiting for a coder: 12th in line"
+    assert waiting_words(13) == "waiting for a coder: 13th in line"
+    assert waiting_words(21) == "waiting for a coder: 21st in line"
+    assert waiting_words(22) == "waiting for a coder: 22nd in line"
+    assert waiting_words(None) == "waiting for a coder"
+
+
+def test_an_active_session_waiting_for_a_coder_is_worded_as_waiting() -> None:
+    waiting = SessionSummary(
+        id="s", name="today", active=True, state="running", activity=WAITING_SECOND
+    )
+    assert running_words((waiting,)) == "waiting for a coder: 2nd in line"
+
+
+def test_what_else_runs_while_waiting_for_a_coder_comes_first() -> None:
+    activity = (*WAITING_SECOND, Activity(kind="planner"))
+    waiting = SessionSummary(id="s", name="today", active=True, state="running", activity=activity)
+    assert running_words((waiting,)) == ("running the planner and waiting for a coder: 2nd in line")
 
 
 def test_attaching_alone_to_an_inactive_session_views_it_only() -> None:
