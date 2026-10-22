@@ -1314,7 +1314,7 @@ def test_the_in_process_setup_holds_the_workspace_lock_while_its_block_runs(
         assert WorkspaceLock(directories.root / ".orbit").take() == WorkspaceOwner(pid=os.getpid())
         assert in_process.owner is None
         registry = WorkspaceRegistry(in_process.store)
-        found = asyncio.run(registry.find_or_register(str(directories.root)))
+        found = asyncio.run(registry.find_or_register(str(directories.root))).workspace_id
         served = asyncio.run(registry.served())
     after = WorkspaceLock(directories.root / ".orbit")
     assert after.take() is None

@@ -14,7 +14,7 @@ import pytest
 from orbit.agent import ImportBlocked, OpenedStore, RecoveryFailed, open_workspace_store
 from orbit.agent.application.ports import ReadFailed, StoredSession
 from orbit.agent.domain.sessions import SessionRecord, record_json
-from orbit.agent.external import store_startup
+from orbit.agent.external import store_startup, workspace_registry
 from orbit.agent.external.session_import import Imported
 from orbit.agent.external.sqlite_store import SqliteStore, WorkspaceStore
 from orbit.protocol import EventEnvelope, Notice, encode
@@ -153,6 +153,24 @@ async def test_an_import_of_old_session_files_is_noted_within_the_workspace(
 ) -> None:
     legacy_sessions(root)
     assert await opened_notes(state, root) == [IMPORT_NOTE]
+
+
+async def test_a_moved_repository_re_attached_is_noted_first(
+    monkeypatch: pytest.MonkeyPatch, state: Path, root: Path, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(workspace_registry, "workspace_fingerprint", lambda path: "root ")
+    old = tmp_path / "old"
+    old.mkdir()
+    old_id = await workspace_id_of(state, old)
+    old.rmdir()
+    legacy_sessions(root)
+    store = await SqliteStore.open(state)
+    try:
+        opened = await open_workspace_store(store, root, owned=True)
+    finally:
+        await store.close()
+    moved = f"Re-attached the sessions of {old}, which moved to {root}."
+    assert opened.store.workspace_id == old_id and opened.notes == [moved, IMPORT_NOTE]
 
 
 async def test_each_recovered_file_holding_new_events_is_noted(state: Path, root: Path) -> None:

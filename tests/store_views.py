@@ -33,7 +33,9 @@ async def open_view(state: Path, workspace: Path | str) -> OwnView:
     own in ``state``."""
     store = await SqliteStore.open(state)
     try:
-        workspace_id = await WorkspaceRegistry(store).find_or_register(str(workspace))
+        workspace_id = (
+            await WorkspaceRegistry(store).find_or_register(str(workspace))
+        ).workspace_id
     except BaseException:
         await store.close()
         raise

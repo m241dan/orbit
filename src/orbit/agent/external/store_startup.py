@@ -33,7 +33,8 @@ class OpenedStore:
 
 
 async def open_workspace_store(store: SqliteStore, root: Path, *, owned: bool) -> OpenedStore:
-    """The view of ``store`` for the workspace at ``root``, registered if it isn't yet, with the
+    """The view of ``store`` for the workspace at ``root``, registered if it isn't yet (or taken
+    over from where its repository was before it moved, which is noted first), with the
     sessions an older orbit saved as files imported and, if this orbit ``owned`` the workspace,
     the events an earlier run parked in fallback files too, the notes on what was imported, and
     the fallback files. An orbit that doesn't own it leaves the fallback files to the owner,
@@ -43,11 +44,12 @@ async def open_workspace_store(store: SqliteStore, root: Path, *, owned: bool) -
     the old sessions can't be imported and :class:`RecoveryFailed` if a fallback file can't be
     recovered.
     """
-    workspace_id = await WorkspaceRegistry(store).find_or_register(str(root))
-    view = store.workspace_view(workspace_id)
+    registered = await WorkspaceRegistry(store).find_or_register(str(root))
+    view = store.workspace_view(registered.workspace_id)
     orbit = await asyncio.to_thread(orbit_dir, str(root))
-    fallback = FallbackFiles(store.state_dir, workspace_id, orbit)
-    opened = OpenedStore(view, await _imported(view, orbit, root), fallback, root)
+    fallback = FallbackFiles(store.state_dir, registered.workspace_id, orbit)
+    moved = [] if registered.note is None else [registered.note]
+    opened = OpenedStore(view, moved + await _imported(view, orbit, root), fallback, root)
     if not owned:
         return opened
     return replace(opened, notes=opened.notes + await opened.recover())

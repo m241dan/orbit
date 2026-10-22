@@ -649,6 +649,17 @@ database serves every repository you run orbit in, each with its own sessions, f
 repository's path. Session locks are lock files in `locks/` there, so two orbits on one repository
 keep out of each other's sessions only when they share the state directory.
 
+A repository that's moved keeps its sessions. Orbit records each repository's root commits and
+its `origin` URL; when it starts on a path it doesn't know (a local `orbit chat`, `orbit serve`,
+or a frontend adding a workspace), it looks for a workspace with the same root commits, and the
+same `origin` or none on one side, whose path has gone. The `origin` matches however it's
+written: `git@github.com:o/r.git`, `ssh://git@github.com/o/r` and `https://github.com/o/r` are
+the same. If exactly one is found, the new path takes it over, with its sessions and events, and
+the first frontend to attach is told `Re-attached the sessions of <old path>, which moved to <new
+path>.` A second clone while the first is still where it was gets a workspace of its own, as
+does a repository with no commits yet; if several gone workspaces match, none is taken and the
+note says `<new path> looks like <old a>, <old b>; started it as a new workspace.`
+
 Older orbits saved sessions as JSON files in `.git/orbit/sessions` (`.orbit/sessions` outside a
 git repository), with the super review count in `reviews.json`. The first time orbit starts on such
 a repository it imports them into the store, in one go, keeping sessions it can't read as they are
