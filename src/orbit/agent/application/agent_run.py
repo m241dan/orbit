@@ -413,14 +413,14 @@ class AgentRun:
         first."""
         check = asyncio.create_task(self._run_one(step))
         self._checks.add(check)
+        # Kept until it has ended, not just the call, so the run's end waits for it.
+        check.add_done_callback(self._checks.discard)
         try:
             passed, output = await check
         except asyncio.CancelledError:
             if cancelling():  # The call was cancelled, not the run ended.
                 raise
             return Reply("The run ended before the check finished.", is_error=True)
-        finally:
-            self._checks.discard(check)
         return Reply(check_reply(step, passed, output))
 
     async def _run_one(self, step: VerificationStep) -> tuple[bool, str]:

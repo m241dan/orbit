@@ -4,12 +4,11 @@ usage limit that stopped it resets."""
 
 import asyncio
 from collections.abc import Callable
-from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime
 
 from orbit.agent.application.desk import AgentDesk, Agents
-from orbit.agent.application.lanes import TurnSlot
+from orbit.agent.application.lanes import TurnSlot, stop
 from orbit.agent.application.limit_pause import LimitPause
 from orbit.agent.application.review_lane import ReviewLane
 from orbit.agent.application.tasks import Tasks
@@ -161,10 +160,11 @@ class WorkTurns:
         self._closed = True
         waiting = self._waiting
         self.forget_wait()
-        if waiting is not None:
-            with suppress(asyncio.CancelledError):
-                await waiting
-        await self._turns.close()
+        try:
+            if waiting is not None:
+                await stop(waiting)
+        finally:  # Cancelled meanwhile, the run is still stopped.
+            await self._turns.close()
 
     @property
     def _waits(self) -> bool:

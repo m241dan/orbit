@@ -2,6 +2,7 @@
 
 import asyncio
 from collections.abc import Awaitable, Callable
+from contextlib import suppress
 from typing import Any
 
 import pytest
@@ -723,6 +724,50 @@ async def test_a_check_whose_call_is_cancelled_is_stopped() -> None:
     running.cancel()
     with pytest.raises(asyncio.CancelledError):
         await running
+
+
+class SlowToStop:
+    """A step runner whose step, once stopped, keeps unwinding until ``release`` is set;
+    ``began`` and ``unwinding`` say how far it got."""
+
+    def __init__(self) -> None:
+        self.began = asyncio.Event()
+        self.unwinding = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def __call__(self, step: VerificationStep, root: str) -> tuple[bool, str]:
+        self.began.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            self.unwinding.set()
+            await self._unwind()
+            raise
+        raise AssertionError("unreachable")
+
+    async def _unwind(self) -> None:
+        """Wait for ``release``, through any cancellation meanwhile."""
+        while not self.release.is_set():
+            with suppress(asyncio.CancelledError):
+                await self.release.wait()
+
+
+async def test_a_check_whose_call_is_cancelled_holds_the_runs_end_until_it_has_stopped() -> None:
+    step = SlowToStop()
+    verification = Verification((STEP,), step)
+    agent_run, running = await started("coder", verification=verification)
+    call = asyncio.ensure_future(agent_run.handle("run_check", {"step": STEP.name}))
+    await asyncio.wait_for(step.began.wait(), 5)
+    call.cancel()
+    await asyncio.wait_for(step.unwinding.wait(), 5)
+    running.cancel()
+    for _ in range(20):
+        await asyncio.sleep(0)
+    assert not running.done()
+    step.release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(running, 5)
+    assert call.cancelled()
 
 
 class Target:

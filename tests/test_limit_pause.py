@@ -4,6 +4,8 @@ the limit resets."""
 import asyncio
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 from orbit.agent import WorkspaceHost
 from orbit.agent.application.limit_pause import LimitPause
 from orbit.agent.application.ports import UsageSource
@@ -186,6 +188,35 @@ async def test_closing_while_waiting_ends_the_wait() -> None:
     await asyncio.wait_for(session.close(), 5)
 
     assert not waits.release.is_set()
+
+
+class SlowWaits(Waits):
+    """Waits whose sleep, once cancelled, keeps unwinding until cancelled again; ``unwinding``
+    is set once it is."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.unwinding = asyncio.Event()
+
+    async def sleep(self, seconds: float) -> None:
+        try:
+            await super().sleep(seconds)
+        except asyncio.CancelledError:
+            self.unwinding.set()
+            await asyncio.Event().wait()
+
+
+async def test_a_close_cancelled_while_the_wait_ends_is_cancelled_once_every_part_stops() -> None:
+    waits = SlowWaits()
+    session, launcher = limited(waits=waits)
+    await asyncio.wait_for(run(session), 5)
+    closing = asyncio.create_task(session.close())
+    await asyncio.wait_for(waits.unwinding.wait(), 5)
+    closing.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(closing, 5)
+
+    assert len(launcher.launches) == 1
 
 
 async def halt(session: WorkspaceHost, store: FakeStore) -> list[Event]:
