@@ -1,20 +1,26 @@
-"""The ModalSlot holding one modal at a time and telling a closed one from a stale one."""
+"""The ModalSlot holding one modal at a time and telling a closed one from a stale one, and
+closing a modal wherever it is in the screen stack."""
 
 from collections.abc import Awaitable, Callable
 
+from textual.app import App
 from textual.screen import ModalScreen
 
-from orbit.tui.modal import ModalSlot
+from orbit.tui.modal import ModalSlot, close_modal
 
 Closed = Callable[[int | None], Awaitable[None]]
 
 
 class Screen(ModalScreen[int]):
-    """A modal recording what it was dismissed with."""
+    """A modal on top, recording what it was dismissed with."""
 
     def __init__(self) -> None:
         super().__init__()
         self.dismissed: list[int | None] = []
+
+    @property
+    def is_active(self) -> bool:
+        return True
 
     def dismiss(self, result: int | None = None) -> None:  # type: ignore[override]
         self.dismissed.append(result)
@@ -83,3 +89,52 @@ def record(results: list[int | None]) -> Closed:
         results.append(result)
 
     return closed
+
+
+class Modal(ModalScreen[int]):
+    """A modal with nothing in it."""
+
+
+async def test_closing_a_modal_on_top_dismisses_it_calling_back_with_the_result() -> None:
+    app = App[None]()
+    results: list[int | None] = []
+    async with app.run_test() as pilot:
+        screen = Modal()
+        app.push_screen(screen, results.append)
+        await pilot.pause()
+        close_modal(screen, 1)
+        await pilot.pause()
+        assert screen not in app.screen_stack
+        assert results == [1]
+
+
+async def test_closing_a_modal_under_another_removes_it_without_calling_back() -> None:
+    app = App[None]()
+    results: list[int | None] = []
+    async with app.run_test() as pilot:
+        screen, other = Modal(), Modal()
+        app.push_screen(screen, results.append)
+        app.push_screen(other)
+        await pilot.pause()
+        close_modal(screen, 1)
+        await pilot.pause()
+        assert app.screen_stack == [app.screen_stack[0], other]
+        assert not screen.is_attached
+        assert results == []
+        other.dismiss(None)
+        await pilot.pause()
+        assert len(app.screen_stack) == 1
+
+
+async def test_closing_a_modal_closed_already_leaves_the_one_on_top() -> None:
+    app = App[None]()
+    async with app.run_test() as pilot:
+        screen, other = Modal(), Modal()
+        app.push_screen(screen)
+        await pilot.pause()
+        screen.dismiss(1)
+        app.push_screen(other)
+        close_modal(screen, None)
+        await pilot.pause()
+        assert app.screen is other
+        assert screen not in app.screen_stack

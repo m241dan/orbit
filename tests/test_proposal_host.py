@@ -1,10 +1,10 @@
 """The ProposalHost tracking which proposal's modal is shown, and when to close it."""
 
-import pytest
 from textual.app import App
 
 from orbit.protocol import AgentExited, ChecksProposed, DecideProposal, ProposedStep
 from orbit.tui.proposals import Decided, ProposalHost, ProposalScreen
+from orbit.tui.widgets import ConfirmScreen
 
 PROPOSAL = ChecksProposed(
     agent_id="agent-3", task_id="1", steps=(ProposedStep(name="Lint", command=("ruff",)),)
@@ -109,18 +109,33 @@ async def test_a_second_proposal_waits_until_the_first_is_decided() -> None:
         assert app.host.shown is None
 
 
-async def test_withdrawing_the_shown_proposal_clears_it_before_its_screen_closes(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    host, pushed = recording_host()
-    host.show(PROPOSAL)
-    [(screen, _)] = pushed
-    dismissed: list[object] = []
-    monkeypatch.setattr(screen, "dismiss", dismissed.append)
-    host.withdraw(AgentExited(agent_id="agent-3", reason="finished"))
-    assert host.shown is None
-    host.follow(())
-    assert dismissed == [None]
+async def test_withdrawing_the_shown_proposal_clears_it_before_its_screen_closes() -> None:
+    app = Host()
+    async with app.run_test() as pilot:
+        app.host.show(PROPOSAL)
+        await pilot.pause()
+        app.host.withdraw(AgentExited(agent_id="agent-3", reason="finished"))
+        assert app.host.shown is None
+        app.host.follow(())
+        await pilot.pause()
+        assert app.proposal_screens() == []
+        assert app.decisions == []
+
+
+async def test_a_proposal_withdrawn_under_another_modal_is_closed_and_decides_nothing() -> None:
+    app = Host()
+    async with app.run_test() as pilot:
+        app.host.show(PROPOSAL)
+        await pilot.pause()
+        other = ConfirmScreen("Other", "Another modal.", "yes", "no")
+        app.push_screen(other)
+        await pilot.pause()
+        app.host.withdraw(AgentExited(agent_id="agent-3", reason="finished"))
+        await pilot.pause()
+        assert app.proposal_screens() == []
+        assert app.host.shown is None
+        assert app.screen is other
+        assert app.decisions == []
 
 
 async def test_withdrawing_the_shown_proposal_shows_the_next_waiting() -> None:
@@ -165,17 +180,17 @@ async def test_a_snapshot_replaces_the_waiting_proposals() -> None:
     assert host.shown is None
 
 
-async def test_a_superseded_screens_late_decision_leaves_the_newer_tracked(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    host, pushed = recording_host()
-    host.show(PROPOSAL)
-    [(first, first_decided)] = pushed
-    monkeypatch.setattr(first, "dismiss", lambda result: None)
-    host.follow((OTHER,))
-    (_, _), (second, _) = pushed
-    await first_decided(None)
-    assert host.shown is second
+async def test_a_superseded_screens_late_decision_leaves_the_newer_tracked() -> None:
+    app = Host()
+    async with app.run_test() as pilot:
+        app.host.show(PROPOSAL)
+        await pilot.pause()
+        app.host.follow((OTHER,))
+        second = app.host.shown
+        await pilot.pause()
+        assert second is not None and second.proposal == OTHER
+        assert app.host.shown is second
+        assert app.proposal_screens() == [second]
 
 
 async def test_a_decision_clears_the_shown_proposal() -> None:

@@ -1,4 +1,4 @@
-"""The slot holding the one modal a host shows at a time."""
+"""The slot holding the one modal a host shows at a time, and closing a modal wherever it is."""
 
 from collections.abc import Awaitable, Callable
 from typing import Any
@@ -30,9 +30,26 @@ class ModalSlot[S: ModalScreen[Any], R]:
         self._push(screen, closed)
 
     def close(self, result: R | None) -> None:
-        """Dismiss the modal shown, if any, with ``result``, no longer showing it."""
+        """Close the modal shown, if any, with ``result``, no longer showing it."""
         screen = self.showing
         if screen is None:
             return
         self.showing = None  # Its callback runs later, after any modal opened since.
+        close_modal(screen, result)
+
+
+def close_modal[R](screen: ModalScreen[R], result: R | None) -> None:
+    """Close ``screen``: dismiss it with ``result`` if it's on top, calling back with it; take it
+    out of the screen stack if another modal is over it, deliberately not calling back, as
+    nothing answered it; and leave it if it's closed already."""
+    # Textual's dismiss pops the top screen whichever screen it's called on.
+    if screen.is_active:
         screen.dismiss(result)
+        return
+    app = screen.app
+    stack = app._screen_stack
+    if screen not in stack:
+        return
+    stack.remove(screen)
+    screen._pop_result_callback()
+    app.call_later(app._replace_screen, screen)

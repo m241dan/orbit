@@ -4,8 +4,10 @@ import pytest
 from textual.widgets import Static
 
 from orbit.protocol import (
+    STORAGE_FAILED,
     CommandAccepted,
     CommandRefused,
+    ErrorOccurred,
     Event,
     OwnershipDeclined,
     OwnershipOffered,
@@ -13,6 +15,7 @@ from orbit.protocol import (
     TakeOwnership,
 )
 from orbit.tui import OrbitApp
+from orbit.tui.storage_halt import StorageHaltScreen
 from orbit.tui.view.confirm import TAKE_OVER_MESSAGE, TAKE_OVER_TITLE
 from orbit.tui.widgets import ChatPrompt, ConfirmScreen
 from tests.tui_fakes import SNAPSHOT, FakeSession, feed_events
@@ -125,3 +128,17 @@ async def test_an_accepted_answer_leaves_no_modal_open() -> None:
         accepted = CommandAccepted(command_id=session.envelopes[-1].command_id)
         await feed_events(session, pilot, accepted)
         assert not isinstance(app.screen, ConfirmScreen)
+
+
+async def test_an_offer_settled_under_a_storage_halt_leaves_no_modal_once_it_lifts() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    halt = ErrorOccurred(code=STORAGE_FAILED, message="Orbit stopped this session.")
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, OFFERING, halt, OwnershipTaken())
+        assert isinstance(app.screen, StorageHaltScreen)
+        assert not any(isinstance(screen, ConfirmScreen) for screen in app.screen_stack)
+        await feed_events(session, pilot, SNAPSHOT)
+        assert not any(isinstance(screen, ConfirmScreen) for screen in app.screen_stack)
+        assert not isinstance(app.screen, StorageHaltScreen)
+        assert session.commands == []

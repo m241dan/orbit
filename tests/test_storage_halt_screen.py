@@ -257,3 +257,16 @@ async def test_a_closed_modal_leaves_the_one_opened_since_shown() -> None:
         await feed_events(session, pilot, snapshot(STILL))
         assert len(halt_screens(app)) == 1
         assert modal_text(app) == STILL
+
+
+async def test_a_halt_lifted_under_another_modal_closes_its_modal_and_leaves_the_other() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, HALT)
+        other = ConfirmScreen("Other", "Another modal.", "yes", "no")
+        app.push_screen(other)
+        await feed_events(session, pilot, snapshot(None))
+        assert halt_screens(app) == []
+        assert app.screen is other
+        assert app.storage_halt is None

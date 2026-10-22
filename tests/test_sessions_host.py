@@ -301,6 +301,23 @@ async def test_a_live_snapshot_dismisses_the_offer_shown() -> None:
         assert app.sent == []
 
 
+async def test_an_offer_withdrawn_under_another_modal_is_closed_and_sends_nothing() -> None:
+    app = Host()
+    async with app.run_test() as pilot:
+        app.host.view(view(OLD))
+        app.host.offer()
+        await pilot.pause()
+        other = ConfirmScreen("Other", "Another modal.", "yes", "no")
+        app.push_screen(other)
+        await pilot.pause()
+        app.host.view(opened(OLD))
+        await pilot.pause()
+        assert app.activation_screens() == []
+        assert app.host.offered is None
+        assert app.screen is other
+        assert app.sent == []
+
+
 def test_the_mark_names_the_tasks_the_active_session_runs_without_numbers() -> None:
     app = Host()
     host = SessionsHost(app.push_screen, app._sent)  # Opens on the first workspace listed.
