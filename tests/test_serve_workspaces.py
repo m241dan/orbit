@@ -5,11 +5,12 @@ import asyncio
 import re
 import subprocess
 import threading
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import ExitStack
 from pathlib import Path
 
 import pytest
+import typer
 
 from orbit.agent import (
     OrbitConfig,
@@ -17,6 +18,7 @@ from orbit.agent import (
     ServedWorkspaces,
     SqliteStore,
     StorageSettings,
+    StoreError,
     WorkspaceLock,
     WorkspaceRegistry,
     WorkspaceUnavailable,
@@ -24,7 +26,7 @@ from orbit.agent import (
 )
 from orbit.agent.external import served_workspaces
 from orbit.cli import backend
-from orbit.cli.backend import _Backend, _workspaces
+from orbit.cli.backend import _added, _Backend, _workspaces
 
 FLAGS = _Backend(None, None, False, False, False, False, new=False, name=None)
 
@@ -280,6 +282,70 @@ async def test_a_failure_making_the_host_lets_the_lock_go(
     with pytest.raises(RuntimeError, match="A bug"):
         await workspaces(stack, store).open(str(root))
     assert free(root) and await WorkspaceRegistry(store).served() == []
+
+
+async def test_a_workspace_whose_unflagging_fails_stays_served_and_locked_until_the_stack_closes(
+    stack: ExitStack, store: SqliteStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = directory(tmp_path)
+    source = workspaces(stack, store)
+    host = await source.open(str(root))
+    await host.close()
+
+    async def fails(self: WorkspaceRegistry, workspace_id: str, served: bool) -> None:
+        raise StoreError("The store failed.")
+
+    monkeypatch.setattr(WorkspaceRegistry, "set_served", fails)
+
+    with pytest.raises(StoreError, match="The store failed"):
+        await source.close(host.workspace_id)
+    held = not free(root) and source.serves(host.workspace_id)
+    stack.close()
+
+    assert held and free(root)
+
+
+type Refusal = Callable[[Path, pytest.MonkeyPatch], _Backend]
+"""What makes the workspace at a root unservable, giving the flags it's served with."""
+
+
+def invalid_config(root: Path, monkeypatch: pytest.MonkeyPatch) -> _Backend:
+    (root / ".orbit").mkdir()
+    (root / ".orbit" / "config.toml").write_text("roles = 1\n")
+    return FLAGS
+
+
+def missing_identity(root: Path, monkeypatch: pytest.MonkeyPatch) -> _Backend:
+    subprocess.run(["git", "init", "-q", str(root)], check=True)
+    monkeypatch.setattr(served_workspaces, "has_git_identity", lambda path: False)
+    return _Backend(None, None, False, True, False, False, new=False, name=None)
+
+
+def unmakeable_lock(root: Path, monkeypatch: pytest.MonkeyPatch) -> _Backend:
+    (root / ".orbit").write_text("")
+    return FLAGS
+
+
+@pytest.mark.parametrize("refusal", [invalid_config, missing_identity, unmakeable_lock])
+def test_serve_startup_and_a_frontend_add_refuse_a_workspace_saying_the_same(
+    refusal: Refusal,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    root = directory(tmp_path)
+    flags = refusal(root, monkeypatch)
+    store = asyncio.run(SqliteStore.open(tmp_path / "state"))
+    with ExitStack() as stack:
+        source = workspaces(stack, store, flags)
+        with pytest.raises(typer.Exit) as exited:
+            _added(source, root)
+        with pytest.raises(WorkspaceUnavailable) as refused:
+            asyncio.run(source.open(str(root)))
+    asyncio.run(store.close())
+
+    assert exited.value.exit_code == 2
+    assert capsys.readouterr().err == f"{refused.value}\n"
 
 
 def gated(monkeypatch: pytest.MonkeyPatch, gate: threading.Event, fails: bool = False) -> None:

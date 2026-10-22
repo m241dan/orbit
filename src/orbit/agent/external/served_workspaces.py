@@ -133,9 +133,10 @@ class ServedWorkspaces:
             raise
 
     async def close(self, workspace_id: str) -> None:
-        """Let go of the lock on the workspace ``workspace_id`` and stop serving it."""
-        self._locks.pop(workspace_id).close()
+        """Stop serving the workspace ``workspace_id`` and let go of its lock. If the store
+        fails to unflag it, it's still served, its lock held until the stack closes."""
         await WorkspaceRegistry(self._store).set_served(workspace_id, False)
+        self._locks.pop(workspace_id).close()
 
     def _let_go(self) -> None:
         """Let go of the locks of the workspaces still served."""
