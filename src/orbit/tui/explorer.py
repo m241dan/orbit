@@ -13,7 +13,11 @@ from orbit.protocol import AddWorkspace, DirectoryEntry, DirectoryListing, ListD
 from orbit.tui.view.common import kept_highlight
 from orbit.tui.view.explorer import (
     EXPLORER_HINT,
+    FIELD_HINT,
     answers,
+    candidates_line,
+    completed,
+    completion_parent,
     entry_label,
     entry_path,
     explorer_title,
@@ -21,23 +25,39 @@ from orbit.tui.view.explorer import (
     shown_entries,
 )
 from orbit.tui.view.outcomes import Awaited
-from orbit.tui.view.workspaces import PATH_PLACEHOLDER
-from orbit.tui.widgets import ListScreen
+from orbit.tui.view.workspaces import PATH_PLACEHOLDER, add_command
+from orbit.tui.widgets import ListScreen, PromptInput
 
 Browse = Callable[[ListDirectory | AddWorkspace, Awaited], Awaitable[object]]
 """Sends listing a directory or adding a workspace to the backend, awaiting its outcome as
 told; whatever it returns is ignored."""
 
 
+class ExplorerField(PromptInput):
+    """The explorer's path or URL field, which only takes focus once asked to; tab completes
+    its path and escape returns to the listing."""
+
+    BINDINGS: ClassVar[list[BindingType]] = [
+        Binding("escape", "screen.leave_field", show=False),
+        Binding("tab", "screen.complete", show=False),
+    ]
+
+
 class ExplorerScreen(ListScreen[str | AddWorkspace | None]):
     """Lists the directories on the server's host, starting where the server starts, under the
-    path or URL field, which takes no typing yet; dismisses with the id of a workspace to open,
-    or the ``AddWorkspace`` accepted.
+    path or URL field; dismisses with the id of a workspace to open, or the ``AddWorkspace``
+    accepted.
 
     ``j``/``k`` move; ``l`` or enter lists the highlighted directory, ``h`` the one above; enter
     on a workspace served opens it; ``a`` adds the highlighted directory with ``browse``,
-    dismissing once it's accepted; ``.`` shows or hides hidden directories; escape dismisses
-    with none. Only the listing last asked for is shown, and a refusal shows why under it.
+    dismissing once it's accepted; ``.`` shows or hides hidden directories; ``/`` types in the
+    field; escape dismisses with none. Only the listing last asked for is shown, and a refusal
+    shows why under it.
+
+    In the field, enter adds the path or URL typed, the same way, showing a refusal in the
+    field's hint; tab completes the path's last component from the directories of its parent,
+    from the listing shown when it's that directory's, else from a listing asked for alone,
+    which isn't shown; escape returns to the listing.
     """
 
     AUTO_FOCUS = "OptionList"
@@ -52,6 +72,7 @@ class ExplorerScreen(ListScreen[str | AddWorkspace | None]):
     }
     ExplorerScreen OptionList { height: 1fr; border: none; }
     ExplorerScreen Input { border: round $secondary; }
+    ExplorerScreen Input:focus { border: heavy $accent; }
     ExplorerScreen #explorer-note { color: $error; }
     """
     BINDINGS: ClassVar[list[BindingType]] = [
@@ -59,6 +80,7 @@ class ExplorerScreen(ListScreen[str | AddWorkspace | None]):
         Binding("h", "up", show=False),
         Binding("a", "add", show=False),
         Binding("full_stop", "hidden", show=False),
+        Binding("slash", "type", show=False),
         Binding("escape", "back", show=False),
     ]
 
@@ -70,14 +92,18 @@ class ExplorerScreen(ListScreen[str | AddWorkspace | None]):
         self._asked: str | None = None  # The path last asked for, None for the start.
         self._waiting = False  # Whether the listing last asked for is yet to be shown.
         self._held: DirectoryListing | None = None  # A listing for another path, meanwhile.
+        self._completing: str | None = None  # The directory listed to complete from, if any.
 
     def compose(self) -> ComposeResult:
         with Vertical() as box:
             box.border_title = explorer_title(None)
             box.border_subtitle = EXPLORER_HINT
-            field = Input(placeholder=PATH_PLACEHOLDER, id="explorer-path")
-            field.can_focus = False
+            field = ExplorerField(placeholder=PATH_PLACEHOLDER, id="explorer-path")
+            field.border_title = FIELD_HINT
             yield field
+            candidates = Static("", id="explorer-candidates")
+            candidates.display = False
+            yield candidates
             yield OptionList()
             more = Static("", id="explorer-more")
             more.display = False
@@ -111,8 +137,14 @@ class ExplorerScreen(ListScreen[str | AddWorkspace | None]):
         await self._browse(ListDirectory(path=path), awaited)
 
     def show_listing(self, listing: DirectoryListing) -> None:
-        """Show ``listing`` if it answers the listing last asked for, by its path; hold one for
-        another path, as a symlink followed gives, until that listing is accepted."""
+        """Complete the field from ``listing`` if it's the one asked for to complete from; show
+        it if it answers the listing last asked for, by its path; hold one for another path, as
+        a symlink followed gives, until that listing is accepted."""
+        if listing.path == self._completing:
+            self._completing = None
+            self._complete(listing)
+            if listing.path != self._asked:
+                return
         if not self._waiting:
             return
         if answers(self._asked, listing):
@@ -212,6 +244,61 @@ class ExplorerScreen(ListScreen[str | AddWorkspace | None]):
 
     def action_back(self) -> None:
         self.dismiss(None)
+
+    def action_type(self) -> None:
+        """Type in the field."""
+        self.query_one(ExplorerField).enter_insert_mode()
+
+    def action_leave_field(self) -> None:
+        """Return from the field to the listing."""
+        self.query_one(OptionList).focus()
+
+    async def action_complete(self) -> None:
+        """Complete the last component of the path typed, from the listing shown when it's its
+        parent's, else from that parent's listing once it comes; nothing for no path."""
+        parent = completion_parent(self.query_one(ExplorerField).value)
+        if parent is None:
+            return
+        if self.listing is not None and self.listing.path == parent:
+            self._complete(self.listing)
+            return
+        self._completing = parent
+        await self._browse(ListDirectory(path=parent), Awaited(why=self._refused_typed))
+
+    def _complete(self, listing: DirectoryListing) -> None:
+        """Complete the path typed from the directories ``listing`` shows, unless it's been
+        typed on into another directory since; show the candidates when there are several."""
+        field = self.query_one(ExplorerField)
+        if completion_parent(field.value) != listing.path:
+            return
+        names = [entry.name for entry in shown_entries(listing.entries, self.hidden)]
+        completion = completed(field.value, names)
+        if completion is None:
+            return
+        field.value = completion.text
+        field.cursor_position = len(completion.text)
+        shown = self.query_one("#explorer-candidates", Static)
+        shown.update(candidates_line(completion.candidates))
+        shown.display = bool(completion.candidates)
+
+    @on(Input.Submitted, "#explorer-path")
+    async def _typed(self, event: Input.Submitted) -> None:
+        """Add the path or URL typed, if any, dismissing with it once accepted."""
+        event.stop()
+        text = event.value.strip()
+        if not text:
+            return
+        adding = add_command(text)
+        field = self.query_one(ExplorerField)
+        field.border_subtitle = ""
+        awaited = Awaited(accepted=lambda: self._added(adding), why=self._refused_typed)
+        await self._browse(adding, awaited)
+
+    def _refused_typed(self, why: str) -> None:
+        """Show ``why`` what was typed was refused in the field's hint; nothing once this screen
+        is gone."""
+        if self.is_attached:
+            self.query_one(ExplorerField).border_subtitle = why
 
     def _show_note(self, note: str | None) -> None:
         """Show ``note`` under the listing, or hide it while it's none."""

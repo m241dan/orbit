@@ -1,5 +1,5 @@
 """Browsing the server's directories in the workspace picker's explorer: listing, moving,
-adding and opening workspaces, and refusals."""
+adding and opening workspaces, typing and completing paths in its field, and refusals."""
 
 from textual.containers import Vertical
 from textual.pilot import Pilot
@@ -15,6 +15,7 @@ from orbit.protocol import (
     DirectoryListing,
     ListDirectory,
     SessionSummary,
+    WorkspaceCloning,
     WorkspaceEntry,
 )
 from orbit.tui import Opening, OrbitApp
@@ -39,6 +40,12 @@ SRV = DirectoryListing(
 SRV_A = DirectoryListing(path="/srv/a", parent="/srv", entries=(PLAIN,), total=1)
 OPT_X = DirectoryListing(path="/opt/x", parent="/opt", entries=(), total=0)
 SRV_ROWS = ["⎇ a", "⎇ c (served)", "docs", "link → /opt/x"]
+ORBIT = DirectoryEntry(name="orbit", is_repository=True, hidden=False)
+ORCHARD = DirectoryEntry(name="orchard", is_repository=False, hidden=False)
+SRC = DirectoryListing(path="/src", parent="/", entries=(ORBIT, ORCHARD, DOT), total=3)
+PROJECTS = DirectoryEntry(name="projects", is_repository=False, hidden=False)
+WORK = DirectoryListing(path="/work", parent="/", entries=(PROJECTS,), total=1)
+REPO = WorkspaceEntry(id="R", label="repo", path="/srv/repo", sessions=())
 
 
 def connected() -> OrbitApp:
@@ -280,3 +287,216 @@ async def test_a_listing_with_the_picker_closed_shows_nothing() -> None:
         await pilot.press("enter", "enter")
         await feed_events(session_of(app), pilot, SRV)
         assert [type(s) for s in app.screen_stack[1:]] == [SessionsScreen]
+
+
+def field_of(app: OrbitApp) -> Input:
+    return explorer(app).query_one("#explorer-path", Input)
+
+
+def candidates(app: OrbitApp) -> str | None:
+    shown = explorer(app).query_one("#explorer-candidates", Static)
+    return str(shown.render()) if shown.display else None
+
+
+async def typed(app: OrbitApp, pilot: Pilot[None], text: str) -> None:
+    """Focus the explorer's field with ``/`` and have ``text`` typed in it."""
+    await pilot.press("slash")
+    field = field_of(app)
+    field.value = text
+    field.cursor_position = len(text)
+
+
+async def test_slash_focuses_the_field_where_keys_type_and_escape_returns() -> None:
+    app = connected()
+    async with app.run_test() as pilot:
+        await explore(app, pilot, SRV)
+        await pilot.press("slash")
+        field = field_of(app)
+        assert app.focused is field
+        await pilot.press("slash", "a", "h", "l", "full_stop")
+        assert field.value == "/ahl."
+        await pilot.press("escape")
+        assert isinstance(app.screen, ExplorerScreen)
+        assert explorer(app).query_one(OptionList).has_focus
+        assert changes(session_of(app)) == [ListDirectory(path=None)]
+
+
+async def test_tab_completes_one_match_from_the_listing_with_a_slash() -> None:
+    app = connected()
+    async with app.run_test() as pilot:
+        await explore(app, pilot, SRC)
+        await typed(app, pilot, "/src/orb")
+        await pilot.press("tab")
+        field = field_of(app)
+        assert field.value == "/src/orbit/"
+        assert app.focused is field
+        assert candidates(app) is None
+        assert changes(session_of(app)) == [ListDirectory(path=None)]
+
+
+async def test_tab_completes_several_matches_prefix_and_shows_them() -> None:
+    app = connected()
+    async with app.run_test() as pilot:
+        await explore(app, pilot, SRC)
+        await typed(app, pilot, "/src/or")
+        await pilot.press("tab")
+        assert field_of(app).value == "/src/or"
+        assert candidates(app) == "orbit  orchard"
+        field_of(app).value = "/src/orc"
+        await pilot.press("tab")
+        assert field_of(app).value == "/src/orchard/"
+        assert candidates(app) is None
+
+
+async def test_tab_with_no_match_changes_nothing() -> None:
+    app = connected()
+    async with app.run_test() as pilot:
+        await explore(app, pilot, SRC)
+        await typed(app, pilot, "/src/x")
+        await pilot.press("tab")
+        assert field_of(app).value == "/src/x"
+        assert candidates(app) is None
+
+
+async def test_tab_completes_hidden_directories_only_while_shown() -> None:
+    app = connected()
+    async with app.run_test() as pilot:
+        await explore(app, pilot, SRC)
+        await typed(app, pilot, "/src/.c")
+        await pilot.press("tab")
+        assert field_of(app).value == "/src/.c"
+        await pilot.press("escape", "full_stop")
+        await pilot.press("slash", "tab")
+        assert field_of(app).value == "/src/.cache/"
+
+
+async def test_tab_elsewhere_lists_the_parent_for_completion_alone() -> None:
+    app = connected()
+    async with app.run_test() as pilot:
+        await explore(app, pilot, SRC)
+        await typed(app, pilot, "/work/pro")
+        await pilot.press("tab")
+        assert changes(session_of(app))[-1] == ListDirectory(path="/work")
+        assert field_of(app).value == "/work/pro"
+        await feed_events(session_of(app), pilot, WORK)
+        assert field_of(app).value == "/work/projects/"
+        screen = explorer(app)
+        assert screen.query_one(Vertical).border_title == "/src"
+        assert rows(screen) == ["⎇ orbit", "orchard"]
+        await answer(app, pilot)
+        await feed_events(session_of(app), pilot, WORK)
+        assert rows(screen) == ["⎇ orbit", "orchard"]
+        assert field_of(app).value == "/work/projects/"
+
+
+async def test_a_completion_listing_once_typed_on_completes_nothing() -> None:
+    app = connected()
+    async with app.run_test() as pilot:
+        await explore(app, pilot, SRC)
+        await typed(app, pilot, "/work/pro")
+        await pilot.press("tab")
+        field_of(app).value = "/srv/a"
+        await feed_events(session_of(app), pilot, WORK)
+        assert field_of(app).value == "/srv/a"
+
+
+async def test_tab_without_a_path_does_nothing() -> None:
+    app = connected()
+    async with app.run_test() as pilot:
+        await explore(app, pilot, SRC)
+        await typed(app, pilot, "src")
+        await pilot.press("tab")
+        assert field_of(app).value == "src"
+        assert changes(session_of(app)) == [ListDirectory(path=None)]
+
+
+async def test_a_completion_listing_of_the_directory_asked_for_is_also_shown() -> None:
+    app = connected()
+    async with app.run_test() as pilot:
+        await explore(app, pilot, SRV)
+        await pilot.press("l")
+        await typed(app, pilot, "/srv/a/d")
+        await pilot.press("tab")
+        await feed_events(session_of(app), pilot, SRV_A)
+        assert field_of(app).value == "/srv/a/docs/"
+        assert rows(explorer(app)) == ["docs"]
+
+
+async def test_a_refused_completion_listing_shows_in_the_fields_hint() -> None:
+    app = connected()
+    async with app.run_test() as pilot:
+        await explore(app, pilot, SRC)
+        await typed(app, pilot, "/root/x")
+        await pilot.press("tab")
+        await answer(app, pilot, "Permission denied: /root")
+        assert field_of(app).border_subtitle == "Permission denied: /root"
+        assert explorer(app).note is None
+
+
+async def test_enter_in_the_field_adds_the_path_and_opens_its_sessions_once_listed() -> None:
+    app = connected()
+    async with app.run_test() as pilot:
+        await explore(app, pilot, SRV)
+        await typed(app, pilot, " /srv/repo ")
+        await pilot.press("enter")
+        assert changes(session_of(app))[-1] == AddWorkspace(path="/srv/repo")
+        await answer(app, pilot)
+        await pilot.pause()
+        assert isinstance(app.screen, WorkspacesScreen)
+        catalog = Catalog(workspaces=(B, REPO), agents=(), triggers=(), lanes=())
+        await feed_events(session_of(app), pilot, catalog)
+        screen = app.screen
+        assert isinstance(screen, SessionsScreen) and screen.workspace == "R"
+
+
+async def test_enter_in_the_field_adds_a_url_and_returns_to_the_list_picker() -> None:
+    app = connected()
+    async with app.run_test() as pilot:
+        await explore(app, pilot, SRV)
+        await typed(app, pilot, "https://github.com/o/r")
+        await pilot.press("enter")
+        assert changes(session_of(app))[-1] == AddWorkspace(url="https://github.com/o/r")
+        await answer(app, pilot)
+        await pilot.pause()
+        assert isinstance(app.screen, WorkspacesScreen)
+        cloning = WorkspaceCloning(url="https://github.com/o/r", phase="Receiving objects")
+        await feed_events(session_of(app), pilot, cloning)
+        options = app.screen.query_one(OptionList)
+        labels = [str(options.get_option_at_index(i).prompt) for i in range(options.option_count)]
+        assert "Cloning r… Receiving objects" in labels
+
+
+async def test_a_refused_add_from_the_field_shows_in_its_hint_until_the_next() -> None:
+    app = connected()
+    async with app.run_test() as pilot:
+        await explore(app, pilot, SRV)
+        await typed(app, pilot, "/etc")
+        await pilot.press("enter")
+        await answer(app, pilot, "/etc is outside the browsable root /srv.")
+        field = field_of(app)
+        assert field.border_subtitle == "/etc is outside the browsable root /srv."
+        assert explorer(app).note is None and app.focused is field
+        await pilot.press("enter")
+        assert field.border_subtitle == ""
+
+
+async def test_enter_in_an_empty_field_adds_nothing() -> None:
+    app = connected()
+    async with app.run_test() as pilot:
+        await explore(app, pilot, SRV)
+        await typed(app, pilot, "  ")
+        await pilot.press("enter")
+        assert changes(session_of(app)) == [ListDirectory(path=None)]
+        assert isinstance(app.screen, ExplorerScreen)
+
+
+async def test_a_field_add_answered_once_the_explorer_closed_changes_nothing() -> None:
+    for refused in (None, "Permission denied: /srv/a"):
+        app = connected()
+        async with app.run_test() as pilot:
+            await explore(app, pilot, SRV)
+            await typed(app, pilot, "/srv/repo")
+            await pilot.press("enter", "escape", "escape")
+            await answer(app, pilot, refused)
+            assert isinstance(app.screen, WorkspacesScreen)
+            assert app.screen.note is None

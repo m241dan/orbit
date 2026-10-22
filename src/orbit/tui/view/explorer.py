@@ -2,10 +2,12 @@
 
 import posixpath
 from collections.abc import Sequence
+from dataclasses import dataclass
 
 from orbit.protocol import DirectoryEntry, DirectoryListing
 
-EXPLORER_HINT = "j/k move · l/enter open · h up · a add · . hidden · esc back"
+EXPLORER_HINT = "j/k move · l/enter open · h up · a add · . hidden · / type · esc back"
+FIELD_HINT = "tab complete · enter add · esc back"
 REPOSITORY_MARK = "⎇"
 SERVED_MARK = "(served)"
 
@@ -49,3 +51,39 @@ def answers(asked: str | None, listing: DirectoryListing) -> bool:
     """Whether ``listing`` answers listing the directory at ``asked`` by its path; any listing
     answers listing the starting directory, ``None``."""
     return asked is None or listing.path == asked
+
+
+@dataclass(frozen=True)
+class Completion:
+    """A path completed: the field's ``text``, and the ``candidates`` it may go on to while
+    there are several."""
+
+    text: str
+    candidates: tuple[str, ...] = ()
+
+
+def completion_parent(text: str) -> str | None:
+    """The directory whose entries complete the last component of the path ``text``: what's
+    before its last ``/``, or ``/`` itself; none for text that isn't an absolute path."""
+    if not text.startswith("/"):
+        return None
+    return posixpath.dirname(text)
+
+
+def completed(text: str, names: Sequence[str]) -> Completion | None:
+    """``text`` with its last component completed from the directory ``names`` it starts: the
+    one match with a trailing ``/``, or the longest prefix several share, with them as
+    candidates; none when nothing matches."""
+    stem = posixpath.basename(text)
+    matches = tuple(name for name in names if name.startswith(stem))
+    if not matches:
+        return None
+    head = text[: len(text) - len(stem)]
+    if len(matches) == 1:
+        return Completion(f"{head}{matches[0]}/")
+    return Completion(head + posixpath.commonprefix(matches), matches)
+
+
+def candidates_line(candidates: Sequence[str]) -> str:
+    """What shows the ``candidates`` a path may be completed to, under the field."""
+    return "  ".join(candidates)

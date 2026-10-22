@@ -132,17 +132,26 @@ on it works as at startup: `esc` quits orbit, as there's no workspace left to go
 
 The explorer browses the directories on the server's host, as the server lists them, so a
 frontend on another machine can find a repository there. It fills the screen: the path or URL
-field at the top (it takes no typing yet), the directory listed as its title, and its
+field at the top (below), the directory listed as its title, and its
 directories below, repositories first, marked `⎇`, a workspace served marked `(served)` and a
 symlink `→ <target>`. It starts in the directory holding the workspace added last, else the
 server's `browse_root`, else its account's home. `j`/`k` move; `l` or `enter` lists the
 highlighted directory, and `h` the one above; `enter` on a workspace served opens its session
 picker, as picking it in the list does; `a` adds the highlighted directory, then opens the
 added workspace's session picker; `.` shows or hides hidden directories (hidden at first);
-`esc` goes back to the list. A listing that's refused, such as `Permission denied: <path>`, or
-an add that's refused, shows why under the listing, which stays as it was. A directory holding
-more than 2,000 directories lists 2,000, with a last line saying how many more there are, to
-be typed in the field instead.
+`/` types in the field; `esc` goes back to the list. A listing that's refused, such as
+`Permission denied: <path>`, or an add that's refused, shows why under the listing, which stays
+as it was. A directory holding more than 2,000 directories lists 2,000, with a last line saying
+how many more there are, to be typed in the field instead.
+
+In the field, `enter` adds what's typed: a repository's URL (`https://`, `ssh://`, `file://`
+or `user@host:path`) is cloned, back in the list, where its `Cloning` row shows how it goes;
+anything else is added as a path on the server's host, then opens the added workspace's session
+picker, as `a` does. A refusal shows in the field's hint. `tab` completes the path's last
+directory name, from the listing shown when the path is in its directory, else from a listing
+of the path's directory asked for alone, which the explorer doesn't move to; hidden
+directories complete only while they're shown. One match completes with a trailing `/`;
+several complete as far as they agree, listed under the field. `esc` returns to the listing.
 
 ### Sessions
 
