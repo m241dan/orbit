@@ -8,6 +8,7 @@ Layered, outermost first; each layer may import only the ones below it:
 - ``domain``: the rules the application decides by. Pure.
 """
 
+from orbit.agent.application.browsing import Browsing
 from orbit.agent.application.control_plane import (
     ControlPlane,
     WorkspaceSource,
@@ -47,6 +48,7 @@ from orbit.agent.external.cloner import Cloner
 from orbit.agent.external.config_file import read_config, write_checks
 from orbit.agent.external.control_plane import ControlPlaneServer, ListenFailed
 from orbit.agent.external.directories import resolve_config_dir, resolve_state_dir
+from orbit.agent.external.directory_lister import DirectoryLister
 from orbit.agent.external.fallback_files import FallbackFiles
 from orbit.agent.external.git_tree import GitCoderTree
 from orbit.agent.external.mcp_host import McpHost
@@ -90,6 +92,7 @@ __all__ = [
     "NO_STEPS_NOTE",
     "USER_CONFIG_FILE",
     "Agents",
+    "Browsing",
     "ChecksProposal",
     "ClaudeCliRunner",
     "CloneFailed",
@@ -98,6 +101,7 @@ __all__ = [
     "ConfigWriter",
     "ControlPlane",
     "ControlPlaneServer",
+    "DirectoryLister",
     "FallbackFiles",
     "GitCoderTree",
     "HostMaker",

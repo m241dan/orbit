@@ -11,6 +11,7 @@ from pathlib import Path
 import typer
 
 from orbit.agent import (
+    Browsing,
     CloneFailed,
     Cloner,
     ControlPlane,
@@ -49,10 +50,11 @@ type Added = Path | str
 
 @dataclass(frozen=True)
 class _Serving:
-    """What ``orbit serve`` serves: what ``build``s its control plane, the ``workspaces`` it
-    starts serving, and what's ``served`` as frontends add and remove workspaces."""
+    """What ``orbit serve`` serves: what ``build``s its control plane, letting frontends browse
+    as it's given, the ``workspaces`` it starts serving, and what's ``served`` as frontends add
+    and remove workspaces."""
 
-    build: Callable[[], ControlPlane]
+    build: Callable[[Browsing], ControlPlane]
     workspaces: tuple[ServedWorkspace, ...]
     served: ServedWorkspaces
 
@@ -86,9 +88,9 @@ def _serving(
         workspaces = tuple(workspace for workspace, _ in served)
         makers = [make for _, make in served]
 
-        def build() -> ControlPlane:
+        def build(browsing: Browsing) -> ControlPlane:
             hosts = [make() for make in makers]
-            return ControlPlane(hosts, usage_source, source, store, ledger=store)
+            return ControlPlane(hosts, usage_source, source, store, ledger=store, browsing=browsing)
 
         yield _Serving(build, workspaces, source)
 

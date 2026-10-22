@@ -649,6 +649,7 @@
               "fire_trigger": "#/$defs/FireTrigger",
               "hello": "#/$defs/Hello",
               "history": "#/$defs/History",
+              "list_directory": "#/$defs/ListDirectory",
               "new_session": "#/$defs/NewSession",
               "remove_task": "#/$defs/RemoveTask",
               "remove_workspace": "#/$defs/RemoveWorkspace",
@@ -735,6 +736,9 @@
             },
             {
               "$ref": "#/$defs/Watch"
+            },
+            {
+              "$ref": "#/$defs/ListDirectory"
             }
           ],
           "title": "Payload"
@@ -904,6 +908,106 @@
       "title": "DeleteSession",
       "type": "object"
     },
+    "DirectoryEntry": {
+      "description": "A directory ``name``d in a ``DirectoryListing``: whether it ``is_repository``, holding\n``.git``, the id of the ``workspace`` served there, if any, whether it's ``hidden``, its name\nstarting with ``.``, and, for a symlink, its ``target`` as the link gives it.",
+      "properties": {
+        "hidden": {
+          "title": "Hidden",
+          "type": "boolean"
+        },
+        "is_repository": {
+          "title": "Is Repository",
+          "type": "boolean"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "target": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Target"
+        },
+        "workspace": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Workspace"
+        }
+      },
+      "required": [
+        "name",
+        "is_repository",
+        "hidden"
+      ],
+      "title": "DirectoryEntry",
+      "type": "object"
+    },
+    "DirectoryListing": {
+      "description": "The directories in the directory at ``path`` on the server's host, which ``ListDirectory``\nasked for, repositories first, then by name, at most 2,000 of them: ``truncated`` if there\nare more, ``total`` counting them all. ``parent`` is the directory above it, ``None`` at the\nfilesystem's root or the server's ``browse_root``. A control-plane event, sent to the\nconnection that asked alone and never logged.",
+      "properties": {
+        "entries": {
+          "items": {
+            "$ref": "#/$defs/DirectoryEntry"
+          },
+          "title": "Entries",
+          "type": "array"
+        },
+        "parent": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "total": {
+          "minimum": 0,
+          "title": "Total",
+          "type": "integer"
+        },
+        "truncated": {
+          "default": false,
+          "title": "Truncated",
+          "type": "boolean"
+        },
+        "type": {
+          "const": "directory_listing",
+          "default": "directory_listing",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "entries",
+        "total",
+        "type"
+      ],
+      "title": "DirectoryListing",
+      "type": "object"
+    },
     "EditTask": {
       "description": "Replace task ``task_id`` with ``task`` and make it pending again.\n\nRejected while that task runs.",
       "properties": {
@@ -997,6 +1101,7 @@
               "command_accepted": "#/$defs/CommandAccepted",
               "command_refused": "#/$defs/CommandRefused",
               "conversation_reset": "#/$defs/ConversationReset",
+              "directory_listing": "#/$defs/DirectoryListing",
               "error_occurred": "#/$defs/ErrorOccurred",
               "history_page": "#/$defs/HistoryPage",
               "log_gap": "#/$defs/LogGap",
@@ -1151,6 +1256,9 @@
             },
             {
               "$ref": "#/$defs/UsageTotals"
+            },
+            {
+              "$ref": "#/$defs/DirectoryListing"
             },
             {
               "$ref": "#/$defs/Welcome"
@@ -1364,6 +1472,35 @@
         "type"
       ],
       "title": "HistoryPage",
+      "type": "object"
+    },
+    "ListDirectory": {
+      "description": "List the directories in the directory at ``path``, an absolute path on the server's host,\nor, if it's ``None``, the server's starting directory: its ``browse_root`` if set, else its\naccount's home. Answered to this connection alone with ``DirectoryListing``, then\n``CommandAccepted``. A control-plane command: its envelope's ``workspace`` is ``null``, and\nit may come before ``Attach``. Refused with ``unknown`` for a path there's nothing at, and\n``invalid`` for a relative path, a file, a directory the server can't read, one outside its\n``browse_root`` (symlinks followed), and by a local orbit.",
+      "properties": {
+        "path": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Path"
+        },
+        "type": {
+          "const": "list_directory",
+          "default": "list_directory",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "ListDirectory",
       "type": "object"
     },
     "LogGap": {

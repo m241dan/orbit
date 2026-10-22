@@ -34,6 +34,8 @@ from orbit.protocol import (
     ConversationReset,
     DecideProposal,
     DeleteSession,
+    DirectoryEntry,
+    DirectoryListing,
     EditTask,
     ErrorOccurred,
     Event,
@@ -42,6 +44,7 @@ from orbit.protocol import (
     Hello,
     History,
     HistoryPage,
+    ListDirectory,
     LogGap,
     MessageSent,
     NewSession,
@@ -201,6 +204,8 @@ COMMANDS: tuple[CommandEnvelope, ...] = (
     command(RemoveWorkspace(workspace="w1")),
     command(RemoveWorkspace(workspace="w1", purge=True)),
     command(Watch(streams=(CONTROL_PLANE_STREAM,))),
+    command(ListDirectory()),
+    command(ListDirectory(path="/home/me/src")),
 )
 
 EVENTS: tuple[EventEnvelope, ...] = (
@@ -341,6 +346,19 @@ EVENTS: tuple[EventEnvelope, ...] = (
         UsageTotals(
             workspaces=(WorkspaceUsage(workspace="w1", today=USAGE, lifetime=USAGE + USAGE),),
             total=UsageTotal(today=USAGE, lifetime=USAGE + USAGE),
+        )
+    ),
+    event(
+        DirectoryListing(
+            path="/home/me/src",
+            parent="/home/me",
+            entries=(
+                DirectoryEntry(name="orbit", is_repository=True, workspace="w1", hidden=False),
+                DirectoryEntry(name=".cache", is_repository=False, hidden=True),
+                DirectoryEntry(name="docs", is_repository=False, hidden=False, target="/srv/docs"),
+            ),
+            truncated=True,
+            total=2001,
         )
     ),
     event(Welcome(command_id="c1", server_version="0.1.0")),

@@ -20,6 +20,7 @@ from orbit.protocol import (
     Catalog,
     CommandAccepted,
     CommandRefused,
+    DirectoryListing,
     ErrorOccurred,
     NewSession,
     RemoveWorkspace,
@@ -212,6 +213,15 @@ async def test_the_usage_totals_change_nothing_shown() -> None:
         await feed_events(session, pilot, SERVED)
         totals = UsageTotals(workspaces=(), total=UsageTotal(today=Usage(), lifetime=Usage()))
         await feed_events(session, pilot, totals)
+        assert rows(workspaces(app)) == [B_ROW, A_ROW, "Add a path or URL…"]
+
+
+async def test_a_directory_listing_changes_nothing_shown() -> None:
+    app = connected()
+    async with app.run_test() as pilot:
+        session = session_of(app)
+        await feed_events(session, pilot, SERVED)
+        await feed_events(session, pilot, DirectoryListing(path="/srv", entries=(), total=0))
         assert rows(workspaces(app)) == [B_ROW, A_ROW, "Add a path or URL…"]
 
 

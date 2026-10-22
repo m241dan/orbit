@@ -573,6 +573,33 @@ class UsageTotals(_Message):
     total: UsageTotal
 
 
+class DirectoryEntry(_Message):
+    """A directory ``name``d in a ``DirectoryListing``: whether it ``is_repository``, holding
+    ``.git``, the id of the ``workspace`` served there, if any, whether it's ``hidden``, its name
+    starting with ``.``, and, for a symlink, its ``target`` as the link gives it."""
+
+    name: str
+    is_repository: bool
+    workspace: str | None = None
+    hidden: bool
+    target: str | None = None
+
+
+class DirectoryListing(_Message):
+    """The directories in the directory at ``path`` on the server's host, which ``ListDirectory``
+    asked for, repositories first, then by name, at most 2,000 of them: ``truncated`` if there
+    are more, ``total`` counting them all. ``parent`` is the directory above it, ``None`` at the
+    filesystem's root or the server's ``browse_root``. A control-plane event, sent to the
+    connection that asked alone and never logged."""
+
+    type: Literal["directory_listing"] = "directory_listing"
+    path: str
+    parent: str | None = None
+    entries: tuple[DirectoryEntry, ...]
+    truncated: bool = False
+    total: int = Field(ge=0)
+
+
 Event = Annotated[
     SettingsChanged
     | TurnStarted
@@ -614,6 +641,7 @@ Event = Annotated[
     | WorkspaceCloning
     | AgentsChanged
     | UsageTotals
+    | DirectoryListing
     | Welcome
     | CommandAccepted
     | CommandRefused,

@@ -27,7 +27,8 @@ A command travels in a `CommandEnvelope`:
   workspace that isn't served is refused with `unknown`, and one naming a workspace served but
   not the one attached with `wrong_session`, naming both, but for `Attach`, which moves the
   connection there (see [Attaching](#attaching)). The control plane's own commands,
-  `AddWorkspace`, `RemoveWorkspace` and `Watch`, are for no workspace, and carry `null`.
+  `AddWorkspace`, `RemoveWorkspace`, `Watch` and `ListDirectory`, are for no workspace, and
+  carry `null`.
 - `traceparent` and `tracestate`: W3C trace context. They're optional, aren't checked, and
   aren't set yet.
 
@@ -50,17 +51,17 @@ An event travels in an `EventEnvelope`:
   store, while it's halted, reserves the block once it resumes.
 - `session`: the session the event belongs to. The event's type decides it: the types in
   `SESSIONLESS_EVENTS` (`UsageChanged`, `Catalog`, `SessionStateChanged`, `WorkspaceCloning`,
-  `AgentsChanged` and `UsageTotals`)
+  `AgentsChanged`, `UsageTotals` and `DirectoryListing`)
   belong to no session, carry `null` and are never logged, and every other event carries the
   open session's id, but for the answers to a connection viewing another session (its
   `Snapshot`, `CommandAccepted` and `CommandRefused`), which carry that session's id and are
   never logged. Every event of a session is kept in the store's event log but for
-  `CONNECTION_EVENTS` (`Welcome`, `Catalog`, `Snapshot`, `HistoryPage`, `AgentsChanged` and
-  `UsageTotals`), which answer one connection or the connections watching a stream, and a
+  `CONNECTION_EVENTS` (`Welcome`, `Catalog`, `Snapshot`, `HistoryPage`, `AgentsChanged`,
+  `UsageTotals` and `DirectoryListing`), which answer one connection or the connections watching a stream, and a
   connection's greeting (see [The handshake](#the-handshake)).
 - `workspace`: the id of the workspace the event belongs to, but for the control plane's own
   events, the types in `CONTROL_PLANE_EVENTS` (`Welcome`, `Catalog`, `UsageChanged`,
-  `WorkspaceCloning`, `AgentsChanged` and `UsageTotals`), which carry `null`, as does the `ErrorOccurred` telling of a failed clone
+  `WorkspaceCloning`, `AgentsChanged`, `UsageTotals` and `DirectoryListing`), which carry `null`, as does the `ErrorOccurred` telling of a failed clone
   (see [Workspaces](#workspaces)), whose `session` is `null` too.
 - `traceparent` and `tracestate`, as on commands.
 
@@ -94,8 +95,8 @@ session carries its state (see [Session state](#session-state)).
 
 `Hello` attaches the connection to nothing, and nothing more reaches it until its first
 `Attach(workspace, session)` (see [Attaching](#attaching)); every command but `Attach` and the
-control plane's own, `AddWorkspace` and `RemoveWorkspace` (see [Workspaces](#workspaces)) and
-`Watch` (see [The control-plane stream](#the-control-plane-stream)), sent before then is refused
+control plane's own, `AddWorkspace`, `RemoveWorkspace` and `ListDirectory` (see
+[Workspaces](#workspaces)) and `Watch` (see [The control-plane stream](#the-control-plane-stream)), sent before then is refused
 with `invalid`. The first `Attach` is answered in this order:
 
 1. `Snapshot`: the session as it stands, with its settings, busy lanes, tasks,
@@ -205,7 +206,8 @@ directory. It's registered, or found by its path with the sessions it had, opens
 recently active session, takes its lock (or is read-only while another orbit holds it, see
 [Read-only orbits](#read-only-orbits)) and starts its background work, such as its startup
 check. Adding a workspace already served is accepted with nothing more done. It's refused with
-`invalid` for a relative path or a file, or a workspace whose configuration is invalid or whose
+`invalid` for a relative path, a file, a path outside the server's `browse_root` (see
+[Browsing the server's directories](#browsing-the-servers-directories)), or a workspace whose configuration is invalid or whose
 repository git has no identity for commits in, with `unknown` for a path there's nothing at, and
 with `internal` when orbit fails to make its lock, or fails partway through opening it in the
 store, importing its old sessions or recovering its fallback files, which may have changed them.
@@ -277,6 +279,45 @@ again. If deleting fails once the workspace is removed, it's refused with `inter
 
 A local `orbit chat` serves its own repository alone, and refuses both with `invalid`: `A local
 orbit works on one repository; run orbit serve to work on several.`
+
+### Browsing the server's directories
+
+`ListDirectory(path)` lists the directories in the directory at `path`, an absolute path on the
+server's host, as the server's account sees them, so a frontend can find a repository to add.
+Without `path` (`null`, the default), it lists the server's starting directory: its
+`browse_root` if set, else its account's home. It's answered to the connection that asked alone
+with a `DirectoryListing`, then `CommandAccepted`; the listing carries no workspace and no
+session, and isn't logged. Any connection welcomed may send it, attached or not.
+
+```json
+{"workspace":null,"traceparent":null,"tracestate":null,"command_id":"d17a40","session":null,"payload":{"type":"list_directory","path":"/home/me/src"}}
+```
+
+`DirectoryListing(path, parent, entries, truncated, total)` gives the directory listed, `path`,
+with its symlinks followed, and `parent`, the directory above it, `null` at the filesystem's root
+or at `browse_root`. Its `entries` are the directories in it, files left out, symlinks to
+directories included: repositories (those holding `.git`) first, then the rest by name, ignoring
+case and a leading `.`. Each `DirectoryEntry` gives its `name`, whether it `is_repository`, the
+id of the `workspace` served at it, if any, whether it's `hidden` (its name starts with `.`;
+hidden entries are always listed, for the frontend to show or not) and, for a symlink, its
+`target` as the link gives it. At most 2,000 entries are listed: with more, `truncated` is
+`true`, and `total` counts them all.
+
+```json
+{"workspace":null,"traceparent":null,"tracestate":null,"seq":61,"session":null,"payload":{"type":"directory_listing","path":"/home/me/src","parent":"/home/me","entries":[{"name":"orbit","is_repository":true,"workspace":"4f1c2a9e","hidden":false,"target":null},{"name":"notes","is_repository":false,"workspace":null,"hidden":false,"target":"/srv/notes"}],"truncated":false,"total":2}}
+```
+
+It's refused with `unknown` for a path there's nothing at, and with `invalid` for a relative
+path, a file, or a directory the server's account can't read (`Permission denied: <path>`). A
+local `orbit chat` refuses it with `invalid`: `A local orbit works on one repository; run orbit
+serve to browse for others.`
+
+`browse_root` in the server's `[server]` settings, an absolute directory, confines browsing and
+adding to one tree: a `ListDirectory`, or an `AddWorkspace` with a `path`, whose path, with its
+symlinks followed, is outside it is refused with `invalid`: `/srv/other is outside the browsable
+root /srv/repos.` Symlinks are followed for the check, so a link inside the root leading out of
+it is refused too. Clones are made in the server's clone directory wherever that is. Without
+`browse_root`, the server's account browses whatever it can read.
 
 ## The control-plane stream
 
@@ -530,7 +571,7 @@ file (`ws://127.0.0.1:7433/` by default). Each WebSocket is a connection of its 
 its own handshake and stream: it starts with `Hello` like any other, and what it's sent follows
 the rules above, so every connection gets every event of the session it views and of none,
 outcomes of other connections' commands included, but for the events answering one connection
-(`Welcome`, `Catalog`, `Snapshot`, `HistoryPage`), which reach only it.
+(`Welcome`, `Catalog`, `Snapshot`, `HistoryPage`, `DirectoryListing`), which reach only it.
 
 - **TLS**: with `tls = "off"` (the default) the server speaks plaintext `ws://` and listens on
   loopback alone. With `tls = "tls"` (`--tls tls`) it terminates TLS itself with the server
@@ -604,7 +645,7 @@ Refusals, in `CommandRefused`:
 | `not_configured` | What the command needs isn't set up, such as agents or verification. |
 | `unknown` | The command names something there's none of, such as a task, a lane, a workspace or a stream. |
 | `busy` | What the command acts on is running, so it can't be done now, such as a URL `AddWorkspace` is cloning already. |
-| `invalid` | The command can't be done as given, such as a command before `Hello`, a command for a workspace before the connection is attached, a relative path to `AddWorkspace`, or both or neither of its `path` and `url`, or a `url` that's neither a URL it clones nor an absolute path, adding or removing a workspace on a local orbit, input to a trigger that takes none or `TakeOwnership` with no offer open. |
+| `invalid` | The command can't be done as given, such as a command before `Hello`, a command for a workspace before the connection is attached, a relative path to `AddWorkspace` or `ListDirectory`, a path outside the server's `browse_root`, a directory the server can't read, or both or neither of its `path` and `url`, or a `url` that's neither a URL it clones nor an absolute path, adding, removing or browsing on a local orbit, input to a trigger that takes none or `TakeOwnership` with no offer open. |
 | `locked` | Another orbit holds what the command acts on, such as a session. |
 | `wrong_session` | The command is for a session other than the one its connection views, or a workspace other than the one it's attached to. |
 | `not_active` | The connection views a session that isn't the workspace's open one, and the command would change or run something there (see [Read-only views](#read-only-views)). |

@@ -216,3 +216,29 @@ def test_a_tls_server_is_reached_by_the_hostname_its_certificate_gives(
 ) -> None:
     local = LocalTls(mutual=False, ca="/ca.pem", hostname=hostname)
     assert RunningServer(url="wss://0.0.0.0:7433/", pid=1, tls=local).local_url == url
+
+
+def test_without_a_browse_root_everything_readable_is_browsable(tmp_path: Path) -> None:
+    assert read_server(tmp_path).browse_root is None
+
+
+def test_the_files_browse_root_is_read_with_its_symlinks_followed(tmp_path: Path) -> None:
+    (tmp_path / "srv").mkdir()
+    (tmp_path / "link").symlink_to(tmp_path / "srv")
+    (tmp_path / "config.toml").write_text(f'[server]\nbrowse_root = "{tmp_path / "link"}"\n')
+    assert read_server(tmp_path).browse_root == str((tmp_path / "srv").resolve())
+
+
+@pytest.mark.parametrize("root", ["srv", "notes.txt", "/nowhere/at/all"])
+def test_a_browse_root_that_isnt_an_absolute_directory_is_refused_by_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, root: str
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "srv").mkdir()
+    (tmp_path / "notes.txt").write_text("")
+    given = str(tmp_path / root) if root == "notes.txt" else root
+    (tmp_path / "config.toml").write_text(f'[server]\nbrowse_root = "{given}"\n')
+    problem = f"server.browse_root: {given} isn't an absolute path to a directory"
+    with pytest.raises(ConfigError) as raised:
+        read_server(tmp_path)
+    assert str(raised.value) == f"{tmp_path / 'config.toml'}: {problem}"

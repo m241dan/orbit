@@ -93,7 +93,8 @@ class ServerSettings(TlsSettings):
     frontends on this machine show it under mutual TLS, and the ``clone_dir`` the repositories
     it's asked to serve by URL are cloned into, ``workspaces`` in the state directory if
     ``None``, and ``max_coders``, how many coders run at once across the workspaces it serves,
-    any number if 0."""
+    any number if 0, and ``browse_root``, the absolute directory frontends may browse and add
+    workspaces within, anywhere the server's account can read if ``None``."""
 
     host: str = Field(default="127.0.0.1", min_length=1)
     port: int = Field(default=7433, ge=0, le=65535)
@@ -103,6 +104,7 @@ class ServerSettings(TlsSettings):
     local_client_key: str | None = None
     clone_dir: str | None = None
     max_coders: int = Field(default=DEFAULT_MAX_CODERS, ge=0)
+    browse_root: str | None = None
 
     @field_validator("revoked")
     @classmethod

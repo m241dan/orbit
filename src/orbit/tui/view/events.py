@@ -15,6 +15,7 @@ from orbit.protocol import (
     CommandAccepted,
     CommandRefused,
     ConversationReset,
+    DirectoryListing,
     ErrorOccurred,
     Event,
     HistoryPage,
@@ -57,9 +58,10 @@ ProgressEvent = (
 """Snapshots of progress: the verification steps', whether review is paused, proposed steps,
 usage limits, a session's state and a clone's progress."""
 
-StreamEvent = AgentsChanged | UsageTotals
+StreamEvent = AgentsChanged | UsageTotals | DirectoryListing
 """Snapshots of the control-plane stream: the agents running and the usage totals across the
-workspaces, which the TUI doesn't watch."""
+workspaces, which the TUI doesn't watch; and a listing of the server's directories, which it
+doesn't ask for yet."""
 
 StateEvent = SettingsChanged | BusyChanged | TasksChanged | ProgressEvent | StreamEvent
 """Snapshots of backend state, or a decision it waits for."""

@@ -10,6 +10,7 @@ from orbit.protocol.commands import Command
 from orbit.protocol.events import (
     AgentsChanged,
     Catalog,
+    DirectoryListing,
     Event,
     HistoryPage,
     SessionStateChanged,
@@ -28,6 +29,7 @@ SESSIONLESS_EVENTS: tuple[type[Event], ...] = (
     WorkspaceCloning,
     AgentsChanged,
     UsageTotals,
+    DirectoryListing,
 )
 """The event types that belong to no session: their envelopes carry ``session=None``."""
 
@@ -38,6 +40,7 @@ CONNECTION_EVENTS: tuple[type[Event], ...] = (
     HistoryPage,
     AgentsChanged,
     UsageTotals,
+    DirectoryListing,
 )
 """The event types that answer one connection, and so are never kept in a session's log."""
 
@@ -48,6 +51,7 @@ CONTROL_PLANE_EVENTS: tuple[type[Event], ...] = (
     WorkspaceCloning,
     AgentsChanged,
     UsageTotals,
+    DirectoryListing,
 )
 """The event types that belong to no workspace: their envelopes carry ``workspace=None``."""
 

@@ -8,6 +8,7 @@ from dataclasses import replace
 from pathlib import PurePath
 from typing import Protocol
 
+from orbit.agent.application.browsing import Browsing
 from orbit.agent.application.clones import Clones
 from orbit.agent.application.closing import close_all
 from orbit.agent.application.coder_slots import CoderSlots
@@ -28,6 +29,7 @@ from orbit.agent.application.usage_monitor import UsageMonitor
 from orbit.agent.application.workspace_host import WorkspaceHost
 from orbit.agent.domain.catalog import catalog
 from orbit.agent.domain.clones import added_url
+from orbit.agent.domain.listings import LOCAL_BROWSING
 from orbit.agent.domain.purging import check_purgeable
 from orbit.agent.domain.refusals import STOPPING, Refused
 from orbit.agent.domain.workspaces import (
@@ -51,6 +53,7 @@ from orbit.protocol import (
     Event,
     EventEnvelope,
     Hello,
+    ListDirectory,
     RemoveWorkspace,
     TurnFinished,
     UsageChanged,
@@ -191,6 +194,12 @@ class ControlPlane:
     a source, as for a local orbit serving its own repository alone, they're refused as
     ``invalid``.
 
+    Given ``browsing``, ``ListDirectory``, from any connection welcomed, is answered to that
+    connection alone with the listing of a directory on the server's host, each directory a
+    workspace is served at marked with its id; with a browsable root, it and ``AddWorkspace``
+    with a path are refused as ``invalid`` outside it. Without, as for a local orbit,
+    ``ListDirectory`` is refused as ``invalid``.
+
     Coders' and configurators' tasks share the control plane's coder slots across every
     workspace served: as many run at once as :meth:`cap_coders` allows, any number until it's
     called, and the others wait in line, first come, first served, each session's state saying
@@ -216,9 +225,11 @@ class ControlPlane:
         mark: SeqMark | None = None,
         ledger: UsageLedger | None = None,
         clock: Clock = local_now,
+        browsing: Browsing | None = None,
     ) -> None:
         self._hosts = {host.workspace_id: host for host in hosts}
         self._workspaces = workspaces
+        self._browsing = browsing
         self._changing = asyncio.Lock()
         self._reservations = None if mark is None else MarkReservations(mark)
         self._seqs = Seqs(_last_seq(self._hosts.values(), mark), self._reserve)
@@ -362,6 +373,8 @@ class ControlPlane:
             await self._attach(command, envelope.command_id, connection)
         elif isinstance(command, Watch):
             await self._stream.watch(connection, command.streams)
+        elif isinstance(command, ListDirectory):
+            await self._list(command, connection)
         else:
             host = self._addressed(envelope.workspace, envelope.session, connection)
             await host.handle(command, envelope.command_id, connection)
@@ -386,6 +399,21 @@ class ControlPlane:
         assert command.path is not None  # added_url refuses an AddWorkspace with neither.
         async with self._locked():
             await self._add(command.path, connection, workspaces)
+
+    async def _list(self, command: ListDirectory, connection: SessionConnection) -> None:
+        """Send ``connection`` alone the listing of the directory ``command`` names; refused
+        without browsing, as for a local orbit, or as browsing refuses it."""
+        if self._browsing is None:
+            raise Refused(INVALID, LOCAL_BROWSING)
+        served = {host.path: host.workspace_id for host in self._hosts.values() if host.path}
+        await connection.publish_here(await self._browsing.listing(command.path, served))
+
+    async def _confine(self, path: str, managed: bool) -> None:
+        """Refuse adding the workspace at ``path`` as ``invalid`` when it's outside the
+        browsable root, if there is one, with its symlinks followed, unless it's ``managed``, a
+        clone orbit made in its clone directory."""
+        if not managed and self._browsing is not None:
+            await self._browsing.confined(path)
 
     @asynccontextmanager
     async def _locked(self) -> AsyncIterator[None]:
@@ -422,9 +450,11 @@ class ControlPlane:
         ``managed``, unless it's served already: start its host, opening its most recently
         active session and its background work, and send the catalog to ``connection``, if one
         asked, and every listening connection, or let it go again if that fails or is
-        cancelled; refused unless ``path`` is the absolute path to a directory, or with the
-        code it gives if it can't be served."""
+        cancelled; refused unless ``path`` is the absolute path to a directory, within the
+        browsable root unless it's ``managed``, or with the code it gives if it can't be
+        served."""
         check_addable(path, absolute=PurePath(path).is_absolute())
+        await self._confine(path, managed)
         check_directory(path, await workspaces.kind(path))
         root = await workspaces.top_level(path)
         if any(host.path == root for host in self._hosts.values()):

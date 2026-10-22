@@ -34,6 +34,7 @@ from orbit.protocol import (
     Command,
     CommandRefused,
     DecideProposal,
+    DirectoryListing,
     EditTask,
     ErrorOccurred,
     Event,
@@ -737,14 +738,14 @@ class OrbitApp(App[None], inherit_bindings=False):
                 self._set_busy(lane, busy)
             case TasksChanged(tasks=tasks):
                 self._show_tasks(tasks)
-            case AgentsChanged() | UsageTotals():
+            case AgentsChanged() | UsageTotals() | DirectoryListing():
                 self._follow_stream(event)
             case _:
                 self._show_progress(event)
 
-    def _follow_stream(self, event: AgentsChanged | UsageTotals) -> None:
+    def _follow_stream(self, event: AgentsChanged | UsageTotals | DirectoryListing) -> None:
         """Show the agents running across workspaces in the workspace picker; nothing shows what
-        turns cost across them."""
+        turns cost across them, or the server's directories yet."""
         if isinstance(event, AgentsChanged):
             self._workspaces.follow_agents(event)
 

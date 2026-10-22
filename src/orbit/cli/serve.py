@@ -14,9 +14,11 @@ import typer
 from orbit.agent import (
     INVALID_CONFIG,
     USER_CONFIG_FILE,
+    Browsing,
     ConfigError,
     ControlPlane,
     ControlPlaneServer,
+    DirectoryLister,
     ListenFailed,
     LocalDiscoveryUnavailable,
     LocalTls,
@@ -111,7 +113,7 @@ def serve(
         with _serving(flags, added, state, user_config, clone_dir) as serving:
             logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
             parts = _ServeParts(
-                serving.build,
+                lambda: serving.build(_browsing(settings)),
                 settings,
                 token,
                 _current_revoked(user_config, settings.revoked),
@@ -131,6 +133,12 @@ def _added(text: str) -> Added:
     Exits with status 2 if it's a path that doesn't exist or isn't a directory.
     """
     return text if looks_like_url(text) else _workspace(Path(text))
+
+
+def _browsing(settings: ServerSettings) -> Browsing:
+    """How frontends browse this host: from the account's home, unless confined to the
+    browsable root ``settings`` give."""
+    return Browsing(DirectoryLister(), str(Path.home()), settings.browse_root)
 
 
 def _clone_dir(settings: ServerSettings, state: Path) -> Path:

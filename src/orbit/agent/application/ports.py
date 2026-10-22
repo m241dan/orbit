@@ -10,6 +10,7 @@ from typing import Any, Protocol
 from orbit.agent.domain.agents import Agent
 from orbit.agent.domain.checks import ChecksProposal, Setup
 from orbit.agent.domain.config_errors import ConfigError
+from orbit.agent.domain.listings import FoundDirectory
 from orbit.agent.domain.ownership import WorkspaceOwner
 from orbit.agent.domain.replay import LogBounds
 from orbit.agent.domain.roles import Role
@@ -74,6 +75,21 @@ class Cloner(Protocol):
         progress as it clones. Raises :class:`CloneFailed` if it fails, having removed what it
         cloned; cancelled, it stops git and removes what it cloned before the cancellation
         ends."""
+        ...
+
+
+class DirectoryLister(Protocol):
+    """What reads the directories on the server's host for frontends browsing them."""
+
+    async def resolved(self, path: str) -> str:
+        """``path``, absolute, with every symlink in it followed, as far as there's anything
+        there."""
+        ...
+
+    async def directories(self, path: str) -> list[FoundDirectory]:
+        """The directories in the directory at ``path``, symlinks to directories included.
+        Raises :class:`OSError`, such as :class:`FileNotFoundError` or
+        :class:`PermissionError`, if it can't be read."""
         ...
 
 

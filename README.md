@@ -1149,8 +1149,8 @@ machine needs the new copy first. Copy the new token to your other machines as b
 trusted channel.
 
 The `[server]` table in your `config.toml` sets where it listens, the largest message either
-way, how it serves TLS, where it clones repositories added by URL and how many coders run at
-once; the flags override it. The server enforces `max_message_mb` on what
+way, how it serves TLS, where it clones repositories added by URL, how many coders run at
+once and what frontends may browse; the flags override it. The server enforces `max_message_mb` on what
 it accepts and on what it sends, and chats take whatever size their server sends, so raising it
 on the server is enough:
 
@@ -1169,6 +1169,7 @@ local_client_cert = "/home/me/.config/orbit/tls/local.pem"      # shown by chats
 local_client_key = "/home/me/.config/orbit/tls/local-key.pem"   # its private key, chmod 600
 clone_dir = "/srv/orbit/workspaces"  # where repositories added by URL are cloned
 max_coders = 4       # coders running at once across the workspaces; 0 for no cap
+browse_root = "/srv/repos"  # the one tree frontends may browse and add from; unset: anywhere
 ```
 
 **Taking turns.** `max_coders` (4 unless set; 0 for no cap) caps how many coder and configurator
@@ -1185,9 +1186,19 @@ workspace picker show (`waiting for a coder: 2nd in line`, `⏳ waiting: 4 coder
 planner don't count and never wait, and a run stopped at the usage limit holds no slot until it
 starts again. A local `orbit chat` serves one workspace and has no cap.
 
+**Browsing.** Frontends can list the directories on the server's host, as its account sees
+them, to find a repository to add (the protocol's `ListDirectory`, see
+[docs/protocol.md](docs/protocol.md#workspaces)): repositories first, each marked, and the
+workspace served at each, if any; the listing comes from the server, so it's the server's
+filesystem a frontend on another machine browses. With `browse_root` set, an absolute directory,
+frontends may browse and add workspaces by path within it alone, symlinks followed, so a link
+inside it can't lead out; clones still go to `clone_dir`. Unset, the server's account may browse
+whatever it can read, starting from its home directory. A local `orbit chat` refuses browsing.
+
 Paths in `[server]` may start with `~`, and a relative one is taken from the config directory,
 so `cert = "tls/server.pem"` names `~/.config/orbit/tls/server.pem`; relative `--cert`, `--key`
-and `--client-ca` are taken from the directory `orbit serve` starts in.
+and `--client-ca` are taken from the directory `orbit serve` starts in. `browse_root` is the
+exception: it must be an absolute path to a directory.
 
 An unknown key in `[server]`, or a value of the wrong type or out of range, stops `orbit serve`
 with status 2 and a message naming the file and the key.
