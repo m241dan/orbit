@@ -21,7 +21,7 @@ import logging
 import sqlite3
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import AbstractContextManager, closing
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Self
@@ -33,7 +33,6 @@ from orbit.agent.external.session_locks import SessionLocks, check_session_id
 from orbit.agent.external.sqlite_backup import copy_to, is_database_file
 from orbit.agent.external.sqlite_errors import error_kind
 from orbit.agent.external.sqlite_schema import (
-    BUSY_TIMEOUT,
     StoreError,
     open_database,
     open_existing,
@@ -93,23 +92,6 @@ def _decoded(texts: Sequence[str]) -> list[EventEnvelope]:
     of types this orbit doesn't know."""
     decoded = [decode_event(text) for text in reversed(texts)]
     return [envelope for envelope in decoded if envelope is not None]
-
-
-def find_workspace_id(state_dir: Path, workspace: str) -> str | None:
-    """The id of the workspace at ``workspace`` in the database in ``state_dir``, creating,
-    upgrading and registering nothing; ``None`` if it isn't registered or the database can't be
-    read."""
-    database = state_dir / DATABASE
-    if not database.exists():
-        return None
-    path = str(Path(workspace).resolve())
-    uri = f"{database.absolute().as_uri()}?mode=ro"
-    try:
-        with closing(sqlite3.connect(uri, uri=True, timeout=BUSY_TIMEOUT)) as connection:
-            row = connection.execute("SELECT id FROM workspaces WHERE path = ?", (path,)).fetchone()
-    except sqlite3.Error:
-        return None
-    return None if row is None else str(row[0])
 
 
 class SqliteStore:

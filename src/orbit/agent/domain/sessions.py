@@ -311,12 +311,6 @@ def resumed_settings(saved: Settings, given: Settings, pinned: Collection[str]) 
     return saved.model_copy(update={name: getattr(given, name) for name in pinned})
 
 
-def review_count_json(count: int) -> str:
-    """``count`` commits since the last super review as an older orbit's ``reviews.json`` text,
-    for :func:`parse_review_count` to read back. Only tests use it, to write files to import."""
-    return _ReviewCount(since_super=count).model_dump_json()
-
-
 def parse_review_count(text: str) -> int:
     """The commits since the last super review in JSON ``text``; 0 when it's unreadable."""
     try:

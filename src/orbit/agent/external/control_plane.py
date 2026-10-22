@@ -65,6 +65,7 @@ from orbit.protocol import (
     decode_command,
     encode,
 )
+from orbit.protocol.transport import netloc
 
 UNAUTHORIZED_BODY = "Send the token in orbit's token file as Authorization: Bearer <token>."
 """The body of the HTTP 401 a frontend without the token gets."""
@@ -121,8 +122,7 @@ def close_reason(text: str) -> str:
 def ws_url(host: str, port: int, secure: bool = False) -> str:
     """The URL of the server on ``host`` and ``port``, an IPv6 address in brackets, ``wss://``
     if it's ``secure``, over TLS."""
-    netloc = f"[{host}]:{port}" if ":" in host else f"{host}:{port}"
-    return f"{'wss' if secure else 'ws'}://{netloc}/"
+    return f"{'wss' if secure else 'ws'}://{netloc(host, port)}/"
 
 
 def _decoded(message: Message) -> CommandEnvelope:

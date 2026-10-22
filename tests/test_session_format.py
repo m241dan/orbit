@@ -11,9 +11,9 @@ from orbit.agent.domain.sessions import (
     parse_record,
     parse_review_count,
     record_json,
-    review_count_json,
 )
 from orbit.protocol import Settings, TaskSpec, TaskState, Usage
+from tests.session_builders import review_count_json
 
 FIXTURES = Path(__file__).parent / "fixtures"
 

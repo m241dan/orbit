@@ -70,6 +70,11 @@ def is_loopback(host: str) -> bool:
         return False
 
 
+def netloc(host: str, port: int) -> str:
+    """The network location of ``port`` on ``host``, an IPv6 address in brackets."""
+    return f"[{host}]:{port}" if ":" in host else f"{host}:{port}"
+
+
 def too_open(mode: int) -> bool:
     """Whether a file of ``mode`` lets its group or others in, as a private key or token file
     mustn't."""

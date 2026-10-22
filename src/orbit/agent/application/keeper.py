@@ -551,11 +551,10 @@ class SessionKeeper:
         let go of."""
         await self._reported(store.release(session_id))
 
-    async def _reported[T](self, call: Awaitable[T], suffix: str = "") -> T | None:
-        """What ``call``, to the store, returns; none if it fails, reported with ``suffix``
-        after the store's message."""
+    async def _reported[T](self, call: Awaitable[T]) -> T | None:
+        """What ``call``, to the store, returns; none if it fails, reported."""
         result = await outcome(call)
         if isinstance(result, StoreFailed):
-            await self._publish(ErrorOccurred(code=SAVE_FAILED, message=f"{result}{suffix}"))
+            await self._publish(ErrorOccurred(code=SAVE_FAILED, message=str(result)))
             return None
         return result

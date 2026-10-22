@@ -1,6 +1,7 @@
 """Builders for saved sessions and the hosts that switch between them."""
 
 import asyncio
+import json
 from datetime import UTC, datetime
 from typing import Any
 
@@ -114,3 +115,9 @@ def store_logging(*logged: EventEnvelope) -> FakeStore:
     store = FakeStore()
     store.logged = list(logged)
     return store
+
+
+def review_count_json(count: int) -> str:
+    """``count`` commits since the last super review as an older orbit's ``reviews.json`` text,
+    for :func:`parse_review_count` to read back."""
+    return json.dumps({"since_super": count})

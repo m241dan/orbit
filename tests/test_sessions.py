@@ -25,7 +25,6 @@ from orbit.agent.domain.sessions import (
     renamable,
     resumed_notes,
     resumed_settings,
-    review_count_json,
     session_name,
     stored_summary,
     summarize,
@@ -41,6 +40,7 @@ from orbit.protocol import (
     TaskStatus,
     Usage,
 )
+from tests.session_builders import review_count_json
 
 CREATED = datetime(2026, 10, 7, 9, 5, tzinfo=UTC)
 ACTIVE = datetime(2026, 10, 17, 14, 30, tzinfo=timezone(timedelta(hours=2)))

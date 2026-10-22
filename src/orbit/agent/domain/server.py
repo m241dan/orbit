@@ -14,7 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 
 from orbit.agent.domain.config_errors import ConfigError, validation_problems
 from orbit.protocol import DEFAULT_MAX_MESSAGE_MB
-from orbit.protocol.transport import LOCALHOST
+from orbit.protocol.transport import LOCALHOST, netloc
 from orbit.protocol.transport import is_loopback as is_loopback
 
 EXPIRY_WARNING = timedelta(days=14)
@@ -221,9 +221,8 @@ class RunningServer(BaseModel):
         if self.tls is None:
             return self.url
         parts = urlsplit(self.url)
-        host = self.tls.hostname
-        netloc = f"[{host}]:{parts.port}" if ":" in host else f"{host}:{parts.port}"
-        return parts._replace(netloc=netloc).geturl()
+        assert parts.port is not None  # The run file's URL is serve's, which has a port.
+        return parts._replace(netloc=netloc(self.tls.hostname, parts.port)).geturl()
 
 
 def parse_running(text: str) -> RunningServer | None:
