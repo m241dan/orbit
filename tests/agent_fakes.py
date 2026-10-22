@@ -25,6 +25,7 @@ from orbit.agent.application.ports import (
     StoredSession,
     StoreFailed,
     TreeFailed,
+    UsageLedger,
     UsageSource,
 )
 from orbit.agent.application.review_lane import ReviewLane
@@ -42,6 +43,7 @@ from orbit.agent.domain.roles import REVIEW_ROLES, Role, built_in_roles
 from orbit.agent.domain.sessions import SessionRecord, Unreadable
 from orbit.agent.domain.storage_halt import FailedWrite
 from orbit.agent.domain.usage import UsageFetch
+from orbit.agent.domain.usage_totals import UsageRow, UsageTotalsData, usage_totals
 from orbit.protocol import (
     AGENT_FAILED,
     BUILT_IN_ROLE_NAMES,
@@ -262,6 +264,23 @@ class FakeHalt:
 
     def fail(self, write: FailedWrite, error: StoreFailed) -> None:
         self.failures.append((write, str(error)))
+
+
+class FakeLedger:
+    """A usage ledger in memory: the ``rows`` recorded, oldest first; while ``failure`` is set,
+    recording fails with it."""
+
+    def __init__(self) -> None:
+        self.rows: list[UsageRow] = []
+        self.failure: str | None = None
+
+    async def record(self, row: UsageRow) -> None:
+        if self.failure is not None:
+            raise StoreFailed(self.failure)
+        self.rows.append(row)
+
+    async def totals(self, today_start: datetime) -> UsageTotalsData:
+        return usage_totals({}, {}, {})
 
 
 class FakeFallback:
@@ -625,6 +644,7 @@ def session_for(
     owner: WorkspaceOwner | None = None,
     lock: RepositoryLock | None = None,
     lock_declined_retry: float = LOCK_DECLINED_RETRY,
+    ledger: UsageLedger | None = None,
     **options: Any,
 ) -> tuple[WorkspaceHost, FakeHost, ScriptedLauncher]:
     """A session whose tasks run through agents playing ``scripts``, one per launch, and
@@ -633,7 +653,8 @@ def session_for(
     events going to ``fallback``, if given, recovering parked ones with ``recover``, if given,
     and read-only if another ``owner`` owns the
     repository, trying its ``lock``, if given, every :data:`LOCK_RETRY` seconds and offering it
-    again ``lock_declined_retry`` seconds after a decline.
+    again ``lock_declined_retry`` seconds after a decline. Its turns' usage is recorded in
+    ``ledger``, if given.
 
     ``options`` go to :class:`Agents`, such as ``limits``, ``tree`` or ``roles`` (:data:`ROLES`
     unless given).
@@ -656,6 +677,7 @@ def session_for(
         lock=lock,
         lock_retry=LOCK_RETRY,
         lock_declined_retry=lock_declined_retry,
+        ledger=ledger,
     )
     if usage is not None:
         served(session, usage)
@@ -1184,6 +1206,12 @@ def suggests(*titles: str, replies: list[Reply] | None = None) -> Script:
         return "completed"
 
     return review
+
+
+async def settled() -> None:
+    """Yield to the loop a while, so background work gets as far as it can."""
+    for _ in range(20):
+        await asyncio.sleep(0)
 
 
 async def settle(

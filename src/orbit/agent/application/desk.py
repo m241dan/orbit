@@ -147,6 +147,8 @@ class AgentDesk:
         # The calls not yet answered, by request id, with the agent that made each.
         self._requests: dict[str, tuple[str, OpenRequest]] = {}
         self._starting: asyncio.Task[str] | None = None  # The host's start, shared by callers.
+        # How each agent running was last launched, by its id.
+        self._launches: dict[str, AgentLaunch] = {}
 
     async def publish(self, event: Event) -> None:
         """Publish ``event``, noting the agents it announces as started or exited."""
@@ -186,7 +188,13 @@ class AgentDesk:
         """How to start ``agent`` in its role: told ``prompt``, with ``settings``, in ``cwd``."""
         role = self.agents.roles[agent.role]
         url = await self.url()
-        return AgentLaunch(agent, url, prompt, settings, cwd, role.instructions, role.tools)
+        launch = AgentLaunch(agent, url, prompt, settings, cwd, role.instructions, role.tools)
+        self._launches[agent.id] = launch
+        return launch
+
+    def launched(self, agent_id: str | None) -> AgentLaunch | None:
+        """How agent ``agent_id``, if it's running, was last launched; none before it was."""
+        return None if agent_id is None else self._launches.get(agent_id)
 
     def use_role(self, name: str, role: Role) -> None:
         """Have ``role`` as the role ``name`` from now on."""
@@ -227,6 +235,7 @@ class AgentDesk:
     def close(self, agent: Agent) -> None:
         self.registry.revoke(agent.id)
         self._runs.pop(agent.id, None)
+        self._launches.pop(agent.id, None)
         self._announced.discard(agent.id)
 
     async def handle(self, token: str, tool: str, arguments: dict[str, Any]) -> Reply:

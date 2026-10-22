@@ -4,6 +4,7 @@
 
 from collections.abc import AsyncIterator, Awaitable, Callable, Collection, Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Protocol
 
 from orbit.agent.domain.agents import Agent
@@ -15,6 +16,7 @@ from orbit.agent.domain.roles import Role
 from orbit.agent.domain.sessions import SessionRecord, Unreadable
 from orbit.agent.domain.storage_halt import StorageErrorKind
 from orbit.agent.domain.usage import UsageFetch
+from orbit.agent.domain.usage_totals import UsageRow, UsageTotalsData
 from orbit.agent.domain.verification import VerificationStep
 from orbit.protocol import (
     Event,
@@ -440,4 +442,20 @@ class SessionStore(EventLog, Protocol):
     async def save_review_count(self, count: int) -> None:
         """Save ``count`` as the commits since the last super review; raises
         :class:`StoreFailed`, a :class:`StorageFailed` when the database failed, when it can't."""
+        ...
+
+
+class UsageLedger(Protocol):
+    """Where each finished turn's usage is recorded, across the workspaces, and added up."""
+
+    async def record(self, row: UsageRow) -> None:
+        """Record ``row``; raises :class:`StoreFailed`, a :class:`StorageFailed` when the
+        database failed, when it can't."""
+        ...
+
+    async def totals(self, today_start: datetime) -> UsageTotalsData:
+        """The totals per workspace and in all: today's, of the rows at or after
+        ``today_start``, and lifetime, of every row plus what sessions spent before turns were
+        recorded, as :func:`usage_totals` adds them up. Raises :class:`ReadFailed` when they
+        can't be read."""
         ...

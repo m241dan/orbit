@@ -731,8 +731,8 @@ miss writes still in its `-wal` file, or catch one half done. To restore, stop e
 state directory, replace `orbit.db` with the backup, and start orbit again.
 
 `orbit db forget PATH` deletes everything orbit keeps of the workspace at `PATH` (or with the id
-`PATH`): its saved sessions and their events, its review count, its session locks in `locks/`, its
-fallback files, in the state directory and the repository, and its entry, so orbit starts afresh
+`PATH`): its saved sessions and their events, its review count, its turns' usage, its session
+locks in `locks/`, its fallback files, in the state directory and the repository, and its entry, so orbit starts afresh
 there next time; for a clone `orbit serve` made, it deletes the clone's directory too, and never a
 directory orbit didn't clone into. It says what it deleted, such as `Forgot /home/me/code/old:
 deleted 3 sessions and 0 fallback files.`, and takes `--state-dir` as `chat` does. It refuses,

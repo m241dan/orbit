@@ -229,6 +229,7 @@ def _host_maker(
             owner=backend.owner,
             lock=backend.lock,
             managed=opened.managed,
+            ledger=opened.store.ledger,
         )
 
     return make

@@ -11,6 +11,7 @@ class FailedWrite(StrEnum):
     EVENT_LOG = "the event log"
     SESSION_RECORD = "the session record"
     REVIEW_COUNT = "the review count"
+    USAGE = "the turns' usage"
 
 
 class StorageErrorKind(StrEnum):

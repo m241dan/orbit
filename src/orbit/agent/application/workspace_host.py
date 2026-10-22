@@ -36,6 +36,7 @@ from orbit.agent.application.ports import (
     RepositoryLock,
     SessionStore,
     StoreFailed,
+    UsageLedger,
 )
 from orbit.agent.application.proposals import FrontendReview
 from orbit.agent.application.recovery import RecoveryFailed
@@ -57,6 +58,7 @@ from orbit.agent.application.takeover import (
     Takeover,
 )
 from orbit.agent.application.tasks import Tasks
+from orbit.agent.application.usage_recorder import UsageRecorder
 from orbit.agent.application.verifier import Verification, Verifier
 from orbit.agent.application.views import SessionViews, ViewParts
 from orbit.agent.application.work_commands import (
@@ -102,6 +104,7 @@ from orbit.protocol import (
     TakeOwnership,
     TaskSpec,
     TurnFinished,
+    Usage,
     UsageChanged,
     WorkspaceEntry,
 )
@@ -197,7 +200,9 @@ class WorkspaceHost:
     The session open here is saved in ``store``, if there is one, once it's used, and its
     events are kept in the store's log, ``seq`` counting on from the highest there, with their
     text fields cut and each session's log trimmed as the ``storage`` settings say; ``clock``
-    tells the time, ``new_id`` makes its id and ``name`` names it (by the time, if none). The
+    tells the time, ``new_id`` makes its id and ``name`` names it (by the time, if none). Each
+    of its agents' turns that ends with usage is recorded in the ``ledger``, if there is one,
+    in the background, with the session, the agent's role and model, and the time. The
     user can open another saved session, or a new one, in its place: one opened has its saved
     settings, but for those ``pinned``, by field name, which keep the ``settings`` given here.
     With ``pick_session``, the user picks a saved session from their frontend's picker; until
@@ -256,6 +261,7 @@ class WorkspaceHost:
         lock_retry: float = RETRY_SECONDS,
         lock_declined_retry: float = DECLINED_RETRY_SECONDS,
         managed: bool = False,
+        ledger: UsageLedger | None = None,
     ) -> None:
         self.owned: Callable[[], None] = lambda: None
         # The usage limits fetched last, which the control plane serving this host knows.
@@ -285,6 +291,7 @@ class WorkspaceHost:
         self._keeper = SessionKeeper(store, self._events.put, self._halt, new_sessions)
         self._keeper.rename(name)
         self._review_count = ReviewCount(store, self._halt, self._events.put)
+        self._usage = UsageRecorder(ledger, self._halt, self._events.put, clock)
         self._count_loader = Background("review count", self._events.put)
         self._tasks = Tasks(TaskBoard(), self._events.put, self._save)
         self._board = self._tasks.board
@@ -330,7 +337,10 @@ class WorkspaceHost:
         if record is not None:
             return FailedWrite.SESSION_RECORD, record
         count = await self._review_count.retry()
-        return None if count is None else (FailedWrite.REVIEW_COUNT, count)
+        if count is not None:
+            return FailedWrite.REVIEW_COUNT, count
+        usage = await self._usage.retry()
+        return None if usage is None else (FailedWrite.USAGE, usage)
 
     async def _resume_log(self) -> Failure | None:
         """Append to the event log again, publishing a ``LogGap`` for each span of events that
@@ -757,11 +767,21 @@ class WorkspaceHost:
 
     async def _publish_agents(self, event: Event) -> None:
         """Publish ``event``, from the agents; one that ends a turn adds what the turn cost to
-        what the session spent. Publishing never suspends, so a turn is not cancelled between
-        its TurnFinished and its own bookkeeping, which saves the session after it."""
+        what the session spent, and records it in the background. Publishing never suspends,
+        so a turn is not cancelled between its TurnFinished and its own bookkeeping, which saves
+        the session after it."""
         if isinstance(event, TurnFinished) and event.usage is not None:
             self._switcher.spent += event.usage
+            self._record_usage(event.agent_id, event.usage)
         await self._events.put(event)
+
+    def _record_usage(self, agent_id: str | None, usage: Usage) -> None:
+        """Record ``usage``, what a turn of agent ``agent_id`` cost, unless that agent wasn't
+        launched."""
+        assert self._desk is not None, "Only agents publish turns."
+        launch = self._desk.launched(agent_id)
+        if launch is not None:
+            self._usage.record(self._workspace_id, self._keeper.id, launch, usage)
 
     def _step_names(self) -> tuple[str, ...]:
         """The names of the steps verifying tasks now; none without verification."""
@@ -772,8 +792,9 @@ class WorkspaceHost:
         the super review count, then the work, as :meth:`_stop_work` does: the review lane and
         the startup check, so that nothing wakes the work lane, then the work in progress, which
         stops its agent, and the planner's turn; then stop the retired planners, the planner,
-        the agents' host, the saving of the session, releasing its lock, and the writing of its
-        events to the store, then end every connection's stream, in that order. Each is stopped
+        the agents' host, the recording of turns' usage, the saving of the session, releasing
+        its lock, and the writing of its events to the store, then end every connection's
+        stream, in that order. Each is stopped
         even if one before it fails or the close is cancelled, as :func:`close_all` does."""
         self._closing = True
         await close_all(self._stops())
@@ -790,7 +811,7 @@ class WorkspaceHost:
         stops += [self._seat.close_retired, self._seat.close]
         if self._desk is not None:
             stops.append(self._desk.stop)
-        stops += [self._keeper.close, self._events.close, self._end_connections]
+        stops += [self._usage.close, self._keeper.close, self._events.close, self._end_connections]
         return stops
 
     async def _end_connections(self) -> None:

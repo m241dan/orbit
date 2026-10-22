@@ -4,9 +4,9 @@ a view of it for each workspace.
 The database is ``orbit.db`` in the state directory, in WAL mode. One connection serves it, owned
 by a single thread: every database call runs there, a statement or a transaction at a time, so a
 caller that's cancelled while awaiting one never leaves the connection mid-transaction. The schema
-and opening it are :mod:`sqlite_schema`'s, the events' log's statements :mod:`sqlite_log`'s, and
-copying it to a backup :mod:`sqlite_backup`'s; this module holds the sessions' and review counts'
-statements, and runs them all on the database's thread.
+and opening it are :mod:`sqlite_schema`'s, the events' log's statements :mod:`sqlite_log`'s, the
+turns' usage :mod:`sqlite_usage`'s, and copying it to a backup :mod:`sqlite_backup`'s; this module
+holds the sessions' and review counts' statements, and runs them all on the database's thread.
 
 Session locks are :class:`SessionLocks` lock files in ``locks/<workspace id>`` in the state
 directory, so that a crash leaves no stale lock behind.
@@ -20,13 +20,15 @@ from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Self
 
 from orbit.agent.application.ports import ReadFailed, StorageFailed, StoredSession
 from orbit.agent.domain.replay import LogBounds
 from orbit.agent.domain.sessions import SessionRecord, Unreadable, parse_record, record_json
-from orbit.agent.external import sqlite_log
+from orbit.agent.domain.usage_totals import UsageRow, UsageTotalsData
+from orbit.agent.external import sqlite_log, sqlite_usage
 from orbit.agent.external.session_locks import SessionLocks, check_session_id
 from orbit.agent.external.sqlite_backup import copy_to, is_database_file
 from orbit.agent.external.sqlite_errors import error_kind
@@ -74,7 +76,8 @@ def _remove_tree(directory: Path) -> None:
 class SqliteStore:
     """The state directory's database, shared by every workspace an orbit serves: each
     workspace's saved sessions, events' log and review count are reached through its
-    :meth:`workspace_view`, and the workspaces themselves through a ``WorkspaceRegistry``.
+    :meth:`workspace_view`, and the workspaces themselves through a ``WorkspaceRegistry``. It's
+    also the :class:`UsageLedger` of every workspace's turns.
 
     Each stands for one orbit: the session locks it holds are its own, even against another
     ``SqliteStore`` in the same process. Open one with :meth:`open` and :meth:`close` it when
@@ -284,6 +287,14 @@ class SqliteStore:
         message = "Couldn't save the review count to"
         await self._or_raise(message, self._save_review_count, workspace, count, write=True)
 
+    async def record(self, row: UsageRow) -> None:
+        message = f"Couldn't record the usage of a turn in the session {row.session_id} in"
+        await self._or_raise(message, self._log(sqlite_usage.record), row, write=True)
+
+    async def totals(self, today_start: datetime) -> UsageTotalsData:
+        message = "Couldn't add up the usage in"
+        return await self._or_raise(message, self._log(sqlite_usage.totals), today_start)
+
     async def insert_new(
         self,
         workspace: str,
@@ -367,8 +378,8 @@ class SqliteStore:
         return self._connection
 
     def _log[*A, T](self, function: Callable[[sqlite3.Connection, *A], T]) -> Callable[[*A], T]:
-        """``function`` of :mod:`sqlite_log`, given the open connection; only on the database's
-        thread."""
+        """``function`` of :mod:`sqlite_log` or :mod:`sqlite_usage`, given the open connection;
+        only on the database's thread."""
         return lambda *args: function(self._db, *args)
 
     def _locks_of(self, workspace: str) -> SessionLocks:
@@ -542,6 +553,11 @@ class WorkspaceStore:
     def workspace_id(self) -> str:
         """The id of the workspace this is a view of."""
         return self._id
+
+    @property
+    def ledger(self) -> SqliteStore:
+        """Where turns' usage is recorded: the store, shared by every workspace."""
+        return self._store
 
     async def save(self, record: SessionRecord) -> None:
         await self._store.save(self._id, record)

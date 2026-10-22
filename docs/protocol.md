@@ -257,8 +257,8 @@ a later `orbit serve`: `Can't remove /home/me/src/orbit, which is still served: 
 
 `RemoveWorkspace(workspace, purge=true)` (`purge` defaults to `false`) removes the workspace in
 the same way, under the same refusals, then deletes everything orbit keeps of it: its sessions,
-their events and logs, its review count, its session locks, its fallback files and its entry in
-the registry, so adding it again starts afresh, and, for a clone orbit made (see `url` above), the
+their events and logs, its review count, its turns' usage, its session locks, its fallback files
+and its entry in the registry, so adding it again starts afresh, and, for a clone orbit made (see `url` above), the
 clone's directory. A directory orbit didn't clone into is never deleted. Before anything is
 removed, a clone is checked for work that exists nowhere else: uncommitted changes, stashes and
 commits on any branch that none of its remotes has. If it holds any, the purge is refused with
@@ -391,7 +391,7 @@ conversation, one request at a time.
 
 While the session is halted because a write to the store failed (see `storage_failed` under
 [Codes](#codes)), `ResumeStorage()` retries the writes that failed: the session record as it is
-now, the review count and appending to the event log. When they work, the events parked in the
+now, the review count, the turns' usage not yet recorded and appending to the event log. When they work, the events parked in the
 fallback file and those still queued are appended in `seq` order, skipping any the log holds
 already, the fallback file is deleted, the halt is lifted (commands are accepted again, and
 later Snapshots' `storage_halt` is null) and the command is answered with `CommandAccepted`. For
@@ -577,6 +577,6 @@ Errors, in `ErrorOccurred`:
 | `timed_out` | An agent ran out of time. |
 | `git_failed` | A git command or a worktree failed, or cloning a repository `AddWorkspace` named by its URL did. |
 | `save_failed` | Saving the session failed. |
-| `storage_failed` | A write to the store (the event log, the session record or the review count) failed, so the session halted: its agents, the planner's turn and reviews are cancelled. The message explains which write failed, the database and its error, the likely cause and its fix, the unsaved events' `seq`s and the fallback file they were written to, and how to resume. |
+| `storage_failed` | A write to the store (the event log, the session record, the review count or the turns' usage) failed, so the session halted: its agents, the planner's turn and reviews are cancelled. The message explains which write failed, the database and its error, the likely cause and its fix, the unsaved events' `seq`s and the fallback file they were written to, and how to resume. |
 | `checks_exhausted` | A check still failed after every fix attempt. |
 | `internal` | Orbit itself failed unexpectedly. |

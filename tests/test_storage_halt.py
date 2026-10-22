@@ -49,6 +49,7 @@ from orbit.protocol import (
     SendMessage,
     TaskSpec,
     TurnEndReason,
+    Usage,
     decode_event,
 )
 from tests.agent_fakes import (
@@ -56,11 +57,13 @@ from tests.agent_fakes import (
     START,
     Call,
     FakeFallback,
+    FakeLedger,
     FakeStore,
     FakeTree,
     GatedLog,
     Script,
     Steps,
+    chats,
     checked,
     claims_done,
     desk_of,
@@ -681,6 +684,24 @@ async def test_resuming_while_the_review_count_still_fails_names_it() -> None:
 
     refusal = (await outcome_of(session, ResumeStorage()))[-1].payload
     assert isinstance(refusal, CommandRefused) and "saving the review count" in refusal.message
+    await session.close()
+
+
+async def test_resuming_while_the_turns_usage_still_fails_names_it() -> None:
+    ledger = FakeLedger()
+    ledger.failure = "usage still full"
+    session, _, launcher = session_for(store=FakeStore(), fallback=FakeFallback(), ledger=ledger)
+    launcher.planner_turns = [chats]
+    launcher.planner_usages = [Usage(input_tokens=10)]
+    await send(session, SendMessage(agent=PLANNER, text="Plan it."))
+    error = await halt_error(session)
+    assert "saving the turns' usage" in error.message
+
+    refusal = (await outcome_of(session, ResumeStorage()))[-1].payload
+    assert isinstance(refusal, CommandRefused) and "saving the turns' usage" in refusal.message
+    ledger.failure = None
+    assert (await outcome_of(session, ResumeStorage()))[-1].payload == ACCEPTED
+    assert [row.usage for row in ledger.rows] == [Usage(input_tokens=10)]
     await session.close()
 
 

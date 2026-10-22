@@ -74,6 +74,23 @@ MIGRATIONS: tuple[tuple[str, ...], ...] = (
         # Whether orbit cloned the workspace's repository into its clone directory.
         "ALTER TABLE workspaces ADD COLUMN managed INTEGER NOT NULL DEFAULT 0",
     ),
+    (
+        # What each finished turn cost, and when it finished, as an ISO UTC time; the model is
+        # null for the backend's default.
+        """CREATE TABLE usage (
+            workspace_id TEXT NOT NULL REFERENCES workspaces (id),
+            session_id TEXT NOT NULL,
+            role TEXT NOT NULL,
+            model TEXT,
+            input_tokens INTEGER NOT NULL,
+            output_tokens INTEGER NOT NULL,
+            cache_creation_input_tokens INTEGER NOT NULL,
+            cache_read_input_tokens INTEGER NOT NULL,
+            cost_usd REAL NOT NULL,
+            at TEXT NOT NULL
+        )""",
+        "CREATE INDEX usage_at ON usage (at)",
+    ),
 )
 
 

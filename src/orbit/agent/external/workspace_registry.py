@@ -126,6 +126,7 @@ _PURGES = (
     "DELETE FROM logs WHERE workspace_id = ?",
     "DELETE FROM sessions WHERE workspace_id = ?",
     "DELETE FROM reviews WHERE workspace_id = ?",
+    "DELETE FROM usage WHERE workspace_id = ?",
     "DELETE FROM workspaces WHERE id = ?",
 )
 """What deletes a workspace's records, its row, with its ``forgotten_seq``, last."""
