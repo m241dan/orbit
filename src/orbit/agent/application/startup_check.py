@@ -8,6 +8,7 @@ verification takes the panel over, and in the agents pane as an agent that can b
 
 import asyncio
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 
 from orbit.agent.application.lanes import Background
 from orbit.agent.application.ports import CoderTree, Publish
@@ -38,23 +39,32 @@ AddFix = Callable[[VerificationStep, str], Awaitable[None]]
 """Adds a draft task to fix the step that failed, given its output."""
 
 
+@dataclass(frozen=True)
+class CheckSite:
+    """Where the check runs: in a snapshot of ``tree``'s base, or without a tree in place, in
+    ``root``, the workspace's directory."""
+
+    tree: CoderTree | None
+    root: str
+
+
 class StartupCheck:
-    """Runs ``verification``'s steps once, in a snapshot of ``tree``'s base set up with its
-    setup (or in place, in :attr:`root`, without a tree), publishing progress and the result. A
-    failure goes to ``add_fix``."""
+    """Runs ``verification``'s steps once at ``site``, in a snapshot set up with its tree's
+    setup when it has a tree, publishing progress and the result. A failure goes to
+    ``add_fix``."""
 
     def __init__(
         self,
         verification: Verification,
-        tree: CoderTree | None,
+        site: CheckSite,
         publish: Publish,
         add_fix: AddFix,
     ) -> None:
         self._verification = verification
-        self._tree = tree
+        self._tree = site.tree
+        self._root = site.root
         self._publish = publish
         self._add_fix = add_fix
-        self.root = "."  # The workspace's directory, where the steps run without a tree.
         self._progress = StepProgress.of(step.name for step in verification.steps)
         self._shown = True  # Whether it still has the verification panel.
         self._started = False
@@ -125,7 +135,7 @@ class StartupCheck:
 
     async def _in_snapshot(self) -> Failure | None:
         if self._tree is None:
-            return await self._verify(self.root)
+            return await self._verify(self._root)
         root = await self._tree.snapshot(BASE)
         try:
             return await self._verify(root)

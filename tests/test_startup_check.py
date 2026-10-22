@@ -7,7 +7,7 @@ import pytest
 
 from orbit.agent import Setup, Verification, VerificationStep, WorkspaceHost
 from orbit.agent.application import workspace_host as session_module
-from orbit.agent.application.startup_check import CANCELLED_NOTE, StartupCheck
+from orbit.agent.application.startup_check import CANCELLED_NOTE, CheckSite, StartupCheck
 from orbit.protocol import (
     GIT_FAILED,
     INTERNAL,
@@ -235,7 +235,7 @@ async def test_closing_the_session_stops_it() -> None:
 
 
 async def test_closing_before_it_starts_is_harmless() -> None:
-    check = StartupCheck(checked(Steps()), None, asyncio.Queue[Event]().put, None)  # type: ignore[arg-type]
+    check = StartupCheck(checked(Steps()), CheckSite(None, "."), asyncio.Queue[Event]().put, None)  # type: ignore[arg-type]
     await check.close()
     assert not check.running
 

@@ -38,10 +38,10 @@ from orbit.agent.application.ports import (
 from orbit.agent.application.proposals import FrontendReview
 from orbit.agent.application.recovery import RecoveryFailed
 from orbit.agent.application.review_count import ReviewCount
-from orbit.agent.application.review_lane import ReviewLane
+from orbit.agent.application.review_lane import ReviewHooks, ReviewLane
 from orbit.agent.application.session_state import SessionStates, StateParts
 from orbit.agent.application.settings import SessionSettings
-from orbit.agent.application.startup_check import StartupCheck
+from orbit.agent.application.startup_check import CheckSite, StartupCheck
 from orbit.agent.application.storage_halt import Failure, HaltHooks, StorageHalt
 from orbit.agent.application.switcher import (
     SessionCommand,
@@ -63,7 +63,7 @@ from orbit.agent.application.work_commands import (
     WorkCommand,
     WorkCommands,
 )
-from orbit.agent.application.work_lane import WorkLane
+from orbit.agent.application.work_lane import Beside, WorkLane
 from orbit.agent.application.work_turns import WorkParts, WorkTurns
 from orbit.agent.domain.activity import Activity
 from orbit.agent.domain.board import TaskBoard
@@ -438,9 +438,8 @@ class WorkspaceHost:
     def _work_lane(self) -> WorkLane | None:
         if self._desk is None:
             return None
-        lane = WorkLane(self._desk, self._tasks, self._verifier, self._lane)
-        lane.startup = self._startup
-        return lane
+        beside = Beside(self._lane, self._startup)
+        return WorkLane(self._desk, self._tasks, self._verifier, beside)
 
     def _startup_check(
         self, verification: Verification | None, wanted: bool
@@ -448,11 +447,13 @@ class WorkspaceHost:
         """The check to run at startup, if ``wanted``; none without steps to run."""
         if not wanted or verification is None or not verification.steps:
             return None
-        tree = self._desk.agents.tree if self._desk else None
-        check = StartupCheck(verification, tree, self._events.put, self._add_startup_fix)
-        if self._desk is not None:
-            check.root = self._desk.agents.root
-        return check
+        desk = self._desk
+        site = (
+            CheckSite(desk.agents.tree, desk.agents.root)
+            if desk is not None
+            else CheckSite(None, ".")
+        )
+        return StartupCheck(verification, site, self._events.put, self._add_startup_fix)
 
     async def _add_startup_fix(self, step: VerificationStep, output: str) -> None:
         """Add a draft task to fix ``step``, which failed at startup with ``output``, to the
@@ -695,11 +696,14 @@ class WorkspaceHost:
         if desk is None or not desk.agents.review or desk.agents.tree is None:
             return None
         planner = ReviewPlanner(desk.agents.review_limits)
-        lane = ReviewLane(desk, self._tasks, planner, lambda: self._turns.wake())
-        lane.changed = self._reviews_changed
-        lane.read_only = lambda: self._takeover.read_only
-        lane.halted = lambda: self._halt.halted
-        desk.suggest = lane.suggest
+        hooks = ReviewHooks(
+            lambda: self._turns.wake(),
+            self._reviews_changed,
+            lambda: self._takeover.read_only,
+            lambda: self._halt.halted,
+        )
+        lane = ReviewLane(desk, self._tasks, planner, hooks)
+        desk.suggest = lane.suggest  # Set here, as the lane needs the desk it takes calls from.
         return lane
 
     async def _reviews_changed(self) -> None:

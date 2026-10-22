@@ -7,6 +7,7 @@ review is due and stops reviews generating work forever.
 
 import asyncio
 from collections.abc import Awaitable, Callable, Collection
+from dataclasses import dataclass
 from functools import partial
 
 from orbit.agent.application.agent_run import AgentRun
@@ -14,7 +15,7 @@ from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.lanes import Background
 from orbit.agent.application.outcomes import Outcome, UserStop, cancelling, run_task_to_end
 from orbit.agent.application.ports import CoderTree, Reply
-from orbit.agent.application.tasks import Changed, Tasks, unchanged
+from orbit.agent.application.tasks import Changed, Tasks
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.endings import REVIEW_STOPPED_BY_YOU
 from orbit.agent.domain.reviews import (
@@ -39,20 +40,27 @@ from orbit.protocol import (
 )
 
 
-class ReviewLane:
-    """Queues and runs reviews of ``tasks``' tasks through ``desk``'s agents.
+@dataclass(frozen=True)
+class ReviewHooks:
+    """How the review lane reaches the rest of the session.
 
     ``wake_work`` asks the work lane to run the suggestions a review queued, ``changed`` is
-    called after the lane's state may have changed, and ``halted`` tells whether the session is
-    halted, when no review starts.
+    called after the lane's state may have changed, and ``read_only`` and ``halted`` tell
+    whether another orbit owns the repository or the session is halted, when no review starts.
     """
 
+    wake_work: Callable[[], Awaitable[None]]
+    changed: Changed
+    read_only: Callable[[], bool]
+    halted: Callable[[], bool]
+
+
+class ReviewLane:
+    """Queues and runs reviews of ``tasks``' tasks through ``desk``'s agents, reaching the rest
+    of the session through ``hooks``."""
+
     def __init__(
-        self,
-        desk: AgentDesk,
-        tasks: Tasks,
-        planner: ReviewPlanner,
-        wake_work: Callable[[], Awaitable[None]],
+        self, desk: AgentDesk, tasks: Tasks, planner: ReviewPlanner, hooks: ReviewHooks
     ) -> None:
         assert desk.agents.tree is not None  # Reviews read commits.
         self._desk = desk
@@ -60,11 +68,7 @@ class ReviewLane:
         self._tasks = tasks
         self._board = tasks.board
         self.planner = planner
-        self._wake_work = wake_work
-        self.changed: Changed = unchanged
-        # While another orbit owns the repository, run no reviews.
-        self.read_only: Callable[[], bool] = lambda: False
-        self.halted: Callable[[], bool] = lambda: False
+        self._hooks = hooks
         self._publish = desk.publish
         self._jobs: dict[str, ReviewJob] = {}  # Review task id -> what it reviews.
         self._batches: dict[str, str] = {}  # Review task id -> the batch it suggests into.
@@ -116,7 +120,7 @@ class ReviewLane:
             batch = self._batches.get(task_id)
             if batch is not None and batch in self.planner.open_batches:
                 await self._queue_quietly(self.planner.review_ended(batch))
-                await self.changed()
+                await self._hooks.changed()
         self._status = self.status
 
     async def landed(self, task_id: str, commit: str) -> None:
@@ -124,7 +128,7 @@ class ReviewLane:
         await self._queue(self.planner.landed(self._board.get(task_id), commit))
         if self.planner.count():
             await self._queue(self.planner.super_review(commit))
-        await self.changed()  # The count changed even if no review is due.
+        await self._hooks.changed()  # The count changed even if no review is due.
 
     async def super_review(self) -> None:
         """Queue a super review of the codebase as the user has it: the base's latest commit.
@@ -194,7 +198,7 @@ class ReviewLane:
     def kick(self) -> None:
         """Run the reviews waiting, if they aren't being run already, unless this orbit is
         read-only or the session is halted; those queued meanwhile wait on the board."""
-        if self.read_only() or self.halted() or self._background.running:
+        if self._hooks.read_only() or self._hooks.halted() or self._background.running:
             return
         self._background.start(self._run_reviews())
 
@@ -207,11 +211,11 @@ class ReviewLane:
         diff = None if job is None else await self._diff(job)
         if job is None or diff is None:  # No review is due, or its diff can't be read.
             await self._publish_status()
-            await self.changed()
+            await self._hooks.changed()
             return
         await self._add(job, diff)
         await self._publish_status()
-        await self.changed()
+        await self._hooks.changed()
         self.kick()
 
     async def _queue_quietly(self, job: ReviewJob | None) -> None:
@@ -326,4 +330,4 @@ class ReviewLane:
             return
         await self._queue(self.planner.review_ended(batch))
         if batch in self.planner.open_batches:
-            await self._wake_work()
+            await self._hooks.wake_work()

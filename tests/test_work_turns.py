@@ -10,7 +10,7 @@ from orbit.agent import Agents
 from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.application.verifier import Verifier
-from orbit.agent.application.work_lane import WorkLane
+from orbit.agent.application.work_lane import Beside, WorkLane
 from orbit.agent.application.work_turns import (
     CONFIGURING_NOTE,
     NO_AGENTS_MESSAGE,
@@ -87,7 +87,7 @@ def lane_parts(
     agents = Agents(host, launcher, lambda: "token-1", ROLES)
     desk = AgentDesk(agents, publish)
     verifier = Verifier(verified(Steps()), tasks, publish) if verifying else None
-    work = StopsCounted(desk, tasks, verifier, None)
+    work = StopsCounted(desk, tasks, verifier, Beside())
     return WorkParts(work, None, tasks, verifier, desk, posted.append, halted)
 
 

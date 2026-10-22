@@ -8,6 +8,7 @@ and at a fix that ends in error, which must run before anything puts its work as
 
 import asyncio
 from collections.abc import Collection
+from dataclasses import dataclass
 from functools import partial
 from typing import Literal
 
@@ -43,10 +44,19 @@ RunEnd = Literal["finished", "cancelled", "limited", "fix_failed"]
 limit, or a fix ended in error."""
 
 
+@dataclass(frozen=True)
+class Beside:
+    """What runs beside the work lane: the review lane, if any, and the startup check, if any,
+    whose panel each task takes over."""
+
+    review: ReviewLane | None = None
+    startup: StartupCheck | None = None
+
+
 class WorkLane:
     """Runs ``tasks``' tasks through ``desk``'s agents, checked by ``verifier`` if any.
 
-    Reviews are left to ``review``, when there's a review lane. :meth:`run` is meant to run as
+    Reviews are left to ``beside``'s review lane, when there's one. :meth:`run` is meant to run as
     a task of its own: cancelling it cancels the task running, and the cancel goes on once that
     task has ended. The user's stop, :meth:`stopped_by_user`, cancels only the agent's run, and
     the run ends by itself.
@@ -57,15 +67,15 @@ class WorkLane:
         desk: AgentDesk,
         tasks: Tasks,
         verifier: Verifier | None,
-        review: ReviewLane | None,
+        beside: Beside,
     ) -> None:
         self._desk = desk
         self._tasks = tasks
         self._board = tasks.board
         self._verifier = verifier
         self._publish = desk.publish
-        self._review = review
-        self.startup: StartupCheck | None = None  # Whose panel each task takes over.
+        self._review = beside.review
+        self._startup = beside.startup
         self._landed: dict[str, str] = {}  # Task id -> the commit it landed, until reported.
         self._starts: dict[str, str] = {}  # Task id -> the tree's head when it started.
         # Fixes queued per step along each chain, kept across runs so a restart can't reset
@@ -186,8 +196,8 @@ class WorkLane:
     async def _start(self, task_id: str) -> None:
         """Say task ``task_id``, marked running, started, with every verification step pending
         again."""
-        if self.startup is not None:
-            self.startup.release_panel()
+        if self._startup is not None:
+            self._startup.release_panel()
         if self._verifier is not None:
             await self._verifier.reset()
         await self._publish(TaskStarted(task_id=task_id))

@@ -9,7 +9,7 @@ from orbit.agent.application.ports import Reply
 from orbit.agent.application.startup_check import AGENT_ID as STARTUP_AGENT
 from orbit.agent.application.startup_check import ROLE as STARTUP_ROLE
 from orbit.agent.application.startup_check import TITLE as STARTUP_TITLE
-from orbit.agent.application.startup_check import StartupCheck
+from orbit.agent.application.startup_check import CheckSite, StartupCheck
 from orbit.agent.domain.usage import UsageReport
 from orbit.protocol import (
     CONFIGURATOR,
@@ -296,7 +296,7 @@ async def test_the_startup_check_is_an_agent_only_between_its_start_and_exit() -
     async def add_fix(step: VerificationStep, output: str) -> None:
         pass
 
-    check = StartupCheck(Verification((STEP,), Steps(True)), None, publish, add_fix)
+    check = StartupCheck(Verification((STEP,), Steps(True)), CheckSite(None, "."), publish, add_fix)
     check.start()
     while check.running:
         await asyncio.sleep(0)
