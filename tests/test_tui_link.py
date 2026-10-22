@@ -114,6 +114,22 @@ async def test_quitting_from_the_lost_modal_exits() -> None:
     assert app.return_code == 0
 
 
+async def test_j_and_k_move_the_highlight_in_the_lost_modal() -> None:
+    app, _, link = linked()
+    async with app.run_test() as pilot:
+        await link.move(pilot, lost_long_ago())
+        shown = modal(app)
+        assert shown is not None
+        options = shown.query_one(OptionList)
+        await pilot.press("j")
+        assert options.highlighted == 1
+        await pilot.press("k")
+        assert options.highlighted == 0
+        await pilot.press("j", "enter")
+        await pilot.pause()
+    assert app.return_code == 0
+
+
 async def test_reconnecting_in_time_closes_the_modal_and_stops_waiting() -> None:
     app, _, link = linked()
     async with app.run_test() as pilot:
@@ -331,3 +347,17 @@ async def test_a_final_notice_replaces_the_modal_asking_and_quits_once_closed() 
         await pilot.pause()
         assert app.quits == 1
         assert app.link_screens() == []
+
+
+async def test_a_link_modal_closed_before_it_mounts_leaves_the_final_notice() -> None:
+    app = LinkApp()
+    async with app.run_test() as pilot:
+        app.host.follow(Stopped(URL), NOW)
+        app.host.follow(TokenRefused("Refused."), NOW)  # In the same tick, before it mounts.
+        await pilot.pause()
+        [final] = app.link_screens()
+        assert final.choices == ("Quit",) and app.host.shown is final
+        assert final.query_one(OptionList).highlighted == 0
+        await pilot.press("enter")
+        await pilot.pause()
+        assert app.quits == 1
