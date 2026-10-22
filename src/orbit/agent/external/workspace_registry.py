@@ -23,6 +23,17 @@ class Registered:
     note: str | None = None
 
 
+@dataclass(frozen=True)
+class Workspace:
+    """A workspace registered: its ``id``, its ``path``, whether a server ``served`` it last, and
+    whether it's ``managed``, a clone orbit made at ``path``."""
+
+    id: str
+    path: str
+    served: bool
+    managed: bool
+
+
 def register(connection: sqlite3.Connection, path: Path, fingerprint: str | None) -> Registered:
     """The workspace at the resolved ``path`` in ``connection``: found by its path; else the one
     workspace whose repository, matching ``fingerprint``, has gone from its path, moved to
@@ -96,6 +107,42 @@ def _set_managed(connection: sqlite3.Connection, workspace_id: str) -> None:
     connection.execute("UPDATE workspaces SET managed = 1 WHERE id = ?", (workspace_id,))
 
 
+_BY_ID = "SELECT id, path, served, managed FROM workspaces WHERE id = ?"
+_BY_PATH = "SELECT id, path, served, managed FROM workspaces WHERE path = ?"
+
+
+def _found(connection: sqlite3.Connection, query: str, key: str) -> Workspace | None:
+    """The workspace in ``connection`` that ``query``, either of :data:`_BY_ID` and
+    :data:`_BY_PATH`, finds for ``key``, if there is one."""
+    found = connection.execute(query, (key,)).fetchone()
+    if found is None:
+        return None
+    workspace_id, path, served, managed = found
+    return Workspace(str(workspace_id), str(path), bool(served), bool(managed))
+
+
+_PURGES = (
+    "DELETE FROM events WHERE workspace_id = ?",
+    "DELETE FROM logs WHERE workspace_id = ?",
+    "DELETE FROM sessions WHERE workspace_id = ?",
+    "DELETE FROM reviews WHERE workspace_id = ?",
+    "DELETE FROM workspaces WHERE id = ?",
+)
+"""What deletes a workspace's records, its row, with its ``forgotten_seq``, last."""
+
+
+def _purge(connection: sqlite3.Connection, workspace_id: str) -> int:
+    """Delete the records of the workspace ``workspace_id`` in ``connection``, in one
+    transaction; returns how many sessions it had."""
+    with transaction(connection):
+        (sessions,) = connection.execute(
+            "SELECT count(*) FROM sessions WHERE workspace_id = ?", (workspace_id,)
+        ).fetchone()
+        for statement in _PURGES:
+            connection.execute(statement, (workspace_id,))
+    return int(sessions)
+
+
 def _path(connection: sqlite3.Connection, workspace_id: str) -> str | None:
     row = connection.execute("SELECT path FROM workspaces WHERE id = ?", (workspace_id,))
     found = row.fetchone()
@@ -145,3 +192,27 @@ class WorkspaceRegistry:
         """The path of the workspace ``workspace_id``; ``None`` if it isn't registered."""
         message = f"Couldn't look up the workspace {workspace_id} in"
         return await self._store.run(message, lambda connection: _path(connection, workspace_id))
+
+    async def workspace(self, workspace_id: str) -> Workspace | None:
+        """The workspace ``workspace_id``; ``None`` if it isn't registered."""
+        message = f"Couldn't look up the workspace {workspace_id} in"
+        return await self._store.run(
+            message, lambda connection: _found(connection, _BY_ID, workspace_id)
+        )
+
+    async def find(self, key: str) -> Workspace | None:
+        """The workspace whose id is ``key``, else the one at the path ``key``, resolved;
+        ``None`` if there's neither."""
+        found = await self.workspace(key)
+        if found is not None:
+            return found
+        path = await asyncio.to_thread(lambda: str(Path(key).resolve()))
+        message = f"Couldn't look up the workspace {key} in"
+        return await self._store.run(message, lambda connection: _found(connection, _BY_PATH, path))
+
+    async def purge(self, workspace_id: str) -> int:
+        """Delete the records of the workspace ``workspace_id``, its sessions, their events and
+        logs, its review count and its registration, in one transaction; returns how many
+        sessions it had."""
+        message = f"Couldn't delete the workspace {workspace_id} from"
+        return await self._store.run(message, lambda connection: _purge(connection, workspace_id))

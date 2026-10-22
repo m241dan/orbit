@@ -43,6 +43,7 @@ uv run orbit chat --no-usage                   # don't show usage limits
 uv run orbit chat --profile /tmp/orbit-prof    # record what slows orbit down
 uv run orbit chat --state-dir /tmp/orbit-state # keep saved sessions somewhere else
 uv run orbit db backup ~/orbit-backup.db       # back up the saved sessions (--force replaces)
+uv run orbit db forget ~/code/old              # delete everything orbit keeps of a workspace
 uv run orbit serve --add . --add ~/code/other  # run the control plane on its own, serving both
 uv run orbit serve                             # serve the projects added before again
 uv run orbit serve --port 0                    # on a port the system chooses
@@ -713,6 +714,18 @@ it only once whole, so a backup that fails leaves `PATH` as it was. Copying `orb
 miss writes still in its `-wal` file, or catch one half done. To restore, stop every orbit using the
 state directory, replace `orbit.db` with the backup, and start orbit again.
 
+`orbit db forget PATH` deletes everything orbit keeps of the workspace at `PATH` (or with the id
+`PATH`): its saved sessions and their events, its review count, its session locks in `locks/`, its
+fallback files, in the state directory and the repository, and its entry, so orbit starts afresh
+there next time; for a clone `orbit serve` made, it deletes the clone's directory too, and never a
+directory orbit didn't clone into. It says what it deleted, such as `Forgot /home/me/code/old:
+deleted 3 sessions and 0 fallback files.`, and takes `--state-dir` as `chat` does. It refuses,
+with status 2 and deleting nothing, a path no workspace is registered at, a workspace the `orbit
+serve` running on the state directory serves (remove it there with `purge`, or stop the server),
+one whose lock another orbit holds (`Can't forget /home/me/code/old: an orbit chat, pid 4242 holds
+its lock.`), and a clone holding work that exists nowhere else, listing it, as a frontend's purge
+does.
+
 ### Storage failures
 
 When a write to the store fails, whether the event log, the session record (taking its lock on
@@ -999,6 +1012,16 @@ each in a directory named after the URL's last part without `.git` (`proj` for
 these workspaces as managed, clones it made. A clone that fails says git's message (`orbit serve
 --add` stops with status 2) and leaves nothing behind, and one still under way when the server
 stops is stopped and removed. The same URL can't be cloned twice at once.
+
+**Purging.** A frontend removing a workspace can have its records deleted too, with
+`RemoveWorkspace`'s `purge`: under the same refusals as removing, its sessions, their events, its
+review count, session locks, fallback files and registry entry go, so adding it again starts
+afresh, and so does a managed clone's directory. A directory orbit didn't clone into is never
+deleted. A clone holding work that exists nowhere else, uncommitted changes, stashes or commits on
+any branch its remote doesn't have, isn't purged: the refusal lists what would be lost (`1 commit
+on main not on its remote`), and nothing is removed until it's pushed or dropped. A workspace no
+server serves, such as one only a local `orbit chat` used, is purged with `orbit db forget` (see
+[Where orbit keeps things](#where-orbit-keeps-things)).
 
 Git clones as the server's account, with its credential helpers and SSH agent, and never
 prompts: `GIT_TERMINAL_PROMPT=0`, and SSH runs with `-o BatchMode=yes` added to any

@@ -111,7 +111,9 @@ class FakeSource:
     and the ``flags`` set, each waiting for ``flag_gate``, if given, and failing as
     ``unflag_fails`` says, if it does, when it's cleared. Each URL ``cloning`` is cloned to
     ``/clones/<its last part>``, reporting one step of progress, then waiting for
-    ``clone_gate``, if given, and failing as ``clone_fails`` says, if it does."""
+    ``clone_gate``, if given, and failing as ``clone_fails`` says, if it does. Purging a
+    workspace would lose what ``lost`` says, by id, failing as ``losses_fail`` says, if it
+    does; those ``purged`` are noted, failing as ``purge_fails`` says, if it does."""
 
     def __init__(
         self,
@@ -133,6 +135,10 @@ class FakeSource:
         self.flags: list[tuple[str, bool]] = []
         self.flag_gate: asyncio.Event | None = None
         self.unflag_fails: str | None = None
+        self.lost: dict[str, list[str]] = {}
+        self.losses_fail: str | None = None
+        self.purged: list[str] = []
+        self.purge_fails: str | None = None
 
     async def kind(self, path: str) -> PathKind:
         return self.kinds.get(path, PathKind.DIRECTORY)
@@ -175,6 +181,17 @@ class FakeSource:
     async def close(self, workspace_id: str) -> None:
         assert (workspace_id, False) in self.flags
         self.closed.append(workspace_id)
+
+    async def losses(self, workspace_id: str) -> list[str]:
+        if self.losses_fail is not None:
+            raise WorkspaceUnavailable(self.losses_fail, INTERNAL)
+        return self.lost.get(workspace_id, [])
+
+    async def purge(self, workspace_id: str) -> None:
+        assert workspace_id in self.closed
+        if self.purge_fails is not None:
+            raise WorkspaceUnavailable(self.purge_fails, INTERNAL)
+        self.purged.append(workspace_id)
 
 
 async def welcomed(plane: ControlPlane) -> SessionConnection:

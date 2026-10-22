@@ -1,6 +1,6 @@
 """Opening a workspace, locked, checked and configured off the event loop, then found or
 registered in the store; and the workspaces a server serves as frontends add and remove them,
-by their paths or as clones it makes, each opened so and flagged served."""
+by their paths or as clones it makes, each opened so and flagged served, and purged if asked."""
 
 import asyncio
 from collections.abc import Callable
@@ -27,6 +27,7 @@ from orbit.agent.external.sqlite_schema import StoreError
 from orbit.agent.external.sqlite_store import SqliteStore
 from orbit.agent.external.store_startup import OpenedStore, open_workspace_store
 from orbit.agent.external.workspace_lock import WorkspaceLock
+from orbit.agent.external.workspace_purge import PurgeRefused, purge_losses, purge_workspace
 from orbit.agent.external.workspace_registry import WorkspaceRegistry
 from orbit.protocol import INTERNAL, WorkspaceCloning
 
@@ -225,6 +226,26 @@ class ServedWorkspaces:
         """Stop serving the workspace ``workspace_id`` and let go of its lock, leaving its flag
         as it is."""
         self._locks.pop(workspace_id).close()
+
+    async def losses(self, workspace_id: str) -> list[str]:
+        """What purging the workspace ``workspace_id`` would lose, as :func:`purge_losses`
+        says. Raises :class:`WorkspaceUnavailable` as ``INTERNAL`` if the store fails."""
+        try:
+            workspace = await WorkspaceRegistry(self._store).workspace(workspace_id)
+        except StoreError as exc:
+            raise WorkspaceUnavailable(str(exc), INTERNAL) from None
+        return [] if workspace is None else await purge_losses(workspace)
+
+    async def purge(self, workspace_id: str) -> None:
+        """Delete the records of the workspace ``workspace_id``, as :func:`purge_workspace`
+        does. Raises :class:`WorkspaceUnavailable` as ``INVALID`` if it's refused, or as
+        ``INTERNAL`` if the store fails or a file can't be deleted."""
+        try:
+            await purge_workspace(self._store, workspace_id)
+        except PurgeRefused as exc:
+            raise WorkspaceUnavailable(str(exc)) from None
+        except (StoreError, OSError) as exc:
+            raise WorkspaceUnavailable(str(exc), INTERNAL) from None
 
     def let_go(self) -> None:
         """Let go of the locks of the workspaces still served."""

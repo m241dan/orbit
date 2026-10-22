@@ -25,6 +25,7 @@ from orbit.agent.application.usage_monitor import UsageMonitor
 from orbit.agent.application.workspace_host import WorkspaceHost
 from orbit.agent.domain.catalog import catalog
 from orbit.agent.domain.clones import added_url
+from orbit.agent.domain.purging import check_purgeable
 from orbit.agent.domain.refusals import STOPPING, Refused
 from orbit.agent.domain.workspaces import (
     LOCAL_ONLY,
@@ -92,6 +93,18 @@ class WorkspaceSource(Cloner, Protocol):
     async def close(self, workspace_id: str) -> None:
         """Let go of the lock on the workspace ``workspace_id``, whose host is closed and which
         is no longer flagged served, keeping its records."""
+        ...
+
+    async def losses(self, workspace_id: str) -> list[str]:
+        """What purging the workspace ``workspace_id`` would lose, a short line each: what the
+        directory of a clone orbit made holds that its remote doesn't; none for another
+        workspace. Raises :class:`WorkspaceUnavailable` if that can't be found out."""
+        ...
+
+    async def purge(self, workspace_id: str) -> None:
+        """Delete the records of the workspace ``workspace_id``, which was let go, and, if it's
+        a clone orbit made, its directory. Raises :class:`WorkspaceUnavailable` if they can't
+        be, as ``invalid`` if deleting the clone would lose work."""
         ...
 
 
@@ -166,7 +179,8 @@ class ControlPlane:
 
     Given the ``workspaces`` source, ``AddWorkspace`` and ``RemoveWorkspace``, from any
     connection welcomed, attached or not, add a workspace to those served, starting its host,
-    and remove one, closing its host, each followed by the ``Catalog``; one at a time, as each
+    and remove one, closing its host and, if asked, purging its records, each followed by the
+    ``Catalog``; one at a time, as each
     changes what's served across its awaits. An ``AddWorkspace`` with a URL is accepted at once,
     the repository cloned in the background by the source, with its progress and any failure
     told to every connection, and the clone then added as a path is, as a managed one. Without
@@ -324,7 +338,7 @@ class ControlPlane:
             raise Refused(INVALID, LOCAL_ONLY)
         if isinstance(command, RemoveWorkspace):
             async with self._locked():
-                await self._remove(command.workspace, connection, workspaces)
+                await self._remove(command, connection, workspaces)
             return
         url = added_url(command.path, command.url)
         if url is not None:
@@ -421,23 +435,51 @@ class ControlPlane:
             host.catalog_changed = self._publish_catalog
 
     async def _remove(
-        self, workspace: str, connection: SessionConnection, workspaces: WorkspaceSource
+        self, command: RemoveWorkspace, connection: SessionConnection, workspaces: WorkspaceSource
     ) -> None:
-        """Stop serving the workspace ``workspace``: have ``workspaces`` stop flagging it served,
-        then close its host, having ``connection``, if it's attached there, attached to none,
-        have ``workspaces`` let it go, and send the catalog to ``connection`` and every
-        listening connection, even if closing the host fails; refused for a workspace not
-        served, as ``busy`` while it runs work or another connection views one of its sessions,
-        or with the code ``workspaces`` gives, still served, if its flag can't be cleared."""
+        """Stop serving the workspace ``command`` names: have ``workspaces`` stop flagging it
+        served, then close its host, having ``connection``, if it's attached there, attached to
+        none, have ``workspaces`` let it go and, if ``command`` says to purge it, delete its
+        records, and send the catalog to ``connection`` and every listening connection, even if
+        closing the host fails; refused for a workspace not served, as ``busy`` while it runs
+        work or another connection views one of its sessions, as ``invalid`` when purging it
+        would lose work, or with the code ``workspaces`` gives, still served, if its flag can't
+        be cleared."""
+        workspace = command.workspace
         host = self._hosts[served_workspace(workspace, self._served)]
         self._check_removable(host)
+        if command.purge:
+            await self._check_purgeable(host, workspaces)
         await self._unflag(host, workspaces)
         if connection.workspace == workspace:
             self._detach(connection)
         try:
             await self._let_go(host, workspaces)
+            if command.purge:
+                await self._purge(host, workspaces)
         finally:
             await self._changed(connection)
+
+    @staticmethod
+    async def _check_purgeable(host: WorkspaceHost, workspaces: WorkspaceSource) -> None:
+        """Refuse purging ``host``'s workspace as ``invalid`` if that would lose work, listing
+        it, or with the code ``workspaces`` gives if that can't be found out."""
+        name = host.path or host.workspace_id
+        try:
+            losses = await workspaces.losses(host.workspace_id)
+        except WorkspaceUnavailable as exc:
+            raise Refused(exc.code, f"Can't purge {name}: {exc}") from None
+        check_purgeable(name, losses)
+
+    @staticmethod
+    async def _purge(host: WorkspaceHost, workspaces: WorkspaceSource) -> None:
+        """Have ``workspaces`` delete the records of ``host``'s workspace, no longer served;
+        refused with the code it gives if that fails."""
+        name = host.path or host.workspace_id
+        try:
+            await workspaces.purge(host.workspace_id)
+        except WorkspaceUnavailable as exc:
+            raise Refused(exc.code, f"Removed {name}, but couldn't purge it: {exc}") from None
 
     @staticmethod
     def _check_removable(host: WorkspaceHost) -> None:

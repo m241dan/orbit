@@ -254,6 +254,22 @@ its sessions, its message naming them. It's refused with `internal` if orbit fai
 served in the store, before anything else is done, so it's still served, and served again by
 a later `orbit serve`: `Can't remove /home/me/src/orbit, which is still served: …`.
 
+`RemoveWorkspace(workspace, purge=true)` (`purge` defaults to `false`) removes the workspace in
+the same way, under the same refusals, then deletes everything orbit keeps of it: its sessions,
+their events and logs, its review count, its session locks, its fallback files and its entry in
+the registry, so adding it again starts afresh, and, for a clone orbit made (see `url` above), the
+clone's directory. A directory orbit didn't clone into is never deleted. Before anything is
+removed, a clone is checked for work that exists nowhere else: uncommitted changes, stashes and
+commits on any branch that none of its remotes has. If it holds any, the purge is refused with
+`invalid`, listing it, and nothing is removed: `Can't purge /srv/orbit/workspaces/proj: deleting
+its clone would lose 1 commit on main not on its remote.` Push the work, or drop it, and purge
+again. If deleting fails once the workspace is removed, it's refused with `internal`: `Removed
+/home/me/src/orbit, but couldn't purge it: …`; the workspace is no longer served.
+
+```json
+{"workspace":null,"traceparent":null,"tracestate":null,"command_id":"c83e52","session":null,"payload":{"type":"remove_workspace","workspace":"4f1c2a9e","purge":true}}
+```
+
 A local `orbit chat` serves its own repository alone, and refuses both with `invalid`: `A local
 orbit works on one repository; run orbit serve to work on several.`
 

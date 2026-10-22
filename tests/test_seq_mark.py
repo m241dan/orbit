@@ -99,6 +99,12 @@ class GatedSource:
     async def close(self, workspace_id: str) -> None:
         pass
 
+    async def losses(self, workspace_id: str) -> list[str]:
+        return []
+
+    async def purge(self, workspace_id: str) -> None:
+        pass
+
 
 async def adding(plane: ControlPlane, source: GatedSource) -> int:
     """The highest ``seq`` stamped for other connections to ``plane`` while one adds a workspace

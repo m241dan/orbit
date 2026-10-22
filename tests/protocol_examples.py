@@ -192,6 +192,7 @@ COMMANDS: tuple[CommandEnvelope, ...] = (
     command(AddWorkspace(path="/src/orbit")),
     command(AddWorkspace(url="git@github.com:o/orbit.git")),
     command(RemoveWorkspace(workspace="w1")),
+    command(RemoveWorkspace(workspace="w1", purge=True)),
 )
 
 EVENTS: tuple[EventEnvelope, ...] = (

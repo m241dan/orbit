@@ -9,10 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from orbit.agent import ControlPlane, SqliteStore, StorageSettings, WorkspaceRegistry
-from orbit.agent.application.connection import SessionConnection
-from orbit.cli.backend import _Backend
-from orbit.cli.served import _workspaces
+from orbit.agent import SqliteStore, WorkspaceRegistry
 from orbit.protocol import (
     BUSY,
     GIT_FAILED,
@@ -20,14 +17,12 @@ from orbit.protocol import (
     Catalog,
     CommandAccepted,
     ErrorOccurred,
-    Event,
     WorkspaceCloning,
 )
 from tests.git_repo import bare_repository, started
 from tests.plane_fakes import payloads, refused, say, taken, welcomed
 from tests.process_checks import gone
-
-FLAGS = _Backend(None, None, False, False, False, False, new=False, name=None)
+from tests.serving import serving, until
 
 
 @pytest.fixture
@@ -40,20 +35,6 @@ async def store(tmp_path: Path) -> AsyncIterator[SqliteStore]:
 @pytest.fixture
 def stack() -> ExitStack:
     return ExitStack()
-
-
-def serving(stack: ExitStack, store: SqliteStore, clones: Path) -> ControlPlane:
-    """A control plane serving no workspace yet, cloning into ``clones``."""
-    return ControlPlane(workspaces=_workspaces(stack, FLAGS, store, StorageSettings(), clones))
-
-
-async def until(connection: SessionConnection, kind: type[Event]) -> list[Event]:
-    """What's queued for ``connection`` up to the first event of ``kind``."""
-    events: list[Event] = []
-    while not any(isinstance(event, kind) for event in events):
-        await asyncio.sleep(0.01)
-        events += payloads(taken(connection))
-    return events
 
 
 def managed(connection: sqlite3.Connection) -> list[tuple[str, int]]:

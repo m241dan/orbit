@@ -88,6 +88,20 @@ def _repository_file(path: Path, prefix: str) -> ParkedFile | None:
     return ParkedFile(str(path), path.stem, legacy=True)
 
 
+def remove_fallback_files(directories: Sequence[Path], workspace_id: str) -> int:
+    """Delete the fallback files of the workspace ``workspace_id`` in each of ``directories``,
+    the state directory and the repository's orbit directory, those named for it alone; returns
+    how many it deleted. Raises ``OSError`` if one can't be."""
+    files = [
+        path
+        for directory in directories
+        for path in sorted((directory / FALLBACK).glob(f"{workspace_id}{SEPARATOR}*{SUFFIX}"))
+    ]
+    for path in files:
+        path.unlink(missing_ok=True)
+    return len(files)
+
+
 class FallbackFiles:
     """The fallback files of the workspace ``workspace_id``, in ``state_dir`` or else in
     ``repository_dir``, the repository's orbit directory. A session's events go on to the file

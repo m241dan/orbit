@@ -18,6 +18,7 @@ directory, so that a crash leaves no stale lock behind.
 
 import asyncio
 import logging
+import shutil
 import sqlite3
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
@@ -92,6 +93,12 @@ def _decoded(texts: Sequence[str]) -> list[EventEnvelope]:
     of types this orbit doesn't know."""
     decoded = [decode_event(text) for text in reversed(texts)]
     return [envelope for envelope in decoded if envelope is not None]
+
+
+def _remove_tree(directory: Path) -> None:
+    """Remove ``directory`` and all it holds, if it's there; raises ``OSError`` if it can't."""
+    if directory.exists():
+        shutil.rmtree(directory)
 
 
 class SqliteStore:
@@ -278,6 +285,16 @@ class SqliteStore:
 
     async def release(self, workspace: str, session_id: str) -> None:
         await self._locks_of(workspace).release(session_id)
+
+    async def remove_locks(self, workspace: str) -> None:
+        """Let go of the workspace ``workspace``'s session locks this store holds and remove
+        their directory, for purging the workspace; raises ``OSError`` if it can't be
+        removed."""
+        locks = self._locks.pop(workspace, None)
+        if locks is not None:
+            locks.close()
+        directory = self._lock_dir(workspace)
+        await asyncio.to_thread(_remove_tree, directory)
 
     async def review_count(self, workspace: str) -> int:
         message = "Couldn't read the review count from"

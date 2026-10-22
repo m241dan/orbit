@@ -81,6 +81,7 @@ from orbit.agent.external.user_config import (
 )
 from orbit.agent.external.workspace import workspace_state
 from orbit.agent.external.workspace_lock import WorkspaceLock
+from orbit.agent.external.workspace_purge import Purged, PurgeRefused, purge_workspace
 from orbit.agent.external.workspace_registry import WorkspaceRegistry
 
 __all__ = [
@@ -113,6 +114,8 @@ __all__ = [
     "PathKind",
     "ProposalDecision",
     "ProposalReview",
+    "PurgeRefused",
+    "Purged",
     "RecoveryFailed",
     "RemoteSettings",
     "Role",
@@ -153,6 +156,7 @@ __all__ = [
     "open_workspace",
     "open_workspace_store",
     "orbit_dir",
+    "purge_workspace",
     "read_config",
     "read_remotes",
     "read_server",
