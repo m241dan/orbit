@@ -634,7 +634,7 @@ your checkout out of its way, it doesn't sandbox it.
 | Config files | `.orbit/config.toml` in the repository | the verification steps, setup, roles and limits, committed with your code |
 | User config | `config.toml` in the config directory | your own settings for every repository, such as `[storage]`, `[server]` and `[remotes]` |
 | The token | `token` in the config directory | what frontends show `orbit serve` to connect (see [Serving the control plane](#serving-the-control-plane)) |
-| The run file | `run/server.json` in the state directory | where the `orbit serve` running on that state directory listens |
+| The run file | `run/server.json` in the state directory | where the `orbit serve` running on that state directory listens, beside `run/serve.lock`, which that serve holds |
 | Runtime-owned | `~/.claude` | Claude Code's own: your login, read for usage limits, and the agents' conversations |
 
 The state directory is `--state-dir`, else `$ORBIT_STATE_DIR`, else `$XDG_STATE_HOME/orbit`, else
@@ -991,10 +991,12 @@ chat` makes to find a server, gets no line. Warnings and errors go to stderr.
 One `orbit serve` runs per account and machine, or rather per state directory: while it runs,
 `run/server.json` in the state directory, readable by you alone, holds its URL and process id,
 and over TLS the CA a frontend on the same machine trusts and the hostname it connects by (see
-**Finding the server** below); it's removed as it stops. A second `orbit serve` on the same state
-directory stops with status 2, saying `orbit serve is already running at <url> (pid N); use
---state-dir for a separate one.`; a run file left by a serve that didn't stop cleanly, whose
-process is gone or is the new serve itself (as pid 1 in a container always is), is replaced.
+**Finding the server** below); it's removed as it stops. From its start it also holds
+`run/serve.lock` there, so that of two started together one alone serves. A second `orbit serve`
+on the same state directory stops with status 2, saying `orbit serve is already running at <url>
+(pid N); use --state-dir for a separate one.` (or `running on <state directory>` before the first
+has written its run file); a run file left by a serve that didn't stop cleanly, whose process is
+gone or is the new serve itself (as pid 1 in a container always is), is replaced.
 
 The first `ctrl+c` (or SIGTERM) stops it: it stops accepting frontends (one that arrives then is
 refused with HTTP 503), cancels the work in progress (stopping the agents and revoking their

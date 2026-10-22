@@ -1,9 +1,13 @@
 """Where a running ``orbit serve`` says it is: ``run/server.json`` in the state directory,
 holding its URL and process id, and over TLS how a frontend on this machine reaches it, readable
 by its owner alone, while it listens. There's one per state directory, as one ``orbit serve``
-serves every workspace registered there."""
+serves every workspace registered there, and the serve lock beside it, ``run/serve.lock``, keeps
+it so: an exclusive ``flock`` the serve holds from its start, before it writes the run file, until
+its process ends."""
 
+import fcntl
 import json
+import os
 from pathlib import Path
 
 from orbit.agent.domain.server import LocalTls, RunningServer, parse_running
@@ -12,6 +16,7 @@ from orbit.agent.external.whole_files import write_private
 
 RUN = "run"
 SERVER_FILE = "server.json"
+LOCK_FILE = "serve.lock"
 
 
 class RunFile:
@@ -35,8 +40,47 @@ class RunFile:
         return parse_running(text)
 
     def remove(self) -> None:
-        """Say the server is gone, if the file is there."""
-        self.path.unlink(missing_ok=True)
+        """Say the server in this process is gone, if the file names it, leaving one another
+        serve wrote alone."""
+        server = self.read()
+        if server is not None and server.pid == os.getpid():
+            self.path.unlink(missing_ok=True)
+
+
+class ServeLock:
+    """The serve lock in the ``state`` directory.
+
+    Each stands for one ``orbit serve``: another ``ServeLock`` on the same directory, even in
+    the same process, can't take it while this holds it.
+    """
+
+    def __init__(self, state: Path) -> None:
+        self.path = state / RUN / LOCK_FILE
+        self._fd: int | None = None
+
+    def take(self) -> bool:
+        """Whether this took the lock; ``False`` when another serve holds it.
+
+        Raises ``OSError`` when the lock file can't be made or opened, or locked.
+        """
+        self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        fd = os.open(self.path, os.O_RDWR | os.O_CREAT, 0o600)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            os.close(fd)
+            return False
+        except BaseException:
+            os.close(fd)
+            raise
+        self._fd = fd
+        return True
+
+    def close(self) -> None:
+        """Let go of the lock, if this holds it, leaving its file for the next serve."""
+        if self._fd is not None:
+            os.close(self._fd)
+            self._fd = None
 
 
 def running_server(state: Path) -> RunningServer | None:

@@ -28,6 +28,7 @@ from websockets.sync.client import ClientConnection, connect
 from orbit.agent import (
     ControlPlane,
     RunFile,
+    ServeLock,
     ServerSettings,
     TokenFile,
     WorkspaceHost,
@@ -217,7 +218,7 @@ def test_serve_welcomes_a_frontend_with_the_token_until_stopped(
     assert url.startswith("ws://127.0.0.1:") and not url.endswith(":0/")
     assert frontend.run_file["pid"] == os.getpid()
     assert frontend.close == (1001, "orbit serve is shutting down")
-    assert not list((state / "run").iterdir())
+    assert [p.name for p in (state / "run").iterdir()] == ["serve.lock"]
     token = config_dir / "token"
     assert stat.S_IMODE(token.stat().st_mode) == 0o600
     lines = output.splitlines()
@@ -248,14 +249,23 @@ def test_serve_names_paths_with_braces_verbatim(
 
 
 def test_serve_stops_if_it_cant_write_its_run_file_naming_it(state: Path) -> None:
+    RunFile(state).path.mkdir(parents=True)
+    result = runner.invoke(app, ["serve", *QUIET, "--port", "0"])
+
+    assert result.exit_code == 2
+    assert f"Can't write the run file {RunFile(state).path}" in result.stderr
+    assert "Traceback" not in result.output
+    assert not [t for t in threading.enumerate() if t.name.startswith("orbit-sqlite")]
+
+
+def test_serve_stops_if_it_cant_take_its_lock_naming_it(state: Path) -> None:
     state.mkdir()
     (state / "run").write_text("not a directory\n")
     result = runner.invoke(app, ["serve", *QUIET, "--port", "0"])
 
     assert result.exit_code == 2
-    assert f"Can't write the run file {state / 'run'}" in result.stderr
+    assert f"Can't take the serve lock {ServeLock(state).path}: " in result.stderr
     assert "Traceback" not in result.output
-    assert not [t for t in threading.enumerate() if t.name.startswith("orbit-sqlite")]
 
 
 def test_serve_stops_if_it_cant_name_its_url_in_the_workspace_lock_naming_it(
@@ -468,6 +478,38 @@ def test_a_second_serve_exits_naming_the_first(state: Path) -> None:
         f"orbit serve is already running at ws://127.0.0.1:7433/ (pid {first.pid}); use"
         " --state-dir for a separate one.\n"
     )
+
+
+def test_a_second_serve_exits_while_the_first_holds_the_lock_before_its_run_file(
+    state: Path,
+) -> None:
+    first = ServeLock(state)
+    assert first.take()
+    try:
+        result = runner.invoke(app, ["serve", *QUIET, "--add", ".", "--port", "0"])
+    finally:
+        first.close()
+
+    assert result.exit_code == 2
+    assert result.stderr == (
+        f"orbit serve is already running on {state}; use --state-dir for a separate one.\n"
+    )
+    assert not RunFile(state).path.exists()
+
+
+def test_a_serve_refused_lets_go_of_the_lock(state: Path) -> None:
+    first = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    try:
+        RunFile(state).write("ws://127.0.0.1:7433/", first.pid)
+        result = runner.invoke(app, ["serve", *QUIET, "--add", ".", "--port", "0"])
+    finally:
+        first.kill()
+        first.wait()
+
+    assert result.exit_code == 2
+    lock = ServeLock(state)
+    assert lock.take()
+    lock.close()
 
 
 def test_a_stale_run_file_is_replaced(state: Path, config_dir: Path) -> None:

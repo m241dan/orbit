@@ -4,8 +4,8 @@ import asyncio
 import logging
 import os
 import signal
-from collections.abc import Callable, Collection, Mapping, Sequence
-from contextlib import nullcontext
+from collections.abc import Callable, Collection, Iterator, Mapping, Sequence
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -20,6 +20,7 @@ from orbit.agent import (
     LocalDiscoveryUnavailable,
     LocalTls,
     RunFile,
+    ServeLock,
     ServerSettings,
     TlsError,
     TokenError,
@@ -92,41 +93,62 @@ def serve(
     profile = profile.expanduser().resolve() if profile else None
     state = resolve_state_dir(state, os.environ)
     user_config = resolve_config_dir(config_dir, os.environ)
-    _refuse_second(state)
-    added = [_workspace(path) for path in add or ()]
-    cert, key, client_ca = (_absolute(path) for path in (cert, key, client_ca))
-    given = {"host": host, "port": port, "tls": tls, "cert": cert, "key": key}
-    settings = _server_settings(user_config, {**given, "client_ca": client_ca})
-    token_file = TokenFile(user_config)
-    token = _frontend_token(token_file, settings)
-    flags = _Backend(model, tools, verify, worktree, review, usage, new=False, name=None)
-    with _serving(flags, added, state, user_config) as serving:
-        logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
-        parts = _ServeParts(
-            serving.build,
-            settings,
-            token,
-            _current_revoked(user_config, settings.revoked),
-            RunFile(state),
-            _local_tls(settings, Path.cwd()),
-            _banner(serving.workspaces, token_file, settings),
-            serving.served,
-        )
-        _serve_until_stopped(parts, profile, user_config)
+    with _sole_serve(state):
+        added = [_workspace(path) for path in add or ()]
+        cert, key, client_ca = (_absolute(path) for path in (cert, key, client_ca))
+        given = {"host": host, "port": port, "tls": tls, "cert": cert, "key": key}
+        settings = _server_settings(user_config, {**given, "client_ca": client_ca})
+        token_file = TokenFile(user_config)
+        token = _frontend_token(token_file, settings)
+        flags = _Backend(model, tools, verify, worktree, review, usage, new=False, name=None)
+        with _serving(flags, added, state, user_config) as serving:
+            logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
+            parts = _ServeParts(
+                serving.build,
+                settings,
+                token,
+                _current_revoked(user_config, settings.revoked),
+                RunFile(state),
+                _local_tls(settings, Path.cwd()),
+                _banner(serving.workspaces, token_file, settings),
+                serving.served,
+            )
+            _serve_until_stopped(parts, profile, user_config)
     typer.echo("orbit serve stopped.")
 
 
-def _refuse_second(state: Path) -> None:
+@contextmanager
+def _sole_serve(state: Path) -> Iterator[None]:
+    """Hold the serve lock on the ``state`` directory through the block, as the one ``orbit
+    serve`` running on it.
+
+    Exits with status 2 if another is running on it, or the lock can't be taken.
+    """
+    lock = ServeLock(state)
+    with _exit_on(OSError, message=lambda exc: f"Can't take the serve lock {lock.path}: {exc}"):
+        taken = lock.take()
+    try:
+        _refuse_second(state, taken)
+        yield
+    finally:
+        lock.close()
+
+
+def _refuse_second(state: Path, taken: bool) -> None:
     """Exit with status 2 if an ``orbit serve`` is already running on the ``state``
-    directory, naming it. A run file naming this process is stale, left by a serve that didn't
-    stop cleanly whose pid this one now has, as pid 1 in a container always does."""
+    directory, naming it: one its run file names, or, if this hasn't ``taken`` the serve lock,
+    one that holds it, before its run file is written. A run file naming this process is stale,
+    left by a serve that didn't stop cleanly whose pid this one now has, as pid 1 in a
+    container always does."""
     running = running_server(state)
-    if running is None or running.pid == os.getpid():
+    if running is not None and running.pid != os.getpid():
+        where = f"at {running.url} (pid {running.pid})"
+    elif not taken:
+        where = f"on {state}"
+    else:
         return
     typer.echo(
-        f"orbit serve is already running at {running.url} (pid {running.pid}); use --state-dir"
-        " for a separate one.",
-        err=True,
+        f"orbit serve is already running {where}; use --state-dir for a separate one.", err=True
     )
     raise typer.Exit(2)
 

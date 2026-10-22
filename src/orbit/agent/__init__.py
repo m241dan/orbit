@@ -52,7 +52,7 @@ from orbit.agent.external.repository import (
     in_git_work_tree,
     orbit_dir,
 )
-from orbit.agent.external.run_file import RunFile, running_server
+from orbit.agent.external.run_file import RunFile, ServeLock, running_server
 from orbit.agent.external.session_import import ImportBlocked
 from orbit.agent.external.sqlite_schema import StoreError
 from orbit.agent.external.sqlite_store import SqliteStore, WorkspaceStore
@@ -99,6 +99,7 @@ __all__ = [
     "Role",
     "RunFile",
     "RunningServer",
+    "ServeLock",
     "ServerSettings",
     "SessionStore",
     "Setup",
