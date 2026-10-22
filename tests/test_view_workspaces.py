@@ -124,6 +124,16 @@ def test_a_workspace_without_a_path_contains_none() -> None:
     assert added_workspace((pathless,), "/src/repoA") is None
 
 
+def test_dot_dot_in_the_path_leads_to_the_workspace_it_names() -> None:
+    c = WorkspaceEntry(id="c", label="repoC", path="/src/repoC", sessions=())
+    assert added_workspace((A, c), "/src/repoA/../repoC") == c
+    assert added_workspace((A,), "/src/repoC/../repoA/sub") == A
+
+
+def test_dot_in_the_path_is_ignored() -> None:
+    assert added_workspace((B, A), "/src/./repoA/sub") == A
+
+
 def test_session_states_change_in_every_workspace() -> None:
     changed = SessionStateChanged(session="s", active=True, state="running", viewers=1)
     [a, b] = with_states((A, B), changed)

@@ -1,5 +1,6 @@
 """The list of workspaces a control plane serves, to pick one from, add one or remove one."""
 
+import posixpath
 from collections.abc import Sequence
 from pathlib import PurePosixPath
 from typing import Literal
@@ -90,7 +91,9 @@ def added_workspace(workspaces: Sequence[WorkspaceEntry], path: str) -> Workspac
     """The workspace among ``workspaces`` that adding ``path`` added: the deepest whose path is
     ``path`` or contains it, as a server takes a path inside a repository for its top level;
     none if it isn't listed yet. A workspace new since then elsewhere, as another frontend
-    adds, isn't it."""
+    adds, isn't it. ``..`` and ``.`` in ``path`` are collapsed as the server resolves them, but
+    symlinks can't be resolved here."""
+    path = posixpath.normpath(path)
     deepest = max(workspaces, key=lambda entry: _depth_in(entry.path, path), default=None)
     if deepest is not None and _depth_in(deepest.path, path):
         return deepest
