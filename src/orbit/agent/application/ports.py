@@ -323,9 +323,9 @@ class SeqMark(Protocol):
 class EventLog(SeqMark, Protocol):
     """Where sessions' events are kept, each session's in ``seq`` order."""
 
-    async def latest_seq(self) -> int | None:
-        """The highest ``seq`` logged or reserved now, by this orbit or another; 0 when none is,
-        and ``None`` when it can't be read."""
+    async def latest_seq(self) -> int:
+        """The highest ``seq`` logged or reserved now, by this orbit or another; 0 when none is.
+        Raises :class:`ReadFailed` when it can't be read."""
         ...
 
     async def append(self, session_id: str, envelopes: Sequence[EventEnvelope]) -> int:

@@ -55,7 +55,8 @@ Forget = Callable[[str], None]
 """Has the logged events of the session whose id it's given deleted."""
 
 CatchUp = Callable[[], Awaitable[None]]
-"""Has the events published from now on counted on from the highest ``seq`` logged."""
+"""Has the events published from now on counted on from the highest ``seq`` logged; raises
+:class:`ReadFailed` when that can't be read."""
 
 Commit = Callable[[], None]
 """Switches what the session holds, unless that's refused now: then raises :class:`Refused`."""

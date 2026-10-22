@@ -203,8 +203,8 @@ class SqliteStore:
         none."""
         return self._max_seq
 
-    async def latest_seq(self) -> int | None:
-        return await self._read_or(lambda _: None, self._latest_seq)
+    async def latest_seq(self) -> int:
+        return await self._or_raise("Couldn't read the latest seq from", self._latest_seq)
 
     async def reserve(self, seq: int) -> None:
         message = f"Couldn't reserve the seq numbers up to {seq} in"
@@ -698,7 +698,7 @@ class WorkspaceStore:
         it."""
         return self._store.max_seq()
 
-    async def latest_seq(self) -> int | None:
+    async def latest_seq(self) -> int:
         return await self._store.latest_seq()
 
     async def reserve(self, seq: int) -> None:

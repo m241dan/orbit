@@ -268,7 +268,7 @@ type Outcome = type[StoreFailed] | Callable[[Path], object]
         ),
         (lambda store: store.sessions(), ReadFailed),
         (lambda store: store.delete("abc"), StorageFailed),
-        (lambda store: store.latest_seq(), lambda _: None),
+        (lambda store: store.latest_seq(), ReadFailed),
         (lambda store: store.append("abc", [big_notice()]), StorageFailed),
         (lambda store: store.recent("abc", 10), ReadFailed),
         (lambda store: store.before("abc", 10, 10), ReadFailed),

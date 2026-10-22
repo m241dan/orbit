@@ -412,7 +412,7 @@ class FakeStore:
     def max_seq(self) -> int:
         return max([self.seq, *(envelope.seq for envelope in self.logged), *self.reservations])
 
-    async def latest_seq(self) -> int | None:
+    async def latest_seq(self) -> int:
         await asyncio.sleep(0)  # Reading takes a while.
         return self.max_seq()
 

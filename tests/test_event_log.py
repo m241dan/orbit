@@ -82,11 +82,16 @@ async def test_the_latest_seq_never_counts_down_from_the_highest_appended(
     assert await store.latest_seq() == 7
 
 
-async def test_a_latest_seq_that_cant_be_read_is_none(open_store: Opener, workspace: Path) -> None:
+async def test_a_latest_seq_that_cant_be_read_raises_naming_the_database(
+    open_store: Opener, state: Path, workspace: Path
+) -> None:
     store = await open_store(workspace)
-    await store.close()
+    with database(state) as connection:
+        connection.execute("DROP TABLE high_water")
 
-    assert await store.latest_seq() is None
+    match = r"Couldn't read the latest seq from .*orbit\.db: no such table: high_water"
+    with pytest.raises(ReadFailed, match=match):
+        await store.latest_seq()
 
 
 async def test_deleting_a_session_deletes_its_events_and_no_others(

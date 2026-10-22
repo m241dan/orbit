@@ -22,6 +22,7 @@ from orbit.protocol import (
     Catalog,
     CommandAccepted,
     CommandEnvelope,
+    CommandRefused,
     ErrorOccurred,
     Event,
     EventEnvelope,
@@ -1017,6 +1018,43 @@ async def sqlite(tmp_path: Path) -> AsyncIterator[OwnView]:
     await store.close()
 
 
+async def test_opening_a_saved_session_whose_latest_seq_cant_be_read_is_refused(
+    sqlite: OwnView, tmp_path: Path
+) -> None:
+    await sqlite.save(saved("auth"))
+    session = stored_session(sqlite)
+    await greet(session)
+    delivered(session)
+    with database(tmp_path / "state") as connection:
+        connection.execute("DROP TABLE high_water")
+
+    await send(session, ActivateSession(session="auth"))
+    await session.close()
+
+    [answer] = [e.payload for e in delivered(session) if isinstance(e.payload, CommandRefused)]
+    assert answer.code == INTERNAL
+    assert "Couldn't read the latest seq from" in answer.message
+    assert str(tmp_path / "state" / "orbit.db") in answer.message
+    assert not [e for e in delivered(session) if e.session == "auth"]
+
+
+async def test_a_snapshot_whose_events_cant_be_read_from_the_database_says_why(
+    sqlite: OwnView, tmp_path: Path
+) -> None:
+    session = stored_session(sqlite)
+    with database(tmp_path / "state") as connection:
+        connection.execute("DROP TABLE events")
+
+    await greet(session)
+    snapshot, then = after_snapshot(delivered(session))
+    await session.close()
+
+    assert snapshot.transcript == ()
+    assert isinstance(then, ErrorOccurred) and then.code == INTERNAL
+    assert "Couldn't read the events of the session session-1 from" in then.message
+    assert str(tmp_path / "state" / "orbit.db") in then.message
+
+
 async def test_a_sessions_events_are_logged_but_for_those_answering_one_connection(
     sqlite: OwnView, tmp_path: Path
 ) -> None:
@@ -1502,7 +1540,7 @@ async def trimmed_log(store: OwnView) -> int:
     """The ``seq`` of the oldest event kept of a log of ``session-1`` written to ``store``, after
     any logged before it, and trimmed."""
     await store.forget("session-1")
-    start = (await store.latest_seq() or 0) + 1
+    start = await store.latest_seq() + 1
     await store.append("session-1", [big(seq, "session-1") for seq in range(start, start + 210)])
     await store.trim("session-1", 1024 * 1024, 1024 * 1024 * 9 // 10)
     return (await store.recent("session-1", 1000))[0].seq

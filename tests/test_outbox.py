@@ -1,6 +1,9 @@
 """The outbox the session publishes into, stamping each event as it's put in."""
 
+import pytest
+
 from orbit.agent.application.outbox import SEQ_BLOCK, Outbox, Seqs
+from orbit.agent.application.ports import ReadFailed
 from orbit.agent.domain.storage import StorageSettings
 from orbit.protocol import EventEnvelope, Notice, ToolCallFinished, UsageChanged, Welcome
 from tests.agent_fakes import FakeStore
@@ -148,20 +151,15 @@ async def test_catching_up_never_counts_down() -> None:
 class Unread(FakeStore):
     """A log whose highest ``seq`` can't be read now."""
 
-    async def latest_seq(self) -> int | None:
-        return None
+    async def latest_seq(self) -> int:
+        raise ReadFailed("database is locked")
 
 
-async def test_catching_up_on_a_log_that_cant_be_read_counts_on() -> None:
-    log = Unread()
-    log.seq = 5
-    sent: list[EventEnvelope] = []
-    outbox = Outbox(Open(), log)
-    outbox.deliver = sent.append
-    await outbox.catch_up()
-    outbox.put_nowait(ONE)
+async def test_catching_up_on_a_log_that_cant_be_read_raises() -> None:
+    outbox = Outbox(Open(), Unread())
 
-    assert sent[0].seq == 6
+    with pytest.raises(ReadFailed, match="database is locked"):
+        await outbox.catch_up()
     await outbox.close()
 
 

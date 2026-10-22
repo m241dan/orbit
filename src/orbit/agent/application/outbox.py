@@ -184,9 +184,10 @@ class Outbox:
     async def catch_up(self) -> None:
         """Count on from the highest ``seq`` in the log now, if there is one and it's higher, as
         another orbit may have logged events since this one opened; the count never goes
-        down."""
-        latest = await self._event_log.latest_seq() if self._event_log else None
-        self.seqs.catch_up(latest or 0)
+        down. Raises :class:`ReadFailed` when the log can't be read, so that nothing goes on
+        counting as if none had been logged since."""
+        if self._event_log is not None:
+            self.seqs.catch_up(await self._event_log.latest_seq())
 
     async def transcript(self, session_id: str) -> Transcript:
         """The last :data:`TRANSCRIPT_LENGTH` events of the session ``session_id``, oldest
