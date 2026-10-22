@@ -119,8 +119,8 @@ the highlighted workspace once you confirm (`y` to go ahead, `n`/`esc` to cancel
 stops serving it, keeping its sessions for when it's added again; it's refused, saying why under
 the list, while the workspace runs work or another frontend views one of its sessions. `esc` on
 the list quits orbit at startup, and later closes the picker. When the workspace this chat is on
-is removed, the workspace picker opens; if it's removed from the picker, `esc` there then quits
-orbit, as there's no workspace left to go back to.
+is removed, the workspace picker opens, or stays open if it's removed from there, and from then
+on it works as at startup: `esc` quits orbit, as there's no workspace left to go back to.
 
 ### Sessions
 

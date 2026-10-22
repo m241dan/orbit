@@ -381,8 +381,21 @@ async def test_the_workspace_viewed_removed_opens_the_picker() -> None:
         await pilot.press("enter", "enter")
         await feed_events(session_of(app), pilot, catalog(B))
         screen = workspaces(app)
-        assert not screen.startup
         assert rows(screen) == ["Add /src/repoA", B_ROW, "Add a path…"]
+
+
+async def test_the_workspace_viewed_removed_opens_a_picker_whose_escape_quits() -> None:
+    app = connected()
+    async with app.run_test() as pilot:
+        await feed_events(session_of(app), pilot, SERVED)
+        await pilot.press("enter", "enter")
+        await feed_events(session_of(app), pilot, catalog(B))
+        screen = workspaces(app)
+        assert screen.startup
+        assert screen.query_one(Vertical).border_subtitle == STARTUP_HINT
+        await pilot.press("escape")
+        await pilot.pause()
+    assert app.return_code == 0
 
 
 async def test_opening_with_a_command_attaches_to_the_workspace_picked_then_sends_it() -> None:
@@ -477,6 +490,32 @@ async def test_removing_the_workspace_viewed_from_the_picker_leaves_one_escape_q
         await pilot.press("escape")
         await pilot.pause()
     assert app.return_code == 0
+
+
+async def test_picking_after_removing_the_workspace_viewed_opens_sessions_escape_quits() -> None:
+    app = connected()
+    async with app.run_test() as pilot:
+        await feed_events(session_of(app), pilot, SERVED)
+        await pilot.press("enter", "enter", "ctrl+w", "x", "y")
+        await feed_events(session_of(app), pilot, catalog(B))
+        workspaces(app).query_one(OptionList).highlighted = 1
+        await pilot.press("enter")
+        screen = sessions(app)
+        assert screen.startup and screen.workspace == "B"
+        await pilot.press("escape")
+        await pilot.pause()
+    assert app.return_code == 0
+
+
+async def test_picking_from_the_picker_without_a_loss_opens_sessions_escape_goes_back() -> None:
+    app = connected()
+    async with app.run_test() as pilot:
+        await feed_events(session_of(app), pilot, SERVED)
+        await pilot.press("enter", "enter", "ctrl+w", "k", "enter")
+        assert not sessions(app).startup
+        await pilot.press("escape")
+        assert len(app.screen_stack) == 1
+        assert session_of(app).commands == [Attach(workspace="A", session="a1")]
 
 
 async def test_another_workspace_listed_after_adding_one_served_is_not_picked() -> None:

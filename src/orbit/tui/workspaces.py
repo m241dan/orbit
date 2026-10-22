@@ -244,23 +244,25 @@ class WorkspacesHost:
 
     def open(self, startup: bool = False) -> None:
         """Let the user pick a workspace, add one or remove one, unless the picker is shown
-        already; at ``startup``, escape quits."""
+        already; at ``startup``, or once the app has lost its workspace since, escape quits and
+        the workspace picked is taken as picked at startup."""
         if self.shown is not None:
             return
+        screen = WorkspacesScreen(self.workspaces, self._repository, self._change, startup)
 
         async def picked(workspace: str | None) -> None:
             if workspace is not None:
-                await self._chosen(workspace, startup)
+                await self._chosen(workspace, screen.startup)
 
-        screen = WorkspacesScreen(self.workspaces, self._repository, self._change, startup)
         self._picker.open(screen, picked)
 
     def lost(self) -> None:
-        """Let the user pick a workspace now the app is on none: open the picker, or have
-        escape quit the one shown, as closing it would leave the app on none."""
+        """Let the user pick a workspace now the app is on none: open the picker as at startup,
+        or have escape quit the one shown, as closing it would leave the app on none."""
         if self.shown is not None:
             self.shown.must_pick()
-        self.open()
+            return
+        self.open(startup=True)
 
     def _refresh(self) -> None:
         """Show the workspaces in the picker, if it's shown."""
