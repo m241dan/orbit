@@ -8,6 +8,7 @@ from orbit.agent.domain.activity import (
     TASKS_RUNNING,
     Activity,
     Running,
+    doing,
     first_running,
     reported,
     switch_refusal,
@@ -54,6 +55,21 @@ def test_the_first_running_kind_is_in_order_and_ignores_the_startup_check(
     activity: Activity, kind: Running | None
 ) -> None:
     assert first_running(activity) is kind
+
+
+@pytest.mark.parametrize(
+    ("activity", "work"),
+    [
+        (Activity(tasks=True, review=True, planner=True), "tasks are running"),
+        (Activity(review=True, planner=True), "a review is running"),
+        (Activity(planner=True), "the planner is answering"),
+        (Activity(startup_check=True), None),
+    ],
+)
+def test_what_runs_first_is_called_by_its_kind_and_nothing_when_idle(
+    activity: Activity, work: str | None
+) -> None:
+    assert doing(activity) == work
 
 
 def test_nothing_in_progress_refuses_nothing_and_is_idle() -> None:

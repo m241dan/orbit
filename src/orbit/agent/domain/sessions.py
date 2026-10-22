@@ -17,7 +17,16 @@ from pydantic_core import from_json
 
 from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.reviews import LaneSnapshot
-from orbit.protocol import BUSY, INVALID, LOCKED, SessionSummary, Settings, TaskState, Usage
+from orbit.protocol import (
+    BUSY,
+    INVALID,
+    LOCKED,
+    WRONG_SESSION,
+    SessionSummary,
+    Settings,
+    TaskState,
+    Usage,
+)
 
 FORMAT_VERSION = 5
 """The version of the record format this orbit writes, and the newest it reads."""
@@ -271,6 +280,20 @@ def not_active_message(viewed: str, open_name: str) -> str:
     return (
         f"Session {viewed!r} isn't the active session; {open_name!r} is. Activate it to work in it."
     )
+
+
+def check_addressed_session(addressed: str | None, viewing_id: str | None, open_id: str) -> None:
+    """Refuse a command for the session ``addressed`` as ``wrong_session`` unless that's none or
+    the one its connection views: ``viewing_id``, or the workspace's open session ``open_id``
+    when that's none."""
+    viewed = open_id if viewing_id is None else viewing_id
+    if addressed is None or addressed == viewed:
+        return
+    if viewing_id is None:
+        message = f"Session {addressed!r} isn't open; the open session is {viewed}."
+    else:
+        message = f"Session {addressed!r} isn't the one viewed; this connection views {viewed}."
+    raise Refused(WRONG_SESSION, message)
 
 
 def record_name(session_id: str, record: SessionRecord | Unreadable) -> str:

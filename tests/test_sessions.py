@@ -14,6 +14,7 @@ from orbit.agent.domain.sessions import (
     FORMAT_VERSION,
     SessionRecord,
     Unreadable,
+    check_addressed_session,
     default_name,
     deletion_refusal,
     newest_first,
@@ -33,6 +34,7 @@ from orbit.agent.domain.sessions import (
 from orbit.protocol import (
     INVALID,
     LOCKED,
+    WRONG_SESSION,
     SessionSummary,
     Settings,
     TaskSpec,
@@ -434,3 +436,26 @@ def test_resumed_settings_are_the_saved_ones_but_for_those_pinned() -> None:
     given = Settings(model="haiku", tool_access="off")
     assert resumed_settings(saved, given, ()) == saved
     assert resumed_settings(saved, given, ("model",)) == Settings(model="haiku", tool_access="full")
+
+
+@pytest.mark.parametrize(
+    ("addressed", "viewing"), [(None, None), (None, "b"), ("a", None), ("b", "b")]
+)
+def test_a_command_for_no_session_or_the_one_viewed_is_addressed_there(
+    addressed: str | None, viewing: str | None
+) -> None:
+    check_addressed_session(addressed, viewing, "a")
+
+
+def test_a_command_for_another_session_than_the_open_one_viewed_is_refused() -> None:
+    with pytest.raises(Refused) as refused:
+        check_addressed_session("b", None, "a")
+    message = "Session 'b' isn't open; the open session is a."
+    assert (refused.value.code, str(refused.value)) == (WRONG_SESSION, message)
+
+
+def test_a_command_for_another_session_than_the_saved_one_viewed_is_refused() -> None:
+    with pytest.raises(Refused) as refused:
+        check_addressed_session("a", "b", "a")
+    message = "Session 'a' isn't the one viewed; this connection views b."
+    assert (refused.value.code, str(refused.value)) == (WRONG_SESSION, message)

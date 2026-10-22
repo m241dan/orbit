@@ -16,9 +16,25 @@ class Running(Enum):
     PLANNER = auto()
 
 
-TASKS_RUNNING = "Can't switch: tasks are running. Press ctrl+s to stop them."
-REVIEW_RUNNING = "Can't switch: a review is running. Press c on it in the agents pane to stop it."
-PLANNER_ANSWERING = "Can't switch: the planner is answering. Press ctrl+x to stop it."
+_DOING = {
+    Running.TASKS: "tasks are running",
+    Running.REVIEW: "a review is running",
+    Running.PLANNER: "the planner is answering",
+}
+"""What each kind of running work is called when it keeps a session busy."""
+
+_TO_STOP = {
+    Running.TASKS: "Press ctrl+s to stop them.",
+    Running.REVIEW: "Press c on it in the agents pane to stop it.",
+    Running.PLANNER: "Press ctrl+x to stop it.",
+}
+"""How the user stops each kind of running work."""
+
+_SWITCH_REFUSALS = {kind: f"Can't switch: {_DOING[kind]}. {_TO_STOP[kind]}" for kind in Running}
+
+TASKS_RUNNING = _SWITCH_REFUSALS[Running.TASKS]
+REVIEW_RUNNING = _SWITCH_REFUSALS[Running.REVIEW]
+PLANNER_ANSWERING = _SWITCH_REFUSALS[Running.PLANNER]
 
 
 @dataclass(frozen=True)
@@ -58,11 +74,12 @@ def first_running(activity: Activity) -> Running | None:
     return next((kind for runs, kind in kinds if runs), None)
 
 
-_SWITCH_REFUSALS = {
-    Running.TASKS: TASKS_RUNNING,
-    Running.REVIEW: REVIEW_RUNNING,
-    Running.PLANNER: PLANNER_ANSWERING,
-}
+def doing(activity: Activity) -> str | None:
+    """What runs first of a task run, a review and a planner turn in ``activity``, as it's
+    called when it keeps the session busy, such as "tasks are running"; none when nothing
+    runs."""
+    kind = first_running(activity)
+    return None if kind is None else _DOING[kind]
 
 
 def switch_refusal(activity: Activity) -> str | None:

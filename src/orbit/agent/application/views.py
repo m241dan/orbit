@@ -15,6 +15,7 @@ from orbit.agent.application.takeover import Takeover
 from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.sessions import (
     SessionRecord,
+    check_addressed_session,
     missing_message,
     not_active_message,
     session_name,
@@ -26,7 +27,6 @@ from orbit.protocol import (
     PLANNER_LANE,
     UNKNOWN,
     WORK_LANE,
-    WRONG_SESSION,
     ActivateSession,
     Attach,
     BusyLane,
@@ -177,15 +177,8 @@ class SessionViews:
     def check_addressed(self, connection: SessionConnection, session: str | None) -> None:
         """Refuse a command from ``connection`` for ``session`` unless that's the session it
         views or none, which means that one."""
-        viewing = connection.viewing
-        viewed = self._parts.keeper.id if viewing is None else viewing.id
-        if session is None or session == viewed:
-            return
-        if viewing is None:
-            message = f"Session {session!r} isn't open; the open session is {viewed}."
-        else:
-            message = f"Session {session!r} isn't the one viewed; this connection views {viewed}."
-        raise Refused(WRONG_SESSION, message)
+        viewing = None if connection.viewing is None else connection.viewing.id
+        check_addressed_session(session, viewing, self._parts.keeper.id)
 
     def admit(self, connection: SessionConnection, command: Command) -> None:
         """Refuse ``command`` from ``connection`` as ``not_active`` if it views a session that

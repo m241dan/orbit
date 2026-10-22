@@ -4,7 +4,7 @@ envelope may name; and which workspaces may be added and removed."""
 from collections.abc import Sequence
 from enum import Enum, auto
 
-from orbit.agent.domain.activity import Activity, Running, first_running
+from orbit.agent.domain.activity import Activity, doing
 from orbit.agent.domain.refusals import Refused, joined, unknown
 from orbit.protocol import BUSY, INVALID, UNKNOWN, WRONG_SESSION
 
@@ -73,20 +73,12 @@ def check_directory(path: str, kind: PathKind) -> None:
         raise Refused(INVALID, f"Can't add {path}: it isn't a directory.")
 
 
-_WORK = {
-    Running.TASKS: "tasks are running",
-    Running.REVIEW: "a review is running",
-    Running.PLANNER: "the planner is answering",
-}
-"""What each kind of running work is called when it keeps a workspace from being removed."""
-
-
 def check_removable(workspace: str, activity: Activity, viewed: Sequence[str]) -> None:
     """Refuse removing the workspace ``workspace`` as ``busy`` while its open session runs what
     ``activity`` says, or other connections view the sessions ``viewed``, naming them."""
-    kind = first_running(activity)
-    if kind is not None:
-        raise Refused(BUSY, f"Can't remove {workspace}: {_WORK[kind]}.")
+    work = doing(activity)
+    if work is not None:
+        raise Refused(BUSY, f"Can't remove {workspace}: {work}.")
     if viewed:
         sessions = "session" if len(viewed) == 1 else "sessions"
         views = f"another frontend views its {sessions} {joined(viewed)}"
