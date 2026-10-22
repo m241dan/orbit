@@ -30,6 +30,7 @@ from orbit.protocol import (
     CHECKS_EXHAUSTED,
     GIT_FAILED,
     INTERNAL,
+    TIMED_OUT,
     AddTask,
     AgentExited,
     AgentReply,
@@ -668,6 +669,21 @@ async def test_a_claim_left_queued_when_the_run_times_out_is_answered() -> None:
     assert await asyncio.wait_for(calls[0], 5) == CANCELLED
 
 
+async def test_a_run_that_runs_out_of_time_ends_in_error_saying_so() -> None:
+    events: list[Event] = []
+
+    async def publish(event: Event) -> None:
+        events.append(event)
+
+    _, running = await started("coder", publish, timeout_minutes=0.005)
+    outcome = await asyncio.wait_for(running, 5)
+    message = "agent-1 ran out of time (0.005 minutes)."
+    assert (outcome.status, outcome.detail) == ("error", message)
+    assert [e for e in events if isinstance(e, ErrorOccurred)] == [
+        ErrorOccurred(agent_id="agent-1", code=TIMED_OUT, message=message)
+    ]
+
+
 RUN_ENDED = Reply("The run ended before the check finished.", is_error=True)
 
 
@@ -1131,7 +1147,7 @@ async def test_tree_failed_publishes_the_error_and_ends_in_it() -> None:
 
 
 @pytest.mark.parametrize("minutes", [None, 60])
-async def test_a_timeout_that_is_not_the_runs_own_is_raised(minutes: float | None) -> None:
+async def test_a_timeout_that_is_not_the_runs_own_ends_it_in_error(minutes: float | None) -> None:
     events: list[Event] = []
     verifying = asyncio.Event()
 
@@ -1144,8 +1160,9 @@ async def test_a_timeout_that_is_not_the_runs_own_is_raised(minutes: float | Non
     agent_run, running = await started("coder", times_out_while_verifying, minutes)
     verifying.set()
     call = asyncio.ensure_future(agent_run.handle("complete_task", {"summary": "done"}))
-    with pytest.raises(TimeoutError, match="pipe timed out"):
-        await asyncio.wait_for(running, 5)
+    outcome = await asyncio.wait_for(running, 5)
+    assert (outcome.status, outcome.detail) == ("error", "pipe timed out")
     assert await call == Reply("Orbit couldn't check your work: pipe timed out", is_error=True)
-    assert not any(isinstance(e, ErrorOccurred) for e in events)
-    assert not any(isinstance(e, ErrorOccurred) for e in events)
+    assert [e for e in events if isinstance(e, ErrorOccurred)] == [
+        ErrorOccurred(agent_id="agent-1", code=AGENT_FAILED, message="pipe timed out")
+    ]

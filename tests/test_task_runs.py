@@ -607,6 +607,26 @@ async def test_an_unexpected_error_in_the_work_lane_is_reported() -> None:
     assert len(launcher.launches) == 1
 
 
+class TimesOutFirst(Steps):
+    """A step runner whose first run raises a TimeoutError of its own, then passes."""
+
+    async def __call__(self, step: VerificationStep, root: str) -> tuple[bool, str]:
+        if not self.runs:
+            self.runs.append(step.name)
+            raise TimeoutError("pipe timed out")
+        return await super().__call__(step, root)
+
+
+async def test_a_task_raising_its_own_timeout_ends_in_error_and_the_lane_goes_on() -> None:
+    verification = verified(TimesOutFirst(True))
+    session, _, launcher = session_for(claims_done, claims_done, verification=verification)
+    events = await asyncio.wait_for(run(session, TaskSpec(prompt="a"), TaskSpec(prompt="b")), 5)
+    assert ErrorOccurred(agent_id="agent-1", code=AGENT_FAILED, message="pipe timed out") in events
+    assert not any(isinstance(e, ErrorOccurred) and e.code == INTERNAL for e in events)
+    assert len(launcher.launches) == 2
+    assert [task.status for task in board(events)] == ["error", "completed"]
+
+
 async def test_a_task_whose_lane_crashes_ends_in_error() -> None:
     tree = FakeTree()
     tree.failures["prepare"] = ValueError("boom")

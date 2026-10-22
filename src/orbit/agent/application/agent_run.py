@@ -39,8 +39,8 @@ from orbit.agent.domain.roles import (
     RUN_CHECK,
     SUGGEST_TASK,
     Role,
-    out_of_time,
     task_suggestion,
+    timeout_ending,
 )
 from orbit.agent.domain.verification import (
     VerificationStep,
@@ -51,7 +51,6 @@ from orbit.agent.domain.verification import (
 from orbit.protocol import (
     AGENT_FAILED,
     NOT_CONFIGURED,
-    TIMED_OUT,
     AgentExited,
     AgentExitReason,
     AgentStarted,
@@ -212,19 +211,15 @@ class AgentRun:
         return asyncio.create_task(self._stream())
 
     async def _serve_in_time(self, before: object) -> None:
-        """Serve the agent until it's done, or its role's time runs out."""
+        """Serve the agent until it's done, its role's time runs out, or serving raises a
+        TimeoutError of its own."""
         minutes = self.role.timeout_minutes
         try:
             async with asyncio.timeout(self.role.timeout_seconds) as deadline:
                 await self._serve(before)
-        except TimeoutError:
-            # Raised while serving, not the role's time running out.
-            if minutes is None or not deadline.expired():
-                raise
-            message = out_of_time(self.agent.id, minutes)
-            await self._publish(
-                ErrorOccurred(agent_id=self.agent.id, code=TIMED_OUT, message=message)
-            )
+        except TimeoutError as exc:
+            code, message = timeout_ending(deadline.expired(), minutes, self.agent.id, exc)
+            await self._publish(ErrorOccurred(agent_id=self.agent.id, code=code, message=message))
 
     async def handle(self, tool: str, arguments: dict[str, Any]) -> Reply:
         return await dispatch(self._work.task.role, self.role, self._tools, tool, arguments)

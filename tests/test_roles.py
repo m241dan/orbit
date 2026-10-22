@@ -9,9 +9,17 @@ from orbit.agent.domain.roles import (
     role_task,
     suggested_task,
     task_suggestion,
+    timeout_ending,
     tool_rules,
 )
-from orbit.protocol import BUILT_IN_ROLE_NAMES, Settings, TaskSpec, ToolAccess
+from orbit.protocol import (
+    AGENT_FAILED,
+    BUILT_IN_ROLE_NAMES,
+    TIMED_OUT,
+    Settings,
+    TaskSpec,
+    ToolAccess,
+)
 
 INSTRUCTIONS = {name: f"You are orbit's {name}." for name in BUILT_IN_ROLE_NAMES}
 BUILT_IN_ROLES = built_in_roles(INSTRUCTIONS)
@@ -79,6 +87,19 @@ def test_a_roles_timeout_in_seconds_is_its_minutes_or_no_limit(
 @pytest.mark.parametrize(("minutes", "shown"), [(2, "2"), (2.0, "2"), (0.5, "0.5")])
 def test_out_of_time_names_who_and_their_minutes(minutes: float, shown: str) -> None:
     assert out_of_time("agent-3", minutes) == f"agent-3 ran out of time ({shown} minutes)."
+
+
+def test_a_timeout_after_the_deadline_expired_is_running_out_of_time() -> None:
+    ending = timeout_ending(True, 2, "agent-3", TimeoutError("pipe timed out"))
+    assert ending == (TIMED_OUT, "agent-3 ran out of time (2 minutes).")
+
+
+@pytest.mark.parametrize(("expired", "minutes"), [(False, 2), (False, None), (True, None)])
+def test_a_timeout_the_deadline_didnt_cause_is_a_failure(
+    expired: bool, minutes: float | None
+) -> None:
+    ending = timeout_ending(expired, minutes, "agent-3", TimeoutError("pipe timed out"))
+    assert ending == (AGENT_FAILED, "pipe timed out")
 
 
 def test_a_role_task_runs_in_the_role_with_its_settings() -> None:

@@ -16,12 +16,14 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from orbit.agent.domain.config_errors import ConfigError
 from orbit.protocol import (
+    AGENT_FAILED,
     BUILT_IN_ROLE_NAMES,
     CODER,
     CONFIGURATOR,
     PLANNER,
     REVIEWER,
     SUPER_REVIEWER,
+    TIMED_OUT,
     Settings,
     TaskSpec,
     ToolAccess,
@@ -137,6 +139,17 @@ def tool_rules(tool_access: ToolAccess, tools: Sequence[str]) -> ToolRules:
 def out_of_time(who: str, minutes: float) -> str:
     """The error saying ``who`` ran out of their role's ``minutes``."""
     return f"{who} ran out of time ({minutes:g} minutes)."
+
+
+def timeout_ending(
+    expired: bool, minutes: float | None, who: str, exc: TimeoutError
+) -> tuple[str, str]:
+    """The error code and message for ``who``'s work that raised ``exc``: they ran out of their
+    role's ``minutes`` only if its deadline ``expired``, as the work can raise a TimeoutError of
+    its own."""
+    if minutes is None or not expired:
+        return AGENT_FAILED, str(exc)
+    return TIMED_OUT, out_of_time(who, minutes)
 
 
 def role_task(role_name: str, role: Role, prompt: str) -> TaskSpec:

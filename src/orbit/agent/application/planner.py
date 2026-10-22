@@ -19,9 +19,9 @@ from orbit.agent.domain.agents import Agent
 from orbit.agent.domain.roles import (
     PROPOSE_TASK,
     REPORT_PROGRESS,
-    out_of_time,
     suggested_task,
     task_suggestion,
+    timeout_ending,
 )
 from orbit.agent.domain.verification import steps_note
 from orbit.protocol import (
@@ -29,7 +29,6 @@ from orbit.protocol import (
     CODER,
     PLAN_TASK,
     PLANNER,
-    TIMED_OUT,
     AgentExited,
     AgentStarted,
     ErrorOccurred,
@@ -42,16 +41,6 @@ from orbit.protocol import (
 )
 
 RESUME_FAILED_NOTE = "Couldn't resume the planner's conversation; starting fresh."
-
-
-def _timed_out(
-    exc: TimeoutError, deadline: asyncio.Timeout, minutes: float | None
-) -> tuple[str, str]:
-    """The error code and message for a turn that raised ``exc``: the planner ran out of its
-    ``minutes`` only if ``deadline`` expired, as the turn can raise a TimeoutError of its own."""
-    if minutes is None or not deadline.expired():
-        return AGENT_FAILED, str(exc)
-    return TIMED_OUT, out_of_time("The planner", minutes)
 
 
 class PlannerChat:
@@ -115,9 +104,9 @@ class PlannerChat:
         except asyncio.CancelledError:
             return await self._end(turn_id, finished, "cancelled")
         except TimeoutError as exc:
-            return await self._fail(
-                turn_id, finished, *_timed_out(exc, deadline, role.timeout_minutes)
-            )
+            minutes = role.timeout_minutes
+            ending = timeout_ending(deadline.expired(), minutes, "The planner", exc)
+            return await self._fail(turn_id, finished, *ending)
         except Exception as exc:
             return await self._fail(turn_id, finished, AGENT_FAILED, str(exc))
         return finished or "completed"
