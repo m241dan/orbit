@@ -793,6 +793,46 @@ async def test_a_call_whose_run_closes_while_it_is_published_is_refused() -> Non
     assert (answer.text, answer.is_error) == (reply.text, True)
 
 
+class HangingTarget:
+    """Answers no call: each is handled until it's cancelled."""
+
+    def __init__(self) -> None:
+        self.handling = asyncio.Event()
+
+    async def handle(self, tool: str, arguments: dict[str, Any]) -> Reply:
+        self.handling.set()
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+
+async def test_a_cancelled_call_is_answered_with_an_error_reply() -> None:
+    events: list[Event] = []
+
+    async def publish(event: Event) -> None:
+        events.append(event)
+
+    agents = Agents(FakeHost(), ScriptedLauncher(FakeHost()), lambda: "token-1", ROLES)
+    desk = AgentDesk(agents, publish)
+    target = HangingTarget()
+    agent = desk.open(target, "coder", "1")
+    await desk.publish(AgentStarted(agent_id=agent.id, role="coder", task_id="1"))
+    call = asyncio.ensure_future(desk.handle("token-1", "get_task", {}))
+    await asyncio.wait_for(target.handling.wait(), 5)
+    call.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await call
+    [request] = [e for e in events if isinstance(e, AgentRequest)]
+    [answer] = [e for e in events if isinstance(e, AgentReply)]
+    assert answer == AgentReply(
+        agent_id=agent.id,
+        request_id=request.request_id,
+        text="Orbit stopped handling this call.",
+        is_error=True,
+    )
+    [running] = desk.running
+    assert running.open_requests == ()
+
+
 def desk_on(host: FakeHost, publish: Publish = ignore) -> AgentDesk:
     """A desk whose agents reach orbit through ``host``, publishing to ``publish``."""
     agents = Agents(host, ScriptedLauncher(host), lambda: "token-1", ROLES)

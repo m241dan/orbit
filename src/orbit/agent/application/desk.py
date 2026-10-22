@@ -45,6 +45,9 @@ from orbit.protocol import (
 # The refusal of a call from an agent that isn't running.
 UNKNOWN_AGENT = Reply("Unknown or expired agent token.", is_error=True)
 
+# The reply published for a call whose handling was cancelled, so it doesn't look unanswered.
+STOPPED_HANDLING = Reply("Orbit stopped handling this call.", is_error=True)
+
 # Longest progress note shown; agents can be chatty.
 NOTE_LIMIT = 200
 
@@ -236,15 +239,20 @@ class AgentDesk:
         )
         # Open only once its request is published, so a snapshot can't show it twice.
         self._requests[request_id] = (agent.id, OpenRequest(request_id=request_id, tool=tool))
+        reply = STOPPED_HANDLING  # Unless it's answered: a cancelled call is still replied to.
         try:
             reply = await self._request(agent, tool, arguments)
         finally:
             del self._requests[request_id]
-        await self.publish(
-            AgentReply(
-                agent_id=agent.id, request_id=request_id, text=reply.text, is_error=reply.is_error
+            # Publishing never suspends, so a cancelled call's reply doesn't swallow the cancel.
+            await self.publish(
+                AgentReply(
+                    agent_id=agent.id,
+                    request_id=request_id,
+                    text=reply.text,
+                    is_error=reply.is_error,
+                )
             )
-        )
         return reply
 
     async def _request(self, agent: Agent, tool: str, arguments: dict[str, Any]) -> Reply:
