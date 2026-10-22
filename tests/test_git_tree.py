@@ -1,6 +1,7 @@
 """The coder's worktree, against real throwaway git repositories."""
 
 import asyncio
+import os
 import subprocess
 import sys
 import threading
@@ -944,6 +945,24 @@ async def test_ignoring_paths_keeps_the_exclude_files_mode(repo: Path) -> None:
     await tree.ignore({"__pycache__/"})
     assert "__pycache__/" in exclude.read_text()
     assert exclude.stat().st_mode & 0o777 == 0o664
+
+
+async def test_ignoring_paths_that_cant_replace_the_exclude_file_leaves_it_whole(
+    repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tree = GitCoderTree(str(repo))
+    await tree.prepare(keep=False)
+    exclude = repo / ".git" / "info" / "exclude"
+    exclude.write_text("*.log\n")
+
+    def full(source: Path, target: Path) -> None:
+        raise OSError("No space left on device")
+
+    monkeypatch.setattr(os, "replace", full)
+    with pytest.raises(RuntimeError, match="No space left on device"):
+        await tree.ignore({"__pycache__/"})
+    assert exclude.read_text() == "*.log\n"
+    assert [p.name for p in exclude.parent.iterdir()] == ["exclude"]
 
 
 async def test_ignoring_paths_that_cant_be_written_raises_runtime_error(repo: Path) -> None:

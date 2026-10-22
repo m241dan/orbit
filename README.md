@@ -1561,7 +1561,7 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     token it checks, read afresh for each frontend, and rotates it, `tls_warnings` (in `tls`) checks
     the server's TLS settings, key and certificate before it listens, with the messages in
     `tls_messages`, `RunFile` (in `run_file`) says where it listens, both written through
-    `private_files`, and `user_config` reads `[storage]`, `[server]` and `[remotes]`.
+    `whole_files`, and `user_config` reads `[storage]`, `[server]` and `[remotes]`.
   - `application`: `ControlPlane` (in `control_plane`) is what frontends connect to: each
     `SessionConnection` (in `connection`) from its `connect()` implements `Session`. It owns
     what's shared: the connections, the `Outbox` (in `outbox`), which stamps each event with its
