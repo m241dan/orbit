@@ -10,7 +10,7 @@ import pytest
 from orbit.agent import Verification, VerificationStep
 from orbit.agent.application.agent_run import AgentRun
 from orbit.agent.application.desk import NOTE_LIMIT, AgentDesk, Agents, progress_note
-from orbit.agent.application.outcomes import Outcome, see_to_end, tree_failed
+from orbit.agent.application.outcomes import Outcome, cancelling, see_to_end, tree_failed
 from orbit.agent.application.ports import CallHandler, ProposalDecision, Reply
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.application.verifier import Verifier
@@ -1087,6 +1087,26 @@ async def test_see_to_end_leaves_a_task_it_never_started_as_it_was() -> None:
 
     assert await see_to_end(tasks, task_id, DEFAULT, unstarted()) == Outcome("completed")
     assert ending(tasks, task_id) == ("pending", "", "")
+
+
+async def cancelling_once_cancelled(waiting: asyncio.Event) -> bool:
+    """Whether :func:`cancelling` says so in a task cancelled as it waits, once ``waiting``."""
+    waiting.set()
+    with suppress(asyncio.CancelledError):
+        await asyncio.Event().wait()
+    return cancelling()
+
+
+async def test_a_task_being_cancelled_is_cancelling() -> None:
+    waiting = asyncio.Event()
+    task = asyncio.create_task(cancelling_once_cancelled(waiting))
+    await waiting.wait()
+    task.cancel()
+    assert await task
+
+
+async def test_a_task_not_being_cancelled_is_not_cancelling() -> None:
+    assert not cancelling()
 
 
 async def test_tree_failed_publishes_the_error_and_ends_in_it() -> None:
