@@ -394,6 +394,40 @@ async def test_a_refused_attach_leaves_the_session_shown_to_attach_to_again() ->
     assert again[1:] == [back.model_copy(update={"payload": ATTACH.payload})]
 
 
+async def test_an_attach_unanswered_when_the_link_drops_is_sent_again_as_it_was() -> None:
+    switch = CommandEnvelope(command_id="switch", payload=Attach(workspace="w1", session="b"))
+    async with viewing() as (fake, session, events, first):
+        await session.send(switch)
+        await fake.command()
+        await drop_after(first, events)
+        _, again = await reconnecting(fake, session)
+
+    assert again[1:] == [switch]
+
+
+async def test_a_refused_attach_is_answered_by_any_session_shown_before_it() -> None:
+    switch = CommandEnvelope(command_id="switch", payload=Attach(workspace="w1", session="b"))
+    async with viewing() as (fake, session, events, first):
+        await session.send(switch)
+        await fake.command()
+        await drop_after(first, events, answer(5, RUN), answer(6, switch, refused=True))
+        _, again = await reconnecting(fake, session)
+
+    assert again[1:] == [switch.model_copy(update={"payload": ATTACH.payload})]
+
+
+async def test_an_accepted_attach_gives_way_to_a_later_switch() -> None:
+    switch = CommandEnvelope(command_id="switch", payload=Attach(workspace="w1", session="b"))
+    async with viewing() as (fake, session, events, first):
+        await session.send(switch)
+        await fake.command()
+        shown = (snapshot(5, active=False, session="b"), answer(6, switch))
+        await drop_after(first, events, *shown, snapshot(7, active=True, session="c"))
+        _, again = await reconnecting(fake, session)
+
+    assert again[1:] == [switch.model_copy(update={"payload": Attach(workspace="w1", session="c")})]
+
+
 async def test_the_workspace_a_snapshot_names_is_the_one_attached_to_again() -> None:
     async with viewing() as (fake, session, events, first):
         await drop_after(first, events, snapshot(5, active=True, session="s", workspace="w2"))

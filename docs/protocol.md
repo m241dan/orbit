@@ -188,8 +188,9 @@ to it alone, as `Attach` does; a `SessionStateChanged` reports the deleted sessi
 viewers. The delete's `CommandAccepted` follows.
 
 A reconnecting `orbit.client.WebSocketSession` sends its `Hello` again and, if it had attached,
-its last `Attach`, for the workspace and session the last `Snapshot` it got showed, if it got
-one since, so it views that session again.
+its last `Attach`: as it was while it's unanswered, so a switch the link dropped isn't lost;
+otherwise for the workspace and session the last `Snapshot` it got showed, if it got one since,
+so it views that session again, the one it viewed before a refused `Attach` included.
 
 ## Workspaces
 
