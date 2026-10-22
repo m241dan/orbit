@@ -262,6 +262,18 @@ def note_entry(event: TaskMerged | Notice | StartupChecked) -> tuple[str, EntryK
             assert_never(event)
 
 
+_TELEMETRY_LOGGERS = ("opentelemetry", "orbit.telemetry")
+"""The loggers, with those under them, whose warnings are telemetry's."""
+
+
+def warning_entry(logger: str, message: str) -> tuple[str, EntryKind]:
+    """A warning logged as ``message`` by ``logger`` as a transcript entry, naming telemetry
+    when it's telemetry's."""
+    if any(logger == name or logger.startswith(f"{name}.") for name in _TELEMETRY_LOGGERS):
+        return f"⚠ Telemetry: {message}", "verify"
+    return f"⚠ {message}", "verify"
+
+
 AgentNote = (
     AgentStarted | TaskGaveUp | AgentReply | ProgressNoted | Notice | StartupChecked | LogGap
 )

@@ -1698,8 +1698,10 @@ running its own control plane), `service.instance.id`, new each start, and `host
 batched and sent in the background; when `orbit chat` closes, or `orbit serve` stops gracefully,
 orbit waits at most 5 seconds for those not yet sent, then logs one warning naming how many it
 dropped, such as `Telemetry dropped 3 spans it couldn't export.` `orbit serve` logs warnings, from
-orbit and OpenTelemetry alike (an unreachable collector, say), to stderr; `orbit chat` keeps them
-off the screen while the TUI runs, and prints the dropped spans' warning after it closes.
+orbit and OpenTelemetry alike (an unreachable collector, say), to stderr. `orbit chat` keeps them
+off the screen while the TUI runs, showing each kind (the same logger and message) once per run as
+a transcript note (`⚠ Telemetry: …` for telemetry's), and prints every one to stderr, in order,
+after it closes, followed by the dropped spans' warning.
 
 ## Development
 

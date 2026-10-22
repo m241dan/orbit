@@ -115,9 +115,10 @@ from orbit.tui.view.proposals import decision_entry
 from orbit.tui.view.rules import planner_reset_entry
 from orbit.tui.view.sessions import chosen_workspace
 from orbit.tui.view.tasks import edit_refusal
-from orbit.tui.view.transcript import PLANNER_BUSY
+from orbit.tui.view.transcript import PLANNER_BUSY, warning_entry
 from orbit.tui.view.triggers import trigger_key_labels
 from orbit.tui.view.windows import SIDEBAR_WINDOWS, neighbors
+from orbit.tui.warning_capture import WarningCapture
 from orbit.tui.widgets import (
     ChatPrompt,
     StatusLine,
@@ -236,6 +237,8 @@ class OrbitApp(App[None], inherit_bindings=False):
         self._missing_triggers: frozenset[str] = frozenset()
         self.clock: Callable[[], float] = time.monotonic
         self._pickers = SettingsPickers()
+        # Orbit's and OpenTelemetry's warnings, shown as notes while the app runs.
+        self.warnings = WarningCapture()
 
     def compose(self) -> ComposeResult:
         with Horizontal():
@@ -256,6 +259,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         yield KeyFooter()
 
     async def on_unmount(self) -> None:
+        self.warnings.detach()
         await self._session.close()
 
     @property
@@ -282,6 +286,9 @@ class OrbitApp(App[None], inherit_bindings=False):
         self._pickers.install(self)
         if self._link is not None:  # Before the events start, which start the link.
             self._link.watch(self._follow_link)
+        self.warnings.attach(
+            lambda logger, message: self._feed.append(*warning_entry(logger, message))
+        )
         self._consume_events()
 
     @on(ChatPrompt.Submitted, "#prompt")

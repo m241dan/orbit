@@ -1,5 +1,6 @@
 """The telemetry ``orbit chat`` starts from the user config, hands its backend and stops."""
 
+import io
 import logging
 import sys
 from collections.abc import Iterator
@@ -11,7 +12,6 @@ from typer.testing import CliRunner
 
 from orbit.agent import WorkspaceHost
 from orbit.cli import app
-from orbit.cli.telemetry import _quiet_logging
 from orbit.telemetry import Off
 from orbit.telemetry.otel import OtelTelemetry
 from tests.cli_fakes import LocalApp, StartedTelemetry
@@ -137,24 +137,32 @@ def test_telemetry_configured_without_its_extra_stops_chat_naming_the_extra(
     assert hosts == []
 
 
-def _quieted(name: str) -> bool:
-    return any(isinstance(h, logging.NullHandler) for h in logging.getLogger(name).handlers)
+def _stderr_so_far() -> bytes:
+    """What the CLI runner's stderr has been written so far."""
+    sys.stderr.flush()
+    buffer = sys.stderr.buffer
+    assert isinstance(buffer, io.BytesIO)
+    return buffer.getvalue()
 
 
-def test_quiet_logging_sends_orbits_and_opentelemetrys_records_nowhere_for_the_block() -> None:
-    with _quiet_logging():
-        assert _quieted("orbit") and _quieted("opentelemetry")
-    assert not _quieted("orbit") and not _quieted("opentelemetry")
+def test_chat_prints_the_warnings_logged_while_the_tui_ran_only_after_it_exits(
+    hosts: list[WorkspaceHost], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Without pytest's handlers, an uncaptured warning goes to stderr, as it would in a run.
+    monkeypatch.setattr(logging.root, "handlers", [])
+    during: list[bytes] = []
 
+    async def warn(host: WorkspaceHost) -> None:
+        for count in (1, 2):
+            logging.getLogger("orbit.telemetry.otel").warning("Dropped %d spans.", count)
+        logging.getLogger("opentelemetry.sdk").error("Export failed.")
+        during.append(_stderr_so_far())
 
-def test_chat_keeps_logging_quiet_while_the_tui_runs(hosts: list[WorkspaceHost]) -> None:
-    seen: list[bool] = []
+    LocalApp.during = warn
+    LocalApp.halted = "Halted."
 
-    async def note(host: WorkspaceHost) -> None:
-        seen.append(_quieted("orbit"))
+    result = runner.invoke(app, ["chat"])
 
-    LocalApp.during = note
-
-    assert runner.invoke(app, ["chat"]).exit_code == 0
-    assert seen == [True]
-    assert not _quieted("orbit")
+    assert result.exit_code == 0
+    assert during == [b""]
+    assert result.stderr == "Dropped 1 spans.\nDropped 2 spans.\nExport failed.\nHalted.\n"

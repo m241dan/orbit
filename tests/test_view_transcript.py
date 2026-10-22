@@ -55,6 +55,7 @@ from orbit.tui.view.transcript import (
     speaker_label,
     starts_collapsed,
     tool_call_entry,
+    warning_entry,
 )
 
 
@@ -189,6 +190,17 @@ def test_merges_and_notices_become_transcript_entries() -> None:
     blocked = TaskMerged(task_id="1", result="blocked", detail="a.txt has local changes")
     assert note_entry(blocked) == ("⚠ Not merged (blocked): a.txt has local changes", "verify")
     assert note_entry(Notice(message="2 stashes")) == ("📌 2 stashes", "verify")
+
+
+@pytest.mark.parametrize("logger", ["opentelemetry.sdk.trace", "orbit.telemetry.otel"])
+def test_a_telemetry_warning_is_a_note_naming_telemetry(logger: str) -> None:
+    assert warning_entry(logger, "export failed") == ("⚠ Telemetry: export failed", "verify")
+
+
+def test_another_warning_is_a_note_of_its_message() -> None:
+    entry = warning_entry("orbit.agent.external.sqlite_store", "Couldn't read")
+
+    assert entry == ("⚠ Couldn't read", "verify")
 
 
 def test_a_gap_in_the_log_says_which_events_werent_saved() -> None:

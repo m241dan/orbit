@@ -1,6 +1,5 @@
 """Starting the telemetry the user config asks for, and stopping it on exit."""
 
-import logging
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -18,9 +17,6 @@ from orbit.telemetry import (
     load_telemetry,
     start_telemetry,
 )
-
-_QUIETED = ("orbit", "opentelemetry")
-"""The loggers whose warnings mustn't reach the terminal while the TUI draws on it."""
 
 
 def _telemetry_settings(config_dir: Path) -> TelemetrySettings:
@@ -54,17 +50,3 @@ def _telemetry(run: TelemetryRun) -> Iterator[RunningTelemetry]:
         yield telemetry
     finally:
         telemetry.close()
-
-
-@contextmanager
-def _quiet_logging() -> Iterator[None]:
-    """Run the block with orbit's and OpenTelemetry's log records going nowhere visible, rather
-    than to the terminal Python writes them to when nothing handles them."""
-    nowhere = logging.NullHandler()
-    for name in _QUIETED:
-        logging.getLogger(name).addHandler(nowhere)
-    try:
-        yield
-    finally:
-        for name in _QUIETED:
-            logging.getLogger(name).removeHandler(nowhere)

@@ -45,7 +45,7 @@ from orbit.cli.options import (
     WorkspaceOption,
     WorktreeOption,
 )
-from orbit.cli.telemetry import _quiet_logging, _telemetry
+from orbit.cli.telemetry import _telemetry
 from orbit.cli.threaded import ThreadedSession
 from orbit.client import (
     CaUnreadable,
@@ -131,8 +131,8 @@ def chat(
     directories = _Directories(root, state, user_config)
     picking = not flags.fresh
     run = TelemetryRun("orbit-chat", user_config, state, os.environ)
-    # Telemetry's warnings would draw over the TUI; those left as it stops print after it.
-    with _telemetry(run) as telemetry, _quiet_logging():
+    # The TUI captures the warnings logged while it runs; those as telemetry stops go to stderr.
+    with _telemetry(run) as telemetry:
         flags = replace(flags, telemetry=telemetry)
         with _in_process(flags, directories, pick_session=picking, make=_backend) as backend:
             session = ThreadedSession(backend.build, _thread_context(profile))
@@ -480,14 +480,25 @@ def _thread_context(profile: Path | None) -> Callable[[], AbstractContextManager
 
 
 def _launch(tui: OrbitApp, profile: Path | None) -> None:
-    """Run ``tui``, profiled into the ``profile`` directory if there is one, then print why
-    its session is halted, if it is, as the halt's modal no longer shows it."""
+    """Run ``tui``, profiled into the ``profile`` directory if there is one, capturing the
+    warnings that would draw over it, then print them, and why its session is halted, if it
+    is, as the halt's modal no longer shows it."""
+    try:
+        with tui.warnings.capturing():
+            _run(tui, profile)
+    finally:
+        for line in tui.warnings.lines():
+            typer.echo(line, err=True)
+    if tui.storage_halt is not None:
+        typer.echo(tui.storage_halt, err=True)
+
+
+def _run(tui: OrbitApp, profile: Path | None) -> None:
+    """Run ``tui``, profiled into the ``profile`` directory if there is one."""
     if profile is None:
         tui.run()
     else:
         asyncio.run(_run_profiled(tui, profile))
-    if tui.storage_halt is not None:
-        typer.echo(tui.storage_halt, err=True)
 
 
 async def _run_profiled(tui: OrbitApp, directory: Path) -> None:

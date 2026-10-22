@@ -17,7 +17,7 @@ from orbit.agent.external.control_plane import ControlPlaneServer
 from orbit.cli.threaded import ThreadedSession
 from orbit.protocol import PROTOCOL_VERSION, CommandEnvelope, Hello
 from orbit.telemetry import Off, TelemetryRun, TelemetrySettings
-from orbit.tui import Opening
+from orbit.tui import Opening, WarningCapture
 
 
 @dataclass
@@ -41,6 +41,7 @@ class FakeApp:
     opening: Opening = field(default_factory=Opening)
     storage_halt: str | None = None
     ran: bool = field(default=False)
+    warnings: WarningCapture = field(default_factory=WarningCapture)
 
     def __post_init__(self) -> None:
         FakeApp.built.append(self)
@@ -89,6 +90,7 @@ class LocalApp:
     def __init__(self, session: ThreadedSession, *, opening: Opening) -> None:
         self.session = session
         self.storage_halt = LocalApp.halted
+        self.warnings = WarningCapture()
         LocalApp.picks.append(opening.pick)
         LocalApp.repositories.append(opening.repository)
 
