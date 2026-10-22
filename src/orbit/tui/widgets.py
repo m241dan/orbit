@@ -382,6 +382,61 @@ class PickerScreen(ListScreen[int | None]):
         self.dismiss(None)
 
 
+class ChoiceScreen(ListScreen[int]):
+    """``title`` with ``message`` and the ``choices`` to pick from, the first preselected, in a
+    box bordered in the accent colour, or the error colour with the ``error`` class; dismisses
+    with the index of the one picked, or ``escape_index`` on escape."""
+
+    AUTO_FOCUS = "OptionList"
+    DEFAULT_CSS = """
+    ChoiceScreen { align: center middle; }
+    ChoiceScreen > Vertical {
+        width: 70;
+        max-width: 90%;
+        height: auto;
+        border: round $accent;
+        padding: 0 1;
+    }
+    ChoiceScreen.error > Vertical { border: round $error; }
+    ChoiceScreen OptionList { height: auto; border: none; }
+    """
+    BINDINGS: ClassVar[list[BindingType]] = [
+        Binding("escape", "escape", show=False),
+    ]
+
+    def __init__(
+        self,
+        title: str,
+        message: str,
+        choices: Sequence[str],
+        *,
+        escape_index: int,
+    ) -> None:
+        super().__init__()
+        self.title_text = title
+        self.message = message
+        self.choices = tuple(choices)
+        self.escape_index = escape_index
+
+    def compose(self) -> ComposeResult:
+        with Vertical() as box:
+            box.border_title = self.title_text
+            yield Static(Text(self.message), id="choice-message")
+            yield OptionList(*self.choices)
+
+    def on_mount(self) -> None:
+        # One dismissed before it mounts, replaced by a newer one, has no list left.
+        for options in self.query(OptionList):
+            options.highlighted = 0
+
+    @on(OptionList.OptionSelected)
+    def _picked(self, event: OptionList.OptionSelected) -> None:
+        self.dismiss(event.option_index)
+
+    def action_escape(self) -> None:
+        self.dismiss(self.escape_index)
+
+
 class ConfirmScreen(ModalScreen[bool]):
     """Asks ``title`` with ``message``; dismisses with True on ``y``, False on ``n`` or escape.
 

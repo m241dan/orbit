@@ -20,8 +20,7 @@ from orbit.protocol import (
     TaskState,
 )
 from orbit.tui import OrbitApp
-from orbit.tui.sessions import ActivationScreen
-from orbit.tui.widgets import ChatPrompt
+from orbit.tui.widgets import ChatPrompt, ChoiceScreen
 from tests.session_apps import CATALOG, CURRENT, OLD, RUNNING, catalog, joined, started
 from tests.tui_fakes import entries, feed_events, opened
 
@@ -52,19 +51,19 @@ def mark(app: OrbitApp) -> str | None:
     return str(line.render()) if line.display else None
 
 
-def prompt(app: OrbitApp) -> ActivationScreen:
+def prompt(app: OrbitApp) -> ChoiceScreen:
     screen = app.screen
-    assert isinstance(screen, ActivationScreen)
+    assert isinstance(screen, ChoiceScreen)
     return screen
 
 
-def choices(screen: ActivationScreen) -> list[str]:
+def choices(screen: ChoiceScreen) -> list[str]:
     options = screen.query_one(OptionList)
     return [str(options.get_option_at_index(i).prompt) for i in range(options.option_count)]
 
 
-def message(screen: ActivationScreen) -> str:
-    return str(screen.query_one("#activation-message", Static).render())
+def message(screen: ChoiceScreen) -> str:
+    return str(screen.query_one("#choice-message", Static).render())
 
 
 async def test_a_view_shows_the_viewing_mark_naming_the_session() -> None:
@@ -114,7 +113,7 @@ async def test_picking_a_session_viewed_read_only_offers_to_make_it_active() -> 
             Attach(workspace="w", session="old"),
             ActivateSession(session="old"),
         ]
-        assert not isinstance(app.screen, ActivationScreen)
+        assert not isinstance(app.screen, ChoiceScreen)
 
 
 async def test_just_look_closes_the_prompt_and_keeps_the_view() -> None:
@@ -126,7 +125,7 @@ async def test_just_look_closes_the_prompt_and_keeps_the_view() -> None:
         await pilot.press("j", "enter")
 
         assert session.commands == [Attach(workspace="w", session="old")]
-        assert not isinstance(app.screen, ActivationScreen)
+        assert not isinstance(app.screen, ChoiceScreen)
         assert mark(app) == VIEWING_OLD
 
 
@@ -139,7 +138,7 @@ async def test_escape_just_looks() -> None:
         await pilot.press("escape")
 
         assert session.commands == [Attach(workspace="w", session="old")]
-        assert not isinstance(app.screen, ActivationScreen)
+        assert not isinstance(app.screen, ChoiceScreen)
 
 
 async def test_with_the_active_session_running_the_prompt_only_offers_to_just_look() -> None:
@@ -154,7 +153,7 @@ async def test_with_the_active_session_running_the_prompt_only_offers_to_just_lo
         assert message(screen) == "today is running a task; you can switch once it's idle."
         await pilot.press("enter")
         assert session.commands == [Attach(workspace="w", session="old")]
-        assert not isinstance(app.screen, ActivationScreen)
+        assert not isinstance(app.screen, ChoiceScreen)
 
 
 async def test_a_session_activated_directly_offers_nothing() -> None:
@@ -163,14 +162,14 @@ async def test_a_session_activated_directly_offers_nothing() -> None:
         await feed_events(session, pilot, CATALOG)
         await pilot.press("enter", "j", "enter")
         await feed_events(session, pilot, opened(OLD))
-        assert not isinstance(app.screen, ActivationScreen)
+        assert not isinstance(app.screen, ChoiceScreen)
 
 
 async def test_a_view_not_picked_here_offers_nothing_until_enter_on_its_mark() -> None:
     app, session = started()
     async with app.run_test() as pilot:
         await feed_events(session, pilot, CATALOG, view(OLD))
-        assert not isinstance(app.screen, ActivationScreen)
+        assert not isinstance(app.screen, ChoiceScreen)
 
         await pilot.press("enter")
         assert choices(prompt(app)) == ["Make this the active session", "Just look"]
@@ -183,7 +182,7 @@ async def test_enter_on_the_prompt_of_a_live_session_offers_nothing() -> None:
     async with app.run_test() as pilot:
         await feed_events(session, pilot, CATALOG, opened(CURRENT))
         await pilot.press("enter")
-        assert not isinstance(app.screen, ActivationScreen)
+        assert not isinstance(app.screen, ChoiceScreen)
         assert session.commands == []
 
 
@@ -276,10 +275,10 @@ async def test_a_live_snapshot_closes_the_prompt_shown_and_sends_nothing() -> No
         await pilot.press("enter")
         prompt(app)
         await feed_events(session, pilot, opened(OLD))
-        assert not isinstance(app.screen, ActivationScreen)
+        assert not isinstance(app.screen, ChoiceScreen)
 
         await pilot.press("enter")
-        assert not isinstance(app.screen, ActivationScreen)
+        assert not isinstance(app.screen, ChoiceScreen)
         assert session.commands == []
 
 
@@ -338,11 +337,11 @@ async def test_the_offer_again_replaces_the_one_still_shown_and_comes_once() -> 
         await pilot.press("enter", "j", "enter")
         await feed_events(session, pilot, view(OLD), IDLE)
 
-        [screen] = [s for s in app.screen_stack if isinstance(s, ActivationScreen)]
+        [screen] = [s for s in app.screen_stack if isinstance(s, ChoiceScreen)]
         assert message(screen) == "today is idle now."
         await pilot.press("escape")
         await feed_events(session, pilot, RUNNING_T3, IDLE)
-        assert not isinstance(app.screen, ActivationScreen)
+        assert not isinstance(app.screen, ChoiceScreen)
         assert session.commands == [Attach(workspace="w", session="old")]
 
 
@@ -350,5 +349,5 @@ async def test_a_view_not_picked_here_is_not_offered_again_when_the_active_one_i
     app, session = started()
     async with app.run_test() as pilot:
         await feed_events(session, pilot, CATALOG, RUNNING_T3, view(OLD), IDLE)
-        assert not isinstance(app.screen, ActivationScreen)
+        assert not isinstance(app.screen, ChoiceScreen)
         assert mark(app) == VIEWING_OLD

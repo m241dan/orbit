@@ -22,10 +22,10 @@ from orbit.protocol import (
     WorkspaceEntry,
 )
 from orbit.tui import Opening, OrbitApp
-from orbit.tui.link import LinkHost, LinkScreen
+from orbit.tui.link import LinkHost
 from orbit.tui.modal import Closed
 from orbit.tui.view.link import LOST_AFTER, ended_message, lost_delay
-from orbit.tui.widgets import ChatPrompt
+from orbit.tui.widgets import ChatPrompt, ChoiceScreen
 from tests.tui_fakes import FakeLink, FakeSession, entries, feed_events
 
 URL = "ws://127.0.0.1:7433/"
@@ -55,9 +55,9 @@ def status(app: OrbitApp) -> str | None:
     return str(line.render()) if line.display else None
 
 
-def modal(app: OrbitApp) -> LinkScreen | None:
+def modal(app: OrbitApp) -> ChoiceScreen | None:
     """The link's modal, if it's the screen on top."""
-    return app.screen if isinstance(app.screen, LinkScreen) else None
+    return app.screen if isinstance(app.screen, ChoiceScreen) else None
 
 
 def lost_long_ago() -> Reconnecting:
@@ -165,6 +165,14 @@ async def test_the_old_modals_late_callback_leaves_the_new_one_open() -> None:
         assert app.screen is stopped
         await pilot.press("escape")
         assert modal(app) is None
+
+
+async def test_the_stopped_modal_is_bordered_as_an_error() -> None:
+    app, _, link = linked()
+    async with app.run_test() as pilot:
+        await link.move(pilot, Stopped(URL))
+        stopped = modal(app)
+        assert stopped is not None and stopped.has_class("error")
 
 
 async def test_escape_keeps_trying_and_quit_exits_from_the_stopped_modal() -> None:
@@ -282,15 +290,15 @@ class LinkApp(App[None]):
         self.quits = 0
         self.host = LinkHost(self._push, self._quit, lambda _: None, self.set_timer)
 
-    def _push(self, screen: LinkScreen, closed: Closed[int]) -> None:
+    def _push(self, screen: ChoiceScreen, closed: Closed[int]) -> None:
         self.callbacks.append(closed)
         self.push_screen(screen, closed)
 
     def _quit(self) -> None:
         self.quits += 1
 
-    def link_screens(self) -> list[LinkScreen]:
-        return [screen for screen in self.screen_stack if isinstance(screen, LinkScreen)]
+    def link_screens(self) -> list[ChoiceScreen]:
+        return [screen for screen in self.screen_stack if isinstance(screen, ChoiceScreen)]
 
 
 async def test_a_superseded_modals_late_quit_does_not_quit() -> None:

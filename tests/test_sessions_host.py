@@ -16,14 +16,13 @@ from orbit.protocol import (
     WorkspaceEntry,
 )
 from orbit.tui.sessions import (
-    ActivationScreen,
     SessionChange,
     SessionChoice,
     SessionsHost,
     SessionsScreen,
 )
 from orbit.tui.view.sessions import chosen_workspace
-from orbit.tui.widgets import ConfirmScreen
+from orbit.tui.widgets import ChoiceScreen, ConfirmScreen
 from tests.tui_fakes import opened
 
 OLD = SessionSummary(id="old", name="auth rework")
@@ -54,8 +53,8 @@ class Host(App[None]):
         self.sent.append(command)
         return command.type not in self.failing
 
-    def activation_screens(self) -> list[ActivationScreen]:
-        return [screen for screen in self.screen_stack if isinstance(screen, ActivationScreen)]
+    def activation_screens(self) -> list[ChoiceScreen]:
+        return [screen for screen in self.screen_stack if isinstance(screen, ChoiceScreen)]
 
     def sessions_screens(self) -> list[SessionsScreen]:
         return [screen for screen in self.screen_stack if isinstance(screen, SessionsScreen)]
@@ -284,7 +283,7 @@ async def test_offering_twice_shows_one_offer() -> None:
         await pilot.pause()
         [screen] = app.activation_screens()
         assert app.host.offered is screen
-        screen.dismiss(False)
+        screen.dismiss(1)  # Just look.
         await pilot.pause()
         assert app.host.offered is None
         assert app.sent == []

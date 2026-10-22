@@ -1,17 +1,10 @@
 """The status line and modals that show how the link to a control plane in another process
 stands."""
 
-from collections.abc import Callable, Sequence
-from typing import ClassVar, assert_never
+from collections.abc import Callable
+from typing import assert_never
 
-from rich.text import Text
-from textual import on
-from textual.app import ComposeResult
-from textual.binding import Binding, BindingType
-from textual.containers import Vertical
-from textual.screen import ModalScreen
 from textual.timer import Timer
-from textual.widgets import OptionList, Static
 
 from orbit.protocol import (
     Connected,
@@ -34,47 +27,13 @@ from orbit.tui.view.link import (
     reconnecting_status,
     stopped_message,
 )
+from orbit.tui.widgets import ChoiceScreen
 
 
-class LinkScreen(ModalScreen[int]):
-    """``title`` with ``message`` and the ``choices`` to pick from, the first preselected;
-    dismisses with the index of the one picked, or the first's on escape."""
-
-    AUTO_FOCUS = "OptionList"
-    DEFAULT_CSS = """
-    LinkScreen { align: center middle; }
-    LinkScreen > Vertical {
-        width: 70;
-        max-width: 90%;
-        height: auto;
-        border: round $error;
-        padding: 0 1;
-    }
-    LinkScreen OptionList { height: auto; border: none; }
-    """
-    BINDINGS: ClassVar[list[BindingType]] = [Binding("escape", "pick_first", show=False)]
-
-    def __init__(self, title: str, message: str, choices: Sequence[str]) -> None:
-        super().__init__()
-        self.title_text = title
-        self.message = message
-        self.choices = tuple(choices)
-
-    def compose(self) -> ComposeResult:
-        with Vertical() as box:
-            box.border_title = self.title_text
-            yield Static(Text(self.message), id="link-message")
-            yield OptionList(*self.choices)
-
-    def on_mount(self) -> None:
-        self.query_one(OptionList).highlighted = 0
-
-    @on(OptionList.OptionSelected)
-    def _picked(self, event: OptionList.OptionSelected) -> None:
-        self.dismiss(event.option_index)
-
-    def action_pick_first(self) -> None:
-        self.dismiss(0)
+def _link_screen(title: str, message: str, choices: tuple[str, ...]) -> ChoiceScreen:
+    """The modal asking ``title`` with ``message`` about the link, offering ``choices``, the
+    first picked on escape, bordered as an error."""
+    return ChoiceScreen(title, message, choices, escape_index=0).add_class("error")
 
 
 _SOONEST = 0.01  # Textual's timers can't wait no time at all.
@@ -92,7 +51,7 @@ class LinkHost:
 
     def __init__(
         self,
-        push: Push[LinkScreen, int],
+        push: Push[ChoiceScreen, int],
         quit: Callable[[], None],
         show_status: ShowStatus,
         after: After,
@@ -101,10 +60,10 @@ class LinkHost:
         self._show_status = show_status
         self._after = after
         self._timer: Timer | None = None  # Until the user is asked whether to keep trying.
-        self._slot = ModalSlot[LinkScreen, int](push)
+        self._slot = ModalSlot[ChoiceScreen, int](push)
 
     @property
-    def shown(self) -> LinkScreen | None:
+    def shown(self) -> ChoiceScreen | None:
         """The modal asking whether to keep trying, or saying why the link won't be retried, if
         open."""
         return self._slot.showing
@@ -143,13 +102,13 @@ class LinkHost:
         self._show_status(None)
         self._stop_timer()
         self._slot.close(None)
-        self._slot.open(LinkScreen(title, message, (QUIT,)), self._quit_now)
+        self._slot.open(_link_screen(title, message, (QUIT,)), self._quit_now)
 
     def _ask(self, title: str, message: str) -> None:
         """Ask ``title`` with ``message`` whether to keep trying, unless that's being asked."""
         if self.shown is not None:
             return
-        self._slot.open(LinkScreen(title, message, CHOICES), self._answered)
+        self._slot.open(_link_screen(title, message, CHOICES), self._answered)
 
     async def _answered(self, index: int | None) -> None:
         """Quit if the choice at ``index`` is to."""

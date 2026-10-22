@@ -9,7 +9,7 @@ from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
 from textual.containers import Vertical
 from textual.screen import ModalScreen
-from textual.widgets import Input, OptionList, Static
+from textual.widgets import Input, OptionList
 
 from orbit.protocol import (
     ActivateSession,
@@ -32,6 +32,7 @@ from orbit.tui.view.sessions import (
     ACTIVATION_TITLE,
     DELETE_TITLE,
     DELETE_YES,
+    JUST_LOOK_CHOICE,
     NAME_PLACEHOLDER,
     NEW_SESSION_LABEL,
     SESSIONS_HINTS,
@@ -62,7 +63,7 @@ from orbit.tui.view.sessions import (
     workspace_sessions,
 )
 from orbit.tui.view.workspaces import with_states
-from orbit.tui.widgets import ListScreen, TypingListScreen, confirm
+from orbit.tui.widgets import ChoiceScreen, TypingListScreen, confirm
 
 SessionChoice = Attach | ActivateSession | NewSession
 """What the user chose: a saved session to view, and perhaps activate, or a new one to start."""
@@ -224,51 +225,6 @@ class SessionsScreen(TypingListScreen[tuple[SessionChoice, ...]]):
         self._typing(name_hint(renaming=renaming is not None), renaming.name if renaming else "")
 
 
-class ActivationScreen(ListScreen[bool]):
-    """Says ``message`` about the session viewed read-only and offers ``choices``, the first
-    preselected; dismisses with True on making it the active session, False on just looking
-    or escape."""
-
-    AUTO_FOCUS = "OptionList"
-    DEFAULT_CSS = """
-    ActivationScreen { align: center middle; }
-    ActivationScreen > Vertical {
-        width: 70;
-        max-width: 90%;
-        height: auto;
-        border: round $accent;
-        padding: 0 1;
-    }
-    ActivationScreen OptionList { height: auto; border: none; }
-    """
-    BINDINGS: ClassVar[list[BindingType]] = [
-        Binding("escape", "just_look", show=False),
-    ]
-
-    def __init__(self, message: str, choices: Sequence[str]) -> None:
-        super().__init__()
-        self.message = message
-        self.choices = tuple(choices)
-
-    def compose(self) -> ComposeResult:
-        with Vertical() as box:
-            box.border_title = ACTIVATION_TITLE
-            yield Static(Text(self.message), id="activation-message")
-            yield OptionList(*self.choices)
-
-    def on_mount(self) -> None:
-        # One dismissed before it mounts, replaced by a newer offer, has no list left.
-        for options in self.query(OptionList):
-            options.highlighted = 0
-
-    @on(OptionList.OptionSelected)
-    def _picked(self, event: OptionList.OptionSelected) -> None:
-        self.dismiss(self.choices[event.option_index] == ACTIVATE_CHOICE)
-
-    def action_just_look(self) -> None:
-        self.dismiss(False)
-
-
 Send = Callable[[SessionChoice | SessionChange], Awaitable[bool]]
 """Sends a session command to the backend, returning whether it was sent."""
 OpensOn = Callable[[Sequence[WorkspaceEntry]], WorkspaceEntry | None]
@@ -308,7 +264,7 @@ class SessionsHost:
         # The session picked and viewed only as the active one ran, until that one turns idle.
         self._held: str | None = None
         self._picker = ModalSlot[SessionsScreen, tuple[SessionChoice, ...]](push)
-        self._offer = ModalSlot[ActivationScreen, bool](push)  # The offer to activate.
+        self._offer = ModalSlot[ChoiceScreen, int](push)  # The offer to activate.
 
     @property
     def shown(self) -> SessionsScreen | None:
@@ -316,7 +272,7 @@ class SessionsHost:
         return self._picker.showing
 
     @property
-    def offered(self) -> ActivationScreen | None:
+    def offered(self) -> ChoiceScreen | None:
         """The offer to make the session viewed the active one, if shown."""
         return self._offer.showing
 
@@ -432,15 +388,17 @@ class SessionsHost:
         """Show the offer to make the session ``viewed`` the active one, saying ``message`` and
         offering ``choices``."""
 
-        async def answered(activate: bool | None) -> None:
-            if activate:
+        async def answered(index: int | None) -> None:
+            if index is not None and choices[index] == ACTIVATE_CHOICE:
                 await self._send(ActivateSession(session=viewed))
 
-        self._offer.open(ActivationScreen(message, choices), answered)
+        just_look = choices.index(JUST_LOOK_CHOICE)
+        screen = ChoiceScreen(ACTIVATION_TITLE, message, choices, escape_index=just_look)
+        self._offer.open(screen, answered)
 
     def _withdraw(self) -> None:
         """Close the offer shown, if any."""
-        self._offer.close(False)
+        self._offer.close(None)
 
     def open(self, startup: StartupPick | None = None, workspace: str | None = None) -> None:
         """Let the user pick a session of the ``workspace``, by default the one this frontend is
