@@ -480,6 +480,12 @@ class OrbitApp(App[None], inherit_bindings=False):
         if self._selected == "detail":  # Its pane just closed.
             self._select("transcript")
 
+    @on(ConversationTabs.Relabelled)
+    def _retitle_tab(self, message: ConversationTabs.Relabelled) -> None:
+        # Another tab may have been shown since the relabel was posted.
+        if message.key == self._transcript.only:
+            self._transcript.relabel(message.label)
+
     @on(AgentsPane.Cancel)
     async def _cancel_agent(self, message: AgentsPane.Cancel) -> None:
         await self._send(CancelAgent(agent_id=message.agent_id))

@@ -4,6 +4,7 @@ from contextlib import contextmanager
 
 import pytest
 from textual import events
+from textual.pilot import Pilot
 from textual.widgets import Footer, Tab
 from textual.worker import WorkerFailed
 
@@ -67,9 +68,11 @@ from tests.tui_fakes import (
     FakeSession,
     accept_last,
     active_tab,
+    call,
     entries,
     feed_events,
     picker,
+    result,
     said,
     selected,
     show_settings,
@@ -1126,6 +1129,61 @@ async def test_the_shown_tabs_title_follows_its_relabelling() -> None:
         assert tab_strip(app) == [*STRIP, "checker"]
         assert transcript.only == "agent-2"
         assert transcript.border_title == "Conversation · checker"
+
+
+async def inspect_latest(app: OrbitApp, pilot: Pilot[None]) -> Transcript:
+    """Open the shown tab's list and the detail pane on its latest entry."""
+    await pilot.press("k", "enter", "enter")
+    await pilot.pause()
+    transcript = app.query_one(Transcript)
+    assert transcript.detail.opened and app.focused is transcript.shown
+    return transcript
+
+
+async def test_relabelling_the_shown_planner_tab_keeps_its_list_and_details() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test(size=(120, 30)) as pilot:
+        await feed_events(session, pilot, call(PLANNER, "c1"), result(PLANNER, "c1", "x"))
+        await pilot.press("ctrl+t")
+        transcript = await inspect_latest(app, pilot)
+
+        await feed_events(session, pilot, BusyChanged(busy=True, lane="planner"))
+        assert transcript.border_title == "Conversation · ● planner"
+        assert app.focused is transcript.shown and transcript.detail.opened
+
+        await pilot.press("tab")  # The pane itself.
+        await feed_events(session, pilot, BusyChanged(busy=False, lane="planner"))
+        assert transcript.border_title == "Conversation · planner"
+        assert transcript.detail.has_focus and transcript.detail.opened
+        assert selected(app) == ["detail"]
+
+
+async def test_a_relabel_of_a_tab_no_longer_shown_leaves_the_title_alone() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test(size=(120, 30)) as pilot:
+        tabs = app.query_one(ConversationTabs)
+        tabs.post_message(ConversationTabs.Relabelled("coder", "● coder"))
+        await pilot.pause()
+        assert app.query_one(Transcript).border_title == "Conversation"
+
+
+async def test_relabelling_the_shown_agent_tab_keeps_its_list_and_details() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test(size=(120, 30)) as pilot:
+        await feed_events(
+            session, pilot, started("agent-1"), call("agent-1", "c1"), result("agent-1", "c1", "x")
+        )
+        await pilot.click(list(app.query_one(ConversationTabs).query(Tab))[2])
+        transcript = await inspect_latest(app, pilot)
+        await pilot.press("tab")
+
+        await feed_events(session, pilot, AgentExited(agent_id="agent-1", reason="finished"))
+        assert transcript.border_title == "Conversation · coder"
+        assert transcript.detail.has_focus and transcript.detail.opened
+        assert selected(app) == ["detail"]
 
 
 async def test_coder_output_lands_in_the_coder_tab_and_stays_after_it_exits() -> None:

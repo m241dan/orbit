@@ -3,6 +3,7 @@
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from textual.message import Message
 from textual.widgets import Tab, Tabs
 
 from orbit.protocol import PLANNER, Event, RunningAgent
@@ -32,6 +33,14 @@ class ConversationTabs(Tabs):
     """
 
     can_focus = False
+
+    class Relabelled(Message):
+        """The shown tab, keyed ``key``, is now labelled ``label``."""
+
+        def __init__(self, key: str | None, label: str) -> None:
+            super().__init__()
+            self.key = key
+            self.label = label
 
     ALL_TAB_ID = "tab-all"
     PLANNER_TAB_ID = f"tab-{PLANNER}"
@@ -142,5 +151,4 @@ class ConversationTabs(Tabs):
         if tab.label_text != label:
             tab.label = label
             if self.active == tab_id:
-                # Let the transcript's title follow the new label.
-                self.post_message(self.TabActivated(self, tab))
+                self.post_message(self.Relabelled(self.agent_of(tab_id), label))

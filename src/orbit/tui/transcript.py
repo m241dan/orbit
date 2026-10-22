@@ -298,6 +298,11 @@ class Transcript(Vertical):
         # Laid out once shown, which is when its end is known.
         self.call_after_refresh(log.show_place)
 
+    def relabel(self, label: str) -> None:
+        """Title the shown tab by its new ``label``, leaving what's shown as it is."""
+        self._label = label
+        self._retitle()
+
     def show_session(self, name: str | None) -> None:
         """End the title with the open session's ``name``, or with none."""
         self._session = name
