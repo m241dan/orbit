@@ -132,6 +132,16 @@ def test_dot_dot_in_the_path_leads_to_the_workspace_it_names() -> None:
 
 def test_dot_in_the_path_is_ignored() -> None:
     assert added_workspace((B, A), "/src/./repoA/sub") == A
+    assert added_workspace((B, A), "/src/repoA/./sub") == A
+
+
+def test_dot_dot_out_of_a_workspace_served_does_not_match_it() -> None:
+    assert added_workspace((A, B), "/src/repoA/../repoB") == B
+    assert added_workspace((A,), "/src/repoA/../repoB") is None
+
+
+def test_duplicate_slashes_in_the_path_are_collapsed() -> None:
+    assert added_workspace((B, A), "/src//repoA") == A
 
 
 def test_session_states_change_in_every_workspace() -> None:

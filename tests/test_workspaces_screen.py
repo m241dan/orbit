@@ -212,6 +212,19 @@ async def test_a_path_in_a_workspace_served_picks_it_once_accepted() -> None:
             assert sessions(app).workspace == "A"
 
 
+async def test_a_path_leaving_a_workspace_served_by_dot_dot_picks_the_one_it_names() -> None:
+    app = connected()
+    async with app.run_test() as pilot:
+        session = session_of(app)
+        await feed_events(session, pilot, catalog(A))
+        await pilot.press("j", "enter", *"/src/repoA/../repoB", "enter")
+        await accept_last(app, pilot)
+        await pilot.pause()
+        assert isinstance(app.screen, WorkspacesScreen)
+        await feed_events(session, pilot, catalog(A, B))
+        assert sessions(app).workspace == "B"
+
+
 async def test_a_path_added_picks_the_new_workspace_containing_it_over_another_new_one() -> None:
     app = connected()
     async with app.run_test() as pilot:
