@@ -90,6 +90,21 @@ class FailingTrims(FakeStore):
         raise StoreFailed("trim failed")
 
 
+class BuggyFor(FakeStore):
+    """A log whose appends of the session ``failing`` raise an error no store should, while
+    ``buggy``."""
+
+    def __init__(self, failing: str) -> None:
+        super().__init__()
+        self.failing = failing
+        self.buggy = True
+
+    async def append(self, session_id: str, envelopes: Sequence[EventEnvelope]) -> int:
+        if self.buggy and session_id == self.failing:
+            raise ValueError("a bug")
+        return await super().append(session_id, envelopes)
+
+
 def stored_session(store: FakeStore | OwnView) -> WorkspaceHost:
     return WorkspaceHost(store=store, clock=Ticks(), new_id=lambda: "session-1")
 
@@ -176,6 +191,45 @@ async def test_a_session_appended_before_the_failing_one_stays_logged() -> None:
     await writer.close()
 
     assert log.logged == [notice(1)] and fallback.files == {"b": [notice(2, "b")]}
+
+
+async def test_an_unexpected_append_error_stops_the_appending_and_diverts_the_batch() -> None:
+    log, fallback, failures = BuggyFor("b"), FakeFallback(), list[StoreFailed]()
+    writer = LogWriter(log, Published(), overflow=Overflow(fallback, failures.append))
+    writer.add("a", notice(1))
+    writer.add("b", notice(2, "b"))
+    await asyncio.sleep(0.01)
+
+    assert [str(error) for error in failures] == [
+        "The event log writer stopped on an unexpected error: ValueError('a bug')"
+    ]
+    assert log.logged == [notice(1)] and fallback.files == {"b": [notice(2, "b")]}
+    await writer.close()
+
+
+async def test_after_an_unexpected_append_error_resuming_writes_later_events() -> None:
+    log, fallback = BuggyFor("a"), FakeFallback()
+    writer = LogWriter(log, Published(), overflow=Overflow(fallback))
+    writer.add("a", notice(1))
+    await asyncio.sleep(0.01)
+    log.buggy = False
+
+    assert await writer.resume() == []
+    writer.add("a", notice(2))
+    await asyncio.sleep(0.01)
+    assert log.logged == [notice(1), notice(2)]
+    await writer.close()
+
+
+async def test_closing_after_an_unexpected_append_error_returns() -> None:
+    log, fallback = BuggyFor("a"), FakeFallback()
+    writer = LogWriter(log, Published(), overflow=Overflow(fallback))
+    writer.add("a", notice(1))
+    await asyncio.sleep(0.01)
+    writer.add("a", notice(2))
+    await writer.close()
+
+    assert fallback.files == {"a": [notice(1), notice(2)]}
 
 
 async def test_stopping_sends_what_queued_and_what_follows_to_the_fallback() -> None:
@@ -592,6 +646,20 @@ async def test_a_cancelled_close_stops_the_writer_at_once() -> None:
     assert asyncio.all_tasks() == {asyncio.current_task()}
 
 
+async def test_a_cancelled_writer_isnt_taken_for_a_failed_one() -> None:
+    log, failures = GatedLog(), list[StoreFailed]()
+    writer = LogWriter(log, Published(), overflow=Overflow(failed=failures.append))
+    writer.add("a", notice(1))
+    await log.waiting.wait()
+    closing = asyncio.create_task(writer.close())
+    await asyncio.sleep(0)
+    closing.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await closing
+    assert failures == []
+
+
 # Reserving seqs
 
 
@@ -983,6 +1051,20 @@ async def test_closing_writes_the_events_still_queued() -> None:
     await session.close()
 
     assert [envelope.payload for envelope in store.logged] == [Notice(message="last")]
+
+
+async def test_an_unexpected_log_error_halts_the_session_as_a_failing_log_does() -> None:
+    store = BuggyFor("session-1")
+    session = stored_session(store)
+    await greet(session)
+    await publish(session, Notice(message="n0"))
+    await asyncio.sleep(0.01)
+    await session.close()
+
+    sent = delivered(session)
+    assert payloads_of(Notice, sent) == [Notice(message="n0")]
+    [error] = payloads_of(ErrorOccurred, sent)
+    assert error.code == STORAGE_FAILED and "ValueError('a bug')" in error.message
 
 
 async def test_a_failing_log_halts_the_session_and_the_frontend_gets_every_event() -> None:

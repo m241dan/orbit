@@ -98,9 +98,10 @@ class LogWriter:
     are written, a failed one reported so too, and :meth:`reserve` has the log reserve the
     ``seq`` up to one once they're written. Adding never waits for the log.
 
-    A failed append or reservation, or :meth:`stop`, stops the appending and the reserving: the
-    envelopes not appended, and every one added from then on, go to the ``overflow``'s fallback
-    instead (nowhere without one), and a failed append or reservation is told to its ``failed``.
+    A failed append or reservation, an unexpected error in a write, or :meth:`stop`, stops the
+    appending and the reserving: the envelopes not appended, and every one added from then on, go
+    to the ``overflow``'s fallback instead (nowhere without one), and a failed append or
+    reservation, or the unexpected error, is told to its ``failed``.
     Those envelopes are still read back as still to be written, until :meth:`resume` appends them
     and appending carries on. A session forgotten meanwhile has its envelopes not in the log
     dropped instead, and its events deleted from the log then, or, when that fails, once it
@@ -319,7 +320,18 @@ class LogWriter:
         while not self._closing or self._queued or self._forgetting or self._unreserved:
             await self._ready.wait()
             self._ready.clear()
-            await self._write()
+            try:
+                await self._write()
+            except Exception as exc:  # A bug; nothing awaits the writer till it closes.
+                await self._crashed(exc)
+
+    async def _crashed(self, exc: Exception) -> None:
+        """Stop the appending on ``exc``, which escaped a write, as a failed append does: what
+        wasn't appended goes to the fallback, and the failure is told to ``failed``."""
+        writing, self._writing = self._writing, []
+        self._stopped = True
+        self._failed(StoreFailed(f"The event log writer stopped on an unexpected error: {exc!r}"))
+        await self._divert(writing)
 
     @property
     def _unreserved(self) -> bool:
@@ -397,6 +409,7 @@ class LogWriter:
             self._stopped = True
             self._failed(error)
             return False
+        self._writing = _without(self._writing, session_id)  # Logged, so not to divert.
         if self._log_bytes and not self._stopped:
             limit = self._log_bytes
             await self._trims.attempt(self._log.trim(session_id, limit, trim_target(limit)))
