@@ -5,7 +5,6 @@ It takes commands from the frontends, asks the domain what follows from them, dr
 ports to do it, and reports what happened as events.
 """
 
-import asyncio
 from collections.abc import Awaitable, Callable, Collection, Sequence
 from contextlib import suppress
 from dataclasses import replace
@@ -279,7 +278,6 @@ class WorkspaceHost:
         self._keeper.rename(name)
         self._review_count = ReviewCount(store, self._halt, self._events.put)
         self._count_loader = Background("review count", self._events.put)
-        self._count_loading = asyncio.Lock()  # Reads it once at a time, the takeover's last.
         self._tasks = Tasks(TaskBoard(), self._events.put, self._save)
         self._board = self._tasks.board
         self._proposals = FrontendReview(self._events.put, self._agent_on)
@@ -730,31 +728,16 @@ class WorkspaceHost:
         await self._save()
 
     async def _load_review_count(self) -> None:
-        """Have the review planner count on from the repository's saved super review count,
-        read once, as the background work starts, and again on taking the repository over: the
-        planner's own count is never replaced otherwise, so a frontend joining while the count
-        can't be saved, or as it's saved, doesn't roll it back."""
-        async with self._count_loading:
-            await self._count_on()
+        """Have the review planner, if there is one, count on from the repository's saved super
+        review count, read once, as the background work starts."""
+        if self._lane is not None:
+            await self._review_count.count_on(self._lane.planner)
 
     async def _reload_review_count(self) -> None:
         """Read the repository's saved super review count again, now this orbit owns it: the
         orbit that owned it may have counted on since it was read."""
-        async with self._count_loading:
-            self._review_count.forget()
-            await self._count_on()
-
-    async def _count_on(self) -> None:
-        """Have the review planner, if there is one, count on from the repository's saved super
-        review count, unless that can't be read or the planner counted on itself while it
-        was."""
-        if self._lane is None:
-            return
-        planner = self._lane.planner
-        before = planner.since_super
-        count = await self._review_count.load()
-        if count is not None and planner.since_super == before:
-            planner.since_super = count
+        if self._lane is not None:
+            await self._review_count.recount_on(self._lane.planner)
 
     async def _save(self) -> None:
         """Save the session, if it's used, as it is now."""

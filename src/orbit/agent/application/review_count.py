@@ -6,6 +6,7 @@ import asyncio
 from orbit.agent.application.failures import ReportedOnce, outcome
 from orbit.agent.application.ports import Publish, SessionStore, StoreFailed
 from orbit.agent.application.storage_halt import Halting
+from orbit.agent.domain.reviews import ReviewPlanner
 from orbit.agent.domain.storage_halt import FailedWrite
 
 
@@ -22,6 +23,31 @@ class ReviewCount:
         self._count: int | None = None  # The count the store holds; none until it's read.
         self._wanted: int | None = None  # The count last asked to be saved.
         self._saving = asyncio.Lock()  # Saves one at a time, so the newest is written last.
+        self._loading = asyncio.Lock()  # Reads it once at a time, a recount's last.
+
+    async def count_on(self, planner: ReviewPlanner) -> None:
+        """Have ``planner`` count on from the count saved, unless that's been read already,
+        can't be read, or ``planner`` counted on itself while it was: its own count is never
+        replaced otherwise, so it isn't rolled back by a count read as it's saved."""
+        async with self._loading:
+            if self._count is None:
+                await self._count_on(planner)
+
+    async def recount_on(self, planner: ReviewPlanner) -> None:
+        """Have ``planner`` count on from the count saved, read again, as another orbit may
+        have counted on since it was read, unless it can't be read or ``planner`` counted on
+        itself while it was."""
+        async with self._loading:
+            self.forget()
+            await self._count_on(planner)
+
+    async def _count_on(self, planner: ReviewPlanner) -> None:
+        """Have ``planner`` count on from the count saved, unless that can't be read or
+        ``planner`` counted on itself while it was."""
+        before = planner.since_super
+        count = await self.load()
+        if count is not None and planner.since_super == before:
+            planner.since_super = count
 
     async def load(self) -> int | None:
         """The repository's commits since the last super review; none without a store, or when

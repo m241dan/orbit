@@ -5,6 +5,7 @@ import asyncio
 from orbit.agent.application.keeper import NewSessions, SessionKeeper
 from orbit.agent.application.ports import StoreFailed
 from orbit.agent.application.review_count import ReviewCount
+from orbit.agent.domain.reviews import ReviewLimits, ReviewPlanner
 from orbit.agent.domain.storage_halt import FailedWrite
 from orbit.protocol import SAVE_FAILED, ErrorOccurred
 from tests.agent_fakes import FakeHalt, FakeStore, Ticks
@@ -168,3 +169,87 @@ async def test_a_count_read_after_a_failed_read_saves_as_usual() -> None:
     assert await count.load() == 7
     await count.save(8)
     assert store.counts == [8]
+
+
+class SlowStore(FakeStore):
+    """A store whose count reads yield once before they're done, counted in ``reads``."""
+
+    def __init__(self, count: int) -> None:
+        super().__init__(count=count)
+        self.reads = 0
+
+    async def review_count(self) -> int:
+        self.reads += 1
+        await asyncio.sleep(0)  # Reading takes a while, as reading a file does.
+        return await super().review_count()
+
+
+def planner() -> ReviewPlanner:
+    """A review planner that hasn't counted on yet."""
+    return ReviewPlanner(ReviewLimits())
+
+
+async def test_loads_at_once_read_the_count_once() -> None:
+    store = SlowStore(count=4)
+    _, count, _ = both_for(store)
+    first, second = planner(), planner()
+    await asyncio.gather(count.count_on(first), count.count_on(second))
+    assert store.reads == 1
+    assert first.since_super == 4 and second.since_super == 0
+
+
+async def test_a_count_read_once_is_not_read_again() -> None:
+    store = SlowStore(count=4)
+    _, count, _ = both_for(store)
+    counting = planner()
+    await count.count_on(counting)
+    counting.since_super = 5
+    await count.count_on(counting)
+    assert store.reads == 1 and counting.since_super == 5
+
+
+async def test_a_load_that_failed_is_tried_again_on_the_next() -> None:
+    store = SlowStore(count=4)
+    store.count_load_failure = "busy"
+    _, count, _ = both_for(store)
+    counting = planner()
+    await count.count_on(counting)
+    assert counting.since_super == 0
+    store.count_load_failure = None
+    await count.count_on(counting)
+    assert store.reads == 2 and counting.since_super == 4
+
+
+async def test_a_planner_that_counted_on_during_the_read_keeps_its_count() -> None:
+    store = SlowStore(count=4)
+    _, count, _ = both_for(store)
+    counting = planner()
+
+    async def count_one() -> None:
+        counting.since_super += 1
+
+    await asyncio.gather(count.count_on(counting), count_one())
+    assert counting.since_super == 1
+    await count.save(1)
+    assert store.counts == [1]
+
+
+async def test_a_recount_reads_the_count_again_after_a_load_in_flight() -> None:
+    store = SlowStore(count=4)
+    _, count, _ = both_for(store)
+    counting = planner()
+
+    async def moved() -> None:
+        await asyncio.sleep(0)
+        store.count = 6
+
+    await asyncio.gather(count.count_on(counting), count.recount_on(counting), moved())
+    assert store.reads == 2 and counting.since_super == 6
+
+
+async def test_without_a_store_nothing_counts_on() -> None:
+    _, count, _ = both_for(None)
+    counting = planner()
+    await count.count_on(counting)
+    await count.recount_on(counting)
+    assert counting.since_super == 0
