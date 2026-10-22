@@ -24,6 +24,7 @@ from orbit.protocol import (
     Event,
     NewSession,
     Notice,
+    RemoveTask,
     ResumeStorage,
     RunTasks,
     TaskSpec,
@@ -168,6 +169,32 @@ async def test_running_while_waiting_starts_at_once_and_drops_the_wait() -> None
     assert len(launcher.launches) == 2
 
 
+async def test_a_reviews_wake_while_waiting_starts_nothing_early() -> None:
+    waits = Waits()
+    session, launcher = limited(claims_done, waits=waits)
+    await asyncio.wait_for(run(session), 5)
+    await session._turns.wake()
+    events = await drained(session)
+    await session.close()
+
+    assert len(launcher.launches) == 1
+    assert RESUMING_NOTE not in notes(events)
+
+
+async def test_a_wait_ending_with_no_work_left_starts_nothing_and_says_nothing() -> None:
+    waits = Waits()
+    session, launcher = limited(waits=waits)
+    await asyncio.wait_for(run(session), 5)
+    await send(session, RemoveTask(task_id="1"))
+    waits.release.set()
+    events = await drained(session)
+    await session.close()
+
+    assert len(launcher.launches) == 1
+    assert board(events) == ()
+    assert RESUMING_NOTE not in notes(events)
+
+
 async def test_switching_sessions_drops_the_wait() -> None:
     waits = Waits()
     session, launcher = limited(waits=waits, store=FakeStore())
@@ -266,6 +293,21 @@ async def test_a_wait_ending_while_halted_starts_the_run_once_the_halt_lifts() -
     assert RESUMING_NOTE in notes(events)
     assert statuses(events) == ["completed"]
     assert len(launcher.launches) == 2
+
+
+async def test_a_wait_ending_while_halted_starts_nothing_and_says_nothing() -> None:
+    waits, store = Waits(), FakeStore()
+    session, launcher = limited(claims_done, waits=waits, store=store)
+    await asyncio.wait_for(run(session), 5)
+    await halt(session, store)
+    waits.release.set()
+    events = await drained(session)
+
+    assert session.storage_halted
+    assert not session._turns.running
+    assert len(launcher.launches) == 1
+    assert RESUMING_NOTE not in notes(events)
+    await session.close()
 
 
 def fails_as_lifted(session: WorkspaceHost) -> None:
