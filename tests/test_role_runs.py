@@ -7,16 +7,11 @@ from orbit.protocol import (
     TIMED_OUT,
     AgentExited,
     ErrorOccurred,
-    Event,
     Settings,
     TaskSpec,
     TurnEndReason,
 )
-from tests.agent_fakes import ROLES, Call, Steps, board, run, session_for, verified
-
-
-def statuses(events: list[Event]) -> list[str]:
-    return [t.status for t in board(events)]
+from tests.agent_fakes import ROLES, Call, Steps, board, run, session_for, statuses, verified
 
 
 async def test_an_agent_is_launched_with_its_roles_instructions_and_tools() -> None:

@@ -37,6 +37,7 @@ from tests.agent_fakes import (
     payloads,
     run,
     session_for,
+    statuses,
     verified,
 )
 
@@ -47,10 +48,6 @@ async def gives_up(call: Call) -> TurnEndReason:
     await call("get_task")
     await call("give_up", reason="blocked")
     return "completed"
-
-
-def statuses(events: list[Event]) -> list[str]:
-    return [t.status for t in board(events)]
 
 
 async def test_finished_work_is_done_in_the_tree_then_committed_and_merged() -> None:

@@ -14,7 +14,7 @@ from orbit.agent.external.usage_api import UsageApi
 os.environ.setdefault("TEXTUAL_ANIMATIONS", "none")
 
 # Fixtures more than one test module uses.
-pytest_plugins = ["tests.cli_fakes", "tests.git_repo"]
+pytest_plugins = ["tests.cli_fakes", "tests.git_repo", "tests.store_views"]
 
 
 def pytest_xdist_auto_num_workers(config: pytest.Config) -> int | None:

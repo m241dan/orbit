@@ -69,6 +69,7 @@ from tests.agent_fakes import (
     Steps,
     board,
     board_of,
+    chats,
     claims_done,
     desk_of,
     keeps_claiming,
@@ -82,10 +83,6 @@ from tests.agent_fakes import (
     tasks_of,
     verified,
 )
-
-
-async def never_starts(call: Call) -> TurnEndReason:
-    return "completed"
 
 
 async def idle(session: WorkspaceHost) -> list[Event]:
@@ -119,7 +116,7 @@ async def test_each_task_gets_its_own_agent_with_its_settings() -> None:
 
 
 async def test_running_again_runs_only_tasks_that_did_not_finish() -> None:
-    session, _, launcher = session_for(claims_done, never_starts, claims_done)
+    session, _, launcher = session_for(claims_done, chats, claims_done)
     events = await asyncio.wait_for(run(session, TaskSpec(prompt="a"), TaskSpec(prompt="b")), 5)
     assert statuses(events) == ["completed", "error"]
 
@@ -150,7 +147,7 @@ async def test_running_without_agents_is_refused() -> None:
 
 
 async def test_a_failed_task_does_not_stop_the_next() -> None:
-    session, _, _ = session_for(never_starts, claims_done)
+    session, _, _ = session_for(chats, claims_done)
     events = await asyncio.wait_for(run(session, TaskSpec(prompt="a"), TaskSpec(prompt="b")), 5)
     assert statuses(events) == ["error", "completed"]
 

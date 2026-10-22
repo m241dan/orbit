@@ -2,7 +2,7 @@
 
 import asyncio
 import sqlite3
-from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
+from collections.abc import Callable, Iterator
 from contextlib import closing, contextmanager
 from pathlib import Path
 
@@ -12,36 +12,7 @@ from orbit.agent.external import sqlite_schema
 from orbit.agent.external.sqlite_schema import MIGRATIONS, StoreError, transaction
 from orbit.agent.external.sqlite_store import SqliteStore
 from orbit.agent.external.workspace_registry import register
-from tests.store_views import OwnView, database, open_view, store_threads
-
-type Opener = Callable[[Path], Awaitable[OwnView]]
-
-
-@pytest.fixture
-def state(tmp_path: Path) -> Path:
-    return tmp_path / "state" / "orbit"
-
-
-@pytest.fixture
-def workspace(tmp_path: Path) -> Path:
-    path = tmp_path / "project"
-    path.mkdir()
-    return path
-
-
-@pytest.fixture
-async def open_store(state: Path) -> AsyncIterator[Opener]:
-    """Opens a store in ``state`` for a workspace, closing it after the test."""
-    opened: list[OwnView] = []
-
-    async def open_at(workspace: Path) -> OwnView:
-        opened.append(await open_view(state, workspace))
-        return opened[-1]
-
-    yield open_at
-    for store in opened:
-        await store.close()
-
+from tests.store_views import Opener, database, store_threads
 
 # Failures at open
 
@@ -131,7 +102,6 @@ async def test_a_file_that_isnt_a_database_is_refused_naming_it(
 async def test_a_database_that_cant_be_created_is_refused(
     open_store: Opener, state: Path, workspace: Path
 ) -> None:
-    state.parent.mkdir(parents=True)
     state.write_text("in the way")
     with pytest.raises(StoreError, match=r"Couldn't create the database .*orbit\.db: "):
         await open_store(workspace)

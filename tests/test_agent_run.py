@@ -67,7 +67,8 @@ from tests.agent_fakes import (
 )
 
 
-async def claims_done(call: Call) -> TurnEndReason:
+async def passes(call: Call) -> TurnEndReason:
+    """Fetches the task, claims it done, and checks the claim passed verification."""
     await call("get_task")
     reply = await call("complete_task", summary="added it")
     assert "passed" in reply.text
@@ -75,7 +76,7 @@ async def claims_done(call: Call) -> TurnEndReason:
 
 
 async def test_an_agent_gets_its_task_claims_done_and_passes() -> None:
-    session, _, launcher = session_for(claims_done, verification=verified(Steps(True)))
+    session, _, launcher = session_for(passes, verification=verified(Steps(True)))
     events = await asyncio.wait_for(run(session), 5)
 
     [launch] = launcher.launches
@@ -106,7 +107,7 @@ async def revoked(host: FakeHost, token: str = "token-1") -> bool:
 
 
 async def test_the_token_stops_working_once_the_agent_is_done() -> None:
-    session, host, _ = session_for(claims_done, verification=verified(Steps(True)))
+    session, host, _ = session_for(passes, verification=verified(Steps(True)))
     await asyncio.wait_for(run(session), 5)
     reply = await host.call("token-1", "get_task")
     assert reply.is_error and "token" in reply.text
@@ -138,7 +139,7 @@ async def test_failed_checks_go_back_to_the_same_agent_to_fix() -> None:
 async def test_once_its_fixes_run_out_a_fresh_agent_takes_over() -> None:
     session, _, launcher = session_for(
         keeps_claiming,
-        claims_done,
+        passes,
         verification=verified(Steps(False, False, True)),
         limits=Limits(max_attempts=1),
     )
@@ -153,7 +154,7 @@ async def test_once_its_fixes_run_out_a_fresh_agent_takes_over() -> None:
 async def test_a_task_that_falls_back_ends_unverified_with_the_failed_step_as_its_reason() -> None:
     session, _, _ = session_for(
         keeps_claiming,
-        claims_done,
+        passes,
         verification=verified(Steps(False, False, True)),
         limits=Limits(max_attempts=1),
     )
@@ -167,7 +168,7 @@ async def test_a_task_that_falls_back_ends_unverified_with_the_failed_step_as_it
 async def test_a_passing_fix_clears_the_reason_its_parent_failed() -> None:
     session, _, _ = session_for(
         keeps_claiming,
-        claims_done,
+        passes,
         verification=verified(Steps(False, False, True)),
         limits=Limits(max_attempts=1),
     )
@@ -401,7 +402,7 @@ async def test_cancelling_during_verification_stops_the_agent_and_the_run() -> N
         await call("complete_task", summary="done")
         return "completed"
 
-    session, host, launcher = session_for(waits, claims_done, verification=verified(steps))
+    session, host, launcher = session_for(waits, passes, verification=verified(steps))
     for prompt in ("one", "two"):
         await send(session, AddTask(task=TaskSpec(prompt=prompt)))
     await send(session, RunTasks())
@@ -421,9 +422,7 @@ async def test_cancelling_during_verification_stops_the_agent_and_the_run() -> N
 
 
 async def test_the_host_is_started_once_for_all_tasks() -> None:
-    session, host, launcher = session_for(
-        claims_done, claims_done, verification=verified(Steps(True, True))
-    )
+    session, host, launcher = session_for(passes, passes, verification=verified(Steps(True, True)))
     events = await asyncio.wait_for(run(session, TaskSpec(prompt="a"), TaskSpec(prompt="b")), 5)
     assert host.starts == 1
     assert [launch.agent.id for launch in launcher.launches] == ["agent-1", "agent-2"]
@@ -480,7 +479,7 @@ async def test_cancelling_while_the_agent_is_stopped_ends_the_run_as_cancelled()
             await gate.wait()
         raise AssertionError("unreachable")
 
-    session, host, launcher = session_for(slow_to_stop, claims_done, exit_grace=0.01)
+    session, host, launcher = session_for(slow_to_stop, passes, exit_grace=0.01)
     for prompt in ("one", "two"):
         await send(session, AddTask(task=TaskSpec(prompt=prompt)))
     await send(session, RunTasks())
@@ -510,7 +509,7 @@ async def test_an_agent_that_stops_without_changing_anything_falls_back_unverifi
     # Before the task, after it, after the failed check, and when the agent exits.
     workspace = FakeWorkspace("before", "edited", "edited", "edited", "fix-before", "fixed")
     session, _, launcher = session_for(
-        stops_after_a_fix_request, claims_done, verification=verified(steps, workspace)
+        stops_after_a_fix_request, passes, verification=verified(steps, workspace)
     )
     events = await asyncio.wait_for(run(session), 5)
 
@@ -524,7 +523,7 @@ async def test_an_agent_that_stops_without_changing_anything_keeps_its_last_fail
     workspace = FakeWorkspace("before", "edited", "edited", "edited", "fix-before", "fixed")
     session, _, _ = session_for(
         stops_after_a_fix_request,
-        claims_done,
+        passes,
         verification=verified(Steps(False, True), workspace),
     )
     events = await asyncio.wait_for(run(session), 5)

@@ -16,35 +16,15 @@ from orbit.agent.external.sqlite_schema import StoreError
 from orbit.agent.external.sqlite_store import SqliteStore, find_workspace_id
 from orbit.protocol import EventEnvelope, Notice
 from tests.git_repo import git
-from tests.store_views import WHEN, OwnView, database, fill_up, open_view, record, store_threads
-
-type Opener = Callable[[Path], Awaitable[OwnView]]
-
-
-@pytest.fixture
-def state(tmp_path: Path) -> Path:
-    return tmp_path / "state" / "orbit"
-
-
-@pytest.fixture
-def workspace(tmp_path: Path) -> Path:
-    path = tmp_path / "project"
-    path.mkdir()
-    return path
-
-
-@pytest.fixture
-async def open_store(state: Path) -> AsyncIterator[Opener]:
-    """Opens a store in ``state`` for a workspace, closing it after the test."""
-    opened: list[OwnView] = []
-
-    async def open_at(workspace: Path) -> OwnView:
-        opened.append(await open_view(state, workspace))
-        return opened[-1]
-
-    yield open_at
-    for store in opened:
-        await store.close()
+from tests.store_views import (
+    WHEN,
+    Opener,
+    OwnView,
+    database,
+    fill_up,
+    record,
+    store_threads,
+)
 
 
 async def test_the_sqlite_store_is_a_session_store(open_store: Opener, workspace: Path) -> None:

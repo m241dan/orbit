@@ -12,11 +12,10 @@ from orbit.protocol import (
     TasksChanged,
     TaskSpec,
     TaskState,
-    TurnEndReason,
 )
 from orbit.tui import OrbitApp
 from orbit.tui.agents import AgentsPane
-from tests.agent_fakes import Call, frontend, session_for
+from tests.agent_fakes import chats, frontend, session_for
 from tests.tui_fakes import FakeSession, active_tab, board, feed_events, shown, tab_strip
 
 
@@ -175,9 +174,6 @@ async def test_the_startup_check_is_listed_against_the_base_commit() -> None:
 
 
 async def test_a_real_planners_reply_shows_on_the_planner_tab() -> None:
-    async def chats(call: Call) -> TurnEndReason:
-        return "completed"
-
     session, _, launcher = session_for()
     launcher.planner_turns = [chats]
     launcher.planner_replies = ["Here's a plan."]

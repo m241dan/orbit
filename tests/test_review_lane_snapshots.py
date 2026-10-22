@@ -139,7 +139,7 @@ async def switched(
     return session, await opened(session, ActivateSession(session="auth"))
 
 
-def statuses(events: list[Event]) -> list[TaskStatus]:
+def snapshot_statuses(events: list[Event]) -> list[TaskStatus]:
     return [t.status for t in last_of(Snapshot, events).tasks]
 
 
@@ -147,7 +147,7 @@ async def test_an_interrupted_review_that_suggested_nothing_closes_its_batch() -
     session, _, store, events = await reopened(crashed(), reviewing())
     assert reviews_of(store).planner.batches == {}
     assert last_of(Snapshot, events).review == ReviewStatus(paused=False, open_batches=0)
-    assert statuses(events) == ["completed", "cancelled"]
+    assert snapshot_statuses(events) == ["completed", "cancelled"]
     await session.close()
 
 
@@ -166,7 +166,7 @@ async def test_an_interrupted_reviews_batch_waits_for_its_work_without_running_i
     assert last_of(Snapshot, events).review == ReviewStatus(paused=False, open_batches=1)
     await asyncio.sleep(0.05)
     assert launcher.launches == []
-    assert statuses(events) == ["completed", "cancelled", "pending"]
+    assert snapshot_statuses(events) == ["completed", "cancelled", "pending"]
     await session.close()
 
 
@@ -194,7 +194,7 @@ async def test_interrupted_tasks_that_are_not_open_reviews_change_nothing() -> N
     snapshot = reviewing().model_copy(update={"planner": PlannerSnapshot(next_batch=2)})
     tasks = (task("1", "coder", "running"), *crashed()[1:])
     session, _, store, events = await reopened(tasks, snapshot)
-    assert statuses(events) == ["cancelled", "cancelled"]
+    assert snapshot_statuses(events) == ["cancelled", "cancelled"]
     assert reviews_of(store) == snapshot
     await session.close()
 

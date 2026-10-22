@@ -5,7 +5,6 @@ import os
 import sqlite3
 from collections.abc import AsyncIterator, Iterator
 from contextlib import AbstractContextManager, closing, contextmanager
-from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -21,13 +20,7 @@ from orbit.agent.external import session_import, sqlite_schema
 from orbit.agent.external.session_import import Imported, import_session_files, imported_note
 from orbit.agent.external.session_locks import SessionLocks
 from orbit.agent.external.sqlite_store import NewRows
-from tests.store_views import OwnView, open_view
-
-WHEN = datetime(2026, 10, 17, 14, 30, tzinfo=UTC)
-
-
-def record(session_id: str, name: str = "Oct 17 14:30") -> SessionRecord:
-    return SessionRecord(id=session_id, name=name, created=WHEN, last_active=WHEN)
+from tests.store_views import OwnView, open_view, record
 
 
 @pytest.fixture

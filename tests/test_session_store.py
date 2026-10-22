@@ -2,22 +2,15 @@
 
 import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable
-from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
 from orbit.agent.application.ports import SessionStore, StoredSession
-from orbit.agent.domain.sessions import SessionRecord, Unreadable
-from tests.store_views import OwnView, open_view
-
-WHEN = datetime(2026, 10, 17, 14, 30, tzinfo=UTC)
+from orbit.agent.domain.sessions import Unreadable
+from tests.store_views import OwnView, open_view, record
 
 type Opener = Callable[[], Awaitable[SessionStore]]
-
-
-def record(session_id: str = "abc", name: str = "Oct 17 14:30") -> SessionRecord:
-    return SessionRecord(id=session_id, name=name, created=WHEN, last_active=WHEN)
 
 
 @pytest.fixture

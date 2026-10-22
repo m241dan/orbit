@@ -209,7 +209,7 @@ def test_the_steps_note_says_when_nothing_verifies_tasks() -> None:
     assert "No verification steps" in steps_note(())
 
 
-def statuses(progress: StepProgress) -> list[StepStatus]:
+def step_statuses(progress: StepProgress) -> list[StepStatus]:
     return [step.status for step in progress.steps]
 
 
@@ -222,13 +222,13 @@ def test_step_progress_starts_with_every_step_pending() -> None:
 
 def test_setting_a_step_leaves_the_progress_it_came_from_alone() -> None:
     progress = StepProgress.of(["Unit tests", "Lint"])
-    assert statuses(progress.set(1, "failed")) == ["pending", "failed"]
-    assert statuses(progress) == ["pending", "pending"]
+    assert step_statuses(progress.set(1, "failed")) == ["pending", "failed"]
+    assert step_statuses(progress) == ["pending", "pending"]
 
 
 def test_cancelling_marks_only_the_running_step_cancelled() -> None:
     progress = StepProgress.of(["Unit tests", "Lint"]).set(0, "passed").set(1, "running")
-    assert statuses(progress.cancel_running()) == ["passed", "cancelled"]
+    assert step_statuses(progress.cancel_running()) == ["passed", "cancelled"]
 
 
 def test_cancelling_with_no_step_running_changes_nothing() -> None:
@@ -243,7 +243,7 @@ def test_resetting_makes_every_step_pending_again() -> None:
 
 def test_skipping_marks_every_step_skipped() -> None:
     progress = StepProgress.of(["Unit tests", "Lint"]).set(0, "passed")
-    assert statuses(progress.skip()) == ["skipped", "skipped"]
+    assert step_statuses(progress.skip()) == ["skipped", "skipped"]
 
 
 async def test_using_new_steps_replaces_the_steps_and_their_progress_together() -> None:

@@ -2,7 +2,7 @@
 to it."""
 
 import sqlite3
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 import pytest
@@ -13,35 +13,7 @@ from orbit.agent.external import sqlite_schema
 from orbit.agent.external.workspace_registry import register
 from orbit.protocol import EventEnvelope, TasksChanged, decode_event, encode
 from tests.agent_fakes import notice
-from tests.store_views import OwnView, big, database, open_view, record
-
-type Opener = Callable[[Path], Awaitable[OwnView]]
-
-
-@pytest.fixture
-def state(tmp_path: Path) -> Path:
-    return tmp_path / "state"
-
-
-@pytest.fixture
-def workspace(tmp_path: Path) -> Path:
-    path = tmp_path / "project"
-    path.mkdir()
-    return path
-
-
-@pytest.fixture
-async def open_store(state: Path) -> AsyncIterator[Opener]:
-    """Opens a store in ``state`` for a workspace, closing it after the test."""
-    opened: list[OwnView] = []
-
-    async def open_at(workspace: Path) -> OwnView:
-        opened.append(await open_view(state, workspace))
-        return opened[-1]
-
-    yield open_at
-    for store in opened:
-        await store.close()
+from tests.store_views import Opener, OwnView, big, database, record
 
 
 def logged(state: Path) -> list[tuple[str, int, str, str, int]]:

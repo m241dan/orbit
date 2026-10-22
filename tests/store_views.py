@@ -2,10 +2,12 @@
 
 import sqlite3
 import threading
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 from contextlib import closing, contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
+
+import pytest
 
 from orbit.agent.domain.sessions import SessionRecord
 from orbit.agent.external.sqlite_store import THREAD_PREFIX, SqliteStore, WorkspaceStore
@@ -38,6 +40,31 @@ async def open_view(state: Path, workspace: Path | str) -> OwnView:
     return OwnView(store, workspace_id)
 
 
+type Opener = Callable[[Path], Awaitable[OwnView]]
+
+
+@pytest.fixture
+def workspace(tmp_path: Path) -> Path:
+    """An empty workspace directory, ``project``."""
+    path = tmp_path / "project"
+    path.mkdir()
+    return path
+
+
+@pytest.fixture
+async def open_store(state: Path) -> AsyncIterator[Opener]:
+    """Opens a store in ``state`` for a workspace, closing it after the test."""
+    opened: list[OwnView] = []
+
+    async def open_at(workspace: Path) -> OwnView:
+        opened.append(await open_view(state, workspace))
+        return opened[-1]
+
+    yield open_at
+    for store in opened:
+        await store.close()
+
+
 def big(seq: int, session: str = "abc") -> EventEnvelope:
     """An event of the session ``session`` of about 10 KB."""
     return notice(seq, session, "x" * 10_000)
@@ -46,8 +73,9 @@ def big(seq: int, session: str = "abc") -> EventEnvelope:
 WHEN = datetime(2026, 10, 17, 14, 30, tzinfo=UTC)
 
 
-def record(session_id: str = "abc") -> SessionRecord:
-    return SessionRecord(id=session_id, name="Oct 17 14:30", created=WHEN, last_active=WHEN)
+def record(session_id: str = "abc", name: str = "Oct 17 14:30") -> SessionRecord:
+    """A session record ``session_id`` named ``name``, created and last active at ``WHEN``."""
+    return SessionRecord(id=session_id, name=name, created=WHEN, last_active=WHEN)
 
 
 @contextmanager

@@ -47,6 +47,7 @@ from tests.agent_fakes import (
     board_of,
     claims_done,
     events_until,
+    keeps_claiming,
     lane_of,
     of_type,
     queued,
@@ -291,12 +292,6 @@ def test_launcher_scripts_for_reviews_are_kept_apart() -> None:
 
 
 async def test_tasks_of_a_batch_are_fixed_within_it() -> None:
-    async def keeps_claiming(call: Call) -> TurnEndReason:
-        await call("get_task")
-        while "another agent" not in (await call("complete_task", summary="try")).text:
-            pass
-        return "completed"
-
     session, _, _ = session_for(
         claims_done,
         keeps_claiming,
@@ -327,12 +322,6 @@ async def test_work_that_committed_nothing_is_not_reviewed() -> None:
 
 
 async def test_a_fix_of_the_users_task_joins_no_batch() -> None:
-    async def keeps_claiming(call: Call) -> TurnEndReason:
-        await call("get_task")
-        while "another agent" not in (await call("complete_task", summary="try")).text:
-            pass
-        return "completed"
-
     session, _, _ = session_for(
         keeps_claiming,
         claims_done,

@@ -3,11 +3,9 @@ it's running, and how many connections view it."""
 
 import asyncio
 from collections.abc import Callable
-from datetime import UTC, datetime
 
 from orbit.agent import WorkspaceHost
 from orbit.agent.application.connection import SessionConnection
-from orbit.agent.domain.sessions import SessionRecord
 from orbit.protocol import (
     PLANNER,
     SUPER_REVIEW,
@@ -47,6 +45,7 @@ from tests.agent_fakes import (
     send,
     session_for,
 )
+from tests.session_builders import saved
 
 OPEN = "session-1"
 """The id of the session :func:`session_for` opens."""
@@ -293,12 +292,6 @@ async def test_a_joining_connections_catalog_has_the_open_sessions_state_but_not
         1,  # The first frontend's: the second's Hello attached it to nothing yet.
         (Activity(kind="planner"),),
     )
-
-
-def saved(session_id: str) -> SessionRecord:
-    """A saved session ``session_id``, last active a while ago."""
-    when = datetime(2026, 10, 1, 9, 0, tzinfo=UTC)
-    return SessionRecord(id=session_id, name="Earlier", created=when, last_active=when)
 
 
 async def test_the_catalog_shows_other_sessions_inactive_idle_and_unviewed() -> None:
