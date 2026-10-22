@@ -24,7 +24,7 @@ async def spawned(
 
     Raises ``OSError`` (such as ``FileNotFoundError``) when the program can't be started.
     """
-    process = await asyncio.create_subprocess_exec(*command, start_new_session=True, **options)
+    process = await _started(command, options)
     try:
         yield process
     except BaseException:
@@ -33,6 +33,24 @@ async def spawned(
         raise
     if process.returncode is None:
         await _stop_group(process)
+
+
+async def _started(
+    command: Sequence[str], options: Mapping[str, Any]
+) -> asyncio.subprocess.Process:
+    """``command`` started in a session of its own with ``options``. If cancelled while
+    starting, the start is let finish and what it started is stopped before cancelling."""
+    # Cancelling the start itself would kill only the program, leaving what it started.
+    start = asyncio.ensure_future(
+        asyncio.create_subprocess_exec(*command, start_new_session=True, **options)
+    )
+    try:
+        return await asyncio.shield(start)
+    except asyncio.CancelledError:
+        await asyncio.wait([start])
+        if start.exception() is None:
+            await _stop_group(start.result())
+        raise
 
 
 async def _stop_group(process: asyncio.subprocess.Process) -> None:

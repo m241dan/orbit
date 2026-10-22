@@ -3,6 +3,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -130,6 +131,53 @@ async def test_a_group_ignoring_sigterm_is_killed_after_the_grace(
     script = 'trap "" TERM; sleep 30 & echo $! > "$PID_FILE"; wait'
     grandchild = await cancelled_grandchild(tmp_path, script)
     assert await gone(grandchild)
+
+
+def gated_start(monkeypatch: pytest.MonkeyPatch, gate: asyncio.Event, *, fails: bool) -> None:
+    """Make starting a program hold until ``gate`` is set, as a busy loop can, after the
+    program is running; then fail with ``FileNotFoundError`` if ``fails``."""
+    start = asyncio.create_subprocess_exec
+
+    async def gated(*command: str, **options: Any) -> asyncio.subprocess.Process:
+        process = await start(*command, **options)
+        await gate.wait()
+        if fails:
+            raise FileNotFoundError(command[0])
+        return process
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", gated)
+
+
+async def test_cancelling_while_starting_stops_what_the_child_started(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    gate = asyncio.Event()
+    gated_start(monkeypatch, gate, fails=False)
+    pid_file = tmp_path / "pid"
+    env = {**os.environ, "PID_FILE": str(pid_file)}
+    script = 'sleep 30 & echo $! > "$PID_FILE"; wait'
+    task = asyncio.create_task(run_process(("sh", "-c", script), tmp_path, env=env))
+    grandchild = int(await recorded_line(pid_file))
+    task.cancel()
+    await asyncio.sleep(0)
+    gate.set()
+    await asyncio.wait_for(asyncio.gather(task, return_exceptions=True), timeout=5)
+    assert task.cancelled()
+    assert await gone(grandchild)
+
+
+async def test_cancelling_a_start_that_then_fails_stays_cancelled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    gate = asyncio.Event()
+    gated_start(monkeypatch, gate, fails=True)
+    task = asyncio.create_task(run_process(("true",), tmp_path))
+    await asyncio.sleep(0.1)
+    task.cancel()
+    await asyncio.sleep(0)
+    gate.set()
+    await asyncio.wait_for(asyncio.gather(task, return_exceptions=True), timeout=5)
+    assert task.cancelled()
 
 
 def test_this_process_is_alive() -> None:
