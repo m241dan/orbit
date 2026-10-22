@@ -16,7 +16,14 @@ from orbit.agent.domain.sessions import SessionRecord, Unreadable
 from orbit.agent.domain.storage_halt import StorageErrorKind
 from orbit.agent.domain.usage import UsageFetch
 from orbit.agent.domain.verification import VerificationStep
-from orbit.protocol import Event, EventEnvelope, MergeResult, ProposalAction, Settings
+from orbit.protocol import (
+    Event,
+    EventEnvelope,
+    MergeResult,
+    ProposalAction,
+    Settings,
+    WorkspaceCloning,
+)
 
 Publish = Callable[[Event], Awaitable[None]]
 """Publishes an event to the frontend."""
@@ -51,6 +58,21 @@ class HostFailed(Exception):
 
 class ConfigWriteFailed(Exception):
     """Saving to the project's config file failed, as the message says."""
+
+
+class CloneFailed(Exception):
+    """Cloning a repository failed, as the message says: git's message, perhaps with a hint."""
+
+
+class Cloner(Protocol):
+    """What clones the repositories frontends ask a server to serve."""
+
+    async def clone(self, url: str, progress: Callable[[WorkspaceCloning], None]) -> str:
+        """The path of a new clone of the repository at ``url``, telling ``progress`` of git's
+        progress as it clones. Raises :class:`CloneFailed` if it fails, having removed what it
+        cloned; cancelled, it stops git and removes what it cloned before the cancellation
+        ends."""
+        ...
 
 
 class RepositoryLock(Protocol):

@@ -2,11 +2,13 @@
 :class:`orbit.protocol.Session`, over the workspace hosts it routes their commands to."""
 
 import asyncio
-from collections.abc import Awaitable, Callable, Iterable
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
+from contextlib import asynccontextmanager
 from dataclasses import replace
 from pathlib import PurePath
 from typing import Protocol
 
+from orbit.agent.application.clones import Clones
 from orbit.agent.application.closing import close_all
 from orbit.agent.application.connection import (
     ConnectionParts,
@@ -17,11 +19,12 @@ from orbit.agent.application.connection import (
 )
 from orbit.agent.application.handshake import HandshakeParts
 from orbit.agent.application.outbox import Seqs
-from orbit.agent.application.ports import SeqMark, UsageSource
+from orbit.agent.application.ports import Cloner, SeqMark, UsageSource
 from orbit.agent.application.seq_mark import MarkReservations
 from orbit.agent.application.usage_monitor import UsageMonitor
 from orbit.agent.application.workspace_host import WorkspaceHost
 from orbit.agent.domain.catalog import catalog
+from orbit.agent.domain.clones import added_url
 from orbit.agent.domain.refusals import STOPPING, Refused
 from orbit.agent.domain.workspaces import (
     LOCAL_ONLY,
@@ -61,9 +64,9 @@ class WorkspaceUnavailable(Exception):
         self.code = code
 
 
-class WorkspaceSource(Protocol):
-    """Where the workspaces a control plane serves come from as frontends add them, and where
-    they go as they're removed."""
+class WorkspaceSource(Cloner, Protocol):
+    """Where the workspaces a control plane serves come from as frontends add them, by their
+    paths or as clones of repositories it makes, and where they go as they're removed."""
 
     async def kind(self, path: str) -> PathKind:
         """What there is at ``path``."""
@@ -74,10 +77,11 @@ class WorkspaceSource(Protocol):
         level, if it's in one, else itself, resolved."""
         ...
 
-    async def open(self, root: str) -> WorkspaceHost:
-        """The host of the workspace at ``root``, registered or found by its path and flagged
-        served, with its lock taken if no other orbit holds it, making it read-only otherwise.
-        Raises :class:`WorkspaceUnavailable` if it can't be served."""
+    async def open(self, root: str, *, managed: bool = False) -> WorkspaceHost:
+        """The host of the workspace at ``root``, registered or found by its path, flagged
+        served and, if ``managed``, as a clone orbit made, with its lock taken if no other orbit
+        holds it, making it read-only otherwise. Raises :class:`WorkspaceUnavailable` if it
+        can't be served."""
         ...
 
     async def set_served(self, workspace_id: str, served: bool) -> None:
@@ -126,6 +130,13 @@ class _ControlEvents:
         """Stamp ``item`` and deliver it to every listening connection."""
         self.put_nowait(item)
 
+    def announce(self, item: Event) -> None:
+        """Stamp ``item`` and deliver it to every listening connection and every one welcomed
+        but attached to no workspace, as a clone's news is for whoever may have asked for it."""
+        envelope = self.stamp(item)
+        for connections in self._everywhere():
+            connections.announce(envelope)
+
 
 class ControlPlane:
     """What the frontends connect to: holds a host for each workspace served, ``hosts``, routes
@@ -156,8 +167,11 @@ class ControlPlane:
     Given the ``workspaces`` source, ``AddWorkspace`` and ``RemoveWorkspace``, from any
     connection welcomed, attached or not, add a workspace to those served, starting its host,
     and remove one, closing its host, each followed by the ``Catalog``; one at a time, as each
-    changes what's served across its awaits. Without one, as for a local orbit serving its own
-    repository alone, they're refused as ``invalid``.
+    changes what's served across its awaits. An ``AddWorkspace`` with a URL is accepted at once,
+    the repository cloned in the background by the source, with its progress and any failure
+    told to every connection, and the clone then added as a path is, as a managed one. Without
+    a source, as for a local orbit serving its own repository alone, they're refused as
+    ``invalid``.
 
     Given the ``mark`` of the store every workspace's log shares, as ``orbit serve`` has, the
     ``seq`` count on past it, and each block of them is reserved there, once, as it's crossed,
@@ -181,6 +195,7 @@ class ControlPlane:
         self._events = _ControlEvents(self._seqs, self._everywhere)
         self._place = Place(self._events, self._events.stamp, self._lobby)
         self._usage = UsageMonitor(usage, self._events.put) if usage else None
+        self._clones = Clones(self._events.announce)
         for host in self._hosts.values():
             self._serve(host)
         self._started = False
@@ -302,33 +317,67 @@ class ControlPlane:
         self, command: AddWorkspace | RemoveWorkspace, connection: SessionConnection
     ) -> None:
         """Add or remove the workspace ``command`` names, as ``connection`` asks, once no other
-        change is under way; refused without a source of workspaces, or once closing."""
+        change is under way, or start cloning the repository it names; refused without a
+        source of workspaces, or once closing."""
         workspaces = self._workspaces
         if workspaces is None:
             raise Refused(INVALID, LOCAL_ONLY)
-        async with self._changing:
-            if self._closing:
-                raise Refused(INVALID, STOPPING)
-            if isinstance(command, AddWorkspace):
-                await self._add(command.path, connection, workspaces)
-            else:
+        if isinstance(command, RemoveWorkspace):
+            async with self._locked():
                 await self._remove(command.workspace, connection, workspaces)
+            return
+        url = added_url(command.path, command.url)
+        if url is not None:
+            self._clone(url, workspaces)
+            return
+        assert command.path is not None  # added_url refuses an AddWorkspace with neither.
+        async with self._locked():
+            await self._add(command.path, connection, workspaces)
+
+    @asynccontextmanager
+    async def _locked(self) -> AsyncIterator[None]:
+        """Run the block once no other change is under way; refused once closing."""
+        async with self._changing:
+            self._check_open()
+            yield
+
+    def _check_open(self) -> None:
+        """Refuse a change as ``invalid`` once closing."""
+        if self._closing:
+            raise Refused(INVALID, STOPPING)
+
+    def _clone(self, url: str, workspaces: WorkspaceSource) -> None:
+        """Have ``workspaces`` clone the repository at ``url`` in the background, then serve
+        the clone, managed; refused once closing, or as ``busy`` while ``url`` is being cloned
+        already."""
+        self._check_open()
+
+        async def serve(path: str) -> None:
+            async with self._locked():
+                await self._add(path, None, workspaces, managed=True)
+
+        self._clones.start(url, workspaces, serve)
 
     async def _add(
-        self, path: str, connection: SessionConnection, workspaces: WorkspaceSource
+        self,
+        path: str,
+        connection: SessionConnection | None,
+        workspaces: WorkspaceSource,
+        managed: bool = False,
     ) -> None:
-        """Serve the workspace at ``path``, from ``workspaces``, unless it's served already:
-        start its host, opening its most recently active session and its background work, and
-        send the catalog to ``connection``, which asked, and every listening connection, or let it
-        go again if that fails or is cancelled; refused unless ``path`` is the absolute path to
-        a directory, or with the code it gives if it can't be served."""
+        """Serve the workspace at ``path``, from ``workspaces``, as a clone orbit made if
+        ``managed``, unless it's served already: start its host, opening its most recently
+        active session and its background work, and send the catalog to ``connection``, if one
+        asked, and every listening connection, or let it go again if that fails or is
+        cancelled; refused unless ``path`` is the absolute path to a directory, or with the
+        code it gives if it can't be served."""
         check_addable(path, absolute=PurePath(path).is_absolute())
         check_directory(path, await workspaces.kind(path))
         root = await workspaces.top_level(path)
         if any(host.path == root for host in self._hosts.values()):
             return
         try:
-            host = await workspaces.open(root)
+            host = await workspaces.open(root, managed=managed)
         except WorkspaceUnavailable as exc:
             raise Refused(exc.code, f"Can't add {root}: {exc}") from None
         try:
@@ -340,10 +389,10 @@ class ControlPlane:
                 await self._let_go(host, workspaces)
             raise
 
-    async def _start(self, host: WorkspaceHost, connection: SessionConnection) -> None:
-        """Serve ``host``, as :meth:`_begin` does, and send the catalog to ``connection`` and
-        every listening connection. Its events are stamped and delivered as it opens its most
-        recently active session, but no ``Attach`` reaches it till it's open."""
+    async def _start(self, host: WorkspaceHost, connection: SessionConnection | None) -> None:
+        """Serve ``host``, as :meth:`_begin` does, and send the catalog to ``connection``, if
+        given, and every listening connection. Its events are stamped and delivered as it opens
+        its most recently active session, but no ``Attach`` reaches it till it's open."""
         self._serve(host)
         await self._begin(host)
         await self._changed(connection)
@@ -421,10 +470,14 @@ class ControlPlane:
         finally:
             await workspaces.close(host.workspace_id)
 
-    async def _changed(self, connection: SessionConnection) -> None:
+    async def _changed(self, connection: SessionConnection | None) -> None:
         """Send every listening connection the catalog, as the workspaces served changed, and
-        ``connection``, which changed them, even if it isn't listening yet."""
+        ``connection``, which changed them, even if it isn't listening yet; for a clone, which
+        no connection waits on, every one welcomed but attached to none too."""
         catalog = await self._catalog()
+        if connection is None:
+            self._events.announce(catalog)
+            return
         await self._events.put(catalog)
         if not connection.listening:
             await connection.publish_here(catalog)
@@ -510,12 +563,13 @@ class ControlPlane:
         return self._usage.latest if self._usage else None
 
     async def close(self) -> None:
-        """Stop the usage monitor, if there is one, then close every host, which ends the
-        streams of the connections attached to its workspace, then end the others', then
-        reserve in the mark, if there is one, the ``seq`` still to be reserved; each is
-        closed even if stopping one before it fails or the close is cancelled, as
-        :func:`close_all` does."""
+        """Stop the clones under way, each removing what it cloned, then the usage monitor, if
+        there is one, then close every host, which ends the streams of the connections attached
+        to its workspace, then end the others', then reserve in the mark, if there is one, the
+        ``seq`` still to be reserved; each is closed even if stopping one before it fails or the
+        close is cancelled, as :func:`close_all` does."""
         self._closing = True
+        await self._clones.close()  # A clone being served waits for the lock this takes.
         async with self._changing:  # A workspace being added is closed with the rest.
             await close_all(self._stops())
 

@@ -31,6 +31,7 @@ from orbit.agent import (
     TokenFile,
     WorkspaceLock,
     local_tls,
+    looks_like_url,
     read_server,
     resolve_config_dir,
     resolve_state_dir,
@@ -57,7 +58,7 @@ from orbit.cli.options import (
     VerifyOption,
     WorktreeOption,
 )
-from orbit.cli.served import _serving
+from orbit.cli.served import Added, _serving
 from orbit.profiling import profiled
 
 logger = logging.getLogger(__name__)
@@ -99,14 +100,15 @@ def serve(
     state = resolve_state_dir(state, os.environ)
     user_config = resolve_config_dir(config_dir, os.environ)
     with _sole_serve(state):
-        added = [_workspace(path) for path in add or ()]
+        added = [_added(text) for text in add or ()]
         cert, key, client_ca = (_absolute(path) for path in (cert, key, client_ca))
         given = {"host": host, "port": port, "tls": tls, "cert": cert, "key": key}
         settings = _server_settings(user_config, {**given, "client_ca": client_ca})
         token_file = TokenFile(user_config)
         token = _frontend_token(token_file, settings)
         flags = _Backend(model, tools, verify, worktree, review, usage, new=False, name=None)
-        with _serving(flags, added, state, user_config) as serving:
+        clone_dir = _clone_dir(settings, state)
+        with _serving(flags, added, state, user_config, clone_dir) as serving:
             logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
             parts = _ServeParts(
                 serving.build,
@@ -120,6 +122,21 @@ def serve(
             )
             _serve_until_stopped(parts, profile, user_config)
     typer.echo("orbit serve stopped.")
+
+
+def _added(text: str) -> Added:
+    """The workspace ``--add`` names with ``text``: a URL, to clone, or else the directory at
+    its path.
+
+    Exits with status 2 if it's a path that doesn't exist or isn't a directory.
+    """
+    return text if looks_like_url(text) else _workspace(Path(text))
+
+
+def _clone_dir(settings: ServerSettings, state: Path) -> Path:
+    """Where repositories added by URL are cloned: ``clone_dir`` in ``settings``, else
+    ``workspaces`` in the ``state`` directory."""
+    return Path(settings.clone_dir) if settings.clone_dir else state / "workspaces"
 
 
 @contextmanager

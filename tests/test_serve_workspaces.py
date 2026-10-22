@@ -36,6 +36,8 @@ from orbit.cli.served import _added, _workspaces
 from orbit.protocol import INTERNAL, INVALID
 
 FLAGS = _Backend(None, None, False, False, False, False, new=False, name=None)
+CLONES = Path("/nonexistent/clones")
+"""A clone directory for serving that clones nothing."""
 
 
 @pytest.fixture
@@ -51,7 +53,7 @@ def stack() -> ExitStack:
 
 
 def workspaces(stack: ExitStack, store: SqliteStore, flags: _Backend = FLAGS) -> ServedWorkspaces:
-    return _workspaces(stack, flags, store, StorageSettings())
+    return _workspaces(stack, flags, store, StorageSettings(), store.state_dir / "workspaces")
 
 
 def directory(tmp_path: Path, name: str = "repo") -> Path:
@@ -372,7 +374,7 @@ def test_serving_with_every_workspace_added_servable_flags_them_all(tmp_path: Pa
     first, second = directory(tmp_path, "first"), directory(tmp_path, "second")
     state = tmp_path / "state"
 
-    with served._serving(FLAGS, [first, second], state, tmp_path / "config") as serving:
+    with served._serving(FLAGS, [first, second], state, tmp_path / "config", CLONES) as serving:
         roots = [workspace.root for workspace in serving.workspaces]
 
     assert roots == [first, second]
@@ -387,7 +389,7 @@ def test_serving_stops_with_a_later_workspace_added_unservable_leaving_the_other
     state = tmp_path / "state"
 
     with pytest.raises(typer.Exit) as exited:
-        stack.enter_context(served._serving(FLAGS, [good, bad], state, tmp_path / "config"))
+        stack.enter_context(served._serving(FLAGS, [good, bad], state, tmp_path / "config", CLONES))
 
     assert exited.value.exit_code == 2
     assert flagged(state) == [] and free(good)
@@ -407,7 +409,9 @@ def test_serving_stops_if_the_workspaces_added_cant_be_flagged(
     monkeypatch.setattr(WorkspaceRegistry, "set_served", fails)
 
     with pytest.raises(typer.Exit) as exited:
-        stack.enter_context(served._serving(FLAGS, [root], tmp_path / "state", tmp_path / "config"))
+        stack.enter_context(
+            served._serving(FLAGS, [root], tmp_path / "state", tmp_path / "config", CLONES)
+        )
 
     assert exited.value.exit_code == 2
     assert capsys.readouterr().err == "The store failed.\n" and free(root)

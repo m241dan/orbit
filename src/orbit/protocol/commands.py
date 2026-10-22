@@ -206,17 +206,28 @@ class TakeOwnership(_Message):
 
 
 class AddWorkspace(_Message):
-    """Serve the workspace at ``path``, an absolute path on the server's host to a directory: a
-    repository's top level, which a path inside it stands for, or a plain directory. It's
-    registered, or found by its path, opens its most recently active session, takes its lock and
-    runs its startup check, and a ``Catalog`` listing it follows. A control-plane command: its
-    envelope's ``workspace`` is ``null``. Accepted, changing nothing, for a workspace already
-    served; refused with ``invalid`` for a relative path or a file, ``unknown`` for a path
-    there's nothing at, and ``invalid`` by a local orbit, which serves its own repository
-    alone."""
+    """Serve the workspace at ``path``, or a clone of the repository at ``url``; exactly one is
+    given, else it's refused with ``invalid``. A control-plane command: its envelope's
+    ``workspace`` is ``null``; a local orbit, which serves its own repository alone, refuses it
+    with ``invalid``.
+
+    ``path`` is an absolute path on the server's host to a directory: a repository's top level,
+    which a path inside it stands for, or a plain directory. It's registered, or found by its
+    path, opens its most recently active session, takes its lock and runs its startup check, and
+    a ``Catalog`` listing it follows. Accepted, changing nothing, for a workspace already served;
+    refused with ``invalid`` for a relative path or a file, and ``unknown`` for a path there's
+    nothing at.
+
+    ``url`` is an ``https://``, ``ssh://`` or ``file://`` URL, a scp-style ``user@host:path`` or
+    an absolute path on the server's host; anything else is refused with ``invalid``, and a URL
+    already being cloned with ``busy``. It's accepted at once and cloned in the background into
+    the server's clone directory, with ``WorkspaceCloning`` events reporting git's progress; the
+    clone is then served as one added by its path is, and a ``Catalog`` listing it follows, or
+    a control-plane ``ErrorOccurred`` coded ``git_failed`` gives git's message."""
 
     type: Literal["add_workspace"] = "add_workspace"
-    path: str = Field(min_length=1)
+    path: str | None = Field(default=None, min_length=1)
+    url: str | None = Field(default=None, min_length=1)
 
 
 class RemoveWorkspace(_Message):

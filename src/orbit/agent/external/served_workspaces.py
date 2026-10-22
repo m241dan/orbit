@@ -1,14 +1,14 @@
 """Opening a workspace, locked, checked and configured off the event loop, then found or
 registered in the store; and the workspaces a server serves as frontends add and remove them,
-each opened so and flagged served."""
+by their paths or as clones it makes, each opened so and flagged served."""
 
 import asyncio
 from collections.abc import Callable
-from contextlib import ExitStack
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from orbit.agent.application.control_plane import WorkspaceUnavailable
+from orbit.agent.application.ports import Cloner
 from orbit.agent.application.recovery import RecoveryFailed
 from orbit.agent.application.workspace_host import WorkspaceHost
 from orbit.agent.domain.config import OrbitConfig
@@ -28,7 +28,7 @@ from orbit.agent.external.sqlite_store import SqliteStore
 from orbit.agent.external.store_startup import OpenedStore, open_workspace_store
 from orbit.agent.external.workspace_lock import WorkspaceLock
 from orbit.agent.external.workspace_registry import WorkspaceRegistry
-from orbit.protocol import INTERNAL
+from orbit.protocol import INTERNAL, WorkspaceCloning
 
 
 @dataclass(frozen=True)
@@ -61,11 +61,13 @@ class OpenedWorkspace:
 @dataclass(frozen=True)
 class Opening:
     """How a workspace is opened: checked for a git identity if ``identity``, flagged served if
-    ``flag``, and its lock naming the server's ``url`` if it's known."""
+    ``flag``, its lock naming the server's ``url`` if it's known, and marked as a clone orbit
+    made if ``managed``."""
 
     identity: bool
     flag: bool
     url: str | None = None
+    managed: bool = False
 
 
 async def open_workspace(
@@ -87,7 +89,7 @@ async def open_workspace(
         await asyncio.wait([preparing])
         raise
     try:
-        opened = await _view(store, root, owned=served.owner is None, flag=opening.flag)
+        opened = await _view(store, root, owned=served.owner is None, opening=opening)
     except BaseException:
         served.lock.close()
         raise
@@ -111,35 +113,39 @@ def _prepared(root: Path, make_host: HostMaker, opening: Opening) -> _Prepared:
 class ServedWorkspaces:
     """The workspaces a server serves from the ``store``, each with its host made by
     ``make_host``, checked for a git identity if the coder works in a ``worktree``, and its
-    workspace lock held, if it's free, until it's removed or ``stack`` closes: those it starts
-    with, as :meth:`served` serves them, and those frontends add, as a control plane's
-    ``WorkspaceSource``. Once the server's ``url`` is known, the locks taken name it."""
+    workspace lock held, if it's free, until it's removed or :meth:`let_go`: those it starts
+    with, as :meth:`served` serves them, and those frontends add, by their paths or as clones
+    ``cloner`` makes, as a control plane's ``WorkspaceSource``. Once the server's ``url`` is
+    known, the locks taken name it."""
 
     def __init__(
-        self,
-        stack: ExitStack,
-        store: SqliteStore,
-        make_host: HostMaker,
-        *,
-        worktree: bool,
+        self, store: SqliteStore, make_host: HostMaker, cloner: Cloner, *, worktree: bool
     ) -> None:
         self._store = store
         self._make_host = make_host
+        self._cloner = cloner
         self._worktree = worktree
         self._locks: dict[str, WorkspaceLock] = {}
         self.url: str | None = None
-        stack.callback(self._let_go)
 
     @property
     def locks(self) -> tuple[WorkspaceLock, ...]:
         """The locks of the workspaces served."""
         return tuple(self._locks.values())
 
-    def served(self, root: Path) -> tuple[ServedWorkspace, Callable[[], WorkspaceHost]]:
-        """The workspace at ``root`` served from the start, with what builds its host, its lock
-        held, if it's free, left flagged as it was until :meth:`flag_served`. Raises
-        :class:`WorkspaceUnavailable` as :meth:`open` says."""
-        return asyncio.run(self._taken(root, flag=False))
+    def served(
+        self, root: Path, *, managed: bool = False
+    ) -> tuple[ServedWorkspace, Callable[[], WorkspaceHost]]:
+        """The workspace at ``root`` served from the start, marked as a clone orbit made if
+        ``managed``, with what builds its host, its lock held, if it's free, left flagged as it
+        was until :meth:`flag_served`. Raises :class:`WorkspaceUnavailable` as :meth:`open`
+        says."""
+        return asyncio.run(self._taken(root, Opening(self._worktree, flag=False, managed=managed)))
+
+    def cloned(self, url: str) -> str:
+        """The path of a new clone of the repository at ``url``, made before serving starts.
+        Raises :class:`CloneFailed` if it fails."""
+        return asyncio.run(self.clone(url, _unshown))
 
     def flag_served(self) -> None:
         """Flag every workspace served as served, so a server starting later serves them again.
@@ -164,27 +170,31 @@ class ServedWorkspaces:
         :func:`top_level` finds it."""
         return str(await asyncio.to_thread(top_level, Path(path).resolve()))
 
-    async def open(self, root: str) -> WorkspaceHost:
-        """The host of the workspace at ``root``, registered or found and flagged served, its
-        lock taken if it's free. Raises :class:`WorkspaceUnavailable` if git has no identity for
-        the coder's commits there, its configuration is invalid, its lock can't be made or the
-        store fails."""
-        _, make = await self._taken(Path(root), flag=True)
+    async def clone(self, url: str, progress: Callable[[WorkspaceCloning], None]) -> str:
+        """The path of a new clone of the repository at ``url``, as the cloner makes it."""
+        return await self._cloner.clone(url, progress)
+
+    async def open(self, root: str, *, managed: bool = False) -> WorkspaceHost:
+        """The host of the workspace at ``root``, registered or found, flagged served and, if
+        ``managed``, marked as a clone orbit made, its lock taken if it's free. Raises
+        :class:`WorkspaceUnavailable` if git has no identity for the coder's commits there, its
+        configuration is invalid, its lock can't be made or the store fails."""
+        opening = Opening(self._worktree, flag=True, managed=managed)
+        _, make = await self._taken(Path(root), opening)
         return make()
 
     async def _taken(
-        self, root: Path, *, flag: bool
+        self, root: Path, opening: Opening
     ) -> tuple[ServedWorkspace, Callable[[], WorkspaceHost]]:
-        """The workspace at ``root``, registered or found and flagged served if ``flag``, with
-        what builds its host, its lock taken if it's free and held until it's removed or the
-        stack closes, naming the server's URL if it's known by then. Raises
-        :class:`WorkspaceUnavailable` as :meth:`open` says, or as ``INTERNAL`` if the lock can't
-        name the URL, having let it go."""
-        opening = Opening(identity=self._worktree, flag=flag, url=self.url)
+        """The workspace at ``root``, opened as ``opening`` says, with what builds its host, its
+        lock taken if it's free and held until it's removed or let go, naming the server's URL
+        if it's known by then. Raises :class:`WorkspaceUnavailable` as :meth:`open` says, or as
+        ``INTERNAL`` if the lock can't name the URL, having let it go."""
+        opening = replace(opening, url=self.url)
         opened = await open_workspace(self._store, root, self._make_host, opening)
         # The server may have started listening while the workspace was opened.
         if self.url is not None and self.url != opening.url:
-            await self._named(opened, self.url, flagged=flag)
+            await self._named(opened, self.url, flagged=opening.flag)
         self._locks[opened.workspace_id] = opened.served.lock
         return opened.served, opened.make
 
@@ -216,11 +226,15 @@ class ServedWorkspaces:
         as it is."""
         self._locks.pop(workspace_id).close()
 
-    def _let_go(self) -> None:
+    def let_go(self) -> None:
         """Let go of the locks of the workspaces still served."""
         for lock in self._locks.values():
             lock.close()
         self._locks.clear()
+
+
+def _unshown(progress: WorkspaceCloning) -> None:
+    """Show no one a clone's ``progress``."""
 
 
 def _let_go_prepared(preparing: asyncio.Future[_Prepared]) -> None:
@@ -284,15 +298,18 @@ def locked(root: Path, url: str | None = None) -> tuple[WorkspaceLock, Workspace
         ) from None
 
 
-async def _view(store: SqliteStore, root: Path, *, owned: bool, flag: bool) -> OpenedStore:
+async def _view(store: SqliteStore, root: Path, *, owned: bool, opening: Opening) -> OpenedStore:
     """The workspace at ``root``'s view of ``store``, as :func:`open_workspace_store` opens it,
-    recovering its fallback files if this orbit ``owned`` it, flagged as served if ``flag``. Raises
-    :class:`WorkspaceUnavailable` as ``INTERNAL`` if that fails, as it may have changed the
-    store or the workspace's files by then."""
+    recovering its fallback files if this orbit ``owned`` it, marked managed and flagged as
+    served as ``opening`` says. Raises :class:`WorkspaceUnavailable` as ``INTERNAL`` if that
+    fails, as it may have changed the store or the workspace's files by then."""
     try:
         opened = await open_workspace_store(store, root, owned=owned)
-        if flag:
-            await _flagged(WorkspaceRegistry(store), opened.store.workspace_id)
+        workspace_id = opened.store.workspace_id
+        if opening.managed:
+            await WorkspaceRegistry(store).set_managed(workspace_id)
+        if opening.flag:
+            await _flagged(WorkspaceRegistry(store), workspace_id)
     except (StoreError, ImportBlocked, RecoveryFailed) as exc:
         raise WorkspaceUnavailable(str(exc), INTERNAL) from None
     return opened

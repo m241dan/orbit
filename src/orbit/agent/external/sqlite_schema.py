@@ -70,6 +70,10 @@ MIGRATIONS: tuple[tuple[str, ...], ...] = (
         # Whether a server serves the workspace.
         "ALTER TABLE workspaces ADD COLUMN served INTEGER NOT NULL DEFAULT 0",
     ),
+    (
+        # Whether orbit cloned the workspace's repository into its clone directory.
+        "ALTER TABLE workspaces ADD COLUMN managed INTEGER NOT NULL DEFAULT 0",
+    ),
 )
 
 

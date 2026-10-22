@@ -89,6 +89,7 @@ from orbit.protocol import (
     VerificationSkipped,
     VerificationStarted,
     Welcome,
+    WorkspaceCloning,
     WorkspaceEntry,
 )
 
@@ -189,6 +190,7 @@ COMMANDS: tuple[CommandEnvelope, ...] = (
     command(ResumeStorage()),
     command(TakeOwnership(take=True)),
     command(AddWorkspace(path="/src/orbit")),
+    command(AddWorkspace(url="git@github.com:o/orbit.git")),
     command(RemoveWorkspace(workspace="w1")),
 )
 
@@ -308,6 +310,9 @@ EVENTS: tuple[EventEnvelope, ...] = (
             triggers=(TriggerEntry(name="super-review", label="Super review", manual=True),),
             lanes=("work", PLANNER_LANE),
         )
+    ),
+    event(
+        WorkspaceCloning(url="git@github.com:o/orbit.git", phase="Receiving objects", percent=42)
     ),
     event(Welcome(command_id="c1", server_version="0.1.0")),
     event(CommandAccepted(command_id="c1")),

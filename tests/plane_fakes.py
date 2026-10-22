@@ -1,20 +1,34 @@
 """Fakes for a control plane serving several workspaces."""
 
 import asyncio
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
+from pathlib import PurePath
 
-from orbit.agent import Agents, ControlPlane, WorkspaceHost, WorkspaceOwner
+from orbit.agent import (
+    Agents,
+    CloneFailed,
+    ControlPlane,
+    PathKind,
+    WorkspaceHost,
+    WorkspaceOwner,
+    WorkspaceUnavailable,
+)
 from orbit.agent.application.connection import SessionConnection
 from orbit.agent.application.ports import RepositoryLock
 from orbit.protocol import (
+    INTERNAL,
+    INVALID,
     Attach,
     BusyChanged,
+    Catalog,
     Command,
     CommandEnvelope,
+    CommandRefused,
     Event,
     EventEnvelope,
     TaskSpec,
     TurnEndReason,
+    WorkspaceCloning,
 )
 from tests.agent_fakes import HELLO, LOCK_RETRY, ROLES, Call, FakeHost, ScriptedLauncher
 
@@ -88,3 +102,94 @@ async def idle(connection: SessionConnection) -> None:
         event = envelope.payload
         if isinstance(event, BusyChanged) and event.lane == "work" and not event.busy:
             return
+
+
+class FakeSource:
+    """Workspaces for a control plane to serve: each path is a directory, but for those
+    ``kinds`` says otherwise, standing for itself, but for those ``tops`` names the top level
+    of; noting the workspaces ``opened``, by path, those opened ``managed``, ``closed``, by id,
+    and the ``flags`` set, each waiting for ``flag_gate``, if given, and failing as
+    ``unflag_fails`` says, if it does, when it's cleared. Each URL ``cloning`` is cloned to
+    ``/clones/<its last part>``, reporting one step of progress, then waiting for
+    ``clone_gate``, if given, and failing as ``clone_fails`` says, if it does."""
+
+    def __init__(
+        self,
+        kinds: dict[str, PathKind] | None = None,
+        tops: dict[str, str] | None = None,
+    ) -> None:
+        self.cloning: list[str] = []
+        self.clone_gate: asyncio.Event | None = None
+        self.clone_fails: str | None = None
+        self.managed: list[str] = []
+        self.kinds = kinds or {}
+        self.tops = tops or {}
+        self.opened: list[str] = []
+        self.closed: list[str] = []
+        self.hosts: list[WorkspaceHost] = []
+        self.gate: asyncio.Event | None = None
+        self.unavailable: str | None = None
+        self.unavailable_code = INVALID
+        self.flags: list[tuple[str, bool]] = []
+        self.flag_gate: asyncio.Event | None = None
+        self.unflag_fails: str | None = None
+
+    async def kind(self, path: str) -> PathKind:
+        return self.kinds.get(path, PathKind.DIRECTORY)
+
+    async def top_level(self, path: str) -> str:
+        return self.tops.get(path, path)
+
+    async def clone(self, url: str, progress: Callable[[WorkspaceCloning], None]) -> str:
+        self.cloning.append(url)
+        progress(WorkspaceCloning(url=url, phase="Receiving objects", percent=50))
+        if self.clone_gate is not None:
+            await self.clone_gate.wait()
+        if self.clone_fails is not None:
+            raise CloneFailed(self.clone_fails)
+        return f"/clones/{PurePath(url).name}"
+
+    async def open(self, root: str, *, managed: bool = False) -> WorkspaceHost:
+        self.opened.append(root)
+        if managed:
+            self.managed.append(root)
+        if self.gate is not None:
+            await self.gate.wait()
+        if self.unavailable is not None:
+            raise WorkspaceUnavailable(self.unavailable, self.unavailable_code)
+        host = self.make(PurePath(root).name)
+        self.hosts.append(host)
+        return host
+
+    def make(self, name: str) -> WorkspaceHost:
+        """The host of the workspace ``name``."""
+        return workspace(name)
+
+    async def set_served(self, workspace_id: str, served: bool) -> None:
+        if self.flag_gate is not None:
+            await self.flag_gate.wait()
+        if not served and self.unflag_fails is not None:
+            raise WorkspaceUnavailable(self.unflag_fails, INTERNAL)
+        self.flags.append((workspace_id, served))
+
+    async def close(self, workspace_id: str) -> None:
+        assert (workspace_id, False) in self.flags
+        self.closed.append(workspace_id)
+
+
+async def welcomed(plane: ControlPlane) -> SessionConnection:
+    """A new connection to ``plane`` that has said Hello, with nothing queued."""
+    connection = plane.connect()
+    await say(connection, "hello", HELLO)
+    taken(connection)
+    return connection
+
+
+def ids(catalog: Event) -> list[str]:
+    """The ids of the workspaces ``catalog`` lists."""
+    assert isinstance(catalog, Catalog)
+    return [entry.id for entry in catalog.workspaces]
+
+
+def refused(command_id: str, code: str, message: str) -> CommandRefused:
+    return CommandRefused(command_id=command_id, code=code, message=message)

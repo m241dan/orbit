@@ -17,6 +17,7 @@ from orbit.protocol import (
     RemoveWorkspace,
     SessionStateChanged,
     SessionSummary,
+    WorkspaceCloning,
     WorkspaceEntry,
 )
 from orbit.tui import Opening, OrbitApp
@@ -99,6 +100,15 @@ async def test_connected_the_picker_preselects_the_workspace_at_the_repository()
         assert rows(screen) == [B_ROW, A_ROW, "Add a path…"]
         assert highlighted(screen) == 1
         assert session_of(app).commands == []
+
+
+async def test_a_clones_progress_changes_nothing_the_picker_shows_yet() -> None:
+    app = connected()
+    async with app.run_test() as pilot:
+        await feed_events(session_of(app), pilot, SERVED)
+        progress = WorkspaceCloning(url="https://github.com/o/proj.git", phase="Receiving objects")
+        await feed_events(session_of(app), pilot, progress)
+        assert rows(workspaces(app)) == [B_ROW, A_ROW, "Add a path…"]
 
 
 async def test_picking_a_workspace_opens_its_session_picker_whose_pick_attaches() -> None:

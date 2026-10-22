@@ -16,6 +16,7 @@ from orbit.agent.application.control_plane import (
 from orbit.agent.application.desk import Agents
 from orbit.agent.application.handshake import NO_STEPS_NOTE
 from orbit.agent.application.ports import (
+    CloneFailed,
     ConfigWriter,
     ProposalDecision,
     ProposalReview,
@@ -30,6 +31,7 @@ from orbit.agent.application.verifier import Verification
 from orbit.agent.application.workspace_host import WorkspaceHost
 from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.checks import ChecksProposal, Setup
+from orbit.agent.domain.clones import looks_like_url
 from orbit.agent.domain.config import OrbitConfig
 from orbit.agent.domain.config_errors import INVALID_CONFIG, ConfigError
 from orbit.agent.domain.ownership import WorkspaceOwner
@@ -41,6 +43,7 @@ from orbit.agent.domain.verification import VerificationStep
 from orbit.agent.domain.workspaces import PathKind
 from orbit.agent.external.checks import run_step
 from orbit.agent.external.claude_cli import MODEL_ALIASES, ClaudeCliRunner
+from orbit.agent.external.cloner import Cloner
 from orbit.agent.external.config_file import read_config, write_checks
 from orbit.agent.external.control_plane import ControlPlaneServer, ListenFailed
 from orbit.agent.external.directories import resolve_config_dir, resolve_state_dir
@@ -88,6 +91,8 @@ __all__ = [
     "Agents",
     "ChecksProposal",
     "ClaudeCliRunner",
+    "CloneFailed",
+    "Cloner",
     "ConfigError",
     "ConfigWriter",
     "ControlPlane",
@@ -144,6 +149,7 @@ __all__ = [
     "has_git_identity",
     "in_git_work_tree",
     "local_tls",
+    "looks_like_url",
     "open_workspace",
     "open_workspace_store",
     "orbit_dir",

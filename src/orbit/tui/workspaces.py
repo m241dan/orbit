@@ -145,6 +145,7 @@ class WorkspacesScreen(TypingListScreen[str | None]):
         if isinstance(row, WorkspaceEntry):
             self.dismiss(row.id)
         elif isinstance(row, AddWorkspace):
+            assert row.path is not None  # The picker offers adding the repository's path alone.
             await self._add(row.path)
         else:
             self._typing(PATH_HINT)

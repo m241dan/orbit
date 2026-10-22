@@ -92,6 +92,10 @@ def _set_served(connection: sqlite3.Connection, workspace_id: str, served: bool)
     connection.execute("UPDATE workspaces SET served = ? WHERE id = ?", (served, workspace_id))
 
 
+def _set_managed(connection: sqlite3.Connection, workspace_id: str) -> None:
+    connection.execute("UPDATE workspaces SET managed = 1 WHERE id = ?", (workspace_id,))
+
+
 def _path(connection: sqlite3.Connection, workspace_id: str) -> str | None:
     row = connection.execute("SELECT path FROM workspaces WHERE id = ?", (workspace_id,))
     found = row.fetchone()
@@ -130,6 +134,12 @@ class WorkspaceRegistry:
         await self._store.run(
             message, lambda connection: _set_served(connection, workspace_id, served)
         )
+
+    async def set_managed(self, workspace_id: str) -> None:
+        """Mark the workspace ``workspace_id`` as managed: orbit cloned its repository into its
+        clone directory."""
+        message = f"Couldn't mark the workspace {workspace_id} managed in"
+        await self._store.run(message, lambda connection: _set_managed(connection, workspace_id))
 
     async def path(self, workspace_id: str) -> str | None:
         """The path of the workspace ``workspace_id``; ``None`` if it isn't registered."""

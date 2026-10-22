@@ -49,7 +49,8 @@ An event travels in an `EventEnvelope`:
   that fail, it's reserved with the next block, or as the server stops. A local orbit's
   store, while it's halted, reserves the block once it resumes.
 - `session`: the session the event belongs to. The event's type decides it: the types in
-  `SESSIONLESS_EVENTS` (`UsageChanged`, `Catalog` and `SessionStateChanged`)
+  `SESSIONLESS_EVENTS` (`UsageChanged`, `Catalog`, `SessionStateChanged` and
+  `WorkspaceCloning`)
   belong to no session, carry `null` and are never logged, and every other event carries the
   open session's id, but for the answers to a connection viewing another session (its
   `Snapshot`, `CommandAccepted` and `CommandRefused`), which carry that session's id and are
@@ -57,8 +58,9 @@ An event travels in an `EventEnvelope`:
   `CONNECTION_EVENTS` (`Welcome`, `Catalog`, `Snapshot` and `HistoryPage`), which answer one
   connection, and a connection's greeting (see [The handshake](#the-handshake)).
 - `workspace`: the id of the workspace the event belongs to, but for the control plane's own
-  events, the types in `CONTROL_PLANE_EVENTS` (`Welcome`, `Catalog` and `UsageChanged`), which
-  carry `null`.
+  events, the types in `CONTROL_PLANE_EVENTS` (`Welcome`, `Catalog`, `UsageChanged` and
+  `WorkspaceCloning`), which carry `null`, as does the `ErrorOccurred` telling of a failed clone
+  (see [Workspaces](#workspaces)), whose `session` is `null` too.
 - `traceparent` and `tracestate`, as on commands.
 
 ```json
@@ -204,7 +206,41 @@ with `internal` when orbit fails to make its lock, or fails partway through open
 store, importing its old sessions or recovering its fallback files, which may have changed them.
 
 ```json
-{"workspace":null,"traceparent":null,"tracestate":null,"command_id":"a71c03","session":null,"payload":{"type":"add_workspace","path":"/home/me/src/orbit"}}
+{"workspace":null,"traceparent":null,"tracestate":null,"command_id":"a71c03","session":null,"payload":{"type":"add_workspace","path":"/home/me/src/orbit","url":null}}
+```
+
+`AddWorkspace(url)` serves a clone of the repository at `url`, which the server makes: an
+`https://`, `ssh://` or `file://` URL, a scp-style `user@host:path`, or an absolute path on the
+server's host (cloned, not served in place). An `AddWorkspace` is given `path` or `url`, never
+both; both, neither, or a `url` of any other kind, such as `ftp://x`, is refused with `invalid`.
+It's accepted at once, and git clones the repository in the background, so other commands carry
+on meanwhile; a second `AddWorkspace` with the same `url` while it's being cloned is refused with
+`busy`. The clone goes to the server's clone directory (`clone_dir` in `[server]`, by default
+`workspaces` in its state directory), in a directory named after the URL's last part without
+`.git` (`proj` for `https://github.com/o/proj.git`), or `proj-2`, `proj-3` and so on when that's
+taken. Git runs as the server's account, with its credential helpers and SSH agent, and never
+prompts: frontends never send credentials.
+
+```json
+{"workspace":null,"traceparent":null,"tracestate":null,"command_id":"b52d10","session":null,"payload":{"type":"add_workspace","path":null,"url":"git@github.com:o/proj.git"}}
+```
+
+As git clones, `WorkspaceCloning(url, phase, percent)` events report its progress: the `phase`
+git is in, such as `Receiving objects`, and how far through it it is, `percent`, when git says
+(`null` when it doesn't). Once the clone is made, it's served as one added by its path is,
+marked in the registry as managed, a clone orbit made, and a `Catalog` listing it follows. If
+the clone fails, an `ErrorOccurred` coded `git_failed` gives git's last lines, such as
+`Couldn't clone git@github.com:o/proj.git: ERROR: Repository not found.`, with, when they look
+like git lacked credentials, the hint `The server's account needs access to this repository: an
+SSH key or a git credential helper.`, and what was cloned is removed; if the clone can't be
+served, the `ErrorOccurred` carries the code adding its path would be refused with. The
+progress, the failure and that `Catalog` reach every connection that's listening and every one
+welcomed but attached to no workspace, as whichever asked may not be attached yet; they carry
+no workspace and no session, and aren't logged. A clone still under way when the server stops
+is stopped, and what it cloned removed.
+
+```json
+{"workspace":null,"traceparent":null,"tracestate":null,"seq":57,"session":null,"payload":{"type":"workspace_cloning","url":"git@github.com:o/proj.git","phase":"Receiving objects","percent":42}}
 ```
 
 `RemoveWorkspace(workspace)` stops serving the workspace whose id is `workspace`: its host
@@ -502,8 +538,8 @@ Refusals, in `CommandRefused`:
 | --- | --- |
 | `not_configured` | What the command needs isn't set up, such as agents or verification. |
 | `unknown` | The command names something there's none of, such as a task, a lane or a workspace. |
-| `busy` | What the command acts on is running, so it can't be done now. |
-| `invalid` | The command can't be done as given, such as a command before `Hello`, a command for a workspace before the connection is attached, a relative path to `AddWorkspace`, adding or removing a workspace on a local orbit, input to a trigger that takes none or `TakeOwnership` with no offer open. |
+| `busy` | What the command acts on is running, so it can't be done now, such as a URL `AddWorkspace` is cloning already. |
+| `invalid` | The command can't be done as given, such as a command before `Hello`, a command for a workspace before the connection is attached, a relative path to `AddWorkspace`, or both or neither of its `path` and `url`, or a `url` that's neither a URL it clones nor an absolute path, adding or removing a workspace on a local orbit, input to a trigger that takes none or `TakeOwnership` with no offer open. |
 | `locked` | Another orbit holds what the command acts on, such as a session. |
 | `wrong_session` | The command is for a session other than the one its connection views, or a workspace other than the one it's attached to. |
 | `not_active` | The connection views a session that isn't the workspace's open one, and the command would change or run something there (see [Read-only views](#read-only-views)). |
@@ -516,7 +552,7 @@ Errors, in `ErrorOccurred`:
 | --- | --- |
 | `agent_failed` | An agent's run or turn failed, as when orbit's MCP server couldn't start or the checks it proposed couldn't be saved, or it exited without doing its task. |
 | `timed_out` | An agent ran out of time. |
-| `git_failed` | A git command or a worktree failed. |
+| `git_failed` | A git command or a worktree failed, or cloning a repository `AddWorkspace` named by its URL did. |
 | `save_failed` | Saving the session failed. |
 | `storage_failed` | A write to the store (the event log, the session record or the review count) failed, so the session halted: its agents, the planner's turn and reviews are cancelled. The message explains which write failed, the database and its error, the likely cause and its fix, the unsaved events' `seq`s and the fallback file they were written to, and how to resume. |
 | `checks_exhausted` | A check still failed after every fix attempt. |

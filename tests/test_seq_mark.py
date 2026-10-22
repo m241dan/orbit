@@ -3,12 +3,13 @@ past the mark when it serves no workspace, once per block however many it serves
 whenever a block is crossed, even as a workspace is being added."""
 
 import asyncio
+from collections.abc import Callable
 from pathlib import Path
 
-from orbit.agent import ControlPlane, PathKind, SqliteStore, WorkspaceHost
+from orbit.agent import CloneFailed, ControlPlane, PathKind, SqliteStore, WorkspaceHost
 from orbit.agent.application.outbox import SEQ_BLOCK
 from orbit.agent.application.seq_mark import MarkReservations
-from orbit.protocol import AddWorkspace
+from orbit.protocol import AddWorkspace, WorkspaceCloning
 from tests.agent_fakes import HELLO, FakeStore
 from tests.plane_fakes import say, taken
 
@@ -78,7 +79,10 @@ class GatedSource:
     async def top_level(self, path: str) -> str:
         return path
 
-    async def open(self, root: str) -> WorkspaceHost:
+    async def clone(self, url: str, progress: Callable[[WorkspaceCloning], None]) -> str:
+        raise CloneFailed("Nothing is cloned here.")
+
+    async def open(self, root: str, *, managed: bool = False) -> WorkspaceHost:
         source = self
 
         class Gated(WorkspaceHost):

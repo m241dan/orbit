@@ -70,7 +70,15 @@ def certificate_dates(not_before: datetime, not_after: datetime, now: datetime) 
     return CertificateDates.VALID
 
 
-SERVER_PATHS = ("cert", "key", "client_ca", "ca", "local_client_cert", "local_client_key")
+SERVER_PATHS = (
+    "cert",
+    "key",
+    "client_ca",
+    "ca",
+    "local_client_cert",
+    "local_client_key",
+    "clone_dir",
+)
 """The server settings that name files."""
 
 
@@ -79,7 +87,9 @@ class ServerSettings(TlsSettings):
     lets the system choose one), ``max_message_mb``, the largest message either way, its TLS
     settings, the fingerprints of the client certificates ``revoked`` under mutual TLS, and the
     client certificate ``local_client_cert``, with its private key ``local_client_key``, that
-    frontends on this machine show it under mutual TLS."""
+    frontends on this machine show it under mutual TLS, and the ``clone_dir`` the repositories
+    it's asked to serve by URL are cloned into, ``workspaces`` in the state directory if
+    ``None``."""
 
     host: str = Field(default="127.0.0.1", min_length=1)
     port: int = Field(default=7433, ge=0, le=65535)
@@ -87,6 +97,7 @@ class ServerSettings(TlsSettings):
     revoked: tuple[str, ...] = Field(default=(), strict=False)  # A TOML array is a list.
     local_client_cert: str | None = None
     local_client_key: str | None = None
+    clone_dir: str | None = None
 
     @field_validator("revoked")
     @classmethod

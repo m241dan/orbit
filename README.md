@@ -985,11 +985,34 @@ served changes nothing. Removing one lets its lock go and keeps its sessions for
 again; it's refused while the workspace runs work or another frontend views one of its
 sessions, and if the store fails to record that it's removed, it stays served. A plain `orbit
 serve` later serves those added, not those removed. A local `orbit
-chat` works on its own repository alone and refuses both. It takes the backend flags `chat` has (`--model`, `--tools`, `--verify`,
+chat` works on its own repository alone and refuses both.
+
+**Cloning.** A server can also be given a repository by URL, with no one touching its
+filesystem: `orbit serve --add <url>` clones it before serving, and a frontend's `AddWorkspace`
+with a `url` is accepted at once and cloned in the background, its progress (`Receiving objects
+42%`) reported to every frontend, then served like any added workspace. It takes `https://`,
+`ssh://` and `file://` URLs, scp-style `user@host:path`, and, from a frontend, an absolute path
+on the server's host, which is cloned rather than served in place (`--add` serves a path in
+place). Clones go to `clone_dir` in `[server]`, by default `workspaces` in the state directory,
+each in a directory named after the URL's last part without `.git` (`proj` for
+`git@github.com:o/proj.git`), or `proj-2`, `proj-3` and so on when that's taken; orbit marks
+these workspaces as managed, clones it made. A clone that fails says git's message (`orbit serve
+--add` stops with status 2) and leaves nothing behind, and one still under way when the server
+stops is stopped and removed. The same URL can't be cloned twice at once.
+
+Git clones as the server's account, with its credential helpers and SSH agent, and never
+prompts: `GIT_TERMINAL_PROMPT=0`, and SSH runs with `-o BatchMode=yes` added to any
+`GIT_SSH_COMMAND` or `core.sshCommand` you set. Frontends never send credentials, so a private
+repository needs the server's account to have access to it already: an SSH key (in its
+`~/.ssh`, or its agent) or a git credential helper (`git config --global credential.helper
+store`, say). A clone that fails for want of them says so: `The server's account needs access
+to this repository: an SSH key or a git credential helper.` It takes the backend flags `chat` has (`--model`, `--tools`, `--verify`,
 `--worktree`, `--review`, `--usage`, `--profile`, which writes `serve.prof` and
 `serve-blocked.log`), which apply to every workspace it serves, each reading its own
 `.orbit/config.toml`, `--state-dir` and `--config-dir`, and:
 
+- `--add`: a workspace to serve, by its path or a URL to clone (see **Cloning** above),
+  repeatable.
 - `--host`: the address to listen on, by default `127.0.0.1`. Without TLS only loopback is
   allowed (`127.0.0.1`, `::1`, `localhost`); another host stops it with status 2, pointing at
   `--tls`. With TLS any address is.
@@ -1072,7 +1095,7 @@ machine needs the new copy first. Copy the new token to your other machines as b
 trusted channel.
 
 The `[server]` table in your `config.toml` sets where it listens, the largest message either
-way and how it serves TLS; the flags override it. The server enforces `max_message_mb` on what
+way, how it serves TLS and where it clones repositories added by URL; the flags override it. The server enforces `max_message_mb` on what
 it accepts and on what it sends, and chats take whatever size their server sends, so raising it
 on the server is enough:
 
@@ -1089,6 +1112,7 @@ ca = "/home/me/.config/orbit/tls/ca.pem"            # the CA that signed cert
 revoked = []         # SHA-256 fingerprints of client certificates refused under mtls
 local_client_cert = "/home/me/.config/orbit/tls/local.pem"      # shown by chats here, under mtls
 local_client_key = "/home/me/.config/orbit/tls/local-key.pem"   # its private key, chmod 600
+clone_dir = "/srv/orbit/workspaces"  # where repositories added by URL are cloned
 ```
 
 Paths in `[server]` may start with `~`, and a relative one is taken from the config directory,

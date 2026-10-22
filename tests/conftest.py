@@ -83,3 +83,18 @@ def no_git_identity(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     for name in ("AUTHOR", "COMMITTER"):
         for part in ("NAME", "EMAIL"):
             monkeypatch.delenv(f"GIT_{name}_{part}", raising=False)
+
+
+SLOW_SSH = 'echo $$ > "$ORBIT_TEST_PIDFILE"\nexec sleep 30\n'
+"""An SSH that notes its pid, then hangs, as one waiting on a slow server."""
+
+
+@pytest.fixture
+def slow_ssh(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    """Have git's SSH hang; returns the file it notes its pid in."""
+    script = tmp_path / "ssh.sh"
+    script.write_text(SLOW_SSH)
+    pidfile = tmp_path / "ssh.pid"
+    monkeypatch.setenv("GIT_SSH_COMMAND", f"sh {script}")
+    monkeypatch.setenv("ORBIT_TEST_PIDFILE", str(pidfile))
+    return pidfile

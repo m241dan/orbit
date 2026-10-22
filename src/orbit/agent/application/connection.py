@@ -151,6 +151,15 @@ class Connections:
             if connection.listening:
                 connection.deliver(envelope)
 
+    def announce(self, envelope: EventEnvelope) -> None:
+        """Pass ``envelope``, a control-plane event, to every connection that's listening, as
+        :meth:`broadcast` does, and to every one welcomed but attached to no workspace."""
+        for connection in tuple(self._open):
+            if connection.listening:
+                connection.deliver(envelope)
+            elif connection.handshake.welcomed and connection.workspace is None:
+                connection.receive(envelope)
+
     def _sees(self, connection: "SessionConnection", session: str | None) -> bool:
         """Whether the events of ``session``, or those of none, reach ``connection``."""
         return session is None or self._viewed_by(connection) == session

@@ -23,7 +23,7 @@ async def test_a_newer_database_is_refused_naming_both_versions(
     await (await open_store(workspace)).close()
     with database(state) as connection:
         connection.execute("INSERT INTO schema_version (version) VALUES (99)")
-    with pytest.raises(StoreError, match=r"orbit\.db has schema version 99, newer than .* 5;"):
+    with pytest.raises(StoreError, match=r"orbit\.db has schema version 99, newer than .* 6;"):
         await open_store(workspace)
     assert store_threads() == []
 
@@ -55,6 +55,7 @@ async def test_a_migration_applied_meanwhile_by_another_orbit_isnt_run_again(
             (3,),
             (4,),
             (5,),
+            (6,),
         ]
 
 
@@ -65,7 +66,7 @@ async def test_a_newer_version_written_meanwhile_is_refused(
         other.execute("INSERT INTO schema_version (version) VALUES (99)")
 
     racing(monkeypatch, state, newer)
-    with pytest.raises(StoreError, match=r"orbit\.db has schema version 99, newer than .* 5;"):
+    with pytest.raises(StoreError, match=r"orbit\.db has schema version 99, newer than .* 6;"):
         await open_store(workspace)
     with database(state) as connection:
         tables = connection.execute("SELECT name FROM sqlite_master WHERE name = 'workspaces'")
@@ -86,6 +87,7 @@ async def test_stores_opened_at_once_on_a_new_state_directory_both_open(
             (3,),
             (4,),
             (5,),
+            (6,),
         ]
         assert connection.execute("SELECT count(*) FROM workspaces").fetchone() == (2,)
 
@@ -124,10 +126,10 @@ async def test_a_failed_migration_is_rolled_back_and_refused(
     await (await open_store(workspace)).close()
     broken = (*MIGRATIONS, ("CREATE TABLE extra (x)", "NOT SQL"))
     monkeypatch.setattr(sqlite_schema, "MIGRATIONS", broken)
-    with pytest.raises(StoreError, match=r"upgrade the database .*orbit\.db to schema version 6"):
+    with pytest.raises(StoreError, match=r"upgrade the database .*orbit\.db to schema version 7"):
         await open_store(workspace)
     with database(state) as connection:
-        assert connection.execute("SELECT max(version) FROM schema_version").fetchone() == (5,)
+        assert connection.execute("SELECT max(version) FROM schema_version").fetchone() == (6,)
         tables = connection.execute("SELECT name FROM sqlite_master WHERE name = 'extra'")
         assert tables.fetchall() == []
 
@@ -189,7 +191,7 @@ async def test_a_store_that_fails_to_open_closes_its_connection(
     assert store_threads() == []
 
 
-async def test_a_version_4_database_upgrades_to_5_with_no_workspace_served(
+async def test_a_version_4_database_upgrades_with_no_workspace_served(
     monkeypatch: pytest.MonkeyPatch, state: Path, workspace: Path
 ) -> None:
     with monkeypatch.context() as patched:
@@ -200,8 +202,25 @@ async def test_a_version_4_database_upgrades_to_5_with_no_workspace_served(
     store = await SqliteStore.open(state)
     await store.close()
     with database(state) as connection:
-        assert connection.execute("SELECT max(version) FROM schema_version").fetchone() == (5,)
+        assert connection.execute("SELECT max(version) FROM schema_version").fetchone() == (6,)
         assert connection.execute("SELECT path, served FROM workspaces").fetchall() == [
+            (str(workspace), 0)
+        ]
+
+
+async def test_a_version_5_database_upgrades_to_6_with_no_workspace_managed(
+    monkeypatch: pytest.MonkeyPatch, state: Path, workspace: Path
+) -> None:
+    with monkeypatch.context() as patched:
+        patched.setattr(sqlite_schema, "MIGRATIONS", MIGRATIONS[:5])
+        connection = sqlite_schema.open_database(state / "orbit.db")
+        register(connection, workspace.resolve(), None)
+        connection.close()
+    store = await SqliteStore.open(state)
+    await store.close()
+    with database(state) as connection:
+        assert connection.execute("SELECT max(version) FROM schema_version").fetchone() == (6,)
+        assert connection.execute("SELECT path, managed FROM workspaces").fetchall() == [
             (str(workspace), 0)
         ]
 

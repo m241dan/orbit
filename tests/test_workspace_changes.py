@@ -5,16 +5,13 @@ both."""
 import asyncio
 from collections.abc import Sequence
 from dataclasses import replace
-from pathlib import PurePath
 
 from orbit.agent import (
     ControlPlane,
     PathKind,
     Verification,
     WorkspaceHost,
-    WorkspaceUnavailable,
 )
-from orbit.agent.application.connection import SessionConnection
 from orbit.agent.application.outbox import SEQ_BLOCK
 from orbit.agent.domain.workspaces import LOCAL_ONLY
 from orbit.protocol import (
@@ -37,7 +34,20 @@ from orbit.protocol import (
     Snapshot,
 )
 from tests.agent_fakes import HELLO, STEP, FakeStore, Steps
-from tests.plane_fakes import TASK, idle, joined, payloads, say, taken, working, workspace
+from tests.plane_fakes import (
+    TASK,
+    FakeSource,
+    idle,
+    ids,
+    joined,
+    payloads,
+    refused,
+    say,
+    taken,
+    welcomed,
+    working,
+    workspace,
+)
 
 
 class Slow(WorkspaceHost):
@@ -68,62 +78,6 @@ class Unclosable(WorkspaceHost):
         raise OSError("The store won't close.")
 
 
-class FakeSource:
-    """Workspaces for a control plane to serve: each path is a directory, but for those
-    ``kinds`` says otherwise, standing for itself, but for those ``tops`` names the top level
-    of; noting the workspaces ``opened``, by path, ``closed``, by id, and the ``flags`` set,
-    each waiting for ``flag_gate``, if given, and failing as ``unflag_fails`` says, if it
-    does, when it's cleared."""
-
-    def __init__(
-        self,
-        kinds: dict[str, PathKind] | None = None,
-        tops: dict[str, str] | None = None,
-    ) -> None:
-        self.kinds = kinds or {}
-        self.tops = tops or {}
-        self.opened: list[str] = []
-        self.closed: list[str] = []
-        self.hosts: list[WorkspaceHost] = []
-        self.gate: asyncio.Event | None = None
-        self.unavailable: str | None = None
-        self.unavailable_code = INVALID
-        self.flags: list[tuple[str, bool]] = []
-        self.flag_gate: asyncio.Event | None = None
-        self.unflag_fails: str | None = None
-
-    async def kind(self, path: str) -> PathKind:
-        return self.kinds.get(path, PathKind.DIRECTORY)
-
-    async def top_level(self, path: str) -> str:
-        return self.tops.get(path, path)
-
-    async def open(self, root: str) -> WorkspaceHost:
-        self.opened.append(root)
-        if self.gate is not None:
-            await self.gate.wait()
-        if self.unavailable is not None:
-            raise WorkspaceUnavailable(self.unavailable, self.unavailable_code)
-        host = self.make(PurePath(root).name)
-        self.hosts.append(host)
-        return host
-
-    def make(self, name: str) -> WorkspaceHost:
-        """The host of the workspace ``name``."""
-        return workspace(name)
-
-    async def set_served(self, workspace_id: str, served: bool) -> None:
-        if self.flag_gate is not None:
-            await self.flag_gate.wait()
-        if not served and self.unflag_fails is not None:
-            raise WorkspaceUnavailable(self.unflag_fails, INTERNAL)
-        self.flags.append((workspace_id, served))
-
-    async def close(self, workspace_id: str) -> None:
-        assert (workspace_id, False) in self.flags
-        self.closed.append(workspace_id)
-
-
 class SlowSource(FakeSource):
     """Workspaces whose hosts wait for ``gate``, if given, before opening their latest session,
     and then fail to if they ``fail``."""
@@ -135,24 +89,6 @@ class SlowSource(FakeSource):
 
     def make(self, name: str) -> WorkspaceHost:
         return Slow(name, self.latest_gate, fails=self.fail)
-
-
-async def welcomed(plane: ControlPlane) -> SessionConnection:
-    """A new connection to ``plane`` that has said Hello, with nothing queued."""
-    connection = plane.connect()
-    await say(connection, "hello", HELLO)
-    taken(connection)
-    return connection
-
-
-def ids(catalog: Event) -> list[str]:
-    """The ids of the workspaces ``catalog`` lists."""
-    assert isinstance(catalog, Catalog)
-    return [entry.id for entry in catalog.workspaces]
-
-
-def refused(command_id: str, code: str, message: str) -> CommandRefused:
-    return CommandRefused(command_id=command_id, code=code, message=message)
 
 
 async def test_adding_a_workspace_serves_it_and_sends_the_catalog_listing_it() -> None:

@@ -95,22 +95,42 @@
       "type": "object"
     },
     "AddWorkspace": {
-      "description": "Serve the workspace at ``path``, an absolute path on the server's host to a directory: a\nrepository's top level, which a path inside it stands for, or a plain directory. It's\nregistered, or found by its path, opens its most recently active session, takes its lock and\nruns its startup check, and a ``Catalog`` listing it follows. A control-plane command: its\nenvelope's ``workspace`` is ``null``. Accepted, changing nothing, for a workspace already\nserved; refused with ``invalid`` for a relative path or a file, ``unknown`` for a path\nthere's nothing at, and ``invalid`` by a local orbit, which serves its own repository\nalone.",
+      "description": "Serve the workspace at ``path``, or a clone of the repository at ``url``; exactly one is\ngiven, else it's refused with ``invalid``. A control-plane command: its envelope's\n``workspace`` is ``null``; a local orbit, which serves its own repository alone, refuses it\nwith ``invalid``.\n\n``path`` is an absolute path on the server's host to a directory: a repository's top level,\nwhich a path inside it stands for, or a plain directory. It's registered, or found by its\npath, opens its most recently active session, takes its lock and runs its startup check, and\na ``Catalog`` listing it follows. Accepted, changing nothing, for a workspace already served;\nrefused with ``invalid`` for a relative path or a file, and ``unknown`` for a path there's\nnothing at.\n\n``url`` is an ``https://``, ``ssh://`` or ``file://`` URL, a scp-style ``user@host:path`` or\nan absolute path on the server's host; anything else is refused with ``invalid``, and a URL\nalready being cloned with ``busy``. It's accepted at once and cloned in the background into\nthe server's clone directory, with ``WorkspaceCloning`` events reporting git's progress; the\nclone is then served as one added by its path is, and a ``Catalog`` listing it follows, or\na control-plane ``ErrorOccurred`` coded ``git_failed`` gives git's message.",
       "properties": {
         "path": {
-          "minLength": 1,
-          "title": "Path",
-          "type": "string"
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Path"
         },
         "type": {
           "const": "add_workspace",
           "default": "add_workspace",
           "title": "Type",
           "type": "string"
+        },
+        "url": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Url"
         }
       },
       "required": [
-        "path",
         "type"
       ],
       "title": "AddWorkspace",
@@ -915,7 +935,8 @@
               "verification_finished": "#/$defs/VerificationFinished",
               "verification_skipped": "#/$defs/VerificationSkipped",
               "verification_started": "#/$defs/VerificationStarted",
-              "welcome": "#/$defs/Welcome"
+              "welcome": "#/$defs/Welcome",
+              "workspace_cloning": "#/$defs/WorkspaceCloning"
             },
             "propertyName": "type"
           },
@@ -1030,6 +1051,9 @@
             },
             {
               "$ref": "#/$defs/Catalog"
+            },
+            {
+              "$ref": "#/$defs/WorkspaceCloning"
             },
             {
               "$ref": "#/$defs/Welcome"
@@ -2962,6 +2986,44 @@
         "type"
       ],
       "title": "Welcome",
+      "type": "object"
+    },
+    "WorkspaceCloning": {
+      "description": "The repository at ``url``, which ``AddWorkspace`` asked to serve, is being cloned: git is\nat ``phase``, such as ``Receiving objects``, ``percent`` of the way through it if git says.\nA control-plane event, sent to every connection and never logged.",
+      "properties": {
+        "percent": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Percent"
+        },
+        "phase": {
+          "title": "Phase",
+          "type": "string"
+        },
+        "type": {
+          "const": "workspace_cloning",
+          "default": "workspace_cloning",
+          "title": "Type",
+          "type": "string"
+        },
+        "url": {
+          "title": "Url",
+          "type": "string"
+        }
+      },
+      "required": [
+        "url",
+        "phase",
+        "type"
+      ],
+      "title": "WorkspaceCloning",
       "type": "object"
     },
     "WorkspaceEntry": {

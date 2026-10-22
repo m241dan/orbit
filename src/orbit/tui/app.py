@@ -61,6 +61,7 @@ from orbit.protocol import (
     UpdateSettings,
     UsageChanged,
     VerificationChanged,
+    WorkspaceCloning,
 )
 from orbit.tui.agents import AgentsPane
 from orbit.tui.commands import CommandDesk
@@ -817,7 +818,8 @@ class OrbitApp(App[None], inherit_bindings=False):
 
     def _show_progress(self, event: ProgressEvent) -> None:
         """Show the verification steps' progress, whether review is paused, proposed steps, usage
-        limits, or a session's state, which the session picker shows."""
+        limits, or a session's state, which the session picker shows; a clone's progress isn't
+        shown yet."""
         if isinstance(event, VerificationChanged):
             self._verification.show(event.steps, event.title)
         elif isinstance(event, ReviewStatus):
@@ -826,6 +828,8 @@ class OrbitApp(App[None], inherit_bindings=False):
             self._proposals.show(event)
         elif isinstance(event, UsageChanged):
             self._usage.show(event)
+        elif isinstance(event, WorkspaceCloning):
+            return
         else:
             self._sessions.follow_state(event)
             self._workspaces.follow_state(event)

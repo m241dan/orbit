@@ -475,6 +475,17 @@ def with_state(summary: SessionSummary, changed: SessionStateChanged) -> Session
     return summary.model_copy(update=update)
 
 
+class WorkspaceCloning(_Message):
+    """The repository at ``url``, which ``AddWorkspace`` asked to serve, is being cloned: git is
+    at ``phase``, such as ``Receiving objects``, ``percent`` of the way through it if git says.
+    A control-plane event, sent to every connection and never logged."""
+
+    type: Literal["workspace_cloning"] = "workspace_cloning"
+    url: str
+    phase: str
+    percent: int | None = None
+
+
 class WorkspaceEntry(_Message):
     """Workspace ``id``, shown as ``label``, at ``path`` on the backend's host, if it has one,
     whether it's ``read_only``, as another orbit owns its repository, and its ``sessions`` as
@@ -554,6 +565,7 @@ Event = Annotated[
     | Snapshot
     | HistoryPage
     | Catalog
+    | WorkspaceCloning
     | Welcome
     | CommandAccepted
     | CommandRefused,

@@ -82,6 +82,29 @@ async def test_the_served_flag_round_trips(store: SqliteStore, tmp_path: Path) -
     assert await registry.served() == [(first_id, str(first.resolve()))]
 
 
+async def test_a_workspace_marked_managed_stays_so_when_found_again(
+    store: SqliteStore, tmp_path: Path
+) -> None:
+    registry = WorkspaceRegistry(store)
+    clone = directory(tmp_path, "clone")
+    other = directory(tmp_path, "other")
+    workspace_id = (await registry.find_or_register(str(clone))).workspace_id
+    await registry.find_or_register(str(other))
+    await registry.set_managed(workspace_id)
+    await registry.find_or_register(str(clone))
+    assert await managed(store) == [(str(clone.resolve()), 1), (str(other.resolve()), 0)]
+
+
+async def managed(store: SqliteStore) -> list[tuple[str, int]]:
+    """The path of each workspace registered in ``store``, by path, and whether it's managed."""
+
+    def listed(connection: sqlite3.Connection) -> list[tuple[str, int]]:
+        rows = connection.execute("SELECT path, managed FROM workspaces ORDER BY path")
+        return [(str(path), int(flag)) for path, flag in rows]
+
+    return await store.run("Couldn't list the workspaces in", listed)
+
+
 async def test_the_flag_is_kept_when_the_workspace_is_found_again(
     store: SqliteStore, tmp_path: Path
 ) -> None:
@@ -251,5 +274,7 @@ async def test_a_closed_store_fails_each_call_naming_the_database(
         await registry.served()
     with pytest.raises(StoreError, match=f"Couldn't mark whether the workspace w .*{database}"):
         await registry.set_served("w", True)
+    with pytest.raises(StoreError, match=f"Couldn't mark the workspace w managed in {database}"):
+        await registry.set_managed("w")
     with pytest.raises(StoreError, match=f"Couldn't look up the workspace w in {database}"):
         await registry.path("w")

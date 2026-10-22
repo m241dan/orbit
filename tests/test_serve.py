@@ -64,7 +64,8 @@ from orbit.protocol import (
     decode_event,
     encode,
 )
-from tests.store_views import workspace_id_of
+from tests.git_repo import bare_repository
+from tests.store_views import database, workspace_id_of
 from tests.tls_certs import DAY, Ca, ServerFiles, make_ca, make_client, make_server, other_key
 
 runner = CliRunner()
@@ -624,6 +625,47 @@ def test_adding_a_missing_workspace_exits_naming_it(tmp_path: Path) -> None:
     result = runner.invoke(app, ["serve", *QUIET, "--add", str(tmp_path / "missing")])
     assert result.exit_code == 2
     assert f"Workspace {tmp_path / 'missing'} doesn't exist." in result.stderr
+
+
+def test_adding_a_url_clones_it_into_the_state_directory_and_serves_it_managed(
+    state: Path, config_dir: Path, tmp_path: Path
+) -> None:
+    url = bare_repository(tmp_path).as_uri()
+    clone = state / "workspaces" / "proj"
+    frontend = Frontend(state, config_dir)
+    output = served(frontend, "--port", "0", added=(url,))
+
+    [catalog] = [e for e in frontend.events if isinstance(e, Catalog)]
+    assert [w.path for w in catalog.workspaces] == [str(clone)]
+    assert (clone / "a.txt").read_text() == "one\n"
+    assert output.splitlines()[:2] == [f"Cloning {url}…", f"Cloned {url} into {clone}."]
+    with database(state) as connection:
+        rows = connection.execute("SELECT path, served, managed FROM workspaces").fetchall()
+    assert rows == [(str(clone), 1, 1)]
+
+
+def test_adding_a_url_clones_it_into_the_clone_directory_the_config_file_sets(
+    state: Path, config_dir: Path, tmp_path: Path
+) -> None:
+    config_dir.mkdir()
+    (config_dir / "config.toml").write_text('[server]\nclone_dir = "clones"\n')
+    url = bare_repository(tmp_path).as_uri()
+    frontend = Frontend(state, config_dir)
+    served(frontend, "--port", "0", added=(url,))
+
+    [catalog] = [e for e in frontend.events if isinstance(e, Catalog)]
+    assert [w.path for w in catalog.workspaces] == [str(config_dir / "clones" / "proj")]
+
+
+def test_adding_a_url_that_cant_be_cloned_exits_with_gits_message(
+    state: Path, tmp_path: Path
+) -> None:
+    url = (tmp_path / "nothing.git").as_uri()
+    result = runner.invoke(app, ["serve", *QUIET, "--add", url, "--port", "0"])
+    assert result.exit_code == 2
+    assert result.stderr.startswith(f"Couldn't clone {url}: ")
+    assert "does not appear to be a git repository" in result.stderr
+    assert list((state / "workspaces").iterdir()) == []
 
 
 def _changes(websocket: ClientConnection, command_id: str, command: Command) -> list[Event]:

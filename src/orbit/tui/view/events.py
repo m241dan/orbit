@@ -39,15 +39,21 @@ from orbit.protocol import (
     VerificationSkipped,
     VerificationStarted,
     Welcome,
+    WorkspaceCloning,
 )
 from orbit.tui.view.progress import TaskProgress
 from orbit.tui.view.transcript import AgentNote
 
 ProgressEvent = (
-    VerificationChanged | ReviewStatus | ChecksProposed | UsageChanged | SessionStateChanged
+    VerificationChanged
+    | ReviewStatus
+    | ChecksProposed
+    | UsageChanged
+    | SessionStateChanged
+    | WorkspaceCloning
 )
 """Snapshots of progress: the verification steps', whether review is paused, proposed steps,
-usage limits and a session's state."""
+usage limits, a session's state and a clone's progress."""
 
 StateEvent = SettingsChanged | BusyChanged | TasksChanged | ProgressEvent
 """Snapshots of backend state, or a decision it waits for."""

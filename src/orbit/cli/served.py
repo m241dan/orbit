@@ -1,5 +1,6 @@
-"""The workspaces ``orbit serve`` serves: those added with ``--add`` and those flagged served
-by an earlier run, each opened with its lock held while it's served."""
+"""The workspaces ``orbit serve`` serves: those added with ``--add``, by their paths or cloned
+from their URLs, and those flagged served by an earlier run, each opened with its lock held
+while it's served."""
 
 import asyncio
 from collections.abc import Callable, Iterator, Sequence
@@ -10,6 +11,8 @@ from pathlib import Path
 import typer
 
 from orbit.agent import (
+    CloneFailed,
+    Cloner,
     ControlPlane,
     ServedWorkspace,
     ServedWorkspaces,
@@ -25,13 +28,23 @@ from orbit.cli.errors import _exit_on
 
 
 def _workspaces(
-    stack: ExitStack, flags: _Backend, store: SqliteStore, storage: StorageSettings
+    stack: ExitStack,
+    flags: _Backend,
+    store: SqliteStore,
+    storage: StorageSettings,
+    clone_dir: Path,
 ) -> ServedWorkspaces:
     """The workspaces ``orbit serve`` serves from the ``store``, each with its host made as
     ``flags`` ask, keeping its sessions as ``storage`` says, and its lock held until it's
-    removed or ``stack`` closes."""
+    removed or ``stack`` closes, those added by URL cloned into ``clone_dir``."""
     make = _maker(flags, storage, pick_session=False)
-    return ServedWorkspaces(stack, store, make, worktree=flags.worktree)
+    source = ServedWorkspaces(store, make, Cloner(clone_dir), worktree=flags.worktree)
+    stack.callback(source.let_go)
+    return source
+
+
+type Added = Path | str
+"""A workspace added with ``--add``: the directory it's at, or the URL it's cloned from."""
 
 
 @dataclass(frozen=True)
@@ -46,25 +59,26 @@ class _Serving:
 
 @contextmanager
 def _serving(
-    flags: _Backend, added: Sequence[Path], state: Path, user_config: Path
+    flags: _Backend, added: Sequence[Added], state: Path, user_config: Path, clone_dir: Path
 ) -> Iterator[_Serving]:
-    """Run the block serving the ``added`` workspaces, flagged as served in the store in
-    ``state`` once every one is found to be servable, and those flagged before, with the backend
-    ``flags`` ask for and the user config in ``user_config``, holding each one's workspace lock
-    if no other orbit does; yields what's served, then lets the locks go and closes the store.
-    A workspace flagged before whose directory is gone, or that can't be served, is skipped,
-    with a warning.
+    """Run the block serving the ``added`` workspaces, those added by URL cloned first into
+    ``clone_dir`` and marked managed, flagged as served in the store in ``state`` once every one
+    is found to be servable, and those flagged before, with the backend ``flags`` ask for and
+    the user config in ``user_config``, holding each one's workspace lock if no other orbit
+    does; yields what's served, then lets the locks go and closes the store. A workspace
+    flagged before whose directory is gone, or that can't be served, is skipped, with a
+    warning.
 
-    Exits with status 2 if the store can't be opened, or an ``added`` workspace can't be
-    registered, locked, opened or flagged, git has no identity for its repository with the
-    coder committing there, or its configuration is invalid, leaving each flagged as it was.
+    Exits with status 2 if the store can't be opened, a clone fails, or an ``added`` workspace
+    can't be registered, locked, opened or flagged, git has no identity for its repository with
+    the coder committing there, or its configuration is invalid, leaving each flagged as it was.
     """
     storage = _storage(user_config)
     usage_source = _usage_source(flags)
     with ExitStack() as stack:
         store = _open(state)
         stack.callback(lambda: asyncio.run(store.close()))
-        source = _workspaces(stack, flags, store, storage)
+        source = _workspaces(stack, flags, store, storage, clone_dir)
         served = [_added(source, root) for root in dict.fromkeys(added)]
         with _exit_on(WorkspaceUnavailable):
             source.flag_served()
@@ -79,15 +93,31 @@ def _serving(
 
 
 def _added(
-    source: ServedWorkspaces, root: Path
+    source: ServedWorkspaces, added: Added
 ) -> tuple[ServedWorkspace, Callable[[], WorkspaceHost]]:
-    """The workspace at ``root``, added with ``--add``, served by ``source``, not yet flagged
-    served.
+    """The workspace ``added`` with ``--add``, at its directory or cloned from its URL by
+    ``source`` and marked managed, served by ``source``, not yet flagged served.
 
-    Exits with status 2 if it can't be served.
+    Exits with status 2 if the clone fails or it can't be served.
     """
+    if isinstance(added, Path):
+        root, managed = added, False
+    else:
+        root, managed = _cloned(source, added), True
     with _exit_on(WorkspaceUnavailable):
-        return source.served(root)
+        return source.served(root, managed=managed)
+
+
+def _cloned(source: ServedWorkspaces, url: str) -> Path:
+    """The directory ``source`` cloned the repository at ``url`` into, saying so.
+
+    Exits with status 2, with git's message, if the clone fails.
+    """
+    typer.echo(f"Cloning {url}…")
+    with _exit_on(CloneFailed):
+        root = Path(source.cloned(url))
+    typer.echo(f"Cloned {url} into {root}.")
+    return root
 
 
 def _earlier(

@@ -1,5 +1,6 @@
 """Real throwaway git repositories for the tests that run git itself."""
 
+import asyncio
 import subprocess
 from pathlib import Path
 
@@ -34,3 +35,19 @@ def repo(tmp_path: Path) -> Path:
     root = init_repo(tmp_path / "repo")
     commit_file(root, "a.txt", "one\n", "start")
     return root
+
+
+def bare_repository(tmp_path: Path, name: str = "proj.git") -> Path:
+    """A bare repository ``name`` in ``tmp_path`` with one commit, of ``a.txt``."""
+    source = init_repo(tmp_path / "source")
+    commit_file(source, "a.txt", "one\n", "start")
+    bare = tmp_path / name
+    git(tmp_path, "clone", "-q", "--bare", str(source), str(bare))
+    return bare
+
+
+async def started(pidfile: Path) -> int:
+    """The pid the slow SSH noted, once it has."""
+    while not pidfile.exists() or not pidfile.read_text().strip():
+        await asyncio.sleep(0.01)
+    return int(pidfile.read_text())

@@ -19,11 +19,12 @@ WorkspaceOption = Annotated[
     ),
 ]
 AddOption = Annotated[
-    list[Path] | None,
+    list[str] | None,
     typer.Option(
         "--add",
         help="Serve the project at this path from now on, here and in every later orbit serve"
-        " (repeatable). Inside a git repository, its top level.",
+        " (repeatable). Inside a git repository, its top level. An https://, ssh:// or file://"
+        " URL, or user@host:path, is cloned into clone_dir first.",
     ),
 ]
 NewOption = Annotated[
