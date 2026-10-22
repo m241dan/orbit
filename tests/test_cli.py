@@ -8,7 +8,7 @@ import sys
 import threading
 from collections.abc import Callable, Iterator
 from contextlib import closing, contextmanager
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -28,13 +28,13 @@ from orbit.agent import (
     McpHost,
     Role,
     Setup,
-    SqliteStore,
     UsageApi,
     Verification,
     VerificationStep,
     WorkspaceHost,
     WorkspaceLock,
     WorkspaceOwner,
+    WorkspaceRegistry,
     WorkspaceStore,
     run_step,
     workspace_state,
@@ -45,7 +45,7 @@ from orbit.agent.domain.reviews import ReviewLimits
 from orbit.agent.domain.sessions import SessionRecord, Unreadable, default_name, record_json
 from orbit.agent.domain.usage import UsageUnavailable
 from orbit.cli import app
-from orbit.cli.backend import _Backend, _Directories, _in_process, _Made
+from orbit.cli.backend import _Backend, _backend, _Directories, _in_process
 from orbit.cli.errors import _configured, _exit_on
 from orbit.protocol import (
     AddTask,
@@ -1299,32 +1299,6 @@ def test_a_repository_that_cant_be_locked_stops_chat(
     assert launched == []
 
 
-@dataclass
-class Made:
-    """What a stand-in for the backend's wiring made: the backends asked for, whether each was
-    to pick a session, and the store it opened for each."""
-
-    backends: list[tuple[_Backend, bool]]
-    stores: list[SqliteStore]
-
-    def __call__(
-        self, backend: _Backend, directories: _Directories, *, pick_session: bool
-    ) -> _Made:
-        self.backends.append((backend, pick_session))
-        store = asyncio.run(SqliteStore.open(directories.state))
-        self.stores.append(store)
-
-        def build() -> ControlPlane:
-            raise AssertionError("Nothing builds the session here.")
-
-        return _Made(build, store, "the-workspace")
-
-
-@pytest.fixture
-def made() -> Made:
-    return Made([], [])
-
-
 @pytest.fixture
 def directories(tmp_path: Path) -> _Directories:
     return _Directories(tmp_path, tmp_path / "state", tmp_path / "config")
@@ -1334,41 +1308,32 @@ FLAGS = _Backend("opus", None, True, True, True, True, False, None)
 
 
 def test_the_in_process_setup_holds_the_workspace_lock_while_its_block_runs(
-    made: Made, directories: _Directories
+    directories: _Directories,
 ) -> None:
-    with _in_process(FLAGS, directories, pick_session=True, make=made) as in_process:
+    with _in_process(FLAGS, directories, pick_session=True, make=_backend) as in_process:
         assert WorkspaceLock(directories.root / ".orbit").take() == WorkspaceOwner(pid=os.getpid())
-        assert in_process.store is made.stores[0] and in_process.owner is None
-        assert in_process.workspace_id == "the-workspace"
+        assert in_process.owner is None
+        registry = WorkspaceRegistry(in_process.store)
+        found = asyncio.run(registry.find_or_register(str(directories.root)))
+        served = asyncio.run(registry.served())
     after = WorkspaceLock(directories.root / ".orbit")
     assert after.take() is None
     after.close()
-    assert made.backends == [(replace(FLAGS, lock=in_process.lock), True)]
+    assert in_process.workspace_id == found and served == []
 
 
-def test_the_in_process_setup_lets_the_lock_go_when_its_block_raises(
-    made: Made, directories: _Directories
+def test_the_in_process_setup_lets_the_lock_go_and_closes_the_store_when_its_block_raises(
+    directories: _Directories,
 ) -> None:
     with (
         pytest.raises(RuntimeError, match="broken"),
-        _in_process(FLAGS, directories, pick_session=True, make=made),
+        _in_process(FLAGS, directories, pick_session=True, make=_backend) as in_process,
     ):
         raise RuntimeError("broken")
     after = WorkspaceLock(directories.root / ".orbit")
     assert after.take() is None
     after.close()
-
-
-def test_the_in_process_setup_closes_the_store_after_its_block(
-    made: Made, directories: _Directories
-) -> None:
-    with (
-        pytest.raises(RuntimeError),
-        _in_process(FLAGS, directories, pick_session=True, make=made),
-    ):
-        raise RuntimeError("broken")
-    [store] = made.stores
-    assert store._closed
+    assert in_process.store._closed
 
 
 def test_chat_closes_the_store_when_the_app_fails(

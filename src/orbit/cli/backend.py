@@ -18,11 +18,12 @@ from orbit.agent import (
     ConfigError,
     ControlPlane,
     GitCoderTree,
-    ImportBlocked,
+    HostMaker,
     McpHost,
     OpenedStore,
+    OpenedWorkspace,
+    Opening,
     OrbitConfig,
-    RecoveryFailed,
     Role,
     ServedWorkspace,
     ServedWorkspaces,
@@ -37,8 +38,7 @@ from orbit.agent import (
     WorkspaceRegistry,
     WorkspaceUnavailable,
     in_git_work_tree,
-    locked,
-    open_workspace_store,
+    open_workspace,
     read_config,
     read_storage,
     run_step,
@@ -101,24 +101,6 @@ class _Directories:
 
 
 @dataclass(frozen=True)
-class _Made:
-    """What a backend's wiring made: what ``build``s its control plane, the ``store`` it opened,
-    and the id of the workspace it serves."""
-
-    build: Callable[[], ControlPlane]
-    store: SqliteStore
-    workspace_id: str
-
-
-class _MakeBackend(Protocol):
-    """What builds the control plane a backend asks for, as :func:`_backend` does."""
-
-    def __call__(
-        self, backend: _Backend, directories: _Directories, *, pick_session: bool
-    ) -> _Made: ...
-
-
-@dataclass(frozen=True)
 class _InProcess:
     """A backend set up in this process: what ``build``s its control plane, its ``store``, the
     id of the workspace it serves, and the workspace ``lock``, with the repository's ``owner``
@@ -131,60 +113,86 @@ class _InProcess:
     owner: WorkspaceOwner | None
 
 
+class _MakeBackend(Protocol):
+    """What sets up the backend a chat asks for, as :func:`_backend` does."""
+
+    def __call__(
+        self, flags: _Backend, directories: _Directories, *, pick_session: bool
+    ) -> _InProcess: ...
+
+
 @contextmanager
 def _in_process(
     flags: _Backend, directories: _Directories, *, pick_session: bool, make: _MakeBackend
 ) -> Iterator[_InProcess]:
-    """Run the block in the workspace, with the backend ``flags`` ask for, made by ``make`` in
-    ``directories``, holding the workspace lock if no other orbit does, and listing the saved
-    sessions to pick from if ``pick_session``; yields the backend set up, then closes its store
-    and lets the lock go.
+    """Run the block in the workspace, with the backend ``flags`` ask for, set up by ``make``
+    in ``directories``, holding the workspace lock if no other orbit does, and listing the
+    saved sessions to pick from if ``pick_session``; yields the backend set up, then closes its
+    store and lets the lock go.
 
-    Exits with status 2 if the lock can't be made, a configuration is invalid or the store
-    can't be opened.
+    Exits with status 2 if the workspace can't be opened.
     """
     # Every adapter works relative to the current directory, so move into the workspace
     # before anything reads the filesystem.
     os.chdir(directories.root)
-    with _repository_lock(directories.root) as (lock, owner):
-        backend = replace(flags, owner=owner, lock=lock)
-        made = make(backend, directories, pick_session=pick_session)
-        try:
-            yield _InProcess(made.build, made.store, made.workspace_id, lock, owner)
-        finally:  # Whatever ran the session has closed it, so nothing uses the store any more.
-            asyncio.run(made.store.close())
-
-
-@contextmanager
-def _repository_lock(root: Path) -> Iterator[tuple[WorkspaceLock, WorkspaceOwner | None]]:
-    """Hold the workspace lock on the repository at ``root`` while the block runs, if no other
-    orbit holds it; yields the lock and the owner, if another orbit is.
-
-    Exits with status 2 if the lock can't be made.
-    """
-    with _exit_on(WorkspaceUnavailable):
-        lock, owner = locked(root)
+    backend = make(flags, directories, pick_session=pick_session)
     try:
-        yield lock, owner
-    finally:
-        lock.close()
+        yield backend
+    finally:  # Whatever ran the session has closed it, so nothing uses the store any more.
+        try:
+            asyncio.run(backend.store.close())
+        finally:
+            backend.lock.close()
 
 
-def _backend(backend: _Backend, directories: _Directories, *, pick_session: bool) -> _Made:
-    """What builds the control plane over the workspace host ``backend`` asks for in
-    ``directories``, listing the saved sessions to pick from if ``pick_session``, with the store
-    it opened once and the workspace's view of it.
+def _backend(flags: _Backend, directories: _Directories, *, pick_session: bool) -> _InProcess:
+    """The backend ``flags`` ask for over the workspace in ``directories``, opened as
+    :func:`open_workspace` opens it, without checking git's identity, as only ``orbit serve``
+    does, nor flagging it served, listing the saved sessions to pick from if ``pick_session``.
 
-    Exits with status 2 if a configuration is invalid or the store can't be opened.
+    Exits with status 2 if a configuration is invalid or the workspace can't be opened.
     """
     storage = _storage(directories.user_config)
-    root = directories.root
-    make = _host_maker(backend, root, _config(root), storage, pick_session=pick_session)
-    usage_source = UsageApi() if backend.usage else None
-    store, opened = _open_store(directories.state, root, owned=backend.owner is None)
-    return _Made(
-        lambda: ControlPlane([make(opened)], usage_source), store, opened.store.workspace_id
+    usage_source = UsageApi() if flags.usage else None
+    make = _maker(flags, storage, pick_session=pick_session)
+    store = _open(directories.state)
+    try:
+        opened = _opened(store, directories.root, make)
+    except BaseException:
+        asyncio.run(store.close())
+        raise
+    served = opened.served
+    return _InProcess(
+        lambda: ControlPlane([opened.make()], usage_source),
+        store,
+        opened.workspace_id,
+        served.lock,
+        served.owner,
     )
+
+
+def _opened(store: SqliteStore, root: Path, make: HostMaker) -> OpenedWorkspace:
+    """The workspace at ``root`` opened over ``store`` for a chat, its host made by ``make``.
+
+    Exits with status 2 if it can't be opened.
+    """
+    with _exit_on(WorkspaceUnavailable):
+        opening = Opening(identity=False, flag=False)
+        return asyncio.run(open_workspace(store, root, make, opening))
+
+
+def _maker(flags: _Backend, storage: StorageSettings, *, pick_session: bool) -> HostMaker:
+    """What gives, for a served workspace and its configuration, what builds its host as
+    ``flags`` ask, keeping its sessions as ``storage`` says, listing the saved sessions to pick
+    from if ``pick_session``."""
+
+    def make(
+        workspace: ServedWorkspace, config: OrbitConfig
+    ) -> Callable[[OpenedStore], WorkspaceHost]:
+        backend = replace(flags, owner=workspace.owner, lock=workspace.lock)
+        return _host_maker(backend, workspace.root, config, storage, pick_session=pick_session)
+
+    return make
 
 
 def _host_maker(
@@ -232,13 +240,7 @@ def _workspaces(
     """The workspaces ``orbit serve`` serves from the ``store``, each with its host made as
     ``flags`` ask, keeping its sessions as ``storage`` says, and its lock held until it's
     removed or ``stack`` closes."""
-
-    def make(
-        workspace: ServedWorkspace, config: OrbitConfig
-    ) -> Callable[[OpenedStore], WorkspaceHost]:
-        backend = replace(flags, owner=workspace.owner, lock=workspace.lock)
-        return _host_maker(backend, workspace.root, config, storage, pick_session=False)
-
+    make = _maker(flags, storage, pick_session=False)
     return ServedWorkspaces(stack, store, make, worktree=flags.worktree)
 
 
@@ -333,37 +335,12 @@ def _present(root: Path) -> bool:
     return False
 
 
-def _config(root: Path) -> OrbitConfig:
-    """The configuration in the project file of the workspace at ``root``.
-
-    Exits with status 2 if the file is invalid.
-    """
-    return _configured(lambda: read_config(str(root)))
-
-
 def _storage(config_dir: Path) -> StorageSettings:
     """The storage settings in the user config in ``config_dir``.
 
     Exits with status 2 if the file is invalid.
     """
     return _configured(lambda: read_storage(config_dir))
-
-
-def _open_store(state: Path, root: Path, *, owned: bool) -> tuple[SqliteStore, OpenedStore]:
-    """The store in the ``state`` directory and the workspace at ``root``'s view of it, with the
-    sessions an older orbit saved as files imported and, if this orbit ``owned`` the workspace,
-    the events an earlier run parked in fallback files too, the notes on what was imported, and
-    the fallback files.
-
-    Exits with status 2 if the store can't be opened, the old sessions can't be imported or a
-    fallback file can't be recovered.
-    """
-    store = _open(state)
-    try:
-        return store, _open_view(store, root, owned=owned)
-    except BaseException:
-        asyncio.run(store.close())
-        raise
 
 
 def _open(state: Path) -> SqliteStore:
@@ -373,17 +350,6 @@ def _open(state: Path) -> SqliteStore:
     """
     with _exit_on(StoreError):
         return asyncio.run(SqliteStore.open(state))
-
-
-def _open_view(store: SqliteStore, root: Path, *, owned: bool) -> OpenedStore:
-    """The workspace at ``root``'s view of ``store``, as :func:`open_workspace_store` opens it,
-    recovering its fallback files if this orbit ``owned`` it.
-
-    Exits with status 2 if it can't be registered, its old sessions can't be imported or a
-    fallback file can't be recovered.
-    """
-    with _exit_on(StoreError, ImportBlocked, RecoveryFailed):
-        return asyncio.run(open_workspace_store(store, root, owned=owned))
 
 
 def _verification(config: OrbitConfig) -> Verification:

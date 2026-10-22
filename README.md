@@ -47,7 +47,7 @@ uv run orbit serve --add . --add ~/code/other  # run the control plane on its ow
 uv run orbit serve                             # serve the projects added before again
 uv run orbit serve --port 0                    # on a port the system chooses
 uv run orbit serve --tls tls --cert server.pem --key server-key.pem --host 0.0.0.0  # over TLS
-uv run orbit chat --connect ws://127.0.0.1:7433/  # show the session orbit serve runs
+uv run orbit chat --connect ws://127.0.0.1:7433/  # join the orbit serve running there
 uv run orbit chat --connect wss://orbit.example.lan:7433/ --ca ca.pem  # over TLS
 uv run orbit chat --remote work                # connect to the control plane [remotes.work] names
 uv run orbit chat --local                      # run in-process even with orbit serve running
@@ -884,8 +884,9 @@ tool_access = "full"
 verify = false
 ```
 
-`orbit chat` reads it at startup and refuses to start if it's invalid, naming each problem (for
-example `roles.coder.tool_access: Input should be 'off', 'restricted' or 'full'`).
+`orbit chat` reads it at startup, and `orbit serve` at startup and as a frontend adds a workspace;
+each refuses an invalid one, naming each problem (for example
+`roles.coder.tool_access: Input should be 'off', 'restricted' or 'full'`).
 
 ### How agents reach orbit
 

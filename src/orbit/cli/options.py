@@ -164,7 +164,7 @@ LocalOption = Annotated[
     bool,
     typer.Option(
         "--local",
-        help="Run the control plane here, even when an orbit serve is running for the workspace.",
+        help="Run the control plane here, even when an orbit serve is running.",
     ),
 ]
 

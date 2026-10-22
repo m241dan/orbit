@@ -22,12 +22,13 @@ from orbit.agent import (
     WorkspaceLock,
     WorkspaceRegistry,
     WorkspaceUnavailable,
+    orbit_dir,
     read_config,
 )
 from orbit.agent.application.recovery import RecoveryFailed
 from orbit.agent.external import served_workspaces
 from orbit.cli import backend
-from orbit.cli.backend import _added, _Backend, _workspaces
+from orbit.cli.backend import _added, _Backend, _backend, _Directories, _workspaces
 from orbit.protocol import INTERNAL, INVALID
 
 FLAGS = _Backend(None, None, False, False, False, False, new=False, name=None)
@@ -57,7 +58,7 @@ def directory(tmp_path: Path, name: str = "repo") -> Path:
 
 def free(root: Path) -> bool:
     """Whether no orbit holds the workspace lock on the repository at ``root``."""
-    lock = WorkspaceLock(root / ".orbit")
+    lock = WorkspaceLock(orbit_dir(str(root)))
     owner = lock.take()
     lock.close()
     return owner is None
@@ -186,7 +187,7 @@ async def test_a_repository_git_has_no_identity_for_is_unavailable_with_a_worktr
         WorkspaceUnavailable, match=f"^{re.escape(f'Git has no identity for commits in {root}')}"
     ) as refused:
         await workspaces(stack, store, flags).open(str(root))
-    assert refused.value.code == INVALID
+    assert refused.value.code == INVALID and free(root)
 
 
 async def test_a_slow_identity_check_leaves_the_event_loop_running(
@@ -430,3 +431,53 @@ async def test_an_add_cancelled_while_preparing_that_then_fails_takes_no_lock(
     await cancelled_while_preparing(source, root, gate)
 
     assert free(root) and source.locks == ()
+
+
+def failing_store(root: Path, monkeypatch: pytest.MonkeyPatch) -> _Backend:
+    async def fails(store: SqliteStore, root: Path, *, owned: bool) -> None:
+        raise StoreError("The store failed.")
+
+    monkeypatch.setattr(served_workspaces, "open_workspace_store", fails)
+    return FLAGS
+
+
+def chat_directories(tmp_path: Path, root: Path) -> _Directories:
+    return _Directories(root, tmp_path / "state", tmp_path / "config")
+
+
+@pytest.mark.parametrize("refusal", [invalid_config, unmakeable_lock, failing_store])
+def test_chat_and_a_frontend_add_refuse_a_workspace_saying_the_same_and_let_the_lock_go(
+    refusal: Refusal,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    root = directory(tmp_path)
+    flags = refusal(root, monkeypatch)
+    with pytest.raises(typer.Exit) as exited:
+        _backend(flags, chat_directories(tmp_path, root), pick_session=False)
+    chat_free = refusal is unmakeable_lock or free(root)
+    store = asyncio.run(SqliteStore.open(tmp_path / "state"))
+    with ExitStack() as stack, pytest.raises(WorkspaceUnavailable) as refused:
+        asyncio.run(workspaces(stack, store, flags).open(str(root)))
+    asyncio.run(store.close())
+
+    assert exited.value.exit_code == 2 and chat_free
+    assert capsys.readouterr().err == f"{refused.value}\n"
+
+
+def test_chat_opens_a_repository_git_has_no_identity_for_unflagged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = directory(tmp_path)
+    flags = missing_identity(root, monkeypatch)
+
+    chat = _backend(flags, chat_directories(tmp_path, root), pick_session=False)
+    try:
+        held = not free(root)
+        served = asyncio.run(WorkspaceRegistry(chat.store).served())
+    finally:
+        asyncio.run(chat.store.close())
+        chat.lock.close()
+
+    assert held and served == [] and chat.owner is None

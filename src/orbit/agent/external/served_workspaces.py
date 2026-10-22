@@ -1,5 +1,6 @@
-"""The workspaces a server serves as frontends add and remove them: each checked, configured
-and locked off the event loop, then found or registered in the store and flagged served."""
+"""Opening a workspace, locked, checked and configured off the event loop, then found or
+registered in the store; and the workspaces a server serves as frontends add and remove them,
+each opened so and flagged served."""
 
 import asyncio
 from collections.abc import Callable
@@ -45,6 +46,62 @@ type HostMaker = Callable[[ServedWorkspace, OrbitConfig], Callable[[OpenedStore]
 view of the store."""
 
 type _Prepared = tuple[ServedWorkspace, Callable[[OpenedStore], WorkspaceHost]]
+
+
+@dataclass(frozen=True)
+class OpenedWorkspace:
+    """A workspace opened over the store: the ``served`` workspace, with its lock held, the id
+    it's registered with, and what ``make``s its host over its view of the store."""
+
+    served: ServedWorkspace
+    workspace_id: str
+    make: Callable[[], WorkspaceHost]
+
+
+@dataclass(frozen=True)
+class Opening:
+    """How a workspace is opened: checked for a git identity if ``identity``, flagged served if
+    ``flag``, and its lock naming the server's ``url`` if it's known."""
+
+    identity: bool
+    flag: bool
+    url: str | None = None
+
+
+async def open_workspace(
+    store: SqliteStore, root: Path, make_host: HostMaker, opening: Opening
+) -> OpenedWorkspace:
+    """The workspace at ``root`` opened over ``store`` as ``opening`` says, its lock taken if
+    it's free, configured, with its host made by ``make_host``. Raises
+    :class:`WorkspaceUnavailable` if the lock can't be made, git has no identity for commits
+    there, its configuration is invalid or the store fails, having let the lock go."""
+    # Git, the configuration file and the lock would stall the event loop.
+    preparing = asyncio.ensure_future(asyncio.to_thread(_prepared, root, make_host, opening))
+    try:
+        served, make = await asyncio.shield(preparing)
+    except asyncio.CancelledError:
+        preparing.add_done_callback(_let_go_prepared)
+        raise
+    try:
+        opened = await _view(store, root, owned=served.owner is None, flag=opening.flag)
+    except BaseException:
+        served.lock.close()
+        raise
+    return OpenedWorkspace(served, opened.store.workspace_id, lambda: make(opened))
+
+
+def _prepared(root: Path, make_host: HostMaker, opening: Opening) -> _Prepared:
+    """The workspace at ``root``, its lock taken if it's free, checked and configured as
+    ``opening`` says, with what ``make_host`` gives to build its host over its view of the
+    store. Raises :class:`WorkspaceUnavailable` as :func:`open_workspace`
+    says, and lets the lock go if anything after taking it fails."""
+    lock, owner = locked(root, opening.url)
+    served = ServedWorkspace(root, owner, lock)
+    try:
+        return served, make_host(served, workspace_config(root, worktree=opening.identity))
+    except BaseException:
+        lock.close()
+        raise
 
 
 class ServedWorkspaces:
@@ -105,33 +162,10 @@ class ServedWorkspaces:
         """The workspace at ``root``, registered or found and flagged served, with what builds
         its host, its lock taken if it's free and held until it's removed or the stack closes.
         Raises :class:`WorkspaceUnavailable` as :meth:`open` says."""
-        # Git, the configuration file and the lock would stall every served workspace.
-        preparing = asyncio.ensure_future(asyncio.to_thread(self._prepared, root))
-        try:
-            served, make = await asyncio.shield(preparing)
-        except asyncio.CancelledError:
-            preparing.add_done_callback(_let_go_prepared)
-            raise
-        try:
-            opened = await _flagged_view(self._store, root, owned=served.owner is None)
-        except BaseException:
-            served.lock.close()
-            raise
-        self._locks[opened.store.workspace_id] = served.lock
-        return served, lambda: make(opened)
-
-    def _prepared(self, root: Path) -> _Prepared:
-        """The workspace at ``root``, its lock taken if it's free, with what builds its host
-        over its view of the store. Raises :class:`WorkspaceUnavailable` as :meth:`open` says,
-        and lets the lock go if building fails."""
-        config = workspace_config(root, worktree=self._worktree)
-        lock, owner = locked(root, self.url)
-        served = ServedWorkspace(root, owner, lock)
-        try:
-            return served, self._make_host(served, config)
-        except BaseException:
-            lock.close()
-            raise
+        opening = Opening(identity=self._worktree, flag=True, url=self.url)
+        opened = await open_workspace(self._store, root, self._make_host, opening)
+        self._locks[opened.workspace_id] = opened.served.lock
+        return opened.served, opened.make
 
     async def close(self, workspace_id: str) -> None:
         """Stop serving the workspace ``workspace_id`` and let go of its lock. If the store
@@ -207,14 +241,15 @@ def locked(root: Path, url: str | None = None) -> tuple[WorkspaceLock, Workspace
         ) from None
 
 
-async def _flagged_view(store: SqliteStore, root: Path, *, owned: bool) -> OpenedStore:
+async def _view(store: SqliteStore, root: Path, *, owned: bool, flag: bool) -> OpenedStore:
     """The workspace at ``root``'s view of ``store``, as :func:`open_workspace_store` opens it,
-    recovering its fallback files if this orbit ``owned`` it, flagged as served. Raises
+    recovering its fallback files if this orbit ``owned`` it, flagged as served if ``flag``. Raises
     :class:`WorkspaceUnavailable` as ``INTERNAL`` if that fails, as it may have changed the
     store or the workspace's files by then."""
     try:
         opened = await open_workspace_store(store, root, owned=owned)
-        await WorkspaceRegistry(store).set_served(opened.store.workspace_id, True)
+        if flag:
+            await WorkspaceRegistry(store).set_served(opened.store.workspace_id, True)
     except (StoreError, ImportBlocked, RecoveryFailed) as exc:
         raise WorkspaceUnavailable(str(exc), INTERNAL) from None
     return opened

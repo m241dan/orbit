@@ -56,9 +56,11 @@ from orbit.agent.external.repository import (
 from orbit.agent.external.run_file import RunFile, ServeLock, running_server
 from orbit.agent.external.served_workspaces import (
     HostMaker,
+    OpenedWorkspace,
+    Opening,
     ServedWorkspace,
     ServedWorkspaces,
-    locked,
+    open_workspace,
     top_level,
 )
 from orbit.agent.external.session_import import ImportBlocked
@@ -100,6 +102,8 @@ __all__ = [
     "LocalTls",
     "McpHost",
     "OpenedStore",
+    "OpenedWorkspace",
+    "Opening",
     "OrbitConfig",
     "PathKind",
     "ProposalDecision",
@@ -140,7 +144,7 @@ __all__ = [
     "has_git_identity",
     "in_git_work_tree",
     "local_tls",
-    "locked",
+    "open_workspace",
     "open_workspace_store",
     "orbit_dir",
     "read_config",
