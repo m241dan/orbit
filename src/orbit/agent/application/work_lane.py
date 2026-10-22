@@ -95,10 +95,12 @@ class WorkLane:
         self._resume: str | None = None
 
     def reset(self) -> None:
-        """Forget the fix counts and the task a run stopped at of the session left, whose task
-        ids the next one reuses."""
+        """Forget the fix counts, the task a run stopped at and what its tasks landed and
+        started from, of the session left, whose task ids the next one reuses."""
         self._fallbacks = FallbackFixes()
         self._resume = None
+        self._landed.clear()
+        self._starts.clear()
 
     def stopped_by_user(self) -> bool:
         """Stop the run going now, as the user asked: cancel the agent's run of its task, which
@@ -179,11 +181,16 @@ class WorkLane:
 
     async def _run_current(self, task_id: str) -> Outcome:
         """Run task ``task_id`` through a new agent, then tell the review lane how it ended;
-        returns how it did. The lane stopping leaves the review lane as it is."""
+        returns how it did. The lane stopping tells the review lane only of work that landed,
+        which must always be reviewed."""
         run = partial(self._run_alone, task_id)
         stop = UserStop(STOPPED_BY_YOU, self._cancelled)
-        outcome = await run_task_to_end(self._tasks, task_id, run, stop, self._publish)
-        await self._report_to_review(task_id)
+        finished = False
+        try:
+            outcome = await run_task_to_end(self._tasks, task_id, run, stop, self._publish)
+            finished = True
+        finally:
+            await self._report_to_review(task_id, finished)
         return outcome
 
     async def _run_alone(self, task_id: str) -> Outcome:
@@ -218,22 +225,30 @@ class WorkLane:
             await self._verifier.reset()
         await self._publish(TaskStarted(task_id=task_id))
 
-    async def _report_to_review(self, task_id: str) -> None:
-        """Tell the review lane how task ``task_id`` ended."""
+    async def _report_to_review(self, task_id: str, finished: bool) -> None:
+        """Tell the review lane the commit task ``task_id`` landed, if any, or else, if it
+        ``finished`` rather than being cut short, that it ended."""
+        commit = self._landed.pop(task_id, None)
         if self._review is None:
             return
-        commit = self._landed.pop(task_id, None)
         if commit is not None:
             await self._review.landed(task_id, commit)
-        else:
+        elif finished:
             await self._review.ended(task_id)
 
     async def _run_agent(self, task_id: str) -> Outcome:
         """Run task ``task_id`` through a new agent and land its work; a fallback queues a fix
         for a fresh one."""
         root = await self._prepare(task_id)
+        try:
+            return await self._run_prepared(task_id, root)
+        finally:
+            self._starts.pop(task_id, None)
+
+    async def _run_prepared(self, task_id: str, root: str) -> Outcome:
+        """Run task ``task_id``, its tree readied at ``root``, through a new agent and land its
+        work, as :meth:`_run_agent` does."""
         if not await self._holds_fixed_work(task_id):
-            self._starts.pop(task_id)
             return ended("gave_up", gave_up(WORK_GONE))
         task = self._board.get(task_id).task
         verifier = self._verifier
@@ -278,7 +293,7 @@ class WorkLane:
             message = commit_message(state.task, outcome.summaries, fix=state.fixes is not None)
         verifier = self._verifier if self._desk.agents.roles[state.task.role].verify else None
         lander = Lander(self._desk.agents.tree, verifier, self._publish)
-        landing = await lander.land(task_id, message, root, self._starts.pop(task_id))
+        landing = await lander.land(task_id, message, root, self._starts[task_id])
         if landing.failure is not None:
             reason, detail = failure_reason(*landing.failure, rebased=True)
             return Outcome("unverified", landing.failure, reason=reason, detail=detail)
