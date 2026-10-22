@@ -64,9 +64,11 @@ from tests.agent_fakes import (
     checked,
     claims_done,
     desk_of,
+    events_until,
     frontend,
     gated_planner,
     greet,
+    idle,
     lane_of,
     outcome_of,
     payloads,
@@ -79,6 +81,7 @@ from tests.agent_fakes import (
     startup_of,
     suggests,
     tasks_of,
+    turns_of,
 )
 from tests.store_views import fill_up, open_view
 
@@ -541,11 +544,13 @@ async def test_an_outbox_without_a_log_diverts_and_loses_nothing() -> None:
 # Resuming
 
 
-async def halted_session(store: FakeStore, fallback: FakeFallback) -> WorkspaceHost:
-    """A session over ``store`` halted by its failing appends, with three notices published
-    first."""
+async def halted_session(
+    store: FakeStore, fallback: FakeFallback, *scripts: Script
+) -> WorkspaceHost:
+    """A session over ``store`` whose agents play ``scripts``, halted by its failing appends,
+    with three notices published first."""
     store.append_failure = "disk full"
-    session, _, _ = session_for(store=store, fallback=fallback)
+    session, _, _ = session_for(*scripts, store=store, fallback=fallback)
     for n in range(3):
         await publish(session, Notice(message=f"n{n}"))
     await halt_error(session)
@@ -568,6 +573,38 @@ async def test_resuming_once_writing_works_logs_the_parked_events_and_lifts_the_
     assert [envelope.seq for envelope in store.logged] == sorted(
         {envelope.seq for envelope in store.logged}
     )
+
+
+async def resumed_session(*scripts: Script) -> WorkspaceHost:
+    """A session whose agents play ``scripts``, halted and then resumed, with a task waiting."""
+    store, fallback = FakeStore(), FakeFallback()
+    session = await halted_session(store, fallback, *scripts)
+    store.append_failure = None
+    assert (await outcome_of(session, ResumeStorage()))[-1].payload == ACCEPTED
+    await send(session, AddTask(task=TASK))
+    return session
+
+
+async def worked(session: WorkspaceHost) -> list[str]:
+    """The statuses of the session's tasks once its work lane goes idle again."""
+    await asyncio.wait_for(events_until(session, idle()), 5)
+    return [t.status for t in tasks_of(session).board.tasks]
+
+
+async def test_a_run_after_resuming_works_the_tasks() -> None:
+    session = await resumed_session(claims_done)
+
+    assert (await outcome_of(session, RunTasks()))[-1].payload == ACCEPTED
+    assert await worked(session) == ["completed"]
+    await session.close()
+
+
+async def test_a_reviews_wake_after_resuming_starts_the_queued_work() -> None:
+    session = await resumed_session(claims_done)
+    await turns_of(session).wake()
+
+    assert await worked(session) == ["completed"]
+    await session.close()
 
 
 async def test_resuming_logs_a_gap_for_events_that_reached_no_fallback() -> None:
