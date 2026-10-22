@@ -4,13 +4,9 @@ a view of it for each workspace.
 The database is ``orbit.db`` in the state directory, in WAL mode. One connection serves it, owned
 by a single thread: every database call runs there, a statement or a transaction at a time, so a
 caller that's cancelled while awaiting one never leaves the connection mid-transaction. The schema
-and opening it are :mod:`sqlite_schema`'s, and copying it to a backup :mod:`sqlite_backup`'s.
-
-Each session's log has a row in ``logs`` with the size of its events, kept as they're appended
-and trimmed, and the highest ``seq`` trimmed from it. ``high_water`` holds the highest ``seq`` ever
-appended or reserved, so that none is handed out again once its event is deleted, or when it was
-never logged, and each workspace's ``forgotten_seq`` the highest deleted with a session's log,
-which counts as another session's.
+and opening it are :mod:`sqlite_schema`'s, the events' log's statements :mod:`sqlite_log`'s, and
+copying it to a backup :mod:`sqlite_backup`'s; this module holds the sessions' and review counts'
+statements, and runs them all on the database's thread.
 
 Session locks are :class:`SessionLocks` lock files in ``locks/<workspace id>`` in the state
 directory, so that a crash leaves no stale lock behind.
@@ -30,6 +26,7 @@ from typing import Self
 from orbit.agent.application.ports import ReadFailed, StorageFailed, StoredSession
 from orbit.agent.domain.replay import LogBounds
 from orbit.agent.domain.sessions import SessionRecord, Unreadable, parse_record, record_json
+from orbit.agent.external import sqlite_log
 from orbit.agent.external.session_locks import SessionLocks, check_session_id
 from orbit.agent.external.sqlite_backup import copy_to, is_database_file
 from orbit.agent.external.sqlite_errors import error_kind
@@ -39,7 +36,7 @@ from orbit.agent.external.sqlite_schema import (
     open_existing,
     transaction,
 )
-from orbit.protocol import EventEnvelope, decode_event, encode
+from orbit.protocol import EventEnvelope
 
 DATABASE = "orbit.db"
 LOCKS = "locks"
@@ -66,33 +63,6 @@ class NewRows:
 
     rows: tuple[SessionRow, ...]
     review_count: int | None
-
-
-def _max_seq(connection: sqlite3.Connection) -> int:
-    """The highest ``seq`` ever appended to ``connection``'s log or reserved there, 0 when
-    there's none: the higher of its mark and its ``events`` table's highest."""
-    (seq,) = connection.execute(
-        """SELECT max(coalesce((SELECT max(seq) FROM high_water), 0),
-            coalesce((SELECT max(seq) FROM events), 0))"""
-    ).fetchone()
-    return int(seq)
-
-
-type EventRow = tuple[str, str, int, str, str, int]
-
-
-def _event_row(workspace_id: str, session_id: str, envelope: EventEnvelope) -> EventRow:
-    """``envelope``'s row in the ``events`` table, as an event of the session ``session_id`` in
-    the workspace ``workspace_id``: its JSON as sent, and that JSON's size in bytes."""
-    text = encode(envelope)
-    return (workspace_id, session_id, envelope.seq, envelope.payload.type, text, len(text.encode()))
-
-
-def _decoded(texts: Sequence[str]) -> list[EventEnvelope]:
-    """The events whose JSON ``texts`` holds, latest first, decoded oldest first, but for those
-    of types this orbit doesn't know."""
-    decoded = [decode_event(text) for text in reversed(texts)]
-    return [envelope for envelope in decoded if envelope is not None]
 
 
 def _remove_tree(directory: Path) -> None:
@@ -232,7 +202,9 @@ class SqliteStore:
         :class:`ReadFailed` when they can't be read."""
         check_session_id(session_id)
         message = f"Couldn't read the events of the session {session_id} from"
-        return await self._or_raise(message, self._recent, workspace, session_id, limit)
+        return await self._or_raise(
+            message, self._log(sqlite_log.recent), workspace, session_id, limit
+        )
 
     async def before(
         self, workspace: str, session_id: str, before_seq: int, limit: int
@@ -243,7 +215,9 @@ class SqliteStore:
         can't be read."""
         check_session_id(session_id)
         message = f"Couldn't read the events of the session {session_id} from"
-        return await self._or_raise(message, self._before, workspace, session_id, before_seq, limit)
+        return await self._or_raise(
+            message, self._log(sqlite_log.before), workspace, session_id, before_seq, limit
+        )
 
     async def after(
         self, workspace: str, session_id: str, after_seq: int
@@ -252,23 +226,29 @@ class SqliteStore:
         ``after_seq``, oldest first, but for those of types this orbit doesn't know; ``None``
         when they can't be read."""
         check_session_id(session_id)
-        return await self._read_or(lambda _: None, self._after, workspace, session_id, after_seq)
+        return await self._read_or(
+            lambda _: None, self._log(sqlite_log.after), workspace, session_id, after_seq
+        )
 
     async def bounds(self, workspace: str, session_id: str, since: int) -> LogBounds | None:
         """Where the log of the session ``session_id`` stands in the workspace ``workspace``'s,
         for a frontend that saw the events up to ``since``; ``None`` when that can't be read."""
         check_session_id(session_id)
-        return await self._read_or(lambda _: None, self._bounds, workspace, session_id, since)
+        return await self._read_or(
+            lambda _: None, self._log(sqlite_log.bounds), workspace, session_id, since
+        )
 
     async def trim(self, workspace: str, session_id: str, limit: int, target: int) -> None:
         check_session_id(session_id)
         message = f"Couldn't trim the events of the session {session_id} in"
-        await self._or_raise(message, self._trim, workspace, session_id, limit, target, write=True)
+        await self._or_raise(
+            message, self._log(sqlite_log.trim), workspace, session_id, limit, target, write=True
+        )
 
     async def trimmed(self, workspace: str, session_id: str) -> bool:
         check_session_id(session_id)
         message = f"Couldn't read whether the session {session_id}'s log was trimmed in"
-        return await self._or_raise(message, self._trimmed, workspace, session_id)
+        return await self._or_raise(message, self._log(sqlite_log.trimmed), workspace, session_id)
 
     async def forget(self, workspace: str, session_id: str) -> None:
         check_session_id(session_id)
@@ -386,6 +366,11 @@ class SqliteStore:
         assert self._connection is not None, "The store isn't open."
         return self._connection
 
+    def _log[*A, T](self, function: Callable[[sqlite3.Connection, *A], T]) -> Callable[[*A], T]:
+        """``function`` of :mod:`sqlite_log`, given the open connection; only on the database's
+        thread."""
+        return lambda *args: function(self._db, *args)
+
     def _locks_of(self, workspace: str) -> SessionLocks:
         """The workspace ``workspace``'s session locks, made if they aren't yet: closed, taking
         none, once the store is."""
@@ -402,7 +387,7 @@ class SqliteStore:
 
     def _connect(self) -> None:
         self._connection = open_database(self._database)
-        self._max_seq = _max_seq(self._connection)
+        self._max_seq = sqlite_log.max_seq(self._connection)
 
     def _connect_existing(self) -> None:
         self._connection = open_existing(self._database)
@@ -482,169 +467,29 @@ class SqliteStore:
 
     def _append(self, workspace: str, session_id: str, envelopes: Sequence[EventEnvelope]) -> int:
         """Add ``envelopes`` to the session ``session_id``'s log, but for those whose ``seq`` it
-        holds already, as when parked events are imported again; returns how many it added."""
-        rows = [_event_row(workspace, session_id, envelope) for envelope in envelopes]
-        highest = max([0, *(envelope.seq for envelope in envelopes)])
-        with transaction(self._db):
-            inserted = [row for row in rows if self._insert_event(row)]
-            added = sum(row[5] for row in inserted)
-            self._db.execute(
-                """INSERT INTO logs (workspace_id, session_id, size) VALUES (?, ?, ?)
-                ON CONFLICT (workspace_id, session_id) DO UPDATE SET size = size + excluded.size""",
-                (workspace, session_id, added),
-            )
-            self._db.execute("UPDATE high_water SET seq = max(seq, ?)", (highest,))
+        holds already; returns how many it added."""
+        added, highest = sqlite_log.append(self._db, workspace, session_id, envelopes)
         self._max_seq = max(self._max_seq, highest)
-        return len(inserted)
+        return added
 
     def _reserve(self, seq: int) -> None:
         """Raise the mark to ``seq``, counted in :meth:`max_seq` from then on."""
-        self._db.execute("UPDATE high_water SET seq = max(seq, ?)", (seq,))
+        sqlite_log.reserve(self._db, seq)
         self._max_seq = max(self._max_seq, seq)
 
     def _latest_seq(self) -> int:
         """The highest ``seq`` ever logged or reserved now, counted in :meth:`max_seq` from then
         on."""
-        self._max_seq = max(self._max_seq, _max_seq(self._db))
+        self._max_seq = max(self._max_seq, sqlite_log.max_seq(self._db))
         return self._max_seq
-
-    def _insert_event(self, row: EventRow) -> bool:
-        """Add ``row`` to the ``events`` table unless its ``seq`` is there; returns whether it
-        was added."""
-        cursor = self._db.execute(
-            """INSERT INTO events (workspace_id, session_id, seq, type, json, size)
-            VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING""",
-            row,
-        )
-        return cursor.rowcount > 0
-
-    def _recent(self, workspace: str, session_id: str, limit: int) -> list[EventEnvelope]:
-        """The session ``session_id``'s last ``limit`` events, oldest first, but for those of
-        types this orbit doesn't know."""
-        rows = self._db.execute(
-            """SELECT json FROM events WHERE workspace_id = ? AND session_id = ?
-            ORDER BY seq DESC LIMIT ?""",
-            (workspace, session_id, limit),
-        )
-        return _decoded([str(text) for (text,) in rows])
-
-    def _before(
-        self, workspace: str, session_id: str, before_seq: int, limit: int
-    ) -> tuple[list[EventEnvelope], bool]:
-        """The session ``session_id``'s last ``limit`` events before ``before_seq``, oldest
-        first, but for those of types this orbit doesn't know, and whether earlier ones remain."""
-        rows = self._db.execute(
-            """SELECT json FROM events WHERE workspace_id = ? AND session_id = ? AND seq < ?
-            ORDER BY seq DESC LIMIT ?""",
-            (workspace, session_id, before_seq, limit + 1),
-        )
-        texts = [str(text) for (text,) in rows]
-        return _decoded(texts[:limit]), len(texts) > limit
-
-    def _after(self, workspace: str, session_id: str, after_seq: int) -> list[EventEnvelope]:
-        """The session ``session_id``'s events after ``after_seq``, oldest first, but for those
-        of types this orbit doesn't know."""
-        rows = self._db.execute(
-            """SELECT json FROM events WHERE workspace_id = ? AND session_id = ? AND seq > ?
-            ORDER BY seq DESC""",
-            (workspace, session_id, after_seq),
-        )
-        return _decoded([str(text) for (text,) in rows])
-
-    def _trim(self, workspace: str, session_id: str, limit: int, target: int) -> None:
-        """Delete the session ``session_id``'s oldest events, if its log is over ``limit``
-        bytes, keeping the latest that together come under ``target``, and always its newest:
-        a newest event of ``target`` bytes or more is kept alone, over ``target`` or even
-        ``limit`` until a later one is appended."""
-        key = (workspace, session_id)
-        with transaction(self._db):
-            row = self._db.execute(
-                "SELECT size FROM logs WHERE workspace_id = ? AND session_id = ?", key
-            ).fetchone()
-            if row is None or row[0] <= limit:
-                return
-            # An event goes when it and those after it come to the target or more, but the
-            # newest stays so that reopening the session shows where it was.
-            (cut,) = self._db.execute(
-                """SELECT max(seq) FROM (
-                    SELECT seq, sum(size) OVER (ORDER BY seq DESC) AS kept,
-                        row_number() OVER (ORDER BY seq DESC) AS place FROM events
-                    WHERE workspace_id = ? AND session_id = ?
-                ) WHERE kept >= ? AND place > 1""",
-                (*key, target),
-            ).fetchone()
-            self._db.execute(
-                "DELETE FROM events WHERE workspace_id = ? AND session_id = ? AND seq <= ?",
-                (*key, cut),
-            )
-            self._db.execute(
-                """UPDATE logs SET
-                    size = (SELECT coalesce(sum(size), 0) FROM events
-                        WHERE workspace_id = ?1 AND session_id = ?2),
-                    trimmed_seq = coalesce(?3, trimmed_seq)
-                WHERE workspace_id = ?1 AND session_id = ?2""",
-                (*key, cut),
-            )
-
-    def _trimmed(self, workspace: str, session_id: str) -> bool:
-        row = self._db.execute(
-            "SELECT trimmed_seq FROM logs WHERE workspace_id = ? AND session_id = ?",
-            (workspace, session_id),
-        ).fetchone()
-        return row is not None and row[0] > 0
-
-    def _bounds(self, workspace: str, session_id: str, since: int) -> LogBounds:
-        """The bounds of the session ``session_id``'s log in the workspace's, for a frontend that
-        saw the events up to ``since``."""
-        (first,) = self._db.execute(
-            "SELECT min(seq) FROM events WHERE workspace_id = ? AND session_id = ?",
-            (workspace, session_id),
-        ).fetchone()
-        # Events forgotten count as another session's: a frontend may have seen them last.
-        (others,) = self._db.execute(
-            """SELECT max(
-                coalesce((SELECT max(seq) FROM events WHERE workspace_id = ?1 AND session_id != ?2),
-                    0),
-                (SELECT forgotten_seq FROM workspaces WHERE id = ?1))""",
-            (workspace, session_id),
-        ).fetchone()
-        # The last event trimmed was the session's too.
-        (own,) = self._db.execute(
-            """SELECT max(seq) FROM (
-                SELECT seq FROM events WHERE workspace_id = ?1 AND session_id = ?2 AND seq <= ?3
-                UNION ALL SELECT trimmed_seq FROM logs
-                    WHERE workspace_id = ?1 AND session_id = ?2
-                    AND trimmed_seq > 0 AND trimmed_seq <= ?3
-            )""",
-            (workspace, session_id, since),
-        ).fetchone()
-        return LogBounds(first_seq=first, others_seq=int(others), own_seq=own)
 
     def _forget(self, workspace: str, session_id: str) -> None:
         with transaction(self._db):
-            self._forget_log(workspace, session_id)
-
-    def _forget_log(self, workspace: str, session_id: str) -> None:
-        """Delete the session ``session_id``'s events and its row in ``logs``, within a
-        transaction, raising the workspace's ``forgotten_seq`` to the highest deleted."""
-        self._db.execute(
-            """UPDATE workspaces SET forgotten_seq = max(forgotten_seq, coalesce(
-                (SELECT max(seq) FROM events WHERE workspace_id = ?1 AND session_id = ?2), 0))
-            WHERE id = ?1""",
-            (workspace, session_id),
-        )
-        self._db.execute(
-            "DELETE FROM events WHERE workspace_id = ? AND session_id = ?",
-            (workspace, session_id),
-        )
-        self._db.execute(
-            "DELETE FROM logs WHERE workspace_id = ? AND session_id = ?",
-            (workspace, session_id),
-        )
+            sqlite_log.forget_log(self._db, workspace, session_id)
 
     def _delete(self, workspace: str, session_id: str) -> None:
         with transaction(self._db):
-            self._forget_log(workspace, session_id)
+            sqlite_log.forget_log(self._db, workspace, session_id)
             self._db.execute(
                 "DELETE FROM sessions WHERE workspace_id = ? AND id = ?",
                 (workspace, session_id),
