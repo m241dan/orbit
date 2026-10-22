@@ -6,11 +6,11 @@ process ends, so a lock file nobody holds is free to take. The file names the ow
 reads it.
 """
 
-import fcntl
 import os
 from pathlib import Path
 
 from orbit.agent.domain.ownership import WorkspaceOwner, owner_text, parse_owner
+from orbit.agent.external.file_locks import rewrite, take_flock
 
 LOCK_FILE = "workspace.lock"
 
@@ -39,16 +39,9 @@ class WorkspaceLock:
         Raises ``OSError`` when the lock file can't be made, opened or written.
         """
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        fd = os.open(self.path, os.O_RDWR | os.O_CREAT, 0o644)
-        try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            _write(fd, WorkspaceOwner(pid=os.getpid(), url=self._url))
-        except BlockingIOError:
-            os.close(fd)
+        fd = take_flock(self.path, owner_text(WorkspaceOwner(pid=os.getpid(), url=self._url)))
+        if fd is None:
             return self.owner()
-        except BaseException:
-            os.close(fd)
-            raise
         self._fd = fd
         return None
 
@@ -57,7 +50,7 @@ class WorkspaceLock:
         and once it takes it later; raises ``OSError`` when it can't be written."""
         self._url = url
         if self._fd is not None:
-            _write(self._fd, WorkspaceOwner(pid=os.getpid(), url=url))
+            rewrite(self._fd, owner_text(WorkspaceOwner(pid=os.getpid(), url=url)))
 
     def owner(self) -> WorkspaceOwner:
         """The owner the lock file names; one naming nobody if it can't be read."""
@@ -71,9 +64,3 @@ class WorkspaceLock:
         if self._fd is not None:
             os.close(self._fd)
             self._fd = None
-
-
-def _write(fd: int, owner: WorkspaceOwner) -> None:
-    """Have the lock file open as ``fd`` name ``owner`` alone."""
-    os.ftruncate(fd, 0)
-    os.pwrite(fd, owner_text(owner).encode(), 0)

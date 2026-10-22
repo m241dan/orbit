@@ -17,6 +17,7 @@ from enum import Enum, auto
 from pathlib import Path
 
 from orbit.agent.application.ports import StoreFailed
+from orbit.agent.external.file_locks import take_flock
 
 
 def check_session_id(session_id: str) -> None:
@@ -44,23 +45,6 @@ def locked_dir(directory: Path, operation: int) -> Iterator[None]:
         yield
     finally:
         os.close(fd)
-
-
-def _lock_file(lock: Path) -> int | None:
-    """A descriptor holding an exclusive lock on the file ``lock``, created if need be, with this
-    process's id written in it; none when another open file holds the lock."""
-    fd = os.open(lock, os.O_RDWR | os.O_CREAT, 0o644)
-    try:
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        os.ftruncate(fd, 0)
-        os.write(fd, str(os.getpid()).encode())
-    except BlockingIOError:
-        os.close(fd)
-        return None
-    except BaseException:
-        os.close(fd)
-        raise
-    return fd
 
 
 def _lock_held(lock: Path) -> bool:
@@ -176,7 +160,7 @@ class SessionLocks:
                 raise StoreFailed(f"Couldn't lock the session {lock}: the locks are closed")
             if session_id in self._held:
                 return _Taken.OURS
-            fd = _lock_file(lock)
+            fd = take_flock(lock, str(os.getpid()))
             if fd is None:
                 return _Taken.REFUSED
             self._held[session_id] = fd
