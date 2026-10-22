@@ -95,3 +95,16 @@ def test_imports_from_test_modules_are_found_however_they_are_written() -> None:
         "tests.test_cli",
         "tests.test_replay.notice",
     ]
+
+
+def test_tracing_imports_no_orbit_package() -> None:
+    forbidden: list[str] = _contract("Tracing imports no orbit package")["forbidden_modules"]
+    for package in ("orbit.agent", "orbit.tui", "orbit.protocol", "orbit.cli", "orbit.client"):
+        assert _forbids(forbidden, package), package
+
+
+def test_neither_the_domain_nor_the_protocol_may_import_tracing() -> None:
+    contract = _contract("Neither the domain nor the protocol traces")
+    assert contract["type"] == "forbidden"
+    assert set(contract["source_modules"]) == {"orbit.agent.domain", "orbit.protocol"}
+    assert _forbids(contract["forbidden_modules"], "orbit.tracing")

@@ -4,6 +4,8 @@ An envelope's own fields come first, then ``payload``: the command or event, wit
 ``type``.
 """
 
+from collections.abc import Mapping
+
 from pydantic import Field
 
 from orbit.protocol.commands import Command
@@ -58,8 +60,7 @@ CONTROL_PLANE_EVENTS: tuple[type[Event], ...] = (
 
 class _Envelope(WireTolerant):
     """What commands' and events' envelopes share: the id of the ``workspace`` they belong to,
-    none for the control plane's own, and the trace context, which isn't checked and isn't set
-    yet."""
+    none for the control plane's own, and the trace context, which isn't checked."""
 
     workspace: str | None = None
     traceparent: str | None = None
@@ -83,6 +84,22 @@ class EventEnvelope(_Envelope):
     seq: int = Field(ge=1)
     session: str | None = None
     payload: Event
+
+
+_TRACE_FIELDS = ("traceparent", "tracestate")
+
+
+def trace_carrier(envelope: _Envelope) -> dict[str, str]:
+    """The trace context ``envelope`` carries, by W3C header name, holding only the fields
+    set."""
+    fields = {"traceparent": envelope.traceparent, "tracestate": envelope.tracestate}
+    return {name: value for name, value in fields.items() if value is not None}
+
+
+def with_trace_carrier[E: _Envelope](envelope: E, carrier: Mapping[str, str]) -> E:
+    """A copy of ``envelope`` carrying the trace context in ``carrier``, ignoring its other
+    keys."""
+    return envelope.model_copy(update={name: carrier.get(name) for name in _TRACE_FIELDS})
 
 
 # The Snapshot's transcript and history pages hold envelopes, so they're complete once those

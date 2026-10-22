@@ -56,6 +56,8 @@ from orbit.protocol.envelope import (
     SESSIONLESS_EVENTS,
     CommandEnvelope,
     EventEnvelope,
+    trace_carrier,
+    with_trace_carrier,
 )
 from orbit.protocol.events import (
     AgentEntry,
@@ -369,5 +371,7 @@ __all__ = [
     "decode_event",
     "encode",
     "event_adapter",
+    "trace_carrier",
     "with_state",
+    "with_trace_carrier",
 ]

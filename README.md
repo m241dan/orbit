@@ -1685,6 +1685,13 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
   (in `probe`) asks a control plane whether it takes it; both open the WebSocket through
   `open_connection` (in `upgrade`), which raises `TokenRejected` on a 401. It imports no
   orbit package but `orbit.protocol`, and only `orbit.cli` imports it.
+- `orbit.tracing`: the tracing port, standard library only. `Telemetry` starts `Span`s, each a
+  child of the current span, which a `ContextVar` keeps (`current_span`), so it follows the
+  code across awaits and into the tasks started under it; `NoTelemetry` records nothing but
+  still nests spans. It imports no orbit package, and neither `orbit.protocol` nor the
+  backend's domain imports it. Trace context crosses the wire in the envelopes'
+  `traceparent` and `tracestate`, which `orbit.protocol`'s `trace_carrier` and
+  `with_trace_carrier` read and set.
 - `orbit.agent`: backend, with no UI imports. Three layers, each importing only the ones below:
   - `external`: adapters that reach outside the backend. `ClaudeCliRunner` launches agents as
     `claude -p --output-format stream-json` runs connected to orbit (`run_agent`, and `converse`

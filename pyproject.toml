@@ -123,6 +123,28 @@ type = "forbidden"
 source_modules = ["orbit.agent", "orbit.tui", "orbit.protocol"]
 forbidden_modules = ["orbit.client"]
 
+# The tracing port knows nothing of what it traces, and stays off the wire contract and the
+# domain's pure rules.
+[[tool.importlinter.contracts]]
+name = "Tracing imports no orbit package"
+type = "forbidden"
+source_modules = ["orbit.tracing"]
+forbidden_modules = [
+    "orbit.agent",
+    "orbit.tui",
+    "orbit.protocol",
+    "orbit.cli",
+    "orbit.client",
+    "orbit.profiling",
+    "pydantic",
+]
+
+[[tool.importlinter.contracts]]
+name = "Neither the domain nor the protocol traces"
+type = "forbidden"
+source_modules = ["orbit.agent.domain", "orbit.protocol"]
+forbidden_modules = ["orbit.tracing"]
+
 # Inside the backend: external adapters over the application over the domain. A layer may
 # import the ones below it, never above.
 [[tool.importlinter.contracts]]
