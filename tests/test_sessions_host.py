@@ -191,6 +191,22 @@ async def test_opening_twice_shows_one_picker() -> None:
         assert screen.startup and screen.resume
 
 
+async def test_dismissing_and_reopening_before_the_callback_keeps_one_picker() -> None:
+    app = Host()
+    async with app.run_test() as pilot:
+        app.host.open()
+        await pilot.pause()
+        app.screen.dismiss(None)
+        app.host.open()
+        await pilot.pause()
+        app.host.open()
+        await pilot.pause()
+        app.host.open()
+        await pilot.pause()
+        [screen] = app.sessions_screens()
+        assert app.host.shown is screen
+
+
 async def test_closing_with_a_choice_sends_it_and_forgets_the_screen() -> None:
     app = Host()
     async with app.run_test() as pilot:
