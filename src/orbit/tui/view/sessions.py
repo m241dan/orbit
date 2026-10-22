@@ -17,7 +17,13 @@ from orbit.protocol import (
     Usage,
     WorkspaceEntry,
 )
-from orbit.tui.view.common import SPINNER_FRAMES, STATUS_ICONS, ListHints, active_session
+from orbit.tui.view.common import (
+    SPINNER_FRAMES,
+    STATUS_ICONS,
+    ListHints,
+    active_session,
+    ordinal,
+)
 from orbit.tui.view.tasks import coder_wait, usage_label
 from orbit.tui.view.workspaces import workspace_at
 
@@ -360,14 +366,6 @@ def waiting_words(position: int | None) -> str:
         return "waiting for a coder"
     place = "next" if position == 1 else ordinal(position)
     return f"waiting for a coder: {place} in line"
-
-
-def ordinal(number: int) -> str:
-    """``number`` as an ordinal: ``1st``, ``2nd``, ``3rd``, ``4th``, ``11th``, ``21st``."""
-    suffixes = {1: "st", 2: "nd", 3: "rd"}
-    teen = number % 100 in (11, 12, 13)
-    suffix = "th" if teen else suffixes.get(number % 10, "th")
-    return f"{number}{suffix}"
 
 
 def _activity_word(activity: Activity) -> str:

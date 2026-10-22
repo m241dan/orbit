@@ -108,8 +108,12 @@ workspace picker and opens on that repository. The picker lists:
 - `Add <path>` first, when the repository the chat runs in isn't among the workspaces served:
   `enter` adds it, then goes on as for a workspace served.
 - The workspaces served, each with its label, its path, its active session's name and whether
-  that one is `running` or `idle`, and `read-only` while another orbit owns its repository. The
-  workspace of the repository the chat runs in is highlighted, else the first.
+  that one is `running` or `idle`, the agents running in it by role (`2 coders · 1 reviewer`,
+  nothing while none runs), where its active session waits in line for a coder (`waiting: 2nd`,
+  `waiting: next`; see Taking turns in [Serving the control plane](#serving-the-control-plane)),
+  and `read-only` while another orbit owns its repository. The picker watches the server's
+  control-plane stream while it's open, so the agents stay current, and stops when it closes.
+  The workspace of the repository the chat runs in is highlighted, else the first.
 - A row for each clone under way, `Cloning <name>… 42%` (or git's phase while it gives no
   percentage), until the clone is served and listed in its place.
 - `Add a path or URL…`: `enter` asks for a path on the server's host or a repository's URL,
@@ -1174,8 +1178,9 @@ ended, its verification and merge included, however it ends; while every slot is
 waits in line behind those that asked before it, and a workspace's next task joins the back, so
 workspaces take turns. A run waiting stays running, and its session's state says where it is
 in line (`waiting_for_coder`, see [docs/protocol.md](docs/protocol.md#session-state)), which the
-session picker, the line above the prompt of a session viewed read-only and the task list show
-(`waiting for a coder: 2nd in line`, `⏳ waiting: 4 coders busy`);
+session picker, the line above the prompt of a session viewed read-only, the task list and the
+workspace picker show (`waiting for a coder: 2nd in line`, `⏳ waiting: 4 coders busy`,
+`waiting: 2nd`);
 `ctrl+s` takes it out of line and holds it, as it stops any run. Reviews, super reviews and the
 planner don't count and never wait, and a run stopped at the usage limit holds no slot until it
 starts again. A local `orbit chat` serves one workspace and has no cap.

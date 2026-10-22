@@ -3,7 +3,9 @@
 import pytest
 
 from orbit.protocol import (
+    Activity,
     AddWorkspace,
+    AgentRef,
     RemoveWorkspace,
     SessionStateChanged,
     SessionSummary,
@@ -20,6 +22,7 @@ from orbit.tui.view.workspaces import (
     WORKSPACES_HINTS,
     add_command,
     added_workspace,
+    agents_summary,
     clone_failed,
     clone_label,
     clone_name,
@@ -99,9 +102,59 @@ def test_a_workspace_without_a_path_or_active_session_shows_its_label() -> None:
     assert workspace_label(WorkspaceEntry(id="w", label="here", sessions=())) == "here"
 
 
+def agent(workspace: str, role: str, number: int = 1) -> AgentRef:
+    return AgentRef(
+        workspace=workspace, session="s", agent_id=f"agent-{number}", role=role, task_id="t"
+    )
+
+
+def test_a_workspace_row_counts_its_running_agents_by_role() -> None:
+    agents = (agent("a", "reviewer", 1), agent("a", "coder", 2), agent("a", "coder", 3))
+    others = (agent("b", "planner"),)
+    label = "repoA · /src/repoA · today, idle · 2 coders · 1 reviewer"
+    assert workspace_label(A, (*agents, *others)) == label
+
+
+def test_a_workspace_row_without_running_agents_has_no_agents_note() -> None:
+    assert workspace_label(B, (agent("a", "coder"),)) == "repoB · /src/repoB"
+
+
+@pytest.mark.parametrize(
+    ("position", "note"), [(2, "waiting: 2nd"), (1, "waiting: next"), (None, "waiting")]
+)
+def test_a_workspace_row_says_where_its_active_session_waits_for_a_coder(
+    position: int | None, note: str
+) -> None:
+    wait = Activity(kind="waiting_for_coder", position=position)
+    waiting = TODAY.model_copy(update={"state": "running", "activity": (wait,)})
+    entry = A.model_copy(update={"sessions": (waiting,), "read_only": True})
+    label = f"repoA · /src/repoA · today, running · 1 coder · {note} · read-only"
+    assert workspace_label(entry, (agent("a", "coder"),)) == label
+
+
+def test_the_agents_summary_counts_one_role() -> None:
+    assert agents_summary(("coder",)) == "1 coder"
+
+
+def test_the_agents_summary_lists_roles_in_their_order() -> None:
+    roles = ("planner", "reviewer", "coder", "coder")
+    assert agents_summary(roles) == "2 coders · 1 reviewer · 1 planner"
+
+
+def test_the_agents_summary_lists_every_built_in_role_then_others() -> None:
+    roles = ("auditor", "planner", "super-reviewer", "reviewer", "configurator", "coder")
+    summary = "1 coder · 1 configurator · 1 reviewer · 1 super reviewer · 1 planner · 1 auditor"
+    assert agents_summary(roles) == summary
+
+
+def test_the_agents_summary_of_none_is_empty() -> None:
+    assert agents_summary(()) == ""
+
+
 def test_row_labels() -> None:
     assert row_label(AddWorkspace(path="/src/repoC")) == "Add /src/repoC"
     assert row_label(B) == "repoB · /src/repoB"
+    assert row_label(B, (agent("b", "coder"),)) == "repoB · /src/repoB · 1 coder"
     assert row_label(ADD_PATH) == "Add a path or URL…"
     assert row_label(CLONING) == "Cloning proj… Receiving objects"
 

@@ -11,12 +11,16 @@ from textual.containers import Vertical
 from textual.widgets import Input, OptionList, Static
 
 from orbit.protocol import (
+    CONTROL_PLANE_STREAM,
     GIT_FAILED,
     AddWorkspace,
+    AgentRef,
+    AgentsChanged,
     Catalog,
     ErrorOccurred,
     RemoveWorkspace,
     SessionStateChanged,
+    Watch,
     WorkspaceCloning,
     WorkspaceEntry,
 )
@@ -48,9 +52,9 @@ from orbit.tui.view.workspaces import (
 )
 from orbit.tui.widgets import ChoiceScreen, TypingListScreen
 
-Change = Callable[[AddWorkspace | RemoveWorkspace, Awaited], Awaitable[object]]
-"""Sends adding or removing a workspace to the backend, awaiting its outcome as told; whatever
-it returns is ignored."""
+Change = Callable[[AddWorkspace | RemoveWorkspace | Watch, Awaited], Awaitable[object]]
+"""Sends adding or removing a workspace, or the streams to watch, to the backend, awaiting its
+outcome as told; whatever it returns is ignored."""
 Chosen = Callable[[str, bool], Awaitable[None]]
 """Takes the id of the workspace picked, and whether it was picked at startup."""
 
@@ -67,7 +71,8 @@ class WorkspacesScreen(TypingListScreen[str | None]):
     failing, shows why. ``x`` asks whether to remove the highlighted workspace keeping its
     sessions or deleting them too, then sends ``RemoveWorkspace``, showing why if it's refused.
     Escape leaves the path box, or dismisses with none, or quits orbit at ``startup``, where
-    there's nothing to go back to.
+    there's nothing to go back to. Once shown it watches the control-plane stream, so each
+    workspace's row can show the :attr:`agents` running in it.
     """
 
     DEFAULT_CSS = """
@@ -88,6 +93,7 @@ class WorkspacesScreen(TypingListScreen[str | None]):
         super().__init__(None, startup)
         self.workspaces = tuple(workspaces)
         self.cloning: tuple[WorkspaceCloning, ...] = ()  # The clones under way, as shown.
+        self.agents: tuple[AgentRef, ...] = ()  # The agents running, as shown.
         self.repository = repository
         self._change = change
         self._adding: str | None = None  # The path added, until its workspace is listed.
@@ -102,7 +108,7 @@ class WorkspacesScreen(TypingListScreen[str | None]):
         with Vertical() as box:
             box.border_title = WORKSPACES_TITLE
             box.border_subtitle = self.hint
-            yield OptionList(*map(row_label, self.rows))
+            yield OptionList(*self._labels)
             note = Static("", id="workspace-note")
             note.display = False
             yield note
@@ -110,8 +116,14 @@ class WorkspacesScreen(TypingListScreen[str | None]):
             path.display = False
             yield path
 
-    def on_mount(self) -> None:
+    async def on_mount(self) -> None:
         self.query_one(OptionList).highlighted = preselected(self.rows, self.repository)
+        await self._change(Watch(streams=(CONTROL_PLANE_STREAM,)), Awaited())
+
+    @property
+    def _labels(self) -> tuple[str, ...]:
+        """What the rows show, in order."""
+        return tuple(row_label(row, self.agents) for row in self.rows)
 
     @property
     def note(self) -> str | None:
@@ -131,13 +143,19 @@ class WorkspacesScreen(TypingListScreen[str | None]):
         if not self._pick_added() and self.is_mounted:
             self._relist(shown)
 
+    def show_agents(self, agents: Sequence[AgentRef]) -> None:
+        """Show ``agents`` running in place of those shown, keeping the highlight."""
+        self.agents = tuple(agents)
+        if self.is_mounted:
+            self._relist(self._keys)
+
     def _relist(self, shown: Sequence[str]) -> None:
         """List the rows again in place of rows with keys ``shown``, keeping the highlight on
         the row it was on, or where it was if that one's gone."""
         options = self.query_one(OptionList)
         highlighted = options.highlighted
         options.clear_options()
-        options.add_options(map(row_label, self.rows))
+        options.add_options(self._labels)
         options.highlighted = kept_highlight(shown, highlighted, self._keys)
 
     @property
@@ -249,8 +267,10 @@ class WorkspacesHost:
     """Keeps the workspaces the latest ``Catalog`` lists, as ``SessionStateChanged`` changes
     their sessions, and shows them with ``push`` when asked, for the ``repository`` the
     frontend runs in, refreshing the picker while it's shown, and the clones under way, as
-    ``WorkspaceCloning`` reports them, until they're listed or fail. ``change`` sends adding and
-    removing workspaces, and ``chosen`` takes the workspace picked."""
+    ``WorkspaceCloning`` reports them, until they're listed or fail, and the agents running, as
+    ``AgentsChanged`` reports them while the picker watches for them. ``change`` sends adding
+    and removing workspaces and the streams to watch, and ``chosen`` takes the workspace
+    picked."""
 
     def __init__(
         self,
@@ -296,16 +316,23 @@ class WorkspacesHost:
         self.workspaces = with_states(self.workspaces, changed)
         self._refresh()
 
+    def follow_agents(self, changed: AgentsChanged) -> None:
+        """Show the agents ``changed`` lists in the picker, if it's shown."""
+        if self.shown is not None:
+            self.shown.show_agents(changed.agents)
+
     def open(self, startup: bool = False) -> None:
         """Let the user pick a workspace, add one or remove one, unless the picker is shown
         already; at ``startup``, or once the app has lost its workspace since, escape quits and
-        the workspace picked is taken as picked at startup."""
+        the workspace picked is taken as picked at startup. The picker watches the control-plane
+        stream while it's shown, and stops once it's closed."""
         if self.shown is not None:
             return
         screen = WorkspacesScreen(self.workspaces, self._repository, self._change, startup)
         screen.cloning = self.cloning
 
         async def picked(workspace: str | None) -> None:
+            await self._change(Watch(streams=()), Awaited())
             if workspace is not None:
                 await self._chosen(workspace, screen.startup)
 

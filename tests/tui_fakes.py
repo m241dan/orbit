@@ -38,6 +38,7 @@ from orbit.protocol import (
     ToolCallFinished,
     ToolCallStarted,
     Usage,
+    Watch,
 )
 from orbit.tui import OrbitApp
 from orbit.tui.entries import GutteredEntry
@@ -123,6 +124,16 @@ async def feed_events(session: FakeSession, pilot: Pilot[None], *events: Event) 
     for event in events:
         await session.queue.put(event)
     await pilot.pause()
+
+
+def changes(session: FakeSession) -> list[Command]:
+    """The commands ``session`` got, but for the streams the workspace picker watches."""
+    return [command for command in session.commands if not isinstance(command, Watch)]
+
+
+def watches(session: FakeSession) -> list[Watch]:
+    """The streams ``session`` was told to watch, in turn."""
+    return [command for command in session.commands if isinstance(command, Watch)]
 
 
 async def accept_last(session: FakeSession, pilot: Pilot[None]) -> None:

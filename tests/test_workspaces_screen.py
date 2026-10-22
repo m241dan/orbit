@@ -8,10 +8,13 @@ from textual.widgets import Input, OptionList
 
 from orbit.protocol import (
     BUSY,
+    CONTROL_PLANE_STREAM,
     GIT_FAILED,
     INVALID,
     UNKNOWN,
+    Activity,
     AddWorkspace,
+    AgentRef,
     AgentsChanged,
     Attach,
     Catalog,
@@ -25,15 +28,17 @@ from orbit.protocol import (
     Usage,
     UsageTotal,
     UsageTotals,
+    Watch,
     WorkspaceCloning,
     WorkspaceEntry,
 )
 from orbit.tui import Opening, OrbitApp
 from orbit.tui.sessions import SessionsScreen
+from orbit.tui.view.outcomes import Awaited
 from orbit.tui.view.workspaces import STARTUP_HINT
 from orbit.tui.widgets import ChoiceScreen
 from orbit.tui.workspaces import WorkspacesScreen
-from tests.tui_fakes import FakeLink, FakeSession, feed_events
+from tests.tui_fakes import FakeLink, FakeSession, changes, feed_events, watches
 
 TODAY_A = SessionSummary(id="a1", name="today", active=True)
 EARLIER_A = SessionSummary(id="a0", name="earlier")
@@ -88,15 +93,19 @@ def highlighted(screen: WorkspacesScreen) -> int | None:
     return screen.query_one(OptionList).highlighted
 
 
+def last_change(app: OrbitApp) -> str:
+    """The id of the last command sent but for watching streams, which closing the picker
+    sends."""
+    envelopes = session_of(app).envelopes
+    return next(e.command_id for e in reversed(envelopes) if not isinstance(e.payload, Watch))
+
+
 async def accept_last(app: OrbitApp, pilot: Pilot[None]) -> None:
-    session = session_of(app)
-    await session.queue.put(CommandAccepted(command_id=session.envelopes[-1].command_id))
+    await session_of(app).queue.put(CommandAccepted(command_id=last_change(app)))
 
 
 def refusal(app: OrbitApp, code: str, message: str) -> CommandRefused:
-    return CommandRefused(
-        command_id=session_of(app).envelopes[-1].command_id, code=code, message=message
-    )
+    return CommandRefused(command_id=last_change(app), code=code, message=message)
 
 
 async def test_connected_the_picker_preselects_the_workspace_at_the_repository() -> None:
@@ -107,18 +116,103 @@ async def test_connected_the_picker_preselects_the_workspace_at_the_repository()
         assert screen.startup
         assert rows(screen) == [B_ROW, A_ROW, "Add a path or URL…"]
         assert highlighted(screen) == 1
-        assert session_of(app).commands == []
+        assert changes(session_of(app)) == []
 
 
-async def test_the_control_plane_streams_events_change_nothing_shown() -> None:
+WATCHING = Watch(streams=(CONTROL_PLANE_STREAM,))
+
+
+def agent(workspace: str, role: str, number: int) -> AgentRef:
+    return AgentRef(
+        workspace=workspace, session="s", agent_id=f"agent-{number}", role=role, task_id="t"
+    )
+
+
+async def test_the_picker_watches_the_control_plane_while_it_is_open() -> None:
+    app = connected()
+    async with app.run_test() as pilot:
+        session = session_of(app)
+        await feed_events(session, pilot, SERVED)
+        assert watches(session) == [WATCHING]
+        await pilot.press("enter", "enter")
+        await pilot.pause()
+        assert watches(session) == [WATCHING, Watch(streams=())]
+        await pilot.press("ctrl+w")
+        await pilot.pause()
+        assert watches(session) == [WATCHING, Watch(streams=()), WATCHING]
+        await pilot.press("escape")
+        await pilot.pause()
+        assert watches(session) == [WATCHING, Watch(streams=()), WATCHING, Watch(streams=())]
+
+
+async def test_each_workspace_row_shows_its_running_agents_by_role() -> None:
+    app = connected()
+    async with app.run_test() as pilot:
+        session = session_of(app)
+        await feed_events(session, pilot, SERVED)
+        running = (agent("A", "coder", 1), agent("A", "reviewer", 2), agent("A", "coder", 3))
+        await feed_events(session, pilot, AgentsChanged(agents=running))
+        a_row = f"{A_ROW} · 2 coders · 1 reviewer"
+        assert rows(workspaces(app)) == [B_ROW, a_row, "Add a path or URL…"]
+        await feed_events(session, pilot, AgentsChanged(agents=()))
+        assert rows(workspaces(app)) == [B_ROW, A_ROW, "Add a path or URL…"]
+
+
+async def test_a_picker_opened_again_shows_no_agents_until_they_are_sent_again() -> None:
+    app = connected()
+    async with app.run_test() as pilot:
+        session = session_of(app)
+        await feed_events(session, pilot, SERVED)
+        await feed_events(session, pilot, AgentsChanged(agents=(agent("B", "planner", 1),)))
+        await pilot.press("enter", "enter", "ctrl+w")
+        await pilot.pause()
+        assert rows(workspaces(app)) == [B_ROW, A_ROW, "Add a path or URL…"]
+
+
+async def test_agents_changing_while_the_picker_is_closed_show_nothing() -> None:
+    app = connected()
+    async with app.run_test() as pilot:
+        session = session_of(app)
+        await feed_events(session, pilot, SERVED)
+        await pilot.press("enter", "enter")
+        await feed_events(session, pilot, AgentsChanged(agents=(agent("B", "coder", 1),)))
+        await pilot.press("ctrl+w")
+        await pilot.pause()
+        assert rows(workspaces(app)) == [B_ROW, A_ROW, "Add a path or URL…"]
+
+
+async def test_a_workspace_row_says_where_its_session_waits_for_a_coder() -> None:
+    app = connected()
+    async with app.run_test() as pilot:
+        session = session_of(app)
+        await feed_events(session, pilot, SERVED)
+        wait = Activity(kind="waiting_for_coder", position=2)
+        changed = SessionStateChanged(
+            session="b1", active=True, state="running", viewers=1, activity=(wait,)
+        )
+        await feed_events(session, pilot, changed)
+        b_row = "repoB · /src/repoB · flags, running · waiting: 2nd"
+        assert rows(workspaces(app)) == [b_row, A_ROW, "Add a path or URL…"]
+
+
+def test_agents_shown_before_the_picker_is_mounted_show_once_it_is() -> None:
+    async def change(command: AddWorkspace | RemoveWorkspace | Watch, awaited: Awaited) -> None:
+        """Send nothing."""
+
+    screen = WorkspacesScreen((A,), None, change)
+    running = (agent("A", "coder", 1),)
+    screen.show_agents(running)
+    assert screen.agents == running
+
+
+async def test_the_usage_totals_change_nothing_shown() -> None:
     app = connected()
     async with app.run_test() as pilot:
         session = session_of(app)
         await feed_events(session, pilot, SERVED)
         totals = UsageTotals(workspaces=(), total=UsageTotal(today=Usage(), lifetime=Usage()))
-        await feed_events(session, pilot, AgentsChanged(agents=()), totals)
+        await feed_events(session, pilot, totals)
         assert rows(workspaces(app)) == [B_ROW, A_ROW, "Add a path or URL…"]
-        assert session_of(app).commands == []
 
 
 PROJ_URL = "https://github.com/o/proj.git"
@@ -148,7 +242,7 @@ async def test_enter_on_a_clones_row_does_nothing() -> None:
         await pilot.press("j", "enter", "x")
         screen = workspaces(app)
         assert app.screen is screen and not screen.query_one(Input).display
-        assert session.commands == []
+        assert changes(session) == []
 
 
 async def test_a_clone_under_way_shows_in_a_picker_opened_later() -> None:
@@ -169,7 +263,7 @@ async def test_a_url_typed_is_sent_as_one_closing_the_field_once_accepted(url: s
         session = session_of(app)
         await feed_events(session, pilot, SERVED)
         await pilot.press("j", "enter", *url, "enter")
-        assert session.commands == [AddWorkspace(url=url)]
+        assert changes(session) == [AddWorkspace(url=url)]
         await accept_last(app, pilot)
         await pilot.pause()
         assert not workspaces(app).query_one(Input).display
@@ -230,7 +324,7 @@ async def test_picking_a_workspace_opens_its_session_picker_whose_pick_attaches(
         assert screen.startup and screen.workspace == "A"
         assert rows(screen)[:2] == ["  Resume today · active", "  earlier"]
         await pilot.press("j", "enter")
-        assert session_of(app).commands[0] == Attach(workspace="A", session="a0")
+        assert changes(session_of(app))[0] == Attach(workspace="A", session="a0")
 
 
 async def test_resuming_attaches_to_the_active_session() -> None:
@@ -238,7 +332,7 @@ async def test_resuming_attaches_to_the_active_session() -> None:
     async with app.run_test() as pilot:
         await feed_events(session_of(app), pilot, SERVED)
         await pilot.press("enter", "enter")
-        assert session_of(app).commands == [Attach(workspace="A", session="a1")]
+        assert changes(session_of(app)) == [Attach(workspace="A", session="a1")]
 
 
 async def test_without_a_repository_served_the_first_workspace_is_preselected() -> None:
@@ -257,13 +351,13 @@ async def test_a_repository_not_served_is_offered_first_and_added_then_its_sessi
         assert rows(workspaces(app)) == ["Add /src/repoC", B_ROW, A_ROW, "Add a path or URL…"]
         assert highlighted(workspaces(app)) == 0
         await pilot.press("enter")
-        assert session.commands == [AddWorkspace(path="/src/repoC")]
+        assert changes(session) == [AddWorkspace(path="/src/repoC")]
         await accept_last(app, pilot)
         await feed_events(session, pilot, catalog(B, A, C))
         screen = sessions(app)
         assert screen.workspace == "C"
         await pilot.press("enter")
-        assert session.commands[-1] == Attach(workspace="C", session="c1")
+        assert changes(session)[-1] == Attach(workspace="C", session="c1")
 
 
 async def test_a_workspace_added_and_listed_before_its_acceptance_is_picked_on_it() -> None:
@@ -289,7 +383,7 @@ async def test_adding_a_path_sends_it_and_a_refusal_shows_in_the_fields_hint() -
         path = workspaces(app).query_one(Input)
         assert path.display and app.focused is path
         await pilot.press(*"/nowhere", "enter")
-        assert session.commands == [AddWorkspace(path="/nowhere")]
+        assert changes(session) == [AddWorkspace(path="/nowhere")]
         await feed_events(session, pilot, refusal(app, UNKNOWN, "There's no /nowhere."))
         assert path.border_subtitle == "There's no /nowhere."
         assert workspaces(app).note is None
@@ -311,7 +405,7 @@ async def test_an_empty_path_sends_nothing_and_escape_goes_back_to_the_list() ->
     async with app.run_test() as pilot:
         await feed_events(session_of(app), pilot, SERVED)
         await pilot.press("j", "enter", "space", "enter")
-        assert session_of(app).commands == []
+        assert changes(session_of(app)) == []
         await pilot.press("escape")
         screen = workspaces(app)
         assert not screen.query_one(Input).display
@@ -326,7 +420,7 @@ async def test_a_path_in_a_workspace_served_picks_it_once_accepted() -> None:
             session = session_of(app)
             await feed_events(session, pilot, SERVED)
             await pilot.press("j", "enter", *path, "enter")
-            assert session.commands == [AddWorkspace(path=path)]
+            assert changes(session) == [AddWorkspace(path=path)]
             await accept_last(app, pilot)
             await pilot.pause()
             assert sessions(app).workspace == "A"
@@ -367,7 +461,7 @@ async def test_x_keeps_a_workspaces_sessions_by_default_and_a_busy_refusal_shows
         assert choice.title_text == "Stop serving repoB"
         assert choice.choices == ("Keep its sessions", "Delete its sessions too", "Cancel")
         await pilot.press("enter")
-        assert session.commands == [RemoveWorkspace(workspace="B", purge=False)]
+        assert changes(session) == [RemoveWorkspace(workspace="B", purge=False)]
         busy = "Can't remove /src/repoB: it's running task 3."
         await feed_events(session, pilot, refusal(app, BUSY, busy))
         assert workspaces(app).note == busy
@@ -385,7 +479,7 @@ async def test_x_then_deleting_its_sessions_purges_and_a_refusal_lists_what_is_l
             "Delete its sessions too, and its clone directory /srv/clones/proj"
         )
         await pilot.press("j", "enter")
-        assert session.commands == [RemoveWorkspace(workspace="P", purge=True)]
+        assert changes(session) == [RemoveWorkspace(workspace="P", purge=True)]
         lost = "Can't purge proj: its clone has 2 commits its remote doesn't."
         await feed_events(session, pilot, refusal(app, INVALID, lost))
         assert workspaces(app).note == lost
@@ -397,7 +491,7 @@ async def test_x_cancelled_removes_nothing() -> None:
         async with app.run_test() as pilot:
             await feed_events(session_of(app), pilot, SERVED)
             await pilot.press("x", *keys)
-            assert session_of(app).commands == []
+            assert changes(session_of(app)) == []
             assert isinstance(app.screen, WorkspacesScreen)
 
 
@@ -487,7 +581,7 @@ async def test_moving_to_another_workspace_resumes_its_active_session_first() ->
         assert screen.workspace == "B" and not screen.joined and not screen.startup
         assert rows(screen) == ["  Resume flags · active", "New session"]
         await pilot.press("enter")
-        assert session_of(app).commands[-1] == Attach(workspace="B", session="b1")
+        assert changes(session_of(app))[-1] == Attach(workspace="B", session="b1")
         await pilot.press("ctrl+p")
         assert sessions(app).workspace == "B"
 
@@ -497,7 +591,7 @@ async def test_a_new_session_in_another_workspace_attaches_there_first() -> None
     async with app.run_test() as pilot:
         await feed_events(session_of(app), pilot, SERVED)
         await pilot.press("enter", "enter", "ctrl+w", "k", "enter", "j", "enter", "enter")
-        assert session_of(app).commands[-2:] == [
+        assert changes(session_of(app))[-2:] == [
             Attach(workspace="B", session="b1"),
             NewSession(),
         ]
@@ -509,7 +603,7 @@ async def test_escape_from_another_workspaces_sessions_stays_on_the_workspace_vi
         await feed_events(session_of(app), pilot, SERVED)
         await pilot.press("enter", "enter", "ctrl+w", "k", "enter", "escape", "ctrl+p")
         assert sessions(app).workspace == "A"
-        assert session_of(app).commands == [Attach(workspace="A", session="a1")]
+        assert changes(session_of(app)) == [Attach(workspace="A", session="a1")]
 
 
 async def test_another_workspaces_sessions_follow_the_catalog_while_shown() -> None:
@@ -553,7 +647,7 @@ async def test_opening_with_a_command_attaches_to_the_workspace_picked_then_send
     async with app.run_test() as pilot:
         await feed_events(session_of(app), pilot, SERVED)
         await pilot.press("enter")
-        assert session_of(app).commands == [
+        assert changes(session_of(app)) == [
             Attach(workspace="A", session="a1"),
             NewSession(name="auth"),
         ]
@@ -566,7 +660,7 @@ async def test_opening_with_a_command_on_a_workspace_without_an_active_session_s
         idle = A.model_copy(update={"sessions": (EARLIER_A,)})
         await feed_events(session_of(app), pilot, catalog(idle))
         await pilot.press("enter")
-        assert session_of(app).commands == []
+        assert changes(session_of(app)) == []
 
 
 async def test_a_local_orbit_never_shows_the_workspace_picker() -> None:
@@ -625,7 +719,7 @@ async def test_removing_the_workspace_viewed_from_the_picker_keeps_one_picker() 
         await pilot.press("enter", "enter", "ctrl+w", "x", "enter")
         await feed_events(session_of(app), pilot, catalog(B))
         assert [type(s) for s in app.screen_stack[1:]] == [WorkspacesScreen]
-        assert session_of(app).commands[-1] == RemoveWorkspace(workspace="A")
+        assert changes(session_of(app))[-1] == RemoveWorkspace(workspace="A")
 
 
 async def test_removing_the_workspace_viewed_from_the_picker_leaves_one_escape_quits() -> None:
@@ -665,7 +759,7 @@ async def test_picking_from_the_picker_without_a_loss_opens_sessions_escape_goes
         assert not sessions(app).startup
         await pilot.press("escape")
         assert len(app.screen_stack) == 1
-        assert session_of(app).commands == [Attach(workspace="A", session="a1")]
+        assert changes(session_of(app)) == [Attach(workspace="A", session="a1")]
 
 
 async def test_another_workspace_listed_after_adding_one_served_is_not_picked() -> None:

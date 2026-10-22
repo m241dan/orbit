@@ -19,7 +19,7 @@ from orbit.tui.tabs import ConversationTabs
 from orbit.tui.transcript import Transcript
 from orbit.tui.working import WorkingRow
 from tests.session_apps import CATALOG, OLD, RUNNING, SWITCH_TO_OLD, in_process, joined
-from tests.tui_fakes import FakeSession, feed_events, labels, started
+from tests.tui_fakes import FakeSession, changes, feed_events, labels, started
 from tests.tui_fakes import opened as snapshot_of
 
 NOW = 222.0  # Shows the spinner's first frame.
@@ -252,7 +252,7 @@ async def test_activating_another_session_clears_the_working_lines() -> None:
         await fed(session, pilot, started("agent-2"), turn("agent-2"), read("agent-2", "c1", "a"))
         await fed(session, pilot, CATALOG)
         await pilot.press("j", "k", "enter")
-        assert session.commands == SWITCH_TO_OLD
+        assert changes(session) == SWITCH_TO_OLD
         await fed(session, pilot, snapshot_of(OLD))
         assert lines(row) == ()
         assert not ticking(app)
@@ -264,7 +264,7 @@ async def test_attaching_to_another_session_clears_the_working_lines() -> None:
         row = await opened(app, pilot)
         await fed(session, pilot, CATALOG, RUNNING)
         await pilot.press("enter", "j", "enter")
-        assert session.commands == [Attach(workspace="w", session="old")]
+        assert changes(session) == [Attach(workspace="w", session="old")]
         await fed(session, pilot, started("agent-2"), turn("agent-2"), read("agent-2", "c1", "a"))
         await fed(session, pilot, snapshot_of(OLD))
         assert lines(row) == ()

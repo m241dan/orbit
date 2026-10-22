@@ -2,7 +2,7 @@
 
 from textual.app import App
 
-from orbit.protocol import AddWorkspace, RemoveWorkspace
+from orbit.protocol import AddWorkspace, RemoveWorkspace, Watch
 from orbit.tui.view.outcomes import Awaited
 from orbit.tui.workspaces import WorkspacesHost, WorkspacesScreen
 
@@ -15,7 +15,9 @@ class Host(App[None]):
         self.picked: list[str] = []
         self.host = WorkspacesHost(self.push_screen, self._change, self._chosen)
 
-    async def _change(self, command: AddWorkspace | RemoveWorkspace, awaited: Awaited) -> None:
+    async def _change(
+        self, command: AddWorkspace | RemoveWorkspace | Watch, awaited: Awaited
+    ) -> None:
         """Send nothing."""
 
     async def _chosen(self, workspace: str, startup: bool) -> None:

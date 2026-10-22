@@ -36,7 +36,7 @@ from tests.session_apps import (
     started,
 )
 from tests.session_builders import saved, store_with
-from tests.tui_fakes import FakeSession, entries, feed_events, opened
+from tests.tui_fakes import FakeSession, changes, entries, feed_events, opened
 
 OLD_ROW = "  auth rework · Oct 16 18:02"
 SAVED_ROWS = [OLD_ROW, "  elsewhere · open in another orbit", "  bad.json · unreadable: not JSON"]
@@ -66,7 +66,7 @@ async def test_in_process_the_startup_picker_lists_the_saved_sessions_then_new_s
         assert screen.startup and not screen.resume
         assert options(screen) == [*SAVED_ROWS, "New session"]
         assert screen.query_one(OptionList).highlighted == 0
-        assert session.commands == []
+        assert changes(session) == []
 
 
 async def test_connected_the_startup_picker_offers_to_resume_the_active_session_first() -> None:
@@ -83,7 +83,7 @@ async def test_connected_the_startup_picker_offers_to_resume_the_active_session_
         ]
         assert screen.query_one(OptionList).highlighted == 0
         await pilot.press("enter")
-        assert session.commands == [Attach(workspace="w", session="now")]
+        assert changes(session) == [Attach(workspace="w", session="now")]
         assert no_picker(app)
 
 
@@ -117,7 +117,7 @@ async def test_picking_with_the_active_session_idle_and_unviewed_activates_it() 
         await feed_events(session, pilot, CATALOG)
         await pilot.press("j", "k", "enter")
 
-        assert session.commands == SWITCH_TO_OLD
+        assert changes(session) == SWITCH_TO_OLD
         assert no_picker(app)
 
 
@@ -137,7 +137,7 @@ async def test_picking_while_a_task_runs_only_views_the_session() -> None:
     async with app.run_test() as pilot:
         await feed_events(session, pilot, CATALOG, RUNNING)
         await pilot.press("enter", "j", "enter")
-        assert session.commands == [Attach(workspace="w", session="old")]
+        assert changes(session) == [Attach(workspace="w", session="old")]
 
 
 async def test_picking_while_another_frontend_views_the_active_session_only_views() -> None:
@@ -148,7 +148,7 @@ async def test_picking_while_another_frontend_views_the_active_session_only_view
         await pilot.press("enter")
         assert options(picker(app))[0] == "  Resume today · Oct 16 18:02 · active · viewed by 2"
         await pilot.press("j", "enter")
-        assert session.commands == [Attach(workspace="w", session="old")]
+        assert changes(session) == [Attach(workspace="w", session="old")]
 
 
 async def test_picking_a_session_that_fails_to_send_shows_why_and_activates_nothing() -> None:
@@ -160,7 +160,7 @@ async def test_picking_a_session_that_fails_to_send_shows_why_and_activates_noth
         await pilot.pause()
 
         assert app.is_running
-        assert session.commands == [Attach(workspace="w", session="old")]
+        assert changes(session) == [Attach(workspace="w", session="old")]
         assert entries(app)[-1] == ("Couldn't send the command: the backend is gone", "error")
 
 
@@ -173,7 +173,7 @@ async def test_deleting_a_session_that_fails_to_send_shows_why() -> None:
         await pilot.pause()
 
         assert app.is_running
-        assert session.commands == [DeleteSession(session_id="old")]
+        assert changes(session) == [DeleteSession(session_id="old")]
         assert entries(app)[-1] == ("Couldn't send the command: the backend is gone", "error")
 
 
@@ -184,7 +184,7 @@ async def test_locked_and_unreadable_sessions_cannot_be_opened() -> None:
         screen = picker(app)
         await pilot.press("j", "enter", "j", "enter")
 
-        assert session.commands == []
+        assert changes(session) == []
         assert app.screen is screen
 
 
@@ -198,7 +198,7 @@ async def test_a_new_session_is_started_with_the_name_typed() -> None:
         assert app.focused is name
         await pilot.press(*" jk ", "enter")
 
-        assert session.commands == [NewSession(name="jk")]
+        assert changes(session) == [NewSession(name="jk")]
         assert no_picker(app)
 
 
@@ -208,7 +208,7 @@ async def test_a_new_session_without_a_name_leaves_it_to_the_backend() -> None:
         await feed_events(session, pilot, catalog(CURRENT))
         await pilot.press("enter", "space", "enter")
 
-        assert session.commands == [NewSession(name=None)]
+        assert changes(session) == [NewSession(name=None)]
 
 
 async def test_escape_from_the_name_goes_back_to_the_list() -> None:
@@ -223,7 +223,7 @@ async def test_escape_from_the_name_goes_back_to_the_list() -> None:
         assert name.value == ""
         assert app.focused is screen.query_one(OptionList)
         await pilot.press("k", "enter")
-        assert session.commands == []  # Back on the list, k moved to the locked session.
+        assert changes(session) == []  # Back on the list, k moved to the locked session.
 
 
 async def test_escape_at_startup_quits_orbit() -> None:
@@ -233,7 +233,7 @@ async def test_escape_at_startup_quits_orbit() -> None:
         await pilot.press("escape")
         await pilot.pause()
         assert not app.is_running
-    assert session.commands == []
+    assert changes(session) == []
 
 
 async def test_ctrl_p_shows_the_picker_with_the_session_viewed_first() -> None:
@@ -246,7 +246,7 @@ async def test_ctrl_p_shows_the_picker_with_the_session_viewed_first() -> None:
         assert not screen.startup
         assert options(screen)[:2] == ["● today · Oct 16 18:02 · active", OLD_ROW]
         await pilot.press("j", "enter")
-        assert session.commands == SWITCH_TO_OLD
+        assert changes(session) == SWITCH_TO_OLD
 
 
 async def test_choosing_the_session_viewed_just_closes_the_picker() -> None:
@@ -255,7 +255,7 @@ async def test_choosing_the_session_viewed_just_closes_the_picker() -> None:
         await feed_events(session, pilot, CATALOG)
         await pilot.press("ctrl+p", "enter")
 
-        assert session.commands == []
+        assert changes(session) == []
         assert no_picker(app)
 
 
@@ -266,7 +266,7 @@ async def test_escape_mid_session_keeps_the_session_viewed() -> None:
         await pilot.press("ctrl+p", "escape")
 
         assert no_picker(app)
-        assert session.commands == []
+        assert changes(session) == []
         assert app.is_running
 
 
@@ -277,7 +277,7 @@ async def test_only_the_first_catalog_opens_the_startup_picker() -> None:
         await pilot.press("enter")
         await feed_events(session, pilot, CATALOG)
 
-        assert session.commands == SWITCH_TO_OLD
+        assert changes(session) == SWITCH_TO_OLD
         assert no_picker(app)
         assert app.is_running
 
@@ -296,7 +296,7 @@ async def test_ctrl_p_does_nothing_over_another_modal() -> None:
         screen = picker(app)
         await pilot.press("ctrl+p")
         assert app.screen is screen
-        assert session.commands == []
+        assert changes(session) == []
 
 
 async def test_ctrl_p_twice_shows_one_picker_that_escape_closes() -> None:
@@ -360,7 +360,7 @@ async def test_r_asks_for_the_highlighted_sessions_new_name_starting_from_its_na
         assert subtitle(screen) == "enter rename · esc back"
         await pilot.press("ctrl+u", *"jk", "enter")
 
-        assert session.commands == [RenameSession(session_id="old", name="jk")]
+        assert changes(session) == [RenameSession(session_id="old", name="jk")]
         assert app.screen is screen
         assert not name.display
         assert app.focused is screen.query_one(OptionList)
@@ -372,7 +372,7 @@ async def test_the_session_viewed_can_be_renamed() -> None:
     async with app.run_test() as pilot:
         await feed_events(session, pilot, CATALOG)
         await pilot.press("ctrl+p", "r", "!", "enter")
-        assert session.commands == [RenameSession(session_id="now", name="today!")]
+        assert changes(session) == [RenameSession(session_id="now", name="today!")]
 
 
 async def test_an_empty_new_name_keeps_the_old_one() -> None:
@@ -381,7 +381,7 @@ async def test_an_empty_new_name_keeps_the_old_one() -> None:
         await feed_events(session, pilot, CATALOG)
         await pilot.press("r", "ctrl+u", "space", "enter")
 
-        assert session.commands == []
+        assert changes(session) == []
         assert not picker(app).query_one(Input).display
 
 
@@ -394,7 +394,7 @@ async def test_escape_from_a_new_name_goes_back_to_the_list_without_renaming() -
         assert not picker(app).query_one(Input).display
         await pilot.press("j", "enter")  # Back on the list: a new session, not a rename.
         await pilot.press("enter")
-        assert session.commands == [NewSession(name=None)]
+        assert changes(session) == [NewSession(name=None)]
 
 
 async def test_r_and_x_do_nothing_on_new_session() -> None:
@@ -404,7 +404,7 @@ async def test_r_and_x_do_nothing_on_new_session() -> None:
         await pilot.press("r", "x")
 
         assert not picker(app).query_one(Input).display
-        assert session.commands == []
+        assert changes(session) == []
 
 
 async def test_x_deletes_the_highlighted_session_once_confirmed() -> None:
@@ -421,7 +421,7 @@ async def test_x_deletes_the_highlighted_session_once_confirmed() -> None:
         )
         await pilot.press("y")
 
-        assert session.commands == [DeleteSession(session_id="old")]
+        assert changes(session) == [DeleteSession(session_id="old")]
         assert isinstance(app.screen, SessionsScreen)
 
 
@@ -431,7 +431,7 @@ async def test_n_or_escape_keeps_the_session() -> None:
         await feed_events(session, pilot, CATALOG)
         await pilot.press("x", "n", "x", "escape")
 
-        assert session.commands == []
+        assert changes(session) == []
         assert isinstance(app.screen, SessionsScreen)
 
 
@@ -441,7 +441,7 @@ async def test_deleting_a_session_open_somewhere_is_left_to_the_backend_to_refus
         await feed_events(session, pilot, CATALOG)
         await pilot.press("ctrl+p", "x", "j", "j", "x")
 
-        assert session.commands == [
+        assert changes(session) == [
             DeleteSession(session_id="now"),
             DeleteSession(session_id="busy"),
         ]
@@ -462,7 +462,7 @@ async def test_a_catalog_again_refreshes_the_picker_shown_in_place() -> None:
         assert options(screen) == ["  flags · Oct 16 18:02", "New session"]
         assert screen.query_one(OptionList).highlighted == 0  # Kept within the sessions.
         await pilot.press("enter")
-        assert session.commands == SWITCH_TO_OLD
+        assert changes(session) == SWITCH_TO_OLD
 
 
 NEWER = SessionSummary(id="new", name="fresh", last_active=ACTIVE)
@@ -476,7 +476,7 @@ async def test_a_catalog_adding_a_session_above_keeps_the_highlighted_session() 
 
         assert picker(app).query_one(OptionList).highlighted == 1
         await pilot.press("enter")
-        assert session.commands == SWITCH_TO_OLD
+        assert changes(session) == SWITCH_TO_OLD
 
 
 async def test_a_catalog_reordering_the_rows_keeps_the_highlighted_session() -> None:
@@ -511,7 +511,7 @@ async def test_a_catalog_dropping_the_highlighted_session_keeps_the_highlight_in
         assert screen.query_one(OptionList).highlighted == 0
         assert screen.rows[0].id == LOCKED.id  # The deleted session's neighbour.
         await pilot.press("enter")
-        assert session.commands == []  # Now on the locked session.
+        assert changes(session) == []  # Now on the locked session.
 
 
 async def test_a_catalog_dropping_the_highlighted_last_session_moves_to_the_nearest_one() -> None:

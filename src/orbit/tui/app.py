@@ -761,9 +761,15 @@ class OrbitApp(App[None], inherit_bindings=False):
             case TasksChanged(tasks=tasks):
                 self._show_tasks(tasks)
             case AgentsChanged() | UsageTotals():
-                pass  # The TUI doesn't watch the control-plane stream.
+                self._follow_stream(event)
             case _:
                 self._show_progress(event)
+
+    def _follow_stream(self, event: AgentsChanged | UsageTotals) -> None:
+        """Show the agents running across workspaces in the workspace picker; nothing shows what
+        turns cost across them."""
+        if isinstance(event, AgentsChanged):
+            self._workspaces.follow_agents(event)
 
     def _follow_agents(self, event: Event) -> None:
         self._agents.track(event)

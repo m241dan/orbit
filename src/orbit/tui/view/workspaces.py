@@ -7,14 +7,22 @@ from pathlib import PurePosixPath
 from typing import Literal
 
 from orbit.protocol import (
+    CODER,
+    CONFIGURATOR,
+    PLANNER,
+    REVIEWER,
+    SUPER_REVIEWER,
+    Activity,
     AddWorkspace,
+    AgentRef,
     RemoveWorkspace,
     SessionStateChanged,
     WorkspaceCloning,
     WorkspaceEntry,
     with_state,
 )
-from orbit.tui.view.common import ListHints, active_session
+from orbit.tui.view.common import ListHints, active_session, counted, ordinal
+from orbit.tui.view.tasks import coder_wait
 
 WORKSPACES_TITLE = "Workspaces"
 ADD_PATH: Literal["add_path"] = "add_path"
@@ -30,6 +38,8 @@ LIST_HINT = "j/k move · enter open · x remove · esc close"
 STARTUP_HINT = "j/k move · enter open · x remove · esc quit"
 PATH_HINT = "enter add · esc back"
 WORKSPACES_HINTS = ListHints(closing=LIST_HINT, quitting=STARTUP_HINT)
+ROLE_ORDER = (CODER, CONFIGURATOR, REVIEWER, SUPER_REVIEWER, PLANNER)
+"""The order the agents summary counts the built-in roles in, before any others."""
 
 # What a repository's URL starts with, as against a path: a scheme git clones over, or the
 # user and host of a scp-style ``user@host:path``.
@@ -92,27 +102,63 @@ def row_key(row: WorkspaceRow) -> str:
     return row.id if isinstance(row, WorkspaceEntry) else row
 
 
-def row_label(row: WorkspaceRow) -> str:
-    """What the picker shows for ``row``."""
+def row_label(row: WorkspaceRow, agents: Sequence[AgentRef] = ()) -> str:
+    """What the picker shows for ``row``, with the ``agents`` running in its workspace."""
     if isinstance(row, AddWorkspace):
         return f"Add {row.path}"
     if isinstance(row, WorkspaceEntry):
-        return workspace_label(row)
+        return workspace_label(row, agents)
     if isinstance(row, WorkspaceCloning):
         return clone_label(row)
     return ADD_PATH_LABEL
 
 
-def workspace_label(entry: WorkspaceEntry) -> str:
-    """A workspace's row: its label, its path, its active session's name and state, and
-    ``read-only`` while another orbit owns it: ``orbit · /src/orbit · today, idle``."""
+def workspace_label(entry: WorkspaceEntry, agents: Sequence[AgentRef] = ()) -> str:
+    """A workspace's row: its label, its path, its active session's name and state, the agents
+    among ``agents`` running in it by role, where its active session waits for a coder, and
+    ``read-only`` while another orbit owns it: ``orbit · /src/orbit · today, running · 2 coders
+    · waiting: 2nd``."""
     details = [entry.label] if entry.path is None else [entry.label, entry.path]
-    active = active_session(entry.sessions)
-    if active is not None:
-        details.append(f"{active.name}, {active.state}")
+    details.extend(activity_notes(entry, agents))
     if entry.read_only:
         details.append(READ_ONLY_NOTE)
     return " · ".join(details)
+
+
+def activity_notes(entry: WorkspaceEntry, agents: Sequence[AgentRef]) -> list[str]:
+    """What's going on in ``entry``'s workspace: its active session's name and state, the
+    agents among ``agents`` running in it by role, and where its active session waits for a
+    coder, each only while there's one."""
+    active = active_session(entry.sessions)
+    state = None if active is None else f"{active.name}, {active.state}"
+    running = agents_summary(roles_in(agents, entry.id))
+    wait = None if active is None else wait_note(active.activity)
+    return [note for note in (state, running, wait) if note]
+
+
+def roles_in(agents: Sequence[AgentRef], workspace: str) -> list[str]:
+    """The roles of the ``agents`` running in the workspace ``workspace``, one per agent."""
+    return [agent.role for agent in agents if agent.workspace == workspace]
+
+
+def agents_summary(roles: Sequence[str]) -> str:
+    """How many agents run in each of ``roles``, one per agent: the built-in roles in
+    :data:`ROLE_ORDER`, then others as first named: ``2 coders · 1 reviewer``; empty for
+    none."""
+    order = {role: index for index, role in enumerate(ROLE_ORDER)}
+    named = sorted(dict.fromkeys(roles), key=lambda role: order.get(role, len(order)))
+    return " · ".join(counted(roles.count(role), role.replace("-", " ")) for role in named)
+
+
+def wait_note(activity: Sequence[Activity]) -> str | None:
+    """Where a session running ``activity`` waits in line for a coder: ``waiting: 2nd``,
+    ``waiting: next`` at 1, and just ``waiting`` without a position; none while it doesn't
+    wait."""
+    wait = coder_wait(activity)
+    if wait is None or wait.position is None:
+        return None if wait is None else "waiting"
+    place = "next" if wait.position == 1 else ordinal(wait.position)
+    return f"waiting: {place}"
 
 
 def clone_label(cloning: WorkspaceCloning) -> str:

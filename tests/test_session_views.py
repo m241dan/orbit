@@ -22,7 +22,7 @@ from orbit.protocol import (
 from orbit.tui import OrbitApp
 from orbit.tui.widgets import ChatPrompt, ChoiceScreen
 from tests.session_apps import CATALOG, CURRENT, OLD, RUNNING, catalog, joined, started
-from tests.tui_fakes import entries, feed_events, opened, rows
+from tests.tui_fakes import changes, entries, feed_events, opened, rows
 
 VIEWING_OLD = "viewing auth rework; today is idle (enter to switch)"
 TODAY = SessionRef(id="now", name="today")
@@ -109,7 +109,7 @@ async def test_picking_a_session_viewed_read_only_offers_to_make_it_active() -> 
             "auth rework is a read-only view; today is the active session, which runs work."
         )
         await pilot.press("enter")
-        assert session.commands == [
+        assert changes(session) == [
             Attach(workspace="w", session="old"),
             ActivateSession(session="old"),
         ]
@@ -124,7 +124,7 @@ async def test_just_look_closes_the_prompt_and_keeps_the_view() -> None:
         await feed_events(session, pilot, view(OLD))
         await pilot.press("j", "enter")
 
-        assert session.commands == [Attach(workspace="w", session="old")]
+        assert changes(session) == [Attach(workspace="w", session="old")]
         assert not isinstance(app.screen, ChoiceScreen)
         assert mark(app) == VIEWING_OLD
 
@@ -137,7 +137,7 @@ async def test_escape_just_looks() -> None:
         await feed_events(session, pilot, view(OLD))
         await pilot.press("escape")
 
-        assert session.commands == [Attach(workspace="w", session="old")]
+        assert changes(session) == [Attach(workspace="w", session="old")]
         assert not isinstance(app.screen, ChoiceScreen)
 
 
@@ -152,7 +152,7 @@ async def test_with_the_active_session_running_the_prompt_only_offers_to_just_lo
         assert choices(screen) == ["Just look"]
         assert message(screen) == "today is running a task; you can switch once it's idle."
         await pilot.press("enter")
-        assert session.commands == [Attach(workspace="w", session="old")]
+        assert changes(session) == [Attach(workspace="w", session="old")]
         assert not isinstance(app.screen, ChoiceScreen)
 
 
@@ -174,7 +174,7 @@ async def test_a_view_not_picked_here_offers_nothing_until_enter_on_its_mark() -
         await pilot.press("enter")
         assert choices(prompt(app)) == ["Make this the active session", "Just look"]
         await pilot.press("enter")
-        assert session.commands == [ActivateSession(session="old")]
+        assert changes(session) == [ActivateSession(session="old")]
 
 
 async def test_enter_on_the_prompt_of_a_live_session_offers_nothing() -> None:
@@ -183,7 +183,7 @@ async def test_enter_on_the_prompt_of_a_live_session_offers_nothing() -> None:
         await feed_events(session, pilot, CATALOG, opened(CURRENT))
         await pilot.press("enter")
         assert not isinstance(app.screen, ChoiceScreen)
-        assert session.commands == []
+        assert changes(session) == []
 
 
 async def test_a_busy_refusal_of_activating_shows_its_message() -> None:
@@ -205,7 +205,7 @@ async def test_running_tasks_in_a_view_shows_the_refusal_naming_the_open_session
     async with app.run_test() as pilot:
         await feed_events(session, pilot, CATALOG, view(OLD))
         await pilot.press("ctrl+r")
-        assert session.commands == [RunTasks()]
+        assert changes(session) == [RunTasks()]
         text = (
             "Session 'auth rework' isn't the active session; 'today' is. Activate it to work in it."
         )
@@ -221,7 +221,7 @@ async def test_j_and_k_move_between_the_choices() -> None:
     async with app.run_test() as pilot:
         await feed_events(session, pilot, CATALOG, view(OLD))
         await pilot.press("enter", "j", "k", "enter")
-        assert session.commands == [ActivateSession(session="old")]
+        assert changes(session) == [ActivateSession(session="old")]
 
 
 async def test_a_state_change_activating_a_third_session_names_it_in_the_prompt() -> None:
@@ -279,7 +279,7 @@ async def test_a_live_snapshot_closes_the_prompt_shown_and_sends_nothing() -> No
 
         await pilot.press("enter")
         assert not isinstance(app.screen, ChoiceScreen)
-        assert session.commands == []
+        assert changes(session) == []
 
 
 async def test_the_viewing_mark_names_what_the_active_session_runs_until_it_is_idle() -> None:
@@ -324,7 +324,7 @@ async def test_a_pick_held_back_by_a_running_session_is_offered_again_once_it_is
         assert message(screen) == "today is idle now."
         assert choices(screen) == ["Make this the active session", "Just look"]
         await pilot.press("enter")
-        assert session.commands == [
+        assert changes(session) == [
             Attach(workspace="w", session="old"),
             ActivateSession(session="old"),
         ]
@@ -342,7 +342,7 @@ async def test_the_offer_again_replaces_the_one_still_shown_and_comes_once() -> 
         await pilot.press("escape")
         await feed_events(session, pilot, RUNNING_T3, IDLE)
         assert not isinstance(app.screen, ChoiceScreen)
-        assert session.commands == [Attach(workspace="w", session="old")]
+        assert changes(session) == [Attach(workspace="w", session="old")]
 
 
 async def test_a_view_not_picked_here_is_not_offered_again_when_the_active_one_is_idle() -> None:

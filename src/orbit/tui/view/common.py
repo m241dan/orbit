@@ -71,6 +71,14 @@ def counted(count: int, singular: str, plural: str | None = None) -> str:
     return f"{count} {noun}"
 
 
+def ordinal(number: int) -> str:
+    """``number`` as an ordinal: ``1st``, ``2nd``, ``3rd``, ``4th``, ``11th``, ``21st``."""
+    suffixes = {1: "st", 2: "nd", 3: "rd"}
+    teen = number % 100 in (11, 12, 13)
+    suffix = "th" if teen else suffixes.get(number % 10, "th")
+    return f"{number}{suffix}"
+
+
 def model_label(settings: Settings) -> str:
     return settings.model or "default"
 
