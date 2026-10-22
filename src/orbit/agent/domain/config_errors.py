@@ -3,6 +3,9 @@ description of what's wrong with it."""
 
 from pydantic import ValidationError
 
+INVALID_CONFIG = "Invalid orbit configuration: "
+"""What the message about an invalid configuration starts with."""
+
 
 class ConfigError(ValueError):
     """The configuration is invalid; the message says where and why, on one line per problem."""

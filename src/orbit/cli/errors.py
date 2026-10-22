@@ -5,9 +5,7 @@ from contextlib import contextmanager
 
 import typer
 
-from orbit.agent import ConfigError
-
-INVALID_CONFIG = "Invalid orbit configuration: "
+from orbit.agent import INVALID_CONFIG, ConfigError
 
 
 @contextmanager

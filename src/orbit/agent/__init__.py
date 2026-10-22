@@ -30,7 +30,7 @@ from orbit.agent.application.workspace_host import WorkspaceHost
 from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.checks import ChecksProposal, Setup
 from orbit.agent.domain.config import OrbitConfig
-from orbit.agent.domain.config_errors import ConfigError
+from orbit.agent.domain.config_errors import INVALID_CONFIG, ConfigError
 from orbit.agent.domain.ownership import WorkspaceOwner
 from orbit.agent.domain.remotes import RemoteSettings
 from orbit.agent.domain.roles import Role
@@ -53,6 +53,13 @@ from orbit.agent.external.repository import (
     orbit_dir,
 )
 from orbit.agent.external.run_file import RunFile, ServeLock, running_server
+from orbit.agent.external.served_workspaces import (
+    HostMaker,
+    ServedWorkspace,
+    ServedWorkspaces,
+    locked,
+    top_level,
+)
 from orbit.agent.external.session_import import ImportBlocked
 from orbit.agent.external.sqlite_schema import StoreError
 from orbit.agent.external.sqlite_store import SqliteStore, WorkspaceStore
@@ -71,6 +78,7 @@ from orbit.agent.external.workspace_lock import WorkspaceLock
 from orbit.agent.external.workspace_registry import WorkspaceRegistry
 
 __all__ = [
+    "INVALID_CONFIG",
     "MODEL_ALIASES",
     "NO_STEPS_NOTE",
     "USER_CONFIG_FILE",
@@ -83,6 +91,7 @@ __all__ = [
     "ControlPlaneServer",
     "FallbackFiles",
     "GitCoderTree",
+    "HostMaker",
     "ImportBlocked",
     "Limits",
     "ListenFailed",
@@ -100,6 +109,8 @@ __all__ = [
     "RunFile",
     "RunningServer",
     "ServeLock",
+    "ServedWorkspace",
+    "ServedWorkspaces",
     "ServerSettings",
     "SessionStore",
     "Setup",
@@ -127,6 +138,7 @@ __all__ = [
     "has_git_identity",
     "in_git_work_tree",
     "local_tls",
+    "locked",
     "open_workspace_store",
     "orbit_dir",
     "read_config",
@@ -138,6 +150,7 @@ __all__ = [
     "run_step",
     "running_server",
     "tls_warnings",
+    "top_level",
     "workspace_state",
     "write_checks",
 ]

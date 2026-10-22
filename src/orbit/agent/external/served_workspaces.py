@@ -1,0 +1,217 @@
+"""The workspaces a server serves as frontends add and remove them: each checked, configured
+and locked off the event loop, then found or registered in the store and flagged served."""
+
+import asyncio
+from collections.abc import Callable
+from contextlib import ExitStack
+from dataclasses import dataclass
+from pathlib import Path
+
+from orbit.agent.application.control_plane import WorkspaceUnavailable
+from orbit.agent.application.recovery import RecoveryFailed
+from orbit.agent.application.workspace_host import WorkspaceHost
+from orbit.agent.domain.config import OrbitConfig
+from orbit.agent.domain.config_errors import INVALID_CONFIG, ConfigError
+from orbit.agent.domain.ownership import WorkspaceOwner
+from orbit.agent.domain.workspaces import PathKind
+from orbit.agent.external.config_file import read_config
+from orbit.agent.external.repository import (
+    git_top_level,
+    has_git_identity,
+    in_git_work_tree,
+    orbit_dir,
+)
+from orbit.agent.external.session_import import ImportBlocked
+from orbit.agent.external.sqlite_schema import StoreError
+from orbit.agent.external.sqlite_store import SqliteStore
+from orbit.agent.external.store_startup import OpenedStore, open_workspace_store
+from orbit.agent.external.workspace_lock import WorkspaceLock
+from orbit.agent.external.workspace_registry import WorkspaceRegistry
+
+
+@dataclass(frozen=True)
+class ServedWorkspace:
+    """A workspace a server serves: the one at ``root``, with the repository's ``owner`` if
+    another orbit owns it, making it read-only, and its workspace ``lock``."""
+
+    root: Path
+    owner: WorkspaceOwner | None
+    lock: WorkspaceLock
+
+
+type HostMaker = Callable[[ServedWorkspace, OrbitConfig], Callable[[OpenedStore], WorkspaceHost]]
+"""What gives, for a served workspace and its configuration, what builds its host over its
+view of the store."""
+
+type _Prepared = tuple[ServedWorkspace, Callable[[OpenedStore], WorkspaceHost]]
+
+
+class ServedWorkspaces:
+    """The workspaces a server serves from the ``store``, each with its host made by
+    ``make_host``, checked for a git identity if the coder works in a ``worktree``, and its
+    workspace lock held, if it's free, until it's removed or ``stack`` closes: those it starts
+    with, as :meth:`served` serves them, and those frontends add, as a control plane's
+    ``WorkspaceSource``. Once the server's ``url`` is known, the locks taken name it."""
+
+    def __init__(
+        self,
+        stack: ExitStack,
+        store: SqliteStore,
+        make_host: HostMaker,
+        *,
+        worktree: bool,
+    ) -> None:
+        self._store = store
+        self._make_host = make_host
+        self._worktree = worktree
+        self._locks: dict[str, WorkspaceLock] = {}
+        self.url: str | None = None
+        stack.callback(self._let_go)
+
+    @property
+    def locks(self) -> tuple[WorkspaceLock, ...]:
+        """The locks of the workspaces served."""
+        return tuple(self._locks.values())
+
+    def served(self, root: Path) -> tuple[ServedWorkspace, Callable[[], WorkspaceHost]]:
+        """The workspace at ``root`` served from the start, flagged served, with what builds its
+        host, its lock held, if it's free. Raises :class:`WorkspaceUnavailable` as :meth:`open`
+        says."""
+        return asyncio.run(self._taken(root))
+
+    def serves(self, workspace_id: str) -> bool:
+        """Whether the workspace ``workspace_id`` is served."""
+        return workspace_id in self._locks
+
+    async def kind(self, path: str) -> PathKind:
+        """What there is at ``path``."""
+        return await asyncio.to_thread(_kind, Path(path))
+
+    async def top_level(self, path: str) -> str:
+        """The path of the workspace the directory at ``path`` stands for, as
+        :func:`top_level` finds it."""
+        return str(await asyncio.to_thread(top_level, Path(path).resolve()))
+
+    async def open(self, root: str) -> WorkspaceHost:
+        """The host of the workspace at ``root``, registered or found and flagged served, its
+        lock taken if it's free. Raises :class:`WorkspaceUnavailable` if git has no identity for
+        the coder's commits there, its configuration is invalid, its lock can't be made or the
+        store fails."""
+        _, make = await self._taken(Path(root))
+        return make()
+
+    async def _taken(self, root: Path) -> tuple[ServedWorkspace, Callable[[], WorkspaceHost]]:
+        """The workspace at ``root``, registered or found and flagged served, with what builds
+        its host, its lock taken if it's free and held until it's removed or the stack closes.
+        Raises :class:`WorkspaceUnavailable` as :meth:`open` says."""
+        # Git, the configuration file and the lock would stall every served workspace.
+        preparing = asyncio.ensure_future(asyncio.to_thread(self._prepared, root))
+        try:
+            served, make = await asyncio.shield(preparing)
+        except asyncio.CancelledError:
+            preparing.add_done_callback(_let_go_prepared)
+            raise
+        try:
+            opened = await _flagged_view(self._store, root, owned=served.owner is None)
+        except BaseException:
+            served.lock.close()
+            raise
+        self._locks[opened.store.workspace_id] = served.lock
+        return served, lambda: make(opened)
+
+    def _prepared(self, root: Path) -> _Prepared:
+        """The workspace at ``root``, its lock taken if it's free, with what builds its host
+        over its view of the store. Raises :class:`WorkspaceUnavailable` as :meth:`open` says,
+        and lets the lock go if building fails."""
+        config = workspace_config(root, worktree=self._worktree)
+        lock, owner = locked(root, self.url)
+        served = ServedWorkspace(root, owner, lock)
+        try:
+            return served, self._make_host(served, config)
+        except BaseException:
+            lock.close()
+            raise
+
+    async def close(self, workspace_id: str) -> None:
+        """Let go of the lock on the workspace ``workspace_id`` and stop serving it."""
+        self._locks.pop(workspace_id).close()
+        await WorkspaceRegistry(self._store).set_served(workspace_id, False)
+
+    def _let_go(self) -> None:
+        """Let go of the locks of the workspaces still served."""
+        for lock in self._locks.values():
+            lock.close()
+        self._locks.clear()
+
+
+def _let_go_prepared(preparing: asyncio.Future[_Prepared]) -> None:
+    """Let go of the lock of the workspace ``preparing`` prepared for an add that was cancelled
+    meanwhile, if it was prepared."""
+    if preparing.cancelled() or preparing.exception() is not None:
+        return
+    served, _ = preparing.result()
+    served.lock.close()
+
+
+def top_level(directory: Path) -> Path:
+    """The project directory ``directory``, resolved, stands for: its git work tree's top
+    level, if it's in one."""
+    top = git_top_level(str(directory))
+    return Path(top) if top else directory
+
+
+def _kind(path: Path) -> PathKind:
+    """What there is at ``path``."""
+    if path.is_dir():
+        return PathKind.DIRECTORY
+    return PathKind.FILE if path.exists() else PathKind.MISSING
+
+
+def workspace_config(root: Path, *, worktree: bool) -> OrbitConfig:
+    """The configuration of the workspace at ``root``. Raises :class:`WorkspaceUnavailable`
+    if it's invalid, or, with a ``worktree``, git has no identity for commits there."""
+    problem = _identity_problem(root) if worktree else None
+    if problem is not None:
+        raise WorkspaceUnavailable(problem)
+    try:
+        return read_config(str(root))
+    except ConfigError as exc:
+        raise WorkspaceUnavailable(f"{INVALID_CONFIG}{exc}") from None
+
+
+def _identity_problem(root: Path) -> str | None:
+    """What's wrong if the workspace at ``root`` is a git repository that git has no identity
+    for commits in, as the coder's worktree commits there; none otherwise."""
+    if not in_git_work_tree(str(root)) or has_git_identity(str(root)):
+        return None
+    return (
+        f"Git has no identity for commits in {root}: set user.name and user.email"
+        ' (git config --global user.name "…"), or mount your ~/.gitconfig into the container.'
+    )
+
+
+def locked(root: Path, url: str | None = None) -> tuple[WorkspaceLock, WorkspaceOwner | None]:
+    """The workspace lock on the repository at ``root``, naming the server's ``url`` if it's
+    known, and the owner, if another orbit holds it. Raises :class:`WorkspaceUnavailable` if
+    it can't be made."""
+    lock = WorkspaceLock(orbit_dir(str(root)))
+    if url is not None:
+        lock.announce(url)
+    try:
+        return lock, lock.take()
+    except OSError as exc:
+        raise WorkspaceUnavailable(
+            f"Couldn't lock the repository with {lock.path}: {exc}"
+        ) from None
+
+
+async def _flagged_view(store: SqliteStore, root: Path, *, owned: bool) -> OpenedStore:
+    """The workspace at ``root``'s view of ``store``, as :func:`open_workspace_store` opens it,
+    recovering its fallback files if this orbit ``owned`` it, flagged as served. Raises
+    :class:`WorkspaceUnavailable` if that fails."""
+    try:
+        opened = await open_workspace_store(store, root, owned=owned)
+        await WorkspaceRegistry(store).set_served(opened.store.workspace_id, True)
+    except (StoreError, ImportBlocked, RecoveryFailed) as exc:
+        raise WorkspaceUnavailable(str(exc)) from None
+    return opened

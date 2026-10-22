@@ -22,9 +22,10 @@ from orbit.agent import (
     McpHost,
     OpenedStore,
     OrbitConfig,
-    PathKind,
     RecoveryFailed,
     Role,
+    ServedWorkspace,
+    ServedWorkspaces,
     SqliteStore,
     StorageSettings,
     StoreError,
@@ -35,18 +36,17 @@ from orbit.agent import (
     WorkspaceOwner,
     WorkspaceRegistry,
     WorkspaceUnavailable,
-    git_top_level,
-    has_git_identity,
     in_git_work_tree,
+    locked,
     open_workspace_store,
-    orbit_dir,
     read_config,
     read_storage,
     run_step,
+    top_level,
     workspace_state,
     write_checks,
 )
-from orbit.cli.errors import INVALID_CONFIG, _configured, _exit_on
+from orbit.cli.errors import _configured, _exit_on
 from orbit.protocol import PLANNER, Settings, ToolAccess
 
 
@@ -62,14 +62,7 @@ def _workspace(path: Path) -> Path:
     if not resolved.is_dir():
         typer.echo(f"Workspace {resolved} isn't a directory.", err=True)
         raise typer.Exit(2)
-    return _top_level(resolved)
-
-
-def _top_level(directory: Path) -> Path:
-    """The project directory ``directory``, resolved, stands for: its git work tree's top
-    level, if it's in one."""
-    top = git_top_level(str(directory))
-    return Path(top) if top else directory
+    return top_level(resolved)
 
 
 @dataclass(frozen=True)
@@ -169,11 +162,8 @@ def _repository_lock(root: Path) -> Iterator[tuple[WorkspaceLock, WorkspaceOwner
 
     Exits with status 2 if the lock can't be made.
     """
-    lock = WorkspaceLock(orbit_dir(str(root)))
-    with _exit_on(
-        OSError, message=lambda exc: f"Couldn't lock the repository with {lock.path}: {exc}"
-    ):
-        owner = lock.take()
+    with _exit_on(WorkspaceUnavailable):
+        lock, owner = locked(root)
     try:
         yield lock, owner
     finally:
@@ -236,167 +226,20 @@ def _host_maker(
     return make
 
 
-@dataclass(frozen=True)
-class _ServedWorkspace:
-    """A workspace ``orbit serve`` serves: the one at ``root``, with the repository's ``owner``
-    if another orbit owns it, making it read-only, and its workspace ``lock``."""
-
-    root: Path
-    owner: WorkspaceOwner | None
-    lock: WorkspaceLock
-
-
-class _Workspaces:
+def _workspaces(
+    stack: ExitStack, flags: _Backend, store: SqliteStore, storage: StorageSettings
+) -> ServedWorkspaces:
     """The workspaces ``orbit serve`` serves from the ``store``, each with its host made as
-    ``flags`` ask, keeping its sessions as ``storage`` says, and its workspace lock held, if
-    it's free, until it's removed or ``stack`` closes: those it starts with, as :meth:`served`
-    serves them, and those frontends add, as a control plane's ``WorkspaceSource``. Once the
-    server's ``url`` is known, the locks taken name it."""
+    ``flags`` ask, keeping its sessions as ``storage`` says, and its lock held until it's
+    removed or ``stack`` closes."""
 
-    def __init__(
-        self, stack: ExitStack, flags: _Backend, store: SqliteStore, storage: StorageSettings
-    ) -> None:
-        self._flags = flags
-        self._store = store
-        self._storage = storage
-        self._locks: dict[str, WorkspaceLock] = {}
-        self.url: str | None = None
-        stack.callback(self._let_go)
+    def make(
+        workspace: ServedWorkspace, config: OrbitConfig
+    ) -> Callable[[OpenedStore], WorkspaceHost]:
+        backend = replace(flags, owner=workspace.owner, lock=workspace.lock)
+        return _host_maker(backend, workspace.root, config, storage, pick_session=False)
 
-    @property
-    def locks(self) -> tuple[WorkspaceLock, ...]:
-        """The locks of the workspaces served."""
-        return tuple(self._locks.values())
-
-    def served(self, root: Path) -> tuple[_ServedWorkspace, Callable[[], WorkspaceHost]]:
-        """The workspace at ``root`` served from the start, flagged served, with what builds its
-        host, its lock held, if it's free. Raises :class:`WorkspaceUnavailable` as :meth:`open`
-        says."""
-        return asyncio.run(self._taken(root))
-
-    def serves(self, workspace_id: str) -> bool:
-        """Whether the workspace ``workspace_id`` is served."""
-        return workspace_id in self._locks
-
-    async def kind(self, path: str) -> PathKind:
-        """What there is at ``path``."""
-        return await asyncio.to_thread(_kind, Path(path))
-
-    async def top_level(self, path: str) -> str:
-        """The path of the workspace the directory at ``path`` stands for, as :func:`_workspace`
-        finds it."""
-        return str(await asyncio.to_thread(_top_level, Path(path).resolve()))
-
-    async def open(self, root: str) -> WorkspaceHost:
-        """The host of the workspace at ``root``, registered or found and flagged served, its
-        lock taken if it's free. Raises :class:`WorkspaceUnavailable` if git has no identity for
-        the coder's commits there, its configuration is invalid, its lock can't be made or the
-        store fails."""
-        _, make = await self._taken(Path(root))
-        return make()
-
-    async def _taken(self, root: Path) -> tuple[_ServedWorkspace, Callable[[], WorkspaceHost]]:
-        """The workspace at ``root``, registered or found and flagged served, with what builds
-        its host, its lock taken if it's free and held until it's removed or the stack closes.
-        Raises :class:`WorkspaceUnavailable` as :meth:`open` says."""
-        # Git, the configuration file and the lock would stall every served workspace.
-        preparing = asyncio.ensure_future(asyncio.to_thread(self._prepared, root))
-        try:
-            served, make = await asyncio.shield(preparing)
-        except asyncio.CancelledError:
-            preparing.add_done_callback(_let_go_prepared)
-            raise
-        try:
-            opened = await _flagged_view(self._store, root, owned=served.owner is None)
-        except BaseException:
-            served.lock.close()
-            raise
-        self._locks[opened.store.workspace_id] = served.lock
-        return served, lambda: make(opened)
-
-    def _prepared(
-        self, root: Path
-    ) -> tuple[_ServedWorkspace, Callable[[OpenedStore], WorkspaceHost]]:
-        """The workspace at ``root``, its lock taken if it's free, with what builds its host
-        over its view of the store. Raises :class:`WorkspaceUnavailable` as :meth:`open` says,
-        and lets the lock go if building fails."""
-        config = _workspace_config(root, worktree=self._flags.worktree)
-        lock, owner = _locked(root, self.url)
-        try:
-            backend = replace(self._flags, owner=owner, lock=lock)
-            make = _host_maker(backend, root, config, self._storage, pick_session=False)
-        except BaseException:
-            lock.close()
-            raise
-        return _ServedWorkspace(root, owner, lock), make
-
-    async def close(self, workspace_id: str) -> None:
-        """Let go of the lock on the workspace ``workspace_id`` and stop serving it."""
-        self._locks.pop(workspace_id).close()
-        await WorkspaceRegistry(self._store).set_served(workspace_id, False)
-
-    def _let_go(self) -> None:
-        """Let go of the locks of the workspaces still served."""
-        for lock in self._locks.values():
-            lock.close()
-        self._locks.clear()
-
-
-def _let_go_prepared(
-    preparing: asyncio.Future[tuple[_ServedWorkspace, Callable[[OpenedStore], WorkspaceHost]]],
-) -> None:
-    """Let go of the lock of the workspace ``preparing`` prepared for an add that was cancelled
-    meanwhile, if it was prepared."""
-    if preparing.cancelled() or preparing.exception() is not None:
-        return
-    served, _ = preparing.result()
-    served.lock.close()
-
-
-def _kind(path: Path) -> PathKind:
-    """What there is at ``path``."""
-    if path.is_dir():
-        return PathKind.DIRECTORY
-    return PathKind.FILE if path.exists() else PathKind.MISSING
-
-
-def _workspace_config(root: Path, *, worktree: bool) -> OrbitConfig:
-    """The configuration of the workspace at ``root``. Raises :class:`WorkspaceUnavailable`
-    if it's invalid, or, with a ``worktree``, git has no identity for commits there."""
-    problem = _identity_problem(root) if worktree else None
-    if problem is not None:
-        raise WorkspaceUnavailable(problem)
-    try:
-        return read_config(str(root))
-    except ConfigError as exc:
-        raise WorkspaceUnavailable(f"{INVALID_CONFIG}{exc}") from None
-
-
-def _locked(root: Path, url: str | None) -> tuple[WorkspaceLock, WorkspaceOwner | None]:
-    """The workspace lock on the repository at ``root``, naming the server's ``url`` if it's
-    known, and the owner, if another orbit holds it. Raises :class:`WorkspaceUnavailable` if
-    it can't be made."""
-    lock = WorkspaceLock(orbit_dir(str(root)))
-    if url is not None:
-        lock.announce(url)
-    try:
-        return lock, lock.take()
-    except OSError as exc:
-        raise WorkspaceUnavailable(
-            f"Couldn't lock the repository with {lock.path}: {exc}"
-        ) from None
-
-
-async def _flagged_view(store: SqliteStore, root: Path, *, owned: bool) -> OpenedStore:
-    """The workspace at ``root``'s view of ``store``, as :func:`open_workspace_store` opens it,
-    recovering its fallback files if this orbit ``owned`` it, flagged as served. Raises
-    :class:`WorkspaceUnavailable` if that fails."""
-    try:
-        opened = await open_workspace_store(store, root, owned=owned)
-        await WorkspaceRegistry(store).set_served(opened.store.workspace_id, True)
-    except (StoreError, ImportBlocked, RecoveryFailed) as exc:
-        raise WorkspaceUnavailable(str(exc)) from None
-    return opened
+    return ServedWorkspaces(stack, store, make, worktree=flags.worktree)
 
 
 @dataclass(frozen=True)
@@ -405,8 +248,8 @@ class _Serving:
     starts serving, and what's ``served`` as frontends add and remove workspaces."""
 
     build: Callable[[], ControlPlane]
-    workspaces: tuple[_ServedWorkspace, ...]
-    served: _Workspaces
+    workspaces: tuple[ServedWorkspace, ...]
+    served: ServedWorkspaces
 
 
 @contextmanager
@@ -429,7 +272,7 @@ def _serving(
     with ExitStack() as stack:
         store = _open(state)
         stack.callback(lambda: asyncio.run(store.close()))
-        source = _Workspaces(stack, flags, store, storage)
+        source = _workspaces(stack, flags, store, storage)
         served = [_added(source, root) for root in dict.fromkeys(added)]
         served += _earlier(source, store)
         workspaces = tuple(workspace for workspace, _ in served)
@@ -441,7 +284,9 @@ def _serving(
         yield _Serving(build, workspaces, source)
 
 
-def _added(source: _Workspaces, root: Path) -> tuple[_ServedWorkspace, Callable[[], WorkspaceHost]]:
+def _added(
+    source: ServedWorkspaces, root: Path
+) -> tuple[ServedWorkspace, Callable[[], WorkspaceHost]]:
     """The workspace at ``root``, added with ``--add``, served by ``source`` and flagged served.
 
     Exits with status 2 if it can't be served, leaving it unflagged.
@@ -451,14 +296,14 @@ def _added(source: _Workspaces, root: Path) -> tuple[_ServedWorkspace, Callable[
 
 
 def _earlier(
-    source: _Workspaces, store: SqliteStore
-) -> list[tuple[_ServedWorkspace, Callable[[], WorkspaceHost]]]:
+    source: ServedWorkspaces, store: SqliteStore
+) -> list[tuple[ServedWorkspace, Callable[[], WorkspaceHost]]]:
     """The workspaces flagged as served in ``store`` by an earlier run that ``source`` doesn't
     serve yet, served by it, but for those that are gone or can't be served, warning of each.
 
     Exits with status 2 if the store fails.
     """
-    served: list[tuple[_ServedWorkspace, Callable[[], WorkspaceHost]]] = []
+    served: list[tuple[ServedWorkspace, Callable[[], WorkspaceHost]]] = []
     for workspace_id, root in _flagged(store):
         if source.serves(workspace_id):
             continue
@@ -467,17 +312,6 @@ def _earlier(
         except WorkspaceUnavailable as exc:
             typer.echo(f"Warning: The workspace {root} isn't served: {exc}", err=True)
     return served
-
-
-def _identity_problem(root: Path) -> str | None:
-    """What's wrong if the workspace at ``root`` is a git repository that git has no identity
-    for commits in, as the coder's worktree commits there; none otherwise."""
-    if not in_git_work_tree(str(root)) or has_git_identity(str(root)):
-        return None
-    return (
-        f"Git has no identity for commits in {root}: set user.name and user.email"
-        ' (git config --global user.name "…"), or mount your ~/.gitconfig into the container.'
-    )
 
 
 def _flagged(store: SqliteStore) -> list[tuple[str, Path]]:

@@ -12,6 +12,7 @@ from pathlib import Path
 import typer
 
 from orbit.agent import (
+    INVALID_CONFIG,
     USER_CONFIG_FILE,
     ConfigError,
     ControlPlane,
@@ -20,6 +21,8 @@ from orbit.agent import (
     LocalDiscoveryUnavailable,
     LocalTls,
     RunFile,
+    ServedWorkspace,
+    ServedWorkspaces,
     ServeLock,
     ServerSettings,
     TlsError,
@@ -33,8 +36,8 @@ from orbit.agent import (
     running_server,
     tls_warnings,
 )
-from orbit.cli.backend import _Backend, _ServedWorkspace, _serving, _workspace, _Workspaces
-from orbit.cli.errors import INVALID_CONFIG, _configured, _exit_on
+from orbit.cli.backend import _Backend, _serving, _workspace
+from orbit.cli.errors import _configured, _exit_on
 from orbit.cli.options import (
     AddOption,
     CertOption,
@@ -154,7 +157,7 @@ def _refuse_second(state: Path, taken: bool) -> None:
 
 
 def _banner(
-    workspaces: Sequence[_ServedWorkspace], token_file: TokenFile, settings: ServerSettings
+    workspaces: Sequence[ServedWorkspace], token_file: TokenFile, settings: ServerSettings
 ) -> Callable[[str], str]:
     """What gives the line ``orbit serve`` prints once listening at a URL, listing the
     ``workspaces`` it serves, each as its owner, or read-only while another orbit owns it, or
@@ -173,7 +176,7 @@ def _banner(
     return banner
 
 
-def _standing(workspace: _ServedWorkspace) -> str:
+def _standing(workspace: ServedWorkspace) -> str:
     """How ``orbit serve`` serves ``workspace``: as its owner, or read-only, naming the owner."""
     owner = workspace.owner
     if owner is None:
@@ -307,7 +310,7 @@ class _ServeParts:
     run_file: RunFile
     local: LocalTls | None
     banner: Callable[[str], str]
-    served: _Workspaces
+    served: ServedWorkspaces
 
 
 async def _served(parts: _ServeParts, profile: Path | None) -> None:

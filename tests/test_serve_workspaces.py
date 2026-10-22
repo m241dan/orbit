@@ -14,6 +14,7 @@ import pytest
 from orbit.agent import (
     OrbitConfig,
     PathKind,
+    ServedWorkspaces,
     SqliteStore,
     StorageSettings,
     WorkspaceLock,
@@ -21,8 +22,9 @@ from orbit.agent import (
     WorkspaceUnavailable,
     read_config,
 )
+from orbit.agent.external import served_workspaces
 from orbit.cli import backend
-from orbit.cli.backend import _Backend, _Workspaces
+from orbit.cli.backend import _Backend, _workspaces
 
 FLAGS = _Backend(None, None, False, False, False, False, new=False, name=None)
 
@@ -39,8 +41,8 @@ def stack() -> ExitStack:
     return ExitStack()
 
 
-def workspaces(stack: ExitStack, store: SqliteStore, flags: _Backend = FLAGS) -> _Workspaces:
-    return _Workspaces(stack, flags, store, StorageSettings())
+def workspaces(stack: ExitStack, store: SqliteStore, flags: _Backend = FLAGS) -> ServedWorkspaces:
+    return _workspaces(stack, flags, store, StorageSettings())
 
 
 def directory(tmp_path: Path, name: str = "repo") -> Path:
@@ -142,7 +144,7 @@ class CountedLock(WorkspaceLock):
 async def test_a_lock_closed_with_its_workspace_isnt_let_go_again_as_the_stack_closes(
     stack: ExitStack, store: SqliteStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(backend, "WorkspaceLock", CountedLock)
+    monkeypatch.setattr(served_workspaces, "WorkspaceLock", CountedLock)
     monkeypatch.setattr(CountedLock, "closes", 0)
     root = directory(tmp_path)
     source = workspaces(stack, store)
@@ -173,13 +175,41 @@ async def test_a_repository_git_has_no_identity_for_is_unavailable_with_a_worktr
 ) -> None:
     root = directory(tmp_path)
     subprocess.run(["git", "init", "-q", str(root)], check=True)
-    monkeypatch.setattr(backend, "has_git_identity", lambda path: False)
+    monkeypatch.setattr(served_workspaces, "has_git_identity", lambda path: False)
     flags = _Backend(None, None, False, True, False, False, new=False, name=None)
 
     with pytest.raises(
         WorkspaceUnavailable, match=f"^{re.escape(f'Git has no identity for commits in {root}')}"
     ):
         await workspaces(stack, store, flags).open(str(root))
+
+
+async def test_a_slow_identity_check_leaves_the_event_loop_running(
+    stack: ExitStack, store: SqliteStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = directory(tmp_path)
+    subprocess.run(["git", "init", "-q", str(root)], check=True)
+    checking, gate = threading.Event(), threading.Event()
+
+    def waits(path: str) -> bool:
+        checking.set()
+        assert gate.wait(10)
+        return False
+
+    monkeypatch.setattr(served_workspaces, "has_git_identity", waits)
+    flags = _Backend(None, None, False, True, False, False, new=False, name=None)
+    opening = asyncio.create_task(workspaces(stack, store, flags).open(str(root)))
+
+    async def lets_go() -> None:
+        """Let the identity check finish once it's under way, running meanwhile."""
+        while not checking.is_set():
+            await asyncio.sleep(0.01)
+        gate.set()
+
+    await asyncio.wait_for(lets_go(), 5)
+
+    with pytest.raises(WorkspaceUnavailable, match=r"^Git has no identity"):
+        await opening
 
 
 async def test_a_lock_that_cant_be_made_is_unavailable_naming_it(
@@ -212,7 +242,7 @@ async def test_a_failure_opening_the_store_lets_the_lock_go(
     async def fails(store: SqliteStore, root: Path, *, owned: bool) -> None:
         raise RuntimeError("A bug.")
 
-    monkeypatch.setattr(backend, "open_workspace_store", fails)
+    monkeypatch.setattr(served_workspaces, "open_workspace_store", fails)
 
     with pytest.raises(RuntimeError, match="A bug"):
         await workspaces(stack, store).open(str(root))
@@ -229,7 +259,7 @@ async def test_the_configuration_is_read_off_the_event_loop(
         threads.append(threading.current_thread())
         return read_config(path)
 
-    monkeypatch.setattr(backend, "read_config", recorded)
+    monkeypatch.setattr(served_workspaces, "read_config", recorded)
 
     host = await workspaces(stack, store).open(str(root))
     await host.close()
@@ -262,10 +292,12 @@ def gated(monkeypatch: pytest.MonkeyPatch, gate: threading.Event, fails: bool = 
             raise RuntimeError("A bug.")
         return read_config(path)
 
-    monkeypatch.setattr(backend, "read_config", waits)
+    monkeypatch.setattr(served_workspaces, "read_config", waits)
 
 
-async def cancelled_while_preparing(source: _Workspaces, root: Path, gate: threading.Event) -> None:
+async def cancelled_while_preparing(
+    source: ServedWorkspaces, root: Path, gate: threading.Event
+) -> None:
     """Open the workspace at ``root`` with ``source``, cancel it while it's being prepared, then
     let the preparation finish."""
     opening = asyncio.create_task(source.open(str(root)))

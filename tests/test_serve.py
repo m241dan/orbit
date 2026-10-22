@@ -28,6 +28,7 @@ from websockets.sync.client import ClientConnection, connect
 from orbit.agent import (
     ControlPlane,
     RunFile,
+    ServedWorkspaces,
     ServeLock,
     ServerSettings,
     TokenFile,
@@ -38,7 +39,6 @@ from orbit.agent import (
 from orbit.agent.domain.server import client_fingerprint, is_revoked
 from orbit.agent.external.repository import in_git_work_tree
 from orbit.cli import app, backend, chat, serve
-from orbit.cli.backend import _Workspaces
 from orbit.protocol import (
     PROTOCOL_VERSION,
     AddTask,
@@ -1269,7 +1269,7 @@ def serve_parts(plane: ControlPlane, state: Path) -> serve._ServeParts:
         run_file=RunFile(state),
         local=None,
         banner=lambda url: url,
-        served=cast(_Workspaces, None),  # Never reached: serving stops before listening.
+        served=cast(ServedWorkspaces, None),  # Never reached: serving stops before listening.
     )
 
 
