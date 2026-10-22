@@ -138,9 +138,16 @@ def test_a_lock_that_cant_be_taken_raises_and_stays_free(
         raise OSError("no locks here")
 
     lock = ServeLock(tmp_path)
-    monkeypatch.setattr("orbit.agent.external.run_file.fcntl.flock", failing)
+    monkeypatch.setattr("orbit.agent.external.file_locks.fcntl.flock", failing)
     with pytest.raises(OSError, match="no locks here"):
         lock.take()
     monkeypatch.undo()
     assert lock.take()
+    lock.close()
+
+
+def test_taking_the_lock_leaves_its_file_empty(tmp_path: Path) -> None:
+    lock = ServeLock(tmp_path)
+    assert lock.take()
+    assert lock.path.read_bytes() == b""
     lock.close()

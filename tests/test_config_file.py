@@ -1,6 +1,8 @@
 import os
 import re
 import stat
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -285,3 +287,15 @@ def test_writing_checks_keeps_the_files_mode(tmp_path: Path) -> None:
     path.chmod(0o664)
     write_checks(str(tmp_path), ChecksProposal(steps=(LINT,)))
     assert stat.S_IMODE(path.stat().st_mode) == 0o664
+
+
+def test_a_utf8_file_is_read_under_an_ascii_locale(tmp_path: Path) -> None:
+    write(tmp_path, "")
+    (tmp_path / CONFIG_PATH).write_text("# Zoë ✓\nfix_attempts = 4\n", encoding="utf-8")
+    script = (
+        "import sys; from orbit.agent.external.config_file import read_config;"
+        " assert read_config(sys.argv[1]).fix_attempts == 4"
+    )
+    ascii_locale = {"LC_ALL": "C", "PYTHONUTF8": "0", "PYTHONCOERCECLOCALE": "0"}
+    env = {**os.environ, **ascii_locale}
+    subprocess.run([sys.executable, "-c", script, str(tmp_path)], check=True, env=env)

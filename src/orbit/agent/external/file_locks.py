@@ -9,13 +9,13 @@ import os
 from pathlib import Path
 
 
-def take_flock(path: Path, text: str) -> int | None:
-    """A descriptor holding an exclusive lock on the file ``path``, created if need be, with
-    ``text`` alone written in it; none when another open file holds the lock.
+def take_flock(path: Path, text: str, mode: int = 0o644) -> int | None:
+    """A descriptor holding an exclusive lock on the file ``path``, created with ``mode`` if
+    need be, with ``text`` alone written in it; none when another open file holds the lock.
 
     Raises ``OSError`` when the file can't be opened, locked or written.
     """
-    fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
+    fd = os.open(path, os.O_RDWR | os.O_CREAT, mode)
     try:
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         rewrite(fd, text)

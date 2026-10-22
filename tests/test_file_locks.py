@@ -1,6 +1,7 @@
 """File locks: an exclusive flock on a file that names whoever holds it."""
 
 import os
+import stat
 from pathlib import Path
 
 import pytest
@@ -67,3 +68,11 @@ def test_rewriting_finishes_a_partial_write(
     monkeypatch.undo()
     os.close(fd)
     assert lock.read_text() == "hello"
+
+
+def test_a_new_lock_file_takes_the_mode_its_given(tmp_path: Path) -> None:
+    lock = tmp_path / "a.lock"
+    fd = take_flock(lock, "123", 0o600)
+    assert fd is not None
+    assert stat.S_IMODE(lock.stat().st_mode) == 0o600
+    os.close(fd)

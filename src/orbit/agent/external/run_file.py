@@ -5,14 +5,14 @@ serves every workspace registered there, and the serve lock beside it, ``run/ser
 it so: an exclusive ``flock`` the serve holds from its start, before it writes the run file, until
 its process ends."""
 
-import fcntl
 import json
 import os
 from pathlib import Path
 
 from orbit.agent.domain.server import LocalTls, RunningServer, parse_running
+from orbit.agent.external.file_locks import take_flock
 from orbit.agent.external.processes import process_alive
-from orbit.agent.external.whole_files import write_private
+from orbit.agent.external.whole_files import PRIVATE, write_private
 
 RUN = "run"
 SERVER_FILE = "server.json"
@@ -64,15 +64,9 @@ class ServeLock:
         Raises ``OSError`` when the lock file can't be made or opened, or locked.
         """
         self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        fd = os.open(self.path, os.O_RDWR | os.O_CREAT, 0o600)
-        try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            os.close(fd)
+        fd = take_flock(self.path, "", PRIVATE)
+        if fd is None:
             return False
-        except BaseException:
-            os.close(fd)
-            raise
         self._fd = fd
         return True
 

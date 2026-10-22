@@ -1,6 +1,5 @@
 """Orbit's project configuration file, ``.orbit/config.toml``."""
 
-import tomllib
 from pathlib import Path
 
 import tomlkit
@@ -10,8 +9,8 @@ from tomlkit.items import AoT, Table
 from orbit.agent.application.ports import ConfigWriteFailed
 from orbit.agent.domain.checks import ChecksProposal
 from orbit.agent.domain.config import OrbitConfig, load_config
-from orbit.agent.domain.config_errors import ConfigError
 from orbit.agent.external.built_in_roles import read_built_in_roles
+from orbit.agent.external.toml_files import read_toml
 from orbit.agent.external.whole_files import write_whole
 
 CONFIG_PATH = ".orbit/config.toml"
@@ -27,10 +26,7 @@ def read_config(root: str = ".") -> OrbitConfig:
     path = Path(root) / CONFIG_PATH
     if not path.exists():
         return load_config({}, built_in)
-    try:
-        return load_config(tomllib.loads(path.read_text(encoding="utf-8")), built_in)
-    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError, ConfigError) as exc:
-        raise ConfigError(f"{path}: {exc}") from None
+    return read_toml(path, lambda table: load_config(table, built_in))
 
 
 def write_checks(root: str, checks: ChecksProposal) -> None:

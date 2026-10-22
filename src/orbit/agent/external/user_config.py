@@ -1,16 +1,15 @@
 """The user's own orbit configuration, ``config.toml`` in the config directory."""
 
-import tomllib
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel
 
-from orbit.agent.domain.config_errors import ConfigError
 from orbit.agent.domain.remotes import REMOTE_PATHS, RemoteSettings, load_remotes
 from orbit.agent.domain.server import SERVER_PATHS, ServerSettings, load_server
 from orbit.agent.domain.storage import StorageSettings, load_storage
+from orbit.agent.external.toml_files import read_toml
 
 USER_CONFIG_FILE = "config.toml"
 
@@ -61,7 +60,4 @@ def _read[T](config_dir: Path, load: Callable[[dict[str, Any]], T], default: T) 
     path = config_dir / USER_CONFIG_FILE
     if not path.exists():
         return default
-    try:
-        return load(tomllib.loads(path.read_text(encoding="utf-8")))
-    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError, ConfigError) as exc:
-        raise ConfigError(f"{path}: {exc}") from None
+    return read_toml(path, load)
