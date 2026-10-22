@@ -602,7 +602,8 @@ def test_adding_a_workspace_with_an_invalid_config_exits_and_leaves_it_unflagged
     assert result.stderr.startswith("Invalid orbit configuration: ")
 
     frontend = Frontend(state, config_dir, greet=welcomed)
-    served(frontend, "--port", "0", added=())
+    output = served(frontend, "--port", "0", added=())
+    assert "isn't served" not in output
     [catalog] = [e for e in frontend.events if isinstance(e, Catalog)]
     assert catalog.workspaces == ()
 
@@ -1111,6 +1112,19 @@ def test_serve_refuses_a_repository_git_has_no_identity_for(no_identity: Path) -
         ' (git config --global user.name "…"), or mount your ~/.gitconfig into the'
         " container.\n"
     )
+
+
+def test_adding_a_repository_git_has_no_identity_for_leaves_it_unflagged(
+    no_identity: Path, state: Path, config_dir: Path
+) -> None:
+    result = runner.invoke(app, ["serve", *QUIET, "--add", ".", "--port", "0"])
+    assert result.exit_code == 2
+
+    frontend = Frontend(state, config_dir, greet=welcomed)
+    output = served(frontend, "--port", "0", added=())
+    assert "isn't served" not in output
+    [catalog] = [e for e in frontend.events if isinstance(e, Catalog)]
+    assert catalog.workspaces == ()
 
 
 def test_serve_takes_the_identity_from_the_environment(
