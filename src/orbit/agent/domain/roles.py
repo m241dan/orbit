@@ -8,7 +8,8 @@ claims of being done are verified, and how long it may take. Its model and tool 
 defaults for tasks orbit queues in that role; a task the user queues keeps its own settings.
 """
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -46,6 +47,14 @@ ORBIT_TOOLS = (
     PROPOSE_CHECKS,
 )
 """Every tool orbit's MCP server offers agents."""
+
+READ_ONLY_TOOLS = ("Read", "Glob", "Grep", "WebSearch")
+"""What a restricted agent may use besides orbit's tools: reading and searching its tree and the
+web, never running code or writing files. WebFetch is read-only too, but restricting the CLI
+disables it unless the built-in tool set is replaced to name it."""
+
+WRITE_TOOLS = ("Edit", "Write", "NotebookEdit")
+"""The tools a restricted agent is denied, which write files."""
 
 REVIEW_ROLES = frozenset({REVIEWER, SUPER_REVIEWER})
 """The roles that review work rather than do it."""
@@ -95,6 +104,30 @@ class Role(_Config):
     def settings(self) -> Settings:
         """The settings of a task orbit queues in this role."""
         return Settings(model=self.model, tool_access=self.tool_access)
+
+
+@dataclass(frozen=True)
+class ToolRules:
+    """The tools an agent may use, and those it's denied, by the names agents see them by."""
+
+    allowed: tuple[str, ...]
+    denied: tuple[str, ...]
+
+
+def orbit_tool_name(tool: str) -> str:
+    """The name an agent sees orbit's ``tool`` by."""
+    return f"mcp__orbit__{tool}"
+
+
+def tool_rules(tool_access: ToolAccess, tools: Sequence[str]) -> ToolRules:
+    """The tools an agent with ``tool_access`` may use: orbit's ``tools``, and with restricted
+    access the read-only ones; and those it's denied: orbit's others, and with restricted access
+    the ones that write files."""
+    allowed = tuple(orbit_tool_name(tool) for tool in tools)
+    denied = tuple(orbit_tool_name(tool) for tool in ORBIT_TOOLS if tool not in tools)
+    if tool_access == "restricted":
+        return ToolRules(allowed + READ_ONLY_TOOLS, denied + WRITE_TOOLS)
+    return ToolRules(allowed, denied)
 
 
 def out_of_time(who: str, minutes: float) -> str:

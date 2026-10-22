@@ -9,8 +9,9 @@ from orbit.agent.domain.roles import (
     role_task,
     suggested_task,
     task_suggestion,
+    tool_rules,
 )
-from orbit.protocol import BUILT_IN_ROLE_NAMES, Settings, TaskSpec
+from orbit.protocol import BUILT_IN_ROLE_NAMES, Settings, TaskSpec, ToolAccess
 
 INSTRUCTIONS = {name: f"You are orbit's {name}." for name in BUILT_IN_ROLE_NAMES}
 BUILT_IN_ROLES = built_in_roles(INSTRUCTIONS)
@@ -156,3 +157,47 @@ def test_each_built_in_roles_capabilities_follow_its_tools(name: str) -> None:
     role = BUILT_IN_ROLES[name]
     assert role.runs_checks is ("run_check" in role.tools)
     assert role.proposes_checks is ("propose_checks" in role.tools)
+
+
+@pytest.mark.parametrize("access", ["off", "full"])
+def test_unrestricted_tool_rules_allow_the_roles_orbit_tools_and_deny_its_others(
+    access: ToolAccess,
+) -> None:
+    rules = tool_rules(access, ("get_task", "complete_task"))
+    assert rules.allowed == ("mcp__orbit__get_task", "mcp__orbit__complete_task")
+    assert rules.denied == (
+        "mcp__orbit__run_check",
+        "mcp__orbit__report_progress",
+        "mcp__orbit__give_up",
+        "mcp__orbit__suggest_task",
+        "mcp__orbit__propose_task",
+        "mcp__orbit__propose_checks",
+    )
+
+
+def test_restricted_tool_rules_add_reading_and_searching_and_deny_writing() -> None:
+    rules = tool_rules("restricted", ("propose_task", "report_progress"))
+    assert rules.allowed == (
+        "mcp__orbit__propose_task",
+        "mcp__orbit__report_progress",
+        "Read",
+        "Glob",
+        "Grep",
+        "WebSearch",
+    )
+    assert rules.denied == (
+        "mcp__orbit__get_task",
+        "mcp__orbit__complete_task",
+        "mcp__orbit__run_check",
+        "mcp__orbit__give_up",
+        "mcp__orbit__suggest_task",
+        "mcp__orbit__propose_checks",
+        "Edit",
+        "Write",
+        "NotebookEdit",
+    )
+
+
+def test_tool_rules_for_every_orbit_tool_deny_none_unless_restricted() -> None:
+    assert tool_rules("full", ORBIT_TOOLS).denied == ()
+    assert tool_rules("restricted", ORBIT_TOOLS).denied == ("Edit", "Write", "NotebookEdit")

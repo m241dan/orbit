@@ -18,7 +18,7 @@ from typing import Any
 
 from orbit.agent.application.ports import AgentLaunch, ResumeFailed
 from orbit.agent.domain.agents import Agent
-from orbit.agent.domain.roles import ORBIT_TOOLS
+from orbit.agent.domain.roles import tool_rules
 from orbit.agent.external.processes import spawned
 from orbit.protocol import (
     AGENT_FAILED,
@@ -59,12 +59,6 @@ TOKEN_VARIABLE = "ORBIT_AGENT_TOKEN"
 TOOL_TIMEOUT_MS = 30 * 60 * 1000
 # Statuses the CLI reports for an MCP server that is, or is about to be, usable.
 LIVE_MCP_STATUSES = ("connected", "pending")
-# What a restricted agent may use besides orbit's tools: reading and searching its tree and
-# the web, never running code (--restricted removes Bash and its kin) or writing files.
-# WebFetch is read-only too, but --restricted disables it unless --tools names it, and --tools
-# would replace the built-in set.
-READ_ONLY_TOOLS = ("Read", "Glob", "Grep", "WebSearch")
-WRITE_TOOLS = ("Edit", "Write", "NotebookEdit")
 # How agents are told to work is in the replies to their calls, which know their role.
 AGENT_RULES = (
     "You are an agent working for orbit, which hands out tasks and verifies the work. Talk to"
@@ -78,19 +72,17 @@ def agent_args(launch: AgentLaunch) -> list[str]:
     read and search its tree and the web, and nothing more."""
     headers = {"Authorization": f"Bearer ${{{TOKEN_VARIABLE}}}"}
     config = {"mcpServers": {"orbit": {"type": "http", "url": launch.url, "headers": headers}}}
-    allowed = [f"mcp__orbit__{tool}" for tool in launch.tools]
-    hidden = [f"mcp__orbit__{tool}" for tool in ORBIT_TOOLS if tool not in launch.tools]
+    tools = tool_rules(launch.settings.tool_access, launch.tools)
     rules = f"{AGENT_RULES}\n\n{launch.instructions}"
     args = [*("--mcp-config", json.dumps(config), "--strict-mcp-config")]
     if launch.settings.tool_access == "restricted":
-        allowed += READ_ONLY_TOOLS
-        hidden += WRITE_TOOLS
+        # --restricted removes Bash and its kin, so the agent can't run code.
         # --restricted skips CLAUDE.md discovery; naming the tree (with the variable agent_env
         # sets) brings the project's CLAUDE.md back.
         args += ["--restricted", "--add-dir", os.path.abspath(launch.cwd)]
-    if hidden:
-        args += ["--disallowedTools", ",".join(hidden)]
-    return [*args, "--allowedTools", ",".join(allowed), "--append-system-prompt", rules]
+    if tools.denied:
+        args += ["--disallowedTools", ",".join(tools.denied)]
+    return [*args, "--allowedTools", ",".join(tools.allowed), "--append-system-prompt", rules]
 
 
 def agent_env(agent: Agent) -> dict[str, str]:
