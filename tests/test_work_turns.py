@@ -20,6 +20,7 @@ from orbit.agent.application.work_turns import (
     WorkTurns,
 )
 from orbit.agent.domain.board import TaskBoard
+from orbit.agent.domain.endings import STOPPED_BY_YOU
 from orbit.agent.domain.refusals import Refused
 from orbit.protocol import (
     BUSY,
@@ -27,6 +28,7 @@ from orbit.protocol import (
     NOT_CONFIGURED,
     WORK_LANE,
     BusyChanged,
+    ErrorOccurred,
     Event,
     Notice,
     Settings,
@@ -42,9 +44,9 @@ class StopsCounted(WorkLane):
 
     stops = 0
 
-    def stopped_by_user(self) -> None:
+    def stopped_by_user(self) -> bool:
         self.stops += 1
-        super().stopped_by_user()
+        return super().stopped_by_user()
 
 
 @dataclass
@@ -187,6 +189,21 @@ async def test_a_hold_ends_the_run_by_itself(lane: Lane) -> None:
     lane.turns.hold()
     await turn_ended(lane)
     assert not lane.turns.running
+
+
+async def test_a_hold_mid_task_stops_it_and_the_run_ends_by_itself(lane: Lane) -> None:
+    await add(lane)
+    [task] = lane.tasks.board.tasks
+    await lane.turns.run_tasks()
+    for _ in range(100):
+        if lane.tasks.board.get(task.id).status == "running":
+            break
+        await asyncio.sleep(0)
+    lane.turns.hold()
+    await turn_ended(lane)
+    stopped_task = lane.tasks.board.get(task.id)
+    assert (stopped_task.status, stopped_task.reason) == ("cancelled", STOPPED_BY_YOU)
+    assert not any(isinstance(event, ErrorOccurred) for event in lane.posted)
 
 
 async def test_a_hold_tells_the_work_lane_the_user_stopped_its_run(lane: Lane) -> None:

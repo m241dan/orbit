@@ -47,7 +47,9 @@ class WorkLane:
     """Runs ``tasks``' tasks through ``desk``'s agents, checked by ``verifier`` if any.
 
     Reviews are left to ``review``, when there's a review lane. :meth:`run` is meant to run as
-    a task of its own: cancelling it cancels the task running, and the run ends there.
+    a task of its own: cancelling it cancels the task running, and the cancel goes on once that
+    task has ended. The user's stop, :meth:`stopped_by_user`, cancels only the agent's run, and
+    the run ends by itself.
     """
 
     def __init__(
@@ -69,7 +71,9 @@ class WorkLane:
         # Fixes queued per step along each chain, kept across runs so a restart can't reset
         # the cap.
         self._fallbacks = FallbackFixes()
+        self._running = False  # A run is going.
         self._stopped = False  # The user stopped the run going now.
+        self._agent: asyncio.Task[Outcome] | None = None  # The agent's run of the current task.
         self._current: str | None = None  # The task running, until the review lane hears of it.
         # The task a run stopped at, which the next one runs first: a fix must run before
         # another task puts its work aside.
@@ -81,10 +85,15 @@ class WorkLane:
         self._fallbacks = FallbackFixes()
         self._resume = None
 
-    def stopped_by_user(self) -> None:
-        """The run going now is being cancelled because the user stopped it, which the task it
-        cancels says."""
+    def stopped_by_user(self) -> bool:
+        """Stop the run going now, as the user asked: cancel the agent's run of its task, which
+        that task says, and run no other; returns whether a run was going."""
+        if not self._running:
+            return False
         self._stopped = True
+        if self._agent is not None:
+            self._agent.cancel()
+        return True
 
     @property
     def current(self) -> str | None:
@@ -102,14 +111,21 @@ class WorkLane:
         """Run the tasks waiting, in order but the one the last run stopped at first, until
         none are left, the user stops one, or one ends in error for the usage limit or as a fix;
         returns which. Any other cancel goes on once the task running has ended."""
+        self._running, self._stopped = True, False
+        try:
+            return await self._run_tasks()
+        finally:
+            self._running = False
+
+    async def _run_tasks(self) -> RunEnd:
+        """Run the tasks waiting, as :meth:`run` does; returns why the run ended."""
         tried: set[str] = set()
-        self._stopped = False
         while (task_id := self.next_work(tried)) is not None:
             tried.add(task_id)
             self._resume = None
             fixing = self._board.get(task_id).fixes is not None
             outcome = await self._run_task(task_id)
-            if outcome.status == "cancelled":
+            if outcome.status == "cancelled" or self._stopped:
                 return "cancelled"
             if outcome.status == "error" and (end := await self._stop_at(outcome, fixing)):
                 self._resume = task_id
@@ -138,11 +154,23 @@ class WorkLane:
     async def _run_current(self, task_id: str) -> Outcome:
         """Run task ``task_id`` through a new agent, then tell the review lane how it ended;
         returns how it did. The lane stopping leaves the review lane as it is."""
-        run = partial(self._run_started, task_id)
+        run = partial(self._run_alone, task_id)
         stop = UserStop(STOPPED_BY_YOU, self._cancelled)
         outcome = await run_task_to_end(self._tasks, task_id, run, stop, self._publish)
         await self._report_to_review(task_id)
         return outcome
+
+    async def _run_alone(self, task_id: str) -> Outcome:
+        """How started task ``task_id``'s run through an agent ended, run as a task of its own
+        that the user's stop cancels, leaving the run going; anything unexpected escapes."""
+        agent = asyncio.create_task(self._run_started(task_id))
+        if self._stopped:  # The user stopped the run as the task started.
+            agent.cancel()
+        self._agent = agent
+        try:
+            return await agent
+        finally:
+            self._agent = None
 
     async def _run_started(self, task_id: str) -> Outcome:
         """How started task ``task_id``'s run through an agent ended; anything unexpected
@@ -151,15 +179,9 @@ class WorkLane:
         return await self._run_agent(task_id)
 
     async def _cancelled(self) -> None:
-        """The task running was cancelled: mark the step in progress cancelled. The user's stop
-        ends with the task, so the run is no longer being cancelled; any other cancel goes on."""
+        """The task running was cancelled: mark the step in progress cancelled."""
         if self._verifier is not None:
             await self._verifier.cancel()
-        # Read after the await: the user may have stopped the run meanwhile.
-        if self._stopped:
-            run = asyncio.current_task()
-            assert run is not None  # Cancelled, so a task runs.
-            run.uncancel()
 
     async def _start(self, task_id: str) -> None:
         """Say task ``task_id``, marked running, started, with every verification step pending

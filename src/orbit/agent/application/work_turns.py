@@ -124,9 +124,10 @@ class WorkTurns:
         self._held = True
         if self.forget_wait():
             self._parts.post(Notice(message=WAIT_CANCELLED_NOTE))
-        if self._turns.cancel():
+        if self._turns.running:
             assert self._parts.work is not None  # Only the work lane takes work turns.
-            self._parts.work.stopped_by_user()
+            if not self._parts.work.stopped_by_user():
+                self._turns.cancel()  # The turn hasn't begun its run, so nothing is left to end.
 
     async def wake(self) -> None:
         """Run the work a review queued, unless something runs, the user cancelled or the

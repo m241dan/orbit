@@ -1,14 +1,15 @@
 """A lane cancelled as it starts a task still ends the task, which can then be run or removed."""
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 
 from orbit.agent import Agents
 from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.review_lane import ReviewLane
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.application.verifier import Verifier
-from orbit.agent.application.work_lane import WorkLane
+from orbit.agent.application.work_lane import RunEnd, WorkLane
+from orbit.agent.application.work_turns import WorkParts, WorkTurns
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.endings import CANCELLED, STOPPED_BY_YOU
 from orbit.agent.domain.reviews import ReviewLimits, ReviewPlanner
@@ -24,18 +25,20 @@ from tests.agent_fakes import ROLES, FakeHost, FakeTree, ScriptedLauncher, Steps
 
 
 class Gate:
-    """Publishing that holds, once, the first event ``holds`` picks, until the test is done."""
+    """Publishing that holds, once, the first event ``holds`` picks, until :attr:`released` is
+    set."""
 
     def __init__(self, holds: Callable[[Event], bool]) -> None:
         self.holds = holds
         self.reached = asyncio.Event()
+        self.released = asyncio.Event()
         self.events: list[Event] = []
 
     async def __call__(self, event: Event) -> None:
         self.events.append(event)
         if not self.reached.is_set() and self.holds(event):
             self.reached.set()
-            await asyncio.Event().wait()
+            await self.released.wait()
 
 
 def running(event: Event) -> bool:
@@ -80,17 +83,22 @@ class Hearing(ReviewLane):
 async def cancel_work(
     gate: Gate, stopped: bool = False, review: Hearing | None = None
 ) -> tuple[Tasks, str]:
-    """Run a work lane publishing through ``gate``, beside ``review`` if any, and cancel it once
-    ``gate`` holds, as the user does if ``stopped``; returns its tasks and the task it ran."""
+    """Run a work lane publishing through ``gate``, beside ``review`` if any, and cancel its run
+    once ``gate`` holds, or, if ``stopped``, stop it as the user does and let ``gate`` go;
+    returns its tasks and the task it ran."""
     tasks = review.tasks if review is not None else Tasks(TaskBoard(), gate)
     task_id = tasks.board.add(TaskSpec(prompt="a"))
     lane = WorkLane(desk_for(gate), tasks, Verifier(verified(Steps()), tasks, gate), review)
     run = asyncio.create_task(lane.run())
     await gate.reached.wait()
     if stopped:
-        lane.stopped_by_user()
-    run.cancel()
-    await asyncio.gather(run, return_exceptions=True)
+        assert lane.stopped_by_user()
+        gate.released.set()
+        assert await run == "cancelled"  # The user's stop ends the run, not its task.
+    else:
+        run.cancel()
+        await asyncio.gather(run, return_exceptions=True)
+        assert run.cancelled()
     return tasks, task_id
 
 
@@ -157,3 +165,65 @@ async def test_a_task_the_user_stops_is_still_reported_to_the_review_lane() -> N
     tasks, task_id = await cancel_work(gate, stopped=True, review=review)
     ended_and_free(tasks, task_id, STOPPED_BY_YOU)
     assert review.heard == [task_id]
+
+
+async def test_a_work_lane_the_user_stops_as_it_closes_still_just_closes() -> None:
+    gate = Gate(lambda event: isinstance(event, TaskStarted))
+    review = hearing(gate)
+    task_id = review.tasks.board.add(TaskSpec(prompt="a"))
+    verifier = Verifier(verified(Steps()), review.tasks, gate)
+    lane = WorkLane(desk_for(gate), review.tasks, verifier, review)
+    run = asyncio.create_task(lane.run())
+    await gate.reached.wait()
+    gate.reached.clear()  # Hold again as the verification is marked cancelled.
+    gate.holds = lambda event: isinstance(event, VerificationChanged)
+    run.cancel()
+    await gate.reached.wait()
+    lane.stopped_by_user()
+    gate.released.set()
+    await asyncio.gather(run, return_exceptions=True)
+    assert run.cancelled()
+    ended_and_free(review.tasks, task_id, CANCELLED)
+    assert review.heard == []
+
+
+class Watched(WorkLane):
+    """A work lane that keeps the turn each of its runs runs as."""
+
+    def __init__(self, desk: AgentDesk, tasks: Tasks, verifier: Verifier, review: Hearing) -> None:
+        super().__init__(desk, tasks, verifier, review)
+        self.turns: list[asyncio.Task[object]] = []
+
+    async def run(self) -> RunEnd:
+        turn = asyncio.current_task()
+        assert turn is not None
+        self.turns.append(turn)
+        return await super().run()
+
+
+async def stop_turns_mid_run(stop: Callable[[WorkTurns], Awaitable[None]]) -> None:
+    """Start a work lane's turn beside a review lane, ``stop`` the turns once its task has
+    started, and assert the turn ended cancelled, its task too, telling the review lane
+    nothing."""
+    gate = Gate(lambda event: isinstance(event, TaskStarted))
+    review = hearing(gate)
+    tasks = review.tasks
+    task_id = tasks.board.add(TaskSpec(prompt="a"))
+    desk, verifier = desk_for(gate), Verifier(verified(Steps()), tasks, gate)
+    work = Watched(desk, tasks, verifier, review)
+    turns = WorkTurns(WorkParts(work, review, tasks, verifier, desk, lambda _: None, lambda: False))
+    await turns.run_tasks()
+    await gate.reached.wait()
+    await stop(turns)
+    [turn] = work.turns
+    assert turn.cancelled()
+    ended_and_free(tasks, task_id, CANCELLED)
+    assert review.heard == []
+
+
+async def test_closing_the_turns_mid_run_ends_the_turn_cancelled_telling_review_nothing() -> None:
+    await stop_turns_mid_run(WorkTurns.close)
+
+
+async def test_a_halt_mid_run_ends_the_turn_cancelled_telling_review_nothing() -> None:
+    await stop_turns_mid_run(WorkTurns.stop_turn)
