@@ -1,5 +1,6 @@
 """A session halted because storage failed opens a modal and keeps a status line by the prompt."""
 
+from textual.color import Color
 from textual.containers import VerticalScroll
 from textual.pilot import Pilot
 from textual.widgets import Static
@@ -28,6 +29,7 @@ EXPLANATION = (
 STILL = "Orbit stopped this session: saving the session record to /s/orbit.db failed."
 EVENT_LOG_STATUS = "Session stopped: event log failed; see the transcript"
 HALT = ErrorOccurred(code=STORAGE_FAILED, message=EXPLANATION)
+LONG = "\n".join(f"line {n}" for n in range(100))
 
 
 def modal(app: OrbitApp) -> StorageHaltScreen:
@@ -37,7 +39,7 @@ def modal(app: OrbitApp) -> StorageHaltScreen:
 
 
 def modal_text(app: OrbitApp) -> str:
-    return str(modal(app).query_one("#storage-halt-body", Static).render())
+    return str(modal(app).query_one("#text-body", Static).render())
 
 
 def halt_screens(app: OrbitApp) -> list[StorageHaltScreen]:
@@ -71,6 +73,27 @@ async def test_a_storage_error_opens_the_modal_and_the_status_line() -> None:
         assert (str(box.border_title), str(box.border_subtitle)) == (HALT_TITLE, HALT_HINT)
         assert modal_text(app) == EXPLANATION
         assert status(app) == EVENT_LOG_STATUS
+
+
+async def test_j_k_and_the_arrows_scroll_a_long_explanation() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, ErrorOccurred(code=STORAGE_FAILED, message=LONG))
+        box = modal(app).query_one(VerticalScroll)
+        await pilot.press("j", "j", "down")
+        assert box.scroll_y == 3
+        await pilot.press("k", "up")
+        assert box.scroll_y == 1
+
+
+async def test_the_modal_is_bordered_as_an_error() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, HALT)
+        _, colour = modal(app).query_one(VerticalScroll).styles.border_top
+        assert colour == Color.parse(app.get_css_variables()["error"])
 
 
 async def test_the_error_stays_in_the_transcript() -> None:

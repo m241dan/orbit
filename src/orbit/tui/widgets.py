@@ -437,6 +437,53 @@ class ChoiceScreen(ListScreen[int]):
         self.dismiss(self.escape_index)
 
 
+class TextScreen(ModalScreen[None]):
+    """``text`` in full, titled ``title`` with the keys in ``hint``: j/k and the arrow keys
+    scroll it and escape closes it. Subclasses add their own keys and may recolour the border."""
+
+    AUTO_FOCUS = None
+    DEFAULT_CSS = """
+    TextScreen { align: center middle; }
+    TextScreen > VerticalScroll {
+        width: 100;
+        max-width: 90%;
+        height: auto;
+        max-height: 80%;
+        border: round $accent;
+        padding: 0 1;
+    }
+    """
+    BINDINGS: ClassVar[list[BindingType]] = [
+        Binding("j,down", "scroll(1)", show=False),
+        Binding("k,up", "scroll(-1)", show=False),
+        Binding("escape", "close", show=False),
+    ]
+
+    def __init__(self, title: str, hint: str, text: str) -> None:
+        super().__init__()
+        self.title_text = title
+        self.hint = hint
+        self.text = text
+
+    def compose(self) -> ComposeResult:
+        with VerticalScroll(can_focus=False) as box:
+            box.border_title = self.title_text
+            box.border_subtitle = self.hint
+            yield Static(Text(self.text), id="text-body")
+
+    def show(self, text: str) -> None:
+        """Show ``text`` in place of the text shown, or to be shown once composed."""
+        self.text = text
+        for body in self.query("#text-body").results(Static):
+            body.update(Text(text))
+
+    def action_scroll(self, step: int) -> None:
+        self.query_one(VerticalScroll).scroll_relative(y=step, animate=False)
+
+    def action_close(self) -> None:
+        self.dismiss(None)
+
+
 class ConfirmScreen(ModalScreen[bool]):
     """Asks ``title`` with ``message``; dismisses with True on ``y``, False on ``n`` or escape.
 

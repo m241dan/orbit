@@ -46,7 +46,7 @@ def reason_screen(app: OrbitApp) -> ReasonScreen:
 def shown(app: OrbitApp) -> tuple[str, str, str]:
     """The open modal's title, subtitle and body."""
     box = reason_screen(app).query_one(VerticalScroll)
-    body = str(box.query_one("#reason-body").render())
+    body = str(box.query_one("#text-body").render())
     return str(box.border_title), str(box.border_subtitle), body
 
 
