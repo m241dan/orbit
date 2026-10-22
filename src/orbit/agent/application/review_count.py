@@ -36,6 +36,11 @@ class ReviewCount:
         """Take the count ``store`` holds as the one saved."""
         self._count = await store.review_count()
 
+    def forget(self) -> None:
+        """Forget the count read, as another orbit may have saved one since; nothing is saved
+        until a load works again."""
+        self._count = None
+
     async def save(self, count: int) -> None:
         """Save ``count`` as the repository's commits since the last super review, if it
         changed."""

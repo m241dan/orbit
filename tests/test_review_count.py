@@ -56,6 +56,18 @@ async def test_a_review_count_that_cannot_be_saved_halts_and_nothing_more_is_sav
     assert store.counts == []
 
 
+async def test_a_forgotten_count_is_not_saved_until_it_is_read_again() -> None:
+    store = FakeStore(count=4)
+    _, count, _ = await loaded(store)
+    count.forget()
+    await count.save(5)
+    store.count = 6
+    assert await count.load() == 6
+    await count.save(6)
+    await count.save(7)
+    assert store.counts == [7]
+
+
 async def test_retrying_saves_the_count_last_asked_for_though_halted() -> None:
     store = FakeStore()
     store.count_failure = "full"

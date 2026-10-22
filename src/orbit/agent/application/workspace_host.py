@@ -664,9 +664,9 @@ class WorkspaceHost:
 
     async def _take_ownership(self, command: TakeOwnership, command_id: str) -> None:
         """Answer the offer of the repository: own it, if ``command`` takes it, send the catalog
-        saying so, recover the fallback files the owner left, and run the work queued for
-        ``command_id`` and the reviews waiting, even if running the queued work fails; refused
-        when no offer is open."""
+        saying so, recover the fallback files the owner left, read the super review count it
+        left, and run the work queued for ``command_id`` and the reviews waiting, even if
+        running the queued work fails; refused when no offer is open."""
         self._takeover.answer(command.take)
         if not command.take:
             await self._events.put(OwnershipDeclined())
@@ -676,6 +676,7 @@ class WorkspaceHost:
         await self._events.put(Notice(message=OWNED_NOTE))
         await self._switcher.publish_catalog()  # Other workspaces' connections learn it here.
         await self._recover_parked()
+        await self._reload_review_count()
         try:
             await self._commands.own(command_id)
         finally:  # After the queued work, so its tasks get agents first, even if it fails.
@@ -721,13 +722,22 @@ class WorkspaceHost:
 
     async def _load_review_count(self) -> None:
         """Have the review planner count on from the repository's saved super review count, read
-        once: the planner's own count is never replaced once it's been, so a frontend joining
-        while the count can't be saved, or as it's saved, doesn't roll it back."""
+        once, and again on taking the repository over: the planner's own count is never
+        replaced otherwise once it's been, so a frontend joining while the count can't be
+        saved, or as it's saved, doesn't roll it back."""
         if self._lane is None:
             return
         async with self._count_loading:
             if not self._count_loaded:
                 self._count_loaded = await self._count_on(self._lane.planner)
+
+    async def _reload_review_count(self) -> None:
+        """Read the repository's saved super review count again, now this orbit owns it: the
+        orbit that owned it may have counted on since it was read."""
+        async with self._count_loading:
+            self._review_count.forget()
+            self._count_loaded = False
+        await self._load_review_count()
 
     async def _count_on(self, planner: ReviewPlanner) -> bool:
         """Have ``planner`` count on from the repository's saved super review count, unless it

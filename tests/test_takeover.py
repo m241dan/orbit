@@ -36,6 +36,7 @@ from tests.agent_fakes import (
     OWNER,
     Call,
     FakeLock,
+    FakeStore,
     FakeTree,
     claims_done,
     commands_of,
@@ -141,6 +142,23 @@ async def test_taking_over_lets_reviews_run() -> None:
     await send(session, TakeOwnership(take=True))
 
     assert lane_of(session).running
+    await session.close()
+
+
+async def test_taking_over_counts_on_from_the_super_count_the_owner_left() -> None:
+    store = FakeStore(count=3)
+    lock = FakeLock(free=True)
+    session, _, _ = session_for(owner=OWNER, lock=lock, tree=FakeTree(), review=True, store=store)
+    await events_until(session, offered)
+    while lane_of(session).planner.since_super != 3:
+        await asyncio.sleep(0)
+    store.count = 5
+    await send(session, TakeOwnership(take=True))
+    await events_until(session, lambda event: event == ACCEPTED)
+
+    assert lane_of(session).planner.since_super == 5
+    await session._review_count.save(3)
+    assert store.counts == [3]
     await session.close()
 
 

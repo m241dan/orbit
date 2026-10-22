@@ -15,6 +15,7 @@ from orbit.protocol import (
     ErrorOccurred,
     Event,
     Notice,
+    ResumeStorage,
     SendMessage,
     Settings,
     Snapshot,
@@ -24,6 +25,7 @@ from orbit.protocol import (
     UpdateSettings,
 )
 from tests.agent_fakes import (
+    ACCEPTED,
     HELLO,
     START,
     Call,
@@ -40,6 +42,7 @@ from tests.agent_fakes import (
     idle,
     lane_of,
     of_type,
+    outcome_of,
     send,
     session_for,
     settle,
@@ -53,6 +56,10 @@ TASK = TaskSpec(prompt="Add a flag.")
 async def proposes(call: Call) -> TurnEndReason:
     await call("propose_task", title="Add the flag", prompt="Add --fast to the CLI.")
     return "completed"
+
+
+def storage_failed(event: Event) -> bool:
+    return isinstance(event, ErrorOccurred) and event.code == STORAGE_FAILED
 
 
 def errors(events: list[Event]) -> list[str]:
@@ -242,6 +249,41 @@ async def test_a_join_while_halted_keeps_the_super_count_the_store_has_not_saved
     await asyncio.wait_for(joined(session), 5)
 
     assert lane_of(session).planner.since_super == 8 and store.count == 7
+    await session.close()
+
+
+async def test_a_join_while_the_super_count_is_saved_keeps_the_count_being_saved() -> None:
+    store = FakeStore(count=7)
+    store.count_yields = [50]
+    session = reviewed(store)
+    await asyncio.wait_for(joined(session), 5)
+    lane_of(session).planner.since_super = 8
+    saving = asyncio.create_task(session._review_count.save(8))
+    await asyncio.sleep(0)
+    await asyncio.wait_for(joined(session), 5)
+
+    assert lane_of(session).planner.since_super == 8
+    await saving
+    assert store.count == 8
+    await session.close()
+
+
+async def test_a_join_while_the_super_count_cannot_be_saved_keeps_it_to_save_on_resuming() -> None:
+    store = FakeStore(count=7)
+    session = reviewed(store)
+    await asyncio.wait_for(joined(session), 5)
+    store.count_failure = "disk full"
+    lane_of(session).planner.since_super = 8
+    await session._review_count.save(8)
+    await events_until(session, storage_failed)
+    await asyncio.wait_for(joined(session), 5)
+    assert lane_of(session).planner.since_super == 8 and store.count == 7
+
+    store.count_failure = None
+    assert (await outcome_of(session, ResumeStorage()))[-1].payload == ACCEPTED
+    lane_of(session).planner.since_super += 1
+    await session._review_count.save(lane_of(session).planner.since_super)
+    assert store.counts == [8, 9]
     await session.close()
 
 
