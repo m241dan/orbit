@@ -3,7 +3,7 @@
 import time
 from collections.abc import AsyncIterator, Callable
 from contextlib import aclosing
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from typing import ClassVar, assert_never
 
 from textual import on, work
@@ -71,6 +71,7 @@ from orbit.tui.event_stream import event_batches
 from orbit.tui.footer import KeyFooter
 from orbit.tui.history import HistoryPager
 from orbit.tui.link import LinkHost
+from orbit.tui.opening import Hosts, Opening, OpeningHost
 from orbit.tui.panels import UsagePanel, VerificationPanel
 from orbit.tui.proposals import ProposalHost
 from orbit.tui.reason import ReasonScreen
@@ -128,18 +129,6 @@ from orbit.tui.widgets import (
     mark_selected,
 )
 from orbit.tui.workspaces import WorkspacesHost
-
-
-@dataclass(frozen=True)
-class Opening:
-    """How the app opens: on the workspace at the ``repository`` it runs in, if there's one,
-    which a linked app's workspace picker preselects or offers to add, sending ``command``, if
-    given, once attached, and with the session picker if ``pick``."""
-
-    command: Command | None = None
-    pick: bool = False
-    repository: str | None = None
-
 
 _PLAIN_OPENING = Opening()
 
@@ -210,9 +199,6 @@ class OrbitApp(App[None], inherit_bindings=False):
         super().__init__()
         self._session = session
         self._link = link
-        self._opening = opening.command
-        self._pick = opening.pick
-        self._attaching = True  # Until the first catalog has the app attach.
         # Id of the window h/j/k/l last moved to.
         self._selected = "prompt"
         # Which lanes have work in progress, as last reported (or just requested).
@@ -229,7 +215,13 @@ class OrbitApp(App[None], inherit_bindings=False):
             lambda workspaces: None if link else chosen_workspace(workspaces, repository),
         )
         self._workspaces = WorkspacesHost(
-            self.push_screen, self._send, self._open_workspace, repository
+            self.push_screen,
+            self._send,
+            lambda workspace, startup: self._opening.open_workspace(workspace, startup),
+            repository,
+        )
+        self._opening = OpeningHost(
+            opening, link is not None, self._send, Hosts(self._sessions, self._workspaces)
         )
         # The feed shows answers once mounted, before any event arrives.
         self._desk = CommandDesk(session.send, self._render_event, lambda e: self._feed.render(e))
@@ -547,16 +539,6 @@ class OrbitApp(App[None], inherit_bindings=False):
         """Show the workspace picker."""
         self._workspaces.open()
 
-    async def _open_workspace(self, workspace: str, startup: bool) -> None:
-        """Open the session picker of the ``workspace`` picked; at ``startup``, unless the app
-        picks a session, attach to its active session and send the command to open with."""
-        if startup and not self._pick:
-            attach = self._sessions.join(workspace)
-            if attach is not None and await self._send(attach):
-                await self._send_opening()
-            return
-        self._sessions.open("resume" if startup else None, workspace)
-
     async def action_cancel_turn(self) -> None:
         # The planner has its own lane, stopped with ctrl+x; ctrl+s stops the task run.
         await self._send(CancelTurn(lane=WORK_LANE))
@@ -611,7 +593,7 @@ class OrbitApp(App[None], inherit_bindings=False):
                 with self.batch_update():
                     for event in coalesce(batch):
                         self._render_event(event)
-                await self._open_once_listed(batch)
+                await self._opening.listed(batch)
 
     async def _hello(self) -> bool:
         """Whether the Hello opening the session was sent; a failure to send it is shown."""
@@ -619,33 +601,6 @@ class OrbitApp(App[None], inherit_bindings=False):
             Hello(client=f"orbit-tui {__version__}", protocol_version=PROTOCOL_VERSION),
             failure="The backend failed to start the session",
         )
-
-    async def _open_once_listed(self, batch: list[Event]) -> None:
-        """Once ``batch`` has the first catalog, open the workspace picker over a link; else
-        attach to the active session of the workspace opened on, then send the command to open
-        with, if there's one, once that's sent."""
-        if not self._first_listed(batch):
-            return
-        if self._link is not None:
-            self._workspaces.open(startup=True)
-            return
-        attach = self._sessions.opening
-        if attach is not None and await self._send(attach):
-            await self._send_opening()
-
-    def _first_listed(self, batch: list[Event]) -> bool:
-        """Whether ``batch`` has the first catalog, after which the app no longer waits for
-        one."""
-        if not self._attaching or not any(isinstance(event, Catalog) for event in batch):
-            return False
-        self._attaching = False
-        return True
-
-    async def _send_opening(self) -> None:
-        """Send the command to open with, if there's one, only once."""
-        if self._opening is not None:
-            command, self._opening = self._opening, None
-            await self._send(command)
 
     async def _next_batch(self, batches: AsyncIterator[list[Event]]) -> list[Event]:
         """The next of ``batches``; none once they end, or once reading them fails, which is
@@ -727,9 +682,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         if attached is not None:
             self._transcript.show_session(attached.name)
         self._show_viewing()
-        if self._pick and self._link is None:
-            self._pick = False
-            self._sessions.open("pick")
+        self._opening.catalog_shown()
 
     def _follow_sessions(self, catalog: Catalog) -> None:
         """List ``catalog``'s sessions of the workspace the app is on, letting the user pick
