@@ -3,6 +3,7 @@
 import asyncio
 
 from orbit.agent import Verification, VerificationStep, WorkspaceHost
+from orbit.agent.application.ports import StoreFailed
 from orbit.agent.domain.reviews import ReviewLimits
 from orbit.agent.domain.storage_halt import FailedWrite
 from orbit.protocol import (
@@ -235,7 +236,7 @@ async def test_a_join_while_halted_keeps_the_super_count_the_store_has_not_saved
     store = FakeStore(count=7)
     session = reviewed(store)
     await asyncio.wait_for(joined(session), 5)
-    session._halt.fail(FailedWrite.EVENT_LOG, RuntimeError("disk full"))
+    session._halt.fail(FailedWrite.EVENT_LOG, StoreFailed("disk full"))
     lane_of(session).planner.since_super = 8
     await session._review_count.save(8)
     await asyncio.wait_for(joined(session), 5)

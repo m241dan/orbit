@@ -3,7 +3,7 @@ couldn't take them."""
 
 from dataclasses import dataclass
 
-from orbit.agent.application.ports import EventLog, ParkedEvents, ParkedFile
+from orbit.agent.application.ports import EventLog, ParkedEvents, ParkedFile, StoreFailed
 
 
 class RecoveryFailed(Exception):
@@ -35,6 +35,6 @@ async def _recover(parked: ParkedEvents, log: EventLog, file: ParkedFile) -> Rec
         envelopes = sorted(await parked.read(file), key=lambda envelope: envelope.seq)
         added = await log.append(file.session_id, envelopes) if envelopes else 0
         await parked.delete(file)
-    except RuntimeError as error:
+    except StoreFailed as error:
         raise RecoveryFailed(file.path, str(error)) from error
     return Recovered(file.path, added)

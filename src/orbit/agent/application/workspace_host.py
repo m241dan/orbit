@@ -35,6 +35,7 @@ from orbit.agent.application.ports import (
     ProposalReview,
     RepositoryLock,
     SessionStore,
+    StoreFailed,
 )
 from orbit.agent.application.proposals import FrontendReview
 from orbit.agent.application.recovery import RecoveryFailed
@@ -328,13 +329,13 @@ class WorkspaceHost:
         """Append to the event log again, publishing a ``LogGap`` for each span of events that
         reached neither it nor a fallback file; returns the error, if appending failed."""
         resumed = await self._events.resume_log()
-        if isinstance(resumed, RuntimeError):
+        if isinstance(resumed, StoreFailed):
             return FailedWrite.EVENT_LOG, resumed
         for first, last in resumed:
             await self._events.put(LogGap(first_seq=first, last_seq=last))
         return None
 
-    def _log_failed(self, error: RuntimeError) -> None:
+    def _log_failed(self, error: StoreFailed) -> None:
         """Halt the session, as appending to its event log failed with ``error``."""
         self._halt.fail(FailedWrite.EVENT_LOG, error)
 

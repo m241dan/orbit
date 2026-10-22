@@ -13,7 +13,7 @@ import pytest
 from orbit.agent import WorkspaceHost
 from orbit.agent.application.keeper import SessionKeeper
 from orbit.agent.application.outbox import Outbox
-from orbit.agent.application.ports import StorageFailed
+from orbit.agent.application.ports import StorageFailed, StoreFailed
 from orbit.agent.application.storage_halt import (
     UNKNOWN_DATABASE,
     HaltHooks,
@@ -412,7 +412,7 @@ async def test_a_review_ending_while_halted_starts_no_work_on_its_fixes() -> Non
         await call("get_task")
         await call("suggest_task", title="Add tests", prompt="Please add tests.")
         await call("complete_task", summary="Reviewed")
-        sessions[0]._halt.fail(FailedWrite.EVENT_LOG, RuntimeError("disk full"))
+        sessions[0]._halt.fail(FailedWrite.EVENT_LOG, StoreFailed("disk full"))
         return "completed"
 
     session, _, launcher = session_for(
@@ -454,7 +454,7 @@ async def test_a_fix_cancelled_by_the_halt_leaves_its_batch_waiting_for_it() -> 
     await send(session, RunTasks())
     await asyncio.wait_for(started.wait(), 5)  # The last fix runs; its end would make a review due.
     planned = lane_of(session).planner.snapshot()
-    session._halt.fail(FailedWrite.EVENT_LOG, RuntimeError("disk full"))
+    session._halt.fail(FailedWrite.EVENT_LOG, StoreFailed("disk full"))
     await envelopes_until(session, work_stopped_after_halt)
     await asyncio.sleep(0.05)
     reviewers = [la for la in launcher.launches if la.agent.role == "reviewer"]
@@ -490,7 +490,7 @@ async def test_until_the_explanation_is_made_the_halt_says_what_failed() -> None
     halt = StorageHalt(lambda event: asyncio.sleep(0))
     assert halt.message is None and not halt.halted
     halt.check()
-    halt.fail(FailedWrite.SESSION_RECORD, RuntimeError("full"))
+    halt.fail(FailedWrite.SESSION_RECORD, StoreFailed("full"))
 
     assert halt.halted and halt.message == halting_message(FailedWrite.SESSION_RECORD)
     with pytest.raises(Refused) as refusal:
@@ -506,8 +506,8 @@ async def test_a_session_halts_once_however_many_writes_fail() -> None:
         published.append(event)
 
     halt = StorageHalt(record)
-    halt.fail(FailedWrite.EVENT_LOG, RuntimeError("first"))
-    halt.fail(FailedWrite.SESSION_RECORD, RuntimeError("second"))
+    halt.fail(FailedWrite.EVENT_LOG, StoreFailed("first"))
+    halt.fail(FailedWrite.SESSION_RECORD, StoreFailed("second"))
     while halt.message == halting_message(FailedWrite.EVENT_LOG):
         await asyncio.sleep(0)
     await halt.close()
@@ -525,7 +525,7 @@ async def test_once_closed_a_failure_only_marks_the_session_halted() -> None:
 
     halt = StorageHalt(record)
     await halt.close()
-    halt.fail(FailedWrite.EVENT_LOG, RuntimeError("late"))
+    halt.fail(FailedWrite.EVENT_LOG, StoreFailed("late"))
     await asyncio.sleep(0.01)
 
     assert halt.halted and published == []
@@ -657,7 +657,7 @@ async def test_resuming_a_session_that_isnt_halted_is_accepted_and_does_nothing(
 
 async def test_resuming_while_the_halt_is_still_under_way_is_refused() -> None:
     halt = StorageHalt(lambda event: asyncio.sleep(0))
-    halt.fail(FailedWrite.EVENT_LOG, RuntimeError("full"))
+    halt.fail(FailedWrite.EVENT_LOG, StoreFailed("full"))
 
     with pytest.raises(Refused) as refusal:
         await halt.resume()
@@ -672,13 +672,13 @@ async def test_a_resumed_halt_halts_again_on_the_next_failure() -> None:
         published.append(event)
 
     halt = StorageHalt(record, HaltHooks())
-    halt.fail(FailedWrite.EVENT_LOG, RuntimeError("first"))
+    halt.fail(FailedWrite.EVENT_LOG, StoreFailed("first"))
     while halt.message == halting_message(FailedWrite.EVENT_LOG):
         await asyncio.sleep(0)
     await asyncio.sleep(0.01)
     await halt.resume()
     assert not halt.halted
-    halt.fail(FailedWrite.EVENT_LOG, RuntimeError("second"))
+    halt.fail(FailedWrite.EVENT_LOG, StoreFailed("second"))
     while halt.message == halting_message(FailedWrite.EVENT_LOG):
         await asyncio.sleep(0)
     await halt.close()
@@ -723,13 +723,13 @@ async def test_a_halt_lifted_despite_failures_halts_again_on_the_first() -> None
     async def record(event: Event) -> None:
         published.append(event)
 
-    async def retry() -> tuple[FailedWrite, RuntimeError] | None:
-        halt.fail(FailedWrite.EVENT_LOG, RuntimeError("again"))
-        halt.fail(FailedWrite.SESSION_RECORD, RuntimeError("later"))
+    async def retry() -> tuple[FailedWrite, StoreFailed] | None:
+        halt.fail(FailedWrite.EVENT_LOG, StoreFailed("again"))
+        halt.fail(FailedWrite.SESSION_RECORD, StoreFailed("later"))
         return None
 
     halt = StorageHalt(record, HaltHooks(retry=retry))
-    halt.fail(FailedWrite.EVENT_LOG, RuntimeError("first"))
+    halt.fail(FailedWrite.EVENT_LOG, StoreFailed("first"))
     while halt.message == halting_message(FailedWrite.EVENT_LOG):
         await asyncio.sleep(0)
     await asyncio.sleep(0.01)
@@ -753,7 +753,7 @@ class BlockedRetry:
     release: asyncio.Event
     runs: int = 0
 
-    async def __call__(self) -> tuple[FailedWrite, RuntimeError] | None:
+    async def __call__(self) -> tuple[FailedWrite, StoreFailed] | None:
         self.runs += 1
         self.started.set()
         await self.release.wait()
@@ -766,7 +766,7 @@ async def halted_on_retry(
     """A halt, its halting done, whose retry blocks until released."""
     retry = BlockedRetry(asyncio.Event(), asyncio.Event())
     halt = StorageHalt(record, HaltHooks(retry=retry))
-    halt.fail(FailedWrite.EVENT_LOG, RuntimeError("first"))
+    halt.fail(FailedWrite.EVENT_LOG, StoreFailed("first"))
     while halt.message == halting_message(FailedWrite.EVENT_LOG):
         await asyncio.sleep(0)
     await asyncio.sleep(0.01)
@@ -801,7 +801,7 @@ async def test_a_failure_during_a_resume_refused_a_second_time_halts_again() -> 
     await retry.started.wait()
     with pytest.raises(Refused):
         await asyncio.wait_for(halt.resume(), 1)
-    halt.fail(FailedWrite.EVENT_LOG, RuntimeError("again"))
+    halt.fail(FailedWrite.EVENT_LOG, StoreFailed("again"))
     retry.release.set()
     await first
     assert halt.halted
@@ -833,14 +833,14 @@ class BlockedDivert:
 async def test_a_resume_while_one_is_explaining_its_failed_retry_is_refused() -> None:
     retries = 0
 
-    async def retry() -> tuple[FailedWrite, RuntimeError] | None:
+    async def retry() -> tuple[FailedWrite, StoreFailed] | None:
         nonlocal retries
         retries += 1
-        return FailedWrite.SESSION_RECORD, RuntimeError("still full")
+        return FailedWrite.SESSION_RECORD, StoreFailed("still full")
 
     divert = BlockedDivert(asyncio.Event(), asyncio.Event())
     halt = StorageHalt(lambda event: asyncio.sleep(0), HaltHooks(divert=divert, retry=retry))
-    halt.fail(FailedWrite.EVENT_LOG, RuntimeError("first"))
+    halt.fail(FailedWrite.EVENT_LOG, StoreFailed("first"))
     while halt.message == halting_message(FailedWrite.EVENT_LOG):
         await asyncio.sleep(0)
     await asyncio.sleep(0.01)

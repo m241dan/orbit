@@ -5,7 +5,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 from orbit.agent.application.failures import ReportedOnce, outcome
-from orbit.agent.application.ports import EventLog, Fallback, Publish
+from orbit.agent.application.ports import EventLog, Fallback, Publish, StoreFailed
 from orbit.agent.domain.replay import LogBounds
 from orbit.agent.domain.storage import trim_target
 from orbit.agent.domain.storage_halt import SeqSpan, lost_spans
@@ -41,11 +41,11 @@ def _without(queued: Queued, session_id: str) -> Queued:
     return [(session, envelope) for session, envelope in queued if session != session_id]
 
 
-Failed = Callable[[RuntimeError], None]
+Failed = Callable[[StoreFailed], None]
 """Told that an append failed with the error given."""
 
 
-def _ignored(error: RuntimeError) -> None:
+def _ignored(error: StoreFailed) -> None:
     pass
 
 
@@ -178,7 +178,7 @@ class LogWriter:
     ) -> tuple[list[EventEnvelope], bool]:
         """The last ``limit`` events of the session ``session_id`` before ``before_seq``, oldest
         first, logged or still to be written, each once, and whether earlier ones remain. Raises
-        ``RuntimeError`` when the log can't be read."""
+        :class:`ReadFailed` when the log can't be read."""
         # Read on both sides of the log's read, as recent does.
         pending = self._unwritten(session_id)
         logged, more = await self._log.before(session_id, before_seq, limit)
@@ -237,7 +237,7 @@ class LogWriter:
                 self._places[session_id] = await self._to_fallback(session_id, [])
         return _in_order([envelope for _, envelope in self._diverted]), self._places[session_id]
 
-    async def resume(self) -> list[SeqSpan] | RuntimeError:
+    async def resume(self) -> list[SeqSpan] | StoreFailed:
         """Append to the log again, once stopped: the envelopes the fallback took, then those
         queued, in ``seq`` order, one append per session. Once that works, the fallback files are
         removed and appending carries on; returns the spans of the envelopes no fallback took,
@@ -263,7 +263,7 @@ class LogWriter:
             self._forgetting[:0] = held
             self._wake()
 
-    async def _append_taken(self, parked: Queued, queued: Queued) -> RuntimeError | None:
+    async def _append_taken(self, parked: Queued, queued: Queued) -> StoreFailed | None:
         """Append ``parked`` and ``queued``, taken from the queue, as :meth:`_append_whole`
         does; when that fails or is cancelled, ``queued`` are queued again, so that, still
         stopped, the writer sends them to the fallback."""
@@ -281,12 +281,12 @@ class LogWriter:
         self._queued[:0] = queued
         self._ready.set()
 
-    async def _append_whole(self, queued: Queued) -> RuntimeError | None:
+    async def _append_whole(self, queued: Queued) -> StoreFailed | None:
         """Append ``queued`` to the log by ``seq``, one append per session; returns the error
         of the first that fails."""
         for session_id, envelopes in _by_session(queued).items():
             error = await outcome(self._log.append(session_id, _in_order(envelopes)))
-            if isinstance(error, RuntimeError):
+            if isinstance(error, StoreFailed):
                 return error
         return None
 
@@ -348,7 +348,7 @@ class LogWriter:
             return
         seq = self._reserving
         error = await outcome(self._log.reserve(seq))
-        if isinstance(error, RuntimeError):
+        if isinstance(error, StoreFailed):
             self._stopped = True
             self._failed(error)
             return
@@ -362,7 +362,7 @@ class LogWriter:
             if self._stopped:
                 await self._drop(session_id)
                 # The halt that stopped the writer already reported the storage problem.
-                if isinstance(await outcome(self._log.forget(session_id)), RuntimeError):
+                if isinstance(await outcome(self._log.forget(session_id)), StoreFailed):
                     self._held.append(session_id)
                 return
         await self._forgets.attempt(self._log.forget(session_id))
@@ -393,7 +393,7 @@ class LogWriter:
         after if it's over the limit and the writer still running; a failed append stops the
         appending and is told to ``failed``."""
         error = await outcome(self._log.append(session_id, envelopes))
-        if isinstance(error, RuntimeError):
+        if isinstance(error, StoreFailed):
             self._stopped = True
             self._failed(error)
             return False

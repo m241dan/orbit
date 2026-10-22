@@ -7,6 +7,7 @@ from collections.abc import Sequence
 from orbit.agent import Agents
 from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.lanes import SessionGate
+from orbit.agent.application.ports import StoreFailed
 from orbit.agent.application.review_lane import ReviewHooks, ReviewLane
 from orbit.agent.application.storage_halt import HaltHooks, StorageHalt
 from orbit.agent.application.tasks import Tasks
@@ -63,7 +64,7 @@ class Halting:
     async def publish(self, event: Event) -> None:
         self.events.append(event)
         if isinstance(event, TasksChanged) and self._first_ended(event):
-            self.halt.fail(FailedWrite.EVENT_LOG, RuntimeError("disk full"))
+            self.halt.fail(FailedWrite.EVENT_LOG, StoreFailed("disk full"))
 
     def _first_ended(self, event: TasksChanged) -> bool:
         return any(t.id == self.first and t.status not in WAITING for t in event.tasks)

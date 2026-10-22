@@ -23,6 +23,7 @@ from orbit.agent.application.ports import (
     RepositoryLock,
     SessionStore,
     StoredSession,
+    StoreFailed,
     TreeFailed,
     UsageSource,
 )
@@ -259,7 +260,7 @@ class FakeHalt:
     def halted(self) -> bool:
         return bool(self.failures)
 
-    def fail(self, write: FailedWrite, error: RuntimeError) -> None:
+    def fail(self, write: FailedWrite, error: StoreFailed) -> None:
         self.failures.append((write, str(error)))
 
 
@@ -353,13 +354,13 @@ class FakeStore:
 
     async def save(self, record: SessionRecord) -> None:
         if self.failure is not None:
-            raise RuntimeError(self.failure)
+            raise StoreFailed(self.failure)
         await asyncio.sleep(0)  # Saving takes a while, as writing a file does.
         self.saved.append(record)
 
     async def load(self, session_id: str) -> SessionRecord | Unreadable:
         if self.load_failure is not None:
-            raise RuntimeError(self.load_failure)
+            raise StoreFailed(self.load_failure)
         if session_id in self.broken:
             return Unreadable(self.broken[session_id])
         found = [r for r in self.saved if r.id == session_id]
@@ -379,7 +380,7 @@ class FakeStore:
         if self.on_delete is not None:
             await self.on_delete()
         if self.delete_failure is not None:
-            raise RuntimeError(self.delete_failure)
+            raise StoreFailed(self.delete_failure)
         self.deleted.append(session_id)
         self.saved = [r for r in self.saved if r.id != session_id]
         self.locked.discard(session_id)
@@ -388,7 +389,7 @@ class FakeStore:
         if self.on_acquire is not None:
             await self.on_acquire()
         if self.lock_failure is not None:
-            raise RuntimeError(self.lock_failure)
+            raise StoreFailed(self.lock_failure)
         if session_id in self.elsewhere:
             return False
         if self.free:
@@ -399,7 +400,7 @@ class FakeStore:
         if self.on_release is not None:
             await self.on_release()
         if self.release_failure is not None:
-            raise RuntimeError(self.release_failure)
+            raise StoreFailed(self.release_failure)
         self.released.append(session_id)
         self.locked.discard(session_id)
 
@@ -412,13 +413,13 @@ class FakeStore:
 
     async def reserve(self, seq: int) -> None:
         if self.reserve_failure is not None:
-            raise RuntimeError(self.reserve_failure)
+            raise StoreFailed(self.reserve_failure)
         await asyncio.sleep(0)  # Writing takes a while.
         self.reservations.append(seq)
 
     async def append(self, session_id: str, envelopes: Sequence[EventEnvelope]) -> int:
         if self.append_failure is not None:
-            raise RuntimeError(self.append_failure)
+            raise StoreFailed(self.append_failure)
         await asyncio.sleep(0)  # Writing takes a while.
         self.appends.append((session_id, list(envelopes)))
         stored = {envelope.seq for envelope in self.logged}
@@ -462,18 +463,18 @@ class FakeStore:
 
     async def forget(self, session_id: str) -> None:
         if self.forget_failure is not None:
-            raise RuntimeError(self.forget_failure)
+            raise StoreFailed(self.forget_failure)
         self.forgotten.append(session_id)
         self.logged = [envelope for envelope in self.logged if envelope.session != session_id]
 
     async def review_count(self) -> int:
         if self.count_load_failure is not None:
-            raise RuntimeError(self.count_load_failure)
+            raise StoreFailed(self.count_load_failure)
         return self.count
 
     async def save_review_count(self, count: int) -> None:
         if self.count_failure is not None:
-            raise RuntimeError(self.count_failure)
+            raise StoreFailed(self.count_failure)
         for _ in range(self.count_yields.pop(0) if self.count_yields else 0):
             await asyncio.sleep(0)  # Saving takes a while, as writing a file does.
         self.count = count

@@ -3,6 +3,7 @@
 import asyncio
 
 from orbit.agent.application.keeper import NewSessions, SessionKeeper
+from orbit.agent.application.ports import StoreFailed
 from orbit.agent.application.review_count import ReviewCount
 from orbit.agent.domain.storage_halt import FailedWrite
 from orbit.protocol import SAVE_FAILED, ErrorOccurred
@@ -75,7 +76,7 @@ async def test_a_count_retry_that_fails_returns_the_error() -> None:
     await count.save(1)
 
     error = await count.retry()
-    assert isinstance(error, RuntimeError) and str(error) == "full"
+    assert isinstance(error, StoreFailed) and str(error) == "full"
     assert len(halt.failures) == 1
 
 

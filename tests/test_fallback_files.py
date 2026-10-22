@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from orbit.agent.application.ports import ParkedFile
+from orbit.agent.application.ports import ParkedFile, ReadFailed, StoreFailed
 from orbit.agent.external.fallback_files import FallbackFiles
 from orbit.protocol import EventEnvelope, decode_event
 from tests.agent_fakes import notice
@@ -212,7 +212,7 @@ async def test_a_parked_file_that_isnt_envelopes_cant_be_read(
     else:
         path.write_bytes(text)
 
-    with pytest.raises(RuntimeError):
+    with pytest.raises(ReadFailed):
         await files.read(ParkedFile(str(path), "s1"))
 
 
@@ -248,12 +248,12 @@ async def test_a_parked_file_with_a_bad_line_before_good_ones_cant_be_read(
         appended.write('{"seq": 2, "sess\n')
     await files.write("s1", [notice(3)])
 
-    with pytest.raises(RuntimeError):
+    with pytest.raises(ReadFailed):
         await files.read(file)
 
 
 async def test_a_missing_parked_file_cant_be_read(files: FallbackFiles, tmp_path: Path) -> None:
-    with pytest.raises(RuntimeError, match="No such file"):
+    with pytest.raises(ReadFailed, match="No such file"):
         await files.read(ParkedFile(str(tmp_path / "gone.jsonl"), "s1"))
 
 
@@ -273,7 +273,7 @@ async def test_a_parked_file_that_cant_be_deleted_says_why(
     directory = tmp_path / "state" / "fallback"
     directory.chmod(0o500)
     try:
-        with pytest.raises(RuntimeError, match="Permission denied"):
+        with pytest.raises(StoreFailed, match="Permission denied"):
             await files.delete(file)
     finally:
         directory.chmod(0o700)

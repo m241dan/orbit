@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from orbit.agent import WorkspaceHost
 from orbit.agent.application.connection import SessionConnection
+from orbit.agent.application.ports import StoreFailed
 from orbit.agent.domain.sessions import OPEN_UNDELETABLE, OPEN_UNRENAMABLE, SessionRecord
 from orbit.protocol import (
     INVALID,
@@ -241,7 +242,7 @@ async def test_a_left_session_that_cant_be_read_back_sends_its_viewers_no_view()
 
     async def fail_listing() -> None:
         store.on_acquire = None
-        store.list_failure = RuntimeError("The store is gone.")
+        store.list_failure = StoreFailed("The store is gone.")
 
     store.on_acquire = fail_listing
     await say(activating, "activate", ActivateSession(session=EARLIER))

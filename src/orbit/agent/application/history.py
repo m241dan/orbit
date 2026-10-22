@@ -17,7 +17,7 @@ class SessionHistory:
 
     async def page(self, command: History) -> HistoryPage:
         """The page of events ``command`` asks for; refused for a session that isn't this
-        workspace's. Raises ``RuntimeError`` when the log can't be read."""
+        workspace's. Raises :class:`ReadFailed` when the log can't be read."""
         session_id = command.session
         if not await self._known(session_id):
             raise Refused(UNKNOWN, missing_message(session_id))

@@ -2,6 +2,7 @@
 after."""
 
 from orbit.agent import WorkspaceHost
+from orbit.agent.application.ports import StoreFailed
 from orbit.protocol import (
     INVALID,
     LOCKED,
@@ -198,7 +199,7 @@ async def test_resuming_while_a_rename_still_fails_is_refused_and_stays_halted()
 async def test_resuming_while_the_sessions_cannot_be_listed_keeps_the_halt_and_the_rename() -> None:
     store = store_with(saved("old"))
     session = await halted_by_a_rename(store)
-    store.failure, store.list_failure = None, RuntimeError("Couldn't list the sessions.")
+    store.failure, store.list_failure = None, StoreFailed("Couldn't list the sessions.")
 
     refusal = (await outcome_of(session, ResumeStorage()))[-1].payload
     assert isinstance(refusal, CommandRefused) and refusal.code == STORAGE_FAILED

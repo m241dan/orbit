@@ -22,6 +22,7 @@ from orbit.agent.application.ports import (
     SessionStore,
     StepRunner,
     StoredSession,
+    StoreFailed,
     Workspace,
 )
 from orbit.agent.application.recovery import RecoveryFailed
@@ -118,6 +119,7 @@ __all__ = [
     "StepRunner",
     "StorageSettings",
     "StoreError",
+    "StoreFailed",
     "StoredSession",
     "TlsError",
     "TlsMode",

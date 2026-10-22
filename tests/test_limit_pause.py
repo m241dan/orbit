@@ -8,7 +8,7 @@ import pytest
 
 from orbit.agent import WorkspaceHost
 from orbit.agent.application.limit_pause import LimitPause
-from orbit.agent.application.ports import UsageSource
+from orbit.agent.application.ports import StoreFailed, UsageSource
 from orbit.agent.application.storage_halt import Failure
 from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.storage_halt import FailedWrite
@@ -273,7 +273,7 @@ def fails_as_lifted(session: WorkspaceHost) -> None:
     retry = session._halt._retry
 
     async def failing() -> Failure | None:
-        session._halt.fail(FailedWrite.EVENT_LOG, RuntimeError("full again"))
+        session._halt.fail(FailedWrite.EVENT_LOG, StoreFailed("full again"))
         return await retry()
 
     session._halt._retry = failing

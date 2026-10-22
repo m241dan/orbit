@@ -12,7 +12,7 @@ from collections.abc import Sequence
 from contextlib import suppress
 from pathlib import Path
 
-from orbit.agent.application.ports import ParkedFile
+from orbit.agent.application.ports import ParkedFile, ReadFailed, StoreFailed
 from orbit.protocol import EventEnvelope, ProtocolError, decode_event, encode
 
 FALLBACK = "fallback"
@@ -47,32 +47,32 @@ def _write_all(descriptor: int, data: bytes) -> None:
 def _read(path: Path) -> list[EventEnvelope]:
     """The envelopes in the file at ``path``, one per line, but for those of types this orbit
     doesn't know and a last line, without a newline, that isn't one: the write that failed.
-    Raises ``RuntimeError`` when it can't be read or another line isn't an envelope."""
+    Raises :class:`ReadFailed` when it can't be read or another line isn't an envelope."""
     try:
         *lines, last = path.read_bytes().split(b"\n")
     except OSError as error:
-        raise RuntimeError(str(error)) from error
+        raise ReadFailed(str(error)) from error
     decoded = [_decode(line) for line in lines if line.strip()]
-    with suppress(RuntimeError):
+    with suppress(ReadFailed):
         decoded.append(_decode(last))
     return [envelope for envelope in decoded if envelope is not None]
 
 
 def _decode(line: bytes) -> EventEnvelope | None:
     """The envelope ``line`` holds, or ``None`` for one of a type this orbit doesn't know;
-    raises ``RuntimeError`` if it holds neither."""
+    raises :class:`ReadFailed` if it holds neither."""
     try:
         return decode_event(line.decode("utf-8"))
     except (UnicodeDecodeError, ProtocolError) as error:
-        raise RuntimeError(str(error)) from error
+        raise ReadFailed(str(error)) from error
 
 
 def _delete(path: Path) -> None:
-    """Delete the file at ``path``; raises ``RuntimeError`` when it can't."""
+    """Delete the file at ``path``; raises :class:`StoreFailed` when it can't."""
     try:
         path.unlink(missing_ok=True)
     except OSError as error:
-        raise RuntimeError(str(error)) from error
+        raise StoreFailed(str(error)) from error
 
 
 class FallbackFiles:

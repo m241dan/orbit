@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from orbit.agent.application.failures import ReportedOnce, outcome
-from orbit.agent.application.ports import Publish, SessionStore, StoredSession
+from orbit.agent.application.ports import Publish, SessionStore, StoredSession, StoreFailed
 from orbit.agent.application.storage_halt import Halting
 from orbit.agent.domain.refusals import STOPPING, Refused
 from orbit.agent.domain.reviews import LaneSnapshot
@@ -230,7 +230,7 @@ class SessionKeeper:
         if error is not None:
             self._halt.fail(FailedWrite.SESSION_RECORD, error)
 
-    async def retry(self, contents: Callable[[], Contents]) -> RuntimeError | None:
+    async def retry(self, contents: Callable[[], Contents]) -> StoreFailed | None:
         """Save the session as :meth:`save` does, though it's halted, as resuming does, and then
         redo the rename of a saved session whose save failed; returns the error when a save
         fails, or when a store problem keeps the rename from being redone, keeping it to retry.
@@ -246,12 +246,12 @@ class SessionKeeper:
             return None
         if renamed is False:
             self._renaming = renaming
-            return RuntimeError(
+            return StoreFailed(
                 f"Couldn't claim the saved session {renaming.session_id} to rename it."
             )
-        return renamed if isinstance(renamed, RuntimeError) else None
+        return renamed if isinstance(renamed, StoreFailed) else None
 
-    async def _save(self, contents: Callable[[], Contents], retrying: bool) -> RuntimeError | None:
+    async def _save(self, contents: Callable[[], Contents], retrying: bool) -> StoreFailed | None:
         """Save the session as :meth:`save` does, halted or not if ``retrying``; returns the
         error when the save fails."""
         if self._store is None:
@@ -263,7 +263,7 @@ class SessionKeeper:
             locked = await self._lock(self._store)
             if locked is True:
                 return await self._write(self._store, contents_now)
-        return locked if isinstance(locked, RuntimeError) else None
+        return locked if isinstance(locked, StoreFailed) else None
 
     def _due(self, contents: Contents, retrying: bool) -> bool:
         """Whether ``contents`` are to be saved: the session is open, not halted unless
@@ -273,17 +273,17 @@ class SessionKeeper:
         open_now = not self._closed and (retrying or not self._halt.halted)
         return open_now and self.used and contents != self._saved
 
-    async def _lock(self, store: SessionStore) -> RuntimeError | bool:
+    async def _lock(self, store: SessionStore) -> StoreFailed | bool:
         """Lock the session in ``store`` on its first save; returns whether it's locked, or the
         error when the store fails as it's taken, leaving it to be tried again."""
         if self._locked is None:
             acquired = await self._acquire(store)
-            if isinstance(acquired, RuntimeError):
+            if isinstance(acquired, StoreFailed):
                 return acquired
             self._locked = acquired
         return self._locked
 
-    async def _acquire(self, store: SessionStore) -> RuntimeError | bool:
+    async def _acquire(self, store: SessionStore) -> StoreFailed | bool:
         """Take the session's lock in ``store``; returns whether it was taken, reporting it if
         another orbit holds it, or the error when the store fails."""
         acquired = await outcome(store.acquire(self.id))
@@ -292,7 +292,7 @@ class SessionKeeper:
             await self._publish(ErrorOccurred(code=LOCKED, message=message))
         return acquired
 
-    async def _write(self, store: SessionStore, contents: Contents) -> RuntimeError | None:
+    async def _write(self, store: SessionStore, contents: Contents) -> StoreFailed | None:
         """Save ``contents`` as the session in ``store``, now its last active time; returns the
         error when it fails."""
         record = SessionRecord(
@@ -307,7 +307,7 @@ class SessionKeeper:
             spent=contents.spent,
         )
         error = await outcome(store.save(record))
-        if isinstance(error, RuntimeError):
+        if isinstance(error, StoreFailed):
             return error
         self._saved = contents
         return None
@@ -344,12 +344,12 @@ class SessionKeeper:
         :class:`Refused`) if it can't be renamed; a failing save halts the session, and other
         store problems are reported."""
         renamed = await self._rename(_Renaming(session_id, name))
-        if isinstance(renamed, RuntimeError):
+        if isinstance(renamed, StoreFailed):
             self._halt.fail(FailedWrite.SESSION_RECORD, renamed)
             return False
         return renamed
 
-    async def _rename(self, renaming: _Renaming) -> RuntimeError | bool:
+    async def _rename(self, renaming: _Renaming) -> StoreFailed | bool:
         """Carry out ``renaming`` as :meth:`rename_saved` does; returns whether it was renamed,
         not if a store problem kept it from being claimed, or the error when its save fails,
         keeping it to :meth:`retry`. Refused if it's the session open here by then."""
@@ -367,7 +367,7 @@ class SessionKeeper:
                 )
             finally:
                 await self._release(self._store, renaming.session_id)
-        if not isinstance(error, RuntimeError):
+        if not isinstance(error, StoreFailed):
             return True
         self._renaming = renaming
         return error
@@ -390,7 +390,7 @@ class SessionKeeper:
         then its events still to be logged; returns whether it was deleted, reporting it and
         letting go of the lock if it can't be."""
         error = await outcome(store.delete(session_id))
-        if isinstance(error, RuntimeError):
+        if isinstance(error, StoreFailed):
             await self._release(store, session_id)
             await self._publish(ErrorOccurred(code=SAVE_FAILED, message=str(error)))
             return False
@@ -555,7 +555,7 @@ class SessionKeeper:
         """What ``call``, to the store, returns; none if it fails, reported with ``suffix``
         after the store's message."""
         result = await outcome(call)
-        if isinstance(result, RuntimeError):
+        if isinstance(result, StoreFailed):
             await self._publish(ErrorOccurred(code=SAVE_FAILED, message=f"{result}{suffix}"))
             return None
         return result

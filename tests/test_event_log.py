@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from orbit.agent.application.ports import EventLog, StorageFailed
+from orbit.agent.application.ports import EventLog, ReadFailed, StorageFailed
 from orbit.agent.domain.replay import LogBounds, can_replay
 from orbit.agent.external import sqlite_schema
 from orbit.agent.external.workspace_registry import register
@@ -113,7 +113,7 @@ async def test_an_append_that_fails_part_way_is_rolled_back_whole(
             """CREATE TRIGGER no_fourth BEFORE INSERT ON events WHEN NEW.seq = 4
             BEGIN SELECT RAISE(ABORT, 'no'); END"""
         )
-    with pytest.raises(RuntimeError, match=r"save the events of the session abc to .*orbit\.db"):
+    with pytest.raises(StorageFailed, match=r"save the events of the session abc to .*orbit\.db"):
         await store.append("abc", [notice(1), notice(3), notice(4)])
     assert [seq for _, seq, *_ in logged(state)] == [2]
     assert store.max_seq() == 2
@@ -129,7 +129,7 @@ async def test_a_delete_that_fails_keeps_the_sessions_events(
         connection.execute(
             "CREATE TRIGGER refuse BEFORE DELETE ON sessions BEGIN SELECT RAISE(FAIL, 'no'); END"
         )
-    with pytest.raises(RuntimeError, match="Couldn't delete the session abc"):
+    with pytest.raises(StorageFailed, match="Couldn't delete the session abc"):
         await store.delete("abc")
     assert [seq for _, seq, *_ in logged(state)] == [1]
     assert await store.load("abc") == record()
@@ -138,7 +138,7 @@ async def test_a_delete_that_fails_keeps_the_sessions_events(
 async def test_a_closed_store_refuses_to_append(open_store: Opener, workspace: Path) -> None:
     store = await open_store(workspace)
     await store.close()
-    with pytest.raises(RuntimeError, match="the store is closed"):
+    with pytest.raises(StorageFailed, match="the store is closed"):
         await store.append("abc", [notice(1)])
 
 
@@ -178,7 +178,7 @@ async def test_an_append_that_cant_start_is_refused(
     store = await open_store(workspace)
     with database(state) as connection:
         connection.execute("BEGIN IMMEDIATE")  # Another writer holds the database.
-        with pytest.raises(RuntimeError, match="database is locked"):
+        with pytest.raises(StorageFailed, match="database is locked"):
             await store.append("abc", [notice(1)])
         connection.execute("ROLLBACK")
     assert logged(state) == []
@@ -272,7 +272,7 @@ async def test_events_before_a_seq_that_cant_be_read_raise_naming_the_database(
     await store.close()
 
     match = r"Couldn't read the events of the session abc from .*orbit\.db: "
-    with pytest.raises(RuntimeError, match=match):
+    with pytest.raises(ReadFailed, match=match):
         await store.before("abc", 10, 10)
 
 
@@ -581,7 +581,7 @@ async def test_a_trim_that_fails_is_refused_and_trimmed_reads_false(
     await store.trim("abc", 1, 1)
     await store.close()
 
-    with pytest.raises(RuntimeError, match=r"Couldn't trim the events of the session abc in "):
+    with pytest.raises(StorageFailed, match=r"Couldn't trim the events of the session abc in "):
         await store.trim("abc", 1, 1)
     assert not await store.trimmed("abc")
 
@@ -614,7 +614,7 @@ async def test_a_forget_that_fails_is_refused(open_store: Opener, workspace: Pat
     store = await open_store(workspace)
     await store.close()
 
-    with pytest.raises(RuntimeError, match=r"Couldn't delete the events of the session abc from "):
+    with pytest.raises(StorageFailed, match=r"Couldn't delete the events of the session abc from "):
         await store.forget("abc")
 
 

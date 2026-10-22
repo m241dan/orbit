@@ -8,6 +8,7 @@ import pytest
 
 from orbit.agent import WorkspaceHost
 from orbit.agent.application.log_writer import LogWriter, Overflow
+from orbit.agent.application.ports import ReadFailed, StoreFailed
 from orbit.agent.domain.replay import LogBounds
 from orbit.agent.domain.storage import StorageSettings
 from orbit.protocol import (
@@ -78,7 +79,7 @@ class FailsFor(FakeStore):
 
     async def append(self, session_id: str, envelopes: Sequence[EventEnvelope]) -> int:
         if session_id == self.failing:
-            raise RuntimeError("disk full")
+            raise StoreFailed("disk full")
         return await super().append(session_id, envelopes)
 
 
@@ -86,7 +87,7 @@ class FailingTrims(FakeStore):
     """A log whose trims fail."""
 
     async def trim(self, session_id: str, limit: int, target: int) -> None:
-        raise RuntimeError("trim failed")
+        raise StoreFailed("trim failed")
 
 
 def stored_session(store: FakeStore | OwnView) -> WorkspaceHost:
@@ -322,7 +323,7 @@ async def test_resuming_while_the_log_still_fails_keeps_diverting() -> None:
     writer.add("a", notice(2))
 
     error = await writer.resume()
-    assert isinstance(error, RuntimeError) and str(error) == "still full"
+    assert isinstance(error, StoreFailed) and str(error) == "still full"
     writer.add("a", notice(3))
     await writer.close()
     assert fallback.files == {"a": [notice(1), notice(2), notice(3)]}
@@ -819,14 +820,14 @@ class Unreadable(FakeStore):
     async def before(
         self, session_id: str, before_seq: int, limit: int
     ) -> tuple[list[EventEnvelope], bool]:
-        raise RuntimeError("database is locked")
+        raise ReadFailed("database is locked")
 
 
 async def test_reads_before_a_seq_of_a_log_that_cant_be_read_raise() -> None:
     writer = LogWriter(Unreadable(), Published())
     writer.add("a", notice(1))
 
-    with pytest.raises(RuntimeError, match="database is locked"):
+    with pytest.raises(ReadFailed, match="database is locked"):
         await writer.before("a", 10, 10)
     await writer.close()
 

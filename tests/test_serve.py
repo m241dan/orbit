@@ -31,6 +31,7 @@ from orbit.agent import (
     ServedWorkspaces,
     ServeLock,
     ServerSettings,
+    StoreFailed,
     TokenFile,
     WorkspaceHost,
     WorkspaceLock,
@@ -1270,7 +1271,7 @@ class StoreGone(WorkspaceHost):
     """A host whose store fails as it opens its latest session."""
 
     async def open_latest(self) -> None:
-        raise RuntimeError("The store is gone.")
+        raise StoreFailed("The store is gone.")
 
 
 def serve_parts(plane: ControlPlane, state: Path) -> serve._ServeParts:

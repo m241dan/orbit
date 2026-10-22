@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from orbit.agent.application.lanes import Background
-from orbit.agent.application.ports import Publish, StorageFailed
+from orbit.agent.application.ports import Publish, StorageFailed, StoreFailed
 from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.storage_halt import (
     FailedWrite,
@@ -24,7 +24,7 @@ Divert = Callable[[], Awaitable[tuple[Sequence[EventEnvelope], str | None]]]
 """Stops appending events to the log, sending them to the fallback instead; returns those sent
 there so far and the open session's fallback file, or ``None`` when none could be written."""
 
-Failure = tuple[FailedWrite, RuntimeError]
+Failure = tuple[FailedWrite, StoreFailed]
 """A write to the store that failed, and its error."""
 
 Retry = Callable[[], Awaitable[Failure | None]]
@@ -40,7 +40,7 @@ class Halting(Protocol):
         """Whether a write to the store failed, so nothing more is written."""
         ...
 
-    def fail(self, write: FailedWrite, error: RuntimeError) -> None:
+    def fail(self, write: FailedWrite, error: StoreFailed) -> None:
         """Halt the session because ``write`` failed with ``error``."""
         ...
 
@@ -70,7 +70,7 @@ class HaltHooks:
 _NO_HOOKS = HaltHooks()
 
 
-def fault_of(write: FailedWrite, error: RuntimeError) -> StorageFault:
+def fault_of(write: FailedWrite, error: StoreFailed) -> StorageFault:
     """The fault of ``write`` failing with ``error``: as the store described it, or not
     recognised when it didn't."""
     if isinstance(error, StorageFailed):
@@ -113,7 +113,7 @@ class StorageHalt:
         """Why the session halted on ``fault``: a short note until the explanation is made."""
         return self._explanation or halting_message(fault.write)
 
-    def fail(self, write: FailedWrite, error: RuntimeError) -> None:
+    def fail(self, write: FailedWrite, error: StoreFailed) -> None:
         """Halt the session because ``write`` failed with ``error``, unless it's halted already;
         once closed, only mark it halted. While :meth:`resume` lifts the halt, the failure
         halts the session again once it's lifted."""

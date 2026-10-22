@@ -17,6 +17,7 @@ directory, so that a crash leaves no stale lock behind.
 """
 
 import asyncio
+import logging
 import sqlite3
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
@@ -25,7 +26,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Self
 
-from orbit.agent.application.ports import StorageFailed, StoredSession
+from orbit.agent.application.ports import ReadFailed, StorageFailed, StoredSession
 from orbit.agent.domain.replay import LogBounds
 from orbit.agent.domain.sessions import SessionRecord, Unreadable, parse_record, record_json
 from orbit.agent.external.session_locks import SessionLocks, check_session_id
@@ -43,6 +44,8 @@ from orbit.protocol import EventEnvelope, decode_event, encode
 DATABASE = "orbit.db"
 LOCKS = "locks"
 THREAD_PREFIX = "orbit-sqlite"
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -195,7 +198,7 @@ class SqliteStore:
     async def save(self, workspace: str, record: SessionRecord) -> None:
         check_session_id(record.id)
         message = f"Couldn't save the session {record.id} to"
-        await self._or_raise(message, self._save, workspace, record, failed=True)
+        await self._or_raise(message, self._save, workspace, record, write=True)
 
     async def load(self, workspace: str, session_id: str) -> SessionRecord | Unreadable:
         check_session_id(session_id)
@@ -209,7 +212,7 @@ class SqliteStore:
     async def delete(self, workspace: str, session_id: str) -> None:
         check_session_id(session_id)
         message = f"Couldn't delete the session {session_id} from"
-        await self._or_raise(message, self._delete, workspace, session_id, failed=True)
+        await self._or_raise(message, self._delete, workspace, session_id, write=True)
         await self._locks_of(workspace).remove(session_id)
 
     def max_seq(self) -> int:
@@ -223,7 +226,7 @@ class SqliteStore:
 
     async def reserve(self, seq: int) -> None:
         message = f"Couldn't reserve the seq numbers up to {seq} in"
-        await self._or_raise(message, self._reserve, seq, failed=True)
+        await self._or_raise(message, self._reserve, seq, write=True)
 
     async def append(
         self, workspace: str, session_id: str, envelopes: Sequence[EventEnvelope]
@@ -231,7 +234,7 @@ class SqliteStore:
         check_session_id(session_id)
         message = f"Couldn't save the events of the session {session_id} to"
         return await self._or_raise(
-            message, self._append, workspace, session_id, envelopes, failed=True
+            message, self._append, workspace, session_id, envelopes, write=True
         )
 
     async def recent(self, workspace: str, session_id: str, limit: int) -> list[EventEnvelope]:
@@ -246,8 +249,8 @@ class SqliteStore:
     ) -> tuple[list[EventEnvelope], bool]:
         """The last ``limit`` events logged of the session ``session_id`` in the workspace
         ``workspace`` before ``before_seq``, oldest first, but for those of types this orbit
-        doesn't know, and whether earlier ones remain. Raises ``RuntimeError`` when they can't
-        be read."""
+        doesn't know, and whether earlier ones remain. Raises :class:`ReadFailed` when they
+        can't be read."""
         check_session_id(session_id)
         message = f"Couldn't read the events of the session {session_id} from"
         return await self._or_raise(message, self._before, workspace, session_id, before_seq, limit)
@@ -270,7 +273,7 @@ class SqliteStore:
     async def trim(self, workspace: str, session_id: str, limit: int, target: int) -> None:
         check_session_id(session_id)
         message = f"Couldn't trim the events of the session {session_id} in"
-        await self._or_raise(message, self._trim, workspace, session_id, limit, target)
+        await self._or_raise(message, self._trim, workspace, session_id, limit, target, write=True)
 
     async def trimmed(self, workspace: str, session_id: str) -> bool:
         check_session_id(session_id)
@@ -279,13 +282,13 @@ class SqliteStore:
     async def forget(self, workspace: str, session_id: str) -> None:
         check_session_id(session_id)
         message = f"Couldn't delete the events of the session {session_id} from"
-        await self._or_raise(message, self._forget, workspace, session_id)
+        await self._or_raise(message, self._forget, workspace, session_id, write=True)
 
     async def acquire(self, workspace: str, session_id: str) -> bool:
         """Lock the session ``session_id`` of the workspace ``workspace`` for this orbit;
         returns ``False`` when another running orbit has it locked.
 
-        Raises ``RuntimeError`` when the lock can't be taken, as once the store is closed.
+        Raises :class:`StoreFailed` when the lock can't be taken, as once the store is closed.
         """
         return await self._locks_of(workspace).acquire(session_id)
 
@@ -298,7 +301,7 @@ class SqliteStore:
 
     async def save_review_count(self, workspace: str, count: int) -> None:
         message = "Couldn't save the review count to"
-        await self._or_raise(message, self._save_review_count, workspace, count, failed=True)
+        await self._or_raise(message, self._save_review_count, workspace, count, write=True)
 
     async def insert_new(
         self,
@@ -311,10 +314,13 @@ class SqliteStore:
         committed inside ``committing()``, all while ``reading()`` is held, and rolled back if
         anything fails; returns how many sessions it saved.
 
-        Raises ``sqlite3.Error`` when the database fails, and whatever ``reading`` or
+        Raises :class:`StorageFailed` when the database fails, and whatever ``reading`` or
         ``committing`` raises.
         """
-        return await self._call(self._insert_new, workspace, reading, committing)
+        message = "Couldn't import the sessions into"
+        return await self._or_raise(
+            message, self._insert_new, workspace, reading, committing, write=True
+        )
 
     async def backup(self, target: Path) -> None:
         """Copy the database to ``target``, owner read-write, replacing any file there only once
@@ -330,26 +336,26 @@ class SqliteStore:
         self, fallback: Callable[[sqlite3.Error], T], function: Callable[[*A], T], *args: *A
     ) -> T:
         """What ``function(*args)`` returns, run on the database's thread, or what ``fallback``
-        makes of the error when the database fails."""
+        makes of the error, logged, when the database fails."""
         try:
             return await self._call(function, *args)
         except sqlite3.Error as error:
+            logger.warning("Couldn't read from %s: %s", self._database, error)
             return fallback(error)
 
     async def _or_raise[*A, T](
-        self, message: str, function: Callable[[*A], T], *args: *A, failed: bool = False
+        self, message: str, function: Callable[[*A], T], *args: *A, write: bool = False
     ) -> T:
         """What ``function(*args)`` returns, run on the database's thread.
 
         Raises, saying ``message`` and the database, when the database fails: a
-        :class:`StorageFailed` when ``failed``, as for a write that halts the session, or else a
-        ``RuntimeError``.
+        :class:`StorageFailed` when it's a ``write``, or else a :class:`ReadFailed`.
         """
         try:
             return await self._call(function, *args)
         except sqlite3.Error as error:
             text = self._message(message, error)
-            raise (self._failed(text, error) if failed else RuntimeError(text)) from error
+            raise (self._failed(text, error) if write else ReadFailed(text)) from error
 
     def _message(self, message: str, error: sqlite3.Error) -> str:
         """``message``, followed by the database and ``error``."""
@@ -661,7 +667,7 @@ class SqliteStore:
         """The sessions of the workspace ``workspace`` saved as ``rows``, each marked locked when
         another orbit holds it in ``locks``.
 
-        Raises ``RuntimeError`` when the locks can't be checked.
+        Raises :class:`ReadFailed` when the locks can't be checked.
         """
         try:
             self._lock_dir(workspace).mkdir(parents=True, exist_ok=True)
@@ -672,7 +678,7 @@ class SqliteStore:
                 ]
         except OSError as error:
             message = f"Couldn't list the sessions in {self._database}: their locks can't be"
-            raise RuntimeError(f"{message} checked: {error}") from error
+            raise ReadFailed(f"{message} checked: {error}") from error
 
 
 class WorkspaceStore:

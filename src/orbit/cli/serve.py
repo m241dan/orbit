@@ -25,6 +25,7 @@ from orbit.agent import (
     ServedWorkspaces,
     ServeLock,
     ServerSettings,
+    StoreFailed,
     TlsError,
     TokenError,
     TokenFile,
@@ -325,7 +326,7 @@ async def _served(parts: _ServeParts, profile: Path | None) -> None:
         server = ControlPlaneServer(plane, parts.token, parts.settings, typer.echo)
         server.revoked = parts.revoked
         try:
-            with _exit_on(RuntimeError, message=lambda exc: f"{CANT_OPEN}{exc}"):
+            with _exit_on(StoreFailed, message=lambda exc: f"{CANT_OPEN}{exc}"):
                 await plane.start()
             url = await server.start()
         except BaseException:

@@ -243,7 +243,15 @@ class StoredSession:
     locked: bool
 
 
-class StorageFailed(RuntimeError):
+class StoreFailed(Exception):
+    """A call to the store failed, as its message says."""
+
+
+class ReadFailed(StoreFailed):
+    """A read from the store failed, as its message says."""
+
+
+class StorageFailed(StoreFailed):
     """A write to the store failed, as ``message`` says: ``database`` is its file, ``error`` the
     error as the database reported it, and ``kind`` what orbit makes of that."""
 
@@ -288,11 +296,11 @@ class ParkedEvents(Protocol):
 
     async def read(self, file: ParkedFile) -> list[EventEnvelope]:
         """The envelopes in ``file``, in the order written, but for those of types this orbit
-        doesn't know; raises ``RuntimeError`` when it can't be read or holds something else."""
+        doesn't know; raises :class:`ReadFailed` when it can't be read or holds something else."""
         ...
 
     async def delete(self, file: ParkedFile) -> None:
-        """Delete ``file``; raises ``RuntimeError`` when it can't."""
+        """Delete ``file``; raises :class:`StoreFailed` when it can't."""
         ...
 
 
@@ -311,13 +319,13 @@ class EventLog(Protocol):
     async def reserve(self, seq: int) -> None:
         """Note that every ``seq`` up to ``seq`` may be handed out, logged or not, so that the
         highest ``seq`` logged counts it from now on and none of them is handed out again. Raises
-        ``RuntimeError``, a :class:`StorageFailed` when the database failed, when it can't."""
+        :class:`StoreFailed`, a :class:`StorageFailed` when the database failed, when it can't."""
         ...
 
     async def append(self, session_id: str, envelopes: Sequence[EventEnvelope]) -> int:
         """Add ``envelopes``, events of the session ``session_id``, to its log, all of them or
         none, skipping those whose ``seq`` it holds already; returns how many it added. Raises
-        ``RuntimeError``, a :class:`StorageFailed` when the database failed, when it can't."""
+        :class:`StoreFailed`, a :class:`StorageFailed` when the database failed, when it can't."""
         ...
 
     async def recent(self, session_id: str, limit: int) -> list[EventEnvelope]:
@@ -329,8 +337,8 @@ class EventLog(Protocol):
         self, session_id: str, before_seq: int, limit: int
     ) -> tuple[list[EventEnvelope], bool]:
         """The last ``limit`` events logged of the session ``session_id`` before ``before_seq``,
-        oldest first, and whether earlier ones remain. Raises ``RuntimeError`` when they can't be
-        read."""
+        oldest first, and whether earlier ones remain. Raises :class:`ReadFailed` when they can't
+        be read."""
         ...
 
     async def after(self, session_id: str, after_seq: int) -> list[EventEnvelope] | None:
@@ -347,8 +355,8 @@ class EventLog(Protocol):
         """When the log of the session ``session_id`` holds more than ``limit`` bytes, delete
         its oldest events until it holds less than ``target``, noting that it was trimmed;
         its newest event is always kept, so one of ``target`` bytes or more leaves the log over
-        ``target``, or even ``limit``, until a later event is appended. Raises ``RuntimeError``
-        when it can't."""
+        ``target``, or even ``limit``, until a later event is appended. Raises
+        :class:`StorageFailed` when it can't."""
         ...
 
     async def trimmed(self, session_id: str) -> bool:
@@ -358,7 +366,7 @@ class EventLog(Protocol):
 
     async def forget(self, session_id: str) -> None:
         """Delete the events of the session ``session_id`` from its log, and its log with them;
-        raises ``RuntimeError`` when it can't."""
+        raises :class:`StorageFailed` when it can't."""
         ...
 
 
@@ -367,7 +375,7 @@ class SessionStore(EventLog, Protocol):
     log and the repository's count of commits since the last super review."""
 
     async def save(self, record: SessionRecord) -> None:
-        """Save ``record``, replacing the one saved with its id; raises ``RuntimeError``, a
+        """Save ``record``, replacing the one saved with its id; raises :class:`StoreFailed`, a
         :class:`StorageFailed` when the database failed, when it can't."""
         ...
 
@@ -377,30 +385,31 @@ class SessionStore(EventLog, Protocol):
 
     async def sessions(self) -> list[StoredSession]:
         """Every saved session, unreadable ones included, by id; none when none is saved. Raises
-        ``RuntimeError`` when the sessions can't be listed."""
+        :class:`ReadFailed` when the sessions can't be listed."""
         ...
 
     async def delete(self, session_id: str) -> None:
         """Delete the session ``session_id``, its events and its lock, readable or not; raises
-        ``RuntimeError``, a :class:`StorageFailed` when the database failed, when it can't."""
+        :class:`StoreFailed`, a :class:`StorageFailed` when the database failed, when it can't."""
         ...
 
     async def acquire(self, session_id: str) -> bool:
         """Lock the session ``session_id`` for this orbit; returns ``False`` when another
-        running orbit has it locked. A lock left by one that ended is taken over."""
+        running orbit has it locked. A lock left by one that ended is taken over. Raises
+        :class:`StoreFailed` when the lock can't be taken."""
         ...
 
     async def release(self, session_id: str) -> None:
         """Unlock the session ``session_id``, if this orbit holds its lock; raises
-        ``RuntimeError`` when it can't."""
+        :class:`StoreFailed` when it can't."""
         ...
 
     async def review_count(self) -> int:
         """The commits since the last super review; 0 when none is saved. Raises
-        ``RuntimeError`` when the store can't be read."""
+        :class:`ReadFailed` when the store can't be read."""
         ...
 
     async def save_review_count(self, count: int) -> None:
-        """Save ``count`` as the commits since the last super review; raises ``RuntimeError``,
-        a :class:`StorageFailed` when the database failed, when it can't."""
+        """Save ``count`` as the commits since the last super review; raises
+        :class:`StoreFailed`, a :class:`StorageFailed` when the database failed, when it can't."""
         ...

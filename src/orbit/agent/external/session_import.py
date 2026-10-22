@@ -13,13 +13,13 @@ that another orbit imports and renames first is left to it, as nothing to import
 
 import asyncio
 import os
-import sqlite3
 from collections.abc import Iterator
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 
+from orbit.agent.application.ports import StorageFailed
 from orbit.agent.domain.sessions import Unreadable, parse_record, parse_review_count
 from orbit.agent.external.session_files import REVIEWS, SESSIONS
 from orbit.agent.external.session_locks import SessionLocks
@@ -77,8 +77,9 @@ async def import_session_files(store: WorkspaceStore, legacy_dir: Path) -> Impor
         )
     except _Gone:
         return None
-    except sqlite3.Error as error:
-        raise ImportBlocked(f"Couldn't import the sessions in {sessions}: {error}") from error
+    except StorageFailed as failed:
+        message = f"Couldn't import the sessions in {sessions}: {failed.error}"
+        raise ImportBlocked(message) from failed
     return Imported(count, retired[0])
 
 

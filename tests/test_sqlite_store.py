@@ -1,19 +1,26 @@
 """The SQLite store: its database, workspaces, failures, backups and its thread."""
 
 import asyncio
+import logging
 import sqlite3
 from collections.abc import AsyncIterator, Awaitable, Callable
-from contextlib import closing
+from contextlib import AbstractContextManager, closing, nullcontext
 from pathlib import Path
 
 import pytest
 
-from orbit.agent.application.ports import SessionStore, StorageFailed, StoredSession
+from orbit.agent.application.ports import (
+    ReadFailed,
+    SessionStore,
+    StorageFailed,
+    StoredSession,
+    StoreFailed,
+)
 from orbit.agent.domain.sessions import SessionRecord, Unreadable
 from orbit.agent.domain.storage_halt import StorageErrorKind
 from orbit.agent.external import sqlite_store
 from orbit.agent.external.sqlite_schema import StoreError
-from orbit.agent.external.sqlite_store import SqliteStore, find_workspace_id
+from orbit.agent.external.sqlite_store import NewRows, SqliteStore, find_workspace_id
 from orbit.protocol import EventEnvelope, Notice
 from tests.git_repo import git
 from tests.store_views import (
@@ -187,7 +194,7 @@ async def test_two_views_of_one_workspace_share_its_locks(shared: SqliteStore, s
 async def test_a_view_made_after_the_store_closed_takes_no_lock(state: Path) -> None:
     store = await SqliteStore.open(state)
     await store.close()
-    with pytest.raises(RuntimeError, match="closed"):
+    with pytest.raises(StoreFailed, match="closed"):
         await store.workspace_view("w").acquire("abc")
 
 
@@ -228,7 +235,7 @@ async def test_sessions_whose_locks_cant_be_checked_fail_to_list(
     store = await open_store(workspace)
     await store.save(record())
     (state / "locks").write_text("in the way")
-    with pytest.raises(RuntimeError, match=r"Couldn't list the sessions in .*orbit\.db: their"):
+    with pytest.raises(ReadFailed, match=r"Couldn't list the sessions in .*orbit\.db: their"):
         await store.sessions()
 
 
@@ -242,18 +249,18 @@ async def test_a_broken_database_fails_each_call_as_the_port_says(
     with database(state) as connection:
         connection.execute("DROP TABLE sessions")
         connection.execute("DROP TABLE reviews")
-    with pytest.raises(RuntimeError, match=r"Couldn't save the session abc to .*orbit\.db"):
+    with pytest.raises(StorageFailed, match=r"Couldn't save the session abc to .*orbit\.db"):
         await store.save(record())
     loaded = await store.load("abc")
     assert isinstance(loaded, Unreadable)
     assert loaded.reason.startswith("it can't be read from ")
-    with pytest.raises(RuntimeError, match=r"Couldn't list the sessions in .*orbit\.db"):
+    with pytest.raises(ReadFailed, match=r"Couldn't list the sessions in .*orbit\.db"):
         await store.sessions()
-    with pytest.raises(RuntimeError, match=r"Couldn't delete the session abc from .*orbit\.db"):
+    with pytest.raises(StorageFailed, match=r"Couldn't delete the session abc from .*orbit\.db"):
         await store.delete("abc")
-    with pytest.raises(RuntimeError, match=r"Couldn't read the review count from .*orbit\.db"):
+    with pytest.raises(ReadFailed, match=r"Couldn't read the review count from .*orbit\.db"):
         await store.review_count()
-    with pytest.raises(RuntimeError, match=r"Couldn't save the review count to .*orbit\.db"):
+    with pytest.raises(StorageFailed, match=r"Couldn't save the review count to .*orbit\.db"):
         await store.save_review_count(1)
 
 
@@ -263,23 +270,23 @@ async def test_a_closed_store_fails_each_call_as_the_port_says(
     store = await open_store(workspace)
     await store.save(record())
     await store.close()
-    with pytest.raises(RuntimeError, match=r"Couldn't save the session abc to .*orbit\.db"):
+    with pytest.raises(StorageFailed, match=r"Couldn't save the session abc to .*orbit\.db"):
         await store.save(record())
     assert await store.load("abc") == Unreadable(
         f"it can't be read from {state / 'orbit.db'}: the store is closed"
     )
-    with pytest.raises(RuntimeError, match=r"Couldn't list the sessions in .*orbit\.db"):
+    with pytest.raises(ReadFailed, match=r"Couldn't list the sessions in .*orbit\.db"):
         await store.sessions()
-    with pytest.raises(RuntimeError, match=r"Couldn't delete the session abc from .*orbit\.db"):
+    with pytest.raises(StorageFailed, match=r"Couldn't delete the session abc from .*orbit\.db"):
         await store.delete("abc")
-    with pytest.raises(RuntimeError, match=r"Couldn't read the review count from .*orbit\.db"):
+    with pytest.raises(ReadFailed, match=r"Couldn't read the review count from .*orbit\.db"):
         await store.review_count()
-    with pytest.raises(RuntimeError, match=r"Couldn't save the review count to .*orbit\.db"):
+    with pytest.raises(StorageFailed, match=r"Couldn't save the review count to .*orbit\.db"):
         await store.save_review_count(1)
 
 
 type StoreCall = Callable[[OwnView], Awaitable[object]]
-type Outcome = type[RuntimeError] | Callable[[Path], object]
+type Outcome = type[StoreFailed] | Callable[[Path], object]
 
 
 @pytest.mark.parametrize(
@@ -290,18 +297,18 @@ type Outcome = type[RuntimeError] | Callable[[Path], object]
             lambda store: store.load("abc"),
             lambda database: Unreadable(f"it can't be read from {database}: the store is closed"),
         ),
-        (lambda store: store.sessions(), RuntimeError),
+        (lambda store: store.sessions(), ReadFailed),
         (lambda store: store.delete("abc"), StorageFailed),
         (lambda store: store.latest_seq(), lambda _: None),
         (lambda store: store.append("abc", [big_notice()]), StorageFailed),
         (lambda store: store.recent("abc", 10), lambda _: []),
-        (lambda store: store.before("abc", 10, 10), RuntimeError),
+        (lambda store: store.before("abc", 10, 10), ReadFailed),
         (lambda store: store.after("abc", 0), lambda _: None),
         (lambda store: store.bounds("abc", 0), lambda _: None),
-        (lambda store: store.trim("abc", 10, 5), RuntimeError),
+        (lambda store: store.trim("abc", 10, 5), StorageFailed),
         (lambda store: store.trimmed("abc"), lambda _: False),
-        (lambda store: store.forget("abc"), RuntimeError),
-        (lambda store: store.review_count(), RuntimeError),
+        (lambda store: store.forget("abc"), StorageFailed),
+        (lambda store: store.review_count(), ReadFailed),
         (lambda store: store.save_review_count(1), StorageFailed),
     ],
 )
@@ -325,12 +332,38 @@ async def test_each_call_on_a_closed_store_has_its_own_failure(
         )
 
 
+def no_rows() -> AbstractContextManager[NewRows]:
+    return nullcontext(NewRows((), None))
+
+
+async def test_an_import_into_a_closed_store_fails_as_a_write(
+    open_store: Opener, state: Path, workspace: Path
+) -> None:
+    store = await open_store(workspace)
+    await store.close()
+    with pytest.raises(StorageFailed) as raised:
+        await store.insert_new(no_rows, nullcontext)
+    assert str(raised.value).endswith(f"{state / 'orbit.db'}: the store is closed")
+    assert raised.value.error == "the store is closed"
+    assert isinstance(raised.value.__cause__, sqlite3.ProgrammingError)
+
+
+async def test_a_read_that_falls_back_logs_why(
+    open_store: Opener, state: Path, workspace: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    store = await open_store(workspace)
+    await store.close()
+    with caplog.at_level(logging.WARNING):
+        assert await store.recent("abc", 10) == []
+    assert f"Couldn't read from {state / 'orbit.db'}: the store is closed" in caplog.text
+
+
 async def test_acquiring_after_closing_raises_and_takes_no_lock(
     open_store: Opener, workspace: Path
 ) -> None:
     store, other = await open_store(workspace), await open_store(workspace)
     await store.close()
-    with pytest.raises(RuntimeError, match="closed"):
+    with pytest.raises(StoreFailed, match="closed"):
         await store.acquire("abc")
     assert await other.acquire("abc")
 

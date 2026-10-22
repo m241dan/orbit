@@ -11,6 +11,7 @@ from orbit.agent.application.planner_seat import (
     NOTHING_TO_RESET,
     PLANNER_BUSY_RESET,
 )
+from orbit.agent.application.ports import StoreFailed
 from orbit.agent.application.work_turns import CONFIGURING_NOTE, NO_AGENTS_MESSAGE
 from orbit.agent.domain.catalog import LANES, TRIGGERS
 from orbit.agent.domain.sessions import SessionRecord
@@ -300,7 +301,7 @@ async def test_a_change_while_sessions_cannot_be_listed_reports_it_once_and_is_a
     store.saved = [SessionRecord(id="other", name="other", created=START, last_active=START)]
     session = WorkspaceHost(store=store, new_id=lambda: "session-1")
     await greeted(session)
-    store.list_failure = RuntimeError("Couldn't list the sessions in orbit.db: busy")
+    store.list_failure = StoreFailed("Couldn't list the sessions in orbit.db: busy")
     await send_as(session, "c20", command)
     events = await outcome(session)
     await session.close()

@@ -4,7 +4,7 @@ session."""
 import asyncio
 
 from orbit.agent.application.failures import ReportedOnce, outcome
-from orbit.agent.application.ports import Publish, SessionStore
+from orbit.agent.application.ports import Publish, SessionStore, StoreFailed
 from orbit.agent.application.storage_halt import Halting
 from orbit.agent.domain.storage_halt import FailedWrite
 
@@ -49,7 +49,7 @@ class ReviewCount:
             if error is not None:
                 self._halt.fail(FailedWrite.REVIEW_COUNT, error)
 
-    async def retry(self) -> RuntimeError | None:
+    async def retry(self) -> StoreFailed | None:
         """Save the count last asked to be saved, if it changed, though the session is halted,
         as resuming does; returns the error when the save fails."""
         if self._store is None or self._wanted is None:
@@ -57,13 +57,13 @@ class ReviewCount:
         async with self._saving:
             return await self._write(self._store, self._wanted)
 
-    async def _write(self, store: SessionStore, count: int) -> RuntimeError | None:
+    async def _write(self, store: SessionStore, count: int) -> StoreFailed | None:
         """Save ``count`` in ``store``, if it changed and the count saved has been read; returns
         the error when it fails."""
         if self._count is None or count == self._count:
             return None
         error = await outcome(store.save_review_count(count))
-        if isinstance(error, RuntimeError):
+        if isinstance(error, StoreFailed):
             return error
         self._count = count
         return None

@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 
+from orbit.agent.application.ports import StoreFailed
 from orbit.agent.external import session_locks
 from orbit.agent.external.session_locks import SessionLocks, locked_dir
 
@@ -78,7 +79,7 @@ async def test_a_lock_left_by_an_ended_process_is_taken_over(tmp_path: Path) -> 
 
 async def test_a_lock_that_cant_be_taken_raises(tmp_path: Path) -> None:
     (sessions(tmp_path) / "abc.lock").mkdir(parents=True)
-    with pytest.raises(RuntimeError, match=r"Couldn't lock the session .*abc\.lock"):
+    with pytest.raises(StoreFailed, match=r"Couldn't lock the session .*abc\.lock"):
         await locks_in(tmp_path).acquire("abc")
 
 
@@ -90,7 +91,7 @@ async def test_a_lock_that_fails_after_opening_is_let_go(
 
     with monkeypatch.context() as patch:
         patch.setattr(os, "ftruncate", fail)
-        with pytest.raises(RuntimeError, match=r"Couldn't lock the session .*abc\.lock"):
+        with pytest.raises(StoreFailed, match=r"Couldn't lock the session .*abc\.lock"):
             await locks_in(tmp_path).acquire("abc")
     assert await locks_in(tmp_path).acquire("abc")
 
@@ -125,7 +126,7 @@ async def test_a_lock_that_cant_be_released_raises(
         raise PermissionError("read-only")
 
     monkeypatch.setattr(Path, "unlink", refused)
-    with pytest.raises(RuntimeError, match=r"Couldn't unlock the session .*abc\.lock: read-only"):
+    with pytest.raises(StoreFailed, match=r"Couldn't unlock the session .*abc\.lock: read-only"):
         await locks.release("abc")
 
 
@@ -194,7 +195,7 @@ async def test_a_cancelled_acquire_of_a_lock_we_hold_keeps_it(tmp_path: Path) ->
 async def test_acquiring_after_closing_raises_and_takes_no_lock(tmp_path: Path) -> None:
     locks = locks_in(tmp_path)
     locks.close()
-    with pytest.raises(RuntimeError, match=r"Couldn't lock the session .*abc\.lock: the locks"):
+    with pytest.raises(StoreFailed, match=r"Couldn't lock the session .*abc\.lock: the locks"):
         await locks.acquire("abc")
     assert await locks_in(tmp_path).acquire("abc")
 
@@ -206,7 +207,7 @@ async def test_a_lock_being_taken_when_closed_is_free_once_both_finish(tmp_path:
         acquiring = asyncio.create_task(locks.acquire("abc"))
         await asyncio.sleep(0.05)
         locks.close()
-    with pytest.raises(RuntimeError, match="closed"):
+    with pytest.raises(StoreFailed, match="closed"):
         await acquiring
     assert await locks_in(tmp_path).acquire("abc")
 
@@ -286,9 +287,7 @@ async def test_closing_while_a_lock_is_let_go_closes_each_lock_once(
         await asyncio.to_thread(hook.entered.wait, 5)  # The release waits on close().
         recorder.go.set()
         await asyncio.to_thread(closer.join)
-        with pytest.raises(
-            RuntimeError, match=r"Couldn't unlock the session .*abc\.lock: .*closed"
-        ):
+        with pytest.raises(StoreFailed, match=r"Couldn't unlock the session .*abc\.lock: .*closed"):
             await releasing
     assert errors == []
     assert Counter(i for i in recorder.closed if i is None or i in inodes) == Counter(inodes)
@@ -312,7 +311,7 @@ async def test_closing_before_a_release_reaches_its_lock_leaves_it_open_to_take(
         await asyncio.to_thread(hook.entered.wait, 5)  # The release holds the directory.
         locks.close()
         hook.go.set()
-        with pytest.raises(RuntimeError, match="closed"):
+        with pytest.raises(StoreFailed, match="closed"):
             await releasing
     assert [i for i in recorder.closed if i == inode] == [inode]
     assert (sessions(tmp_path) / "abc.lock").exists()
@@ -357,7 +356,7 @@ async def test_letting_go_after_closing_raises_and_leaves_the_lock(
     recorder = CloseRecorder()
     with monkeypatch.context() as patch:
         patch.setattr(os, "close", recorder)
-        with pytest.raises(RuntimeError, match=r"Couldn't \w+ the session .*abc\.lock: .*closed"):
+        with pytest.raises(StoreFailed, match=r"Couldn't \w+ the session .*abc\.lock: .*closed"):
             await getattr(locks, action)("abc")
     assert [i for i in recorder.closed if i is None or i == inode] == []
     assert (sessions(tmp_path) / "abc.lock").read_text() == str(os.getpid())

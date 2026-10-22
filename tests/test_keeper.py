@@ -17,6 +17,7 @@ from orbit.agent.application.keeper import (
     local_now,
     new_session_id,
 )
+from orbit.agent.application.ports import StoreFailed
 from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.reviews import LaneSnapshot, PlannerSnapshot
 from orbit.agent.domain.sessions import OPEN_UNDELETABLE, OPEN_UNRENAMABLE, SessionRecord
@@ -253,7 +254,7 @@ async def test_a_retry_takes_the_lock_that_could_not_be_taken_and_saves_the_sess
     keeper, halt = halting_keeper(store)
     await save(keeper, WITH_TASK)
     error = await keeper.retry(lambda: WITH_TASK)
-    assert isinstance(error, RuntimeError) and str(error) == "disk full"
+    assert isinstance(error, StoreFailed) and str(error) == "disk full"
     store.lock_failure = None
 
     assert await keeper.retry(lambda: WITH_TASK) is None
@@ -312,7 +313,7 @@ async def test_a_retry_that_fails_returns_the_error_without_telling_the_halt() -
     await save(keeper, WITH_TASK)
 
     error = await keeper.retry(lambda: WITH_TASK)
-    assert isinstance(error, RuntimeError) and str(error) == "disk full"
+    assert isinstance(error, StoreFailed) and str(error) == "disk full"
     assert len(halt.failures) == 1
 
 
@@ -426,7 +427,7 @@ async def test_a_retried_rename_that_fails_again_is_kept_to_retry() -> None:
     await keeper.rename_saved("other", "Renamed")
 
     error = await keeper.retry(lambda: EMPTY)
-    assert isinstance(error, RuntimeError) and str(error) == "disk full"
+    assert isinstance(error, StoreFailed) and str(error) == "disk full"
     store.failure = None
     assert await keeper.retry(lambda: EMPTY) is None
     assert store.last.name == "Renamed" and store.released == ["other"] * 3
@@ -460,7 +461,7 @@ async def retried_through(store: FakeStore, keeper: SessionKeeper) -> None:
     """Check that retrying ``keeper``'s pending rename while ``store`` has a problem fails,
     keeping it, and that it's renamed once ``store`` works, every lock taken let go of."""
     error = await keeper.retry(lambda: EMPTY)
-    assert isinstance(error, RuntimeError) and "other" in str(error)
+    assert isinstance(error, StoreFailed) and "other" in str(error)
     assert store.last.name == "other" and store.locked == set()
     store.list_failure = store.lock_failure = store.load_failure = None
     assert await keeper.retry(lambda: EMPTY) is None
@@ -470,7 +471,7 @@ async def retried_through(store: FakeStore, keeper: SessionKeeper) -> None:
 async def test_a_pending_rename_retried_while_the_sessions_cannot_be_listed_is_kept() -> None:
     keeper, _, store = failed_rename()
     await keeper.rename_saved("other", "Renamed")
-    store.failure, store.list_failure = None, RuntimeError(LISTING_FAILED)
+    store.failure, store.list_failure = None, StoreFailed(LISTING_FAILED)
     await retried_through(store, keeper)
 
 
@@ -584,7 +585,7 @@ def unlistable_store_with(session_id: str) -> FakeStore:
     """A store holding the session ``session_id`` whose sessions can't be listed."""
     store = FakeStore()
     store.saved = [SessionRecord(id=session_id, name=session_id, created=START, last_active=START)]
-    store.list_failure = RuntimeError(LISTING_FAILED)
+    store.list_failure = StoreFailed(LISTING_FAILED)
     return store
 
 
@@ -626,7 +627,7 @@ async def test_a_listing_failing_after_one_that_worked_is_reported_again() -> No
     await keeper.summaries()
     store.list_failure = None
     assert [summary.id for summary in await keeper.summaries()] == ["other"]
-    store.list_failure = RuntimeError(LISTING_FAILED)
+    store.list_failure = StoreFailed(LISTING_FAILED)
     assert await keeper.summaries() == ()
     assert published.errors == [LISTING_FAILED, LISTING_FAILED]
 

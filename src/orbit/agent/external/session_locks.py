@@ -16,6 +16,8 @@ from contextlib import contextmanager, suppress
 from enum import Enum, auto
 from pathlib import Path
 
+from orbit.agent.application.ports import StoreFailed
+
 
 def check_session_id(session_id: str) -> None:
     """Raise ``ValueError`` if ``session_id`` isn't a plain file name, as session ids are."""
@@ -101,7 +103,7 @@ class SessionLocks:
     async def acquire(self, session_id: str) -> bool:
         """Lock the session ``session_id``; returns ``False`` when another orbit holds its lock.
 
-        Raises ``RuntimeError`` when the lock can't be taken, as after :meth:`close`.
+        Raises :class:`StoreFailed` when the lock can't be taken, as after :meth:`close`.
         """
         taking = asyncio.ensure_future(asyncio.to_thread(self._acquire, session_id))
         try:
@@ -111,19 +113,20 @@ class SessionLocks:
             # we already held). A lock that can't be let go of mustn't lose the cancellation.
             await asyncio.wait([taking])
             if taking.exception() is None and taking.result() is _Taken.CREATED:
-                with suppress(RuntimeError):
+                with suppress(StoreFailed):
                     await self.release(session_id)
             raise
 
     async def release(self, session_id: str) -> None:
         """Let go of the session ``session_id``'s lock if this holds it, and remove its file;
-        raises ``RuntimeError`` when it can't, as after :meth:`close`."""
+        raises :class:`StoreFailed` when it can't, as after :meth:`close`."""
         if self._closed or session_id in self._held:
             await asyncio.to_thread(self._remove, session_id, "unlock")
 
     async def remove(self, session_id: str) -> None:
         """Remove the session ``session_id``'s lock, letting go of it if this holds it, for
-        deleting the session; raises ``RuntimeError`` when it can't, as after :meth:`close`."""
+        deleting the session; raises :class:`StoreFailed` when it can't, as after
+        :meth:`close`."""
         await asyncio.to_thread(self._remove, session_id, "delete")
 
     @contextmanager
@@ -160,17 +163,17 @@ class SessionLocks:
             with locked_dir(lock.parent, fcntl.LOCK_EX):
                 return self._take(session_id, lock)
         except OSError as error:
-            raise RuntimeError(f"Couldn't lock the session {lock}: {error}") from error
+            raise StoreFailed(f"Couldn't lock the session {lock}: {error}") from error
 
     def _take(self, session_id: str, lock: Path) -> _Taken:
         """Take the session ``session_id``'s ``lock`` unless another orbit holds it; returns
         whether this took it, already held it, or was refused.
 
-        Raises ``RuntimeError`` once this is closed.
+        Raises :class:`StoreFailed` once this is closed.
         """
         with self._guard:
             if self._closed:
-                raise RuntimeError(f"Couldn't lock the session {lock}: the locks are closed")
+                raise StoreFailed(f"Couldn't lock the session {lock}: the locks are closed")
             if session_id in self._held:
                 return _Taken.OURS
             fd = _lock_file(lock)
@@ -183,7 +186,8 @@ class SessionLocks:
         """Let go of the session ``session_id``'s lock if this holds it, and remove its file;
         errors say what failed to ``action`` it.
 
-        Raises ``RuntimeError`` once this is closed, leaving the file to whichever orbit holds it.
+        Raises :class:`StoreFailed` once this is closed, leaving the file to whichever orbit holds
+        it.
         """
         lock = self.path(session_id)
         try:
@@ -192,16 +196,16 @@ class SessionLocks:
                 self._let_go(session_id, lock, action)
                 lock.unlink(missing_ok=True)
         except OSError as error:
-            raise RuntimeError(f"Couldn't {action} the session {lock}: {error}") from error
+            raise StoreFailed(f"Couldn't {action} the session {lock}: {error}") from error
 
     def _let_go(self, session_id: str, lock: Path, action: str) -> None:
         """Let go of the session ``session_id``'s ``lock`` if this holds it.
 
-        Raises ``RuntimeError``, saying it failed to ``action`` it, once this is closed.
+        Raises :class:`StoreFailed`, saying it failed to ``action`` it, once this is closed.
         """
         with self._guard:
             if self._closed:
-                raise RuntimeError(f"Couldn't {action} the session {lock}: the locks are closed")
+                raise StoreFailed(f"Couldn't {action} the session {lock}: the locks are closed")
             fd = self._held.pop(session_id, None)
             if fd is not None:
                 os.close(fd)

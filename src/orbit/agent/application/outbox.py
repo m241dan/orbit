@@ -4,7 +4,7 @@ from collections.abc import Callable
 from typing import Protocol
 
 from orbit.agent.application.log_writer import LogWriter, Overflow
-from orbit.agent.application.ports import EventLog
+from orbit.agent.application.ports import EventLog, StoreFailed
 from orbit.agent.domain.replay import can_replay
 from orbit.agent.domain.storage import StorageSettings, cut_fields
 from orbit.agent.domain.storage_halt import SeqSpan
@@ -166,8 +166,8 @@ class Outbox:
     ) -> tuple[tuple[EventEnvelope, ...], bool, bool]:
         """The last ``limit`` events of the session ``session_id`` before ``before_seq``, oldest
         first, logged or still to be, whether earlier ones remain, and, when none do, whether
-        earlier ones were trimmed from the log; none without a log. Raises ``RuntimeError`` when
-        the log can't be read."""
+        earlier ones were trimmed from the log; none without a log. Raises :class:`ReadFailed`
+        when the log can't be read."""
         if self._writer is None:
             return (), False, False
         earlier, more = await self._writer.before(session_id, before_seq, limit)
@@ -206,7 +206,7 @@ class Outbox:
             return [], None
         return await self._writer.stop(session_id)
 
-    async def resume_log(self) -> list[SeqSpan] | RuntimeError:
+    async def resume_log(self) -> list[SeqSpan] | StoreFailed:
         """Write to the log again, once stopped, starting with the envelopes the fallback took
         and those queued; returns the spans of the envelopes lost, which reached neither, or the
         error when the log still fails. Nothing is lost without a log."""

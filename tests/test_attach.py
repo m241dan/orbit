@@ -5,6 +5,7 @@ from collections.abc import Callable
 
 from orbit.agent import WorkspaceHost
 from orbit.agent.application.connection import SessionConnection
+from orbit.agent.application.ports import StoreFailed
 from orbit.agent.domain.sessions import missing_message, summarize
 from orbit.protocol import (
     BUSY,
@@ -268,7 +269,7 @@ async def test_attaching_when_the_sessions_cant_be_listed_changes_nothing() -> N
     store = stored()
     session = workspace(store)
     connection = await joined(session, "first")
-    store.list_failure = RuntimeError("The store is gone.")
+    store.list_failure = StoreFailed("The store is gone.")
     await say(connection, "attach", Attach(workspace=WORKSPACE, session=EARLIER))
     events = await taken(connection)
     store.list_failure = None
@@ -597,7 +598,7 @@ async def test_a_delete_that_cant_list_the_sessions_leaves_the_connection_viewin
     store = stored()
 
     def unlistable() -> None:
-        store.list_failure = RuntimeError("store gone")
+        store.list_failure = StoreFailed("store gone")
 
     deleted, ran, watched = await failed_change(
         store, DeleteSession(session_id=EARLIER), unlistable
