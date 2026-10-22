@@ -59,6 +59,10 @@ WRITE_TOOLS = ("Edit", "Write", "NotebookEdit")
 REVIEW_ROLES = frozenset({REVIEWER, SUPER_REVIEWER})
 """The roles that review work rather than do it."""
 
+CODER_ROLES = frozenset({CODER, CONFIGURATOR})
+"""The roles whose tasks take one of the coders' slots a control plane shares across its
+workspaces."""
+
 
 class _Config(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")

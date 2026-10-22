@@ -143,17 +143,21 @@ SessionState = Literal["running", "idle"]
 none."""
 
 
-ActivityKind = Literal["task_run", "review", "planner", "startup_check"]
-"""What's in progress in a session: a ``task_run``, a ``review``, a ``planner`` turn or the
+ActivityKind = Literal["task_run", "waiting_for_coder", "review", "planner", "startup_check"]
+"""What's in progress in a session: a ``task_run``, its task ``waiting_for_coder`` while every
+coder's slot across the workspaces served is taken, a ``review``, a ``planner`` turn or the
 ``startup_check``."""
 
 
 class Activity(_Message):
     """Something in progress in a session, of ``kind``; ``task_id`` is the task a task run runs
-    or the task whose work a review reviews, and none otherwise, such as for a super review."""
+    or the task whose work a review reviews, and none otherwise, such as for a super review;
+    ``position`` is where a task run ``waiting_for_coder`` waits in line, 1 next, and none
+    otherwise."""
 
     kind: ActivityKind
     task_id: str | None = None
+    position: int | None = Field(default=None, ge=1)
 
 
 class SessionSummary(_Message):

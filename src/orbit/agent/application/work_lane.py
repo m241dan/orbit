@@ -14,6 +14,7 @@ from functools import partial
 from typing import Literal
 
 from orbit.agent.application.agent_run import AgentRun
+from orbit.agent.application.coder_slots import CoderSeat
 from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.landing import Lander
 from orbit.agent.application.lanes import OPEN_GATE, SessionGate
@@ -30,7 +31,7 @@ from orbit.agent.domain.endings import (
     WORK_GONE,
     gave_up,
 )
-from orbit.agent.domain.roles import REVIEW_ROLES
+from orbit.agent.domain.roles import CODER_ROLES, REVIEW_ROLES
 from orbit.agent.domain.usage_limits import FIX_ERROR_NOTE, limit_hit
 from orbit.agent.domain.verification import FallbackFixes, failure_reason, fix_prompt
 from orbit.protocol import (
@@ -49,12 +50,14 @@ limit, or a fix ended in error."""
 @dataclass(frozen=True)
 class Beside:
     """What runs beside the work lane: the review lane, if any, and the startup check, if any,
-    whose panel each task takes over; and the session's ``gate``, which stops a run halted
-    before its next task."""
+    whose panel each task takes over; the session's ``gate``, which stops a run halted before
+    its next task; and its seat at the ``coders``' slots, if any, which a coder's or
+    configurator's task takes one of before it starts."""
 
     review: ReviewLane | None = None
     startup: StartupCheck | None = None
     gate: SessionGate = OPEN_GATE
+    coders: CoderSeat | None = None
 
 
 class WorkLane:
@@ -63,7 +66,9 @@ class WorkLane:
     Reviews are left to ``beside``'s review lane, when there's one. :meth:`run` is meant to run as
     a task of its own: cancelling it cancels the task running, and the cancel goes on once that
     task has ended. The user's stop, :meth:`stopped_by_user`, cancels only the agent's run, and
-    the run ends by itself.
+    the run ends by itself. A coder's or configurator's task takes a slot at ``beside``'s
+    coders, waiting in line for one, before it starts, and gives it back once it has ended,
+    however it does; the user's stop leaves the line.
     """
 
     def __init__(
@@ -81,6 +86,8 @@ class WorkLane:
         self._review = beside.review
         self._startup = beside.startup
         self._gate = beside.gate
+        self._coders = beside.coders
+        self._seated = False  # The task about to run or running took a coder's slot.
         self._landed: dict[str, str] = {}  # Task id -> the commit it landed, until reported.
         self._starts: dict[str, str] = {}  # Task id -> the tree's head when it started.
         # Fixes queued per step along each chain, kept across runs so a restart can't reset
@@ -108,6 +115,8 @@ class WorkLane:
         if not self._running:
             return False
         self._stopped = True
+        if self._coders is not None:
+            self._coders.drop()
         if self._agent is not None:
             self._agent.cancel()
         return True
@@ -117,6 +126,11 @@ class WorkLane:
         """The task the run is on or, before it picks one, the one it will pick; none when
         there's none."""
         return self._current or self.next_work()
+
+    @property
+    def waiting_for_coder(self) -> int | None:
+        """Where the run waits in line for a coder's slot, 1 next; none if it doesn't."""
+        return None if self._coders is None else self._coders.position
 
     def next_work(self, tried: Collection[str] = ()) -> str | None:
         """The next task for the work lane, the one a run stopped at first; reviews have their
@@ -141,13 +155,43 @@ class WorkLane:
         while (task_id := self.next_work(tried)) is not None:
             if self._gate.halted():  # It may have halted as the last task ended.
                 return "cancelled"
-            tried.add(task_id)
-            self._resume = None
-            fixing = self._board.get(task_id).fixes is not None
-            outcome = await self._run_task(task_id)
-            if end := await self._end_at(task_id, outcome, fixing):
+            if not await self._seat(task_id):
+                return "cancelled"
+            try:
+                end = await self._run_seated(task_id, tried)
+            finally:
+                self._unseat()
+            if end is not None:
                 return end
         return "finished"
+
+    async def _seat(self, task_id: str) -> bool:
+        """Take a coder's slot for task ``task_id``, waiting in line for one, if its role takes
+        one; returns whether it may run, false if the user stopped the run as it waited."""
+        coders = self._coders
+        if coders is None or self._board.get(task_id).task.role not in CODER_ROLES:
+            return True
+        self._seated = await coders.acquire()
+        return self._seated
+
+    def _unseat(self) -> None:
+        """Give back the coder's slot the task that ran took, if it took one."""
+        if self._seated:
+            assert self._coders is not None  # Only a seat takes slots.
+            self._seated = False
+            self._coders.release()
+
+    async def _run_seated(self, task_id: str, tried: set[str]) -> RunEnd | None:
+        """Run task ``task_id``, noted among those ``tried``, unless the session halted or the
+        board changed as it waited for a slot, then why the run ends, as :meth:`_end_at` says;
+        none if the run goes on, picking its next task again."""
+        if self._gate.halted() or self.next_work(tried) != task_id:
+            return None
+        tried.add(task_id)
+        self._resume = None
+        fixing = self._board.get(task_id).fixes is not None
+        outcome = await self._run_task(task_id)
+        return await self._end_at(task_id, outcome, fixing)
 
     async def _end_at(self, task_id: str, outcome: Outcome, fixing: bool) -> RunEnd | None:
         """Why the run ends at task ``task_id``, which ended in ``outcome``, ``fixing`` another

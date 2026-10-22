@@ -17,6 +17,9 @@ from orbit.protocol import DEFAULT_MAX_MESSAGE_MB
 from orbit.protocol.transport import LOCALHOST, netloc
 from orbit.protocol.transport import is_loopback as is_loopback
 
+DEFAULT_MAX_CODERS = 4
+"""How many coders ``orbit serve`` runs at once across its workspaces unless told otherwise."""
+
 EXPIRY_WARNING = timedelta(days=14)
 """How long before a server certificate expires ``orbit serve`` warns of it."""
 
@@ -89,7 +92,8 @@ class ServerSettings(TlsSettings):
     client certificate ``local_client_cert``, with its private key ``local_client_key``, that
     frontends on this machine show it under mutual TLS, and the ``clone_dir`` the repositories
     it's asked to serve by URL are cloned into, ``workspaces`` in the state directory if
-    ``None``."""
+    ``None``, and ``max_coders``, how many coders run at once across the workspaces it serves,
+    any number if 0."""
 
     host: str = Field(default="127.0.0.1", min_length=1)
     port: int = Field(default=7433, ge=0, le=65535)
@@ -98,6 +102,7 @@ class ServerSettings(TlsSettings):
     local_client_cert: str | None = None
     local_client_key: str | None = None
     clone_dir: str | None = None
+    max_coders: int = Field(default=DEFAULT_MAX_CODERS, ge=0)
 
     @field_validator("revoked")
     @classmethod

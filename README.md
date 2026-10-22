@@ -1130,7 +1130,8 @@ machine needs the new copy first. Copy the new token to your other machines as b
 trusted channel.
 
 The `[server]` table in your `config.toml` sets where it listens, the largest message either
-way, how it serves TLS and where it clones repositories added by URL; the flags override it. The server enforces `max_message_mb` on what
+way, how it serves TLS, where it clones repositories added by URL and how many coders run at
+once; the flags override it. The server enforces `max_message_mb` on what
 it accepts and on what it sends, and chats take whatever size their server sends, so raising it
 on the server is enough:
 
@@ -1148,7 +1149,19 @@ revoked = []         # SHA-256 fingerprints of client certificates refused under
 local_client_cert = "/home/me/.config/orbit/tls/local.pem"      # shown by chats here, under mtls
 local_client_key = "/home/me/.config/orbit/tls/local-key.pem"   # its private key, chmod 600
 clone_dir = "/srv/orbit/workspaces"  # where repositories added by URL are cloned
+max_coders = 4       # coders running at once across the workspaces; 0 for no cap
 ```
+
+**Taking turns.** `max_coders` (4 unless set; 0 for no cap) caps how many coder and configurator
+tasks run at once across every workspace the server serves: tasks, fixes and startup-check
+fixes alike. Each task takes a coder's slot as its agent starts and gives it back once it has
+ended, its verification and merge included, however it ends; while every slot is taken, it
+waits in line behind those that asked before it, and a workspace's next task joins the back, so
+workspaces take turns. A run waiting stays running, and its session's state says where it is
+in line (`waiting_for_coder`, see [docs/protocol.md](docs/protocol.md#session-state));
+`ctrl+s` takes it out of line and holds it, as it stops any run. Reviews, super reviews and the
+planner don't count and never wait, and a run stopped at the usage limit holds no slot until it
+starts again. A local `orbit chat` serves one workspace and has no cap.
 
 Paths in `[server]` may start with `~`, and a relative one is taken from the config directory,
 so `cert = "tls/server.pem"` names `~/.config/orbit/tls/server.pem`; relative `--cert`, `--key`
@@ -1663,7 +1676,8 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     and lands work that passes, and `WorkTurns` (in `work_turns`) decides when it runs: when the
     user asks (`ctrl+r`), when a review queues work unless the user held it, first for a
     configurator, and again by itself once the usage limit that stopped it resets, timed by a
-    `LimitPause` (in `limit_pause`). `AgentRun` (in `agent_run`) sees one task through one agent, and a
+    `LimitPause` (in `limit_pause`); each coder's task takes one of the control plane's
+    `CoderSlots` (in `coder_slots`) first. `AgentRun` (in `agent_run`) sees one task through one agent, and a
     `ProposalTrial` (in `proposal_trial`) tries the checks a configurator proposes and has the
     user decide on them; `AgentDesk` (in `desk`) launches agents and routes their calls by token;
     `Verifier` (in `verifier`) runs the steps; `Lander` (in `landing`) commits and merges

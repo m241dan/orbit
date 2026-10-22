@@ -15,7 +15,7 @@ import threading
 import time
 import urllib.request
 from collections.abc import Awaitable, Callable, Iterator
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import cast
 
@@ -1367,3 +1367,25 @@ async def test_a_store_failing_as_serve_opens_a_latest_session_exits_with_status
     assert exited.value.exit_code == 2
     assert "The store is gone." in capsys.readouterr().err
     assert host.closing
+
+
+class Capped(ControlPlane):
+    """A control plane noting each cap on its coders."""
+
+    def __init__(self, hosts: list[WorkspaceHost]) -> None:
+        super().__init__(hosts)
+        self.caps: list[int] = []
+
+    def cap_coders(self, limit: int) -> None:
+        self.caps.append(limit)
+        super().cap_coders(limit)
+
+
+async def test_serve_caps_the_coders_running_at_once_as_its_settings_say(tmp_path: Path) -> None:
+    plane = Capped([StoreGone(workspace="/src/a", workspace_id="a")])
+    parts = replace(serve_parts(plane, tmp_path), settings=ServerSettings(port=0, max_coders=2))
+
+    with pytest.raises(typer.Exit):
+        await serve._served(parts, None)
+
+    assert plane.caps == [2]

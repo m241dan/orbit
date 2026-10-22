@@ -10,6 +10,7 @@ from typing import Protocol
 
 from orbit.agent.application.clones import Clones
 from orbit.agent.application.closing import close_all
+from orbit.agent.application.coder_slots import CoderSlots
 from orbit.agent.application.connection import (
     ConnectionParts,
     Connections,
@@ -187,6 +188,11 @@ class ControlPlane:
     a source, as for a local orbit serving its own repository alone, they're refused as
     ``invalid``.
 
+    Coders' and configurators' tasks share the control plane's coder slots across every
+    workspace served: as many run at once as :meth:`cap_coders` allows, any number until it's
+    called, and the others wait in line, first come, first served, each session's state saying
+    where.
+
     Given the ``mark`` of the store every workspace's log shares, as ``orbit serve`` has, the
     ``seq`` count on past it, and each block of them is reserved there, once, as it's crossed,
     whether any workspace is served or not. Without one, each is reserved in the log of every
@@ -210,6 +216,7 @@ class ControlPlane:
         self._place = Place(self._events, self._events.stamp, self._lobby)
         self._usage = UsageMonitor(usage, self._events.put) if usage else None
         self._clones = Clones(self._events.announce)
+        self._coders = CoderSlots(changed=self._check_states)
         for host in self._hosts.values():
             self._serve(host)
         self._started = False
@@ -227,6 +234,7 @@ class ControlPlane:
         host.outbox.deliver = lambda envelope: self._deliver(host, envelope)
         host.catalog_changed = self._publish_catalog
         host.latest_usage = self._latest_usage
+        host.coder_slots = self._coders
 
     def _reserve(self, seq: int) -> None:
         """Have every ``seq`` up to ``seq`` reserved: in the mark, if there is one, else in the
@@ -236,6 +244,22 @@ class ControlPlane:
             return
         for host in self._hosts.values():
             host.outbox.reserve(seq)
+
+    def cap_coders(self, limit: int) -> None:
+        """Run at most ``limit`` coders at once across the workspaces served, or any number if
+        it's 0."""
+        self._coders.cap(limit)
+
+    @property
+    def coders_running(self) -> int:
+        """How many coders' slots are taken across the workspaces served."""
+        return self._coders.taken
+
+    def _check_states(self) -> None:
+        """Have every host publish its open session's state if that changed, as the line for
+        coders did."""
+        for host in self._hosts.values():
+            host.check_state()
 
     @property
     def hosts(self) -> tuple[WorkspaceHost, ...]:
@@ -505,8 +529,10 @@ class ControlPlane:
 
     async def _let_go(self, host: WorkspaceHost, workspaces: WorkspaceSource) -> None:
         """Stop serving ``host``'s workspace: close ``host``, then have ``workspaces`` let it
-        go, even if closing ``host`` fails."""
+        go, even if closing ``host`` fails; its place in line for a coder, if any, goes at
+        once."""
         self._hosts.pop(host.workspace_id, None)
+        self._coders.drop(host.workspace_id)
         try:
             await host.close()
         finally:

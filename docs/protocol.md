@@ -307,15 +307,21 @@ Each session in a `Catalog` carries its state as it is when the Catalog is sent:
 - `viewers`: how many welcomed connections view it: the open session's, and, for another
   session, those attached to it (see [Attaching](#attaching)).
 - `activity`: what's in progress in the open session, in this order, each an
-  `Activity(kind, task_id)`: a `task_run` of task `task_id`, a `review` of task `task_id`, the
-  task whose work it reviews, a `planner` turn and the `startup_check`, whose `task_id` is null.
+  `Activity(kind, task_id, position)`: a `task_run` of task `task_id`, `waiting_for_coder` while
+  that task waits for a coder, a `review` of task `task_id`, the task whose work it reviews, a
+  `planner` turn and the `startup_check`, whose `task_id` is null. A server runs at most
+  `max_coders` coder and configurator tasks at once across its workspaces (see the README); a
+  task run whose next such task waits for one has `waiting_for_coder` with `position`, its place
+  in line, 1 next, across every workspace; `position` is null for every other kind. The session
+  is `running` while it waits.
   A review of several tasks' work, such as a batch's, is one `review` per task, in task order;
   a super review reviews no particular task, so it's one `review` whose `task_id` is null. It's
   empty for any other session. The startup check shows here though it leaves the state `idle`.
 
 Whenever one of them changes for a session, every welcomed connection gets
 `SessionStateChanged(session, active, state, viewers, activity)` with the new values: a task run,
-review, planner turn or the startup check starting or ending, a run moving on to its next task, a
+review, planner turn or the startup check starting or ending, a run moving on to its next task,
+its place in line for a coder changing, joining the line or leaving it as it gets one, a
 connection joining, closing or attaching to
 another session, which sends one for the session it left and one for the session it views, and
 another session activated, which sends one for the session left (inactive, idle, no viewers unless

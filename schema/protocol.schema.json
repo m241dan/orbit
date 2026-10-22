@@ -43,17 +43,31 @@
       "type": "object"
     },
     "Activity": {
-      "description": "Something in progress in a session, of ``kind``; ``task_id`` is the task a task run runs\nor the task whose work a review reviews, and none otherwise, such as for a super review.",
+      "description": "Something in progress in a session, of ``kind``; ``task_id`` is the task a task run runs\nor the task whose work a review reviews, and none otherwise, such as for a super review;\n``position`` is where a task run ``waiting_for_coder`` waits in line, 1 next, and none\notherwise.",
       "properties": {
         "kind": {
           "enum": [
             "task_run",
+            "waiting_for_coder",
             "review",
             "planner",
             "startup_check"
           ],
           "title": "Kind",
           "type": "string"
+        },
+        "position": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Position"
         },
         "task_id": {
           "anyOf": [

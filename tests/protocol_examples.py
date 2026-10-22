@@ -262,7 +262,12 @@ EVENTS: tuple[EventEnvelope, ...] = (
             active=True,
             state="running",
             viewers=2,
-            activity=(Activity(kind="review", task_id="t2"), Activity(kind="planner")),
+            activity=(
+                Activity(kind="task_run", task_id="t1"),
+                Activity(kind="waiting_for_coder", position=2),
+                Activity(kind="review", task_id="t2"),
+                Activity(kind="planner"),
+            ),
         )
     ),
     event(

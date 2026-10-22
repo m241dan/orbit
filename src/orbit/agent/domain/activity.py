@@ -27,7 +27,9 @@ class Activity:
     ``review`` of the tasks ``reviewing``, a ``planner`` turn and the ``startup_check``. The
     task run's task and the reviewed tasks are none while they aren't known; a review of no
     particular task, such as a super review, reviews no tasks. The startup check runs on the
-    base commit rather than in a session, so it leaves the session idle."""
+    base commit rather than in a session, so it leaves the session idle. A task run waiting in
+    line for a coder's slot waits at position ``waiting_for_coder``, 1 next, and none
+    otherwise."""
 
     tasks: bool = False
     review: bool = False
@@ -35,6 +37,7 @@ class Activity:
     startup_check: bool = False
     task_id: str | None = None
     reviewing: tuple[str, ...] | None = None
+    waiting_for_coder: int | None = None
 
     @property
     def running(self) -> bool:
@@ -69,13 +72,15 @@ def switch_refusal(activity: Activity) -> str | None:
 
 
 def reported(activity: Activity) -> tuple[Reported, ...]:
-    """What's in progress in ``activity`` as connections are told it: a task run, a review, a
-    planner turn and the startup check, in that order; a task run or a review once its tasks
-    are known. A review is told once per task it reviews, in order, or once without a task if
-    it reviews no particular one."""
+    """What's in progress in ``activity`` as connections are told it: a task run, its wait for
+    a coder, a review, a planner turn and the startup check, in that order; a task run or a
+    review once its tasks are known. A review is told once per task it reviews, in order, or
+    once without a task if it reviews no particular one."""
     task_run = activity.tasks and activity.task_id is not None
+    position = activity.waiting_for_coder
     entries = (
         (task_run, (Reported(kind="task_run", task_id=activity.task_id),)),
+        (position is not None, (Reported(kind="waiting_for_coder", position=position),)),
         (activity.review, _reviews(activity.reviewing)),
         (activity.planner, (Reported(kind="planner"),)),
         (activity.startup_check, (Reported(kind="startup_check"),)),

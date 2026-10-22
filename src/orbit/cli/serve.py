@@ -341,6 +341,7 @@ async def _served(parts: _ServeParts, profile: Path | None) -> None:
     """
     with profiled(profile, "serve") if profile else nullcontext():
         plane = parts.build()
+        plane.cap_coders(parts.settings.max_coders)
         server = ControlPlaneServer(plane, parts.token, parts.settings, typer.echo)
         server.revoked = parts.revoked
         try:

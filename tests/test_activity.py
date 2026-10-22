@@ -68,11 +68,18 @@ def test_the_startup_check_alone_refuses_nothing_and_is_idle() -> None:
 
 def test_everything_in_progress_is_reported_in_order_with_its_task() -> None:
     activity = Activity(
-        tasks=True, review=True, planner=True, startup_check=True, task_id="t1", reviewing=("t2",)
+        tasks=True,
+        review=True,
+        planner=True,
+        startup_check=True,
+        task_id="t1",
+        reviewing=("t2",),
+        waiting_for_coder=2,
     )
 
     assert reported(activity) == (
         Reported(kind="task_run", task_id="t1"),
+        Reported(kind="waiting_for_coder", position=2),
         Reported(kind="review", task_id="t2"),
         Reported(kind="planner"),
         Reported(kind="startup_check"),
@@ -104,3 +111,12 @@ def test_a_review_of_several_tasks_is_reported_once_per_task_in_order() -> None:
 
 def test_a_review_of_no_particular_task_is_reported_once_without_one() -> None:
     assert reported(Activity(review=True, reviewing=())) == (Reported(kind="review"),)
+
+
+def test_a_task_run_waiting_for_a_coder_is_reported_with_its_position() -> None:
+    activity = Activity(tasks=True, task_id="t1", waiting_for_coder=1)
+
+    assert reported(activity) == (
+        Reported(kind="task_run", task_id="t1"),
+        Reported(kind="waiting_for_coder", position=1),
+    )

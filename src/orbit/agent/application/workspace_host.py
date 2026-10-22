@@ -12,6 +12,7 @@ from datetime import datetime
 from pathlib import PurePath
 
 from orbit.agent.application.closing import close_all
+from orbit.agent.application.coder_slots import CoderSeat, CoderSlots
 from orbit.agent.application.connection import Connections, Place, SessionConnection
 from orbit.agent.application.desk import AgentDesk, Agents
 from orbit.agent.application.handshake import HostGreeting
@@ -168,6 +169,10 @@ class WorkspaceHost:
     its background work starts, on the base commit; a failure adds a draft task to
     fix it.
 
+    A coder's or configurator's task takes one of :attr:`coder_slots` as it starts, waiting in
+    line for one while every one is taken, and gives it back once it ends; the control plane
+    serving the host shares its slots across its workspaces.
+
     The one-off notices of a greeting are the workspace, no verification steps, the
     ``startup_notes`` and work left by earlier runs; like the rest of a greeting, they reach
     only the connection whose first ``Attach`` they answer, as a ``HistoryPage`` does the one
@@ -256,6 +261,8 @@ class WorkspaceHost:
         # The usage limits fetched last, which the control plane serving this host knows.
         self.latest_usage: Callable[[], UsageChanged | None] = lambda: None
         self.catalog_changed: Callable[[WorkspaceEntry], Awaitable[None]] = _unannounced
+        # The coders' slots its tasks take, shared by the control plane serving this host.
+        self.coder_slots = CoderSlots()
         self._takeover = Takeover(
             owner is not None,
             lock,
@@ -293,6 +300,7 @@ class WorkspaceHost:
         self._closing = False
         self._started = False
         self._lane = self._review_lane()
+        self._coders = CoderSeat(lambda: self.coder_slots, workspace_id, lambda: self._keeper.id)
         hooks = SeatHooks(self._save, self._keeper.use, self._step_names)
         self._seat = PlannerSeat(self._desk, self._tasks, self._events, hooks)
         self._startup = self._startup_check(
@@ -388,9 +396,11 @@ class WorkspaceHost:
 
     def _switching(self, kept: bool) -> None:
         """A switch is under way, with whether the session left stays ``kept``: its views
-        follow, and its run, if the usage limit stopped one, no longer starts again."""
+        follow, and its run, if the usage limit stopped one, no longer starts again, nor waits in
+        line for a coder."""
         self._views.switching(kept)
         self._turns.forget_wait()
+        self._coders.drop()
 
     def _work_commands(self) -> WorkCommands:
         """What handles the work commands on this session."""
@@ -440,7 +450,7 @@ class WorkspaceHost:
     def _work_lane(self) -> WorkLane | None:
         if self._desk is None:
             return None
-        beside = Beside(self._lane, self._startup, self._gate)
+        beside = Beside(self._lane, self._startup, self._gate, self._coders)
         return WorkLane(self._desk, self._tasks, self._verifier, beside)
 
     def _startup_check(
@@ -822,7 +832,7 @@ class WorkspaceHost:
 
     def _activity(self) -> Activity:
         """What's in progress now: a task run, a review, a planner turn and the startup check,
-        with the tasks the run and the review are on."""
+        with the tasks the run and the review are on, and where the run waits for a coder."""
         return Activity(
             tasks=self._turns.running,
             review=self._lane is not None and self._lane.running,
@@ -830,6 +840,7 @@ class WorkspaceHost:
             startup_check=self._startup is not None and self._startup.running,
             task_id=self._work.current if self._work else None,
             reviewing=self._lane.reviewing if self._lane else None,
+            waiting_for_coder=self._work.waiting_for_coder if self._work else None,
         )
 
     def start_background(self) -> None:
