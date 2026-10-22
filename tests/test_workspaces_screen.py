@@ -22,6 +22,7 @@ from orbit.protocol import (
     CommandRefused,
     DirectoryListing,
     ErrorOccurred,
+    ListDirectory,
     NewSession,
     RemoveWorkspace,
     SessionStateChanged,
@@ -36,7 +37,7 @@ from orbit.protocol import (
 from orbit.tui import Opening, OrbitApp
 from orbit.tui.sessions import SessionsScreen
 from orbit.tui.view.outcomes import Awaited
-from orbit.tui.view.workspaces import STARTUP_HINT
+from orbit.tui.view.workspaces import PATH_HINT, STARTUP_HINT
 from orbit.tui.widgets import ChoiceScreen
 from orbit.tui.workspaces import WorkspacesScreen
 from tests.tui_fakes import FakeLink, FakeSession, changes, feed_events, watches
@@ -99,6 +100,13 @@ def last_change(app: OrbitApp) -> str:
     sends."""
     envelopes = session_of(app).envelopes
     return next(e.command_id for e in reversed(envelopes) if not isinstance(e.payload, Watch))
+
+
+async def typing(app: OrbitApp, pilot: Pilot[None]) -> None:
+    """Open the picker's path box, which ``Add a path or URL…`` no longer opens, until the
+    explorer's field takes typed paths and URLs."""
+    workspaces(app)._typing(PATH_HINT)
+    await pilot.pause()
 
 
 async def accept_last(app: OrbitApp, pilot: Pilot[None]) -> None:
@@ -197,7 +205,9 @@ async def test_a_workspace_row_says_where_its_session_waits_for_a_coder() -> Non
 
 
 def test_agents_shown_before_the_picker_is_mounted_show_once_it_is() -> None:
-    async def change(command: AddWorkspace | RemoveWorkspace | Watch, awaited: Awaited) -> None:
+    async def change(
+        command: AddWorkspace | RemoveWorkspace | Watch | ListDirectory, awaited: Awaited
+    ) -> None:
         """Send nothing."""
 
     screen = WorkspacesScreen((A,), None, change)
@@ -272,7 +282,8 @@ async def test_a_url_typed_is_sent_as_one_closing_the_field_once_accepted(url: s
     async with app.run_test() as pilot:
         session = session_of(app)
         await feed_events(session, pilot, SERVED)
-        await pilot.press("j", "enter", *url, "enter")
+        await typing(app, pilot)
+        await pilot.press(*url, "enter")
         assert changes(session) == [AddWorkspace(url=url)]
         await accept_last(app, pilot)
         await pilot.pause()
@@ -284,7 +295,8 @@ async def test_a_clone_failing_drops_its_row_and_shows_gits_message_in_the_field
     async with app.run_test() as pilot:
         session = session_of(app)
         await feed_events(session, pilot, SERVED)
-        await pilot.press("j", "enter", *PROJ_URL, "enter")
+        await typing(app, pilot)
+        await pilot.press(*PROJ_URL, "enter")
         await accept_last(app, pilot)
         await feed_events(session, pilot, WorkspaceCloning(url=PROJ_URL, phase="Resolving"))
         failed = f"Couldn't clone {PROJ_URL}: Repository not found."
@@ -301,7 +313,8 @@ async def test_another_clone_failing_or_another_error_leaves_the_field_alone() -
     async with app.run_test() as pilot:
         session = session_of(app)
         await feed_events(session, pilot, SERVED)
-        await pilot.press("j", "enter", *PROJ_URL, "enter")
+        await typing(app, pilot)
+        await pilot.press(*PROJ_URL, "enter")
         await accept_last(app, pilot)
         await feed_events(session, pilot, WorkspaceCloning(url=PROJ_URL, phase="Resolving"))
         other = "Couldn't clone git@host:o/other.git: denied"
@@ -389,7 +402,7 @@ async def test_adding_a_path_sends_it_and_a_refusal_shows_in_the_fields_hint() -
     async with app.run_test() as pilot:
         session = session_of(app)
         await feed_events(session, pilot, SERVED)
-        await pilot.press("j", "enter")
+        await typing(app, pilot)
         path = workspaces(app).query_one(Input)
         assert path.display and app.focused is path
         await pilot.press(*"/nowhere", "enter")
@@ -404,7 +417,8 @@ async def test_a_path_added_under_a_workspace_picks_the_one_it_adds() -> None:
     async with app.run_test() as pilot:
         session = session_of(app)
         await feed_events(session, pilot, SERVED)
-        await pilot.press("j", "enter", *"/src/repoC/sub", "enter")
+        await typing(app, pilot)
+        await pilot.press(*"/src/repoC/sub", "enter")
         await accept_last(app, pilot)
         await feed_events(session, pilot, catalog(B, A, C))
         assert sessions(app).workspace == "C"
@@ -414,7 +428,8 @@ async def test_an_empty_path_sends_nothing_and_escape_goes_back_to_the_list() ->
     app = connected()
     async with app.run_test() as pilot:
         await feed_events(session_of(app), pilot, SERVED)
-        await pilot.press("j", "enter", "space", "enter")
+        await typing(app, pilot)
+        await pilot.press("space", "enter")
         assert changes(session_of(app)) == []
         await pilot.press("escape")
         screen = workspaces(app)
@@ -429,7 +444,8 @@ async def test_a_path_in_a_workspace_served_picks_it_once_accepted() -> None:
         async with app.run_test() as pilot:
             session = session_of(app)
             await feed_events(session, pilot, SERVED)
-            await pilot.press("j", "enter", *path, "enter")
+            await typing(app, pilot)
+            await pilot.press(*path, "enter")
             assert changes(session) == [AddWorkspace(path=path)]
             await accept_last(app, pilot)
             await pilot.pause()
@@ -441,7 +457,8 @@ async def test_a_path_leaving_a_workspace_served_by_dot_dot_picks_the_one_it_nam
     async with app.run_test() as pilot:
         session = session_of(app)
         await feed_events(session, pilot, catalog(A))
-        await pilot.press("j", "enter", *"/src/repoA/../repoB", "enter")
+        await typing(app, pilot)
+        await pilot.press(*"/src/repoA/../repoB", "enter")
         await accept_last(app, pilot)
         await pilot.pause()
         assert isinstance(app.screen, WorkspacesScreen)
@@ -454,7 +471,8 @@ async def test_a_path_added_picks_the_new_workspace_containing_it_over_another_n
     async with app.run_test() as pilot:
         session = session_of(app)
         await feed_events(session, pilot, catalog(A))
-        await pilot.press("j", "enter", *"/src/repoC/sub", "enter")
+        await typing(app, pilot)
+        await pilot.press(*"/src/repoC/sub", "enter")
         await accept_last(app, pilot)
         await feed_events(session, pilot, catalog(B, A, C))
         assert sessions(app).workspace == "C"
@@ -778,7 +796,8 @@ async def test_another_workspace_listed_after_adding_one_served_is_not_picked() 
         session = session_of(app)
         await feed_events(session, pilot, SERVED)
         # The server serves /src/repoA already, reached here through a link.
-        await pilot.press("j", "enter", *"/home/me/repoA", "enter")
+        await typing(app, pilot)
+        await pilot.press(*"/home/me/repoA", "enter")
         await accept_last(app, pilot)
         await feed_events(session, pilot, catalog(B, A, C))
         assert rows(workspaces(app))[-2] == "repoC · /src/repoC · new, idle"

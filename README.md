@@ -116,14 +116,7 @@ workspace picker and opens on that repository. The picker lists:
   The workspace of the repository the chat runs in is highlighted, else the first.
 - A row for each clone under way, `Cloning <name>… 42%` (or git's phase while it gives no
   percentage), until the clone is served and listed in its place.
-- `Add a path or URL…`: `enter` asks for a path on the server's host or a repository's URL,
-  which `enter` adds and `esc` leaves. Text starting with `https://`, `ssh://` or `file://`, or
-  shaped like `user@host:path`, is a URL: the server clones it (see Cloning in
-  [Serving the control plane](#serving-the-control-plane)) while its row shows how far it's got; if the
-  clone fails, the URL is back in the box with git's message under it. Anything else is a path,
-  which opens the added workspace's session picker; a path in a workspace already served opens
-  that one's. A path or URL that's refused, such as a path that doesn't exist, shows why under
-  the box.
+- `Add a path or URL…`: `enter` opens the explorer (below).
 
 `enter` on a workspace opens its session picker, `Resume <name>` first (see
 [Sessions](#sessions)), and picking a session there moves the chat to that workspace. `x` asks
@@ -136,6 +129,20 @@ while its clone holds work its remote doesn't, listing what would be lost. `esc`
 the list quits orbit at startup, and later closes the picker. When the workspace this chat is on
 is removed, the workspace picker opens, or stays open if it's removed from there, and from then
 on it works as at startup: `esc` quits orbit, as there's no workspace left to go back to.
+
+The explorer browses the directories on the server's host, as the server lists them, so a
+frontend on another machine can find a repository there. It fills the screen: the path or URL
+field at the top (it takes no typing yet), the directory listed as its title, and its
+directories below, repositories first, marked `⎇`, a workspace served marked `(served)` and a
+symlink `→ <target>`. It starts in the directory holding the workspace added last, else the
+server's `browse_root`, else its account's home. `j`/`k` move; `l` or `enter` lists the
+highlighted directory, and `h` the one above; `enter` on a workspace served opens its session
+picker, as picking it in the list does; `a` adds the highlighted directory, then opens the
+added workspace's session picker; `.` shows or hides hidden directories (hidden at first);
+`esc` goes back to the list. A listing that's refused, such as `Permission denied: <path>`, or
+an add that's refused, shows why under the listing, which stays as it was. A directory holding
+more than 2,000 directories lists 2,000, with a last line saying how many more there are, to
+be typed in the field instead.
 
 ### Sessions
 
@@ -1032,8 +1039,7 @@ each in a directory named after the URL's last part without `.git` (`proj` for
 these workspaces as managed, clones it made. A clone that fails says git's message (`orbit serve
 --add` stops with status 2) and leaves nothing behind, and one still under way when the server
 stops is stopped and removed. The same URL can't be cloned twice at once. In the TUI, the
-workspace picker's `Add a path or URL…` clones a URL typed in, showing its progress in a row of
-its own (see [Workspaces](#workspaces)).
+workspace picker shows a clone's progress in a row of its own (see [Workspaces](#workspaces)).
 
 **Watching what runs.** A frontend that shows more than one workspace at a time can watch
 the control-plane stream, with the protocol's `Watch(["control_plane"])` (see

@@ -17,13 +17,16 @@ from orbit.protocol import (
     AgentRef,
     AgentsChanged,
     Catalog,
+    DirectoryListing,
     ErrorOccurred,
+    ListDirectory,
     RemoveWorkspace,
     SessionStateChanged,
     Watch,
     WorkspaceCloning,
     WorkspaceEntry,
 )
+from orbit.tui.explorer import ExplorerScreen
 from orbit.tui.modal import ModalSlot, Push
 from orbit.tui.view.common import kept_highlight
 from orbit.tui.view.outcomes import Awaited
@@ -52,9 +55,11 @@ from orbit.tui.view.workspaces import (
 )
 from orbit.tui.widgets import ChoiceScreen, TypingListScreen
 
-Change = Callable[[AddWorkspace | RemoveWorkspace | Watch, Awaited], Awaitable[object]]
-"""Sends adding or removing a workspace, or the streams to watch, to the backend, awaiting its
-outcome as told; whatever it returns is ignored."""
+Change = Callable[
+    [AddWorkspace | RemoveWorkspace | Watch | ListDirectory, Awaited], Awaitable[object]
+]
+"""Sends adding or removing a workspace, the streams to watch, or listing a directory, to the
+backend, awaiting its outcome as told; whatever it returns is ignored."""
 Chosen = Callable[[str, bool], Awaitable[None]]
 """Takes the id of the workspace picked, and whether it was picked at startup."""
 
@@ -65,11 +70,13 @@ class WorkspacesScreen(TypingListScreen[str | None]):
     of the workspace picked.
 
     ``j``/``k`` (and the arrows) move, preselected on the workspace at ``repository``, and
-    enter picks the highlighted workspace. Enter on adding sends ``AddWorkspace`` with
-    ``change``, asking for the path or URL first on ``Add a path or URL…``, and picks the
-    workspace added by its path once accepted and listed; a refusal, or the clone of a URL
-    failing, shows why. ``x`` asks whether to remove the highlighted workspace keeping its
-    sessions or deleting them too, then sends ``RemoveWorkspace``, showing why if it's refused.
+    enter picks the highlighted workspace. Enter on adding the repository sends
+    ``AddWorkspace`` with ``change``, and on ``Add a path or URL…`` opens the explorer over the
+    server's directories, which may open a workspace, picking it, or add one; either way the
+    workspace added by its path is picked once accepted and listed. A refusal, or the clone of
+    a URL typed in the path box failing, shows why. ``x`` asks whether to remove the highlighted
+    workspace keeping its sessions or deleting them too, then sends ``RemoveWorkspace``,
+    showing why if it's refused.
     Escape leaves the path box, or dismisses with none, or quits orbit at ``startup``, where
     there's nothing to go back to. Once shown it watches the control-plane stream, so each
     workspace's row can show the :attr:`agents` running in it.
@@ -98,6 +105,7 @@ class WorkspacesScreen(TypingListScreen[str | None]):
         self._change = change
         self._adding: str | None = None  # The path added, until its workspace is listed.
         self._cloning: str | None = None  # The URL added, until its clone fails or another is.
+        self._explorer: ExplorerScreen | None = None  # The explorer opened from here, if open.
 
     @property
     def rows(self) -> tuple[WorkspaceRow, ...]:
@@ -184,7 +192,26 @@ class WorkspacesScreen(TypingListScreen[str | None]):
         elif isinstance(row, AddWorkspace):
             await self._add(row)
         elif row == ADD_PATH:
-            self._typing(PATH_HINT)
+            self._explore()
+
+    def _explore(self) -> None:
+        """Open the explorer, picking the workspace it opens or adds."""
+        explorer = ExplorerScreen(self._change)
+        self._explorer = explorer
+
+        async def explored(pick: str | AddWorkspace | None) -> None:
+            self._explorer = None
+            if isinstance(pick, AddWorkspace):
+                self._added(pick)
+            elif pick is not None:
+                self.dismiss(pick)
+
+        self.app.push_screen(explorer, explored)
+
+    def show_listing(self, listing: DirectoryListing) -> None:
+        """Show ``listing`` in the explorer, if it's open."""
+        if self._explorer is not None:
+            self._explorer.show_listing(listing)
 
     @on(Input.Submitted, "#workspace-path")
     async def _typed(self, event: Input.Submitted) -> None:
@@ -268,8 +295,9 @@ class WorkspacesHost:
     their sessions, and shows them with ``push`` when asked, for the ``repository`` the
     frontend runs in, refreshing the picker while it's shown, and the clones under way, as
     ``WorkspaceCloning`` reports them, until they're listed or fail, and the agents running, as
-    ``AgentsChanged`` reports them while the picker watches for them. ``change`` sends adding
-    and removing workspaces and the streams to watch, and ``chosen`` takes the workspace
+    ``AgentsChanged`` reports them while the picker watches for them, and the directories
+    ``DirectoryListing`` lists, in its explorer. ``change`` sends adding and removing
+    workspaces, the streams to watch and listing directories, and ``chosen`` takes the workspace
     picked."""
 
     def __init__(
@@ -315,6 +343,11 @@ class WorkspacesHost:
         """Note ``changed``'s session's state."""
         self.workspaces = with_states(self.workspaces, changed)
         self._refresh()
+
+    def follow_listing(self, listing: DirectoryListing) -> None:
+        """Show ``listing`` in the picker's explorer, if it's shown."""
+        if self.shown is not None:
+            self.shown.show_listing(listing)
 
     def follow_agents(self, changed: AgentsChanged) -> None:
         """Show the agents ``changed`` lists in the picker, if it's shown."""

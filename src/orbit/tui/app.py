@@ -744,10 +744,12 @@ class OrbitApp(App[None], inherit_bindings=False):
                 self._show_progress(event)
 
     def _follow_stream(self, event: AgentsChanged | UsageTotals | DirectoryListing) -> None:
-        """Show the agents running across workspaces in the workspace picker; nothing shows what
-        turns cost across them, or the server's directories yet."""
+        """Show the agents running across workspaces in the workspace picker, and the server's
+        directories in its explorer; nothing shows what turns cost across them."""
         if isinstance(event, AgentsChanged):
             self._workspaces.follow_agents(event)
+        elif isinstance(event, DirectoryListing):
+            self._workspaces.follow_listing(event)
 
     def _follow_agents(self, event: Event) -> None:
         self._agents.track(event)
