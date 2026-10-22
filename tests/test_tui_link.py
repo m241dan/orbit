@@ -1,6 +1,7 @@
 """How the TUI shows its link to a control plane in another process."""
 
 import pytest
+from textual.app import App
 from textual.widgets import OptionList, Static
 
 from orbit.protocol import (
@@ -21,7 +22,8 @@ from orbit.protocol import (
     WorkspaceEntry,
 )
 from orbit.tui import Opening, OrbitApp
-from orbit.tui.link import LinkScreen
+from orbit.tui.link import LinkHost, LinkScreen
+from orbit.tui.modal import Closed
 from orbit.tui.view.link import LOST_AFTER, ended_message, lost_delay
 from orbit.tui.widgets import ChatPrompt
 from tests.tui_fakes import FakeLink, FakeSession, entries, feed_events
@@ -269,3 +271,55 @@ def test_the_lost_modal_waits_out_what_is_left_of_two_minutes() -> None:
     assert lost_delay(NOW, NOW) == LOST_AFTER
     assert lost_delay(NOW - 20, NOW) == LOST_AFTER - 20
     assert lost_delay(NOW - 500, NOW) == 0
+
+
+class LinkApp(App[None]):
+    """An app holding a LinkHost, recording each modal's callback and each quit."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.callbacks: list[Closed[int]] = []
+        self.quits = 0
+        self.host = LinkHost(self._push, self._quit, lambda _: None, self.set_timer)
+
+    def _push(self, screen: LinkScreen, closed: Closed[int]) -> None:
+        self.callbacks.append(closed)
+        self.push_screen(screen, closed)
+
+    def _quit(self) -> None:
+        self.quits += 1
+
+    def link_screens(self) -> list[LinkScreen]:
+        return [screen for screen in self.screen_stack if isinstance(screen, LinkScreen)]
+
+
+async def test_a_superseded_modals_late_quit_does_not_quit() -> None:
+    app = LinkApp()
+    async with app.run_test() as pilot:
+        app.host.follow(Stopped(URL), NOW)
+        await pilot.pause()
+        app.host.follow(Connected(URL), NOW)
+        app.host.follow(Stopped(URL), NOW)
+        await pilot.pause()
+        newer = app.host.shown
+        await app.callbacks[0](1)  # Quit, picked on the closed modal.
+        assert app.quits == 0
+        assert app.host.shown is newer
+        assert app.link_screens() == [newer]
+
+
+async def test_a_final_notice_replaces_the_modal_asking_and_quits_once_closed() -> None:
+    app = LinkApp()
+    async with app.run_test() as pilot:
+        app.host.follow(Stopped(URL), NOW)
+        await pilot.pause()
+        app.host.follow(TokenRefused("Refused."), NOW)
+        await pilot.pause()
+        [final] = app.link_screens()
+        assert final.choices == ("Quit",) and app.host.shown is final
+        await app.callbacks[0](1)
+        assert app.quits == 0
+        await pilot.press("enter")
+        await pilot.pause()
+        assert app.quits == 1
+        assert app.link_screens() == []

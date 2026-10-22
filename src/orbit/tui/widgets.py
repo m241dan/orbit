@@ -15,6 +15,7 @@ from textual.widget import Widget
 from textual.widgets import Input, OptionList, Static, TextArea
 
 from orbit.protocol import Settings
+from orbit.tui.modal import Push
 from orbit.tui.view.common import SPINNER_FPS, ListHints, picker_hint
 from orbit.tui.view.confirm import confirm_hint
 from orbit.tui.view.settings import settings_summary
@@ -422,14 +423,12 @@ class ConfirmScreen(ModalScreen[bool]):
         self.dismiss(confirmed)
 
 
-Answered = Callable[[bool | None], Awaitable[None]]
-"""Takes the user's answer to a confirmation: True on yes."""
-PushConfirm = Callable[[ConfirmScreen, Answered], object]
-"""Shows a confirmation, calling back with the user's answer."""
-
-
 def confirm(
-    push: PushConfirm, title: str, message: str, yes: str, then: Callable[[], Awaitable[object]]
+    push: Push[ConfirmScreen, bool],
+    title: str,
+    message: str,
+    yes: str,
+    then: Callable[[], Awaitable[object]],
 ) -> None:
     """Ask ``title`` with ``message`` with ``push``, ``yes`` naming what ``y`` does, and await
     ``then`` only if the user answers yes."""

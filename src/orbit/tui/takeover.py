@@ -2,13 +2,12 @@
 
 from collections.abc import Awaitable, Callable
 
-from orbit.tui.modal import Closed, ModalSlot
+from orbit.tui.modal import ModalSlot, Push
 from orbit.tui.view.confirm import TAKE_OVER_MESSAGE, TAKE_OVER_NO, TAKE_OVER_TITLE, TAKE_OVER_YES
 from orbit.tui.view.outcomes import Awaited
 from orbit.tui.widgets import ConfirmScreen
 
 Answer = Callable[[bool, Awaited], Awaitable[object]]
-Push = Callable[[ConfirmScreen, Closed[bool]], object]
 
 
 class TakeoverHost:
@@ -17,7 +16,7 @@ class TakeoverHost:
     refused while the offer is still open; once the offer is settled, from here or another
     frontend, closes the modal still open."""
 
-    def __init__(self, push: Push, answer: Answer) -> None:
+    def __init__(self, push: Push[ConfirmScreen, bool], answer: Answer) -> None:
         self._slot = ModalSlot[ConfirmScreen, bool](push)
         self._answer = answer
         self.open = False  # Whether the offer is open, as far as this frontend knows.

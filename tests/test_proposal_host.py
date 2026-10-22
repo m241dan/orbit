@@ -23,6 +23,17 @@ class Host(App[None]):
     async def _decided(self, proposal: ChecksProposed, decision: DecideProposal) -> None:
         self.decisions.append((proposal, decision))
 
+    def recording(self) -> list[Decided]:
+        """Have the host push through this app, recording each screen's callback."""
+        callbacks: list[Decided] = []
+
+        def push(screen: ProposalScreen, decided: Decided) -> None:
+            callbacks.append(decided)
+            self.push_screen(screen, decided)
+
+        self.host = ProposalHost(push, self._decided)
+        return callbacks
+
     def proposal_screens(self) -> list[ProposalScreen]:
         return [screen for screen in self.screen_stack if isinstance(screen, ProposalScreen)]
 
@@ -189,6 +200,22 @@ async def test_a_superseded_screens_late_decision_leaves_the_newer_tracked() -> 
         second = app.host.shown
         await pilot.pause()
         assert second is not None and second.proposal == OTHER
+        assert app.host.shown is second
+        assert app.proposal_screens() == [second]
+
+
+async def test_a_superseded_screens_late_decision_sends_nothing() -> None:
+    app = Host()
+    callbacks = app.recording()
+    async with app.run_test() as pilot:
+        app.host.show(PROPOSAL)
+        await pilot.pause()
+        app.host.follow((OTHER,))
+        await pilot.pause()
+        second = app.host.shown
+        await callbacks[0](DecideProposal(task_id="1", action="accept"))
+        await pilot.pause()
+        assert app.decisions == []
         assert app.host.shown is second
         assert app.proposal_screens() == [second]
 

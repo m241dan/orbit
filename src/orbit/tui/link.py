@@ -22,7 +22,7 @@ from orbit.protocol import (
     Stopped,
     TokenRefused,
 )
-from orbit.tui.modal import Closed, ModalSlot
+from orbit.tui.modal import ModalSlot, Push
 from orbit.tui.view.link import (
     CHOICES,
     QUIT,
@@ -79,7 +79,6 @@ class LinkScreen(ModalScreen[int]):
 
 _SOONEST = 0.01  # Textual's timers can't wait no time at all.
 
-Push = Callable[[LinkScreen, Closed[int]], object]
 ShowStatus = Callable[[str | None], None]
 After = Callable[[float, Callable[[], None]], Timer]
 
@@ -91,8 +90,13 @@ class LinkHost:
     is shown with only the choice to quit; ``quit`` ends the app, and
     ``after`` calls back after a delay."""
 
-    def __init__(self, push: Push, quit: Callable[[], None], show_status: ShowStatus, after: After):
-        self._push = push
+    def __init__(
+        self,
+        push: Push[LinkScreen, int],
+        quit: Callable[[], None],
+        show_status: ShowStatus,
+        after: After,
+    ) -> None:
         self._quit = quit
         self._show_status = show_status
         self._after = after
@@ -101,7 +105,8 @@ class LinkHost:
 
     @property
     def shown(self) -> LinkScreen | None:
-        """The modal asking whether to keep trying, if open."""
+        """The modal asking whether to keep trying, or saying why the link won't be retried, if
+        open."""
         return self._slot.showing
 
     def follow(self, state: LinkState, now: float) -> None:
@@ -134,10 +139,11 @@ class LinkHost:
 
     def _final(self, title: str, message: str) -> None:
         """Show ``title`` with ``message``, saying why the link won't be retried, quitting once
-        it's closed."""
+        it's closed, in place of any modal open."""
         self._show_status(None)
         self._stop_timer()
-        self._push(LinkScreen(title, message, (QUIT,)), self._quit_now)
+        self._slot.close(None)
+        self._slot.open(LinkScreen(title, message, (QUIT,)), self._quit_now)
 
     def _ask(self, title: str, message: str) -> None:
         """Ask ``title`` with ``message`` whether to keep trying, unless that's being asked."""

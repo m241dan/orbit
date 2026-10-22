@@ -12,7 +12,7 @@ from textual.screen import ModalScreen
 from textual.widgets import Input, Static
 
 from orbit.protocol import AgentExited, ChecksProposed, DecideProposal, Event, ProposalAction
-from orbit.tui.modal import ModalSlot
+from orbit.tui.modal import ModalSlot, Push
 from orbit.tui.view.proposals import (
     FEEDBACK_HINT,
     FEEDBACK_PLACEHOLDER,
@@ -91,7 +91,6 @@ class ProposalScreen(ModalScreen[DecideProposal | None]):
 
 
 Decided = Callable[[DecideProposal | None], Awaitable[None]]
-Push = Callable[[ProposalScreen, Decided], object]
 Decide = Callable[[ChecksProposed, DecideProposal], Awaitable[object]]
 
 
@@ -100,7 +99,7 @@ class ProposalHost:
     closes the one shown when it's no longer waiting; ``decide`` takes the user's decision on
     a proposal."""
 
-    def __init__(self, push: Push, decide: Decide) -> None:
+    def __init__(self, push: Push[ProposalScreen, DecideProposal], decide: Decide) -> None:
         self._slot = ModalSlot[ProposalScreen, DecideProposal](push)
         self._decide = decide
         self._waiting: list[ChecksProposed] = []  # Those to show after the one shown, in order.

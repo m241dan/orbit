@@ -82,6 +82,17 @@ async def test_a_closed_screens_late_callback_passes_nothing_on_and_leaves_the_n
     assert slot.showing is newer
 
 
+async def test_a_superseded_screens_late_answer_passes_nothing_on() -> None:
+    slot, pushed = recording_slot()
+    results: list[int | None] = []
+    slot.open(Screen(), record(results))
+    slot.close(None)
+    slot.open(Screen(), record(results))
+    [(_, stale), _] = pushed
+    await stale(2)
+    assert results == []
+
+
 def record(results: list[int | None]) -> Closed:
     """A callback appending each result to ``results``."""
 
@@ -138,3 +149,20 @@ async def test_closing_a_modal_closed_already_leaves_the_one_on_top() -> None:
         await pilot.pause()
         assert app.screen is other
         assert screen not in app.screen_stack
+
+
+async def test_closing_a_slots_modal_under_another_removes_it_and_leaves_the_other_up() -> None:
+    app = App[None]()
+    results: list[int | None] = []
+    async with app.run_test() as pilot:
+        slot = ModalSlot[Modal, int](app.push_screen)
+        screen, other = Modal(), Modal()
+        slot.open(screen, record(results))
+        app.push_screen(other)
+        await pilot.pause()
+        slot.close(1)
+        await pilot.pause()
+        assert slot.showing is None
+        assert app.screen is other
+        assert screen not in app.screen_stack
+        assert results == []

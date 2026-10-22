@@ -10,7 +10,7 @@ from textual.containers import VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import Static
 
-from orbit.tui.modal import Closed, ModalSlot
+from orbit.tui.modal import ModalSlot, Push
 from orbit.tui.view.storage import HALT_HINT, HALT_TITLE, halt_status
 
 Retry = Callable[[], Awaitable[object]]
@@ -61,7 +61,6 @@ class StorageHaltScreen(ModalScreen[None]):
         self.dismiss(None)
 
 
-Push = Callable[[StorageHaltScreen, Closed[None]], object]
 ShowStatus = Callable[[str | None], None]
 
 
@@ -69,7 +68,9 @@ class StorageHaltHost:
     """Follows whether the session is halted: while it is, the status line is shown with
     ``show_status`` and the halt's modal, one at a time, with ``push``; ``retry`` tries again."""
 
-    def __init__(self, push: Push, retry: Retry, show_status: ShowStatus) -> None:
+    def __init__(
+        self, push: Push[StorageHaltScreen, None], retry: Retry, show_status: ShowStatus
+    ) -> None:
         self._slot = ModalSlot[StorageHaltScreen, None](push)
         self._retry = retry
         self._show_status = show_status

@@ -25,7 +25,7 @@ from orbit.protocol import (
     WorkspaceEntry,
     with_state,
 )
-from orbit.tui.modal import ModalSlot
+from orbit.tui.modal import ModalSlot, Push
 from orbit.tui.view.common import kept_highlight
 from orbit.tui.view.sessions import (
     ACTIVATE_CHOICE,
@@ -263,8 +263,6 @@ class ActivationScreen(ListScreen[bool]):
         self.dismiss(False)
 
 
-Push = Callable[[ModalScreen[Any], Callable[[Any], Awaitable[None]]], object]
-"""Shows a modal screen, calling back with what it dismisses with."""
 Send = Callable[[SessionChoice | SessionChange], Awaitable[bool]]
 """Sends a session command to the backend, returning whether it was sent."""
 OpensOn = Callable[[Sequence[WorkspaceEntry]], WorkspaceEntry | None]
@@ -287,11 +285,10 @@ class SessionsHost:
 
     def __init__(
         self,
-        push: Push,
+        push: Push[ModalScreen[Any], Any],
         send: Send,
         opens_on: OpensOn = _first,
     ) -> None:
-        self._push = push
         self._send = send
         self._opens_on = opens_on
         self._workspaces: tuple[WorkspaceEntry, ...] = ()  # As the latest catalog lists them.
@@ -304,8 +301,13 @@ class SessionsHost:
         self._offering: str | None = None  # The session picked to view only, until its view.
         # The session picked and viewed only as the active one ran, until that one turns idle.
         self._held: str | None = None
-        self.shown: SessionsScreen | None = None  # The picker shown, if any.
+        self._picker = ModalSlot[SessionsScreen, tuple[SessionChoice, ...]](push)
         self._offer = ModalSlot[ActivationScreen, bool](push)  # The offer to activate.
+
+    @property
+    def shown(self) -> SessionsScreen | None:
+        """The picker shown, if any."""
+        return self._picker.showing
 
     @property
     def offered(self) -> ActivationScreen | None:
@@ -454,13 +456,11 @@ class SessionsHost:
         viewing, sessions = self._viewing(workspace)
 
         async def chosen(choice: tuple[SessionChoice, ...] | None) -> None:
-            self.shown = None
             if choice and not viewing.joined:
                 self.join(viewing.workspace)
             await self._send_choice(choice or (), sessions)
 
-        self.shown = SessionsScreen(sessions, viewing, self._send, startup)
-        self._push(self.shown, chosen)
+        self._picker.open(SessionsScreen(sessions, viewing, self._send, startup), chosen)
 
     async def _send_choice(
         self, choice: Sequence[SessionChoice], sessions: Sequence[SessionSummary]

@@ -17,7 +17,7 @@ from orbit.protocol import (
     SessionStateChanged,
     WorkspaceEntry,
 )
-from orbit.tui.sessions import Push
+from orbit.tui.modal import ModalSlot, Push
 from orbit.tui.view.common import kept_highlight
 from orbit.tui.view.outcomes import Awaited
 from orbit.tui.view.workspaces import (
@@ -215,14 +215,22 @@ class WorkspacesHost:
     removing workspaces, and ``chosen`` takes the workspace picked."""
 
     def __init__(
-        self, push: Push, change: Change, chosen: Chosen, repository: str | None = None
+        self,
+        push: Push[WorkspacesScreen, str],
+        change: Change,
+        chosen: Chosen,
+        repository: str | None = None,
     ) -> None:
-        self._push = push
         self._change = change
         self._chosen = chosen
         self._repository = repository
         self.workspaces: tuple[WorkspaceEntry, ...] = ()
-        self.shown: WorkspacesScreen | None = None  # The picker shown, if any.
+        self._picker = ModalSlot[WorkspacesScreen, str](push)
+
+    @property
+    def shown(self) -> WorkspacesScreen | None:
+        """The picker shown, if any."""
+        return self._picker.showing
 
     def follow(self, catalog: Catalog) -> None:
         """List the workspaces in ``catalog``."""
@@ -241,12 +249,11 @@ class WorkspacesHost:
             return
 
         async def picked(workspace: str | None) -> None:
-            self.shown = None
             if workspace is not None:
                 await self._chosen(workspace, startup)
 
-        self.shown = WorkspacesScreen(self.workspaces, self._repository, self._change, startup)
-        self._push(self.shown, picked)
+        screen = WorkspacesScreen(self.workspaces, self._repository, self._change, startup)
+        self._picker.open(screen, picked)
 
     def lost(self) -> None:
         """Let the user pick a workspace now the app is on none: open the picker, or have
