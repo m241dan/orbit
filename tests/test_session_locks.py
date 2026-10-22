@@ -3,6 +3,7 @@
 import asyncio
 import fcntl
 import os
+import stat
 import subprocess
 import sys
 import threading
@@ -51,6 +52,11 @@ async def test_acquiring_writes_a_lock_with_our_process_id(tmp_path: Path) -> No
     assert await locks_in(tmp_path).acquire("abc")
     assert (sessions(tmp_path) / "abc.lock").read_text() == str(os.getpid())
     assert [path.name for path in sessions(tmp_path).iterdir()] == ["abc.lock"]
+
+
+async def test_a_lock_file_is_readable_by_its_owner_alone(tmp_path: Path) -> None:
+    assert await locks_in(tmp_path).acquire("abc")
+    assert stat.S_IMODE((sessions(tmp_path) / "abc.lock").stat().st_mode) == 0o600
 
 
 async def test_acquiring_a_lock_another_orbit_holds_is_refused(tmp_path: Path) -> None:

@@ -2,6 +2,7 @@
 
 import json
 import os
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -20,6 +21,13 @@ def test_the_first_orbit_takes_the_lock_naming_its_process(tmp_path: Path) -> No
     assert lock.held
     assert lock.path == tmp_path / "orbit" / "workspace.lock"
     assert json.loads(lock.path.read_text()) == {"pid": os.getpid()}
+    lock.close()
+
+
+def test_the_lock_file_is_readable_by_its_owner_alone(tmp_path: Path) -> None:
+    lock = WorkspaceLock(tmp_path)
+    assert lock.take() is None
+    assert stat.S_IMODE(lock.path.stat().st_mode) == 0o600
     lock.close()
 
 

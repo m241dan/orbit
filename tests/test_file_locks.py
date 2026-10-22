@@ -72,7 +72,15 @@ def test_rewriting_finishes_a_partial_write(
 
 def test_a_new_lock_file_takes_the_mode_its_given(tmp_path: Path) -> None:
     lock = tmp_path / "a.lock"
-    fd = take_flock(lock, "123", 0o600)
+    fd = take_flock(lock, "123", 0o640)
+    assert fd is not None
+    assert stat.S_IMODE(lock.stat().st_mode) == 0o640
+    os.close(fd)
+
+
+def test_a_new_lock_file_is_readable_by_its_owner_alone_by_default(tmp_path: Path) -> None:
+    lock = tmp_path / "a.lock"
+    fd = take_flock(lock, "123")
     assert fd is not None
     assert stat.S_IMODE(lock.stat().st_mode) == 0o600
     os.close(fd)

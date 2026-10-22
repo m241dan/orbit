@@ -12,7 +12,7 @@ from pathlib import Path
 from orbit.agent.domain.server import LocalTls, RunningServer, parse_running
 from orbit.agent.external.file_locks import take_flock
 from orbit.agent.external.processes import process_alive
-from orbit.agent.external.whole_files import PRIVATE, write_private
+from orbit.agent.external.whole_files import write_private
 
 RUN = "run"
 SERVER_FILE = "server.json"
@@ -64,7 +64,7 @@ class ServeLock:
         Raises ``OSError`` when the lock file can't be made or opened, or locked.
         """
         self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        fd = take_flock(self.path, "", PRIVATE)
+        fd = take_flock(self.path, "")
         if fd is None:
             return False
         self._fd = fd
