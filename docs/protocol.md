@@ -194,8 +194,10 @@ directory. It's registered, or found by its path with the sessions it had, opens
 recently active session, takes its lock (or is read-only while another orbit holds it, see
 [Read-only orbits](#read-only-orbits)) and starts its background work, such as its startup
 check. Adding a workspace already served is accepted with nothing more done. It's refused with
-`invalid` for a relative path or a file, or a workspace whose configuration is invalid, and with
-`unknown` for a path there's nothing at.
+`invalid` for a relative path or a file, or a workspace whose configuration is invalid or whose
+repository git has no identity for commits in, with `unknown` for a path there's nothing at, and
+with `internal` when orbit fails to make its lock, or fails partway through opening it in the
+store, importing its old sessions or recovering its fallback files, which may have changed them.
 
 ```json
 {"workspace":null,"traceparent":null,"tracestate":null,"command_id":"a71c03","session":null,"payload":{"type":"add_workspace","path":"/home/me/src/orbit"}}

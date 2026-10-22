@@ -85,6 +85,7 @@ class FakeSource:
         self.hosts: list[WorkspaceHost] = []
         self.gate: asyncio.Event | None = None
         self.unavailable: str | None = None
+        self.unavailable_code = INVALID
 
     async def kind(self, path: str) -> PathKind:
         return self.kinds.get(path, PathKind.DIRECTORY)
@@ -97,7 +98,7 @@ class FakeSource:
         if self.gate is not None:
             await self.gate.wait()
         if self.unavailable is not None:
-            raise WorkspaceUnavailable(self.unavailable)
+            raise WorkspaceUnavailable(self.unavailable, self.unavailable_code)
         host = self.make(PurePath(root).name)
         self.hosts.append(host)
         return host
@@ -271,6 +272,21 @@ async def test_a_workspace_that_cant_be_served_is_refused_as_invalid_saying_why(
 
     message = "Can't add /src/c: Invalid orbit configuration: no roles."
     assert outcome == [refused("add", INVALID, message)]
+    assert plane.hosts == ()
+
+
+async def test_a_workspace_whose_store_fails_partway_is_refused_as_internal_saying_why() -> None:
+    source = FakeSource()
+    source.unavailable = "The store failed."
+    source.unavailable_code = INTERNAL
+    plane = ControlPlane(workspaces=source)
+    connection = await welcomed(plane)
+
+    await say(connection, "add", AddWorkspace(path="/src/c"))
+    outcome = payloads(taken(connection))
+    await plane.close()
+
+    assert outcome == [refused("add", INTERNAL, "Can't add /src/c: The store failed.")]
     assert plane.hosts == ()
 
 

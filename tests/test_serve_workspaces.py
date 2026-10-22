@@ -24,9 +24,11 @@ from orbit.agent import (
     WorkspaceUnavailable,
     read_config,
 )
+from orbit.agent.application.recovery import RecoveryFailed
 from orbit.agent.external import served_workspaces
 from orbit.cli import backend
 from orbit.cli.backend import _added, _Backend, _workspaces
+from orbit.protocol import INTERNAL, INVALID
 
 FLAGS = _Backend(None, None, False, False, False, False, new=False, name=None)
 
@@ -167,9 +169,9 @@ async def test_an_invalid_configuration_is_unavailable_saying_why(
     (root / ".orbit").mkdir()
     (root / ".orbit" / "config.toml").write_text("roles = 1\n")
 
-    with pytest.raises(WorkspaceUnavailable, match=r"^Invalid orbit configuration: "):
+    with pytest.raises(WorkspaceUnavailable, match=r"^Invalid orbit configuration: ") as refused:
         await workspaces(stack, store).open(str(root))
-    assert free(root)
+    assert refused.value.code == INVALID and free(root)
 
 
 async def test_a_repository_git_has_no_identity_for_is_unavailable_with_a_worktree(
@@ -182,8 +184,9 @@ async def test_a_repository_git_has_no_identity_for_is_unavailable_with_a_worktr
 
     with pytest.raises(
         WorkspaceUnavailable, match=f"^{re.escape(f'Git has no identity for commits in {root}')}"
-    ):
+    ) as refused:
         await workspaces(stack, store, flags).open(str(root))
+    assert refused.value.code == INVALID
 
 
 async def test_a_slow_identity_check_leaves_the_event_loop_running(
@@ -220,8 +223,11 @@ async def test_a_lock_that_cant_be_made_is_unavailable_naming_it(
     root = directory(tmp_path)
     (root / ".orbit").write_text("")
 
-    with pytest.raises(WorkspaceUnavailable, match=r"^Couldn't lock the repository with "):
+    with pytest.raises(
+        WorkspaceUnavailable, match=r"^Couldn't lock the repository with "
+    ) as refused:
         await workspaces(stack, store).open(str(root))
+    assert refused.value.code == INTERNAL
 
 
 async def test_a_store_that_fails_is_unavailable_and_lets_the_lock_go(
@@ -231,9 +237,32 @@ async def test_a_store_that_fails_is_unavailable_and_lets_the_lock_go(
     store = await SqliteStore.open(tmp_path / "state")
     await store.close()
 
-    with pytest.raises(WorkspaceUnavailable):
+    with pytest.raises(WorkspaceUnavailable) as refused:
         await workspaces(stack, store).open(str(root))
-    assert free(root)
+    assert refused.value.code == INTERNAL and free(root)
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [StoreError("The store failed."), RecoveryFailed("/parked.jsonl", "it's unreadable")],
+)
+async def test_a_store_or_recovery_failing_partway_through_opening_is_unavailable_as_internal(
+    failure: Exception,
+    stack: ExitStack,
+    store: SqliteStore,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = directory(tmp_path)
+
+    async def fails(store: SqliteStore, root: Path, *, owned: bool) -> None:
+        raise failure
+
+    monkeypatch.setattr(served_workspaces, "open_workspace_store", fails)
+
+    with pytest.raises(WorkspaceUnavailable, match=f"^{re.escape(str(failure))}$") as refused:
+        await workspaces(stack, store).open(str(root))
+    assert refused.value.code == INTERNAL and free(root)
 
 
 async def test_a_failure_opening_the_store_lets_the_lock_go(

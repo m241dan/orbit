@@ -27,6 +27,7 @@ from orbit.agent.external.sqlite_store import SqliteStore
 from orbit.agent.external.store_startup import OpenedStore, open_workspace_store
 from orbit.agent.external.workspace_lock import WorkspaceLock
 from orbit.agent.external.workspace_registry import WorkspaceRegistry
+from orbit.protocol import INTERNAL
 
 
 @dataclass(frozen=True)
@@ -193,8 +194,8 @@ def _identity_problem(root: Path) -> str | None:
 
 def locked(root: Path, url: str | None = None) -> tuple[WorkspaceLock, WorkspaceOwner | None]:
     """The workspace lock on the repository at ``root``, naming the server's ``url`` if it's
-    known, and the owner, if another orbit holds it. Raises :class:`WorkspaceUnavailable` if
-    it can't be made."""
+    known, and the owner, if another orbit holds it. Raises :class:`WorkspaceUnavailable` as
+    ``INTERNAL`` if it can't be made."""
     lock = WorkspaceLock(orbit_dir(str(root)))
     if url is not None:
         lock.announce(url)
@@ -202,17 +203,18 @@ def locked(root: Path, url: str | None = None) -> tuple[WorkspaceLock, Workspace
         return lock, lock.take()
     except OSError as exc:
         raise WorkspaceUnavailable(
-            f"Couldn't lock the repository with {lock.path}: {exc}"
+            f"Couldn't lock the repository with {lock.path}: {exc}", INTERNAL
         ) from None
 
 
 async def _flagged_view(store: SqliteStore, root: Path, *, owned: bool) -> OpenedStore:
     """The workspace at ``root``'s view of ``store``, as :func:`open_workspace_store` opens it,
     recovering its fallback files if this orbit ``owned`` it, flagged as served. Raises
-    :class:`WorkspaceUnavailable` if that fails."""
+    :class:`WorkspaceUnavailable` as ``INTERNAL`` if that fails, as it may have changed the
+    store or the workspace's files by then."""
     try:
         opened = await open_workspace_store(store, root, owned=owned)
         await WorkspaceRegistry(store).set_served(opened.store.workspace_id, True)
     except (StoreError, ImportBlocked, RecoveryFailed) as exc:
-        raise WorkspaceUnavailable(str(exc)) from None
+        raise WorkspaceUnavailable(str(exc), INTERNAL) from None
     return opened

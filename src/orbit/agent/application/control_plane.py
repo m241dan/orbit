@@ -54,8 +54,13 @@ STOPPING = "Orbit is stopping."
 
 
 class WorkspaceUnavailable(Exception):
-    """A workspace can't be served, for the reason its message gives, such as an invalid
-    configuration."""
+    """A workspace can't be served, for the reason ``message`` gives, refused with ``code``:
+    ``INVALID`` when it's the workspace as given, such as an invalid configuration, or
+    ``INTERNAL`` when orbit failed, such as the store, perhaps partway through opening it."""
+
+    def __init__(self, message: str, code: str = INVALID) -> None:
+        super().__init__(message)
+        self.code = code
 
 
 class WorkspaceSource(Protocol):
@@ -296,7 +301,7 @@ class ControlPlane:
         start its host, opening its most recently active session and its background work, and
         send the catalog to ``connection``, which asked, and every listening connection, or let it
         go again if that fails or is cancelled; refused unless ``path`` is the absolute path to
-        a directory, or as ``invalid`` if it can't be served."""
+        a directory, or with the code it gives if it can't be served."""
         check_addable(path, absolute=PurePath(path).is_absolute())
         check_directory(path, await workspaces.kind(path))
         root = await workspaces.top_level(path)
@@ -305,7 +310,7 @@ class ControlPlane:
         try:
             host = await workspaces.open(root)
         except WorkspaceUnavailable as exc:
-            raise Refused(INVALID, f"Can't add {root}: {exc}") from None
+            raise Refused(exc.code, f"Can't add {root}: {exc}") from None
         try:
             await self._start(host, connection)
         except BaseException:
