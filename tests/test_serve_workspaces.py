@@ -382,6 +382,25 @@ async def test_a_workspace_whose_unflagging_failed_is_added_again_owned_with_its
     assert len(held) == 1 and CountedLock.closes == 1 and free(root)
 
 
+def test_a_workspace_whose_unflagging_failed_is_served_again_owned_and_freed_once_closed(
+    stack: ExitStack, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = directory(tmp_path)
+    store = asyncio.run(SqliteStore.open(tmp_path / "state"))
+    source = workspaces(stack, store)
+    workspace_id = asyncio.run(unflagging_failed(source, root, monkeypatch))
+    held = source.locks
+
+    served, make = source.served(root)
+    locks = source.locks
+    asyncio.run(make().close())
+    asyncio.run(source.close(workspace_id))
+    asyncio.run(store.close())
+
+    assert served.owner is None and locks == held and len(locks) == 1
+    assert free(root) and source.locks == ()
+
+
 async def test_a_failed_add_of_a_workspace_whose_lock_is_held_leaves_it_held(
     stack: ExitStack, store: SqliteStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
