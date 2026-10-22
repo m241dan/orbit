@@ -78,6 +78,7 @@ from orbit.tui.panels import UsagePanel, VerificationPanel
 from orbit.tui.proposals import ProposalHost
 from orbit.tui.reason import ReasonScreen
 from orbit.tui.sessions import SessionsHost
+from orbit.tui.settings_pickers import SettingsPickers
 from orbit.tui.storage_halt import StorageHaltHost
 from orbit.tui.tabs import ConversationTabs
 from orbit.tui.takeover import TakeoverHost
@@ -111,21 +112,12 @@ from orbit.tui.view.outcomes import Awaited
 from orbit.tui.view.proposals import decision_entry
 from orbit.tui.view.rules import planner_reset_entry
 from orbit.tui.view.sessions import chosen_workspace
-from orbit.tui.view.settings import (
-    model_choices,
-    model_options,
-    picked_model,
-    picked_tool_access,
-    tool_access_choices,
-    tool_access_labels,
-)
 from orbit.tui.view.tasks import edit_refusal
 from orbit.tui.view.transcript import PLANNER_BUSY
 from orbit.tui.view.triggers import trigger_key_labels
 from orbit.tui.view.windows import SIDEBAR_WINDOWS, neighbors
 from orbit.tui.widgets import (
     ChatPrompt,
-    PickerScreen,
     StatusLine,
     confirm,
     mark_selected,
@@ -207,7 +199,6 @@ class OrbitApp(App[None], inherit_bindings=False):
         self._busy: dict[BusyLane, bool] = {WORK_LANE: False, PLANNER_LANE: False}
         # Last settings reported by the backend; None until the first report.
         self._settings: Settings | None = None
-        self._model_choices: tuple[str, ...] = ()
         self._proposals = ProposalHost(self.push_screen, self._decide)
         repository = opening.repository
         self._sessions = SessionsHost(
@@ -242,9 +233,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         # The actions of the keys whose trigger the last catalog lacks, which are hidden.
         self._missing_triggers: frozenset[str] = frozenset()
         self.clock: Callable[[], float] = time.monotonic
-        # Pickers are built once and installed so they open instantly.
-        self._model_picker = PickerScreen("Model", model_options(())[1])
-        self._tool_picker = PickerScreen("Tool access", tool_access_labels())
+        self._pickers = SettingsPickers()
 
     def compose(self) -> ComposeResult:
         with Horizontal():
@@ -288,8 +277,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         )
         self._pager = HistoryPager(self._transcript, self._feed, self._send)
         self.query_one(f"#{self._selected}").add_class("selected")
-        self.install_screen(self._model_picker, "pick-model")
-        self.install_screen(self._tool_picker, "pick-tool-access")
+        self._pickers.install(self)
         if self._link is not None:  # Before the events start, which start the link.
             self._link.watch(self._follow_link)
         self._consume_events()
@@ -448,10 +436,7 @@ class OrbitApp(App[None], inherit_bindings=False):
                 await self._send(EditTask(task_id=current.id, task=result))
 
         editor = TaskEditorScreen(
-            None if current is None else current.task,
-            self._settings or Settings(),
-            lambda: self._model_choices,
-            (self._model_picker, self._tool_picker),
+            None if current is None else current.task, self._settings or Settings(), self._pickers
         )
         self.push_screen(editor, saved)
 
@@ -552,23 +537,15 @@ class OrbitApp(App[None], inherit_bindings=False):
         # While a picker is open, its modal screen blocks the app's key bindings, so a second
         # picker can't be pushed on top.
         if self._settings is not None:
-            _, current = model_choices(self._model_choices, self._settings)
-            self._model_picker.choose(current, self._request_model)
+            self._pickers.choose_model(self._shown_settings, self._request_settings)
 
     def action_pick_tool_access(self) -> None:
         if self._settings is not None:
-            _, current = tool_access_choices(self._settings)
-            self._tool_picker.choose(current, self._request_tool_access)
+            self._pickers.choose_tools(self._shown_settings, self._request_settings)
 
-    # The settings may have changed while the picker was open, so a pick changes only its own
-    # setting of the settings as they are now.
-    async def _request_model(self, index: int) -> None:
+    def _shown_settings(self) -> Settings:
         assert self._settings is not None  # Only picked once settings were shown.
-        await self._request_settings(picked_model(self._model_choices, self._settings, index))
-
-    async def _request_tool_access(self, index: int) -> None:
-        assert self._settings is not None  # Only picked once settings were shown.
-        await self._request_settings(picked_tool_access(self._settings, index))
+        return self._settings
 
     async def _request_settings(self, settings: Settings) -> None:
         # The display updates when the backend confirms with SettingsChanged.
@@ -809,9 +786,8 @@ class OrbitApp(App[None], inherit_bindings=False):
         await self._show_and_send(shown, proposal.agent_id, decision, outcome)
 
     def _show_settings(self, settings: Settings, choices: tuple[str, ...]) -> None:
-        if choices != self._model_choices:
-            self._model_picker.set_labels(model_options(choices)[1])
-        self._settings, self._model_choices = settings, choices
+        self._pickers.show_choices(choices)
+        self._settings = settings
         self._prompt.show_settings(settings)
 
     def _set_busy(self, lane: BusyLane, busy: bool) -> None:

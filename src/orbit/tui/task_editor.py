@@ -1,6 +1,5 @@
 """The modal that edits one task."""
 
-from collections.abc import Callable, Sequence
 from typing import ClassVar
 
 from textual import on
@@ -11,15 +10,10 @@ from textual.screen import ModalScreen
 from textual.widgets import Input, Static
 
 from orbit.protocol import Settings, TaskSpec
+from orbit.tui.settings_pickers import SettingsPickers
 from orbit.tui.view.common import model_label
-from orbit.tui.view.settings import (
-    model_choices,
-    picked_model,
-    picked_tool_access,
-    tool_access_choices,
-)
 from orbit.tui.view.tasks import TASK_EDITOR_HINT, join_prompt, split_prompt, task_editor_title
-from orbit.tui.widgets import PickerScreen, PromptBox, PromptInput, mark_selected
+from orbit.tui.widgets import PromptBox, PromptInput, mark_selected
 
 
 class FieldBox(Static):
@@ -49,9 +43,8 @@ class TaskEditorScreen(ModalScreen[TaskSpec | None]):
     ``join_prompt``. Works like the main screen: j/k select a field, J/K scroll the prompt box
     from any field, i types in the title or prompt (escape stops; enter stops in the title and
     adds a line in the prompt), enter on model or tools opens its picker, ctrl+s saves and
-    escape discards. The pickers are the app's model and tool access ``pickers``, built once
-    so they open instantly; ``models`` returns the app's current model choices, which the
-    model picker's labels follow.
+    escape discards. The pickers are the app's ``pickers``, built once so they open instantly
+    and offering the app's current model choices.
     """
 
     AUTO_FOCUS = None
@@ -81,16 +74,14 @@ class TaskEditorScreen(ModalScreen[TaskSpec | None]):
         self,
         task: TaskSpec | None,
         settings: Settings,
-        models: Callable[[], Sequence[str]],
-        pickers: tuple[PickerScreen, PickerScreen],
+        pickers: SettingsPickers,
     ) -> None:
         super().__init__()
         self.title_text = task_editor_title(new=task is None)
         self._prompt = "" if task is None else task.prompt
         self._settings = settings if task is None else task.settings
         self._role = TaskSpec.model_fields["role"].default if task is None else task.role
-        self._models = models
-        self._model_picker, self._tool_picker = pickers
+        self._pickers = pickers
         self._field = 0
 
     def compose(self) -> ComposeResult:
@@ -132,16 +123,10 @@ class TaskEditorScreen(ModalScreen[TaskSpec | None]):
             self._choose_tools()
 
     def _choose_model(self) -> None:
-        _, current = model_choices(self._models(), self._settings)
-        self._model_picker.choose(
-            current, lambda index: self._update(picked_model(self._models(), self._settings, index))
-        )
+        self._pickers.choose_model(lambda: self._settings, self._update)
 
     def _choose_tools(self) -> None:
-        _, current = tool_access_choices(self._settings)
-        self._tool_picker.choose(
-            current, lambda index: self._update(picked_tool_access(self._settings, index))
-        )
+        self._pickers.choose_tools(lambda: self._settings, self._update)
 
     def action_save(self) -> None:
         """Save the task, if it has a title; its body may be empty."""
