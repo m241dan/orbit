@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 
 import pytest
 
+from orbit.agent.application.lanes import OPEN_GATE, SessionGate
 from orbit.agent.application.outbox import EventSink
 from orbit.agent.application.planner_seat import PlannerSeat, SeatHooks
 from orbit.agent.application.proposals import FrontendReview
@@ -91,7 +92,7 @@ def commands_for(
     events: EventSink = recorded
     tasks = Tasks(TaskBoard(), recorded.put)
     seat = PlannerSeat(None, tasks, events, SeatHooks(recorded.save, lambda: None, tuple))
-    work = WorkParts(None, None, tasks, None, None, recorded.put_nowait, lambda: False)
+    work = WorkParts(None, None, tasks, None, None, recorded.put_nowait, OPEN_GATE)
     turns = WorkTurns(work) if outcomes is None else ScriptedTurns(work, outcomes)
     parts = CommandParts(
         SessionSettings(Settings()),
@@ -105,7 +106,7 @@ def commands_for(
         None,
         recorded.save,
         nothing,
-        lambda: outcomes is not None,
+        SessionGate(read_only=lambda: outcomes is not None),
     )
     return WorkCommands(parts), tasks
 

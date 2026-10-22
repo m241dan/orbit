@@ -1,14 +1,34 @@
 """What the lanes share: a failure that escapes one is reported to the user, not lost with the
-background task that ran it, and a busy lane's turns are run one at a time."""
+background task that ran it, a busy lane's turns are run one at a time, and the session's gate
+says whether work may start."""
 
 import asyncio
 from collections.abc import Callable, Coroutine
+from dataclasses import dataclass
 from typing import Any
 
 from orbit.agent.application.outcomes import cancelling
 from orbit.agent.application.ports import Publish
 from orbit.agent.domain.refusals import Refused
 from orbit.protocol import BUSY, INTERNAL, BusyChanged, BusyLane, ErrorOccurred, Event
+
+
+def _never() -> bool:
+    return False
+
+
+@dataclass(frozen=True)
+class SessionGate:
+    """What keeps work from starting: ``halted`` tells whether the session is halted, as a write
+    to the store failed, and ``read_only`` whether another orbit owns the repository. Asked
+    afresh each time, as either may change across an ``await``."""
+
+    halted: Callable[[], bool] = _never
+    read_only: Callable[[], bool] = _never
+
+
+OPEN_GATE = SessionGate()
+"""A gate that never keeps work from starting."""
 
 
 def crash_of(task: "asyncio.Task[object]") -> BaseException | None:

@@ -7,6 +7,7 @@ import pytest
 
 from orbit.agent import Agents
 from orbit.agent.application.desk import AgentDesk
+from orbit.agent.application.lanes import OPEN_GATE, SessionGate
 from orbit.agent.application.review_lane import ReviewHooks, ReviewLane
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.application.verifier import Verifier
@@ -62,7 +63,7 @@ async def no_work() -> None:
 def hooks(read_only: bool = False, halted: Callable[[], bool] = lambda: False) -> ReviewHooks:
     """Hooks waking no work lane and acting on no change, ``read_only`` or not, halted as
     ``halted`` says."""
-    return ReviewHooks(no_work, no_work, lambda: read_only, halted)
+    return ReviewHooks(no_work, no_work, SessionGate(halted, lambda: read_only))
 
 
 def ended_and_free(tasks: Tasks, task_id: str, reason: str) -> None:
@@ -247,7 +248,7 @@ async def stop_turns_mid_run(stop: Callable[[WorkTurns], Awaitable[None]]) -> No
     task_id = tasks.board.add(TaskSpec(prompt="a"))
     desk, verifier = desk_for(gate), Verifier(verified(Steps()), tasks, gate)
     work = Watched(desk, tasks, verifier, review)
-    turns = WorkTurns(WorkParts(work, review, tasks, verifier, desk, lambda _: None, lambda: False))
+    turns = WorkTurns(WorkParts(work, review, tasks, verifier, desk, lambda _: None, OPEN_GATE))
     await turns.run_tasks()
     await gate.reached.wait()
     await stop(turns)

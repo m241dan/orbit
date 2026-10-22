@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from orbit.agent.application.desk import AgentDesk, Agents
-from orbit.agent.application.lanes import Background, TurnSlot
+from orbit.agent.application.lanes import Background, SessionGate, TurnSlot
 from orbit.agent.application.limit_pause import LimitPause
 from orbit.agent.application.review_lane import ReviewLane
 from orbit.agent.application.tasks import Tasks
@@ -43,7 +43,7 @@ TASKS_RUNNING_MESSAGE = "Tasks are already running."
 class WorkParts:
     """What decides when the work lane runs: the ``work`` lane and review ``lane``, if any, the
     ``tasks`` they run, the ``verifier`` and agents' ``desk``, if any, ``post``, which
-    publishes events without blocking, ``halted``, which tells whether the session is
+    publishes events without blocking, the session's ``gate``, which tells whether it's
     halted, and ``usage``, the usage limits fetched last, if any."""
 
     work: WorkLane | None
@@ -52,7 +52,7 @@ class WorkParts:
     verifier: Verifier | None
     desk: AgentDesk | None
     post: Callable[[Event], None]
-    halted: Callable[[], bool]
+    gate: SessionGate
     usage: Callable[[], UsageChanged | None] = lambda: None
 
 
@@ -169,7 +169,7 @@ class WorkTurns:
     def _waits(self) -> bool:
         """Whether work not asked for waits: held, already running, waiting to start again or
         halted."""
-        return self._held or self.running or self._waiting or self._parts.halted()
+        return self._held or self.running or self._waiting or self._parts.gate.halted()
 
     async def _start(self, *, asked: bool) -> None:
         """Start the work lane's turn if there is work, unless closed. The user ``asked`` lifts a
@@ -218,7 +218,7 @@ class WorkTurns:
             self._waiting = False
             raise
         self._waiting = False
-        if self._parts.halted():
+        if self._parts.gate.halted():
             self._due = True
             return
         await self._start_now()

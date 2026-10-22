@@ -12,7 +12,7 @@ from functools import partial
 
 from orbit.agent.application.agent_run import AgentRun
 from orbit.agent.application.desk import AgentDesk
-from orbit.agent.application.lanes import Background
+from orbit.agent.application.lanes import Background, SessionGate
 from orbit.agent.application.outcomes import Outcome, UserStop, cancelling, run_task_to_end
 from orbit.agent.application.ports import CoderTree, Reply
 from orbit.agent.application.tasks import Changed, Tasks
@@ -45,14 +45,13 @@ class ReviewHooks:
     """How the review lane reaches the rest of the session.
 
     ``wake_work`` asks the work lane to run the suggestions a review queued, ``changed`` is
-    called after the lane's state may have changed, and ``read_only`` and ``halted`` tell
-    whether another orbit owns the repository or the session is halted, when no review starts.
+    called after the lane's state may have changed, and the session's ``gate`` tells whether
+    another orbit owns the repository or the session is halted, when no review starts.
     """
 
     wake_work: Callable[[], Awaitable[None]]
     changed: Changed
-    read_only: Callable[[], bool]
-    halted: Callable[[], bool]
+    gate: SessionGate
 
 
 class ReviewLane:
@@ -198,7 +197,8 @@ class ReviewLane:
     def kick(self) -> None:
         """Run the reviews waiting, if they aren't being run already, unless this orbit is
         read-only or the session is halted; those queued meanwhile wait on the board."""
-        if self._hooks.read_only() or self._hooks.halted() or self._background.running:
+        gate = self._hooks.gate
+        if gate.read_only() or gate.halted() or self._background.running:
             return
         self._background.start(self._run_reviews())
 
@@ -274,8 +274,11 @@ class ReviewLane:
         self._paused_noted = self.planner.paused
 
     async def _run_reviews(self) -> None:
+        """Run the reviews waiting, one at a time, until none are left or the session halts."""
         tried = self._spent()
         while (task_id := self._next_review(tried)) is not None:
+            if self._hooks.gate.halted():  # It may have halted as the last review ended.
+                return
             tried.add(task_id)
             self._reviewing = task_id
             try:

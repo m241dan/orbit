@@ -3,7 +3,8 @@
 After each task that completes, the verification steps run until one fails; a failure adds a
 task to fix it right after the failed one. Work that passes lands, and the review lane, if any,
 hears how each task ended. A run stops at a task its agent couldn't do for Claude's usage limit,
-and at a fix that ends in error, which must run before anything puts its work aside.
+at a fix that ends in error, which must run before anything puts its work aside, and once the
+session halts.
 """
 
 import asyncio
@@ -15,6 +16,7 @@ from typing import Literal
 from orbit.agent.application.agent_run import AgentRun
 from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.landing import Lander
+from orbit.agent.application.lanes import OPEN_GATE, SessionGate
 from orbit.agent.application.outcomes import Outcome, UserStop, ended, run_task_to_end
 from orbit.agent.application.review_lane import ReviewLane
 from orbit.agent.application.startup_check import StartupCheck
@@ -47,10 +49,12 @@ limit, or a fix ended in error."""
 @dataclass(frozen=True)
 class Beside:
     """What runs beside the work lane: the review lane, if any, and the startup check, if any,
-    whose panel each task takes over."""
+    whose panel each task takes over; and the session's ``gate``, which stops a run halted
+    before its next task."""
 
     review: ReviewLane | None = None
     startup: StartupCheck | None = None
+    gate: SessionGate = OPEN_GATE
 
 
 class WorkLane:
@@ -76,6 +80,7 @@ class WorkLane:
         self._publish = desk.publish
         self._review = beside.review
         self._startup = beside.startup
+        self._gate = beside.gate
         self._landed: dict[str, str] = {}  # Task id -> the commit it landed, until reported.
         self._starts: dict[str, str] = {}  # Task id -> the tree's head when it started.
         # Fixes queued per step along each chain, kept across runs so a restart can't reset
@@ -119,8 +124,9 @@ class WorkLane:
 
     async def run(self) -> RunEnd:
         """Run the tasks waiting, in order but the one the last run stopped at first, until
-        none are left, the user stops one, or one ends in error for the usage limit or as a fix;
-        returns which. Any other cancel goes on once the task running has ended."""
+        none are left, the user stops one, the session halts, which ends it as cancelled, or one
+        ends in error for the usage limit or as a fix; returns which. Any other cancel goes on
+        once the task running has ended."""
         self._running, self._stopped = True, False
         try:
             return await self._run_tasks()
@@ -131,16 +137,26 @@ class WorkLane:
         """Run the tasks waiting, as :meth:`run` does; returns why the run ended."""
         tried: set[str] = set()
         while (task_id := self.next_work(tried)) is not None:
+            if self._gate.halted():  # It may have halted as the last task ended.
+                return "cancelled"
             tried.add(task_id)
             self._resume = None
             fixing = self._board.get(task_id).fixes is not None
             outcome = await self._run_task(task_id)
-            if outcome.status == "cancelled" or self._stopped:
-                return "cancelled"
-            if outcome.status == "error" and (end := await self._stop_at(outcome, fixing)):
-                self._resume = task_id
+            if end := await self._end_at(task_id, outcome, fixing):
                 return end
         return "finished"
+
+    async def _end_at(self, task_id: str, outcome: Outcome, fixing: bool) -> RunEnd | None:
+        """Why the run ends at task ``task_id``, which ended in ``outcome``, ``fixing`` another
+        or not: it was cancelled or stopped, or the run stops at its error, to run it first
+        next time; none if the run goes on."""
+        if outcome.status == "cancelled" or self._stopped:
+            return "cancelled"
+        if outcome.status == "error" and (end := await self._stop_at(outcome, fixing)):
+            self._resume = task_id
+            return end
+        return None
 
     async def _stop_at(self, error: Outcome, fixing: bool) -> RunEnd | None:
         """Why the run stops at a task that ended in ``error``: its agent hit the usage limit,

@@ -26,6 +26,7 @@ from orbit.agent.application.keeper import (
     local_now,
     new_session_id,
 )
+from orbit.agent.application.lanes import SessionGate
 from orbit.agent.application.log_writer import Overflow
 from orbit.agent.application.outbox import EventSink, Outbox
 from orbit.agent.application.planner_seat import PlannerSeat, SeatHooks
@@ -266,6 +267,7 @@ class WorkspaceHost:
             lambda: self._events.stop_log(self._keeper.id), self._stop_work, self._retry_storage
         )
         self._halt = StorageHalt(lambda event: self._events.put(event), halt_hooks)
+        self._gate = SessionGate(lambda: self._halt.halted, lambda: self._takeover.read_only)
         overflow = Overflow(fallback, self._log_failed)
         self._connections = Connections(lambda: self._states.check(), lambda: self._keeper.id)
         self._workspace_id = workspace_id
@@ -403,7 +405,7 @@ class WorkspaceHost:
             self._startup,
             self._save,
             self._reviews_changed,
-            lambda: self._takeover.read_only,
+            self._gate,
         )
         return WorkCommands(parts)
 
@@ -430,7 +432,7 @@ class WorkspaceHost:
             self._verifier,
             self._desk,
             self._events.put_nowait,
-            lambda: self._halt.halted,
+            self._gate,
             lambda: self.latest_usage(),
         )
         return WorkTurns(parts)
@@ -438,7 +440,7 @@ class WorkspaceHost:
     def _work_lane(self) -> WorkLane | None:
         if self._desk is None:
             return None
-        beside = Beside(self._lane, self._startup)
+        beside = Beside(self._lane, self._startup, self._gate)
         return WorkLane(self._desk, self._tasks, self._verifier, beside)
 
     def _startup_check(
@@ -699,8 +701,7 @@ class WorkspaceHost:
         hooks = ReviewHooks(
             lambda: self._turns.wake(),
             self._reviews_changed,
-            lambda: self._takeover.read_only,
-            lambda: self._halt.halted,
+            self._gate,
         )
         lane = ReviewLane(desk, self._tasks, planner, hooks)
         desk.suggest = lane.suggest  # Set here, as the lane needs the desk it takes calls from.

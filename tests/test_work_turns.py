@@ -8,6 +8,7 @@ import pytest
 
 from orbit.agent import Agents
 from orbit.agent.application.desk import AgentDesk
+from orbit.agent.application.lanes import OPEN_GATE, SessionGate
 from orbit.agent.application.limit_pause import LimitPause
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.application.verifier import Verifier
@@ -118,7 +119,9 @@ def lane_parts(
     verifier = Verifier(verified(Steps()), tasks, publish) if verifying else None
     work = StopsCounted(desk, tasks, verifier, Beside())
     halted = halt or Halt()
-    return WorkParts(work, None, tasks, verifier, desk, posted.append, lambda: halted.on)
+    return WorkParts(
+        work, None, tasks, verifier, desk, posted.append, SessionGate(lambda: halted.on)
+    )
 
 
 @pytest.fixture
@@ -314,7 +317,7 @@ async def test_without_verification_configuring_is_refused() -> None:
 
 async def test_without_agents_runs_and_configuring_are_refused() -> None:
     tasks = Tasks(TaskBoard(), lambda _: asyncio.sleep(0))
-    turns = WorkTurns(WorkParts(None, None, tasks, None, None, lambda _: None, lambda: False))
+    turns = WorkTurns(WorkParts(None, None, tasks, None, None, lambda _: None, OPEN_GATE))
     for attempt in (turns.run_tasks, turns.configure_checks):
         with pytest.raises(Refused) as refused:
             await attempt()
