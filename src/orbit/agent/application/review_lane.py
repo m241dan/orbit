@@ -14,7 +14,7 @@ from orbit.agent.application.agent_run import AgentRun
 from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.lanes import Background, SessionGate
 from orbit.agent.application.outcomes import Outcome, UserStop, cancelling, run_task_to_end
-from orbit.agent.application.ports import CoderTree, Reply
+from orbit.agent.application.ports import CoderTree, Reply, TreeFailed
 from orbit.agent.application.tasks import Changed, Tasks
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.endings import REVIEW_STOPPED_BY_YOU
@@ -134,7 +134,7 @@ class ReviewLane:
         (The coder's tree may lag behind it, or not exist yet.)"""
         try:
             commit = await self._tree.base_commit()
-        except RuntimeError as exc:  # Git failed; the review is skipped rather than the run.
+        except TreeFailed as exc:  # Git failed; the review is skipped rather than the run.
             await self._publish(
                 ErrorOccurred(code=GIT_FAILED, message=f"Super review skipped: {exc}")
             )
@@ -230,7 +230,7 @@ class ReviewLane:
             return ""
         try:
             return await self._tree.show(job.commits)
-        except RuntimeError as exc:  # Git failed; the review is skipped rather than the run.
+        except TreeFailed as exc:  # Git failed; the review is skipped rather than the run.
             await self._publish(ErrorOccurred(code=GIT_FAILED, message=f"Review skipped: {exc}"))
             return None
 

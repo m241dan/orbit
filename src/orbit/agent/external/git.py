@@ -7,10 +7,11 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from orbit.agent.application.ports import TreeFailed
 from orbit.agent.external.processes import run_process
 
 
-class GitUnavailable(RuntimeError):
+class GitUnavailable(TreeFailed):
     """Git couldn't be started."""
 
 

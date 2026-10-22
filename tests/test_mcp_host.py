@@ -12,7 +12,7 @@ from mcp.client.client import Client
 from mcp.client.streamable_http import streamable_http_client
 from mcp.types import TextContent
 
-from orbit.agent.application.ports import Reply
+from orbit.agent.application.ports import HostFailed, Reply
 from orbit.agent.domain.roles import ORBIT_TOOLS
 from orbit.agent.external import mcp_host
 from orbit.agent.external.mcp_host import PROMPT_RECIPE, McpHost
@@ -171,7 +171,7 @@ async def test_a_server_that_fails_to_start_is_reported(monkeypatch: pytest.Monk
         raise OSError("no sockets for you")
 
     monkeypatch.setattr("uvicorn.Server.serve", broken)
-    with pytest.raises(RuntimeError, match="failed to start") as raised:
+    with pytest.raises(HostFailed, match="failed to start") as raised:
         await McpHost().start(RecordingHandler())
     assert isinstance(raised.value.__cause__, OSError)
 
@@ -185,7 +185,7 @@ async def test_a_server_that_fails_to_start_closes_its_socket(
     sockets = Sockets()
     monkeypatch.setattr(mcp_host, "socket", sockets)
     monkeypatch.setattr("uvicorn.Server.serve", broken)
-    with pytest.raises(RuntimeError, match=r"^Orbit's MCP server failed to start\.$"):
+    with pytest.raises(HostFailed, match=r"^Orbit's MCP server failed to start\.$"):
         await McpHost().start(RecordingHandler())
     [made] = sockets.made
     assert made.fileno() == -1

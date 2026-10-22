@@ -15,6 +15,7 @@ from websockets.exceptions import ConnectionClosed, InvalidStatus
 from orbit.agent import ControlPlane, WorkspaceHost
 from orbit.agent.application import connection as connection_module
 from orbit.agent.application.connection import SessionConnection
+from orbit.agent.application.ports import HostFailed
 from orbit.agent.domain.server import ServerSettings
 from orbit.agent.external import control_plane as control_plane_module
 from orbit.agent.external.control_plane import (
@@ -349,7 +350,7 @@ async def test_a_server_that_fails_to_start_is_reported(monkeypatch: pytest.Monk
 
     monkeypatch.setattr("uvicorn.Server.serve", broken)
     server = ControlPlaneServer(ControlPlane([WorkspaceHost()]), lambda: TOKEN, LOOPBACK, Lines())
-    with pytest.raises(RuntimeError, match="failed to start") as raised:
+    with pytest.raises(HostFailed, match="failed to start") as raised:
         await server.start()
     assert isinstance(raised.value.__cause__, OSError)
 
@@ -381,7 +382,7 @@ async def test_a_server_that_fails_to_start_closes_its_socket(
     monkeypatch.setattr(control_plane_module, "socket", sockets)
     monkeypatch.setattr("uvicorn.Server.serve", broken)
     server = ControlPlaneServer(ControlPlane([WorkspaceHost()]), lambda: TOKEN, LOOPBACK, Lines())
-    with pytest.raises(RuntimeError, match=r"^Orbit's control plane failed to start\.$"):
+    with pytest.raises(HostFailed, match=r"^Orbit's control plane failed to start\.$"):
         await server.start()
     [made] = sockets.made
     assert made.fileno() == -1

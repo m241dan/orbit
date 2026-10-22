@@ -10,6 +10,7 @@ from typing import Any
 
 import pytest
 
+from orbit.agent.application.ports import TreeFailed
 from orbit.agent.domain.checks import Setup
 from orbit.agent.external import git_tree, whole_files
 from orbit.agent.external.git import GitResult, GitUnavailable
@@ -107,7 +108,7 @@ async def test_a_failing_commit_raises_with_gits_message(repo: Path) -> None:
     tree = GitCoderTree(str(repo))
     path = Path(await tree.prepare(keep=False))
     (path / "b.txt").write_text("two\n")
-    with pytest.raises(RuntimeError, match="hook says no"):
+    with pytest.raises(TreeFailed, match="hook says no"):
         await tree.commit("Add b")
 
 
@@ -120,7 +121,7 @@ async def test_commit_raises_when_git_cant_tell_whats_staged(repo: Path) -> None
     (repo / ".git" / "objects" / tree_id[:2] / tree_id[2:]).unlink()  # HEAD can't be read.
     (path / "c.txt").write_text("three\n")
 
-    with pytest.raises(RuntimeError, match=r"git diff failed: .*bad tree object"):
+    with pytest.raises(TreeFailed, match=r"git diff failed: .*bad tree object"):
         await tree.commit("Add c")
     assert git(path, "rev-parse", "HEAD") == before
 
@@ -181,7 +182,7 @@ async def test_a_rebase_failing_without_conflicts_raises_with_gits_message(repo:
     commit_file(repo, "c.txt", "three\n", "user's commit")
     (path / "c.txt").write_text("in the way\n")
 
-    with pytest.raises(RuntimeError, match=r"(?s)git rebase failed: .*c\.txt") as raised:
+    with pytest.raises(TreeFailed, match=r"(?s)git rebase failed: .*c\.txt") as raised:
         await tree.integrate()
     assert "no rebase in progress" not in str(raised.value)
     assert not (repo / ".git" / "worktrees" / "coder" / "rebase-merge").exists()
@@ -201,7 +202,7 @@ async def test_a_rebase_refused_before_it_starts_raises_with_gits_message(repo: 
     hook.chmod(0o755)
 
     refused = r"(?s)git rebase failed: .*refused by the hook"
-    with pytest.raises(RuntimeError, match=refused) as raised:
+    with pytest.raises(TreeFailed, match=refused) as raised:
         await tree.integrate()
     assert "no rebase in progress" not in str(raised.value).lower()
     assert git(path, "rev-parse", "HEAD") == before
@@ -221,11 +222,11 @@ async def test_a_rebase_is_aborted_even_when_listing_its_conflicts_fails(
 
     async def failing_diff(self: GitCoderTree, cwd: Path, *args: str) -> str:
         if args[0] == "diff":
-            raise RuntimeError("git diff failed: out of memory")
+            raise TreeFailed("git diff failed: out of memory")
         return await real(self, cwd, *args)
 
     monkeypatch.setattr(GitCoderTree, "_git", failing_diff)
-    with pytest.raises(RuntimeError, match="out of memory"):
+    with pytest.raises(TreeFailed, match="out of memory"):
         await tree.integrate()
     assert not (repo / ".git" / "worktrees" / "coder" / "rebase-merge").exists()
     assert git(path, "rev-parse", "HEAD") == before
@@ -343,7 +344,7 @@ async def test_a_failing_abort_doesnt_hide_why_the_rebase_failed(
         return await real(cwd, *args)
 
     monkeypatch.setattr(git_tree, "git", failing)
-    with pytest.raises(RuntimeError, match="out of memory"):
+    with pytest.raises(TreeFailed, match="out of memory"):
         await tree.integrate()
 
 
@@ -492,9 +493,9 @@ async def test_a_changed_setup_command_runs_again(repo: Path) -> None:
 async def test_a_failing_setup_raises_and_runs_again_next_time(repo: Path) -> None:
     command = (sys.executable, "-c", "import sys; print('no network'); sys.exit(1)")
     tree = GitCoderTree(str(repo), setup=Setup(command=command))
-    with pytest.raises(RuntimeError, match="no network"):
+    with pytest.raises(TreeFailed, match="no network"):
         await tree.prepare(keep=False)
-    with pytest.raises(RuntimeError, match="no network"):
+    with pytest.raises(TreeFailed, match="no network"):
         await tree.prepare(keep=False)
 
 
@@ -560,7 +561,7 @@ async def test_leftovers_report_unmerged_commits_and_stashed_work(repo: Path) ->
 
 
 def test_outside_a_repository_prepare_fails(tmp_path: Path) -> None:
-    with pytest.raises(RuntimeError, match="git"):
+    with pytest.raises(TreeFailed, match="git"):
         asyncio.run(GitCoderTree(str(tmp_path)).prepare(keep=False))
 
 
@@ -581,10 +582,10 @@ async def test_head_is_the_trees_latest_commit(repo: Path) -> None:
     assert await tree.head() == git(path, "rev-parse", "HEAD")
 
 
-async def test_head_before_the_coder_tree_exists_raises_a_runtime_error(repo: Path) -> None:
-    # git can't run in a directory that isn't there; callers expect a RuntimeError, not an OSError.
+async def test_head_before_the_coder_tree_exists_raises_a_tree_failure(repo: Path) -> None:
+    # git can't run in a directory that isn't there; callers expect a TreeFailed, not an OSError.
     tree = GitCoderTree(str(repo))
-    with pytest.raises(RuntimeError, match="git rev-parse"):
+    with pytest.raises(TreeFailed, match="git rev-parse"):
         await tree.head()
 
 
@@ -679,7 +680,7 @@ async def test_a_snapshot_is_named_for_its_commit_not_the_ref(repo: Path) -> Non
 
 async def test_a_snapshot_of_a_missing_commit_fails_and_leaves_nothing(repo: Path) -> None:
     tree = GitCoderTree(str(repo))
-    with pytest.raises(RuntimeError, match="git rev-parse"):
+    with pytest.raises(TreeFailed, match="git rev-parse"):
         await tree.snapshot("no-such-commit")
     assert await tree.leftovers() == []
 
@@ -700,7 +701,7 @@ def failing_add(monkeypatch: pytest.MonkeyPatch, *, after: bool, lock: bool = Fa
             await real(self, cwd, *args)
         if lock:
             await real(self, cwd, "worktree", "lock", args[-2])
-        raise RuntimeError("git worktree failed: index.lock exists")
+        raise TreeFailed("git worktree failed: index.lock exists")
 
     monkeypatch.setattr(GitCoderTree, "_git", fake)
 
@@ -711,7 +712,7 @@ async def test_a_failed_snapshot_leaves_no_directory_or_worktree(
 ) -> None:
     failing_add(monkeypatch, after=after)
     tree = GitCoderTree(str(repo))
-    with pytest.raises(RuntimeError, match=r"index\.lock"):
+    with pytest.raises(TreeFailed, match=r"index\.lock"):
         await tree.snapshot("HEAD")
     assert snapshot_dirs(repo) == []
     assert "snapshot-" not in git(repo, "worktree", "list")
@@ -723,7 +724,7 @@ async def test_a_failed_snapshot_left_locked_is_unregistered(
 ) -> None:
     failing_add(monkeypatch, after=True, lock=True)
     tree = GitCoderTree(str(repo))
-    with pytest.raises(RuntimeError, match=r"index\.lock"):
+    with pytest.raises(TreeFailed, match=r"index\.lock"):
         await tree.snapshot("HEAD")
     assert snapshot_dirs(repo) == []
     assert "snapshot-" not in git(repo, "worktree", "list", "--porcelain")
@@ -744,7 +745,7 @@ async def test_a_failing_cleanup_doesnt_hide_why_the_snapshot_failed(
 
     monkeypatch.setattr(git_tree, "git", no_remove)
     tree = GitCoderTree(str(repo))
-    with pytest.raises(RuntimeError, match=r"index\.lock"):
+    with pytest.raises(TreeFailed, match=r"index\.lock"):
         await tree.snapshot("HEAD")
     assert snapshot_dirs(repo) == [] and tree._snapshots == set()
 
@@ -757,13 +758,13 @@ async def test_an_unremovable_snapshot_directory_doesnt_hide_why_the_snapshot_fa
     async def locking_add(self: GitCoderTree, cwd: Path, *args: str) -> str:
         if args[:2] == ("worktree", "add"):
             Path(args[-2]).parent.chmod(0o555)
-            raise RuntimeError("git worktree failed: index.lock exists")
+            raise TreeFailed("git worktree failed: index.lock exists")
         return await real(self, cwd, *args)
 
     monkeypatch.setattr(GitCoderTree, "_git", locking_add)
     tree = GitCoderTree(str(repo))
     try:
-        with pytest.raises(RuntimeError, match=r"index\.lock"):
+        with pytest.raises(TreeFailed, match=r"index\.lock"):
             await tree.snapshot("HEAD")
     finally:
         (repo / ".git" / "orbit").chmod(0o755)
@@ -776,7 +777,7 @@ async def test_a_snapshot_whose_directory_cant_be_made_raises(repo: Path) -> Non
     orbit.chmod(0o555)
     tree = GitCoderTree(str(repo))
     try:
-        with pytest.raises(RuntimeError, match="Couldn't make a snapshot directory"):
+        with pytest.raises(TreeFailed, match="Couldn't make a snapshot directory"):
             await tree.snapshot("HEAD")
     finally:
         orbit.chmod(0o755)
@@ -788,7 +789,7 @@ async def test_snapshots_that_cant_be_listed_raise(repo: Path) -> None:
     orbit.mkdir()
     orbit.chmod(0o000)
     try:
-        with pytest.raises(RuntimeError, match="Couldn't list the snapshots"):
+        with pytest.raises(TreeFailed, match="Couldn't list the snapshots"):
             await GitCoderTree(str(repo)).leftovers()
     finally:
         orbit.chmod(0o755)
@@ -959,39 +960,39 @@ async def test_ignoring_paths_that_cant_replace_the_exclude_file_leaves_it_whole
         raise OSError("No space left on device")
 
     monkeypatch.setattr(os, "replace", full)
-    with pytest.raises(RuntimeError, match="No space left on device"):
+    with pytest.raises(TreeFailed, match="No space left on device"):
         await tree.ignore({"__pycache__/"})
     assert exclude.read_text() == "*.log\n"
     assert [p.name for p in exclude.parent.iterdir()] == ["exclude"]
 
 
-async def test_ignoring_paths_that_cant_be_written_raises_runtime_error(repo: Path) -> None:
+async def test_ignoring_paths_that_cant_be_written_raises_a_tree_failure(repo: Path) -> None:
     tree = GitCoderTree(str(repo))
     await tree.prepare(keep=False)
     info = repo / ".git" / "info"
     (info / "exclude").unlink()
     info.rmdir()
     info.write_text("")  # Not a directory any more.
-    with pytest.raises(RuntimeError, match="Couldn't ignore files in"):
+    with pytest.raises(TreeFailed, match="Couldn't ignore files in"):
         await tree.ignore({"__pycache__/"})
 
 
-async def test_ignoring_paths_with_a_non_utf8_exclude_file_raises_runtime_error(
+async def test_ignoring_paths_with_a_non_utf8_exclude_file_raises_a_tree_failure(
     repo: Path,
 ) -> None:
     tree = GitCoderTree(str(repo))
     await tree.prepare(keep=False)
     exclude = repo / ".git" / "info" / "exclude"
     exclude.write_bytes(b"# \xff\n")
-    with pytest.raises(RuntimeError, match=r"Couldn't ignore files in .*exclude"):
+    with pytest.raises(TreeFailed, match=r"Couldn't ignore files in .*exclude"):
         await tree.ignore({"__pycache__/"})
 
 
-async def test_a_setup_stamp_that_cant_be_read_raises_runtime_error(repo: Path) -> None:
+async def test_a_setup_stamp_that_cant_be_read_raises_a_tree_failure(repo: Path) -> None:
     path = Path(await GitCoderTree(str(repo)).prepare(keep=False))
     (path.parent / "coder.synced").mkdir()  # A directory in the stamp's place.
     setup, runs = counting_setup(repo)
-    with pytest.raises(RuntimeError, match=r"Couldn't read the setup record in .*coder\.synced"):
+    with pytest.raises(TreeFailed, match=r"Couldn't read the setup record in .*coder\.synced"):
         await GitCoderTree(str(repo), setup=setup).prepare(keep=False)
     assert not runs.exists()
 
@@ -1015,15 +1016,15 @@ async def test_a_setup_stamp_that_vanishes_while_read_runs_the_setup(
     assert runs.read_text() == "x"
 
 
-async def test_a_non_utf8_setup_stamp_raises_runtime_error(repo: Path) -> None:
+async def test_a_non_utf8_setup_stamp_raises_a_tree_failure(repo: Path) -> None:
     path = Path(await GitCoderTree(str(repo)).prepare(keep=False))
     (path.parent / "coder.synced").write_bytes(b"\xff")
     setup, _ = counting_setup(repo)
-    with pytest.raises(RuntimeError, match=r"Couldn't read the setup record in .*coder\.synced"):
+    with pytest.raises(TreeFailed, match=r"Couldn't read the setup record in .*coder\.synced"):
         await GitCoderTree(str(repo), setup=setup).prepare(keep=False)
 
 
-async def test_a_watched_file_that_cant_be_read_raises_runtime_error(
+async def test_a_watched_file_that_cant_be_read_raises_a_tree_failure(
     repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     commit_file(repo, "uv.lock", "v1\n", "lock")
@@ -1033,12 +1034,12 @@ async def test_a_watched_file_that_cant_be_read_raises_runtime_error(
         raise PermissionError("denied")
 
     monkeypatch.setattr(Path, "read_bytes", read_bytes)
-    with pytest.raises(RuntimeError, match=r"Couldn't read .*uv\.lock to check the setup: denied"):
+    with pytest.raises(TreeFailed, match=r"Couldn't read .*uv\.lock to check the setup: denied"):
         await GitCoderTree(str(repo), setup=setup).prepare(keep=False)
     assert not runs.exists()
 
 
-async def test_a_setup_that_cant_be_recorded_raises_runtime_error(
+async def test_a_setup_that_cant_be_recorded_raises_a_tree_failure(
     repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     setup, _ = counting_setup(repo)
@@ -1050,7 +1051,7 @@ async def test_a_setup_that_cant_be_recorded_raises_runtime_error(
         real_write(path, text)
 
     monkeypatch.setattr(git_tree, "write_whole", write_whole)
-    with pytest.raises(RuntimeError, match=r"Couldn't record the setup in .*coder\.synced: denied"):
+    with pytest.raises(TreeFailed, match=r"Couldn't record the setup in .*coder\.synced: denied"):
         await GitCoderTree(str(repo), setup=setup).prepare(keep=False)
 
 
@@ -1068,7 +1069,7 @@ async def test_a_setup_swapped_in_runs_at_the_next_prepare(repo: Path) -> None:
 
 async def test_a_missing_root_isnt_in_a_repository(tmp_path: Path) -> None:
     missing = tmp_path / "missing"
-    with pytest.raises(RuntimeError, match=f"{missing} isn't in a git repository"):
+    with pytest.raises(TreeFailed, match=f"{missing} isn't in a git repository"):
         await GitCoderTree(str(missing)).head()
 
 
@@ -1090,7 +1091,7 @@ async def test_the_repositorys_git_directory_is_found_once(
     assert found == [str(repo)]
 
 
-async def test_a_setup_that_cant_start_raises_runtime_error(repo: Path) -> None:
+async def test_a_setup_that_cant_start_raises_a_tree_failure(repo: Path) -> None:
     tree = GitCoderTree(str(repo), Setup(command=("orbit-no-such-command", "--sync")))
-    with pytest.raises(RuntimeError, match="orbit-no-such-command --sync failed to start"):
+    with pytest.raises(TreeFailed, match="orbit-no-such-command --sync failed to start"):
         await tree.prepare(keep=False)

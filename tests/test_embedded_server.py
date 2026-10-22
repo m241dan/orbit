@@ -7,6 +7,7 @@ import pytest
 import uvicorn
 from starlette.applications import Starlette
 
+from orbit.agent.application.ports import HostFailed
 from orbit.agent.external.embedded_server import EmbeddedServer
 
 
@@ -40,7 +41,7 @@ async def test_serving_that_ends_before_starting_raises_and_closes_the_socket(
 
     monkeypatch.setattr("uvicorn.Server.serve", broken)
     sock = bound()
-    with pytest.raises(RuntimeError, match=r"^It failed\.$") as raised:
+    with pytest.raises(HostFailed, match=r"^It failed\.$") as raised:
         await embedded().start_serving(sock, "It failed.")
     assert isinstance(raised.value.__cause__, OSError)
     assert sock.fileno() == -1

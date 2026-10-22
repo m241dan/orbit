@@ -7,6 +7,7 @@ import tomlkit
 from tomlkit.exceptions import TOMLKitError
 from tomlkit.items import AoT, Table
 
+from orbit.agent.application.ports import ConfigWriteFailed
 from orbit.agent.domain.checks import ChecksProposal
 from orbit.agent.domain.config import OrbitConfig, load_config
 from orbit.agent.domain.config_errors import ConfigError
@@ -36,13 +37,13 @@ def write_checks(root: str, checks: ChecksProposal) -> None:
     """Make ``checks`` the verification steps and setup in ``root``'s file, creating it if it's
     missing. The file's steps and setup are replaced; everything else in it stays as it was.
 
-    Raises ``RuntimeError``, naming the file, when it can't be read, parsed or written.
+    Raises :class:`ConfigWriteFailed`, naming the file, when it can't be read, parsed or written.
     """
     path = Path(root) / CONFIG_PATH
     try:
         _write_checks(path, checks)
     except (OSError, UnicodeDecodeError, TOMLKitError) as exc:
-        raise RuntimeError(f"Couldn't save the checks to {path}: {exc}") from exc
+        raise ConfigWriteFailed(f"Couldn't save the checks to {path}: {exc}") from exc
 
 
 def _write_checks(path: Path, checks: ChecksProposal) -> None:

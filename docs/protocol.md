@@ -508,7 +508,7 @@ Errors, in `ErrorOccurred`:
 
 | Code | When |
 | --- | --- |
-| `agent_failed` | An agent's run or turn failed, or it exited without doing its task. |
+| `agent_failed` | An agent's run or turn failed, as when orbit's MCP server couldn't start or the checks it proposed couldn't be saved, or it exited without doing its task. |
 | `timed_out` | An agent ran out of time. |
 | `git_failed` | A git command or a worktree failed. |
 | `save_failed` | Saving the session failed. |

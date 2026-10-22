@@ -11,7 +11,13 @@ from orbit.agent import Verification, VerificationStep
 from orbit.agent.application.agent_run import AgentRun
 from orbit.agent.application.desk import NOTE_LIMIT, AgentDesk, Agents, progress_note
 from orbit.agent.application.outcomes import Outcome, cancelling, see_to_end, tree_failed
-from orbit.agent.application.ports import CallHandler, ProposalDecision, Reply
+from orbit.agent.application.ports import (
+    CallHandler,
+    HostFailed,
+    ProposalDecision,
+    Reply,
+    TreeFailed,
+)
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.application.verifier import Verifier
 from orbit.agent.domain.agent_task import Limits
@@ -854,7 +860,7 @@ async def test_concurrent_callers_start_the_host_once_and_share_its_url() -> Non
 async def test_a_host_that_failed_to_start_is_started_again_next_time() -> None:
     host = FailingHost()
     desk = desk_on(host)
-    with pytest.raises(RuntimeError, match="failed to start"):
+    with pytest.raises(HostFailed, match="failed to start"):
         await desk.url()
     await asyncio.sleep(0)  # The failed start is forgotten.
     assert await desk.url() == URL
@@ -864,7 +870,7 @@ async def test_a_host_that_failed_to_start_is_started_again_next_time() -> None:
 async def test_stopping_after_a_failed_start_stops_nothing() -> None:
     host = FailingHost()
     desk = desk_on(host)
-    with pytest.raises(RuntimeError):
+    with pytest.raises(HostFailed):
         await desk.url()
     await desk.stop()
     assert host.stops == 0
@@ -887,7 +893,7 @@ class StoppedAsItFailsHost(FailingHost):
 async def test_stopping_as_a_start_fails_stops_nothing() -> None:
     host = StoppedAsItFailsHost()
     desk = host.desk = desk_on(host)
-    with pytest.raises(RuntimeError, match="failed to start"):
+    with pytest.raises(HostFailed, match="failed to start"):
         await desk.url()
     [stopping] = host.stopping
     await asyncio.wait_for(stopping, 5)
@@ -928,7 +934,7 @@ def assert_closed_unannounced(desk: AgentDesk, events: list[Event]) -> None:
 async def test_a_run_whose_host_fails_to_start_closes_its_agent_unannounced() -> None:
     events: list[Event] = []
     desk, running = run_on(FailingHost(), events)
-    with pytest.raises(RuntimeError, match="failed to start"):
+    with pytest.raises(HostFailed, match="failed to start"):
         await asyncio.wait_for(running, 5)
     assert_closed_unannounced(desk, events)
 
@@ -1114,7 +1120,7 @@ async def test_tree_failed_publishes_the_error_and_ends_in_it() -> None:
     async def publish(event: Event) -> None:
         published.append(event)
 
-    outcome = await tree_failed(publish, RuntimeError("git broke"))
+    outcome = await tree_failed(publish, TreeFailed("git broke"))
 
     assert published == [ErrorOccurred(code=GIT_FAILED, message="git broke")]
     assert (outcome.status, outcome.reason, outcome.detail) == (

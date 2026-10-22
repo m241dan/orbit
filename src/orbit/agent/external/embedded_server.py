@@ -7,6 +7,8 @@ from contextlib import contextmanager
 
 import uvicorn
 
+from orbit.agent.application.ports import HostFailed
+
 
 class EmbeddedServer(uvicorn.Server):
     """A uvicorn server that leaves signals to the program it runs in, which decides how it
@@ -19,7 +21,7 @@ class EmbeddedServer(uvicorn.Server):
     async def start_serving(self, sock: socket.socket, failure: str) -> asyncio.Task[None]:
         """The task serving on ``sock``, once the server has started.
 
-        Raises :class:`RuntimeError` saying ``failure`` if serving ends before it starts. If
+        Raises :class:`HostFailed` saying ``failure`` if serving ends before it starts. If
         starting fails or is cancelled, serving is stopped and ``sock`` closed.
         """
         serving = asyncio.create_task(self.serve(sockets=[sock]))
@@ -34,9 +36,9 @@ class EmbeddedServer(uvicorn.Server):
         return serving
 
     async def _started(self, serving: asyncio.Task[None], failure: str) -> None:
-        """Wait until the server has started; raises :class:`RuntimeError` saying ``failure``,
+        """Wait until the server has started; raises :class:`HostFailed` saying ``failure``,
         from what ended it, if ``serving`` ends first."""
         while not self.started:
             if serving.done():
-                raise RuntimeError(failure) from serving.exception()
+                raise HostFailed(failure) from serving.exception()
             await asyncio.sleep(0.01)

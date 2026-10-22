@@ -15,7 +15,7 @@ import tempfile
 from collections.abc import Collection, Sequence
 from pathlib import Path
 
-from orbit.agent.application.ports import Merge
+from orbit.agent.application.ports import Merge, TreeFailed
 from orbit.agent.domain.checks import Setup
 from orbit.agent.external.git import git
 from orbit.agent.external.processes import run_process
@@ -33,12 +33,12 @@ async def _run_setup(command: Sequence[str], cwd: Path) -> tuple[bool, str]:
     """Run the setup ``command`` in ``cwd``; returns whether it succeeded and its combined
     output.
 
-    Raises ``RuntimeError`` when it can't be started, such as in a directory that isn't there.
+    Raises ``TreeFailed`` when it can't be started, such as in a directory that isn't there.
     """
     try:
         returncode, output = await run_process(command, cwd)
     except OSError as error:
-        raise RuntimeError(f"{' '.join(command[:2])} failed to start in {cwd}: {error}") from error
+        raise TreeFailed(f"{' '.join(command[:2])} failed to start in {cwd}: {error}") from error
     return returncode == 0, output.decode(errors="replace").strip()
 
 
@@ -50,7 +50,7 @@ def _fingerprint(setup: Setup, path: Path) -> str:
         try:
             content = file.read_bytes() if file.is_file() else None
         except OSError as error:
-            raise RuntimeError(f"Couldn't read {file} to check the setup: {error}") from error
+            raise TreeFailed(f"Couldn't read {file} to check the setup: {error}") from error
         digest.update(repr((name, content)).encode())
     return digest.hexdigest()
 
@@ -58,20 +58,20 @@ def _fingerprint(setup: Setup, path: Path) -> str:
 def _read_stamp(stamp: Path) -> str | None:
     """The digest ``stamp`` records; ``None`` when there isn't one, so the setup runs.
 
-    Raises ``RuntimeError`` when it's there but can't be read.
+    Raises ``TreeFailed`` when it's there but can't be read.
     """
     try:
         return stamp.read_text()
     except FileNotFoundError:
         return None
     except (OSError, UnicodeDecodeError) as error:
-        raise RuntimeError(f"Couldn't read the setup record in {stamp}: {error}") from error
+        raise TreeFailed(f"Couldn't read the setup record in {stamp}: {error}") from error
 
 
 def _add_ignores(exclude: Path, paths: Collection[str]) -> None:
     """Add ``paths`` to the git exclude file ``exclude`` under orbit's header, once each.
 
-    Raises ``RuntimeError`` when the file can't be read or written.
+    Raises ``TreeFailed`` when the file can't be read or written.
     """
     try:
         exclude.parent.mkdir(exist_ok=True)
@@ -81,26 +81,26 @@ def _add_ignores(exclude: Path, paths: Collection[str]) -> None:
             new.insert(0, IGNORE_HEADER)
         write_whole(exclude, "\n".join([*lines, *new]) + "\n")
     except (OSError, UnicodeDecodeError) as error:
-        raise RuntimeError(f"Couldn't ignore files in {exclude}: {error}") from error
+        raise TreeFailed(f"Couldn't ignore files in {exclude}: {error}") from error
 
 
 def _make_snapshot_dir(parent: Path, commit: str) -> Path:
     """A new, empty directory in ``parent`` for a snapshot of ``commit``, named so it can't
     collide with any other, from this process or another.
 
-    Raises ``RuntimeError`` when it can't be made.
+    Raises ``TreeFailed`` when it can't be made.
     """
     try:
         parent.mkdir(parents=True, exist_ok=True)
         return Path(tempfile.mkdtemp(prefix=f"snapshot-{commit[:12]}-", dir=parent))
     except OSError as error:
-        raise RuntimeError(f"Couldn't make a snapshot directory in {parent}: {error}") from error
+        raise TreeFailed(f"Couldn't make a snapshot directory in {parent}: {error}") from error
 
 
 def _snapshot_dirs(parent: Path) -> set[Path]:
     """The snapshot directories in ``parent``, by whoever made them; none when it's missing.
 
-    Raises ``RuntimeError`` when ``parent`` can't be listed.
+    Raises ``TreeFailed`` when ``parent`` can't be listed.
     """
     try:
         if not parent.is_dir():
@@ -111,7 +111,7 @@ def _snapshot_dirs(parent: Path) -> set[Path]:
             if path.is_dir() and path.name.startswith(SNAPSHOT_PREFIXES)
         }
     except OSError as error:
-        raise RuntimeError(f"Couldn't list the snapshots in {parent}: {error}") from error
+        raise TreeFailed(f"Couldn't list the snapshots in {parent}: {error}") from error
 
 
 class GitCoderTree:
@@ -145,7 +145,7 @@ class GitCoderTree:
         await self._git(path, "add", "-A")
         staged = await git(path, "diff", "--cached", "--quiet")
         if staged.status not in (0, 1):  # 0: nothing staged, 1: something is.
-            raise RuntimeError(f"git diff failed: {staged.text}")
+            raise TreeFailed(f"git diff failed: {staged.text}")
         if staged.ok:
             return False
         await self._git(path, "commit", "-q", "-m", message)
@@ -202,7 +202,7 @@ class GitCoderTree:
             return await asyncio.shield(making)
         except asyncio.CancelledError:
             await asyncio.wait([making])
-            with contextlib.suppress(RuntimeError):  # It failed to make one: nothing to remove.
+            with contextlib.suppress(TreeFailed):  # It failed to make one: nothing to remove.
                 await asyncio.to_thread(shutil.rmtree, making.result(), ignore_errors=True)
             raise
 
@@ -211,7 +211,7 @@ class GitCoderTree:
         locked as a killed ``git worktree add`` leaves it, ignoring failures so the error that
         stopped it is the one raised."""
         try:
-            with contextlib.suppress(RuntimeError):
+            with contextlib.suppress(TreeFailed):
                 await git(self._root, "worktree", "remove", "--force", "--force", str(path))
             await asyncio.to_thread(shutil.rmtree, path, ignore_errors=True)
         finally:
@@ -299,18 +299,18 @@ class GitCoderTree:
             return
         ok, output = await _run_setup(self.setup.command, path)
         if not ok:
-            raise RuntimeError(f"Setting up the coder's tree failed: {output}")
+            raise TreeFailed(f"Setting up the coder's tree failed: {output}")
         try:
             await asyncio.to_thread(write_whole, stamp, digest)
         except OSError as error:
-            raise RuntimeError(f"Couldn't record the setup in {stamp}: {error}") from error
+            raise TreeFailed(f"Couldn't record the setup in {stamp}: {error}") from error
 
     # Merging
 
     async def _rebase(self, path: Path, base: str) -> Merge:
         """Replay the tree's work onto ``base``; a conflict leaves it as it was.
 
-        Raises ``RuntimeError`` with git's own message when the rebase fails without one.
+        Raises ``TreeFailed`` with git's own message when the rebase fails without one.
         """
         try:
             rebase = await git(path, "rebase", "-q", base)
@@ -320,7 +320,7 @@ class GitCoderTree:
         finally:  # Cancelled or failed too: never leave the tree mid-rebase.
             await self._abort_rebase_shielded(path)
         if not conflicts:
-            raise RuntimeError(f"git rebase failed: {rebase.text}")
+            raise TreeFailed(f"git rebase failed: {rebase.text}")
         files = ", ".join(conflicts.splitlines())
         return Merge("conflict", f"The work on {BRANCH} conflicts with {self._base}: {files}.")
 
@@ -336,7 +336,7 @@ class GitCoderTree:
 
     async def _try_abort_rebase(self, path: Path) -> None:
         """Abort the rebase in progress in ``path``, if there is one, ignoring failures."""
-        with contextlib.suppress(RuntimeError):
+        with contextlib.suppress(TreeFailed):
             await self._abort_rebase(path)
 
     async def _abort_rebase(self, path: Path) -> None:
@@ -363,7 +363,7 @@ class GitCoderTree:
     async def _git(self, cwd: Path, *args: str) -> str:
         result = await git(cwd, *args)
         if not result.ok:
-            raise RuntimeError(f"git {args[0]} failed: {result.text}")
+            raise TreeFailed(f"git {args[0]} failed: {result.text}")
         return result.text
 
     # Paths
@@ -373,7 +373,7 @@ class GitCoderTree:
         if self._common is None:
             common = await find_git_common_dir(str(self._root))
             if common is None:
-                raise RuntimeError(f"{self._root} isn't in a git repository, or git can't be run.")
+                raise TreeFailed(f"{self._root} isn't in a git repository, or git can't be run.")
             self._common = Path(common)
         return self._common
 

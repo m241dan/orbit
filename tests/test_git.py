@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from orbit.agent.application.ports import TreeFailed
 from orbit.agent.external.git import GitResult, GitUnavailable, git, git_sync
 
 
@@ -56,5 +57,5 @@ async def test_a_missing_git_makes_git_unavailable(
         git_sync(repo, "status")
 
 
-def test_git_unavailable_is_a_runtime_error() -> None:
-    assert issubclass(GitUnavailable, RuntimeError)
+def test_git_unavailable_is_a_tree_failure() -> None:
+    assert issubclass(GitUnavailable, TreeFailed)

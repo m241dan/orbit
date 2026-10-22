@@ -6,7 +6,7 @@ import itertools
 import pytest
 
 from orbit.agent import WorkspaceHost
-from orbit.agent.application.ports import Reply
+from orbit.agent.application.ports import Reply, TreeFailed
 from orbit.agent.application.work_turns import WorkTurns
 from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.endings import BUG, CANCELLED, REVIEW_STOPPED_BY_YOU, STOPPED_BY_YOU
@@ -403,7 +403,7 @@ async def test_a_super_review_can_be_asked_for_before_any_task_ran() -> None:
 
 async def test_a_super_review_is_skipped_when_the_base_commit_cannot_be_read() -> None:
     tree = FakeTree()
-    tree.failures["base_commit"] = RuntimeError("git rev-parse failed: unknown revision")
+    tree.failures["base_commit"] = TreeFailed("git rev-parse failed: unknown revision")
     session, _, _ = session_for(reviewers=(suggests(),), tree=tree, review=True)
     await send(session, FireTrigger(trigger=SUPER_REVIEW))
     events = await asyncio.wait_for(settle(session, until=_errored), 10)
@@ -648,7 +648,7 @@ async def test_a_review_can_suggest_after_its_first_suggestion_landed() -> None:
 
 async def test_a_snapshot_that_fails_errors_the_review_and_the_next_review_still_runs() -> None:
     tree = FakeTree()
-    tree.failures["snapshot"] = RuntimeError("git worktree add failed: no space left")
+    tree.failures["snapshot"] = TreeFailed("git worktree add failed: no space left")
     session, _, _ = session_for(
         claims_done, claims_done, reviewers=(suggests(),), tree=tree, review=True
     )
@@ -666,7 +666,7 @@ async def test_a_snapshot_that_fails_errors_the_review_and_the_next_review_still
 
 async def test_a_diff_that_cannot_be_shown_skips_the_review_and_the_run_goes_on() -> None:
     tree = FakeTree()
-    tree.failures["show"] = RuntimeError("git show failed: bad object c1")
+    tree.failures["show"] = TreeFailed("git show failed: bad object c1")
     session, _, _ = session_for(
         claims_done, claims_done, reviewers=(suggests(),), tree=tree, review=True
     )

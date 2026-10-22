@@ -28,7 +28,8 @@ INCOMPATIBLE = "incompatible"
 is sent on that stream."""
 
 AGENT_FAILED = "agent_failed"
-"""An error's code: an agent's run or turn failed, or it exited without doing its task."""
+"""An error's code: an agent's run or turn failed, as when orbit's MCP server couldn't start or
+the checks it proposed couldn't be saved, or it exited without doing its task."""
 
 TIMED_OUT = "timed_out"
 """An error's code: an agent ran out of time."""

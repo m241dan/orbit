@@ -7,6 +7,7 @@ import pytest
 
 from orbit.agent import Setup, Verification, VerificationStep, WorkspaceHost
 from orbit.agent.application import workspace_host as session_module
+from orbit.agent.application.ports import TreeFailed
 from orbit.agent.application.startup_check import CANCELLED_NOTE, CheckSite, StartupCheck
 from orbit.protocol import (
     GIT_FAILED,
@@ -243,7 +244,7 @@ async def test_closing_before_it_starts_is_harmless() -> None:
 async def test_a_snapshot_git_cannot_make_is_reported() -> None:
     class Broken(FakeTree):
         async def snapshot(self, commit: str) -> str:
-            raise RuntimeError("git worktree failed: no commits")
+            raise TreeFailed("git worktree failed: no commits")
 
     steps = Steps()
     session, _, _ = session_for(verification=checked(steps), tree=Broken(), check_at_startup=True)

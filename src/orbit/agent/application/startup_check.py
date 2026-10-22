@@ -11,7 +11,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 from orbit.agent.application.lanes import Background
-from orbit.agent.application.ports import CoderTree, Publish
+from orbit.agent.application.ports import CoderTree, Publish, TreeFailed
 from orbit.agent.application.verifier import Failure, Verification, first_failure
 from orbit.agent.domain.checks import setup_step
 from orbit.agent.domain.verification import StepProgress, VerificationStep, trim_output
@@ -126,7 +126,7 @@ class StartupCheck:
             await self._cancel_running()
             await self._publish(Notice(message=CANCELLED_NOTE))
             raise
-        except RuntimeError as exc:  # Git couldn't make the snapshot.
+        except TreeFailed as exc:  # Git couldn't make the snapshot.
             message = f"The startup check couldn't run: {exc}"
             await self._publish(ErrorOccurred(code=GIT_FAILED, message=message))
             return "crashed"

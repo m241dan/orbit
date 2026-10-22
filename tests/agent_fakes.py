@@ -17,11 +17,13 @@ from orbit.agent.application.ports import (
     AgentLaunch,
     CallHandler,
     Fallback,
+    HostFailed,
     Merge,
     Reply,
     RepositoryLock,
     SessionStore,
     StoredSession,
+    TreeFailed,
     UsageSource,
 )
 from orbit.agent.application.review_lane import ReviewLane
@@ -138,7 +140,7 @@ class FailingHost(FakeHost):
     async def start(self, handler: CallHandler) -> str:
         if self.failures:
             self.failures -= 1
-            raise RuntimeError("Orbit's MCP server failed to start.")
+            raise HostFailed("Orbit's MCP server failed to start.")
         return await super().start(handler)
 
 
@@ -521,7 +523,7 @@ class FakeTree:
         self.prepared.append(keep)
         self._fail("prepare")
         if self.broken:
-            raise RuntimeError(self.broken)
+            raise TreeFailed(self.broken)
         return self.path
 
     async def commit(self, message: str) -> bool:
@@ -538,7 +540,7 @@ class FakeTree:
 
     async def head(self) -> str:
         if not self.prepared:  # Like git in a worktree that doesn't exist yet.
-            raise RuntimeError("git rev-parse failed: the coder's tree doesn't exist")
+            raise TreeFailed("git rev-parse failed: the coder's tree doesn't exist")
         return f"c{len(self.commits) + self.agent_commits}"
 
     async def base_commit(self) -> str:

@@ -5,12 +5,12 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
-from orbit.agent.application.ports import Publish
+from orbit.agent.application.ports import ConfigWriteFailed, HostFailed, Publish, TreeFailed
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.application.verifier import Failure
 from orbit.agent.domain.checks import ChecksProposal
 from orbit.agent.domain.endings import CANCELLED, Ending, bug, error
-from orbit.protocol import ACTIVE_STATUSES, GIT_FAILED, ErrorOccurred, TaskStatus
+from orbit.protocol import ACTIVE_STATUSES, AGENT_FAILED, GIT_FAILED, ErrorOccurred, TaskStatus
 
 
 def cancelling() -> bool:
@@ -59,10 +59,21 @@ async def see_to_end(
     return reached
 
 
-async def tree_failed(publish: Publish, exc: RuntimeError) -> Outcome:
+async def tree_failed(publish: Publish, exc: TreeFailed) -> Outcome:
     """A task's ending in error because git or its tree failed with ``exc``, published with
     ``publish``."""
-    await publish(ErrorOccurred(code=GIT_FAILED, message=str(exc)))
+    return await _failed(publish, GIT_FAILED, exc)
+
+
+async def run_failed(publish: Publish, exc: HostFailed | ConfigWriteFailed) -> Outcome:
+    """A task's ending in error because its run failed with ``exc``, the host agents reach orbit
+    through not serving or the checks it proposed not saving, published with ``publish``."""
+    return await _failed(publish, AGENT_FAILED, exc)
+
+
+async def _failed(publish: Publish, code: str, exc: Exception) -> Outcome:
+    """A task's ending in error because of ``exc``, published with ``publish`` as ``code``."""
+    await publish(ErrorOccurred(code=code, message=str(exc)))
     return ended("error", error(str(exc)))
 
 
@@ -88,7 +99,8 @@ async def run_task_to_end(
 ) -> Outcome:
     """How task ``task_id`` of ``tasks``, started and then ``run``, ended, recorded as its end.
     Stopped on its own, it ends as ``stop`` says; when the lane itself is stopping, it ends as
-    cancelled and the cancellation goes on. A tree failure is published with ``publish``."""
+    cancelled and the cancellation goes on. A failure of the tree, of the host agents reach orbit
+    through or of saving the config is published with ``publish``; anything else is a bug."""
     default = ended("cancelled", (CANCELLED, ""))  # What the lane stopping leaves it as.
     return await see_to_end(
         tasks, task_id, default, _run_from_start(tasks, task_id, run, stop, publish)
@@ -111,5 +123,7 @@ async def _run_from_start(
         if cancelling():  # The lane itself is stopping, not just this task.
             raise
         return ended("cancelled", (stop.reason, ""))
-    except RuntimeError as exc:  # Git or the tree failed.
+    except TreeFailed as exc:
         return await tree_failed(publish, exc)
+    except (HostFailed, ConfigWriteFailed) as exc:
+        return await run_failed(publish, exc)

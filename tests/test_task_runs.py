@@ -16,6 +16,7 @@ from orbit.agent import (
 )
 from orbit.agent.application.agent_run import AgentRun
 from orbit.agent.application.desk import AgentDesk, Agents
+from orbit.agent.application.ports import TreeFailed
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.agent_task import Limits
 from orbit.agent.domain.board import WAITING, TaskBoard
@@ -621,7 +622,7 @@ async def test_a_task_whose_lane_crashes_ends_in_error() -> None:
 async def test_a_task_whose_tree_cant_be_readied_ends_in_error_saying_why() -> None:
     tree = FakeTree()
     message = "git worktree add failed\nfatal: no space left on device"
-    tree.failures["prepare"] = RuntimeError(message)
+    tree.failures["prepare"] = TreeFailed(message)
     session, _, _ = session_for(claims_done, tree=tree)
     events = await asyncio.wait_for(run(session, TaskSpec(prompt="a")), 5)
     assert ErrorOccurred(code=GIT_FAILED, message=message) in events

@@ -14,13 +14,13 @@ from orbit.agent import (
     read_config,
     write_checks,
 )
-from orbit.agent.application.ports import Merge, ProposalDecision
+from orbit.agent.application.ports import ConfigWriteFailed, Merge, ProposalDecision
 from orbit.agent.domain.checks import ChecksProposal, Setup
 from orbit.agent.domain.commits import configure_message
 from orbit.agent.domain.verification import VerificationStep
 from orbit.agent.external.config_file import CONFIG_PATH
 from orbit.protocol import (
-    GIT_FAILED,
+    AGENT_FAILED,
     AddTask,
     BusyChanged,
     ErrorOccurred,
@@ -69,7 +69,7 @@ class Writer:
 
 
 def unsaveable(root: str, checks: ChecksProposal) -> None:
-    raise RuntimeError("Couldn't save the checks to .orbit/config.toml: read-only")
+    raise ConfigWriteFailed("Couldn't save the checks to .orbit/config.toml: read-only")
 
 
 async def everything(session: WorkspaceHost, *tasks: TaskSpec) -> list[Event]:
@@ -152,7 +152,7 @@ async def test_checks_that_cant_be_saved_end_the_task_in_error_and_change_nothin
     session = accepting(claims_done, steps=steps, tree=tree, write_config=unsaveable)
     events = await asyncio.wait_for(everything(session, CONFIGURE, CODE), 5)
     message = "Couldn't save the checks to .orbit/config.toml: read-only"
-    assert ErrorOccurred(code=GIT_FAILED, message=message) in events
+    assert ErrorOccurred(code=AGENT_FAILED, message=message) in events
     assert [t.status for t in board(events)] == ["error", "completed"]
     assert steps.runs == ["setup", "Lint", "Tests", STEP.name]
     assert tree.setups == []

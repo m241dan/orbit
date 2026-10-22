@@ -26,7 +26,7 @@ StepRunner = Callable[[VerificationStep, str], Awaitable[tuple[bool, str]]]
 
 ConfigWriter = Callable[[str, ChecksProposal], None]
 """Makes accepted checks the verification steps and setup in the project config in a directory;
-raises ``RuntimeError`` when it can't."""
+raises :class:`ConfigWriteFailed` when it can't."""
 
 PlannerRoleReader = Callable[[], Role | ConfigError]
 """Reads the planner's role from the project's config again: the role, or why the config is
@@ -38,6 +38,19 @@ UsageSource = Callable[[], Awaitable[UsageFetch]]
 Workspace = Callable[[str], Awaitable[object]]
 """A fingerprint of the working tree in a directory, equal before and after a task that
 changed no files; ``None`` when it can't be told."""
+
+
+class TreeFailed(Exception):
+    """Git, or the coder's tree, failed, as the message says."""
+
+
+class HostFailed(Exception):
+    """A server orbit runs, such as the host agents reach it through, couldn't serve, as the
+    message says."""
+
+
+class ConfigWriteFailed(Exception):
+    """Saving to the project's config file failed, as the message says."""
 
 
 class RepositoryLock(Protocol):
@@ -69,7 +82,8 @@ class AgentHost(Protocol):
     """Where agents reach orbit: a server that passes their tool calls to a handler."""
 
     async def start(self, handler: CallHandler) -> str:
-        """Start serving calls to ``handler``; returns the URL agents connect to."""
+        """Start serving calls to ``handler``; returns the URL agents connect to. Raises
+        :class:`HostFailed` when it can't serve."""
         ...
 
     async def stop(self) -> None:
@@ -137,7 +151,8 @@ class CoderTree(Protocol):
     """The working tree the coding agent works in, apart from the user's checkout, and the
     branch its commits are merged into from there.
 
-    ``setup`` is what sets it up now; ``branch`` is the branch its commits are made on.
+    ``setup`` is what sets it up now; ``branch`` is the branch its commits are made on. Its
+    methods raise :class:`TreeFailed` when git or the tree fails.
     """
 
     setup: Setup | None
