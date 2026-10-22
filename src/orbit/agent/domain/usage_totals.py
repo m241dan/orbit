@@ -5,7 +5,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from orbit.protocol import Usage
+from orbit.protocol import Usage, UsageTotal, UsageTotals, WorkspaceUsage
 
 SessionKey = tuple[str, str]
 """A session: its workspace's id and its own."""
@@ -91,3 +91,22 @@ def usage_totals(
         _summed(totals.lifetime for totals in workspaces.values()),
     )
     return UsageTotalsData(workspaces, total)
+
+
+def day_start(now: datetime) -> datetime:
+    """When the day ``now`` falls in began: midnight in ``now``'s timezone."""
+    return now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+def _total(totals: SpendTotals) -> UsageTotal:
+    return UsageTotal(today=totals.today, lifetime=totals.lifetime)
+
+
+def totals_event(totals: UsageTotalsData) -> UsageTotals:
+    """The event telling ``totals``: each workspace's, in the order they're given, and the
+    total."""
+    workspaces = tuple(
+        WorkspaceUsage(workspace=workspace, today=spend.today, lifetime=spend.lifetime)
+        for workspace, spend in totals.workspaces.items()
+    )
+    return UsageTotals(workspaces=workspaces, total=_total(totals.total))

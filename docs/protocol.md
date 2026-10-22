@@ -27,7 +27,7 @@ A command travels in a `CommandEnvelope`:
   workspace that isn't served is refused with `unknown`, and one naming a workspace served but
   not the one attached with `wrong_session`, naming both, but for `Attach`, which moves the
   connection there (see [Attaching](#attaching)). The control plane's own commands,
-  `AddWorkspace` and `RemoveWorkspace`, are for no workspace, and carry `null`.
+  `AddWorkspace`, `RemoveWorkspace` and `Watch`, are for no workspace, and carry `null`.
 - `traceparent` and `tracestate`: W3C trace context. They're optional, aren't checked, and
   aren't set yet.
 
@@ -49,17 +49,18 @@ An event travels in an `EventEnvelope`:
   that fail, it's reserved with the next block, or as the server stops. A local orbit's
   store, while it's halted, reserves the block once it resumes.
 - `session`: the session the event belongs to. The event's type decides it: the types in
-  `SESSIONLESS_EVENTS` (`UsageChanged`, `Catalog`, `SessionStateChanged` and
-  `WorkspaceCloning`)
+  `SESSIONLESS_EVENTS` (`UsageChanged`, `Catalog`, `SessionStateChanged`, `WorkspaceCloning`,
+  `AgentsChanged` and `UsageTotals`)
   belong to no session, carry `null` and are never logged, and every other event carries the
   open session's id, but for the answers to a connection viewing another session (its
   `Snapshot`, `CommandAccepted` and `CommandRefused`), which carry that session's id and are
   never logged. Every event of a session is kept in the store's event log but for
-  `CONNECTION_EVENTS` (`Welcome`, `Catalog`, `Snapshot` and `HistoryPage`), which answer one
-  connection, and a connection's greeting (see [The handshake](#the-handshake)).
+  `CONNECTION_EVENTS` (`Welcome`, `Catalog`, `Snapshot`, `HistoryPage`, `AgentsChanged` and
+  `UsageTotals`), which answer one connection or the connections watching a stream, and a
+  connection's greeting (see [The handshake](#the-handshake)).
 - `workspace`: the id of the workspace the event belongs to, but for the control plane's own
-  events, the types in `CONTROL_PLANE_EVENTS` (`Welcome`, `Catalog`, `UsageChanged` and
-  `WorkspaceCloning`), which carry `null`, as does the `ErrorOccurred` telling of a failed clone
+  events, the types in `CONTROL_PLANE_EVENTS` (`Welcome`, `Catalog`, `UsageChanged`,
+  `WorkspaceCloning`, `AgentsChanged` and `UsageTotals`), which carry `null`, as does the `ErrorOccurred` telling of a failed clone
   (see [Workspaces](#workspaces)), whose `session` is `null` too.
 - `traceparent` and `tracestate`, as on commands.
 
@@ -93,8 +94,9 @@ session carries its state (see [Session state](#session-state)).
 
 `Hello` attaches the connection to nothing, and nothing more reaches it until its first
 `Attach(workspace, session)` (see [Attaching](#attaching)); every command but `Attach` and the
-control plane's own, `AddWorkspace` and `RemoveWorkspace` (see [Workspaces](#workspaces)), sent
-before then is refused with `invalid`. The first `Attach` is answered in this order:
+control plane's own, `AddWorkspace` and `RemoveWorkspace` (see [Workspaces](#workspaces)) and
+`Watch` (see [The control-plane stream](#the-control-plane-stream)), sent before then is refused
+with `invalid`. The first `Attach` is answered in this order:
 
 1. `Snapshot`: the session as it stands, with its settings, busy lanes, tasks,
    verification steps, review status, checks proposals waiting for a decision, running
@@ -273,6 +275,44 @@ again. If deleting fails once the workspace is removed, it's refused with `inter
 
 A local `orbit chat` serves its own repository alone, and refuses both with `invalid`: `A local
 orbit works on one repository; run orbit serve to work on several.`
+
+## The control-plane stream
+
+A connection receives the optional streams it watches, none until it says otherwise.
+`Watch(streams)` sets them, in place of those it watched before: `["control_plane"]` turns the
+control-plane stream on and `[]` turns every stream off. It's a control-plane command, its
+envelope's `workspace` `null`, and any connection welcomed may send it, attached or not. A stream
+there's none of is refused with `unknown`, naming those there are, and changes nothing: `No
+stream 'nope'; the stream is control_plane.`
+
+```json
+{"workspace":null,"traceparent":null,"tracestate":null,"command_id":"d94f21","session":null,"payload":{"type":"watch","streams":["control_plane"]}}
+```
+
+The control-plane stream tells what runs across every workspace served, in two events. As the
+connection starts watching, it gets both, then the Watch's `CommandAccepted`; watching it again
+sends nothing more.
+
+- `AgentsChanged(agents)`: every agent running in any workspace, oldest first, each an
+  `AgentRef(workspace, session, agent_id, role, task_id)`, as the workspace's `AgentStarted`
+  named it, the startup check and the planner included. It's sent whole again whenever an agent
+  starts or exits in any workspace.
+- `UsageTotals(workspaces, total)`: what turns have cost, each a `today` and a `lifetime`
+  `Usage` with tokens of each kind and `cost_usd` (`turns` and `duration_ms` aren't counted):
+  `workspaces` has one `WorkspaceUsage(workspace, today, lifetime)` per workspace that recorded
+  any, and `total` adds them up. Today starts at midnight in the server's local time; the
+  lifetime counts every turn recorded, sessions since deleted included, and what sessions spent
+  before turns were recorded. It's sent again after each turn finishes, once its usage is
+  recorded. When the totals can't be read, an `ErrorOccurred` coded `internal` saying why is
+  sent in their place.
+
+Both reach only the connections watching the stream, carry no workspace and no session, and
+aren't logged. Workspaces and sessions changing reach every connection as before, in the
+`Catalog` and `SessionStateChanged`, whether it watches or not.
+
+```json
+{"workspace":null,"traceparent":null,"tracestate":null,"seq":58,"session":null,"payload":{"type":"agents_changed","agents":[{"workspace":"4f1c2a9e","session":"20261018-0801","agent_id":"agent-3","role":"coder","task_id":"2"}]}}
+```
 
 ## Activation
 
@@ -560,7 +600,7 @@ Refusals, in `CommandRefused`:
 | Code | When |
 | --- | --- |
 | `not_configured` | What the command needs isn't set up, such as agents or verification. |
-| `unknown` | The command names something there's none of, such as a task, a lane or a workspace. |
+| `unknown` | The command names something there's none of, such as a task, a lane, a workspace or a stream. |
 | `busy` | What the command acts on is running, so it can't be done now, such as a URL `AddWorkspace` is cloning already. |
 | `invalid` | The command can't be done as given, such as a command before `Hello`, a command for a workspace before the connection is attached, a relative path to `AddWorkspace`, or both or neither of its `path` and `url`, or a `url` that's neither a URL it clones nor an absolute path, adding or removing a workspace on a local orbit, input to a trigger that takes none or `TakeOwnership` with no offer open. |
 | `locked` | Another orbit holds what the command acts on, such as a session. |

@@ -39,7 +39,7 @@ from orbit.agent import (
     run_step,
     workspace_state,
 )
-from orbit.agent.application.ports import UsageSource
+from orbit.agent.application.ports import UsageLedger, UsageSource
 from orbit.agent.domain.ownership import read_only_note
 from orbit.agent.domain.reviews import ReviewLimits
 from orbit.agent.domain.sessions import SessionRecord, Unreadable, default_name, record_json
@@ -124,9 +124,13 @@ def launched(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> list[WorkspaceH
         LocalApp.threads.append(threading.current_thread().name)
         return built
 
-    def plane(hosts: list[WorkspaceHost], usage: UsageSource | None = None) -> ControlPlane:
+    def plane(
+        hosts: list[WorkspaceHost],
+        usage: UsageSource | None = None,
+        ledger: UsageLedger | None = None,
+    ) -> ControlPlane:
         LocalApp.usage_sources.append(usage)
-        return ControlPlane(hosts, usage)
+        return ControlPlane(hosts, usage, ledger=ledger)
 
     monkeypatch.setattr("orbit.cli.chat.OrbitApp", LocalApp)
     monkeypatch.setattr("orbit.cli.backend.WorkspaceHost", session)

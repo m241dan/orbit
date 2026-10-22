@@ -12,6 +12,7 @@ from orbit.protocol import (
     INVALID,
     UNKNOWN,
     AddWorkspace,
+    AgentsChanged,
     Attach,
     Catalog,
     CommandAccepted,
@@ -21,6 +22,9 @@ from orbit.protocol import (
     RemoveWorkspace,
     SessionStateChanged,
     SessionSummary,
+    Usage,
+    UsageTotal,
+    UsageTotals,
     WorkspaceCloning,
     WorkspaceEntry,
 )
@@ -103,6 +107,17 @@ async def test_connected_the_picker_preselects_the_workspace_at_the_repository()
         assert screen.startup
         assert rows(screen) == [B_ROW, A_ROW, "Add a path or URL…"]
         assert highlighted(screen) == 1
+        assert session_of(app).commands == []
+
+
+async def test_the_control_plane_streams_events_change_nothing_shown() -> None:
+    app = connected()
+    async with app.run_test() as pilot:
+        session = session_of(app)
+        await feed_events(session, pilot, SERVED)
+        totals = UsageTotals(workspaces=(), total=UsageTotal(today=Usage(), lifetime=Usage()))
+        await feed_events(session, pilot, AgentsChanged(agents=()), totals)
+        assert rows(workspaces(app)) == [B_ROW, A_ROW, "Add a path or URL…"]
         assert session_of(app).commands == []
 
 

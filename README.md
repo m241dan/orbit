@@ -1031,6 +1031,14 @@ stops is stopped and removed. The same URL can't be cloned twice at once. In the
 workspace picker's `Add a path or URL…` clones a URL typed in, showing its progress in a row of
 its own (see [Workspaces](#workspaces)).
 
+**Watching what runs.** A frontend that shows more than one workspace at a time can watch
+the control-plane stream, with the protocol's `Watch(["control_plane"])` (see
+[docs/protocol.md](docs/protocol.md#the-control-plane-stream)): it's told every agent running in
+any workspace served (its workspace, session, role and task), again whenever one starts or
+exits, and what turns have cost in each workspace and in all, today (since midnight in the
+server's local time) and over its lifetime, again after each turn finishes. `Watch([])` stops
+it; a frontend that never watches is sent neither.
+
 **Purging.** A frontend removing a workspace can have its records deleted too, with
 `RemoveWorkspace`'s `purge`: under the same refusals as removing, its sessions, their events, its
 review count, session locks, fallback files and registry entry go, so adding it again starts

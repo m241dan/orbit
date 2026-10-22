@@ -246,6 +246,16 @@ class RemoveWorkspace(_Message):
     purge: bool = False
 
 
+class Watch(_Message):
+    """Receive the optional ``streams`` named from now on, in place of those watched before:
+    ``("control_plane",)`` turns the control-plane stream on, ``()`` turns every stream off. A
+    control-plane command: its envelope's ``workspace`` is ``null``, and it may come before
+    ``Attach``. Refused with ``unknown``, changing nothing, for a stream there's none of."""
+
+    type: Literal["watch"] = "watch"
+    streams: tuple[str, ...] = ()
+
+
 Command = Annotated[
     Hello
     | SendMessage
@@ -269,7 +279,8 @@ Command = Annotated[
     | ResumeStorage
     | TakeOwnership
     | AddWorkspace
-    | RemoveWorkspace,
+    | RemoveWorkspace
+    | Watch,
     Field(discriminator="type"),
 ]
 

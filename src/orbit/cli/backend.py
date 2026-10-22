@@ -162,7 +162,7 @@ def _backend(flags: _Backend, directories: _Directories, *, pick_session: bool) 
         raise
     served = opened.served
     return _InProcess(
-        lambda: ControlPlane([opened.make()], usage_source),
+        lambda: ControlPlane([opened.make()], usage_source, ledger=store),
         store,
         opened.workspace_id,
         served.lock,

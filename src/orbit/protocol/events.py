@@ -529,6 +529,50 @@ class Catalog(_Message):
     lanes: tuple[str, ...]
 
 
+class AgentRef(_Message):
+    """Agent ``agent_id``, running in the ``role`` on task ``task_id``, in the session
+    ``session`` of the workspace ``workspace``."""
+
+    workspace: str
+    session: str
+    agent_id: str
+    role: str
+    task_id: str
+
+
+class AgentsChanged(_Message):
+    """Every agent running in any workspace served, oldest first; sent whole to the connections
+    watching the control-plane stream as they start watching and whenever an agent starts or
+    exits. A control-plane event, never logged."""
+
+    type: Literal["agents_changed"] = "agents_changed"
+    agents: tuple[AgentRef, ...]
+
+
+class UsageTotal(_Message):
+    """What turns cost ``today``, since midnight in the server's local time, and over the
+    ``lifetime``; only their tokens of each kind and cost are counted."""
+
+    today: Usage
+    lifetime: Usage
+
+
+class WorkspaceUsage(UsageTotal):
+    """What the turns of the workspace ``workspace`` cost, today and over its lifetime."""
+
+    workspace: str
+
+
+class UsageTotals(_Message):
+    """What turns cost in each workspace that recorded any, by its id, and in ``total``; sent to
+    the connections watching the control-plane stream as they start watching and after each
+    turn finishes. A control-plane event, never logged."""
+
+    type: Literal["usage_totals"] = "usage_totals"
+    workspaces: tuple[WorkspaceUsage, ...]
+    total: UsageTotal
+
+
 Event = Annotated[
     SettingsChanged
     | TurnStarted
@@ -568,6 +612,8 @@ Event = Annotated[
     | HistoryPage
     | Catalog
     | WorkspaceCloning
+    | AgentsChanged
+    | UsageTotals
     | Welcome
     | CommandAccepted
     | CommandRefused,

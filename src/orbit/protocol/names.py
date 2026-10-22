@@ -46,3 +46,11 @@ STARTUP_TASK = "startup"
 
 PLAN_TASK = "plan"
 """The task the planner's ``AgentStarted`` names; it works on no task of the list."""
+
+
+CONTROL_PLANE_STREAM = "control_plane"
+"""The optional stream of the agents running across the workspaces and what turns have cost,
+which ``Watch`` turns on."""
+
+STREAMS = (CONTROL_PLANE_STREAM,)
+"""The optional streams' names, which ``Watch`` chooses among."""

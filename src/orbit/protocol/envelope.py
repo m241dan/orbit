@@ -8,12 +8,14 @@ from pydantic import Field
 
 from orbit.protocol.commands import Command
 from orbit.protocol.events import (
+    AgentsChanged,
     Catalog,
     Event,
     HistoryPage,
     SessionStateChanged,
     Snapshot,
     UsageChanged,
+    UsageTotals,
     Welcome,
     WorkspaceCloning,
 )
@@ -24,13 +26,29 @@ SESSIONLESS_EVENTS: tuple[type[Event], ...] = (
     Catalog,
     SessionStateChanged,
     WorkspaceCloning,
+    AgentsChanged,
+    UsageTotals,
 )
 """The event types that belong to no session: their envelopes carry ``session=None``."""
 
-CONNECTION_EVENTS: tuple[type[Event], ...] = (Welcome, Catalog, Snapshot, HistoryPage)
+CONNECTION_EVENTS: tuple[type[Event], ...] = (
+    Welcome,
+    Catalog,
+    Snapshot,
+    HistoryPage,
+    AgentsChanged,
+    UsageTotals,
+)
 """The event types that answer one connection, and so are never kept in a session's log."""
 
-CONTROL_PLANE_EVENTS: tuple[type[Event], ...] = (Welcome, Catalog, UsageChanged, WorkspaceCloning)
+CONTROL_PLANE_EVENTS: tuple[type[Event], ...] = (
+    Welcome,
+    Catalog,
+    UsageChanged,
+    WorkspaceCloning,
+    AgentsChanged,
+    UsageTotals,
+)
 """The event types that belong to no workspace: their envelopes carry ``workspace=None``."""
 
 

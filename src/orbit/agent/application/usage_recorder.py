@@ -1,6 +1,7 @@
 """Recording what each finished turn cost, in the background, so publishing never waits on it."""
 
 import asyncio
+from collections.abc import Callable
 
 from orbit.agent.application.failures import outcome
 from orbit.agent.application.keeper import Clock
@@ -12,12 +13,16 @@ from orbit.agent.domain.usage_totals import UsageRow, counted
 from orbit.protocol import Usage
 
 
+def _unheard() -> None:
+    """Tell no one a row was written."""
+
+
 class UsageRecorder:
     """Records each finished turn's usage in ``ledger``, if there is one, as a row timed by
     ``clock``, writing in the background; a failure in the background is reported with
     ``publish``. A row that can't be written halts the session through ``halt`` and is kept, with
     those after it, to be written when the halt is retried; nothing is written while it's
-    halted."""
+    halted. :attr:`recorded` is called after each row is written."""
 
     def __init__(
         self, ledger: UsageLedger | None, halt: Halting, publish: Publish, clock: Clock
@@ -28,6 +33,7 @@ class UsageRecorder:
         self._pending: list[UsageRow] = []  # The rows not yet written, oldest first.
         self._writer = Background("usage", publish)
         self._writing = asyncio.Lock()  # Writes the rows once at a time, a retry's included.
+        self.recorded: Callable[[], None] = _unheard
 
     def record(self, workspace_id: str, session_id: str, launch: AgentLaunch, usage: Usage) -> None:
         """Record ``usage``, a finished turn's, in the session ``session_id`` of the workspace
@@ -66,6 +72,7 @@ class UsageRecorder:
                 if isinstance(error, StoreFailed):
                     return error
                 self._pending.pop(0)
+                self.recorded()
         return None
 
     async def close(self) -> None:

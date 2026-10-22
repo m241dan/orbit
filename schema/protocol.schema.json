@@ -218,6 +218,40 @@
       "title": "AgentExited",
       "type": "object"
     },
+    "AgentRef": {
+      "description": "Agent ``agent_id``, running in the ``role`` on task ``task_id``, in the session\n``session`` of the workspace ``workspace``.",
+      "properties": {
+        "agent_id": {
+          "title": "Agent Id",
+          "type": "string"
+        },
+        "role": {
+          "title": "Role",
+          "type": "string"
+        },
+        "session": {
+          "title": "Session",
+          "type": "string"
+        },
+        "task_id": {
+          "title": "Task Id",
+          "type": "string"
+        },
+        "workspace": {
+          "title": "Workspace",
+          "type": "string"
+        }
+      },
+      "required": [
+        "workspace",
+        "session",
+        "agent_id",
+        "role",
+        "task_id"
+      ],
+      "title": "AgentRef",
+      "type": "object"
+    },
     "AgentReply": {
       "description": "Orbit's answer to request ``request_id``.",
       "properties": {
@@ -320,6 +354,30 @@
         "type"
       ],
       "title": "AgentStarted",
+      "type": "object"
+    },
+    "AgentsChanged": {
+      "description": "Every agent running in any workspace served, oldest first; sent whole to the connections\nwatching the control-plane stream as they start watching and whenever an agent starts or\nexits. A control-plane event, never logged.",
+      "properties": {
+        "agents": {
+          "items": {
+            "$ref": "#/$defs/AgentRef"
+          },
+          "title": "Agents",
+          "type": "array"
+        },
+        "type": {
+          "const": "agents_changed",
+          "default": "agents_changed",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "agents",
+        "type"
+      ],
+      "title": "AgentsChanged",
       "type": "object"
     },
     "AssistantMessage": {
@@ -600,7 +658,8 @@
               "run_tasks": "#/$defs/RunTasks",
               "send_message": "#/$defs/SendMessage",
               "take_ownership": "#/$defs/TakeOwnership",
-              "update_settings": "#/$defs/UpdateSettings"
+              "update_settings": "#/$defs/UpdateSettings",
+              "watch": "#/$defs/Watch"
             },
             "propertyName": "type"
           },
@@ -673,6 +732,9 @@
             },
             {
               "$ref": "#/$defs/RemoveWorkspace"
+            },
+            {
+              "$ref": "#/$defs/Watch"
             }
           ],
           "title": "Payload"
@@ -927,6 +989,7 @@
               "agent_reply": "#/$defs/AgentReply",
               "agent_request": "#/$defs/AgentRequest",
               "agent_started": "#/$defs/AgentStarted",
+              "agents_changed": "#/$defs/AgentsChanged",
               "assistant_message": "#/$defs/AssistantMessage",
               "busy_changed": "#/$defs/BusyChanged",
               "catalog": "#/$defs/Catalog",
@@ -958,6 +1021,7 @@
               "turn_finished": "#/$defs/TurnFinished",
               "turn_started": "#/$defs/TurnStarted",
               "usage_changed": "#/$defs/UsageChanged",
+              "usage_totals": "#/$defs/UsageTotals",
               "verification_changed": "#/$defs/VerificationChanged",
               "verification_finished": "#/$defs/VerificationFinished",
               "verification_skipped": "#/$defs/VerificationSkipped",
@@ -1081,6 +1145,12 @@
             },
             {
               "$ref": "#/$defs/WorkspaceCloning"
+            },
+            {
+              "$ref": "#/$defs/AgentsChanged"
+            },
+            {
+              "$ref": "#/$defs/UsageTotals"
             },
             {
               "$ref": "#/$defs/Welcome"
@@ -2876,6 +2946,51 @@
       "title": "UsageLimit",
       "type": "object"
     },
+    "UsageTotal": {
+      "description": "What turns cost ``today``, since midnight in the server's local time, and over the\n``lifetime``; only their tokens of each kind and cost are counted.",
+      "properties": {
+        "lifetime": {
+          "$ref": "#/$defs/Usage"
+        },
+        "today": {
+          "$ref": "#/$defs/Usage"
+        }
+      },
+      "required": [
+        "today",
+        "lifetime"
+      ],
+      "title": "UsageTotal",
+      "type": "object"
+    },
+    "UsageTotals": {
+      "description": "What turns cost in each workspace that recorded any, by its id, and in ``total``; sent to\nthe connections watching the control-plane stream as they start watching and after each\nturn finishes. A control-plane event, never logged.",
+      "properties": {
+        "total": {
+          "$ref": "#/$defs/UsageTotal"
+        },
+        "type": {
+          "const": "usage_totals",
+          "default": "usage_totals",
+          "title": "Type",
+          "type": "string"
+        },
+        "workspaces": {
+          "items": {
+            "$ref": "#/$defs/WorkspaceUsage"
+          },
+          "title": "Workspaces",
+          "type": "array"
+        }
+      },
+      "required": [
+        "workspaces",
+        "total",
+        "type"
+      ],
+      "title": "UsageTotals",
+      "type": "object"
+    },
     "VerificationChanged": {
       "description": "The verification steps and their progress, sent on connect and after every change.\n\nNot sent when no steps are configured. ``title`` names what the steps are checking when\nit isn't the current task, such as the startup check; the panel shows it as a heading.",
       "properties": {
@@ -2994,6 +3109,30 @@
       "title": "VerificationStarted",
       "type": "object"
     },
+    "Watch": {
+      "description": "Receive the optional ``streams`` named from now on, in place of those watched before:\n``(\"control_plane\",)`` turns the control-plane stream on, ``()`` turns every stream off. A\ncontrol-plane command: its envelope's ``workspace`` is ``null``, and it may come before\n``Attach``. Refused with ``unknown``, changing nothing, for a stream there's none of.",
+      "properties": {
+        "streams": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Streams",
+          "type": "array"
+        },
+        "type": {
+          "const": "watch",
+          "default": "watch",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "Watch",
+      "type": "object"
+    },
     "Welcome": {
       "description": "``Hello`` ``command_id`` was received, in place of its ``CommandAccepted``: the backend,\norbit ``server_version``, publishes its events from here on.",
       "properties": {
@@ -3105,6 +3244,28 @@
         "sessions"
       ],
       "title": "WorkspaceEntry",
+      "type": "object"
+    },
+    "WorkspaceUsage": {
+      "description": "What the turns of the workspace ``workspace`` cost, today and over its lifetime.",
+      "properties": {
+        "lifetime": {
+          "$ref": "#/$defs/Usage"
+        },
+        "today": {
+          "$ref": "#/$defs/Usage"
+        },
+        "workspace": {
+          "title": "Workspace",
+          "type": "string"
+        }
+      },
+      "required": [
+        "today",
+        "lifetime",
+        "workspace"
+      ],
+      "title": "WorkspaceUsage",
       "type": "object"
     }
   },

@@ -105,6 +105,10 @@ class Connections:
         asker = _asker()
         return sorted({self._viewed_by(c) for c in self._open if c is not asker})
 
+    def watching(self, stream: str) -> list["SessionConnection"]:
+        """The connections here watching the optional stream ``stream``."""
+        return [c for c in self._open if stream in c.streams]
+
     def attached(self, session_id: str) -> list["SessionConnection"]:
         """The connections attached to the session ``session_id``."""
         return [c for c in self._open if c.attached_id == session_id]
@@ -265,6 +269,7 @@ class SessionConnection:
         self._ended = False
         self.attached: SessionRef | None = None  # None while it views the open session.
         self.workspace: str | None = None  # The id of the workspace attached to, once it is.
+        self.streams: frozenset[str] = frozenset()  # The optional streams it watches.
         self._place.connections.add(self)
 
     def move(self, place: Place) -> None:
@@ -373,6 +378,14 @@ class SessionConnection:
             self._drop()
             return
         self._handshake.deliver(envelope)
+
+    def tell(self, envelope: EventEnvelope) -> None:
+        """Queue ``envelope``, an event of a stream this connection watches, as a live event
+        once it's listening, else for the stream at once."""
+        if self.listening:
+            self.deliver(envelope)
+        else:
+            self.receive(envelope)
 
     def receive(self, envelope: EventEnvelope) -> None:
         """Queue ``envelope`` for the stream, unless it has ended; closes the connection as too

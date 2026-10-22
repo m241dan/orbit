@@ -24,6 +24,7 @@ from orbit.protocol import (
     WORK_LANE,
     AcceptTask,
     AddTask,
+    AgentsChanged,
     BusyChanged,
     BusyLane,
     CancelAgent,
@@ -60,6 +61,7 @@ from orbit.protocol import (
     TaskState,
     UpdateSettings,
     UsageChanged,
+    UsageTotals,
     VerificationChanged,
     WorkspaceCloning,
 )
@@ -758,6 +760,8 @@ class OrbitApp(App[None], inherit_bindings=False):
                 self._set_busy(lane, busy)
             case TasksChanged(tasks=tasks):
                 self._show_tasks(tasks)
+            case AgentsChanged() | UsageTotals():
+                pass  # The TUI doesn't watch the control-plane stream.
             case _:
                 self._show_progress(event)
 

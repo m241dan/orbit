@@ -7,6 +7,7 @@ from typing import TypeIs, get_args
 from orbit.protocol import (
     AgentExited,
     AgentRequest,
+    AgentsChanged,
     AssistantMessage,
     BusyChanged,
     Catalog,
@@ -34,6 +35,7 @@ from orbit.protocol import (
     TurnFinished,
     TurnStarted,
     UsageChanged,
+    UsageTotals,
     VerificationChanged,
     VerificationFinished,
     VerificationSkipped,
@@ -55,7 +57,11 @@ ProgressEvent = (
 """Snapshots of progress: the verification steps', whether review is paused, proposed steps,
 usage limits, a session's state and a clone's progress."""
 
-StateEvent = SettingsChanged | BusyChanged | TasksChanged | ProgressEvent
+StreamEvent = AgentsChanged | UsageTotals
+"""Snapshots of the control-plane stream: the agents running and the usage totals across the
+workspaces, which the TUI doesn't watch."""
+
+StateEvent = SettingsChanged | BusyChanged | TasksChanged | ProgressEvent | StreamEvent
 """Snapshots of backend state, or a decision it waits for."""
 
 TurnEvent = (

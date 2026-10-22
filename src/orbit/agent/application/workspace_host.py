@@ -202,7 +202,8 @@ class WorkspaceHost:
     text fields cut and each session's log trimmed as the ``storage`` settings say; ``clock``
     tells the time, ``new_id`` makes its id and ``name`` names it (by the time, if none). Each
     of its agents' turns that ends with usage is recorded in the ``ledger``, if there is one,
-    in the background, with the session, the agent's role and model, and the time. The
+    in the background, with the session, the agent's role and model, and the time, and
+    :attr:`usage_recorded` is called once its row is written. The
     user can open another saved session, or a new one, in its place: one opened has its saved
     settings, but for those ``pinned``, by field name, which keep the ``settings`` given here.
     With ``pick_session``, the user picks a saved session from their frontend's picker; until
@@ -267,6 +268,7 @@ class WorkspaceHost:
         # The usage limits fetched last, which the control plane serving this host knows.
         self.latest_usage: Callable[[], UsageChanged | None] = lambda: None
         self.catalog_changed: Callable[[WorkspaceEntry], Awaitable[None]] = _unannounced
+        self.usage_recorded: Callable[[], None] = lambda: None
         # The coders' slots its tasks take, shared by the control plane serving this host.
         self.coder_slots = CoderSlots()
         self._takeover = Takeover(
@@ -292,6 +294,7 @@ class WorkspaceHost:
         self._keeper.rename(name)
         self._review_count = ReviewCount(store, self._halt, self._events.put)
         self._usage = UsageRecorder(ledger, self._halt, self._events.put, clock)
+        self._usage.recorded = lambda: self.usage_recorded()
         self._count_loader = Background("review count", self._events.put)
         self._tasks = Tasks(TaskBoard(), self._events.put, self._save)
         self._board = self._tasks.board

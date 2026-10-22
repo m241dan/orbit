@@ -18,9 +18,11 @@ from orbit.agent.application.connection import (
     Publish,
     SessionConnection,
 )
+from orbit.agent.application.control_stream import ControlStream
 from orbit.agent.application.handshake import HandshakeParts
+from orbit.agent.application.keeper import Clock, local_now
 from orbit.agent.application.outbox import Seqs
-from orbit.agent.application.ports import Cloner, SeqMark, UsageSource
+from orbit.agent.application.ports import Cloner, SeqMark, UsageLedger, UsageSource
 from orbit.agent.application.seq_mark import MarkReservations
 from orbit.agent.application.usage_monitor import UsageMonitor
 from orbit.agent.application.workspace_host import WorkspaceHost
@@ -52,6 +54,7 @@ from orbit.protocol import (
     RemoveWorkspace,
     TurnFinished,
     UsageChanged,
+    Watch,
     WorkspaceEntry,
 )
 
@@ -193,6 +196,12 @@ class ControlPlane:
     called, and the others wait in line, first come, first served, each session's state saying
     where.
 
+    A connection welcomed, attached or not, chooses the optional streams it receives with
+    ``Watch``: the control-plane stream tells it every agent running across the workspaces
+    served, as each starts or exits, and the usage totals the ``ledger`` adds up, if there is
+    one, today's from midnight as ``clock`` tells it, after each turn's row is written; both
+    as it starts watching too.
+
     Given the ``mark`` of the store every workspace's log shares, as ``orbit serve`` has, the
     ``seq`` count on past it, and each block of them is reserved there, once, as it's crossed,
     whether any workspace is served or not. Without one, each is reserved in the log of every
@@ -205,6 +214,8 @@ class ControlPlane:
         usage: UsageSource | None = None,
         workspaces: WorkspaceSource | None = None,
         mark: SeqMark | None = None,
+        ledger: UsageLedger | None = None,
+        clock: Clock = local_now,
     ) -> None:
         self._hosts = {host.workspace_id: host for host in hosts}
         self._workspaces = workspaces
@@ -217,6 +228,7 @@ class ControlPlane:
         self._usage = UsageMonitor(usage, self._events.put) if usage else None
         self._clones = Clones(self._events.announce)
         self._coders = CoderSlots(changed=self._check_states)
+        self._stream = ControlStream(self._events, self._everywhere, ledger, clock)
         for host in self._hosts.values():
             self._serve(host)
         self._started = False
@@ -235,6 +247,7 @@ class ControlPlane:
         host.catalog_changed = self._publish_catalog
         host.latest_usage = self._latest_usage
         host.coder_slots = self._coders
+        host.usage_recorded = self._stream.recorded
 
     def _reserve(self, seq: int) -> None:
         """Have every ``seq`` up to ``seq`` reserved: in the mark, if there is one, else in the
@@ -347,6 +360,8 @@ class ControlPlane:
             await self._change(command, connection)
         elif isinstance(command, Attach):
             await self._attach(command, envelope.command_id, connection)
+        elif isinstance(command, Watch):
+            await self._stream.watch(connection, command.streams)
         else:
             host = self._addressed(envelope.workspace, envelope.session, connection)
             await host.handle(command, envelope.command_id, connection)
@@ -605,10 +620,11 @@ class ControlPlane:
 
     def _deliver(self, host: WorkspaceHost, envelope: EventEnvelope) -> None:
         """Pass ``envelope``, just published by ``host``, to the connections attached to its
-        workspace it's for, then have ``host`` publish its open session's state if that
-        changed."""
+        workspace it's for, and the agents it starts or ends to the control-plane stream, then
+        have ``host`` publish its open session's state if that changed."""
         self._nudge_usage(envelope.payload)
         host.connections.deliver(envelope)
+        self._stream.observe(host.workspace_id, envelope)
         host.check_state()
 
     def _start_background(self, host: WorkspaceHost) -> None:
@@ -632,10 +648,10 @@ class ControlPlane:
 
     async def close(self) -> None:
         """Stop the clones under way, each removing what it cloned, then the usage monitor, if
-        there is one, then close every host, which ends the streams of the connections attached
-        to its workspace, then end the others', then reserve in the mark, if there is one, the
-        ``seq`` still to be reserved; each is closed even if stopping one before it fails or the
-        close is cancelled, as :func:`close_all` does."""
+        there is one, and the reading of the usage totals, then close every host, which ends the
+        streams of the connections attached to its workspace, then end the others', then reserve
+        in the mark, if there is one, the ``seq`` still to be reserved; each is closed even if
+        stopping one before it fails or the close is cancelled, as :func:`close_all` does."""
         self._closing = True
         await self._clones.close()  # A clone being served waits for the lock this takes.
         async with self._changing:  # A workspace being added is closed with the rest.
@@ -646,6 +662,7 @@ class ControlPlane:
         stops: list[Callable[[], Awaitable[None]]] = (
             [] if self._usage is None else [self._usage.close]
         )
+        stops.append(self._stream.close)
         stops += [host.close for host in self._hosts.values()]
         stops.append(self._end_lobby)
         if self._reservations is not None:

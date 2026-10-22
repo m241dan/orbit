@@ -4,6 +4,7 @@ meaningful."""
 from datetime import UTC, datetime
 
 from orbit.protocol import (
+    CONTROL_PLANE_STREAM,
     PLANNER,
     PLANNER_LANE,
     REVIEW_ORIGIN,
@@ -14,8 +15,10 @@ from orbit.protocol import (
     AddWorkspace,
     AgentEntry,
     AgentExited,
+    AgentRef,
     AgentReply,
     AgentRequest,
+    AgentsChanged,
     AgentStarted,
     AssistantMessage,
     Attach,
@@ -84,13 +87,17 @@ from orbit.protocol import (
     Usage,
     UsageChanged,
     UsageLimit,
+    UsageTotal,
+    UsageTotals,
     VerificationChanged,
     VerificationFinished,
     VerificationSkipped,
     VerificationStarted,
+    Watch,
     Welcome,
     WorkspaceCloning,
     WorkspaceEntry,
+    WorkspaceUsage,
 )
 
 WHEN = datetime(2026, 10, 18, 9, 30, tzinfo=UTC)
@@ -193,6 +200,7 @@ COMMANDS: tuple[CommandEnvelope, ...] = (
     command(AddWorkspace(url="git@github.com:o/orbit.git")),
     command(RemoveWorkspace(workspace="w1")),
     command(RemoveWorkspace(workspace="w1", purge=True)),
+    command(Watch(streams=(CONTROL_PLANE_STREAM,))),
 )
 
 EVENTS: tuple[EventEnvelope, ...] = (
@@ -319,6 +327,21 @@ EVENTS: tuple[EventEnvelope, ...] = (
     ),
     event(
         WorkspaceCloning(url="git@github.com:o/orbit.git", phase="Receiving objects", percent=42)
+    ),
+    event(
+        AgentsChanged(
+            agents=(
+                AgentRef(
+                    workspace="w1", session="s1", agent_id="agent-1", role="coder", task_id="t1"
+                ),
+            )
+        )
+    ),
+    event(
+        UsageTotals(
+            workspaces=(WorkspaceUsage(workspace="w1", today=USAGE, lifetime=USAGE + USAGE),),
+            total=UsageTotal(today=USAGE, lifetime=USAGE + USAGE),
+        )
     ),
     event(Welcome(command_id="c1", server_version="0.1.0")),
     event(CommandAccepted(command_id="c1")),
