@@ -471,15 +471,13 @@ async def cancelled_while_preparing(
     source: ServedWorkspaces, root: Path, gate: threading.Event
 ) -> None:
     """Open the workspace at ``root`` with ``source``, cancel it while it's being prepared, then
-    let the preparation finish."""
+    let the preparation finish and the cancellation end."""
     opening = asyncio.create_task(source.open(str(root)))
     await asyncio.sleep(0.05)
     opening.cancel()
+    gate.set()
     with pytest.raises(asyncio.CancelledError):
         await opening
-    gate.set()
-    for _ in range(200):
-        await asyncio.sleep(0.01)
 
 
 async def test_an_add_cancelled_while_preparing_lets_the_lock_go_once_prepared(
@@ -494,6 +492,21 @@ async def test_an_add_cancelled_while_preparing_lets_the_lock_go_once_prepared(
 
     assert free(root) and source.locks == ()
     assert await WorkspaceRegistry(store).served() == []
+
+
+async def test_a_later_add_of_a_workspace_whose_add_was_cancelled_takes_its_lock(
+    stack: ExitStack, store: SqliteStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = directory(tmp_path)
+    gate = threading.Event()
+    gated(monkeypatch, gate)
+    source = workspaces(stack, store)
+    await cancelled_while_preparing(source, root, gate)
+
+    host = await source.open(str(root))
+    await host.close()
+
+    assert not host.read_only
 
 
 async def test_an_add_cancelled_while_preparing_that_then_fails_takes_no_lock(

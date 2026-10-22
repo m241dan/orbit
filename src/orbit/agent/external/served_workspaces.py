@@ -74,13 +74,17 @@ async def open_workspace(
     """The workspace at ``root`` opened over ``store`` as ``opening`` says, its lock taken if
     it's free, configured, with its host made by ``make_host``. Raises
     :class:`WorkspaceUnavailable` if the lock can't be made, git has no identity for commits
-    there, its configuration is invalid or the store fails, having let the lock go."""
+    there, its configuration is invalid or the store fails, having let the lock go. Cancelled while
+    it's prepared, it lets the lock go before the cancellation ends."""
     # Git, the configuration file and the lock would stall the event loop.
     preparing = asyncio.ensure_future(asyncio.to_thread(_prepared, root, make_host, opening))
     try:
         served, make = await asyncio.shield(preparing)
     except asyncio.CancelledError:
         preparing.add_done_callback(_let_go_prepared)
+        # The thread runs on regardless; waiting for it means the lock it takes is let go by the
+        # time the cancellation is, as that callback runs before this wait ends.
+        await asyncio.wait([preparing])
         raise
     try:
         opened = await _view(store, root, owned=served.owner is None, flag=opening.flag)
