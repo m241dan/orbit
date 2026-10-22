@@ -381,3 +381,74 @@ async def test_the_next_run_starts_with_the_task_at_the_limit_then_keeps_board_o
 
     assert [launch.agent.task_id for launch in launcher.launches] == [a.id, b.id, b.id, a.id]
     assert statuses(events) == ["completed", "completed"]
+
+
+def forgets_where_it_stopped(session: WorkspaceHost) -> None:
+    """Have the session's work lane forget the task its last run stopped at, as switching
+    sessions away and back does, leaving the board to say what runs first."""
+    lane = session._work
+    assert lane is not None
+    lane.reset()
+
+
+async def test_a_fix_in_error_runs_before_an_earlier_task_in_error_on_a_tree_with_its_work() -> (
+    None
+):
+    tree = FakeTree()
+    session, _, launcher = session_for(
+        errs,
+        keeps_claiming,
+        errs,
+        errs,
+        verification=verified(Steps(False, False)),
+        limits=Limits(max_attempts=1),
+        tree=tree,
+    )
+    launcher.turn_errors.append("boom")
+    first = await asyncio.wait_for(run(session, TaskSpec(prompt="a"), TaskSpec(prompt="b")), 5)
+    a, b, fix = board(first)
+    assert (a.status, b.status, fix.status) == ("error", "unverified", "error")
+
+    forgets_where_it_stopped(session)
+    await send(session, RunTasks())
+    await asyncio.wait_for(events_until(session, idle()), 5)
+    await session.close()
+
+    assert [launch.agent.task_id for launch in launcher.launches] == [a.id, b.id, fix.id, fix.id]
+    assert tree.prepared == [False, False, True, True]
+
+
+def hits_the_limit(launcher: ScriptedLauncher) -> Script:
+    """A script whose turn ends in error as its agent hits the usage limit."""
+
+    async def script(call: Call) -> TurnEndReason:
+        launcher.turn_errors.append(LIMIT)
+        return "error"
+
+    return script
+
+
+async def test_a_fix_at_the_limit_runs_before_an_earlier_task_in_error_on_starting_again() -> None:
+    waits, tree = Waits(), FakeTree()
+    session, _, launcher = session_for(
+        errs,
+        keeps_claiming,
+        verification=verified(Steps(False, False)),
+        limits=Limits(max_attempts=1),
+        pause=waits.pause,
+        tree=tree,
+    )
+    launcher.scripts.extend([hits_the_limit(launcher), errs])
+    launcher.turn_errors.append("boom")
+    first = await asyncio.wait_for(run(session, TaskSpec(prompt="a"), TaskSpec(prompt="b")), 5)
+    a, b, fix = board(first)
+    assert (a.status, b.status, fix.status) == ("error", "unverified", "error")
+    assert notes(first)[-1] == paused_note(START + timedelta(minutes=15))
+
+    forgets_where_it_stopped(session)
+    await send(session, RunTasks())
+    await asyncio.wait_for(events_until(session, idle()), 5)
+    await session.close()
+
+    assert [launch.agent.task_id for launch in launcher.launches] == [a.id, b.id, fix.id, fix.id]
+    assert tree.prepared == [False, False, True, True]

@@ -24,6 +24,9 @@ from orbit.protocol import (
 WAITING: frozenset[TaskStatus] = ACTIVE_STATUSES | {"pending"}
 # Statuses a run leaves alone; any other task is worth (another) run.
 SETTLED: frozenset[TaskStatus] = ACTIVE_STATUSES | {"draft", "completed", "unverified", "gave_up"}
+# Statuses of a fix that stopped short, whose work is still in the tree: it runs before any other
+# task puts that work aside.
+CUT_SHORT: frozenset[TaskStatus] = frozenset({"error", "cancelled"})
 
 # What clears a task's reason for ending badly.
 _NO_REASON = {"reason": "", "reason_detail": ""}
@@ -42,6 +45,10 @@ def interrupted(tasks: Sequence[TaskState]) -> tuple[tuple[TaskState, ...], int]
 
 def _in_roles(role: str, roles: Collection[str] | None, exclude: Collection[str]) -> bool:
     return role not in exclude and (roles is None or role in roles)
+
+
+def _cut_short(state: TaskState) -> bool:
+    return state.fixes is not None and state.status in CUT_SHORT
 
 
 class TaskBoard:
@@ -161,16 +168,26 @@ class TaskBoard:
         first: str | None = None,
     ) -> str | None:
         """The first task that isn't settled or in ``skip``, if any: only in ``roles`` if
-        given, and never in ``exclude``. Task ``first``, if given, comes before the others
-        while it's one of them."""
-        runnable = [
-            state.id
+        given, and never in ``exclude``. A fix that ended in error or was cancelled comes first,
+        before another task puts its work aside; then task ``first``, if given, while it's one of
+        them; then the board's order."""
+        runnable = self._unsettled(skip, roles, exclude)
+        cut_short = [state.id for state in runnable if _cut_short(state)]
+        ids = [state.id for state in runnable]
+        return next(iter(cut_short + [i for i in ids if i == first] + ids), None)
+
+    def _unsettled(
+        self, skip: Collection[str], roles: Collection[str] | None, exclude: Collection[str]
+    ) -> list[TaskState]:
+        """The tasks, in order, that aren't settled or in ``skip``: only in ``roles`` if given,
+        and never in ``exclude``."""
+        return [
+            state
             for state in self._tasks
             if state.status not in SETTLED
             and state.id not in skip
             and _in_roles(state.task.role, roles, exclude)
         ]
-        return first if first in runnable else next(iter(runnable), None)
 
     def has_waiting(self, role: str) -> bool:
         """Whether a task in ``role`` is still to run, or running."""

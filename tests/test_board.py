@@ -108,6 +108,44 @@ def test_next_runnable_takes_first_before_board_order_while_it_is_runnable() -> 
     assert board.next_runnable(first="gone") == ids[0]
 
 
+def fix_after_an_error(fix_status: TaskStatus) -> tuple[TaskBoard, str, str]:
+    """A board whose first task ended in error, and whose second, unverified, has a fix that
+    ended in ``fix_status``; returns it, the first task's id and the fix's."""
+    board = TaskBoard()
+    first = board.add(ONE)
+    second = board.add(TWO)
+    board.finish(first, "error", "Crashed")
+    board.finish(second, "unverified", "Lint failed")
+    fix = board.add(FIX, fixes=second)
+    board.finish(fix, fix_status, "Crashed")
+    return board, first, fix
+
+
+@pytest.mark.parametrize("status", ["error", "cancelled"])
+def test_next_runnable_takes_a_fix_cut_short_before_earlier_tasks(status: TaskStatus) -> None:
+    board, first, fix = fix_after_an_error(status)
+    assert board.next_runnable() == fix
+    assert board.next_runnable(first=first) == fix
+    assert board.next_runnable(skip={fix}) == first
+
+
+@pytest.mark.parametrize("status", ["pending", "unverified", "gave_up"])
+def test_next_runnable_keeps_board_order_for_a_fix_still_to_run_or_settled(
+    status: TaskStatus,
+) -> None:
+    board, first, _ = fix_after_an_error(status)
+    assert board.next_runnable() == first
+
+
+def test_next_runnable_limits_a_fix_cut_short_to_roles_and_excludes() -> None:
+    board, _, fix = fix_after_an_error("error")
+    assert board.next_runnable(roles={"coder"}) == fix
+    assert board.next_runnable(roles={"reviewer"}) is None
+    assert board.next_runnable(exclude={"coder"}) is None
+    board.add_first(TaskSpec(prompt="review", role="reviewer"))
+    assert board.next_runnable(roles={"reviewer"}) == board.tasks[0].id
+
+
 def test_a_passing_fix_completes_the_tasks_it_fixed() -> None:
     board = TaskBoard()
     first = board.add(ONE)
