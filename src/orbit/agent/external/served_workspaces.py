@@ -26,7 +26,7 @@ from orbit.agent.external.session_import import ImportBlocked
 from orbit.agent.external.sqlite_schema import StoreError
 from orbit.agent.external.sqlite_store import SqliteStore
 from orbit.agent.external.store_startup import OpenedStore, open_workspace_store
-from orbit.agent.external.workspace_lock import WorkspaceLock
+from orbit.agent.external.workspace_lock import LOCK_FILE, WorkspaceLock
 from orbit.agent.external.workspace_purge import PurgeRefused, purge_losses, purge_workspace
 from orbit.agent.external.workspace_registry import WorkspaceRegistry
 from orbit.protocol import INTERNAL, WorkspaceCloning
@@ -35,11 +35,18 @@ from orbit.protocol import INTERNAL, WorkspaceCloning
 @dataclass(frozen=True)
 class ServedWorkspace:
     """A workspace a server serves: the one at ``root``, with the repository's ``owner`` if
-    another orbit owns it, making it read-only, and its workspace ``lock``."""
+    another orbit owns it, making it read-only, and its workspace ``lock``, ``kept`` if it was
+    held already, so a failed add leaves it held."""
 
     root: Path
     owner: WorkspaceOwner | None
     lock: WorkspaceLock
+    kept: bool = False
+
+    def let_go(self) -> None:
+        """Let go of the lock, unless it's kept."""
+        if not self.kept:
+            self.lock.close()
 
 
 type HostMaker = Callable[[ServedWorkspace, OrbitConfig], Callable[[OpenedStore], WorkspaceHost]]
@@ -63,12 +70,14 @@ class OpenedWorkspace:
 class Opening:
     """How a workspace is opened: checked for a git identity if ``identity``, flagged served if
     ``flag``, its lock naming the server's ``url`` if it's known, and marked as a clone orbit
-    made if ``managed``."""
+    made if ``managed``; whichever of the ``held`` locks is on its repository is kept rather than
+    another taken."""
 
     identity: bool
     flag: bool
     url: str | None = None
     managed: bool = False
+    held: tuple[WorkspaceLock, ...] = ()
 
 
 async def open_workspace(
@@ -92,7 +101,7 @@ async def open_workspace(
     try:
         opened = await _view(store, root, owned=served.owner is None, opening=opening)
     except BaseException:
-        served.lock.close()
+        served.let_go()
         raise
     return OpenedWorkspace(served, opened.store.workspace_id, lambda: make(opened))
 
@@ -102,13 +111,24 @@ def _prepared(root: Path, make_host: HostMaker, opening: Opening) -> _Prepared:
     ``opening`` says, with what ``make_host`` gives to build its host over its view of the
     store. Raises :class:`WorkspaceUnavailable` as :func:`open_workspace`
     says, and lets the lock go if anything after taking it fails."""
-    lock, owner = locked(root, opening.url)
-    served = ServedWorkspace(root, owner, lock)
+    served = _locked_served(root, opening)
     try:
         return served, make_host(served, workspace_config(root, worktree=opening.identity))
     except BaseException:
-        lock.close()
+        served.let_go()
         raise
+
+
+def _locked_served(root: Path, opening: Opening) -> ServedWorkspace:
+    """The workspace at ``root`` with whichever of ``opening``'s held locks is on its
+    repository, kept, or else its own lock, taken if it's free. Raises
+    :class:`WorkspaceUnavailable` as :func:`locked` says."""
+    path = orbit_dir(str(root)) / LOCK_FILE
+    kept = next((lock for lock in opening.held if lock.path == path), None)
+    if kept is not None:
+        return ServedWorkspace(root, None, kept, kept=True)
+    lock, owner = locked(root, opening.url)
+    return ServedWorkspace(root, owner, lock)
 
 
 class ServedWorkspaces:
@@ -116,8 +136,9 @@ class ServedWorkspaces:
     ``make_host``, checked for a git identity if the coder works in a ``worktree``, and its
     workspace lock held, if it's free, until it's removed or :meth:`let_go`: those it starts
     with, as :meth:`served` serves them, and those frontends add, by their paths or as clones
-    ``cloner`` makes, as a control plane's ``WorkspaceSource``. Once the server's ``url`` is
-    known, the locks taken name it."""
+    ``cloner`` makes, as a control plane's ``WorkspaceSource``; one added again while its lock
+    is still held, as it is when unflagging it failed, keeps that lock. Once the server's
+    ``url`` is known, the locks taken name it."""
 
     def __init__(
         self, store: SqliteStore, make_host: HostMaker, cloner: Cloner, *, worktree: bool
@@ -188,10 +209,12 @@ class ServedWorkspaces:
         self, root: Path, opening: Opening
     ) -> tuple[ServedWorkspace, Callable[[], WorkspaceHost]]:
         """The workspace at ``root``, opened as ``opening`` says, with what builds its host, its
-        lock taken if it's free and held until it's removed or let go, naming the server's URL
-        if it's known by then. Raises :class:`WorkspaceUnavailable` as :meth:`open` says, or as
-        ``INTERNAL`` if the lock can't name the URL, having let it go."""
-        opening = replace(opening, url=self.url)
+        lock kept if it's held already, else taken if it's free, and held until it's removed or
+        let go, naming the server's URL if it's known by then. Raises
+        :class:`WorkspaceUnavailable` as :meth:`open` says, or as ``INTERNAL`` if the lock can't
+        name the URL, having let it go."""
+        held = tuple(lock for lock in self._locks.values() if lock.held)
+        opening = replace(opening, url=self.url, held=held)
         opened = await open_workspace(self._store, root, self._make_host, opening)
         # The server may have started listening while the workspace was opened.
         if self.url is not None and self.url != opening.url:
@@ -207,7 +230,7 @@ class ServedWorkspaces:
         try:
             lock.announce(url)
         except OSError as exc:
-            lock.close()
+            opened.served.let_go()
             if flagged:
                 await self.set_served(opened.workspace_id, False)
             raise WorkspaceUnavailable(
@@ -264,7 +287,7 @@ def _let_go_prepared(preparing: asyncio.Future[_Prepared]) -> None:
     if preparing.cancelled() or preparing.exception() is not None:
         return
     served, _ = preparing.result()
-    served.lock.close()
+    served.let_go()
 
 
 def top_level(directory: Path) -> Path:

@@ -343,6 +343,61 @@ async def test_a_workspace_whose_unflagging_fails_is_unavailable_and_stays_serve
     assert held and free(root)
 
 
+async def unflagging_failed(
+    source: ServedWorkspaces, root: Path, monkeypatch: pytest.MonkeyPatch
+) -> str:
+    """The id of the workspace at ``root``, opened with ``source``, its host closed, whose
+    unflagging then failed, so its lock is still held, with the store working again."""
+    host = await source.open(str(root))
+    await host.close()
+    set_served = WorkspaceRegistry.set_served
+
+    async def fails(self: WorkspaceRegistry, workspace_id: str, served: bool) -> None:
+        raise StoreError("The store failed.")
+
+    monkeypatch.setattr(WorkspaceRegistry, "set_served", fails)
+    with pytest.raises(WorkspaceUnavailable):
+        await source.set_served(host.workspace_id, False)
+    monkeypatch.setattr(WorkspaceRegistry, "set_served", set_served)
+    return host.workspace_id
+
+
+async def test_a_workspace_whose_unflagging_failed_is_added_again_owned_with_its_held_lock(
+    stack: ExitStack, store: SqliteStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(served_workspaces, "WorkspaceLock", CountedLock)
+    monkeypatch.setattr(CountedLock, "closes", 0)
+    root = directory(tmp_path)
+    source = workspaces(stack, store)
+    workspace_id = await unflagging_failed(source, root, monkeypatch)
+    held = source.locks
+
+    host = await source.open(str(root))
+    await host.close()
+    served = await WorkspaceRegistry(store).served()
+    stack.close()
+
+    assert not host.read_only and host.workspace_id == workspace_id
+    assert served == [(workspace_id, str(root))] and source.locks == ()
+    assert len(held) == 1 and CountedLock.closes == 1 and free(root)
+
+
+async def test_a_failed_add_of_a_workspace_whose_lock_is_held_leaves_it_held(
+    stack: ExitStack, store: SqliteStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = directory(tmp_path)
+    source = workspaces(stack, store)
+    workspace_id = await unflagging_failed(source, root, monkeypatch)
+    (root / ".orbit" / "config.toml").write_text("roles = 1\n")
+
+    with pytest.raises(WorkspaceUnavailable, match=r"^Invalid orbit configuration: "):
+        await source.open(str(root))
+    held = not free(root) and source.serves(workspace_id)
+    stack.close()
+
+    assert held and free(root)
+
+
 async def test_closing_a_workspace_lets_its_lock_go_leaving_its_flag(
     stack: ExitStack, store: SqliteStore, tmp_path: Path
 ) -> None:
