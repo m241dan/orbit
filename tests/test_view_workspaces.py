@@ -156,3 +156,9 @@ def test_row_keys_tell_rows_apart_by_workspace_or_path() -> None:
 def test_relisting_with_no_row_highlighted_highlights_none() -> None:
     keys = tuple(map(row_key, workspace_rows((A, B), None)))
     assert kept_highlight(keys, None, keys) is None
+
+
+def test_relisting_without_the_highlighted_workspace_keeps_it_on_the_nearest_row() -> None:
+    shown = tuple(map(row_key, workspace_rows((A, B), None)))
+    keys = tuple(map(row_key, workspace_rows((A,), None)))
+    assert kept_highlight(shown, 1, keys) == 1 and keys[1] == row_key(ADD_PATH)

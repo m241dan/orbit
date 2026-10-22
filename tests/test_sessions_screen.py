@@ -460,8 +460,8 @@ async def test_a_catalog_again_refreshes_the_picker_shown_in_place() -> None:
         assert screen is app.screen
         assert screen.sessions == (CURRENT, renamed)
         assert options(screen) == ["  flags · Oct 16 18:02", "New session"]
-        assert screen.query_one(OptionList).highlighted == 1  # Kept within the list.
-        await pilot.press("k", "enter")
+        assert screen.query_one(OptionList).highlighted == 0  # Kept within the sessions.
+        await pilot.press("enter")
         assert session.commands == SWITCH_TO_OLD
 
 
@@ -514,7 +514,7 @@ async def test_a_catalog_dropping_the_highlighted_session_keeps_the_highlight_in
         assert session.commands == []  # Now on the locked session.
 
 
-async def test_a_catalog_dropping_the_highlighted_last_session_moves_onto_new_session() -> None:
+async def test_a_catalog_dropping_the_highlighted_last_session_moves_to_the_nearest_one() -> None:
     app, session = in_process()
     async with app.run_test() as pilot:
         await feed_events(session, pilot, CATALOG)
@@ -523,7 +523,7 @@ async def test_a_catalog_dropping_the_highlighted_last_session_moves_onto_new_se
 
         screen = picker(app)
         assert screen.rows == (OLD, LOCKED)
-        assert screen.query_one(OptionList).highlighted == 2  # New session, where it was.
+        assert screen.query_one(OptionList).highlighted == 1  # The nearest, not New session.
 
 
 async def test_renaming_and_deleting_through_the_backend_refresh_the_picker() -> None:

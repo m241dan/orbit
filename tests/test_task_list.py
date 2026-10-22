@@ -251,6 +251,20 @@ async def test_highlight_stays_on_its_task_as_the_board_changes() -> None:
         assert tasks.highlighted == 4
 
 
+async def test_removing_the_only_task_leaves_the_new_task_row_unhighlighted() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, board("one"))
+        await open_task_list(pilot)
+        tasks = app.query_one(TaskList)
+        assert tasks.highlighted == 0
+        await feed_events(session, pilot, TasksChanged(tasks=()))
+        assert tasks.highlighted is None
+        await pilot.press("enter")
+        assert len(app.screen_stack) == 1
+
+
 async def test_enter_activates_the_task_list() -> None:
     app = OrbitApp(FakeSession())
     async with app.run_test() as pilot:

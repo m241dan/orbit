@@ -476,7 +476,11 @@ class OrbitApp(App[None], inherit_bindings=False):
         agent = tabs.agent_of(event.tab.id or "")
         tabs.mark_read(agent)
         self._transcript.show_only(agent, event.tab.label_text)
-        if self._selected == "detail":  # Its pane just closed.
+        self._leave_closed_detail()
+
+    def _leave_closed_detail(self) -> None:
+        """Select the conversation in place of its detail pane, which has just closed."""
+        if self._selected == "detail":
             self._select("transcript")
 
     @on(ConversationTabs.Relabelled)
@@ -770,6 +774,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         # Its tasks shown first, as the transcript's notes on them read them, and its usage
         # set after, as the transcript's turns count theirs.
         self._feed.replace((envelope.payload for envelope in snapshot.transcript), snapshot.agents)
+        self._leave_closed_detail()
         self._transcript.track(snapshot, self._tabs.roles)
         self._pager.follow(snapshot)
         self._open_session(snapshot.session)

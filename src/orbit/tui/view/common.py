@@ -105,15 +105,21 @@ def kept_highlight(
 ) -> int | None:
     """Where the highlight on row ``highlighted`` of rows with ``shown_keys`` goes once rows
     with ``keys`` are shown, a trailing action row's key being None: on the row with its key,
-    or, when that's gone, on the row where it was, kept within the rows, which may be the
-    trailing action row; nowhere when nothing was highlighted, the trailing row it was on has
-    gone or no rows are left."""
+    or, when that's gone, on the row where it was, kept within the keyed rows, never moving
+    onto the trailing action row; nowhere when nothing was highlighted, the trailing row it
+    was on has gone or no keyed rows are left."""
     if highlighted is None or not keys:
         return None
     key = shown_keys[highlighted]
     if key in keys:
         return list(keys).index(key)
-    return None if key is None else min(highlighted, len(keys) - 1)
+    return None if key is None else _nearest_keyed(highlighted, keys)
+
+
+def _nearest_keyed(index: int, keys: Sequence[str | None]) -> int | None:
+    """The keyed row of rows with ``keys`` nearest row ``index``, or None when there's none."""
+    keyed = sum(1 for key in keys if key is not None)
+    return min(index, keyed - 1) if keyed else None
 
 
 @dataclass(frozen=True)

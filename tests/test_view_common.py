@@ -83,7 +83,7 @@ SHOWN = ("a", "b", "c", None)
         (("c", "b", "a", None), 1),  # Reordered: it follows its key.
         (("x", "a", "b", "c", None), 2),  # One appeared above it.
         (("a", "c", None), 1),  # Its own row went: the nearest one.
-        (("a", None), 1),  # And kept within the rows.
+        (("a", None), 0),  # And kept within the keyed rows.
     ],
 )
 def test_the_highlight_follows_its_key_or_goes_to_the_nearest_row(
@@ -104,8 +104,12 @@ def test_nothing_highlighted_stays_so() -> None:
     assert kept_highlight(SHOWN, None, ("a", "b", None)) is None
 
 
-def test_a_gone_last_row_moves_the_highlight_onto_the_trailing_action_row() -> None:
-    assert kept_highlight(SHOWN, 2, ("a", "b", None)) == 2
+def test_a_gone_last_row_moves_the_highlight_to_the_nearest_keyed_row() -> None:
+    assert kept_highlight(SHOWN, 2, ("a", "b", None)) == 1
+
+
+def test_the_last_keyed_row_gone_leaves_the_trailing_action_row_unhighlighted() -> None:
+    assert kept_highlight(("a", None), 0, (None,)) is None
 
 
 def test_no_rows_left_leave_nothing_highlighted() -> None:

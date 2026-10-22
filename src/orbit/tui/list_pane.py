@@ -42,9 +42,10 @@ class ListPane(ModalFocus, OptionList):
     def show_rows(self, rows: Sequence[Row], trailing: Option | None = None) -> None:
         """Show ``rows``, then ``trailing`` if given. The same keys in the same order have the
         rows whose label changed relabelled in place; otherwise the rows are rebuilt, the
-        highlight staying on its key's row, or on the nearest one when that row has gone. A
-        highlighted trailing row that's gone leaves nothing highlighted, so the highlight
-        never lands on a row the user didn't choose."""
+        highlight staying on its key's row, or on the nearest of ``rows`` when that row has
+        gone, never on ``trailing``. A highlighted trailing row that's gone, or a highlighted
+        row gone with no rows left, leaves nothing highlighted, so the highlight never lands
+        on a row the user didn't choose."""
         rows = tuple(rows)
         keys = tuple(key for key, _ in rows) + (() if trailing is None else (None,))
         if keys == self._shown_keys:
