@@ -124,6 +124,8 @@ from orbit.tui.view.sessions import chosen_workspace
 from orbit.tui.view.settings import (
     model_choices,
     model_options,
+    picked_model,
+    picked_tool_access,
     tool_access_choices,
     tool_access_labels,
 )
@@ -556,13 +558,23 @@ class OrbitApp(App[None], inherit_bindings=False):
         # While a picker is open, its modal screen blocks the app's key bindings, so a second
         # picker can't be pushed on top.
         if self._settings is not None:
-            options, current = model_choices(self._model_choices, self._settings)
-            self._model_picker.choose(options, current, self._request_settings)
+            _, current = model_choices(self._model_choices, self._settings)
+            self._model_picker.choose(current, self._request_model)
 
     def action_pick_tool_access(self) -> None:
         if self._settings is not None:
-            options, current = tool_access_choices(self._settings)
-            self._tool_picker.choose(options, current, self._request_settings)
+            _, current = tool_access_choices(self._settings)
+            self._tool_picker.choose(current, self._request_tool_access)
+
+    # The settings may have changed while the picker was open, so a pick changes only its own
+    # setting of the settings as they are now.
+    async def _request_model(self, index: int) -> None:
+        assert self._settings is not None  # Only picked once settings were shown.
+        await self._request_settings(picked_model(self._model_choices, self._settings, index))
+
+    async def _request_tool_access(self, index: int) -> None:
+        assert self._settings is not None  # Only picked once settings were shown.
+        await self._request_settings(picked_tool_access(self._settings, index))
 
     async def _request_settings(self, settings: Settings) -> None:
         # The display updates when the backend confirms with SettingsChanged.

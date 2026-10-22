@@ -38,6 +38,17 @@ def tool_access_choices(settings: Settings) -> tuple[list[Settings], int | None]
     return _with_current(options, settings)
 
 
+def picked_model(choices: Sequence[str], settings: Settings, index: int) -> Settings:
+    """``settings`` with the model of option ``index`` of the model picker offering
+    ``choices``."""
+    return model_choices(choices, settings)[0][index]
+
+
+def picked_tool_access(settings: Settings, index: int) -> Settings:
+    """``settings`` with the tool access of option ``index`` of the tool access picker."""
+    return tool_access_choices(settings)[0][index]
+
+
 def _with_current(options: list[Settings], settings: Settings) -> tuple[list[Settings], int | None]:
     """``options`` and the index of ``settings`` among them, or None when it isn't one."""
     return options, options.index(settings) if settings in options else None

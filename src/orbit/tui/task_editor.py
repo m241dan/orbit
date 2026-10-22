@@ -12,7 +12,12 @@ from textual.widgets import Input, Static
 
 from orbit.protocol import Settings, TaskSpec
 from orbit.tui.view.common import model_label
-from orbit.tui.view.settings import model_choices, tool_access_choices
+from orbit.tui.view.settings import (
+    model_choices,
+    picked_model,
+    picked_tool_access,
+    tool_access_choices,
+)
 from orbit.tui.view.tasks import TASK_EDITOR_HINT, join_prompt, split_prompt, task_editor_title
 from orbit.tui.widgets import PickerScreen, PromptBox, PromptInput, mark_selected
 
@@ -127,12 +132,16 @@ class TaskEditorScreen(ModalScreen[TaskSpec | None]):
             self._choose_tools()
 
     def _choose_model(self) -> None:
-        options, current = model_choices(self._models(), self._settings)
-        self._model_picker.choose(options, current, self._update)
+        _, current = model_choices(self._models(), self._settings)
+        self._model_picker.choose(
+            current, lambda index: self._update(picked_model(self._models(), self._settings, index))
+        )
 
     def _choose_tools(self) -> None:
-        options, current = tool_access_choices(self._settings)
-        self._tool_picker.choose(options, current, self._update)
+        _, current = tool_access_choices(self._settings)
+        self._tool_picker.choose(
+            current, lambda index: self._update(picked_tool_access(self._settings, index))
+        )
 
     def action_save(self) -> None:
         """Save the task, if it has a title; its body may be empty."""

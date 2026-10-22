@@ -238,6 +238,41 @@ async def test_editor_model_picker_uses_choices_that_arrive_while_open() -> None
         assert session.commands == [AddTask(task=task)]
 
 
+async def test_editor_model_pick_sends_the_model_labelled_after_choices_change_while_open() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await show_settings(session, pilot, Settings(tool_access="full"))
+        await open_task_list(pilot)
+        await pilot.press("enter", "i")
+        await pilot.press(*"Add a widget", "escape", "j", "j", "enter")
+        choices = ("haiku", "opus", "sonnet", "fable")
+        await feed_events(
+            session, pilot, SettingsChanged(settings=Settings(), model_choices=choices)
+        )
+        await pilot.press("end")
+        labels, highlighted = picker(app)[1:]
+        assert highlighted is not None and labels[highlighted] == "fable"
+        await pilot.press("enter", "ctrl+s")
+        task = TaskSpec(prompt="Add a widget", settings=Settings(model="fable", tool_access="full"))
+        assert session.commands == [AddTask(task=task)]
+
+
+async def test_editor_tool_access_pick_changes_only_the_tool_access() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await show_settings(session, pilot, Settings(model="opus", tool_access="off"))
+        await open_task_list(pilot)
+        await pilot.press("enter", "i")
+        await pilot.press(*"Add a widget", "escape", "j", "j", "enter", "down", "enter")
+        await pilot.press("j", "enter", "end", "enter", "ctrl+s")
+        task = TaskSpec(
+            prompt="Add a widget", settings=Settings(model="sonnet", tool_access="full")
+        )
+        assert session.commands == [AddTask(task=task)]
+
+
 async def test_editor_opens_the_apps_pickers_built_once() -> None:
     session = FakeSession()
     app = OrbitApp(session)

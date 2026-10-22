@@ -4,6 +4,8 @@ from orbit.protocol import (
 from orbit.tui.view.settings import (
     model_choices,
     model_options,
+    picked_model,
+    picked_tool_access,
     settings_summary,
     tool_access_choices,
     tool_access_labels,
@@ -70,3 +72,16 @@ def test_tool_access_choices_offer_each_access_in_order_and_mark_the_current_one
         ],
         0,
     )
+
+
+def test_picked_model_changes_only_the_model() -> None:
+    settings = Settings(model="opus", tool_access="off")
+    assert picked_model(("opus", "sonnet"), settings, 2) == Settings(
+        model="sonnet", tool_access="off"
+    )
+    assert picked_model(("opus",), settings, 0) == Settings(tool_access="off")
+
+
+def test_picked_tool_access_changes_only_the_tool_access() -> None:
+    settings = Settings(model="opus", tool_access="off")
+    assert picked_tool_access(settings, 2) == Settings(model="opus", tool_access="full")

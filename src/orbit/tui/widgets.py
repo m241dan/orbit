@@ -357,19 +357,14 @@ class PickerScreen(ListScreen[int | None]):
             options.clear_options()
             options.add_options(self._labels)
 
-    def choose[T](
-        self,
-        options: Sequence[T],
-        current: int | None,
-        chosen: Callable[[T], Awaitable[None] | None],
-    ) -> None:
+    def choose(self, current: int | None, chosen: Callable[[int], Awaitable[None] | None]) -> None:
         """Show the picker with option ``current`` highlighted and call ``chosen`` with the
-        item of ``options`` picked; escape calls nothing."""
+        index picked; escape calls nothing."""
         self.current = current
 
         async def picked(index: int | None) -> None:
             if index is not None:
-                result = chosen(options[index])
+                result = chosen(index)
                 if result is not None:
                     await result
 

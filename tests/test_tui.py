@@ -688,6 +688,49 @@ async def test_model_picker_selection_requests_that_model() -> None:
         assert not isinstance(app.screen, PickerScreen)
 
 
+async def test_model_pick_keeps_tool_access_changed_while_the_picker_is_open() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await show_settings(session, pilot, Settings(model="opus", tool_access="full"))
+        await pilot.press("ctrl+o")
+        await show_settings(session, pilot, Settings(model="opus", tool_access="off"))
+        await pilot.press("down", "enter")
+        assert session.commands == [
+            UpdateSettings(settings=Settings(model="sonnet", tool_access="off"))
+        ]
+
+
+async def test_tool_access_pick_keeps_model_changed_while_the_picker_is_open() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await show_settings(session, pilot, Settings(model="opus", tool_access="off"))
+        await pilot.press("ctrl+l")
+        await show_settings(session, pilot, Settings(model="sonnet", tool_access="off"))
+        await pilot.press("down", "enter")
+        assert session.commands == [
+            UpdateSettings(settings=Settings(model="sonnet", tool_access="restricted"))
+        ]
+
+
+async def test_model_pick_sends_the_model_labelled_after_choices_change_while_open() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await show_settings(session, pilot, Settings())
+        await pilot.press("ctrl+o")
+        choices = ("haiku", "opus", "sonnet", "fable")
+        await feed_events(
+            session, pilot, SettingsChanged(settings=Settings(), model_choices=choices)
+        )
+        await pilot.press("end")
+        labels, highlighted = picker(app)[1:]
+        assert highlighted is not None and labels[highlighted] == "fable"
+        await pilot.press("enter")
+        assert session.commands == [UpdateSettings(settings=Settings(model="fable"))]
+
+
 async def test_model_picker_highlights_nothing_for_custom_model() -> None:
     session = FakeSession()
     app = OrbitApp(session)
