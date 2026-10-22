@@ -8,6 +8,7 @@ from pathlib import Path
 from orbit.agent import Browsing, ControlPlane, DirectoryLister, WorkspaceHost
 from orbit.agent.domain.listings import LOCAL_BROWSING, FoundDirectory
 from orbit.protocol import (
+    INTERNAL,
     INVALID,
     UNKNOWN,
     AddWorkspace,
@@ -115,6 +116,76 @@ async def test_no_path_lists_the_home_directory(tmp_path: Path) -> None:
 
     assert isinstance(listing, DirectoryListing)
     assert (listing.path, [entry.name for entry in listing.entries]) == (str(tmp_path), ["a"])
+
+
+def latest(path: Path | None) -> FakeSource:
+    """Workspaces whose latest added is at ``path``, if any."""
+    source = FakeSource()
+    source.latest = None if path is None else str(path)
+    return source
+
+
+async def starting_path(home: Path, source: FakeSource, root: Path | None = None) -> str:
+    """The directory listed for no path, browsing from ``home`` with ``source``'s
+    workspaces, confined to ``root`` if given."""
+    plane = ControlPlane(workspaces=source, browsing=browsing(home, root))
+    listing, _ = await listed(plane, None)
+    await plane.close()
+    assert isinstance(listing, DirectoryListing)
+    return listing.path
+
+
+async def test_no_path_lists_beside_the_latest_added_workspace(tmp_path: Path) -> None:
+    (tmp_path / "src" / "a").mkdir(parents=True)
+    (tmp_path / "work" / "b").mkdir(parents=True)
+
+    beside_b = await starting_path(tmp_path, latest(tmp_path / "work" / "b"))
+    beside_a = await starting_path(tmp_path, latest(tmp_path / "src" / "a"))
+
+    assert (beside_b, beside_a) == (str(tmp_path / "work"), str(tmp_path / "src"))
+
+
+async def test_no_path_lists_home_when_the_latest_added_workspaces_directory_is_gone(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "home").mkdir()
+
+    gone = await starting_path(tmp_path / "home", latest(tmp_path / "gone" / "a"))
+
+    assert gone == str(tmp_path / "home")
+
+
+async def test_no_path_lists_the_root_when_the_latest_added_workspace_is_outside_it(
+    tmp_path: Path,
+) -> None:
+    x, y = fenced(tmp_path)
+
+    outside = await starting_path(tmp_path, latest(y / "repo"), x)
+    none = await starting_path(tmp_path, latest(None), x)
+    inside = await starting_path(tmp_path, latest(x / "a"), x)
+
+    assert (outside, none, inside) == (str(x), str(x), str(x))
+
+
+async def test_no_path_lists_home_without_a_source_of_workspaces(tmp_path: Path) -> None:
+    plane = ControlPlane(browsing=browsing(tmp_path))
+
+    listing, _ = await listed(plane, None)
+    await plane.close()
+
+    assert isinstance(listing, DirectoryListing) and listing.path == str(tmp_path)
+
+
+async def test_no_path_is_refused_when_the_latest_added_cant_be_found(tmp_path: Path) -> None:
+    source = FakeSource()
+    source.latest_fails = "The store failed."
+    plane = ControlPlane(workspaces=source, browsing=browsing(tmp_path))
+
+    outcome = await listed(plane, None)
+    await plane.close()
+
+    message = "Can't find where to start listing: The store failed."
+    assert outcome == [refused("list", INTERNAL, message)]
 
 
 async def test_only_the_connection_asking_gets_the_listing(tmp_path: Path) -> None:

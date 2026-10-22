@@ -245,6 +245,14 @@ class ServedWorkspaces:
         except StoreError as exc:
             raise WorkspaceUnavailable(str(exc), INTERNAL) from None
 
+    async def latest_added(self) -> str | None:
+        """The path of the workspace served that was flagged served last, if any. Raises
+        :class:`WorkspaceUnavailable` as ``INTERNAL`` if the store fails."""
+        try:
+            return await WorkspaceRegistry(self._store).latest_added()
+        except StoreError as exc:
+            raise WorkspaceUnavailable(str(exc), INTERNAL) from None
+
     async def close(self, workspace_id: str) -> None:
         """Stop serving the workspace ``workspace_id`` and let go of its lock, leaving its flag
         as it is."""

@@ -1193,7 +1193,9 @@ workspace served at each, if any; the listing comes from the server, so it's the
 filesystem a frontend on another machine browses. With `browse_root` set, an absolute directory,
 frontends may browse and add workspaces by path within it alone, symlinks followed, so a link
 inside it can't lead out; clones still go to `clone_dir`. Unset, the server's account may browse
-whatever it can read, starting from its home directory. A local `orbit chat` refuses browsing.
+whatever it can read. Browsing starts in the directory holding the workspace added last (by
+`AddWorkspace`, `--add` or a clone), if it's still there and inside `browse_root`; else at
+`browse_root`, if set, else the server account's home directory. A local `orbit chat` refuses browsing.
 
 Paths in `[server]` may start with `~`, and a relative one is taken from the config directory,
 so `cert = "tls/server.pem"` names `~/.config/orbit/tls/server.pem`; relative `--cert`, `--key`

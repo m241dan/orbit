@@ -1,11 +1,12 @@
 """The workspaces registered in the state directory's database: each found by its path, taken
-over from where its repository was before it moved, or registered with a new id, and whether a
-server serves it."""
+over from where its repository was before it moved, or registered with a new id, whether a
+server serves it, and when it was last flagged served."""
 
 import asyncio
 import sqlite3
 import uuid
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
 from orbit.agent.domain.fingerprints import fingerprints_match, lookalikes_note, reattached_note
@@ -99,8 +100,26 @@ def _served(connection: sqlite3.Connection) -> list[tuple[str, str]]:
     return [(str(workspace_id), str(path)) for workspace_id, path in rows]
 
 
+def _latest_added(connection: sqlite3.Connection) -> str | None:
+    """The path of the workspace served in ``connection`` that was flagged served last, if
+    any."""
+    found = connection.execute(
+        """SELECT path FROM workspaces WHERE served AND added_at IS NOT NULL
+        ORDER BY added_at DESC, rowid DESC LIMIT 1"""
+    ).fetchone()
+    return None if found is None else str(found[0])
+
+
 def _set_served(connection: sqlite3.Connection, workspace_id: str, served: bool) -> None:
-    connection.execute("UPDATE workspaces SET served = ? WHERE id = ?", (served, workspace_id))
+    """Flag the workspace ``workspace_id`` in ``connection`` as ``served``, or not, stamping
+    when it was flagged served; unflagging keeps the stamp."""
+    if not served:
+        connection.execute("UPDATE workspaces SET served = 0 WHERE id = ?", (workspace_id,))
+        return
+    now = datetime.now(UTC).isoformat(timespec="microseconds")
+    connection.execute(
+        "UPDATE workspaces SET served = 1, added_at = ? WHERE id = ?", (now, workspace_id)
+    )
 
 
 def _set_managed(connection: sqlite3.Connection, workspace_id: str) -> None:
@@ -176,8 +195,14 @@ class WorkspaceRegistry:
         """The id and path of each workspace a server serves, by path."""
         return await self._store.run("Couldn't list the served workspaces in", _served)
 
+    async def latest_added(self) -> str | None:
+        """The path of the workspace served that was flagged served last; ``None`` if none
+        is."""
+        return await self._store.run("Couldn't find the latest added workspace in", _latest_added)
+
     async def set_served(self, workspace_id: str, served: bool) -> None:
-        """Have a server serve the workspace ``workspace_id`` if ``served``, else not."""
+        """Have a server serve the workspace ``workspace_id`` if ``served``, stamping when, else
+        not."""
         message = f"Couldn't mark whether the workspace {workspace_id} is served in"
         await self._store.run(
             message, lambda connection: _set_served(connection, workspace_id, served)

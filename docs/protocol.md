@@ -284,8 +284,10 @@ orbit works on one repository; run orbit serve to work on several.`
 
 `ListDirectory(path)` lists the directories in the directory at `path`, an absolute path on the
 server's host, as the server's account sees them, so a frontend can find a repository to add.
-Without `path` (`null`, the default), it lists the server's starting directory: its
-`browse_root` if set, else its account's home. It's answered to the connection that asked alone
+Without `path` (`null`, the default), it lists the server's starting directory: the one holding
+the served workspace added last (by its `added_at`, stamped each time a workspace is flagged
+served, by `AddWorkspace`, `orbit serve --add` or a clone), if it's there and inside the
+`browse_root`; else the `browse_root` if set, else its account's home. It's answered to the connection that asked alone
 with a `DirectoryListing`, then `CommandAccepted`; the listing carries no workspace and no
 session, and isn't logged. Any connection welcomed may send it, attached or not.
 

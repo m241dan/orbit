@@ -97,6 +97,11 @@ class WorkspaceSource(Cloner, Protocol):
         serves it, or doesn't. Raises :class:`WorkspaceUnavailable` if that fails."""
         ...
 
+    async def latest_added(self) -> str | None:
+        """The path of the workspace served that was flagged served last, if any. Raises
+        :class:`WorkspaceUnavailable` if that can't be found out."""
+        ...
+
     async def close(self, workspace_id: str) -> None:
         """Let go of the lock on the workspace ``workspace_id``, whose host is closed and which
         is no longer flagged served, keeping its records."""
@@ -196,7 +201,8 @@ class ControlPlane:
 
     Given ``browsing``, ``ListDirectory``, from any connection welcomed, is answered to that
     connection alone with the listing of a directory on the server's host, each directory a
-    workspace is served at marked with its id; with a browsable root, it and ``AddWorkspace``
+    workspace is served at marked with its id, starting, with no path, beside the workspace the
+    source added last; with a browsable root, it and ``AddWorkspace``
     with a path are refused as ``invalid`` outside it. Without, as for a local orbit,
     ``ListDirectory`` is refused as ``invalid``.
 
@@ -406,7 +412,19 @@ class ControlPlane:
         if self._browsing is None:
             raise Refused(INVALID, LOCAL_BROWSING)
         served = {host.path: host.workspace_id for host in self._hosts.values() if host.path}
-        await connection.publish_here(await self._browsing.listing(command.path, served))
+        latest = None if command.path is not None else await self._latest_added()
+        listing = await self._browsing.listing(command.path, served, latest)
+        await connection.publish_here(listing)
+
+    async def _latest_added(self) -> str | None:
+        """The path of the workspace served that was flagged served last, if any; refused when
+        that can't be found out."""
+        if self._workspaces is None:
+            return None
+        try:
+            return await self._workspaces.latest_added()
+        except WorkspaceUnavailable as exc:
+            raise Refused(exc.code, f"Can't find where to start listing: {exc}") from None
 
     async def _confine(self, path: str, managed: bool) -> None:
         """Refuse adding the workspace at ``path`` as ``invalid`` when it's outside the

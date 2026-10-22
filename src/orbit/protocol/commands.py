@@ -258,8 +258,9 @@ class Watch(_Message):
 
 class ListDirectory(_Message):
     """List the directories in the directory at ``path``, an absolute path on the server's host,
-    or, if it's ``None``, the server's starting directory: its ``browse_root`` if set, else its
-    account's home. Answered to this connection alone with ``DirectoryListing``, then
+    or, if it's ``None``, the server's starting directory: the one holding the served workspace
+    added last, if it's there and inside its ``browse_root``, else its ``browse_root`` if set,
+    else its account's home. Answered to this connection alone with ``DirectoryListing``, then
     ``CommandAccepted``. A control-plane command: its envelope's ``workspace`` is ``null``, and
     it may come before ``Attach``. Refused with ``unknown`` for a path there's nothing at, and
     ``invalid`` for a relative path, a file, a directory the server can't read, one outside its

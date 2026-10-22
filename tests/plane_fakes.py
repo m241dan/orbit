@@ -113,7 +113,8 @@ class FakeSource:
     ``/clones/<its last part>``, reporting one step of progress, then waiting for
     ``clone_gate``, if given, and failing as ``clone_fails`` says, if it does. Purging a
     workspace would lose what ``lost`` says, by id, failing as ``losses_fail`` says, if it
-    does; those ``purged`` are noted, failing as ``purge_fails`` says, if it does."""
+    does; those ``purged`` are noted, failing as ``purge_fails`` says, if it does. The workspace
+    added last is at ``latest``, if any, unless finding it fails as ``latest_fails`` says."""
 
     def __init__(
         self,
@@ -139,6 +140,8 @@ class FakeSource:
         self.losses_fail: str | None = None
         self.purged: list[str] = []
         self.purge_fails: str | None = None
+        self.latest: str | None = None
+        self.latest_fails: str | None = None
 
     async def kind(self, path: str) -> PathKind:
         return self.kinds.get(path, PathKind.DIRECTORY)
@@ -177,6 +180,11 @@ class FakeSource:
         if not served and self.unflag_fails is not None:
             raise WorkspaceUnavailable(self.unflag_fails, INTERNAL)
         self.flags.append((workspace_id, served))
+
+    async def latest_added(self) -> str | None:
+        if self.latest_fails is not None:
+            raise WorkspaceUnavailable(self.latest_fails, INTERNAL)
+        return self.latest
 
     async def close(self, workspace_id: str) -> None:
         assert (workspace_id, False) in self.flags

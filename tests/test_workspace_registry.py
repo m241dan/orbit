@@ -18,6 +18,7 @@ from orbit.agent.external.repository import workspace_fingerprint
 from orbit.agent.external.sqlite_schema import StoreError
 from orbit.agent.external.sqlite_store import SqliteStore
 from orbit.agent.external.workspace_registry import Registered, WorkspaceRegistry, register
+from tests.store_views import database
 
 REPO = "root git@github.com:o/r.git"
 """The fingerprint of a repository, wherever it is."""
@@ -80,6 +81,42 @@ async def test_the_served_flag_round_trips(store: SqliteStore, tmp_path: Path) -
     ]
     await registry.set_served(second_id, False)
     assert await registry.served() == [(first_id, str(first.resolve()))]
+
+
+async def test_the_latest_added_is_the_served_workspace_flagged_served_last(
+    store: SqliteStore, tmp_path: Path
+) -> None:
+    registry = WorkspaceRegistry(store)
+    first, second = directory(tmp_path, "first"), directory(tmp_path, "second")
+    first_id = (await registry.find_or_register(str(first))).workspace_id
+    second_id = (await registry.find_or_register(str(second))).workspace_id
+    assert await registry.latest_added() is None
+    await registry.set_served(first_id, True)
+    await registry.set_served(second_id, True)
+    assert await registry.latest_added() == str(second.resolve())
+    await registry.set_served(first_id, True)
+    assert await registry.latest_added() == str(first.resolve())
+    await registry.set_served(first_id, False)
+    assert await registry.latest_added() == str(second.resolve())
+
+
+async def test_flagging_served_stamps_the_time_and_unflagging_keeps_it(
+    store: SqliteStore, tmp_path: Path
+) -> None:
+    registry = WorkspaceRegistry(store)
+    workspace_id = (
+        await registry.find_or_register(str(directory(tmp_path, "project")))
+    ).workspace_id
+    before = datetime.now(UTC)
+    await registry.set_served(workspace_id, True)
+    after = datetime.now(UTC)
+    with database(tmp_path / "state") as connection:
+        (stamped,) = connection.execute("SELECT added_at FROM workspaces").fetchone()
+    await registry.set_served(workspace_id, False)
+    with database(tmp_path / "state") as connection:
+        kept = connection.execute("SELECT added_at FROM workspaces").fetchone()
+    assert before <= datetime.fromisoformat(stamped) <= after
+    assert kept == (stamped,)
 
 
 async def test_a_workspace_marked_managed_stays_so_when_found_again(
@@ -274,6 +311,8 @@ async def test_a_closed_store_fails_each_call_naming_the_database(
         await registry.served()
     with pytest.raises(StoreError, match=f"Couldn't mark whether the workspace w .*{database}"):
         await registry.set_served("w", True)
+    with pytest.raises(StoreError, match=f"Couldn't find the latest added workspace in {database}"):
+        await registry.latest_added()
     with pytest.raises(StoreError, match=f"Couldn't mark the workspace w managed in {database}"):
         await registry.set_managed("w")
     with pytest.raises(StoreError, match=f"Couldn't look up the workspace w in {database}"):

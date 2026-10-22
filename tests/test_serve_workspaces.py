@@ -114,6 +114,38 @@ async def test_opening_a_workspace_flags_it_served_and_locks_it_until_closed(
     assert source.locks == ()
 
 
+async def test_the_latest_added_is_the_workspace_opened_last_even_when_reopened(
+    stack: ExitStack, store: SqliteStore, tmp_path: Path
+) -> None:
+    first, second = directory(tmp_path, "a"), directory(tmp_path, "b")
+    source = workspaces(stack, store)
+
+    before = await source.latest_added()
+    host = await source.open(str(first))
+    await (await source.open(str(second))).close()
+    latest = await source.latest_added()
+    await host.close()
+    await source.set_served(host.workspace_id, False)
+    await source.close(host.workspace_id)
+    await (await source.open(str(first))).close()
+
+    assert (before, latest) == (None, str(second))
+    assert await source.latest_added() == str(first)
+
+
+async def test_a_store_failing_to_find_the_latest_added_is_unavailable(
+    stack: ExitStack, store: SqliteStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def fails(self: WorkspaceRegistry) -> str | None:
+        raise StoreError("The store failed.")
+
+    monkeypatch.setattr(WorkspaceRegistry, "latest_added", fails)
+
+    with pytest.raises(WorkspaceUnavailable, match="The store failed") as unavailable:
+        await workspaces(stack, store).latest_added()
+    assert unavailable.value.code == INTERNAL
+
+
 async def test_a_workspace_another_orbit_owns_opens_read_only(
     stack: ExitStack, store: SqliteStore, tmp_path: Path
 ) -> None:

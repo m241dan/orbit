@@ -1,5 +1,5 @@
-"""Browsing the directories on the server's host, from its starting directory, confined to its
-browsable root if it has one."""
+"""Browsing the directories on the server's host, from its starting directory, beside the
+workspace added last, confined to its browsable root if it has one."""
 
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -7,6 +7,7 @@ from pathlib import PurePath
 
 from orbit.agent.application.ports import DirectoryLister
 from orbit.agent.domain.listings import check_inside, check_listable, listing, unreadable
+from orbit.agent.domain.refusals import Refused
 from orbit.protocol import DirectoryListing
 
 
@@ -20,19 +21,34 @@ class Browsing:
     home: str
     root: str | None = None
 
-    async def listing(self, path: str | None, served: Mapping[str, str]) -> DirectoryListing:
+    async def listing(
+        self, path: str | None, served: Mapping[str, str], latest: str | None = None
+    ) -> DirectoryListing:
         """The listing of the directory at ``path``, with its symlinks followed, or of the
         starting directory if it's ``None``, its entries marked with the ids of the workspaces
         ``served`` at their paths; refused as ``invalid`` for a relative path, one outside the
         root, a file or one that can't be read, and as ``unknown`` when there's nothing
-        there."""
-        given = (self.root or self.home) if path is None else path
-        check_listable(given, absolute=PurePath(given).is_absolute())
-        resolved = await self.confined(given)
+        there.
+
+        The starting directory is the one holding ``latest``, the workspace added last, if it
+        can be listed, else the root, if there is one, else home."""
+        if path is not None:
+            return await self._listed(path, served)
+        if latest is not None:
+            try:
+                return await self._listed(str(PurePath(latest).parent), served)
+            except Refused:
+                pass  # Gone or outside the root, so start where there's no workspace.
+        return await self._listed(self.root or self.home, served)
+
+    async def _listed(self, path: str, served: Mapping[str, str]) -> DirectoryListing:
+        """The listing of the directory at ``path``, as :meth:`listing` says."""
+        check_listable(path, absolute=PurePath(path).is_absolute())
+        resolved = await self.confined(path)
         try:
             found = await self.lister.directories(resolved)
         except OSError as exc:
-            raise unreadable(given, exc) from None
+            raise unreadable(path, exc) from None
         return listing(resolved, self._parent(resolved), found, served)
 
     async def confined(self, path: str) -> str:

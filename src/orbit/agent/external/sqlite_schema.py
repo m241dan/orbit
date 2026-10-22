@@ -91,6 +91,13 @@ MIGRATIONS: tuple[tuple[str, ...], ...] = (
         )""",
         "CREATE INDEX usage_at ON usage (at)",
     ),
+    (
+        # When the workspace was last flagged served, as an ISO UTC time; null until it is. Those
+        # served already get the migration's time, to the millisecond.
+        "ALTER TABLE workspaces ADD COLUMN added_at TEXT",
+        """UPDATE workspaces SET added_at = strftime('%Y-%m-%dT%H:%M:%f000+00:00', 'now')
+        WHERE served""",
+    ),
 )
 
 
