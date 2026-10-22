@@ -17,14 +17,20 @@ def _never() -> bool:
     return False
 
 
+def _admit() -> None:
+    """Refuse nothing."""
+
+
 @dataclass(frozen=True)
 class SessionGate:
     """What keeps work from starting: ``halted`` tells whether the session is halted, as a write
-    to the store failed, and ``read_only`` whether another orbit owns the repository. Asked
-    afresh each time, as either may change across an ``await``."""
+    to the store failed, ``read_only`` whether another orbit owns the repository, and ``check``
+    refuses work the user asked for, raising :class:`Refused`, while the session is halted.
+    Asked afresh each time, as either may change across an ``await``."""
 
     halted: Callable[[], bool] = _never
     read_only: Callable[[], bool] = _never
+    check: Callable[[], None] = _admit
 
 
 OPEN_GATE = SessionGate()

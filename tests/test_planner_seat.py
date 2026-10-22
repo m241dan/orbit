@@ -25,6 +25,7 @@ from orbit.protocol import (
     INVALID,
     NOT_CONFIGURED,
     PLANNER,
+    STORAGE_FAILED,
     AgentExited,
     BusyChanged,
     ConversationReset,
@@ -36,6 +37,7 @@ from orbit.protocol import (
 )
 from tests.agent_fakes import ROLES, FakeHost, ScriptedLauncher, chats, hangs
 
+HALTED_MESSAGE = "The session is halted."
 EXITED = AgentExited(agent_id="agent-1", reason="finished")
 
 
@@ -64,10 +66,12 @@ class Seated:
 
 
 def seated(
-    roles: Mapping[str, Role] | None = ROLES, planner_role: PlannerRoleReader | None = None
+    roles: Mapping[str, Role] | None = ROLES,
+    planner_role: PlannerRoleReader | None = None,
+    halts: bool = False,
 ) -> Seated:
     """A seat with agents in ``roles``, or none if None, whose planner role reads again with
-    ``planner_role``."""
+    ``planner_role``, and whose session halts as it's saved if ``halts``."""
     events: asyncio.Queue[Event] = asyncio.Queue()
     host = FakeHost()
     launcher = ScriptedLauncher(host)
@@ -75,10 +79,18 @@ def seated(
     desk = AgentDesk(agents, events.put) if roles is not None else None
     calls: list[str] = []
 
-    async def save() -> None:
-        calls.append("save")
+    halted = False
 
-    hooks = SeatHooks(save, lambda: calls.append("use"), lambda: ())
+    async def save() -> None:
+        nonlocal halted
+        calls.append("save")
+        halted = halts
+
+    def check() -> None:
+        if halted:
+            raise Refused(STORAGE_FAILED, HALTED_MESSAGE)
+
+    hooks = SeatHooks(save, lambda: calls.append("use"), lambda: (), check)
     seat = PlannerSeat(desk, Tasks(TaskBoard(), events.put), events, hooks)
     return Seated(seat, events, launcher, calls)
 
@@ -113,6 +125,16 @@ async def test_a_turn_marks_the_session_used_and_saves_before_and_after() -> Non
     assert events[0] == BusyChanged(busy=True, lane="planner")
     assert isinstance(events[-2], TurnFinished)
     assert events[-1] == BusyChanged(busy=False, lane="planner")
+
+
+async def test_a_submit_whose_save_halts_the_session_is_refused_and_starts_no_turn() -> None:
+    seated_ = seated(halts=True)
+    seated_.launcher.planner_turns = [chats]
+    with pytest.raises(Refused) as refused:
+        await seated_.seat.submit("Plan.", Settings())
+    assert (refused.value.code, str(refused.value)) == (STORAGE_FAILED, HALTED_MESSAGE)
+    assert seated_.seat.turn is None
+    assert seated_.launcher.launches == []
 
 
 async def test_the_conversation_is_known_once_a_turn_starts_it() -> None:

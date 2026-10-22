@@ -32,14 +32,20 @@ NOTHING_TO_RESET = "The planner has no conversation to reset."
 ROLE_KEPT = "Kept the planner's role, as the config is invalid"
 
 
+def _admit() -> None:
+    """Refuse nothing."""
+
+
 @dataclass(frozen=True)
 class SeatHooks:
-    """What the seat asks of its session: to ``save`` it, to mark it ``use``d, and the
-    ``step_names`` verifying tasks now."""
+    """What the seat asks of its session: to ``save`` it, to mark it ``use``d, the
+    ``step_names`` verifying tasks now, and to ``check`` it, refusing a turn by raising
+    :class:`Refused` while it's halted."""
 
     save: Callable[[], Awaitable[None]]
     use: Callable[[], None]
     step_names: Callable[[], tuple[str, ...]]
+    check: Callable[[], None] = _admit
 
 
 class PlannerSeat:
@@ -84,13 +90,15 @@ class PlannerSeat:
 
     async def submit(self, text: str, settings: Settings) -> None:
         """Start a turn of the planner's conversation on ``text`` with ``settings``, in its
-        own lane; refused without a planner, or while it answers."""
+        own lane; refused without a planner, while it answers, or once saving the session halted
+        it."""
         if self._planner is None:
             # Frees the prompt of a frontend that marked the lane busy when it sent this.
             await self._events.put(BusyChanged(busy=False, lane=PLANNER_LANE))
             raise Refused(NOT_CONFIGURED, NO_PLANNER_MESSAGE)
         self._hooks.use()
         await self._hooks.save()
+        self._hooks.check()  # The save may have halted the session.
         await self._turns.start(self._answer(self._planner, text, settings))
 
     async def _answer(self, planner: PlannerChat, text: str, settings: Settings) -> TurnEndReason:

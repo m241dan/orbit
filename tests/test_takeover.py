@@ -4,16 +4,19 @@ import asyncio
 from collections.abc import Sequence
 
 from orbit.agent import WorkspaceHost
+from orbit.agent.application.ports import StoreFailed
 from orbit.agent.application.recovery import RecoveryFailed
 from orbit.agent.application.takeover import NO_OFFER, RetryTimes, Takeover
 from orbit.agent.application.work_turns import TASKS_RUNNING_MESSAGE
 from orbit.agent.application.workspace_host import OWNED_NOTE
 from orbit.agent.domain.ownership import queued_dropped_note
+from orbit.agent.domain.storage_halt import FailedWrite
 from orbit.protocol import (
     BUSY,
     CONFIGURE_CHECKS,
     INTERNAL,
     INVALID,
+    STORAGE_FAILED,
     ActivateSession,
     AddTask,
     Catalog,
@@ -41,6 +44,7 @@ from tests.agent_fakes import (
     OWNER,
     Call,
     Configurator,
+    FakeFallback,
     FakeLock,
     FakeStore,
     FakeTree,
@@ -55,6 +59,7 @@ from tests.agent_fakes import (
     send,
     session_for,
     sole,
+    tasks_of,
     turns_of,
     views_on_joining,
 )
@@ -548,6 +553,32 @@ async def test_a_recovery_that_fails_on_taking_over_is_reported_and_work_still_r
     assert ErrorOccurred(code=INTERNAL, message=str(failure)) in events
     assert len(launcher.launches) == 1 and not session.read_only
     await session.close()
+
+
+async def test_the_queued_work_does_not_start_once_recovering_on_taking_over_halts() -> None:
+    lock, sessions = FakeLock(), list[WorkspaceHost]()
+
+    async def halts() -> Sequence[str]:
+        sessions[0]._halt.fail(FailedWrite.EVENT_LOG, StoreFailed("disk full"))
+        return ()
+
+    session, _, launcher = session_for(
+        claims_done, owner=OWNER, lock=lock, recover=halts, fallback=FakeFallback()
+    )
+    sessions.append(session)
+    await send(session, AddTask(task=TaskSpec(prompt="Add a flag.")))
+    await send(session, RunTasks())
+    lock.free = True
+    await events_until(session, offered)
+
+    await send(session, TakeOwnership(take=True))
+    events = await events_until(session, lambda event: event == ACCEPTED)
+    await session.close()
+
+    errors = [event for event in events if isinstance(event, ErrorOccurred)]
+    assert errors and all(error.code == STORAGE_FAILED for error in errors)
+    assert launcher.launches == []
+    assert tasks_of(session).board.tasks[0].status == "pending"
 
 
 async def test_declining_the_offer_recovers_nothing() -> None:

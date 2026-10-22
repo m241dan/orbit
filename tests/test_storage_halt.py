@@ -33,8 +33,10 @@ from orbit.agent.external.fallback_files import FallbackFiles
 from orbit.protocol import (
     PLANNER,
     PLANNER_LANE,
+    REVIEWER,
     STORAGE_FAILED,
     AddTask,
+    AgentExited,
     BusyChanged,
     CommandRefused,
     ErrorOccurred,
@@ -608,6 +610,37 @@ async def test_a_reviews_wake_after_resuming_starts_the_queued_work() -> None:
 
     assert await worked(session) == ["completed"]
     await session.close()
+
+
+async def test_resuming_runs_the_review_waiting_on_the_board() -> None:
+    store, fallback = FakeStore(), FakeFallback()
+    store.append_failure = "disk full"
+    session, _, launcher = session_for(
+        reviewers=(suggests(),), tree=FakeTree(), review=True, store=store, fallback=fallback
+    )
+    await publish(session, Notice(message="n0"))
+    await halt_error(session)
+    tasks_of(session).board.add(TaskSpec(prompt="Review it.", role=REVIEWER))
+    store.append_failure = None
+
+    assert (await outcome_of(session, ResumeStorage()))[-1].payload == ACCEPTED
+    await events_until(session, lambda event: isinstance(event, AgentExited))
+    assert [launch.agent.role for launch in launcher.launches] == [REVIEWER]
+    await session.close()
+
+
+async def test_the_startup_check_does_not_start_on_a_halted_session() -> None:
+    steps = Steps(True)
+    session, _, _ = session_for(
+        verification=checked(steps), tree=FakeTree(), check_at_startup=True, store=FakeStore()
+    )
+    session._halt.fail(FailedWrite.EVENT_LOG, StoreFailed("disk full"))
+    session.start_background()
+    startup = startup_of(session)
+    await session.close()
+
+    assert startup is not None and not startup.running and startup.panel is None
+    assert steps.runs == []
 
 
 async def test_resuming_logs_a_gap_for_events_that_reached_no_fallback() -> None:

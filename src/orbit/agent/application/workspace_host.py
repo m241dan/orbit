@@ -290,7 +290,9 @@ class WorkspaceHost:
             lambda: self._events.stop_log(self._keeper.id), self._stop_work, self._retry_storage
         )
         self._halt = StorageHalt(lambda event: self._events.put(event), halt_hooks)
-        self._gate = SessionGate(lambda: self._halt.halted, lambda: self._takeover.read_only)
+        self._gate = SessionGate(
+            lambda: self._halt.halted, lambda: self._takeover.read_only, self._halt.check
+        )
         overflow = Overflow(fallback, self._log_failed)
         self._connections = Connections(lambda: self._states.check(), lambda: self._keeper.id)
         self._workspace_id = workspace_id
@@ -318,7 +320,7 @@ class WorkspaceHost:
         self._started = False
         self._lane = self._review_lane()
         self._coders = CoderSeat(lambda: self.coder_slots, workspace_id, lambda: self._keeper.id)
-        hooks = SeatHooks(self._save, self._keeper.use, self._step_names)
+        hooks = SeatHooks(self._save, self._keeper.use, self._step_names, self._halt.check)
         self._seat = PlannerSeat(self._desk, self._tasks, self._events, hooks)
         self._startup = self._startup_check(
             verification, check_at_startup and not self._takeover.read_only
@@ -688,11 +690,13 @@ class WorkspaceHost:
             await self._views.deleted(command.session_id)
 
     async def _resume_storage(self) -> None:
-        """Lift the halt, if the writes that failed now work, and start the run whose wait to
-        start again ended while halted."""
+        """Lift the halt, if the writes that failed now work, start the run whose wait to start
+        again ended while halted, and the reviews waiting."""
         await self._halt.resume()
         if not self._halt.halted:
             await self._turns.lifted()
+            if self._lane is not None:
+                self._lane.kick()
 
     async def _take_ownership(self, command: TakeOwnership, command_id: str) -> None:
         """Answer the offer of the repository: own it, if ``command`` takes it, send the catalog
@@ -890,15 +894,15 @@ class WorkspaceHost:
         return work.current, work.waiting_for_coder, work.coders_busy
 
     def start_background(self) -> None:
-        """Start loading the super review count, the startup check, if there is one, and the
-        tries of the repository's lock, unless they were started for an earlier connection
-        attaching here."""
+        """Start loading the super review count, the startup check, if there is one and the
+        session isn't halted, and the tries of the repository's lock, unless they were started
+        for an earlier connection attaching here."""
         if self._started:
             return
         self._started = True
         self._count_loader.start(self._load_review_count())
         self._takeover.start()
-        if self._startup is not None:
+        if self._startup is not None and not self._halt.halted:
             self._startup.start()
 
     def _no_steps(self) -> bool:

@@ -173,20 +173,22 @@ class WorkTurns:
 
     async def _start(self, *, asked: bool) -> None:
         """Start the work lane's turn if there is work, unless closed. The user ``asked`` lifts a
-        hold, and a run already running refuses them; otherwise a hold, a running run or a halt
-        keeps it waiting."""
+        hold, and a halt or a run already running refuses them; otherwise a hold, a running run
+        or a halt keeps it waiting."""
         work = self._startable(asked=asked)
         if work is not None:
             await self._turns.start(self._run(work))
 
     def _startable(self, *, asked: bool) -> WorkLane | None:
         """The work lane, if :meth:`_start` would start its turn now; the user ``asked`` lifts a
-        hold."""
+        hold, and is refused while the session is halted."""
         work = self._parts.work
         assert work is not None  # Work needs agents.
         if self._closed:
             return None
         if asked:
+            # The session may have halted since the command was admitted, as it was saved.
+            self._parts.gate.check()
             self._held = False
         elif self._waits:
             return None

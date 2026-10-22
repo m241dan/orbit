@@ -30,6 +30,7 @@ from orbit.protocol import (
     CONFIGURATOR,
     INTERNAL,
     NOT_CONFIGURED,
+    STORAGE_FAILED,
     WORK_LANE,
     BusyChanged,
     ErrorOccurred,
@@ -78,11 +79,19 @@ class Sleeps:
         return LimitPause(now=lambda: START, sleep=self.sleep)
 
 
+HALTED_MESSAGE = "The session is halted."
+
+
 @dataclass
 class Halt:
     """Whether the session is halted, as a test sets it."""
 
     on: bool = False
+
+    def check(self) -> None:
+        """Refuse, as the halt does, while on."""
+        if self.on:
+            raise Refused(STORAGE_FAILED, HALTED_MESSAGE)
 
 
 @dataclass
@@ -121,7 +130,13 @@ def lane_parts(
     work = StopsCounted(desk, tasks, verifier, Beside())
     halted = halt or Halt()
     return WorkParts(
-        work, None, tasks, verifier, desk, posted.append, SessionGate(lambda: halted.on)
+        work,
+        None,
+        tasks,
+        verifier,
+        desk,
+        posted.append,
+        SessionGate(lambda: halted.on, check=halted.check),
     )
 
 
@@ -200,6 +215,36 @@ async def test_a_wake_while_halted_starts_no_work(lane: Lane) -> None:
     await lane.turns.wake()
     assert not lane.turns.running
     assert BusyChanged(busy=True, lane=WORK_LANE) not in lane.posted
+
+
+async def test_a_run_for_the_user_while_halted_is_refused_as_the_halt_refuses(
+    lane: Lane,
+) -> None:
+    await add(lane)
+    lane.halt.on = True
+    with pytest.raises(Refused) as refused:
+        await lane.turns.run_tasks()
+    assert (refused.value.code, str(refused.value)) == (STORAGE_FAILED, HALTED_MESSAGE)
+    assert not lane.turns.running
+
+
+async def test_configuring_whose_save_halts_the_session_is_refused_and_starts_no_run() -> None:
+    halt = Halt()
+
+    async def halts() -> None:
+        halt.on = True
+
+    tasks = Tasks(TaskBoard(), lambda _: asyncio.sleep(0), halts)
+    parts = lane_parts(tasks, [], True, halt)
+    turns = WorkTurns(parts)
+    assert parts.desk is not None
+    try:
+        with pytest.raises(Refused) as refused:
+            await turns.configure_checks()
+    finally:
+        await parts.desk.stop()
+    assert (refused.value.code, str(refused.value)) == (STORAGE_FAILED, HALTED_MESSAGE)
+    assert not turns.running
 
 
 async def test_a_wake_once_the_halt_lifts_starts_waiting_work(lane: Lane) -> None:
