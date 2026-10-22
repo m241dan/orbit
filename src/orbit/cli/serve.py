@@ -37,7 +37,7 @@ from orbit.agent import (
     running_server,
     tls_warnings,
 )
-from orbit.cli.backend import _Backend, _serving, _workspace
+from orbit.cli.backend import _Backend, _workspace
 from orbit.cli.errors import _configured, _exit_on
 from orbit.cli.options import (
     AddOption,
@@ -57,6 +57,7 @@ from orbit.cli.options import (
     VerifyOption,
     WorktreeOption,
 )
+from orbit.cli.served import _serving
 from orbit.profiling import profiled
 
 logger = logging.getLogger(__name__)

@@ -13,6 +13,7 @@ import pytest
 import typer
 
 from orbit.agent import (
+    ImportBlocked,
     OrbitConfig,
     PathKind,
     ServedWorkspaces,
@@ -27,8 +28,9 @@ from orbit.agent import (
 )
 from orbit.agent.application.recovery import RecoveryFailed
 from orbit.agent.external import served_workspaces
-from orbit.cli import backend
-from orbit.cli.backend import _added, _Backend, _backend, _Directories, _workspaces
+from orbit.cli import backend, served
+from orbit.cli.backend import _Backend, _backend, _Directories
+from orbit.cli.served import _added, _workspaces
 from orbit.protocol import INTERNAL, INVALID
 
 FLAGS = _Backend(None, None, False, False, False, False, new=False, name=None)
@@ -368,7 +370,7 @@ def test_serving_with_every_workspace_added_servable_flags_them_all(tmp_path: Pa
     first, second = directory(tmp_path, "first"), directory(tmp_path, "second")
     state = tmp_path / "state"
 
-    with backend._serving(FLAGS, [first, second], state, tmp_path / "config") as serving:
+    with served._serving(FLAGS, [first, second], state, tmp_path / "config") as serving:
         roots = [workspace.root for workspace in serving.workspaces]
 
     assert roots == [first, second]
@@ -383,7 +385,7 @@ def test_serving_stops_with_a_later_workspace_added_unservable_leaving_the_other
     state = tmp_path / "state"
 
     with pytest.raises(typer.Exit) as exited:
-        stack.enter_context(backend._serving(FLAGS, [good, bad], state, tmp_path / "config"))
+        stack.enter_context(served._serving(FLAGS, [good, bad], state, tmp_path / "config"))
 
     assert exited.value.exit_code == 2
     assert flagged(state) == [] and free(good)
@@ -403,9 +405,7 @@ def test_serving_stops_if_the_workspaces_added_cant_be_flagged(
     monkeypatch.setattr(WorkspaceRegistry, "set_served", fails)
 
     with pytest.raises(typer.Exit) as exited:
-        stack.enter_context(
-            backend._serving(FLAGS, [root], tmp_path / "state", tmp_path / "config")
-        )
+        stack.enter_context(served._serving(FLAGS, [root], tmp_path / "state", tmp_path / "config"))
 
     assert exited.value.exit_code == 2
     assert capsys.readouterr().err == "The store failed.\n" and free(root)
@@ -509,19 +509,31 @@ async def test_an_add_cancelled_while_preparing_that_then_fails_takes_no_lock(
     assert free(root) and source.locks == ()
 
 
-def failing_store(root: Path, monkeypatch: pytest.MonkeyPatch) -> _Backend:
-    async def fails(store: SqliteStore, root: Path, *, owned: bool) -> None:
-        raise StoreError("The store failed.")
+def failing_with(failure: Exception) -> Refusal:
+    """What has opening the workspace's view of the store fail with ``failure``."""
 
-    monkeypatch.setattr(served_workspaces, "open_workspace_store", fails)
-    return FLAGS
+    def failing(root: Path, monkeypatch: pytest.MonkeyPatch) -> _Backend:
+        async def fails(store: SqliteStore, root: Path, *, owned: bool) -> None:
+            raise failure
+
+        monkeypatch.setattr(served_workspaces, "open_workspace_store", fails)
+        return FLAGS
+
+    return failing
+
+
+failing_store = failing_with(StoreError("The store failed."))
+failing_import = failing_with(ImportBlocked("Couldn't import /sessions: it's unreadable."))
+failing_recovery = failing_with(RecoveryFailed("/parked.jsonl", "it's unreadable"))
 
 
 def chat_directories(tmp_path: Path, root: Path) -> _Directories:
     return _Directories(root, tmp_path / "state", tmp_path / "config")
 
 
-@pytest.mark.parametrize("refusal", [invalid_config, unmakeable_lock, failing_store])
+@pytest.mark.parametrize(
+    "refusal", [invalid_config, unmakeable_lock, failing_store, failing_import, failing_recovery]
+)
 def test_chat_and_a_frontend_add_refuse_a_workspace_saying_the_same_and_let_the_lock_go(
     refusal: Refusal,
     tmp_path: Path,
