@@ -15,6 +15,7 @@ from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.lanes import Background, SessionGate
 from orbit.agent.application.outcomes import Outcome, UserStop, cancelling, run_task_to_end
 from orbit.agent.application.ports import CoderTree, Reply, TreeFailed
+from orbit.agent.application.snapshots import snapshot_of
 from orbit.agent.application.tasks import Changed, Tasks
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.endings import REVIEW_STOPPED_BY_YOU
@@ -320,12 +321,11 @@ class ReviewLane:
 
     async def _run_reviewer(self, task_id: str, commit: str | None) -> Outcome:
         """Run the reviewer in a snapshot of ``commit``; a review the user queued works in place."""
-        root = await self._tree.snapshot(commit) if commit else self._desk.agents.root
-        try:
-            return await AgentRun(task_id, self._tasks, None, self._desk).run(None, root)
-        finally:
-            if commit:
-                await self._tree.drop(root)
+        run = AgentRun(task_id, self._tasks, None, self._desk).run
+        if not commit:
+            return await run(None, self._desk.agents.root)
+        async with snapshot_of(self._tree, commit, self._publish) as root:
+            return await run(None, root)
 
     async def _after(self, batch: str | None) -> None:
         """A review ended: review its batch if that's done, else run the suggestions it made."""

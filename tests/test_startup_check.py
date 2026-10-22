@@ -241,6 +241,27 @@ async def test_closing_before_it_starts_is_harmless() -> None:
     assert not check.running
 
 
+async def test_a_snapshot_that_cannot_be_dropped_leaves_the_failure_reported() -> None:
+    tree = FakeTree()
+    tree.failures["drop"] = TreeFailed("git worktree remove failed")
+    session, _, _ = session_for(
+        verification=checked(Steps(False)), tree=tree, check_at_startup=True
+    )
+
+    events = await until_checked(session)
+
+    message = (
+        f"The snapshot at {SNAPSHOT} couldn't be removed and is left over:"
+        " git worktree remove failed"
+    )
+    assert ErrorOccurred(code=GIT_FAILED, message=message) in events
+    assert StartupChecked(passed=False, step="Lint", output="1 test failed") in events
+    [draft] = board(events)
+    assert draft.task.prompt.splitlines()[0] == "Fix failing check: Lint"
+    assert AgentExited(agent_id="startup-check", reason="finished") in events
+    await session.close()
+
+
 async def test_a_snapshot_git_cannot_make_is_reported() -> None:
     class Broken(FakeTree):
         async def snapshot(self, commit: str) -> str:

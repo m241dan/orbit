@@ -212,6 +212,20 @@ async def test_a_crashing_reviewer_still_has_its_snapshot_dropped() -> None:
     assert tree.dropped == ["/work/review-c1"]
 
 
+async def test_a_snapshot_that_cannot_be_dropped_leaves_the_review_completed() -> None:
+    tree = FakeTree()
+    tree.failures["drop"] = TreeFailed("git worktree remove failed")
+    session, _, _ = session_for(claims_done, reviewers=(suggests(),), tree=tree, review=True)
+    await start(session)
+    events = await asyncio.wait_for(settle(session), 10)
+    assert [t.status for t in board(events)] == ["completed", "completed"]
+    message = (
+        "The snapshot at /work/review-c1 couldn't be removed and is left over:"
+        " git worktree remove failed"
+    )
+    assert ErrorOccurred(code=GIT_FAILED, message=message) in events
+
+
 async def test_after_cancelling_suggestions_wait_to_be_run() -> None:
     gate = asyncio.Event()
 

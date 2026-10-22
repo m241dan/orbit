@@ -12,6 +12,7 @@ from dataclasses import dataclass
 
 from orbit.agent.application.lanes import Background
 from orbit.agent.application.ports import CoderTree, Publish, TreeFailed
+from orbit.agent.application.snapshots import snapshot_of
 from orbit.agent.application.verifier import Failure, Verification, first_failure
 from orbit.agent.domain.checks import setup_step
 from orbit.agent.domain.verification import StepProgress, VerificationStep, trim_output
@@ -136,11 +137,8 @@ class StartupCheck:
     async def _in_snapshot(self) -> Failure | None:
         if self._tree is None:
             return await self._verify(self._root)
-        root = await self._tree.snapshot(BASE)
-        try:
+        async with snapshot_of(self._tree, BASE, self._publish) as root:
             return await self._verify(root)
-        finally:
-            await self._tree.drop(root)
 
     async def _verify(self, root: str) -> Failure | None:
         """Set up ``root``, then run the steps there; returns the first failure."""

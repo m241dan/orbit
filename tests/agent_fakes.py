@@ -592,6 +592,7 @@ class FakeTree:
 
     async def drop(self, path: str) -> None:
         self.dropped.append(path)
+        self._fail("drop")
 
     async def untracked(self) -> frozenset[str]:
         return self.untracked_sets.pop(0) if self.untracked_sets else frozenset()
