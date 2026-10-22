@@ -25,7 +25,12 @@ def commit_message(task: TaskSpec, summaries: Sequence[str], fix: bool = False) 
 
 def _subject(task: TaskSpec, summaries: Sequence[str]) -> str:
     first = _first_line(summaries[0]) if summaries else ""
-    return _trim(first or _first_line(task.prompt), SUBJECT_LIMIT - 1)
+    return _trim(first, SUBJECT_LIMIT - 1) if first else task_title(task)
+
+
+def task_title(task: TaskSpec) -> str:
+    """``task``'s title: its prompt's first line, cut to fit a commit's subject."""
+    return _trim(_first_line(task.prompt), SUBJECT_LIMIT - 1)
 
 
 def _trim(text: str, limit: int) -> str:

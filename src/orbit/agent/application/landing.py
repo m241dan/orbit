@@ -3,8 +3,10 @@
 from dataclasses import dataclass
 
 from orbit.agent.application.ports import CoderTree, Merge, Publish
+from orbit.agent.application.task_trace import MERGE_CONFLICT_EVENT, MERGE_RESULT
 from orbit.agent.application.verifier import Failure, Verifier
 from orbit.protocol import TaskMerged
+from orbit.tracing import current_span
 
 # Times the work is rebased onto a base that keeps moving before orbit stops trying.
 MAX_REBASES = 3
@@ -20,7 +22,8 @@ class Landing:
 
 
 class Lander:
-    """Commits and merges tasks' work from ``tree``, verifying it again after a rebase."""
+    """Commits and merges tasks' work from ``tree``, verifying it again after a rebase; the
+    merge's result is recorded on the current span."""
 
     def __init__(self, tree: CoderTree, verifier: Verifier | None, publish: Publish) -> None:
         self._tree = tree
@@ -34,6 +37,7 @@ class Lander:
         merge = await self._integrate(task_id, root)
         if not isinstance(merge, Merge):
             return Landing(failure=merge)
+        _record_merge(merge)
         # Read after any rebase, which rewrites the commits.
         head = await self._tree.head()
         commit = head if head != start else None
@@ -65,3 +69,11 @@ class Lander:
         if self._verifier is None:
             return None
         return await self._verifier.check(task_id, None, root)
+
+
+def _record_merge(merge: Merge) -> None:
+    """Record what came of ``merge`` on the current span, and a conflict as an event."""
+    span = current_span()
+    span.set_attributes({MERGE_RESULT: merge.result})
+    if merge.result == "conflict":
+        span.event(MERGE_CONFLICT_EVENT)

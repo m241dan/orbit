@@ -20,6 +20,7 @@ from orbit.agent.application.lanes import stop
 from orbit.agent.application.outcomes import Outcome, cancelling, ended
 from orbit.agent.application.ports import Reply
 from orbit.agent.application.proposal_trial import ProposalTrial
+from orbit.agent.application.task_trace import CHECK_RUNS, FIX_ATTEMPTS, GAVE_UP_EVENT
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.application.verifier import Failure, Verifier, first_failure
 from orbit.agent.domain.agent_task import FINISHED, AgentTask, Phase
@@ -61,6 +62,7 @@ from orbit.protocol import (
     TurnFinished,
     Usage,
 )
+from orbit.tracing import current_span
 
 Wake = Literal["exited", "gave_up"]
 """Why the run loop wakes up, other than a claim that the task is done."""
@@ -105,7 +107,10 @@ def _fail(claim: "asyncio.Future[Reply] | None", exc: BaseException) -> None:
 
 
 class AgentRun:
-    """One agent working on task ``task_id`` of ``tasks``, from launch until it exits."""
+    """One agent working on task ``task_id`` of ``tasks``, from launch until it exits.
+
+    Its check runs, fixes asked and giving up are recorded on the span current as it's made,
+    which the agent's calls, arriving from elsewhere, don't see as current."""
 
     def __init__(
         self, task_id: str, tasks: Tasks, verifier: Verifier | None, desk: AgentDesk
@@ -115,6 +120,8 @@ class AgentRun:
         self._board = tasks.board
         self._verifier = verifier
         self._desk = desk
+        self._span = current_span()
+        self._check_runs = 0
         self._publish = self._noting
         self._error: str | None = None  # The first error published while the agent ran.
         self._given_up = ""  # Why the agent gave up, if it did.
@@ -344,6 +351,7 @@ class AgentRun:
         self._failure = failure
         if self._work.phase == "working":
             assert self._verifier is not None  # Only verification fails.
+            self._span.set_attributes({FIX_ATTEMPTS: self._work.attempt})
             self._failed_state = await self._verifier.fingerprint(self._root)
             await self._tasks.change(self._retry)
         return reply
@@ -406,6 +414,8 @@ class AgentRun:
         refusal = self._work.request_check()
         if refusal is not None:
             return Reply(refusal, is_error=True)
+        self._check_runs += 1
+        self._span.set_attributes({CHECK_RUNS: self._check_runs})
         return await self._checked(step)
 
     async def _checked(self, step: VerificationStep) -> Reply:
@@ -461,6 +471,7 @@ class AgentRun:
         if self._work.phase != "gave_up":
             return Reply(reply, is_error=True)
         self._given_up = reason
+        self._span.event(GAVE_UP_EVENT)
         await self._publish(
             TaskGaveUp(agent_id=self.agent.id, task_id=self._task_id, reason=reason)
         )

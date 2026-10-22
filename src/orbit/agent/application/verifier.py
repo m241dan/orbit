@@ -1,10 +1,16 @@
 """Verifying a task once its agent is done: which steps run, and reporting their progress."""
 
+import time
 from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass, replace
 from typing import TypeVar
 
 from orbit.agent.application.ports import CoderTree, Publish, StepRunner, Workspace
+from orbit.agent.application.task_trace import (
+    VERIFY_FAILED_STEP,
+    VERIFY_RESULT,
+    VERIFY_STEP_EVENT,
+)
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.domain.verification import (
     MAX_FALLBACK_FIXES,
@@ -22,6 +28,7 @@ from orbit.protocol import (
     VerificationSkipped,
     VerificationStarted,
 )
+from orbit.tracing import Attributes, current_span
 
 T = TypeVar("T")
 
@@ -68,7 +75,7 @@ class Verification:
 
 class Verifier:
     """Runs ``verification``'s steps on ``tasks``, publishing their progress as it
-    goes."""
+    goes; a task's verification is recorded on the current span, its result and each step's."""
 
     def __init__(
         self,
@@ -124,9 +131,12 @@ class Verifier:
             self._progress = self._progress.skip()
             await self.publish_steps()
             await self._publish(VerificationSkipped(task_id=task_id, reason=reason))
+            current_span().set_attributes({VERIFY_RESULT: "skipped"})
             return None
         await self._tasks.change(lambda board: board.set_status(task_id, "verifying"))
-        return await self._tidily(self._verify(task_id, root))
+        failure = await self._tidily(self._verify(task_id, root))
+        _record_result(failure)
+        return failure
 
     async def run_one(self, step: VerificationStep, root: str) -> tuple[bool, str]:
         """Run ``step`` at ``root`` on its own, as an agent asked; returns its result."""
@@ -173,12 +183,17 @@ class Verifier:
     async def _verify(self, task_id: str, root: str) -> Failure | None:
         """Run the steps at ``root`` after task ``task_id``; returns the first failure."""
 
+        started = time.monotonic()
+
         async def on_step(number: int, status: StepStatus) -> None:
+            nonlocal started
             self._progress = self._progress.set(number, status)
             await self.publish_steps()
             if status == "running":
+                started = time.monotonic()
                 await self._publish(VerificationStarted(task_id=task_id, step=number))
             else:
+                _record_step(self._progress.names[number], status, started)
                 passed = status == "passed"
                 await self._publish(
                     VerificationFinished(task_id=task_id, step=number, passed=passed)
@@ -187,3 +202,20 @@ class Verifier:
         return await first_failure(
             self.verification.steps, self.verification.run_step, root, on_step
         )
+
+
+def _record_step(name: str, result: StepStatus, started: float) -> None:
+    """Record on the current span that the step ``name``, run since ``started``, ended as
+    ``result``."""
+    duration_ms = (time.monotonic() - started) * 1000
+    attributes: Attributes = {"name": name, "result": result, "duration_ms": duration_ms}
+    current_span().event(VERIFY_STEP_EVENT, attributes)
+
+
+def _record_result(failure: Failure | None) -> None:
+    """Record on the current span whether verification passed, or the step that failed."""
+    if failure is None:
+        current_span().set_attributes({VERIFY_RESULT: "passed"})
+        return
+    step, _ = failure
+    current_span().set_attributes({VERIFY_RESULT: "failed", VERIFY_FAILED_STEP: step.name})

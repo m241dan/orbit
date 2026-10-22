@@ -1703,6 +1703,14 @@ off the screen while the TUI runs, showing each kind (the same logger and messag
 a transcript note (`⚠ Telemetry: …` for telemetry's), and prints every one to stderr, in order,
 after it closes, followed by the dropped spans' warning.
 
+Each task the work lane runs is one span, `orbit.task`, starting its own trace: who the task is
+(workspace, session, id, title, role, model and who queued it), what its turns cost in tokens and
+dollars, how long it waited for a coder's slot, its fix attempts and the checks its agent ran,
+how verification and merging came out, and its final status and reason, with each verification
+step, a give-up and a merge conflict as events, and its wait and run as child spans. Spans hold
+no prompts, agent messages, diffs or check output. [docs/telemetry.md](docs/telemetry.md) lists
+every span, attribute and event.
+
 ## Development
 
 Write tests first. Coverage is held at 100% (`fail_under` in `pyproject.toml`); only
@@ -1796,7 +1804,9 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     user asks (`ctrl+r`), when a review queues work unless the user held it, first for a
     configurator, and again by itself once the usage limit that stopped it resets, timed by a
     `LimitPause` (in `limit_pause`); each coder's task takes one of the control plane's
-    `CoderSlots` (in `coder_slots`) first. `AgentRun` (in `agent_run`) sees one task through one agent, and a
+    `CoderSlots` (in `coder_slots`) first, and each is traced as an `orbit.task` span by
+    `TaskTracing` (in `task_trace`), current while it runs so what runs it records on it.
+    `AgentRun` (in `agent_run`) sees one task through one agent, and a
     `ProposalTrial` (in `proposal_trial`) tries the checks a configurator proposes and has the
     user decide on them; `AgentDesk` (in `desk`) launches agents and routes their calls by token;
     `Verifier` (in `verifier`) runs the steps; `Lander` (in `landing`) commits and merges

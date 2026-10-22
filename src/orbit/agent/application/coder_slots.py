@@ -42,6 +42,16 @@ class CoderSlots:
         """How many slots are taken."""
         return self._taken
 
+    @property
+    def waiting(self) -> int:
+        """How many wait in line."""
+        return len(self._line)
+
+    @property
+    def open(self) -> bool:
+        """Whether one asking for a slot now takes it without waiting in line."""
+        return not self._line and self._free
+
     def cap(self, limit: int) -> None:
         """Have ``limit`` slots from now on, or as many as asked for if it's 0, granting those
         waiting any that are free."""
@@ -57,7 +67,7 @@ class CoderSlots:
         """Take a slot for the ``workspace``'s ``session``, waiting in line for one; returns
         whether it took one, false if its place was dropped. Cancelled, it leaves the line, or
         gives back the slot it was just granted."""
-        if not self._line and self._free:
+        if self.open:
             self._taken += 1
             return True
         place = _Place(workspace, session, asyncio.get_running_loop().create_future())
@@ -138,3 +148,13 @@ class CoderSeat:
     def position(self) -> int | None:
         """Where the open session waits in line, 1 next; none if it doesn't."""
         return self.slots().position(self.workspace, self.session())
+
+    @property
+    def waiting(self) -> int:
+        """How many wait in line for a coder's slot."""
+        return self.slots().waiting
+
+    @property
+    def open(self) -> bool:
+        """Whether a slot taken now is taken without waiting in line."""
+        return self.slots().open

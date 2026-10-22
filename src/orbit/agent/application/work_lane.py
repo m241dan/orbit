@@ -9,7 +9,7 @@ session halts.
 
 import asyncio
 from collections.abc import Collection
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import partial
 from typing import Literal
 
@@ -21,6 +21,7 @@ from orbit.agent.application.lanes import OPEN_GATE, SessionGate
 from orbit.agent.application.outcomes import Outcome, UserStop, ended, run_task_to_end
 from orbit.agent.application.review_lane import ReviewLane
 from orbit.agent.application.startup_check import StartupCheck
+from orbit.agent.application.task_trace import TaskTracing
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.application.verifier import Failure, Verifier
 from orbit.agent.domain.board import TaskBoard
@@ -51,13 +52,14 @@ limit, or a fix ended in error."""
 class Beside:
     """What runs beside the work lane: the review lane, if any, and the startup check, if any,
     whose panel each task takes over; the session's ``gate``, which stops a run halted before
-    its next task; and its seat at the ``coders``' slots, if any, which a coder's or
-    configurator's task takes one of before it starts."""
+    its next task; its seat at the ``coders``' slots, if any, which a coder's or
+    configurator's task takes one of before it starts; and the ``tracing`` of its tasks."""
 
     review: ReviewLane | None = None
     startup: StartupCheck | None = None
     gate: SessionGate = OPEN_GATE
     coders: CoderSeat | None = None
+    tracing: TaskTracing = field(default_factory=TaskTracing)
 
 
 class WorkLane:
@@ -68,7 +70,8 @@ class WorkLane:
     task has ended. The user's stop, :meth:`stopped_by_user`, cancels only the agent's run, and
     the run ends by itself. A coder's or configurator's task takes a slot at ``beside``'s
     coders, waiting in line for one, before it starts, and gives it back once it has ended,
-    however it does; the user's stop leaves the line.
+    however it does; the user's stop leaves the line. Each task is traced, from before it
+    waits for a slot until its status is final, with ``beside``'s tracing.
     """
 
     def __init__(
@@ -87,6 +90,7 @@ class WorkLane:
         self._startup = beside.startup
         self._gate = beside.gate
         self._coders = beside.coders
+        self._tracing = beside.tracing
         self._seated = False  # The task about to run or running took a coder's slot.
         self._landed: dict[str, str] = {}  # Task id -> the commit it landed, until reported.
         self._starts: dict[str, str] = {}  # Task id -> the tree's head when it started.
@@ -163,15 +167,28 @@ class WorkLane:
         while (task_id := self.next_work(tried)) is not None:
             if self._gate.halted():  # It may have halted as the last task ended.
                 return "cancelled"
-            if not await self._seat(task_id):
-                return "cancelled"
-            try:
-                end = await self._run_seated(task_id, tried)
-            finally:
-                self._unseat()
+            with self._tracing.task(self._board, task_id, self._model(task_id)):
+                end = await self._take(task_id, tried)
             if end is not None:
                 return end
         return "finished"
+
+    def _model(self, task_id: str) -> str | None:
+        """The model task ``task_id`` runs on: its own, or else its role's; none if neither
+        names one."""
+        task = self._board.get(task_id).task
+        role = self._desk.agents.roles.get(task.role)
+        return task.settings.model or (role.model if role is not None else None)
+
+    async def _take(self, task_id: str, tried: set[str]) -> RunEnd | None:
+        """Seat task ``task_id`` and run it, as :meth:`_run_seated` does; the run ends cancelled
+        if the user stopped it as it waited for a slot."""
+        if not await self._seat(task_id):
+            return "cancelled"
+        try:
+            return await self._run_seated(task_id, tried)
+        finally:
+            self._unseat()
 
     async def _seat(self, task_id: str) -> bool:
         """Take a coder's slot for task ``task_id``, waiting in line for one, if its role takes
@@ -179,7 +196,7 @@ class WorkLane:
         coders = self._coders
         if coders is None or self._board.get(task_id).task.role not in CODER_ROLES:
             return True
-        self._seated = await coders.acquire()
+        self._seated = await self._tracing.seat(coders)
         return self._seated
 
     def _unseat(self) -> None:
@@ -305,8 +322,9 @@ class WorkLane:
         task = self._board.get(task_id).task
         verifier = self._verifier
         before = await verifier.state_before(task, root) if verifier is not None else None
-        outcome = await AgentRun(task_id, self._tasks, verifier, self._desk).run(before, root)
-        return await self._settle(task_id, outcome, root)
+        with self._tracing.run():
+            outcome = await AgentRun(task_id, self._tasks, verifier, self._desk).run(before, root)
+            return await self._settle(task_id, outcome, root)
 
     async def _settle(self, task_id: str, outcome: Outcome, root: str) -> Outcome:
         """What task ``task_id``'s run ending in ``outcome`` at ``root`` comes to: the checks

@@ -57,6 +57,7 @@ from orbit.agent.application.takeover import (
     RetryTimes,
     Takeover,
 )
+from orbit.agent.application.task_trace import TaskTracing
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.application.usage_recorder import UsageRecorder
 from orbit.agent.application.verifier import Verification, Verifier
@@ -472,7 +473,8 @@ class WorkspaceHost:
     def _work_lane(self) -> WorkLane | None:
         if self._desk is None:
             return None
-        beside = Beside(self._lane, self._startup, self._gate, self._coders)
+        tracing = TaskTracing(self.telemetry, self._workspace_id, lambda: self._keeper.id)
+        beside = Beside(self._lane, self._startup, self._gate, self._coders, tracing)
         return WorkLane(self._desk, self._tasks, self._verifier, beside)
 
     def _startup_check(

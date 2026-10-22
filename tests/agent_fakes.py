@@ -88,6 +88,7 @@ from orbit.protocol import (
     VerificationChanged,
     Welcome,
 )
+from orbit.tracing import NoTelemetry, Telemetry
 
 Backend = WorkspaceHost | ControlPlane
 """A workspace host, driven through the control plane around it, or a control plane."""
@@ -645,6 +646,7 @@ def session_for(
     lock: RepositoryLock | None = None,
     lock_declined_retry: float = LOCK_DECLINED_RETRY,
     ledger: UsageLedger | None = None,
+    telemetry: Telemetry | None = None,
     **options: Any,
 ) -> tuple[WorkspaceHost, FakeHost, ScriptedLauncher]:
     """A session whose tasks run through agents playing ``scripts``, one per launch, and
@@ -654,7 +656,7 @@ def session_for(
     and read-only if another ``owner`` owns the
     repository, trying its ``lock``, if given, every :data:`LOCK_RETRY` seconds and offering it
     again ``lock_declined_retry`` seconds after a decline. Its turns' usage is recorded in
-    ``ledger``, if given.
+    ``ledger``, if given, and its work traced with ``telemetry``, if given.
 
     ``options`` go to :class:`Agents`, such as ``limits``, ``tree`` or ``roles`` (:data:`ROLES`
     unless given).
@@ -678,6 +680,7 @@ def session_for(
         lock_retry=LOCK_RETRY,
         lock_declined_retry=lock_declined_retry,
         ledger=ledger,
+        telemetry=telemetry or NoTelemetry(),
     )
     if usage is not None:
         served(session, usage)
