@@ -24,11 +24,6 @@ from orbit.protocol import (
     WORK_LANE,
     AcceptTask,
     AddTask,
-    AgentExited,
-    AgentReply,
-    AgentRequest,
-    AgentStarted,
-    AssistantMessage,
     BusyChanged,
     BusyLane,
     CancelAgent,
@@ -36,9 +31,7 @@ from orbit.protocol import (
     Catalog,
     ChecksProposed,
     Command,
-    CommandAccepted,
     CommandRefused,
-    ConversationReset,
     DecideProposal,
     EditTask,
     ErrorOccurred,
@@ -48,14 +41,8 @@ from orbit.protocol import (
     HistoryPage,
     Link,
     LinkState,
-    LogGap,
-    MessageSent,
-    Notice,
-    OwnershipDeclined,
     OwnershipOffered,
     OwnershipTaken,
-    ProgressNoted,
-    ProposalDecided,
     RemoveTask,
     ResetConversation,
     ResumeStorage,
@@ -63,30 +50,17 @@ from orbit.protocol import (
     RunTasks,
     SendMessage,
     Session,
-    SessionStateChanged,
     SessionSummary,
     Settings,
     SettingsChanged,
     Snapshot,
-    StartupChecked,
     TakeOwnership,
-    TaskGaveUp,
-    TaskMerged,
     TasksChanged,
     TaskSpec,
-    TaskStarted,
     TaskState,
-    ToolCallFinished,
-    ToolCallStarted,
-    TurnFinished,
-    TurnStarted,
     UpdateSettings,
     UsageChanged,
     VerificationChanged,
-    VerificationFinished,
-    VerificationSkipped,
-    VerificationStarted,
-    Welcome,
 )
 from orbit.tui.agents import AgentsPane
 from orbit.tui.commands import CommandDesk
@@ -115,7 +89,19 @@ from orbit.tui.view.confirm import (
     RESET_TITLE,
     RESET_YES,
 )
-from orbit.tui.view.events import coalesce
+from orbit.tui.view.events import (
+    ANSWER_EVENTS,
+    FEED_EVENTS,
+    OWNERSHIP_EVENTS,
+    SESSION_EVENTS,
+    STATE_EVENTS,
+    OwnershipEvent,
+    ProgressEvent,
+    SessionEvent,
+    StateEvent,
+    coalesce,
+    in_group,
+)
 from orbit.tui.view.log import Entry
 from orbit.tui.view.outcomes import Awaited
 from orbit.tui.view.proposals import decision_entry
@@ -656,62 +642,19 @@ class OrbitApp(App[None], inherit_bindings=False):
 
     def _render_event(self, event: Event) -> None:
         self._follow_agents(event)
-        match event:
-            case (
-                SettingsChanged()
-                | BusyChanged()
-                | TasksChanged()
-                | VerificationChanged()
-                | ReviewStatus()
-                | ChecksProposed()
-                | UsageChanged()
-                | SessionStateChanged()
-            ):
-                self._render_state(event)
-            case (
-                TurnStarted()
-                | TurnFinished()
-                | ErrorOccurred()
-                | AssistantMessage()
-                | ToolCallStarted()
-                | ToolCallFinished()
-                | TaskStarted()
-                | VerificationStarted()
-                | VerificationSkipped()
-                | VerificationFinished()
-                | TaskMerged()
-                | AgentStarted()
-                | TaskGaveUp()
-                | AgentExited()
-                | AgentRequest()
-                | AgentReply()
-                | ProgressNoted()
-                | Notice()
-                | StartupChecked()
-                | LogGap()
-            ):
-                self._feed.render(event)
-            case (
-                ConversationReset()
-                | Snapshot()
-                | Catalog()
-                | HistoryPage()
-                | OwnershipOffered()
-                | OwnershipTaken()
-                | OwnershipDeclined()
-            ):
-                self._render_session(event)
-            case (
-                CommandAccepted() | CommandRefused() | Welcome() | MessageSent() | ProposalDecided()
-            ):
-                self._desk.answer(event)
-            case _:
-                assert_never(event)
+        if in_group(event, STATE_EVENTS):
+            self._render_state(event)
+        elif in_group(event, FEED_EVENTS):
+            self._feed.render(event)
+        elif in_group(event, SESSION_EVENTS):
+            self._render_session(event)
+        elif in_group(event, ANSWER_EVENTS):
+            self._desk.answer(event)
+        else:
+            assert_never(event)
         self._follow_halt(event)
 
-    def _render_ownership(
-        self, event: OwnershipOffered | OwnershipTaken | OwnershipDeclined
-    ) -> None:
+    def _render_ownership(self, event: OwnershipEvent) -> None:
         """Ask whether to take over the repository offered, or close the offer once it's
         settled, clearing the read-only mark if this orbit owns it."""
         if isinstance(event, OwnershipOffered):
@@ -737,16 +680,7 @@ class OrbitApp(App[None], inherit_bindings=False):
     def _follow_link(self, state: LinkState) -> None:
         self._link_host.follow(state, self.clock())
 
-    def _render_session(
-        self,
-        event: ConversationReset
-        | Snapshot
-        | Catalog
-        | HistoryPage
-        | OwnershipOffered
-        | OwnershipTaken
-        | OwnershipDeclined,
-    ) -> None:
+    def _render_session(self, event: SessionEvent) -> None:
         """Rule off the planner's conversation where it was reset, show a snapshot of the session
         viewed or a page of its history, follow a catalog, or follow the session's hold on the
         repository."""
@@ -756,7 +690,7 @@ class OrbitApp(App[None], inherit_bindings=False):
             self._render_catalog(event)
         elif isinstance(event, HistoryPage):
             self._pager.show(event)
-        elif isinstance(event, OwnershipOffered | OwnershipTaken | OwnershipDeclined):
+        elif in_group(event, OWNERSHIP_EVENTS):
             self._render_ownership(event)
         else:
             self._feed.append(*planner_reset_entry(), PLANNER)
@@ -837,17 +771,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         """Mark the prompt while the session viewed isn't the active one, or hide the mark."""
         self._viewing.show(self._sessions.mark)
 
-    def _render_state(
-        self,
-        event: SettingsChanged
-        | BusyChanged
-        | TasksChanged
-        | VerificationChanged
-        | ReviewStatus
-        | ChecksProposed
-        | UsageChanged
-        | SessionStateChanged,
-    ) -> None:
+    def _render_state(self, event: StateEvent) -> None:
         """Show a snapshot of backend state, or a decision it waits for."""
         match event:
             case SettingsChanged(settings=settings, model_choices=choices):
@@ -869,14 +793,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         self._task_list.show(tasks)
         self._agents.number_tasks(self._task_list.numbers_by_id)
 
-    def _show_progress(
-        self,
-        event: VerificationChanged
-        | ReviewStatus
-        | ChecksProposed
-        | UsageChanged
-        | SessionStateChanged,
-    ) -> None:
+    def _show_progress(self, event: ProgressEvent) -> None:
         """Show the verification steps' progress, whether review is paused, proposed steps, usage
         limits, or a session's state, which the session picker shows."""
         if isinstance(event, VerificationChanged):

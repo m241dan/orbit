@@ -19,12 +19,11 @@ from orbit.protocol import (
     SendMessage,
     Welcome,
 )
+from orbit.tui.view.events import AnswerEvent
 from orbit.tui.view.outcomes import Awaited, Outcomes, awaiting, settled
 
 Send = Callable[[CommandEnvelope], Awaitable[None]]
 """Sends a command to the open session."""
-Answer = CommandAccepted | CommandRefused | Welcome | MessageSent | ProposalDecided
-"""What the backend makes of a command: its outcome, or the message or decision it accepted."""
 Shown = CommandRefused | MessageSent | ProposalDecided
 """The answers the conversation shows."""
 
@@ -64,7 +63,7 @@ class CommandDesk:
             return False
         return True
 
-    def answer(self, event: Answer) -> None:
+    def answer(self, event: AnswerEvent) -> None:
         """Follow what the backend made of a command: its outcome, or the message or decision
         it accepted."""
         if isinstance(event, MessageSent | ProposalDecided):

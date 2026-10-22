@@ -2,7 +2,7 @@
 
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
-from typing import TypeGuard, assert_never, get_args
+from typing import assert_never, get_args
 
 from orbit.protocol import (
     PLANNER,
@@ -15,36 +15,33 @@ from orbit.protocol import (
     ConversationReset,
     ErrorOccurred,
     Event,
-    LogGap,
     MessageSent,
-    Notice,
-    ProgressNoted,
     ProposalDecided,
     RunningAgent,
-    StartupChecked,
-    TaskGaveUp,
-    TaskMerged,
-    TaskStarted,
     ToolCallFinished,
     ToolCallStarted,
     TurnFinished,
     TurnStarted,
-    VerificationFinished,
-    VerificationSkipped,
-    VerificationStarted,
 )
 from orbit.tui.panels import VerificationPanel
 from orbit.tui.tabs import ConversationTabs
 from orbit.tui.tasks import TaskList
 from orbit.tui.transcript import Transcript
 from orbit.tui.view.common import EntryKind
+from orbit.tui.view.events import (
+    ACTIVITY_EVENTS,
+    TASK_PROGRESS_EVENTS,
+    ActivityEvent,
+    FeedEvent,
+    TurnEvent,
+    in_group,
+)
 from orbit.tui.view.log import Entry
 from orbit.tui.view.progress import TaskProgress, task_note
 from orbit.tui.view.proposals import decision_entry
 from orbit.tui.view.rules import exit_rule, planner_reset_entry, turn_rule_entry
 from orbit.tui.view.tabs import stopped_callers
 from orbit.tui.view.transcript import (
-    AgentNote,
     activity_entry,
     error_agent,
     error_entry,
@@ -60,31 +57,20 @@ from orbit.tui.view.turns import (
     turn_started,
 )
 
-ConversationEvent = (
-    TurnStarted
-    | TurnFinished
-    | ErrorOccurred
-    | CommandRefused
-    | AssistantMessage
-    | ToolCallStarted
-    | ToolCallFinished
-)
-"""Events of an agent's turns: their start and end, errors, messages and tool calls; and
-refused commands, shown as errors."""
+ConversationEvent = TurnEvent | CommandRefused
+"""Events of an agent's turns, and refused commands, shown as errors."""
 
 UserEvent = MessageSent | ProposalDecided
 """What the user said: their messages to agents and their decisions on proposals."""
 
-FeedEvent = ConversationEvent | TaskProgress | AgentNote | AgentRequest | AgentExited | UserEvent
-"""Events the conversation shows as entries."""
+ShownEvent = FeedEvent | CommandRefused | UserEvent
+"""Events the conversation shows as entries: those it shows as they come, and the answers the
+command desk hands it."""
 
-_FEED_EVENTS: tuple[type[FeedEvent], ...] = get_args(FeedEvent)
-"""The classes in ``FeedEvent``, for ``isinstance``."""
-
-
-def _is_feed_event(event: Event) -> TypeGuard[FeedEvent]:
-    """Whether the conversation shows ``event`` as entries."""
-    return isinstance(event, _FEED_EVENTS)
+_CONVERSATION_EVENTS: tuple[type[ConversationEvent], ...] = get_args(ConversationEvent)
+_USER_EVENTS: tuple[type[UserEvent], ...] = get_args(UserEvent)
+_SHOWN_EVENTS: tuple[type[ShownEvent], ...] = get_args(ShownEvent)
+"""The classes in each grouping, for ``isinstance``."""
 
 
 @dataclass(eq=False)
@@ -104,43 +90,18 @@ class ConversationFeed:
     # Whether the events shown were logged before, so none of their tabs' output is new.
     _replaying: bool = field(default=False, init=False)
 
-    def render(self, event: FeedEvent) -> None:
+    def render(self, event: ShownEvent) -> None:
         """Show ``event`` in the conversation."""
-        match event:
-            case (
-                TurnStarted()
-                | TurnFinished()
-                | ErrorOccurred()
-                | CommandRefused()
-                | AssistantMessage()
-                | ToolCallStarted()
-                | ToolCallFinished()
-            ):
-                self._render_conversation(event)
-            case (
-                TaskStarted()
-                | VerificationStarted()
-                | VerificationSkipped()
-                | VerificationFinished()
-                | TaskMerged()
-            ):
-                self._render_progress(event)
-            case (
-                AgentStarted()
-                | TaskGaveUp()
-                | AgentExited()
-                | AgentRequest()
-                | AgentReply()
-                | ProgressNoted()
-                | Notice()
-                | StartupChecked()
-                | LogGap()
-            ):
-                self._render_activity(event)
-            case MessageSent() | ProposalDecided():
-                self._render_user(event)
-            case _:
-                assert_never(event)
+        if in_group(event, _CONVERSATION_EVENTS):
+            self._render_conversation(event)
+        elif in_group(event, TASK_PROGRESS_EVENTS):
+            self._render_progress(event)
+        elif in_group(event, ACTIVITY_EVENTS):
+            self._render_activity(event)
+        elif in_group(event, _USER_EVENTS):
+            self._render_user(event)
+        else:
+            assert_never(event)
 
     def replace(self, events: Iterable[Event], running: Sequence[RunningAgent]) -> None:
         """Show ``events`` in place of the conversation and its running turns, as they were
@@ -181,7 +142,7 @@ class ConversationFeed:
         """Show ``event``, read from the session's log, if the conversation shows it."""
         if isinstance(event, ConversationReset):
             self.append(*planner_reset_entry(), PLANNER)
-        elif _is_feed_event(event):
+        elif in_group(event, _SHOWN_EVENTS):
             self.render(event)
 
     def append(self, text: str, kind: EntryKind, agent: str | None = None) -> Entry:
@@ -222,7 +183,7 @@ class ConversationFeed:
             self.tabs.mark_unread(key)
         self.transcript.add_entry(Entry(text, kind), key)
 
-    def _render_activity(self, event: AgentNote | AgentRequest | AgentExited) -> None:
+    def _render_activity(self, event: ActivityEvent) -> None:
         """Show an agent's activity, a notice or the startup check's result; an agent's start
         ends the calls and requests of any earlier run under its id, its exit ends its run in
         one rule, and a request to orbit is an entry its reply updates."""

@@ -1,3 +1,6 @@
+from itertools import combinations
+from typing import get_args
+
 import pytest
 
 from orbit.protocol import (
@@ -19,7 +22,25 @@ from orbit.protocol import (
     VerificationSkipped,
     VerificationStarted,
 )
-from orbit.tui.view.events import coalesce
+from orbit.tui.view.events import (
+    ANSWER_EVENTS,
+    FEED_EVENTS,
+    SESSION_EVENTS,
+    STATE_EVENTS,
+    coalesce,
+    in_group,
+)
+
+GROUPS: tuple[tuple[type[Event], ...], ...] = (
+    STATE_EVENTS,
+    FEED_EVENTS,
+    SESSION_EVENTS,
+    ANSWER_EVENTS,
+)
+"""The groupings the app routes events by."""
+
+IGNORED: frozenset[type[Event]] = frozenset()
+"""The events the TUI deliberately doesn't render: none."""
 
 
 def tasks_changed(*task_ids: str) -> TasksChanged:
@@ -113,3 +134,19 @@ def test_coalesce_keeps_other_events_in_order() -> None:
 def test_coalesce_passes_empty_and_single_batches_through() -> None:
     assert coalesce([]) == []
     assert coalesce([tasks_changed("1")]) == [tasks_changed("1")]
+
+
+def test_groupings_are_disjoint() -> None:
+    for first, second in combinations(GROUPS, 2):
+        assert not set(first) & set(second)
+
+
+def test_groupings_cover_every_event_but_those_ignored() -> None:
+    (union, *_) = get_args(Event)
+    rendered = {kind for group in GROUPS for kind in group}
+    assert rendered == set(get_args(union)) - IGNORED
+
+
+def test_in_group_is_whether_the_event_is_of_the_group() -> None:
+    assert in_group(tasks_changed("1"), STATE_EVENTS)
+    assert not in_group(tasks_changed("1"), FEED_EVENTS)
