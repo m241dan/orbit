@@ -101,8 +101,8 @@ class SessionViews:
         the open session's as it stands, or a saved one's from its record and its last logged
         events. Refused (raising :class:`Refused`) for a session there's none of or that's
         unreadable; nothing changes if the saved sessions can't be listed, which is reported.
-        If the saved one is deleted or opened while its events are read, :meth:`_publish_view`
-        says what's published instead."""
+        If the saved one is deleted or opened while its events are read, :meth:`_show` says
+        what's published instead."""
         parts = self._parts
         record = None if session_id == parts.keeper.id else await parts.keeper.saved(session_id)
         # It may have been deleted, or opened, while it was read.
@@ -114,24 +114,8 @@ class SessionViews:
         if record is None:
             return
         connection.attach(SessionRef(id=record.id, name=record.name))
-        await self._publish_view(connection, record.id, await self._view(record))
+        await self._show(record, [connection], attaching=True)
         parts.states.check()
-
-    async def _publish_view(
-        self, connection: SessionConnection, session_id: str, view: Shown
-    ) -> None:
-        """Publish ``view``, the read-only view of the session ``session_id``, to ``connection``
-        if it's still attached to it; nothing if it was deleted meanwhile, which moved
-        ``connection`` to the open session and sent it the live snapshot, and the live snapshot
-        if it was opened meanwhile. The switch leaves those attached to the session it opens
-        attached, and so viewing it live, but publishes its snapshot only to connections already
-        listening, which one attaching first isn't yet."""
-        if connection.attached_id != session_id:
-            return
-        if session_id == self._parts.keeper.id:
-            await self._attach_live(connection)
-            return
-        await view.publish(connection.publish_here)
 
     async def _attach_live(self, connection: SessionConnection) -> None:
         """Have ``connection`` view the open session, live, and publish its snapshot."""
@@ -155,15 +139,24 @@ class SessionViews:
         if record is not None:
             await self._show(record, viewers)
 
-    async def _show(self, record: SessionRecord, viewers: list[SessionConnection]) -> None:
+    async def _show(
+        self, record: SessionRecord, viewers: list[SessionConnection], attaching: bool = False
+    ) -> None:
         """Publish the read-only view of the session saved as ``record`` to each of the
-        ``viewers`` still attached to it once it's read, unless it's open again by then."""
+        ``viewers`` still attached to it once it's read; nothing to one attached elsewhere
+        meanwhile, which got that one's, or to one deleting it moved to the open session, which
+        got the live snapshot. If it's open again by then, those still attached view it live:
+        the switch published its snapshot to those listening, but not to viewers still
+        ``attaching``, which this publishes it to."""
         view = await self._view(record)
-        # Another switch may have opened it again meanwhile, whose live snapshot they get.
-        if record.id == self._parts.keeper.id:
-            return
         # One may have attached elsewhere while the view was read.
-        for connection in [c for c in viewers if c.attached_id == record.id]:
+        still = attached_to(record.id, viewers)
+        # Another switch may have opened it again meanwhile.
+        if record.id == self._parts.keeper.id:
+            for connection in still if attaching else []:
+                await self._attach_live(connection)
+            return
+        for connection in still:
             await view.publish(connection.publish_here)
 
     def open_session(self) -> SessionRef:
@@ -259,3 +252,8 @@ class SessionViews:
             viewers=parts.states.of(record.id).viewers,
         )
         return Shown(view, transcript.error)
+
+
+def attached_to(session_id: str, connections: list[SessionConnection]) -> list[SessionConnection]:
+    """The ``connections`` attached to the session ``session_id``."""
+    return [c for c in connections if c.attached_id == session_id]

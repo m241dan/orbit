@@ -6,7 +6,7 @@ from collections.abc import Callable
 from orbit.agent import WorkspaceHost
 from orbit.agent.application.connection import SessionConnection
 from orbit.agent.application.ports import StoreFailed
-from orbit.agent.domain.sessions import missing_message, summarize
+from orbit.agent.domain.sessions import SessionRecord, missing_message, summarize
 from orbit.protocol import (
     BUSY,
     INVALID,
@@ -53,6 +53,7 @@ from tests.attach_fakes import (
     OPEN,
     SAVED_TASK,
     TASK,
+    WHEN,
     envelopes,
     joined,
     outcome,
@@ -64,6 +65,9 @@ from tests.attach_fakes import (
     viewing,
     workspace,
 )
+
+LATER = "later"
+"""The id of another saved session that isn't open."""
 
 NOT_ACTIVE_MESSAGE = (
     "Session 'old work' isn't the active session; 'today' is. Activate it to work in it."
@@ -660,3 +664,55 @@ async def test_attaching_to_a_session_opened_while_its_record_is_held_attaches_l
     assert (snapshots[-1].session.id, snapshots[-1].active) == (EARLIER, True)
     assert snapshots[-1].tasks == (SAVED_TASK,)
     assert all(s.active for s in snapshots)
+
+
+async def attach_held(
+    store: FakeStore, attaching: SessionConnection
+) -> tuple[asyncio.Task[None], asyncio.Event]:
+    """``attaching``'s attach to ``earlier``, held as its view's events are read from
+    ``store`` until the event returned is set."""
+    release = asyncio.Event()
+
+    async def held(session_id: str) -> None:
+        store.on_recent = None
+        await release.wait()
+
+    store.on_recent = held
+    attach = asyncio.create_task(
+        say(attaching, "attach", Attach(workspace=WORKSPACE, session=EARLIER))
+    )
+    await asyncio.sleep(0.01)
+    return attach, release
+
+
+async def test_a_session_opened_while_its_view_is_held_leaves_the_viewer_live() -> None:
+    store = stored()
+    session = workspace(store)
+    other = await joined(session, "other")
+    attaching = await joined(session, "attaching")
+    attach, release = await attach_held(store, attaching)
+    await say(other, "activate", ActivateSession(session=EARLIER))
+    release.set()
+    await attach
+    snapshots = [e for e in await taken(attaching) if isinstance(e, Snapshot)]
+    await session.close()
+
+    assert attaching.viewing is None
+    assert (snapshots[-1].session.id, snapshots[-1].active) == (EARLIER, True)
+    assert all(s.active for s in snapshots)
+
+
+async def test_viewing_another_session_while_a_view_is_held_ends_on_the_other() -> None:
+    store = stored()
+    store.saved.append(SessionRecord(id=LATER, name="new work", created=WHEN, last_active=WHEN))
+    session = workspace(store)
+    attaching = await joined(session, "attaching")
+    attach, release = await attach_held(store, attaching)
+    await say(attaching, "later", Attach(workspace=WORKSPACE, session=LATER))
+    release.set()
+    await attach
+    snapshots = [e for e in await taken(attaching) if isinstance(e, Snapshot)]
+    await session.close()
+
+    assert attaching.viewing == SessionRef(id=LATER, name="new work")
+    assert [s.session.id for s in snapshots] == [LATER]
