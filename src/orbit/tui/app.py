@@ -671,6 +671,8 @@ class OrbitApp(App[None], inherit_bindings=False):
         else:
             assert_never(event)
         self._follow_halt(event)
+        if isinstance(event, ErrorOccurred):
+            self._workspaces.follow_error(event)
 
     def _render_ownership(self, event: OwnershipEvent) -> None:
         """Ask whether to take over the repository offered, or close the offer once it's
@@ -818,8 +820,7 @@ class OrbitApp(App[None], inherit_bindings=False):
 
     def _show_progress(self, event: ProgressEvent) -> None:
         """Show the verification steps' progress, whether review is paused, proposed steps, usage
-        limits, or a session's state, which the session picker shows; a clone's progress isn't
-        shown yet."""
+        limits, a clone's progress or a session's state, which the pickers show."""
         if isinstance(event, VerificationChanged):
             self._verification.show(event.steps, event.title)
         elif isinstance(event, ReviewStatus):
@@ -829,7 +830,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         elif isinstance(event, UsageChanged):
             self._usage.show(event)
         elif isinstance(event, WorkspaceCloning):
-            return
+            self._workspaces.follow_cloning(event)
         else:
             self._sessions.follow_state(event)
             self._workspaces.follow_state(event)

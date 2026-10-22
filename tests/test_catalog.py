@@ -154,6 +154,12 @@ def test_a_catalog_round_trips() -> None:
     assert event_adapter.validate_json(made.model_dump_json()) == made
 
 
+def test_a_workspace_entry_is_managed_only_when_asked() -> None:
+    plain = workspace_entry(("w1", "proj", "/x/proj"), ())
+    clone = workspace_entry(("w2", "proj", "/c/proj"), (), managed=True)
+    assert (plain.managed, clone.managed) == (False, True)
+
+
 async def test_the_catalog_belongs_to_no_session() -> None:
     session = WorkspaceHost()
     await greet(session)

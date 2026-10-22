@@ -327,13 +327,15 @@ async def _view(store: SqliteStore, root: Path, *, owned: bool, opening: Opening
     try:
         opened = await open_workspace_store(store, root, owned=owned)
         workspace_id = opened.store.workspace_id
+        registry = WorkspaceRegistry(store)
         if opening.managed:
-            await WorkspaceRegistry(store).set_managed(workspace_id)
+            await registry.set_managed(workspace_id)
         if opening.flag:
-            await _flagged(WorkspaceRegistry(store), workspace_id)
+            await _flagged(registry, workspace_id)
+        registered = await registry.workspace(workspace_id)
     except (StoreError, ImportBlocked, RecoveryFailed) as exc:
         raise WorkspaceUnavailable(str(exc), INTERNAL) from None
-    return opened
+    return replace(opened, managed=registered is not None and registered.managed)
 
 
 async def _flagged(registry: WorkspaceRegistry, workspace_id: str) -> None:

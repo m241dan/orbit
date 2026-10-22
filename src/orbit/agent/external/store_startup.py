@@ -18,12 +18,13 @@ from orbit.agent.external.workspace_registry import WorkspaceRegistry
 @dataclass(frozen=True)
 class OpenedStore:
     """The workspace at ``root``'s view of the store, the notes on what was imported into it,
-    and the workspace's fallback files."""
+    the workspace's fallback files, and whether it's ``managed``, a clone orbit made."""
 
     store: WorkspaceStore
     notes: list[str]
     fallback: FallbackFiles
     root: Path
+    managed: bool = False
 
     async def recover(self) -> list[str]:
         """Import the workspace's fallback files into its view of the store, then delete them;

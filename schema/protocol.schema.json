@@ -3032,7 +3032,7 @@
       "type": "object"
     },
     "WorkspaceEntry": {
-      "description": "Workspace ``id``, shown as ``label``, at ``path`` on the backend's host, if it has one,\nwhether it's ``read_only``, as another orbit owns its repository, and its ``sessions`` as\nthe list of sessions shows them.",
+      "description": "Workspace ``id``, shown as ``label``, at ``path`` on the backend's host, if it has one,\nwhether it's ``read_only``, as another orbit owns its repository, whether it's ``managed``,\na clone orbit made at ``path``, which purging it deletes, and its ``sessions`` as the list\nof sessions shows them.",
       "properties": {
         "id": {
           "title": "Id",
@@ -3041,6 +3041,11 @@
         "label": {
           "title": "Label",
           "type": "string"
+        },
+        "managed": {
+          "default": false,
+          "title": "Managed",
+          "type": "boolean"
         },
         "path": {
           "anyOf": [

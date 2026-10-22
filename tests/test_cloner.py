@@ -108,7 +108,9 @@ async def test_a_clone_directory_that_cant_be_made_fails(tmp_path: Path) -> None
     (tmp_path / "file").write_text("")
     clones = tmp_path / "file" / "clones"
 
-    with pytest.raises(CloneFailed, match=f"Couldn't make a directory in {clones}: "):
+    with pytest.raises(
+        CloneFailed, match=f"Couldn't clone /srv/proj: couldn't make a directory in {clones}: "
+    ):
         await Cloner(clones).clone("/srv/proj", Progress())
 
 

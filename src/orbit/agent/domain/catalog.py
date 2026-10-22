@@ -61,11 +61,13 @@ def workspace_entry(
     sessions: tuple[SessionSummary, ...],
     *,
     read_only: bool = False,
+    managed: bool = False,
     live: Iterable[SessionStateChanged] = (),
 ) -> WorkspaceEntry:
     """The catalog's entry for the ``workspace``, its id, then the name and path of its
     directory, if it has one, holding ``sessions``, those ``live`` is about in those states,
-    ``read_only`` if another orbit owns its repository."""
+    ``read_only`` if another orbit owns its repository, ``managed`` if it's a clone orbit
+    made."""
     workspace_id, name, path = workspace
     label = name or NO_WORKSPACE_LABEL
     states = {state.session: state for state in live}
@@ -74,7 +76,12 @@ def workspace_entry(
         for summary in sessions
     )
     return WorkspaceEntry(
-        id=workspace_id, label=label, path=path, read_only=read_only, sessions=shown
+        id=workspace_id,
+        label=label,
+        path=path,
+        read_only=read_only,
+        managed=managed,
+        sessions=shown,
     )
 
 

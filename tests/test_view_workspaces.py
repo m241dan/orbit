@@ -1,18 +1,36 @@
 """The workspace picker's rows, labels and hints."""
 
-from orbit.protocol import AddWorkspace, SessionStateChanged, SessionSummary, WorkspaceEntry
+import pytest
+
+from orbit.protocol import (
+    AddWorkspace,
+    RemoveWorkspace,
+    SessionStateChanged,
+    SessionSummary,
+    WorkspaceCloning,
+    WorkspaceEntry,
+)
 from orbit.tui.view.common import kept_highlight, picker_hint
 from orbit.tui.view.workspaces import (
     ADD_PATH,
     LIST_HINT,
     PATH_HINT,
+    REMOVE_MESSAGE,
     STARTUP_HINT,
     WORKSPACES_HINTS,
+    add_command,
     added_workspace,
+    clone_failed,
+    clone_label,
+    clone_name,
+    clones_left,
     preselected,
-    remove_message,
+    removal,
+    remove_choices,
+    remove_title,
     row_key,
     row_label,
+    with_clone,
     with_states,
     workspace_at,
     workspace_label,
@@ -23,10 +41,16 @@ TODAY = SessionSummary(id="s", name="today", active=True)
 EARLIER = SessionSummary(id="e", name="earlier")
 A = WorkspaceEntry(id="a", label="repoA", path="/src/repoA", sessions=(EARLIER, TODAY))
 B = WorkspaceEntry(id="b", label="repoB", path="/src/repoB", sessions=())
+CLONE = WorkspaceEntry(id="c", label="proj", path="/srv/clones/proj", managed=True, sessions=())
+CLONING = WorkspaceCloning(url="https://github.com/o/proj.git", phase="Receiving objects")
 
 
 def test_rows_list_the_served_workspaces_then_adding_a_path() -> None:
     assert workspace_rows((A, B), "/src/repoA") == (A, B, ADD_PATH)
+
+
+def test_rows_list_the_clones_under_way_before_adding_a_path() -> None:
+    assert workspace_rows((A,), "/src/repoA", (CLONING,)) == (A, CLONING, ADD_PATH)
 
 
 def test_rows_offer_to_add_the_repository_first_while_it_is_not_served() -> None:
@@ -78,13 +102,96 @@ def test_a_workspace_without_a_path_or_active_session_shows_its_label() -> None:
 def test_row_labels() -> None:
     assert row_label(AddWorkspace(path="/src/repoC")) == "Add /src/repoC"
     assert row_label(B) == "repoB · /src/repoB"
-    assert row_label(ADD_PATH) == "Add a path…"
+    assert row_label(ADD_PATH) == "Add a path or URL…"
+    assert row_label(CLONING) == "Cloning proj… Receiving objects"
+
+
+def test_a_clones_row_is_keyed_by_its_url() -> None:
+    assert row_key(CLONING) == "cloning https://github.com/o/proj.git"
+
+
+@pytest.mark.parametrize(
+    "text", ["https://github.com/o/r", "git@github.com:o/r.git", "file:///x/r.git", "ssh://h/r"]
+)
+def test_text_that_looks_like_a_url_is_added_as_one(text: str) -> None:
+    assert add_command(text) == AddWorkspace(url=text)
+
+
+@pytest.mark.parametrize("text", ["/srv/repo", "~/repo", "/srv/a@b:c", "repo:2"])
+def test_other_text_is_added_as_a_path(text: str) -> None:
+    assert add_command(text) == AddWorkspace(path=text)
+
+
+@pytest.mark.parametrize(
+    ("url", "name"),
+    [
+        ("https://github.com/o/proj.git", "proj"),
+        ("git@github.com:proj", "proj"),
+        ("file:///x/my proj/", "my-proj"),
+        ("https://host/", "host"),
+        ("https://host/.git", "repository"),
+    ],
+)
+def test_a_clone_is_named_as_the_server_names_its_directory(url: str, name: str) -> None:
+    assert clone_name(url) == name
+
+
+def test_a_clone_shows_how_far_through_its_phase_it_is() -> None:
+    progress = CLONING.model_copy(update={"percent": 42})
+    assert clone_label(progress) == "Cloning proj… 42%"
+
+
+def test_a_clones_progress_takes_the_place_of_its_last() -> None:
+    other = WorkspaceCloning(url="git@host:o/other.git", phase="Counting objects")
+    progress = CLONING.model_copy(update={"percent": 42})
+    assert with_clone((CLONING, other), progress) == (progress, other)
+
+
+def test_a_new_clones_progress_goes_after_the_others() -> None:
+    other = WorkspaceCloning(url="git@host:o/other.git", phase="Counting objects")
+    assert with_clone((CLONING,), other) == (CLONING, other)
+
+
+def test_a_clone_is_done_once_a_new_workspace_with_its_name_is_listed() -> None:
+    other = WorkspaceCloning(url="git@host:o/other.git", phase="Counting objects")
+    assert clones_left((CLONING, other), (A,), (A, CLONE)) == (other,)
+
+
+def test_a_clone_numbered_beside_one_of_its_name_is_done_once_listed() -> None:
+    numbered = CLONE.model_copy(update={"id": "d", "label": "proj-2"})
+    assert clones_left((CLONING,), (CLONE,), (CLONE, numbered)) == ()
+
+
+def test_a_clone_is_under_way_while_only_an_old_workspace_has_its_name() -> None:
+    other = A.model_copy(update={"id": "e", "label": "projector"})
+    assert clones_left((CLONING,), (CLONE,), (CLONE, other)) == (CLONING,)
+
+
+def test_a_failure_belongs_to_the_clone_of_the_url_it_names() -> None:
+    url = "https://github.com/o/proj"
+    assert clone_failed(f"Couldn't clone {url}: not found", url)
+    assert not clone_failed(f"Couldn't clone {url}2: not found", url)
 
 
 def test_removing_asks_about_the_workspace_by_its_label() -> None:
-    assert remove_message(A) == (
-        'Stop serving "repoA"? Its sessions are kept, for when it\'s added again.'
+    assert remove_title(A) == "Stop serving repoA"
+    assert REMOVE_MESSAGE.startswith("Its sessions can be kept")
+
+
+def test_removing_offers_to_keep_or_delete_its_sessions_or_cancel() -> None:
+    assert remove_choices(A) == ("Keep its sessions", "Delete its sessions too", "Cancel")
+
+
+def test_removing_a_clone_names_the_directory_deleting_it_deletes() -> None:
+    assert remove_choices(CLONE)[1] == (
+        "Delete its sessions too, and its clone directory /srv/clones/proj"
     )
+
+
+def test_each_choice_removes_keeping_or_deleting_its_sessions_or_nothing() -> None:
+    assert removal(A, 0) == RemoveWorkspace(workspace="a")
+    assert removal(A, 1) == RemoveWorkspace(workspace="a", purge=True)
+    assert removal(A, 2) is None
 
 
 def test_the_workspace_added_is_the_one_at_its_path() -> None:

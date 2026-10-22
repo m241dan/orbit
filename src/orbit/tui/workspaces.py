@@ -11,32 +11,42 @@ from textual.containers import Vertical
 from textual.widgets import Input, OptionList, Static
 
 from orbit.protocol import (
+    GIT_FAILED,
     AddWorkspace,
     Catalog,
+    ErrorOccurred,
     RemoveWorkspace,
     SessionStateChanged,
+    WorkspaceCloning,
     WorkspaceEntry,
 )
 from orbit.tui.modal import ModalSlot, Push
 from orbit.tui.view.common import kept_highlight
 from orbit.tui.view.outcomes import Awaited
 from orbit.tui.view.workspaces import (
+    ADD_PATH,
+    CANCEL_INDEX,
     PATH_HINT,
     PATH_PLACEHOLDER,
-    REMOVE_TITLE,
-    REMOVE_YES,
+    REMOVE_MESSAGE,
     WORKSPACES_HINTS,
     WORKSPACES_TITLE,
     WorkspaceRow,
+    add_command,
     added_workspace,
+    clone_failed,
+    clones_left,
     preselected,
-    remove_message,
+    removal,
+    remove_choices,
+    remove_title,
     row_key,
     row_label,
+    with_clone,
     with_states,
     workspace_rows,
 )
-from orbit.tui.widgets import TypingListScreen, confirm
+from orbit.tui.widgets import ChoiceScreen, TypingListScreen
 
 Change = Callable[[AddWorkspace | RemoveWorkspace, Awaited], Awaitable[object]]
 """Sends adding or removing a workspace to the backend, awaiting its outcome as told; whatever
@@ -47,14 +57,17 @@ Chosen = Callable[[str, bool], Awaitable[None]]
 
 class WorkspacesScreen(TypingListScreen[str | None]):
     """Lists ``workspaces``, offering first to add the ``repository`` the frontend runs in while
-    none is at it, then to add a path; dismisses with the id of the workspace picked.
+    none is at it, then the clones :attr:`cloning`, then to add a path or URL; dismisses with the id
+    of the workspace picked.
 
     ``j``/``k`` (and the arrows) move, preselected on the workspace at ``repository``, and
     enter picks the highlighted workspace. Enter on adding sends ``AddWorkspace`` with
-    ``change``, asking for the path first on ``Add a path…``, and picks the workspace once
-    accepted and listed; a refusal shows why. ``x`` asks to remove the highlighted workspace,
-    then sends ``RemoveWorkspace``, showing why if it's refused. Escape leaves the path box, or
-    dismisses with none, or quits orbit at ``startup``, where there's nothing to go back to.
+    ``change``, asking for the path or URL first on ``Add a path or URL…``, and picks the
+    workspace added by its path once accepted and listed; a refusal, or the clone of a URL
+    failing, shows why. ``x`` asks whether to remove the highlighted workspace keeping its
+    sessions or deleting them too, then sends ``RemoveWorkspace``, showing why if it's refused.
+    Escape leaves the path box, or dismisses with none, or quits orbit at ``startup``, where
+    there's nothing to go back to.
     """
 
     DEFAULT_CSS = """
@@ -74,14 +87,16 @@ class WorkspacesScreen(TypingListScreen[str | None]):
     ) -> None:
         super().__init__(None, startup)
         self.workspaces = tuple(workspaces)
+        self.cloning: tuple[WorkspaceCloning, ...] = ()  # The clones under way, as shown.
         self.repository = repository
         self._change = change
         self._adding: str | None = None  # The path added, until its workspace is listed.
+        self._cloning: str | None = None  # The URL added, until its clone fails or another is.
 
     @property
     def rows(self) -> tuple[WorkspaceRow, ...]:
         """The rows listed, in order."""
-        return workspace_rows(self.workspaces, self.repository)
+        return workspace_rows(self.workspaces, self.repository, self.cloning)
 
     def compose(self) -> ComposeResult:
         with Vertical() as box:
@@ -104,11 +119,15 @@ class WorkspacesScreen(TypingListScreen[str | None]):
         note = self.query_one("#workspace-note", Static)
         return str(note.render()) if note.display else None
 
-    def show(self, workspaces: Sequence[WorkspaceEntry]) -> None:
-        """List ``workspaces`` in place of those listed, keeping the highlight on the row it was
-        on, or where it was if that one's gone; picks the workspace being added once listed."""
+    def show(
+        self, workspaces: Sequence[WorkspaceEntry], cloning: Sequence[WorkspaceCloning] = ()
+    ) -> None:
+        """List ``workspaces`` and the clones ``cloning`` in place of those listed, keeping the
+        highlight on the row it was on, or where it was if that one's gone; picks the workspace
+        being added once listed."""
         shown = self._keys
         self.workspaces = tuple(workspaces)
+        self.cloning = tuple(cloning)
         if not self._pick_added() and self.is_mounted:
             self._relist(shown)
 
@@ -145,32 +164,46 @@ class WorkspacesScreen(TypingListScreen[str | None]):
         if isinstance(row, WorkspaceEntry):
             self.dismiss(row.id)
         elif isinstance(row, AddWorkspace):
-            assert row.path is not None  # The picker offers adding the repository's path alone.
-            await self._add(row.path)
-        else:
+            await self._add(row)
+        elif row == ADD_PATH:
             self._typing(PATH_HINT)
 
     @on(Input.Submitted, "#workspace-path")
     async def _typed(self, event: Input.Submitted) -> None:
         event.stop()
-        path = event.value.strip()
-        if path:
-            await self._add(path)
+        text = event.value.strip()
+        if text:
+            await self._add(add_command(text))
 
-    async def _add(self, path: str) -> None:
-        """Send adding the workspace at ``path``, picking it once it's accepted and listed."""
+    async def _add(self, adding: AddWorkspace) -> None:
+        """Send ``adding``, picking the workspace added by its path once it's accepted and
+        listed."""
         self._show_note(None)
-        awaited = Awaited(accepted=lambda: self._added(path), why=self._refused)
-        await self._change(AddWorkspace(path=path), awaited)
+        awaited = Awaited(accepted=lambda: self._added(adding), why=self._refused)
+        await self._change(adding, awaited)
 
-    def _added(self, path: str) -> None:
-        """Pick the workspace adding ``path`` adds, now accepted, once it's listed, unless this
-        screen is gone."""
+    def _added(self, adding: AddWorkspace) -> None:
+        """Go back to the list now ``adding`` is accepted, unless this screen is gone: pick the
+        workspace added by its path once it's listed, or await the clone of its URL, which its
+        row shows."""
         if not self.is_attached:
             return
         self._typing(None)
-        self._adding = path
+        if adding.url is not None:
+            self._cloning = adding.url
+            return
+        self._adding = adding.path
         self._pick_added()
+
+    def clone_failed(self, message: str) -> None:
+        """Show ``message``, git's on a clone failing, in the path box's hint, with the URL
+        back in the box to change, if it's the clone this picker asked for."""
+        url = self._cloning
+        if url is None or not clone_failed(message, url):
+            return
+        self._cloning = None
+        self._typing(PATH_HINT, url)
+        self.query_one(Input).border_subtitle = message
 
     def _refused(self, why: str) -> None:
         """Show ``why`` adding or removing a workspace was refused: in the path box's hint while
@@ -184,18 +217,21 @@ class WorkspacesScreen(TypingListScreen[str | None]):
             self._show_note(why)
 
     def action_remove(self) -> None:
-        """Remove the highlighted workspace once the user confirms; other rows remove
-        nothing."""
+        """Remove the highlighted workspace, keeping its sessions or deleting them too as the
+        user chooses, unless they cancel; other rows remove nothing."""
         row = self.rows[self.query_one(OptionList).highlighted or 0]
         if not isinstance(row, WorkspaceEntry):
             return
-        removing = RemoveWorkspace(workspace=row.id)
 
-        async def remove() -> None:
-            self._show_note(None)
-            await self._change(removing, Awaited(why=self._refused))
+        async def chosen(index: int | None) -> None:
+            removing = None if index is None else removal(row, index)
+            if removing is not None:
+                self._show_note(None)
+                await self._change(removing, Awaited(why=self._refused))
 
-        confirm(self.app.push_screen, REMOVE_TITLE, remove_message(row), REMOVE_YES, remove)
+        choices = remove_choices(row)
+        screen = ChoiceScreen(remove_title(row), REMOVE_MESSAGE, choices, escape_index=CANCEL_INDEX)
+        self.app.push_screen(screen, chosen)
 
     def must_pick(self) -> None:
         """Have escape quit orbit, as at startup, now there's nothing to go back to."""
@@ -212,7 +248,8 @@ class WorkspacesScreen(TypingListScreen[str | None]):
 class WorkspacesHost:
     """Keeps the workspaces the latest ``Catalog`` lists, as ``SessionStateChanged`` changes
     their sessions, and shows them with ``push`` when asked, for the ``repository`` the
-    frontend runs in, refreshing the picker while it's shown. ``change`` sends adding and
+    frontend runs in, refreshing the picker while it's shown, and the clones under way, as
+    ``WorkspaceCloning`` reports them, until they're listed or fail. ``change`` sends adding and
     removing workspaces, and ``chosen`` takes the workspace picked."""
 
     def __init__(
@@ -226,6 +263,7 @@ class WorkspacesHost:
         self._chosen = chosen
         self._repository = repository
         self.workspaces: tuple[WorkspaceEntry, ...] = ()
+        self.cloning: tuple[WorkspaceCloning, ...] = ()
         self._picker = ModalSlot[WorkspacesScreen, str](push)
 
     @property
@@ -234,9 +272,24 @@ class WorkspacesHost:
         return self._picker.showing
 
     def follow(self, catalog: Catalog) -> None:
-        """List the workspaces in ``catalog``."""
+        """List the workspaces in ``catalog``, in place of the clones it lists."""
+        self.cloning = clones_left(self.cloning, self.workspaces, catalog.workspaces)
         self.workspaces = catalog.workspaces
         self._refresh()
+
+    def follow_cloning(self, progress: WorkspaceCloning) -> None:
+        """Note how far the clone ``progress`` is about has got."""
+        self.cloning = with_clone(self.cloning, progress)
+        self._refresh()
+
+    def follow_error(self, error: ErrorOccurred) -> None:
+        """Drop the clone ``error`` says failed, if it's a clone's, telling the picker shown."""
+        if error.code != GIT_FAILED:
+            return
+        self.cloning = tuple(c for c in self.cloning if not clone_failed(error.message, c.url))
+        self._refresh()
+        if self.shown is not None:
+            self.shown.clone_failed(error.message)
 
     def follow_state(self, changed: SessionStateChanged) -> None:
         """Note ``changed``'s session's state."""
@@ -250,6 +303,7 @@ class WorkspacesHost:
         if self.shown is not None:
             return
         screen = WorkspacesScreen(self.workspaces, self._repository, self._change, startup)
+        screen.cloning = self.cloning
 
         async def picked(workspace: str | None) -> None:
             if workspace is not None:
@@ -268,4 +322,4 @@ class WorkspacesHost:
     def _refresh(self) -> None:
         """Show the workspaces in the picker, if it's shown."""
         if self.shown is not None:
-            self.shown.show(self.workspaces)
+            self.shown.show(self.workspaces, self.cloning)

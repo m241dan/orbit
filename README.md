@@ -110,16 +110,25 @@ workspace picker and opens on that repository. The picker lists:
 - The workspaces served, each with its label, its path, its active session's name and whether
   that one is `running` or `idle`, and `read-only` while another orbit owns its repository. The
   workspace of the repository the chat runs in is highlighted, else the first.
-- `Add a path…`: `enter` asks for a path on the server's host, which `enter` adds and `esc`
-  leaves, opening the added workspace's session picker; a path in a workspace already served
-  opens that one's. A path that's refused, such as one that doesn't exist, shows why under the
-  box.
+- A row for each clone under way, `Cloning <name>… 42%` (or git's phase while it gives no
+  percentage), until the clone is served and listed in its place.
+- `Add a path or URL…`: `enter` asks for a path on the server's host or a repository's URL,
+  which `enter` adds and `esc` leaves. Text starting with `https://`, `ssh://` or `file://`, or
+  shaped like `user@host:path`, is a URL: the server clones it (see Cloning in
+  [Serving the control plane](#serving-the-control-plane)) while its row shows how far it's got; if the
+  clone fails, the URL is back in the box with git's message under it. Anything else is a path,
+  which opens the added workspace's session picker; a path in a workspace already served opens
+  that one's. A path or URL that's refused, such as a path that doesn't exist, shows why under
+  the box.
 
 `enter` on a workspace opens its session picker, `Resume <name>` first (see
-[Sessions](#sessions)), and picking a session there moves the chat to that workspace. `x` removes
-the highlighted workspace once you confirm (`y` to go ahead, `n`/`esc` to cancel): the server
-stops serving it, keeping its sessions for when it's added again; it's refused, saying why under
-the list, while the workspace runs work or another frontend views one of its sessions. `esc` on
+[Sessions](#sessions)), and picking a session there moves the chat to that workspace. `x` asks
+whether to stop serving the highlighted workspace: `Keep its sessions` (preselected) keeps them
+for when it's added again, `Delete its sessions too` purges its records (see Purging in
+[Serving the control plane](#serving-the-control-plane)) and, for a clone the server made, names its directory,
+which goes too, and `Cancel` or `esc` removes nothing. It's refused, saying why under the list,
+while the workspace runs work or another frontend views one of its sessions, or, when purging,
+while its clone holds work its remote doesn't, listing what would be lost. `esc` on
 the list quits orbit at startup, and later closes the picker. When the workspace this chat is on
 is removed, the workspace picker opens, or stays open if it's removed from there, and from then
 on it works as at startup: `esc` quits orbit, as there's no workspace left to go back to.
@@ -1011,7 +1020,9 @@ each in a directory named after the URL's last part without `.git` (`proj` for
 `git@github.com:o/proj.git`), or `proj-2`, `proj-3` and so on when that's taken; orbit marks
 these workspaces as managed, clones it made. A clone that fails says git's message (`orbit serve
 --add` stops with status 2) and leaves nothing behind, and one still under way when the server
-stops is stopped and removed. The same URL can't be cloned twice at once.
+stops is stopped and removed. The same URL can't be cloned twice at once. In the TUI, the
+workspace picker's `Add a path or URL…` clones a URL typed in, showing its progress in a row of
+its own (see [Workspaces](#workspaces)).
 
 **Purging.** A frontend removing a workspace can have its records deleted too, with
 `RemoveWorkspace`'s `purge`: under the same refusals as removing, its sessions, their events, its
@@ -1021,7 +1032,8 @@ deleted. A clone holding work that exists nowhere else, uncommitted changes, sta
 any branch its remote doesn't have, isn't purged: the refusal lists what would be lost (`1 commit
 on main not on its remote`), and nothing is removed until it's pushed or dropped. A workspace no
 server serves, such as one only a local `orbit chat` used, is purged with `orbit db forget` (see
-[Where orbit keeps things](#where-orbit-keeps-things)).
+[Where orbit keeps things](#where-orbit-keeps-things)). In the TUI, `x` in the workspace picker
+offers `Delete its sessions too` beside keeping them (see [Workspaces](#workspaces)).
 
 Git clones as the server's account, with its credential helpers and SSH agent, and never
 prompts: `GIT_TERMINAL_PROMPT=0`, and SSH runs with `-o BatchMode=yes` added to any

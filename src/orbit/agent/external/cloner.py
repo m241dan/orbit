@@ -34,7 +34,7 @@ class Cloner:
         Raises :class:`CloneFailed` with git's message if it fails, having removed the
         directory; cancelled, git and what it started are stopped and the directory removed
         before the cancellation ends."""
-        directory = await asyncio.to_thread(self._claimed, clone_name(url))
+        directory = await asyncio.to_thread(self._claimed, url)
         try:
             await _cloned(url, directory, progress)
         except BaseException:
@@ -42,12 +42,12 @@ class Cloner:
             raise
         return str(directory)
 
-    def _claimed(self, name: str) -> Path:
-        """A new, empty directory in the clone directory, named ``name`` or, if that's taken,
-        numbered. Raises :class:`CloneFailed` if it can't be made."""
+    def _claimed(self, url: str) -> Path:
+        """A new, empty directory in the clone directory for the clone of ``url``, named for it
+        or, if that's taken, numbered. Raises :class:`CloneFailed` if it can't be made."""
         try:
             self.clone_dir.mkdir(parents=True, exist_ok=True)
-            names = clone_names(name)
+            names = clone_names(clone_name(url))
             while True:
                 directory = self.clone_dir / next(names)
                 try:
@@ -56,7 +56,8 @@ class Cloner:
                     continue
                 return directory
         except OSError as exc:
-            raise CloneFailed(f"Couldn't make a directory in {self.clone_dir}: {exc}") from None
+            message = f"couldn't make a directory in {self.clone_dir}: {exc}"
+            raise CloneFailed(f"Couldn't clone {url}: {message}") from None
 
 
 async def _cloned(url: str, directory: Path, progress: Callable[[WorkspaceCloning], None]) -> None:

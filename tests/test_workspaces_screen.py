@@ -1,18 +1,22 @@
 """Picking a workspace: the picker shown at startup over a link and on ctrl+w, adding the
 repository or a path, removing a workspace, and moving to another workspace's sessions."""
 
+import pytest
 from textual.containers import Vertical
 from textual.pilot import Pilot
 from textual.widgets import Input, OptionList
 
 from orbit.protocol import (
     BUSY,
+    GIT_FAILED,
+    INVALID,
     UNKNOWN,
     AddWorkspace,
     Attach,
     Catalog,
     CommandAccepted,
     CommandRefused,
+    ErrorOccurred,
     NewSession,
     RemoveWorkspace,
     SessionStateChanged,
@@ -23,7 +27,7 @@ from orbit.protocol import (
 from orbit.tui import Opening, OrbitApp
 from orbit.tui.sessions import SessionsScreen
 from orbit.tui.view.workspaces import STARTUP_HINT
-from orbit.tui.widgets import ConfirmScreen
+from orbit.tui.widgets import ChoiceScreen
 from orbit.tui.workspaces import WorkspacesScreen
 from tests.tui_fakes import FakeLink, FakeSession, feed_events
 
@@ -97,18 +101,109 @@ async def test_connected_the_picker_preselects_the_workspace_at_the_repository()
         await feed_events(session_of(app), pilot, SERVED)
         screen = workspaces(app)
         assert screen.startup
-        assert rows(screen) == [B_ROW, A_ROW, "Add a path…"]
+        assert rows(screen) == [B_ROW, A_ROW, "Add a path or URL…"]
         assert highlighted(screen) == 1
         assert session_of(app).commands == []
 
 
-async def test_a_clones_progress_changes_nothing_the_picker_shows_yet() -> None:
+PROJ_URL = "https://github.com/o/proj.git"
+PROJ = WorkspaceEntry(id="P", label="proj", path="/srv/clones/proj", managed=True, sessions=())
+
+
+async def test_a_clones_progress_shows_in_its_row_until_the_catalog_lists_it() -> None:
     app = connected()
     async with app.run_test() as pilot:
-        await feed_events(session_of(app), pilot, SERVED)
-        progress = WorkspaceCloning(url="https://github.com/o/proj.git", phase="Receiving objects")
-        await feed_events(session_of(app), pilot, progress)
-        assert rows(workspaces(app)) == [B_ROW, A_ROW, "Add a path…"]
+        session = session_of(app)
+        await feed_events(session, pilot, SERVED)
+        await feed_events(session, pilot, WorkspaceCloning(url=PROJ_URL, phase="Counting objects"))
+        assert rows(workspaces(app))[2] == "Cloning proj… Counting objects"
+        progress = WorkspaceCloning(url=PROJ_URL, phase="Receiving objects", percent=42)
+        await feed_events(session, pilot, progress)
+        assert rows(workspaces(app)) == [B_ROW, A_ROW, "Cloning proj… 42%", "Add a path or URL…"]
+        await feed_events(session, pilot, catalog(B, A, PROJ))
+        assert rows(workspaces(app))[2:] == ["proj · /srv/clones/proj", "Add a path or URL…"]
+
+
+async def test_enter_on_a_clones_row_does_nothing() -> None:
+    app = connected()
+    async with app.run_test() as pilot:
+        session = session_of(app)
+        await feed_events(session, pilot, SERVED)
+        await feed_events(session, pilot, WorkspaceCloning(url=PROJ_URL, phase="Resolving"))
+        await pilot.press("j", "enter", "x")
+        screen = workspaces(app)
+        assert app.screen is screen and not screen.query_one(Input).display
+        assert session.commands == []
+
+
+async def test_a_clone_under_way_shows_in_a_picker_opened_later() -> None:
+    app = connected()
+    async with app.run_test() as pilot:
+        session = session_of(app)
+        await feed_events(session, pilot, SERVED)
+        await pilot.press("enter", "enter")
+        await feed_events(session, pilot, WorkspaceCloning(url=PROJ_URL, phase="Resolving"))
+        await pilot.press("ctrl+w")
+        assert rows(workspaces(app))[2] == "Cloning proj… Resolving"
+
+
+@pytest.mark.parametrize("url", [PROJ_URL, "git@github.com:o/r.git", "file:///x/r.git"])
+async def test_a_url_typed_is_sent_as_one_closing_the_field_once_accepted(url: str) -> None:
+    app = connected()
+    async with app.run_test() as pilot:
+        session = session_of(app)
+        await feed_events(session, pilot, SERVED)
+        await pilot.press("j", "enter", *url, "enter")
+        assert session.commands == [AddWorkspace(url=url)]
+        await accept_last(app, pilot)
+        await pilot.pause()
+        assert not workspaces(app).query_one(Input).display
+
+
+async def test_a_clone_failing_drops_its_row_and_shows_gits_message_in_the_fields_hint() -> None:
+    app = connected()
+    async with app.run_test() as pilot:
+        session = session_of(app)
+        await feed_events(session, pilot, SERVED)
+        await pilot.press("j", "enter", *PROJ_URL, "enter")
+        await accept_last(app, pilot)
+        await feed_events(session, pilot, WorkspaceCloning(url=PROJ_URL, phase="Resolving"))
+        failed = f"Couldn't clone {PROJ_URL}: Repository not found."
+        await feed_events(session, pilot, ErrorOccurred(code=GIT_FAILED, message=failed))
+        screen = workspaces(app)
+        assert rows(screen) == [B_ROW, A_ROW, "Add a path or URL…"]
+        field = screen.query_one(Input)
+        assert field.display and field.value == PROJ_URL
+        assert field.border_subtitle == failed
+
+
+async def test_another_clone_failing_or_another_error_leaves_the_field_alone() -> None:
+    app = connected()
+    async with app.run_test() as pilot:
+        session = session_of(app)
+        await feed_events(session, pilot, SERVED)
+        await pilot.press("j", "enter", *PROJ_URL, "enter")
+        await accept_last(app, pilot)
+        await feed_events(session, pilot, WorkspaceCloning(url=PROJ_URL, phase="Resolving"))
+        other = "Couldn't clone git@host:o/other.git: denied"
+        await feed_events(session, pilot, ErrorOccurred(code=GIT_FAILED, message=other))
+        await feed_events(session, pilot, ErrorOccurred(code=UNKNOWN, message=f"{PROJ_URL}: "))
+        screen = workspaces(app)
+        assert rows(screen)[2] == "Cloning proj… Resolving"
+        assert not screen.query_one(Input).display
+
+
+async def test_a_clone_failing_with_the_picker_closed_drops_its_row() -> None:
+    app = connected()
+    async with app.run_test() as pilot:
+        session = session_of(app)
+        await feed_events(session, pilot, SERVED)
+        await pilot.press("enter", "enter")
+        await feed_events(session, pilot, WorkspaceCloning(url=PROJ_URL, phase="Resolving"))
+        failed = f"Couldn't clone {PROJ_URL}: Repository not found."
+        await feed_events(session, pilot, ErrorOccurred(code=GIT_FAILED, message=failed))
+        await pilot.press("ctrl+w")
+        assert rows(workspaces(app)) == [B_ROW, A_ROW, "Add a path or URL…"]
 
 
 async def test_picking_a_workspace_opens_its_session_picker_whose_pick_attaches() -> None:
@@ -135,7 +230,7 @@ async def test_without_a_repository_served_the_first_workspace_is_preselected() 
     app = connected(None)
     async with app.run_test() as pilot:
         await feed_events(session_of(app), pilot, SERVED)
-        assert rows(workspaces(app)) == [B_ROW, A_ROW, "Add a path…"]
+        assert rows(workspaces(app)) == [B_ROW, A_ROW, "Add a path or URL…"]
         assert highlighted(workspaces(app)) == 0
 
 
@@ -144,7 +239,7 @@ async def test_a_repository_not_served_is_offered_first_and_added_then_its_sessi
     async with app.run_test() as pilot:
         session = session_of(app)
         await feed_events(session, pilot, SERVED)
-        assert rows(workspaces(app)) == ["Add /src/repoC", B_ROW, A_ROW, "Add a path…"]
+        assert rows(workspaces(app)) == ["Add /src/repoC", B_ROW, A_ROW, "Add a path or URL…"]
         assert highlighted(workspaces(app)) == 0
         await pilot.press("enter")
         assert session.commands == [AddWorkspace(path="/src/repoC")]
@@ -246,32 +341,49 @@ async def test_a_path_added_picks_the_new_workspace_containing_it_over_another_n
         assert sessions(app).workspace == "C"
 
 
-async def test_x_removes_a_workspace_once_confirmed_and_a_busy_refusal_shows() -> None:
+async def test_x_keeps_a_workspaces_sessions_by_default_and_a_busy_refusal_shows() -> None:
     app = connected()
     async with app.run_test() as pilot:
         session = session_of(app)
         await feed_events(session, pilot, SERVED)
         await pilot.press("k", "x")
-        confirm = app.screen
-        assert isinstance(confirm, ConfirmScreen)
-        assert (
-            confirm.message
-            == 'Stop serving "repoB"? Its sessions are kept, for when it\'s added again.'
-        )
-        await pilot.press("y")
-        assert session.commands == [RemoveWorkspace(workspace="B")]
+        choice = app.screen
+        assert isinstance(choice, ChoiceScreen)
+        assert choice.title_text == "Stop serving repoB"
+        assert choice.choices == ("Keep its sessions", "Delete its sessions too", "Cancel")
+        await pilot.press("enter")
+        assert session.commands == [RemoveWorkspace(workspace="B", purge=False)]
         busy = "Can't remove /src/repoB: it's running task 3."
         await feed_events(session, pilot, refusal(app, BUSY, busy))
         assert workspaces(app).note == busy
 
 
-async def test_x_unconfirmed_removes_nothing() -> None:
+async def test_x_then_deleting_its_sessions_purges_and_a_refusal_lists_what_is_lost() -> None:
     app = connected()
     async with app.run_test() as pilot:
-        await feed_events(session_of(app), pilot, SERVED)
-        await pilot.press("x", "n")
-        assert session_of(app).commands == []
-        assert isinstance(app.screen, WorkspacesScreen)
+        session = session_of(app)
+        await feed_events(session, pilot, catalog(A, PROJ))
+        await pilot.press("j", "x")
+        choice = app.screen
+        assert isinstance(choice, ChoiceScreen)
+        assert choice.choices[1] == (
+            "Delete its sessions too, and its clone directory /srv/clones/proj"
+        )
+        await pilot.press("j", "enter")
+        assert session.commands == [RemoveWorkspace(workspace="P", purge=True)]
+        lost = "Can't purge proj: its clone has 2 commits its remote doesn't."
+        await feed_events(session, pilot, refusal(app, INVALID, lost))
+        assert workspaces(app).note == lost
+
+
+async def test_x_cancelled_removes_nothing() -> None:
+    for keys in (("escape",), ("j", "j", "enter")):
+        app = connected()
+        async with app.run_test() as pilot:
+            await feed_events(session_of(app), pilot, SERVED)
+            await pilot.press("x", *keys)
+            assert session_of(app).commands == []
+            assert isinstance(app.screen, WorkspacesScreen)
 
 
 async def test_x_on_a_row_adding_a_workspace_does_nothing() -> None:
@@ -297,7 +409,7 @@ async def test_a_removal_listed_while_shown_keeps_the_highlight_on_its_row() -> 
         await feed_events(session_of(app), pilot, SERVED)
         await feed_events(session_of(app), pilot, catalog(A))
         screen = workspaces(app)
-        assert rows(screen) == [A_ROW, "Add a path…"]
+        assert rows(screen) == [A_ROW, "Add a path or URL…"]
         assert highlighted(screen) == 0
         await feed_events(session_of(app), pilot, catalog(C, A))
         assert highlighted(screen) == 1
@@ -404,7 +516,7 @@ async def test_the_workspace_viewed_removed_opens_the_picker() -> None:
         await pilot.press("enter", "enter")
         await feed_events(session_of(app), pilot, catalog(B))
         screen = workspaces(app)
-        assert rows(screen) == ["Add /src/repoA", B_ROW, "Add a path…"]
+        assert rows(screen) == ["Add /src/repoA", B_ROW, "Add a path or URL…"]
 
 
 async def test_the_workspace_viewed_removed_opens_a_picker_whose_escape_quits() -> None:
@@ -485,8 +597,8 @@ async def test_an_add_listed_while_confirming_a_removal_is_picked_after() -> Non
         await accept_last(app, pilot)
         await pilot.press("j", "x")
         await feed_events(session_of(app), pilot, catalog(B, A, C))
-        assert isinstance(app.screen, ConfirmScreen)
-        await pilot.press("n")
+        assert isinstance(app.screen, ChoiceScreen)
+        await pilot.press("escape")
         await feed_events(session_of(app), pilot, catalog(B, A, C))
         assert sessions(app).workspace == "C"
 
@@ -495,7 +607,7 @@ async def test_removing_the_workspace_viewed_from_the_picker_keeps_one_picker() 
     app = connected()
     async with app.run_test() as pilot:
         await feed_events(session_of(app), pilot, SERVED)
-        await pilot.press("enter", "enter", "ctrl+w", "x", "y")
+        await pilot.press("enter", "enter", "ctrl+w", "x", "enter")
         await feed_events(session_of(app), pilot, catalog(B))
         assert [type(s) for s in app.screen_stack[1:]] == [WorkspacesScreen]
         assert session_of(app).commands[-1] == RemoveWorkspace(workspace="A")
@@ -505,7 +617,7 @@ async def test_removing_the_workspace_viewed_from_the_picker_leaves_one_escape_q
     app = connected()
     async with app.run_test() as pilot:
         await feed_events(session_of(app), pilot, SERVED)
-        await pilot.press("enter", "enter", "ctrl+w", "x", "y")
+        await pilot.press("enter", "enter", "ctrl+w", "x", "enter")
         await feed_events(session_of(app), pilot, catalog(B))
         screen = workspaces(app)
         assert screen.startup
@@ -519,7 +631,7 @@ async def test_picking_after_removing_the_workspace_viewed_opens_sessions_escape
     app = connected()
     async with app.run_test() as pilot:
         await feed_events(session_of(app), pilot, SERVED)
-        await pilot.press("enter", "enter", "ctrl+w", "x", "y")
+        await pilot.press("enter", "enter", "ctrl+w", "x", "enter")
         await feed_events(session_of(app), pilot, catalog(B))
         workspaces(app).query_one(OptionList).highlighted = 1
         await pilot.press("enter")

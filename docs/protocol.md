@@ -87,7 +87,8 @@ Otherwise the backend answers `Hello` with `Welcome`, which carries the Hello's 
 and the backend's `server_version`. `Welcome` is Hello's outcome: it takes the place of
 `CommandAccepted`. A `Catalog` follows it: what exists, namely the workspaces served, each with
 its id, label, path, sessions and `read_only`, true when another orbit owns its repository (see
-[Read-only orbits](#read-only-orbits)), then the agents' roles, the triggers and the lanes. Each
+[Read-only orbits](#read-only-orbits)) and `managed`, true for a clone the server made from a
+URL, whose directory purging it deletes, then the agents' roles, the triggers and the lanes. Each
 session carries its state (see [Session state](#session-state)).
 
 `Hello` attaches the connection to nothing, and nothing more reaches it until its first

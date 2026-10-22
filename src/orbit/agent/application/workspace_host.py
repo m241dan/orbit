@@ -162,7 +162,7 @@ class WorkspaceHost:
     events, in envelopes naming the workspace by ``workspace_id``, and its ``Connections`` route
     them among the connections the control plane makes, whose ``Handshake`` greets each with
     the :attr:`greeting` as it first attaches here. Commands from every connection are handled
-    as they arrive.
+    as they arrive. Its catalog entry says it's ``managed`` if it's a clone orbit made.
 
     With ``check_at_startup``, the ``verification`` steps also run once in the background as
     its background work starts, on the base commit; a failure adds a draft task to
@@ -250,6 +250,7 @@ class WorkspaceHost:
         lock: RepositoryLock | None = None,
         lock_retry: float = RETRY_SECONDS,
         lock_declined_retry: float = DECLINED_RETRY_SECONDS,
+        managed: bool = False,
     ) -> None:
         self.owned: Callable[[], None] = lambda: None
         # The usage limits fetched last, which the control plane serving this host knows.
@@ -285,6 +286,7 @@ class WorkspaceHost:
         self._verifier = _verifier(verification, self._tasks, self._events, agents)
         self._desk = AgentDesk(agents, self._publish_agents) if agents else None
         self._workspace = workspace
+        self._managed = managed
         self._recover = recover
         owner_notes = () if owner is None else (read_only_note(owner),)
         self._startup_notes = (*owner_notes, *startup_notes)
@@ -878,7 +880,13 @@ class WorkspaceHost:
         a connection joining would see it."""
         live = self._states.current(joining=True).values()
         workspace = (self._workspace_id, _workspace_label(self._workspace), self._workspace)
-        return workspace_entry(workspace, sessions, read_only=self._takeover.read_only, live=live)
+        return workspace_entry(
+            workspace,
+            sessions,
+            read_only=self._takeover.read_only,
+            managed=self._managed,
+            live=live,
+        )
 
     def _steps_shown(self) -> tuple[tuple[StepState, ...], str]:
         """The verification steps the panel shows, and their title: the startup check's while

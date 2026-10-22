@@ -19,7 +19,7 @@ from orbit.protocol import (
     ErrorOccurred,
     WorkspaceCloning,
 )
-from tests.git_repo import bare_repository, started
+from tests.git_repo import bare_repository, init_repo, started
 from tests.plane_fakes import payloads, refused, say, taken, welcomed
 from tests.process_checks import gone
 from tests.serving import serving, until
@@ -61,9 +61,29 @@ async def test_a_url_is_cloned_then_served_flagged_and_managed(
     catalog = events[-1]
     assert isinstance(catalog, Catalog)
     [entry] = catalog.workspaces
-    assert entry.path == str(clones / "proj")
+    assert entry.path == str(clones / "proj") and entry.managed
     assert await WorkspaceRegistry(store).served() == [(entry.id, str(clones / "proj"))]
     assert await store.run("Couldn't list", managed) == [(str(clones / "proj"), 1)]
+
+
+async def test_a_workspace_is_listed_managed_as_its_registry_entry_says(
+    stack: ExitStack, store: SqliteStore, tmp_path: Path
+) -> None:
+    clone, plain = init_repo(tmp_path / "clone"), init_repo(tmp_path / "plain")
+    registry = WorkspaceRegistry(store)
+    await registry.set_managed((await registry.find_or_register(str(clone))).workspace_id)
+    plane = serving(stack, store, tmp_path / "clones")
+    connection = await welcomed(plane)
+
+    await say(connection, "clone", AddWorkspace(path=str(clone)))
+    await say(connection, "plain", AddWorkspace(path=str(plain)))
+    events = payloads(taken(connection))
+    await plane.close()
+    stack.close()
+
+    catalog = [event for event in events if isinstance(event, Catalog)][-1]
+    managed_by_path = {entry.path: entry.managed for entry in catalog.workspaces}
+    assert managed_by_path == {str(clone): True, str(plain): False}
 
 
 async def test_a_second_clone_of_a_name_taken_lands_beside_it(

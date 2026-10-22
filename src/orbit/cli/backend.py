@@ -228,6 +228,7 @@ def _host_maker(
             recover=opened.recover,
             owner=backend.owner,
             lock=backend.lock,
+            managed=opened.managed,
         )
 
     return make

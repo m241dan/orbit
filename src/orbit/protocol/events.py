@@ -488,13 +488,15 @@ class WorkspaceCloning(_Message):
 
 class WorkspaceEntry(_Message):
     """Workspace ``id``, shown as ``label``, at ``path`` on the backend's host, if it has one,
-    whether it's ``read_only``, as another orbit owns its repository, and its ``sessions`` as
-    the list of sessions shows them."""
+    whether it's ``read_only``, as another orbit owns its repository, whether it's ``managed``,
+    a clone orbit made at ``path``, which purging it deletes, and its ``sessions`` as the list
+    of sessions shows them."""
 
     id: str
     label: str
     path: str | None = None
     read_only: bool = False
+    managed: bool = False
     sessions: tuple[SessionSummary, ...]
 
 
