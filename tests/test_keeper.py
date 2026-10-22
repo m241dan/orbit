@@ -1,6 +1,7 @@
 """Keeping the open session saved: only once it's used, after each change, locked while open."""
 
 import asyncio
+from collections.abc import Awaitable
 from dataclasses import replace
 from datetime import timedelta
 
@@ -8,6 +9,7 @@ import pytest
 
 from orbit.agent.application.keeper import (
     ALREADY_OPEN,
+    AlreadyOpen,
     Contents,
     Left,
     NewSessions,
@@ -17,13 +19,15 @@ from orbit.agent.application.keeper import (
 )
 from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.reviews import LaneSnapshot, PlannerSnapshot
-from orbit.agent.domain.sessions import SessionRecord
+from orbit.agent.domain.sessions import OPEN_UNDELETABLE, OPEN_UNRENAMABLE, SessionRecord
 from orbit.agent.domain.storage_halt import FailedWrite
 from orbit.protocol import (
     BUSY,
+    INVALID,
     LOCKED,
     SAVE_FAILED,
     UNKNOWN,
+    ErrorOccurred,
     Settings,
     Usage,
 )
@@ -702,3 +706,94 @@ async def test_an_open_cancelled_while_catching_up_lets_go_of_its_lock() -> None
         await opening
     assert store.released == ["other"] and store.locked == set()
     assert keeper.id == "one" and not keeper.used
+
+
+def gated(store: FakeStore) -> tuple[asyncio.Event, asyncio.Event]:
+    """Events that the next lock taken in ``store`` has been asked for, and that lets it be
+    taken; later locks are taken at once."""
+    asked, go = asyncio.Event(), asyncio.Event()
+
+    async def wait() -> None:
+        store.on_acquire = None
+        asked.set()
+        await go.wait()
+
+    store.on_acquire = wait
+    return asked, go
+
+
+async def raced[T](store: FakeStore, first: Awaitable[object], then: Awaitable[T]) -> T:
+    """What ``then`` comes to, started once ``first`` is taking its lock in ``store`` and
+    given time to run before ``first`` takes it and finishes."""
+    asked, go = gated(store)
+    started = asyncio.ensure_future(first)
+    await asyncio.wait_for(asked.wait(), timeout=1)
+    racing = asyncio.ensure_future(then)
+    for _ in range(10):
+        await asyncio.sleep(0)
+    go.set()
+    await started
+    return await racing
+
+
+def store_with_other() -> FakeStore:
+    """A store holding the saved session ``other``."""
+    store = FakeStore()
+    store.saved = [SessionRecord(id="other", name="other", created=START, last_active=START)]
+    return store
+
+
+async def test_a_rename_racing_an_open_of_its_session_is_refused_and_keeps_its_lock() -> None:
+    store = store_with_other()
+    keeper, _ = keeper_for(store)
+    with pytest.raises(Refused) as refused:
+        await raced(store, keeper.open("other", loads), keeper.rename_saved("other", "Renamed"))
+    assert (refused.value.code, refused.value.message) == (INVALID, OPEN_UNRENAMABLE)
+    assert keeper.id == "other" and keeper.name == "other"
+    assert store.locked == {"other"} and store.released == []
+    assert [r.name for r in store.saved] == ["other"]
+
+
+async def test_a_rename_racing_an_open_saves_nothing_over_the_open_sessions_newer_save() -> None:
+    store = store_with_other()
+    keeper, _ = keeper_for(store)
+    with pytest.raises(Refused):
+        await raced(store, keeper.open("other", loads), keeper.rename_saved("other", "Renamed"))
+    await save(keeper, WITH_TASK)
+    assert store.last.tasks == (TASK,) and store.last.name == "other"
+    assert store.locked == {"other"}
+
+
+async def test_an_open_racing_a_rename_of_its_session_opens_it_renamed_and_locked() -> None:
+    store = store_with_other()
+    keeper, _ = keeper_for(store)
+    opened = await raced(
+        store, keeper.rename_saved("other", "Renamed"), keeper.open("other", loads)
+    )
+    assert not isinstance(opened, AlreadyOpen) and opened is not None
+    assert opened.record.name == "Renamed" and keeper.name == "Renamed"
+    assert store.locked == {"other"} and store.released == ["other"]
+
+
+async def test_a_delete_racing_an_open_of_its_session_is_refused_and_keeps_it() -> None:
+    store = store_with_other()
+    keeper, forgotten = forgetting_keeper(store)
+    with pytest.raises(Refused) as refused:
+        await raced(store, keeper.open("other", loads), keeper.delete_saved("other"))
+    assert (refused.value.code, refused.value.message) == (INVALID, OPEN_UNDELETABLE)
+    assert keeper.id == "other" and store.locked == {"other"}
+    assert store.deleted == [] and [r.id for r in store.saved] == ["other"]
+    assert "other" not in forgotten
+
+
+async def test_a_pending_rename_of_a_session_opened_since_is_dropped_and_reported() -> None:
+    keeper, published, store = failed_rename()
+    await keeper.rename_saved("other", "Renamed")
+    store.failure = None
+    await keeper.open("other", loads)
+
+    assert await keeper.retry(lambda: EMPTY) is None
+    assert published.events[-1] == ErrorOccurred(code=INVALID, message=OPEN_UNRENAMABLE)
+    assert store.last.name == "other" and store.locked == {"other"}
+    assert await keeper.retry(lambda: EMPTY) is None
+    assert store.last.name == "other"
