@@ -21,6 +21,7 @@ from orbit.protocol import (
     PROTOCOL_VERSION,
     STORAGE_FAILED,
     SUPER_REVIEW,
+    UNKNOWN,
     WORK_LANE,
     AcceptTask,
     AddTask,
@@ -783,9 +784,15 @@ class OrbitApp(App[None], inherit_bindings=False):
 
     async def _decide(self, proposal: ChecksProposed, decision: DecideProposal) -> None:
         """Note the user's ``decision`` on ``proposal`` in the conversation and send it; refused
-        or not sent, the note is dropped and ``proposal`` shown again."""
+        or not sent, the note is dropped and ``proposal`` shown again, unless it was refused as
+        no longer waiting."""
         shown = decision_entry(proposal.agent_id, decision)
-        outcome = Awaited(refused=lambda: self._proposals.reopen(proposal))
+
+        def undecide(code: str) -> None:
+            if code != UNKNOWN:
+                self._proposals.reopen(proposal)
+
+        outcome = Awaited(code=undecide)
         await self._show_and_send(shown, proposal.agent_id, decision, outcome)
 
     def _show_settings(self, settings: Settings, choices: tuple[str, ...]) -> None:

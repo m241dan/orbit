@@ -103,6 +103,7 @@ class ProposalHost:
         self._slot = ModalSlot[ProposalScreen, DecideProposal](push)
         self._decide = decide
         self._waiting: list[ChecksProposed] = []  # Those to show after the one shown, in order.
+        self._exited: set[str] = set()  # The agents that exited, whose proposals can't be decided.
 
     @property
     def shown(self) -> ProposalScreen | None:
@@ -140,6 +141,7 @@ class ProposalHost:
         shown and showing the next."""
         if not isinstance(event, AgentExited):
             return
+        self._exited.add(event.agent_id)
         self._waiting = [p for p in self._waiting if p.agent_id != event.agent_id]
         screen = self.shown
         if screen is not None and screen.proposal.agent_id == event.agent_id:
@@ -148,11 +150,17 @@ class ProposalHost:
 
     def reopen(self, proposal: ChecksProposed) -> None:
         """Ask the user about ``proposal`` again, its decision undone: now, or next once the one
-        shown is done with."""
-        if self.shown is None or self.shown.proposal != proposal:
-            self._waiting = [proposal, *(p for p in self._waiting if p != proposal)]
+        shown is done with; not once its agent has exited."""
+        if proposal.agent_id in self._exited:
+            return
+        self._wait_first(proposal)
         if self.shown is None:
             self._show_next()
+
+    def _wait_first(self, proposal: ChecksProposed) -> None:
+        """Show ``proposal`` before those waiting, unless it's shown."""
+        if self.shown is None or self.shown.proposal != proposal:
+            self._waiting = [proposal, *(p for p in self._waiting if p != proposal)]
 
     def _wait(self, proposal: ChecksProposed) -> None:
         """Show ``proposal`` after those waiting, unless it's shown or waiting already."""

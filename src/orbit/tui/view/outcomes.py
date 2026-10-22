@@ -10,17 +10,18 @@ def _nothing() -> None:
 
 
 def _ignored(_why: str) -> None:
-    """Does nothing with why a command was refused, when nothing awaits it."""
+    """Does nothing with why a command was refused, or its code, when nothing awaits it."""
 
 
 @dataclass(frozen=True)
 class Awaited:
     """What to do once a command is ``accepted``, and once it's ``refused`` or isn't sent,
-    after which ``why`` takes the message saying why."""
+    after which ``why`` takes the message saying why and ``code`` the refusal's code."""
 
     accepted: Callable[[], None] = _nothing
     refused: Callable[[], None] = _nothing
     why: Callable[[str], None] = _ignored
+    code: Callable[[str], None] = _ignored
 
 
 @dataclass(frozen=True)

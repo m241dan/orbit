@@ -3,6 +3,8 @@
 from orbit.protocol import (
     PLANNER,
     PLANNER_LANE,
+    UNKNOWN,
+    AgentExited,
     AgentRequest,
     AgentStarted,
     AssistantMessage,
@@ -458,6 +460,41 @@ async def test_a_refused_decision_drops_its_entry_and_shows_the_proposal_again()
         assert entries(app)[-1] == ("Not now.", "error")
         assert not any(text.startswith("orbit → agent-3") for text, _ in entries(app))
         assert [screen.proposal for screen in proposal_screens(app)] == [PROPOSAL]
+
+
+async def test_a_decision_refused_as_unknown_drops_its_entry_and_leaves_the_proposal_closed() -> (
+    None
+):
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, PROPOSAL)
+        await pilot.press("a")
+        await pilot.pause()
+        [sent] = session.envelopes
+        message = "No proposal is waiting for task 1."
+        await feed_events(
+            session,
+            pilot,
+            CommandRefused(command_id=sent.command_id, code=UNKNOWN, message=message),
+        )
+        assert entries(app)[-1] == (message, "error")
+        assert not any(text.startswith("orbit → agent-3") for text, _ in entries(app))
+        assert proposal_screens(app) == []
+
+
+async def test_a_decision_whose_agent_exits_before_its_refusal_leaves_the_proposal_closed() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, PROPOSAL)
+        await pilot.press("a")
+        await pilot.pause()
+        [sent] = session.envelopes
+        refused = CommandRefused(command_id=sent.command_id, code="busy", message="Not now.")
+        await feed_events(session, pilot, AgentExited(agent_id="agent-3", reason="killed"), refused)
+        assert not any(text.startswith("orbit → agent-3") for text, _ in entries(app))
+        assert proposal_screens(app) == []
 
 
 async def test_a_decision_that_failed_to_send_drops_its_entry_and_shows_the_proposal_again() -> (

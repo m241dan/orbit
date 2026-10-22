@@ -84,7 +84,9 @@ class CommandDesk:
             return
         self._echoes.discard(command_id)
         message = f"{failure}: {exc}"
-        self._settle(command_id, refusal=message)
+        self._settle(
+            command_id, CommandRefused(command_id=command_id, code=INTERNAL, message=message)
+        )
         self._report(ErrorOccurred(code=INTERNAL, message=message))
 
     def _echo(self, event: MessageSent | ProposalDecided) -> None:
@@ -104,11 +106,11 @@ class CommandDesk:
         if isinstance(event, CommandAccepted):
             self._settle(event.command_id)
             return
-        self._settle(event.command_id, refusal=event.message)
+        self._settle(event.command_id, event)
         self._show(event)
 
-    def _settle(self, command_id: str, refusal: str | None = None) -> None:
-        """Do what awaits ``command_id`` being accepted, or refused for the ``refusal`` given, if
+    def _settle(self, command_id: str, refusal: CommandRefused | None = None) -> None:
+        """Do what awaits ``command_id`` being accepted, or refused as ``refusal`` says, if
         anything does."""
         self._outcomes, awaited = settled(self._outcomes, command_id)
         if awaited is None:
@@ -117,4 +119,5 @@ class CommandDesk:
             awaited.accepted()
         else:
             awaited.refused()
-            awaited.why(refusal)
+            awaited.why(refusal.message)
+            awaited.code(refusal.code)

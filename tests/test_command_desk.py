@@ -173,3 +173,19 @@ async def test_a_failure_to_send_tells_what_awaits_it_why() -> None:
     reasons: list[str] = []
     assert not await desk.desk.send(RunTasks(), Awaited(why=reasons.append))
     assert reasons == ["Couldn't send the command: boom"]
+
+
+async def test_a_refusal_tells_what_awaits_it_its_code() -> None:
+    desk = Desk()
+    codes: list[str] = []
+    await desk.desk.send(RunTasks(), Awaited(code=codes.append))
+    desk.desk.answer(CommandRefused(command_id=desk.last_id, code=INVALID, message="no"))
+    assert codes == [INVALID]
+
+
+async def test_a_failure_to_send_tells_what_awaits_it_an_internal_code() -> None:
+    desk = Desk()
+    desk.failing = RuntimeError("boom")
+    codes: list[str] = []
+    assert not await desk.desk.send(RunTasks(), Awaited(code=codes.append))
+    assert codes == [INTERNAL]
