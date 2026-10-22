@@ -17,7 +17,7 @@ from orbit.agent.application.keeper import (
     Opened,
     SessionKeeper,
 )
-from orbit.agent.application.outbox import EventSink
+from orbit.agent.application.outbox import EventSink, Shown
 from orbit.agent.application.planner_seat import PlannerSeat
 from orbit.agent.application.review_lane import ReviewLane
 from orbit.agent.application.settings import SessionSettings
@@ -43,7 +43,6 @@ from orbit.protocol import (
     Notice,
     RenameSession,
     SessionSummary,
-    Snapshot,
     TaskState,
     Usage,
     WorkspaceEntry,
@@ -77,7 +76,7 @@ class SwitchParts:
     lane: ReviewLane | None
     work: WorkLane | None
     activity: Callable[[], Activity]
-    snapshot: Callable[[datetime | None], Awaitable[Snapshot]]
+    snapshot: Callable[[datetime | None], Awaitable[Shown]]
     entry: Callable[[tuple[SessionSummary, ...]], WorkspaceEntry]
     broadcast: Callable[[WorkspaceEntry], Awaitable[None]]
     switching: Callable[[bool], None]
@@ -318,7 +317,7 @@ class SessionSwitcher:
             await parts.lane.end_interrupted(stopped)
         await parts.tasks.changed_elsewhere()
         await self.publish_catalog()
-        await self._to_everyone(await parts.snapshot(last_active))
+        await (await parts.snapshot(last_active)).publish(self._to_everyone)
         if parts.lane is not None:
             await parts.lane.note_pause()
 

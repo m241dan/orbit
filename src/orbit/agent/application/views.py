@@ -7,7 +7,7 @@ from typing import NotRequired, TypedDict, Unpack
 
 from orbit.agent.application.connection import Connections, SessionConnection
 from orbit.agent.application.keeper import SessionKeeper
-from orbit.agent.application.outbox import Outbox
+from orbit.agent.application.outbox import Outbox, Shown
 from orbit.agent.application.session_state import SessionStates
 from orbit.agent.application.settings import SessionSettings
 from orbit.agent.application.storage_halt import StorageHalt
@@ -83,7 +83,7 @@ class ViewParts:
     connections: Connections
     states: SessionStates
     settings: SessionSettings
-    live: Callable[[], Awaitable[Snapshot]]
+    live: Callable[[], Awaitable[Shown]]
     halt: StorageHalt
     takeover: Takeover
 
@@ -118,7 +118,7 @@ class SessionViews:
         parts.states.check()
 
     async def _publish_view(
-        self, connection: SessionConnection, session_id: str, view: Snapshot
+        self, connection: SessionConnection, session_id: str, view: Shown
     ) -> None:
         """Publish ``view``, the read-only view of the session ``session_id``, to ``connection``
         if it's still attached to it; nothing if it was deleted meanwhile, which moved
@@ -131,12 +131,12 @@ class SessionViews:
         if session_id == self._parts.keeper.id:
             await self._attach_live(connection)
             return
-        await connection.publish_here(view)
+        await view.publish(connection.publish_here)
 
     async def _attach_live(self, connection: SessionConnection) -> None:
         """Have ``connection`` view the open session, live, and publish its snapshot."""
         connection.attach(None)
-        await self._parts.events.put(await self._parts.live())
+        await (await self._parts.live()).publish(self._parts.events.put)
 
     def switching(self, kept: bool) -> None:
         """Have the connection whose command switches the open session view the session it
@@ -164,7 +164,7 @@ class SessionViews:
             return
         # One may have attached elsewhere while the view was read.
         for connection in [c for c in viewers if c.attached_id == record.id]:
-            await connection.publish_here(view)
+            await view.publish(connection.publish_here)
 
     def open_session(self) -> SessionRef:
         """The workspace's open session."""
@@ -216,7 +216,7 @@ class SessionViews:
             live = await parts.live()
             # One may have attached elsewhere while the snapshot was taken.
             for connection in [c for c in moved if c.attached is None]:
-                await connection.publish_here(live)
+                await live.publish(connection.publish_here)
         parts.states.check()
 
     def renamed(self, session_id: str, name: str) -> None:
@@ -240,12 +240,12 @@ class SessionViews:
             **session,
         )
 
-    async def _view(self, record: SessionRecord) -> Snapshot:
+    async def _view(self, record: SessionRecord) -> Shown:
         """The read-only view of the session saved as ``record``: as it was saved, with its last
-        logged events, nothing running in it."""
+        logged events, nothing running in it, and why it shows none if they can't be read."""
         parts = self._parts
         transcript = await parts.events.transcript(record.id)
-        return self.snapshot(
+        view = self.snapshot(
             session=summarize(record),
             settings=record.settings,
             busy={WORK_LANE: False, PLANNER_LANE: False},
@@ -254,7 +254,8 @@ class SessionViews:
             review=None,
             proposals=(),
             agents=(),
-            transcript=transcript,
+            transcript=transcript.events,
             active=False,
             viewers=parts.states.of(record.id).viewers,
         )
+        return Shown(view, transcript.error)

@@ -239,10 +239,11 @@ class SqliteStore:
 
     async def recent(self, workspace: str, session_id: str, limit: int) -> list[EventEnvelope]:
         """The last ``limit`` events logged of the session ``session_id`` in the workspace
-        ``workspace``, oldest first, but for those of types this orbit doesn't know; none when
-        they can't be read."""
+        ``workspace``, oldest first, but for those of types this orbit doesn't know. Raises
+        :class:`ReadFailed` when they can't be read."""
         check_session_id(session_id)
-        return await self._read_or(lambda _: [], self._recent, workspace, session_id, limit)
+        message = f"Couldn't read the events of the session {session_id} from"
+        return await self._or_raise(message, self._recent, workspace, session_id, limit)
 
     async def before(
         self, workspace: str, session_id: str, before_seq: int, limit: int
@@ -277,7 +278,8 @@ class SqliteStore:
 
     async def trimmed(self, workspace: str, session_id: str) -> bool:
         check_session_id(session_id)
-        return await self._read_or(lambda _: False, self._trimmed, workspace, session_id)
+        message = f"Couldn't read whether the session {session_id}'s log was trimmed in"
+        return await self._or_raise(message, self._trimmed, workspace, session_id)
 
     async def forget(self, workspace: str, session_id: str) -> None:
         check_session_id(session_id)

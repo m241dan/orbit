@@ -145,6 +145,9 @@ they were shown live, and the conversation carries on from there. Moving up past
 back through earlier events to the session's start, or, once its log was trimmed (see
 `session_log_mb` under [Where orbit keeps things](#where-orbit-keeps-things)), to the line
 "Older events were removed (session_log_mb)".
+When the event log can't be read, such as while the database stays locked, the conversation
+opens empty, followed by an error saying its events couldn't be read and why, so an empty
+conversation isn't taken for the session's.
 
 Every chat, in process or connected to an `orbit serve` (see [Serving the control plane](#serving-the-control-plane)),
 starts with the session picker, connected once you've picked the workspace (see

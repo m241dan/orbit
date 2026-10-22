@@ -28,7 +28,7 @@ from orbit.agent.application.keeper import (
 )
 from orbit.agent.application.lanes import SessionGate
 from orbit.agent.application.log_writer import Overflow
-from orbit.agent.application.outbox import EventSink, Outbox
+from orbit.agent.application.outbox import EventSink, Outbox, Shown
 from orbit.agent.application.planner_seat import PlannerSeat, SeatHooks
 from orbit.agent.application.ports import (
     Fallback,
@@ -98,7 +98,6 @@ from orbit.protocol import (
     RunningAgent,
     SessionSummary,
     Settings,
-    Snapshot,
     StepState,
     TakeOwnership,
     TaskSpec,
@@ -857,13 +856,13 @@ class WorkspaceHost:
         tree = self._desk.agents.tree if self._desk and not self._takeover.read_only else None
         return await tree.leftovers() if tree else []
 
-    async def _snapshot(self, last_active: datetime | None = None) -> Snapshot:
+    async def _snapshot(self, last_active: datetime | None = None) -> Shown:
         """The session open here, last active at ``last_active``, as it stands now, with its
-        latest events."""
+        latest events, and why it shows none if they can't be read."""
         transcript = await self._events.transcript(self._keeper.id)
         # Read after the transcript, so the state is as it stands once that's read.
         steps, title = self._steps_shown()
-        return self._views.snapshot(
+        snapshot = self._views.snapshot(
             session=self._switcher.summary(last_active),
             settings=self._settings.current,
             busy={WORK_LANE: self._turns.running, PLANNER_LANE: self._seat.running},
@@ -873,9 +872,10 @@ class WorkspaceHost:
             review=self._lane.status if self._lane else None,
             proposals=self._proposals.waiting,
             agents=self._running_agents(),
-            transcript=transcript,
+            transcript=transcript.events,
             viewers=self._states.of(self._keeper.id).viewers,
         )
+        return Shown(snapshot, transcript.error)
 
     def _entry(self, sessions: tuple[SessionSummary, ...]) -> WorkspaceEntry:
         """This workspace's entry in the catalog, holding ``sessions``, the open one's state as

@@ -1024,7 +1024,7 @@ def store_of(session: WorkspaceHost) -> SessionStore | None:
 
 async def snapshot_of(session: WorkspaceHost) -> Snapshot:
     """The snapshot of the session as it stands now."""
-    return await session._snapshot()
+    return (await session._snapshot()).snapshot
 
 
 def put_on_board(session: WorkspaceHost, *tasks: TaskSpec) -> None:

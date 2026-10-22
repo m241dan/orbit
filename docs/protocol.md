@@ -133,6 +133,8 @@ asked gets it once, before its `Snapshot`. Orbit sends no Catalog when only a se
 changes.
 A frontend replaces the conversation it shows with every Snapshot's transcript, so joining
 shows where the session left off and a switch shows the session switched to.
+When the log can't be read, the transcript is empty and an `ErrorOccurred` coded `internal`
+follows the Snapshot, saying the conversation's events couldn't be read and why.
 
 ## Attaching
 

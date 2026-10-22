@@ -891,6 +891,92 @@ class Unreadable(FakeStore):
         raise ReadFailed("database is locked")
 
 
+class UnreadableRecent(FakeStore):
+    """A log whose latest events can't be read back."""
+
+    async def recent(self, session_id: str, limit: int) -> list[EventEnvelope]:
+        raise ReadFailed("database is locked")
+
+
+class UntoldTrims(FakeStore):
+    """A log that can't tell whether events were trimmed from it."""
+
+    async def trimmed(self, session_id: str) -> bool:
+        raise ReadFailed("database is locked")
+
+
+UNREAD = ErrorOccurred(
+    code=INTERNAL,
+    message="The conversation's events couldn't be read, so none are shown: database is locked",
+)
+
+
+async def test_recent_reads_of_a_log_that_cant_be_read_raise() -> None:
+    writer = LogWriter(UnreadableRecent(), Published())
+    writer.add("a", notice(1))
+
+    with pytest.raises(ReadFailed, match="database is locked"):
+        await writer.recent("a", 10)
+    await writer.close()
+
+
+async def test_reading_whether_a_log_that_cant_be_read_was_trimmed_raises() -> None:
+    writer = LogWriter(UntoldTrims(), Published())
+
+    with pytest.raises(ReadFailed, match="database is locked"):
+        await writer.trimmed("a")
+    await writer.close()
+
+
+def after_snapshot(sent: Sequence[EventEnvelope]) -> tuple[Snapshot, Event | None]:
+    """The first snapshot ``sent`` and the event right after it, if any."""
+    payloads = [envelope.payload for envelope in sent]
+    at = next(i for i, payload in enumerate(payloads) if isinstance(payload, Snapshot))
+    snapshot = payloads[at]
+    assert isinstance(snapshot, Snapshot)
+    return snapshot, next(iter(payloads[at + 1 :]), None)
+
+
+async def test_a_snapshot_whose_events_cant_be_read_comes_empty_then_says_why() -> None:
+    store = UnreadableRecent()
+    store.logged = [notice(1, "session-1")]
+    session = stored_session(store)
+
+    await greet(session)
+    snapshot, then = after_snapshot(delivered(session))
+    await session.close()
+
+    assert (snapshot.transcript, then) == ((), UNREAD)
+
+
+async def test_a_saved_sessions_view_whose_events_cant_be_read_comes_empty_then_says_why() -> None:
+    store = UnreadableRecent()
+    store.saved = [saved("auth")]
+    session = stored_session(store)
+    await greet(session)
+    delivered(session)
+
+    attach = CommandEnvelope(command_id=ATTACH_ID, payload=attach_to(session, "auth"))
+    await frontend(session).send(attach)
+    snapshot, then = after_snapshot(delivered(session))
+    await session.close()
+
+    assert (snapshot.session.id, snapshot.transcript, then) == ("auth", (), UNREAD)
+
+
+async def test_a_snapshot_whose_events_can_be_read_comes_without_an_error() -> None:
+    store = FakeStore()
+    store.logged = [notice(1, "session-1")]
+    session = stored_session(store)
+
+    await greet(session)
+    snapshot, then = after_snapshot(delivered(session))
+    await session.close()
+
+    assert snapshot.transcript == (notice(1, "session-1"),)
+    assert not isinstance(then, ErrorOccurred)
+
+
 async def test_reads_before_a_seq_of_a_log_that_cant_be_read_raise() -> None:
     writer = LogWriter(Unreadable(), Published())
     writer.add("a", notice(1))
@@ -1277,6 +1363,17 @@ async def test_history_of_a_session_that_isnt_this_workspaces_is_refused(
     await session.close()
 
     assert answer == [refused(UNKNOWN, "There's no saved session 'elsewhere'.")]
+
+
+async def test_history_whose_log_cant_tell_if_it_was_trimmed_is_refused() -> None:
+    store = UntoldTrims()
+    store.logged = [notice(1, "session-1")]
+    session = stored_session(store)
+
+    answer = await history(session, History(session="session-1", before_seq=10))
+    await session.close()
+
+    assert answer == [refused(INTERNAL, "Orbit failed to handle History: database is locked")]
 
 
 async def test_history_of_a_session_whose_log_cant_be_read_is_refused() -> None:

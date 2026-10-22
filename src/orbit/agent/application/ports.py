@@ -331,8 +331,8 @@ class EventLog(Protocol):
         ...
 
     async def recent(self, session_id: str, limit: int) -> list[EventEnvelope]:
-        """The last ``limit`` events logged of the session ``session_id``, oldest first; none
-        when they can't be read."""
+        """The last ``limit`` events logged of the session ``session_id``, oldest first. Raises
+        :class:`ReadFailed` when they can't be read."""
         ...
 
     async def before(
@@ -362,8 +362,8 @@ class EventLog(Protocol):
         ...
 
     async def trimmed(self, session_id: str) -> bool:
-        """Whether events of the session ``session_id`` were trimmed from its log; ``False``
-        when that can't be read."""
+        """Whether events of the session ``session_id`` were trimmed from its log. Raises
+        :class:`ReadFailed` when that can't be read."""
         ...
 
     async def forget(self, session_id: str) -> None:

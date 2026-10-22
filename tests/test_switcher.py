@@ -7,6 +7,7 @@ from itertools import count
 import pytest
 
 from orbit.agent.application.keeper import NewSessions, SessionKeeper
+from orbit.agent.application.outbox import Shown
 from orbit.agent.application.planner_seat import PlannerSeat, SeatHooks
 from orbit.agent.application.settings import SessionSettings
 from orbit.agent.application.switcher import SessionSwitcher, SwitchParts
@@ -53,9 +54,9 @@ class Held:
     def settings(self) -> Settings:
         return self.owned.current
 
-    async def snapshot(self, last_active: datetime | None) -> Snapshot:
+    async def snapshot(self, last_active: datetime | None) -> Shown:
         self.snapshots.append(last_active)
-        return Snapshot(
+        snapshot = Snapshot(
             session=SessionSummary(id="snapshot", name="snapshot"),
             settings=self.settings,
             model_choices=(),
@@ -66,6 +67,7 @@ class Held:
             proposals=(),
             agents=(),
         )
+        return Shown(snapshot)
 
     def entry(self, sessions: tuple[SessionSummary, ...]) -> WorkspaceEntry:
         self.catalogs.append(sessions)

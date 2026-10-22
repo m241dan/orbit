@@ -128,7 +128,7 @@ async def test_a_saved_sessions_view_taken_while_storage_is_halted_carries_the_h
     viewer = connect(session)
     await say(viewer, "viewer", HELLO)
     snapshot = await attached_view(session, viewer)
-    halt = (await session._snapshot()).storage_halt
+    halt = (await session._snapshot()).snapshot.storage_halt
     await session.close()
 
     assert [e.code for e in errors] == [STORAGE_FAILED]

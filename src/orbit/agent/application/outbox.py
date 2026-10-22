@@ -1,23 +1,57 @@
 """Where the session's events are published, each stamped as it's published."""
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from typing import Protocol
 
 from orbit.agent.application.log_writer import LogWriter, Overflow
-from orbit.agent.application.ports import EventLog, StoreFailed
+from orbit.agent.application.ports import EventLog, ReadFailed, StoreFailed
 from orbit.agent.domain.replay import can_replay
 from orbit.agent.domain.storage import StorageSettings, cut_fields
 from orbit.agent.domain.storage_halt import SeqSpan
 from orbit.protocol import (
     CONNECTION_EVENTS,
     CONTROL_PLANE_EVENTS,
+    INTERNAL,
     SESSIONLESS_EVENTS,
+    ErrorOccurred,
     Event,
     EventEnvelope,
+    Snapshot,
 )
 
 TRANSCRIPT_LENGTH = 500
 """How many of a session's latest events its transcript holds."""
+
+
+@dataclass(frozen=True)
+class Transcript:
+    """A session's latest ``events``, oldest first; none when they couldn't be read, with the
+    ``error`` saying so."""
+
+    events: tuple[EventEnvelope, ...] = ()
+    error: ErrorOccurred | None = None
+
+
+@dataclass(frozen=True)
+class Shown:
+    """A session's ``snapshot``, and the ``error``, if any, to publish after it: why its
+    transcript is empty though the session's conversation may not be."""
+
+    snapshot: Snapshot
+    error: ErrorOccurred | None = None
+
+    async def publish(self, send: Callable[[Event], Awaitable[None]]) -> None:
+        """Publish the snapshot with ``send``, then the error, if there is one."""
+        await send(self.snapshot)
+        if self.error is not None:
+            await send(self.error)
+
+
+def _unread(error: ReadFailed) -> Transcript:
+    """The transcript of a session whose events couldn't be read, as ``error`` says."""
+    message = f"The conversation's events couldn't be read, so none are shown: {error}"
+    return Transcript(error=ErrorOccurred(code=INTERNAL, message=message))
 
 
 _WHOLE = StorageSettings(tool_output_kb=0, session_log_mb=0)
@@ -154,12 +188,16 @@ class Outbox:
         latest = await self._event_log.latest_seq() if self._event_log else None
         self.seqs.catch_up(latest or 0)
 
-    async def transcript(self, session_id: str) -> tuple[EventEnvelope, ...]:
+    async def transcript(self, session_id: str) -> Transcript:
         """The last :data:`TRANSCRIPT_LENGTH` events of the session ``session_id``, oldest
-        first, logged or still to be; none without a log."""
+        first, logged or still to be; none without a log, or with the error saying why when the
+        log can't be read."""
         if self._writer is None:
-            return ()
-        return tuple(await self._writer.recent(session_id, TRANSCRIPT_LENGTH))
+            return Transcript()
+        try:
+            return Transcript(tuple(await self._writer.recent(session_id, TRANSCRIPT_LENGTH)))
+        except ReadFailed as error:
+            return _unread(error)
 
     async def history(
         self, session_id: str, before_seq: int, limit: int

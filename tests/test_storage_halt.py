@@ -344,12 +344,12 @@ async def test_a_snapshot_taken_while_halted_carries_the_explanation() -> None:
     store = FakeStore()
     session, _, _ = session_for(store=store, fallback=FakeFallback())
     await greet(session)
-    assert (await session._snapshot()).storage_halt is None
+    assert (await session._snapshot()).snapshot.storage_halt is None
     store.failure = "full"
     await send(session, AddTask(task=TASK))
     error = await halt_error(session)
 
-    assert (await session._snapshot()).storage_halt == error.message
+    assert (await session._snapshot()).snapshot.storage_halt == error.message
     await session.close()
 
 
@@ -562,7 +562,7 @@ async def test_resuming_once_writing_works_logs_the_parked_events_and_lifts_the_
     assert store.logged[: len(parked)] == sorted(parked, key=lambda envelope: envelope.seq)
     assert any(halted(envelope) for envelope in store.logged)
     assert fallback.files == {}
-    assert (await session._snapshot()).storage_halt is None
+    assert (await session._snapshot()).snapshot.storage_halt is None
     assert (await outcome_of(session, RunTasks()))[-1].payload == ACCEPTED
     await session.close()
     assert [envelope.seq for envelope in store.logged] == sorted(
@@ -575,7 +575,7 @@ async def test_resuming_logs_a_gap_for_events_that_reached_no_fallback() -> None
     fallback.broken = True
     session = await halted_session(store, fallback)
     store.append_failure = None
-    lost = [envelope.seq for envelope in await session._events.transcript("session-1")]
+    lost = [envelope.seq for envelope in (await session._events.transcript("session-1")).events]
 
     [gap] = payloads_of(LogGap, await outcome_of(session, ResumeStorage()))
     assert gap == LogGap(first_seq=lost[0], last_seq=lost[-1])
@@ -594,7 +594,7 @@ async def test_resuming_while_writing_still_fails_is_refused_and_the_session_sta
     refusal = (await outcome_of(session, ResumeStorage()))[-1].payload
     assert isinstance(refusal, CommandRefused) and refusal.code == STORAGE_FAILED
     assert "still full" in refusal.message
-    assert (await session._snapshot()).storage_halt == refusal.message
+    assert (await session._snapshot()).snapshot.storage_halt == refusal.message
     assert (await outcome_of(session, RunTasks()))[-1].payload == refused(
         STORAGE_FAILED, refusal.message
     )
@@ -710,7 +710,7 @@ async def test_a_failure_while_the_halt_is_lifted_halts_the_session_again() -> N
     await send(session, ResumeStorage())
     error = await halt_error(session)
     assert "full again" in error.message
-    assert (await session._snapshot()).storage_halt == error.message
+    assert (await session._snapshot()).snapshot.storage_halt == error.message
     assert (await outcome_of(session, RunTasks()))[-1].payload == refused(
         STORAGE_FAILED, error.message
     )

@@ -400,7 +400,7 @@ async def test_a_greetings_notices_are_not_logged() -> None:
     transcript = await session._events.transcript(session.saved_session.id)
     await session.close()
 
-    assert notices([e.payload for e in transcript]) == [Notice(message="logged")]
+    assert notices([e.payload for e in transcript.events]) == [Notice(message="logged")]
 
 
 LIVE = Notice(message="live")

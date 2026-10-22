@@ -167,7 +167,8 @@ class LogWriter:
 
     async def recent(self, session_id: str, limit: int) -> list[EventEnvelope]:
         """The last ``limit`` events of the session ``session_id``, oldest first: those in the
-        log, and after them those still to be written, each once."""
+        log, and after them those still to be written, each once. Raises :class:`ReadFailed`
+        when the log can't be read."""
         # Read on both sides of the log's read: an event written meanwhile is in the log, or
         # was still to be written before it, and one added meanwhile is still to be written.
         before = self._unwritten(session_id)
@@ -210,8 +211,8 @@ class LogWriter:
         return _with_pending(logged, session_id, since, [*pending, *self._pending()])
 
     async def trimmed(self, session_id: str) -> bool:
-        """Whether events of the session ``session_id`` were trimmed from the log; ``False``
-        when that can't be read."""
+        """Whether events of the session ``session_id`` were trimmed from the log. Raises
+        :class:`ReadFailed` when that can't be read."""
         return await self._log.trimmed(session_id)
 
     def _unwritten(self, session_id: str) -> list[EventEnvelope]:

@@ -215,14 +215,16 @@ async def test_recent_events_of_types_this_orbit_doesnt_know_are_left_out(
     assert await store.recent("abc", 10) == [notice(2)]
 
 
-async def test_recent_events_that_cant_be_read_are_none(
+async def test_recent_events_that_cant_be_read_raise_naming_the_database(
     open_store: Opener, workspace: Path
 ) -> None:
     store = await open_store(workspace)
     await store.append("abc", [notice(1)])
     await store.close()
 
-    assert await store.recent("abc", 10) == []
+    match = r"Couldn't read the events of the session abc from .*orbit\.db: the store is closed"
+    with pytest.raises(ReadFailed, match=match):
+        await store.recent("abc", 10)
 
 
 async def test_recent_events_under_an_id_that_isnt_a_plain_file_name_are_refused(
@@ -573,7 +575,7 @@ async def test_upgrading_an_empty_log_starts_the_mark_at_0(
     assert marks(state) == (0, [0])
 
 
-async def test_a_trim_that_fails_is_refused_and_trimmed_reads_false(
+async def test_a_trim_that_fails_is_refused_and_so_is_reading_whether_it_was_trimmed(
     open_store: Opener, workspace: Path
 ) -> None:
     store = await open_store(workspace)
@@ -583,7 +585,9 @@ async def test_a_trim_that_fails_is_refused_and_trimmed_reads_false(
 
     with pytest.raises(StorageFailed, match=r"Couldn't trim the events of the session abc in "):
         await store.trim("abc", 1, 1)
-    assert not await store.trimmed("abc")
+    match = r"Couldn't read whether the session abc's log was trimmed in .*orbit\.db: "
+    with pytest.raises(ReadFailed, match=match):
+        await store.trimmed("abc")
 
 
 @pytest.mark.parametrize("call", ["trim", "trimmed"])
