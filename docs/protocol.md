@@ -173,7 +173,8 @@ comes from the session's saved record and its last logged events: `active` false
 settings and tasks, its `transcript`, nothing busy or running, no steps, review or proposals,
 and `open_session` naming the open session. Nothing runs in a viewed session, and it publishes
 no events while it isn't the open one. On a view, `History`, `RenameSession`, `DeleteSession`,
-`Attach`, `ActivateSession` and `NewSession` work as usual; every other command is refused with `not_active`, its message
+`Attach`, `ActivateSession` and `NewSession` work as usual, as does `ResumeStorage`, since a
+storage halt is the workspace's rather than the session's; every other command is refused with `not_active`, its message
 naming the viewed session and the open one, such as `Session 'old work' isn't the active
 session; 'today' is. Activate it to work in it.` The answers to a viewing connection's
 commands reach it alone.

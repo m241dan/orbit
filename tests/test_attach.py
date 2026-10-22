@@ -29,6 +29,7 @@ from orbit.protocol import (
     HistoryPage,
     OwnershipOffered,
     RenameSession,
+    ResumeStorage,
     RunTasks,
     SessionRef,
     SessionStateChanged,
@@ -289,6 +290,53 @@ async def test_attaching_when_the_sessions_cant_be_listed_changes_nothing() -> N
 async def test_a_view_refuses_work_as_not_active_naming_both_sessions() -> None:
     session = workspace(stored())
     viewer = await viewing(session, "viewer")
+    await say(viewer, "run", RunTasks())
+    events = await taken(viewer)
+    await session.close()
+
+    assert events == [CommandRefused(command_id="run", code=NOT_ACTIVE, message=NOT_ACTIVE_MESSAGE)]
+
+
+async def halted_with_a_view(store: FakeStore) -> tuple[WorkspaceHost, SessionConnection]:
+    """A session over ``store``, halted as adding a task failed to save with "Disk full.", and a
+    connection viewing ``earlier`` that has read what the halt brought."""
+    session = workspace(store)
+    viewer = await viewing(session, "viewer")
+    other = await joined(session, "other")
+    store.failure = "Disk full."
+    await say(other, "add", AddTask(task=TASK))
+    await taken(other)
+    await taken(viewer)
+    return session, viewer
+
+
+async def test_a_view_resuming_storage_once_writing_works_lifts_the_halt() -> None:
+    store = stored()
+    session, viewer = await halted_with_a_view(store)
+    store.failure = None
+    await say(viewer, "resume", ResumeStorage())
+    resumed = await taken(viewer)
+    halt = (await session._snapshot()).snapshot.storage_halt
+    await session.close()
+
+    assert outcome(resumed) == CommandAccepted(command_id="resume")
+    assert halt is None
+
+
+async def test_a_view_resuming_storage_while_writing_still_fails_is_refused_as_halted() -> None:
+    session, viewer = await halted_with_a_view(stored())
+    await say(viewer, "resume", ResumeStorage())
+    refused = outcome(await taken(viewer))
+    halt = (await session._snapshot()).snapshot.storage_halt
+    await session.close()
+
+    assert isinstance(refused, CommandRefused)
+    assert (refused.command_id, refused.code) == ("resume", STORAGE_FAILED)
+    assert "Disk full." in refused.message and halt == refused.message
+
+
+async def test_a_view_still_refuses_work_as_not_active_while_storage_is_halted() -> None:
+    session, viewer = await halted_with_a_view(stored())
     await say(viewer, "run", RunTasks())
     events = await taken(viewer)
     await session.close()

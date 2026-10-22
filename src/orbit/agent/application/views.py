@@ -37,6 +37,7 @@ from orbit.protocol import (
     History,
     NewSession,
     RenameSession,
+    ResumeStorage,
     ReviewStatus,
     RunningAgent,
     SessionRef,
@@ -47,8 +48,17 @@ from orbit.protocol import (
     TaskState,
 )
 
-VIEW_COMMANDS = (Attach, ActivateSession, NewSession, History, RenameSession, DeleteSession)
-"""The commands a connection viewing a session that isn't open may send; the others are
+VIEW_COMMANDS = (
+    Attach,
+    ActivateSession,
+    NewSession,
+    History,
+    RenameSession,
+    DeleteSession,
+    ResumeStorage,
+)
+"""The commands a connection viewing a session that isn't open may send, ``ResumeStorage``
+among them as a storage halt is the workspace's rather than the session's; the others are
 refused as ``not_active``."""
 
 
