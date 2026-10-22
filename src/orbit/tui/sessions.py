@@ -36,6 +36,7 @@ from orbit.tui.view.sessions import (
     NEW_SESSION_LABEL,
     SESSIONS_HINTS,
     SESSIONS_TITLE,
+    PickerRow,
     Viewing,
     activation_choices,
     activation_message,
@@ -44,14 +45,18 @@ from orbit.tui.view.sessions import (
     can_delete,
     can_open,
     delete_message,
+    held_back,
     idle_now_message,
     name_hint,
     opening_attach,
     picked_commands,
-    picker_sessions,
+    picker_rows,
+    picker_viewing,
     running_words,
     session_label,
+    session_turned_idle,
     starting_commands,
+    unjoined_view,
     viewed_only,
     viewing_mark,
     workspace_sessions,
@@ -110,8 +115,13 @@ class SessionsScreen(TypingListScreen[tuple[SessionChoice, ...]]):
     @property
     def rows(self) -> tuple[SessionSummary, ...]:
         """The sessions listed, in order, before ``New session``."""
-        with_attached = self.resume or not self.startup
-        return picker_sessions(self.sessions, self.attached, with_attached=with_attached)
+        return tuple(row.summary for row in self._picker_rows)
+
+    @property
+    def _picker_rows(self) -> tuple[PickerRow, ...]:
+        """The rows listed, in order, before ``New session``."""
+        viewing = Viewing(self.workspace, self.attached, self.joined)
+        return picker_rows(self.sessions, viewing, startup=self.startup, resume=self.resume)
 
     def compose(self) -> ComposeResult:
         with Vertical() as box:
@@ -147,12 +157,8 @@ class SessionsScreen(TypingListScreen[tuple[SessionChoice, ...]]):
     def _labels(self) -> list[Text | str]:
         """The rows' labels, then ``New session``'s."""
         rows = [
-            session_label(
-                summary,
-                attached=self.joined and summary.id == self.attached,
-                resume=(self.startup or not self.joined) and summary.id == self.attached,
-            )
-            for summary in self.rows
+            session_label(row.summary, attached=row.attached, resume=row.resume)
+            for row in self._picker_rows
         ]
         return [*rows, NEW_SESSION_LABEL]
 
@@ -385,7 +391,7 @@ class SessionsHost:
         self._workspaces = with_states(self._workspaces, changed)
         self._refresh()
         held = self._held
-        active = None if held is None else self._turned_idle(held)
+        active = None if held is None else session_turned_idle(self.sessions, held)
         if held is not None and active is not None:
             self._held = None
             self._withdraw()
@@ -407,7 +413,8 @@ class SessionsHost:
         if snapshot.active:  # The offer is moot once it's live.
             self._withdraw()
         self._refresh()
-        self._held = self._held_back(session.id) if offering else None
+        running, active = self.running, self.active_name
+        self._held = held_back(session.id, running=running, active=active) if offering else None
         if offering:
             self.offer()
 
@@ -420,18 +427,6 @@ class SessionsHost:
         running = self.running
         message = activation_message(self.viewed_name, active, running=running)
         self._show_offer(viewed, message, activation_choices(running=running is not None))
-
-    def _held_back(self, viewed: str) -> str | None:
-        """The session ``viewed``, if a running active session keeps it from being the active
-        one; none otherwise."""
-        return viewed if self.running is not None and self.active_name is not None else None
-
-    def _turned_idle(self, held: str) -> str | None:
-        """The name of the active session, if it's idle and isn't the session ``held``."""
-        active = next((summary for summary in self.sessions if summary.active), None)
-        if active is None or active.id == held or active.state != "idle":
-            return None
-        return active.name
 
     def _show_offer(self, viewed: str, message: str, choices: Sequence[str]) -> None:
         """Show the offer to make the session ``viewed`` the active one, saying ``message`` and
@@ -453,7 +448,9 @@ class SessionsHost:
         says, escape quits. Picking in another workspace moves this frontend there."""
         if self.shown is not None:
             return
-        viewing, sessions = self._viewing(workspace)
+        viewing, sessions = picker_viewing(
+            self._workspaces, self.workspace, self.attached, self.sessions, workspace
+        )
 
         async def chosen(choice: tuple[SessionChoice, ...] | None) -> None:
             if choice and not viewing.joined:
@@ -475,15 +472,6 @@ class SessionsHost:
                 self._offering = None
                 return
 
-    def _viewing(self, workspace: str | None) -> tuple[Viewing, tuple[SessionSummary, ...]]:
-        """What this frontend views of the ``workspace``, the one it's on by default, and its
-        sessions."""
-        if workspace is None or workspace == self.workspace:
-            # No session is listed, so none is picked, until a catalog names the workspace.
-            return Viewing(workspace=self.workspace or "", attached=self.attached), self.sessions
-        sessions = workspace_sessions(self._workspaces, workspace)
-        return Viewing(workspace, active_id(sessions), joined=False), sessions
-
     def _refresh(self) -> None:
         """Show the sessions in the picker, if it's shown: of the workspace it lists, with its
         active one to resume if this frontend isn't on it."""
@@ -493,5 +481,5 @@ class SessionsHost:
         if shown.joined:
             shown.show(self.sessions, self.attached)
             return
-        sessions = workspace_sessions(self._workspaces, shown.workspace)
-        shown.show(sessions, active_id(sessions))
+        viewing, sessions = unjoined_view(self._workspaces, shown.workspace)
+        shown.show(sessions, viewing.attached)

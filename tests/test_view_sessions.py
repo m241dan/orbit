@@ -18,6 +18,8 @@ from orbit.tui.view.sessions import (
     RENAME_HINT,
     SESSIONS_HINTS,
     STARTUP_HINT,
+    PickerRow,
+    Viewing,
     activation_choices,
     activation_message,
     active_name,
@@ -26,16 +28,21 @@ from orbit.tui.view.sessions import (
     can_open,
     chosen_workspace,
     delete_message,
+    held_back,
     idle_now_message,
     local_time,
     name_hint,
     opening_attach,
     picked_commands,
+    picker_rows,
     picker_sessions,
+    picker_viewing,
     running_words,
     session_label,
+    session_turned_idle,
     state_notes,
     task_counts,
+    unjoined_view,
     viewed_only,
     viewing_mark,
     workspace_sessions,
@@ -367,3 +374,85 @@ def test_opening_attaches_to_the_active_session_of_the_workspace() -> None:
     assert opening_attach("w1", others) == Attach(workspace="w1", session="a")
     assert opening_attach(None, others) is None
     assert opening_attach("w1", others[:1]) is None
+
+
+def test_the_picker_marks_the_session_viewed_first() -> None:
+    rows = picker_rows((OLD, NOW), Viewing("w", "now"), startup=False, resume=False)
+    assert rows == (PickerRow(NOW, attached=True), PickerRow(OLD))
+
+
+def test_the_picker_at_startup_offers_to_resume_the_session_viewed() -> None:
+    rows = picker_rows((NOW, OLD), Viewing("w", "now"), startup=True, resume=True)
+    assert rows == (PickerRow(NOW, attached=True, resume=True), PickerRow(OLD))
+
+
+def test_the_picker_at_startup_only_to_pick_leaves_out_the_session_viewed() -> None:
+    rows = picker_rows((NOW, OLD), Viewing("w", "now"), startup=True, resume=False)
+    assert rows == (PickerRow(OLD),)
+
+
+def test_the_picker_of_a_workspace_not_joined_offers_its_active_session_unmarked() -> None:
+    viewing = Viewing("w", "now", joined=False)
+    rows = picker_rows((OLD, NOW), viewing, startup=False, resume=False)
+    assert rows == (PickerRow(NOW, resume=True), PickerRow(OLD))
+
+
+IDLE_NOW = SessionSummary(id="now", name="today", active=True, state="idle")
+RUNNING_NOW = SessionSummary(id="now", name="today", active=True, state="running")
+
+
+def test_a_session_held_back_by_an_idle_active_one_names_that_one() -> None:
+    assert session_turned_idle((OLD, IDLE_NOW), "old") == "today"
+
+
+def test_a_running_active_session_has_not_turned_idle() -> None:
+    assert session_turned_idle((OLD, RUNNING_NOW), "old") is None
+
+
+def test_the_held_session_turned_active_has_not_turned_idle() -> None:
+    assert session_turned_idle((OLD, IDLE_NOW), "now") is None
+
+
+def test_with_no_active_session_none_turned_idle() -> None:
+    assert session_turned_idle((OLD, OTHER), "old") is None
+
+
+def test_a_running_active_session_holds_back_the_session_viewed() -> None:
+    assert held_back("old", running="a task", active="today") == "old"
+
+
+def test_an_idle_active_session_holds_back_nothing() -> None:
+    assert held_back("old", running=None, active="today") is None
+
+
+def test_an_unknown_active_session_holds_back_nothing() -> None:
+    assert held_back("old", running="a task", active=None) is None
+
+
+IN_W = WorkspaceEntry(id="w", label="w", sessions=(OLD, NOW))
+IN_V = WorkspaceEntry(id="v", label="v", sessions=(OTHER, IDLE_NOW))
+
+
+def test_another_workspace_is_viewed_unjoined_at_its_active_session() -> None:
+    viewing, sessions = unjoined_view((IN_W, IN_V), "v")
+    assert viewing == Viewing("v", "now", joined=False)
+    assert sessions == (OTHER, IDLE_NOW)
+
+
+def test_the_picker_of_the_workspace_it_is_on_views_what_this_frontend_views() -> None:
+    here = picker_viewing((IN_W, IN_V), "w", "old", (OLD,), "w")
+    assert here == (Viewing("w", "old"), (OLD,))
+
+
+def test_the_picker_views_the_workspace_it_is_on_by_default() -> None:
+    assert picker_viewing((IN_W,), "w", "old", (OLD,), None) == (Viewing("w", "old"), (OLD,))
+
+
+def test_the_picker_before_any_workspace_views_none() -> None:
+    assert picker_viewing((), None, None, (), None) == (Viewing("", None), ())
+
+
+def test_the_picker_of_another_workspace_views_it_unjoined() -> None:
+    viewing, sessions = picker_viewing((IN_W, IN_V), "w", "old", (OLD,), "v")
+    assert viewing == Viewing("v", "now", joined=False)
+    assert sessions == (OTHER, IDLE_NOW)

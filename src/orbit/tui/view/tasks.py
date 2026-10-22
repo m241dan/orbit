@@ -129,6 +129,21 @@ def session_usage_subtitle(usage: Usage) -> str:
     return "" if usage == Usage() else f"session: {usage_label(usage)}"
 
 
+def acceptable(state: TaskState) -> bool:
+    """Whether ``state`` can be accepted: only a draft can."""
+    return state.status == "draft"
+
+
+def ticking(tasks: Sequence[TaskState]) -> bool:
+    """Whether the spinners turn: while any of ``tasks`` runs."""
+    return any(state.status == "running" for state in tasks)
+
+
+def new_task_row() -> Text:
+    """The task list's trailing row, to add a task."""
+    return Text(NEW_TASK_LABEL, style="dim italic")
+
+
 def active_task(tasks: Sequence[TaskState]) -> int | None:
     """The index of the topmost task that's running or verifying, in any role; None if none."""
     return next((i for i, t in enumerate(tasks) if t.status in ACTIVE_STATUSES), None)

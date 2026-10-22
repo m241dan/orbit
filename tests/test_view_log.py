@@ -3,12 +3,15 @@
 from orbit.tui.view.log import (
     Entry,
     after_rows,
+    entry_action,
+    entry_component,
     latest_rule,
     nearest_row,
     shown,
     shown_rows,
     thinking_places,
 )
+from orbit.tui.view.tool_calls import ToolCall
 
 THOUGHT = Entry("hmm", "agent", "coder", turn="t1")
 SAID = Entry("done", "agent", "coder")
@@ -79,3 +82,20 @@ def test_latest_rule_is_the_agents_last_ruled_entry() -> None:
 
 def test_latest_rule_is_none_without_one_of_the_agents() -> None:
     assert latest_rule([SAID, Entry("theirs", "rule", "planner")], "coder") is None
+
+
+def test_choosing_a_tool_call_inspects_it() -> None:
+    call = ToolCall("c", "Read", "Read a.py", {})
+    assert entry_action(Entry("Read a.py", "tool", call=call)) == "inspect"
+
+
+def test_choosing_any_other_entry_toggles_it() -> None:
+    assert entry_action(Entry("hi\nthere", "assistant")) == "toggle"
+
+
+def test_an_entry_is_styled_as_its_kind() -> None:
+    assert entry_component(Entry("oops", "error")) == "transcript--error"
+
+
+def test_an_agent_thinking_out_loud_is_styled_as_thinking() -> None:
+    assert entry_component(Entry("hmm", "assistant", turn="t")) == "transcript--thinking"

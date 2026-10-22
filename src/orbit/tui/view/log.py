@@ -2,6 +2,7 @@
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Literal
 
 from orbit.tui.view.common import EntryKind
 from orbit.tui.view.tool_calls import ToolCall
@@ -58,3 +59,16 @@ def latest_rule(entries: Sequence[Entry], agent: str) -> int | None:
     """Where among ``entries`` ``agent``'s latest rule is; None when it has none."""
     rules = [i for i, entry in enumerate(entries) if entry.agent == agent and ruled(entry.kind)]
     return rules[-1] if rules else None
+
+
+def entry_action(entry: Entry) -> Literal["inspect", "toggle"]:
+    """What choosing ``entry`` does: a tool call or request is inspected, anything else is
+    collapsed or expanded."""
+    return "toggle" if entry.call is None else "inspect"
+
+
+def entry_component(entry: Entry) -> str:
+    """The component class ``entry`` is styled by: an agent's thinking out loud is styled as
+    thinking, anything else as its kind."""
+    component = "thinking" if entry.turn is not None else entry.kind
+    return f"transcript--{component}"

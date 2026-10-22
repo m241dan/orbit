@@ -4,7 +4,6 @@ import time
 from collections.abc import Callable, Sequence
 from typing import ClassVar
 
-from rich.text import Text
 from textual import events
 from textual.binding import Binding, BindingType
 from textual.message import Message
@@ -14,13 +13,15 @@ from orbit.protocol import TaskState, Usage
 from orbit.tui.list_pane import ListPane
 from orbit.tui.view.common import spinner_frame
 from orbit.tui.view.tasks import (
-    NEW_TASK_LABEL,
+    acceptable,
     active_task,
     follow_top,
+    new_task_row,
     session_usage_subtitle,
     task_label,
     task_list_title,
     task_numbers,
+    ticking,
 )
 from orbit.tui.widgets import Ticker
 
@@ -125,7 +126,7 @@ class TaskList(ListPane):
 
     def action_accept(self) -> None:
         state = self._highlighted_task()
-        if state is not None and state.status == "draft":
+        if state is not None and acceptable(state):
             self.post_message(self.Accept(state.id))
 
     def action_remove(self) -> None:
@@ -160,7 +161,7 @@ class TaskList(ListPane):
         self.tasks, self.numbers = tasks, task_numbers(tasks)
         self.numbers_by_id = dict(zip((t.id for t in tasks), self.numbers, strict=True))
         self._redraw()
-        self._ticker.keep(any(t.status == "running" for t in tasks))
+        self._ticker.keep(ticking(tasks))
         self._follow()
 
     def _follow(self) -> None:
@@ -207,7 +208,7 @@ class TaskList(ListPane):
             (t.id, task_label(t, n, frame, width=width))
             for t, n in zip(self.tasks, self.numbers, strict=True)
         ]
-        self.show_rows(rows, Option(Text(NEW_TASK_LABEL, style="dim italic")))
+        self.show_rows(rows, Option(new_task_row()))
 
     def _row_width(self) -> int:
         """The cells a row's line has, leaving room for a vertical scrollbar whether or not

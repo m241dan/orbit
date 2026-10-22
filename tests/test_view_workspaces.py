@@ -1,7 +1,7 @@
 """The workspace picker's rows, labels and hints."""
 
 from orbit.protocol import AddWorkspace, SessionStateChanged, SessionSummary, WorkspaceEntry
-from orbit.tui.view.common import picker_hint
+from orbit.tui.view.common import kept_highlight, picker_hint
 from orbit.tui.view.workspaces import (
     ADD_PATH,
     LIST_HINT,
@@ -141,3 +141,8 @@ def test_row_keys_tell_rows_apart_by_workspace_or_path() -> None:
     assert row_key(A) == row_key(A.model_copy(update={"sessions": ()})) == "a"
     assert row_key(AddWorkspace(path="/src/a")) == "add /src/a"
     assert row_key(ADD_PATH) == "add_path"
+
+
+def test_relisting_with_no_row_highlighted_highlights_none() -> None:
+    keys = tuple(map(row_key, workspace_rows((A, B), None)))
+    assert kept_highlight(keys, None, keys) is None

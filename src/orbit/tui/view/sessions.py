@@ -17,7 +17,7 @@ from orbit.protocol import (
     Usage,
     WorkspaceEntry,
 )
-from orbit.tui.view.common import SPINNER_FRAMES, STATUS_ICONS, ListHints
+from orbit.tui.view.common import SPINNER_FRAMES, STATUS_ICONS, ListHints, active_session
 from orbit.tui.view.tasks import usage_label
 from orbit.tui.view.workspaces import workspace_at
 
@@ -87,13 +87,14 @@ def workspace_sessions(
 
 def active_id(sessions: Sequence[SessionSummary]) -> str | None:
     """The id of the active session among ``sessions``; none if none is."""
-    return next((summary.id for summary in sessions if summary.active), None)
+    active = active_session(sessions)
+    return None if active is None else active.id
 
 
 def opening_attach(workspace: str | None, sessions: Sequence[SessionSummary]) -> Attach | None:
     """What a frontend opening on the workspace ``workspace`` sends to view its active session
     among ``sessions``; none without either."""
-    active = next((summary for summary in sessions if summary.active), None)
+    active = active_session(sessions)
     if workspace is None or active is None:
         return None
     return Attach(workspace=workspace, session=active.id)
@@ -107,6 +108,75 @@ def picker_sessions(
     first."""
     first = [summary for summary in sessions if summary.id == attached and with_attached]
     return (*first, *(summary for summary in sessions if summary.id != attached))
+
+
+@dataclass(frozen=True)
+class PickerRow:
+    """A row of the picker: the session ``summary``, marked if it's the one this frontend views,
+    ``attached``, and saying ``Resume`` if it's to be resumed."""
+
+    summary: SessionSummary
+    attached: bool = False
+    resume: bool = False
+
+
+def picker_rows(
+    sessions: Sequence[SessionSummary], viewing: Viewing, *, startup: bool, resume: bool
+) -> tuple[PickerRow, ...]:
+    """The rows the picker lists of ``sessions`` from ``viewing``: the session attached first,
+    unless opened at ``startup`` without offering to ``resume`` it, marked once the frontend has
+    joined the workspace, and to resume at ``startup`` or before it has joined, then the
+    others."""
+    attached, resuming = viewing.attached, startup or not viewing.joined
+    listed = picker_sessions(sessions, attached, with_attached=resume or not startup)
+    return tuple(
+        PickerRow(
+            summary,
+            attached=viewing.joined and summary.id == attached,
+            resume=resuming and summary.id == attached,
+        )
+        for summary in listed
+    )
+
+
+def unjoined_view(
+    workspaces: Sequence[WorkspaceEntry], workspace: str
+) -> tuple[Viewing, tuple[SessionSummary, ...]]:
+    """What a frontend that hasn't joined the workspace ``workspace`` among ``workspaces`` views
+    of it, its active session to resume, and its sessions."""
+    sessions = workspace_sessions(workspaces, workspace)
+    return Viewing(workspace, active_id(sessions), joined=False), sessions
+
+
+def picker_viewing(
+    workspaces: Sequence[WorkspaceEntry],
+    on: str | None,
+    attached: str | None,
+    sessions: Sequence[SessionSummary],
+    workspace: str | None,
+) -> tuple[Viewing, tuple[SessionSummary, ...]]:
+    """What the picker of the ``workspace`` among ``workspaces`` views, and its sessions: by
+    default, or when it's the workspace ``on`` that this frontend is on, the session
+    ``attached`` among ``sessions``; else that workspace, unjoined."""
+    if workspace is None or workspace == on:
+        # No session is listed, so none is picked, until a catalog names the workspace.
+        return Viewing(workspace=on or "", attached=attached), tuple(sessions)
+    return unjoined_view(workspaces, workspace)
+
+
+def held_back(viewed: str, *, running: str | None, active: str | None) -> str | None:
+    """The session ``viewed``, if the active session ``active``, ``running`` what it says, keeps
+    it from being the active one; none while that's idle or isn't known."""
+    return viewed if running is not None and active is not None else None
+
+
+def session_turned_idle(sessions: Sequence[SessionSummary], held: str) -> str | None:
+    """The name of the active session among ``sessions``, if it's idle and isn't the session
+    ``held``; none otherwise."""
+    active = active_session(sessions)
+    if active is None or active.id == held or active.state != "idle":
+        return None
+    return active.name
 
 
 def session_label(
@@ -169,7 +239,7 @@ def viewed_only(
 def _free(sessions: Sequence[SessionSummary], attached: str | None) -> bool:
     """Whether the active session among ``sessions``, if any, is idle with no frontend viewing it
     but this one, which views the session ``attached``."""
-    active = next((summary for summary in sessions if summary.active), None)
+    active = active_session(sessions)
     if active is None:
         return True
     return active.state == "idle" and _others(active, active.id == attached) == 0
@@ -281,13 +351,14 @@ def _activity_word(activity: Activity) -> str:
 
 def active_name(sessions: Sequence[SessionSummary]) -> str | None:
     """The name of the active session among ``sessions``; none if none is."""
-    return next((summary.name for summary in sessions if summary.active), None)
+    active = active_session(sessions)
+    return None if active is None else active.name
 
 
 def running_words(sessions: Sequence[SessionSummary]) -> str | None:
     """What the active session among ``sessions`` runs, in words; none while it's idle or none
     is active."""
-    active = next((summary for summary in sessions if summary.active), None)
+    active = active_session(sessions)
     if active is None or active.state != "running":
         return None
     return activity_words(active.activity)

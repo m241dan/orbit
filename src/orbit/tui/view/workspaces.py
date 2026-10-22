@@ -5,7 +5,7 @@ from pathlib import PurePosixPath
 from typing import Literal
 
 from orbit.protocol import AddWorkspace, SessionStateChanged, WorkspaceEntry, with_state
-from orbit.tui.view.common import ListHints
+from orbit.tui.view.common import ListHints, active_session
 
 WORKSPACES_TITLE = "Workspaces"
 ADD_PATH: Literal["add_path"] = "add_path"
@@ -73,7 +73,7 @@ def workspace_label(entry: WorkspaceEntry) -> str:
     """A workspace's row: its label, its path, its active session's name and state, and
     ``read-only`` while another orbit owns it: ``orbit · /src/orbit · today, idle``."""
     details = [entry.label] if entry.path is None else [entry.label, entry.path]
-    active = next((summary for summary in entry.sessions if summary.active), None)
+    active = active_session(entry.sessions)
     if active is not None:
         details.append(f"{active.name}, {active.state}")
     if entry.read_only:

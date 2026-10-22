@@ -1,6 +1,6 @@
 """What the other view modules share: entry kinds, the spinner, status icons, model labels,
-token counts, counted nouns, the lines of text, where a list's highlight goes and the keys a
-picker shows."""
+token counts, counted nouns, the lines of text, where a list's highlight goes, the keys a
+picker shows and the active session."""
 
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -8,7 +8,7 @@ from typing import Literal
 
 from rich.cells import cell_len, set_cell_size
 
-from orbit.protocol import Settings, StepStatus, TaskStatus
+from orbit.protocol import SessionSummary, Settings, StepStatus, TaskStatus
 
 EntryKind = Literal[
     "user",
@@ -131,3 +131,8 @@ def picker_hint(hints: ListHints, *, startup: bool, box: str | None) -> str:
     if box is not None:
         return box
     return hints.quitting if startup else hints.closing
+
+
+def active_session(sessions: Sequence[SessionSummary]) -> SessionSummary | None:
+    """The active session among ``sessions``; none if none is."""
+    return next((summary for summary in sessions if summary.active), None)

@@ -22,6 +22,8 @@ from orbit.tui.view.common import EntryKind
 from orbit.tui.view.log import (
     Entry,
     after_rows,
+    entry_action,
+    entry_component,
     latest_rule,
     nearest_row,
     shown,
@@ -379,7 +381,7 @@ class TranscriptLog(ListPane):
     def _select(self, event: OptionList.OptionSelected) -> None:
         """Inspect a tool call or request; collapse or expand any other entry."""
         event.stop()
-        if self._entries[self._rows[event.option_index]].call is None:
+        if entry_action(self._entries[self._rows[event.option_index]]) == "toggle":
             self.toggle(event.option_index)
         else:
             self.inspect(True)
@@ -394,8 +396,7 @@ class TranscriptLog(ListPane):
         entry = self._entries[index]
         marked = row == self._marked
         band = banded(entry.kind)
-        component = "thinking" if entry.turn is not None else entry.kind
-        style = self.get_component_rich_style(f"transcript--{component}", partial=not band)
+        style = self.get_component_rich_style(entry_component(entry), partial=not band)
         gutter_style = self.get_component_rich_style(
             "transcript--marker" if marked else "transcript--gutter", partial=True
         )

@@ -3,11 +3,13 @@ from typing import get_args
 import pytest
 
 from orbit.protocol import (
+    SessionSummary,
     TaskStatus,
 )
 from orbit.tui.view.common import (
     STATUS_ICONS,
     ListHints,
+    active_session,
     counted,
     kept_highlight,
     picker_hint,
@@ -127,3 +129,12 @@ def test_at_startup_a_picker_shows_escape_quits() -> None:
 
 def test_a_picker_shows_its_text_boxs_keys_while_typing() -> None:
     assert picker_hint(HINTS, startup=True, box="enter add · esc back") == "enter add · esc back"
+
+
+def test_with_no_active_session_none_is_active() -> None:
+    assert active_session((SessionSummary(id="a", name="a"),)) is None
+
+
+def test_the_one_active_session_is_the_active_one() -> None:
+    active = SessionSummary(id="b", name="b", active=True)
+    assert active_session((SessionSummary(id="a", name="a"), active)) == active

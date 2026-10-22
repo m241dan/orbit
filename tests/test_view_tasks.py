@@ -1,3 +1,5 @@
+from rich.text import Text
+
 from orbit.protocol import (
     TaskSpec,
     TaskState,
@@ -8,15 +10,18 @@ from orbit.tui.view.rules import usage_text
 from orbit.tui.view.tasks import (
     NEW_TASK_LABEL,
     TASK_EDITOR_HINT,
+    acceptable,
     active_task,
     edit_refusal,
     follow_top,
     join_prompt,
+    new_task_row,
     session_usage_subtitle,
     split_prompt,
     task_editor_title,
     task_list_title,
     task_numbers,
+    ticking,
     usage_label,
 )
 
@@ -209,3 +214,21 @@ def test_session_usage_subtitle_shows_what_was_spent() -> None:
 
 def test_session_usage_subtitle_shows_a_cost_without_tokens() -> None:
     assert session_usage_subtitle(Usage(cost_usd=2.5)) == "session: 0 tok · $2.50"
+
+
+def test_only_a_draft_can_be_accepted() -> None:
+    draft, pending = states("draft", "pending")
+    assert acceptable(draft)
+    assert not acceptable(pending)
+
+
+def test_the_spinners_tick_while_a_task_runs() -> None:
+    assert ticking(states("completed", "running"))
+
+
+def test_the_spinners_stop_with_no_task_running() -> None:
+    assert not ticking(states("verifying", "pending"))
+
+
+def test_the_new_task_row_is_dim_and_italic() -> None:
+    assert new_task_row() == Text(NEW_TASK_LABEL, style="dim italic")
