@@ -43,3 +43,14 @@ def read_only_note(owner: WorkspaceOwner) -> str:
         f"Read-only: {owner.described} owns this repository. Tasks you run are queued until this"
         " orbit owns it."
     )
+
+
+def queued_dropped_note(count: int) -> str:
+    """The note saying a switch of sessions dropped the ``count`` commands queued while
+    read-only, which have to be asked for again."""
+    if count == 1:
+        return "Switched sessions: 1 queued command was dropped. Ask for it again in this session."
+    return (
+        f"Switched sessions: {count} queued commands were dropped. Ask for them again in this"
+        " session."
+    )

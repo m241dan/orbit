@@ -72,7 +72,7 @@ from orbit.agent.application.work_turns import WorkParts, WorkTurns
 from orbit.agent.domain.activity import Activity
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.catalog import workspace_entry
-from orbit.agent.domain.ownership import WorkspaceOwner, read_only_note
+from orbit.agent.domain.ownership import WorkspaceOwner, queued_dropped_note, read_only_note
 from orbit.agent.domain.refusals import STOPPING, Refused
 from orbit.agent.domain.reviews import ReviewPlanner
 from orbit.agent.domain.storage import StorageSettings
@@ -410,10 +410,13 @@ class WorkspaceHost:
     def _switching(self, kept: bool) -> None:
         """A switch is under way, with whether the session left stays ``kept``: its views
         follow, and its run, if the usage limit stopped one, no longer starts again, nor waits in
-        line for a coder."""
+        line for a coder; the work queued while read-only is dropped, with a note if any was."""
         self._views.switching(kept)
         self._turns.forget_wait()
         self._coders.drop()
+        dropped = self._commands.drop_queued()
+        if dropped:
+            self._events.put_nowait(Notice(message=queued_dropped_note(dropped)))
 
     def _work_commands(self) -> WorkCommands:
         """What handles the work commands on this session."""

@@ -101,6 +101,13 @@ class WorkCommands:
         """The commands queued while read-only, oldest first."""
         return tuple(self._queued)
 
+    def drop_queued(self) -> int:
+        """Drop the commands queued while read-only, as the session they were asked in was
+        left; returns how many there were."""
+        dropped = len(self._queued)
+        self._queued.clear()
+        return dropped
+
     async def handle(self, command: WorkCommand, command_id: str) -> None:
         """Handle ``command``, sent as ``command_id``, or queue it if it starts work while
         read-only or taking ownership; work that couldn't run once this orbit owns the

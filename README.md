@@ -1609,7 +1609,9 @@ tasks (`ctrl+r`) and the triggers (`ctrl+g`, `ctrl+e`) are accepted and queued, 
 nothing runs: no task, review or startup check. Those an owning orbit would refuse, such as a super
 review with reviews off, are refused just the same. It notes no work left in `.git/orbit` by
 earlier runs, since what's there may be the owner's running work. The planner, the sessions, drafts
-and settings work as usual. The queue is dropped when the orbit exits.
+and settings work as usual. The queue is dropped when the orbit exits, and when you switch
+sessions, with a note saying how many queued commands were dropped, so you ask for them again in
+the session you want them run in.
 
 A read-only orbit tries the lock every 5 seconds. Once the owner has gone, it takes the lock and
 asks, once, in a modal: "The repository is free". `y` takes it over: the orbit owns the

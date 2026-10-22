@@ -8,11 +8,13 @@ from orbit.agent.application.recovery import RecoveryFailed
 from orbit.agent.application.takeover import NO_OFFER, RetryTimes, Takeover
 from orbit.agent.application.work_turns import TASKS_RUNNING_MESSAGE
 from orbit.agent.application.workspace_host import OWNED_NOTE
+from orbit.agent.domain.ownership import queued_dropped_note
 from orbit.protocol import (
     BUSY,
     CONFIGURE_CHECKS,
     INTERNAL,
     INVALID,
+    ActivateSession,
     AddTask,
     Catalog,
     CommandRefused,
@@ -27,6 +29,7 @@ from orbit.protocol import (
     RunTasks,
     Snapshot,
     TakeOwnership,
+    TasksChanged,
     TaskSpec,
     TurnEndReason,
     WorkspaceEntry,
@@ -55,6 +58,7 @@ from tests.agent_fakes import (
     turns_of,
     views_on_joining,
 )
+from tests.attach_fakes import EARLIER, stored
 
 
 def offered(event: Event) -> bool:
@@ -633,3 +637,50 @@ async def test_work_sent_after_a_takeover_that_failed_runs_at_once() -> None:
 
     assert session.queued_work == () and len(launcher.launches) == 1
     await session.close()
+
+
+def dropped_notes(events: Sequence[Event]) -> list[Event]:
+    """The notices in ``events`` saying queued work was dropped by a switch."""
+    return [e for e in events if isinstance(e, Notice) and e.message.startswith("Switched")]
+
+
+async def switched_with_work_queued(switch: ActivateSession | NewSession) -> list[Event]:
+    """The events of a read-only session that queues a run of its tasks, makes the ``switch``,
+    adds a task there and takes ownership, checking nothing ran and nothing stayed queued."""
+    lock = FakeLock()
+    session, _, launcher = session_for(claims_done, owner=OWNER, lock=lock, store=stored())
+    await send(session, AddTask(task=TaskSpec(prompt="Add a flag.")))
+    await send(session, RunTasks())
+    await send(session, switch)
+    await send(session, AddTask(task=TaskSpec(prompt="Add a flag.")))
+    events = await events_until(session, lambda event: isinstance(event, TasksChanged))
+    lock.free = True
+    events += await events_until(session, offered)
+
+    await send(session, TakeOwnership(take=True))
+    events += await events_until(session, lambda event: event == Notice(message=OWNED_NOTE))
+    await asyncio.sleep(0.05)
+    assert launcher.launches == [] and session.queued_work == ()
+    await session.close()
+    return events
+
+
+async def test_switching_to_a_saved_session_drops_the_work_queued_and_says_so_once() -> None:
+    events = await switched_with_work_queued(ActivateSession(session=EARLIER))
+    assert dropped_notes(events) == [Notice(message=queued_dropped_note(1))]
+
+
+async def test_switching_to_a_new_session_drops_the_work_queued_and_says_so_once() -> None:
+    events = await switched_with_work_queued(NewSession())
+    assert dropped_notes(events) == [Notice(message=queued_dropped_note(1))]
+
+
+async def test_switching_with_nothing_queued_says_nothing_dropped() -> None:
+    session, _, _ = session_for(owner=OWNER, store=stored())
+    await send(session, AddTask(task=TaskSpec(prompt="Add a flag.")))
+    await send(session, ActivateSession(session=EARLIER))
+    events = await events_until(session, lambda event: isinstance(event, Snapshot))
+    await asyncio.sleep(0.05)
+    events += queued(session)
+    await session.close()
+    assert dropped_notes(events) == []
