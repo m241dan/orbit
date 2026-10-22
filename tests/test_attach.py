@@ -629,3 +629,33 @@ async def test_a_rename_that_cant_claim_the_session_leaves_the_view_naming_the_o
     _, ran, _ = await failed_change(store, RenameSession(session_id=EARLIER, name="older"), failing)
 
     assert ran == [CommandRefused(command_id="run", code=NOT_ACTIVE, message=NOT_ACTIVE_MESSAGE)]
+
+
+async def test_attaching_to_a_session_opened_while_its_record_is_held_attaches_live() -> None:
+    store = stored()
+    session = workspace(store)
+    other = await joined(session, "other")
+    attaching = await joined(session, "attaching")
+    release = asyncio.Event()
+
+    async def held() -> None:
+        store.on_list = None
+        await release.wait()
+
+    store.on_list = held
+    attach = asyncio.create_task(
+        say(attaching, "attach", Attach(workspace=WORKSPACE, session=EARLIER))
+    )
+    await asyncio.sleep(0.01)
+    await say(other, "activate", ActivateSession(session=EARLIER))
+    release.set()
+    await attach
+    events = await taken(attaching)
+    await session.close()
+
+    assert answer(events) == CommandAccepted(command_id="attach")
+    assert attaching.viewing is None
+    snapshots = [e for e in events if isinstance(e, Snapshot)]
+    assert (snapshots[-1].session.id, snapshots[-1].active) == (EARLIER, True)
+    assert snapshots[-1].tasks == (SAVED_TASK,)
+    assert all(s.active for s in snapshots)

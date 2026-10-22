@@ -109,8 +109,7 @@ class SessionViews:
         if session_id in self._deleted:
             raise Refused(UNKNOWN, missing_message(session_id))
         if session_id == parts.keeper.id:
-            connection.attach(None)
-            await parts.events.put(await parts.live())
+            await self._attach_live(connection)
             return
         if record is None:
             return
@@ -130,8 +129,14 @@ class SessionViews:
         if connection.attached_id != session_id:
             return
         if session_id == self._parts.keeper.id:
-            view = await self._parts.live()
+            await self._attach_live(connection)
+            return
         await connection.publish_here(view)
+
+    async def _attach_live(self, connection: SessionConnection) -> None:
+        """Have ``connection`` view the open session, live, and publish its snapshot."""
+        connection.attach(None)
+        await self._parts.events.put(await self._parts.live())
 
     def switching(self, kept: bool) -> None:
         """Have the connection whose command switches the open session view the session it
