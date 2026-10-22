@@ -476,6 +476,21 @@ async def test_cancel_stops_what_the_cli_started(tmp_path: Path) -> None:
     assert await gone(call["child"])
 
 
+async def test_cancel_stops_what_the_cli_left_holding_its_output(tmp_path: Path) -> None:
+    # The CLI exits at once, but its child keeps stdout open, so the turn never sees its end.
+    runner, scenario = make_runner(tmp_path, stdout=lines(INIT), spawn=True)
+    turn = asyncio.create_task(run(runner, "hi"))
+    recorded = Path(f"{scenario}.calls")
+    while not (recorded.exists() and recorded.read_text().endswith("\n")):
+        await asyncio.sleep(0.01)
+    [call] = calls(scenario)
+    assert await gone(call["pid"])
+    turn.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(turn, timeout=5)
+    assert await gone(call["child"])
+
+
 # Agents: a CLI connected to orbit's MCP server
 
 TOOLS = ("get_task", "complete_task")

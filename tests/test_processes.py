@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from orbit.agent.external import processes
-from orbit.agent.external.processes import process_alive, run_process
+from orbit.agent.external.processes import process_alive, run_process, spawned
 from tests.process_checks import gone
 
 
@@ -62,14 +62,20 @@ async def test_cancelling_kills_the_child(tmp_path: Path) -> None:
         os.kill(pid, 0)
 
 
+async def recorded_line(path: Path) -> str:
+    """The line written to ``path``, once it's whole."""
+    while not (path.exists() and path.read_text().endswith("\n")):
+        await asyncio.sleep(0.01)
+    return path.read_text()
+
+
 async def cancelled_grandchild(tmp_path: Path, script: str) -> int:
     """The pid of the grandchild ``script`` records in ``$PID_FILE``, once ``run_process``
     running it under ``sh`` has been cancelled."""
     pid_file = tmp_path / "pid"
     env = {**os.environ, "PID_FILE": str(pid_file)}
     task = asyncio.create_task(run_process(("sh", "-c", script), tmp_path, env=env))
-    while not (pid_file.exists() and pid_file.read_text().endswith("\n")):
-        await asyncio.sleep(0.01)
+    await recorded_line(pid_file)
     task.cancel()
     await asyncio.wait_for(asyncio.gather(task, return_exceptions=True), timeout=5)
     assert task.cancelled()
@@ -79,6 +85,35 @@ async def cancelled_grandchild(tmp_path: Path, script: str) -> int:
 async def test_cancelling_stops_what_the_child_started(tmp_path: Path) -> None:
     grandchild = await cancelled_grandchild(tmp_path, 'sleep 30 & echo $! > "$PID_FILE"; wait')
     assert await gone(grandchild)
+
+
+async def test_cancelling_stops_what_the_child_started_after_the_child_exits(
+    tmp_path: Path,
+) -> None:
+    pid_file = tmp_path / "pid"
+    env = {**os.environ, "PID_FILE": str(pid_file)}
+    # sh exits at once, but the sleep it backgrounds holds its stdout open.
+    script = 'sleep 30 & echo $$ $! > "$PID_FILE"'
+    task = asyncio.create_task(run_process(("sh", "-c", script), tmp_path, env=env))
+    child, grandchild = map(int, (await recorded_line(pid_file)).split())
+    assert await gone(child)
+    task.cancel()
+    await asyncio.wait_for(asyncio.gather(task, return_exceptions=True), timeout=5)
+    assert task.cancelled()
+    assert await gone(grandchild)
+
+
+async def test_a_failing_block_stops_the_group(tmp_path: Path) -> None:
+    with pytest.raises(ValueError):
+        async with spawned(("sleep", "30"), cwd=tmp_path) as process:
+            raise ValueError
+    assert process.returncode is not None
+
+
+async def test_a_block_leaving_the_program_running_stops_it(tmp_path: Path) -> None:
+    async with spawned(("sleep", "30"), cwd=tmp_path) as process:
+        pass
+    assert process.returncode is not None
 
 
 async def test_cancelling_lets_the_child_exit_cleanly_on_sigterm(tmp_path: Path) -> None:

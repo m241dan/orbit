@@ -17,17 +17,22 @@ async def spawned(
     command: Sequence[str], **options: Any
 ) -> AsyncIterator[asyncio.subprocess.Process]:
     """Start ``command`` in a session of its own, passing ``options`` to
-    ``asyncio.create_subprocess_exec``, and yield it. If it's still running on exit (cancelled,
-    say), its whole process group is stopped and it's reaped before this exits.
+    ``asyncio.create_subprocess_exec``, and yield it. If the block raises (is cancelled, say),
+    its whole process group is stopped, even if the program itself has exited and only what it
+    started is left, and the program is reaped before this exits. If the block ends normally
+    with the program still running, the same happens.
 
     Raises ``OSError`` (such as ``FileNotFoundError``) when the program can't be started.
     """
     process = await asyncio.create_subprocess_exec(*command, start_new_session=True, **options)
     try:
         yield process
-    finally:
-        if process.returncode is None:
-            await _stop_group(process)
+    except BaseException:
+        # The program may have exited while what it started lives on, holding its pipes open.
+        await _stop_group(process)
+        raise
+    if process.returncode is None:
+        await _stop_group(process)
 
 
 async def _stop_group(process: asyncio.subprocess.Process) -> None:
