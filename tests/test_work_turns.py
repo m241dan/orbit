@@ -28,6 +28,7 @@ from orbit.agent.domain.usage_limits import RESUMING_NOTE
 from orbit.protocol import (
     BUSY,
     CONFIGURATOR,
+    INTERNAL,
     NOT_CONFIGURED,
     WORK_LANE,
     BusyChanged,
@@ -408,8 +409,19 @@ async def test_an_error_in_the_wait_is_reported(lane: Lane) -> None:
     lane.sleeps.release.set()
     await settled()
     [error] = [event for event in lane.posted if isinstance(event, ErrorOccurred)]
+    assert error.code == INTERNAL
+    assert f"The {WORK_LANE} lane" in error.message
     assert "clock broke" in error.message
     assert not lane.turns.running
+
+
+async def test_running_once_a_wait_failed_starts_the_run(lane: Lane) -> None:
+    await limited(lane)
+    lane.sleeps.error = RuntimeError("clock broke")
+    lane.sleeps.release.set()
+    await settled()
+    await lane.turns.run_tasks()
+    assert lane.turns.running
 
 
 async def test_closing_while_waiting_leaves_no_task_running(lane: Lane) -> None:
