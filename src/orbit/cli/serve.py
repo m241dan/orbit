@@ -357,9 +357,10 @@ async def _until_stopped(
     try:
         _write_run_file(parts.run_file, url, parts.local)
         written = True
+        # A workspace whose lock is taken from here on names the URL as it's added.
+        parts.served.url = url
         for lock in parts.served.locks:
             _announce(lock, url)
-        parts.served.url = url
         typer.echo(parts.banner(url))
         await stopping.wait()
     finally:

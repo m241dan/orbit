@@ -5,6 +5,7 @@ import asyncio
 import re
 import subprocess
 import threading
+import time
 from collections.abc import AsyncIterator, Callable
 from contextlib import ExitStack
 from pathlib import Path
@@ -20,6 +21,7 @@ from orbit.agent import (
     SqliteStore,
     StorageSettings,
     StoreError,
+    WorkspaceHost,
     WorkspaceLock,
     WorkspaceRegistry,
     WorkspaceUnavailable,
@@ -520,6 +522,123 @@ async def test_an_add_cancelled_while_preparing_that_then_fails_takes_no_lock(
     await cancelled_while_preparing(source, root, gate)
 
     assert free(root) and source.locks == ()
+
+
+async def test_an_add_cancelled_as_it_flags_the_workspace_served_leaves_it_unflagged_and_free(
+    stack: ExitStack, store: SqliteStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = directory(tmp_path)
+    flagged = asyncio.Event()
+    set_served = WorkspaceRegistry.set_served
+
+    async def flags_then_waits(self: WorkspaceRegistry, workspace_id: str, served: bool) -> None:
+        await set_served(self, workspace_id, served)
+        if served:
+            flagged.set()
+            await asyncio.Event().wait()
+
+    monkeypatch.setattr(WorkspaceRegistry, "set_served", flags_then_waits)
+    source = workspaces(stack, store)
+    opening = asyncio.create_task(source.open(str(root)))
+    await flagged.wait()
+    opening.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await opening
+    assert free(root) and source.locks == ()
+    assert await WorkspaceRegistry(store).served() == []
+
+
+async def opened_as_the_server_starts(
+    source: ServedWorkspaces, root: Path, gate: threading.Event, url: str
+) -> WorkspaceHost:
+    """The host of the workspace at ``root``, opened with ``source`` before the server's
+    ``url`` is known and prepared once it is."""
+    opening = asyncio.create_task(source.open(str(root)))
+    await asyncio.sleep(0.05)
+    source.url = url
+    gate.set()
+    return await opening
+
+
+async def test_a_lock_taken_as_the_server_starts_names_its_url(
+    stack: ExitStack, store: SqliteStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = directory(tmp_path)
+    gate = threading.Event()
+    gated(monkeypatch, gate)
+    source = workspaces(stack, store)
+
+    host = await opened_as_the_server_starts(source, root, gate, "ws://127.0.0.1:7433/")
+    await host.close()
+
+    assert WorkspaceLock(root / ".orbit").owner().url == "ws://127.0.0.1:7433/"
+
+
+async def test_a_lock_that_cant_name_the_url_known_once_taken_is_unavailable_and_let_go(
+    stack: ExitStack, store: SqliteStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = directory(tmp_path)
+    gate = threading.Event()
+    gated(monkeypatch, gate)
+
+    def unwritable(lock: WorkspaceLock, url: str) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(WorkspaceLock, "announce", unwritable)
+    source = workspaces(stack, store)
+
+    with pytest.raises(
+        WorkspaceUnavailable, match=r"^Couldn't write the workspace lock "
+    ) as refused:
+        await opened_as_the_server_starts(source, root, gate, "ws://127.0.0.1:7433/")
+    assert refused.value.code == INTERNAL
+    assert free(root) and source.locks == ()
+    assert await WorkspaceRegistry(store).served() == []
+
+
+def test_a_lock_served_from_the_start_that_cant_name_the_url_leaves_the_flag_alone(
+    stack: ExitStack, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = directory(tmp_path)
+    gate = threading.Event()
+    gated(monkeypatch, gate)
+
+    def unwritable(lock: WorkspaceLock, url: str) -> None:
+        raise OSError("disk full")
+
+    store = asyncio.run(SqliteStore.open(tmp_path / "state"))
+    source = workspaces(stack, store)
+    gate.set()
+    workspace_id = asyncio.run(flagged_and_closed(source, root))
+    gate.clear()
+    monkeypatch.setattr(WorkspaceLock, "announce", unwritable)
+    serving = threading.Thread(target=lambda: refused_served(source, root))
+    serving.start()
+    time.sleep(0.05)
+    source.url = "ws://127.0.0.1:7433/"
+    gate.set()
+    serving.join()
+    served = asyncio.run(WorkspaceRegistry(store).served())
+    asyncio.run(store.close())
+
+    assert free(root) and source.locks == ()
+    assert served == [(workspace_id, str(root))]
+
+
+async def flagged_and_closed(source: ServedWorkspaces, root: Path) -> str:
+    """The id of the workspace at ``root``, opened with ``source``, so flagged served, then
+    closed, leaving its flag."""
+    host = await source.open(str(root))
+    await host.close()
+    await source.close(host.workspace_id)
+    return host.workspace_id
+
+
+def refused_served(source: ServedWorkspaces, root: Path) -> None:
+    """Serve the workspace at ``root`` from the start with ``source``, refused as unavailable."""
+    with pytest.raises(WorkspaceUnavailable, match=r"^Couldn't write the workspace lock "):
+        source.served(root)
 
 
 def failing_with(failure: Exception) -> Refusal:

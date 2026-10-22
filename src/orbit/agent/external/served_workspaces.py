@@ -177,11 +177,31 @@ class ServedWorkspaces:
     ) -> tuple[ServedWorkspace, Callable[[], WorkspaceHost]]:
         """The workspace at ``root``, registered or found and flagged served if ``flag``, with
         what builds its host, its lock taken if it's free and held until it's removed or the
-        stack closes. Raises :class:`WorkspaceUnavailable` as :meth:`open` says."""
+        stack closes, naming the server's URL if it's known by then. Raises
+        :class:`WorkspaceUnavailable` as :meth:`open` says, or as ``INTERNAL`` if the lock can't
+        name the URL, having let it go."""
         opening = Opening(identity=self._worktree, flag=flag, url=self.url)
         opened = await open_workspace(self._store, root, self._make_host, opening)
+        # The server may have started listening while the workspace was opened.
+        if self.url is not None and self.url != opening.url:
+            await self._named(opened, self.url, flagged=flag)
         self._locks[opened.workspace_id] = opened.served.lock
         return opened.served, opened.make
+
+    async def _named(self, opened: OpenedWorkspace, url: str, *, flagged: bool) -> None:
+        """Have the lock of the workspace ``opened`` name the server's ``url``. Raises
+        :class:`WorkspaceUnavailable` as ``INTERNAL`` if it can't be written, having let the
+        lock go and flagged the workspace not served again if it was ``flagged``."""
+        lock = opened.served.lock
+        try:
+            lock.announce(url)
+        except OSError as exc:
+            lock.close()
+            if flagged:
+                await self.set_served(opened.workspace_id, False)
+            raise WorkspaceUnavailable(
+                f"Couldn't write the workspace lock {lock.path}: {exc}", INTERNAL
+            ) from None
 
     async def set_served(self, workspace_id: str, served: bool) -> None:
         """Flag the workspace ``workspace_id`` as ``served``, or not, in the store. Raises
@@ -272,7 +292,19 @@ async def _view(store: SqliteStore, root: Path, *, owned: bool, flag: bool) -> O
     try:
         opened = await open_workspace_store(store, root, owned=owned)
         if flag:
-            await WorkspaceRegistry(store).set_served(opened.store.workspace_id, True)
+            await _flagged(WorkspaceRegistry(store), opened.store.workspace_id)
     except (StoreError, ImportBlocked, RecoveryFailed) as exc:
         raise WorkspaceUnavailable(str(exc), INTERNAL) from None
     return opened
+
+
+async def _flagged(registry: WorkspaceRegistry, workspace_id: str) -> None:
+    """Flag the workspace ``workspace_id`` served in ``registry``; cancelled meanwhile, flag it
+    not served again, so a server starting later doesn't serve a workspace whose add was
+    cancelled."""
+    try:
+        await registry.set_served(workspace_id, True)
+    except asyncio.CancelledError:
+        # The store's one thread runs writes in order, so this lands after the flag, if it does.
+        await registry.set_served(workspace_id, False)
+        raise
