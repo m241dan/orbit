@@ -11,7 +11,8 @@ WorkspaceState = frozenset[tuple[str, int, int]]
 
 async def workspace_state(root: Path | str = ".") -> WorkspaceState | None:
     """The files git sees under ``root`` (tracked, plus untracked ones not ignored), each
-    with its size and modification time; a missing tracked file has both as -1.
+    with its size and modification time; a tracked file that's missing or can't be read
+    has both as -1.
 
     ``None`` when ``root`` isn't in a git work tree or git can't be run, so the caller
     can't tell whether anything changed.
@@ -34,8 +35,10 @@ def _fingerprints(root: Path, paths: set[str]) -> WorkspaceState:
 
 
 def _fingerprint(root: Path, path: str) -> tuple[str, int, int]:
+    """``path`` with its size and modification time, not following a symlink; -1 for both
+    when it can't be read, as when it's gone or a directory above it became a file."""
     try:
-        stat = os.stat(root / path)
-    except FileNotFoundError:
+        stat = os.lstat(root / path)
+    except OSError:
         return path, -1, -1
     return path, stat.st_size, stat.st_mtime_ns

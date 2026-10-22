@@ -474,6 +474,16 @@ async def test_prepare_raises_when_git_cant_tell_an_ancestor_and_doesnt_catch_up
     assert not [args for args in ran if args[0] in ("rebase", "merge")]
 
 
+async def test_holds_work_raises_when_git_cant_tell_an_ancestor(
+    monkeypatch: pytest.MonkeyPatch, repo: Path
+) -> None:
+    tree = GitCoderTree(str(repo))
+    await tree.prepare(keep=False)
+    failing_merge_base(monkeypatch)
+    with pytest.raises(TreeFailed, match="git merge-base failed: fatal: bad object deadbeef"):
+        await tree.holds_work()
+
+
 def warning_git(monkeypatch: pytest.MonkeyPatch) -> None:
     """Make every git command warn on stderr, as a misconfigured repository can."""
 

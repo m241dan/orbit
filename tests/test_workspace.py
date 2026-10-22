@@ -71,17 +71,44 @@ async def test_a_missing_tracked_file_has_no_size_or_time(staged: Path) -> None:
     assert ("tracked.py", -1, -1) in state
 
 
+async def test_a_tracked_path_under_a_directory_now_a_file_reads_as_missing(
+    staged: Path,
+) -> None:
+    (staged / "pkg").mkdir()
+    (staged / "pkg" / "x.py").write_text("")
+    git(staged, "add", "pkg")
+    before = await workspace_state(staged)
+    (staged / "pkg" / "x.py").unlink()
+    (staged / "pkg").rmdir()
+    (staged / "pkg").write_text("")
+    state = await workspace_state(staged)
+    assert state is not None
+    assert state != before
+    assert ("pkg/x.py", -1, -1) in state
+
+
+async def test_re_pointing_a_dangling_symlink_changes_the_state(staged: Path) -> None:
+    (staged / "link").symlink_to("missing")
+    git(staged, "add", "link")
+    before = await workspace_state(staged)
+    (staged / "link").unlink()
+    (staged / "link").symlink_to("also-missing-elsewhere")
+    state = await workspace_state(staged)
+    assert state is not None
+    assert state != before
+
+
 async def test_files_are_checked_off_the_event_loops_thread(
     staged: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     threads: set[threading.Thread] = set()
-    real_stat = os.stat
+    real_stat = os.lstat
 
     def recording_stat(path: Path, *args: Any, **kwargs: Any) -> os.stat_result:
         threads.add(threading.current_thread())
         return real_stat(path, *args, **kwargs)
 
-    monkeypatch.setattr(os, "stat", recording_stat)
+    monkeypatch.setattr(os, "lstat", recording_stat)
     state = await workspace_state(staged)
     assert state is not None
     assert {path for path, _, _ in state} == {".gitignore", "tracked.py"}
