@@ -222,13 +222,16 @@ def reviewed(store: FakeStore) -> WorkspaceHost:
 
 
 async def joined(session: WorkspaceHost) -> None:
-    """Have a new connection join ``session``, until it's been greeted to the end."""
+    """Have a new connection join ``session``, until it's been greeted to the end and the super
+    review count is loaded, if its background work starts to load it."""
     connection = connect(session)
     await connection.send(CommandEnvelope(command_id="join", payload=HELLO))
     await connection.send(CommandEnvelope(command_id="attach", payload=attach_to(session)))
     async for envelope in connection.events():
         if envelope.payload == Notice(message=LEFTOVER):
-            return
+            break
+    while session._count_loader.running:
+        await asyncio.sleep(0)
 
 
 async def test_the_super_count_is_loaded_from_the_store_on_the_first_join() -> None:
@@ -236,6 +239,17 @@ async def test_the_super_count_is_loaded_from_the_store_on_the_first_join() -> N
     await asyncio.wait_for(joined(session), 5)
 
     assert lane_of(session).planner.since_super == 7
+    await session.close()
+
+
+async def test_a_second_join_keeps_the_super_count_risen_since_the_first() -> None:
+    store = FakeStore(count=7)
+    session = reviewed(store)
+    await asyncio.wait_for(joined(session), 5)
+    lane_of(session).planner.since_super = 8
+    await asyncio.wait_for(joined(session), 5)
+
+    assert lane_of(session).planner.since_super == 8
     await session.close()
 
 
@@ -281,6 +295,7 @@ async def test_a_join_while_the_super_count_cannot_be_saved_keeps_it_to_save_on_
 
     store.count_failure = None
     assert (await outcome_of(session, ResumeStorage()))[-1].payload == ACCEPTED
+    assert lane_of(session).planner.since_super == store.count == 8
     lane_of(session).planner.since_super += 1
     await session._review_count.save(lane_of(session).planner.since_super)
     assert store.counts == [8, 9]
@@ -307,7 +322,7 @@ async def test_a_super_count_moved_while_it_was_read_is_kept() -> None:
     await store.session.close()
 
 
-async def test_a_super_count_that_could_not_be_read_is_read_on_the_next_join() -> None:
+async def test_a_super_count_that_could_not_be_read_is_not_read_again_on_a_join() -> None:
     store = FakeStore(count=7)
     store.count_load_failure = "busy"
     session = reviewed(store)
@@ -315,5 +330,16 @@ async def test_a_super_count_that_could_not_be_read_is_read_on_the_next_join() -
     store.count_load_failure = None
     await asyncio.wait_for(joined(session), 5)
 
-    assert lane_of(session).planner.since_super == 7
+    assert lane_of(session).planner.since_super == 0
+    await session._review_count.save(1)
+    assert store.counts == []
     await session.close()
+
+
+async def test_closing_stops_loading_the_super_count() -> None:
+    store = FakeStore(count=7)
+    session = reviewed(store)
+    session.start_background()
+    await session.close()
+
+    assert lane_of(session).planner.since_super == 0

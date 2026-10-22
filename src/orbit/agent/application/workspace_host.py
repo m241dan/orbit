@@ -26,7 +26,7 @@ from orbit.agent.application.keeper import (
     local_now,
     new_session_id,
 )
-from orbit.agent.application.lanes import SessionGate
+from orbit.agent.application.lanes import Background, SessionGate
 from orbit.agent.application.log_writer import Overflow
 from orbit.agent.application.outbox import EventSink, Outbox, Shown
 from orbit.agent.application.planner_seat import PlannerSeat, SeatHooks
@@ -278,8 +278,8 @@ class WorkspaceHost:
         self._keeper = SessionKeeper(store, self._events.put, self._halt, new_sessions)
         self._keeper.rename(name)
         self._review_count = ReviewCount(store, self._halt, self._events.put)
-        self._count_loaded = False  # Whether the review count has been read from the store.
-        self._count_loading = asyncio.Lock()  # Reads it one join at a time.
+        self._count_loader = Background("review count", self._events.put)
+        self._count_loading = asyncio.Lock()  # Reads it once at a time, the takeover's last.
         self._tasks = Tasks(TaskBoard(), self._events.put, self._save)
         self._board = self._tasks.board
         self._proposals = FrontendReview(self._events.put, self._agent_on)
@@ -415,7 +415,6 @@ class WorkspaceHost:
         return HostGreeting(
             lambda: self._keeper.id,
             lambda since: self._events.missed(self._keeper.id, since),
-            self._load_review_count,
             self._workspace,
             self._no_steps,
             self._startup_notes,
@@ -720,34 +719,31 @@ class WorkspaceHost:
         await self._save()
 
     async def _load_review_count(self) -> None:
-        """Have the review planner count on from the repository's saved super review count, read
-        once, and again on taking the repository over: the planner's own count is never
-        replaced otherwise once it's been, so a frontend joining while the count can't be
-        saved, or as it's saved, doesn't roll it back."""
-        if self._lane is None:
-            return
+        """Have the review planner count on from the repository's saved super review count,
+        read once, as the background work starts, and again on taking the repository over: the
+        planner's own count is never replaced otherwise, so a frontend joining while the count
+        can't be saved, or as it's saved, doesn't roll it back."""
         async with self._count_loading:
-            if not self._count_loaded:
-                self._count_loaded = await self._count_on(self._lane.planner)
+            await self._count_on()
 
     async def _reload_review_count(self) -> None:
         """Read the repository's saved super review count again, now this orbit owns it: the
         orbit that owned it may have counted on since it was read."""
         async with self._count_loading:
             self._review_count.forget()
-            self._count_loaded = False
-        await self._load_review_count()
+            await self._count_on()
 
-    async def _count_on(self, planner: ReviewPlanner) -> bool:
-        """Have ``planner`` count on from the repository's saved super review count, unless it
-        counted on itself while that was read; returns whether it was read."""
+    async def _count_on(self) -> None:
+        """Have the review planner, if there is one, count on from the repository's saved super
+        review count, unless that can't be read or the planner counted on itself while it
+        was."""
+        if self._lane is None:
+            return
+        planner = self._lane.planner
         before = planner.since_super
         count = await self._review_count.load()
-        if count is None:
-            return False
-        if planner.since_super == before:
+        if count is not None and planner.since_super == before:
             planner.since_super = count
-        return True
 
     async def _save(self) -> None:
         """Save the session, if it's used, as it is now."""
@@ -766,20 +762,24 @@ class WorkspaceHost:
         return self._verifier.step_names if self._verifier else ()
 
     async def close(self) -> None:
-        """Stop a storage halt under way and the tries of the repository's lock, then the work,
-        as :meth:`_stop_work` does: the review lane and the startup check, so that nothing wakes
-        the work lane, then the work in progress, which stops its agent, and the planner's turn;
-        then stop the retired planners, the planner, the agents' host, the saving of the
-        session, releasing its lock, and the writing of its events to the store, then end every
-        connection's stream, in that order. Each is stopped even if one before it fails or the
-        close is cancelled, as :func:`close_all` does."""
+        """Stop a storage halt under way, the tries of the repository's lock and the loading of
+        the super review count, then the work, as :meth:`_stop_work` does: the review lane and
+        the startup check, so that nothing wakes the work lane, then the work in progress, which
+        stops its agent, and the planner's turn; then stop the retired planners, the planner,
+        the agents' host, the saving of the session, releasing its lock, and the writing of its
+        events to the store, then end every connection's stream, in that order. Each is stopped
+        even if one before it fails or the close is cancelled, as :func:`close_all` does."""
         self._closing = True
         await close_all(self._stops())
 
     def _stops(self) -> list[Callable[[], Awaitable[None]]]:
         """What :meth:`close` awaits, in order: nothing that could wake the work lane runs once
         its turn is cancelled, as in :meth:`_stop_work`."""
-        stops: list[Callable[[], Awaitable[None]]] = [self._halt.close, self._takeover.close]
+        stops: list[Callable[[], Awaitable[None]]] = [
+            self._halt.close,
+            self._takeover.close,
+            self._count_loader.close,
+        ]
         stops += self._work_stops(self._stop_turns)
         stops += [self._seat.close_retired, self._seat.close]
         if self._desk is not None:
@@ -837,11 +837,13 @@ class WorkspaceHost:
         )
 
     def start_background(self) -> None:
-        """Start the startup check, if there is one, and the tries of the repository's lock,
-        unless they were started for an earlier connection attaching here."""
+        """Start loading the super review count, the startup check, if there is one, and the
+        tries of the repository's lock, unless they were started for an earlier connection
+        attaching here."""
         if self._started:
             return
         self._started = True
+        self._count_loader.start(self._load_review_count())
         self._takeover.start()
         if self._startup is not None:
             self._startup.start()

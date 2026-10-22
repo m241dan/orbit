@@ -44,14 +44,13 @@ class HandshakeParts:
 @dataclass(frozen=True)
 class HostGreeting:
     """What a workspace's host gives the handshake of a connection attaching to it first: its
-    ``open_session``'s id, the events of it a frontend ``missed`` since a ``seq``, what loads
-    the review count (``load_review_count``) and the one-off notices: the ``workspace``, if
-    any, whether there are ``no_steps``, the ``startup_notes`` and the ``leftovers`` of earlier
-    runs. Once it's greeted, the background ``start``\\s, unless the host is ``closing``."""
+    ``open_session``'s id, the events of it a frontend ``missed`` since a ``seq`` and the
+    one-off notices: the ``workspace``, if any, whether there are ``no_steps``, the
+    ``startup_notes`` and the ``leftovers`` of earlier runs. Once it's greeted, the background
+    ``start``\\s, unless the host is ``closing``."""
 
     open_session: Callable[[], str]
     missed: Callable[[int], Awaitable[Sequence[EventEnvelope] | None]]
-    load_review_count: Callable[[], Awaitable[None]]
     workspace: str | None
     no_steps: Callable[[], bool]
     startup_notes: Sequence[str]
@@ -225,11 +224,10 @@ class Handshake:
             await snapshot()
 
     def _steps(self, greeting: HostGreeting) -> list[Callable[[], Awaitable[None]]]:
-        """The steps after the session is shown, in order: the latest usage, loading the review
-        count of the host ``greeting`` is of and its one-off notices."""
+        """The steps after the session is shown, in order: the latest usage and the one-off
+        notices of the host ``greeting`` is of."""
         return [
             self._publish_usage,
-            greeting.load_review_count,
             lambda: self._publish_notes(greeting),
             lambda: self._publish_leftovers(greeting),
         ]

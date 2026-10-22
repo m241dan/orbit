@@ -70,9 +70,6 @@ class Parts:
         await self._part("catalog")
         return CATALOG
 
-    async def load_review_count(self) -> None:
-        await self._part("review count")
-
     async def leftovers(self) -> Sequence[str]:
         await self._part("leftovers")
         return self.notes
@@ -100,7 +97,6 @@ class Parts:
         return HostGreeting(
             lambda: OPEN,
             self.missed,
-            self.load_review_count,
             workspace,
             lambda: self.no_steps,
             (),
@@ -185,7 +181,6 @@ async def test_joining_publishes_everything_in_order_and_starts_the_background()
     assert parts.log == [
         f"view {OPEN}",
         USAGE,
-        "review count",
         Notice(message="Workspace: /work"),
         Notice(message=NO_STEPS_NOTE),
         "leftovers",
@@ -198,14 +193,14 @@ async def test_joining_publishes_everything_in_order_and_starts_the_background()
 async def test_a_bare_join_views_the_session_and_publishes_no_notes() -> None:
     parts = Parts()
     await parts.joined()
-    assert parts.log == [f"view {OPEN}", "review count", "leftovers", "start"]
+    assert parts.log == [f"view {OPEN}", "leftovers", "start"]
 
 
 async def test_joining_a_session_that_isnt_open_views_it_and_never_replays() -> None:
     parts = Parts()
     parts.missing = []
     await parts.joined(since=15, session="earlier")
-    assert parts.log == ["view earlier", "review count", "leftovers", "start"]
+    assert parts.log == ["view earlier", "leftovers", "start"]
 
 
 async def test_joining_a_session_there_is_none_of_is_refused_and_changes_nothing() -> None:
@@ -221,11 +216,10 @@ async def test_joining_a_session_there_is_none_of_is_refused_and_changes_nothing
 
 async def test_the_background_starts_once_even_when_cancelled_while_joining() -> None:
     parts = Parts()
-    parts.cancel_at = "review count"
+    parts.cancel_at, parts.notes = "leftovers", ["left over"]
     with pytest.raises(asyncio.CancelledError):
         await parts.joined()
-    assert parts.log.count("start") == 1
-    assert "leftovers" not in parts.log
+    assert parts.log[1:] == ["leftovers", "start"]
 
 
 def missed(seq: int) -> EventEnvelope:
@@ -242,7 +236,6 @@ async def test_joining_the_open_session_after_a_hello_that_can_catch_up_replays_
         missed(16),
         missed(17),
         USAGE,
-        "review count",
         Notice(message="Workspace: /work"),
         "leftovers",
         Notice(message="left over"),
@@ -257,7 +250,7 @@ async def test_a_join_after_leaving_gets_the_snapshot_without_asking() -> None:
     handshake.leave()
     parts.log.clear()
     await handshake.join(parts.greeting(), OPEN, parts.view)
-    assert parts.log == [f"view {OPEN}", "review count", "leftovers", "start"]
+    assert parts.log == [f"view {OPEN}", "leftovers", "start"]
     assert handshake.greeted
 
 
@@ -278,7 +271,7 @@ async def test_a_join_with_nothing_missed_gets_no_snapshot() -> None:
     parts = Parts()
     parts.missing = []
     await parts.joined(since=15)
-    assert parts.log[:2] == ["missed since 15", "review count"]
+    assert parts.log[:2] == ["missed since 15", "leftovers"]
 
 
 async def test_what_was_missed_that_cant_be_had_fails_the_join() -> None:
@@ -305,21 +298,6 @@ async def test_a_failure_after_the_view_is_an_internal_error_and_the_background_
     message = "Orbit failed to finish greeting the frontend: no leftovers"
     error = ErrorOccurred(code=INTERNAL, message=message)
     assert parts.log[-2:] == [error, "start"]
-
-
-async def test_a_review_count_that_fails_still_publishes_the_steps_after_it() -> None:
-    parts = Parts()
-    parts.fail_at, parts.no_steps, parts.notes = "review count", True, ["left over"]
-    await parts.joined()
-    message = "Orbit failed to finish greeting the frontend: no review count"
-    assert parts.log[1:] == [
-        "review count",
-        ErrorOccurred(code=INTERNAL, message=message),
-        Notice(message=NO_STEPS_NOTE),
-        "leftovers",
-        Notice(message="left over"),
-        "start",
-    ]
 
 
 async def test_a_catalog_that_fails_fails_hello_with_no_welcome() -> None:
