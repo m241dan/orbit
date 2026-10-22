@@ -52,6 +52,7 @@ uv run orbit chat --connect wss://orbit.example.lan:7433/ --ca ca.pem  # over TL
 uv run orbit chat --remote work                # connect to the control plane [remotes.work] names
 uv run orbit chat --local                      # run in-process even with orbit serve running
 uv run orbit token rotate                      # replace the token frontends show orbit serve
+uv run orbit version                           # show the installed version
 ```
 
 With orbit installed as a tool, drop the `uv run`.
@@ -869,7 +870,9 @@ A project can change these, orbit's limits, its verification steps (see
 [Verification steps](#verification-steps)) and its worktree setup (see
 [Where tasks run, and how their work lands](#where-tasks-run-and-how-their-work-lands)), in
 `.orbit/config.toml`. A role it names that's built in keeps the fields it doesn't set; any other
-name adds a role. Every field is optional:
+name adds a role, which must set `instructions` and otherwise gets `get_task`, `complete_task`,
+`report_progress` and `give_up` as its tools, `restricted` tool access, the default model, its
+claims verified, and no time limit. Every other field is optional:
 
 ```toml
 fix_attempts = 5               # in-session fixes asked of one agent before its task falls back
