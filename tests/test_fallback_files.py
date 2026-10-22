@@ -68,7 +68,7 @@ async def test_a_file_already_there_is_made_the_owners_alone(
 async def test_with_the_state_directory_unwritable_events_go_to_the_repository(
     files: FallbackFiles, tmp_path: Path, unwritable: Path
 ) -> None:
-    path = tmp_path / "repo" / ".git" / "orbit" / "fallback" / "s1.jsonl"
+    path = tmp_path / "repo" / ".git" / "orbit" / "fallback" / "w1-s1.jsonl"
 
     assert await files.write("s1", [notice(1)]) == str(path)
     assert decoded(path) == [notice(1)]
@@ -79,7 +79,7 @@ async def test_events_stay_in_the_file_they_went_to_though_another_place_frees_u
 ) -> None:
     await files.write("s1", [notice(1)])
     unwritable.chmod(0o700)
-    path = tmp_path / "repo" / ".git" / "orbit" / "fallback" / "s1.jsonl"
+    path = tmp_path / "repo" / ".git" / "orbit" / "fallback" / "w1-s1.jsonl"
 
     assert await files.write("s1", [notice(2)]) == str(path)
     assert decoded(path) == [notice(1), notice(2)]
@@ -92,7 +92,7 @@ async def test_when_the_file_used_fails_the_next_place_is_tried(
     (tmp_path / "state" / "fallback" / "w1-s1.jsonl").chmod(0o400)
     written = await files.write("s1", [notice(2)])
 
-    assert written == str(tmp_path / "repo" / ".git" / "orbit" / "fallback" / "s1.jsonl")
+    assert written == str(tmp_path / "repo" / ".git" / "orbit" / "fallback" / "w1-s1.jsonl")
 
 
 async def test_an_append_that_fails_midway_leaves_the_file_as_it_was_and_moves_on(
@@ -116,7 +116,7 @@ async def test_an_append_that_fails_midway_leaves_the_file_as_it_was_and_moves_o
     monkeypatch.undo()
 
     state = tmp_path / "state" / "fallback" / "w1-s1.jsonl"
-    repository = tmp_path / "repo" / ".git" / "orbit" / "fallback" / "s1.jsonl"
+    repository = tmp_path / "repo" / ".git" / "orbit" / "fallback" / "w1-s1.jsonl"
     assert written == str(repository)
     assert decoded(state) == [notice(1)]
     assert decoded(repository) == [notice(2), notice(3)]
@@ -134,7 +134,7 @@ async def test_removing_a_sessions_files_deletes_them_in_both_places(
     files: FallbackFiles, tmp_path: Path
 ) -> None:
     await files.write("s1", [notice(1)])
-    repository = tmp_path / "repo" / ".git" / "orbit" / "fallback" / "s1.jsonl"
+    repository = tmp_path / "repo" / ".git" / "orbit" / "fallback" / "w1-s1.jsonl"
     repository.parent.mkdir(parents=True)
     repository.write_text("")
     await files.write("s2", [notice(2)])
@@ -176,15 +176,46 @@ async def test_the_files_parked_are_this_workspaces_in_the_state_directory_then_
     await files.write("a", [notice(2)])
     repository = tmp_path / "repo" / ".git" / "orbit" / "fallback"
     repository.mkdir(parents=True)
-    (repository / "s3.jsonl").write_text("")
+    (repository / "w1-s3.jsonl").write_text("")
     (repository / "notes.txt").write_text("")
     state = tmp_path / "state" / "fallback"
+    (state / "w1-a.jsonl").rename(repository / "w1-a.jsonl")
 
     assert await files.parked() == [
-        ParkedFile(str(state / "w1-a.jsonl"), "a"),
         ParkedFile(str(state / "w1-b-1.jsonl"), "b-1"),
-        ParkedFile(str(repository / "s3.jsonl"), "s3"),
+        ParkedFile(str(repository / "w1-a.jsonl"), "a"),
+        ParkedFile(str(repository / "w1-s3.jsonl"), "s3"),
     ]
+
+
+async def test_a_repository_file_is_named_with_the_workspace(
+    files: FallbackFiles, tmp_path: Path, unwritable: Path
+) -> None:
+    written = await files.write("s1", [notice(1)])
+
+    assert written == str(tmp_path / "repo" / ".git" / "orbit" / "fallback" / "w1-s1.jsonl")
+
+
+async def test_a_workspace_sharing_the_repository_parks_none_of_anothers_files(
+    files: FallbackFiles, tmp_path: Path, unwritable: Path
+) -> None:
+    await files.write("s1", [notice(1)])
+    unwritable.chmod(0o700)
+    await files.write("s2", [notice(2)])
+    other = FallbackFiles(tmp_path / "state", "w2", tmp_path / "repo" / ".git" / "orbit")
+
+    assert len(await files.parked()) == 2
+    assert await other.parked() == []
+
+
+async def test_a_legacy_repository_file_is_parked_by_its_session_as_legacy(
+    files: FallbackFiles, tmp_path: Path
+) -> None:
+    repository = tmp_path / "repo" / ".git" / "orbit" / "fallback"
+    repository.mkdir(parents=True)
+    (repository / "s3.jsonl").write_text("")
+
+    assert await files.parked() == [ParkedFile(str(repository / "s3.jsonl"), "s3", legacy=True)]
 
 
 async def test_with_no_fallback_directories_nothing_is_parked(files: FallbackFiles) -> None:

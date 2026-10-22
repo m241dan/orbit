@@ -64,6 +64,7 @@ from orbit.protocol import (
     decode_event,
     encode,
 )
+from tests.store_views import workspace_id_of
 from tests.tls_certs import DAY, Ca, ServerFiles, make_ca, make_client, make_server, other_key
 
 runner = CliRunner()
@@ -358,7 +359,8 @@ def test_a_read_only_workspace_taken_over_names_the_servers_url_in_its_lock(
 def test_a_read_only_workspace_recovers_the_parked_events_only_once_taken_over(
     project: Path, state: Path, config_dir: Path
 ) -> None:
-    parked = project / ".orbit" / "fallback" / "s1.jsonl"
+    workspace_id = asyncio.run(workspace_id_of(state, project))
+    parked = project / ".orbit" / "fallback" / f"{workspace_id}-s1.jsonl"
     parked.parent.mkdir(parents=True)
     notice = EventEnvelope(seq=1, session="s1", payload=Notice(message="parked"))
     parked.write_text(f"{encode(notice)}\n")
@@ -378,7 +380,7 @@ def test_a_read_only_workspace_recovers_the_parked_events_only_once_taken_over(
     frontend = Frontend(state, config_dir, takes_over)
     served(frontend, "--port", "0")
 
-    note = "Recovered 1 event from .orbit/fallback/s1.jsonl into the session's log."
+    note = f"Recovered 1 event from {parked.relative_to(project)} into the session's log."
     assert Notice(message=note) not in frontend.events[: len(ATTACHED)]
     assert Notice(message=note) in frontend.events
     assert left == [True, False]

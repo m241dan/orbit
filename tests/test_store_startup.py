@@ -12,12 +12,13 @@ from pathlib import Path
 import pytest
 
 from orbit.agent import ImportBlocked, OpenedStore, RecoveryFailed, open_workspace_store
+from orbit.agent.application.ports import ReadFailed, StoredSession
 from orbit.agent.domain.sessions import SessionRecord, record_json
 from orbit.agent.external import store_startup
 from orbit.agent.external.session_import import Imported
 from orbit.agent.external.sqlite_store import SqliteStore, WorkspaceStore
 from orbit.protocol import EventEnvelope, Notice, encode
-from tests.store_views import open_view
+from tests.store_views import open_view, workspace_id_of
 
 WHEN = datetime(2026, 10, 17, 14, 30, tzinfo=UTC)
 SAVED = SessionRecord(id="abc", name="auth rework", created=WHEN, last_active=WHEN)
@@ -61,10 +62,15 @@ def park(path: Path, *seqs: int) -> Path:
 
 async def park_in_state(state: Path, root: Path, *seqs: int) -> Path:
     """The session ``s1``'s fallback file in ``state``, holding notices numbered ``seqs``."""
-    store = await open_view(state, root)
-    workspace_id = store.workspace_id
-    await store.close()
+    workspace_id = await workspace_id_of(state, root)
     return park(state / "fallback" / f"{workspace_id}-s1.jsonl", *seqs)
+
+
+async def park_in_repository(state: Path, root: Path, *seqs: int, session: str = "s1") -> Path:
+    """The session ``session``'s fallback file in ``root``'s orbit directory, holding notices
+    numbered ``seqs``."""
+    workspace_id = await workspace_id_of(state, root)
+    return park(root / ".orbit" / "fallback" / f"{workspace_id}-{session}.jsonl", *seqs)
 
 
 def store_threads() -> list[str]:
@@ -112,7 +118,7 @@ async def test_the_store_is_opened_with_the_workspaces_fallback_files(
         workspace_id = opened.store.workspace_id
         assert opened.fallback.places("s1") == [
             state / "fallback" / f"{workspace_id}-s1.jsonl",
-            root / ".orbit" / "fallback" / "s1.jsonl",
+            root / ".orbit" / "fallback" / f"{workspace_id}-s1.jsonl",
         ]
     finally:
         await store.close()
@@ -122,11 +128,11 @@ async def test_old_session_files_are_imported_before_fallback_files_are_recovere
     state: Path, root: Path
 ) -> None:
     legacy_sessions(root)
-    park(root / ".orbit" / "fallback" / "s1.jsonl", 1)
+    path = await park_in_repository(state, root, 1)
 
     assert await opened_notes(state, root) == [
         IMPORT_NOTE,
-        "Recovered 1 event from .orbit/fallback/s1.jsonl into the session's log.",
+        f"Recovered 1 event from {path.relative_to(root)} into the session's log.",
     ]
 
 
@@ -134,7 +140,7 @@ async def test_a_blocked_import_leaves_the_fallback_files_unrecovered(
     state: Path, root: Path
 ) -> None:
     sessions = legacy_sessions(root)
-    path = park(root / ".orbit" / "fallback" / "s1.jsonl", 1)
+    path = await park_in_repository(state, root, 1)
     with held(sessions / "abc.lock"), pytest.raises(ImportBlocked):
         await opened_notes(state, root)
 
@@ -151,7 +157,7 @@ async def test_an_import_of_old_session_files_is_noted_within_the_workspace(
 
 async def test_each_recovered_file_holding_new_events_is_noted(state: Path, root: Path) -> None:
     outside = await park_in_state(state, root, 2, 1)
-    park(root / ".orbit" / "fallback" / "s2.jsonl")
+    await park_in_repository(state, root, session="s2")
 
     assert await opened_notes(state, root) == [
         f"Recovered 2 events from {outside} into the session's log."
@@ -224,7 +230,7 @@ async def test_a_cancelled_import_is_cancelled(
 
 
 async def test_a_failed_recovery_keeps_the_fallback_file(state: Path, root: Path) -> None:
-    path = park(root / ".orbit" / "fallback" / "s1.jsonl")
+    path = await park_in_repository(state, root)
     path.write_text("not an envelope\n")
     with pytest.raises(RecoveryFailed, match="Not JSON"):
         await opened_notes(state, root)
@@ -246,7 +252,7 @@ async def test_an_orbit_not_owning_the_workspace_leaves_its_fallback_files(
     state: Path, root: Path
 ) -> None:
     outside = await park_in_state(state, root, 1)
-    inside = park(root / ".orbit" / "fallback" / "s2.jsonl", 2)
+    inside = await park_in_repository(state, root, 2, session="s2")
 
     assert await opened_unowned(state, root) == []
     assert outside.exists() and inside.exists()
@@ -263,15 +269,62 @@ async def test_an_orbit_not_owning_the_workspace_still_imports_old_session_files
 async def test_recovering_later_imports_and_deletes_the_fallback_files_with_notes(
     state: Path, root: Path
 ) -> None:
-    path = park(root / ".orbit" / "fallback" / "s1.jsonl", 2, 1)
+    path = await park_in_repository(state, root, 2, 1)
     store = await SqliteStore.open(state)
     try:
         opened = await open_workspace_store(store, root, owned=False)
         assert await opened.recover() == [
-            "Recovered 2 events from .orbit/fallback/s1.jsonl into the session's log."
+            f"Recovered 2 events from {path.relative_to(root)} into the session's log."
         ]
     finally:
         await store.close()
 
     assert not path.exists()
     assert await logged(state, root) == [parked_notice(1), parked_notice(2)]
+
+
+async def save_session(state: Path, root: Path, session_id: str) -> None:
+    """Save a session ``session_id`` in the workspace at ``root`` in the store in ``state``."""
+    store = await open_view(state, root)
+    try:
+        await store.save(SessionRecord(id=session_id, name="", created=WHEN, last_active=WHEN))
+    finally:
+        await store.close()
+
+
+async def test_a_legacy_file_is_recovered_by_the_workspace_with_its_session(
+    state: Path, root: Path
+) -> None:
+    await save_session(state, root, "s1")
+    path = park(root / ".orbit" / "fallback" / "s1.jsonl", 2, 1)
+
+    assert await opened_notes(state, root) == [
+        "Recovered 2 events from .orbit/fallback/s1.jsonl into the session's log."
+    ]
+    assert not path.exists()
+    assert await logged(state, root) == [parked_notice(1), parked_notice(2)]
+
+
+async def test_a_legacy_file_is_left_by_a_workspace_without_its_session(
+    state: Path, root: Path
+) -> None:
+    await save_session(state, root, "s2")
+    path = park(root / ".orbit" / "fallback" / "s1.jsonl", 1)
+
+    assert await opened_notes(state, root) == []
+    assert path.exists()
+    assert await logged(state, root) == []
+
+
+async def test_sessions_that_cant_be_listed_stop_the_recovery_of_a_legacy_file(
+    monkeypatch: pytest.MonkeyPatch, state: Path, root: Path
+) -> None:
+    async def unlisted(store: WorkspaceStore) -> list[StoredSession]:
+        raise ReadFailed("The sessions can't be listed.")
+
+    monkeypatch.setattr(WorkspaceStore, "sessions", unlisted)
+    path = park(root / ".orbit" / "fallback" / "s1.jsonl", 1)
+    with pytest.raises(RecoveryFailed, match="The sessions can't be listed"):
+        await opened_notes(state, root)
+
+    assert path.exists()

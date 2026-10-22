@@ -244,7 +244,7 @@ async def test_with_the_state_directory_unwritable_events_go_to_the_repository(
     await publish(session, Notice(message="later"))
     await session.close()
 
-    file = repository / "fallback" / "session-1.jsonl"
+    file = repository / "fallback" / "w1-session-1.jsonl"
     assert f"were written to {file}" in error.message
     assert Notice(message="lost?") in [envelope.payload for envelope in lines_of(file)]
     assert Notice(message="later") in [envelope.payload for envelope in lines_of(file)]

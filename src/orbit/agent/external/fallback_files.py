@@ -2,8 +2,9 @@
 can't take them.
 
 A session's file is ``fallback/<workspace id>-<session id>.jsonl`` in the state directory, else
-``fallback/<session id>.jsonl`` in the repository's orbit directory (``.git/orbit``, or
-``.orbit`` outside git). Each is readable by its owner alone.
+in the repository's orbit directory (``.git/orbit``, or ``.orbit`` outside git), which the
+repository's worktrees share. Each is readable by its owner alone. Earlier orbits named the
+repository's ``fallback/<session id>.jsonl``.
 """
 
 import asyncio
@@ -17,6 +18,7 @@ from orbit.protocol import EventEnvelope, ProtocolError, decode_event, encode
 
 FALLBACK = "fallback"
 SUFFIX = ".jsonl"
+SEPARATOR = "-"  # Ids have none, so a name without it is an earlier orbit's, by session alone.
 
 
 def _append(path: Path, lines: str) -> None:
@@ -75,6 +77,17 @@ def _delete(path: Path) -> None:
         raise StoreFailed(str(error)) from error
 
 
+def _repository_file(path: Path, prefix: str) -> ParkedFile | None:
+    """The file at ``path`` in the repository, if it may be the workspace's whose names start
+    with ``prefix``: one so named, or a legacy one, named by its session alone; ``None`` for
+    another workspace's."""
+    if path.stem.startswith(prefix):
+        return ParkedFile(str(path), path.stem.removeprefix(prefix))
+    if SEPARATOR in path.stem:
+        return None
+    return ParkedFile(str(path), path.stem, legacy=True)
+
+
 class FallbackFiles:
     """The fallback files of the workspace ``workspace_id``, in ``state_dir`` or else in
     ``repository_dir``, the repository's orbit directory. A session's events go on to the file
@@ -89,10 +102,8 @@ class FallbackFiles:
 
     def places(self, session_id: str) -> list[Path]:
         """Where the session ``session_id``'s fallback file goes, the first that works."""
-        return [
-            self._state_dir / FALLBACK / f"{self._workspace_id}-{session_id}{SUFFIX}",
-            self._repository_dir / FALLBACK / f"{session_id}{SUFFIX}",
-        ]
+        name = f"{self._workspace_id}{SEPARATOR}{session_id}{SUFFIX}"
+        return [self._state_dir / FALLBACK / name, self._repository_dir / FALLBACK / name]
 
     async def write(self, session_id: str, envelopes: Sequence[EventEnvelope]) -> str | None:
         lines = "".join(f"{encode(envelope)}\n" for envelope in envelopes)
@@ -129,13 +140,14 @@ class FallbackFiles:
 
     def _parked(self) -> list[ParkedFile]:
         """This workspace's files in the state directory, then the repository's, each by
-        path."""
-        prefix = f"{self._workspace_id}-"
+        path, the repository's legacy ones, which may be this workspace's, among them."""
+        prefix = f"{self._workspace_id}{SEPARATOR}"
         state = sorted((self._state_dir / FALLBACK).glob(f"{prefix}*{SUFFIX}"))
         repository = sorted((self._repository_dir / FALLBACK).glob(f"*{SUFFIX}"))
+        found = (_repository_file(path, prefix) for path in repository)
         return [
             *(ParkedFile(str(path), path.stem.removeprefix(prefix)) for path in state),
-            *(ParkedFile(str(path), path.stem) for path in repository),
+            *(file for file in found if file is not None),
         ]
 
     async def read(self, file: ParkedFile) -> list[EventEnvelope]:

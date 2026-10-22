@@ -727,8 +727,9 @@ session is halted prints the explanation to the terminal (stderr) once the app h
 The events that weren't saved, and every event after them while the session is halted, go to a
 fallback file, one JSON envelope per line, readable by you alone:
 `fallback/<workspace id>-<session id>.jsonl` in the state directory, or, if that can't be
-written, `.git/orbit/fallback/<session id>.jsonl` in the repository (`.orbit/fallback/` outside
-git). The explanation names the file, or says that neither place could be written.
+written, `.git/orbit/fallback/<workspace id>-<session id>.jsonl` in the repository
+(`.orbit/fallback/` outside git), which its worktrees share. The explanation names the file, or
+says that neither place could be written.
 
 Once the cause is fixed, "Try again" retries the writes that failed: the session record as it is
 now, taking its lock first if that failed, a saved session's rename whose save failed (dropped,
@@ -742,13 +743,16 @@ If a write still fails, or the store still can't list, lock or read the session 
 retried on, the session stays halted and the explanation is given again for the failure now.
 
 Restarting orbit recovers the events too. The orbit that owns the repository, once the
-database is open as it starts, imports each of the repository's fallback files, from both places,
+database is open as it starts, imports each of the workspace's fallback files, from both places,
 into the log the same way, skipping events already stored, deletes it, and says in the
 conversation how many events it recovered from which file, as in "Recovered 37 events from
-.git/orbit/fallback/<session id>.jsonl into the session's log.", counting only the events it
-newly stored; a file whose events were all stored already is deleted without a word. A fallback
-file that can't be read or imported stops orbit before the app starts, with status 2 and a
-message naming the file and the error, leaving the file as it was. A read-only orbit leaves the
+.git/orbit/fallback/<workspace id>-<session id>.jsonl into the session's log.", counting only the
+events it newly stored; a file whose events were all stored already is deleted without a word. A
+file an earlier orbit left in the repository as `.git/orbit/fallback/<session id>.jsonl` is
+recovered only by the workspace that has that session, and left alone by the others. A fallback
+file that can't be read or imported, or whose session can't be told because the saved sessions
+can't be listed, stops orbit before the app starts, with status 2 and a message naming the file
+and the error, leaving the file as it was. A read-only orbit leaves the
 fallback files alone, as the owner may still be writing them, and recovers them the same way
 once it takes the repository over, before running the work queued; a file it can't recover then
 is reported as an error and left for the next start.

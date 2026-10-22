@@ -40,6 +40,14 @@ async def open_view(state: Path, workspace: Path | str) -> OwnView:
     return OwnView(store, workspace_id)
 
 
+async def workspace_id_of(state: Path, workspace: Path | str) -> str:
+    """The id of the workspace at ``workspace`` in a store in ``state``, registered if it isn't
+    yet."""
+    view = await open_view(state, workspace)
+    await view.close()
+    return view.workspace_id
+
+
 type Opener = Callable[[Path], Awaitable[OwnView]]
 
 

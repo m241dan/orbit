@@ -281,17 +281,19 @@ class Fallback(Protocol):
 @dataclass(frozen=True)
 class ParkedFile:
     """A fallback file an earlier run left: its ``path``, holding events of the session
-    ``session_id``."""
+    ``session_id``, and whether it's ``legacy``, named by its session alone as earlier orbits
+    named it, so it may be another workspace's."""
 
     path: str
     session_id: str
+    legacy: bool = False
 
 
 class ParkedEvents(Protocol):
     """The fallback files of this workspace, in every place they go."""
 
     async def parked(self) -> list[ParkedFile]:
-        """Every fallback file of this workspace, by path."""
+        """Every fallback file of this workspace, by path, and every legacy one that may be."""
         ...
 
     async def read(self, file: ParkedFile) -> list[EventEnvelope]:
