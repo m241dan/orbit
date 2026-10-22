@@ -132,10 +132,20 @@ class ServedWorkspaces:
         return tuple(self._locks.values())
 
     def served(self, root: Path) -> tuple[ServedWorkspace, Callable[[], WorkspaceHost]]:
-        """The workspace at ``root`` served from the start, flagged served, with what builds its
-        host, its lock held, if it's free. Raises :class:`WorkspaceUnavailable` as :meth:`open`
-        says."""
-        return asyncio.run(self._taken(root))
+        """The workspace at ``root`` served from the start, with what builds its host, its lock
+        held, if it's free, left flagged as it was until :meth:`flag_served`. Raises
+        :class:`WorkspaceUnavailable` as :meth:`open` says."""
+        return asyncio.run(self._taken(root, flag=False))
+
+    def flag_served(self) -> None:
+        """Flag every workspace served as served, so a server starting later serves them again.
+        Raises :class:`WorkspaceUnavailable` if the store fails."""
+        asyncio.run(self._flag_served())
+
+    async def _flag_served(self) -> None:
+        """Flag every workspace served as served, as :meth:`flag_served` does."""
+        for workspace_id in tuple(self._locks):
+            await self.set_served(workspace_id, True)
 
     def serves(self, workspace_id: str) -> bool:
         """Whether the workspace ``workspace_id`` is served."""
@@ -155,22 +165,31 @@ class ServedWorkspaces:
         lock taken if it's free. Raises :class:`WorkspaceUnavailable` if git has no identity for
         the coder's commits there, its configuration is invalid, its lock can't be made or the
         store fails."""
-        _, make = await self._taken(Path(root))
+        _, make = await self._taken(Path(root), flag=True)
         return make()
 
-    async def _taken(self, root: Path) -> tuple[ServedWorkspace, Callable[[], WorkspaceHost]]:
-        """The workspace at ``root``, registered or found and flagged served, with what builds
-        its host, its lock taken if it's free and held until it's removed or the stack closes.
-        Raises :class:`WorkspaceUnavailable` as :meth:`open` says."""
-        opening = Opening(identity=self._worktree, flag=True, url=self.url)
+    async def _taken(
+        self, root: Path, *, flag: bool
+    ) -> tuple[ServedWorkspace, Callable[[], WorkspaceHost]]:
+        """The workspace at ``root``, registered or found and flagged served if ``flag``, with
+        what builds its host, its lock taken if it's free and held until it's removed or the
+        stack closes. Raises :class:`WorkspaceUnavailable` as :meth:`open` says."""
+        opening = Opening(identity=self._worktree, flag=flag, url=self.url)
         opened = await open_workspace(self._store, root, self._make_host, opening)
         self._locks[opened.workspace_id] = opened.served.lock
         return opened.served, opened.make
 
+    async def set_served(self, workspace_id: str, served: bool) -> None:
+        """Flag the workspace ``workspace_id`` as ``served``, or not, in the store. Raises
+        :class:`WorkspaceUnavailable` as ``INTERNAL`` if the store fails."""
+        try:
+            await WorkspaceRegistry(self._store).set_served(workspace_id, served)
+        except StoreError as exc:
+            raise WorkspaceUnavailable(str(exc), INTERNAL) from None
+
     async def close(self, workspace_id: str) -> None:
-        """Stop serving the workspace ``workspace_id`` and let go of its lock. If the store
-        fails to unflag it, it's still served, its lock held until the stack closes."""
-        await WorkspaceRegistry(self._store).set_served(workspace_id, False)
+        """Stop serving the workspace ``workspace_id`` and let go of its lock, leaving its flag
+        as it is."""
         self._locks.pop(workspace_id).close()
 
     def _let_go(self) -> None:

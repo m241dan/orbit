@@ -954,7 +954,8 @@ again, and with none added yet it starts empty and says so. `--add` takes a proj
 any directory in a git repository for the repository's top level; a path that doesn't exist, or
 isn't a directory, stops it with status 2, as does one added now that can't be served (an
 invalid `.orbit/config.toml`, no git identity for commits, a lock that can't be made or sessions
-that can't be opened or imported), which is left as it was rather than added. A workspace added
+that can't be opened or imported), which is left as it was rather than added, as are those added
+with it. A workspace added
 earlier whose directory has gone since, or that can't be served for any of those reasons, is
 skipped, with a warning naming it and why, and the rest are served. Before it listens, each
 workspace served opens its latest session and starts its startup check and its tries of the
@@ -965,7 +966,8 @@ host, a repository's top level stands for any directory in it, and the workspace
 latest session, takes its lock and runs its startup check, as at start; adding one already
 served changes nothing. Removing one lets its lock go and keeps its sessions for when it's added
 again; it's refused while the workspace runs work or another frontend views one of its
-sessions. A plain `orbit serve` later serves those added, not those removed. A local `orbit
+sessions, and if the store fails to record that it's removed, it stays served. A plain `orbit
+serve` later serves those added, not those removed. A local `orbit
 chat` works on its own repository alone and refuses both. It takes the backend flags `chat` has (`--model`, `--tools`, `--verify`,
 `--worktree`, `--review`, `--usage`, `--profile`, which writes `serve.prof` and
 `serve-blocked.log`), which apply to every workspace it serves, each reading its own

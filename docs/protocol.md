@@ -210,7 +210,9 @@ next `Attach` is answered as a first one is, with a snapshot, as the `since` its
 was of the workspace removed. It's refused with `unknown` for a workspace that isn't served, and
 with `busy` while the workspace runs work, its message naming what runs, such as
 `Can't remove /home/me/src/orbit: tasks are running.`, or while another connection views one of
-its sessions, its message naming them.
+its sessions, its message naming them. It's refused with `internal` if orbit fails to stop flagging it as
+served in the store, before anything else is done, so it's still served, and served again by
+a later `orbit serve`: `Can't remove /home/me/src/orbit, which is still served: …`.
 
 A local `orbit chat` serves its own repository alone, and refuses both with `invalid`: `A local
 orbit works on one repository; run orbit serve to work on several.`

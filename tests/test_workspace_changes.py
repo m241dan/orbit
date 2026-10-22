@@ -71,7 +71,9 @@ class Unclosable(WorkspaceHost):
 class FakeSource:
     """Workspaces for a control plane to serve: each path is a directory, but for those
     ``kinds`` says otherwise, standing for itself, but for those ``tops`` names the top level
-    of; noting the workspaces ``opened``, by path, and ``closed``, by id."""
+    of; noting the workspaces ``opened``, by path, ``closed``, by id, and the ``flags`` set,
+    each waiting for ``flag_gate``, if given, and failing as ``unflag_fails`` says, if it
+    does, when it's cleared."""
 
     def __init__(
         self,
@@ -86,6 +88,9 @@ class FakeSource:
         self.gate: asyncio.Event | None = None
         self.unavailable: str | None = None
         self.unavailable_code = INVALID
+        self.flags: list[tuple[str, bool]] = []
+        self.flag_gate: asyncio.Event | None = None
+        self.unflag_fails: str | None = None
 
     async def kind(self, path: str) -> PathKind:
         return self.kinds.get(path, PathKind.DIRECTORY)
@@ -107,7 +112,15 @@ class FakeSource:
         """The host of the workspace ``name``."""
         return workspace(name)
 
+    async def set_served(self, workspace_id: str, served: bool) -> None:
+        if self.flag_gate is not None:
+            await self.flag_gate.wait()
+        if not served and self.unflag_fails is not None:
+            raise WorkspaceUnavailable(self.unflag_fails, INTERNAL)
+        self.flags.append((workspace_id, served))
+
     async def close(self, workspace_id: str) -> None:
+        assert (workspace_id, False) in self.flags
         self.closed.append(workspace_id)
 
 
@@ -319,8 +332,51 @@ async def test_removing_an_idle_workspace_closes_it_and_leaves_the_others() -> N
 
     assert ids(catalog) == ["a"] and accepted == CommandAccepted(command_id="remove")
     assert [ids(event) for event in seen_in_a] == [["a"]]
-    assert source.closed == ["c"]
+    assert source.flags == [("c", False)] and source.closed == ["c"]
     assert second.closing and still_open
+
+
+async def test_a_workspace_whose_flag_cant_be_cleared_stays_served_and_is_refused() -> None:
+    host = workspace("c")
+    source = FakeSource()
+    source.unflag_fails = "The store failed."
+    plane = ControlPlane([host], workspaces=source)
+    in_c = await joined(plane, host)
+    taken(in_c)
+
+    await say(in_c, "remove", RemoveWorkspace(workspace="c"))
+    outcome = payloads(taken(in_c))
+    served = [served.workspace_id for served in plane.hosts]
+    still_open = not host.closing
+    await plane.close()
+
+    message = "Can't remove /src/c, which is still served: The store failed."
+    assert outcome == [refused("remove", INTERNAL, message)]
+    assert served == ["c"] and still_open and in_c.workspace == "c"
+    assert source.closed == []
+
+
+async def test_a_workspace_viewed_as_its_flag_is_cleared_is_flagged_again_and_refused() -> None:
+    host = workspace("c")
+    source = FakeSource()
+    source.flag_gate = asyncio.Event()
+    plane = ControlPlane([host], workspaces=source)
+    connection = await welcomed(plane)
+    removing = asyncio.create_task(say(connection, "remove", RemoveWorkspace(workspace="c")))
+    await asyncio.sleep(0.01)
+    viewer = asyncio.create_task(joined(plane, host))
+    await asyncio.sleep(0.01)
+
+    source.flag_gate.set()
+    await asyncio.gather(removing, viewer)
+    outcome = payloads(taken(connection))
+    served = [served.workspace_id for served in plane.hosts]
+    await plane.close()
+
+    message = "Can't remove /src/c: another frontend views its session c-1."
+    assert outcome == [refused("remove", BUSY, message)]
+    assert served == ["c"] and source.flags == [("c", False), ("c", True)]
+    assert source.closed == []
 
 
 async def test_removing_a_workspace_not_served_is_refused_as_unknown() -> None:
@@ -462,7 +518,7 @@ async def test_a_workspace_whose_latest_session_fails_to_open_is_let_go() -> Non
     message = "Orbit failed to handle AddWorkspace: The store is gone."
     assert outcome == [refused("add", INTERNAL, message)]
     assert served == ()
-    assert source.closed == ["c", "c"]
+    assert source.closed == ["c", "c"] and source.flags == [("c", False), ("c", False)]
     assert source.opened == ["/src/c", "/src/c"]
     assert source.hosts[0].closing
 
@@ -484,7 +540,7 @@ async def test_an_add_cancelled_as_its_latest_session_opens_lets_the_workspace_g
 
     assert adding.cancelled()
     assert served == ()
-    assert source.closed == ["c"]
+    assert source.closed == ["c"] and source.flags == [("c", False)]
     assert source.hosts[0].closing
 
 

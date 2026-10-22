@@ -99,6 +99,7 @@ async def test_opening_a_workspace_flags_it_served_and_locks_it_until_closed(
     served = await registry.served()
     owner = WorkspaceLock(root / ".orbit").owner()
     await host.close()
+    await source.set_served(host.workspace_id, False)
     await source.close(host.workspace_id)
 
     assert served == [(host.workspace_id, str(root))]
@@ -314,7 +315,7 @@ async def test_a_failure_making_the_host_lets_the_lock_go(
     assert free(root) and await WorkspaceRegistry(store).served() == []
 
 
-async def test_a_workspace_whose_unflagging_fails_stays_served_and_locked_until_the_stack_closes(
+async def test_a_workspace_whose_unflagging_fails_is_unavailable_and_stays_served_and_locked(
     stack: ExitStack, store: SqliteStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     root = directory(tmp_path)
@@ -327,12 +328,87 @@ async def test_a_workspace_whose_unflagging_fails_stays_served_and_locked_until_
 
     monkeypatch.setattr(WorkspaceRegistry, "set_served", fails)
 
-    with pytest.raises(StoreError, match="The store failed"):
-        await source.close(host.workspace_id)
+    with pytest.raises(WorkspaceUnavailable, match="The store failed") as unavailable:
+        await source.set_served(host.workspace_id, False)
     held = not free(root) and source.serves(host.workspace_id)
     stack.close()
 
+    assert unavailable.value.code == INTERNAL
     assert held and free(root)
+
+
+async def test_closing_a_workspace_lets_its_lock_go_leaving_its_flag(
+    stack: ExitStack, store: SqliteStore, tmp_path: Path
+) -> None:
+    root = directory(tmp_path)
+    source = workspaces(stack, store)
+    host = await source.open(str(root))
+    await host.close()
+
+    await source.close(host.workspace_id)
+
+    assert free(root) and not source.serves(host.workspace_id)
+    assert await WorkspaceRegistry(store).served() == [(host.workspace_id, str(root))]
+
+
+def flagged(state: Path) -> list[str]:
+    """The directories of the workspaces flagged served in the store in ``state``."""
+
+    async def read() -> list[str]:
+        store = await SqliteStore.open(state)
+        try:
+            return [path for _, path in await WorkspaceRegistry(store).served()]
+        finally:
+            await store.close()
+
+    return asyncio.run(read())
+
+
+def test_serving_with_every_workspace_added_servable_flags_them_all(tmp_path: Path) -> None:
+    first, second = directory(tmp_path, "first"), directory(tmp_path, "second")
+    state = tmp_path / "state"
+
+    with backend._serving(FLAGS, [first, second], state, tmp_path / "config") as serving:
+        roots = [workspace.root for workspace in serving.workspaces]
+
+    assert roots == [first, second]
+    assert sorted(flagged(state)) == [str(first), str(second)]
+
+
+def test_serving_stops_with_a_later_workspace_added_unservable_leaving_the_others_unflagged(
+    stack: ExitStack, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    good, bad = directory(tmp_path, "good"), directory(tmp_path, "bad")
+    invalid_config(bad, monkeypatch)
+    state = tmp_path / "state"
+
+    with pytest.raises(typer.Exit) as exited:
+        stack.enter_context(backend._serving(FLAGS, [good, bad], state, tmp_path / "config"))
+
+    assert exited.value.exit_code == 2
+    assert flagged(state) == [] and free(good)
+
+
+def test_serving_stops_if_the_workspaces_added_cant_be_flagged(
+    stack: ExitStack,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    root = directory(tmp_path)
+
+    async def fails(self: WorkspaceRegistry, workspace_id: str, served: bool) -> None:
+        raise StoreError("The store failed.")
+
+    monkeypatch.setattr(WorkspaceRegistry, "set_served", fails)
+
+    with pytest.raises(typer.Exit) as exited:
+        stack.enter_context(
+            backend._serving(FLAGS, [root], tmp_path / "state", tmp_path / "config")
+        )
+
+    assert exited.value.exit_code == 2
+    assert capsys.readouterr().err == "The store failed.\n" and free(root)
 
 
 type Refusal = Callable[[Path, pytest.MonkeyPatch], _Backend]

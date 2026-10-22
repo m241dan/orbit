@@ -79,9 +79,14 @@ class WorkspaceSource(Protocol):
         Raises :class:`WorkspaceUnavailable` if it can't be served."""
         ...
 
+    async def set_served(self, workspace_id: str, served: bool) -> None:
+        """Flag the workspace ``workspace_id`` as ``served``, or not, so a server starting later
+        serves it, or doesn't. Raises :class:`WorkspaceUnavailable` if that fails."""
+        ...
+
     async def close(self, workspace_id: str) -> None:
-        """Let go of the lock on the workspace ``workspace_id``, whose host is closed, and stop
-        serving it, keeping its records."""
+        """Let go of the lock on the workspace ``workspace_id``, whose host is closed and which
+        is no longer flagged served, keeping its records."""
         ...
 
 
@@ -311,7 +316,10 @@ class ControlPlane:
         try:
             await self._start(host, connection)
         except BaseException:
-            await self._let_go(host, workspaces)
+            try:
+                await workspaces.set_served(host.workspace_id, False)
+            finally:
+                await self._let_go(host, workspaces)
             raise
 
     async def _start(self, host: WorkspaceHost, connection: SessionConnection) -> None:
@@ -348,20 +356,43 @@ class ControlPlane:
     async def _remove(
         self, workspace: str, connection: SessionConnection, workspaces: WorkspaceSource
     ) -> None:
-        """Stop serving the workspace ``workspace``: close its host, having ``connection``, if
-        it's attached there, attached to none, have ``workspaces`` let it go, and send the
-        catalog to ``connection`` and every listening connection, even if closing the host
-        fails; refused for a workspace not served, or as ``busy`` while it runs work or another
-        connection views one of its sessions."""
+        """Stop serving the workspace ``workspace``: have ``workspaces`` stop flagging it served,
+        then close its host, having ``connection``, if it's attached there, attached to none,
+        have ``workspaces`` let it go, and send the catalog to ``connection`` and every
+        listening connection, even if closing the host fails; refused for a workspace not
+        served, as ``busy`` while it runs work or another connection views one of its sessions,
+        or with the code ``workspaces`` gives, still served, if its flag can't be cleared."""
         host = self._hosts[served_workspace(workspace, self._served)]
-        viewed = host.connections.others_view()
-        check_removable(host.path or workspace, host.activity, viewed)
+        self._check_removable(host)
+        await self._unflag(host, workspaces)
         if connection.workspace == workspace:
             self._detach(connection)
         try:
             await self._let_go(host, workspaces)
         finally:
             await self._changed(connection)
+
+    @staticmethod
+    def _check_removable(host: WorkspaceHost) -> None:
+        """Refuse removing ``host``'s workspace as ``busy`` while it runs work or another
+        connection views one of its sessions."""
+        viewed = host.connections.others_view()
+        check_removable(host.path or host.workspace_id, host.activity, viewed)
+
+    async def _unflag(self, host: WorkspaceHost, workspaces: WorkspaceSource) -> None:
+        """Have ``workspaces`` stop flagging ``host``'s workspace served, flagging it again and
+        refusing as :meth:`_check_removable` does if it got busy meanwhile; refused with the code
+        ``workspaces`` gives if that fails."""
+        name = host.path or host.workspace_id
+        try:
+            await workspaces.set_served(host.workspace_id, False)
+        except WorkspaceUnavailable as exc:
+            raise Refused(exc.code, f"Can't remove {name}, which is still served: {exc}") from None
+        try:
+            self._check_removable(host)
+        except Refused:
+            await workspaces.set_served(host.workspace_id, True)
+            raise
 
     async def _let_go(self, host: WorkspaceHost, workspaces: WorkspaceSource) -> None:
         """Stop serving ``host``'s workspace: close ``host``, then have ``workspaces`` let it

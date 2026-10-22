@@ -259,15 +259,15 @@ def _serving(
     flags: _Backend, added: Sequence[Path], state: Path, user_config: Path
 ) -> Iterator[_Serving]:
     """Run the block serving the ``added`` workspaces, flagged as served in the store in
-    ``state`` once each is found to be servable, and those flagged before, with the backend
+    ``state`` once every one is found to be servable, and those flagged before, with the backend
     ``flags`` ask for and the user config in ``user_config``, holding each one's workspace lock
     if no other orbit does; yields what's served, then lets the locks go and closes the store.
     A workspace flagged before whose directory is gone, or that can't be served, is skipped,
     with a warning.
 
     Exits with status 2 if the store can't be opened, or an ``added`` workspace can't be
-    registered, locked or opened, git has no identity for its repository with the coder
-    committing there, or its configuration is invalid.
+    registered, locked, opened or flagged, git has no identity for its repository with the
+    coder committing there, or its configuration is invalid, leaving each flagged as it was.
     """
     storage = _storage(user_config)
     usage_source = UsageApi() if flags.usage else None
@@ -276,6 +276,8 @@ def _serving(
         stack.callback(lambda: asyncio.run(store.close()))
         source = _workspaces(stack, flags, store, storage)
         served = [_added(source, root) for root in dict.fromkeys(added)]
+        with _exit_on(WorkspaceUnavailable):
+            source.flag_served()
         served += _earlier(source, store)
         workspaces = tuple(workspace for workspace, _ in served)
         makers = [make for _, make in served]
@@ -289,9 +291,10 @@ def _serving(
 def _added(
     source: ServedWorkspaces, root: Path
 ) -> tuple[ServedWorkspace, Callable[[], WorkspaceHost]]:
-    """The workspace at ``root``, added with ``--add``, served by ``source`` and flagged served.
+    """The workspace at ``root``, added with ``--add``, served by ``source``, not yet flagged
+    served.
 
-    Exits with status 2 if it can't be served, leaving it unflagged.
+    Exits with status 2 if it can't be served.
     """
     with _exit_on(WorkspaceUnavailable):
         return source.served(root)
