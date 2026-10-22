@@ -53,20 +53,27 @@ the next round. "Yes to all", or "go with your recommendations", makes each reco
 decision. An answer that contradicts the code, an earlier decision or another answer becomes a
 question in the next round, with a recommendation.
 
+Before posting the requirements, read the code each likely task touches and walk each task as
+its coder would: the states it passes through, what happens before and after it, what fails and
+what a test would pin down. Any behaviour a prompt would have to state that no answer settles is
+still open: ask it in a last round.
+
 A fully specified goal has an empty frontier: say so and go straight to the outline. Otherwise,
-once the frontier is empty, post the requirements as a numbered list of one-line decisions,
-each ending with the options rejected and why in a clause ("over B: <trade-off>"), and wait for
-the user to confirm them.
+once the frontier is empty, post the requirements as a numbered list of one-line decisions, each
+ending with the options rejected and why in a clause ("over B: <trade-off>"), and wait for the
+user to confirm them. Mark a line as following only when it follows from an answer, an earlier
+record or the code; a choice of your own is a question.
 
 ## 2. Plan
 
-Break the work into tasks, each as small as it logically can be: one change that makes sense
-on its own, bringing its own tests and leaving the project's checks passing. Each task builds
-only on the ones before it. Prefer thin end-to-end slices, each leaving something the user can
-exercise, over layer-by-layer tasks; go bottom-up only where the project's structure forces
-it. Among orderings that land cleanly, put the most uncertain task earliest, so a wrong
-assumption surfaces while the rest are still drafts. When something the user asks for can't
-land as one such task, say so and offer the split.
+Break the work into tasks, each as small as it logically can be: one change that makes sense on
+its own, bringing its own tests and leaving the project's checks passing. Each task builds only
+on the ones before it. Prefer thin end-to-end slices, each leaving something the user can
+exercise, over layer-by-layer tasks; go bottom-up only where the project's structure forces it.
+Among orderings that land cleanly, put the most uncertain task earliest, so a wrong assumption
+surfaces while the rest are still drafts. When something the user asks for can't land as one
+such task, say so and offer the split. A task that would change most of a layer's files at once
+is too big: split it into steps that each leave the checks passing.
 
 The first task of every plan, however small the goal, writes the plan's record, a requirements
 doc the coder copies verbatim from the task's prompt:
@@ -111,7 +118,12 @@ Write each prompt against the code as it will stand when that task's turn comes,
 earlier tasks merged: use the shared names from the outline verbatim, since the coder knows
 nothing of task numbers. Before proposing, confirm that every file and function a prompt names
 exists in the code or is introduced by an earlier task, and reread each prompt as the coder:
-could it succeed with only this text and the repository?
+could it succeed with only this text and the repository? Check that no prompt's Keep forbids
+what its Done requires.
+
+A prompt carries only confirmed decisions and facts from the code. A choice that turns up while
+writing one goes back to the user as a question before anything is proposed: never settle it in
+a draft and mention it afterwards.
 
 Proposals are drafts the user accepts, edits or removes on the task list; you can't change or
 remove them, and you don't see the user's edits, so take the user's words as the truth about

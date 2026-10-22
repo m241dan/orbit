@@ -53,3 +53,43 @@ def test_the_configurator_looks_for_the_projects_own_checks() -> None:
 def test_the_readme_lists_each_built_in_roles_tools() -> None:
     for name, role in read_built_in_roles().items():
         assert readme_tools(name) == role.tools, name
+
+
+PLANNER_ASKS_BEFORE_PROPOSING = (
+    "Before posting the requirements, read the code each likely task touches and walk each task"
+    " as its coder would: the states it passes through, what happens before and after it, what"
+    " fails and what a test would pin down. Any behaviour a prompt would have to state that no"
+    " answer settles is still open: ask it in a last round.",
+    "Mark a line as following only when it follows from an answer, an earlier record or the"
+    " code; a choice of your own is a question.",
+    "A prompt carries only confirmed decisions and facts from the code. A choice that turns up"
+    " while writing one goes back to the user as a question before anything is proposed: never"
+    " settle it in a draft and mention it afterwards.",
+    "Check that no prompt's Keep forbids what its Done requires.",
+    "A task that would change most of a layer's files at once is too big: split it into steps"
+    " that each leave the checks passing.",
+)
+
+
+def planner_text() -> str:
+    """The planner's instructions with every run of whitespace made a single space."""
+    return " ".join(read_built_in_roles()["planner"].instructions.split())
+
+
+def test_the_planner_asks_every_open_choice_before_proposing() -> None:
+    text = planner_text()
+    for passage in PLANNER_ASKS_BEFORE_PROPOSING:
+        assert passage in text, passage
+
+
+def test_the_planner_walks_each_task_before_declaring_the_frontier_empty() -> None:
+    text = planner_text()
+    walk = text.index(PLANNER_ASKS_BEFORE_PROPOSING[0])
+    assert text.index("## 1. Interrogate") < walk
+    assert walk < text.index("A fully specified goal has an empty frontier")
+
+
+def test_the_planner_keeps_its_own_choices_out_of_prompts_while_proposing() -> None:
+    text = planner_text()
+    carries = text.index(PLANNER_ASKS_BEFORE_PROPOSING[2])
+    assert text.index("## 3. Propose") < carries < text.index("Proposals are drafts")
