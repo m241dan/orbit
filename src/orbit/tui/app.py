@@ -745,7 +745,8 @@ class OrbitApp(App[None], inherit_bindings=False):
     def _render_snapshot(self, snapshot: Snapshot) -> None:
         """Replace the state shown with ``snapshot``'s, the conversation with its transcript's,
         and open the session it holds, asking about the repository while it says it's offered;
-        the agents pane follows it as it follows every event."""
+        the agents pane follows it as it follows every event, and the working row once its
+        roles are known."""
         self._show_settings(snapshot.settings, snapshot.model_choices)
         for lane, busy in snapshot.busy.items():
             self._set_busy(lane, busy)
@@ -756,6 +757,7 @@ class OrbitApp(App[None], inherit_bindings=False):
         # Its tasks shown first, as the transcript's notes on them read them, and its usage
         # set after, as the transcript's turns count theirs.
         self._feed.replace((envelope.payload for envelope in snapshot.transcript), snapshot.agents)
+        self._transcript.track(snapshot, self._tabs.roles)
         self._pager.follow(snapshot)
         self._open_session(snapshot.session)
         self._sessions.view(snapshot)
@@ -786,7 +788,9 @@ class OrbitApp(App[None], inherit_bindings=False):
     def _follow_agents(self, event: Event) -> None:
         self._agents.track(event)
         self._tabs.track(event)
-        self._transcript.track(event, self._tabs.roles)
+        # A snapshot's roles are known only once it replaces the conversation.
+        if not isinstance(event, Snapshot):
+            self._transcript.track(event, self._tabs.roles)
         self._proposals.withdraw(event)
 
     def _show_tasks(self, tasks: tuple[TaskState, ...]) -> None:

@@ -7,8 +7,10 @@ from rich.cells import cell_len
 
 from orbit.protocol import (
     PLANNER,
+    PLANNER_LANE,
     AgentExited,
     Event,
+    RunningAgent,
     Snapshot,
     ToolCallFinished,
     ToolCallStarted,
@@ -49,10 +51,20 @@ type Working = tuple[WorkingAgent, ...]
 
 def track_working(working: Working, event: Event, now: float) -> Working:
     """Who runs, and which of their calls, after ``event`` at ``now``; a snapshot replaces
-    them with the agents it says run, timed from ``now``."""
+    them with the agents it says are mid-turn, timed from ``now``."""
     if isinstance(event, Snapshot):
-        return tuple(WorkingAgent(running.agent_id, now) for running in event.agents)
+        return tuple(
+            WorkingAgent(running.agent_id, now)
+            for running in event.agents
+            if _mid_turn(running, event)
+        )
     return _track_turn(working, event, now)
+
+
+def _mid_turn(running: RunningAgent, snapshot: Snapshot) -> bool:
+    """Whether ``running`` is mid-turn in ``snapshot``: the planner's agent lives between its
+    turns, so only while the planner's lane is busy; any other lives only while its run does."""
+    return running.role != PLANNER or snapshot.busy.get(PLANNER_LANE, False)
 
 
 def _track_turn(working: Working, event: Event, now: float) -> Working:

@@ -3,6 +3,7 @@
 from rich.cells import cell_len
 
 from orbit.protocol import (
+    PLANNER_LANE,
     AgentExited,
     Event,
     Notice,
@@ -56,18 +57,23 @@ def done(agent: str | None, call_id: str) -> ToolCallFinished:
     return ToolCallFinished(turn_id="t", agent_id=agent, call_id=call_id, output="")
 
 
-def snapshot(*agents: str) -> Snapshot:
-    """A snapshot of a session with ``agents`` running."""
+def snapshot(*agents: str, planner: str | None = None, planning: bool = False) -> Snapshot:
+    """A snapshot of a session with coders ``agents`` running, and its ``planner`` agent live,
+    mid-turn if ``planning``."""
+    coders = tuple(RunningAgent(agent_id=agent, role="coder", task_id="1") for agent in agents)
+    planners = (
+        () if planner is None else (RunningAgent(agent_id=planner, role="planner", task_id=""),)
+    )
     return Snapshot(
         session=SessionSummary(id="s", name="s"),
         settings=Settings(),
         model_choices=(),
-        busy={},
+        busy={PLANNER_LANE: planning},
         tasks=(),
         steps=(),
         review=None,
         proposals=(),
-        agents=tuple(RunningAgent(agent_id=agent, role="coder", task_id="1") for agent in agents),
+        agents=(*planners, *coders),
     )
 
 
@@ -219,6 +225,17 @@ def test_a_snapshot_without_running_agents_drops_every_turn_and_call() -> None:
     assert track_working(working, snapshot(), 3) == ()
 
 
-def test_a_snapshot_runs_only_its_agents_timed_from_the_snapshot() -> None:
+def test_a_snapshot_runs_only_its_other_agents_timed_from_the_snapshot() -> None:
     working = tracked((turn("agent-2"), 0), (bash("agent-2", "c1"), 1), (turn("agent-1"), 2))
     assert track_working(working, snapshot("agent-2"), 7) == (WorkingAgent("agent-2", 7),)
+
+
+def test_a_snapshot_with_an_idle_planner_leaves_it_out() -> None:
+    working = tracked((turn("agent-1"), 0))
+    after = track_working(working, snapshot("agent-2", planner="agent-1"), 7)
+    assert after == (WorkingAgent("agent-2", 7),)
+
+
+def test_a_snapshot_with_the_planner_lane_busy_runs_the_planner() -> None:
+    after = track_working((), snapshot("agent-2", planner="agent-1", planning=True), 7)
+    assert after == (WorkingAgent("agent-1", 7), WorkingAgent("agent-2", 7))

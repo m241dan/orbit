@@ -3,9 +3,12 @@
 from textual.pilot import Pilot
 
 from orbit.protocol import (
+    PLANNER_LANE,
     AgentExited,
     Attach,
     Event,
+    RunningAgent,
+    Snapshot,
     ToolCallFinished,
     ToolCallStarted,
     TurnFinished,
@@ -48,6 +51,12 @@ def lines(row: WorkingRow) -> tuple[str, ...]:
 def ticking(app: OrbitApp) -> bool:
     """Whether the conversation's spinners and clocks are turning."""
     return app.query_one(Transcript).ticking
+
+
+def planning(agent: str, busy: bool) -> Snapshot:
+    """A snapshot of the old session, its planner ``agent`` live and mid-turn if ``busy``."""
+    planner = RunningAgent(agent_id=agent, role="planner", task_id="")
+    return snapshot_of(OLD).model_copy(update={"agents": (planner,), "busy": {PLANNER_LANE: busy}})
 
 
 async def opened(app: OrbitApp, pilot: Pilot[None]) -> WorkingRow:
@@ -258,5 +267,31 @@ async def test_attaching_to_another_session_clears_the_working_lines() -> None:
         assert session.commands == [Attach(workspace="w", session="old")]
         await fed(session, pilot, started("agent-2"), turn("agent-2"), read("agent-2", "c1", "a"))
         await fed(session, pilot, snapshot_of(OLD))
+        assert lines(row) == ()
+        assert not ticking(app)
+
+
+async def test_a_snapshot_with_an_idle_planner_shows_no_planner_line() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test(size=(80, 24)) as pilot:
+        row = await opened(app, pilot)
+        await fed(session, pilot, planning("agent-1", busy=False))
+        assert lines(row) == ()
+        assert not ticking(app)
+
+
+async def test_a_snapshot_switching_sessions_shows_its_busy_planner_as_the_planner() -> None:
+    app, session = in_process()
+    async with app.run_test(size=(80, 24)) as pilot:
+        row = await opened(app, pilot)
+        await fed(session, pilot, started("agent-1", "planner"), CATALOG)
+        await pilot.press("j", "k", "enter")
+        await fed(session, pilot, planning("agent-7", busy=True))
+        assert lines(row) == ("◜ planner · 0:00",)
+        await pilot.press("ctrl+t")  # The planner tab.
+        assert lines(row) == ("◜ planner · 0:00",)
+        assert ticking(app)
+        await fed(session, pilot, finished("agent-7"))
         assert lines(row) == ()
         assert not ticking(app)
