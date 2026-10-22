@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from orbit.agent.application.ports import TreeFailed
-from orbit.agent.external.processes import run_process
+from orbit.agent.external.processes import spawned
 
 
 class GitUnavailable(TreeFailed):
@@ -17,10 +17,11 @@ class GitUnavailable(TreeFailed):
 
 @dataclass(frozen=True)
 class GitResult:
-    """What a git command exited with and printed."""
+    """What a git command exited with and printed: ``output`` to stdout, ``errors`` to stderr."""
 
     status: int
     output: bytes
+    errors: bytes = b""
 
     @property
     def ok(self) -> bool:
@@ -29,25 +30,35 @@ class GitResult:
 
     @property
     def text(self) -> str:
-        """What it printed, decoded and stripped."""
+        """What it printed to stdout, decoded and stripped."""
         return self.output.decode(errors="replace").strip()
+
+    @property
+    def message(self) -> str:
+        """What it printed to stderr, then to stdout, decoded and stripped: git's message."""
+        errors = self.errors.decode(errors="replace").strip()
+        return "\n".join(part for part in (errors, self.text) if part)
 
 
 async def git(cwd: Path | str, *args: str, stderr: bool = True) -> GitResult:
-    """Run ``git args`` in ``cwd``; returns what it exited with and printed, its stderr too
-    unless ``stderr`` is false. If cancelled, git is killed before this returns.
+    """Run ``git args`` in ``cwd``; returns what it exited with and printed, its stderr apart
+    unless ``stderr`` is false, which drops it. If cancelled, git is killed before this returns.
 
     Raises :class:`GitUnavailable` when git can't be started.
     """
     try:
-        status, output = await run_process(
+        async with spawned(
             ("git", *args),
-            cwd,
-            stderr=asyncio.subprocess.STDOUT if stderr else asyncio.subprocess.DEVNULL,
-        )
+            cwd=cwd,
+            stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE if stderr else asyncio.subprocess.DEVNULL,
+        ) as process:
+            output, errors = await process.communicate()
     except OSError as error:
         raise _unavailable(cwd, args, error) from error
-    return GitResult(status, output)
+    assert process.returncode is not None
+    return GitResult(process.returncode, output, errors or b"")
 
 
 def git_sync(cwd: Path | str, *args: str, stderr: bool = True) -> GitResult:
@@ -58,12 +69,12 @@ def git_sync(cwd: Path | str, *args: str, stderr: bool = True) -> GitResult:
             cwd=cwd,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT if stderr else subprocess.DEVNULL,
+            stderr=subprocess.PIPE if stderr else subprocess.DEVNULL,
             check=False,
         )
     except OSError as error:
         raise _unavailable(cwd, args, error) from error
-    return GitResult(result.returncode, result.stdout)
+    return GitResult(result.returncode, result.stdout, result.stderr or b"")
 
 
 def _unavailable(cwd: Path | str, args: tuple[str, ...], error: OSError) -> GitUnavailable:

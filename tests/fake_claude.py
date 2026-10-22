@@ -16,6 +16,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import TextIO
 
 RECORDED_ENV = (
     "CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD",
@@ -44,18 +45,25 @@ def record_call(scenario_path: Path, spawn: bool) -> None:
         calls.write(json.dumps(record) + "\n")
 
 
+def write_raw(stream: TextIO, text: str) -> None:
+    """Write ``text`` to ``stream`` as bytes, each lone surrogate ``\\udcXX`` as the byte
+    ``XX``, so a scenario can print invalid UTF-8."""
+    stream.buffer.write(text.encode("utf-8", "surrogateescape"))
+    stream.flush()
+
+
 def main() -> int:
     scenario_path = Path(sys.argv[1])
     scenario = json.loads(scenario_path.read_text())
     if scenario.get("exit_at_once"):
-        sys.stderr.write(scenario.get("stderr", ""))
+        write_raw(sys.stderr, scenario.get("stderr", ""))
         return int(scenario.get("exit", 0))
     record_call(scenario_path, bool(scenario.get("spawn")))
     for line in scenario.get("stdout", []):
-        print(line, flush=True)
+        write_raw(sys.stdout, line + "\n")
     if scenario.get("hang"):
         time.sleep(60)
-    sys.stderr.write(scenario.get("stderr", ""))
+    write_raw(sys.stderr, scenario.get("stderr", ""))
     return int(scenario.get("exit", 0))
 
 

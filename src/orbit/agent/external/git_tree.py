@@ -143,10 +143,7 @@ class GitCoderTree:
     async def commit(self, message: str) -> bool:
         path = await self._coder()
         await self._git(path, "add", "-A")
-        staged = await git(path, "diff", "--cached", "--quiet")
-        if staged.status not in (0, 1):  # 0: nothing staged, 1: something is.
-            raise TreeFailed(f"git diff failed: {staged.text}")
-        if staged.ok:
+        if await self._ask(path, "diff", "--cached", "--quiet"):  # Yes: nothing is staged.
             return False
         await self._git(path, "commit", "-q", "-m", message)
         return True
@@ -237,7 +234,11 @@ class GitCoderTree:
         base = await self._base_branch()
         if base is None or not await self._exists(BRANCH):
             return None
-        count = int(await self._git(self._root, "rev-list", "--count", f"{base}..{BRANCH}"))
+        count = int(
+            await self._git(
+                self._root, "rev-list", "--count", f"refs/heads/{base}..refs/heads/{BRANCH}"
+            )
+        )
         if not count:
             return None
         return f"{count} commit{'s' if count > 1 else ''} on {BRANCH} not yet merged into {base}."
@@ -320,7 +321,7 @@ class GitCoderTree:
         finally:  # Cancelled or failed too: never leave the tree mid-rebase.
             await self._abort_rebase_shielded(path)
         if not conflicts:
-            raise TreeFailed(f"git rebase failed: {rebase.text}")
+            raise TreeFailed(f"git rebase failed: {rebase.message}")
         files = ", ".join(conflicts.splitlines())
         return Merge("conflict", f"The work on {BRANCH} conflicts with {self._base}: {files}.")
 
@@ -353,7 +354,7 @@ class GitCoderTree:
         assert self._base is not None
         if await self._checked_out() == self._base:
             merge = await git(self._root, "merge", "-q", "--ff-only", BRANCH)
-            return Merge("merged") if merge.ok else Merge("blocked", merge.text)
+            return Merge("merged") if merge.ok else Merge("blocked", merge.message)
         # Not checked out any more: move the branch, only if nobody else has.
         await self._git(self._root, "update-ref", f"refs/heads/{self._base}", coder, base)
         return Merge("merged")
@@ -361,10 +362,25 @@ class GitCoderTree:
     # Git
 
     async def _git(self, cwd: Path, *args: str) -> str:
+        """What ``git args`` prints to stdout in ``cwd``.
+
+        Raises ``TreeFailed`` with git's message when it fails.
+        """
         result = await git(cwd, *args)
         if not result.ok:
-            raise TreeFailed(f"git {args[0]} failed: {result.text}")
+            raise TreeFailed(f"git {args[0]} failed: {result.message}")
         return result.text
+
+    async def _ask(self, cwd: Path, *args: str) -> bool:
+        """Git's answer to the yes-or-no question ``git args`` in ``cwd``: exit 0 for yes, 1 for
+        no.
+
+        Raises ``TreeFailed`` with git's message when it exits otherwise, unable to tell.
+        """
+        result = await git(cwd, *args)
+        if result.status not in (0, 1):
+            raise TreeFailed(f"git {args[0]} failed: {result.message}")
+        return result.ok
 
     # Paths
 
@@ -411,7 +427,7 @@ class GitCoderTree:
         return (await git(self._root, "rev-parse", "--verify", "-q", f"refs/heads/{branch}")).ok
 
     async def _is_ancestor(self, older: str, newer: str, cwd: Path | None = None) -> bool:
-        return (await git(cwd or self._root, "merge-base", "--is-ancestor", older, newer)).ok
+        return await self._ask(cwd or self._root, "merge-base", "--is-ancestor", older, newer)
 
     async def _dirty(self, path: Path) -> bool:
         return bool(await self._git(path, "status", "--porcelain"))

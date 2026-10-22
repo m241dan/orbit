@@ -435,6 +435,89 @@ async def test_prepare_leaves_unmerged_work_that_conflicts_with_the_base(repo: P
     assert git(path, "status", "--porcelain") == ""
 
 
+def failing_merge_base(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, ...]]:
+    """Make ``git merge-base`` fail as on a corrupt repository; returns the git commands run."""
+    ran: list[tuple[str, ...]] = []
+
+    async def fake(cwd: Path | str, *args: str) -> GitResult:
+        ran.append(args)
+        if args[0] == "merge-base":
+            return GitResult(128, b"", b"fatal: bad object deadbeef\n")
+        return await run_git(cwd, *args)
+
+    monkeypatch.setattr(git_tree, "git", fake)
+    return ran
+
+
+async def test_integrate_raises_when_git_cant_tell_an_ancestor_and_doesnt_rebase(
+    monkeypatch: pytest.MonkeyPatch, repo: Path
+) -> None:
+    tree = GitCoderTree(str(repo))
+    path = Path(await tree.prepare(keep=False))
+    (path / "b.txt").write_text("two\n")
+    await tree.commit("Add b")
+    ran = failing_merge_base(monkeypatch)
+    with pytest.raises(TreeFailed, match="git merge-base failed: fatal: bad object deadbeef"):
+        await tree.integrate()
+    assert not [args for args in ran if args[0] in ("rebase", "merge", "update-ref")]
+
+
+async def test_prepare_raises_when_git_cant_tell_an_ancestor_and_doesnt_catch_up(
+    monkeypatch: pytest.MonkeyPatch, repo: Path
+) -> None:
+    tree = GitCoderTree(str(repo))
+    await tree.prepare(keep=False)
+    commit_file(repo, "c.txt", "three\n", "user's commit")
+    ran = failing_merge_base(monkeypatch)
+    with pytest.raises(TreeFailed, match="git merge-base failed: fatal: bad object deadbeef"):
+        await tree.prepare(keep=False)
+    assert not [args for args in ran if args[0] in ("rebase", "merge")]
+
+
+def warning_git(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make every git command warn on stderr, as a misconfigured repository can."""
+
+    async def fake(cwd: Path | str, *args: str) -> GitResult:
+        result = await run_git(cwd, *args)
+        return GitResult(result.status, result.output, b"warning: noise\n" + result.errors)
+
+    monkeypatch.setattr(git_tree, "git", fake)
+
+
+async def test_a_git_warning_doesnt_change_what_the_tree_reads(
+    monkeypatch: pytest.MonkeyPatch, repo: Path
+) -> None:
+    tree = GitCoderTree(str(repo))
+    path = Path(await tree.prepare(keep=False))
+    warning_git(monkeypatch)
+    assert not await tree.holds_work()  # Clean, so not dirty despite the warning.
+    (path / "a.txt").write_text("orbit\n")
+    await tree.commit("Orbit edits a")
+    (repo / "a.txt").write_text("in the way\n")
+    await tree.integrate()
+    assert await tree.head() == git(path, "rev-parse", "HEAD")
+    assert await tree.untracked() == frozenset()
+    assert await tree.leftovers() == ["1 commit on orbit/coder not yet merged into main."]
+
+
+async def test_a_failing_command_still_raises_with_gits_message_beside_a_warning(
+    monkeypatch: pytest.MonkeyPatch, repo: Path
+) -> None:
+    tree = GitCoderTree(str(repo))
+    warning_git(monkeypatch)
+    with pytest.raises(TreeFailed, match=r"git show failed: warning: noise\nfatal:"):
+        await tree.show(["no-such-commit"])
+
+
+async def test_a_tag_named_like_the_coder_branch_doesnt_change_the_leftovers(repo: Path) -> None:
+    tree = GitCoderTree(str(repo))
+    path = Path(await tree.prepare(keep=False))
+    (path / "a.txt").write_text("orbit\n")
+    await tree.commit("Orbit edits a")
+    git(repo, "tag", "orbit/coder", "main")  # Behind the branch, so it would count none.
+    assert await tree.leftovers() == ["1 commit on orbit/coder not yet merged into main."]
+
+
 def counting_setup(repo: Path, watch: tuple[str, ...] = ()) -> tuple[Setup, Path]:
     """A setup that appends an ``x`` to a file outside the repository each time it runs."""
     runs = repo.parent / "setup-runs"

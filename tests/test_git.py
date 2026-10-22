@@ -17,14 +17,28 @@ def test_a_results_text_is_decoded_and_stripped() -> None:
     assert GitResult(0, b"  main\xff\n").text == "main�"
 
 
+def test_a_results_message_is_what_it_printed_to_stderr_then_stdout() -> None:
+    assert GitResult(1, b" CONFLICT\n", b"error: \xff\n").message == "error: \ufffd\nCONFLICT"
+    assert GitResult(1, b"", b"fatal: no\n").message == "fatal: no"
+    assert GitResult(1, b"out of memory\n").message == "out of memory"
+
+
 async def test_git_gives_what_it_exits_with_and_prints(repo: Path) -> None:
     result = await git(repo, "symbolic-ref", "--short", "HEAD")
     assert result == GitResult(0, b"main\n")
 
 
-async def test_a_failing_command_gives_its_status_and_message(repo: Path) -> None:
+async def test_a_failing_command_gives_its_status_and_message_apart(repo: Path) -> None:
     result = await git(repo, "rev-parse", "--verify", "no-such-ref")
-    assert result.status == 128 and result.text.startswith("fatal:")
+    assert result.status == 128 and result.output == b""
+    assert result.message.startswith("fatal:")
+
+
+async def test_a_warning_is_kept_apart_from_what_git_prints_to_stdout(repo: Path) -> None:
+    git_sync(repo, "tag", "main")  # Now ``main`` is ambiguous, which git warns about.
+    result = await git(repo, "rev-parse", "main")
+    assert result.text == git_sync(repo, "rev-parse", "refs/heads/main").text
+    assert "ambiguous" in result.errors.decode()
 
 
 async def test_without_stderr_only_what_git_prints_to_stdout_is_given(repo: Path) -> None:
@@ -35,8 +49,11 @@ async def test_without_stderr_only_what_git_prints_to_stdout_is_given(repo: Path
 
 def test_git_sync_gives_the_same_as_git(repo: Path) -> None:
     assert git_sync(repo, "symbolic-ref", "--short", "HEAD") == GitResult(0, b"main\n")
-    assert git_sync(repo, "rev-parse", "--verify", "no-such-ref").text.startswith("fatal:")
-    assert git_sync(repo, "rev-parse", "--verify", "no-such-ref", stderr=False).output == b""
+    assert git_sync(repo, "rev-parse", "--verify", "no-such-ref").message.startswith("fatal:")
+    assert git_sync(repo, "rev-parse", "--verify", "no-such-ref").output == b""
+    assert git_sync(repo, "rev-parse", "--verify", "no-such-ref", stderr=False) == GitResult(
+        128, b""
+    )
 
 
 async def test_a_missing_directory_makes_git_unavailable(tmp_path: Path) -> None:

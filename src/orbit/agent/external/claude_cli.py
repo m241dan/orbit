@@ -339,7 +339,7 @@ class _Turn:
             # Let the CLI exit on its own once it's done, so it can save its session.
             status = await process.wait()
             if not finished:
-                raise _crash(status, (await stderr).decode().strip())
+                raise _crash(status, (await stderr).decode(errors="replace").strip())
         finally:
             stderr.cancel()
 
@@ -347,7 +347,7 @@ class _Turn:
         self, turn_id: str, stdout: asyncio.StreamReader
     ) -> AsyncIterator[Event]:
         async for raw in stdout:
-            line = raw.decode().strip()
+            line = raw.decode(errors="replace").strip()
             if line:
                 for event in translate(turn_id, self._parse(line)):
                     yield event

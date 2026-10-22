@@ -406,6 +406,36 @@ async def test_runner_reports_crash_without_stderr(tmp_path: Path) -> None:
         await run(runner, "hi")
 
 
+# Lone surrogates the fake CLI writes as the bytes 0xff and 0xfe: invalid UTF-8.
+INVALID_UTF8 = "\udcff\udcfe"
+
+
+async def test_a_crash_whose_stderr_is_not_utf8_reports_it_with_replacements(
+    tmp_path: Path,
+) -> None:
+    runner, _ = make_runner(tmp_path, stderr=f"Bad {INVALID_UTF8} key\n", exit=1)
+    with pytest.raises(RuntimeError, match=r"^Bad \ufffd\ufffd key$"):
+        await run(runner, "hi")
+
+
+async def test_a_resumed_turn_whose_stderr_is_not_utf8_fails_to_resume(tmp_path: Path) -> None:
+    runner, _ = make_runner(tmp_path, stderr=f"No conversation {INVALID_UTF8}\n", exit=1)
+    runner.set_conversation("agent-3", "saved-7")
+    with pytest.raises(ResumeFailed, match=r"^No conversation \ufffd\ufffd$"):
+        await run(runner, "Carry on.")
+
+
+async def test_a_resumed_turn_whose_output_is_not_utf8_still_fails_to_resume(
+    tmp_path: Path,
+) -> None:
+    text = {"type": "assistant", "message": {"content": [{"type": "text", "text": "x"}]}}
+    line = json.dumps(text).replace('"x"', f'"{INVALID_UTF8}"')
+    runner, _ = make_runner(tmp_path, stdout=[line], exit=1)
+    runner.set_conversation("agent-3", "saved-7")
+    with pytest.raises(ResumeFailed, match=r"^claude exited with status 1$"):
+        await run(runner, "Carry on.")
+
+
 async def test_runner_rejects_non_json_output(tmp_path: Path) -> None:
     runner, _ = make_runner(tmp_path, stdout=["Error: something odd"])
     with pytest.raises(RuntimeError, match="Unexpected output from claude: Error: something odd"):
