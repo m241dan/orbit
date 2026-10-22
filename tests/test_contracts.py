@@ -5,6 +5,7 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
+import orbit
 import orbit.tui
 
 TESTS = Path(__file__).parent
@@ -108,3 +109,21 @@ def test_neither_the_domain_nor_the_protocol_may_import_tracing() -> None:
     assert contract["type"] == "forbidden"
     assert set(contract["source_modules"]) == {"orbit.agent.domain", "orbit.protocol"}
     assert _forbids(contract["forbidden_modules"], "orbit.tracing")
+
+
+def _top_level() -> set[str]:
+    """Orbit's top-level packages and modules, but the ``python -m orbit`` shim."""
+    modules = pkgutil.iter_modules(orbit.__path__, prefix="orbit.")
+    return {module.name for module in modules} - {"orbit.__main__"}
+
+
+def test_only_the_cli_may_import_telemetry() -> None:
+    contract = _contract("Only the CLI uses telemetry")
+    assert _forbids(contract["forbidden_modules"], "orbit.telemetry")
+    assert _top_level() - set(contract["source_modules"]) == {"orbit.cli", "orbit.telemetry"}
+
+
+def test_only_telemetry_may_import_opentelemetry() -> None:
+    contract = _contract("Only telemetry uses OpenTelemetry")
+    assert contract["forbidden_modules"] == ["opentelemetry"]
+    assert _top_level() - set(contract["source_modules"]) == {"orbit.telemetry"}

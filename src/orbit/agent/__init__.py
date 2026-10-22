@@ -80,6 +80,7 @@ from orbit.agent.external.user_config import (
     read_remotes,
     read_server,
     read_storage,
+    read_user_config,
 )
 from orbit.agent.external.workspace import workspace_state
 from orbit.agent.external.workspace_lock import WorkspaceLock
@@ -165,6 +166,7 @@ __all__ = [
     "read_remotes",
     "read_server",
     "read_storage",
+    "read_user_config",
     "resolve_config_dir",
     "resolve_state_dir",
     "run_step",

@@ -108,6 +108,7 @@ from orbit.protocol import (
     UsageChanged,
     WorkspaceEntry,
 )
+from orbit.tracing import NoTelemetry, Telemetry
 
 
 def _verifier(
@@ -136,6 +137,7 @@ def _workspace_label(workspace: str | None) -> str | None:
 
 
 _DEFAULT_STORAGE = StorageSettings()
+_NO_TELEMETRY = NoTelemetry()
 
 OWNED_NOTE = "This orbit now owns the repository; queued work is running."
 """The notice once a read-only orbit takes the repository over."""
@@ -203,7 +205,8 @@ class WorkspaceHost:
     tells the time, ``new_id`` makes its id and ``name`` names it (by the time, if none). Each
     of its agents' turns that ends with usage is recorded in the ``ledger``, if there is one,
     in the background, with the session, the agent's role and model, and the time, and
-    :attr:`usage_recorded` is called once its row is written. The
+    :attr:`usage_recorded` is called once its row is written. Its work is traced with
+    ``telemetry``, recording nothing by default. The
     user can open another saved session, or a new one, in its place: one opened has its saved
     settings, but for those ``pinned``, by field name, which keep the ``settings`` given here.
     With ``pick_session``, the user picks a saved session from their frontend's picker; until
@@ -263,7 +266,10 @@ class WorkspaceHost:
         lock_declined_retry: float = DECLINED_RETRY_SECONDS,
         managed: bool = False,
         ledger: UsageLedger | None = None,
+        telemetry: Telemetry = _NO_TELEMETRY,
     ) -> None:
+        # What its work will be traced with.
+        self.telemetry = telemetry
         self.owned: Callable[[], None] = lambda: None
         # The usage limits fetched last, which the control plane serving this host knows.
         self.latest_usage: Callable[[], UsageChanged | None] = lambda: None

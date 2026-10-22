@@ -6,7 +6,7 @@ import os
 import signal
 from collections.abc import Callable, Collection, Iterator, Mapping, Sequence
 from contextlib import contextmanager, nullcontext
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import typer
@@ -61,7 +61,9 @@ from orbit.cli.options import (
     WorktreeOption,
 )
 from orbit.cli.served import Added, _serving
+from orbit.cli.telemetry import _telemetry
 from orbit.profiling import profiled
+from orbit.telemetry import TelemetryRun
 
 logger = logging.getLogger(__name__)
 CANT_OPEN = "Orbit couldn't open a workspace's latest session: "
@@ -101,6 +103,7 @@ def serve(
     profile = profile.expanduser().resolve() if profile else None
     state = resolve_state_dir(state, os.environ)
     user_config = resolve_config_dir(config_dir, os.environ)
+    logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
     with _sole_serve(state):
         added = [_added(text) for text in add or ()]
         cert, key, client_ca = (_absolute(path) for path in (cert, key, client_ca))
@@ -110,8 +113,12 @@ def serve(
         token = _frontend_token(token_file, settings)
         flags = _Backend(model, tools, verify, worktree, review, usage, new=False, name=None)
         clone_dir = _clone_dir(settings, state)
-        with _serving(flags, added, state, user_config, clone_dir) as serving:
-            logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
+        with (
+            _telemetry(TelemetryRun("orbit-serve", user_config, state, os.environ)) as telemetry,
+            _serving(
+                replace(flags, telemetry=telemetry), added, state, user_config, clone_dir
+            ) as serving,
+        ):
             parts = _ServeParts(
                 lambda: serving.build(_browsing(settings)),
                 settings,

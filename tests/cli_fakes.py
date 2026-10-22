@@ -16,6 +16,7 @@ from orbit.agent.domain.server import ServerSettings
 from orbit.agent.external.control_plane import ControlPlaneServer
 from orbit.cli.threaded import ThreadedSession
 from orbit.protocol import PROTOCOL_VERSION, CommandEnvelope, Hello
+from orbit.telemetry import Off, TelemetryRun, TelemetrySettings
 from orbit.tui import Opening
 
 
@@ -130,3 +131,29 @@ async def control_plane(settings: ServerSettings) -> AsyncIterator[int]:
         yield int(url.rstrip("/").rsplit(":", 1)[1])
     finally:
         await server.stop(served.close)
+
+
+@dataclass
+class StartedTelemetry(Off):
+    """Telemetry the CLI started with ``settings`` for orbit running as ``run``, recording
+    nothing, and whether it was closed."""
+
+    settings: TelemetrySettings
+    run: TelemetryRun
+    closed: bool = False
+
+    def close(self) -> None:
+        self.closed = True
+
+
+@pytest.fixture
+def started_telemetry(monkeypatch: pytest.MonkeyPatch) -> list[StartedTelemetry]:
+    """The telemetry the CLI starts, each a :class:`StartedTelemetry`."""
+    started: list[StartedTelemetry] = []
+
+    def start(settings: TelemetrySettings, run: TelemetryRun) -> StartedTelemetry:
+        started.append(StartedTelemetry(settings, run))
+        return started[-1]
+
+    monkeypatch.setattr("orbit.cli.telemetry.start_telemetry", start)
+    return started

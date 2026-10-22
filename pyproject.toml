@@ -21,6 +21,16 @@ dependencies = [
 [project.scripts]
 orbit = "orbit.cli:app"
 
+[project.optional-dependencies]
+telemetry = [
+    "opentelemetry-exporter-otlp-proto-http>=1.45.1",
+    "opentelemetry-sdk>=1.45.1",
+]
+telemetry-grpc = [
+    "opentelemetry-exporter-otlp-proto-grpc>=1.45.1",
+    "opentelemetry-sdk>=1.45.1",
+]
+
 [build-system]
 requires = ["uv_build>=0.13.0,<0.14.0"]
 build-backend = "uv_build"
@@ -31,6 +41,9 @@ dev = [
     "jsonschema>=4.26.0",
     "lizard>=1.24.1",
     "mypy>=2.4.0",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.45.1",
+    "opentelemetry-exporter-otlp-proto-http>=1.45.1",
+    "opentelemetry-sdk>=1.45.1",
     "pre-commit>=4.6.2",
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
@@ -38,6 +51,7 @@ dev = [
     "pytest-xdist>=3.8.0",
     "ruff>=0.17.0",
     "types-jsonschema>=4.26.0.20261006",
+    "types-protobuf>=7.35.1.20260906",
 ]
 
 [tool.ruff]
@@ -144,6 +158,43 @@ name = "Neither the domain nor the protocol traces"
 type = "forbidden"
 source_modules = ["orbit.agent.domain", "orbit.protocol"]
 forbidden_modules = ["orbit.tracing"]
+
+# Telemetry implements the tracing port with OpenTelemetry, which nothing else imports, and only
+# the CLI, which starts it, knows it.
+[[tool.importlinter.contracts]]
+name = "Only the CLI uses telemetry"
+type = "forbidden"
+source_modules = [
+    "orbit.agent",
+    "orbit.tui",
+    "orbit.protocol",
+    "orbit.client",
+    "orbit.tracing",
+    "orbit.profiling",
+]
+forbidden_modules = ["orbit.telemetry"]
+
+[[tool.importlinter.contracts]]
+name = "Telemetry knows neither the backend nor the frontends"
+type = "forbidden"
+source_modules = ["orbit.telemetry"]
+forbidden_modules = ["orbit.agent", "orbit.tui", "orbit.client", "orbit.cli", "orbit.profiling"]
+
+[[tool.importlinter.contracts]]
+name = "Only telemetry uses OpenTelemetry"
+type = "forbidden"
+source_modules = [
+    "orbit.agent",
+    "orbit.tui",
+    "orbit.protocol",
+    "orbit.client",
+    "orbit.tracing",
+    "orbit.profiling",
+    "orbit.cli",
+]
+forbidden_modules = ["opentelemetry"]
+# The CLI starts telemetry, which imports OpenTelemetry only when it's turned on.
+allow_indirect_imports = true
 
 # Inside the backend: external adapters over the application over the domain. A layer may
 # import the ones below it, never above.

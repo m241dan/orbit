@@ -45,6 +45,7 @@ from orbit.cli.options import (
     WorkspaceOption,
     WorktreeOption,
 )
+from orbit.cli.telemetry import _quiet_logging, _telemetry
 from orbit.cli.threaded import ThreadedSession
 from orbit.client import (
     CaUnreadable,
@@ -61,6 +62,7 @@ from orbit.client import (
 )
 from orbit.profiling import profiled
 from orbit.protocol import NewSession
+from orbit.telemetry import TelemetryRun
 from orbit.tui import Opening, OrbitApp
 
 
@@ -128,9 +130,14 @@ def chat(
     profile = profile.expanduser().resolve() if profile else None
     directories = _Directories(root, state, user_config)
     picking = not flags.fresh
-    with _in_process(flags, directories, pick_session=picking, make=_backend) as backend:
-        session = ThreadedSession(backend.build, _thread_context(profile))
-        _launch(OrbitApp(session, opening=Opening(pick=picking, repository=str(root))), profile)
+    run = TelemetryRun("orbit-chat", user_config, state, os.environ)
+    # Telemetry's warnings would draw over the TUI; those left as it stops print after it.
+    with _telemetry(run) as telemetry, _quiet_logging():
+        flags = replace(flags, telemetry=telemetry)
+        with _in_process(flags, directories, pick_session=picking, make=_backend) as backend:
+            session = ThreadedSession(backend.build, _thread_context(profile))
+            opening = Opening(pick=picking, repository=str(root))
+            _launch(OrbitApp(session, opening=opening), profile)
 
 
 @dataclass(frozen=True)

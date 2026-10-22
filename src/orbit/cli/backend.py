@@ -47,6 +47,9 @@ from orbit.agent import (
 )
 from orbit.cli.errors import _configured, _exit_on
 from orbit.protocol import PLANNER, Settings, ToolAccess
+from orbit.tracing import NoTelemetry, Telemetry
+
+_NO_TELEMETRY = NoTelemetry()
 
 
 def _workspace(path: Path) -> Path:
@@ -68,9 +71,9 @@ def _workspace(path: Path) -> Path:
 class _Backend:
     """What the backend flags ask for: the planner's ``model``, new tasks' ``tools``, and
     whether to ``verify``, run tasks in a ``worktree``, ``review`` landed work and show the
-    ``usage`` limits; a ``new`` session, perhaps with a ``name``; and the ``owner`` of the
+    ``usage`` limits; a ``new`` session, perhaps with a ``name``; the ``owner`` of the
     repository, if another orbit owns it, making this one read-only, with the workspace
-    ``lock`` it tries until it's free."""
+    ``lock`` it tries until it's free; and the ``telemetry`` its work is traced with."""
 
     model: str | None
     tools: ToolAccess | None
@@ -82,6 +85,7 @@ class _Backend:
     name: str | None
     owner: WorkspaceOwner | None = None
     lock: WorkspaceLock | None = None
+    telemetry: Telemetry = _NO_TELEMETRY
 
     @property
     def fresh(self) -> bool:
@@ -230,6 +234,7 @@ def _host_maker(
             lock=backend.lock,
             managed=opened.managed,
             ledger=opened.store.ledger,
+            telemetry=backend.telemetry,
         )
 
     return make

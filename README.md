@@ -675,7 +675,7 @@ your checkout out of its way, it doesn't sandbox it.
 | `.git/orbit` | the repository's git directory | the coder's worktree, review snapshots, what earlier runs left there and `workspace.lock`, which says which orbit owns the repository (`.orbit/workspace.lock` outside git; see [Owning the repository](#owning-the-repository)) |
 | The store | the state directory | `orbit.db`, the saved sessions, their event logs and the super review count of every repository, `locks/`, and `fallback/` for events a failed write left unsaved (see [Storage failures](#storage-failures)) |
 | Config files | `.orbit/config.toml` in the repository | the verification steps, setup, roles and limits, committed with your code |
-| User config | `config.toml` in the config directory | your own settings for every repository, such as `[storage]`, `[server]` and `[remotes]` |
+| User config | `config.toml` in the config directory | your own settings for every repository, such as `[storage]`, `[server]`, `[remotes]` and `[telemetry]` |
 | The token | `token` in the config directory | what frontends show `orbit serve` to connect (see [Serving the control plane](#serving-the-control-plane)) |
 | The run file | `run/server.json` in the state directory | where the `orbit serve` running on that state directory listens, beside `run/serve.lock`, which that serve holds |
 | Runtime-owned | `~/.claude` | Claude Code's own: your login, read for usage limits, and the agents' conversations |
@@ -1650,6 +1650,57 @@ another orbit has owned the repository and gone, or after 5 minutes if it's stil
 one that connects while the question is open; once one answers, the others close the modal. An
 orbit that owns the repository never asks.
 
+### Telemetry
+
+Orbit can export what it does as OpenTelemetry spans, to a collector over OTLP, to stderr, or to
+files. It's off unless the user config turns it on, and then needs an extra that installs the
+OpenTelemetry SDK: `orbit[telemetry]` for OTLP over HTTP, the console and the files, or
+`orbit[telemetry-grpc]` for OTLP over gRPC.
+
+```sh
+uv tool install '/path/to/orbit[telemetry]'    # or: pip install 'orbit[telemetry]'
+```
+
+Telemetry configured without its extra stops `orbit chat` and `orbit serve` with status 2:
+`Telemetry is configured but not installed: pip install 'orbit[telemetry]'`. With it off, orbit
+imports nothing of the SDK. `[telemetry]` in the user config sets it up:
+
+```toml
+[telemetry]
+exporter = "otlp"                 # "none" (the default), "otlp", "console" or "file"
+endpoint = "http://localhost:4318"  # the collector's base URL; the exporter's default if unset
+protocol = "http/protobuf"        # or "grpc"
+headers_file = "otel-headers"     # headers sent to the collector; chmod 600
+file_max_mb = 50                  # the file exporter's files grow to this size each
+file_keep = 5                     # and this many are kept
+service_name = "orbit"            # the service.name spans are sent under
+```
+
+Over HTTP, orbit adds `/v1/traces` to `endpoint`; over gRPC it's used as it is, such as
+`collector:4317`. `headers_file` is taken from the config directory if relative, with `~`
+expanded, and holds one `Name: value` per line, such as `Authorization: Bearer …`; blank lines and
+lines starting with `#` are ignored. As it holds secrets, it must be readable by you alone: one
+others can read stops orbit with status 2 and `run chmod 600 <path>`. The standard variables
+override the configuration: `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`, used as it is, or else
+`OTEL_EXPORTER_OTLP_ENDPOINT`, a base URL, for `endpoint`; and `OTEL_EXPORTER_OTLP_HEADERS` and
+then `OTEL_EXPORTER_OTLP_TRACES_HEADERS` (`name=value` pairs separated by commas) over the headers
+file's, header by header. An unknown key in `[telemetry]`, or a value it doesn't take, stops orbit
+with status 2 and a message naming the file and the key.
+
+`"console"` writes each span to stderr as JSON. `"file"` writes OTLP JSON, one
+`ExportTraceServiceRequest` per line, as the Collector's `otlpjsonfile` receiver reads it, to
+`telemetry/spans-*.jsonl` in the state directory, readable by you alone. It starts a new file
+before one would grow past `file_max_mb`, deleting the oldest so `file_keep` remain.
+
+Every span is kept: there's no sampling. Spans describe the orbit that made them with
+`service.name`, `service.version`, `service.namespace` (`orbit-serve` or `orbit-chat`, for a chat
+running its own control plane), `service.instance.id`, new each start, and `host.name`. Spans are
+batched and sent in the background; when `orbit chat` closes, or `orbit serve` stops gracefully,
+orbit waits at most 5 seconds for those not yet sent, then logs one warning naming how many it
+dropped, such as `Telemetry dropped 3 spans it couldn't export.` `orbit serve` logs warnings, from
+orbit and OpenTelemetry alike (an unreachable collector, say), to stderr; `orbit chat` keeps them
+off the screen while the TUI runs, and prints the dropped spans' warning after it closes.
+
 ## Development
 
 Write tests first. Coverage is held at 100% (`fail_under` in `pyproject.toml`); only
@@ -1692,6 +1743,13 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
   backend's domain imports it. Trace context crosses the wire in the envelopes'
   `traceparent` and `tracestate`, which `orbit.protocol`'s `trace_carrier` and
   `with_trace_carrier` read and set.
+- `orbit.telemetry`: the tracing port over the OpenTelemetry SDK, the only package that imports
+  `opentelemetry`, and only `orbit.cli` imports it. `TelemetrySettings` is the user config's
+  `[telemetry]`; `start_telemetry` gives `Off`, importing nothing of OpenTelemetry, or an
+  `OtelTelemetry` (in `otel`), whose spans nest under `orbit.tracing`'s current span and are
+  batched to an OTLP, console or `OtlpJsonFileExporter` (in `file_exporter`) exporter, and which
+  carries trace context into and out of envelopes with the W3C propagator. It knows neither the
+  backend nor the frontends.
 - `orbit.agent`: backend, with no UI imports. Three layers, each importing only the ones below:
   - `external`: adapters that reach outside the backend. `ClaudeCliRunner` launches agents as
     `claude -p --output-format stream-json` runs connected to orbit (`run_agent`, and `converse`

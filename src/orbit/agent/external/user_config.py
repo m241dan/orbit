@@ -21,7 +21,7 @@ def read_storage(config_dir: Path) -> StorageSettings:
 
     Raises :class:`ConfigError`, naming the file, if it can't be read or is invalid.
     """
-    return _read(config_dir, load_storage, StorageSettings())
+    return read_user_config(config_dir, load_storage, StorageSettings())
 
 
 def read_server(config_dir: Path) -> ServerSettings:
@@ -32,7 +32,7 @@ def read_server(config_dir: Path) -> ServerSettings:
     Raises :class:`ConfigError`, naming the file, if it can't be read or is invalid, as it is
     when the browsable root isn't a directory.
     """
-    settings = _read(config_dir, load_server, ServerSettings())
+    settings = read_user_config(config_dir, load_server, ServerSettings())
     return _browsable(_resolved(settings, SERVER_PATHS, config_dir), config_dir)
 
 
@@ -58,7 +58,7 @@ def read_remotes(config_dir: Path) -> dict[str, RemoteSettings]:
 
     Raises :class:`ConfigError`, naming the file, if it can't be read or is invalid.
     """
-    remotes: dict[str, RemoteSettings] = _read(config_dir, load_remotes, {})
+    remotes: dict[str, RemoteSettings] = read_user_config(config_dir, load_remotes, {})
     return {name: _resolved(remote, REMOTE_PATHS, config_dir) for name, remote in remotes.items()}
 
 
@@ -70,7 +70,7 @@ def _resolved[M: BaseModel](settings: M, keys: tuple[str, ...], config_dir: Path
     return settings.model_copy(update=paths)
 
 
-def _read[T](config_dir: Path, load: Callable[[dict[str, Any]], T], default: T) -> T:
+def read_user_config[T](config_dir: Path, load: Callable[[dict[str, Any]], T], default: T) -> T:
     """What ``load`` makes of ``config_dir``'s file; ``default`` without a file.
 
     Raises :class:`ConfigError`, naming the file, if it can't be read or is invalid.

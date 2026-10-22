@@ -17,7 +17,7 @@ import urllib.request
 from collections.abc import Awaitable, Callable, Iterator
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import pytest
 import typer
@@ -64,6 +64,7 @@ from orbit.protocol import (
     decode_event,
     encode,
 )
+from tests.cli_fakes import StartedTelemetry
 from tests.git_repo import bare_repository
 from tests.store_views import database, workspace_id_of
 from tests.tls_certs import DAY, Ca, ServerFiles, make_ca, make_client, make_server, other_key
@@ -1389,3 +1390,43 @@ async def test_serve_caps_the_coders_running_at_once_as_its_settings_say(tmp_pat
         await serve._served(parts, None)
 
     assert plane.caps == [2]
+
+
+def test_serve_traces_with_the_telemetry_configured_and_closes_it_before_stopping(
+    state: Path,
+    config_dir: Path,
+    started_telemetry: list[StartedTelemetry],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    hosts: list[WorkspaceHost] = []
+
+    def host(*args: Any, **kwargs: Any) -> WorkspaceHost:
+        hosts.append(WorkspaceHost(*args, **kwargs))
+        return hosts[-1]
+
+    monkeypatch.setattr("orbit.cli.backend.WorkspaceHost", host)
+    config_dir.mkdir()
+    (config_dir / "config.toml").write_text('[telemetry]\nexporter = "console"\n')
+    frontend = Frontend(state, config_dir)
+
+    served(frontend, "--port", "0")
+
+    [telemetry] = started_telemetry
+    assert telemetry.settings.exporter == "console"
+    assert telemetry.run.namespace == "orbit-serve"
+    assert (telemetry.run.config_dir, telemetry.run.state_dir) == (config_dir, state)
+    assert [served_host.telemetry for served_host in hosts] == [telemetry]
+    assert telemetry.closed
+
+
+def test_an_invalid_telemetry_setting_stops_serve_naming_the_file_and_the_key(
+    config_dir: Path,
+) -> None:
+    config_dir.mkdir()
+    path = config_dir / "config.toml"
+    path.write_text('[telemetry]\nexporter = "jaeger"\n')
+
+    result = runner.invoke(app, ["serve", *QUIET, "--port", "0"])
+
+    assert result.exit_code == 2
+    assert f"Invalid orbit configuration: {path}: telemetry.exporter: " in result.stderr
