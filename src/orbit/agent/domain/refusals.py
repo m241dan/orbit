@@ -4,6 +4,9 @@ from collections.abc import Sequence
 
 from orbit.protocol import UNKNOWN
 
+STOPPING = "Orbit is stopping."
+"""Why a command is refused once what would handle it is closing."""
+
 
 class Refused(ValueError):
     """A refusal, for the reason ``code`` names (one of the refusal codes in

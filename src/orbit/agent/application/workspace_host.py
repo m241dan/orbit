@@ -70,7 +70,7 @@ from orbit.agent.domain.activity import Activity
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.catalog import workspace_entry
 from orbit.agent.domain.ownership import WorkspaceOwner, read_only_note
-from orbit.agent.domain.refusals import Refused
+from orbit.agent.domain.refusals import STOPPING, Refused
 from orbit.agent.domain.reviews import ReviewPlanner
 from orbit.agent.domain.storage import StorageSettings
 from orbit.agent.domain.storage_halt import FailedWrite
@@ -78,6 +78,7 @@ from orbit.agent.domain.verification import VerificationStep, startup_fix_prompt
 from orbit.protocol import (
     CODER,
     INTERNAL,
+    INVALID,
     PLANNER_LANE,
     WORK_LANE,
     ActivateSession,
@@ -585,8 +586,9 @@ class WorkspaceHost:
         connection: SessionConnection,
     ) -> None:
         """Handle ``command``, sent as ``command_id`` from ``connection`` once its handshake is
-        done: refused while the session is halted, but for ``ResumeStorage``, or but for those a
-        view lets through while ``connection`` views a session that isn't open."""
+        done: refused once closing, and while the session is halted, but for ``ResumeStorage``,
+        or but for those a view lets through while ``connection`` views a session that isn't
+        open."""
         self._views.admit(connection, command)
         await self._admitted(command, command_id, connection)
 
@@ -597,8 +599,10 @@ class WorkspaceHost:
         connection: SessionConnection,
     ) -> None:
         """Handle ``command``, sent as ``command_id`` from ``connection`` once the handshake is
-        done: refused while the session is halted, but for ``ResumeStorage``, which resumes
-        it."""
+        done: refused once closing, and while the session is halted, but for ``ResumeStorage``,
+        which resumes it."""
+        if self._closing:
+            raise Refused(INVALID, STOPPING)
         if isinstance(command, ResumeStorage):
             await self._resume_storage()
             return

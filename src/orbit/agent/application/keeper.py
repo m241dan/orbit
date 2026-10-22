@@ -13,7 +13,7 @@ from datetime import datetime
 from orbit.agent.application.failures import ReportedOnce, outcome
 from orbit.agent.application.ports import Publish, SessionStore, StoredSession
 from orbit.agent.application.storage_halt import Halting
-from orbit.agent.domain.refusals import Refused
+from orbit.agent.domain.refusals import STOPPING, Refused
 from orbit.agent.domain.reviews import LaneSnapshot
 from orbit.agent.domain.sessions import (
     OPEN_UNDELETABLE,
@@ -402,8 +402,10 @@ class SessionKeeper:
         to its record as read once it's locked; returns what was opened, :data:`ALREADY_OPEN`
         if it's the one open already, or none if a store problem, reported, kept it from
         opening. A refusal, its own or ``load``'s, raises :class:`Refused`, with the session's
-        lock let go of, as it is if catching up fails or is cancelled."""
+        lock let go of, as it is if catching up fails or is cancelled; refused, with no lock
+        taken, once closed."""
         async with self._saving:
+            self._check_open()
             # Another switch may have opened it while this one waited.
             if session_id == self.id:
                 return ALREADY_OPEN
@@ -485,12 +487,19 @@ class SessionKeeper:
     async def renew(self, name: str | None, commit: Commit) -> Left:
         """Make a new session ``name``d so (by the time, without a name) the one open here, if
         ``commit`` switches to it; returns the session left. A refused ``commit`` raises
-        :class:`Refused`, leaving the session open as it was."""
+        :class:`Refused`, leaving the session open as it was, as is a renewal once closed."""
         async with self._saving:
+            self._check_open()
             commit()
             created = self._clock()
             named = (name or "").strip() or default_name(created)
             return self._become(self._new_id(), named, created)
+
+    def _check_open(self) -> None:
+        """Refuse what would make a session the one open here once this is closed, as nothing
+        would let go of its lock."""
+        if self._closed:
+            raise Refused(INVALID, STOPPING)
 
     async def leave(self, left: Left, discard: bool) -> None:
         """Let go of the lock of the session ``left``, if it's held, or delete that session if

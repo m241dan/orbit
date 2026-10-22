@@ -181,6 +181,36 @@ async def test_a_closed_session_is_not_saved() -> None:
     assert store.saved == [] and store.released == []
 
 
+async def test_an_open_once_closed_is_refused_and_takes_no_lock() -> None:
+    store = FakeStore()
+    store.saved = [SessionRecord(id="other", name="other", created=START, last_active=START)]
+    acquired: list[str] = []
+
+    async def acquiring() -> None:
+        acquired.append("lock")
+
+    store.on_acquire = acquiring
+    keeper, _ = keeper_for(store)
+    await keeper.close()
+    loaded: list[SessionRecord] = []
+
+    with pytest.raises(Refused, match="Orbit is stopping") as refused:
+        await keeper.open("other", loaded.append)
+    assert refused.value.code == INVALID
+    assert acquired == [] and loaded == [] and keeper.id == "session-1"
+
+
+async def test_a_renewal_once_closed_is_refused_and_commits_nothing() -> None:
+    keeper, _ = keeper_for(FakeStore())
+    await keeper.close()
+    commits: list[str] = []
+
+    with pytest.raises(Refused, match="Orbit is stopping") as refused:
+        await keeper.renew(None, lambda: commits.append("commit"))
+    assert refused.value.code == INVALID
+    assert commits == [] and keeper.id == "session-1"
+
+
 async def test_a_lock_held_elsewhere_is_reported_and_nothing_is_saved() -> None:
     store = FakeStore()
     store.free = False

@@ -297,8 +297,9 @@ class FakeStore:
     set, is the error deleting one raises, and ``release_failure`` the error letting go of a
     lock raises, and ``load_failure`` the error loading one raises, and ``list_failure`` the
     error listing them raises. ``on_acquire``, if set, is awaited as a lock is taken,
-    ``on_delete`` as a session is deleted, ``on_list`` once the sessions are listed but before
-    they're returned, and ``on_recent`` with a session's id as its recent events are read.
+    ``on_release`` as a lock is let go of, ``on_delete`` as a session is deleted, ``on_list``
+    once the sessions are listed but before they're returned, and ``on_recent`` with a
+    session's id as its recent events are read.
 
     The events appended are ``logged``, each append's in ``appends``, with ``seq`` the highest
     logged before; ``append_failure``, while set, is the error every append raises. Each trim
@@ -329,6 +330,7 @@ class FakeStore:
         self.load_failure: str | None = None
         self.list_failure: BaseException | None = None
         self.on_acquire: Callable[[], Awaitable[None]] | None = None
+        self.on_release: Callable[[], Awaitable[None]] | None = None
         self.on_delete: Callable[[], Awaitable[None]] | None = None
         self.on_list: Callable[[], Awaitable[None]] | None = None
         self.on_recent: Callable[[str], Awaitable[None]] | None = None
@@ -392,6 +394,8 @@ class FakeStore:
         return self.free
 
     async def release(self, session_id: str) -> None:
+        if self.on_release is not None:
+            await self.on_release()
         if self.release_failure is not None:
             raise RuntimeError(self.release_failure)
         self.released.append(session_id)

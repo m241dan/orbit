@@ -21,7 +21,7 @@ from orbit.agent.application.ports import UsageSource
 from orbit.agent.application.usage_monitor import UsageMonitor
 from orbit.agent.application.workspace_host import WorkspaceHost
 from orbit.agent.domain.catalog import catalog
-from orbit.agent.domain.refusals import Refused
+from orbit.agent.domain.refusals import STOPPING, Refused
 from orbit.agent.domain.workspaces import (
     LOCAL_ONLY,
     PathKind,
@@ -48,9 +48,6 @@ from orbit.protocol import (
     UsageChanged,
     WorkspaceEntry,
 )
-
-STOPPING = "Orbit is stopping."
-"""Why adding or removing a workspace is refused once the control plane is closing."""
 
 
 class WorkspaceUnavailable(Exception):

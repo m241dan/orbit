@@ -98,6 +98,11 @@ async def refused(
     await send(session, command)
     events = await until_marked(session)
     assert messages(ErrorOccurred, events) == []
+    return refusals(events)
+
+
+def refusals(events: list[Event]) -> list[tuple[str, str]]:
+    """The codes and messages of the refusals among ``events``."""
     return [(e.code, e.message) for e in events if isinstance(e, CommandRefused)]
 
 
@@ -276,6 +281,30 @@ async def test_opening_the_current_session_does_nothing() -> None:
     assert await refused(session, ActivateSession(session="session-1")) == []
     assert store.released == [] and store.locked == {"session-1"}
     await session.close()
+
+
+async def test_a_switch_sent_as_the_host_closes_is_refused_and_takes_no_lock() -> None:
+    store = store_with(saved("other"))
+    session, _ = switching(store)
+    await send(session, AddTask(task=TASK))
+    await until_marked(session)
+    releasing = asyncio.Event()
+    release = asyncio.Event()
+
+    async def held() -> None:
+        releasing.set()
+        await release.wait()
+
+    store.on_release = held
+    closing = asyncio.create_task(session.close())
+    await releasing.wait()
+    await send(session, ActivateSession(session="other"))
+    events = await events_until(session, of_type(CommandRefused))
+    release.set()
+    await closing
+
+    assert refusals(events) == [(INVALID, "Orbit is stopping.")]
+    assert store.locked == set() and store.released == ["session-1"]
 
 
 async def test_a_session_open_in_another_orbit_is_refused() -> None:
