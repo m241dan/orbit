@@ -55,13 +55,13 @@ class ThreadedSession:
         self._running()
 
     async def send(self, envelope: CommandEnvelope) -> None:
-        backend = self._running()
+        backend = await self._started()
         await self._on_backend(backend, backend.session.send(envelope))
 
     async def events(self) -> AsyncGenerator[EventEnvelope]:
         """The inner session's events; if its stream fails, that failure is raised after the
         events before it."""
-        backend = self._running()
+        backend = await self._started()
         loop = asyncio.get_running_loop()
         queue: asyncio.Queue[_Item] = asyncio.Queue()
 
@@ -95,12 +95,28 @@ class ThreadedSession:
 
     def _running(self) -> _Backend:
         """The running backend, started first if it hasn't been."""
+        self._launch()
+        self._ready.wait()
+        return self._built()
+
+    async def _started(self) -> _Backend:
+        """The running backend, started first if it hasn't been, waited for on another thread
+        so the caller's loop keeps running while it's built."""
+        self._launch()
+        if not self._ready.is_set():
+            await asyncio.to_thread(self._ready.wait)
+        return self._built()
+
+    def _launch(self) -> None:
+        """Start the backend thread, if it hasn't been started."""
         if self._closed:
             raise RuntimeError("The session is closed.")
         if self._thread is None:
             self._thread = threading.Thread(target=self._run, name="orbit-backend", daemon=True)
             self._thread.start()
-            self._ready.wait()
+
+    def _built(self) -> _Backend:
+        """The backend, once its thread is ready; it failed to build if there isn't one."""
         if self._backend is None:
             raise RuntimeError("The backend session couldn't be built.") from self._error
         return self._backend

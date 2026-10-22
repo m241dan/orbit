@@ -319,3 +319,75 @@ async def test_a_pump_whose_callers_loop_has_closed_ends_quietly() -> None:
     await session.close()
 
     assert inner.stream_finished.is_set()
+
+
+def gated(gate: threading.Event) -> tuple[ThreadedSession, list[str]]:
+    """A threaded session whose inner session is built only once ``gate`` is set, and the
+    threads that built one."""
+    builders: list[str] = []
+
+    def make() -> SharedSession:
+        gate.wait()
+        builders.append(threading.current_thread().name)
+        return FakeSession()
+
+    return ThreadedSession(make), builders
+
+
+async def test_the_callers_loop_runs_while_the_first_send_waits_for_the_build() -> None:
+    gate = threading.Event()
+    session, _ = gated(gate)
+    release = threading.Timer(1, gate.set)  # Ends a build that blocks the loop, so it fails.
+    release.start()
+    sending = asyncio.create_task(session.send(command("hi")))
+    await asyncio.sleep(0.05)
+
+    assert not gate.is_set() and not sending.done()
+    gate.set()
+    await sending
+    release.cancel()
+    await session.close()
+
+
+async def test_the_callers_loop_runs_while_the_first_events_waits_for_the_build() -> None:
+    gate = threading.Event()
+    session, _ = gated(gate)
+    release = threading.Timer(1, gate.set)
+    release.start()
+    collecting = asyncio.create_task(collect(session))
+    await asyncio.sleep(0.05)
+
+    assert not gate.is_set() and not collecting.done()
+    gate.set()
+    assert await collecting == []
+    release.cancel()
+    await session.close()
+
+
+async def test_a_concurrent_first_send_and_events_start_one_backend_thread() -> None:
+    gate = threading.Event()
+    session, builders = gated(gate)
+    sending = asyncio.create_task(session.send(command("hi")))
+    collecting = asyncio.create_task(collect(session))
+    await asyncio.sleep(0.05)
+    gate.set()
+    await sending
+    await collecting
+    await session.close()
+
+    assert builders == ["orbit-backend"]
+
+
+async def test_a_session_that_fails_to_build_raises_on_send_and_events() -> None:
+    def make() -> SharedSession:
+        raise OSError("no backend")
+
+    session = ThreadedSession(make)
+    with pytest.raises(RuntimeError, match="couldn't be built") as sent:
+        await session.send(command("hi"))
+    with pytest.raises(RuntimeError, match="couldn't be built") as collected:
+        await collect(session)
+    await session.close()
+
+    assert isinstance(sent.value.__cause__, OSError)
+    assert isinstance(collected.value.__cause__, OSError)
