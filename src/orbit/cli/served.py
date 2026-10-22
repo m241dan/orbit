@@ -73,7 +73,7 @@ def _serving(
         makers = [make for _, make in served]
 
         def build() -> ControlPlane:
-            return ControlPlane([make() for make in makers], usage_source, source)
+            return ControlPlane([make() for make in makers], usage_source, source, store)
 
         yield _Serving(build, workspaces, source)
 

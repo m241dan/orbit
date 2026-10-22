@@ -68,8 +68,8 @@ class NewRows:
 
 
 def _max_seq(connection: sqlite3.Connection) -> int:
-    """The highest ``seq`` ever appended to ``connection``'s log, 0 when there's none: the
-    higher of its mark and its ``events`` table's highest."""
+    """The highest ``seq`` ever appended to ``connection``'s log or reserved there, 0 when
+    there's none: the higher of its mark and its ``events`` table's highest."""
     (seq,) = connection.execute(
         """SELECT max(coalesce((SELECT max(seq) FROM high_water), 0),
             coalesce((SELECT max(seq) FROM events), 0))"""
@@ -486,7 +486,8 @@ class SqliteStore:
         self._max_seq = max(self._max_seq, seq)
 
     def _latest_seq(self) -> int:
-        """The highest ``seq`` ever logged now, counted in :meth:`max_seq` from then on."""
+        """The highest ``seq`` ever logged or reserved now, counted in :meth:`max_seq` from then
+        on."""
         self._max_seq = max(self._max_seq, _max_seq(self._db))
         return self._max_seq
 
@@ -693,7 +694,8 @@ class WorkspaceStore:
         await self._store.delete(self._id, session_id)
 
     def max_seq(self) -> int:
-        """The highest ``seq`` ever logged, across workspaces, as the store knows it."""
+        """The highest ``seq`` ever logged or reserved, across workspaces, as the store knows
+        it."""
         return self._store.max_seq()
 
     async def latest_seq(self) -> int | None:

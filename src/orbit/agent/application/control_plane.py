@@ -17,7 +17,8 @@ from orbit.agent.application.connection import (
 )
 from orbit.agent.application.handshake import HandshakeParts
 from orbit.agent.application.outbox import Seqs
-from orbit.agent.application.ports import UsageSource
+from orbit.agent.application.ports import SeqMark, UsageSource
+from orbit.agent.application.seq_mark import MarkReservations
 from orbit.agent.application.usage_monitor import UsageMonitor
 from orbit.agent.application.workspace_host import WorkspaceHost
 from orbit.agent.domain.catalog import catalog
@@ -90,6 +91,12 @@ class WorkspaceSource(Protocol):
         ...
 
 
+def _last_seq(hosts: Iterable[WorkspaceHost], mark: SeqMark | None) -> int:
+    """The highest ``seq`` any of ``hosts`` stamped, or ``mark``, if given, counts."""
+    marked = 0 if mark is None else mark.max_seq()
+    return max([marked, *(host.outbox.last_seq for host in hosts)])
+
+
 async def _untold(entry: WorkspaceEntry) -> None:
     """Tell no one of ``entry``."""
 
@@ -151,6 +158,11 @@ class ControlPlane:
     and remove one, closing its host, each followed by the ``Catalog``; one at a time, as each
     changes what's served across its awaits. Without one, as for a local orbit serving its own
     repository alone, they're refused as ``invalid``.
+
+    Given the ``mark`` of the store every workspace's log shares, as ``orbit serve`` has, the
+    ``seq`` count on past it, and each block of them is reserved there, once, as it's crossed,
+    whether any workspace is served or not. Without one, each is reserved in the log of every
+    workspace served, and those reserved while none was in that of the next one served.
     """
 
     def __init__(
@@ -158,12 +170,13 @@ class ControlPlane:
         hosts: Iterable[WorkspaceHost] = (),
         usage: UsageSource | None = None,
         workspaces: WorkspaceSource | None = None,
+        mark: SeqMark | None = None,
     ) -> None:
         self._hosts = {host.workspace_id: host for host in hosts}
         self._workspaces = workspaces
         self._changing = asyncio.Lock()
-        last = max((host.outbox.last_seq for host in self._hosts.values()), default=0)
-        self._seqs = Seqs(last, self._reserve)
+        self._reservations = None if mark is None else MarkReservations(mark)
+        self._seqs = Seqs(_last_seq(self._hosts.values(), mark), self._reserve)
         self._lobby = Connections(lambda: None, lambda: "")  # Those attached to no workspace.
         self._events = _ControlEvents(self._seqs, self._everywhere)
         self._place = Place(self._events, self._events.stamp, self._lobby)
@@ -175,9 +188,10 @@ class ControlPlane:
 
     def _serve(self, host: WorkspaceHost) -> None:
         """Have ``host`` stamp its events with the ``seq`` shared, deliver them to the
-        connections attached to its workspace, and tell this of changes to its sessions; the
-        ``seq`` reserved before, as when none was served, are reserved in its log too."""
-        if self._seqs.reserved > host.outbox.last_seq:
+        connections attached to its workspace, and tell this of changes to its sessions; without
+        a mark, the ``seq`` reserved before, as when none was served, are reserved in its log
+        too."""
+        if self._reservations is None and self._seqs.reserved > host.outbox.last_seq:
             host.outbox.reserve(self._seqs.reserved)
         self._seqs.catch_up(host.outbox.last_seq)
         host.outbox.seqs = self._seqs
@@ -186,7 +200,11 @@ class ControlPlane:
         host.latest_usage = self._latest_usage
 
     def _reserve(self, seq: int) -> None:
-        """Have the log of every workspace served reserve every ``seq`` up to ``seq``."""
+        """Have every ``seq`` up to ``seq`` reserved: in the mark, if there is one, else in the
+        log of every workspace served."""
+        if self._reservations is not None:
+            self._reservations.reserve(seq)
+            return
         for host in self._hosts.values():
             host.outbox.reserve(seq)
 
@@ -493,7 +511,8 @@ class ControlPlane:
 
     async def close(self) -> None:
         """Stop the usage monitor, if there is one, then close every host, which ends the
-        streams of the connections attached to its workspace, then end the others'; each is
+        streams of the connections attached to its workspace, then end the others', then
+        reserve in the mark, if there is one, the ``seq`` still to be reserved; each is
         closed even if stopping one before it fails or the close is cancelled, as
         :func:`close_all` does."""
         self._closing = True
@@ -507,6 +526,8 @@ class ControlPlane:
         )
         stops += [host.close for host in self._hosts.values()]
         stops.append(self._end_lobby)
+        if self._reservations is not None:
+            stops.append(self._reservations.close)
         return stops
 
     async def _end_lobby(self) -> None:

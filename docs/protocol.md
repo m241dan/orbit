@@ -44,8 +44,10 @@ An event travels in an `EventEnvelope`:
   and again when a saved session is opened, past any another orbit logged or reserved since.
   The store reserves them a block at a time, ahead of their being handed out, so a `seq` is
   never handed out twice, even once the events that had it are deleted, or when they were
-  never logged, as the control plane's own aren't. While the store is halted, the block is
-  reserved once it resumes.
+  never logged, as the control plane's own aren't, and even while no workspace is served.
+  `orbit serve`'s workspaces share one store, so each block is reserved in it once; should
+  that fail, it's reserved with the next block, or as the server stops. A local orbit's
+  store, while it's halted, reserves the block once it resumes.
 - `session`: the session the event belongs to. The event's type decides it: the types in
   `SESSIONLESS_EVENTS` (`UsageChanged`, `Catalog` and `SessionStateChanged`)
   belong to no session, carry `null` and are never logged, and every other event carries the
