@@ -2,6 +2,7 @@
 nothing a task leaves behind outlives it or its session."""
 
 import asyncio
+import itertools
 from collections.abc import Awaitable, Callable
 
 from orbit.agent import Agents
@@ -74,8 +75,13 @@ def lane_for(
     """A work lane on ``tasks`` in a tree whose agents play ``scripts``, publishing with
     ``publish``, beside a review lane that hears."""
     host = FakeHost()
+    tokens = itertools.count(1)
     agents = Agents(
-        host, ScriptedLauncher(host, *scripts), lambda: "token-1", ROLES, tree=FakeTree()
+        host,
+        ScriptedLauncher(host, *scripts),
+        lambda: f"token-{next(tokens)}",
+        ROLES,
+        tree=FakeTree(),
     )
     desk = AgentDesk(agents, publish)
     review = Hearing(desk, tasks)
@@ -97,13 +103,32 @@ async def test_a_lane_cancelled_right_after_a_task_lands_still_reports_the_landi
     assert review.heard == [("landed", task_id, "c1")]
 
 
+async def test_a_reused_id_after_a_cancelled_landing_reports_it_ended_not_the_old_commit() -> None:
+    held = Held()
+    tasks = Tasks(TaskBoard(), held)
+    task_id = tasks.board.add(TaskSpec(prompt="a"))
+    lane, review = lane_for(held, tasks, claims_done, gives_up)
+    run = asyncio.create_task(lane.run())
+    await asyncio.wait_for(held.reached.wait(), 5)
+    run.cancel()
+    await asyncio.gather(run, return_exceptions=True)
+
+    tasks.board.restore([])
+    assert tasks.board.add(TaskSpec(prompt="b")) == task_id
+    assert await asyncio.wait_for(lane.run(), 5) == "finished"
+
+    assert review.heard == [("landed", task_id, "c1"), ("ended", task_id)]
+
+
 async def test_after_a_reset_a_reused_id_that_lands_nothing_reports_it_ended() -> None:
     tasks = Tasks(TaskBoard(), quiet)
     task_id = tasks.board.add(TaskSpec(prompt="a"))
     lane, review = lane_for(quiet, tasks, gives_up)
     lane._landed[task_id] = "stale"  # A landing the session left never reported.
+    lane._starts[task_id] = "stale"
 
     lane.reset()
+    assert lane._landed == {} and lane._starts == {}
     assert await asyncio.wait_for(lane.run(), 5) == "finished"
 
     assert review.heard == [("ended", task_id)]
@@ -119,3 +144,17 @@ async def test_a_task_that_errors_leaves_no_start_behind() -> None:
     assert tasks.board.get(task_id).status == "error"
     assert lane._starts == {}
     assert review.heard == [("ended", task_id)]
+
+
+async def test_a_reused_id_after_an_error_lands_from_its_own_start() -> None:
+    tasks = Tasks(TaskBoard(), quiet)
+    task_id = tasks.board.add(TaskSpec(prompt="a"))
+    lane, review = lane_for(quiet, tasks, wanders_off, claims_done)
+    assert await asyncio.wait_for(lane.run(), 5) == "finished"
+
+    tasks.board.restore([])
+    assert tasks.board.add(TaskSpec(prompt="b")) == task_id
+    assert await asyncio.wait_for(lane.run(), 5) == "finished"
+
+    assert lane._starts == {}
+    assert review.heard == [("ended", task_id), ("landed", task_id, "c1")]
