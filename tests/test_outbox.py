@@ -267,6 +267,18 @@ async def test_an_outbox_reserves_the_seqs_it_stamps_in_its_log_though_none_is_l
     assert log.reservations == [41 + SEQ_BLOCK]
 
 
+async def test_an_outbox_reopened_on_a_log_counts_on_past_the_seqs_reserved() -> None:
+    log = FakeStore()
+    log.seq = 41
+    first = Outbox(Open(), log)
+    first.stamp(UsageChanged())
+    await first.close()
+    reopened = Outbox(Open(), log)
+
+    assert reopened.stamp(ONE).seq == 42 + SEQ_BLOCK
+    await reopened.close()
+
+
 def test_an_outbox_without_a_log_reserves_nowhere() -> None:
     outbox = Outbox(Open())
     outbox.reserve(SEQ_BLOCK)

@@ -298,19 +298,22 @@ class FakeStore:
     if set, is the error taking it raises. Sessions in ``elsewhere`` are locked by another
     orbit, those in ``broken`` are unreadable for the reason given, and ``delete_failure``, if
     set, is the error deleting one raises, and ``release_failure`` the error letting go of a
-    lock raises, and ``load_failure`` the error loading one raises, and ``list_failure`` the
-    error listing them raises. ``on_acquire``, if set, is awaited as a lock is taken,
-    ``on_release`` as a lock is let go of, ``on_delete`` as a session is deleted, ``on_list``
-    once the sessions are listed but before they're returned, and ``on_recent`` with a
-    session's id as its recent events are read.
+    lock raises, and ``load_failure``, if set, the reason every session loaded is unreadable,
+    as a database error makes it, and ``list_failure`` the error listing them raises.
+    ``on_acquire``, if set, is awaited as a lock is taken, ``on_release`` as a lock is let go
+    of, ``on_delete`` as a session is deleted, ``on_list`` once the sessions are listed but
+    before they're returned, and ``on_recent`` with a session's id as its recent events are
+    read.
 
     The events appended are ``logged``, each append's in ``appends``, with ``seq`` the highest
-    logged before; ``append_failure``, while set, is the error every append raises. Each trim
-    asked for is in ``trims``, as the session's id, the limit and the target, and the sessions
-    in ``trimmed_logs`` have had events trimmed. Each session whose events were forgotten is in
-    ``forgotten``; ``forget_failure``, while set, is the error forgetting raises. Each ``seq``
-    reserved is in ``reservations``, which ``seq`` doesn't count; ``reserve_failure``, while
-    set, is the error reserving raises.
+    logged before or deleted since; ``append_failure``, while set, is the error every append
+    raises. Each trim asked for is in ``trims``, as the session's id, the limit and the target,
+    but no event is trimmed: tests of trimming itself use the real store. The sessions in
+    ``trimmed_logs`` count as trimmed. Each session whose events were forgotten is in
+    ``forgotten``, and ``forgotten_seq`` is the highest ``seq`` forgotten or deleted with a
+    session, counted as another session's in the bounds; ``forget_failure``, while set, is the
+    error forgetting raises. Each ``seq`` reserved is in ``reservations``, counted in the mark
+    as the port says; ``reserve_failure``, while set, is the error reserving raises.
     """
 
     def __init__(self, count: int = 0) -> None:
@@ -344,6 +347,7 @@ class FakeStore:
         self.trims: list[tuple[str, int, int]] = []
         self.trimmed_logs: set[str] = set()
         self.forgotten: list[str] = []
+        self.forgotten_seq = 0
         self.forget_failure: str | None = None
         self.reservations: list[int] = []
         self.reserve_failure: str | None = None
@@ -360,7 +364,7 @@ class FakeStore:
 
     async def load(self, session_id: str) -> SessionRecord | Unreadable:
         if self.load_failure is not None:
-            raise StoreFailed(self.load_failure)
+            return Unreadable(self.load_failure)
         if session_id in self.broken:
             return Unreadable(self.broken[session_id])
         found = [r for r in self.saved if r.id == session_id]
@@ -383,6 +387,7 @@ class FakeStore:
             raise StoreFailed(self.delete_failure)
         self.deleted.append(session_id)
         self.saved = [r for r in self.saved if r.id != session_id]
+        self._forget_log(session_id)
         self.locked.discard(session_id)
 
     async def acquire(self, session_id: str) -> bool:
@@ -405,7 +410,7 @@ class FakeStore:
         self.locked.discard(session_id)
 
     def max_seq(self) -> int:
-        return max([self.seq, *(envelope.seq for envelope in self.logged)])
+        return max([self.seq, *(envelope.seq for envelope in self.logged), *self.reservations])
 
     async def latest_seq(self) -> int | None:
         await asyncio.sleep(0)  # Reading takes a while.
@@ -451,7 +456,7 @@ class FakeStore:
         others = {e.seq for e in self.logged} - set(own)
         return LogBounds(
             first_seq=min(own, default=None),
-            others_seq=max(others, default=0),
+            others_seq=max([self.forgotten_seq, *others]),
             own_seq=max((seq for seq in own if seq <= since), default=None),
         )
 
@@ -465,6 +470,14 @@ class FakeStore:
         if self.forget_failure is not None:
             raise StoreFailed(self.forget_failure)
         self.forgotten.append(session_id)
+        self._forget_log(session_id)
+
+    def _forget_log(self, session_id: str) -> None:
+        """Drop the session ``session_id``'s events, raising ``forgotten_seq`` and ``seq`` to the
+        highest dropped, so neither the bounds nor the mark lose it."""
+        dropped = [envelope.seq for envelope in self.logged if envelope.session == session_id]
+        self.forgotten_seq = max([self.forgotten_seq, *dropped])
+        self.seq = max([self.seq, *dropped])
         self.logged = [envelope for envelope in self.logged if envelope.session != session_id]
 
     async def review_count(self) -> int:

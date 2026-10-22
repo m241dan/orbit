@@ -439,13 +439,11 @@ class SessionKeeper:
             return None
         if not action.reread:
             return checked
-        current: T | None = None
         try:
-            current = await self._reread(self._store, session_id, action)
-        finally:
-            if current is None:
-                await self._release(self._store, session_id)
-        return current
+            return await self._reread(self._store, session_id, action)
+        except BaseException:
+            await self._release(self._store, session_id)
+            raise
 
     async def _found[T](self, session_id: str, action: _Action[T]) -> tuple[str, T] | None:
         """The name of the saved session ``session_id`` and what ``action``'s check makes of it;
@@ -470,16 +468,11 @@ class SessionKeeper:
             return []
         return await self._listings.value(self._store.sessions())
 
-    async def _reread[T](
-        self, store: SessionStore, session_id: str, action: _Action[T]
-    ) -> T | None:
+    async def _reread[T](self, store: SessionStore, session_id: str, action: _Action[T]) -> T:
         """What ``action``'s check makes of the session ``session_id`` as ``store`` holds it now,
-        its lock taken; none, reported, if it can't be read, and raises :class:`Refused` if it
-        can't be ``action``ed."""
-        loaded = await self._reported(store.load(session_id))
-        if loaded is None:
-            return None
-        checked = action.check(session_id, loaded, False)
+        its lock taken; raises :class:`Refused` if it can't be ``action``ed, unreadable
+        included."""
+        checked = action.check(session_id, await store.load(session_id), False)
         if isinstance(checked, Refused):
             raise checked
         return checked

@@ -463,7 +463,7 @@ async def retried_through(store: FakeStore, keeper: SessionKeeper) -> None:
     error = await keeper.retry(lambda: EMPTY)
     assert isinstance(error, StoreFailed) and "other" in str(error)
     assert store.last.name == "other" and store.locked == set()
-    store.list_failure = store.lock_failure = store.load_failure = None
+    store.list_failure = store.lock_failure = None
     assert await keeper.retry(lambda: EMPTY) is None
     assert store.last.name == "Renamed" and store.locked == set()
 
@@ -482,12 +482,18 @@ async def test_a_pending_rename_retried_while_its_lock_cannot_be_taken_is_kept()
     await retried_through(store, keeper)
 
 
-async def test_a_pending_rename_retried_while_its_session_cannot_be_read_is_kept() -> None:
-    keeper, _, store = failed_rename()
+async def test_a_pending_rename_retried_while_its_session_cannot_be_read_is_dropped() -> None:
+    keeper, published, store = failed_rename()
     await keeper.rename_saved("other", "Renamed")
-    store.failure, store.load_failure = None, "Couldn't read the session: permission denied"
-    await retried_through(store, keeper)
-    assert store.released == ["other"] * 3
+    store.failure, store.load_failure = None, "it can't be read from orbit.db: permission denied"
+
+    assert await keeper.retry(lambda: EMPTY) is None
+    assert published.codes == [INVALID]
+    assert "permission denied" in published.errors[0]
+    assert store.released == ["other"] * 2 and store.locked == set()
+    store.load_failure = None
+    assert await keeper.retry(lambda: EMPTY) is None
+    assert store.last.name == "other"
 
 
 async def test_a_rename_that_works_tells_the_halt_nothing() -> None:
@@ -499,13 +505,14 @@ async def test_a_rename_that_works_tells_the_halt_nothing() -> None:
     assert store.released == ["other"]
 
 
-async def test_a_rename_whose_session_cannot_be_read_is_reported_and_lets_go_of_its_lock() -> None:
+async def test_a_rename_whose_session_cannot_be_read_is_refused_and_lets_go_of_its_lock() -> None:
     store = FakeStore()
     store.saved = [SessionRecord(id="other", name="other", created=START, last_active=START)]
-    store.load_failure = "Couldn't read the session: permission denied"
+    store.load_failure = "it can't be read from orbit.db: permission denied"
     keeper, published = keeper_for(store)
-    await keeper.rename_saved("other", "Renamed")
-    assert published.errors == ["Couldn't read the session: permission denied"]
+    with pytest.raises(Refused, match="permission denied"):
+        await keeper.rename_saved("other", "Renamed")
+    assert published.errors == []
     assert store.released == ["other"] and store.last.name == "other"
 
 
@@ -557,13 +564,14 @@ async def test_a_session_unreadable_once_locked_is_not_opened_and_lets_go_of_its
     assert store.released == ["other"] and store.locked == set()
 
 
-async def test_an_open_whose_reread_fails_is_reported_and_lets_go_of_its_lock() -> None:
+async def test_an_open_whose_reread_fails_is_refused_and_lets_go_of_its_lock() -> None:
     store = FakeStore()
     store.saved = [SessionRecord(id="other", name="other", created=START, last_active=START)]
-    store.load_failure = "Couldn't read the session: permission denied"
+    store.load_failure = "it can't be read from orbit.db: permission denied"
     keeper, published = keeper_for(store)
-    assert await keeper.open("other", lambda record: None) is None
-    assert published.errors == ["Couldn't read the session: permission denied"]
+    with pytest.raises(Refused, match="permission denied"):
+        await keeper.open("other", lambda record: None)
+    assert published.errors == []
     assert keeper.id == "session-1"
     assert store.released == ["other"] and store.locked == set()
 
