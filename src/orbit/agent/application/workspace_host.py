@@ -669,17 +669,28 @@ class WorkspaceHost:
         if not command.take:
             await self._events.put(OwnershipDeclined())
             return
+        # Work sent from here on joins the queue, so it runs after the work queued before.
+        self._commands.taking()
+        try:
+            await self._announce_owned()
+        except BaseException:
+            self._commands.taken()
+            raise
+        try:
+            await self._commands.own(command_id)
+        finally:  # After the queued work, so its tasks get agents first, even if it fails.
+            if self._lane is not None:
+                self._lane.kick()
+
+    async def _announce_owned(self) -> None:
+        """Say this orbit owns the repository now, send the catalog saying so, recover the
+        fallback files the owner left and read the super review count it left."""
         self.owned()
         await self._events.put(OwnershipTaken())
         await self._events.put(Notice(message=OWNED_NOTE))
         await self._switcher.publish_catalog()  # Other workspaces' connections learn it here.
         await self._recover_parked()
         await self._reload_review_count()
-        try:
-            await self._commands.own(command_id)
-        finally:  # After the queued work, so its tasks get agents first, even if it fails.
-            if self._lane is not None:
-                self._lane.kick()
 
     async def _recover_parked(self) -> None:
         """Recover the fallback files the owner left, now this orbit owns the repository,

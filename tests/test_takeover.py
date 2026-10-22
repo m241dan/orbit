@@ -10,6 +10,7 @@ from orbit.agent.application.work_turns import TASKS_RUNNING_MESSAGE
 from orbit.agent.application.workspace_host import OWNED_NOTE
 from orbit.protocol import (
     BUSY,
+    CONFIGURE_CHECKS,
     INTERNAL,
     INVALID,
     AddTask,
@@ -17,6 +18,7 @@ from orbit.protocol import (
     CommandRefused,
     ErrorOccurred,
     Event,
+    FireTrigger,
     NewSession,
     Notice,
     OwnershipDeclined,
@@ -35,6 +37,7 @@ from tests.agent_fakes import (
     LOCK_RETRY,
     OWNER,
     Call,
+    Configurator,
     FakeLock,
     FakeStore,
     FakeTree,
@@ -44,6 +47,7 @@ from tests.agent_fakes import (
     greeted,
     idle,
     lane_of,
+    no_steps,
     queued,
     send,
     session_for,
@@ -564,4 +568,68 @@ async def test_a_host_given_nothing_to_recover_takes_over_with_no_recovered_note
     notices = [event.message for event in events if isinstance(event, Notice)]
     assert notices == [OWNED_NOTE]
     assert not session.read_only
+    await session.close()
+
+
+class BlockedRecovery:
+    """Recovers nothing, but only once ``release`` is set; ``started`` is set once it's run."""
+
+    def __init__(self) -> None:
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def __call__(self) -> Sequence[str]:
+        self.started.set()
+        await self.release.wait()
+        return ()
+
+
+async def test_work_sent_while_taking_over_runs_after_the_work_queued_before() -> None:
+    lock, recovery = FakeLock(), BlockedRecovery()
+    session, _, launcher = session_for(
+        Configurator(),
+        claims_done,
+        verification=no_steps(),
+        owner=OWNER,
+        lock=lock,
+        recover=recovery,
+    )
+    await send(session, AddTask(task=TaskSpec(prompt="Add a flag.")))
+    await send(session, RunTasks())
+    lock.free = True
+    await events_until(session, offered)
+
+    taking = asyncio.create_task(send(session, TakeOwnership(take=True)))
+    await recovery.started.wait()
+    await send(session, FireTrigger(trigger=CONFIGURE_CHECKS))
+    assert launcher.launches == []
+    queued_then = session.queued_work
+    assert queued_then == (RunTasks(), FireTrigger(trigger=CONFIGURE_CHECKS))
+    recovery.release.set()
+    await taking
+    events = await events_until(session, idle())
+
+    assert len(launcher.launches) == 2  # The configurator goes first, as it does while running.
+    assert not any(isinstance(event, ErrorOccurred) for event in events)
+    assert session.queued_work == ()
+    await session.close()
+
+
+async def test_work_sent_after_a_takeover_that_failed_runs_at_once() -> None:
+    lock = FakeLock(free=True)
+    session, _, launcher = session_for(claims_done, owner=OWNER, lock=lock)
+    await greeted(session)
+    await events_until(session, offered)
+
+    async def failing() -> None:
+        raise RuntimeError("store gone")
+
+    session._switcher.publish_catalog = failing  # type: ignore[method-assign]
+    await send(session, TakeOwnership(take=True))
+    await events_until(session, refused)
+    await send(session, AddTask(task=TaskSpec(prompt="Add a flag.")))
+    await send(session, RunTasks())
+    await events_until(session, idle())
+
+    assert session.queued_work == () and len(launcher.launches) == 1
     await session.close()

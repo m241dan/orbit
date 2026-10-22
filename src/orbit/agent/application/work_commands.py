@@ -88,12 +88,13 @@ class CommandParts:
 
 
 class WorkCommands:
-    """Handles the work commands on the session held in ``parts``; while it's read-only, those
-    that start work are queued, in order, rather than run."""
+    """Handles the work commands on the session held in ``parts``; while it's read-only, or
+    taking ownership, those that start work are queued, in order, rather than run."""
 
     def __init__(self, parts: CommandParts) -> None:
         self._parts = parts
         self._queued: list[QueuedWork] = []
+        self._owning = False  # Taking ownership: queued work hasn't all run yet.
 
     @property
     def queued(self) -> tuple[QueuedWork, ...]:
@@ -102,20 +103,34 @@ class WorkCommands:
 
     async def handle(self, command: WorkCommand, command_id: str) -> None:
         """Handle ``command``, sent as ``command_id``, or queue it if it starts work while
-        read-only; work that couldn't run once this orbit owns the repository is refused."""
-        if self._parts.gate.read_only() and isinstance(command, QueuedWork):
+        read-only or taking ownership; work that couldn't run once this orbit owns the
+        repository is refused."""
+        queueing = self._owning or self._parts.gate.read_only()
+        if queueing and isinstance(command, QueuedWork):
             self._check(command)
             self._queued.append(command)
         else:
             await self._dispatch(command, command_id)
 
+    def taking(self) -> None:
+        """Keep queueing work, as this orbit is taking ownership of the repository, until
+        :meth:`own` has run what's queued or :meth:`taken` says the takeover stopped."""
+        self._owning = True
+
+    def taken(self) -> None:
+        """Stop queueing work for the takeover: it's over."""
+        self._owning = False
+
     async def own(self, command_id: str) -> None:
-        """Run the commands queued while read-only, in order, for ``command_id``, as this orbit
-        owns the repository now; one that fails is reported as an error, and the rest still
-        run. Each is taken off the queue as it's run, so those not yet run stay queued if
-        this stops early."""
-        while self._queued:
-            await self._run_queued(self._queued.pop(0), command_id)
+        """Run the commands queued while read-only or taking ownership, in order, for
+        ``command_id``, as this orbit owns the repository now, those queued meanwhile included;
+        one that fails is reported as an error, and the rest still run. Each is taken off the
+        queue as it's run, so those not yet run stay queued if this stops early."""
+        try:
+            while self._queued:
+                await self._run_queued(self._queued.pop(0), command_id)
+        finally:
+            self.taken()
 
     async def _run_queued(self, command: QueuedWork, command_id: str) -> None:
         """Run the queued ``command`` for ``command_id``, reporting a refusal, or any other
