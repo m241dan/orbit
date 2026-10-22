@@ -81,6 +81,7 @@ from orbit.tui.task_editor import TaskEditorScreen
 from orbit.tui.tasks import TaskList
 from orbit.tui.transcript import Transcript
 from orbit.tui.transcript_log import TranscriptLog
+from orbit.tui.view.common import EntryKind
 from orbit.tui.view.confirm import (
     CONFIGURE_MESSAGE,
     CONFIGURE_TITLE,
@@ -102,7 +103,6 @@ from orbit.tui.view.events import (
     coalesce,
     in_group,
 )
-from orbit.tui.view.log import Entry
 from orbit.tui.view.outcomes import Awaited
 from orbit.tui.view.proposals import decision_entry
 from orbit.tui.view.rules import planner_reset_entry
@@ -311,9 +311,23 @@ class OrbitApp(App[None], inherit_bindings=False):
         self._prompt.action_normal_mode()
         # Busy from now, not from TurnStarted, so a second prompt can't race the turn.
         self._set_busy(PLANNER_LANE, True)
-        entry = self._feed.append(text, "prompt", PLANNER)
-        outcome = Awaited(accepted=lambda: self._sent(text), refused=lambda: self._unsend(entry))
-        await self._send(SendMessage(agent=PLANNER, text=text), outcome)
+        outcome = Awaited(accepted=lambda: self._sent(text), refused=self._unsend)
+        await self._show_and_send(
+            (text, "prompt"), PLANNER, SendMessage(agent=PLANNER, text=text), outcome
+        )
+
+    async def _show_and_send(
+        self, shown: tuple[str, EntryKind], agent: str, command: Command, awaited: Awaited
+    ) -> None:
+        """Show the entry ``shown`` by ``agent`` in the conversation and send ``command`` as
+        ``awaited``; refused or not sent, the entry is dropped before ``awaited`` hears it."""
+        entry = self._feed.append(*shown, agent)
+
+        def dropped() -> None:
+            self._transcript.drop_entry(entry)
+            awaited.refused()
+
+        await self._send(command, replace(awaited, refused=dropped))
 
     def _sent(self, text: str) -> None:
         """Clear the prompt once the planner accepted ``text``, unless the user has edited the
@@ -321,11 +335,10 @@ class OrbitApp(App[None], inherit_bindings=False):
         if self._prompt.text.strip() == text:
             self._prompt.clear()
 
-    def _unsend(self, entry: Entry) -> None:
-        """Undo sending a prompt to the planner, refused or not sent: its prompt ``entry`` is
-        dropped and the planner freed, its text still in the prompt."""
+    def _unsend(self) -> None:
+        """Undo sending a prompt to the planner, refused or not sent: the planner is freed, the
+        prompt's text still in the prompt."""
         self._set_busy(PLANNER_LANE, False)
-        self._transcript.drop_entry(entry)
 
     # Window navigation only applies at the top level, when no window is active.
 
@@ -816,14 +829,9 @@ class OrbitApp(App[None], inherit_bindings=False):
     async def _decide(self, proposal: ChecksProposed, decision: DecideProposal) -> None:
         """Note the user's ``decision`` on ``proposal`` in the conversation and send it; refused
         or not sent, the note is dropped and ``proposal`` shown again."""
-        entry = self._feed.append(*decision_entry(proposal.agent_id, decision), proposal.agent_id)
-        await self._send(decision, Awaited(refused=lambda: self._undecide(proposal, entry)))
-
-    def _undecide(self, proposal: ChecksProposed, entry: Entry) -> None:
-        """Undo deciding on ``proposal``: its decision's ``entry`` is dropped and it's shown
-        again, to decide on anew."""
-        self._transcript.drop_entry(entry)
-        self._proposals.reopen(proposal)
+        shown = decision_entry(proposal.agent_id, decision)
+        outcome = Awaited(refused=lambda: self._proposals.reopen(proposal))
+        await self._show_and_send(shown, proposal.agent_id, decision, outcome)
 
     def _show_settings(self, settings: Settings, choices: tuple[str, ...]) -> None:
         if choices != self._model_choices:
