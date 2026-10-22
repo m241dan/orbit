@@ -1049,6 +1049,24 @@ async def test_ignoring_paths_that_cant_replace_the_exclude_file_leaves_it_whole
     assert [p.name for p in exclude.parent.iterdir()] == ["exclude"]
 
 
+async def test_ignoring_paths_that_fail_midway_leaves_the_exclude_file_whole(
+    repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tree = GitCoderTree(str(repo))
+    await tree.prepare(keep=False)
+    exclude = repo / ".git" / "info" / "exclude"
+    exclude.write_text("*.log\n")
+
+    def full(descriptor: int) -> None:
+        raise OSError("No space left on device")
+
+    monkeypatch.setattr(os, "fsync", full)
+    with pytest.raises(TreeFailed, match="No space left on device"):
+        await tree.ignore({"__pycache__/"})
+    assert exclude.read_text() == "*.log\n"
+    assert [p.name for p in exclude.parent.iterdir()] == ["exclude"]
+
+
 async def test_ignoring_paths_that_cant_be_written_raises_a_tree_failure(repo: Path) -> None:
     tree = GitCoderTree(str(repo))
     await tree.prepare(keep=False)

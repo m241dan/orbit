@@ -282,6 +282,21 @@ def test_writing_checks_that_fails_leaves_the_old_file_and_no_temporary_file(
     assert [p.name for p in path.parent.iterdir()] == ["config.toml"]
 
 
+def test_writing_checks_that_fails_midway_leaves_the_old_file_and_no_temporary_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = write(tmp_path, "fix_attempts = 3\n")
+
+    def full(descriptor: int) -> None:
+        raise OSError("No space left on device")
+
+    monkeypatch.setattr(os, "fsync", full)
+    with pytest.raises(ConfigWriteFailed, match="No space left on device"):
+        write_checks(str(tmp_path), ChecksProposal(steps=(LINT,)))
+    assert path.read_text() == "fix_attempts = 3\n"
+    assert [p.name for p in path.parent.iterdir()] == ["config.toml"]
+
+
 def test_writing_checks_keeps_the_files_mode(tmp_path: Path) -> None:
     path = write(tmp_path, "fix_attempts = 3\n")
     path.chmod(0o664)
