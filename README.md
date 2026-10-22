@@ -573,8 +573,8 @@ line saying they all passed on the current code. Then:
 
 Your decision is noted in the conversation (`orbit → agent-3: proposal accepted`, `… changes
 asked for: add mypy`, `… task ended`), and orbit's reply to the agent completes its request's
-line above. The agent revises
-up to `fix_attempts` times. If it's cancelled or exits while its proposal is showing, the window
+line above. A decision that's refused, or can't be sent, leaves the conversation and its proposal's
+window comes back, next if another is showing, so you can decide again. The agent revises up to `fix_attempts` times. If it's cancelled or exits while its proposal is showing, the window
 closes and the task is cancelled. When several agents propose checks, their windows come one at a
 time, in the order they proposed.
 

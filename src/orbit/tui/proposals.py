@@ -146,6 +146,14 @@ class ProposalHost:
             self._slot.close(None)
             self._show_next()
 
+    def reopen(self, proposal: ChecksProposed) -> None:
+        """Ask the user about ``proposal`` again, its decision undone: now, or next once the one
+        shown is done with."""
+        if self.shown is None or self.shown.proposal != proposal:
+            self._waiting = [proposal, *(p for p in self._waiting if p != proposal)]
+        if self.shown is None:
+            self._show_next()
+
     def _wait(self, proposal: ChecksProposed) -> None:
         """Show ``proposal`` after those waiting, unless it's shown or waiting already."""
         shown = self.shown is not None and self.shown.proposal == proposal

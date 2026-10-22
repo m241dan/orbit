@@ -230,3 +230,34 @@ async def test_a_decision_clears_the_shown_proposal() -> None:
         await pilot.pause()
         assert app.host.shown is None
         assert app.decisions == [(PROPOSAL, end)]
+
+
+async def test_reopening_a_decided_proposal_shows_it_again() -> None:
+    app = Host()
+    async with app.run_test() as pilot:
+        app.host.show(PROPOSAL)
+        await pilot.pause()
+        app.screen.dismiss(DecideProposal(task_id="1", action="accept"))
+        await pilot.pause()
+        app.host.reopen(PROPOSAL)
+        await pilot.pause()
+        [screen] = app.proposal_screens()
+        assert screen.proposal == PROPOSAL
+        assert app.host.shown is screen
+
+
+async def test_reopening_while_another_is_shown_shows_it_next() -> None:
+    third = PROPOSAL.model_copy(update={"agent_id": "agent-5", "task_id": "3"})
+    host, pushed = recording_host()
+    host.show(OTHER)
+    host.show(third)
+    host.show(PROPOSAL)
+    host.reopen(PROPOSAL)
+    host.reopen(OTHER)
+    ((_, first_decided),) = pushed
+    await first_decided(None)
+    assert [screen.proposal for screen, _ in pushed] == [OTHER, PROPOSAL]
+    await pushed[1][1](None)
+    assert [screen.proposal for screen, _ in pushed] == [OTHER, PROPOSAL, third]
+    await pushed[2][1](None)
+    assert len(pushed) == 3

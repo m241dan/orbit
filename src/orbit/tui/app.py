@@ -814,9 +814,16 @@ class OrbitApp(App[None], inherit_bindings=False):
             self._show_viewing()
 
     async def _decide(self, proposal: ChecksProposed, decision: DecideProposal) -> None:
-        """Note the user's ``decision`` on ``proposal`` in the conversation and send it."""
-        self._feed.append(*decision_entry(proposal.agent_id, decision), proposal.agent_id)
-        await self._send(decision)
+        """Note the user's ``decision`` on ``proposal`` in the conversation and send it; refused
+        or not sent, the note is dropped and ``proposal`` shown again."""
+        entry = self._feed.append(*decision_entry(proposal.agent_id, decision), proposal.agent_id)
+        await self._send(decision, Awaited(refused=lambda: self._undecide(proposal, entry)))
+
+    def _undecide(self, proposal: ChecksProposed, entry: Entry) -> None:
+        """Undo deciding on ``proposal``: its decision's ``entry`` is dropped and it's shown
+        again, to decide on anew."""
+        self._transcript.drop_entry(entry)
+        self._proposals.reopen(proposal)
 
     def _show_settings(self, settings: Settings, choices: tuple[str, ...]) -> None:
         if choices != self._model_choices:

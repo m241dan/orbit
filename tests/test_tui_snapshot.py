@@ -41,6 +41,7 @@ from tests.tui_fakes import (
     STRIP,
     TASKS,
     FakeSession,
+    accept_last,
     entries,
     feed_events,
     opened,
@@ -423,4 +424,47 @@ async def test_another_proposal_event_while_one_is_shown_waits_for_it() -> None:
         await feed_events(session, pilot, other)
         assert [screen.proposal for screen in proposal_screens(app)] == [PROPOSAL]
         await pilot.press("a")
+        assert [screen.proposal for screen in proposal_screens(app)] == [other]
+
+
+async def test_a_refused_decision_drops_its_entry_and_shows_the_proposal_again() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, PROPOSAL)
+        await pilot.press("a")
+        await pilot.pause()
+        assert proposal_screens(app) == []
+        [sent] = session.envelopes
+        refused = CommandRefused(command_id=sent.command_id, code="busy", message="Not now.")
+        await feed_events(session, pilot, refused)
+        assert entries(app)[-1] == ("Not now.", "error")
+        assert not any(text.startswith("orbit → agent-3") for text, _ in entries(app))
+        assert [screen.proposal for screen in proposal_screens(app)] == [PROPOSAL]
+
+
+async def test_a_decision_that_failed_to_send_drops_its_entry_and_shows_the_proposal_again() -> (
+    None
+):
+    session = FakeSession()
+    session.send_error = RuntimeError("the backend is gone")
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, PROPOSAL)
+        await pilot.press("a")
+        await pilot.pause()
+        assert entries(app) == [("Couldn't send the command: the backend is gone", "error")]
+        assert [screen.proposal for screen in proposal_screens(app)] == [PROPOSAL]
+
+
+async def test_an_accepted_decision_keeps_its_entry_and_shows_the_next_proposal() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    other = PROPOSAL.model_copy(update={"task_id": "2"})
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, PROPOSAL, other)
+        await pilot.press("a")
+        await pilot.pause()
+        await accept_last(session, pilot)
+        assert entries(app) == [("orbit → agent-3: proposal accepted", "agent")]
         assert [screen.proposal for screen in proposal_screens(app)] == [other]
