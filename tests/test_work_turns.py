@@ -1,16 +1,17 @@
 """When the work lane runs: the user's runs, a review's wake, a hold, and the configurator."""
 
 import asyncio
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 
 import pytest
 
 from orbit.agent import Agents
 from orbit.agent.application.desk import AgentDesk
+from orbit.agent.application.limit_pause import LimitPause
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.application.verifier import Verifier
-from orbit.agent.application.work_lane import Beside, WorkLane
+from orbit.agent.application.work_lane import Beside, RunEnd, WorkLane
 from orbit.agent.application.work_turns import (
     CONFIGURING_NOTE,
     NO_AGENTS_MESSAGE,
@@ -22,6 +23,7 @@ from orbit.agent.application.work_turns import (
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.endings import STOPPED_BY_YOU
 from orbit.agent.domain.refusals import Refused
+from orbit.agent.domain.usage_limits import RESUMING_NOTE
 from orbit.protocol import (
     BUSY,
     CONFIGURATOR,
@@ -34,19 +36,44 @@ from orbit.protocol import (
     Settings,
     TaskSpec,
 )
-from tests.agent_fakes import ROLES, FakeHost, ScriptedLauncher, Steps, hangs, verified
+from tests.agent_fakes import ROLES, START, FakeHost, ScriptedLauncher, Steps, hangs, verified
 
 TASK = TaskSpec(prompt="Add a flag.", settings=Settings(model="opus"))
 
 
 class StopsCounted(WorkLane):
-    """A work lane that counts the times it was told the user stopped its run."""
+    """A work lane that counts the times it was told the user stopped its run, and whose runs
+    stop at once at the usage limit while ``limited``."""
 
     stops = 0
+    limited = False
 
     def stopped_by_user(self) -> bool:
         self.stops += 1
         return super().stopped_by_user()
+
+    async def run(self) -> RunEnd:
+        if self.limited:
+            return "limited"
+        return await super().run()
+
+
+class Sleeps:
+    """A pause whose clock stands at :data:`START` and whose sleeps last until released, then
+    raise ``error``, if set."""
+
+    def __init__(self) -> None:
+        self.release = asyncio.Event()
+        self.error: Exception | None = None
+
+    async def sleep(self, seconds: float) -> None:
+        await self.release.wait()
+        if self.error is not None:
+            raise self.error
+
+    @property
+    def pause(self) -> LimitPause:
+        return LimitPause(now=lambda: START, sleep=self.sleep)
 
 
 @dataclass
@@ -65,6 +92,7 @@ class Lane:
     tasks: Tasks
     posted: list[Event]
     halt: Halt
+    sleeps: Sleeps
 
     def roles(self) -> list[str]:
         return [state.task.role for state in self.tasks.board.tasks]
@@ -74,32 +102,34 @@ def lane_parts(
     tasks: Tasks,
     posted: list[Event],
     verifying: bool,
-    halted: Callable[[], bool] = lambda: False,
+    halt: Halt | None = None,
+    pause: LimitPause | None = None,
 ) -> WorkParts:
     """The parts of work turns whose agents all hang, verified if ``verifying``, in a session
-    halted while ``halted`` holds."""
+    halted as ``halt`` says, timing a run the usage limit stopped with ``pause``."""
 
     async def publish(event: Event) -> None:
         posted.append(event)
 
     host = FakeHost()
     launcher = ScriptedLauncher(host, *[hangs] * 5)
-    agents = Agents(host, launcher, lambda: "token-1", ROLES)
+    agents = Agents(host, launcher, lambda: "token-1", ROLES, pause=pause or LimitPause())
     desk = AgentDesk(agents, publish)
     verifier = Verifier(verified(Steps()), tasks, publish) if verifying else None
     work = StopsCounted(desk, tasks, verifier, Beside())
-    return WorkParts(work, None, tasks, verifier, desk, posted.append, halted)
+    halted = halt or Halt()
+    return WorkParts(work, None, tasks, verifier, desk, posted.append, lambda: halted.on)
 
 
 @pytest.fixture
 async def lane() -> AsyncIterator[Lane]:
     posted: list[Event] = []
-    halt = Halt()
+    halt, sleeps = Halt(), Sleeps()
     tasks = Tasks(TaskBoard(), lambda _: asyncio.sleep(0))
-    parts = lane_parts(tasks, posted, verifying=True, halted=lambda: halt.on)
+    parts = lane_parts(tasks, posted, True, halt, sleeps.pause)
     turns = WorkTurns(parts)
     assert isinstance(parts.work, StopsCounted)
-    yield Lane(turns, parts.work, tasks, posted, halt)
+    yield Lane(turns, parts.work, tasks, posted, halt, sleeps)
     await turns.close()
     assert parts.desk is not None
     await parts.desk.stop()
@@ -305,3 +335,81 @@ async def test_a_run_for_the_user_once_closed_starts_no_work(lane: Lane) -> None
     await lane.turns.run_tasks()
     assert not lane.turns.running
     assert BusyChanged(busy=True, lane=WORK_LANE) not in lane.posted
+
+
+async def settled() -> None:
+    """Yield to the loop a while, so background work gets as far as it can."""
+    for _ in range(20):
+        await asyncio.sleep(0)
+
+
+async def limited(lane: Lane) -> None:
+    """Run a task the usage limit stops, leaving the run waiting to start again."""
+    await add(lane)
+    lane.work.limited = True
+    await lane.turns.run_tasks()
+    await turn_ended(lane)
+    lane.work.limited = False
+    await settled()
+
+
+def notes(lane: Lane) -> list[str]:
+    return [event.message for event in lane.posted if isinstance(event, Notice)]
+
+
+async def test_a_wait_ending_starts_the_run_again_and_says_so(lane: Lane) -> None:
+    await limited(lane)
+    lane.sleeps.release.set()
+    await settled()
+    assert lane.turns.running
+    assert notes(lane)[-1] == RESUMING_NOTE
+
+
+async def test_a_wake_while_waiting_to_start_again_starts_nothing(lane: Lane) -> None:
+    await limited(lane)
+    await lane.turns.wake()
+    assert not lane.turns.running
+
+
+async def test_a_wait_ending_while_halted_starts_nothing_and_says_nothing(lane: Lane) -> None:
+    await limited(lane)
+    lane.halt.on = True
+    lane.sleeps.release.set()
+    await settled()
+    assert not lane.turns.running
+    assert RESUMING_NOTE not in notes(lane)
+
+
+async def test_a_wait_ending_with_no_work_left_says_nothing(lane: Lane) -> None:
+    await limited(lane)
+    [task] = lane.tasks.board.tasks
+    await lane.tasks.change(lambda board: board.remove(task.id))
+    lane.sleeps.release.set()
+    await settled()
+    assert not lane.turns.running
+    assert RESUMING_NOTE not in notes(lane)
+
+
+async def test_a_wake_once_a_wait_failed_starts_the_run(lane: Lane) -> None:
+    await limited(lane)
+    lane.sleeps.error = RuntimeError("clock broke")
+    lane.sleeps.release.set()
+    await settled()
+    await lane.turns.wake()
+    assert lane.turns.running
+
+
+async def test_an_error_in_the_wait_is_reported(lane: Lane) -> None:
+    await limited(lane)
+    lane.sleeps.error = RuntimeError("clock broke")
+    lane.sleeps.release.set()
+    await settled()
+    [error] = [event for event in lane.posted if isinstance(event, ErrorOccurred)]
+    assert "clock broke" in error.message
+    assert not lane.turns.running
+
+
+async def test_closing_while_waiting_leaves_no_task_running(lane: Lane) -> None:
+    await limited(lane)
+    await lane.turns.close()
+    assert asyncio.all_tasks() == {asyncio.current_task()}

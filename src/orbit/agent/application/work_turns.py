@@ -3,12 +3,12 @@ held it or the session halted, first for a configurator, and again by itself onc
 usage limit that stopped it resets."""
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime
 
 from orbit.agent.application.desk import AgentDesk, Agents
-from orbit.agent.application.lanes import TurnSlot, stop
+from orbit.agent.application.lanes import Background, TurnSlot
 from orbit.agent.application.limit_pause import LimitPause
 from orbit.agent.application.review_lane import ReviewLane
 from orbit.agent.application.tasks import Tasks
@@ -74,8 +74,9 @@ class WorkTurns:
         self._held = False  # The user cancelled: don't start work by itself.
         self._closed = False  # The host is going away: start nothing.
         self._turns = TurnSlot(WORK_LANE, TASKS_RUNNING_MESSAGE, parts.post)
-        # A run the usage limit stopped, waiting to start again.
-        self._waiting: asyncio.Task[None] | None = None
+        # A run the usage limit stopped waits here to start again.
+        self._wait = Background(WORK_LANE, _posting(parts.post))
+        self._waiting = False  # The wait hasn't ended yet.
         self._due = False  # Its wait ended while the session was halted.
 
     @property
@@ -137,11 +138,10 @@ class WorkTurns:
     def forget_wait(self) -> bool:
         """Cancel the wait to start again of a run the usage limit stopped, or its start once a
         halt lifts; returns whether there was one."""
-        waiting, self._waiting = self._waiting, None
+        waiting, self._waiting = self._waiting, False
         due, self._due = self._due, False
-        if waiting is not None:
-            waiting.cancel()
-        return due or waiting is not None
+        self._wait.cancel()
+        return due or waiting
 
     async def stop_turn(self) -> None:
         """Cancel the run, if any, as the session halts, and wait for it to end, keeping its
@@ -159,11 +159,9 @@ class WorkTurns:
         """Cancel the run, if any, or its wait to start again, wait for it to end, and start
         nothing from then on."""
         self._closed = True
-        waiting = self._waiting
         self.forget_wait()
         try:
-            if waiting is not None:
-                await stop(waiting)
+            await self._wait.close()
         finally:  # Cancelled meanwhile, the run is still stopped.
             await self._turns.close()
 
@@ -171,22 +169,28 @@ class WorkTurns:
     def _waits(self) -> bool:
         """Whether work not asked for waits: held, already running, waiting to start again or
         halted."""
-        return self._held or self.running or self._waiting is not None or self._parts.halted()
+        return self._held or self.running or self._waiting or self._parts.halted()
 
     async def _start(self, *, asked: bool) -> None:
         """Start the work lane's turn if there is work, unless closed. The user ``asked`` lifts a
         hold, and a run already running refuses them; otherwise a hold, a running run or a halt
         keeps it waiting."""
+        work = self._startable(asked=asked)
+        if work is not None:
+            await self._turns.start(self._run(work))
+
+    def _startable(self, *, asked: bool) -> WorkLane | None:
+        """The work lane, if :meth:`_start` would start its turn now; the user ``asked`` lifts a
+        hold."""
         work = self._parts.work
         assert work is not None  # Work needs agents.
         if self._closed:
-            return
+            return None
         if asked:
             self._held = False
         elif self._waits:
-            return
-        if work.next_work() is not None:
-            await self._turns.start(self._run(work))
+            return None
+        return work if work.next_work() is not None else None
 
     async def _run(self, work: WorkLane) -> None:
         """Run ``work``'s tasks, then, if the usage limit stopped them, wait to start again."""
@@ -200,30 +204,48 @@ class WorkTurns:
         self._parts.post(Notice(message=paused_note(at)))
         stopped = self._turns.turn
         assert stopped is not None  # This runs as the turn stopped.
-        self._waiting = asyncio.create_task(self._start_again(stopped, at))
+        self._waiting = True
+        self._wait.start(self._start_again(stopped, at))
 
     async def _start_again(self, stopped: "asyncio.Task[object]", at: datetime) -> None:
         """Once the ``stopped`` turn has ended, wait until ``at``, then start the run again, or
         once the halt lifts if the session is halted then."""
-        await asyncio.wait([stopped])
-        pause = self._pause
-        await pause.sleep(max(0.0, (at - pause.now()).total_seconds()))
-        self._waiting = None
+        try:
+            await asyncio.wait([stopped])
+            pause = self._pause
+            await pause.sleep(max(0.0, (at - pause.now()).total_seconds()))
+        except Exception:  # Failed, it no longer keeps work waiting; reported as it goes on.
+            self._waiting = False
+            raise
+        self._waiting = False
         if self._parts.halted():
             self._due = True
             return
         await self._start_now()
 
     async def _start_now(self) -> None:
-        """Say the run the usage limit stopped starts again, and start it."""
+        """Start the run the usage limit stopped again, if nothing keeps it waiting and work is
+        left, and say so."""
+        work = self._startable(asked=False)
+        if work is None:
+            return
         self._parts.post(Notice(message=RESUMING_NOTE))
-        await self._start(asked=False)
+        await self._turns.start(self._run(work))
 
     @property
     def _pause(self) -> LimitPause:
         desk = self._parts.desk
         assert desk is not None  # The work lane runs agents.
         return desk.agents.pause
+
+
+def _posting(post: Callable[[Event], None]) -> Callable[[Event], Awaitable[None]]:
+    """Publishing that ``post``s each event."""
+
+    async def publish(event: Event) -> None:
+        post(event)
+
+    return publish
 
 
 def _configurator_task(agents: Agents, verifier: Verifier) -> TaskSpec:

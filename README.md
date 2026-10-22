@@ -930,8 +930,9 @@ Orbit fetches them from the same undocumented endpoint Claude Code's `/usage` us
 Claude login's OAuth token from `~/.claude/.credentials.json` (Linux), sent only to
 `api.anthropic.com`. It fetches at startup, every 5 minutes, and after an agent's turn ends (at most
 once a minute). When it can't get them (no Claude login or an API-key login, an expired login, rate
-limiting, network errors), the panel says why and greys out the last numbers; nothing else is
-affected. The panel is display only.
+limiting, network errors), the panel says why and greys out the last numbers. The panel itself
+is display only, but the latest usage it fetched also decides when a run stopped at the usage
+limit starts again (see **Usage limits** under [Tasks](#tasks)).
 
 `--no-usage` turns it off, and orbit then never reads the token.
 
