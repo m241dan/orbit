@@ -8,8 +8,19 @@ from pathlib import Path
 
 import pytest
 
-from orbit.agent import ServedWorkspaces, SqliteStore, StorageSettings, WorkspaceUnavailable
+from orbit.agent import (
+    Purged,
+    ServedWorkspaces,
+    SqliteStore,
+    StorageSettings,
+    WorkspaceLock,
+    WorkspaceOwner,
+    WorkspaceUnavailable,
+    orbit_dir,
+    purge_workspace,
+)
 from orbit.agent.application.connection import SessionConnection
+from orbit.agent.external import served_workspaces
 from orbit.cli.served import _workspaces
 from orbit.protocol import (
     INTERNAL,
@@ -134,6 +145,39 @@ async def test_a_clone_is_purged_only_once_its_commits_are_pushed(
     assert refusal == [refused("refused", INVALID, message)] and kept
     assert outcome == CommandAccepted(command_id="purged")
     assert not (clones / "proj").exists()
+
+
+async def test_another_orbit_cant_take_a_workspace_lock_while_its_purge_runs(
+    stack: ExitStack,
+    store: SqliteStore,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = init_repo(tmp_path / "a")
+    owners: list[WorkspaceOwner | None] = []
+
+    async def purging(store: SqliteStore, workspace_id: str) -> Purged:
+        lock = WorkspaceLock(orbit_dir(str(root)))
+        owners.append(lock.take())
+        lock.close()
+        return await purge_workspace(store, workspace_id)
+
+    monkeypatch.setattr(served_workspaces, "purge_workspace", purging)
+    plane = serving(stack, store, tmp_path / "clones")
+    connection = await welcomed(plane)
+    workspace_id = (await added(connection, root))[str(root)]
+
+    await say(connection, "purge", RemoveWorkspace(workspace=workspace_id, purge=True))
+    outcome = payloads(taken(connection))[-1]
+    after = WorkspaceLock(orbit_dir(str(root)))
+    free = after.take()
+    after.close()
+    await plane.close()
+    stack.close()
+
+    assert outcome == CommandAccepted(command_id="purge")
+    assert len(owners) == 1 and owners[0] is not None
+    assert free is None
 
 
 def source(stack: ExitStack, store: SqliteStore, tmp_path: Path) -> ServedWorkspaces:

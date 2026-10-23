@@ -1,5 +1,6 @@
 """Purging a workspace as it's removed, from a frontend: under the same refusals as removing,
-its records are deleted once it's let go, unless that would lose a clone's work."""
+its records are deleted once its host is closed, before its lock is let go, unless that would
+lose a clone's work."""
 
 from orbit.agent import ControlPlane
 from orbit.protocol import BUSY, INTERNAL, INVALID, CommandAccepted, RemoveWorkspace
@@ -9,7 +10,7 @@ from tests.plane_fakes import FakeSource, ids, payloads, refused, welcomed, work
 PURGE = RemoveWorkspace(workspace="c", purge=True)
 
 
-async def test_purging_an_idle_workspace_removes_it_then_deletes_its_records() -> None:
+async def test_purging_an_idle_workspace_deletes_its_records_before_letting_it_go() -> None:
     first, second = workspace("a"), workspace("c")
     source = FakeSource()
     plane = ControlPlane([first, second], workspaces=source)
@@ -20,7 +21,7 @@ async def test_purging_an_idle_workspace_removes_it_then_deletes_its_records() -
     await plane.close()
 
     assert ids(catalog) == ["a"] and accepted == CommandAccepted(command_id="purge")
-    assert source.closed == ["c"] and source.purged == ["c"]
+    assert source.steps == ["purge c", "close c"] and source.purged == ["c"]
 
 
 async def test_removing_without_purge_keeps_the_records() -> None:
@@ -95,4 +96,4 @@ async def test_a_purge_that_fails_leaves_the_workspace_removed_and_says_so() -> 
 
     message = "Removed /src/c, but couldn't purge it: The disk is full."
     assert ids(catalog) == [] and outcome == refused("purge", INTERNAL, message)
-    assert source.closed == ["c"] and plane.hosts == ()
+    assert source.steps == ["purge c", "close c"] and plane.hosts == ()

@@ -115,9 +115,10 @@ class WorkspaceSource(Cloner, Protocol):
         ...
 
     async def purge(self, workspace_id: str) -> None:
-        """Delete the records of the workspace ``workspace_id``, which was let go, and, if it's
-        a clone orbit made, its directory. Raises :class:`WorkspaceUnavailable` if they can't
-        be, as ``invalid`` if deleting the clone would lose work."""
+        """Delete the records of the workspace ``workspace_id``, whose host is closed and which
+        is no longer flagged served but still locked, and, if it's a clone orbit made, its
+        directory. Raises :class:`WorkspaceUnavailable` if they can't be, as ``invalid`` if
+        deleting the clone would lose work."""
         ...
 
 
@@ -527,12 +528,12 @@ class ControlPlane:
     ) -> None:
         """Stop serving the workspace ``command`` names: have ``workspaces`` stop flagging it
         served, then close its host, having ``connection``, if it's attached there, attached to
-        none, have ``workspaces`` let it go and, if ``command`` says to purge it, delete its
-        records, and send the catalog to ``connection`` and every listening connection, even if
-        closing the host fails; refused for a workspace not served, as ``busy`` while it runs
-        work or another connection views one of its sessions, as ``invalid`` when purging it
-        would lose work, or with the code ``workspaces`` gives, still served, if its flag can't
-        be cleared."""
+        none, if ``command`` says to purge it, delete its records while its lock is still held,
+        and have ``workspaces`` let it go, and send the catalog to ``connection`` and every
+        listening connection, even if closing the host or purging fails; refused for a workspace
+        not served, as ``busy`` while it runs work or another connection views one of its
+        sessions, as ``invalid`` when purging it would lose work, or with the code
+        ``workspaces`` gives, still served, if its flag can't be cleared."""
         workspace = command.workspace
         host = self._hosts[served_workspace(workspace, self._served)]
         self._check_removable(host)
@@ -542,9 +543,7 @@ class ControlPlane:
         if connection.workspace == workspace:
             self._detach(connection)
         try:
-            await self._let_go(host, workspaces)
-            if command.purge:
-                await self._purge(host, workspaces)
+            await self._let_go(host, workspaces, purge=command.purge)
         finally:
             await self._changed(connection)
 
@@ -561,7 +560,8 @@ class ControlPlane:
 
     @staticmethod
     async def _purge(host: WorkspaceHost, workspaces: WorkspaceSource) -> None:
-        """Have ``workspaces`` delete the records of ``host``'s workspace, no longer served;
+        """Have ``workspaces`` delete the records of ``host``'s workspace, no longer served but
+        still locked;
         refused with the code it gives if that fails."""
         name = host.path or host.workspace_id
         try:
@@ -591,14 +591,19 @@ class ControlPlane:
             await workspaces.set_served(host.workspace_id, True)
             raise
 
-    async def _let_go(self, host: WorkspaceHost, workspaces: WorkspaceSource) -> None:
-        """Stop serving ``host``'s workspace: close ``host``, then have ``workspaces`` let it
-        go, even if closing ``host`` fails; its place in line for a coder, if any, goes at
-        once."""
+    async def _let_go(
+        self, host: WorkspaceHost, workspaces: WorkspaceSource, *, purge: bool = False
+    ) -> None:
+        """Stop serving ``host``'s workspace: close ``host``, then, if ``purge``, delete its
+        records, as :meth:`_purge` does, while ``workspaces`` still holds its lock, then have
+        ``workspaces`` let it go, even if closing ``host`` or purging fails; its place in line
+        for a coder, if any, goes at once."""
         self._hosts.pop(host.workspace_id, None)
         self._coders.drop(host.workspace_id)
         try:
             await host.close()
+            if purge:
+                await self._purge(host, workspaces)
         finally:
             await workspaces.close(host.workspace_id)
 
