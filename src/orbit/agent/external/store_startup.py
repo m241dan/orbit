@@ -7,10 +7,12 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from orbit.agent.application.recovery import recover_parked
+from orbit.agent.domain.sessions import imported_note
 from orbit.agent.domain.storage_halt import recovered_note
 from orbit.agent.external.fallback_files import FallbackFiles
 from orbit.agent.external.repository import orbit_dir
-from orbit.agent.external.session_import import import_session_files, imported_note
+from orbit.agent.external.session_files import SESSIONS
+from orbit.agent.external.session_import import import_session_files
 from orbit.agent.external.sqlite_store import SqliteStore, WorkspaceStore
 from orbit.agent.external.workspace_registry import WorkspaceRegistry
 
@@ -61,7 +63,10 @@ async def _imported(store: WorkspaceStore, legacy: Path, root: Path) -> list[str
     """Import into ``store`` the old session files in ``legacy``, orbit's directory for the
     workspace at ``root``; returns the notes on what was imported."""
     imported = await import_session_files(store, legacy)
-    return [] if imported is None else [imported_note(imported, _shown(legacy, root))]
+    if imported is None:
+        return []
+    sessions = str(_shown(legacy, root) / SESSIONS)
+    return [imported_note(imported.count, sessions, imported.folder)]
 
 
 async def _recovered(store: WorkspaceStore, fallback: FallbackFiles, root: Path) -> list[str]:

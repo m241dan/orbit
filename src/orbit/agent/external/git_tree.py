@@ -17,6 +17,14 @@ from pathlib import Path
 
 from orbit.agent.application.ports import Merge, TreeFailed
 from orbit.agent.domain.checks import Setup
+from orbit.agent.domain.coder_tree import (
+    MergeStep,
+    catch_up_plan,
+    merge_plan,
+    stale_snapshots_note,
+    stashed_note,
+    unmerged_note,
+)
 from orbit.agent.external.git import git
 from orbit.agent.external.processes import run_process
 from orbit.agent.external.repository import ORBIT_DIR, find_git_common_dir
@@ -149,15 +157,13 @@ class GitCoderTree:
         return True
 
     async def integrate(self) -> Merge:
-        if self._base is None:
-            detail = f"There's no branch to merge into (detached HEAD); the work is on {BRANCH}."
-            return Merge("detached", detail)
-        base, coder = await self._tip(self._base), await self._tip(BRANCH)
-        if await self._is_ancestor(coder, base):
-            return Merge("merged")
-        if not await self._is_ancestor(base, coder):
-            return await self._rebase(await self._coder(), base)
-        return await self._fast_forward(base, coder)
+        base = coder = ""
+        coder_in_base = base_in_coder = False
+        if self._base is not None:
+            base, coder = await self._tip(self._base), await self._tip(BRANCH)
+            coder_in_base, base_in_coder = await self._ancestry(coder, base)
+        step = merge_plan(self._base is not None, coder_in_base, base_in_coder)
+        return await self._merge(step, base, coder)
 
     async def holds_work(self) -> bool:
         path = await self._coder()
@@ -234,29 +240,18 @@ class GitCoderTree:
         base = await self._base_branch()
         if base is None or not await self._exists(BRANCH):
             return None
-        count = int(
-            await self._git(
-                self._root, "rev-list", "--count", f"refs/heads/{base}..refs/heads/{BRANCH}"
-            )
+        count = await self._git(
+            self._root, "rev-list", "--count", f"refs/heads/{base}..refs/heads/{BRANCH}"
         )
-        if not count:
-            return None
-        return f"{count} commit{'s' if count > 1 else ''} on {BRANCH} not yet merged into {base}."
+        return unmerged_note(int(count), BRANCH, base)
 
     async def _stashed(self) -> str | None:
         stashes = await self._git(self._root, "stash", "list", "--format=%s")
-        count = sum(STASH_MESSAGE in line for line in stashes.splitlines())
-        return f"{count} stash(es) of unverified orbit work; see git stash list." if count else None
+        return stashed_note(sum(STASH_MESSAGE in line for line in stashes.splitlines()))
 
     async def _stale_snapshots(self) -> str | None:
         snapshots = await asyncio.to_thread(_snapshot_dirs, await self._snapshots_dir())
-        count = len(snapshots - self._snapshots)
-        if not count:
-            return None
-        return (
-            f"{count} snapshot worktree(s) left in .git/orbit by earlier runs; "
-            "remove them with git worktree remove."
-        )
+        return stale_snapshots_note(len(snapshots - self._snapshots))
 
     # Steps of prepare
 
@@ -280,16 +275,21 @@ class GitCoderTree:
 
     async def _catch_up(self, path: Path) -> None:
         """Bring the tree up to the base branch, when it's clean and there is one."""
+        base = await self._clean_base(path)
+        ancestry = await self._ancestry(base, "HEAD", path) if base else (False, False)
+        match catch_up_plan(bool(base), *ancestry):
+            case "fast-forward":
+                await self._git(path, "merge", "-q", "--ff-only", base)
+            case "rebase":
+                # A conflict leaves the work as it was, for integrate to report once it's verified.
+                _ = await self._rebase(path, base)
+
+    async def _clean_base(self, path: Path) -> str:
+        """The base branch's tip for the tree at ``path`` to catch up with; empty when there's
+        no base branch or the tree has changes."""
         if self._base is None or await self._dirty(path):
-            return
-        base = await self._tip(self._base)
-        if await self._is_ancestor(base, "HEAD", path):
-            return
-        if await self._is_ancestor("HEAD", base, path):
-            await self._git(path, "merge", "-q", "--ff-only", base)
-        else:
-            # A conflict leaves the work as it was, for integrate to report once it's verified.
-            _ = await self._rebase(path, base)
+            return ""
+        return await self._tip(self._base)
 
     async def _set_up(self, path: Path) -> None:
         if self.setup is None:
@@ -307,6 +307,21 @@ class GitCoderTree:
             raise TreeFailed(f"Couldn't record the setup in {stamp}: {error}") from error
 
     # Merging
+
+    async def _merge(self, step: MergeStep, base: str, coder: str) -> Merge:
+        """Carry out ``step`` to merge the coder's tip ``coder`` into the base branch's tip
+        ``base``."""
+        match step:
+            case "detached":
+                detail = (
+                    f"There's no branch to merge into (detached HEAD); the work is on {BRANCH}."
+                )
+                return Merge("detached", detail)
+            case "merged":
+                return Merge("merged")
+            case "fast-forward":
+                return await self._fast_forward(base, coder)
+        return await self._rebase(await self._coder(), base)
 
     async def _rebase(self, path: Path, base: str) -> Merge:
         """Replay the tree's work onto ``base``; a conflict leaves it as it was.
@@ -428,6 +443,14 @@ class GitCoderTree:
 
     async def _is_ancestor(self, older: str, newer: str, cwd: Path | None = None) -> bool:
         return await self._ask(cwd or self._root, "merge-base", "--is-ancestor", older, newer)
+
+    async def _ancestry(
+        self, first: str, second: str, cwd: Path | None = None
+    ) -> tuple[bool, bool]:
+        """Whether ``first`` is an ancestor of ``second``, then whether ``second`` is of
+        ``first``, asked only when it isn't, as the merge rules need no more."""
+        first_in_second = await self._is_ancestor(first, second, cwd)
+        return first_in_second, not first_in_second and await self._is_ancestor(second, first, cwd)
 
     async def _dirty(self, path: Path) -> bool:
         return bool(await self._git(path, "status", "--porcelain"))

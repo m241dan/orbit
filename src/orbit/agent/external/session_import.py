@@ -48,17 +48,6 @@ class Imported:
     folder: str
 
 
-def imported_note(imported: Imported, legacy_dir: Path) -> str:
-    """The note that ``imported``'s sessions were imported from ``legacy_dir``'s sessions
-    folder, which is now renamed."""
-    count = imported.count
-    noun = "session" if count == 1 else "sessions"
-    sessions = legacy_dir / SESSIONS
-    return (
-        f"Imported {count} saved {noun} from {sessions}; the old folder is now {imported.folder}."
-    )
-
-
 async def import_session_files(store: WorkspaceStore, legacy_dir: Path) -> Imported | None:
     """Import the sessions and review count saved as files in ``legacy_dir`` into ``store``;
     returns how many sessions it imported and where their folder went, or none when there's no

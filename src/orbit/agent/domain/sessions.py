@@ -335,6 +335,13 @@ def resumed_settings(saved: Settings, given: Settings, pinned: Collection[str]) 
     return saved.model_copy(update={name: getattr(given, name) for name in pinned})
 
 
+def imported_note(count: int, sessions: str, folder: str) -> str:
+    """The note that ``count`` sessions saved as files in the folder ``sessions`` were imported,
+    and that the folder is now named ``folder``."""
+    noun = "session" if count == 1 else "sessions"
+    return f"Imported {count} saved {noun} from {sessions}; the old folder is now {folder}."
+
+
 def parse_review_count(text: str) -> int:
     """The commits since the last super review in JSON ``text``; 0 when it's unreadable."""
     try:

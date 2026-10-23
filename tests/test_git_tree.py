@@ -980,11 +980,11 @@ async def test_leftovers_report_snapshots_left_by_other_sessions_only(repo: Path
     own = await tree.snapshot("HEAD")
 
     assert await tree.leftovers() == [
-        "2 snapshot worktree(s) left in .git/orbit by earlier runs; "
+        "2 snapshot worktrees left in .git/orbit by earlier runs; "
         "remove them with git worktree remove."
     ]
     assert await earlier.leftovers() == [
-        "1 snapshot worktree(s) left in .git/orbit by earlier runs; "
+        "1 snapshot worktree left in .git/orbit by earlier runs; "
         "remove them with git worktree remove."
     ]
     await tree.drop(own)
@@ -995,7 +995,7 @@ async def test_leftovers_report_snapshots_of_the_old_naming(repo: Path) -> None:
     git(repo, "worktree", "add", "-q", "--detach", str(repo / ".git" / "orbit" / "review-HEAD-1"))
     notes = await GitCoderTree(str(repo)).leftovers()
     assert notes == [
-        "1 snapshot worktree(s) left in .git/orbit by earlier runs; "
+        "1 snapshot worktree left in .git/orbit by earlier runs; "
         "remove them with git worktree remove."
     ]
 

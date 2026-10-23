@@ -17,6 +17,7 @@ from orbit.agent.domain.sessions import (
     check_addressed_session,
     default_name,
     deletion_refusal,
+    imported_note,
     newest_first,
     openable,
     parse_record,
@@ -459,3 +460,16 @@ def test_a_command_for_another_session_than_the_saved_one_viewed_is_refused() ->
         check_addressed_session("a", "b", "a")
     message = "Session 'a' isn't the one viewed; this connection views b."
     assert (refused.value.code, str(refused.value)) == (WRONG_SESSION, message)
+
+
+def test_the_import_note_says_how_many_sessions_came_from_where() -> None:
+    assert imported_note(3, ".git/orbit/sessions", "sessions.imported") == (
+        "Imported 3 saved sessions from .git/orbit/sessions; the old folder is now "
+        "sessions.imported."
+    )
+
+
+def test_the_import_note_counts_one_session_as_one() -> None:
+    assert imported_note(1, ".orbit/sessions", "sessions.imported-2") == (
+        "Imported 1 saved session from .orbit/sessions; the old folder is now sessions.imported-2."
+    )

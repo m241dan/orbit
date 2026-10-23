@@ -14,7 +14,7 @@ from orbit.agent.domain.sessions import (
     record_json,
 )
 from orbit.agent.external import session_import, sqlite_schema
-from orbit.agent.external.session_import import Imported, import_session_files, imported_note
+from orbit.agent.external.session_import import Imported, import_session_files
 from orbit.agent.external.session_locks import SessionLocks
 from orbit.agent.external.sqlite_store import NewRows
 from tests.session_builders import review_count_json
@@ -389,20 +389,3 @@ async def test_a_database_that_fails_blocks_the_import(
     finally:
         await store.close()
     assert (legacy / "sessions").is_dir()
-
-
-def test_the_import_note_says_how_many_sessions_came_from_where() -> None:
-    assert imported_note(first(3), Path(".git/orbit")) == (
-        "Imported 3 saved sessions from .git/orbit/sessions; the old folder is now "
-        "sessions.imported."
-    )
-
-
-def test_the_import_note_counts_one_session_as_one() -> None:
-    assert imported_note(first(1), Path(".orbit")).startswith("Imported 1 saved session from ")
-
-
-def test_the_import_note_names_the_folder_the_sessions_went_to() -> None:
-    assert imported_note(Imported(2, "sessions.imported-2"), Path(".orbit")).endswith(
-        "; the old folder is now sessions.imported-2."
-    )

@@ -1869,11 +1869,13 @@ orbit.tui  ──Command──▶  orbit.protocol.Session  ──▶  orbit.agen
     setup step that makes a fresh worktree ready, and the checks a configurator proposes), the
     `Catalog` (in `catalog`: the workspace and its sessions, the agents' roles, the triggers and
     the lanes), `ReviewPlanner` (in `reviews`: when to review, batches, rounds and caps), commit
-    messages (`commits`) and `usage` (parsing the subscription's usage limits, and when to fetch
+    messages (`commits`), `coder_tree` (how the coder's work is merged into the base branch, how
+    its worktree catches up with that branch, and the notes on what earlier runs left) and `usage` (parsing the subscription's usage limits, and when to fetch
     them again). `sessions` holds the rules of saved sessions: the `SessionRecord` and its format
     (versioned, with upgrades from older ones, or why a file is unreadable), how the list of
     sessions summarizes and orders them, when one may be opened, renamed or deleted, and the
-    notes and settings a resumed session starts with.
+    notes and settings a resumed session starts with, and the note on sessions imported from an
+    older orbit's files.
 - `orbit.tui`: frontend. Sends commands and renders events. Imports only `orbit.protocol`.
   `view` turns state and events into text and doesn't import Textual, with a module per area of
   the screen (`events`, `transcript`, `tool_calls`, `proposals`, `tasks`, `panels`, `agents`,
