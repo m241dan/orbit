@@ -1378,6 +1378,8 @@ file that can't be read stops it with status 2. To a server serving mTLS it show
 certificate `--cert <path>` and `--key <path>` give instead (see **Client certificates** above). The backend flags
 (`--model`, `--tools`, `--verify`, `--worktree`, `--review`, `--usage`, `--profile`) configure
 the control plane, so with `--connect` they stop it with status 2: give them to `orbit serve`.
+So does `--state-dir`, which says where a control plane run here keeps its state, and so finds
+one running here, neither of which a chat joining by URL does.
 `--new` and `--name` skip the session picker and open a new session in the workspace picked, as
 picking `New session` does. Any
 number of chats can connect at once, each showing what the others do; quitting one disconnects it
@@ -1417,8 +1419,9 @@ stops with status 2 saying what's wrong, as listed in **TLS and connection error
 with `--remote`. Only servers of the same account on the same machine are found this way; for
 any other, give `--connect` its URL, or name it in `[remotes]`. `--local` skips the search and
 always runs in-process, taking the backend flags; it can't go with `--connect` or `--remote`.
-A chat running in-process, with `--local` or with no server found, has nothing to show `--ca`,
-`--cert` or `--key`, so they stop it with status 2 rather than being ignored.
+A chat running in-process, with `--local` or with no server found, has nothing to show
+`--token-file`, `--ca`, `--cert` or `--key`, so they stop it with status 2 rather than being
+ignored. `--state-dir`, which it finds a server by, and the backend flags work as ever.
 
 A server serving TLS is found too. Its run file records the CA to trust, `ca` in `[server]`, or
 `client_ca` without one, and the hostname to connect by: one its certificate gives as a subject
@@ -1456,8 +1459,8 @@ A relative path is taken from the config directory, and `~` is expanded. `--ca` 
 certificate. A remote not configured stops it with status 2, listing the names that are (or saying
 none are); so do an unknown key in a remote, a `url` that isn't `wss://` or `ws://`, `cert`
 without `key` or the reverse, or `cert` and `key` with `token_file`, each naming the file and the
-key. `--remote` can't go with `--connect`, and the backend flags belong on `orbit serve` as they do
-with `--connect`.
+key. `--remote` can't go with `--connect`, and the backend flags belong on `orbit serve`, and
+`--state-dir` stops it, as they do with `--connect`.
 
 **Two machines.** To run the control plane on a server, `orbit.example.lan` (192.168.1.20), and
 chat from a laptop: on the server, make the CA and the server's certificate as in **TLS** above,

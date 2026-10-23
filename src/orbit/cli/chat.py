@@ -114,6 +114,7 @@ def chat(
     target = _target(connect, remote, user_config, given)
     if target is not None:
         _refuse_local(local, target.flag)
+        _refuse_state_dir(ctx, target.flag)
         joining = _joining(ctx, target.files, user_config, _opening(flags))
         where = f"not orbit chat {target.flag}"
         repository = _repository_for(target.url, workspace)
@@ -128,7 +129,9 @@ def chat(
         where = f"which runs at {found.url}; or pass --local to run one here"
         _join(joining, found.url, where)
         return
-    _refuse_tls_files(given, "--local runs one here" if local else "no orbit serve was found here")
+    _refuse_client_files(
+        given, "--local runs one here" if local else "no orbit serve was found here"
+    )
     # The only place the backend and frontend meet, and where the backend's external
     # adapters are plugged into its ports.
     profile = profile.expanduser().resolve() if profile else None
@@ -303,22 +306,36 @@ def _opening(flags: _Backend) -> NewSession | None:
     return NewSession(name=flags.name) if flags.fresh else None
 
 
-def _refuse_tls_files(given: _ClientFiles, reason: str) -> None:
-    """Exit with status 2 if --ca, --cert or --key were ``given`` to a chat running the control
-    plane here, which would ignore them, ``reason`` saying why it runs here."""
-    named = [flag for flag, path in _TLS_FLAGS.items() if getattr(given, path) is not None]
+def _refuse_client_files(given: _ClientFiles, reason: str) -> None:
+    """Exit with status 2 if --token-file, --ca, --cert or --key were ``given`` to a chat
+    running the control plane here, which would ignore them, ``reason`` saying why it runs
+    here."""
+    named = [flag for flag, path in _CLIENT_FLAGS.items() if getattr(given, path) is not None]
     if named:
+        kind = "connection files" if "--token-file" in named else "TLS files"
         typer.echo(
-            f"The TLS files given ({', '.join(named)}) say how to join a control plane, and"
+            f"The {kind} given ({', '.join(named)}) say how to join a control plane, and"
             f" {reason}: pass --connect or --remote with them, or leave them out.",
             err=True,
         )
         raise typer.Exit(2)
 
 
-_TLS_FLAGS = {"--ca": "ca", "--cert": "cert", "--key": "key"}
-"""The flags naming TLS files a joining chat uses, and the fields of :class:`_ClientFiles` they
-set."""
+_CLIENT_FLAGS = {"--token-file": "token_file", "--ca": "ca", "--cert": "cert", "--key": "key"}
+"""The flags naming the files a joining chat shows or trusts, and the fields of
+:class:`_ClientFiles` they set."""
+
+
+def _refuse_state_dir(ctx: typer.Context, flag: str) -> None:
+    """Exit with status 2 if --state-dir was given to a chat joining the control plane
+    ``flag``, --connect or --remote, names, which keeps its own state and would ignore it."""
+    if _given(ctx, "state"):
+        typer.echo(
+            f"--state-dir says where a control plane run here keeps its state, so it can't go"
+            f" with {flag}.",
+            err=True,
+        )
+        raise typer.Exit(2)
 
 
 def _refuse_local(local: bool, flag: str) -> None:

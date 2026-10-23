@@ -474,3 +474,42 @@ def test_tls_files_with_local_stop_chat_rather_than_being_ignored(
         " here: pass --connect or --remote with them, or leave them out."
     )
     assert in_process.built == [] and FakeApp.built == []
+
+
+@pytest.mark.usefixtures("token_file", "plane")
+def test_a_token_file_with_local_stops_chat_rather_than_being_ignored(
+    state: Path, tmp_path: Path, in_process: InProcess
+) -> None:
+    serving(state)
+    result = runner.invoke(app, ["chat", "--local", "--token-file", str(tmp_path / "token")])
+    assert result.exit_code == 2
+    assert result.stderr.startswith(
+        "The connection files given (--token-file) say how to join a control plane, and --local"
+        " runs one here: pass --connect or --remote with them, or leave them out."
+    )
+    assert in_process.built == [] and FakeApp.built == []
+
+
+@pytest.mark.usefixtures("project", "token_file", "plane")
+def test_a_token_file_with_no_control_plane_found_is_named_with_the_tls_files(
+    tmp_path: Path, in_process: InProcess
+) -> None:
+    flags = ["--token-file", str(tmp_path / "token"), "--ca", "ca.pem"]
+    result = runner.invoke(app, ["chat", *flags])
+    assert result.exit_code == 2
+    assert result.stderr.startswith(
+        "The connection files given (--token-file, --ca) say how to join a control plane, and no"
+        " orbit serve was found here"
+    )
+    assert in_process.built == [] and FakeApp.built == []
+
+
+@pytest.mark.usefixtures("plane", "token_file")
+def test_state_dir_finds_the_orbit_serve_running_on_it(
+    project: Path, tmp_path: Path, in_process: InProcess
+) -> None:
+    elsewhere = tmp_path / "elsewhere"
+    serving(elsewhere)
+    result = runner.invoke(app, ["chat", "--state-dir", str(elsewhere)])
+    assert result.exit_code == 0, result.output
+    assert len(FakeApp.built) == 1 and in_process.built == []

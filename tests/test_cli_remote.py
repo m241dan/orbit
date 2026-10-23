@@ -156,6 +156,16 @@ def test_remote_cant_go_with_local(config: Path) -> None:
     assert FakeApp.built == []
 
 
+def test_state_dir_with_remote_exits_rather_than_being_ignored(config: Path) -> None:
+    _remotes(config, f'[remotes.work]\nurl = "{URL}"\n')
+    result = runner.invoke(app, ["chat", "--remote", "work", "--state-dir", "/tmp/s"])
+    assert result.exit_code == 2
+    assert "--state-dir says where a control plane run here keeps its state, so it can't go" in (
+        result.stderr
+    )
+    assert FakeApp.built == []
+
+
 def test_a_backend_flag_with_remote_exits_saying_it_belongs_on_serve(config: Path) -> None:
     _remotes(config, f'[remotes.work]\nurl = "{URL}"\n')
     result = runner.invoke(app, ["chat", "--remote", "work", "--model", "opus"])

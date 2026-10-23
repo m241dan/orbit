@@ -113,6 +113,17 @@ def test_a_backend_flag_with_connect_exits_saying_it_belongs_on_serve(
 
 
 @pytest.mark.usefixtures("token_file")
+def test_state_dir_with_connect_exits_rather_than_being_ignored() -> None:
+    result = runner.invoke(app, ["chat", "--connect", URL, "--state-dir", "/tmp/s"])
+    assert result.exit_code == 2
+    assert result.stderr.startswith(
+        "--state-dir says where a control plane run here keeps its state, so it can't go with"
+        " --connect."
+    )
+    assert FakeApp.built == []
+
+
+@pytest.mark.usefixtures("token_file")
 def test_every_backend_flag_given_is_named() -> None:
     result = runner.invoke(app, ["chat", "--connect", URL, "--model", "opus", "--no-usage"])
     assert result.exit_code == 2
