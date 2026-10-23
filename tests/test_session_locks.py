@@ -1,6 +1,7 @@
 """Session locks: a lock file per session while an orbit has it open."""
 
 import asyncio
+import errno
 import fcntl
 import os
 import stat
@@ -14,7 +15,8 @@ from pathlib import Path
 
 import pytest
 
-from orbit.agent.application.ports import StoreFailed
+from orbit.agent.application.ports import StorageFailed, StoreFailed
+from orbit.agent.domain.storage_halt import StorageErrorKind
 from orbit.agent.external import session_locks
 from orbit.agent.external.session_locks import SessionLocks, locked_dir
 
@@ -100,6 +102,50 @@ async def test_a_lock_that_fails_after_opening_is_let_go(
         with pytest.raises(StoreFailed, match=r"Couldn't lock the session .*abc\.lock"):
             await locks_in(tmp_path).acquire("abc")
     assert await locks_in(tmp_path).acquire("abc")
+
+
+FAILURES = [(errno.ENOSPC, StorageErrorKind.DISK_FULL), (errno.EROFS, StorageErrorKind.READ_ONLY)]
+"""Operating system errors, and what orbit makes of them."""
+
+VERBS = {"release": "unlock", "remove": "delete"}
+"""What failing to let go of a lock says it couldn't do, by how it was let go of."""
+
+
+@pytest.mark.parametrize(("number", "kind"), FAILURES)
+async def test_a_lock_that_fails_to_be_taken_says_what_kind_of_failure_on_which_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, number: int, kind: StorageErrorKind
+) -> None:
+    def fail(fd: int, length: int) -> None:
+        raise OSError(number, os.strerror(number))
+
+    monkeypatch.setattr(os, "ftruncate", fail)
+    with pytest.raises(StorageFailed, match=r"^Couldn't lock the session ") as caught:
+        await locks_in(tmp_path).acquire("abc")
+    error = caught.value
+    assert error.kind == kind and error.database == str(sessions(tmp_path) / "abc.lock")
+    assert error.error == str(OSError(number, os.strerror(number)))
+
+
+@pytest.mark.parametrize(("number", "kind"), FAILURES)
+@pytest.mark.parametrize("action", ["release", "remove"])
+async def test_a_lock_that_fails_to_be_let_go_of_says_what_kind_of_failure_on_which_file(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    action: str,
+    number: int,
+    kind: StorageErrorKind,
+) -> None:
+    locks = locks_in(tmp_path)
+    await locks.acquire("abc")
+
+    def refused(path: Path, missing_ok: bool = False) -> None:
+        raise OSError(number, os.strerror(number))
+
+    monkeypatch.setattr(Path, "unlink", refused)
+    with pytest.raises(StorageFailed, match=rf"^Couldn't {VERBS[action]} the session ") as caught:
+        await getattr(locks, action)("abc")
+    assert caught.value.kind == kind
+    assert caught.value.database == str(sessions(tmp_path) / "abc.lock")
 
 
 async def test_releasing_removes_our_lock(tmp_path: Path) -> None:
@@ -201,8 +247,11 @@ async def test_a_cancelled_acquire_of_a_lock_we_hold_keeps_it(tmp_path: Path) ->
 async def test_acquiring_after_closing_raises_and_takes_no_lock(tmp_path: Path) -> None:
     locks = locks_in(tmp_path)
     locks.close()
-    with pytest.raises(StoreFailed, match=r"Couldn't lock the session .*abc\.lock: the locks"):
+    with pytest.raises(
+        StoreFailed, match=r"Couldn't lock the session .*abc\.lock: the locks"
+    ) as caught:
         await locks.acquire("abc")
+    assert type(caught.value) is StoreFailed
     assert await locks_in(tmp_path).acquire("abc")
 
 
@@ -362,8 +411,11 @@ async def test_letting_go_after_closing_raises_and_leaves_the_lock(
     recorder = CloseRecorder()
     with monkeypatch.context() as patch:
         patch.setattr(os, "close", recorder)
-        with pytest.raises(StoreFailed, match=r"Couldn't \w+ the session .*abc\.lock: .*closed"):
+        with pytest.raises(
+            StoreFailed, match=r"Couldn't \w+ the session .*abc\.lock: .*closed"
+        ) as caught:
             await getattr(locks, action)("abc")
+    assert type(caught.value) is StoreFailed
     assert [i for i in recorder.closed if i is None or i == inode] == []
     assert (sessions(tmp_path) / "abc.lock").read_text() == str(os.getpid())
     assert not await locks_in(tmp_path).acquire("abc")

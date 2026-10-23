@@ -41,16 +41,15 @@ SeqSpan = tuple[int, int]
 _CAUSES = {
     StorageErrorKind.DISK_FULL: "The disk is full: free space on the disk holding {database}.",
     StorageErrorKind.READ_ONLY: (
-        "The database can't be written: check the owner and mode of the state directory holding"
-        " {database}, and of the files in it."
+        "{database} can't be written: check the owner and mode of the state directory holding"
+        " it, and of the files in it."
     ),
     StorageErrorKind.LOCKED: (
         "The database stayed locked beyond the busy timeout: another process holds the"
         " database; close it, or wait for it to finish."
     ),
     StorageErrorKind.MISSING: (
-        "The database file is missing: the state directory holding {database} was moved or"
-        " removed; put it back."
+        "{database} is missing: the state directory holding it was moved or removed; put it back."
     ),
     StorageErrorKind.UNKNOWN: "Orbit doesn't recognise this error, so it can't say what caused it.",
 }

@@ -776,8 +776,9 @@ agents, the planner's turn, the reviews and the startup check are cancelled, and
 but quitting and "Try again" is refused with `storage_failed` and the same explanation. Nothing more is written
 to `orbit.db` until storage is resumed.
 
-The explanation, shown in the conversation as an error, says which write failed, the database
-and the error SQLite reported, what orbit makes of it and what to do: a full disk needs free
+The explanation, shown in the conversation as an error, says which write failed, the file it
+failed on (the database, or the session's lock file when taking the lock failed) and the error
+SQLite or the operating system reported, what orbit makes of it and what to do: a full disk needs free
 space; a read-only database or a permission error means checking the owner and mode of the state
 directory; a database locked beyond the busy timeout means another process holds it; a missing
 file means the state directory was moved or removed. An error orbit doesn't recognise is said to

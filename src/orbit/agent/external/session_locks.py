@@ -16,8 +16,9 @@ from contextlib import contextmanager, suppress
 from enum import Enum, auto
 from pathlib import Path
 
-from orbit.agent.application.ports import StoreFailed
+from orbit.agent.application.ports import StorageFailed, StoreFailed
 from orbit.agent.external.file_locks import take_flock
+from orbit.agent.external.sqlite_errors import error_kind
 
 
 def check_session_id(session_id: str) -> None:
@@ -62,6 +63,12 @@ def _lock_held(lock: Path) -> bool:
     return False
 
 
+def _failed(failure: str, lock: Path, error: OSError) -> StorageFailed:
+    """The error saying ``failure`` happened to the lock file ``lock`` with ``error``, of the kind
+    orbit makes of it."""
+    return StorageFailed(f"{failure}: {error}", str(lock), str(error), error_kind(error))
+
+
 class _Taken(Enum):
     """What came of trying to take a session's lock."""
 
@@ -87,7 +94,8 @@ class SessionLocks:
     async def acquire(self, session_id: str) -> bool:
         """Lock the session ``session_id``; returns ``False`` when another orbit holds its lock.
 
-        Raises :class:`StoreFailed` when the lock can't be taken, as after :meth:`close`.
+        Raises :class:`StoreFailed` when the lock can't be taken, as after :meth:`close`: a
+        :class:`StorageFailed` when its file fails.
         """
         taking = asyncio.ensure_future(asyncio.to_thread(self._acquire, session_id))
         try:
@@ -147,7 +155,7 @@ class SessionLocks:
             with locked_dir(lock.parent, fcntl.LOCK_EX):
                 return self._take(session_id, lock)
         except OSError as error:
-            raise StoreFailed(f"Couldn't lock the session {lock}: {error}") from error
+            raise _failed(f"Couldn't lock the session {lock}", lock, error) from error
 
     def _take(self, session_id: str, lock: Path) -> _Taken:
         """Take the session ``session_id``'s ``lock`` unless another orbit holds it; returns
@@ -180,7 +188,7 @@ class SessionLocks:
                 self._let_go(session_id, lock, action)
                 lock.unlink(missing_ok=True)
         except OSError as error:
-            raise StoreFailed(f"Couldn't {action} the session {lock}: {error}") from error
+            raise _failed(f"Couldn't {action} the session {lock}", lock, error) from error
 
     def _let_go(self, session_id: str, lock: Path, action: str) -> None:
         """Let go of the session ``session_id``'s ``lock`` if this holds it.

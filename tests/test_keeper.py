@@ -1,9 +1,12 @@
 """Keeping the open session saved: only once it's used, after each change, locked while open."""
 
 import asyncio
+import errno
+import os
 from collections.abc import Awaitable
 from dataclasses import replace
 from datetime import timedelta
+from pathlib import Path
 
 import pytest
 
@@ -18,15 +21,18 @@ from orbit.agent.application.keeper import (
     new_session_id,
 )
 from orbit.agent.application.ports import StoreFailed
+from orbit.agent.application.storage_halt import StorageHalt
 from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.reviews import LaneSnapshot, PlannerSnapshot
 from orbit.agent.domain.sessions import OPEN_UNDELETABLE, OPEN_UNRENAMABLE, SessionRecord
 from orbit.agent.domain.storage_halt import FailedWrite
+from orbit.agent.external.session_locks import SessionLocks
 from orbit.protocol import (
     BUSY,
     INVALID,
     LOCKED,
     SAVE_FAILED,
+    STORAGE_FAILED,
     UNKNOWN,
     ErrorOccurred,
     Notice,
@@ -297,6 +303,47 @@ async def test_a_lock_that_cannot_be_taken_halts_the_session_unkept() -> None:
         (FailedWrite.SESSION_RECORD, "Couldn't lock the session x.lock: disk full")
     ]
     assert store.saved == [] and not keeper.kept
+
+
+class LockingStore(FakeStore):
+    """A store taking its sessions' locks as files in ``directory``."""
+
+    def __init__(self, directory: Path) -> None:
+        super().__init__()
+        self.locks = SessionLocks(directory)
+
+    async def acquire(self, session_id: str) -> bool:
+        return await self.locks.acquire(session_id)
+
+
+@pytest.mark.parametrize(
+    ("number", "cause"),
+    [
+        (errno.ENOSPC, "The disk is full: free space on the disk holding {lock}."),
+        (errno.EROFS, "{lock} can't be written: check the owner and mode of the state directory"),
+    ],
+)
+async def test_a_lock_file_that_cannot_be_written_halts_the_session_naming_the_cause(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, number: int, cause: str
+) -> None:
+    def fail(fd: int, length: int) -> None:
+        raise OSError(number, os.strerror(number))
+
+    monkeypatch.setattr(os, "ftruncate", fail)
+    published = Published()
+    halt = StorageHalt(published)
+    keeper = SessionKeeper(
+        LockingStore(tmp_path), published, halt, NewSessions(Ticks(), lambda: "session-1")
+    )
+    await save(keeper, WITH_TASK)
+    while not published.events:
+        await asyncio.sleep(0)
+    await halt.close()
+
+    [code], [explanation] = published.codes, published.errors
+    lock = tmp_path / "session-1.lock"
+    assert code == STORAGE_FAILED and f"saving the session record to {lock} failed" in explanation
+    assert cause.format(lock=lock) in explanation
 
 
 async def test_a_retry_takes_the_lock_that_could_not_be_taken_and_saves_the_session() -> None:

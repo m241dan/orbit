@@ -17,6 +17,7 @@ from orbit.agent.domain.storage_halt import (
 
 DATABASE = "/state/orbit/orbit.db"
 FALLBACK = "/state/orbit/fallback/w1-s1.jsonl"
+LOCK = "/state/orbit/locks/w1/s1.lock"
 
 
 def fault(
@@ -89,6 +90,24 @@ def test_a_missing_file_says_the_state_directory_was_moved_or_removed() -> None:
     text = storage_halt_explanation(fault(StorageErrorKind.MISSING), None, FALLBACK)
 
     assert "was moved or removed" in text
+
+
+@pytest.mark.parametrize(
+    ("kind", "cause"),
+    [
+        (StorageErrorKind.DISK_FULL, f"The disk is full: free space on the disk holding {LOCK}."),
+        (StorageErrorKind.READ_ONLY, f"{LOCK} can't be written: check the owner and mode of the"),
+        (StorageErrorKind.MISSING, f"{LOCK} is missing: the state directory holding it was"),
+    ],
+)
+def test_a_failing_lock_file_is_named_in_the_cause_as_itself(
+    kind: StorageErrorKind, cause: str
+) -> None:
+    lock_fault = StorageFault(FailedWrite.SESSION_RECORD, LOCK, "[Errno 28] failed", kind)
+
+    text = storage_halt_explanation(lock_fault, None, FALLBACK)
+
+    assert cause in text and "database" not in text
 
 
 def test_an_unknown_error_says_orbit_does_not_recognise_it() -> None:
