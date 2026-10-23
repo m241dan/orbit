@@ -23,7 +23,6 @@ from orbit.protocol import (
     SendMessage,
     SessionState,
     SessionStateChanged,
-    TaskSpec,
     TurnEndReason,
 )
 from tests.agent_fakes import (
@@ -42,11 +41,11 @@ from tests.agent_fakes import (
     send,
     session_for,
 )
+from tests.server_fakes import TASK
 
 OPEN = "session-1"
 """The id of the session :func:`session_for` opens."""
 
-TASK = TaskSpec(prompt="Add a flag.")
 
 RUNNING = Stop("running", lambda e: isinstance(e, SessionStateChanged) and e.state == "running")
 IDLE = Stop("idle", lambda e: isinstance(e, SessionStateChanged) and e.state == "idle")

@@ -3,7 +3,6 @@ itself: their records go, other workspaces' stay, and a clone's directory goes o
 holds nothing its remote doesn't."""
 
 import asyncio
-from collections.abc import AsyncIterator
 from contextlib import ExitStack
 from pathlib import Path
 
@@ -28,13 +27,6 @@ from tests.git_repo import bare_repository, commit_file, git, init_repo
 from tests.plane_fakes import payloads, refused, welcomed
 from tests.serving import FLAGS, serving, until
 from tests.store_views import database, record
-
-
-@pytest.fixture
-async def store(state: Path) -> AsyncIterator[SqliteStore]:
-    opened = await SqliteStore.open(state)
-    yield opened
-    await opened.close()
 
 
 @pytest.fixture

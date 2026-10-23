@@ -1,7 +1,5 @@
 """Importing an older orbit's session files into the SQLite store."""
 
-import fcntl
-import os
 import sqlite3
 from collections.abc import AsyncIterator, Iterator
 from contextlib import AbstractContextManager, closing, contextmanager
@@ -20,7 +18,7 @@ from orbit.agent.external.session_import import Imported, import_session_files, 
 from orbit.agent.external.session_locks import SessionLocks
 from orbit.agent.external.sqlite_store import NewRows
 from tests.session_builders import review_count_json
-from tests.store_views import OwnView, open_view, record
+from tests.store_views import OwnView, held, open_view, record
 
 
 @pytest.fixture
@@ -44,17 +42,6 @@ async def store(tmp_path: Path) -> AsyncIterator[OwnView]:
     opened = await open_view(tmp_path / "state", workspace)
     yield opened
     await opened.close()
-
-
-@contextmanager
-def held(lock: Path) -> Iterator[None]:
-    """Hold ``lock`` as another orbit would."""
-    fd = os.open(lock, os.O_RDWR | os.O_CREAT)
-    try:
-        fcntl.flock(fd, fcntl.LOCK_EX)
-        yield
-    finally:
-        os.close(fd)
 
 
 @contextmanager

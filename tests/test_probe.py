@@ -9,8 +9,7 @@ from websockets.asyncio.server import ServerConnection, serve
 from websockets.http11 import Request, Response
 
 from orbit.client import TokenRejected, accepts
-
-TOKEN = "the-token"
+from tests.server_fakes import TOKEN
 
 
 @asynccontextmanager

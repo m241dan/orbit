@@ -23,14 +23,11 @@ from orbit.protocol import (
     CommandRefused,
     Event,
     EventEnvelope,
-    TaskSpec,
     TurnEndReason,
     WorkspaceCloning,
 )
 from tests.agent_fakes import HELLO, LOCK_RETRY, ROLES, Call, FakeHost, ScriptedLauncher
 from tests.connection_helpers import say, taken
-
-TASK = TaskSpec(prompt="Add a flag.")
 
 
 def workspace(

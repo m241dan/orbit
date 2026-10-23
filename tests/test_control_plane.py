@@ -57,20 +57,7 @@ from orbit.protocol import (
     encode,
 )
 from tests.agent_fakes import board_of, claims_done, control_plane, session_for
-
-TOKEN = "the-token"
-LOOPBACK = ServerSettings(port=0)
-TASK = TaskSpec(prompt="Add a flag.")
-
-
-class Lines:
-    """The lines the server said."""
-
-    def __init__(self) -> None:
-        self.said: list[str] = []
-
-    def __call__(self, line: str) -> None:
-        self.said.append(line)
+from tests.server_fakes import LOOPBACK, TASK, TOKEN, Lines, serving_plane
 
 
 @asynccontextmanager
@@ -81,12 +68,8 @@ async def serving(
 ) -> AsyncIterator[str]:
     """The URL of a server of ``session`` (a new one if none), stopped and closed after."""
     served = control_plane(session or WorkspaceHost())
-    server = ControlPlaneServer(served, lambda: TOKEN, settings, lines or Lines())
-    url = await server.start()
-    try:
+    async with serving_plane(served, served.close, settings, say=lines or Lines()) as (url, _):
         yield url
-    finally:
-        await server.stop(served.close)
 
 
 def frontend(url: str, token: str | None = TOKEN) -> "connect":

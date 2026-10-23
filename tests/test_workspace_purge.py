@@ -2,7 +2,6 @@
 managed clone's directory, unless that would lose work; other workspaces untouched."""
 
 import shutil
-from collections.abc import AsyncIterator
 from pathlib import Path
 
 import pytest
@@ -16,13 +15,6 @@ from orbit.agent.external.workspace_registry import Workspace, WorkspaceRegistry
 from tests.agent_fakes import notice
 from tests.git_repo import bare_repository, commit_file, git
 from tests.store_views import database, record
-
-
-@pytest.fixture
-async def store(state: Path) -> AsyncIterator[SqliteStore]:
-    opened = await SqliteStore.open(state)
-    yield opened
-    await opened.close()
 
 
 async def used(store: SqliteStore, path: Path, *, managed: bool = False) -> str:

@@ -6,7 +6,7 @@ import re
 import subprocess
 import threading
 import time
-from collections.abc import AsyncIterator, Callable
+from collections.abc import Callable
 from contextlib import ExitStack
 from pathlib import Path
 
@@ -38,13 +38,6 @@ from orbit.protocol import INTERNAL, INVALID
 FLAGS = _Backend(None, None, False, False, False, False, new=False, name=None)
 CLONES = Path("/nonexistent/clones")
 """A clone directory for serving that clones nothing."""
-
-
-@pytest.fixture
-async def store(tmp_path: Path) -> AsyncIterator[SqliteStore]:
-    opened = await SqliteStore.open(tmp_path / "state")
-    yield opened
-    await opened.close()
 
 
 @pytest.fixture

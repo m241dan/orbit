@@ -15,7 +15,6 @@ from orbit.protocol import (
     EventEnvelope,
     NewSession,
     Notice,
-    TaskSpec,
     TaskState,
 )
 from tests.agent_fakes import (
@@ -35,9 +34,6 @@ YESTERDAY = datetime(2026, 10, 16, 18, 2, tzinfo=UTC)
 
 
 EARLIER = datetime(2026, 10, 15, 9, 0, tzinfo=UTC)
-
-
-TASK = TaskSpec(prompt="Add a flag.")
 
 
 def saved(session_id: str, *tasks: TaskState, **fields: Any) -> SessionRecord:

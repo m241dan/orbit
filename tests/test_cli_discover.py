@@ -18,10 +18,10 @@ from orbit.cli import app
 from orbit.client import HandshakeRefused, TokenRejected, messages
 from orbit.protocol import NewSession
 from tests.cli_fakes import FakeApp, FakeClient, fake_tui
+from tests.server_fakes import URL
 from tests.tls_certs import ServerFiles, make_ca, make_client
 
 runner = CliRunner()
-URL = "ws://127.0.0.1:7433/"
 
 
 @dataclass

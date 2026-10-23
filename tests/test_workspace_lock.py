@@ -11,8 +11,7 @@ import pytest
 
 from orbit.agent.domain.ownership import WorkspaceOwner
 from orbit.agent.external.workspace_lock import WorkspaceLock
-
-URL = "ws://127.0.0.1:7433/"
+from tests.server_fakes import URL
 
 
 def test_the_first_orbit_takes_the_lock_naming_its_process(tmp_path: Path) -> None:

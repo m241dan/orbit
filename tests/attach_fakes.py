@@ -14,11 +14,11 @@ from orbit.protocol import (
     EventEnvelope,
     SessionStateChanged,
     Snapshot,
-    TaskSpec,
     TaskState,
 )
 from tests.agent_fakes import WORKSPACE, FakeStore, Ticks
 from tests.connection_helpers import joined, received, say
+from tests.server_fakes import TASK
 
 OPEN = "today-id"
 """The id of the workspace's open session."""
@@ -29,9 +29,6 @@ EARLIER = "earlier"
 
 
 WHEN = datetime(2026, 10, 1, 9, 0, tzinfo=UTC)
-
-
-TASK = TaskSpec(prompt="Add a flag.")
 
 
 SAVED_TASK = TaskState(id="t1", task=TASK, status="completed")

@@ -36,7 +36,6 @@ from orbit.protocol import (
 from tests.agent_fakes import HELLO, STEP, FakeStore, Steps
 from tests.connection_helpers import joined, say, taken
 from tests.plane_fakes import (
-    TASK,
     FakeSource,
     idle,
     ids,
@@ -46,6 +45,7 @@ from tests.plane_fakes import (
     working,
     workspace,
 )
+from tests.server_fakes import TASK
 
 
 class Slow(WorkspaceHost):

@@ -3,7 +3,6 @@ directory, then serving each clone, flagged served and managed."""
 
 import asyncio
 import sqlite3
-from collections.abc import AsyncIterator
 from contextlib import ExitStack
 from pathlib import Path
 
@@ -24,13 +23,6 @@ from tests.git_repo import bare_repository, init_repo, started
 from tests.plane_fakes import payloads, refused, welcomed
 from tests.process_checks import gone
 from tests.serving import serving, until
-
-
-@pytest.fixture
-async def store(tmp_path: Path) -> AsyncIterator[SqliteStore]:
-    opened = await SqliteStore.open(tmp_path / "state")
-    yield opened
-    await opened.close()
 
 
 @pytest.fixture

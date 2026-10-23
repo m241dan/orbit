@@ -3,9 +3,10 @@
 from dataclasses import replace
 
 from orbit.agent.application.keeper import Contents, SessionKeeper
-from orbit.protocol import ErrorOccurred, Event, Settings, TaskSpec, TaskState, Usage
+from orbit.protocol import ErrorOccurred, Event, Settings, TaskState, Usage
+from tests import server_fakes
 
-TASK = TaskState(id="1", task=TaskSpec(prompt="Add a flag."))
+TASK = TaskState(id="1", task=server_fakes.TASK)
 
 
 EMPTY = Contents(

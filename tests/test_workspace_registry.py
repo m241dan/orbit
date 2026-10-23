@@ -5,7 +5,6 @@ import shutil
 import sqlite3
 import subprocess
 import threading
-from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -22,13 +21,6 @@ from tests.store_views import database
 
 REPO = "root git@github.com:o/r.git"
 """The fingerprint of a repository, wherever it is."""
-
-
-@pytest.fixture
-async def store(tmp_path: Path) -> AsyncIterator[SqliteStore]:
-    opened = await SqliteStore.open(tmp_path / "state")
-    yield opened
-    await opened.close()
 
 
 def directory(tmp_path: Path, name: str) -> Path:

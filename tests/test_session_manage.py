@@ -27,7 +27,8 @@ from tests.agent_fakes import (
     send,
     until_marked,
 )
-from tests.session_builders import EARLIER, TASK, messages, saved, store_with, switching
+from tests.server_fakes import TASK
+from tests.session_builders import EARLIER, messages, saved, store_with, switching
 
 Managing = RenameSession | DeleteSession
 

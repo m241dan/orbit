@@ -69,9 +69,9 @@ from tests.agent_fakes import (
     until_marked,
     verified,
 )
+from tests.server_fakes import TASK
 from tests.session_builders import (
     EARLIER,
-    TASK,
     YESTERDAY,
     failing_startup,
     last_of,

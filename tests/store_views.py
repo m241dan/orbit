@@ -1,5 +1,7 @@
 """A workspace's view of a SQLite store of its own, as one orbit serving one workspace has."""
 
+import fcntl
+import os
 import sqlite3
 import threading
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
@@ -9,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from orbit.agent.domain.sessions import SessionRecord
+from orbit.agent.domain.sessions import SessionRecord, record_json
 from orbit.agent.external.sqlite_store import THREAD_PREFIX, SqliteStore, WorkspaceStore
 from orbit.agent.external.workspace_registry import WorkspaceRegistry
 from orbit.protocol import EventEnvelope
@@ -62,6 +64,14 @@ def workspace(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
+async def store(state: Path) -> AsyncIterator[SqliteStore]:
+    """A store in ``state``, closed after the test."""
+    opened = await SqliteStore.open(state)
+    yield opened
+    await opened.close()
+
+
+@pytest.fixture
 async def open_store(state: Path) -> AsyncIterator[Opener]:
     """Opens a store in ``state`` for a workspace, closing it after the test."""
     opened: list[OwnView] = []
@@ -86,6 +96,28 @@ WHEN = datetime(2026, 10, 17, 14, 30, tzinfo=UTC)
 def record(session_id: str = "abc", name: str = "Oct 17 14:30") -> SessionRecord:
     """A session record ``session_id`` named ``name``, created and last active at ``WHEN``."""
     return SessionRecord(id=session_id, name=name, created=WHEN, last_active=WHEN)
+
+
+SAVED = record(name="auth rework")
+
+
+def legacy_sessions(orbit_dir: Path) -> Path:
+    """An older orbit's sessions folder in the orbit directory ``orbit_dir``, holding ``SAVED``."""
+    sessions = orbit_dir / "sessions"
+    sessions.mkdir(parents=True)
+    (sessions / "abc.json").write_text(record_json(SAVED))
+    return sessions
+
+
+@contextmanager
+def held(lock: Path) -> Iterator[None]:
+    """Hold ``lock`` as another orbit would."""
+    fd = os.open(lock, os.O_RDWR | os.O_CREAT)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        os.close(fd)
 
 
 @contextmanager

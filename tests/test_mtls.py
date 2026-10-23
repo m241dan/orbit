@@ -34,21 +34,12 @@ from orbit.protocol import (
     decode_event,
     encode,
 )
+from tests.server_fakes import Lines, serving_plane
 from tests.tls_certs import Ca, ServerFiles, make_ca, make_client, make_server
 
 HELLO = CommandEnvelope(
     command_id="hello", payload=Hello(client="tests", protocol_version=PROTOCOL_VERSION)
 )
-
-
-class Lines:
-    """The lines the server said."""
-
-    def __init__(self) -> None:
-        self.said: list[str] = []
-
-    def __call__(self, line: str) -> None:
-        self.said.append(line)
 
 
 @pytest.fixture
@@ -82,14 +73,13 @@ async def serving(
 ) -> AsyncIterator[tuple[str, ControlPlaneServer]]:
     """The URL of a server serving as ``settings`` say, telling ``lines``, and the server."""
     served = ControlPlane([WorkspaceHost()])
-    server = ControlPlaneServer(served, lambda: "", settings, lines)
-    if revoked is not None:
-        server.revoked = lambda: revoked
-    url = await server.start()
-    try:
+    async with serving_plane(served, served.close, settings, token=lambda: "", say=lines) as (
+        url,
+        server,
+    ):
+        if revoked is not None:
+            server.revoked = lambda: revoked
         yield url.replace("127.0.0.1", "localhost"), server
-    finally:
-        await server.stop(served.close)
 
 
 async def _welcomed(url: str, context: ssl.SSLContext) -> bool:

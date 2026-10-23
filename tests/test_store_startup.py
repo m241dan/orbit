@@ -1,27 +1,26 @@
 """Opening a workspace's store at startup: importing old session files, then fallback files."""
 
 import asyncio
-import fcntl
-import os
-import threading
-from collections.abc import Iterator
-from contextlib import contextmanager
-from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
 from orbit.agent import ImportBlocked, OpenedStore, RecoveryFailed, open_workspace_store
 from orbit.agent.application.ports import ReadFailed, StoredSession
-from orbit.agent.domain.sessions import SessionRecord, record_json
+from orbit.agent.domain.sessions import SessionRecord
 from orbit.agent.external import store_startup, workspace_registry
 from orbit.agent.external.session_import import Imported
 from orbit.agent.external.sqlite_store import SqliteStore, WorkspaceStore
 from orbit.protocol import EventEnvelope, Notice, encode
-from tests.store_views import open_view, workspace_id_of
+from tests.store_views import (
+    WHEN,
+    held,
+    legacy_sessions,
+    open_view,
+    store_threads,
+    workspace_id_of,
+)
 
-WHEN = datetime(2026, 10, 17, 14, 30, tzinfo=UTC)
-SAVED = SessionRecord(id="abc", name="auth rework", created=WHEN, last_active=WHEN)
 IMPORT_NOTE = (
     "Imported 1 saved session from .orbit/sessions; the old folder is now sessions.imported."
 )
@@ -39,14 +38,6 @@ def root(tmp_path: Path) -> Path:
 def state(tmp_path: Path) -> Path:
     """A state directory outside the workspace."""
     return tmp_path / "state"
-
-
-def legacy_sessions(root: Path) -> Path:
-    """An older orbit's sessions folder in ``root``'s orbit directory, holding ``SAVED``."""
-    sessions = root / ".orbit" / "sessions"
-    sessions.mkdir(parents=True)
-    (sessions / "abc.json").write_text(record_json(SAVED))
-    return sessions
 
 
 def parked_notice(seq: int) -> EventEnvelope:
@@ -71,21 +62,6 @@ async def park_in_repository(state: Path, root: Path, *seqs: int, session: str =
     numbered ``seqs``."""
     workspace_id = await workspace_id_of(state, root)
     return park(root / ".orbit" / "fallback" / f"{workspace_id}-{session}.jsonl", *seqs)
-
-
-def store_threads() -> list[str]:
-    return [t.name for t in threading.enumerate() if t.name.startswith("orbit-sqlite")]
-
-
-@contextmanager
-def held(lock: Path) -> Iterator[None]:
-    """Hold ``lock`` as another orbit would."""
-    fd = os.open(lock, os.O_RDWR | os.O_CREAT)
-    try:
-        fcntl.flock(fd, fcntl.LOCK_EX)
-        yield
-    finally:
-        os.close(fd)
 
 
 async def opened_notes(state: Path, root: Path) -> list[str]:
@@ -127,7 +103,7 @@ async def test_the_store_is_opened_with_the_workspaces_fallback_files(
 async def test_old_session_files_are_imported_before_fallback_files_are_recovered(
     state: Path, root: Path
 ) -> None:
-    legacy_sessions(root)
+    legacy_sessions(root / ".orbit")
     path = await park_in_repository(state, root, 1)
 
     assert await opened_notes(state, root) == [
@@ -139,7 +115,7 @@ async def test_old_session_files_are_imported_before_fallback_files_are_recovere
 async def test_a_blocked_import_leaves_the_fallback_files_unrecovered(
     state: Path, root: Path
 ) -> None:
-    sessions = legacy_sessions(root)
+    sessions = legacy_sessions(root / ".orbit")
     path = await park_in_repository(state, root, 1)
     with held(sessions / "abc.lock"), pytest.raises(ImportBlocked):
         await opened_notes(state, root)
@@ -151,7 +127,7 @@ async def test_a_blocked_import_leaves_the_fallback_files_unrecovered(
 async def test_an_import_of_old_session_files_is_noted_within_the_workspace(
     state: Path, root: Path
 ) -> None:
-    legacy_sessions(root)
+    legacy_sessions(root / ".orbit")
     assert await opened_notes(state, root) == [IMPORT_NOTE]
 
 
@@ -163,7 +139,7 @@ async def test_a_moved_repository_re_attached_is_noted_first(
     old.mkdir()
     old_id = await workspace_id_of(state, old)
     old.rmdir()
-    legacy_sessions(root)
+    legacy_sessions(root / ".orbit")
     store = await SqliteStore.open(state)
     try:
         opened = await open_workspace_store(store, root, owned=True)
@@ -221,7 +197,7 @@ async def test_a_parked_file_in_the_workspace_is_named_within_it(tmp_path: Path)
 async def test_a_failed_import_leaves_the_shared_store_open_for_other_workspaces(
     state: Path, root: Path, tmp_path: Path
 ) -> None:
-    sessions = legacy_sessions(root)
+    sessions = legacy_sessions(root / ".orbit")
     other = tmp_path / "other"
     other.mkdir()
     store = await SqliteStore.open(state)
@@ -280,7 +256,7 @@ async def test_an_orbit_not_owning_the_workspace_leaves_its_fallback_files(
 async def test_an_orbit_not_owning_the_workspace_still_imports_old_session_files(
     state: Path, root: Path
 ) -> None:
-    legacy_sessions(root)
+    legacy_sessions(root / ".orbit")
     assert await opened_unowned(state, root) == [IMPORT_NOTE]
 
 

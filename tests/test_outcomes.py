@@ -44,7 +44,6 @@ from orbit.protocol import (
     RunTasks,
     SendMessage,
     TasksChanged,
-    TaskSpec,
     TurnEndReason,
 )
 from tests.agent_fakes import (
@@ -63,8 +62,8 @@ from tests.agent_fakes import (
     queued,
     session_for,
 )
+from tests.server_fakes import TASK
 
-TASK = TaskSpec(prompt="Add a flag.")
 OUTCOMES = (CommandAccepted, CommandRefused)
 
 

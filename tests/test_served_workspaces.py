@@ -29,7 +29,8 @@ from orbit.protocol import (
 )
 from tests.agent_fakes import HELLO, STEP, FakeLock, Steps, board_of
 from tests.connection_helpers import joined, say, taken
-from tests.plane_fakes import TASK, idle, payloads, working, workspace
+from tests.plane_fakes import idle, payloads, working, workspace
+from tests.server_fakes import TASK
 
 
 async def test_the_catalog_lists_every_workspace_served_each_read_only_if_it_is() -> None:

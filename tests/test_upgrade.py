@@ -15,8 +15,7 @@ from websockets.http11 import Request, Response
 from orbit.client import TokenRejected, WebSocketSession, accepts, messages, probe, session
 from orbit.client.upgrade import open_connection
 from orbit.protocol import UNAUTHORIZED, LinkState, TokenRefused, bearer_header
-
-TOKEN = "the-token"
+from tests.server_fakes import TOKEN
 
 
 @asynccontextmanager

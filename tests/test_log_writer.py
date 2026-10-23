@@ -57,18 +57,9 @@ from tests.agent_fakes import (
     save_used,
     send,
 )
+from tests.keeper_fakes import Published
 from tests.session_builders import failing_startup, opened, saved, store_with, switching
 from tests.store_views import OwnView, big, database, open_view
-
-
-class Published:
-    """The events a writer reported, in a list."""
-
-    def __init__(self) -> None:
-        self.events: list[Event] = []
-
-    async def __call__(self, event: Event) -> None:
-        self.events.append(event)
 
 
 class FailsFor(FakeStore):

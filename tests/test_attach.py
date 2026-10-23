@@ -53,7 +53,6 @@ from tests.attach_fakes import (
     LOGGED,
     OPEN,
     SAVED_TASK,
-    TASK,
     WHEN,
     outcome,
     snapshot_in,
@@ -63,6 +62,7 @@ from tests.attach_fakes import (
     workspace,
 )
 from tests.connection_helpers import envelopes, joined, received, say
+from tests.server_fakes import TASK
 
 LATER = "later"
 """The id of another saved session that isn't open."""

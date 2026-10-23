@@ -13,8 +13,6 @@ from websockets.datastructures import Headers
 from websockets.http11 import Request, Response
 
 from orbit.agent import ControlPlane, WorkspaceHost
-from orbit.agent.domain.server import ServerSettings
-from orbit.agent.external.control_plane import ControlPlaneServer
 from orbit.client import Backoff, TokenUnreadable, WebSocketSession, messages, read_token
 from orbit.protocol import (
     DEFAULT_MAX_MESSAGE_MB,
@@ -45,8 +43,8 @@ from orbit.protocol import (
     decode_command,
     encode,
 )
+from tests.server_fakes import TOKEN, serving_plane
 
-TOKEN = "the-token"
 TOKEN_FILE = Path("token")  # In the directory each test runs in.
 QUICK = Backoff(first=0.01, most=0.02)
 HELLO = CommandEnvelope(
@@ -625,17 +623,15 @@ async def test_a_connection_dropped_without_a_close_frame_is_reconnected_after()
 
 async def test_an_incompatible_hello_ends_the_link_to_the_control_plane_server() -> None:
     served = ControlPlane([WorkspaceHost()])
-    server = ControlPlaneServer(served, lambda: TOKEN, ServerSettings(port=0), lambda line: None)
-    url = await server.start()
-    session, states = client(url)
-    session.events()
-    future = HELLO.model_copy(update={"payload": Hello(client="tests", protocol_version=99)})
-    try:
-        await session.send(future)
-        assert await states.until(Ended) == Ended(url, "")
-    finally:
-        await session.close()
-        await server.stop(served.close)
+    async with serving_plane(served, served.close) as (url, _):
+        session, states = client(url)
+        session.events()
+        future = HELLO.model_copy(update={"payload": Hello(client="tests", protocol_version=99)})
+        try:
+            await session.send(future)
+            assert await states.until(Ended) == Ended(url, "")
+        finally:
+            await session.close()
 
 
 async def test_a_refused_token_is_reported_naming_its_file_and_not_retried() -> None:
@@ -807,44 +803,38 @@ async def test_the_backoff_doubles_up_to_its_most_and_jitters() -> None:
 async def test_it_talks_to_the_control_plane_server() -> None:
     host = WorkspaceHost()
     served = ControlPlane([host])
-    server = ControlPlaneServer(served, lambda: TOKEN, ServerSettings(port=0), lambda line: None)
-    url = await server.start()
-    session, _ = client(url)
-    events = session.events()
-    attach = Attach(workspace=host.workspace_id, session=host.saved_session.id)
-    try:
-        await session.send(HELLO)
-        greeting = [type((await next_event(events)).payload) for _ in range(2)]
-        await session.send(CommandEnvelope(command_id="attach", payload=attach))
-        attached = (await next_event(events)).payload
-        assert greeting == [Welcome, Catalog] and isinstance(attached, Snapshot)
-    finally:
-        await session.close()
-        await server.stop(served.close)
+    async with serving_plane(served, served.close) as (url, _):
+        session, _ = client(url)
+        events = session.events()
+        attach = Attach(workspace=host.workspace_id, session=host.saved_session.id)
+        try:
+            await session.send(HELLO)
+            greeting = [type((await next_event(events)).payload) for _ in range(2)]
+            await session.send(CommandEnvelope(command_id="attach", payload=attach))
+            attached = (await next_event(events)).payload
+            assert greeting == [Welcome, Catalog] and isinstance(attached, Snapshot)
+        finally:
+            await session.close()
 
 
 async def test_a_rotated_token_file_is_shown_on_reconnecting() -> None:
     tokens = [TOKEN]
     served = ControlPlane([WorkspaceHost()])
-    server = ControlPlaneServer(
-        served, lambda: tokens[-1], ServerSettings(port=0), lambda line: None
-    )
-    url = await server.start()
-    session, states = client(url)
-    events = session.events()
-    try:
-        await session.send(HELLO)
-        assert type((await next_event(events)).payload) is Welcome
-        TOKEN_FILE.write_text("the-new-token\n")
-        tokens.append("the-new-token")
-        assert session._websocket is not None
-        await session._websocket.close(1011)
-        while type((await next_event(events)).payload) is not Welcome:
-            pass
-        assert [type(state) for state in states.seen] == [Connected, Reconnecting, Connected]
-    finally:
-        await session.close()
-        await server.stop(served.close)
+    async with serving_plane(served, served.close, token=lambda: tokens[-1]) as (url, _):
+        session, states = client(url)
+        events = session.events()
+        try:
+            await session.send(HELLO)
+            assert type((await next_event(events)).payload) is Welcome
+            TOKEN_FILE.write_text("the-new-token\n")
+            tokens.append("the-new-token")
+            assert session._websocket is not None
+            await session._websocket.close(1011)
+            while type((await next_event(events)).payload) is not Welcome:
+                pass
+            assert [type(state) for state in states.seen] == [Connected, Reconnecting, Connected]
+        finally:
+            await session.close()
 
 
 def test_the_token_is_read_from_its_file(tmp_path: Path) -> None:

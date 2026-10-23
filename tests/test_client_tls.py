@@ -33,7 +33,8 @@ from orbit.protocol import (
     Reconnecting,
     Welcome,
 )
-from tests.cli_fakes import HELLO, TOKEN, control_plane
+from tests.cli_fakes import HELLO, control_plane
+from tests.server_fakes import TOKEN
 from tests.tls_certs import DAY, Ca, ServerFiles, make_ca, make_client, make_server, other_key
 
 

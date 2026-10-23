@@ -88,9 +88,9 @@ from tests.agent_fakes import (
     tasks_of,
     turns_of,
 )
+from tests.server_fakes import TASK
 from tests.store_views import fill_up, open_view
 
-TASK = TaskSpec(prompt="Add a flag.")
 BIG = Notice(message="x" * 100_000)  # Too big for a database that can't grow.
 
 

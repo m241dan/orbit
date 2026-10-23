@@ -26,9 +26,9 @@ from orbit.tui.link import LinkHost
 from orbit.tui.modal import Closed
 from orbit.tui.view.link import LOST_AFTER, ended_message, lost_delay
 from orbit.tui.widgets import ChatPrompt, ChoiceScreen
+from tests.server_fakes import URL
 from tests.tui_fakes import FakeLink, FakeSession, entries, feed_events
 
-URL = "ws://127.0.0.1:7433/"
 NOW = 1000.0
 WELCOME = Welcome(command_id="hello", server_version="1.0")
 OLD = SessionSummary(id="old", name="earlier")

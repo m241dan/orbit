@@ -10,12 +10,10 @@ from orbit.cli import app
 from orbit.client import WebSocketSession, messages
 from orbit.protocol import NewSession
 from tests.cli_fakes import FakeApp, FakeClient
+from tests.server_fakes import URL
 from tests.tls_certs import make_ca, make_client
 
 runner = CliRunner()
-URL = "ws://127.0.0.1:7433/"
-
-
 pytestmark = pytest.mark.usefixtures("fakes")
 
 

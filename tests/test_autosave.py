@@ -49,8 +49,7 @@ from tests.agent_fakes import (
     start,
     suggests,
 )
-
-TASK = TaskSpec(prompt="Add a flag.")
+from tests.server_fakes import TASK
 
 
 async def proposes(call: Call) -> TurnEndReason:

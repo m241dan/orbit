@@ -13,11 +13,11 @@ import pytest
 from orbit.agent import ControlPlane, WorkspaceHost
 from orbit.agent.application.ports import UsageSource
 from orbit.agent.domain.server import ServerSettings
-from orbit.agent.external.control_plane import ControlPlaneServer
 from orbit.cli.threaded import ThreadedSession
 from orbit.protocol import PROTOCOL_VERSION, CommandEnvelope, Hello
 from orbit.telemetry import Off, TelemetryRun, TelemetrySettings
 from orbit.tui import Opening, WarningCapture
+from tests.server_fakes import serving_plane
 
 
 @dataclass
@@ -115,9 +115,6 @@ class LocalApp:
         await asyncio.wrap_future(asyncio.run_coroutine_threadsafe(work, backend.loop))
 
 
-TOKEN = "the-token"
-
-
 HELLO = CommandEnvelope(
     command_id="hello", payload=Hello(client="tests", protocol_version=PROTOCOL_VERSION)
 )
@@ -127,12 +124,8 @@ HELLO = CommandEnvelope(
 async def control_plane(settings: ServerSettings) -> AsyncIterator[int]:
     """A control plane serving as ``settings`` say, and its port."""
     served = ControlPlane([WorkspaceHost()])
-    server = ControlPlaneServer(served, lambda: TOKEN, settings, lambda line: None)
-    url = await server.start()
-    try:
+    async with serving_plane(served, served.close, settings) as (url, _):
         yield int(url.rstrip("/").rsplit(":", 1)[1])
-    finally:
-        await server.stop(served.close)
 
 
 @dataclass

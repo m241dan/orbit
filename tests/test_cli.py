@@ -1,15 +1,13 @@
 import asyncio
-import fcntl
 import os
 import pstats
 import sqlite3
 import subprocess
 import sys
 import threading
-from collections.abc import Callable, Iterator
-from contextlib import closing, contextmanager
+from collections.abc import Callable
+from contextlib import closing
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -42,7 +40,7 @@ from orbit.agent import (
 from orbit.agent.application.ports import UsageLedger, UsageSource
 from orbit.agent.domain.ownership import read_only_note
 from orbit.agent.domain.reviews import ReviewLimits
-from orbit.agent.domain.sessions import SessionRecord, Unreadable, default_name, record_json
+from orbit.agent.domain.sessions import SessionRecord, Unreadable, default_name
 from orbit.agent.domain.usage import UsageUnavailable
 from orbit.cli import app
 from orbit.cli.backend import _Backend, _backend, _Directories, _in_process
@@ -62,7 +60,14 @@ from orbit.protocol import (
 from tests.agent_fakes import greeted, queued, send, sole, startup_of, store_of
 from tests.cli_fakes import LocalApp
 from tests.conftest import OFFLINE
-from tests.store_views import open_view
+from tests.store_views import (
+    SAVED,
+    WHEN,
+    held,
+    legacy_sessions,
+    open_view,
+    store_threads,
+)
 
 runner = CliRunner()
 
@@ -249,26 +254,10 @@ def test_a_workspace_outside_git_is_used_as_given(
     assert session.agents is not None and session.agents.tree is None
 
 
-WHEN = datetime(2026, 10, 17, 14, 30, tzinfo=UTC)
-SAVED = SessionRecord(id="abc", name="auth rework", created=WHEN, last_active=WHEN)
-
-
-def legacy_sessions(directory: Path) -> Path:
-    """An older orbit's sessions folder in ``directory``, holding ``SAVED``."""
-    sessions = directory / "sessions"
-    sessions.mkdir(parents=True)
-    (sessions / "abc.json").write_text(record_json(SAVED))
-    return sessions
-
-
 def store_in(session: WorkspaceHost) -> WorkspaceStore:
     store = store_of(session)
     assert isinstance(store, WorkspaceStore)
     return store
-
-
-def store_threads() -> list[str]:
-    return [t.name for t in threading.enumerate() if t.name.startswith("orbit-sqlite")]
 
 
 async def stored_ids(state: Path, workspace: Path) -> list[str]:
@@ -574,17 +563,6 @@ def test_a_database_newer_than_orbit_stops_chat(
     assert "has schema version 99, newer than this orbit's 8" in result.output
     assert launched == []
     assert store_threads() == []
-
-
-@contextmanager
-def held(lock: Path) -> Iterator[None]:
-    """Hold ``lock`` as another orbit would."""
-    fd = os.open(lock, os.O_RDWR | os.O_CREAT)
-    try:
-        fcntl.flock(fd, fcntl.LOCK_EX)
-        yield
-    finally:
-        os.close(fd)
 
 
 def test_old_sessions_another_orbit_has_open_stop_chat(

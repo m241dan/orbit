@@ -12,11 +12,9 @@ from websockets.exceptions import InvalidStatus
 from orbit.agent import ControlPlane, WorkspaceHost
 from orbit.agent.application.connection import SessionConnection
 from orbit.agent.domain.health import Readiness, readiness, ready_answer
-from orbit.agent.domain.server import ServerSettings
 from orbit.agent.external.control_plane import ControlPlaneServer
+from tests.server_fakes import LOOPBACK, TOKEN, quiet, serving_plane
 
-TOKEN = "the-token"
-LOOPBACK = ServerSettings(port=0)
 HEALTH_JSON = "application/health+json"
 
 
@@ -32,20 +30,14 @@ class Standing:
         return self.session.connect()
 
 
-def quiet(line: str) -> None:
-    pass
-
-
 @asynccontextmanager
 async def health_client(standing: Standing) -> AsyncIterator[httpx.AsyncClient]:
     """A client of a server of ``standing``, at its base URL, stopped and closed after."""
-    server = ControlPlaneServer(standing, lambda: TOKEN, LOOPBACK, quiet)
-    url = await server.start()
-    try:
-        async with httpx.AsyncClient(base_url=url.replace("ws://", "http://")) as client:
-            yield client
-    finally:
-        await server.stop(standing.session.close)
+    async with (
+        serving_plane(standing, standing.session.close) as (url, _),
+        httpx.AsyncClient(base_url=url.replace("ws://", "http://")) as client,
+    ):
+        yield client
 
 
 def test_a_server_accepting_with_storage_working_is_ready() -> None:

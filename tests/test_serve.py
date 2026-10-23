@@ -59,18 +59,17 @@ from orbit.protocol import (
     RemoveWorkspace,
     Snapshot,
     TakeOwnership,
-    TaskSpec,
     Welcome,
     decode_event,
     encode,
 )
 from tests.cli_fakes import StartedTelemetry
 from tests.git_repo import bare_repository
+from tests.server_fakes import TASK
 from tests.store_views import database, workspace_id_of
 from tests.tls_certs import DAY, Ca, ServerFiles, make_ca, make_client, make_server, other_key
 
 runner = CliRunner()
-TASK = TaskSpec(prompt="Add a flag.")
 QUIET = ["--no-usage", "--no-verify"]
 # What a frontend receives saying Hello and attaching, up to its Attach's acceptance.
 ATTACHED = [Welcome, Catalog, Snapshot, Notice, CommandAccepted]
