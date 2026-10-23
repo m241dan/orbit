@@ -827,6 +827,46 @@ async def test_picking_after_removing_the_workspace_viewed_opens_sessions_escape
     assert app.return_code == 0
 
 
+def opening_auth() -> OrbitApp:
+    """An app linked to a control plane, opening on repoA with a new session named auth."""
+    return connected(opening=Opening(NewSession(name="auth"), repository="/src/repoA"))
+
+
+async def pick_b_after_the_loss(app: OrbitApp, pilot: Pilot[None]) -> None:
+    """Pick repoB in the picker the loss of repoA leaves shown."""
+    await feed_events(session_of(app), pilot, catalog(B))
+    workspaces(app).query_one(OptionList).highlighted = 1
+    await pilot.press("enter")
+    await pilot.pause()
+
+
+def joined_b_once(app: OrbitApp) -> None:
+    """Check the app attached to repoB's active session, having sent auth only once."""
+    sent = changes(session_of(app))
+    assert sent[-1] == Attach(workspace="B", session="b1")
+    assert sent.count(NewSession(name="auth")) == 1
+    assert not any(isinstance(s, SessionsScreen) for s in app.screen_stack)
+
+
+async def test_picking_after_removing_the_workspace_viewed_attaches_its_active_session() -> None:
+    app = opening_auth()
+    async with app.run_test() as pilot:
+        await feed_events(session_of(app), pilot, SERVED)
+        await pilot.press("enter", "ctrl+w", "x", "enter")
+        await pick_b_after_the_loss(app, pilot)
+        joined_b_once(app)
+
+
+async def test_picking_in_the_picker_a_loss_opens_attaches_its_active_session() -> None:
+    app = opening_auth()
+    async with app.run_test() as pilot:
+        await feed_events(session_of(app), pilot, SERVED)
+        await pilot.press("enter", "ctrl+w", "x", "enter", "escape")
+        assert not any(isinstance(s, WorkspacesScreen) for s in app.screen_stack)
+        await pick_b_after_the_loss(app, pilot)
+        joined_b_once(app)
+
+
 async def test_picking_from_the_picker_without_a_loss_opens_sessions_escape_goes_back() -> None:
     app = connected()
     async with app.run_test() as pilot:
