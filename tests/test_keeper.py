@@ -29,6 +29,7 @@ from orbit.agent.domain.storage_halt import FailedWrite
 from orbit.agent.external.session_locks import SessionLocks
 from orbit.protocol import (
     BUSY,
+    INTERNAL,
     INVALID,
     LOCKED,
     SAVE_FAILED,
@@ -699,7 +700,7 @@ async def test_sessions_that_cannot_be_listed_are_reported_and_none_are_summaris
     keeper, published = keeper_for(unlistable_store_with("other"))
     assert await keeper.summaries() == ()
     assert published.errors == [LISTING_FAILED]
-    assert published.codes == [SAVE_FAILED]
+    assert published.codes == [INTERNAL]
 
 
 async def test_an_open_while_the_sessions_cannot_be_listed_is_reported_not_refused() -> None:
@@ -725,6 +726,7 @@ async def test_listings_failing_in_a_row_are_reported_once() -> None:
     assert await keeper.summaries() == ()
     assert await keeper.summaries() == ()
     assert published.errors == [LISTING_FAILED]
+    assert published.codes == [INTERNAL]
 
 
 async def test_a_listing_failing_after_one_that_worked_is_reported_again() -> None:
@@ -736,6 +738,7 @@ async def test_a_listing_failing_after_one_that_worked_is_reported_again() -> No
     store.list_failure = StoreFailed(LISTING_FAILED)
     assert await keeper.summaries() == ()
     assert published.errors == [LISTING_FAILED, LISTING_FAILED]
+    assert published.codes == [INTERNAL, INTERNAL]
 
 
 def forgetting_keeper(store: FakeStore) -> tuple[SessionKeeper, list[str]]:

@@ -6,7 +6,7 @@ import pytest
 
 from orbit.agent.application.failures import ReportedOnce, outcome, unexpected
 from orbit.agent.application.ports import ReadFailed, StoreFailed
-from orbit.protocol import SAVE_FAILED, ErrorOccurred, Event
+from orbit.protocol import INTERNAL, SAVE_FAILED, ErrorOccurred, Event
 from tests.agent_fakes import FakeStore
 
 
@@ -51,18 +51,36 @@ async def test_an_error_that_isnt_the_stores_escapes_unreported() -> None:
         published.append(event)
 
     with pytest.raises(RuntimeError, match="a bug"):
-        await ReportedOnce(publish).attempt(Buggy().save_review_count(1))
+        await ReportedOnce(publish, SAVE_FAILED).attempt(Buggy().save_review_count(1))
     assert published == []
 
 
-async def test_a_store_failure_is_reported_as_a_failed_save() -> None:
+async def test_a_store_failure_is_reported_with_the_code_given() -> None:
     published: list[Event] = []
 
     async def publish(event: Event) -> None:
         published.append(event)
 
-    assert await ReportedOnce(publish).value(Unlistable().review_count()) is None
-    assert published == [ErrorOccurred(code=SAVE_FAILED, message="Couldn't read the review count")]
+    assert await ReportedOnce(publish, INTERNAL).value(Unlistable().review_count()) is None
+    assert published == [ErrorOccurred(code=INTERNAL, message="Couldn't read the review count")]
+
+
+async def test_failures_in_a_row_are_reported_once_until_a_call_works() -> None:
+    published: list[Event] = []
+
+    async def publish(event: Event) -> None:
+        published.append(event)
+
+    store = FakeStore()
+    store.count_failure = "disk full"
+    saves = ReportedOnce(publish, SAVE_FAILED)
+    assert await saves.attempt(store.save_review_count(1)) is False
+    assert await saves.attempt(store.save_review_count(2)) is False
+    store.count_failure = None
+    assert await saves.attempt(store.save_review_count(3)) is True
+    store.count_failure = "disk full"
+    assert await saves.attempt(store.save_review_count(4)) is False
+    assert published == [ErrorOccurred(code=SAVE_FAILED, message="disk full")] * 2
 
 
 def raised() -> ValueError:

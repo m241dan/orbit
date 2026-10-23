@@ -9,7 +9,7 @@ from orbit.agent.application.ports import EventLog, Fallback, Publish, StoreFail
 from orbit.agent.domain.replay import LogBounds
 from orbit.agent.domain.storage import trim_target
 from orbit.agent.domain.storage_halt import SeqSpan, lost_spans
-from orbit.protocol import EventEnvelope
+from orbit.protocol import SAVE_FAILED, EventEnvelope
 
 
 def _in_order(envelopes: Sequence[EventEnvelope]) -> list[EventEnvelope]:
@@ -114,8 +114,8 @@ class LogWriter:
         self._log_bytes = log_bytes
         self._fallback = overflow.fallback
         self._failed = overflow.failed
-        self._trims = ReportedOnce(publish)
-        self._forgets = ReportedOnce(publish)
+        self._trims = ReportedOnce(publish, SAVE_FAILED)
+        self._forgets = ReportedOnce(publish, SAVE_FAILED)
         self._queued: Queued = []
         self._forgetting: list[str] = []  # The sessions whose events to delete, once written.
         self._held: list[str] = []  # Those whose delete failed while stopped, to retry resumed.

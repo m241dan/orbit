@@ -23,7 +23,6 @@ from orbit.protocol import (
     LOCKED,
     NOT_CONFIGURED,
     PLANNER,
-    SAVE_FAILED,
     SUPER_REVIEW,
     UNKNOWN,
     WRONG_SESSION,
@@ -311,7 +310,7 @@ async def test_a_change_while_sessions_cannot_be_listed_reports_it_once_and_is_a
 
     message = "Couldn't list the sessions in orbit.db: busy"
     errors = [e for e in events if isinstance(e, ErrorOccurred)]
-    assert errors == [ErrorOccurred(code=SAVE_FAILED, message=message)]
+    assert errors == [ErrorOccurred(code=INTERNAL, message=message)]
     assert events[-1] == CommandAccepted(command_id="c20")
 
 

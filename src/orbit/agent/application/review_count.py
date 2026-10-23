@@ -8,6 +8,7 @@ from orbit.agent.application.ports import Publish, SessionStore, StoreFailed
 from orbit.agent.application.storage_halt import Halting
 from orbit.agent.domain.reviews import ReviewPlanner
 from orbit.agent.domain.storage_halt import FailedWrite
+from orbit.protocol import INTERNAL
 
 
 class ReviewCount:
@@ -19,7 +20,7 @@ class ReviewCount:
     def __init__(self, store: SessionStore | None, halt: Halting, publish: Publish) -> None:
         self._store = store
         self._halt = halt
-        self._loads = ReportedOnce(publish)
+        self._loads = ReportedOnce(publish, INTERNAL)
         self._count: int | None = None  # The count the store holds; none until it's read.
         self._wanted: int | None = None  # The count last asked to be saved.
         self._saving = asyncio.Lock()  # Saves one at a time, so the newest is written last.

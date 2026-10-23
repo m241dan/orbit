@@ -7,7 +7,7 @@ from orbit.agent.application.ports import StoreFailed
 from orbit.agent.application.review_count import ReviewCount
 from orbit.agent.domain.reviews import ReviewLimits, ReviewPlanner
 from orbit.agent.domain.storage_halt import FailedWrite
-from orbit.protocol import SAVE_FAILED, ErrorOccurred
+from orbit.protocol import INTERNAL, ErrorOccurred
 from tests.agent_fakes import FakeHalt, FakeStore, Ticks
 from tests.keeper_fakes import EMPTY, WITH_TASK, Published, save
 
@@ -156,7 +156,7 @@ async def test_a_count_that_cannot_be_read_is_reported_once_and_never_saved() ->
     assert await count.load() is None
     await count.save(1)
     assert await count.retry() is None
-    assert published.events == [ErrorOccurred(code=SAVE_FAILED, message=store.count_load_failure)]
+    assert published.events == [ErrorOccurred(code=INTERNAL, message=store.count_load_failure)]
     assert store.counts == [] and store.count == 7
 
 

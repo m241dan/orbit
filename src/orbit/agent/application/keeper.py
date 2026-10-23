@@ -41,6 +41,7 @@ from orbit.agent.domain.sessions import (
 )
 from orbit.agent.domain.storage_halt import FailedWrite
 from orbit.protocol import (
+    INTERNAL,
     INVALID,
     LOCKED,
     SAVE_FAILED,
@@ -200,7 +201,7 @@ class SessionKeeper:
     ) -> None:
         self._store = store
         self._publish = publish
-        self._listings = ReportedOnce(publish)
+        self._listings = ReportedOnce(publish, INTERNAL)
         self._halt = halt
         self._clock = new_sessions.clock
         self._new_id = new_sessions.new_id

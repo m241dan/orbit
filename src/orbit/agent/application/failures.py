@@ -5,7 +5,7 @@ import logging
 from collections.abc import Awaitable
 
 from orbit.agent.application.ports import Publish, StoreFailed
-from orbit.protocol import SAVE_FAILED, ErrorOccurred
+from orbit.protocol import ErrorOccurred
 
 logger = logging.getLogger(__name__)
 
@@ -28,10 +28,11 @@ async def outcome[T](call: Awaitable[T]) -> T | StoreFailed:
 
 class ReportedOnce:
     """Calls to the store of one kind, saves or reads, whose first failure since the last that
-    worked is reported with ``publish``."""
+    worked is reported with ``publish`` as an error coded ``code``."""
 
-    def __init__(self, publish: Publish) -> None:
+    def __init__(self, publish: Publish, code: str) -> None:
         self._publish = publish
+        self._code = code
         self._failing = False  # A call failed, and was reported, since the last that worked.
 
     async def attempt(self, call: Awaitable[None]) -> bool:
@@ -54,5 +55,5 @@ class ReportedOnce:
             return result
         if not self._failing:
             self._failing = True
-            await self._publish(ErrorOccurred(code=SAVE_FAILED, message=str(result)))
+            await self._publish(ErrorOccurred(code=self._code, message=str(result)))
         return result
