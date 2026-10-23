@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from orbit.agent.external.repository import (
+    RepositoryUnreadable,
     find_git_common_dir,
     git_common_dir,
     git_top_level,
@@ -125,14 +126,35 @@ def test_orbits_directory_outside_a_repository_is_in_the_workspace(outside: Path
     assert orbit_dir(str(outside)) == outside / ".orbit"
 
 
-def test_orbits_directory_without_git_is_in_the_workspace(
+def test_orbits_directory_without_git_outside_a_repository_is_in_the_workspace(
+    monkeypatch: pytest.MonkeyPatch, outside: Path
+) -> None:
+    def missing(*args: object, **kwargs: object) -> None:
+        raise FileNotFoundError("git")
+
+    monkeypatch.setattr(subprocess, "run", missing)
+    assert orbit_dir(str(outside)) == outside / ".orbit"
+
+
+def test_orbits_directory_without_git_inside_a_repository_is_unreadable(
     monkeypatch: pytest.MonkeyPatch, repo: Path
 ) -> None:
     def missing(*args: object, **kwargs: object) -> None:
         raise FileNotFoundError("git")
 
     monkeypatch.setattr(subprocess, "run", missing)
-    assert orbit_dir(str(repo)) == repo / ".orbit"
+    with pytest.raises(RepositoryUnreadable, match="git"):
+        orbit_dir(str(repo))
+
+
+def test_orbits_directory_in_a_repository_git_cant_read_is_unreadable(outside: Path) -> None:
+    (outside / ".git").write_text(f"gitdir: {outside / 'nowhere'}\n")
+    sub = outside / "sub"
+    sub.mkdir()
+    with pytest.raises(RepositoryUnreadable, match=r"not a git repository") as unreadable:
+        orbit_dir(str(sub))
+    assert str(sub) in str(unreadable.value)
+    assert not (sub / ".orbit").exists()
 
 
 async def test_the_common_dir_is_found_without_blocking(repo: Path, outside: Path) -> None:

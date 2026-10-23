@@ -56,11 +56,33 @@ def has_git_identity(path: str) -> bool:
     return all(_git_query(path, "var", ident) is not None for ident in idents)
 
 
+class RepositoryUnreadable(OSError):
+    """A workspace is in a git repository, but git can't say where its shared git directory
+    is."""
+
+
 def orbit_dir(workspace: str) -> Path:
     """Orbit's directory for ``workspace``: ``orbit`` in the repository's shared git directory,
-    or ``.orbit`` in ``workspace`` outside a repository (or without git)."""
-    common = git_common_dir(workspace)
-    return Path(common) / ORBIT_DIR if common else Path(workspace) / ".orbit"
+    or ``.orbit`` in ``workspace`` outside a repository (with or without git).
+
+    Raises :class:`RepositoryUnreadable` if ``workspace`` is in a repository, as a ``.git`` in
+    it or a parent says, but git fails to find its shared git directory or can't be run.
+    """
+    try:
+        result = git_sync(workspace, *_COMMON_DIR)
+    except GitUnavailable as exc:
+        return _outside_repository(Path(workspace), str(exc))
+    if result.ok:
+        return Path(result.text) / ORBIT_DIR
+    return _outside_repository(Path(workspace), result.message)
+
+
+def _outside_repository(workspace: Path, problem: str) -> Path:
+    """Orbit's directory in ``workspace``, which git couldn't place in a repository, saying
+    ``problem``. Raises :class:`RepositoryUnreadable` if it's in one all the same."""
+    if any((place / ".git").exists() for place in (workspace, *workspace.absolute().parents)):
+        raise RepositoryUnreadable(f"Git can't find the repository {workspace} is in: {problem}")
+    return workspace / ".orbit"
 
 
 def workspace_fingerprint(path: str) -> str | None:

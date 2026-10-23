@@ -5,7 +5,13 @@ from pathlib import Path
 
 import pytest
 
-from orbit.agent import ImportBlocked, OpenedStore, RecoveryFailed, open_workspace_store
+from orbit.agent import (
+    ImportBlocked,
+    OpenedStore,
+    RecoveryFailed,
+    RepositoryUnreadable,
+    open_workspace_store,
+)
 from orbit.agent.application.ports import ReadFailed, StoredSession
 from orbit.agent.domain.sessions import SessionRecord
 from orbit.agent.external import store_startup, workspace_registry
@@ -322,3 +328,11 @@ async def test_sessions_that_cant_be_listed_stop_the_recovery_of_a_legacy_file(
         await opened_notes(state, root)
 
     assert path.exists()
+
+
+async def test_a_repository_git_cant_read_stops_the_opening(state: Path, root: Path) -> None:
+    (root / ".git").write_text(f"gitdir: {root / 'nowhere'}\n")
+
+    with pytest.raises(RepositoryUnreadable, match=r"not a git repository"):
+        await opened_notes(state, root)
+    assert not (root / ".orbit").exists()

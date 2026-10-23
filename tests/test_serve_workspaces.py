@@ -18,6 +18,7 @@ from orbit.agent import (
     ImportBlocked,
     OrbitConfig,
     PathKind,
+    RepositoryUnreadable,
     ServedWorkspaces,
     SqliteStore,
     StorageSettings,
@@ -265,6 +266,18 @@ async def test_a_lock_that_cant_be_made_is_unavailable_naming_it(
     assert refused.value.code == INTERNAL
 
 
+async def test_a_repository_git_cant_read_is_unavailable_taking_no_lock_in_it(
+    stack: ExitStack, store: SqliteStore, tmp_path: Path
+) -> None:
+    root = directory(tmp_path)
+    (root / ".git").write_text(f"gitdir: {tmp_path / 'nowhere'}\n")
+
+    with pytest.raises(WorkspaceUnavailable, match=r"not a git repository") as refused:
+        await workspaces(stack, store).open(str(root))
+    assert refused.value.code == INTERNAL
+    assert not (root / ".orbit").exists()
+
+
 async def test_a_store_that_fails_is_unavailable_and_lets_the_lock_go(
     stack: ExitStack, tmp_path: Path
 ) -> None:
@@ -279,7 +292,11 @@ async def test_a_store_that_fails_is_unavailable_and_lets_the_lock_go(
 
 @pytest.mark.parametrize(
     "failure",
-    [StoreError("The store failed."), RecoveryFailed("/parked.jsonl", "it's unreadable")],
+    [
+        StoreError("The store failed."),
+        RecoveryFailed("/parked.jsonl", "it's unreadable"),
+        RepositoryUnreadable("Git can't find the repository /repo is in."),
+    ],
 )
 async def test_a_store_or_recovery_failing_partway_through_opening_is_unavailable_as_internal(
     failure: Exception,

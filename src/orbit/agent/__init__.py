@@ -53,6 +53,7 @@ from orbit.agent.external.fallback_files import FallbackFiles
 from orbit.agent.external.git_tree import GitCoderTree
 from orbit.agent.external.mcp_host import McpHost
 from orbit.agent.external.repository import (
+    RepositoryUnreadable,
     git_top_level,
     has_git_identity,
     in_git_work_tree,
@@ -123,6 +124,7 @@ __all__ = [
     "Purged",
     "RecoveryFailed",
     "RemoteSettings",
+    "RepositoryUnreadable",
     "Role",
     "RunFile",
     "RunningServer",

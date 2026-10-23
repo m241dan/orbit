@@ -17,6 +17,7 @@ from orbit.agent.domain.ownership import WorkspaceOwner
 from orbit.agent.domain.workspaces import PathKind
 from orbit.agent.external.config_file import read_config
 from orbit.agent.external.repository import (
+    RepositoryUnreadable,
     git_top_level,
     has_git_identity,
     in_git_work_tree,
@@ -123,7 +124,7 @@ def _locked_served(root: Path, opening: Opening) -> ServedWorkspace:
     """The workspace at ``root`` with whichever of ``opening``'s held locks is on its
     repository, kept, or else its own lock, taken if it's free. Raises
     :class:`WorkspaceUnavailable` as :func:`locked` says."""
-    path = orbit_dir(str(root)) / LOCK_FILE
+    path = _orbit_dir(root) / LOCK_FILE
     kept = next((lock for lock in opening.held if lock.path == path), None)
     if kept is not None:
         return ServedWorkspace(root, None, kept, kept=True)
@@ -338,8 +339,8 @@ def _identity_problem(root: Path) -> str | None:
 def locked(root: Path, url: str | None = None) -> tuple[WorkspaceLock, WorkspaceOwner | None]:
     """The workspace lock on the repository at ``root``, naming the server's ``url`` if it's
     known, and the owner, if another orbit holds it. Raises :class:`WorkspaceUnavailable` as
-    ``INTERNAL`` if it can't be made."""
-    lock = WorkspaceLock(orbit_dir(str(root)))
+    ``INTERNAL`` if it can't be found or made."""
+    lock = WorkspaceLock(_orbit_dir(root))
     if url is not None:
         lock.announce(url)
     try:
@@ -348,6 +349,15 @@ def locked(root: Path, url: str | None = None) -> tuple[WorkspaceLock, Workspace
         raise WorkspaceUnavailable(
             f"Couldn't lock the repository with {lock.path}: {exc}", INTERNAL
         ) from None
+
+
+def _orbit_dir(root: Path) -> Path:
+    """Orbit's directory for the workspace at ``root``, where its lock is. Raises
+    :class:`WorkspaceUnavailable` as ``INTERNAL`` if git can't find it in its repository."""
+    try:
+        return orbit_dir(str(root))
+    except RepositoryUnreadable as exc:
+        raise WorkspaceUnavailable(str(exc), INTERNAL) from None
 
 
 async def _view(store: SqliteStore, root: Path, *, owned: bool, opening: Opening) -> OpenedStore:
@@ -364,7 +374,7 @@ async def _view(store: SqliteStore, root: Path, *, owned: bool, opening: Opening
         if opening.flag:
             await _flagged(registry, workspace_id)
         registered = await registry.workspace(workspace_id)
-    except (StoreError, ImportBlocked, RecoveryFailed) as exc:
+    except (StoreError, RepositoryUnreadable, ImportBlocked, RecoveryFailed) as exc:
         raise WorkspaceUnavailable(str(exc), INTERNAL) from None
     return replace(opened, managed=registered is not None and registered.managed)
 

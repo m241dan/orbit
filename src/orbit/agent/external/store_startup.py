@@ -41,9 +41,10 @@ async def open_workspace_store(store: SqliteStore, root: Path, *, owned: bool) -
     the fallback files. An orbit that doesn't own it leaves the fallback files to the owner,
     which may still be writing them.
 
-    Raises :class:`StoreError` if the workspace can't be registered, :class:`ImportBlocked` if
-    the old sessions can't be imported and :class:`RecoveryFailed` if a fallback file can't be
-    recovered.
+    Raises :class:`StoreError` if the workspace can't be registered,
+    :class:`RepositoryUnreadable` if git can't find orbit's directory in its repository,
+    :class:`ImportBlocked` if the old sessions can't be imported and :class:`RecoveryFailed` if a
+    fallback file can't be recovered.
     """
     registered = await WorkspaceRegistry(store).find_or_register(str(root))
     view = store.workspace_view(registered.workspace_id)
