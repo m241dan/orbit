@@ -1,5 +1,5 @@
 """What deleting a clone orbit made would lose, as git sees it: uncommitted changes, stashes, and
-commits on its branches that its remote doesn't have."""
+commits on its branches, or on a detached HEAD, that its remote doesn't have."""
 
 import asyncio
 from pathlib import Path
@@ -22,9 +22,10 @@ async def clone_loss(path: Path) -> list[str]:
         stashes = await _lines(path, "stash", "list")
         branches = await _lines(path, *_BRANCHES)
         unpushed = [(branch, await _unpushed(path, branch)) for branch in branches]
+        detached = await _detached(path)
     except TreeFailed as exc:
         return unchecked_clone(str(exc))
-    return clone_losses(len(changed), len(stashes), unpushed)
+    return clone_losses(len(changed), len(stashes), unpushed, detached)
 
 
 async def _unpushed(path: Path, branch: str) -> int:
@@ -32,6 +33,15 @@ async def _unpushed(path: Path, branch: str) -> int:
     (count,) = await _lines(
         path, "rev-list", "--count", f"refs/heads/{branch}", "--not", "--remotes"
     )
+    return int(count)
+
+
+async def _detached(path: Path) -> int:
+    """How many commits on HEAD in the clone at ``path`` neither a branch nor a remote has: those
+    on a detached HEAD; none when HEAD is unborn, as in an empty clone."""
+    if not (await git(path, "rev-parse", "--verify", "--quiet", "HEAD")).ok:
+        return 0
+    (count,) = await _lines(path, "rev-list", "--count", "HEAD", "--not", "--branches", "--remotes")
     return int(count)
 
 

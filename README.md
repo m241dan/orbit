@@ -1075,8 +1075,9 @@ it; a frontend that never watches is sent neither.
 review count, session locks, fallback files and registry entry go, so adding it again starts
 afresh, and so does a managed clone's directory. A directory orbit didn't clone into is never
 deleted. A clone holding work that exists nowhere else, uncommitted changes, stashes or commits on
-any branch its remote doesn't have, isn't purged: the refusal lists what would be lost (`1 commit
-on main not on its remote`), and nothing is removed until it's pushed or dropped. The server
+any branch, or on a detached HEAD, that its remote doesn't have, isn't purged: the refusal lists
+what would be lost (`1 commit on main not on its remote`), and nothing is removed until it's
+pushed or dropped. The server
 holds the workspace's lock until the purge is done, so no local orbit starts on it meanwhile. A
 workspace no server serves, such as one only a local `orbit chat` used, is purged with `orbit db
 forget` (see [Where orbit keeps things](#where-orbit-keeps-things)). In the TUI, `x` in the

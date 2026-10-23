@@ -8,19 +8,27 @@ from orbit.protocol import INVALID
 
 
 def test_a_clean_clone_loses_nothing() -> None:
-    assert clone_losses(0, 0, [("main", 0)]) == []
+    assert clone_losses(0, 0, [("main", 0)], 0) == []
 
 
 def test_each_kind_of_loss_is_a_line_counted_in_words() -> None:
-    assert clone_losses(1, 1, [("main", 1)]) == [
+    assert clone_losses(1, 1, [("main", 1)], 0) == [
         "uncommitted changes to 1 file",
         "1 stash",
         "1 commit on main not on its remote",
     ]
-    assert clone_losses(2, 3, [("main", 0), ("fix", 4)]) == [
+    assert clone_losses(2, 3, [("main", 0), ("fix", 4)], 0) == [
         "uncommitted changes to 2 files",
         "3 stashes",
         "4 commits on fix not on its remote",
+    ]
+
+
+def test_commits_on_a_detached_head_are_a_line_counted_in_words() -> None:
+    assert clone_losses(0, 0, [], 1) == ["1 commit on a detached HEAD not on its remote"]
+    assert clone_losses(0, 0, [("main", 2)], 3) == [
+        "2 commits on main not on its remote",
+        "3 commits on a detached HEAD not on its remote",
     ]
 
 

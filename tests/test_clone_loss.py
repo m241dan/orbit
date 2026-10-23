@@ -41,6 +41,28 @@ async def test_commits_not_pushed_are_named_by_their_branch(tmp_path: Path) -> N
     assert await clone_loss(clone) == []
 
 
+async def test_commits_on_a_detached_head_would_be_lost(tmp_path: Path) -> None:
+    clone = cloned(tmp_path)
+    git(clone, "checkout", "-q", "--detach")
+    commit_file(clone, "b.txt", "new\n", "one")
+    commit_file(clone, "c.txt", "new\n", "two")
+    assert await clone_loss(clone) == ["2 commits on a detached HEAD not on its remote"]
+
+
+async def test_a_detached_head_at_a_pushed_commit_would_lose_nothing(tmp_path: Path) -> None:
+    clone = cloned(tmp_path)
+    git(clone, "checkout", "-q", "--detach")
+    assert await clone_loss(clone) == []
+
+
+async def test_an_empty_clone_would_lose_nothing(tmp_path: Path) -> None:
+    empty = tmp_path / "empty.git"
+    git(tmp_path, "init", "-q", "--bare", str(empty))
+    clone = tmp_path / "clone"
+    git(tmp_path, "clone", "-q", str(empty), str(clone))
+    assert await clone_loss(clone) == []
+
+
 async def test_a_clone_git_cant_read_may_lose_anything(tmp_path: Path) -> None:
     plain = tmp_path / "plain"
     plain.mkdir()
