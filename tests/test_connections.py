@@ -59,6 +59,7 @@ from tests.agent_fakes import (
     connect,
     control_plane,
     events_until,
+    install_greeting,
     notice,
     publish,
     served,
@@ -349,7 +350,7 @@ async def test_a_second_hellos_failed_greeting_step_reaches_only_that_connection
     async def no_leftovers() -> Sequence[str]:
         raise RuntimeError("no leftovers")
 
-    session._greeting = replace(session._greeting, leftovers=no_leftovers)
+    install_greeting(session, replace(session.greeting, leftovers=no_leftovers))
     second = await joined(session, "second")
 
     message = "Orbit failed to finish greeting the frontend: no leftovers"
@@ -366,7 +367,7 @@ async def test_a_greetings_notices_are_not_logged() -> None:
     await publish(session, Notice(message="logged"))
     await received(first)
 
-    transcript = await session._events.transcript(session.saved_session.id)
+    transcript = await session.outbox.transcript(session.saved_session.id)
     await session.close()
 
     assert notices([e.payload for e in transcript.events]) == [Notice(message="logged")]
@@ -389,7 +390,7 @@ async def rejoined(
     to the open session, the ``live`` events published while what it missed was being read,
     after which it had ``check`` see the connection, before what it missed was returned."""
     session = WorkspaceHost(store=store, clock=Ticks(), new_id=lambda: OPEN)
-    read = session._greeting.missed
+    read = session.greeting.missed
 
     async def slow(seen: int) -> Sequence[EventEnvelope] | None:
         missed = await read(seen)
@@ -398,7 +399,7 @@ async def rejoined(
         check(connection)
         return missed
 
-    session._greeting = replace(session._greeting, missed=slow)
+    install_greeting(session, replace(session.greeting, missed=slow))
     connection = connect(session)
     hello = Hello(client="orbit-tests", protocol_version=HELLO.protocol_version, since=since)
     await say(connection, "rejoin", hello)
@@ -461,7 +462,7 @@ async def test_a_catalog_from_a_task_a_command_started_reaches_every_connection(
 
     async def later() -> None:
         await go.wait()
-        await session._events.put(catalog)
+        await publish(session, catalog)
 
     async def spawned(*args: object) -> None:
         started.append(asyncio.create_task(later()))

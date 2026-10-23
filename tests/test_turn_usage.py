@@ -21,9 +21,11 @@ from tests.agent_fakes import (
     desk_of,
     events_until,
     idle,
+    publish_agents,
     send,
     session_for,
     settled,
+    switcher_of,
 )
 
 CODER_USAGE = Usage(output_tokens=100, cache_read_input_tokens=7, cost_usd=1.0, turns=3)
@@ -78,9 +80,9 @@ async def test_a_turn_of_no_agent_launched_is_counted_but_not_recorded() -> None
     session, _, _ = session_for(ledger=ledger)
     for agent_id in ("agent-9", None):
         turn = TurnFinished(turn_id="t", agent_id=agent_id, reason="completed", usage=CODER_USAGE)
-        await session._publish_agents(turn)
+        await publish_agents(session, turn)
     await settled()
     assert ledger.rows == []
-    assert session._switcher.spent == CODER_USAGE + CODER_USAGE
+    assert switcher_of(session).spent == CODER_USAGE + CODER_USAGE
     assert desk_of(session) is not None
     await session.close()

@@ -56,9 +56,11 @@ from tests.agent_fakes import (
     lane_of,
     no_steps,
     queued,
+    review_count_of,
     send,
     session_for,
     sole,
+    switcher_of,
     tasks_of,
     turns_of,
 )
@@ -170,7 +172,7 @@ async def test_taking_over_counts_on_from_the_super_count_the_owner_left() -> No
     await events_until(session, lambda event: event == ACCEPTED)
 
     assert lane_of(session).planner.since_super == 5
-    await session._review_count.save(3)
+    await review_count_of(session).save(3)
     assert store.counts == [3]
     await session.close()
 
@@ -659,7 +661,7 @@ async def test_work_sent_after_a_takeover_that_failed_runs_at_once() -> None:
     async def failing() -> None:
         raise RuntimeError("store gone")
 
-    session._switcher.publish_catalog = failing  # type: ignore[method-assign]
+    switcher_of(session).publish_catalog = failing  # type: ignore[method-assign]
     await send(session, TakeOwnership(take=True))
     await events_until(session, refused)
     await send(session, AddTask(task=TaskSpec(prompt="Add a flag.")))

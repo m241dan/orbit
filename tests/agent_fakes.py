@@ -11,7 +11,8 @@ from weakref import WeakKeyDictionary
 from orbit.agent import Agents, ControlPlane, Verification, VerificationStep, WorkspaceHost
 from orbit.agent.application.connection import SessionConnection
 from orbit.agent.application.desk import AgentDesk
-from orbit.agent.application.handshake import Handshake
+from orbit.agent.application.handshake import Handshake, HostGreeting
+from orbit.agent.application.lanes import Background
 from orbit.agent.application.planner import PlannerChat
 from orbit.agent.application.ports import (
     AgentLaunch,
@@ -28,10 +29,14 @@ from orbit.agent.application.ports import (
     UsageLedger,
     UsageSource,
 )
+from orbit.agent.application.review_count import ReviewCount
 from orbit.agent.application.review_lane import ReviewLane
 from orbit.agent.application.startup_check import StartupCheck
+from orbit.agent.application.storage_halt import Retry, StorageHalt
+from orbit.agent.application.switcher import SessionSwitcher
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.application.work_commands import WorkCommands
+from orbit.agent.application.work_lane import WorkLane
 from orbit.agent.application.work_turns import WorkTurns
 from orbit.agent.application.workspace_host import UNREGISTERED_WORKSPACE
 from orbit.agent.domain.agent_task import Limits
@@ -1000,6 +1005,51 @@ async def save_used(session: WorkspaceHost) -> None:
 async def publish(session: WorkspaceHost, event: Event) -> None:
     """Queue ``event`` for the session to publish, as its parts do."""
     await session._events.put(event)
+
+
+async def publish_agents(session: WorkspaceHost, event: Event) -> None:
+    """Have the session publish ``event`` as its agent desk does, counting what it reports."""
+    await session._publish_agents(event)
+
+
+def halt_of(session: WorkspaceHost) -> StorageHalt:
+    """The session's storage halt, which halts it as a write fails."""
+    return session._halt
+
+
+def retry_of(session: WorkspaceHost) -> Retry:
+    """What the session's storage halt retries as it resumes."""
+    return session._halt._retry
+
+
+def install_retry(session: WorkspaceHost, retry: Retry) -> None:
+    """Have the session's storage halt retry ``retry`` as it resumes."""
+    session._halt._retry = retry
+
+
+def install_greeting(session: WorkspaceHost, greeting: HostGreeting) -> None:
+    """Have the session greet the connections that attach with ``greeting``."""
+    session._greeting = greeting
+
+
+def review_count_of(session: WorkspaceHost) -> ReviewCount:
+    """The session's review count, which loads and saves the super review count."""
+    return session._review_count
+
+
+def count_loader_of(session: WorkspaceHost) -> Background:
+    """The background work loading the session's review count."""
+    return session._count_loader
+
+
+def work_lane_of(session: WorkspaceHost) -> WorkLane | None:
+    """The session's work lane, if it runs work."""
+    return session._work
+
+
+def switcher_of(session: WorkspaceHost) -> SessionSwitcher:
+    """The session's switcher, which opens and switches its sessions."""
+    return session._switcher
 
 
 def lane_of(session: WorkspaceHost) -> ReviewLane:

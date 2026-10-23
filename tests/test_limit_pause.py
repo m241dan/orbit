@@ -43,15 +43,20 @@ from tests.agent_fakes import (
     board,
     claims_done,
     events_until,
+    halt_of,
     idle,
+    install_retry,
     keeps_claiming,
     payloads,
     publish,
+    retry_of,
     run,
     send,
     session_for,
     statuses,
+    turns_of,
     verified,
+    work_lane_of,
 )
 from tests.connection_helpers import quiet
 
@@ -163,7 +168,7 @@ async def test_a_reviews_wake_while_waiting_starts_nothing_early() -> None:
     waits = Waits()
     session, launcher = limited(claims_done, waits=waits)
     await asyncio.wait_for(run(session), 5)
-    await session._turns.wake()
+    await turns_of(session).wake()
     events = await quiet(payloads(session))
     await session.close()
 
@@ -294,7 +299,7 @@ async def test_a_wait_ending_while_halted_starts_nothing_and_says_nothing() -> N
     events = await quiet(payloads(session))
 
     assert session.storage_halted
-    assert not session._turns.running
+    assert not turns_of(session).running
     assert len(launcher.launches) == 1
     assert RESUMING_NOTE not in notes(events)
     await session.close()
@@ -302,13 +307,13 @@ async def test_a_wait_ending_while_halted_starts_nothing_and_says_nothing() -> N
 
 def fails_as_lifted(session: WorkspaceHost) -> None:
     """Have a write fail while the session's next resume retries the writes that failed."""
-    retry = session._halt._retry
+    retry = retry_of(session)
 
     async def failing() -> Failure | None:
-        session._halt.fail(FailedWrite.EVENT_LOG, StoreFailed("full again"))
+        halt_of(session).fail(FailedWrite.EVENT_LOG, StoreFailed("full again"))
         return await retry()
 
-    session._halt._retry = failing
+    install_retry(session, failing)
 
 
 async def test_a_wait_ended_while_halted_starts_nothing_while_a_resume_halts_again() -> None:
@@ -418,7 +423,7 @@ async def test_the_next_run_starts_with_the_task_at_the_limit_then_keeps_board_o
 def forgets_where_it_stopped(session: WorkspaceHost) -> None:
     """Have the session's work lane forget the task its last run stopped at, as switching
     sessions away and back does, leaving the board to say what runs first."""
-    lane = session._work
+    lane = work_lane_of(session)
     assert lane is not None
     lane.reset()
 

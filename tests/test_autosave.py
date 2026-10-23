@@ -38,11 +38,14 @@ from tests.agent_fakes import (
     chats,
     claims_done,
     connect,
+    count_loader_of,
     events_until,
+    halt_of,
     idle,
     lane_of,
     of_type,
     outcome_of,
+    review_count_of,
     send,
     session_for,
     settle,
@@ -229,7 +232,7 @@ async def joined(session: WorkspaceHost) -> None:
     async for envelope in connection.events():
         if envelope.payload == Notice(message=LEFTOVER):
             break
-    while session._count_loader.running:
+    while count_loader_of(session).running:
         await asyncio.sleep(0)
 
 
@@ -256,9 +259,9 @@ async def test_a_join_while_halted_keeps_the_super_count_the_store_has_not_saved
     store = FakeStore(count=7)
     session = reviewed(store)
     await asyncio.wait_for(joined(session), 5)
-    session._halt.fail(FailedWrite.EVENT_LOG, StoreFailed("disk full"))
+    halt_of(session).fail(FailedWrite.EVENT_LOG, StoreFailed("disk full"))
     lane_of(session).planner.since_super = 8
-    await session._review_count.save(8)
+    await review_count_of(session).save(8)
     await asyncio.wait_for(joined(session), 5)
 
     assert lane_of(session).planner.since_super == 8 and store.count == 7
@@ -271,7 +274,7 @@ async def test_a_join_while_the_super_count_is_saved_keeps_the_count_being_saved
     session = reviewed(store)
     await asyncio.wait_for(joined(session), 5)
     lane_of(session).planner.since_super = 8
-    saving = asyncio.create_task(session._review_count.save(8))
+    saving = asyncio.create_task(review_count_of(session).save(8))
     await asyncio.sleep(0)
     await asyncio.wait_for(joined(session), 5)
 
@@ -287,7 +290,7 @@ async def test_a_join_while_the_super_count_cannot_be_saved_keeps_it_to_save_on_
     await asyncio.wait_for(joined(session), 5)
     store.count_failure = "disk full"
     lane_of(session).planner.since_super = 8
-    await session._review_count.save(8)
+    await review_count_of(session).save(8)
     await events_until(session, storage_failed)
     await asyncio.wait_for(joined(session), 5)
     assert lane_of(session).planner.since_super == 8 and store.count == 7
@@ -296,7 +299,7 @@ async def test_a_join_while_the_super_count_cannot_be_saved_keeps_it_to_save_on_
     assert (await outcome_of(session, ResumeStorage()))[-1].payload == ACCEPTED
     assert lane_of(session).planner.since_super == store.count == 8
     lane_of(session).planner.since_super += 1
-    await session._review_count.save(lane_of(session).planner.since_super)
+    await review_count_of(session).save(lane_of(session).planner.since_super)
     assert store.counts == [8, 9]
     await session.close()
 
@@ -330,7 +333,7 @@ async def test_a_super_count_that_could_not_be_read_is_not_read_again_on_a_join(
     await asyncio.wait_for(joined(session), 5)
 
     assert lane_of(session).planner.since_super == 0
-    await session._review_count.save(1)
+    await review_count_of(session).save(1)
     assert store.counts == []
     await session.close()
 

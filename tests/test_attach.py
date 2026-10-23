@@ -47,6 +47,7 @@ from tests.agent_fakes import (
     Ticks,
     attach_to,
     connect,
+    snapshot_of,
 )
 from tests.attach_fakes import (
     EARLIER,
@@ -130,7 +131,7 @@ async def test_a_saved_sessions_view_taken_while_storage_is_halted_carries_the_h
     viewer = connect(session)
     await say(viewer, "viewer", HELLO)
     snapshot = await attached_view(session, viewer)
-    halt = (await session._snapshot()).snapshot.storage_halt
+    halt = (await snapshot_of(session)).storage_halt
     await session.close()
 
     assert [e.code for e in errors] == [STORAGE_FAILED]
@@ -313,7 +314,7 @@ async def test_a_view_resuming_storage_once_writing_works_lifts_the_halt() -> No
     store.failure = None
     await say(viewer, "resume", ResumeStorage())
     resumed = await received(viewer)
-    halt = (await session._snapshot()).snapshot.storage_halt
+    halt = (await snapshot_of(session)).storage_halt
     await session.close()
 
     assert outcome(resumed) == CommandAccepted(command_id="resume")
@@ -324,7 +325,7 @@ async def test_a_view_resuming_storage_while_writing_still_fails_is_refused_as_h
     session, viewer = await halted_with_a_view(stored())
     await say(viewer, "resume", ResumeStorage())
     refused = outcome(await received(viewer))
-    halt = (await session._snapshot()).snapshot.storage_halt
+    halt = (await snapshot_of(session)).storage_halt
     await session.close()
 
     assert isinstance(refused, CommandRefused)

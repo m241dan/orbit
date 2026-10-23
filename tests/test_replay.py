@@ -118,10 +118,10 @@ async def test_a_reconnecting_frontend_gets_what_it_missed_in_place_of_a_snapsho
 async def test_events_still_to_be_written_are_caught_up_on_once() -> None:
     store = GatedLog()
     session = WorkspaceHost(store=store, clock=Ticks(), new_id=lambda: OPEN)
-    await session._events.put(Notice(message="a"))
+    await publish(session, Notice(message="a"))
     await store.waiting.wait()  # 1 is being written.
-    await session._events.put(Notice(message="b"))
-    await session._events.put(Notice(message="c"))
+    await publish(session, Notice(message="b"))
+    await publish(session, Notice(message="c"))
     delivered(session)  # Sent before the frontend went away.
     await rejoin(session, 1)
     store.gate.set()

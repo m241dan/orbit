@@ -25,6 +25,7 @@ from tests.agent_fakes import (
     of_type,
     outcome_of,
     send,
+    snapshot_of,
     until_marked,
 )
 from tests.server_fakes import TASK
@@ -180,7 +181,7 @@ async def test_resuming_once_the_store_works_redoes_a_rename_that_failed() -> No
     assert (await outcome_of(session, ResumeStorage()))[-1].payload == ACCEPTED
     assert store.last == saved("old", name="new")
     assert store.released == ["old", "old"] and store.locked == set()
-    assert (await session._snapshot()).snapshot.storage_halt is None
+    assert (await snapshot_of(session)).storage_halt is None
     await session.close()
 
 
@@ -191,7 +192,7 @@ async def test_resuming_while_a_rename_still_fails_is_refused_and_stays_halted()
     refusal = (await outcome_of(session, ResumeStorage()))[-1].payload
     assert isinstance(refusal, CommandRefused) and refusal.code == STORAGE_FAILED
     assert "Disk full." in refusal.message
-    assert (await session._snapshot()).snapshot.storage_halt == refusal.message
+    assert (await snapshot_of(session)).storage_halt == refusal.message
     assert store.released == ["old", "old"] and store.locked == set()
     assert store.last == saved("old")
     await session.close()
@@ -204,12 +205,12 @@ async def test_resuming_while_the_sessions_cannot_be_listed_keeps_the_halt_and_t
 
     refusal = (await outcome_of(session, ResumeStorage()))[-1].payload
     assert isinstance(refusal, CommandRefused) and refusal.code == STORAGE_FAILED
-    assert (await session._snapshot()).snapshot.storage_halt == refusal.message
+    assert (await snapshot_of(session)).storage_halt == refusal.message
     assert store.last == saved("old")
     store.list_failure = None
     assert (await outcome_of(session, ResumeStorage()))[-1].payload == ACCEPTED
     assert store.last == saved("old", name="new") and store.locked == set()
-    assert (await session._snapshot()).snapshot.storage_halt is None
+    assert (await snapshot_of(session)).storage_halt is None
     await session.close()
 
 

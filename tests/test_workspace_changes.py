@@ -33,7 +33,7 @@ from orbit.protocol import (
     RunTasks,
     Snapshot,
 )
-from tests.agent_fakes import HELLO, STEP, FakeStore, Steps
+from tests.agent_fakes import HELLO, STEP, FakeStore, Steps, install_greeting
 from tests.connection_helpers import joined, say, taken
 from tests.plane_fakes import (
     FakeSource,
@@ -390,7 +390,7 @@ async def test_an_attach_after_removing_the_workspace_attached_to_gets_a_snapsho
     async def missed(since: int) -> Sequence[EventEnvelope] | None:
         return [stale]
 
-    first._greeting = replace(first._greeting, missed=missed)
+    install_greeting(first, replace(first.greeting, missed=missed))
     plane = ControlPlane([first, second], workspaces=FakeSource())
     connection = plane.connect()
     await say(connection, "hello", HELLO.model_copy(update={"since": 0}))

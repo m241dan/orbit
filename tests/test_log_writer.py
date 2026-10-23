@@ -1149,7 +1149,7 @@ async def test_events_published_at_once_are_written_in_few_appends_and_all_arriv
     session = stored_session(store)
     await save_used(session)
     for n in range(50):
-        session._events.put_nowait(Notice(message=f"n{n}"))
+        session.outbox.put_nowait(Notice(message=f"n{n}"))
     await session.close()
 
     assert len(store.appends) < 50
