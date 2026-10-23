@@ -10,6 +10,20 @@ QUIT = "Quit"
 CHOICES = (KEEP_TRYING, QUIT)
 """The choices a lost or stopped control plane offers, the first preselected."""
 
+NUMBER_WORDS = (
+    "zero",
+    "one",
+    "two",
+    "three",
+    "four",
+    "five",
+    "six",
+    "seven",
+    "eight",
+    "nine",
+    "ten",
+)
+
 STOPPED_TITLE = "The control plane stopped"
 REFUSED_TITLE = "Can't connect"
 ENDED_TITLE = "Disconnected"
@@ -27,7 +41,15 @@ def lost_title(url: str) -> str:
 
 def lost_message(url: str) -> str:
     """What the modal asking whether to keep trying ``url`` says."""
-    return f"Orbit has been trying to reconnect to {url} for two minutes."
+    return f"Orbit has been trying to reconnect to {url} for {minutes_text(LOST_AFTER)}."
+
+
+def minutes_text(seconds: float) -> str:
+    """The whole minutes in ``seconds`` in words: ``one minute``, ``two minutes``, or ``12
+    minutes`` past ten."""
+    minutes = int(seconds // 60)
+    count = NUMBER_WORDS[minutes] if minutes < len(NUMBER_WORDS) else str(minutes)
+    return f"{count} minute{'s' * (minutes != 1)}"
 
 
 def stopped_message(url: str) -> str:

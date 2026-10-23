@@ -24,7 +24,8 @@ from orbit.protocol import (
 from orbit.tui import Opening, OrbitApp
 from orbit.tui.link import LinkHost
 from orbit.tui.modal import Closed
-from orbit.tui.view.link import LOST_AFTER, ended_message, lost_delay
+from orbit.tui.view import link as link_view
+from orbit.tui.view.link import LOST_AFTER, ended_message, lost_delay, lost_message
 from orbit.tui.widgets import ChatPrompt, ChoiceScreen
 from tests.server_fakes import URL
 from tests.tui_fakes import FakeLink, FakeSession, entries, feed_events
@@ -295,6 +296,21 @@ def test_the_lost_modal_waits_out_what_is_left_of_two_minutes() -> None:
     assert lost_delay(NOW, NOW) == LOST_AFTER
     assert lost_delay(NOW - 20, NOW) == LOST_AFTER - 20
     assert lost_delay(NOW - 500, NOW) == 0
+
+
+def test_the_lost_message_says_how_long_orbit_has_been_trying() -> None:
+    assert lost_message(URL) == f"Orbit has been trying to reconnect to {URL} for two minutes."
+
+
+@pytest.mark.parametrize(
+    ("after", "wording"),
+    [(60.0, "one minute"), (180.0, "three minutes"), (720.0, "12 minutes")],
+)
+def test_the_lost_message_follows_lost_after(
+    monkeypatch: pytest.MonkeyPatch, after: float, wording: str
+) -> None:
+    monkeypatch.setattr(link_view, "LOST_AFTER", after)
+    assert lost_message(URL).endswith(f" for {wording}.")
 
 
 class LinkApp(App[None]):

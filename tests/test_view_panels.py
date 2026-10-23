@@ -13,6 +13,12 @@ def test_step_lines_time_only_the_running_step() -> None:
     assert step_lines(steps, "◜ ", 12) == ["✅ Lint", "◜  Tests · 12s"]
 
 
+def test_step_lines_time_a_running_step_like_a_turn() -> None:
+    steps = (StepState(name="Tests", status="running"),)
+    assert step_lines(steps, "◜ ", 42) == ["◜  Tests · 42s"]
+    assert step_lines(steps, "◜ ", 125) == ["◜  Tests · 2m05s"]
+
+
 # The usage panel
 
 TZ = timezone(timedelta(hours=-4))

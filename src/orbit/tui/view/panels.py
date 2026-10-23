@@ -7,6 +7,7 @@ from rich.text import Text
 
 from orbit.protocol import StepState, UsageChanged, UsageLimit
 from orbit.tui.view.common import STEP_ICONS
+from orbit.tui.view.rules import duration_text
 
 # The verification panel
 
@@ -15,9 +16,10 @@ NO_STEPS_TEXT = "No verification steps"
 
 def step_lines(steps: Sequence[StepState], frame: str, elapsed: int, title: str = "") -> list[str]:
     """One line per step, under the ``title`` heading if there is one. The running one shows
-    the spinner ``frame`` and the ``elapsed`` seconds it has been running."""
+    the spinner ``frame`` and how long, ``elapsed`` seconds, it has been running, as a turn's
+    time reads."""
     return [title] * bool(title) + [
-        f"{frame} {s.name} · {elapsed}s"
+        f"{frame} {s.name} · {duration_text(elapsed)}"
         if s.status == "running"
         else f"{STEP_ICONS[s.status]} {s.name}"
         for s in steps
