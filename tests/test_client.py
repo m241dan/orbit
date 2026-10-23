@@ -570,6 +570,26 @@ async def test_a_watch_sent_while_disconnected_is_sent_on_connecting() -> None:
         await session.close()
 
 
+async def test_a_watch_of_nothing_sent_while_disconnected_stops_watching_on_connecting() -> None:
+    async with plane() as (fake, url):
+        session, states = client(url)
+        events = session.events()
+        await session.send(HELLO)
+        first = await fake.connection()
+        await fake.command()
+        await session.send(WATCH)
+        await fake.command()
+        fake.status = 503
+        await drop_after(first, events, event(1))
+        await states.until(Reconnecting)
+        await session.send(UNWATCH)  # Kept for when it connects.
+        fake.status = None
+        _, again = await reconnecting(fake, session)
+        await session.close()
+
+    assert [type(c.payload) for c in again] == [Hello]
+
+
 async def test_a_command_sent_while_disconnected_raises_not_connected() -> None:
     async with plane() as (fake, url):
         fake.status = 503
