@@ -22,16 +22,15 @@ class Clones:
         the clone; refused as ``busy`` while ``url`` is being cloned already."""
         if url in self._tasks:
             raise Refused(BUSY, f"Can't clone {url}: it's being cloned already.")
-        task = asyncio.create_task(self._clone(url, cloner, serve))
-        self._tasks[url] = task
-        task.add_done_callback(lambda _: self._tasks.pop(url))
+        self._tasks[url] = asyncio.create_task(self._clone(url, cloner, serve))
 
     async def _clone(
         self, url: str, cloner: Cloner, serve: Callable[[str], Awaitable[None]]
     ) -> None:
         """Have ``cloner`` clone the repository at ``url``, then ``serve`` the clone, telling
         every connection if either fails: as ``git_failed`` if the clone does, with the code
-        refusing to serve it gives, or as ``internal`` if orbit fails."""
+        refusing to serve it gives, or as ``internal`` if orbit fails; ``url`` is free to clone
+        again once it's done."""
         try:
             await serve(await cloner.clone(url, self._tell))
         except CloneFailed as exc:
@@ -41,6 +40,10 @@ class Clones:
         except Exception as exc:  # A bug mustn't go unreported, as no command waits on it.
             message = f"Orbit failed to serve the clone of {url}: {exc}"
             self._tell(ErrorOccurred(code=INTERNAL, message=message))
+        finally:
+            # Freed here, not as the task ends a step later, so a frontend shown the clone's
+            # catalog can clone the URL again at once.
+            del self._tasks[url]
 
     async def close(self) -> None:
         """Stop every clone under way, each removing what it cloned, and wait until they have."""

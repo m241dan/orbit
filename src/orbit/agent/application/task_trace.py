@@ -1,5 +1,6 @@
 """Tracing a task: the ``orbit.task`` span, from when the task is ready to run until its status
-is final, with its wait for a coder's slot and its run as children.
+is final, with its wait for a coder's slot and its run as children (the telemetry plan's
+decisions 15 to 17).
 
 The task's span is the current one while it runs, so what runs it, from the agent's run to its
 verification and landing, records on it through :func:`current_span`.

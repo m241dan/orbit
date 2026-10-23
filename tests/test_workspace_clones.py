@@ -7,6 +7,7 @@ import asyncio
 import pytest
 
 from orbit.agent import ControlPlane, WorkspaceHost
+from orbit.agent.application.clones import Clones
 from orbit.agent.application.connection import SessionConnection
 from orbit.agent.domain.workspaces import LOCAL_ONLY
 from orbit.protocol import (
@@ -165,6 +166,19 @@ async def test_a_url_being_cloned_already_is_refused_as_busy() -> None:
     message = f"Can't clone {URL}: it's being cloned already."
     assert outcomes[-1] == refused("second", BUSY, message)
     assert again == [CommandAccepted(command_id="again")]
+
+
+async def test_a_url_is_free_again_as_soon_as_its_clone_is_served() -> None:
+    clones = Clones(lambda _: None)
+    served = asyncio.Event()
+
+    async def serve(_: str) -> None:
+        served.set()  # Whoever this wakes, as a catalog would, runs before the clone's task ends.
+
+    clones.start(URL, FakeSource(), serve)
+    await served.wait()
+    clones.start(URL, FakeSource(), serve)
+    await clones.close()
 
 
 async def test_other_changes_go_on_while_a_clone_runs() -> None:
