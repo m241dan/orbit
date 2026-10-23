@@ -1159,6 +1159,45 @@ async def test_relabelling_the_shown_planner_tab_keeps_its_list_and_details() ->
         assert selected(app) == ["detail"]
 
 
+async def click_rows(pilot: Pilot[None], log: TranscriptLog) -> None:
+    """Click the first line of each of ``log``'s rows."""
+    for top, _ in log.row_lines():
+        await pilot.click(log, offset=(4, top))
+    await pilot.pause()
+
+
+async def test_a_click_on_an_inactive_log_neither_toggles_nor_inspects() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test(size=(120, 30)) as pilot:
+        await feed_events(
+            session,
+            pilot,
+            said(PLANNER, "one\n\ntwo"),
+            call(PLANNER, "c1"),
+            result(PLANNER, "c1", "x"),
+        )
+        await pilot.press("ctrl+t")
+        transcript = app.query_one(Transcript)
+        log = transcript.shown
+        before = [log.collapsed(row) for row in range(log.option_count)]
+        await click_rows(pilot, log)
+        assert [log.collapsed(row) for row in range(log.option_count)] == before
+        assert not log.inspecting and not transcript.detail.opened
+        assert app.focused is None
+
+
+async def test_a_click_on_the_active_log_inspects_a_tool_call() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test(size=(120, 30)) as pilot:
+        await feed_events(session, pilot, call(PLANNER, "c1"), result(PLANNER, "c1", "x"))
+        await pilot.press("ctrl+t", "k", "enter")
+        transcript = app.query_one(Transcript)
+        await click_rows(pilot, transcript.shown)
+        assert transcript.shown.inspecting and transcript.detail.opened
+
+
 async def test_a_relabel_of_a_tab_no_longer_shown_leaves_the_title_alone() -> None:
     session = FakeSession()
     app = OrbitApp(session)

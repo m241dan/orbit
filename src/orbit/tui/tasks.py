@@ -4,7 +4,6 @@ import time
 from collections.abc import Callable, Sequence
 from typing import ClassVar
 
-from textual import events
 from textual.binding import Binding, BindingType
 from textual.message import Message
 from textual.widgets.option_list import Option
@@ -145,11 +144,6 @@ class TaskList(ListPane):
         """The task the highlight is on; ``None`` on the new-task row."""
         index = self.highlighted
         return self.tasks[index] if index is not None and index < len(self.tasks) else None
-
-    def on_click(self, event: events.Click) -> None:
-        # Clicks don't pick rows unless the list is active.
-        if not self.has_focus:
-            event.prevent_default()
 
     def show(self, tasks: Sequence[TaskState]) -> None:
         """Show ``tasks``; the highlight stays on its task, or on the new-task row.

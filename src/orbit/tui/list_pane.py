@@ -4,6 +4,7 @@ reaching into OptionList's private caches."""
 from collections.abc import Sequence
 from typing import ClassVar, cast
 
+from textual import events
 from textual.binding import Binding, BindingType
 from textual.css.styles import RulesMap
 from textual.visual import VisualType
@@ -18,8 +19,9 @@ Row = tuple[str, VisualType]
 
 
 class ListPane(ModalFocus, OptionList):
-    """A window's list that only takes focus once activated (``enter_list_mode``);
-    then j/k move and escape returns to window navigation."""
+    """A window's list that only takes focus once activated (``enter_list_mode``), and
+    ignores clicks on its rows until then; then j/k move and escape returns to window
+    navigation."""
 
     _shown_rows: tuple[Row, ...] = ()
     _shown_keys: tuple[str | None, ...] = ()  # The rows' keys, then None for a trailing row.
@@ -33,6 +35,11 @@ class ListPane(ModalFocus, OptionList):
     def enter_list_mode(self) -> None:
         if self._activate() and self.highlighted is None and self.option_count:
             self.highlighted = 0
+
+    def on_click(self, event: events.Click) -> None:
+        # Clicks don't pick rows unless the list is active.
+        if not self.has_focus:
+            event.prevent_default()
 
     def row_lines(self) -> list[tuple[int, int]]:
         """Each row's first line and height, once the list is measured; none before."""
