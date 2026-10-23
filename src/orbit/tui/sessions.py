@@ -15,17 +15,15 @@ from textual.widgets import Input, OptionList
 from orbit.protocol import (
     ActivateSession,
     Attach,
-    Catalog,
     DeleteSession,
     NewSession,
     RenameSession,
     SessionRef,
-    SessionStateChanged,
     SessionSummary,
     Snapshot,
     WorkspaceEntry,
-    with_state,
 )
+from orbit.tui.catalog import CatalogState
 from orbit.tui.modal import ModalSlot, Push
 from orbit.tui.view.common import kept_highlight
 from orbit.tui.view.sessions import (
@@ -61,10 +59,8 @@ from orbit.tui.view.sessions import (
     unjoined_view,
     viewed_only,
     viewing_mark,
-    workspace_sessions,
 )
 from orbit.tui.view.tasks import coder_wait_row
-from orbit.tui.view.workspaces import with_states
 from orbit.tui.widgets import ChoiceScreen, TypingListScreen, confirm
 
 SessionChoice = Attach | ActivateSession | NewSession
@@ -264,22 +260,25 @@ class _Place:
 
 
 class SessionsHost:
-    """Keeps the sessions the latest ``Catalog`` lists of the workspace this frontend is on,
-    which it opens on by itself, as its ``placing`` says, or the user picks, as
-    ``SessionStateChanged`` changes them, and the one this frontend views, live or read-only;
-    shows them with ``push`` when asked, refreshing the picker while it's shown, and offers to
-    make a session viewed read-only the active one, saying what the active one runs. ``send``
-    takes the user's choice and their changes to saved sessions."""
+    """Keeps the workspace this frontend is on, among those the ``catalog`` lists, which it
+    opens on by itself, as its ``placing`` says, or the user picks, and the session this
+    frontend views, live or read-only; shows that workspace's sessions with ``push`` when
+    asked, refreshing the picker while it's shown, and offers to make a session viewed
+    read-only the active one, saying what the active one runs. ``send`` takes the user's choice
+    and their changes to saved sessions."""
 
     def __init__(
-        self, push: Push[ModalScreen[Any], Any], send: Send, placing: Placing = _FIRST
+        self,
+        push: Push[ModalScreen[Any], Any],
+        send: Send,
+        catalog: CatalogState,
+        placing: Placing = _FIRST,
     ) -> None:
         self._send = send
+        self._catalog = catalog
         self._opens_on = placing.opens_on
         self._moved = placing.moved
-        self._workspaces: tuple[WorkspaceEntry, ...] = ()  # As the latest catalog lists them.
         self.workspace: str | None = None  # The id of the workspace it's on, once there.
-        self.sessions: tuple[SessionSummary, ...] = ()
         self.attached: str | None = None  # The session this frontend views, once known.
         self.live = True  # Whether the session viewed is the active one.
         self.open_session: SessionRef | None = None  # The active one, while it's another.
@@ -299,6 +298,11 @@ class SessionsHost:
     def offered(self) -> ChoiceScreen | None:
         """The offer to make the session viewed the active one, if shown."""
         return self._offer.showing
+
+    @property
+    def sessions(self) -> tuple[SessionSummary, ...]:
+        """The sessions of the workspace this frontend is on, as the catalog lists them."""
+        return self._catalog.sessions(self.workspace)
 
     @property
     def attached_session(self) -> SessionSummary | None:
@@ -341,18 +345,17 @@ class SessionsHost:
             return None
         return active_name(self.sessions) or self.open_session.name
 
-    def follow(self, catalog: Catalog) -> None:
-        """List the sessions in ``catalog`` of the workspace this frontend is on, which, until
-        it's on one, it may open on by itself, and which it leaves once ``catalog`` doesn't list
-        it; until a snapshot says which one this frontend views, it's the active one, which a
+    def follow(self) -> None:
+        """Follow the catalog's latest listing: until this frontend is on a workspace, it may
+        open on one by itself, and it leaves the one it's on once the catalog doesn't list it;
+        until a snapshot says which session this frontend views, it's the active one, which a
         frontend attaches to as it opens."""
-        self._workspaces = catalog.workspaces
+        workspaces = self._catalog.workspaces
         if self.workspace is None:
-            chosen = self._opens_on(catalog.workspaces)
+            chosen = self._opens_on(workspaces)
             self.workspace = chosen.id if chosen else None
-        elif not any(entry.id == self.workspace for entry in catalog.workspaces):
+        elif not any(entry.id == self.workspace for entry in workspaces):
             self._leave()
-        self.sessions = workspace_sessions(catalog.workspaces, self.workspace)
         if self.attached is None:
             self.attached = active_id(self.sessions)
         self._refresh()
@@ -382,22 +385,19 @@ class SessionsHost:
         """Be on the workspace ``workspace``, viewing its active session, and return where this
         frontend was."""
         was = _Place(self.workspace, self.attached, self.live, self.open_session)
-        self._be(_Place(workspace, active_id(workspace_sessions(self._workspaces, workspace))))
+        self._be(_Place(workspace, active_id(self._catalog.sessions(workspace))))
         return was
 
     def _be(self, place: _Place) -> None:
         """Be at ``place``, listing the sessions of its workspace as the latest catalog does."""
         self.workspace, self.attached = place.workspace, place.attached
         self.live, self.open_session = place.live, place.open_session
-        self.sessions = workspace_sessions(self._workspaces, place.workspace)
         self._refresh()
         self._moved()
 
-    def follow_state(self, changed: SessionStateChanged) -> None:
-        """Note ``changed``'s session's state; once the active session that held back the
-        session picked turns idle, offer again to make that one the active session."""
-        self.sessions = tuple(with_state(summary, changed) for summary in self.sessions)
-        self._workspaces = with_states(self._workspaces, changed)
+    def follow_state(self) -> None:
+        """Follow a session's state changing in the catalog; once the active session that held
+        back the session picked turns idle, offer again to make that one the active session."""
         self._refresh()
         held = self._held
         active = None if held is None else session_turned_idle(self.sessions, held)
@@ -460,7 +460,7 @@ class SessionsHost:
         if self.shown is not None:
             return
         viewing, sessions = picker_viewing(
-            self._workspaces, self.workspace, self.attached, self.sessions, workspace
+            self._catalog.workspaces, self.workspace, self.attached, self.sessions, workspace
         )
 
         async def chosen(choice: tuple[SessionChoice, ...] | None) -> None:
@@ -498,5 +498,5 @@ class SessionsHost:
         if shown.joined:
             shown.show(self.sessions, self.attached)
             return
-        viewing, sessions = unjoined_view(self._workspaces, shown.workspace)
+        viewing, sessions = unjoined_view(self._catalog.workspaces, shown.workspace)
         shown.show(sessions, viewing.attached)

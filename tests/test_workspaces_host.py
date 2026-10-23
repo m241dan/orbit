@@ -3,8 +3,9 @@
 from textual.app import App
 
 from orbit.protocol import AddWorkspace, ListDirectory, RemoveWorkspace, Watch
+from orbit.tui.catalog import CatalogState
 from orbit.tui.view.outcomes import Awaited
-from orbit.tui.workspaces import WorkspacesHost, WorkspacesScreen
+from orbit.tui.workspaces import Served, WorkspacesHost, WorkspacesScreen
 
 
 class Host(App[None]):
@@ -13,7 +14,9 @@ class Host(App[None]):
     def __init__(self) -> None:
         super().__init__()
         self.picked: list[str] = []
-        self.host = WorkspacesHost(self.push_screen, self._change, self._chosen)
+        self.host = WorkspacesHost(
+            self.push_screen, self._change, self._chosen, Served(CatalogState())
+        )
 
     async def _change(
         self, command: AddWorkspace | RemoveWorkspace | Watch | ListDirectory, awaited: Awaited

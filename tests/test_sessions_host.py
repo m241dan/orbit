@@ -15,6 +15,7 @@ from orbit.protocol import (
     Snapshot,
     WorkspaceEntry,
 )
+from orbit.tui.catalog import CatalogState
 from orbit.tui.sessions import (
     Placing,
     SessionChange,
@@ -37,22 +38,33 @@ def catalog(*sessions: SessionSummary) -> Catalog:
 
 
 class Host(App[None]):
-    """An app holding a SessionsHost, recording the commands it sends, those in ``failing``
-    failing to send, and the marks it shows as the session viewed moves."""
+    """An app holding a SessionsHost over the catalog it follows, recording the commands it
+    sends, those in ``failing`` failing to send, and the marks it shows as the session viewed
+    moves."""
 
     def __init__(self, repository: str | None = None) -> None:
         super().__init__()
         self.sent: list[SessionChoice | SessionChange] = []
         self.failing: set[str] = set()
         self.marks: list[str | None] = []
+        self.catalog = CatalogState()
         self.host = SessionsHost(
             self.push_screen,
             self._sent,
+            self.catalog,
             Placing(
                 lambda workspaces: chosen_workspace(workspaces, repository),
                 lambda: self.marks.append(self.host.mark),
             ),
         )
+
+    def follow(self, listed: Catalog) -> None:
+        self.catalog.follow(listed)
+        self.host.follow()
+
+    def follow_state(self, changed: SessionStateChanged) -> None:
+        self.catalog.follow_state(changed)
+        self.host.follow_state()
 
     async def _sent(self, command: SessionChoice | SessionChange) -> bool:
         self.sent.append(command)
@@ -66,8 +78,9 @@ class Host(App[None]):
 
 
 def test_a_catalog_lists_its_sessions_the_active_one_viewed() -> None:
-    host = Host().host
-    host.follow(catalog(NOW, OLD))
+    app = Host()
+    host = app.host
+    app.follow(catalog(NOW, OLD))
     assert host.sessions == (NOW, OLD)
     assert host.attached == "now"
     assert host.attached_session == NOW
@@ -86,35 +99,39 @@ TWO = Catalog(
 
 
 def test_the_workspace_at_the_repository_is_opened_on_listing_its_sessions_alone() -> None:
-    host = Host("/src/two").host
-    host.follow(TWO)
+    app = Host("/src/two")
+    host = app.host
+    app.follow(TWO)
     assert (host.workspace, host.sessions) == ("w2", (NOW, OLD))
     assert host.opening == Attach(workspace="w2", session="now")
 
 
 def test_without_a_workspace_at_the_repository_the_first_is_opened_on() -> None:
-    host = Host("/src/three").host
-    host.follow(TWO)
+    app = Host("/src/three")
+    host = app.host
+    app.follow(TWO)
     assert (host.workspace, host.sessions) == ("w1", (ELSEWHERE,))
     assert host.opening == Attach(workspace="w1", session="far")
 
 
 def test_a_later_catalog_keeps_the_workspace_opened_on() -> None:
-    host = Host("/src/two").host
-    host.follow(TWO)
-    host.follow(TWO.model_copy(update={"workspaces": TWO.workspaces[::-1]}))
+    app = Host("/src/two")
+    host = app.host
+    app.follow(TWO)
+    app.follow(TWO.model_copy(update={"workspaces": TWO.workspaces[::-1]}))
     assert host.workspace == "w2"
 
 
 def test_a_catalog_listing_no_workspace_has_nothing_to_open_on() -> None:
-    host = Host().host
-    host.follow(Catalog(workspaces=(), agents=(), triggers=(), lanes=()))
+    app = Host()
+    host = app.host
+    app.follow(Catalog(workspaces=(), agents=(), triggers=(), lanes=()))
     assert (host.workspace, host.sessions, host.opening) == (None, (), None)
 
 
 async def test_joining_attaches_to_its_active_session_then_is_on_it() -> None:
     app = Host("/src/two")
-    app.host.follow(TWO)
+    app.follow(TWO)
     assert await app.host.join("w1")
     assert app.sent == [Attach(workspace="w1", session="far")]
     assert (app.host.workspace, app.host.attached, app.host.sessions) == ("w1", "far", (ELSEWHERE,))
@@ -122,7 +139,7 @@ async def test_joining_attaches_to_its_active_session_then_is_on_it() -> None:
 
 async def test_a_join_whose_attach_fails_to_send_stays_where_it_was() -> None:
     app = Host("/src/two")
-    app.host.follow(TWO)
+    app.follow(TWO)
     app.host.view(view(OLD))
     app.failing.add("attach")
     assert not await app.host.join("w1")
@@ -133,7 +150,7 @@ async def test_a_join_whose_attach_fails_to_send_stays_where_it_was() -> None:
 async def test_joining_a_workspace_without_an_active_session_sends_nothing_and_stays() -> None:
     app = Host("/src/two")
     idle = TWO.workspaces[0].model_copy(update={"sessions": (OLD,)})
-    app.host.follow(TWO.model_copy(update={"workspaces": (idle, TWO.workspaces[1])}))
+    app.follow(TWO.model_copy(update={"workspaces": (idle, TWO.workspaces[1])}))
     assert not await app.host.join("w1")
     assert app.sent == []
     assert (app.host.workspace, app.host.attached) == ("w2", "now")
@@ -141,7 +158,7 @@ async def test_joining_a_workspace_without_an_active_session_sends_nothing_and_s
 
 async def test_a_join_shows_the_mark_of_the_session_it_views_right_away() -> None:
     app = Host("/src/two")
-    app.host.follow(TWO)
+    app.follow(TWO)
     app.host.view(view(OLD))
     await app.host.join("w1")
     assert app.marks == [None]
@@ -149,7 +166,7 @@ async def test_a_join_shows_the_mark_of_the_session_it_views_right_away() -> Non
 
 async def test_a_join_failing_to_send_shows_the_mark_of_the_session_still_viewed() -> None:
     app = Host("/src/two")
-    app.host.follow(TWO)
+    app.follow(TWO)
     app.host.view(view(OLD))
     app.failing.add("attach")
     await app.host.join("w1")
@@ -159,7 +176,7 @@ async def test_a_join_failing_to_send_shows_the_mark_of_the_session_still_viewed
 async def test_a_pick_in_another_workspace_failing_to_attach_stays_where_it_was() -> None:
     app = Host("/src/two")
     async with app.run_test() as pilot:
-        app.host.follow(TWO)
+        app.follow(TWO)
         app.host.open(workspace="w1")
         await pilot.pause()
         app.failing.add("attach")
@@ -171,7 +188,7 @@ async def test_a_pick_in_another_workspace_failing_to_attach_stays_where_it_was(
 async def test_a_pick_in_another_workspace_attached_stays_there_if_a_later_command_fails() -> None:
     app = Host("/src/two")
     async with app.run_test() as pilot:
-        app.host.follow(TWO)
+        app.follow(TWO)
         app.host.open(workspace="w1")
         await pilot.pause()
         app.failing.add("new_session")
@@ -182,15 +199,17 @@ async def test_a_pick_in_another_workspace_attached_stays_there_if_a_later_comma
 
 
 def test_a_snapshot_says_which_session_is_viewed_over_the_catalog() -> None:
-    host = Host().host
+    app = Host()
+    host = app.host
     host.view(opened(OLD))
-    host.follow(catalog(NOW, OLD))
+    app.follow(catalog(NOW, OLD))
     assert host.attached_session == OLD
 
 
 def test_a_catalog_without_the_session_viewed_names_none() -> None:
-    host = Host().host
-    host.follow(catalog(OLD))
+    app = Host()
+    host = app.host
+    app.follow(catalog(OLD))
     assert host.attached is None
     assert host.attached_session is None
 
@@ -198,10 +217,10 @@ def test_a_catalog_without_the_session_viewed_names_none() -> None:
 async def test_a_catalog_while_shown_replaces_the_rows_in_place() -> None:
     app = Host()
     async with app.run_test() as pilot:
-        app.host.follow(catalog(NOW))
+        app.follow(catalog(NOW))
         app.host.open()
         await pilot.pause()
-        app.host.follow(catalog(NOW, OLD))
+        app.follow(catalog(NOW, OLD))
         await pilot.pause()
         [screen] = app.sessions_screens()
         assert app.host.shown is screen
@@ -213,10 +232,10 @@ async def test_a_catalog_listing_a_session_made_elsewhere_shows_it_while_shown()
     app = Host()
     made = SessionSummary(id="made", name="made elsewhere")
     async with app.run_test() as pilot:
-        app.host.follow(catalog(NOW, OLD))
+        app.follow(catalog(NOW, OLD))
         app.host.open()
         await pilot.pause()
-        app.host.follow(catalog(made, NOW, OLD))
+        app.follow(catalog(made, NOW, OLD))
         await pilot.pause()
         [screen] = app.sessions_screens()
         options = screen.query_one(OptionList)
@@ -227,11 +246,11 @@ async def test_a_catalog_listing_a_session_made_elsewhere_shows_it_while_shown()
 async def test_a_state_change_while_shown_updates_its_row() -> None:
     app = Host()
     async with app.run_test() as pilot:
-        app.host.follow(catalog(NOW, OLD))
+        app.follow(catalog(NOW, OLD))
         app.host.open()
         await pilot.pause()
         changed = SessionStateChanged(session="now", active=True, state="running", viewers=1)
-        app.host.follow_state(changed)
+        app.follow_state(changed)
         await pilot.pause()
         [screen] = app.sessions_screens()
         assert screen.sessions[0].state == "running"
@@ -241,12 +260,10 @@ async def test_a_state_change_while_shown_updates_its_row() -> None:
 async def test_x_on_a_session_no_longer_active_asks_before_deleting_it() -> None:
     app = Host()
     async with app.run_test() as pilot:
-        app.host.follow(catalog(NOW, OLD))
+        app.follow(catalog(NOW, OLD))
         app.host.open()
         await pilot.pause()
-        app.host.follow_state(
-            SessionStateChanged(session="now", active=False, viewers=1, state="idle")
-        )
+        app.follow_state(SessionStateChanged(session="now", active=False, viewers=1, state="idle"))
         await pilot.pause()
         await pilot.press("x")
 
@@ -320,7 +337,8 @@ def view(summary: SessionSummary) -> Snapshot:
 
 
 def test_a_view_marks_the_session_and_a_live_snapshot_clears_the_mark() -> None:
-    host = Host().host
+    app = Host()
+    host = app.host
     host.view(view(OLD))
     assert not host.live
     assert host.mark == "viewing auth rework; today is idle (enter to switch)"
@@ -367,7 +385,7 @@ async def test_a_view_picked_that_failed_to_send_is_offered_nothing() -> None:
     app = Host()
     app.failing.add("attach")
     async with app.run_test() as pilot:
-        app.host.follow(catalog(NOW, OLD))
+        app.follow(catalog(NOW, OLD))
         app.host.open()
         await pilot.pause()
         app.screen.dismiss((Attach(workspace="w", session="old"),))
@@ -409,11 +427,14 @@ async def test_an_offer_withdrawn_under_another_modal_is_closed_and_sends_nothin
 
 def test_the_mark_names_the_tasks_the_active_session_runs_without_numbers() -> None:
     app = Host()
-    host = SessionsHost(app.push_screen, app._sent)  # Opens on the first workspace listed.
-    host.follow(catalog(NOW, OLD))
+    # Opens on the first workspace listed.
+    host = SessionsHost(app.push_screen, app._sent, app.catalog)
+    app.catalog.follow(catalog(NOW, OLD))
+    host.follow()
     host.view(view(OLD))
     run = (Activity(kind="task_run", task_id="t1"),)
-    host.follow_state(RUNNING.model_copy(update={"activity": run}))
+    app.catalog.follow_state(RUNNING.model_copy(update={"activity": run}))
+    host.follow_state()
     assert host.mark == (
         "viewing auth rework; today is running a task (enter to switch when it's idle)"
     )
@@ -422,8 +443,8 @@ def test_the_mark_names_the_tasks_the_active_session_runs_without_numbers() -> N
 async def test_a_held_pick_made_active_itself_is_not_offered_again() -> None:
     app = Host()
     async with app.run_test() as pilot:
-        app.host.follow(catalog(NOW, OLD))
-        app.host.follow_state(RUNNING)
+        app.follow(catalog(NOW, OLD))
+        app.follow_state(RUNNING)
         app.host.open()
         await pilot.pause()
         app.screen.dismiss((Attach(workspace="w", session="old"),))
@@ -432,12 +453,8 @@ async def test_a_held_pick_made_active_itself_is_not_offered_again() -> None:
         await pilot.pause()
         [held] = app.activation_screens()
 
-        app.host.follow_state(
-            SessionStateChanged(session="now", active=False, state="idle", viewers=0)
-        )
-        app.host.follow_state(
-            SessionStateChanged(session="old", active=True, state="idle", viewers=1)
-        )
+        app.follow_state(SessionStateChanged(session="now", active=False, state="idle", viewers=0))
+        app.follow_state(SessionStateChanged(session="old", active=True, state="idle", viewers=1))
         await pilot.pause()
         assert app.activation_screens() == [held]
 
@@ -447,7 +464,7 @@ async def offered_message(app: Host, *catalogs: Catalog) -> str:
     followed ``catalogs``."""
     async with app.run_test() as pilot:
         for listed in catalogs:
-            app.host.follow(listed)
+            app.follow(listed)
         app.host.view(view(OLD))
         app.host.offer()
         await pilot.pause()

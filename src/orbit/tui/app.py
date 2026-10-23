@@ -69,6 +69,7 @@ from orbit.protocol import (
     WorkspaceCloning,
 )
 from orbit.tui.agents import AgentsPane
+from orbit.tui.catalog import CatalogState
 from orbit.tui.commands import CommandDesk
 from orbit.tui.conversation import ConversationFeed
 from orbit.tui.detail import DetailPane
@@ -126,7 +127,7 @@ from orbit.tui.widgets import (
     confirm,
     mark_selected,
 )
-from orbit.tui.workspaces import WorkspacesHost
+from orbit.tui.workspaces import Served, WorkspacesHost
 
 _PLAIN_OPENING = Opening()
 
@@ -205,9 +206,12 @@ class OrbitApp(App[None], inherit_bindings=False):
         self._settings: Settings | None = None
         self._proposals = ProposalHost(self.push_screen, self._decide)
         repository = opening.repository
+        # The latest catalog, as session states change it, which both pickers read.
+        self._catalog = CatalogState()
         self._sessions = SessionsHost(
             self.push_screen,
             self._send,
+            self._catalog,
             Placing(
                 # Over a link the user picks the workspace.
                 lambda workspaces: None if link else chosen_workspace(workspaces, repository),
@@ -218,7 +222,7 @@ class OrbitApp(App[None], inherit_bindings=False):
             self.push_screen,
             self._send,
             lambda workspace, startup: self._opening.open_workspace(workspace, startup),
-            repository,
+            Served(self._catalog, repository),
         )
         self._opening = OpeningHost(
             opening, link is not None, self._send, Hosts(self._sessions, self._workspaces)
@@ -670,19 +674,20 @@ class OrbitApp(App[None], inherit_bindings=False):
         longer lists the workspace the app is on opens the workspace picker. In process, the
         first catalog opens the session picker, if the app picks one."""
         self._label_triggers(trigger_key_labels(catalog.triggers))
-        self._workspaces.follow(catalog)
-        self._follow_sessions(catalog)
+        self._catalog.follow(catalog)
+        self._workspaces.follow()
+        self._follow_sessions()
         attached = self._sessions.attached_session
         if attached is not None:
             self._transcript.show_session(attached.name)
         self._show_viewing()
         self._opening.catalog_shown()
 
-    def _follow_sessions(self, catalog: Catalog) -> None:
-        """List ``catalog``'s sessions of the workspace the app is on, letting the user pick
-        another once ``catalog`` no longer lists it."""
+    def _follow_sessions(self) -> None:
+        """List the latest catalog's sessions of the workspace the app is on, letting the user
+        pick another once the catalog no longer lists it."""
         was_on = self._sessions.workspace
-        self._sessions.follow(catalog)
+        self._sessions.follow()
         if was_on is not None and self._sessions.workspace is None:
             self._workspaces.lost()
 
@@ -791,8 +796,9 @@ class OrbitApp(App[None], inherit_bindings=False):
         elif isinstance(event, WorkspaceCloning):
             self._workspaces.follow_cloning(event)
         else:
-            self._sessions.follow_state(event)
-            self._workspaces.follow_state(event)
+            self._catalog.follow_state(event)
+            self._sessions.follow_state()
+            self._workspaces.follow()
             self._show_viewing()
 
     async def _decide(self, proposal: ChecksProposed, decision: DecideProposal) -> None:

@@ -2,6 +2,7 @@
 one."""
 
 from collections.abc import Awaitable, Callable, Sequence
+from dataclasses import dataclass
 from typing import ClassVar
 
 from textual import on
@@ -15,16 +16,15 @@ from orbit.protocol import (
     AddWorkspace,
     AgentRef,
     AgentsChanged,
-    Catalog,
     DirectoryListing,
     ErrorOccurred,
     ListDirectory,
     RemoveWorkspace,
-    SessionStateChanged,
     Watch,
     WorkspaceCloning,
     WorkspaceEntry,
 )
+from orbit.tui.catalog import CatalogState
 from orbit.tui.explorer import ExplorerScreen
 from orbit.tui.modal import ModalSlot, Push
 from orbit.tui.view.common import kept_highlight
@@ -47,7 +47,6 @@ from orbit.tui.view.workspaces import (
     row_key,
     row_label,
     with_clone,
-    with_states,
     without_clone,
     workspace_rows,
 )
@@ -60,6 +59,15 @@ Change = Callable[
 backend, awaiting its outcome as told; whatever it returns is ignored."""
 Chosen = Callable[[str, bool], Awaitable[None]]
 """Takes the id of the workspace picked, and whether it was picked at startup."""
+
+
+@dataclass(frozen=True)
+class Served:
+    """The workspaces the control plane serves, as the ``catalog`` lists them, to the frontend
+    running in the ``repository``, if any."""
+
+    catalog: CatalogState
+    repository: str | None = None
 
 
 class WorkspacesScreen(TypingListScreen[str | None]):
@@ -288,26 +296,24 @@ class WorkspacesScreen(TypingListScreen[str | None]):
 
 
 class WorkspacesHost:
-    """Keeps the workspaces the latest ``Catalog`` lists, as ``SessionStateChanged`` changes
-    their sessions, and shows them with ``push`` when asked, for the ``repository`` the
-    frontend runs in, refreshing the picker while it's shown, and the clones under way, as
-    ``WorkspaceCloning`` reports them, until they're served or fail or the link is back, and
-    the agents running, as ``AgentsChanged`` reports them while the picker watches for them,
-    and the directories ``DirectoryListing`` lists, in its explorer. ``change`` sends adding
-    and removing workspaces, the streams to watch and listing directories, and ``chosen``
-    takes the workspace picked."""
+    """Shows the workspaces ``served`` with ``push`` when asked, refreshing the picker while
+    it's shown, and the clones under way, as ``WorkspaceCloning`` reports them, until they're
+    served or fail or the link is back, and the agents running, as ``AgentsChanged`` reports
+    them while the picker watches for them, and the directories ``DirectoryListing`` lists, in
+    its explorer. ``change`` sends adding and removing workspaces, the streams to watch and
+    listing directories, and ``chosen`` takes the workspace picked."""
 
     def __init__(
         self,
         push: Push[WorkspacesScreen, str],
         change: Change,
         chosen: Chosen,
-        repository: str | None = None,
+        served: Served,
     ) -> None:
         self._change = change
+        self._catalog = served.catalog
         self._chosen = chosen
-        self._repository = repository
-        self.workspaces: tuple[WorkspaceEntry, ...] = ()
+        self._repository = served.repository
         self.cloning: tuple[WorkspaceCloning, ...] = ()
         self._picker = ModalSlot[WorkspacesScreen, str](push)
 
@@ -316,9 +322,13 @@ class WorkspacesHost:
         """The picker shown, if any."""
         return self._picker.showing
 
-    def follow(self, catalog: Catalog) -> None:
-        """List the workspaces in ``catalog``."""
-        self.workspaces = catalog.workspaces
+    @property
+    def workspaces(self) -> tuple[WorkspaceEntry, ...]:
+        """The workspaces the catalog lists."""
+        return self._catalog.workspaces
+
+    def follow(self) -> None:
+        """Follow the catalog's latest listing, or a session's state changing in it."""
         self._refresh()
 
     def follow_cloning(self, progress: WorkspaceCloning) -> None:
@@ -340,11 +350,6 @@ class WorkspacesHost:
         """Drop every clone, now the link to the control plane is back, as clones under way
         don't survive the control plane stopping."""
         self.cloning = ()
-        self._refresh()
-
-    def follow_state(self, changed: SessionStateChanged) -> None:
-        """Note ``changed``'s session's state."""
-        self.workspaces = with_states(self.workspaces, changed)
         self._refresh()
 
     def follow_listing(self, listing: DirectoryListing) -> None:
