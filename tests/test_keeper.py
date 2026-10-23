@@ -179,6 +179,41 @@ async def test_saves_at_once_are_written_in_turn_the_newest_last() -> None:
     assert [r.tasks for r in store.saved] == [(TASK,), ()]
 
 
+class HeldStore(FakeStore):
+    """A store whose session saves wait, once begun, until ``go_on`` is set."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.begun = asyncio.Event()
+        self.go_on = asyncio.Event()
+
+    async def save(self, record: SessionRecord) -> None:
+        self.begun.set()
+        await self.go_on.wait()
+        await super().save(record)
+
+
+async def test_a_rename_while_a_save_is_written_is_saved_after_it() -> None:
+    store = HeldStore()
+    keeper, _ = keeper_for(store)
+    writing = asyncio.ensure_future(save(keeper, WITH_TASK))
+    await store.begun.wait()
+    keeper.rename("auth rework")
+    store.go_on.set()
+    await writing
+    await save(keeper, WITH_TASK)
+    assert [r.name for r in store.saved] == ["Oct 17 14:30", "auth rework"]
+
+
+async def test_a_session_renamed_to_its_own_name_is_not_saved_again() -> None:
+    store = FakeStore()
+    keeper, _ = keeper_for(store)
+    await save(keeper, WITH_TASK)
+    keeper.rename(keeper.name)
+    await save(keeper, WITH_TASK)
+    assert len(store.saved) == 1
+
+
 async def test_the_session_is_locked_on_its_first_save_and_released_on_close() -> None:
     store = FakeStore()
     keeper, _ = keeper_for(store)

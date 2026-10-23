@@ -203,7 +203,7 @@ class SessionKeeper:
         self.created = self._clock()
         self.name = default_name(self.created)
         self.used = False
-        self._saved: Contents | None = None  # What the last save wrote.
+        self._saved: tuple[str, Contents] | None = None  # The name and contents last saved.
         self._locked: bool | None = None  # Whether the lock was taken; None until tried.
         self._closed = False
         self._renaming: _Renaming | None = None  # The rename whose save failed, to retry.
@@ -213,7 +213,6 @@ class SessionKeeper:
         """Name the session ``name``, unless it's none or blank; once used, it's saved again
         under that name."""
         self.name = session_name(name) or self.name
-        self._saved = None
 
     @property
     def kept(self) -> bool:
@@ -270,10 +269,10 @@ class SessionKeeper:
     def _due(self, contents: Contents, retrying: bool) -> bool:
         """Whether ``contents`` are to be saved: the session is open, not halted unless
         ``retrying``, used (as it is once it has a task) and holds something it didn't when it
-        was last saved."""
+        was last saved, its name included."""
         self.used = self.used or bool(contents.tasks)
         open_now = not self._closed and (retrying or not self._halt.halted)
-        return open_now and self.used and contents != self._saved
+        return open_now and self.used and (self.name, contents) != self._saved
 
     async def _lock(self, store: SessionStore) -> StoreFailed | bool:
         """Lock the session in ``store`` on its first save; returns whether it's locked, or the
@@ -311,7 +310,7 @@ class SessionKeeper:
         error = await outcome(store.save(record))
         if isinstance(error, StoreFailed):
             return error
-        self._saved = contents
+        self._saved = (record.name, contents)
         return None
 
     async def summaries(self) -> tuple[SessionSummary, ...]:
