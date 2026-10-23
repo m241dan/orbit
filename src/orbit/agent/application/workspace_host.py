@@ -15,6 +15,8 @@ from orbit.agent.application.closing import close_all
 from orbit.agent.application.coder_slots import CoderSeat, CoderSlots
 from orbit.agent.application.connection import Connections, Place, SessionConnection
 from orbit.agent.application.desk import AgentDesk, Agents
+from orbit.agent.application.handover import OWNED_NOTE as OWNED_NOTE
+from orbit.agent.application.handover import Handover, HandoverParts
 from orbit.agent.application.handshake import HostGreeting
 from orbit.agent.application.history import SessionHistory
 from orbit.agent.application.keeper import (
@@ -39,7 +41,6 @@ from orbit.agent.application.ports import (
     UsageLedger,
 )
 from orbit.agent.application.proposals import FrontendReview
-from orbit.agent.application.recovery import RecoveryFailed
 from orbit.agent.application.review_count import ReviewCount
 from orbit.agent.application.review_lane import ReviewHooks, ReviewLane
 from orbit.agent.application.session_state import SessionStates, StateParts
@@ -81,21 +82,17 @@ from orbit.agent.domain.storage_halt import FailedWrite
 from orbit.agent.domain.verification import VerificationStep, startup_fix_prompt
 from orbit.protocol import (
     CODER,
-    INTERNAL,
     INVALID,
     PLANNER_LANE,
     WORK_LANE,
     ActivateSession,
     Attach,
     DeleteSession,
-    ErrorOccurred,
     Event,
     History,
     LogGap,
     NewSession,
     Notice,
-    OwnershipDeclined,
-    OwnershipTaken,
     RenameSession,
     ResumeStorage,
     RunningAgent,
@@ -139,9 +136,6 @@ def _workspace_label(workspace: str | None) -> str | None:
 
 _DEFAULT_STORAGE = StorageSettings()
 _NO_TELEMETRY = NoTelemetry()
-
-OWNED_NOTE = "This orbit now owns the repository; queued work is running."
-"""The notice once a read-only orbit takes the repository over."""
 
 UNREGISTERED_WORKSPACE = "unregistered"
 """The id of a host's workspace when it's given none, as one with no store isn't registered."""
@@ -227,18 +221,9 @@ class WorkspaceHost:
     startup notes, ``RunTasks`` and ``FireTrigger`` are accepted and queued rather than run, and
     no work starts by itself: neither the startup check nor reviews run. It notes no leftovers,
     since only the owner can tell its own running work from what earlier runs left. Given the
-    repository's ``lock``, it's tried every ``lock_retry`` seconds once its background work starts;
-    once it's free, it's held and offered with ``OwnershipOffered``. ``TakeOwnership`` answers:
-    taking it publishes ``OwnershipTaken``, a notice and a ``Catalog`` with this workspace no
-    longer read-only, then runs the work queued, in order; declining it publishes
-    ``OwnershipDeclined``, lets the lock go and offers it again once another orbit has held it
-    since, or after ``lock_declined_retry`` seconds. Taking it first
-    runs ``recover``, which imports the fallback files the owner left into the log, as the
-    owner's startup does, and publishes a notice for each of the notes it returns; one that
-    fails is reported as an ``ErrorOccurred`` coded ``internal``, its files left for the next
-    owner's start.
-    While the offer is open, ``Snapshot`` says so. ``owned`` is called as it's taken, before
-    ``OwnershipTaken`` is published.
+    repository's ``lock``, ``Takeover`` offers it once it's free, trying it every ``lock_retry``
+    seconds and after a decline waiting up to ``lock_declined_retry``, and ``Snapshot`` says
+    while the offer is open; ``Handover`` answers ``TakeOwnership``, calling ``owned`` first.
     """
 
     def __init__(
@@ -330,6 +315,7 @@ class WorkspaceHost:
         self._turns = self._work_turns()
         self._switcher = self._session_switcher(pick_session)
         self._commands = self._work_commands()
+        self._handover = self._make_handover()
         self._greeting = self._host_greeting()
         self._history = SessionHistory(self._keeper, self._events)
         self._states = self._session_states()
@@ -445,6 +431,25 @@ class WorkspaceHost:
             self._gate,
         )
         return WorkCommands(parts)
+
+    def _make_handover(self) -> Handover:
+        """What answers the offer of the repository."""
+        parts = HandoverParts(
+            self._takeover,
+            self._commands,
+            self._events,
+            lambda: self.owned(),
+            lambda: self._switcher.publish_catalog(),
+            self._recover,
+            self._recount_reviews,
+            self._kick_reviews,
+        )
+        return Handover(parts)
+
+    def _kick_reviews(self) -> None:
+        """Start the reviews waiting, if there's a review lane."""
+        if self._lane is not None:
+            self._lane.kick()
 
     def _host_greeting(self) -> HostGreeting:
         """What the handshake of a connection publishes of this host as it first attaches."""
@@ -688,7 +693,7 @@ class WorkspaceHost:
         elif isinstance(command, RenameSession | DeleteSession):
             await self._change_saved(command)
         elif isinstance(command, TakeOwnership):
-            await self._take_ownership(command, command_id)
+            await self._handover.answer(command, command_id)
         else:
             self._switcher.stay()
             await self._commands.handle(command, command_id)
@@ -712,54 +717,6 @@ class WorkspaceHost:
             await self._turns.lifted()
             if self._lane is not None:
                 self._lane.kick()
-
-    async def _take_ownership(self, command: TakeOwnership, command_id: str) -> None:
-        """Answer the offer of the repository: own it, if ``command`` takes it, send the catalog
-        saying so, recover the fallback files the owner left, read the super review count it
-        left, and run the work queued for ``command_id`` and the reviews waiting, even if
-        announcing the ownership or running the queued work fails; refused when no offer is
-        open."""
-        self._takeover.answer(command.take)
-        if not command.take:
-            await self._events.put(OwnershipDeclined())
-            return
-        # Work sent from here on joins the queue, so it runs after the work queued before.
-        self._commands.taking()
-        try:
-            await self._announce_owned()
-        finally:
-            # Owned even if announcing it failed, and no offer comes again to run the queue.
-            await self._run_queued(command_id)
-
-    async def _run_queued(self, command_id: str) -> None:
-        """Run the work queued for ``command_id``, then kick the reviews waiting, even if
-        running the queued work fails."""
-        try:
-            await self._commands.own(command_id)
-        finally:  # After the queued work, so its tasks get agents first, even if it fails.
-            if self._lane is not None:
-                self._lane.kick()
-
-    async def _announce_owned(self) -> None:
-        """Say this orbit owns the repository now, send the catalog saying so, recover the
-        fallback files the owner left and read the super review count it left."""
-        self.owned()
-        await self._events.put(OwnershipTaken())
-        await self._events.put(Notice(message=OWNED_NOTE))
-        await self._switcher.publish_catalog()  # Other workspaces' connections learn it here.
-        await self._recover_parked()
-        await self._reload_review_count()
-
-    async def _recover_parked(self) -> None:
-        """Recover the fallback files the owner left, now this orbit owns the repository,
-        publishing a notice for each recovered or an error if that failed."""
-        try:
-            notes = await self._recover()
-        except RecoveryFailed as exc:
-            await self._events.put(ErrorOccurred(code=INTERNAL, message=str(exc)))
-            return
-        for note in notes:
-            await self._events.put(Notice(message=note))
 
     def _agent_on(self, task_id: str) -> str:
         """The agent working on task ``task_id``; only asked while one is."""
@@ -793,7 +750,7 @@ class WorkspaceHost:
         if self._lane is not None:
             await self._review_count.count_on(self._lane.planner)
 
-    async def _reload_review_count(self) -> None:
+    async def _recount_reviews(self) -> None:
         """Read the repository's saved super review count again, now this orbit owns it: the
         orbit that owned it may have counted on since it was read."""
         if self._lane is not None:
