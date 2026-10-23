@@ -275,8 +275,8 @@ class ControlPlane:
     A connection welcomed, attached or not, chooses the optional streams it receives with
     ``Watch``: the control-plane stream tells it every agent running across the workspaces
     served, as each starts or exits, and the usage totals the ``ledger`` adds up, if there is
-    one, today's from midnight as ``clock`` tells it, after each turn's row is written; both
-    as it starts watching too.
+    one, today's from midnight as ``clock`` tells it, after each turn's row is written and
+    after a workspace is purged; both as it starts watching too.
 
     Given the ``mark`` of the store every workspace's log shares, as ``orbit serve`` has, the
     ``seq`` count on past it, and each block of them is reserved there, once, as it's crossed,
@@ -325,7 +325,7 @@ class ControlPlane:
         host.catalog_changed = self._publish_catalog
         host.latest_usage = self._latest_usage
         host.coder_slots = self._coders
-        host.usage_recorded = self._stream.recorded
+        host.usage_recorded = self._stream.totals_changed
 
     def _reserve(self, seq: int) -> None:
         """Have every ``seq`` up to ``seq`` reserved: in the mark, if there is one, else in the
@@ -596,18 +596,23 @@ class ControlPlane:
         none, if ``command`` says to purge it, delete its records, as :func:`purge` does, while
         its lock is still held, and have ``workspaces`` let it go, and send the catalog to
         ``connection`` and every listening connection, even if closing the host or purging
-        fails; refused for a workspace not served, as ``busy`` while it runs work or another
-        connection views one of its sessions or, when purging, another orbit owns its
-        repository, as ``invalid`` when purging it would lose work, or with the code
-        ``workspaces`` gives, still served, if its flag can't be cleared."""
+        fails, then, once a purge has run, even if it failed, the usage totals read afresh to
+        the control-plane stream's watchers; refused for a workspace not served, as ``busy``
+        while it runs work or another connection views one of its sessions or, when purging,
+        another orbit owns its repository, as ``invalid`` when purging it would lose work, or
+        with the code ``workspaces`` gives, still served, if its flag can't be cleared."""
         host = self._hosts[served_workspace(command.workspace, self._served)]
         self._check_removable(host)
-        async with AsyncExitStack() as stack:
-            stop = partial(self._stop, host, connection, workspaces, stack)
-            if command.purge:
-                await purge(_ServedPurging(host, workspaces, stop), host.workspace_id)
-            else:
-                await stop()
+        try:
+            async with AsyncExitStack() as stack:
+                stop = partial(self._stop, host, connection, workspaces, stack)
+                if command.purge:
+                    await purge(_ServedPurging(host, workspaces, stop), host.workspace_id)
+                else:
+                    await stop()
+        finally:
+            if command.purge:  # Some of its records may be gone even if purging failed.
+                self._stream.totals_changed()
 
     async def _stop(
         self,

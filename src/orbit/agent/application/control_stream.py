@@ -39,8 +39,9 @@ class ControlStream:
     by the starts and exits the workspaces' events tell, and the usage totals the ``ledger`` adds
     up, if there is one, today's from midnight as ``clock`` tells it, else none. A connection
     starting to watch is told both at once; the others, the agents whenever one starts or
-    exits, and the totals, read afresh in the background, after each turn's row is written. A
-    failure escaping that is published in ``events``."""
+    exits, and the totals, read afresh in the background, whenever they change: after each
+    turn's row is written and after a workspace is purged. A failure escaping that is published
+    in ``events``."""
 
     def __init__(
         self,
@@ -54,8 +55,8 @@ class ControlStream:
         self._ledger = ledger
         self._clock = clock
         self._agents: dict[tuple[str, str], AgentRef] = {}  # By workspace id and agent id.
-        self._rows = 0  # How many turns' rows were written, so a read can tell it missed one.
-        self._stale = False  # Whether a row was written since the totals were last read.
+        self._changes = 0  # How often the totals changed, so a read can tell it missed one.
+        self._stale = False  # Whether the totals changed since they were last read.
         self._reader = Background("usage totals", events.put)
 
     async def watch(self, connection: SessionConnection, streams: Sequence[str]) -> None:
@@ -66,12 +67,12 @@ class ControlStream:
         if CONTROL_PLANE_STREAM not in streams or CONTROL_PLANE_STREAM in connection.streams:
             connection.streams = frozenset(streams)
             return
-        rows = self._rows
+        changes = self._changes
         totals = await self._totals()
         connection.streams = frozenset(streams)
         connection.tell(self._stamp(self._agents_changed()))
         connection.tell(self._stamp(totals))
-        if self._rows != rows:  # A row written during the read may be missing from it.
+        if self._changes != changes:  # A change during the read may be missing from it.
             self._refresh()
 
     def observe(self, workspace_id: str, envelope: EventEnvelope) -> None:
@@ -94,10 +95,10 @@ class ControlStream:
             return
         self._broadcast(self._agents_changed())
 
-    def recorded(self) -> None:
-        """Note that a turn's row was written, telling the watchers, if any, the usage totals
-        read afresh."""
-        self._rows += 1
+    def totals_changed(self) -> None:
+        """Note that the usage totals changed, as when a turn's row is written or a workspace's
+        are deleted, telling the watchers, if any, the totals read afresh."""
+        self._changes += 1
         if self._watchers():
             self._refresh()
 
@@ -113,7 +114,7 @@ class ControlStream:
         self._reader.start(self._send_totals())
 
     async def _send_totals(self) -> None:
-        """Tell the watchers the usage totals, read afresh until no row was written meanwhile."""
+        """Tell the watchers the usage totals, read afresh until they didn't change meanwhile."""
         while self._stale:
             self._stale = False
             self._broadcast(await self._totals())

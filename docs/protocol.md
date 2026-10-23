@@ -353,7 +353,8 @@ sends nothing more.
   any, and `total` adds them up. Today starts at midnight in the server's local time; the
   lifetime counts every turn recorded, sessions since deleted included, and what sessions spent
   before turns were recorded. It's sent again after each turn finishes, once its usage is
-  recorded. When the totals can't be read, an `ErrorOccurred` coded `internal` saying why is
+  recorded, and after a `RemoveWorkspace` with `purge`, which deletes the workspace's turns and
+  sessions. When the totals can't be read, an `ErrorOccurred` coded `internal` saying why is
   sent in their place.
 
 Both reach only the connections watching the stream, carry no workspace and no session, and

@@ -9,7 +9,8 @@ from datetime import UTC, datetime
 from orbit.agent import Agents, ControlPlane, WorkspaceHost
 from orbit.agent.application.connection import SessionConnection
 from orbit.agent.application.ports import ReadFailed
-from orbit.agent.domain.usage_totals import UsageTotalsData, usage_totals
+from orbit.agent.domain.purging import Purged
+from orbit.agent.domain.usage_totals import UsageRow, UsageTotalsData, usage_totals
 from orbit.protocol import (
     CONTROL_PLANE_STREAM,
     INTERNAL,
@@ -24,6 +25,7 @@ from orbit.protocol import (
     ErrorOccurred,
     Event,
     EventEnvelope,
+    RemoveWorkspace,
     RunTasks,
     TaskSpec,
     Usage,
@@ -42,7 +44,7 @@ from tests.agent_fakes import (
     settled,
 )
 from tests.connection_helpers import joined, say, taken
-from tests.plane_fakes import idle, payloads, welcomed
+from tests.plane_fakes import FakeSource, idle, payloads, welcomed
 
 NOW = datetime(2026, 10, 22, 15, 0, tzinfo=UTC)
 """The time the control plane's clock tells."""
@@ -336,3 +338,85 @@ async def test_an_unknown_stream_is_refused_naming_the_streams_there_are() -> No
     ]
     assert watcher.streams == {CONTROL_PLANE_STREAM}
     await plane.close()
+
+
+class LedgerSource(FakeSource):
+    """Workspaces whose purging deletes their rows from the ``ledger``, even if it then
+    fails."""
+
+    def __init__(self, ledger: FakeLedger) -> None:
+        super().__init__()
+        self.ledger = ledger
+
+    async def purge(self, workspace_id: str) -> Purged:
+        self.ledger.rows = [row for row in self.ledger.rows if row.workspace_id != workspace_id]
+        return await super().purge(workspace_id)
+
+
+def row(workspace_id: str) -> UsageRow:
+    """A turn's row in the workspace ``workspace_id``, costing :data:`COUNTED`."""
+    return UsageRow(workspace_id, f"{workspace_id}-1", "coder", None, COUNTED, NOW)
+
+
+async def removing(
+    remove: RemoveWorkspace, *, watching: bool = True
+) -> tuple[list[UsageTotals], TotalingLedger, FakeSource]:
+    """The totals told to a watcher, if ``watching``, as another connection has ``remove`` run
+    on one of the workspaces ``a`` and ``b``, each with a turn's row recorded, and the ledger
+    and source it ran with."""
+    ledger = TotalingLedger()
+    ledger.rows = [row("a"), row("b")]
+    source = LedgerSource(ledger)
+    plane = ControlPlane([workspace("a"), workspace("b")], workspaces=source, ledger=ledger)
+    watcher, remover = await welcomed(plane), await welcomed(plane)
+    if watching:
+        await say(watcher, "watch", WATCH)
+    taken(watcher)
+    ledger.asked.clear()
+    await say(remover, "remove", remove)
+    await settled()
+    totals = told(watcher, UsageTotals)
+    await plane.close()
+    return totals, ledger, source
+
+
+async def test_purging_a_workspace_tells_watchers_the_totals_without_it() -> None:
+    totals, _, _ = await removing(RemoveWorkspace(workspace="a", purge=True))
+
+    spent = UsageTotal(today=COUNTED, lifetime=COUNTED)
+    assert totals == [
+        UsageTotals(
+            workspaces=(WorkspaceUsage(workspace="b", today=COUNTED, lifetime=COUNTED),),
+            total=spent,
+        )
+    ]
+
+
+async def test_a_purge_that_fails_still_tells_watchers_the_totals_read_afresh() -> None:
+    ledger = TotalingLedger()
+    ledger.rows = [row("a")]
+    source = LedgerSource(ledger)
+    source.purge_fails = "The store failed."
+    plane = ControlPlane([workspace("a")], workspaces=source, ledger=ledger)
+    watcher, remover = await welcomed(plane), await welcomed(plane)
+    await say(watcher, "watch", WATCH)
+    taken(watcher)
+
+    await say(remover, "purge", RemoveWorkspace(workspace="a", purge=True))
+    await settled()
+
+    assert told(watcher, UsageTotals) == [NO_TOTALS]
+    await plane.close()
+
+
+async def test_removing_without_purge_tells_no_totals() -> None:
+    totals, ledger, source = await removing(RemoveWorkspace(workspace="a"))
+
+    assert source.closed == ["a"]
+    assert totals == [] and ledger.asked == []
+
+
+async def test_purging_with_no_one_watching_reads_no_totals() -> None:
+    _, ledger, source = await removing(RemoveWorkspace(workspace="a", purge=True), watching=False)
+
+    assert source.purged == ["a"] and ledger.asked == []
