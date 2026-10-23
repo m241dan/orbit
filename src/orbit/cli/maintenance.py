@@ -2,8 +2,6 @@
 
 import asyncio
 import os
-from collections.abc import Iterator
-from contextlib import contextmanager
 from pathlib import Path
 from typing import Annotated
 
@@ -15,15 +13,12 @@ from orbit.agent import (
     PurgeRefused,
     SqliteStore,
     StoreError,
+    StorePurging,
     TokenError,
     TokenFile,
-    WorkspaceLock,
-    WorkspaceRegistry,
-    orbit_dir,
-    purge_workspace,
+    purge,
     resolve_config_dir,
     resolve_state_dir,
-    running_server,
 )
 from orbit.cli.errors import _exit_on
 from orbit.cli.options import ConfigDirOption, StateDirOption
@@ -74,47 +69,14 @@ def forget(
 
 async def _forgotten(state: Path, key: str) -> Purged:
     """Purge the workspace whose path or id is ``key`` from the store in ``state``, as
-    :func:`_forget` does."""
+    :func:`purge` does, holding its workspace lock. Raises :class:`PurgeRefused` if there's
+    none, a running ``orbit serve`` serves it, another orbit holds its lock or purging it would
+    lose work."""
     store = await SqliteStore.open(state)
     try:
-        return await _forget(store, key)
+        return await purge(StorePurging(store), key)
     finally:
         await store.close()
-
-
-async def _forget(store: SqliteStore, key: str) -> Purged:
-    """Purge the workspace whose path or id is ``key`` from ``store``, holding its workspace
-    lock. Raises :class:`PurgeRefused` if there's none, a running ``orbit serve`` serves it,
-    another orbit holds its lock or purging it would lose work."""
-    workspace = await WorkspaceRegistry(store).find(key)
-    if workspace is None:
-        raise PurgeRefused(f"No workspace is registered at {key}.")
-    server = running_server(store.state_dir) if workspace.served else None
-    if server is not None:
-        raise PurgeRefused(
-            f"Can't forget {workspace.path}: the orbit serve at {server.url} serves it; remove it"
-            " there with its sessions, or stop that server first."
-        )
-    with _locked(Path(workspace.path)):
-        return await purge_workspace(store, workspace.id)
-
-
-@contextmanager
-def _locked(root: Path) -> Iterator[None]:
-    """Run the block holding the workspace lock of the workspace at ``root``, if it's still
-    there. Raises :class:`PurgeRefused` if another orbit holds it, and ``OSError`` if it can't
-    be taken."""
-    if not root.is_dir():
-        yield
-        return
-    lock = WorkspaceLock(orbit_dir(str(root)))
-    owner = lock.take()
-    try:
-        if owner is not None:
-            raise PurgeRefused(f"Can't forget {root}: {owner.described} holds its lock.")
-        yield
-    finally:
-        lock.close()
 
 
 def _forgotten_note(purged: Purged) -> str:

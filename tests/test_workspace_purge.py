@@ -1,19 +1,24 @@
 """Purging a workspace from the store: its records, session locks and fallback files, and a
-managed clone's directory, unless that would lose work; other workspaces untouched."""
+managed clone's directory, unless that would lose work, deleting the files before the records;
+other workspaces untouched."""
 
 import shutil
 from pathlib import Path
 
 import pytest
 
+from orbit.agent.application.purge import purge
+from orbit.agent.domain.purging import PurgeRefused
+from orbit.agent.domain.workspaces import RegisteredWorkspace
+from orbit.agent.external import workspace_purge
 from orbit.agent.external.fallback_files import FallbackFiles
 from orbit.agent.external.repository import orbit_dir
 from orbit.agent.external.sqlite_schema import StoreError
 from orbit.agent.external.sqlite_store import SqliteStore
-from orbit.agent.external.workspace_purge import PurgeRefused, purge_workspace
-from orbit.agent.external.workspace_registry import Workspace, WorkspaceRegistry
+from orbit.agent.external.workspace_purge import StorePurging, purge_workspace
+from orbit.agent.external.workspace_registry import WorkspaceRegistry
 from tests.agent_fakes import notice
-from tests.git_repo import bare_repository, commit_file, git
+from tests.git_repo import bare_repository, commit_file, git, init_repo
 from tests.store_views import database, record
 
 
@@ -76,7 +81,7 @@ async def test_purging_deletes_every_record_leaving_other_workspaces(
     purged = await purge_workspace(store, second)
 
     assert (purged.sessions, purged.fallback_files, purged.clone) == (1, 2, None)
-    assert purged.workspace == Workspace(second, str(tmp_path / "b"), False, False)
+    assert purged.workspace == RegisteredWorkspace(second, str(tmp_path / "b"), False, False)
     assert rows(state, second) == dict.fromkeys(rows(state, second), 0)
     assert rows(state, first) == dict.fromkeys(rows(state, first), 1)
     assert leftovers(state, tmp_path / "b", second) == []
@@ -139,7 +144,7 @@ async def test_a_managed_clone_with_work_not_pushed_is_refused_deleting_nothing(
     commit_file(clone, "b.txt", "new\n", "more")
 
     with pytest.raises(PurgeRefused) as refusal:
-        await purge_workspace(store, workspace_id)
+        await purge(StorePurging(store), workspace_id)
 
     assert str(refusal.value) == (
         f"Can't purge {clone}: deleting its clone would lose 1 commit on main not on its remote."
@@ -166,7 +171,41 @@ async def test_a_workspace_is_found_by_its_id_or_its_path(
 ) -> None:
     workspace_id = await used(store, tmp_path / "a")
     registry = WorkspaceRegistry(store)
-    found = Workspace(workspace_id, str(tmp_path / "a"), False, False)
+    found = RegisteredWorkspace(workspace_id, str(tmp_path / "a"), False, False)
     assert await registry.find(workspace_id) == found
     assert await registry.find(str(tmp_path / "a" / ".")) == found
     assert await registry.find(str(tmp_path / "b")) is None
+
+
+async def test_a_clone_that_cant_be_deleted_stays_registered_with_its_records_for_a_retry(
+    store: SqliteStore, state: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    clone = cloned(tmp_path)
+    workspace_id = await used(store, clone, managed=True)
+
+    def refused(path: Path) -> None:
+        raise PermissionError(f"Can't delete {path}")
+
+    with monkeypatch.context() as patched:
+        patched.setattr(workspace_purge, "_remove_clone", refused)
+        with pytest.raises(PermissionError):
+            await purge(StorePurging(store), str(clone))
+    assert rows(state, workspace_id) == dict.fromkeys(rows(state, workspace_id), 1)
+
+    purged = await purge(StorePurging(store), str(clone))
+
+    assert purged.clone == str(clone) and not clone.exists()
+    assert rows(state, workspace_id) == dict.fromkeys(rows(state, workspace_id), 0)
+
+
+async def test_a_workspace_is_found_by_a_directory_in_its_repository(
+    store: SqliteStore, tmp_path: Path
+) -> None:
+    repo = init_repo(tmp_path / "repo")
+    (repo / "src").mkdir()
+    registry = WorkspaceRegistry(store)
+    workspace_id = (await registry.find_or_register(str(repo))).workspace_id
+
+    found = await registry.find(str(repo / "src"))
+
+    assert found == RegisteredWorkspace(workspace_id, str(repo), False, False)

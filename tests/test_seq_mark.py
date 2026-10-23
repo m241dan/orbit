@@ -8,7 +8,14 @@ from pathlib import Path
 
 import pytest
 
-from orbit.agent import CloneFailed, ControlPlane, PathKind, SqliteStore, WorkspaceHost
+from orbit.agent import (
+    CloneFailed,
+    ControlPlane,
+    PathKind,
+    Purged,
+    SqliteStore,
+    WorkspaceHost,
+)
 from orbit.agent.application.outbox import SEQ_BLOCK
 from orbit.agent.application.seq_mark import MarkReservations
 from orbit.protocol import AddWorkspace, WorkspaceCloning
@@ -110,8 +117,8 @@ class GatedSource:
     async def losses(self, workspace_id: str) -> list[str]:
         return []
 
-    async def purge(self, workspace_id: str) -> None:
-        pass
+    async def purge(self, workspace_id: str) -> Purged:
+        raise AssertionError("Nothing is purged.")
 
 
 async def adding(plane: ControlPlane, source: GatedSource) -> int:

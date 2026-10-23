@@ -761,11 +761,12 @@ it only once whole, so a backup that fails leaves `PATH` as it was. Copying `orb
 miss writes still in its `-wal` file, or catch one half done. To restore, stop every orbit using the
 state directory, replace `orbit.db` with the backup, and start orbit again.
 
-`orbit db forget PATH` deletes everything orbit keeps of the workspace at `PATH` (or with the id
-`PATH`): its saved sessions and their events, its review count, its turns' usage, its session
+`orbit db forget PATH` deletes everything orbit keeps of the workspace at `PATH`, or the repository
+`PATH` is in, as `orbit chat` finds it (or with the id `PATH`): its saved sessions and their events, its review count, its turns' usage, its session
 locks in `locks/`, its fallback files, in the state directory and the repository, and its entry, so orbit starts afresh
 there next time; for a clone `orbit serve` made, it deletes the clone's directory too, and never a
-directory orbit didn't clone into. It says what it deleted, such as `Forgot /home/me/code/old:
+directory orbit didn't clone into. Files go before the records, so a file it can't delete leaves
+the workspace registered, and running it again finishes the job. It says what it deleted, such as `Forgot /home/me/code/old:
 deleted 3 sessions and 0 fallback files.`, and takes `--state-dir` as `chat` does. It refuses,
 with status 2 and deleting nothing, a path no workspace is registered at, a workspace the `orbit
 serve` running on the state directory serves (remove it there with `purge`, or stop the server),
@@ -1085,7 +1086,9 @@ what would be lost (`1 commit on main not on its remote`), and nothing is remove
 pushed or dropped. Nor is a workspace another orbit owns, such as a local `orbit chat` in its
 repository: the purge is refused as `busy`, naming the owner, though removing it without purging
 still works. The server
-holds the workspace's lock until the purge is done, so no local orbit starts on it meanwhile. A
+holds the workspace's lock until the purge is done, so no local orbit starts on it meanwhile. Its
+files go before its records, so if one can't be deleted the workspace stays registered and
+purging it again finishes the job. A
 workspace no server serves, such as one only a local `orbit chat` used, is purged with `orbit db
 forget` (see [Where orbit keeps things](#where-orbit-keeps-things)). In the TUI, `x` in the
 workspace picker offers `Delete its sessions too` beside keeping them (see

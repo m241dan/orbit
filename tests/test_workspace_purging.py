@@ -125,3 +125,14 @@ async def test_a_workspace_another_orbit_owns_can_still_be_removed_without_purge
 
     assert ids(catalog) == [] and accepted == CommandAccepted(command_id="remove")
     assert source.steps == ["close c"] and source.purged == []
+
+
+async def test_a_purge_asks_what_it_would_lose_once() -> None:
+    source = FakeSource()
+    plane = ControlPlane([workspace("c")], workspaces=source)
+    connection = await welcomed(plane)
+
+    await say(connection, "purge", PURGE)
+    await plane.close()
+
+    assert source.losses_asked == 1 and source.purged == ["c"]

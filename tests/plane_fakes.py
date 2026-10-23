@@ -15,6 +15,8 @@ from orbit.agent import (
 )
 from orbit.agent.application.connection import SessionConnection
 from orbit.agent.application.ports import RepositoryLock
+from orbit.agent.domain.purging import Purged
+from orbit.agent.domain.workspaces import RegisteredWorkspace
 from orbit.protocol import (
     INTERNAL,
     INVALID,
@@ -90,11 +92,11 @@ class FakeSource:
     ``unflag_fails`` says, if it does, when it's cleared. Each URL ``cloning`` is cloned to
     ``/clones/<its last part>``, reporting one step of progress, then waiting for
     ``clone_gate``, if given, and failing as ``clone_fails`` says, if it does; the clones
-    ``removed`` are noted, by path. Purging a
-    workspace would lose what ``lost`` says, by id, failing as ``losses_fail`` says, if it
-    does; those ``purged`` are noted, failing as ``purge_fails`` says, if it does. Each
-    workspace closed or purged, even if that fails, is noted in ``steps``, in order. The workspace
-    added last is at ``latest``, if any, unless finding it fails as ``latest_fails`` says."""
+    ``removed`` are noted, by path. Purging a workspace would lose what ``lost`` says, by id,
+    failing as ``losses_fail`` says, if it does, counting how often it's ``losses_asked``;
+    those ``purged`` are noted, failing as ``purge_fails`` says, if it does. Each workspace
+    closed or purged, even if that fails, is noted in ``steps``, in order. The workspace added
+    last is at ``latest``, if any, unless finding it fails as ``latest_fails`` says."""
 
     def __init__(
         self,
@@ -119,6 +121,7 @@ class FakeSource:
         self.unflag_fails: str | None = None
         self.lost: dict[str, list[str]] = {}
         self.losses_fail: str | None = None
+        self.losses_asked = 0
         self.purged: list[str] = []
         self.purge_fails: str | None = None
         self.steps: list[str] = []
@@ -177,16 +180,19 @@ class FakeSource:
         self.closed.append(workspace_id)
 
     async def losses(self, workspace_id: str) -> list[str]:
+        self.losses_asked += 1
         if self.losses_fail is not None:
             raise WorkspaceUnavailable(self.losses_fail, INTERNAL)
         return self.lost.get(workspace_id, [])
 
-    async def purge(self, workspace_id: str) -> None:
+    async def purge(self, workspace_id: str) -> Purged:
         assert (workspace_id, False) in self.flags
         self.steps.append(f"purge {workspace_id}")
         if self.purge_fails is not None:
             raise WorkspaceUnavailable(self.purge_fails, INTERNAL)
         self.purged.append(workspace_id)
+        workspace = RegisteredWorkspace(workspace_id, f"/src/{workspace_id}", False, False)
+        return Purged(workspace, sessions=0, fallback_files=0, clone=None)
 
 
 async def welcomed(plane: ControlPlane) -> SessionConnection:

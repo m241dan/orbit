@@ -27,6 +27,7 @@ from orbit.agent.application.ports import (
     StoreFailed,
     Workspace,
 )
+from orbit.agent.application.purge import purge
 from orbit.agent.application.recovery import RecoveryFailed
 from orbit.agent.application.verifier import Verification
 from orbit.agent.application.workspace_host import WorkspaceHost
@@ -36,6 +37,7 @@ from orbit.agent.domain.clones import looks_like_url
 from orbit.agent.domain.config import OrbitConfig
 from orbit.agent.domain.config_errors import INVALID_CONFIG, ConfigError
 from orbit.agent.domain.ownership import WorkspaceOwner
+from orbit.agent.domain.purging import Purged, PurgeRefused
 from orbit.agent.domain.remotes import RemoteSettings
 from orbit.agent.domain.roles import Role
 from orbit.agent.domain.server import LocalTls, RunningServer, ServerSettings, TlsMode
@@ -85,7 +87,7 @@ from orbit.agent.external.user_config import (
 )
 from orbit.agent.external.workspace import workspace_state
 from orbit.agent.external.workspace_lock import WorkspaceLock
-from orbit.agent.external.workspace_purge import Purged, PurgeRefused, purge_workspace
+from orbit.agent.external.workspace_purge import StorePurging, purge_workspace
 from orbit.agent.external.workspace_registry import WorkspaceRegistry
 
 __all__ = [
@@ -139,6 +141,7 @@ __all__ = [
     "StorageSettings",
     "StoreError",
     "StoreFailed",
+    "StorePurging",
     "StoredSession",
     "TlsError",
     "TlsMode",
@@ -163,6 +166,7 @@ __all__ = [
     "open_workspace",
     "open_workspace_store",
     "orbit_dir",
+    "purge",
     "purge_workspace",
     "read_config",
     "read_remotes",

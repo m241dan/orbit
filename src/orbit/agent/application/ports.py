@@ -3,6 +3,7 @@
 """
 
 from collections.abc import AsyncIterator, Awaitable, Callable, Collection, Sequence
+from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Protocol
@@ -12,6 +13,7 @@ from orbit.agent.domain.checks import ChecksProposal, Setup
 from orbit.agent.domain.config_errors import ConfigError
 from orbit.agent.domain.listings import FoundDirectory
 from orbit.agent.domain.ownership import WorkspaceOwner
+from orbit.agent.domain.purging import Purged
 from orbit.agent.domain.replay import LogBounds
 from orbit.agent.domain.roles import Role
 from orbit.agent.domain.sessions import SessionRecord, Unreadable
@@ -19,6 +21,7 @@ from orbit.agent.domain.storage_halt import StorageErrorKind
 from orbit.agent.domain.usage import UsageFetch
 from orbit.agent.domain.usage_totals import UsageRow, UsageTotalsData
 from orbit.agent.domain.verification import VerificationStep
+from orbit.agent.domain.workspaces import RegisteredWorkspace
 from orbit.protocol import (
     Event,
     EventEnvelope,
@@ -80,6 +83,55 @@ class Cloner(Protocol):
 
     async def remove(self, path: str) -> None:
         """Remove the clone at ``path``, one it made that couldn't be served, as far as it can."""
+        ...
+
+
+class WorkspaceDeletion(Protocol):
+    """What deletes what orbit keeps of a workspace being purged, each part raising
+    ``OSError`` if a file can't be deleted, or what the store raises if it fails."""
+
+    async def remove_fallback_files(self, workspace: RegisteredWorkspace) -> int:
+        """Delete the fallback files of ``workspace``; returns how many it deleted."""
+        ...
+
+    async def remove_session_locks(self, workspace_id: str) -> None:
+        """Let go of the session locks of the workspace ``workspace_id`` and remove them."""
+        ...
+
+    async def remove_clone(self, path: str) -> None:
+        """Delete the directory of the clone orbit made at ``path``, if it's there."""
+        ...
+
+    async def remove_records(self, workspace_id: str) -> int:
+        """Delete the records of the workspace ``workspace_id``, its registration last, in one
+        transaction; returns how many sessions it had."""
+        ...
+
+
+class WorkspacePurging(Protocol):
+    """What purging a workspace needs from where it's registered and whoever serves it."""
+
+    async def find(self, key: str) -> RegisteredWorkspace | None:
+        """The workspace whose path or id is ``key``; ``None`` if none is registered so."""
+        ...
+
+    def held(self, workspace: RegisteredWorkspace) -> AbstractAsyncContextManager[str | None]:
+        """Run the block keeping other orbits from taking ``workspace`` up, giving why another
+        orbit already holds it, if one does."""
+        ...
+
+    async def losses(self, workspace: RegisteredWorkspace) -> list[str]:
+        """What purging ``workspace`` would lose, a short line each: what the directory of a
+        clone orbit made holds that its remote doesn't; none for another workspace."""
+        ...
+
+    async def stop(self, workspace: RegisteredWorkspace) -> None:
+        """Stop serving ``workspace``, if it's served, before what orbit keeps of it goes."""
+        ...
+
+    async def delete(self, workspace: RegisteredWorkspace) -> Purged:
+        """Delete what orbit keeps of ``workspace``, as :func:`erase` orders it; returns what it
+        deleted."""
         ...
 
 

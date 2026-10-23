@@ -3,8 +3,9 @@
 
 import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import replace
+from functools import partial
 from pathlib import PurePath
 from typing import Protocol
 
@@ -25,17 +26,19 @@ from orbit.agent.application.handshake import HandshakeParts
 from orbit.agent.application.keeper import Clock, local_now
 from orbit.agent.application.outbox import Seqs
 from orbit.agent.application.ports import Cloner, SeqMark, UsageLedger, UsageSource
+from orbit.agent.application.purge import purge
 from orbit.agent.application.seq_mark import MarkReservations
 from orbit.agent.application.usage_monitor import UsageMonitor
 from orbit.agent.application.workspace_host import WorkspaceHost
 from orbit.agent.domain.catalog import catalog
 from orbit.agent.domain.clones import added_url
 from orbit.agent.domain.listings import LOCAL_BROWSING
-from orbit.agent.domain.purging import check_purgeable, check_unowned
+from orbit.agent.domain.purging import Purged, owned_refusal
 from orbit.agent.domain.refusals import STOPPING, Refused
 from orbit.agent.domain.workspaces import (
     LOCAL_ONLY,
     PathKind,
+    RegisteredWorkspace,
     addressed_workspace,
     check_addable,
     check_directory,
@@ -114,12 +117,58 @@ class WorkspaceSource(Cloner, Protocol):
         workspace. Raises :class:`WorkspaceUnavailable` if that can't be found out."""
         ...
 
-    async def purge(self, workspace_id: str) -> None:
+    async def purge(self, workspace_id: str) -> Purged:
         """Delete the records of the workspace ``workspace_id``, whose host is closed and which
         is no longer flagged served but still locked, and, if it's a clone orbit made, its
-        directory. Raises :class:`WorkspaceUnavailable` if they can't be, as ``invalid`` if
-        deleting the clone would lose work."""
+        directory, having checked nothing would be lost, as :func:`erase` orders it; returns
+        what it deleted. Raises :class:`WorkspaceUnavailable` if they can't be, as ``invalid``
+        if it isn't registered."""
         ...
+
+
+class _ServedPurging:
+    """Purging the workspace a control plane serves with ``host``, which ``workspaces`` holds
+    the lock of, having had it ``stop``, which stops serving it, before deleting it, as
+    :func:`purge` does; refused as ``busy`` while another orbit owns its repository, and, with
+    the code ``workspaces`` gives, if what it would lose can't be found out or deleting it
+    fails."""
+
+    def __init__(
+        self, host: WorkspaceHost, workspaces: WorkspaceSource, stop: Callable[[], Awaitable[None]]
+    ) -> None:
+        self._host = host
+        self._workspaces = workspaces
+        self._stop = stop
+        self._name = host.path or host.workspace_id
+
+    async def find(self, key: str) -> RegisteredWorkspace:
+        """The workspace served with the host, whose id is ``key``."""
+        return RegisteredWorkspace(key, self._name, served=True, managed=self._host.managed)
+
+    @asynccontextmanager
+    async def held(self, workspace: RegisteredWorkspace) -> AsyncIterator[str | None]:
+        """Run the block, the lock being held already, giving why it can't be purged if another
+        orbit owns its repository."""
+        owner = self._host.owner
+        yield None if owner is None else owned_refusal(self._name, owner)
+
+    async def losses(self, workspace: RegisteredWorkspace) -> list[str]:
+        """What purging ``workspace`` would lose, as ``workspaces`` says."""
+        try:
+            return await self._workspaces.losses(workspace.id)
+        except WorkspaceUnavailable as exc:
+            raise Refused(exc.code, f"Can't purge {self._name}: {exc}") from None
+
+    async def stop(self, workspace: RegisteredWorkspace) -> None:
+        """Stop serving ``workspace``."""
+        await self._stop()
+
+    async def delete(self, workspace: RegisteredWorkspace) -> Purged:
+        """Have ``workspaces`` delete what orbit keeps of ``workspace``."""
+        try:
+            return await self._workspaces.purge(workspace.id)
+        except WorkspaceUnavailable as exc:
+            raise Refused(exc.code, f"Removed {self._name}, but couldn't purge it: {exc}") from None
 
 
 def _last_seq(hosts: Iterable[WorkspaceHost], mark: SeqMark | None) -> int:
@@ -528,49 +577,40 @@ class ControlPlane:
     ) -> None:
         """Stop serving the workspace ``command`` names: have ``workspaces`` stop flagging it
         served, then close its host, having ``connection``, if it's attached there, attached to
-        none, if ``command`` says to purge it, delete its records while its lock is still held,
-        and have ``workspaces`` let it go, and send the catalog to ``connection`` and every
-        listening connection, even if closing the host or purging fails; refused for a workspace
-        not served, as ``busy`` while it runs work or another connection views one of its
-        sessions or, when purging, another orbit owns its repository, as ``invalid`` when
-        purging it would lose work, or with the code ``workspaces`` gives, still served, if its
-        flag can't be cleared."""
-        workspace = command.workspace
-        host = self._hosts[served_workspace(workspace, self._served)]
+        none, if ``command`` says to purge it, delete its records, as :func:`purge` does, while
+        its lock is still held, and have ``workspaces`` let it go, and send the catalog to
+        ``connection`` and every listening connection, even if closing the host or purging
+        fails; refused for a workspace not served, as ``busy`` while it runs work or another
+        connection views one of its sessions or, when purging, another orbit owns its
+        repository, as ``invalid`` when purging it would lose work, or with the code
+        ``workspaces`` gives, still served, if its flag can't be cleared."""
+        host = self._hosts[served_workspace(command.workspace, self._served)]
         self._check_removable(host)
-        if command.purge:
-            await self._check_purgeable(host, workspaces)
+        async with AsyncExitStack() as stack:
+            stop = partial(self._stop, host, connection, workspaces, stack)
+            if command.purge:
+                await purge(_ServedPurging(host, workspaces, stop), host.workspace_id)
+            else:
+                await stop()
+
+    async def _stop(
+        self,
+        host: WorkspaceHost,
+        connection: SessionConnection,
+        workspaces: WorkspaceSource,
+        stack: AsyncExitStack,
+    ) -> None:
+        """Stop serving ``host``'s workspace: have ``workspaces`` stop flagging it served, as
+        :meth:`_unflag` does, have ``connection``, if it's attached there, attached to none, and
+        close ``host``, its place in line for a coder, if any, going at once; once ``stack``
+        closes, even if closing ``host`` fails, have ``workspaces`` let it go and send the
+        catalog, as :meth:`_changed` does."""
         await self._unflag(host, workspaces)
-        if connection.workspace == workspace:
+        stack.push_async_callback(self._changed, connection)
+        stack.push_async_callback(workspaces.close, host.workspace_id)
+        if connection.workspace == host.workspace_id:
             self._detach(connection)
-        try:
-            await self._let_go(host, workspaces, purge=command.purge)
-        finally:
-            await self._changed(connection)
-
-    @staticmethod
-    async def _check_purgeable(host: WorkspaceHost, workspaces: WorkspaceSource) -> None:
-        """Refuse purging ``host``'s workspace as ``busy`` while another orbit owns its
-        repository, naming it, as ``invalid`` if that would lose work, listing it, or with the
-        code ``workspaces`` gives if that can't be found out."""
-        name = host.path or host.workspace_id
-        check_unowned(name, host.owner)
-        try:
-            losses = await workspaces.losses(host.workspace_id)
-        except WorkspaceUnavailable as exc:
-            raise Refused(exc.code, f"Can't purge {name}: {exc}") from None
-        check_purgeable(name, losses)
-
-    @staticmethod
-    async def _purge(host: WorkspaceHost, workspaces: WorkspaceSource) -> None:
-        """Have ``workspaces`` delete the records of ``host``'s workspace, no longer served but
-        still locked;
-        refused with the code it gives if that fails."""
-        name = host.path or host.workspace_id
-        try:
-            await workspaces.purge(host.workspace_id)
-        except WorkspaceUnavailable as exc:
-            raise Refused(exc.code, f"Removed {name}, but couldn't purge it: {exc}") from None
+        await self._close_host(host)
 
     @staticmethod
     def _check_removable(host: WorkspaceHost) -> None:
@@ -594,21 +634,20 @@ class ControlPlane:
             await workspaces.set_served(host.workspace_id, True)
             raise
 
-    async def _let_go(
-        self, host: WorkspaceHost, workspaces: WorkspaceSource, *, purge: bool = False
-    ) -> None:
-        """Stop serving ``host``'s workspace: close ``host``, then, if ``purge``, delete its
-        records, as :meth:`_purge` does, while ``workspaces`` still holds its lock, then have
-        ``workspaces`` let it go, even if closing ``host`` or purging fails; its place in line
-        for a coder, if any, goes at once."""
-        self._hosts.pop(host.workspace_id, None)
-        self._coders.drop(host.workspace_id)
+    async def _let_go(self, host: WorkspaceHost, workspaces: WorkspaceSource) -> None:
+        """Stop serving ``host``'s workspace: close it, as :meth:`_close_host` does, then have
+        ``workspaces`` let it go, even if closing ``host`` fails."""
         try:
-            await host.close()
-            if purge:
-                await self._purge(host, workspaces)
+            await self._close_host(host)
         finally:
             await workspaces.close(host.workspace_id)
+
+    async def _close_host(self, host: WorkspaceHost) -> None:
+        """Close ``host``, no longer served; its place in line for a coder, if any, goes at
+        once."""
+        self._hosts.pop(host.workspace_id, None)
+        self._coders.drop(host.workspace_id)
+        await host.close()
 
     async def _changed(self, connection: SessionConnection | None) -> None:
         """Send every listening connection the catalog, as the workspaces served changed, and

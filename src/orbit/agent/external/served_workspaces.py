@@ -14,6 +14,7 @@ from orbit.agent.application.workspace_host import WorkspaceHost
 from orbit.agent.domain.config import OrbitConfig
 from orbit.agent.domain.config_errors import INVALID_CONFIG, ConfigError
 from orbit.agent.domain.ownership import WorkspaceOwner
+from orbit.agent.domain.purging import Purged, PurgeRefused
 from orbit.agent.domain.workspaces import PathKind
 from orbit.agent.external.config_file import read_config
 from orbit.agent.external.repository import (
@@ -28,7 +29,7 @@ from orbit.agent.external.sqlite_schema import StoreError
 from orbit.agent.external.sqlite_store import SqliteStore
 from orbit.agent.external.store_startup import OpenedStore, open_workspace_store
 from orbit.agent.external.workspace_lock import LOCK_FILE, WorkspaceLock
-from orbit.agent.external.workspace_purge import PurgeRefused, purge_losses, purge_workspace
+from orbit.agent.external.workspace_purge import purge_losses, purge_workspace
 from orbit.agent.external.workspace_registry import WorkspaceRegistry
 from orbit.protocol import INTERNAL, WorkspaceCloning
 
@@ -287,12 +288,12 @@ class ServedWorkspaces:
             raise WorkspaceUnavailable(str(exc), INTERNAL) from None
         return [] if workspace is None else await purge_losses(workspace)
 
-    async def purge(self, workspace_id: str) -> None:
+    async def purge(self, workspace_id: str) -> Purged:
         """Delete the records of the workspace ``workspace_id``, as :func:`purge_workspace`
-        does. Raises :class:`WorkspaceUnavailable` as ``INVALID`` if it's refused, or as
-        ``INTERNAL`` if the store fails or a file can't be deleted."""
+        does; returns what it deleted. Raises :class:`WorkspaceUnavailable` as ``INVALID`` if
+        it's refused, or as ``INTERNAL`` if the store fails or a file can't be deleted."""
         try:
-            await purge_workspace(self._store, workspace_id)
+            return await purge_workspace(self._store, workspace_id)
         except PurgeRefused as exc:
             raise WorkspaceUnavailable(str(exc)) from None
         except (StoreError, OSError) as exc:

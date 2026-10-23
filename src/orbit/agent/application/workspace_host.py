@@ -520,6 +520,11 @@ class WorkspaceHost:
         return self._workspace
 
     @property
+    def managed(self) -> bool:
+        """Whether the workspace this host serves is a clone orbit made."""
+        return self._managed
+
+    @property
     def activity(self) -> Activity:
         """What's in progress in the open session now."""
         return self._activity()

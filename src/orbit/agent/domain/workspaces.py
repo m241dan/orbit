@@ -2,6 +2,7 @@
 envelope may name; and which workspaces may be added and removed."""
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 from enum import Enum, auto
 
 from orbit.agent.domain.activity import Activity, doing
@@ -83,3 +84,14 @@ def check_removable(workspace: str, activity: Activity, viewed: Sequence[str]) -
         sessions = "session" if len(viewed) == 1 else "sessions"
         views = f"another frontend views its {sessions} {joined(viewed)}"
         raise Refused(BUSY, f"Can't remove {workspace}: {views}.")
+
+
+@dataclass(frozen=True)
+class RegisteredWorkspace:
+    """A workspace registered: its ``id``, its ``path``, whether a server ``served`` it last, and
+    whether it's ``managed``, a clone orbit made at ``path``."""
+
+    id: str
+    path: str
+    served: bool
+    managed: bool

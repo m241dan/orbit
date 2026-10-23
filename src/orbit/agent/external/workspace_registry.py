@@ -10,7 +10,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from orbit.agent.domain.fingerprints import fingerprints_match, lookalikes_note, reattached_note
-from orbit.agent.external.repository import workspace_fingerprint
+from orbit.agent.domain.workspaces import RegisteredWorkspace
+from orbit.agent.external.repository import git_top_level, workspace_fingerprint
 from orbit.agent.external.sqlite_schema import transaction
 from orbit.agent.external.sqlite_store import SqliteStore
 
@@ -22,17 +23,6 @@ class Registered:
 
     workspace_id: str
     note: str | None = None
-
-
-@dataclass(frozen=True)
-class Workspace:
-    """A workspace registered: its ``id``, its ``path``, whether a server ``served`` it last, and
-    whether it's ``managed``, a clone orbit made at ``path``."""
-
-    id: str
-    path: str
-    served: bool
-    managed: bool
 
 
 def register(connection: sqlite3.Connection, path: Path, fingerprint: str | None) -> Registered:
@@ -131,14 +121,14 @@ _BY_ID = "SELECT id, path, served, managed FROM workspaces WHERE id = ?"
 _BY_PATH = "SELECT id, path, served, managed FROM workspaces WHERE path = ?"
 
 
-def _found(connection: sqlite3.Connection, query: str, key: str) -> Workspace | None:
+def _found(connection: sqlite3.Connection, query: str, key: str) -> RegisteredWorkspace | None:
     """The workspace in ``connection`` that ``query``, either of :data:`_BY_ID` and
     :data:`_BY_PATH`, finds for ``key``, if there is one."""
     found = connection.execute(query, (key,)).fetchone()
     if found is None:
         return None
     workspace_id, path, served, managed = found
-    return Workspace(str(workspace_id), str(path), bool(served), bool(managed))
+    return RegisteredWorkspace(str(workspace_id), str(path), bool(served), bool(managed))
 
 
 _PURGES = (
@@ -168,6 +158,13 @@ def _path(connection: sqlite3.Connection, workspace_id: str) -> str | None:
     row = connection.execute("SELECT path FROM workspaces WHERE id = ?", (workspace_id,))
     found = row.fetchone()
     return None if found is None else str(found[0])
+
+
+def _workspace_path(key: str) -> str:
+    """The path of the workspace the path ``key`` stands for: its git work tree's top level, if
+    it's in one, else itself, resolved."""
+    path = str(Path(key).resolve())
+    return git_top_level(path) or path
 
 
 class WorkspaceRegistry:
@@ -220,20 +217,21 @@ class WorkspaceRegistry:
         message = f"Couldn't look up the workspace {workspace_id} in"
         return await self._store.run(message, lambda connection: _path(connection, workspace_id))
 
-    async def workspace(self, workspace_id: str) -> Workspace | None:
+    async def workspace(self, workspace_id: str) -> RegisteredWorkspace | None:
         """The workspace ``workspace_id``; ``None`` if it isn't registered."""
         message = f"Couldn't look up the workspace {workspace_id} in"
         return await self._store.run(
             message, lambda connection: _found(connection, _BY_ID, workspace_id)
         )
 
-    async def find(self, key: str) -> Workspace | None:
-        """The workspace whose id is ``key``, else the one at the path ``key``, resolved;
-        ``None`` if there's neither."""
+    async def find(self, key: str) -> RegisteredWorkspace | None:
+        """The workspace whose id is ``key``, else the one at the path ``key`` stands for: its
+        git work tree's top level, if it's in one, else itself, resolved; ``None`` if there's
+        neither."""
         found = await self.workspace(key)
         if found is not None:
             return found
-        path = await asyncio.to_thread(lambda: str(Path(key).resolve()))
+        path = await asyncio.to_thread(_workspace_path, key)
         message = f"Couldn't look up the workspace {key} in"
         return await self._store.run(message, lambda connection: _found(connection, _BY_PATH, path))
 
