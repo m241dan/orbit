@@ -18,9 +18,9 @@ class WarningCapture(logging.Handler):
     :meth:`capturing`, keeping every one for :meth:`lines` and showing each kind, its logger and
     message template, once per run through what :meth:`attach` is given.
 
-    Recovery can't be told: the loggers sit at WARNING, so no lower record of theirs ever
-    arrives, and a kind once shown isn't shown again. Records may come from any thread; they're
-    shown on the loop that attached.
+    A kind once shown isn't shown again that run (the telemetry plan's decision 12): libraries
+    rarely log recovery. Records may come from any thread; they're shown on the loop that
+    attached.
     """
 
     def __init__(self) -> None:
