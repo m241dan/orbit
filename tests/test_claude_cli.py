@@ -11,6 +11,7 @@ from orbit.agent import ClaudeCliRunner
 from orbit.agent.application.ports import AgentLaunch, ResumeFailed
 from orbit.agent.domain.agents import Agent
 from orbit.agent.domain.roles import ORBIT_TOOLS
+from orbit.agent.domain.usage_limits import limit_hit
 from orbit.agent.external.claude_cli import AGENT_RULES, TOOL_TIMEOUT_MS, translate
 from orbit.protocol import (
     AGENT_FAILED,
@@ -191,6 +192,24 @@ def test_translate_result_carries_the_turns_usage_and_cost() -> None:
 @pytest.mark.parametrize("message", [INIT, RATE_LIMIT, {"type": "something_new"}])
 def test_translate_ignores_other_messages(message: dict[str, Any]) -> None:
     assert translate("t", message) == []
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        {"type": "assistant", "message": {}},
+        {"type": "assistant", "message": {"content": [{"type": "tool_use", "id": "toolu_1"}]}},
+        {"type": "user", "message": {"content": [{"type": "tool_result"}]}},
+        {"type": "user", "message": {"content": None}},
+        {"type": "result", "is_error": True},
+    ],
+)
+def test_translate_rejects_messages_missing_what_they_should_hold(
+    message: dict[str, Any],
+) -> None:
+    with pytest.raises(RuntimeError, match=r"^Unexpected output from claude: \{") as raised:
+        translate("t", message)
+    assert json.dumps(message)[:40] in str(raised.value)
 
 
 # ClaudeCliRunner: drives a real subprocess (the fake CLI above)
@@ -423,6 +442,35 @@ async def test_a_resumed_turn_whose_stderr_is_not_utf8_fails_to_resume(tmp_path:
     runner.set_conversation("agent-3", "saved-7")
     with pytest.raises(ResumeFailed, match=r"^No conversation \ufffd\ufffd$"):
         await run(runner, "Carry on.")
+
+
+async def test_a_resumed_turn_whose_cli_exits_at_once_with_non_utf8_stderr_fails_to_resume(
+    tmp_path: Path,
+) -> None:
+    stderr = f"No conversation {INVALID_UTF8}\n"
+    runner, _ = make_runner(tmp_path, exit_at_once=True, stderr=stderr, exit=1)
+    runner.set_conversation("agent-3", "saved-7")
+    with pytest.raises(ResumeFailed, match=r"^No conversation \ufffd\ufffd$"):
+        await run(runner, "Carry on.")
+
+
+async def test_a_crash_with_invalid_bytes_around_a_usage_limit_still_says_so(
+    tmp_path: Path,
+) -> None:
+    stderr = f"{INVALID_UTF8}You've hit your session limit{INVALID_UTF8}\n"
+    runner, _ = make_runner(tmp_path, stdout=lines(INIT), stderr=stderr, exit=1)
+    with pytest.raises(RuntimeError) as raised:
+        await run(runner, "hi")
+    assert "You've hit your session limit" in str(raised.value)
+    assert limit_hit(str(raised.value))
+
+
+async def test_a_stream_message_missing_its_content_fails_as_unexpected_output(
+    tmp_path: Path,
+) -> None:
+    runner, _ = make_runner(tmp_path, stdout=lines(INIT, {"type": "assistant", "message": {}}))
+    with pytest.raises(RuntimeError, match=r"^Unexpected output from claude: .*assistant"):
+        await run(runner, "hi")
 
 
 async def test_a_resumed_turn_whose_output_is_not_utf8_still_fails_to_resume(

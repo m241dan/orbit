@@ -106,7 +106,15 @@ def check_orbit_connected(message: dict[str, Any]) -> None:
 
 
 def translate(turn_id: str, message: dict[str, Any]) -> list[Event]:
-    """Map one stream-json message to protocol events. Unknown messages map to none."""
+    """Map one stream-json message to protocol events. Unknown messages map to none; a known
+    one missing what it should hold raises RuntimeError."""
+    try:
+        return _events(turn_id, message)
+    except (KeyError, TypeError):
+        raise RuntimeError(f"Unexpected output from claude: {json.dumps(message)[:200]}") from None
+
+
+def _events(turn_id: str, message: dict[str, Any]) -> list[Event]:
     match message.get("type"):
         case "assistant":
             return _assistant_events(turn_id, message["message"]["content"])
