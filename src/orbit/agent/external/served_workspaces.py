@@ -149,6 +149,7 @@ class ServedWorkspaces:
         self._cloner = cloner
         self._worktree = worktree
         self._locks: dict[str, WorkspaceLock] = {}
+        self._fresh: list[str] = []
         self.url: str | None = None
 
     @property
@@ -166,9 +167,23 @@ class ServedWorkspaces:
         return asyncio.run(self._taken(root, Opening(self._worktree, flag=False, managed=managed)))
 
     def cloned(self, url: str) -> str:
-        """The path of a new clone of the repository at ``url``, made before serving starts.
-        Raises :class:`CloneFailed` if it fails."""
-        return asyncio.run(self.clone(url, _unshown))
+        """The path of a new clone of the repository at ``url``, made before serving starts and
+        removed by :meth:`drop_clones` unless :meth:`keep_clones` is called first. Raises
+        :class:`CloneFailed` if it fails."""
+        path = asyncio.run(self.clone(url, _unshown))
+        self._fresh.append(path)
+        return path
+
+    def keep_clones(self) -> None:
+        """Keep the clones made before serving started, now that serving them has."""
+        self._fresh.clear()
+
+    def drop_clones(self) -> None:
+        """Remove the clones made before serving started that aren't kept, their locks let go
+        first."""
+        for path in self._fresh:
+            asyncio.run(self.remove(path))
+        self._fresh.clear()
 
     def flag_served(self) -> None:
         """Flag every workspace served as served, so a server starting later serves them again.

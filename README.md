@@ -1053,8 +1053,12 @@ place). Clones go to `clone_dir` in `[server]`, by default `workspaces` in the s
 each in a directory named after the URL's last part without `.git` (`proj` for
 `git@github.com:o/proj.git`), or `proj-2`, `proj-3` and so on when that's taken; orbit marks
 these workspaces as managed, clones it made. A clone that fails says git's message (`orbit serve
---add` stops with status 2) and leaves nothing behind, and one still under way when the server
-stops is stopped and removed. The same URL can't be cloned twice at once. In the TUI, the
+--add` stops with status 2) and leaves nothing behind, as does a clone `orbit serve --add` made
+that it then can't serve, along with every other clone it made that run; one still under way
+when the server stops is stopped and removed. The same URL can't be cloned twice at once.
+`--add <url>` clones every time it's given, even a URL an earlier run cloned and still serves,
+so after the first run start the server with a plain `orbit serve`, which serves its clones
+again. In the TUI, the
 workspace picker shows a clone's progress in a row of its own (see [Workspaces](#workspaces)).
 
 **Watching what runs.** A frontend that shows more than one workspace at a time can watch

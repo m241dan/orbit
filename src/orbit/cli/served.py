@@ -37,9 +37,11 @@ def _workspaces(
 ) -> ServedWorkspaces:
     """The workspaces ``orbit serve`` serves from the ``store``, each with its host made as
     ``flags`` ask, keeping its sessions as ``storage`` says, and its lock held until it's
-    removed or ``stack`` closes, those added by URL cloned into ``clone_dir``."""
+    removed or ``stack`` closes, those added by URL cloned into ``clone_dir`` and, unless
+    they're kept, removed when ``stack`` closes."""
     make = _maker(flags, storage, pick_session=False)
     source = ServedWorkspaces(store, make, Cloner(clone_dir), worktree=flags.worktree)
+    stack.callback(source.drop_clones)
     stack.callback(source.let_go)
     return source
 
@@ -73,7 +75,8 @@ def _serving(
 
     Exits with status 2 if the store can't be opened, a clone fails, or an ``added`` workspace
     can't be registered, locked, opened or flagged, git has no identity for its repository with
-    the coder committing there, or its configuration is invalid, leaving each flagged as it was.
+    the coder committing there, or its configuration is invalid, leaving each flagged as it was
+    and removing the clones it made.
     """
     storage = _storage(user_config)
     usage_source = _usage_source(flags)
@@ -92,6 +95,7 @@ def _serving(
             hosts = [make() for make in makers]
             return ControlPlane(hosts, usage_source, source, store, ledger=store, browsing=browsing)
 
+        source.keep_clones()
         yield _Serving(build, workspaces, source)
 
 

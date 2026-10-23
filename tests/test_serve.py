@@ -65,7 +65,7 @@ from orbit.protocol import (
     encode,
 )
 from tests.cli_fakes import StartedTelemetry
-from tests.git_repo import bare_repository
+from tests.git_repo import bare_repository, commit_file, init_repo
 from tests.server_fakes import TASK
 from tests.store_views import database, workspace_id_of
 from tests.tls_certs import DAY, Ca, ServerFiles, make_ca, make_client, make_server, other_key
@@ -667,6 +667,49 @@ def test_adding_a_url_that_cant_be_cloned_exits_with_gits_message(
     assert result.stderr.startswith(f"Couldn't clone {url}: ")
     assert "does not appear to be a git repository" in result.stderr
     assert list((state / "workspaces").iterdir()) == []
+
+
+def test_adding_a_url_whose_clone_cant_be_served_exits_and_removes_the_clone(
+    state: Path, tmp_path: Path
+) -> None:
+    source = init_repo(tmp_path / "proj")
+    (source / ".orbit").mkdir()
+    commit_file(source, ".orbit/config.toml", "not = [toml\n", "break")
+    url = source.as_uri()
+    result = runner.invoke(app, ["serve", *QUIET, "--add", url, "--port", "0"])
+    assert result.exit_code == 2
+    assert result.stderr.startswith("Invalid orbit configuration: ")
+    assert f"Cloned {url} into {state / 'workspaces' / 'proj'}." in result.stdout
+    assert list((state / "workspaces").iterdir()) == []
+
+
+def test_adding_a_url_then_a_missing_path_exits_and_removes_the_clone(
+    state: Path, tmp_path: Path
+) -> None:
+    url = bare_repository(tmp_path).as_uri()
+    missing = str(tmp_path / "missing")
+    result = runner.invoke(app, ["serve", *QUIET, "--add", url, "--add", missing, "--port", "0"])
+    assert result.exit_code == 2
+    assert f"Workspace {missing} doesn't exist." in result.stderr
+    assert not (state / "workspaces" / "proj").exists()
+
+
+def test_adding_a_url_then_a_path_that_cant_be_served_exits_and_removes_the_clone(
+    project: Path, state: Path, tmp_path: Path
+) -> None:
+    _break_config(project)
+    url = bare_repository(tmp_path).as_uri()
+    result = runner.invoke(app, ["serve", *QUIET, "--add", url, "--add", ".", "--port", "0"])
+    assert result.exit_code == 2
+    assert result.stderr.startswith("Invalid orbit configuration: ")
+    assert list((state / "workspaces").iterdir()) == []
+
+
+def test_adding_a_path_that_cant_be_served_leaves_it_in_place(project: Path) -> None:
+    _break_config(project)
+    result = runner.invoke(app, ["serve", *QUIET, "--add", str(project), "--port", "0"])
+    assert result.exit_code == 2
+    assert (project / ".orbit" / "config.toml").read_text() == "not = [toml\n"
 
 
 def _changes(websocket: ClientConnection, command_id: str, command: Command) -> list[Event]:
