@@ -240,6 +240,23 @@ async def test_a_moved_repository_takes_over_its_workspace_and_sessions(
     assert await registry.find_or_register(str(new)) == Registered(first.workspace_id)
 
 
+async def test_a_managed_workspace_re_attached_to_a_new_path_isnt_managed(
+    monkeypatch: pytest.MonkeyPatch, store: SqliteStore, tmp_path: Path
+) -> None:
+    fingerprinted(monkeypatch, REPO)
+    old = directory(tmp_path, "clone")
+    registry = WorkspaceRegistry(store)
+    first = await registry.find_or_register(str(old))
+    await registry.set_managed(first.workspace_id)
+    shutil.rmtree(old)
+    checkout = directory(tmp_path, "checkout")
+
+    moved = await registry.find_or_register(str(checkout))
+
+    assert moved.workspace_id == first.workspace_id
+    assert await managed(store) == [(str(checkout.resolve()), 0)]
+
+
 async def test_a_second_clone_while_the_first_is_there_is_a_new_workspace(
     monkeypatch: pytest.MonkeyPatch, store: SqliteStore, tmp_path: Path
 ) -> None:

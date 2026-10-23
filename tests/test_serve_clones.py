@@ -2,6 +2,7 @@
 directory, then serving each clone, flagged served and managed."""
 
 import asyncio
+import shutil
 import sqlite3
 from contextlib import ExitStack
 from pathlib import Path
@@ -78,6 +79,32 @@ async def test_a_workspace_is_listed_managed_as_its_registry_entry_says(
     catalog = [event for event in events if isinstance(event, Catalog)][-1]
     managed_by_path = {entry.path: entry.managed for entry in catalog.workspaces}
     assert managed_by_path == {str(clone): True, str(plain): False}
+
+
+async def test_a_clone_that_re_attaches_to_a_gone_managed_workspace_stays_managed(
+    stack: ExitStack, store: SqliteStore, tmp_path: Path
+) -> None:
+    url = bare_repository(tmp_path).as_uri()
+    gone_clone = tmp_path / "gone" / "proj"
+    git(tmp_path, "clone", "-q", url, str(gone_clone))
+    registry = WorkspaceRegistry(store)
+    workspace_id = (await registry.find_or_register(str(gone_clone))).workspace_id
+    await registry.set_managed(workspace_id)
+    shutil.rmtree(gone_clone)
+    clones = tmp_path / "clones"
+    plane = serving(stack, store, clones)
+    connection = await welcomed(plane)
+
+    await say(connection, "add", AddWorkspace(url=url))
+    events = await asyncio.wait_for(until(connection, Catalog), 30)
+    await plane.close()
+    stack.close()
+
+    catalog = events[-1]
+    assert isinstance(catalog, Catalog)
+    [entry] = catalog.workspaces
+    assert (entry.id, entry.path, entry.managed) == (workspace_id, str(clones / "proj"), True)
+    assert await store.run("Couldn't list", managed) == [(str(clones / "proj"), 1)]
 
 
 async def test_a_second_clone_of_a_name_taken_lands_beside_it(

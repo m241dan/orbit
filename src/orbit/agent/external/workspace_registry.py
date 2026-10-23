@@ -73,10 +73,11 @@ def _reattached(
     connection: sqlite3.Connection, path: Path, fingerprint: str | None, moved: tuple[str, str]
 ) -> Registered:
     """The workspace ``moved``, by its id and old path, re-attached to its repository at
-    ``path``, with ``fingerprint``."""
+    ``path``, with ``fingerprint``, and no longer managed: orbit didn't clone into ``path``,
+    unless the cloner marks it managed again."""
     workspace_id, old = moved
     connection.execute(
-        "UPDATE workspaces SET path = ?, fingerprint = ?, name = ? WHERE id = ?",
+        "UPDATE workspaces SET path = ?, fingerprint = ?, name = ?, managed = 0 WHERE id = ?",
         (str(path), fingerprint, path.name, workspace_id),
     )
     return Registered(workspace_id, reattached_note(old, str(path)))

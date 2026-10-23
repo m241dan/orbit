@@ -699,7 +699,8 @@ same `origin` or none on one side, whose path has gone. The `origin` matches how
 written: `git@github.com:o/r.git`, `ssh://git@github.com/o/r` and `https://github.com/o/r` are
 the same. If exactly one is found, the new path takes it over, with its sessions and events, and
 the first frontend to attach is told `Re-attached the sessions of <old path>, which moved to <new
-path>.` A second clone while the first is still where it was gets a workspace of its own, as
+path>.` A clone orbit made, taken over by a path it didn't clone into, is no longer managed, so
+purging it later leaves that directory alone. A second clone while the first is still where it was gets a workspace of its own, as
 does a repository with no commits yet; if several gone workspaces match, none is taken and the
 note says `<new path> looks like <old a>, <old b>; started it as a new workspace.`
 

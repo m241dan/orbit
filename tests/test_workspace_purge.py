@@ -113,6 +113,24 @@ async def test_a_managed_clone_whose_directory_is_gone_is_purged(
     assert rows(state, workspace_id)["workspaces"] == 0
 
 
+async def test_a_clone_re_attached_to_a_checkout_is_purged_leaving_the_checkout(
+    store: SqliteStore, state: Path, tmp_path: Path
+) -> None:
+    clone = cloned(tmp_path)
+    workspace_id = await used(store, clone, managed=True)
+    shutil.rmtree(clone)
+    checkout = tmp_path / "code" / "proj"
+    git(tmp_path, "clone", "-q", str(tmp_path / "proj.git"), str(checkout))
+    registry = WorkspaceRegistry(store)
+    assert (await registry.find_or_register(str(checkout))).workspace_id == workspace_id
+
+    purged = await purge_workspace(store, workspace_id)
+
+    assert purged.clone is None
+    assert (checkout / "a.txt").is_file()
+    assert rows(state, workspace_id)["workspaces"] == 0
+
+
 async def test_a_managed_clone_with_work_not_pushed_is_refused_deleting_nothing(
     store: SqliteStore, state: Path, tmp_path: Path
 ) -> None:
