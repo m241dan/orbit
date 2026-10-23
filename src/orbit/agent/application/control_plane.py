@@ -181,6 +181,16 @@ async def _untold(entry: WorkspaceEntry) -> None:
     """Tell no one of ``entry``."""
 
 
+async def _flag_anyway(host: WorkspaceHost, workspaces: WorkspaceSource, *, served: bool) -> None:
+    """Have ``workspaces`` flag ``host``'s workspace ``served``, or not, as it cleans up after
+    another failure, which it mustn't replace: its own failure is only logged."""
+    try:
+        await workspaces.set_served(host.workspace_id, served)
+    except WorkspaceUnavailable as exc:
+        flag = "served" if served else "not served"
+        unexpected(f"Orbit failed to flag {host.path or host.workspace_id} {flag}: {exc}", exc)
+
+
 class _ControlEvents:
     """The control plane's own events, each stamped with the next of ``seqs`` as no workspace's
     and no session's, and delivered to every listening connection among those ``everywhere``
@@ -519,9 +529,9 @@ class ControlPlane:
         ``managed``, unless it's served already: start its host, opening its most recently
         active session and its background work, and send the catalog to ``connection``, if one
         asked, and every listening connection, or let it go again if that fails or is
-        cancelled; refused unless ``path`` is the absolute path to a directory, within the
-        browsable root unless it's ``managed``, or with the code it gives if it can't be
-        served."""
+        cancelled, raising what failed even if clearing its flag fails; refused unless ``path``
+        is the absolute path to a directory, within the browsable root unless it's ``managed``,
+        or with the code it gives if it can't be served."""
         check_addable(path, absolute=PurePath(path).is_absolute())
         await self._confine(path, managed)
         check_directory(path, await workspaces.kind(path))
@@ -536,7 +546,7 @@ class ControlPlane:
             await self._start(host, connection)
         except BaseException:
             try:
-                await workspaces.set_served(host.workspace_id, False)
+                await _flag_anyway(host, workspaces, served=False)
             finally:
                 await self._let_go(host, workspaces)
             raise
@@ -621,7 +631,8 @@ class ControlPlane:
 
     async def _unflag(self, host: WorkspaceHost, workspaces: WorkspaceSource) -> None:
         """Have ``workspaces`` stop flagging ``host``'s workspace served, flagging it again and
-        refusing as :meth:`_check_removable` does if it got busy meanwhile; refused with the code
+        refusing as :meth:`_check_removable` does if it got busy meanwhile, even if flagging it
+        again fails; refused with the code
         ``workspaces`` gives if that fails."""
         name = host.path or host.workspace_id
         try:
@@ -631,7 +642,7 @@ class ControlPlane:
         try:
             self._check_removable(host)
         except Refused:
-            await workspaces.set_served(host.workspace_id, True)
+            await _flag_anyway(host, workspaces, served=True)
             raise
 
     async def _let_go(self, host: WorkspaceHost, workspaces: WorkspaceSource) -> None:

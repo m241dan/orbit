@@ -1,16 +1,20 @@
 """Adding and removing the workspaces a control plane serves, from a frontend: each starts or
-stops a workspace's host, leaves the others alone and sends the Catalog; a local orbit refuses
-both."""
+stops a workspace's host, leaves the others alone and sends the Catalog, and a failure cleaning up
+after one is logged rather than replacing it; a local orbit refuses both."""
 
 import asyncio
+import logging
 from collections.abc import Sequence
 from dataclasses import replace
+
+import pytest
 
 from orbit.agent import (
     ControlPlane,
     PathKind,
     Verification,
     WorkspaceHost,
+    WorkspaceUnavailable,
 )
 from orbit.agent.application.outbox import SEQ_BLOCK
 from orbit.agent.domain.workspaces import LOCAL_ONLY
@@ -515,3 +519,91 @@ async def test_a_workspace_that_fails_to_close_is_still_removed_from_the_catalog
     assert outcome == refused("remove", INTERNAL, message)
     assert [ids(event) for event in seen_in_a] == [["a"]]
     assert source.closed == ["c"]
+
+
+class Unflaggable(SlowSource):
+    """Workspaces, as :class:`SlowSource` gives, that fail to be flagged as ``failing``."""
+
+    def __init__(
+        self, gate: asyncio.Event | None = None, *, fail: bool = True, failing: bool
+    ) -> None:
+        super().__init__(gate, fail=fail)
+        self.failing = failing
+
+    async def set_served(self, workspace_id: str, served: bool) -> None:
+        if self.flag_gate is not None:
+            await self.flag_gate.wait()
+        if served == self.failing:
+            raise WorkspaceUnavailable("The store failed.", INTERNAL)
+        self.flags.append((workspace_id, served))
+
+    async def close(self, workspace_id: str) -> None:
+        self.closed.append(workspace_id)
+
+
+async def test_an_add_whose_start_fails_refuses_with_its_own_failure_not_the_unflagging(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    source = Unflaggable(failing=False)
+    plane = ControlPlane(workspaces=source)
+    connection = await welcomed(plane)
+
+    with caplog.at_level(logging.ERROR):
+        await say(connection, "add", AddWorkspace(path="/src/c"))
+    outcome = payloads(taken(connection))
+    served = plane.hosts
+    await plane.close()
+
+    message = "Orbit failed to handle AddWorkspace: The store is gone."
+    assert outcome == [refused("add", INTERNAL, message)]
+    assert served == () and source.closed == ["c"] and source.hosts[0].closing
+    assert "Orbit failed to flag /src/c not served: The store failed." in caplog.messages
+
+
+async def test_an_add_cancelled_stays_cancelled_when_unflagging_fails(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    gate = asyncio.Event()
+    source = Unflaggable(gate, failing=False)
+    plane = ControlPlane(workspaces=source)
+    connection = await welcomed(plane)
+    adding = asyncio.create_task(say(connection, "add", AddWorkspace(path="/src/c")))
+    while not source.hosts:
+        await asyncio.sleep(0.01)
+    await asyncio.sleep(0.01)
+
+    with caplog.at_level(logging.ERROR):
+        adding.cancel()
+        await asyncio.gather(adding, return_exceptions=True)
+    outcome = payloads(taken(connection))
+    await plane.close()
+
+    assert adding.cancelled() and outcome == []
+    assert source.closed == ["c"] and source.hosts[0].closing
+    assert "Orbit failed to flag /src/c not served: The store failed." in caplog.messages
+
+
+async def test_a_remove_gone_busy_is_refused_as_busy_when_flagging_again_fails(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    host = workspace("c")
+    source = Unflaggable(failing=True)
+    source.flag_gate = asyncio.Event()
+    plane = ControlPlane([host], workspaces=source)
+    connection = await welcomed(plane)
+    removing = asyncio.create_task(say(connection, "remove", RemoveWorkspace(workspace="c")))
+    await asyncio.sleep(0.01)
+    viewer = asyncio.create_task(joined(plane, host=host))
+    await asyncio.sleep(0.01)
+
+    with caplog.at_level(logging.ERROR):
+        source.flag_gate.set()
+        await asyncio.gather(removing, viewer)
+    outcome = payloads(taken(connection))
+    served = [served.workspace_id for served in plane.hosts]
+    await plane.close()
+
+    message = "Can't remove /src/c: another frontend views its session c-1."
+    assert outcome == [refused("remove", BUSY, message)]
+    assert served == ["c"] and source.flags == [("c", False)]
+    assert "Orbit failed to flag /src/c served: The store failed." in caplog.messages
