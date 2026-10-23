@@ -322,13 +322,14 @@ async def test_events_after_a_seq_of_types_this_orbit_doesnt_know_are_left_out(
     assert await store.after("abc", 0) == [notice(2)]
 
 
-async def test_events_after_a_seq_that_cant_be_read_are_none(
+async def test_events_after_a_seq_that_cant_be_read_raise(
     open_store: Opener, workspace: Path
 ) -> None:
     store = await open_store(workspace)
     await store.close()
 
-    assert await store.after("abc", 0) is None
+    with pytest.raises(ReadFailed, match=r"Couldn't read the events of the session abc from "):
+        await store.after("abc", 0)
 
 
 async def test_bounds_are_the_sessions_oldest_seq_the_highest_of_its_workspaces_others_and_its_own(
@@ -347,11 +348,12 @@ async def test_bounds_are_the_sessions_oldest_seq_the_highest_of_its_workspaces_
     assert await store.bounds("def", 9) == LogBounds(first_seq=5, others_seq=7, own_seq=5)
 
 
-async def test_bounds_that_cant_be_read_are_none(open_store: Opener, workspace: Path) -> None:
+async def test_bounds_that_cant_be_read_raise(open_store: Opener, workspace: Path) -> None:
     store = await open_store(workspace)
     await store.close()
 
-    assert await store.bounds("abc", 0) is None
+    with pytest.raises(ReadFailed, match=r"Couldn't read where the session abc's log stands in "):
+        await store.bounds("abc", 0)
 
 
 @pytest.mark.parametrize("read", ["after", "bounds"])

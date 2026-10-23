@@ -167,7 +167,7 @@ async def test_a_third_workspace_waits_first_in_line_behind_two_coders() -> None
         await until(running(host))
 
     await until(lambda: hosts[2].activity.waiting_for_coder == 1)
-    assert gates.started == ["a", "b"]
+    await gates.until_started("a", "b")  # Their agents start a moment after their slots.
     gates.let("b")
     await gates.until_started("a", "b", "c")
     gates.let("a", "c")

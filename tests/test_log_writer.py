@@ -871,11 +871,9 @@ async def test_whether_a_log_was_trimmed_is_the_logs() -> None:
 class Unreadable(FakeStore):
     """A log whose events can't be read back."""
 
-    async def after(self, session_id: str, after_seq: int) -> list[EventEnvelope] | None:
-        return None
-
-    async def bounds(self, session_id: str, since: int) -> LogBounds | None:
-        return None
+    def __init__(self) -> None:
+        super().__init__()
+        self.after_failure = self.bounds_failure = "database is locked"
 
     async def before(
         self, session_id: str, before_seq: int, limit: int
@@ -978,12 +976,14 @@ async def test_reads_before_a_seq_of_a_log_that_cant_be_read_raise() -> None:
     await writer.close()
 
 
-async def test_reads_after_a_seq_of_a_log_that_cant_be_read_are_none() -> None:
+async def test_reads_after_a_seq_of_a_log_that_cant_be_read_raise() -> None:
     writer = LogWriter(Unreadable(), Published())
     writer.add("a", notice(1))
 
-    assert await writer.after("a", 0) is None
-    assert await writer.bounds("a", 1) is None
+    with pytest.raises(ReadFailed, match="database is locked"):
+        await writer.after("a", 0)
+    with pytest.raises(ReadFailed, match="database is locked"):
+        await writer.bounds("a", 1)
     await writer.close()
 
 

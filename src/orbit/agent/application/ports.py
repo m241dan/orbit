@@ -391,14 +391,15 @@ class EventLog(SeqMark, Protocol):
         be read."""
         ...
 
-    async def after(self, session_id: str, after_seq: int) -> list[EventEnvelope] | None:
-        """The events logged of the session ``session_id`` after ``after_seq``, oldest first;
-        ``None`` when they can't be read."""
+    async def after(self, session_id: str, after_seq: int) -> list[EventEnvelope]:
+        """The events logged of the session ``session_id`` after ``after_seq``, oldest first.
+        Raises :class:`ReadFailed` when they can't be read."""
         ...
 
-    async def bounds(self, session_id: str, since: int) -> LogBounds | None:
+    async def bounds(self, session_id: str, since: int) -> LogBounds:
         """Where the log of the session ``session_id`` stands in its workspace's, for a frontend
-        that saw the events up to ``since``; ``None`` when that can't be read."""
+        that saw the events up to ``since``. Raises :class:`ReadFailed` when that can't be
+        read."""
         ...
 
     async def trim(self, session_id: str, limit: int, target: int) -> None:

@@ -188,26 +188,22 @@ class LogWriter:
         earlier = [envelope for envelope in found if envelope.seq < before_seq]
         return _latest(earlier, limit), more or len(earlier) > limit
 
-    async def after(self, session_id: str, after_seq: int) -> list[EventEnvelope] | None:
+    async def after(self, session_id: str, after_seq: int) -> list[EventEnvelope]:
         """The events of the session ``session_id`` after ``after_seq``, oldest first, logged or
-        still to be written, each once; ``None`` when the log can't be read."""
+        still to be written, each once. Raises :class:`ReadFailed` when the log can't be read."""
         # Read on both sides of the log's read, as recent does.
         pending = self._unwritten(session_id)
         logged = await self._log.after(session_id, after_seq)
-        if logged is None:
-            return None
         found = _in_order([*logged, *pending, *self._unwritten(session_id)])
         return [envelope for envelope in found if envelope.seq > after_seq]
 
-    async def bounds(self, session_id: str, since: int) -> LogBounds | None:
+    async def bounds(self, session_id: str, since: int) -> LogBounds:
         """Where the log of the session ``session_id`` stands in its workspace's, for a frontend
-        that saw the events up to ``since``, counting the events still to be written as logged;
-        ``None`` when the log can't be read."""
+        that saw the events up to ``since``, counting the events still to be written as logged.
+        Raises :class:`ReadFailed` when the log can't be read."""
         # Read on both sides of the log's read, as recent does.
         pending = self._pending()
         logged = await self._log.bounds(session_id, since)
-        if logged is None:
-            return None
         return _with_pending(logged, session_id, since, [*pending, *self._pending()])
 
     async def trimmed(self, session_id: str) -> bool:

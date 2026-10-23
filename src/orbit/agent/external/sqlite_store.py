@@ -231,23 +231,24 @@ class SqliteStore:
             message, self._log(sqlite_log.before), workspace, session_id, before_seq, limit
         )
 
-    async def after(
-        self, workspace: str, session_id: str, after_seq: int
-    ) -> list[EventEnvelope] | None:
+    async def after(self, workspace: str, session_id: str, after_seq: int) -> list[EventEnvelope]:
         """The events logged of the session ``session_id`` in the workspace ``workspace`` after
-        ``after_seq``, oldest first, but for those of types this orbit doesn't know; ``None``
-        when they can't be read."""
+        ``after_seq``, oldest first, but for those of types this orbit doesn't know. Raises
+        :class:`ReadFailed` when they can't be read."""
         check_session_id(session_id)
-        return await self._read_or(
-            lambda _: None, self._log(sqlite_log.after), workspace, session_id, after_seq
+        message = f"Couldn't read the events of the session {session_id} from"
+        return await self._or_raise(
+            message, self._log(sqlite_log.after), workspace, session_id, after_seq
         )
 
-    async def bounds(self, workspace: str, session_id: str, since: int) -> LogBounds | None:
+    async def bounds(self, workspace: str, session_id: str, since: int) -> LogBounds:
         """Where the log of the session ``session_id`` stands in the workspace ``workspace``'s,
-        for a frontend that saw the events up to ``since``; ``None`` when that can't be read."""
+        for a frontend that saw the events up to ``since``. Raises :class:`ReadFailed` when that
+        can't be read."""
         check_session_id(session_id)
-        return await self._read_or(
-            lambda _: None, self._log(sqlite_log.bounds), workspace, session_id, since
+        message = f"Couldn't read where the session {session_id}'s log stands in"
+        return await self._or_raise(
+            message, self._log(sqlite_log.bounds), workspace, session_id, since
         )
 
     async def trim(self, workspace: str, session_id: str, limit: int, target: int) -> None:
@@ -602,10 +603,10 @@ class WorkspaceStore:
     ) -> tuple[list[EventEnvelope], bool]:
         return await self._store.before(self._id, session_id, before_seq, limit)
 
-    async def after(self, session_id: str, after_seq: int) -> list[EventEnvelope] | None:
+    async def after(self, session_id: str, after_seq: int) -> list[EventEnvelope]:
         return await self._store.after(self._id, session_id, after_seq)
 
-    async def bounds(self, session_id: str, since: int) -> LogBounds | None:
+    async def bounds(self, session_id: str, since: int) -> LogBounds:
         return await self._store.bounds(self._id, session_id, since)
 
     async def trim(self, session_id: str, limit: int, target: int) -> None:

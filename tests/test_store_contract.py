@@ -1,13 +1,13 @@
 """The rules every session store keeps, checked on the fake the other tests use and on the real
 SQLite store alike, so that tests built on the fake hold for the real one."""
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
 
-from orbit.agent.application.ports import SessionStore
+from orbit.agent.application.ports import ReadFailed, SessionStore
 from orbit.agent.domain.sessions import Unreadable
 from tests.agent_fakes import FakeStore, notice
 from tests.store_views import Opener, database, record
@@ -15,11 +15,12 @@ from tests.store_views import Opener, database, record
 
 @dataclass(frozen=True)
 class Subject:
-    """A ``store`` under test, and how to ``spoil`` a session saved in it, leaving its record
-    unreadable."""
+    """A ``store`` under test, how to ``spoil`` a session saved in it, leaving its record
+    unreadable, and how to ``break_down`` its database, leaving its log unreadable."""
 
     store: SessionStore
     spoil: Callable[[str], None]
+    break_down: Callable[[], Awaitable[None]]
 
 
 def fake_subject() -> Subject:
@@ -28,7 +29,10 @@ def fake_subject() -> Subject:
     def spoil(session_id: str) -> None:
         store.broken[session_id] = "it isn't JSON"
 
-    return Subject(store, spoil)
+    async def break_down() -> None:
+        store.after_failure = store.bounds_failure = "database is locked"
+
+    return Subject(store, spoil, break_down)
 
 
 async def sqlite_subject(open_store: Opener, state: Path, workspace: Path) -> Subject:
@@ -38,7 +42,7 @@ async def sqlite_subject(open_store: Opener, state: Path, workspace: Path) -> Su
         with database(state) as connection:
             connection.execute("UPDATE sessions SET record = '{oops' WHERE id = ?", (session_id,))
 
-    return Subject(store, spoil)
+    return Subject(store, spoil, store.close)
 
 
 @pytest.fixture(params=["fake", "sqlite"])
@@ -121,3 +125,17 @@ async def test_appending_skips_the_events_held_already(subject: Subject) -> None
     await store.append("a", [notice(1), notice(2)])
     assert await store.append("a", [notice(2), notice(3)]) == 1
     assert await store.recent("a", 10) == [notice(1), notice(2), notice(3)]
+
+
+async def test_events_after_a_seq_that_cant_be_read_raise(subject: Subject) -> None:
+    await subject.store.append("a", [notice(1)])
+    await subject.break_down()
+    with pytest.raises(ReadFailed):
+        await subject.store.after("a", 0)
+
+
+async def test_bounds_that_cant_be_read_raise(subject: Subject) -> None:
+    await subject.store.append("a", [notice(1)])
+    await subject.break_down()
+    with pytest.raises(ReadFailed):
+        await subject.store.bounds("a", 1)

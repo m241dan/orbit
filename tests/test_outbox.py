@@ -163,6 +163,21 @@ async def test_catching_up_on_a_log_that_cant_be_read_raises() -> None:
     await outbox.close()
 
 
+@pytest.mark.parametrize("read", ["after", "bounds"])
+async def test_a_frontend_whose_catch_up_cant_be_read_misses_nothing_it_can_replay(
+    read: str,
+) -> None:
+    log = FakeStore()
+    outbox = Outbox(Open(), log)
+    outbox.put_nowait(ONE)
+    outbox.put_nowait(TWO)
+    assert await outbox.missed("a", 1) == (EventEnvelope(seq=2, session="a", payload=TWO),)
+    setattr(log, f"{read}_failure", "database is locked")
+
+    assert await outbox.missed("a", 1) is None
+    await outbox.close()
+
+
 async def test_catching_up_without_a_log_counts_on() -> None:
     sent: list[EventEnvelope] = []
     outbox = Outbox(Open())

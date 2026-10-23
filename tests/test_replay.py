@@ -193,15 +193,9 @@ async def test_a_frontend_that_gave_no_seq_gets_a_snapshot() -> None:
     assert kinds(sent[:3]) == [Welcome, Catalog, Snapshot]
 
 
-class Unreadable(FakeStore):
-    """A log whose bounds can be read, but not its events."""
-
-    async def after(self, session_id: str, after_seq: int) -> list[EventEnvelope] | None:
-        return None
-
-
 async def test_a_frontend_whose_missed_events_cant_be_read_gets_a_snapshot() -> None:
-    store = Unreadable()
+    store = FakeStore()
+    store.after_failure = "database is locked"
     store.logged = [notice(1, OPEN)]
     sent = await reconnected(store, 1)
     assert kinds(sent[:3]) == [Welcome, Catalog, Snapshot]

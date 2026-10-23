@@ -286,8 +286,8 @@ type Outcome = type[StoreFailed] | Callable[[Path], object]
         (lambda store: store.append("abc", [big_notice()]), StorageFailed),
         (lambda store: store.recent("abc", 10), ReadFailed),
         (lambda store: store.before("abc", 10, 10), ReadFailed),
-        (lambda store: store.after("abc", 0), lambda _: None),
-        (lambda store: store.bounds("abc", 0), lambda _: None),
+        (lambda store: store.after("abc", 0), ReadFailed),
+        (lambda store: store.bounds("abc", 0), ReadFailed),
         (lambda store: store.trim("abc", 10, 5), StorageFailed),
         (lambda store: store.trimmed("abc"), ReadFailed),
         (lambda store: store.forget("abc"), StorageFailed),
@@ -337,7 +337,7 @@ async def test_a_read_that_falls_back_logs_why(
     store = await open_store(workspace)
     await store.close()
     with caplog.at_level(logging.WARNING):
-        assert await store.after("abc", 0) is None
+        assert isinstance(await store.load("abc"), Unreadable)
     assert f"Couldn't read from {state / 'orbit.db'}: the store is closed" in caplog.text
 
 

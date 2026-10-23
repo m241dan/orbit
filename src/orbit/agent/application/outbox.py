@@ -219,17 +219,22 @@ class Outbox:
         catches up on them alone; ``None`` when it can't, or the log can't be read, or there's
         no log."""
         last = self.seqs.last  # Those stamped from now on reach the frontend anyway.
-        if self._writer is None or not await self._replayable(session_id, since, last):
+        if self._writer is None:
             return None
-        events = await self._writer.after(session_id, since)
-        return None if events is None else tuple(e for e in events if e.seq <= last)
+        try:
+            if not await self._replayable(session_id, since, last):
+                return None
+            events = await self._writer.after(session_id, since)
+        except ReadFailed:
+            return None
+        return tuple(e for e in events if e.seq <= last)
 
     async def _replayable(self, session_id: str, since: int, last: int) -> bool:
         """Whether a frontend that saw the events up to ``since``, with ``last`` the last one
-        stamped, catches up on those of the session ``session_id`` after it alone."""
+        stamped, catches up on those of the session ``session_id`` after it alone. Raises
+        :class:`ReadFailed` when the log can't be read."""
         assert self._writer is not None, "There's no log."
-        bounds = await self._writer.bounds(session_id, since)
-        return bounds is not None and can_replay(since, last, bounds)
+        return can_replay(since, last, await self._writer.bounds(session_id, since))
 
     def forget(self, session_id: str) -> None:
         """Have the events of the session ``session_id`` deleted from the log, if there is one,

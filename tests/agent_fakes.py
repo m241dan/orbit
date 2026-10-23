@@ -21,6 +21,7 @@ from orbit.agent.application.ports import (
     HostFailed,
     LockLeft,
     Merge,
+    ReadFailed,
     Reply,
     RepositoryLock,
     SessionStore,
@@ -341,6 +342,8 @@ class FakeStore:
     session, counted as another session's in the bounds; ``forget_failure``, while set, is the
     error forgetting raises. Each ``seq`` reserved is in ``reservations``, counted in the mark
     as the port says; ``reserve_failure``, while set, is the error reserving raises.
+    ``after_failure`` and ``bounds_failure``, while set, are the errors reading the events after
+    a ``seq`` and the bounds raise, as :class:`ReadFailed`.
     """
 
     def __init__(self, count: int = 0) -> None:
@@ -379,6 +382,8 @@ class FakeStore:
         self.forget_failure: str | None = None
         self.reservations: list[int] = []
         self.reserve_failure: str | None = None
+        self.after_failure: str | None = None
+        self.bounds_failure: str | None = None
 
     @property
     def last(self) -> SessionRecord:
@@ -476,12 +481,12 @@ class FakeStore:
         earlier = [e for e in logged if e.session == session_id and e.seq < before_seq]
         return earlier[-limit:], len(earlier) > limit
 
-    async def after(self, session_id: str, after_seq: int) -> list[EventEnvelope] | None:
-        await asyncio.sleep(0)  # Reading takes a while.
+    async def after(self, session_id: str, after_seq: int) -> list[EventEnvelope]:
+        await self._read(self.after_failure)
         return [e for e in self.logged if e.session == session_id and e.seq > after_seq]
 
-    async def bounds(self, session_id: str, since: int) -> LogBounds | None:
-        await asyncio.sleep(0)  # Reading takes a while.
+    async def bounds(self, session_id: str, since: int) -> LogBounds:
+        await self._read(self.bounds_failure)
         own = [e.seq for e in self.logged if e.session == session_id]
         others = {e.seq for e in self.logged} - set(own)
         return LogBounds(
@@ -489,6 +494,12 @@ class FakeStore:
             others_seq=max([self.forgotten_seq, *others]),
             own_seq=max((seq for seq in own if seq <= since), default=None),
         )
+
+    async def _read(self, failure: str | None) -> None:
+        """Take a while to read, as a database does, or raise ``failure`` if it's set."""
+        if failure is not None:
+            raise ReadFailed(failure)
+        await asyncio.sleep(0)
 
     async def trim(self, session_id: str, limit: int, target: int) -> None:
         self.trims.append((session_id, limit, target))
