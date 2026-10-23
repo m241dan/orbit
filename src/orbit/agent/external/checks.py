@@ -10,7 +10,7 @@ from orbit.agent.external.processes import run_process
 STEP_ENV = {"NO_COLOR": "1"}
 
 
-async def run_step(step: VerificationStep, root: str = ".") -> tuple[bool, str]:
+async def run_step(step: VerificationStep, root: str) -> tuple[bool, str]:
     """Run ``step`` in ``root``; returns whether it passed and its combined stdout and stderr,
     or a line saying so when it failed without any."""
     try:

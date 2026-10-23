@@ -92,7 +92,13 @@ def workspace(
     launcher = ScriptedLauncher(agent_host, *scripts, reviewers=reviewers)
     tokens = (f"{name}-token-{n}" for n in itertools.count())
     agents = Agents(
-        agent_host, launcher, lambda: next(tokens), roles=ROLES, exit_grace=0.5, **options
+        agent_host,
+        launcher,
+        lambda: next(tokens),
+        roles=ROLES,
+        exit_grace=0.5,
+        root=f"/src/{name}",
+        **options,
     )
     host = WorkspaceHost(
         agents=agents, workspace=f"/src/{name}", workspace_id=name, new_id=lambda: f"{name}-1"

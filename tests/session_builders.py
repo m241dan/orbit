@@ -61,7 +61,7 @@ def switching(
     tokens = iter(f"token-{n}" for n in range(1, 100))
     tree = FakeTree() if reviews else None
     agents = Agents(
-        host, launcher, lambda: next(tokens), ROLES, Limits(), tree=tree, review=reviews
+        host, launcher, lambda: next(tokens), ROLES, Limits(), tree=tree, review=reviews, root="."
     )
     ids = iter(f"session-{n}" for n in range(1, 100))
     built = WorkspaceHost(

@@ -9,7 +9,7 @@ from orbit.agent.external.git import GitUnavailable, git
 WorkspaceState = frozenset[tuple[str, int, int]]
 
 
-async def workspace_state(root: Path | str = ".") -> WorkspaceState | None:
+async def workspace_state(root: Path | str) -> WorkspaceState | None:
     """The files git sees under ``root`` (tracked, plus untracked ones not ignored), each
     with its size and modification time; a tracked file that's missing or can't be read
     has both as -1.

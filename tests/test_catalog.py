@@ -44,7 +44,7 @@ def session_in(
     """A session in the repository at ``workspace``, with agents in ``roles``, saved in
     ``store`` if given."""
     host = FakeHost()
-    agents = Agents(host, ScriptedLauncher(host), lambda: "token", roles=roles)
+    agents = Agents(host, ScriptedLauncher(host), lambda: "token", roles=roles, root=".")
     return WorkspaceHost(
         agents=agents, workspace=workspace, store=store, clock=Ticks(), new_id=lambda: "s1"
     )

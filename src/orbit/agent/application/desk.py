@@ -98,7 +98,7 @@ class Agents:
     makes the unguessable tokens they identify themselves with. ``roles`` are the roles tasks
     can name. ``exit_grace`` is how long, in seconds, an agent may take to exit once its task
     is finished before it's stopped. ``tree`` is where they work and their work is merged
-    from; without one they work in the current directory and nothing is committed.
+    from; without one they work in ``root`` and nothing is committed.
     With ``review`` (and a tree), landed work is reviewed, and the whole codebase super
     reviewed, within ``review_limits``. ``proposal_review`` is where the user decides on
     proposed checks; without it, proposals are refused. ``write_config`` saves the checks the
@@ -121,7 +121,7 @@ class Agents:
     proposal_review: ProposalReview | None = None
     write_config: ConfigWriter | None = None
     planner_role: PlannerRoleReader | None = None
-    root: str = "."
+    root: str = field(kw_only=True)
     pause: LimitPause = field(default_factory=LimitPause)
 
 

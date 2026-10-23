@@ -52,7 +52,9 @@ def running(event: Event) -> bool:
 def desk_for(publish: Gate) -> AgentDesk:
     """A desk with no agents to run, in a tree, publishing through ``publish``."""
     host = FakeHost()
-    agents = Agents(host, ScriptedLauncher(host), lambda: "token-1", ROLES, tree=FakeTree())
+    agents = Agents(
+        host, ScriptedLauncher(host), lambda: "token-1", ROLES, tree=FakeTree(), root="."
+    )
     return AgentDesk(agents, publish)
 
 

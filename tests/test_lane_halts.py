@@ -71,7 +71,7 @@ class Halting:
 
     def desk(self, launcher: ScriptedLauncher, tree: FakeTree) -> AgentDesk:
         """A desk launching through ``launcher`` in ``tree``, publishing into the session."""
-        agents = Agents(launcher.host, launcher, lambda: "token-1", ROLES, tree=tree)
+        agents = Agents(launcher.host, launcher, lambda: "token-1", ROLES, tree=tree, root=".")
         return AgentDesk(agents, self.publish)
 
     def add(self, role: str | None = None) -> str:

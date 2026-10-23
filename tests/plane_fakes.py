@@ -61,7 +61,14 @@ def working(name: str, gate: asyncio.Event, started: list[str]) -> WorkspaceHost
 
     agent_host = FakeHost()
     launcher = ScriptedLauncher(agent_host, waits)
-    agents = Agents(agent_host, launcher, lambda: f"{name}-token", roles=ROLES, exit_grace=0.5)
+    agents = Agents(
+        agent_host,
+        launcher,
+        lambda: f"{name}-token",
+        roles=ROLES,
+        exit_grace=0.5,
+        root=f"/src/{name}",
+    )
     return WorkspaceHost(
         agents=agents, workspace=f"/src/{name}", workspace_id=name, new_id=lambda: f"{name}-1"
     )

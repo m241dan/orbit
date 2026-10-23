@@ -226,7 +226,7 @@ async def planner_model(role_model: str | None, picked: str | None) -> str | Non
     async def publish(event: Event) -> None:
         pass
 
-    desk = AgentDesk(Agents(host, launcher, lambda: "token-1", roles), publish)
+    desk = AgentDesk(Agents(host, launcher, lambda: "token-1", roles, root="."), publish)
     chat = PlannerChat(desk, Tasks(TaskBoard(), publish), lambda: ())
     async for _ in chat.run_turn("turn", "Plan.", Settings(model=picked)):
         pass

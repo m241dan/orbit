@@ -549,7 +549,7 @@ runs the steps once in the background against the base commit, so a broken setup
 you type your first prompt rather than on the first task. It runs in a read-only snapshot of the
 base (the same kind reviews use, under `.git/orbit`), set up with the project's setup command
 first, so it never races with an agent in the worktree; outside a git repository it runs in the
-current directory. Nothing waits for it: the prompt, the planner and `ctrl+r` all work meanwhile.
+workspace's directory. Nothing waits for it: the prompt, the planner and `ctrl+r` all work meanwhile.
 The verification panel shows its progress under a "Startup check" heading, with the same icons and
 timing as a task's verification, until a task starts and its own verification takes the panel
 over. It's listed in the agents pane as `startup-check`, where `c` cancels it. When it finishes,
@@ -625,7 +625,8 @@ Accepted checks take effect at once. Orbit itself (not the agent) writes them in
 `.orbit/config.toml`, replacing its `[[verification.steps]]` and `[setup]` and keeping every other
 key and comment, creating the file if it's missing. In the worktree the change is committed as
 "Configure verification steps", with the steps listed in the body, and lands on the base like any
-task's work; with `--no-worktree` the file is written in the current directory and not committed.
+task's work; with `--no-worktree` the file is written in the workspace's directory and not
+committed.
 The next task is verified with the new steps, and its worktree set up with the new setup, without
 a restart. Agents can't change their checks any other way: orbit reads the file only at startup.
 

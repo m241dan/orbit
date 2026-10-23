@@ -238,7 +238,7 @@ class Answers:
 def watched_desk() -> tuple[AgentDesk, Seen]:
     seen = Seen()
     host = FakeHost()
-    agents = Agents(host, ScriptedLauncher(host), lambda: "token-1", ROLES)
+    agents = Agents(host, ScriptedLauncher(host), lambda: "token-1", ROLES, root=".")
     seen.desk = AgentDesk(agents, seen.publish)
     return seen.desk, seen
 

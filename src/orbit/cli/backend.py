@@ -2,7 +2,6 @@
 share."""
 
 import asyncio
-import os
 import secrets
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -128,16 +127,15 @@ class _MakeBackend(Protocol):
 def _in_process(
     flags: _Backend, directories: _Directories, *, pick_session: bool, make: _MakeBackend
 ) -> Iterator[_InProcess]:
-    """Run the block in the workspace, with the backend ``flags`` ask for, set up by ``make``
-    in ``directories``, holding the workspace lock if no other orbit does, and listing the
-    saved sessions to pick from if ``pick_session``; yields the backend set up, then closes its
-    store and lets the lock go.
+    """Run the block with the backend ``flags`` ask for, set up by ``make`` in ``directories``,
+    holding the workspace lock if no other orbit does, and listing the saved sessions to pick
+    from if ``pick_session``; yields the backend set up, then closes its store and lets the lock
+    go.
 
     Exits with status 2 if the workspace can't be opened.
     """
-    # Every adapter works relative to the current directory, so move into the workspace
-    # before anything reads the filesystem.
-    os.chdir(directories.root)
+    # Every adapter is given the workspace's root, as under orbit serve, which serves several
+    # from one process, so the current directory is left as it is.
     backend = make(flags, directories, pick_session=pick_session)
     try:
         yield backend

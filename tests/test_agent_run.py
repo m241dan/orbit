@@ -623,7 +623,12 @@ async def started(
     host = FakeHost()
     roles = {**ROLES, role: ROLES[role].model_copy(update={"timeout_minutes": timeout_minutes})}
     agents = Agents(
-        host, ScriptedLauncher(host, works), lambda: "token-1", roles, proposal_review=Undecided()
+        host,
+        ScriptedLauncher(host, works),
+        lambda: "token-1",
+        roles,
+        proposal_review=Undecided(),
+        root=".",
     )
     tasks = TaskBoard()
     task_id = tasks.add(TaskSpec(prompt="a", role=role))
@@ -805,7 +810,7 @@ async def test_a_call_whose_run_closes_while_it_is_published_is_refused() -> Non
         if isinstance(event, AgentRequest):
             desk.close(agent)  # The run ends while the request is published.
 
-    agents = Agents(host, ScriptedLauncher(host), lambda: "token-1", ROLES)
+    agents = Agents(host, ScriptedLauncher(host), lambda: "token-1", ROLES, root=".")
     desk = AgentDesk(agents, publish)
     agent = desk.open(Target(), "coder", "1")
     reply = await desk.handle("token-1", "get_task", {})
@@ -832,7 +837,7 @@ async def test_a_cancelled_call_is_answered_with_an_error_reply() -> None:
     async def publish(event: Event) -> None:
         events.append(event)
 
-    agents = Agents(FakeHost(), ScriptedLauncher(FakeHost()), lambda: "token-1", ROLES)
+    agents = Agents(FakeHost(), ScriptedLauncher(FakeHost()), lambda: "token-1", ROLES, root=".")
     desk = AgentDesk(agents, publish)
     target = HangingTarget()
     agent = desk.open(target, "coder", "1")
@@ -856,7 +861,7 @@ async def test_a_cancelled_call_is_answered_with_an_error_reply() -> None:
 
 def desk_on(host: FakeHost, publish: Publish = ignore) -> AgentDesk:
     """A desk whose agents reach orbit through ``host``, publishing to ``publish``."""
-    agents = Agents(host, ScriptedLauncher(host), lambda: "token-1", ROLES)
+    agents = Agents(host, ScriptedLauncher(host), lambda: "token-1", ROLES, root=".")
     return AgentDesk(agents, publish)
 
 

@@ -482,16 +482,20 @@ class WorkspaceHost:
     def _startup_check(
         self, verification: Verification | None, wanted: bool
     ) -> StartupCheck | None:
-        """The check to run at startup, if ``wanted``; none without steps to run."""
+        """The check to run at startup, if ``wanted``; none without steps to run, nor without
+        agents or a workspace to say where to run them."""
         if not wanted or verification is None or not verification.steps:
             return None
-        desk = self._desk
-        site = (
-            CheckSite(desk.agents.tree, desk.agents.root)
-            if desk is not None
-            else CheckSite(None, ".")
-        )
+        site = self._check_site()
+        if site is None:
+            return None
         return StartupCheck(verification, site, self._events.put, self._add_startup_fix)
+
+    def _check_site(self) -> CheckSite | None:
+        """Where the startup check runs: where the agents work, else in the workspace given."""
+        if self._desk is not None:
+            return CheckSite(self._desk.agents.tree, self._desk.agents.root)
+        return None if self._workspace is None else CheckSite(None, self._workspace)
 
     async def _add_startup_fix(self, step: VerificationStep, output: str) -> None:
         """Add a draft task to fix ``step``, which failed at startup with ``output``, to the

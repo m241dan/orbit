@@ -91,7 +91,9 @@ def workspace(name: str, ledger: FakeLedger | None = None, *usages: Usage) -> Wo
     launcher = ScriptedLauncher(agent_host, *(claims_done for _ in range(3)))
     launcher.usages = [(usage,) for usage in usages]
     tokens = (f"{name}-token-{n}" for n in itertools.count())
-    agents = Agents(agent_host, launcher, lambda: next(tokens), roles=ROLES, exit_grace=0.5)
+    agents = Agents(
+        agent_host, launcher, lambda: next(tokens), roles=ROLES, exit_grace=0.5, root="."
+    )
     return WorkspaceHost(
         agents=agents,
         workspace=f"/src/{name}",

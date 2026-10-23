@@ -4,6 +4,7 @@ registered in the store, flagged served and locked while it's served."""
 import asyncio
 import re
 import subprocess
+import sys
 import threading
 import time
 from collections.abc import Callable
@@ -33,7 +34,8 @@ from orbit.agent.external import served_workspaces
 from orbit.cli import backend, served
 from orbit.cli.backend import _Backend, _backend, _Directories
 from orbit.cli.served import _added, _workspaces
-from orbit.protocol import INTERNAL, INVALID
+from orbit.protocol import INTERNAL, INVALID, StartupChecked
+from tests.agent_fakes import agent_exited, events_until
 
 FLAGS = _Backend(None, None, False, False, False, False, new=False, name=None)
 CLONES = Path("/nonexistent/clones")
@@ -329,6 +331,30 @@ async def test_the_configuration_is_read_off_the_event_loop(
     await host.close()
 
     assert threads and threads[0] is not threading.main_thread()
+
+
+async def test_a_workspace_elsewhere_is_configured_verified_and_worked_in_at_its_root(
+    stack: ExitStack, store: SqliteStore, tmp_path: Path
+) -> None:
+    root = directory(tmp_path)
+    seen = tmp_path / "seen"
+    code = f"import os, pathlib; pathlib.Path({str(seen)!r}).write_text(os.getcwd())"
+    (root / ".orbit").mkdir()
+    (root / ".orbit" / "config.toml").write_text(
+        f"[[verification.steps]]\nname = 'Where'\ncommand = [{sys.executable!r}, '-c', {code!r}]\n"
+    )
+    verifying = _Backend(None, None, True, False, False, False, new=False, name=None)
+
+    host = await workspaces(stack, store, verifying).open(str(root))
+    events = await events_until(host, agent_exited("startup-check"))
+    await host.close()
+
+    assert Path.cwd() != root
+    assert host.verification is not None and host.agents is not None
+    assert [step.name for step in host.verification.steps] == ["Where"]
+    assert StartupChecked(passed=True) in events
+    assert seen.read_text() == str(root)
+    assert host.agents.root == str(root)
 
 
 async def test_a_failure_making_the_host_lets_the_lock_go(

@@ -520,7 +520,9 @@ async def test_usage_arriving_after_the_task_was_removed_is_skipped() -> None:
     async def publish(event: Event) -> None:
         events.append(event)
 
-    desk = AgentDesk(Agents(host, launcher, lambda: "token-1", ROLES, exit_grace=0.5), publish)
+    desk = AgentDesk(
+        Agents(host, launcher, lambda: "token-1", ROLES, exit_grace=0.5, root="."), publish
+    )
     outcome = await asyncio.wait_for(
         AgentRun(task_id, Tasks(tasks, publish), None, desk).run(None, "."), 5
     )
@@ -568,7 +570,9 @@ async def test_a_failure_saving_usage_is_reported_not_taken_for_a_removed_task()
         if tasks.get(task_id).usage != Usage():
             raise ValueError("saving tripped")
 
-    desk = AgentDesk(Agents(host, launcher, lambda: "token-1", ROLES, exit_grace=0.5), publish)
+    desk = AgentDesk(
+        Agents(host, launcher, lambda: "token-1", ROLES, exit_grace=0.5, root="."), publish
+    )
     run = AgentRun(task_id, Tasks(tasks, publish, changed), None, desk)
     await asyncio.wait_for(run.run(None, "."), 5)
     assert tasks.get(task_id).usage == Usage(input_tokens=10)

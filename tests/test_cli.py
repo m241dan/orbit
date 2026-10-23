@@ -154,10 +154,8 @@ def launched(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> list[WorkspaceH
 
 @pytest.fixture(autouse=True)
 def restore_cwd(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """Chat changes into its workspace; put the working directory back afterwards. Each test
-    starts in an empty directory, so chat never imports the sessions of the repository the tests
-    run in."""
-    monkeypatch.chdir(Path.cwd())
+    """Each test starts in an empty directory, so chat never imports the sessions of the
+    repository the tests run in."""
     start = tmp_path / "start"
     start.mkdir()
     monkeypatch.chdir(start)
@@ -214,12 +212,14 @@ def test_chat_works_in_the_workspace_it_is_given(
     result = runner.invoke(app, ["chat", flag, str(project)])
 
     assert result.exit_code == 0
-    assert Path.cwd() == project.resolve()
+    # Chat stays where it was started: the workspace's root is passed to whatever needs it.
+    assert Path.cwd() == elsewhere
     [session] = launched
     [greeting] = greetings
-    # The project's own configuration is read, from the workspace.
+    # The project's own configuration is read, from the workspace, where agents work.
     assert session.agents is not None
     assert session.agents.limits == Limits(max_attempts=3, max_checks=4)
+    assert session.agents.root == str(project.resolve())
     assert f"Workspace: {project.resolve()}" in greeting.notices
 
 
@@ -233,10 +233,10 @@ def test_a_workspace_inside_a_git_repository_is_its_top_level(
     result = runner.invoke(app, ["chat", "-C", str(sub)])
 
     assert result.exit_code == 0
-    assert Path.cwd() == repo.resolve()
     [session] = launched
     [greeting] = greetings
     assert session.agents is not None
+    assert session.agents.root == str(repo.resolve())
     assert isinstance(session.agents.tree, GitCoderTree)
     assert f"Workspace: {repo.resolve()}" in greeting.notices
 
@@ -249,9 +249,9 @@ def test_a_workspace_outside_git_is_used_as_given(
     result = runner.invoke(app, ["chat", "-C", str(plain)])
 
     assert result.exit_code == 0
-    assert Path.cwd() == plain.resolve()
     [session] = launched
     assert session.agents is not None and session.agents.tree is None
+    assert session.agents.root == str(plain.resolve())
 
 
 def store_in(session: WorkspaceHost) -> WorkspaceStore:
@@ -1302,6 +1302,15 @@ def test_the_in_process_setup_holds_the_workspace_lock_while_its_block_runs(
     assert after.take() is None
     after.close()
     assert in_process.workspace_id == found and served == []
+
+
+def test_the_in_process_setup_leaves_the_current_directory_alone(
+    directories: _Directories,
+) -> None:
+    before = Path.cwd()
+    with _in_process(FLAGS, directories, pick_session=True, make=_backend):
+        assert Path.cwd() == before != directories.root
+    assert Path.cwd() == before
 
 
 def test_the_in_process_setup_lets_the_lock_go_and_closes_the_store_when_its_block_raises(

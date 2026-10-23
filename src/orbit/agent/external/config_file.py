@@ -16,7 +16,7 @@ from orbit.agent.external.whole_files import write_whole
 CONFIG_PATH = ".orbit/config.toml"
 
 
-def read_config(root: str = ".") -> OrbitConfig:
+def read_config(root: str) -> OrbitConfig:
     """The configuration in ``root``'s file over the defaults, whose roles are the built-in
     ones; just the defaults without a file.
 

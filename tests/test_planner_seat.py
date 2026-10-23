@@ -75,7 +75,9 @@ def seated(
     events: asyncio.Queue[Event] = asyncio.Queue()
     host = FakeHost()
     launcher = ScriptedLauncher(host)
-    agents = Agents(host, launcher, lambda: "token-1", roles or {}, planner_role=planner_role)
+    agents = Agents(
+        host, launcher, lambda: "token-1", roles or {}, planner_role=planner_role, root="."
+    )
     desk = AgentDesk(agents, events.put) if roles is not None else None
     calls: list[str] = []
 

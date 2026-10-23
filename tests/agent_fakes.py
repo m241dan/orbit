@@ -675,7 +675,7 @@ def session_for(
     host = FakeHost()
     launcher = ScriptedLauncher(host, *scripts, reviewers=reviewers)
     tokens = iter(f"token-{n}" for n in range(1, 100))
-    options = {"limits": Limits(), "exit_grace": 0.5, "roles": ROLES, **options}
+    options = {"limits": Limits(), "exit_grace": 0.5, "roles": ROLES, "root": ".", **options}
     agents = Agents(host, launcher, lambda: next(tokens), **options)
     session = WorkspaceHost(
         verification=verification,
@@ -1220,7 +1220,7 @@ def steps_chat(
     async def publish(event: Event) -> None:
         sink.append(event)
 
-    desk = AgentDesk(Agents(host, launcher, lambda: "token-1", roles), publish)
+    desk = AgentDesk(Agents(host, launcher, lambda: "token-1", roles, root="."), publish)
     steps: list[tuple[str, ...]] = [("Ruff lint",)]
     return PlannerChat(desk, Tasks(TaskBoard(), publish), lambda: steps[-1]), launcher, steps
 

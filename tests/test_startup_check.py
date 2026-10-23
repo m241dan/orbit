@@ -122,13 +122,15 @@ async def test_a_failing_setup_is_the_failing_check() -> None:
     await session.close()
 
 
-async def test_without_a_tree_it_runs_in_the_current_directory() -> None:
+async def test_without_agents_it_runs_in_the_workspace_given() -> None:
     steps = Steps(True, False)
-    session = WorkspaceHost(verification=checked(steps), check_at_startup=True)
+    session = WorkspaceHost(
+        verification=checked(steps), workspace="/src/project", check_at_startup=True
+    )
 
     events = await until_checked(session)
 
-    assert steps.roots == [".", "."]
+    assert steps.roots == ["/src/project", "/src/project"]
     assert StartupChecked(passed=False, step="Unit tests", output="1 test failed") in events
     # Without agents, the draft has the default settings.
     assert board(events)[0].task.settings.tool_access == "restricted"
@@ -147,11 +149,12 @@ async def test_with_agents_but_no_tree_it_runs_in_the_workspaces_directory() -> 
     await session.close()
 
 
-async def test_it_is_skipped_without_verification_or_steps_or_when_not_asked() -> None:
+async def test_it_is_skipped_without_steps_or_anywhere_to_run_them_or_when_not_asked() -> None:
     sessions = [
         WorkspaceHost(check_at_startup=True),
         WorkspaceHost(verification=Verification((), Steps()), check_at_startup=True),
         WorkspaceHost(verification=checked(Steps())),
+        WorkspaceHost(verification=checked(Steps(True)), check_at_startup=True),
     ]
     for session in sessions:
         events = await quiet(payloads(session))

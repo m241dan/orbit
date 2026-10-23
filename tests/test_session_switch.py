@@ -142,7 +142,9 @@ def starting(**session: Any) -> WorkspaceHost:
     ``session`` goes to :class:`WorkspaceHost`."""
     host = FakeHost()
     tree = FakeTree(leftovers=(LEFTOVER,))
-    agents = Agents(host, ScriptedLauncher(host), lambda: "token", ROLES, Limits(), tree=tree)
+    agents = Agents(
+        host, ScriptedLauncher(host), lambda: "token", ROLES, Limits(), tree=tree, root="."
+    )
     return WorkspaceHost(agents=agents, store=FakeStore(), clock=Ticks(), **session)
 
 

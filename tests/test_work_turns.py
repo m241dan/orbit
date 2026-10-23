@@ -129,7 +129,7 @@ def lane_parts(
 
     host = FakeHost()
     launcher = ScriptedLauncher(host, *[hangs] * 5)
-    agents = Agents(host, launcher, lambda: "token-1", ROLES, pause=pause or LimitPause())
+    agents = Agents(host, launcher, lambda: "token-1", ROLES, pause=pause or LimitPause(), root=".")
     desk = AgentDesk(agents, publish)
     verifier = Verifier(verified(Steps()), tasks, publish) if verifying else None
     work = StopsCounted(desk, tasks, verifier, Beside())

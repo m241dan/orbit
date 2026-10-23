@@ -82,6 +82,7 @@ def lane_for(
         lambda: f"token-{next(tokens)}",
         ROLES,
         tree=FakeTree(),
+        root=".",
     )
     desk = AgentDesk(agents, publish)
     review = Hearing(desk, tasks)
