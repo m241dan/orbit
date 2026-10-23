@@ -10,7 +10,7 @@ from textual import on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding, BindingType
 from textual.containers import Horizontal, Vertical
-from textual.widgets import OptionList, Tabs
+from textual.widgets import Tabs
 
 from orbit import __version__
 from orbit.protocol import (
@@ -430,10 +430,9 @@ class OrbitApp(App[None], inherit_bindings=False):
             self._select("prompt")
             self._prompt.enter_insert_mode()
 
-    @on(OptionList.OptionSelected, "#task-list")
-    def _edit_task(self, event: OptionList.OptionSelected) -> None:
-        tasks = self._task_list.tasks
-        current = tasks[event.option_index] if event.option_index < len(tasks) else None
+    @on(TaskList.Edit)
+    def _edit_task(self, message: TaskList.Edit) -> None:
+        current = message.task
         refusal = None if current is None else edit_refusal(current)
         if refusal is not None:
             self.notify(refusal, severity="warning")

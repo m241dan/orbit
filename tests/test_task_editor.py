@@ -1,4 +1,5 @@
 from textual.containers import VerticalScroll
+from textual.message import Message
 from textual.pilot import Pilot
 
 from orbit.protocol import (
@@ -311,6 +312,30 @@ async def test_enter_on_existing_task_edits_it() -> None:
         await pilot.press("i", "!", "escape", "j", "j", "j", "enter", "k", "enter", "ctrl+s")
         edited = TaskSpec(prompt="two!", settings=Settings(tool_access="off"))
         assert session.commands == [EditTask(task_id="2", task=edited)]
+
+
+async def test_enter_edits_the_chosen_task_though_the_list_is_reordered_before_it_opens() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await show_settings(session, pilot, Settings())
+        await feed_events(session, pilot, board("one", "two"))
+        await open_task_list(pilot)
+        tasks = app.query_one(TaskList)
+        post = tasks.post_message
+        reordered = tuple(reversed(tasks.tasks))
+
+        def reorder_then_post(message: Message) -> bool:
+            # The backend reorders the list after the row was picked, before the app opens it.
+            if isinstance(message, TaskList.Edit):
+                tasks.show(reordered)
+            return post(message)
+
+        tasks.post_message = reorder_then_post  # type: ignore[method-assign]
+        await pilot.press("j", "enter")
+        assert editor_fields(app)[0] == "two"
+        await pilot.press("i", "!", "escape", "ctrl+s")
+        assert session.commands == [EditTask(task_id="2", task=TaskSpec(prompt="two!"))]
 
 
 async def test_editing_a_task_keeps_its_role() -> None:

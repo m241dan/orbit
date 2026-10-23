@@ -4,8 +4,10 @@ import time
 from collections.abc import Callable, Sequence
 from typing import ClassVar
 
+from textual import on
 from textual.binding import Binding, BindingType
 from textual.message import Message
+from textual.widgets import OptionList
 from textual.widgets.option_list import Option
 
 from orbit.protocol import TaskState, Usage
@@ -29,7 +31,7 @@ class TaskList(ListPane):
     """The backend's task list plus a trailing "new task" row.
 
     Like the prompt, it only takes focus once activated (``enter_list_mode``);
-    then j/k move, enter picks a row, ``a`` accepts a draft, ``x`` removes a task, ``f`` shows
+    then j/k move, enter edits a row, ``a`` accepts a draft, ``x`` removes a task, ``f`` shows
     why a task ended and escape returns to window navigation. Its border shows what the
     session's turns cost, and the task about to run says when it waits for a coder. While
     following, it scrolls to keep the active task
@@ -43,6 +45,13 @@ class TaskList(ListPane):
         def __init__(self, task_id: str) -> None:
             super().__init__()
             self.task_id = task_id
+
+    class Edit(Message):
+        """The user picked ``task`` to edit, or ``None`` for the new-task row."""
+
+        def __init__(self, task: TaskState | None) -> None:
+            super().__init__()
+            self.task = task
 
     class Remove(Message):
         """The user asked to remove task ``task_id``."""
@@ -124,6 +133,13 @@ class TaskList(ListPane):
         self.following = True
         self.border_title = task_list_title(held=False)
         self._follow()
+
+    @on(OptionList.OptionSelected)
+    def _edit(self, event: OptionList.OptionSelected) -> None:
+        # Resolved here, so a list replaced before the app takes the message can't change it.
+        event.stop()
+        index = event.option_index
+        self.post_message(self.Edit(self.tasks[index] if index < len(self.tasks) else None))
 
     def action_accept(self) -> None:
         state = self._highlighted_task()
