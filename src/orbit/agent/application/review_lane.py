@@ -123,9 +123,10 @@ class ReviewLane:
                 await self._hooks.changed()
         self._status = self.status
 
-    async def landed(self, task_id: str, commit: str) -> None:
-        """Task ``task_id`` landed ``commit``."""
-        await self._queue(self.planner.landed(self._board.get(task_id), commit))
+    async def landed(self, state: TaskState, commit: str) -> None:
+        """The task that ended as ``state`` landed ``commit``. The task isn't looked up: it may
+        have been removed since it finished, and its work is reviewed all the same."""
+        await self._queue(self.planner.landed(state, commit))
         if self.planner.count():
             await self._queue(self.planner.super_review(commit))
         await self._hooks.changed()  # The count changed even if no review is due.
@@ -142,9 +143,10 @@ class ReviewLane:
             return
         await self._queue(self.planner.super_review(commit))
 
-    async def ended(self, task_id: str) -> None:
-        """Task ``task_id`` finished without landing anything."""
-        await self._queue(self.planner.ended(self._board.get(task_id)))
+    async def ended(self, state: TaskState) -> None:
+        """The task that ended as ``state`` finished without landing anything. The task isn't
+        looked up: it may have been removed since it finished."""
+        await self._queue(self.planner.ended(state))
 
     async def removed(self, task_id: str, state: TaskState) -> None:
         """Task ``task_id``, which was ``state``, was taken off the board. A review's batch
@@ -157,9 +159,10 @@ class ReviewLane:
         open_batch = batch in self.planner.open_batches
         await self._queue(self.planner.review_ended(batch) if open_batch else None)
 
-    def edited(self, task_id: str) -> None:
-        """Task ``task_id`` was edited back to pending, so its batch waits for it again."""
-        self.planner.reopened(self._board.get(task_id))
+    def edited(self, state: TaskState) -> None:
+        """A task was edited back to pending, as ``state``, so its batch waits for it again. The
+        task isn't looked up: it may have been removed since it was edited."""
+        self.planner.reopened(state)
 
     def joined(self, task_id: str) -> None:
         """Task ``task_id`` was added to fix another; if that one is in a batch, so is it."""

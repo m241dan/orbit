@@ -6,16 +6,20 @@ from dataclasses import dataclass, field
 
 import pytest
 
+from orbit.agent import Agents
+from orbit.agent.application.desk import AgentDesk
 from orbit.agent.application.lanes import OPEN_GATE, SessionGate
 from orbit.agent.application.outbox import EventSink
 from orbit.agent.application.planner_seat import PlannerSeat, SeatHooks
 from orbit.agent.application.proposals import FrontendReview
+from orbit.agent.application.review_lane import ReviewHooks, ReviewLane
 from orbit.agent.application.settings import SessionSettings
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.application.work_commands import CommandParts, WorkCommand, WorkCommands
 from orbit.agent.application.work_turns import WorkParts, WorkTurns
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.refusals import Refused
+from orbit.agent.domain.reviews import ReviewLimits, ReviewPlanner
 from orbit.protocol import (
     INTERNAL,
     INVALID,
@@ -41,7 +45,13 @@ from orbit.protocol import (
     TaskSpec,
     UpdateSettings,
 )
-from tests.agent_fakes import logged_with_traceback
+from tests.agent_fakes import (
+    ROLES,
+    FakeHost,
+    FakeTree,
+    ScriptedLauncher,
+    logged_with_traceback,
+)
 
 COMMAND_ID = "c1"
 """The id every command is handled under."""
@@ -51,12 +61,18 @@ TASK = TaskSpec(prompt="Add a flag.", settings=Settings(model="opus"))
 
 @dataclass
 class Recorded:
-    """What the commands published, and when they saved, in order."""
+    """What the commands published, and when they saved, in order. ``meanwhile``, if set, runs
+    once, as the board is next published, as a command that arrives while a change is awaited
+    does."""
 
     effects: list[Event | str] = field(default_factory=list)
+    meanwhile: Callable[[], None] | None = None
 
     async def put(self, event: Event) -> None:
         self.effects.append(event)
+        if isinstance(event, TasksChanged) and self.meanwhile is not None:
+            meanwhile, self.meanwhile = self.meanwhile, None
+            meanwhile()
 
     def put_nowait(self, event: Event) -> None:
         self.effects.append(event)
@@ -64,9 +80,27 @@ class Recorded:
     async def save(self) -> None:
         self.effects.append("saved")
 
+    async def save_reviews(self) -> None:
+        self.effects.append("reviews saved")
+
 
 async def nothing() -> None:
     return None
+
+
+async def quiet(event: Event) -> None:
+    """Publishes nothing."""
+
+
+def review_lane_for(tasks: Tasks) -> ReviewLane:
+    """A review lane on ``tasks``, in a tree, that publishes nothing and, read-only, runs no
+    review."""
+    host = FakeHost()
+    agents = Agents(
+        host, ScriptedLauncher(host), lambda: "token-1", ROLES, tree=FakeTree(), root="."
+    )
+    hooks = ReviewHooks(nothing, nothing, SessionGate(read_only=lambda: True))
+    return ReviewLane(AgentDesk(agents, quiet), tasks, ReviewPlanner(ReviewLimits()), hooks)
 
 
 class ScriptedTurns(WorkTurns):
@@ -90,10 +124,11 @@ def commands_for(
     recorded: Recorded,
     outcomes: list[BaseException | None] | None = None,
     read_only: Callable[[], bool] | None = None,
+    review: bool = False,
 ) -> tuple[WorkCommands, Tasks]:
-    """The work commands of a session without agents, its effects ``recorded``; given
-    ``outcomes``, it's read-only, unless ``read_only`` says otherwise, and its runs are
-    scripted by them."""
+    """The work commands of a session without agents, its effects ``recorded``, with a review
+    lane if ``review``; given ``outcomes``, it's read-only, unless ``read_only`` says otherwise,
+    and its runs are scripted by them."""
     events: EventSink = recorded
     tasks = Tasks(TaskBoard(), recorded.put)
     seat = PlannerSeat(None, tasks, events, SeatHooks(recorded.save, lambda: None, tuple))
@@ -105,12 +140,12 @@ def commands_for(
         tasks,
         seat,
         turns,
-        None,
+        review_lane_for(tasks) if review else None,
         FrontendReview(recorded.put, str),
         None,
         None,
         recorded.save,
-        nothing,
+        recorded.save_reviews,
         SessionGate(read_only=read_only or (lambda: outcomes is not None)),
     )
     return WorkCommands(parts), tasks
@@ -170,6 +205,17 @@ async def test_editing_then_removing_a_task_changes_the_board() -> None:
     assert [task.task for task in tasks.board.tasks] == [edited]
     await commands.handle(RemoveTask(task_id=task_id), COMMAND_ID)
     assert tasks.board.tasks == ()
+
+
+async def test_editing_a_task_removed_as_the_edit_is_awaited_still_saves_the_reviews() -> None:
+    recorded = Recorded()
+    commands, tasks = commands_for(recorded, review=True)
+    await commands.handle(AddTask(task=TASK), COMMAND_ID)
+    task_id = tasks.board.tasks[0].id
+    recorded.meanwhile = lambda: tasks.board.remove(task_id)
+    await commands.handle(EditTask(task_id=task_id, task=TASK), COMMAND_ID)
+    assert tasks.board.tasks == ()
+    assert recorded.effects[-1] == "reviews saved"
 
 
 async def test_an_unknown_trigger_is_refused() -> None:

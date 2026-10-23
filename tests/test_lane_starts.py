@@ -22,6 +22,7 @@ from orbit.protocol import (
     TasksChanged,
     TaskSpec,
     TaskStarted,
+    TaskState,
     VerificationChanged,
 )
 from tests.agent_fakes import ROLES, FakeHost, FakeTree, ScriptedLauncher, Steps, verified
@@ -84,11 +85,11 @@ class Hearing(ReviewLane):
         self.tasks = tasks
         self.heard: list[str] = []
 
-    async def landed(self, task_id: str, commit: str) -> None:
-        self.heard.append(task_id)
+    async def landed(self, state: TaskState, commit: str) -> None:
+        self.heard.append(state.id)
 
-    async def ended(self, task_id: str) -> None:
-        self.heard.append(task_id)
+    async def ended(self, state: TaskState) -> None:
+        self.heard.append(state.id)
 
 
 async def cancel_work(

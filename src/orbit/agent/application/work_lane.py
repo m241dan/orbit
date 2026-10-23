@@ -41,6 +41,7 @@ from orbit.protocol import (
     Notice,
     TaskSpec,
     TaskStarted,
+    TaskState,
 )
 
 RunEnd = Literal["finished", "cancelled", "limited", "fix_failed"]
@@ -280,13 +281,13 @@ class WorkLane:
         which must always be reviewed."""
         run = partial(self._run_alone, task_id)
         stop = UserStop(STOPPED_BY_YOU, self._cancelled)
-        finished = False
+        state = self._board.get(task_id)  # Taken now: the task may be removed once it finishes.
+        outcome: Outcome | None = None
         try:
             outcome = await run_task_to_end(self._tasks, task_id, run, stop, self._publish)
-            finished = True
+            return outcome
         finally:
-            await self._report_to_review(task_id, finished)
-        return outcome
+            await self._report_to_review(state, outcome)
 
     async def _run_alone(self, task_id: str) -> Outcome:
         """How started task ``task_id``'s run through an agent ended, run as a task of its own
@@ -320,16 +321,20 @@ class WorkLane:
             await self._verifier.reset()
         await self._publish(TaskStarted(task_id=task_id))
 
-    async def _report_to_review(self, task_id: str, finished: bool) -> None:
-        """Tell the review lane the commit task ``task_id`` landed, if any, or else, if it
-        ``finished`` rather than being cut short, that it ended."""
-        commit = self._landed.pop(task_id, None)
+    async def _report_to_review(self, state: TaskState, outcome: Outcome | None) -> None:
+        """Tell the review lane the commit the task that was ``state`` landed, if any, or else,
+        if it finished in ``outcome`` rather than being cut short, that it ended. The task is
+        told of as it ended, without looking it up: a task is published as finished before the
+        save that follows, and one removed in that window is reviewed all the same."""
+        commit = self._landed.pop(state.id, None)
         if self._review is None:
             return
+        if outcome is not None:
+            state = state.model_copy(update={"status": outcome.status})
         if commit is not None:
-            await self._review.landed(task_id, commit)
-        elif finished:
-            await self._review.ended(task_id)
+            await self._review.landed(state, commit)
+        elif outcome is not None:
+            await self._review.ended(state)
 
     async def _run_agent(self, task_id: str) -> Outcome:
         """Run task ``task_id`` through a new agent and land its work; a fallback queues a fix

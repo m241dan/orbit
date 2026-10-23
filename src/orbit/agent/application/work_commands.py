@@ -17,6 +17,7 @@ from orbit.agent.application.startup_check import StartupCheck
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.application.work_turns import WorkTurns
 from orbit.agent.domain.agents import Agent
+from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.catalog import CONVERSATIONAL_ROLES, LANES, TRIGGER_NAMES
 from orbit.agent.domain.refusals import Refused, unknown
 from orbit.agent.domain.roles import REVIEW_ROLES
@@ -44,6 +45,7 @@ from orbit.protocol import (
     RunTasks,
     SendMessage,
     TaskSpec,
+    TaskState,
     UpdateSettings,
 )
 
@@ -233,9 +235,15 @@ class WorkCommands:
         lane = self._parts.lane
         if lane is not None and lane.queued_by_orbit(task_id):
             raise Refused(INVALID, "Reviews can't be edited; remove it instead.")
-        await self._parts.tasks.change(lambda board: board.edit(task_id, task))
+
+        def edit(board: TaskBoard) -> TaskState:
+            board.edit(task_id, task)
+            return board.get(task_id)
+
+        # The edited task is taken from the change: it may be removed while the save is awaited.
+        state = await self._parts.tasks.change(edit)
         if lane is not None:
-            lane.edited(task_id)
+            lane.edited(state)
             await self._parts.reviews_changed()
 
     async def _remove(self, task_id: str) -> None:
