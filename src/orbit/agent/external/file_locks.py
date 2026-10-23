@@ -12,12 +12,16 @@ from pathlib import Path
 from orbit.agent.external.whole_files import PRIVATE
 
 
-def take_flock(path: Path, text: str, mode: int = PRIVATE) -> int | None:
+def take_flock(
+    path: Path, text: str, mode: int = PRIVATE, directory_mode: int = 0o777
+) -> int | None:
     """A descriptor holding an exclusive lock on the file ``path``, created with ``mode`` if
-    need be, with ``text`` alone written in it; none when another open file holds the lock.
+    need be, in a directory made with ``directory_mode`` if need be, with ``text`` alone written
+    in it; none when another open file holds the lock.
 
-    Raises ``OSError`` when the file can't be opened, locked or written.
+    Raises ``OSError`` when the file or its directory can't be made, opened, locked or written.
     """
+    path.parent.mkdir(mode=directory_mode, parents=True, exist_ok=True)
     fd = os.open(path, os.O_RDWR | os.O_CREAT, mode)
     try:
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)

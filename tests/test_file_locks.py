@@ -84,3 +84,41 @@ def test_a_new_lock_file_is_readable_by_its_owner_alone_by_default(tmp_path: Pat
     assert fd is not None
     assert stat.S_IMODE(lock.stat().st_mode) == 0o600
     os.close(fd)
+
+
+def test_taking_a_lock_makes_its_missing_directories_with_the_mode_given(
+    tmp_path: Path,
+) -> None:
+    lock = tmp_path / "a" / "b" / "a.lock"
+    fd = take_flock(lock, "123", directory_mode=0o700)
+    assert fd is not None
+    assert lock.read_text() == "123"
+    assert stat.S_IMODE(lock.parent.stat().st_mode) == 0o700
+    os.close(fd)
+
+
+def test_a_refused_take_leaks_no_descriptor(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    lock = tmp_path / "a.lock"
+    held = take_flock(lock, "first")
+    assert held is not None
+    opened: list[int] = []
+    closed: list[int] = []
+    real_open, real_close = os.open, os.close
+
+    def recording_open(path: Path, flags: int, mode: int) -> int:
+        opened.append(real_open(path, flags, mode))
+        return opened[-1]
+
+    def recording_close(fd: int) -> None:
+        closed.append(fd)
+        real_close(fd)
+
+    with monkeypatch.context() as patched:
+        patched.setattr(os, "open", recording_open)
+        patched.setattr(os, "close", recording_close)
+        assert take_flock(lock, "second") is None
+    assert len(opened) == 1
+    assert closed == opened
+    os.close(held)

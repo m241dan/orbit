@@ -38,7 +38,6 @@ class WorkspaceLock:
 
         Raises ``OSError`` when the lock file can't be made, opened or written.
         """
-        self.path.parent.mkdir(parents=True, exist_ok=True)
         fd = take_flock(self.path, owner_text(WorkspaceOwner(pid=os.getpid(), url=self._url)))
         if fd is None:
             return self.owner()

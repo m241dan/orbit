@@ -63,8 +63,7 @@ class ServeLock:
 
         Raises ``OSError`` when the lock file can't be made or opened, or locked.
         """
-        self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        fd = take_flock(self.path, "")
+        fd = take_flock(self.path, "", directory_mode=0o700)
         if fd is None:
             return False
         self._fd = fd
