@@ -684,6 +684,51 @@ async def test_work_sent_after_a_takeover_that_failed_runs_at_once() -> None:
     await session.close()
 
 
+async def recovery_failing() -> Sequence[str]:
+    """Fails to recover, unexpectedly."""
+    raise RuntimeError("store gone")
+
+
+async def test_work_queued_before_a_takeover_that_failed_still_runs() -> None:
+    lock = FakeLock()
+    session, _, launcher = session_for(
+        claims_done, owner=OWNER, lock=lock, recover=recovery_failing
+    )
+    await send(session, AddTask(task=TaskSpec(prompt="Add a flag.")))
+    await send(session, RunTasks())
+    lock.free = True
+    await events_until(session, offered)
+
+    await send(session, TakeOwnership(take=True))
+    await events_until(session, refused)
+    await events_until(session, idle())
+
+    assert session.queued_work == () and len(launcher.launches) == 1
+    assert not session.read_only
+    await session.close()
+
+
+async def test_work_sent_after_a_takeover_that_failed_with_work_queued_runs_at_once() -> None:
+    lock = FakeLock()
+    session, _, launcher = session_for(
+        claims_done, claims_done, owner=OWNER, lock=lock, recover=recovery_failing
+    )
+    await send(session, AddTask(task=TaskSpec(prompt="Add a flag.")))
+    await send(session, RunTasks())
+    lock.free = True
+    await events_until(session, offered)
+    await send(session, TakeOwnership(take=True))
+    await events_until(session, refused)
+    await events_until(session, idle())
+
+    await send(session, AddTask(task=TaskSpec(prompt="Add a switch.")))
+    await send(session, RunTasks())
+    await events_until(session, idle())
+
+    assert session.queued_work == () and len(launcher.launches) == 2
+    await session.close()
+
+
 def dropped_notes(events: Sequence[Event]) -> list[Event]:
     """The notices in ``events`` saying queued work was dropped by a switch."""
     return [e for e in events if isinstance(e, Notice) and e.message.startswith("Switched")]

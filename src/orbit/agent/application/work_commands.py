@@ -112,13 +112,16 @@ class WorkCommands:
     async def handle(self, command: WorkCommand, command_id: str) -> None:
         """Handle ``command``, sent as ``command_id``, or queue it if it starts work while
         read-only or taking ownership; work that couldn't run once this orbit owns the
-        repository is refused."""
+        repository is refused. Work left queued by a takeover that stopped early runs first."""
         queueing = self._owning or self._parts.gate.read_only()
         if queueing and isinstance(command, QueuedWork):
             self._check(command)
             self._queued.append(command)
-        else:
-            await self._dispatch(command, command_id)
+            return
+        if self._queued:
+            self.taking()  # Work sent meanwhile queues behind what's left.
+            await self.own(command_id)
+        await self._dispatch(command, command_id)
 
     def taking(self) -> None:
         """Keep queueing work, as this orbit is taking ownership of the repository, until
@@ -133,7 +136,8 @@ class WorkCommands:
         """Run the commands queued while read-only or taking ownership, in order, for
         ``command_id``, as this orbit owns the repository now, those queued meanwhile included;
         one that fails is reported as an error, and the rest still run. Each is taken off the
-        queue as it's run, so those not yet run stay queued if this stops early."""
+        queue as it's run, so those not yet run stay queued if this stops early, until the
+        next command once owning runs them."""
         try:
             while self._queued:
                 await self._run_queued(self._queued.pop(0), command_id)

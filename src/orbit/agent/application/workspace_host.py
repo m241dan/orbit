@@ -717,7 +717,8 @@ class WorkspaceHost:
         """Answer the offer of the repository: own it, if ``command`` takes it, send the catalog
         saying so, recover the fallback files the owner left, read the super review count it
         left, and run the work queued for ``command_id`` and the reviews waiting, even if
-        running the queued work fails; refused when no offer is open."""
+        announcing the ownership or running the queued work fails; refused when no offer is
+        open."""
         self._takeover.answer(command.take)
         if not command.take:
             await self._events.put(OwnershipDeclined())
@@ -726,9 +727,13 @@ class WorkspaceHost:
         self._commands.taking()
         try:
             await self._announce_owned()
-        except BaseException:
-            self._commands.taken()
-            raise
+        finally:
+            # Owned even if announcing it failed, and no offer comes again to run the queue.
+            await self._run_queued(command_id)
+
+    async def _run_queued(self, command_id: str) -> None:
+        """Run the work queued for ``command_id``, then kick the reviews waiting, even if
+        running the queued work fails."""
         try:
             await self._commands.own(command_id)
         finally:  # After the queued work, so its tasks get agents first, even if it fails.

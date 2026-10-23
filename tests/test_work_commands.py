@@ -1,6 +1,7 @@
 """Tests for the work commands on their own, in a session without agents."""
 
 import asyncio
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 import pytest
@@ -86,10 +87,13 @@ class ScriptedTurns(WorkTurns):
 
 
 def commands_for(
-    recorded: Recorded, outcomes: list[BaseException | None] | None = None
+    recorded: Recorded,
+    outcomes: list[BaseException | None] | None = None,
+    read_only: Callable[[], bool] | None = None,
 ) -> tuple[WorkCommands, Tasks]:
     """The work commands of a session without agents, its effects ``recorded``; given
-    ``outcomes``, it's read-only and its runs are scripted by them."""
+    ``outcomes``, it's read-only, unless ``read_only`` says otherwise, and its runs are
+    scripted by them."""
     events: EventSink = recorded
     tasks = Tasks(TaskBoard(), recorded.put)
     seat = PlannerSeat(None, tasks, events, SeatHooks(recorded.save, lambda: None, tuple))
@@ -107,7 +111,7 @@ def commands_for(
         None,
         recorded.save,
         nothing,
-        SessionGate(read_only=lambda: outcomes is not None),
+        SessionGate(read_only=read_only or (lambda: outcomes is not None)),
     )
     return WorkCommands(parts), tasks
 
@@ -265,3 +269,18 @@ async def test_a_queued_command_whose_failure_cant_be_reported_keeps_the_rest_qu
         await commands.own(COMMAND_ID)
     assert outcomes == [None]
     assert commands.queued == (RunTasks(),)
+
+
+async def test_work_left_queued_by_owning_cancelled_runs_before_the_next_command() -> None:
+    recorded, owned = Recorded(), False
+    outcomes: list[BaseException | None] = [asyncio.CancelledError(), None, None]
+    commands, _ = commands_for(recorded, outcomes, read_only=lambda: not owned)
+    for _ in range(2):
+        await commands.handle(RunTasks(), COMMAND_ID)
+    owned = True
+    with pytest.raises(asyncio.CancelledError):
+        await commands.own(COMMAND_ID)
+
+    await commands.handle(RunTasks(), COMMAND_ID)
+
+    assert outcomes == [] and commands.queued == ()
