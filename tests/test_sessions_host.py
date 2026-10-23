@@ -16,6 +16,7 @@ from orbit.protocol import (
     WorkspaceEntry,
 )
 from orbit.tui.sessions import (
+    Placing,
     SessionChange,
     SessionChoice,
     SessionsHost,
@@ -36,17 +37,21 @@ def catalog(*sessions: SessionSummary) -> Catalog:
 
 
 class Host(App[None]):
-    """An app holding a SessionsHost, recording the commands it sends; those in ``failing``
-    fail to send."""
+    """An app holding a SessionsHost, recording the commands it sends, those in ``failing``
+    failing to send, and the marks it shows as the session viewed moves."""
 
     def __init__(self, repository: str | None = None) -> None:
         super().__init__()
         self.sent: list[SessionChoice | SessionChange] = []
         self.failing: set[str] = set()
+        self.marks: list[str | None] = []
         self.host = SessionsHost(
             self.push_screen,
             self._sent,
-            opens_on=lambda workspaces: chosen_workspace(workspaces, repository),
+            Placing(
+                lambda workspaces: chosen_workspace(workspaces, repository),
+                lambda: self.marks.append(self.host.mark),
+            ),
         )
 
     async def _sent(self, command: SessionChoice | SessionChange) -> bool:
@@ -105,6 +110,75 @@ def test_a_catalog_listing_no_workspace_has_nothing_to_open_on() -> None:
     host = Host().host
     host.follow(Catalog(workspaces=(), agents=(), triggers=(), lanes=()))
     assert (host.workspace, host.sessions, host.opening) == (None, (), None)
+
+
+async def test_joining_attaches_to_its_active_session_then_is_on_it() -> None:
+    app = Host("/src/two")
+    app.host.follow(TWO)
+    assert await app.host.join("w1")
+    assert app.sent == [Attach(workspace="w1", session="far")]
+    assert (app.host.workspace, app.host.attached, app.host.sessions) == ("w1", "far", (ELSEWHERE,))
+
+
+async def test_a_join_whose_attach_fails_to_send_stays_where_it_was() -> None:
+    app = Host("/src/two")
+    app.host.follow(TWO)
+    app.host.view(view(OLD))
+    app.failing.add("attach")
+    assert not await app.host.join("w1")
+    assert (app.host.workspace, app.host.attached, app.host.sessions) == ("w2", "old", (NOW, OLD))
+    assert app.host.open_session == SessionRef(id="now", name="today")
+
+
+async def test_joining_a_workspace_without_an_active_session_sends_nothing_and_stays() -> None:
+    app = Host("/src/two")
+    idle = TWO.workspaces[0].model_copy(update={"sessions": (OLD,)})
+    app.host.follow(TWO.model_copy(update={"workspaces": (idle, TWO.workspaces[1])}))
+    assert not await app.host.join("w1")
+    assert app.sent == []
+    assert (app.host.workspace, app.host.attached) == ("w2", "now")
+
+
+async def test_a_join_shows_the_mark_of_the_session_it_views_right_away() -> None:
+    app = Host("/src/two")
+    app.host.follow(TWO)
+    app.host.view(view(OLD))
+    await app.host.join("w1")
+    assert app.marks == [None]
+
+
+async def test_a_join_failing_to_send_shows_the_mark_of_the_session_still_viewed() -> None:
+    app = Host("/src/two")
+    app.host.follow(TWO)
+    app.host.view(view(OLD))
+    app.failing.add("attach")
+    await app.host.join("w1")
+    assert app.marks[-1] == app.host.mark is not None
+
+
+async def test_a_pick_in_another_workspace_failing_to_attach_stays_where_it_was() -> None:
+    app = Host("/src/two")
+    async with app.run_test() as pilot:
+        app.host.follow(TWO)
+        app.host.open(workspace="w1")
+        await pilot.pause()
+        app.failing.add("attach")
+        app.screen.dismiss((Attach(workspace="w1", session="far"),))
+        await pilot.pause()
+        assert (app.host.workspace, app.host.attached) == ("w2", "now")
+
+
+async def test_a_pick_in_another_workspace_attached_stays_there_if_a_later_command_fails() -> None:
+    app = Host("/src/two")
+    async with app.run_test() as pilot:
+        app.host.follow(TWO)
+        app.host.open(workspace="w1")
+        await pilot.pause()
+        app.failing.add("new_session")
+        app.screen.dismiss((Attach(workspace="w1", session="far"), NewSession()))
+        await pilot.pause()
+        assert (app.host.workspace, app.host.attached) == ("w1", "far")
+        assert app.marks == [None]
 
 
 def test_a_snapshot_says_which_session_is_viewed_over_the_catalog() -> None:

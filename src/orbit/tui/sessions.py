@@ -1,6 +1,7 @@
 """The modal where the user picks a saved session to view or activate, or starts a new one."""
 
 from collections.abc import Awaitable, Callable, Sequence
+from dataclasses import dataclass
 from typing import Any, ClassVar, Literal
 
 from rich.text import Text
@@ -238,22 +239,44 @@ def _first(workspaces: Sequence[WorkspaceEntry]) -> WorkspaceEntry | None:
     return next(iter(workspaces), None)
 
 
+@dataclass(frozen=True)
+class Placing:
+    """Where a frontend is placed: on the workspace it ``opens_on`` by itself, calling
+    ``moved`` once it moves to another workspace, or back as attaching there fails to send."""
+
+    opens_on: OpensOn = _first
+    moved: Callable[[], None] = lambda: None
+
+
+_FIRST = Placing()
+"""Placed on the first workspace listed, with nothing to call as it moves."""
+
+
+@dataclass(frozen=True)
+class _Place:
+    """Where a frontend is: on the workspace ``workspace``, viewing the session ``attached``,
+    ``live`` if it's the active one, else read-only while ``open_session`` is."""
+
+    workspace: str | None
+    attached: str | None
+    live: bool = True
+    open_session: SessionRef | None = None
+
+
 class SessionsHost:
     """Keeps the sessions the latest ``Catalog`` lists of the workspace this frontend is on,
-    which it ``opens_on`` by itself or the user picks, as ``SessionStateChanged`` changes them,
-    and the one this frontend views, live or read-only; shows them with ``push`` when asked,
-    refreshing the picker while it's shown, and offers to make a session viewed read-only the
-    active one, saying what the active one runs. ``send`` takes the user's choice and their
-    changes to saved sessions."""
+    which it opens on by itself, as its ``placing`` says, or the user picks, as
+    ``SessionStateChanged`` changes them, and the one this frontend views, live or read-only;
+    shows them with ``push`` when asked, refreshing the picker while it's shown, and offers to
+    make a session viewed read-only the active one, saying what the active one runs. ``send``
+    takes the user's choice and their changes to saved sessions."""
 
     def __init__(
-        self,
-        push: Push[ModalScreen[Any], Any],
-        send: Send,
-        opens_on: OpensOn = _first,
+        self, push: Push[ModalScreen[Any], Any], send: Send, placing: Placing = _FIRST
     ) -> None:
         self._send = send
-        self._opens_on = opens_on
+        self._opens_on = placing.opens_on
+        self._moved = placing.moved
         self._workspaces: tuple[WorkspaceEntry, ...] = ()  # As the latest catalog lists them.
         self.workspace: str | None = None  # The id of the workspace it's on, once there.
         self.sessions: tuple[SessionSummary, ...] = ()
@@ -339,14 +362,36 @@ class SessionsHost:
         self.workspace = self.attached = self.open_session = None
         self.live = True
 
-    def join(self, workspace: str) -> Attach | None:
-        """Be on the workspace ``workspace``, viewing its active session once attached, and
-        return what attaches to that one; none if it has none."""
-        self.workspace, self.live, self.open_session = workspace, True, None
-        self.sessions = workspace_sessions(self._workspaces, workspace)
-        self.attached = active_id(self.sessions)
+    async def join(self, workspace: str) -> bool:
+        """Whether attaching to the active session of the workspace ``workspace`` was sent, after
+        which this frontend is on that workspace, viewing that session; it stays where it was if
+        that fails to send or there's no active session."""
+        was = self._move(workspace)
+        if await self.attach_active():
+            return True
+        self._be(was)
+        return False
+
+    async def attach_active(self) -> bool:
+        """Whether attaching to the active session of the workspace this frontend is on was
+        sent; not if there's none."""
+        attach = self.opening
+        return attach is not None and await self._send(attach)
+
+    def _move(self, workspace: str) -> _Place:
+        """Be on the workspace ``workspace``, viewing its active session, and return where this
+        frontend was."""
+        was = _Place(self.workspace, self.attached, self.live, self.open_session)
+        self._be(_Place(workspace, active_id(workspace_sessions(self._workspaces, workspace))))
+        return was
+
+    def _be(self, place: _Place) -> None:
+        """Be at ``place``, listing the sessions of its workspace as the latest catalog does."""
+        self.workspace, self.attached = place.workspace, place.attached
+        self.live, self.open_session = place.live, place.open_session
+        self.sessions = workspace_sessions(self._workspaces, place.workspace)
         self._refresh()
-        return self.opening
+        self._moved()
 
     def follow_state(self, changed: SessionStateChanged) -> None:
         """Note ``changed``'s session's state; once the active session that held back the
@@ -419,24 +464,30 @@ class SessionsHost:
         )
 
         async def chosen(choice: tuple[SessionChoice, ...] | None) -> None:
-            if choice and not viewing.joined:
-                self.join(viewing.workspace)
-            await self._send_choice(choice or (), sessions)
+            # Moved before sending, as the view may come back before sending returns.
+            was = self._move(viewing.workspace) if choice and not viewing.joined else None
+            await self._send_choice(choice or (), sessions, was)
 
         self._picker.open(SessionsScreen(sessions, viewing, self._send, startup), chosen)
 
     async def _send_choice(
-        self, choice: Sequence[SessionChoice], sessions: Sequence[SessionSummary]
+        self,
+        choice: Sequence[SessionChoice],
+        sessions: Sequence[SessionSummary],
+        was: _Place | None = None,
     ) -> None:
         """Send the commands of the user's ``choice`` among ``sessions``, until one fails to
-        send."""
+        send; if the first does, go back to where this frontend ``was``, if it moved."""
         # Before sending, as the view may come back before sending returns.
         self._offering = viewed_only(choice, sessions)
         # Refusals come back as errors, shown like any other.
         for command in choice:
             if not await self._send(command):
                 self._offering = None
+                if was is not None:
+                    self._be(was)
                 return
+            was = None  # On the workspace moved to once attached there.
 
     def _refresh(self) -> None:
         """Show the sessions in the picker, if it's shown: of the workspace it lists, with its

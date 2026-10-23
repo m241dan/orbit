@@ -79,7 +79,7 @@ from orbit.tui.opening import Hosts, Opening, OpeningHost
 from orbit.tui.panels import UsagePanel, VerificationPanel
 from orbit.tui.proposals import ProposalHost
 from orbit.tui.reason import ReasonScreen
-from orbit.tui.sessions import SessionsHost
+from orbit.tui.sessions import Placing, SessionsHost
 from orbit.tui.settings_pickers import SettingsPickers
 from orbit.tui.storage_halt import StorageHaltHost
 from orbit.tui.tabs import ConversationTabs
@@ -207,8 +207,11 @@ class OrbitApp(App[None], inherit_bindings=False):
         self._sessions = SessionsHost(
             self.push_screen,
             self._send,
-            # Over a link the user picks the workspace.
-            lambda workspaces: None if link else chosen_workspace(workspaces, repository),
+            Placing(
+                # Over a link the user picks the workspace.
+                lambda workspaces: None if link else chosen_workspace(workspaces, repository),
+                lambda: self._show_viewing(),
+            ),
         )
         self._workspaces = WorkspacesHost(
             self.push_screen,

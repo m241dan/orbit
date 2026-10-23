@@ -28,22 +28,34 @@ NOTICE = Notice(message="hello")
 OPENING = Opening(command=OPEN_WITH)
 
 
-class FakeSessions:
-    """A sessions host whose workspaces' active session is ``attach``, recording the pickers it
-    opens."""
+class Sent:
+    """Records the commands sent; those in ``failing`` fail to send."""
 
-    def __init__(self, attach: Attach | None = ATTACH) -> None:
+    def __init__(self) -> None:
+        self.commands: list[Command] = []
+        self.failing: set[str] = set()
+
+    async def __call__(self, command: Command) -> bool:
+        self.commands.append(command)
+        return command.type not in self.failing
+
+
+class FakeSessions:
+    """A sessions host whose workspaces' active session is ``attach``, which attaching sends
+    with ``send``, recording the workspaces it joins and the pickers it opens."""
+
+    def __init__(self, send: Sent, attach: Attach | None = ATTACH) -> None:
         self.attach = attach
+        self.send = send
         self.joined: list[str] = []
         self.opened: list[tuple[StartupPick | None, str | None]] = []
 
-    @property
-    def opening(self) -> Attach | None:
-        return self.attach
+    async def attach_active(self) -> bool:
+        return self.attach is not None and await self.send(self.attach)
 
-    def join(self, workspace: str) -> Attach | None:
+    async def join(self, workspace: str) -> bool:
         self.joined.append(workspace)
-        return self.attach
+        return await self.attach_active()
 
     def open(self, startup: StartupPick | None = None, workspace: str | None = None) -> None:
         self.opened.append((startup, workspace))
@@ -59,24 +71,13 @@ class FakeWorkspaces:
         self.opened.append(startup)
 
 
-class Sent:
-    """Records the commands sent; those in ``failing`` fail to send."""
-
-    def __init__(self) -> None:
-        self.commands: list[Command] = []
-        self.failing: set[str] = set()
-
-    async def __call__(self, command: Command) -> bool:
-        self.commands.append(command)
-        return command.type not in self.failing
-
-
 def host(
     opening: Opening = OPENING,
     linked: bool = False,
     attach: Attach | None = ATTACH,
 ) -> tuple[OpeningHost, Sent, FakeSessions, FakeWorkspaces]:
-    sent, sessions, workspaces = Sent(), FakeSessions(attach), FakeWorkspaces()
+    sent, workspaces = Sent(), FakeWorkspaces()
+    sessions = FakeSessions(sent, attach)
     return (
         OpeningHost(opening, linked, sent, Hosts(sessions, workspaces)),
         sent,
@@ -117,6 +118,12 @@ async def test_nothing_is_sent_without_an_active_session_to_attach_to() -> None:
     opener, sent, _, _ = host(attach=None)
     await opener.listed([CATALOG])
     assert sent.commands == []
+
+
+async def test_in_process_the_first_catalog_attaches_without_joining_a_workspace() -> None:
+    opener, _, sessions, _ = host()
+    await opener.listed([CATALOG])
+    assert sessions.joined == []
 
 
 async def test_without_an_opening_command_only_the_attach_is_sent() -> None:

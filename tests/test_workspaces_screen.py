@@ -4,7 +4,7 @@ repository or a path, removing a workspace, and moving to another workspace's se
 import pytest
 from textual.containers import Vertical
 from textual.pilot import Pilot
-from textual.widgets import Input, OptionList
+from textual.widgets import Input, OptionList, Static
 
 from orbit.protocol import (
     BUSY,
@@ -25,6 +25,7 @@ from orbit.protocol import (
     ListDirectory,
     NewSession,
     RemoveWorkspace,
+    SessionRef,
     SessionStateChanged,
     SessionSummary,
     Usage,
@@ -40,7 +41,7 @@ from orbit.tui.view.outcomes import Awaited
 from orbit.tui.view.workspaces import PATH_HINT, STARTUP_HINT
 from orbit.tui.widgets import ChoiceScreen
 from orbit.tui.workspaces import WorkspacesScreen
-from tests.tui_fakes import FakeLink, FakeSession, changes, feed_events, watches
+from tests.tui_fakes import FakeLink, FakeSession, changes, feed_events, opened, watches
 
 TODAY_A = SessionSummary(id="a1", name="today", active=True)
 EARLIER_A = SessionSummary(id="a0", name="earlier")
@@ -612,6 +613,53 @@ async def test_moving_to_another_workspace_resumes_its_active_session_first() ->
         assert changes(session_of(app))[-1] == Attach(workspace="B", session="b1")
         await pilot.press("ctrl+p")
         assert sessions(app).workspace == "B"
+
+
+def mark(app: OrbitApp) -> str | None:
+    """The viewing mark by the prompt; none while it's hidden."""
+    line = app.query_one("#viewing", Static)
+    return str(line.render()) if line.display else None
+
+
+async def viewing_earlier_a(app: OrbitApp, pilot: Pilot[None]) -> None:
+    """Join repoA at startup and view its earlier session read-only, then open repoB's
+    sessions."""
+    await feed_events(session_of(app), pilot, SERVED)
+    await pilot.press("enter", "enter")
+    read_only = {"active": False, "open_session": SessionRef(id="a1", name="today")}
+    await feed_events(session_of(app), pilot, opened(EARLIER_A).model_copy(update=read_only))
+    assert mark(app) is not None
+    await pilot.press("ctrl+w", "k", "enter")
+
+
+async def test_moving_to_another_workspace_clears_the_viewing_mark_right_away() -> None:
+    app = connected()
+    async with app.run_test() as pilot:
+        await viewing_earlier_a(app, pilot)
+        await pilot.press("enter")
+        assert mark(app) is None
+
+
+async def test_moving_to_another_workspace_failing_to_attach_stays_viewing_where_it_was() -> None:
+    app = connected()
+    async with app.run_test() as pilot:
+        await viewing_earlier_a(app, pilot)
+        shown = mark(app)
+        session_of(app).send_error = RuntimeError("the backend is gone")
+        await pilot.press("enter")
+        assert mark(app) == shown
+        await pilot.press("ctrl+p")
+        assert sessions(app).workspace == "A"
+
+
+async def test_a_join_at_startup_failing_to_attach_joins_nothing_and_sends_no_opening() -> None:
+    app = connected(opening=Opening(NewSession(name="auth"), repository="/src/repoA"))
+    async with app.run_test() as pilot:
+        await feed_events(session_of(app), pilot, SERVED)
+        session_of(app).send_error = RuntimeError("the backend is gone")
+        await pilot.press("enter")
+        assert changes(session_of(app)) == [Attach(workspace="A", session="a1")]
+        assert (app._sessions.workspace, app._sessions.attached) == (None, None)
 
 
 async def test_a_new_session_in_another_workspace_attaches_there_first() -> None:

@@ -5,7 +5,7 @@ from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
-from orbit.protocol import Attach, Command, Event
+from orbit.protocol import Command, Event
 from orbit.tui.sessions import StartupPick
 from orbit.tui.view.opening import lists_catalog
 
@@ -28,10 +28,9 @@ Send = Callable[[Command], Awaitable[bool]]
 class Sessions(Protocol):
     """The sessions of the workspace the app is on, as :class:`SessionsHost` keeps them."""
 
-    @property
-    def opening(self) -> Attach | None: ...
+    async def attach_active(self) -> bool: ...
 
-    def join(self, workspace: str) -> Attach | None: ...
+    async def join(self, workspace: str) -> bool: ...
 
     def open(self, startup: StartupPick | None = None, workspace: str | None = None) -> None: ...
 
@@ -74,7 +73,7 @@ class OpeningHost:
         if self._linked:
             self._workspaces.open(startup=True)
             return
-        await self._attach(self._sessions.opening)
+        await self._open_on(self._sessions.attach_active())
 
     def _first_listed(self, batch: Sequence[Event]) -> bool:
         """Whether ``batch`` has the first catalog, after which the app no longer waits for
@@ -88,7 +87,7 @@ class OpeningHost:
         """Open the session picker of the ``workspace`` picked; at ``startup``, unless the app
         picks a session, attach to its active session and send the command to open with."""
         if startup and not self._pick:
-            await self._attach(self._sessions.join(workspace))
+            await self._open_on(self._sessions.join(workspace))
             return
         self._sessions.open("resume" if startup else None, workspace)
 
@@ -99,10 +98,10 @@ class OpeningHost:
             self._pick = False
             self._sessions.open("pick")
 
-    async def _attach(self, attach: Attach | None) -> None:
-        """Send ``attach``, if there's one, then, once that's sent, the command to open
-        with."""
-        if attach is not None and await self._send(attach):
+    async def _open_on(self, attaching: Awaitable[bool]) -> None:
+        """Await ``attaching`` to the active session of a workspace, then, once that's sent,
+        send the command to open with."""
+        if await attaching:
             await self._send_opening()
 
     async def _send_opening(self) -> None:
