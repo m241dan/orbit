@@ -1,8 +1,7 @@
-"""``orbit db forget``: purging a workspace no running server serves and no orbit holds the
-lock of, saying what it deleted."""
+"""``orbit db forget``: purging a workspace, as :func:`forget_workspace` does, saying what it
+deleted, or why it's refused."""
 
 import asyncio
-import os
 import sqlite3
 from contextlib import closing
 from pathlib import Path
@@ -10,7 +9,7 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from orbit.agent import RunFile, SqliteStore, WorkspaceLock, WorkspaceRegistry, orbit_dir
+from orbit.agent import SqliteStore, WorkspaceRegistry
 from orbit.agent.external import workspace_purge
 from orbit.agent.external.clone_loss import clone_loss
 from orbit.cli import app
@@ -21,14 +20,13 @@ from tests.store_views import record
 runner = CliRunner()
 
 
-async def _used(state: Path, path: Path, sessions: int, *, managed: bool, served: bool) -> str:
+async def _used(state: Path, path: Path, sessions: int, *, managed: bool) -> str:
     store = await SqliteStore.open(state)
     try:
         registry = WorkspaceRegistry(store)
         workspace_id = (await registry.find_or_register(str(path))).workspace_id
         if managed:
             await registry.set_managed(workspace_id)
-        await registry.set_served(workspace_id, served)
         for number in range(sessions):
             await store.save(workspace_id, record(f"s{number}"))
             await store.append(workspace_id, f"s{number}", [notice(number + 1, f"s{number}", "")])
@@ -37,13 +35,11 @@ async def _used(state: Path, path: Path, sessions: int, *, managed: bool, served
     return workspace_id
 
 
-def used(
-    state: Path, path: Path, sessions: int = 1, *, managed: bool = False, served: bool = False
-) -> str:
+def used(state: Path, path: Path, sessions: int = 1, *, managed: bool = False) -> str:
     """The id of the workspace at ``path``, registered in the store in ``state`` with
-    ``sessions`` sessions, each with an event, managed and flagged served as asked."""
+    ``sessions`` sessions, each with an event, managed if asked."""
     path.mkdir(parents=True, exist_ok=True)
-    return asyncio.run(_used(state, path, sessions, managed=managed, served=served))
+    return asyncio.run(_used(state, path, sessions, managed=managed))
 
 
 def registered(state: Path) -> list[str]:
@@ -90,62 +86,6 @@ def test_a_workspace_is_found_by_its_id_and_its_fallback_files_go(
     message = f"Forgot {tmp_path / 'project'}: deleted 1 session and 1 fallback file.\n"
     assert result.exit_code == 0 and result.stdout == message
     assert registered(state) == [] and not fallback.exists()
-
-
-def test_a_workspace_whose_directory_is_gone_is_purged(state: Path, tmp_path: Path) -> None:
-    used(state, tmp_path / "project")
-    (tmp_path / "project").rmdir()
-
-    result = runner.invoke(app, ["db", "forget", str(tmp_path / "project")])
-
-    assert result.exit_code == 0 and registered(state) == []
-
-
-def test_a_workspace_not_registered_is_refused(state: Path, tmp_path: Path) -> None:
-    used(state, tmp_path / "other")
-    result = runner.invoke(app, ["db", "forget", str(tmp_path / "project")])
-
-    assert result.exit_code == 2
-    assert result.stderr == f"No workspace is registered at {tmp_path / 'project'}.\n"
-
-
-def test_a_workspace_whose_lock_an_orbit_holds_is_refused(state: Path, tmp_path: Path) -> None:
-    workspace_id = used(state, tmp_path / "project")
-    lock = WorkspaceLock(orbit_dir(str(tmp_path / "project")))
-    assert lock.take() is None
-    try:
-        result = runner.invoke(app, ["db", "forget", str(tmp_path / "project")])
-    finally:
-        lock.close()
-
-    assert result.exit_code == 2
-    message = f"Can't forget {tmp_path / 'project'}: an orbit chat, pid {os.getpid()} holds its"
-    assert result.stderr == f"{message} lock.\n"
-    assert registered(state) == [workspace_id]
-
-
-def test_a_workspace_a_running_server_serves_is_refused(state: Path, tmp_path: Path) -> None:
-    workspace_id = used(state, tmp_path / "project", served=True)
-    RunFile(state).write("wss://orbit.example:4567/", os.getpid())
-
-    result = runner.invoke(app, ["db", "forget", str(tmp_path / "project")])
-
-    assert result.exit_code == 2
-    assert result.stderr == (
-        f"Can't forget {tmp_path / 'project'}: the orbit serve at wss://orbit.example:4567/ serves"
-        " it; remove it there with its sessions, or stop that server first.\n"
-    )
-    assert registered(state) == [workspace_id]
-
-
-def test_a_workspace_flagged_served_with_no_server_running_is_purged(
-    state: Path, tmp_path: Path
-) -> None:
-    used(state, tmp_path / "project", served=True)
-
-    result = runner.invoke(app, ["db", "forget", str(tmp_path / "project")])
-
-    assert result.exit_code == 0 and registered(state) == []
 
 
 def test_a_clean_clone_is_purged_with_its_directory(state: Path, tmp_path: Path) -> None:

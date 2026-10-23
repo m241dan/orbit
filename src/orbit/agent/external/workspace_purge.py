@@ -1,6 +1,7 @@
 """Purging a workspace registered in the store, as :func:`purge` orders it: finding it, holding
 its workspace lock, checking what deleting its clone would lose and deleting its session locks,
-fallback files and, for a clone orbit made, its directory, then its records."""
+fallback files and, for a clone orbit made, its directory, then its records; and forgetting one,
+as ``orbit db forget`` does, refusing one a running server serves or another orbit holds."""
 
 import asyncio
 import shutil
@@ -8,7 +9,7 @@ from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
 
-from orbit.agent.application.purge import erase
+from orbit.agent.application.purge import erase, purge
 from orbit.agent.domain.purging import Purged, PurgeRefused, locked_refusal, served_refusal
 from orbit.agent.domain.workspaces import RegisteredWorkspace
 from orbit.agent.external.clone_loss import clone_loss
@@ -81,6 +82,16 @@ class StorePurging:
         """Delete the records of the workspace ``workspace_id``; returns how many sessions it
         had."""
         return await WorkspaceRegistry(self._store).purge(workspace_id)
+
+
+async def forget_workspace(store: SqliteStore, key: str) -> Purged:
+    """Delete what orbit keeps of the workspace whose path or id is ``key`` in ``store``, as
+    :func:`purge` orders it through :class:`StorePurging`, holding its workspace lock while its
+    directory is there. Raises :class:`PurgeRefused`, deleting nothing, if none is registered
+    so, a running ``orbit serve`` serves it, another orbit holds its lock or deleting its clone
+    would lose work; :class:`StoreError` if the store fails, and ``OSError`` if a file can't be
+    deleted or the lock taken."""
+    return await purge(StorePurging(store), key)
 
 
 async def purge_workspace(store: SqliteStore, workspace_id: str) -> Purged:

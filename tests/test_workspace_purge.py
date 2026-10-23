@@ -1,8 +1,11 @@
 """Purging a workspace from the store: its records, session locks and fallback files, and a
 managed clone's directory, unless that would lose work, deleting the files before the records;
-other workspaces untouched."""
+other workspaces untouched. Forgetting one, as ``orbit db forget`` does, holds its workspace
+lock, and refuses one a running server serves or another orbit holds."""
 
+import os
 import shutil
+from collections.abc import Sequence
 from pathlib import Path
 
 import pytest
@@ -13,9 +16,11 @@ from orbit.agent.domain.workspaces import RegisteredWorkspace
 from orbit.agent.external import workspace_purge
 from orbit.agent.external.fallback_files import FallbackFiles
 from orbit.agent.external.repository import orbit_dir
+from orbit.agent.external.run_file import RunFile
 from orbit.agent.external.sqlite_schema import StoreError
 from orbit.agent.external.sqlite_store import SqliteStore
-from orbit.agent.external.workspace_purge import StorePurging, purge_workspace
+from orbit.agent.external.workspace_lock import WorkspaceLock
+from orbit.agent.external.workspace_purge import StorePurging, forget_workspace, purge_workspace
 from orbit.agent.external.workspace_registry import WorkspaceRegistry
 from tests.agent_fakes import notice
 from tests.git_repo import bare_repository, commit_file, git, init_repo
@@ -209,3 +214,100 @@ async def test_a_workspace_is_found_by_a_directory_in_its_repository(
     found = await registry.find(str(repo / "src"))
 
     assert found == RegisteredWorkspace(workspace_id, str(repo), False, False)
+
+
+async def test_forgetting_a_key_no_workspace_is_registered_at_is_refused(
+    store: SqliteStore, tmp_path: Path
+) -> None:
+    await used(store, tmp_path / "other")
+
+    with pytest.raises(PurgeRefused) as refusal:
+        await forget_workspace(store, str(tmp_path / "project"))
+
+    assert str(refusal.value) == f"No workspace is registered at {tmp_path / 'project'}."
+
+
+async def test_a_workspace_a_running_server_serves_is_refused_deleting_nothing(
+    store: SqliteStore, state: Path, tmp_path: Path
+) -> None:
+    workspace_id = await used(store, tmp_path / "project")
+    await WorkspaceRegistry(store).set_served(workspace_id, True)
+    RunFile(state).write("wss://orbit.example:4567/", os.getpid())
+
+    with pytest.raises(PurgeRefused) as refusal:
+        await forget_workspace(store, str(tmp_path / "project"))
+
+    assert str(refusal.value) == (
+        f"Can't forget {tmp_path / 'project'}: the orbit serve at wss://orbit.example:4567/ serves"
+        " it; remove it there with its sessions, or stop that server first."
+    )
+    assert rows(state, workspace_id) == dict.fromkeys(rows(state, workspace_id), 1)
+    assert len(leftovers(state, tmp_path / "project", workspace_id)) == 3
+
+
+async def test_a_workspace_flagged_served_with_no_server_running_is_forgotten(
+    store: SqliteStore, state: Path, tmp_path: Path
+) -> None:
+    workspace_id = await used(store, tmp_path / "project")
+    await WorkspaceRegistry(store).set_served(workspace_id, True)
+
+    purged = await forget_workspace(store, workspace_id)
+
+    assert purged.workspace.id == workspace_id
+    assert rows(state, workspace_id)["workspaces"] == 0
+
+
+async def test_a_workspace_whose_lock_another_orbit_holds_is_refused_deleting_nothing(
+    store: SqliteStore, state: Path, tmp_path: Path
+) -> None:
+    workspace_id = await used(store, tmp_path / "project")
+    lock = WorkspaceLock(orbit_dir(str(tmp_path / "project")))
+    assert lock.take() is None
+    try:
+        with pytest.raises(PurgeRefused) as refusal:
+            await forget_workspace(store, str(tmp_path / "project"))
+    finally:
+        lock.close()
+
+    assert str(refusal.value) == (
+        f"Can't forget {tmp_path / 'project'}: an orbit chat, pid {os.getpid()} holds its lock."
+    )
+    assert rows(state, workspace_id) == dict.fromkeys(rows(state, workspace_id), 1)
+    assert len(leftovers(state, tmp_path / "project", workspace_id)) == 3
+
+
+async def test_a_workspace_whose_directory_is_gone_is_forgotten_without_taking_a_lock(
+    store: SqliteStore, state: Path, tmp_path: Path
+) -> None:
+    workspace_id = await used(store, tmp_path / "project")
+    shutil.rmtree(tmp_path / "project")
+
+    purged = await forget_workspace(store, str(tmp_path / "project"))
+
+    assert purged.workspace.id == workspace_id
+    assert rows(state, workspace_id)["workspaces"] == 0
+    # Taking the lock would have made the orbit directory, and so the workspace's, again.
+    assert not (tmp_path / "project").exists()
+
+
+async def test_forgetting_holds_the_workspace_lock_while_deleting_and_lets_it_go_after(
+    store: SqliteStore, state: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace_id = await used(store, tmp_path / "project")
+    lock = WorkspaceLock(orbit_dir(str(tmp_path / "project")))
+    holders: list[str | None] = []
+
+    def noted(directories: Sequence[Path], workspace_id: str) -> int:
+        owner = lock.take()
+        holders.append(None if owner is None else owner.described)
+        lock.close()
+        return 0
+
+    monkeypatch.setattr(workspace_purge, "remove_fallback_files", noted)
+
+    purged = await forget_workspace(store, str(tmp_path / "project"))
+
+    assert purged.workspace.id == workspace_id
+    assert holders == [f"an orbit chat, pid {os.getpid()}"]
+    assert lock.take() is None
+    lock.close()

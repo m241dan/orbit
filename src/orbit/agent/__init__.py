@@ -86,7 +86,7 @@ from orbit.agent.external.user_config import (
 )
 from orbit.agent.external.workspace import workspace_state
 from orbit.agent.external.workspace_lock import WorkspaceLock
-from orbit.agent.external.workspace_purge import StorePurging, purge_workspace
+from orbit.agent.external.workspace_purge import StorePurging, forget_workspace, purge_workspace
 from orbit.agent.external.workspace_registry import WorkspaceRegistry
 
 __all__ = [
@@ -157,6 +157,7 @@ __all__ = [
     "WorkspaceSource",
     "WorkspaceStore",
     "WorkspaceUnavailable",
+    "forget_workspace",
     "git_top_level",
     "has_git_identity",
     "in_git_work_tree",

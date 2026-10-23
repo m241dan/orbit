@@ -13,10 +13,9 @@ from orbit.agent import (
     PurgeRefused,
     SqliteStore,
     StoreError,
-    StorePurging,
     TokenError,
     TokenFile,
-    purge,
+    forget_workspace,
     resolve_config_dir,
     resolve_state_dir,
 )
@@ -69,12 +68,11 @@ def forget(
 
 async def _forgotten(state: Path, key: str) -> Purged:
     """Purge the workspace whose path or id is ``key`` from the store in ``state``, as
-    :func:`purge` does, holding its workspace lock. Raises :class:`PurgeRefused` if there's
-    none, a running ``orbit serve`` serves it, another orbit holds its lock or purging it would
-    lose work."""
+    :func:`forget_workspace` does. Raises :class:`PurgeRefused` if there's none, a running
+    ``orbit serve`` serves it, another orbit holds its lock or purging it would lose work."""
     store = await SqliteStore.open(state)
     try:
-        return await purge(StorePurging(store), key)
+        return await forget_workspace(store, key)
     finally:
         await store.close()
 
