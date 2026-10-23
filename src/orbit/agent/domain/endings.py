@@ -4,7 +4,7 @@ Each ending is a ``(reason, detail)`` pair; the detail is ``""`` when the reason
 """
 
 from orbit.agent.domain.agent_task import Phase
-from orbit.agent.domain.verification import VerificationStep, failure_report
+from orbit.agent.domain.verification import VerificationStep, failure_reason, failure_report
 from orbit.protocol import TaskStatus
 
 Ending = tuple[str, str]
@@ -27,6 +27,17 @@ WORK_GONE = "The work it fixes isn't in the coder's tree any more; look for it i
 NO_PROPOSAL = "Ended without an accepted proposal"
 """Why a task whose agent's proposal of checks was never accepted, nor last failed, is
 unverified."""
+
+STATUSES: dict[Phase, TaskStatus] = {
+    "assigned": "error",
+    "working": "error",
+    "verifying": "error",
+    "done": "completed",
+    "fallback": "unverified",
+    "gave_up": "gave_up",
+    "ended": "cancelled",
+}
+"""What a task ends as when its agent's run leaves its work in each phase."""
 
 PHASE_ERRORS: dict[Phase, str] = {
     "assigned": "The agent exited before fetching its task",
@@ -69,6 +80,25 @@ def run_ending(status: TaskStatus, phase: Phase, given_up: str, failed: str | No
         case "cancelled":
             return ENDED_AT_PROPOSAL, ""
     return "", ""
+
+
+def task_ending(
+    phase: Phase,
+    failure: tuple[VerificationStep, str] | None,
+    proposal_failure: tuple[VerificationStep, str] | None,
+    given_up: str,
+    failed: str | None,
+) -> tuple[TaskStatus, Ending]:
+    """The status a task ends as when its agent's run leaves its work in ``phase``, and why: the
+    step that last ``failure`` if it fell back for one, its proposal that was never accepted
+    (last failing as ``proposal_failure``) if it fell back without one, or else how the run
+    ended, the agent ``given_up`` for that reason or with the error message ``failed``."""
+    status = STATUSES[phase]
+    if status == "unverified" and failure is not None:
+        return status, failure_reason(*failure)
+    if status == "unverified":
+        return status, unaccepted(proposal_failure)
+    return status, run_ending(status, phase, given_up, failed)
 
 
 def unaccepted(failed: tuple[VerificationStep, str] | None) -> Ending:

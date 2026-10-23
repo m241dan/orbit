@@ -4,14 +4,16 @@ from orbit.agent.domain.endings import (
     BUG,
     ENDED_AT_PROPOSAL,
     NO_PROPOSAL,
+    STATUSES,
     bug,
     error,
     first_line,
     gave_up,
     run_ending,
+    task_ending,
     unaccepted,
 )
-from orbit.agent.domain.verification import VerificationStep, failure_report
+from orbit.agent.domain.verification import VerificationStep, failure_reason, failure_report
 
 
 def test_the_first_line_skips_blank_lines_and_strips_it() -> None:
@@ -79,3 +81,46 @@ def test_a_proposal_that_last_failed_gives_the_step_and_its_report() -> None:
         "Proposed check Lint failed",
         failure_report(step, "E501"),
     )
+
+
+def test_each_phase_ends_its_task_as_its_status() -> None:
+    assert STATUSES == {
+        "assigned": "error",
+        "working": "error",
+        "verifying": "error",
+        "done": "completed",
+        "fallback": "unverified",
+        "gave_up": "gave_up",
+        "ended": "cancelled",
+    }
+
+
+def test_a_fallback_after_a_failure_ends_unverified_for_that_step() -> None:
+    step = VerificationStep("Lint", ("ruff", "check"))
+    proposed = VerificationStep("Types", ("mypy",))
+    ending = task_ending("fallback", (step, "E501"), (proposed, "error"), "", None)
+    assert ending == ("unverified", failure_reason(step, "E501"))
+
+
+def test_a_fallback_without_a_failure_ends_unverified_for_its_proposal() -> None:
+    step = VerificationStep("Lint", ("ruff", "check"))
+    ending = task_ending("fallback", None, (step, "E501"), "", None)
+    assert ending == ("unverified", unaccepted((step, "E501")))
+
+
+def test_a_fallback_without_any_failure_ends_unverified_without_a_proposal() -> None:
+    assert task_ending("fallback", None, None, "", None) == ("unverified", (NO_PROPOSAL, ""))
+
+
+def test_other_phases_end_as_their_run_ended() -> None:
+    step = VerificationStep("Lint", ("ruff", "check"))
+    assert task_ending("gave_up", None, None, "Too vague.", None) == (
+        "gave_up",
+        run_ending("gave_up", "gave_up", "Too vague.", None),
+    )
+    assert task_ending("working", (step, "E501"), None, "", "boom") == (
+        "error",
+        run_ending("error", "working", "", "boom"),
+    )
+    assert task_ending("done", None, None, "", None) == ("completed", ("", ""))
+    assert task_ending("ended", None, None, "", None) == ("cancelled", (ENDED_AT_PROPOSAL, ""))

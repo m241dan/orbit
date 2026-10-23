@@ -124,9 +124,13 @@ class Verifier:
         """
         state = self._board.get(task_id)
         after = None if before is None else await self.fingerprint(root)
-        reason = skip_reason(state.task, before, after, fixing=state.fixes is not None)
-        if reason is None and not self.verification.steps:
-            reason = "no_steps"
+        reason = skip_reason(
+            state.task,
+            before,
+            after,
+            fixing=state.fixes is not None,
+            has_steps=bool(self.verification.steps),
+        )
         if reason is not None:
             self._progress = self._progress.skip()
             await self.publish_steps()

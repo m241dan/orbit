@@ -72,18 +72,21 @@ def may_change_files(task: TaskSpec) -> bool:
 
 
 def skip_reason(
-    task: TaskSpec, before: object, after: object, *, fixing: bool = False
+    task: TaskSpec, before: object, after: object, *, fixing: bool = False, has_steps: bool = True
 ) -> SkipReason | None:
     """Why ``task``, whose turn completed, needs no verification; ``None`` if it does.
 
     ``before`` and ``after`` fingerprint the working tree around the task. ``before`` is
     ``None`` when that couldn't be told, so the task counts as having changed files. A task
     ``fixing`` another is verified even if it changed nothing, as passing completes that one.
+    Without ``has_steps`` there's nothing to verify with, unless another reason skips it first.
     """
     if not may_change_files(task):
         return "tools_off"
     if before is not None and before == after and not fixing:
         return "no_changes"
+    if not has_steps:
+        return "no_steps"
     return None
 
 

@@ -70,6 +70,19 @@ def test_a_fix_with_tools_off_skips_verification() -> None:
     assert skip_reason(task("off"), None, None, fixing=True) == "tools_off"
 
 
+def test_tasks_without_steps_skip_verification() -> None:
+    assert skip_reason(task(), "before", "after", has_steps=False) == "no_steps"
+
+
+def test_a_fix_without_steps_skips_verification() -> None:
+    assert skip_reason(task(), "tree", "tree", fixing=True, has_steps=False) == "no_steps"
+
+
+def test_other_skip_reasons_win_over_having_no_steps() -> None:
+    assert skip_reason(task("off"), None, None, has_steps=False) == "tools_off"
+    assert skip_reason(task(), "tree", "tree", has_steps=False) == "no_changes"
+
+
 def test_fallback_fixes_follow_the_chain_per_step() -> None:
     attempts = FallbackFixes()
     assert not attempts.exhausted("1", "lint", 1)

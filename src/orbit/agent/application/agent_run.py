@@ -23,12 +23,12 @@ from orbit.agent.application.proposal_trial import ProposalTrial
 from orbit.agent.application.task_trace import CHECK_RUNS, FIX_ATTEMPTS, GAVE_UP_EVENT
 from orbit.agent.application.tasks import Tasks
 from orbit.agent.application.verifier import Failure, Verifier, first_failure
-from orbit.agent.domain.agent_task import FINISHED, AgentTask, Phase
+from orbit.agent.domain.agent_task import FINISHED, AgentTask
 from orbit.agent.domain.agents import Agent, bootstrap_prompt
 from orbit.agent.domain.board import TaskBoard
 from orbit.agent.domain.checks import ChecksProposal, parse_proposal
 from orbit.agent.domain.config_errors import ConfigError
-from orbit.agent.domain.endings import Ending, error, run_ending, unaccepted
+from orbit.agent.domain.endings import error, task_ending
 from orbit.agent.domain.refusals import Refused
 from orbit.agent.domain.roles import (
     COMPLETE_TASK,
@@ -45,7 +45,6 @@ from orbit.agent.domain.roles import (
 from orbit.agent.domain.verification import (
     VerificationStep,
     check_reply,
-    failure_reason,
     step_list,
 )
 from orbit.protocol import (
@@ -57,7 +56,6 @@ from orbit.protocol import (
     ErrorOccurred,
     Event,
     TaskGaveUp,
-    TaskStatus,
     TurnFinished,
     Usage,
 )
@@ -65,16 +63,6 @@ from orbit.tracing import current_span
 
 Wake = Literal["exited", "gave_up"]
 """Why the run loop wakes up, other than a claim that the task is done."""
-
-STATUSES: dict[Phase, TaskStatus] = {
-    "assigned": "error",
-    "working": "error",
-    "verifying": "error",
-    "done": "completed",
-    "fallback": "unverified",
-    "gave_up": "gave_up",
-    "ended": "cancelled",
-}
 
 
 @dataclass(frozen=True)
@@ -173,20 +161,11 @@ class AgentRun:
             self._desk.close(self.agent)  # Even if the agent never got as far as starting.
             self._drain()
             await self._end_checks()
-        status = STATUSES[self._work.phase]
-        reason, detail = self._why(status)
+        status, (reason, detail) = task_ending(
+            self._work.phase, self._failure, self._proposal_failure, self._given_up, self._error
+        )
         summaries = tuple(self._work.summaries)
         return Outcome(status, self._failure, summaries, self._accepted, reason, detail)
-
-    def _why(self, status: TaskStatus) -> Ending:
-        """Why the task ended as ``status``: the step that failed, if it fell back for one, its
-        proposal that was never accepted, if it fell back without one, or else how the run
-        ended."""
-        if status == "unverified" and self._failure is not None:
-            return failure_reason(*self._failure)
-        if status == "unverified":
-            return unaccepted(self._proposal_failure)
-        return run_ending(status, self._work.phase, self._given_up, self._error)
 
     async def _noting(self, event: Event) -> None:
         """Publish ``event``, keeping the first error's message to say why the run ended."""
