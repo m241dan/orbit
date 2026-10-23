@@ -233,7 +233,7 @@ async def test_a_parked_file_reads_back_its_envelopes_but_those_of_unknown_types
     assert await files.read(file) == [notice(1), notice(2)]
 
 
-@pytest.mark.parametrize("text", ["not json\n", b"\xff\n"])
+@pytest.mark.parametrize("text", ["not json\n", b"\xff\n", "not json\nnor this\n"])
 async def test_a_parked_file_that_isnt_envelopes_cant_be_read(
     files: FallbackFiles, tmp_path: Path, text: str | bytes
 ) -> None:
@@ -270,7 +270,7 @@ async def test_a_parked_file_ending_in_a_whole_line_without_a_newline_reads_it(
     assert await files.read(file) == [notice(1), notice(2)]
 
 
-async def test_a_parked_file_with_a_bad_line_before_good_ones_cant_be_read(
+async def test_a_parked_file_with_a_torn_line_before_good_ones_reads_every_good_one(
     files: FallbackFiles,
 ) -> None:
     await files.write("s1", [notice(1)])
@@ -279,8 +279,51 @@ async def test_a_parked_file_with_a_bad_line_before_good_ones_cant_be_read(
         appended.write('{"seq": 2, "sess\n')
     await files.write("s1", [notice(3)])
 
-    with pytest.raises(ReadFailed):
-        await files.read(file)
+    assert await files.read(file) == [notice(1), notice(3)]
+
+
+async def test_an_append_after_a_line_without_a_newline_starts_a_line_of_its_own(
+    files: FallbackFiles,
+) -> None:
+    await files.write("s1", [notice(1)])
+    [file] = await files.parked()
+    path = Path(file.path)
+    path.write_text(path.read_text().removesuffix("\n"))
+    await files.write("s1", [notice(2)])
+
+    assert decoded(path) == [notice(1), notice(2)]
+
+
+async def test_after_a_failed_append_that_cant_be_undone_the_next_envelopes_are_readable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    blocked = tmp_path / "blocked"
+    blocked.write_text("a file, so no repository file can be made under it")
+    files = FallbackFiles(tmp_path / "state", "w1", blocked / "repo")
+    await files.write("s1", [notice(1)])
+    real_write = os.write
+    calls: list[int] = []
+
+    def full_disk(descriptor: int, data: bytes) -> int:
+        """Writes half of the first chunk, then finds the disk full, then writes as usual."""
+        calls.append(descriptor)
+        if len(calls) == 1:
+            return real_write(descriptor, bytes(data)[: len(data) // 2])
+        if len(calls) == 2:
+            raise OSError(errno.ENOSPC, "No space left on device")
+        return real_write(descriptor, data)
+
+    def stuck(descriptor: int, length: int) -> None:
+        raise OSError(errno.EIO, "Input/output error")
+
+    monkeypatch.setattr(os, "write", full_disk)
+    monkeypatch.setattr(os, "ftruncate", stuck)
+    assert await files.write("s1", [notice(2), notice(3)]) is None
+    monkeypatch.undo()
+    state = tmp_path / "state" / "fallback" / "w1-s1.jsonl"
+
+    assert await files.write("s1", [notice(4)]) == str(state)
+    assert await files.read(ParkedFile(str(state), "s1")) == [notice(1), notice(2), notice(4)]
 
 
 async def test_a_missing_parked_file_cant_be_read(files: FallbackFiles, tmp_path: Path) -> None:

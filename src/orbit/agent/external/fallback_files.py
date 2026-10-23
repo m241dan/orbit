@@ -23,16 +23,20 @@ SEPARATOR = "-"  # Ids have none, so a name without it is an earlier orbit's, by
 
 def _append(path: Path, lines: str) -> None:
     """Add ``lines`` to the file at ``path``, making it, and its directory, owner-only as
-    needed; raises ``OSError`` when it can't, leaving the file as it was if it can."""
+    needed, after a newline if its last line has none; raises ``OSError`` when it can't,
+    leaving the file as it was if it can."""
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+    descriptor = os.open(path, os.O_RDWR | os.O_CREAT | os.O_APPEND, 0o600)
     try:
         os.fchmod(descriptor, 0o600)
         size = os.fstat(descriptor).st_size
+        data = lines.encode("utf-8")
+        if size and os.pread(descriptor, 1, size - 1) != b"\n":
+            data = b"\n" + data  # Keeps a torn line, from a failed write, a line of its own.
         try:
-            _write_all(descriptor, lines.encode("utf-8"))
+            _write_all(descriptor, data)
         except OSError:
-            with suppress(OSError):  # A torn last line is skipped on reading anyway.
+            with suppress(OSError):  # A torn line is skipped on reading anyway.
                 os.ftruncate(descriptor, size)
             raise
     finally:
@@ -48,16 +52,21 @@ def _write_all(descriptor: int, data: bytes) -> None:
 
 def _read(path: Path) -> list[EventEnvelope]:
     """The envelopes in the file at ``path``, one per line, but for those of types this orbit
-    doesn't know and a last line, without a newline, that isn't one: the write that failed.
-    Raises :class:`ReadFailed` when it can't be read or another line isn't an envelope."""
+    doesn't know and lines that aren't envelopes before the last that ends in a newline: those
+    torn by a failed write, which the next write starts after. Raises :class:`ReadFailed` when
+    it can't be read or that last line isn't an envelope, so it isn't such a file."""
     try:
         *lines, last = path.read_bytes().split(b"\n")
     except OSError as error:
         raise ReadFailed(str(error)) from error
-    decoded = [_decode(line) for line in lines if line.strip()]
-    with suppress(ReadFailed):
-        decoded.append(_decode(last))
-    return [envelope for envelope in decoded if envelope is not None]
+    return [envelope for envelope in _decode_lines(lines, last) if envelope is not None]
+
+
+def _decode_lines(lines: list[bytes], last: bytes) -> list[EventEnvelope | None]:
+    """What each of ``lines``, those ending in a newline, and ``last`` hold, as :func:`_read`
+    reads them."""
+    *earlier, whole = [line for line in lines if line.strip()] or [b""]
+    return [*map(_decode_torn, earlier), _decode(whole) if whole else None, _decode_torn(last)]
 
 
 def _decode(line: bytes) -> EventEnvelope | None:
@@ -67,6 +76,14 @@ def _decode(line: bytes) -> EventEnvelope | None:
         return decode_event(line.decode("utf-8"))
     except (UnicodeDecodeError, ProtocolError) as error:
         raise ReadFailed(str(error)) from error
+
+
+def _decode_torn(line: bytes) -> EventEnvelope | None:
+    """The envelope ``line`` holds, or ``None`` for one of a type this orbit doesn't know or a
+    line that isn't one, as a torn line isn't."""
+    with suppress(ReadFailed):
+        return _decode(line)
+    return None
 
 
 def _delete(path: Path) -> None:
