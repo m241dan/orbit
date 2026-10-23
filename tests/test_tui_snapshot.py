@@ -462,6 +462,25 @@ async def test_a_refused_decision_drops_its_entry_and_shows_the_proposal_again()
         assert [screen.proposal for screen in proposal_screens(app)] == [PROPOSAL]
 
 
+async def test_two_decisions_in_flight_each_hear_their_own_outcome() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    other = PROPOSAL.model_copy(update={"agent_id": "agent-4", "task_id": "2"})
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, PROPOSAL, other)
+        await pilot.press("a")
+        await pilot.pause()
+        await pilot.press("a")
+        await pilot.pause()
+        first, second = session.envelopes
+        refused = CommandRefused(command_id=first.command_id, code="busy", message="Not now.")
+        accepted = CommandAccepted(command_id=second.command_id)
+        await feed_events(session, pilot, accepted, refused)
+        assert not any(text.startswith("orbit → agent-3") for text, _ in entries(app))
+        assert any(text.startswith("orbit → agent-4") for text, _ in entries(app))
+        assert [screen.proposal for screen in proposal_screens(app)] == [PROPOSAL]
+
+
 async def test_a_decision_refused_as_unknown_drops_its_entry_and_leaves_the_proposal_closed() -> (
     None
 ):

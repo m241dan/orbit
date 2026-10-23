@@ -282,6 +282,23 @@ async def test_a_request_refused_for_storage_stops_loading_and_can_be_made_again
         assert loading(app)
 
 
+async def test_a_refusal_of_an_older_request_leaves_the_newer_loading() -> None:
+    session = FakeSession()
+    app = OrbitApp(session)
+    async with app.run_test() as pilot:
+        await feed_events(session, pilot, snapshot(*logged(501, *notices("c"))))
+        await at_the_top(pilot, 1)
+        await pilot.press("k")
+        older = history_id(session)
+        await feed_events(session, pilot, snapshot(*logged(501, *notices("c"))))
+        await pilot.press("escape")
+        await at_the_top(pilot, 1)
+        await pilot.press("k")
+        assert len(histories(session)) == 2
+        await feed_events(session, pilot, refusal(older))
+        assert loading(app)
+
+
 async def test_a_refusal_of_another_command_leaves_the_page_loading() -> None:
     session = FakeSession()
     app = OrbitApp(session)

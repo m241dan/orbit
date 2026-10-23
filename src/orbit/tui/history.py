@@ -39,7 +39,8 @@ class HistoryPager:
         if request is None:
             return
         self._show_loading(True)
-        await self._send(request, Awaited(refused=self._refused))
+        # A request sent after a snapshot reset the paging supersedes any still loading.
+        await self._send(request, Awaited(refused=self._refused, supersedes=True))
 
     def _refused(self) -> None:
         """Stop waiting for the page asked for, which was refused or not sent, so it can be

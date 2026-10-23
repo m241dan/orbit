@@ -29,8 +29,8 @@ Shown = CommandRefused | MessageSent | ProposalDecided
 
 
 class CommandDesk:
-    """Sends commands with ``send`` under fresh ids, doing what awaits the latest command of
-    each kind once it's accepted or refused; ``report`` takes an event standing in for the
+    """Sends commands with ``send`` under fresh ids, doing what awaits each once it's accepted
+    or refused, unless a newer one superseded it; ``report`` takes an event standing in for the
     backend's when a command isn't sent, and ``show`` an answer the conversation shows."""
 
     def __init__(

@@ -133,7 +133,7 @@ class ExplorerScreen(ListScreen[str | AddWorkspace | None]):
         self._waiting = True
         self._held = None
         self._show_note(None)
-        awaited = Awaited(accepted=self._listed, why=self._unlisted)
+        awaited = Awaited(accepted=self._listed, why=self._unlisted, supersedes=True)
         await self._browse(ListDirectory(path=path), awaited)
 
     def show_listing(self, listing: DirectoryListing) -> None:

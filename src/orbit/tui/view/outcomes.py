@@ -1,5 +1,5 @@
 """Following what the backend makes of the commands sent: what to do once each is accepted or
-refused, for the latest command of each kind."""
+refused, by command id, or for only the latest of a kind where a newer one supersedes it."""
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
@@ -16,12 +16,14 @@ def _ignored(_why: str) -> None:
 @dataclass(frozen=True)
 class Awaited:
     """What to do once a command is ``accepted``, and once it's ``refused`` or isn't sent,
-    after which ``why`` takes the message saying why and ``code`` the refusal's code."""
+    after which ``why`` takes the message saying why and ``code`` the refusal's code; when it
+    ``supersedes``, it's awaited in place of any earlier command of its kind that does too."""
 
     accepted: Callable[[], None] = _nothing
     refused: Callable[[], None] = _nothing
     why: Callable[[str], None] = _ignored
     code: Callable[[str], None] = _ignored
+    supersedes: bool = False
 
 
 @dataclass(frozen=True)
@@ -34,8 +36,13 @@ class Outcomes:
 
 def awaiting(outcomes: Outcomes, command_id: str, kind: str, awaited: Awaited) -> Outcomes:
     """``outcomes`` also awaiting the outcome of ``command_id``, a command of the ``kind``, as
-    ``awaited``, in place of any earlier command of that kind: only the latest counts."""
-    kept = {key: entry for key, entry in outcomes.awaited.items() if entry[0] != kind}
+    ``awaited``; one that supersedes takes the place of any earlier superseding command of that
+    kind, so only the latest counts."""
+    kept = {
+        key: entry
+        for key, entry in outcomes.awaited.items()
+        if not (awaited.supersedes and entry[1].supersedes and entry[0] == kind)
+    }
     return Outcomes({**kept, command_id: (kind, awaited)})
 
 

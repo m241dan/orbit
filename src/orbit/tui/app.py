@@ -306,7 +306,8 @@ class OrbitApp(App[None], inherit_bindings=False):
         self._prompt.action_normal_mode()
         # Busy from now, not from TurnStarted, so a second prompt can't race the turn.
         self._set_busy(PLANNER_LANE, True)
-        outcome = Awaited(accepted=lambda: self._sent(text), refused=self._unsend)
+        # A newer prompt supersedes an earlier one: only its outcome frees the planner.
+        outcome = Awaited(accepted=lambda: self._sent(text), refused=self._unsend, supersedes=True)
         await self._show_and_send(
             (text, "prompt"), PLANNER, SendMessage(agent=PLANNER, text=text), outcome
         )
@@ -640,8 +641,8 @@ class OrbitApp(App[None], inherit_bindings=False):
                 self._halt.halted(message)
 
     async def _resume_storage(self) -> None:
-        # Trying again lifts the halt once accepted.
-        await self._send(ResumeStorage(), Awaited(accepted=self._halt.lifted))
+        # Trying again lifts the halt once accepted; only the latest try counts.
+        await self._send(ResumeStorage(), Awaited(accepted=self._halt.lifted, supersedes=True))
 
     def _follow_link(self, state: LinkState) -> None:
         self._link_host.follow(state, self.clock())

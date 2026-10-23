@@ -1,15 +1,20 @@
 """The CommandDesk sending commands and following what the backend makes of each."""
 
+from dataclasses import replace
+
 from orbit.protocol import (
     INTERNAL,
     INVALID,
     PLANNER,
+    AddWorkspace,
     CommandAccepted,
     CommandEnvelope,
     CommandRefused,
+    DecideProposal,
     ErrorOccurred,
     Event,
     Hello,
+    History,
     MessageSent,
     NotConnected,
     RunTasks,
@@ -102,17 +107,6 @@ async def test_a_refused_command_does_what_awaits_its_refusal_and_is_shown() -> 
     assert desk.shown == [refusal]
 
 
-async def test_only_the_latest_command_of_each_kind_awaits_its_outcome() -> None:
-    desk = Desk()
-    await desk.desk.send(RunTasks(), desk.noted("first"))
-    first = desk.last_id
-    await desk.desk.send(RunTasks(), desk.noted("second"))
-    second = desk.last_id
-    desk.desk.answer(CommandAccepted(command_id=first))
-    desk.desk.answer(CommandAccepted(command_id=second))
-    assert desk.log == ["second accepted"]
-
-
 async def test_a_welcome_settles_nothing() -> None:
     desk = Desk()
     await desk.desk.send(RunTasks(), desk.noted("run"))
@@ -189,3 +183,44 @@ async def test_a_failure_to_send_tells_what_awaits_it_an_internal_code() -> None
     codes: list[str] = []
     assert not await desk.desk.send(RunTasks(), Awaited(code=codes.append))
     assert codes == [INTERNAL]
+
+
+async def test_two_decisions_in_flight_each_hear_their_own_outcome() -> None:
+    desk = Desk()
+    await desk.desk.send(DecideProposal(task_id="1", action="accept"), desk.noted("first"))
+    first = desk.last_id
+    await desk.desk.send(DecideProposal(task_id="2", action="accept"), desk.noted("second"))
+    desk.desk.answer(CommandAccepted(command_id=desk.last_id))
+    desk.desk.answer(CommandRefused(command_id=first, code=INVALID, message="no"))
+    assert desk.log == ["second accepted", "first refused"]
+
+
+async def test_two_workspaces_added_in_flight_each_hear_their_own_outcome() -> None:
+    desk = Desk()
+    reasons: list[str] = []
+    first = Awaited(accepted=lambda: desk.log.append("first accepted"), why=reasons.append)
+    await desk.desk.send(AddWorkspace(path="/srv/a"), first)
+    first_id = desk.last_id
+    await desk.desk.send(AddWorkspace(path="/srv/b"), desk.noted("second"))
+    desk.desk.answer(CommandRefused(command_id=desk.last_id, code=INVALID, message="no"))
+    desk.desk.answer(CommandAccepted(command_id=first_id))
+    assert desk.log == ["second refused", "first accepted"]
+    assert reasons == []
+
+
+async def test_a_newer_superseding_request_drops_what_awaited_the_older() -> None:
+    desk = Desk()
+    request = History(session="s1", before_seq=501)
+    await desk.desk.send(request, replace(desk.noted("older"), supersedes=True))
+    older = desk.last_id
+    await desk.desk.send(request, replace(desk.noted("newer"), supersedes=True))
+    desk.desk.answer(CommandRefused(command_id=older, code=INVALID, message="no"))
+    desk.desk.answer(CommandAccepted(command_id=desk.last_id))
+    assert desk.log == ["newer accepted"]
+
+
+async def test_an_outcome_of_an_unknown_command_does_nothing() -> None:
+    desk = Desk()
+    await desk.desk.send(RunTasks(), desk.noted("run"))
+    desk.desk.answer(CommandAccepted(command_id="unknown"))
+    assert desk.log == []
