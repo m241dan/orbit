@@ -711,7 +711,10 @@ class WorkspaceHost:
 
     async def _resume_storage(self) -> None:
         """Lift the halt, if the writes that failed now work, start the run whose wait to start
-        again ended while halted, and the reviews waiting."""
+        again ended while halted, and the reviews waiting. A startup check the halt cancelled
+        stays cancelled, as one the user cancelled does: it runs once as orbit starts, the
+        conversation has said it was cancelled, and the first task's verification runs the same
+        steps."""
         await self._halt.resume()
         if not self._halt.halted:
             await self._turns.lifted()

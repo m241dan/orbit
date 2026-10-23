@@ -85,6 +85,7 @@ from tests.agent_fakes import (
     review_count_of,
     send,
     session_for,
+    settled,
     snapshot_of,
     startup_of,
     suggests,
@@ -629,6 +630,47 @@ async def test_resuming_runs_the_review_waiting_on_the_board() -> None:
     assert (await outcome_of(session, ResumeStorage()))[-1].payload == ACCEPTED
     await events_until(session, lambda event: isinstance(event, AgentExited))
     assert [launch.agent.role for launch in launcher.launches] == [REVIEWER]
+    await session.close()
+
+
+async def test_a_resume_that_fails_to_lift_the_halt_starts_no_review() -> None:
+    store, fallback = FakeStore(), FakeFallback()
+    store.append_failure = "disk full"
+    session, _, launcher = session_for(
+        reviewers=(suggests(),), tree=FakeTree(), review=True, store=store, fallback=fallback
+    )
+    await publish(session, Notice(message="n0"))
+    await halt_error(session)
+    tasks_of(session).board.add(TaskSpec(prompt="Review it.", role=REVIEWER))
+    store.append_failure = "still full"
+
+    refusal = (await outcome_of(session, ResumeStorage()))[-1].payload
+    assert isinstance(refusal, CommandRefused) and refusal.code == STORAGE_FAILED
+    await settled()
+    assert not lane_of(session).running
+    assert launcher.launches == []
+    await session.close()
+
+
+async def test_resuming_does_not_run_the_startup_check_the_halt_cancelled() -> None:
+    steps = Steps(True)
+    steps.gate = asyncio.Event()
+    store = FakeStore()
+    store.append_failure = "disk full"
+    session, _, _ = session_for(
+        verification=checked(steps), tree=FakeTree(), check_at_startup=True, store=store
+    )
+    await halt_error(session)
+    startup = startup_of(session)
+    assert startup is not None
+    while startup.running:
+        await asyncio.sleep(0.01)
+    store.append_failure = None
+
+    assert (await outcome_of(session, ResumeStorage()))[-1].payload == ACCEPTED
+    await settled()
+    assert not startup.running and startup.agent is None
+    assert steps.runs == ["Lint"]  # Only the run the halt cancelled.
     await session.close()
 
 

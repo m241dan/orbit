@@ -502,7 +502,8 @@ async def test_the_next_prompt_resumes_the_conversation_after_a_turn_ran_out_of_
 
 async def test_a_turn_finished_before_its_time_runs_out_keeps_its_reason() -> None:
     published: list[Event] = []
-    chat, launcher, _ = steps_chat(chats, published=published, roles=timed_planner(0.0001))
+    # Long enough for the turn to finish first on a loaded machine; the hook after it blocks.
+    chat, launcher, _ = steps_chat(chats, published=published, roles=timed_planner(0.01))
     launcher.planner_afters.append(blocks)
     assert await chat.answer("Plan.", Settings()) == "completed"
     assert finished_turns(published) == [

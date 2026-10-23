@@ -813,7 +813,9 @@ now, taking its lock first if that failed, a saved session's rename whose save f
 with an error, if that session was deleted or another orbit has it open since), the super review
 count and the event log. When they work, the events in the fallback file and those still waiting
 are appended to the log in `seq` order in one go, skipping any it already holds, the fallback file
-is deleted and the halt is lifted: commands are accepted again and work can carry on. Events that
+is deleted and the halt is lifted: commands are accepted again, the reviews waiting on the board
+start, a run the usage limit had stopped starts again if its wait ended meanwhile, and work can
+carry on; a startup check the halt cancelled stays cancelled, like one you cancelled. Events that
 reached neither the log nor a fallback file are recorded as a gap, which the conversation, and
 paging back through it, shows in their place as a line such as "Events 1204–1210 weren't saved".
 If a write still fails, or the store still can't list, lock or read the session a rename is
