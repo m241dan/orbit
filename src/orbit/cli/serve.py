@@ -246,11 +246,10 @@ def _server_settings(config_dir: Path, given: Mapping[str, object]) -> ServerSet
     """The server settings in the user config in ``config_dir``, with the ``given`` ones that
     aren't ``None`` over them, after warning of what they serve with.
 
-    Exits with status 2 if the file is invalid, or the server can't serve as they say.
+    Exits with status 2 if the file or a flag is invalid, or the server can't serve as they say.
     """
-    settings = _configured(lambda: read_server(config_dir))
-    update = {k: str(v) if isinstance(v, Path) else v for k, v in given.items() if v is not None}
-    settings = settings.model_copy(update=update)
+    read = _configured(lambda: read_server(config_dir))
+    settings = _configured(lambda: read.with_flags(given))
     with _exit_on(TlsError):
         for warning in tls_warnings(settings):
             typer.echo(f"Warning: {warning}", err=True)

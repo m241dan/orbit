@@ -242,3 +242,22 @@ def test_a_browse_root_that_isnt_an_absolute_directory_is_refused_by_name(
     with pytest.raises(ConfigError) as raised:
         read_server(tmp_path)
     assert str(raised.value) == f"{tmp_path / 'config.toml'}: {problem}"
+
+
+def test_a_flag_given_overrides_the_setting_and_a_path_is_taken_as_a_string() -> None:
+    settings = ServerSettings(host="::1", port=1).with_flags({"port": 2, "cert": Path("/s.pem")})
+    assert settings == ServerSettings(host="::1", port=2, cert="/s.pem")
+
+
+def test_a_flag_not_given_keeps_the_setting() -> None:
+    settings = ServerSettings(host="::1", revoked=(SHA256,))
+    assert settings.with_flags({"host": None, "port": None}) == settings
+
+
+@pytest.mark.parametrize(
+    ("given", "flag"),
+    [({"host": ""}, "--host"), ({"port": 70000}, "--port"), ({"client_ca": 1}, "--client-ca")],
+)
+def test_an_invalid_flag_is_refused_by_name(given: dict[str, object], flag: str) -> None:
+    with pytest.raises(ConfigError, match=f"^{re.escape(flag)}: "):
+        ServerSettings().with_flags(given)

@@ -26,6 +26,7 @@ from websockets.exceptions import ConnectionClosed, InvalidStatus
 from websockets.sync.client import ClientConnection, connect
 
 from orbit.agent import (
+    INVALID_CONFIG,
     ControlPlane,
     RunFile,
     ServedWorkspaces,
@@ -1429,3 +1430,26 @@ def test_an_invalid_telemetry_setting_stops_serve_naming_the_file_and_the_key(
 
     assert result.exit_code == 2
     assert f"Invalid orbit configuration: {path}: telemetry.exporter: " in result.stderr
+
+
+def test_a_flag_overrides_the_config_files_setting_and_one_not_given_keeps_it(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "config.toml").write_text('[server]\nhost = "::1"\nport = 1\n')
+    settings = serve._server_settings(tmp_path, {"host": None, "port": 2})
+    assert (settings.host, settings.port) == ("::1", 2)
+
+
+def test_serve_refuses_an_empty_host_naming_the_flag() -> None:
+    result = runner.invoke(app, ["serve", *QUIET, "--host", ""])
+    assert result.exit_code == 2
+    assert result.stderr.startswith(f"{INVALID_CONFIG}--host: ")
+
+
+def test_serve_refuses_an_invalid_port_naming_the_flag(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with pytest.raises(typer.Exit) as exited:
+        serve._server_settings(tmp_path, {"port": 70000})
+    assert exited.value.exit_code == 2
+    assert capsys.readouterr().err.startswith(f"{INVALID_CONFIG}--port: ")

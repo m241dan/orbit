@@ -4,10 +4,10 @@ serves TLS, and what its run file says while it does."""
 import hashlib
 import ipaddress
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from datetime import datetime, timedelta
 from enum import StrEnum
-from typing import Any, Literal
+from typing import Any, Literal, Protocol, runtime_checkable
 from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
@@ -120,6 +120,39 @@ class ServerSettings(TlsSettings):
     @property
     def max_message_bytes(self) -> int:
         return self.max_message_mb * 1024 * 1024
+
+    def with_flags(self, given: Mapping[str, object]) -> "ServerSettings":
+        """These settings with the command-line flags ``given``, by setting name, over them,
+        ignoring those that are ``None`` and taking paths as strings.
+
+        Raises :class:`ConfigError` naming the flag if one is invalid.
+        """
+        flags = {
+            k: v.__fspath__() if isinstance(v, _PathLike) else v
+            for k, v in given.items()
+            if v is not None
+        }
+        try:
+            return ServerSettings.model_validate({**self.model_dump(), **flags})
+        except ValidationError as exc:
+            raise ConfigError(_flag_problems(exc)) from None
+
+
+@runtime_checkable
+class _PathLike(Protocol):
+    """A path, such as a flag's ``Path``; the domain leaves ``pathlib`` to the layers above."""
+
+    def __fspath__(self) -> str: ...
+
+
+def _flag_problems(error: ValidationError) -> str:
+    """``error``'s problems, one per line, each naming the flag and saying why."""
+    return "\n".join(f"{_flag(problem['loc'][0])}: {problem['msg']}" for problem in error.errors())
+
+
+def _flag(setting: object) -> str:
+    """The command-line flag that sets the server setting ``setting``."""
+    return "--" + str(setting).replace("_", "-")
 
 
 _SHA256 = re.compile(r"[0-9A-F]{64}")
