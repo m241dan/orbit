@@ -19,6 +19,7 @@ from orbit.agent.application.ports import (
     CallHandler,
     Fallback,
     HostFailed,
+    LockLeft,
     Merge,
     Reply,
     RepositoryLock,
@@ -322,7 +323,8 @@ class FakeStore:
     (none once it runs out). ``free`` says whether the lock can be taken, and ``lock_failure``,
     if set, is the error taking it raises. Sessions in ``elsewhere`` are locked by another
     orbit, those in ``broken`` are unreadable for the reason given, and ``delete_failure``, if
-    set, is the error deleting one raises, and ``release_failure`` the error letting go of a
+    set, is the error deleting one raises, ``lock_left`` the error raised once one is deleted but
+    its lock isn't, and ``release_failure`` the error letting go of a
     lock raises, and ``load_failure``, if set, the reason every session loaded is unreadable,
     as a database error makes it, and ``list_failure`` the error listing them raises.
     ``on_acquire``, if set, is awaited as a lock is taken, ``on_release`` as a lock is let go
@@ -357,6 +359,7 @@ class FakeStore:
         self.broken: dict[str, str] = {}
         self.deleted: list[str] = []
         self.delete_failure: str | None = None
+        self.lock_left: str | None = None
         self.release_failure: str | None = None
         self.load_failure: str | None = None
         self.list_failure: BaseException | None = None
@@ -413,6 +416,8 @@ class FakeStore:
         self.deleted.append(session_id)
         self.saved = [r for r in self.saved if r.id != session_id]
         self._forget_log(session_id)
+        if self.lock_left is not None:
+            raise LockLeft(self.lock_left)
         self.locked.discard(session_id)
 
     async def acquire(self, session_id: str) -> bool:

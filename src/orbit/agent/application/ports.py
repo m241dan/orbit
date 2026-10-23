@@ -291,6 +291,10 @@ class ReadFailed(StoreFailed):
     """A read from the store failed, as its message says."""
 
 
+class LockLeft(StoreFailed):
+    """A session was deleted, but its lock file couldn't be removed, as the message says."""
+
+
 class StorageFailed(StoreFailed):
     """A write to the store failed, as ``message`` says: ``database`` is its file, ``error`` the
     error as the database reported it, and ``kind`` what orbit makes of that."""
@@ -436,7 +440,8 @@ class SessionStore(EventLog, Protocol):
 
     async def delete(self, session_id: str) -> None:
         """Delete the session ``session_id``, its events and its lock, readable or not; raises
-        :class:`StoreFailed`, a :class:`StorageFailed` when the database failed, when it can't."""
+        :class:`StoreFailed`, a :class:`StorageFailed` when the database failed, when it can't,
+        or :class:`LockLeft` when the session was deleted but its lock file wasn't removed."""
         ...
 
     async def acquire(self, session_id: str) -> bool:

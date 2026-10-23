@@ -11,7 +11,13 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from orbit.agent.application.failures import ReportedOnce, outcome
-from orbit.agent.application.ports import Publish, SessionStore, StoredSession, StoreFailed
+from orbit.agent.application.ports import (
+    LockLeft,
+    Publish,
+    SessionStore,
+    StoredSession,
+    StoreFailed,
+)
 from orbit.agent.application.storage_halt import Halting
 from orbit.agent.domain.refusals import STOPPING, Refused
 from orbit.agent.domain.reviews import LaneSnapshot
@@ -40,6 +46,7 @@ from orbit.protocol import (
     SAVE_FAILED,
     UNKNOWN,
     ErrorOccurred,
+    Notice,
     SessionSummary,
     Settings,
     TaskState,
@@ -389,9 +396,12 @@ class SessionKeeper:
     async def _delete(self, store: SessionStore, session_id: str) -> bool:
         """Delete the session ``session_id`` from ``store``, whose lock this orbit took to, and
         then its events still to be logged; returns whether it was deleted, reporting it and
-        letting go of the lock if it can't be."""
+        letting go of the lock if it can't be. A lock file left behind doesn't undo the deletion:
+        it's noted."""
         error = await outcome(store.delete(session_id))
-        if isinstance(error, StoreFailed):
+        if isinstance(error, LockLeft):
+            await self._publish(Notice(message=str(error)))
+        elif isinstance(error, StoreFailed):
             await self._release(store, session_id)
             await self._publish(ErrorOccurred(code=SAVE_FAILED, message=str(error)))
             return False

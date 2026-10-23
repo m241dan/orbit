@@ -29,6 +29,7 @@ from orbit.protocol import (
     SAVE_FAILED,
     UNKNOWN,
     ErrorOccurred,
+    Notice,
     Settings,
     Usage,
 )
@@ -753,6 +754,29 @@ async def test_a_session_that_cannot_be_deleted_keeps_its_logged_events() -> Non
     keeper, forgotten = forgetting_keeper(store)
     await keeper.delete_saved("other")
     assert forgotten == []
+
+
+async def test_a_session_deleted_whose_lock_file_lingers_counts_as_deleted() -> None:
+    store = FakeStore()
+    store.saved = [SessionRecord(id="other", name="other", created=START, last_active=START)]
+    store.lock_left = "Couldn't delete the session other.lock: read-only"
+    published = Published()
+    forgotten: list[str] = []
+    new_sessions = NewSessions(Ticks(), lambda: "session-1", forgotten.append)
+    keeper = SessionKeeper(store, published, FakeHalt(), new_sessions)
+    assert await keeper.delete_saved("other") is True
+    assert store.deleted == ["other"] and forgotten == ["other"]
+    assert published.errors == []
+    assert published.events == [Notice(message="Couldn't delete the session other.lock: read-only")]
+
+
+async def test_a_session_whose_database_delete_fails_is_not_deleted() -> None:
+    store = FakeStore()
+    store.saved = [SessionRecord(id="other", name="other", created=START, last_active=START)]
+    store.delete_failure = "Couldn't delete the session: read-only"
+    keeper, published = keeper_for(store)
+    assert await keeper.delete_saved("other") is False
+    assert published.codes == [SAVE_FAILED] and store.released == ["other"]
 
 
 def loads(record: SessionRecord) -> None:

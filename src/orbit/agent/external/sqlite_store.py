@@ -24,7 +24,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import Self
 
-from orbit.agent.application.ports import ReadFailed, StorageFailed, StoredSession
+from orbit.agent.application.ports import (
+    LockLeft,
+    ReadFailed,
+    StorageFailed,
+    StoredSession,
+    StoreFailed,
+)
 from orbit.agent.domain.replay import LogBounds
 from orbit.agent.domain.sessions import SessionRecord, Unreadable, parse_record, record_json
 from orbit.agent.domain.usage_totals import UsageRow, UsageTotalsData
@@ -175,7 +181,10 @@ class SqliteStore:
         check_session_id(session_id)
         message = f"Couldn't delete the session {session_id} from"
         await self._or_raise(message, self._delete, workspace, session_id, write=True)
-        await self._locks_of(workspace).remove(session_id)
+        try:
+            await self._locks_of(workspace).remove(session_id)
+        except StoreFailed as error:
+            raise LockLeft(str(error)) from error
 
     def max_seq(self) -> int:
         """The highest ``seq`` ever logged or reserved, across workspaces, when the store opened

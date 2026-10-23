@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from orbit.agent.application.ports import (
+    LockLeft,
     ReadFailed,
     SessionStore,
     StorageFailed,
@@ -231,6 +232,19 @@ async def test_a_broken_database_fails_each_call_as_the_port_says(
         await store.review_count()
     with pytest.raises(StorageFailed, match=r"Couldn't save the review count to .*orbit\.db"):
         await store.save_review_count(1)
+
+
+async def test_a_delete_whose_lock_file_cannot_be_removed_deletes_and_says_so(
+    open_store: Opener, state: Path, workspace: Path
+) -> None:
+    store = await open_store(workspace)
+    await store.save(record())
+    await store.acquire("other")
+    [locks] = (state / "locks").iterdir()
+    (locks / "abc.lock").mkdir()
+    with pytest.raises(LockLeft, match=r"Couldn't delete the session .*abc\.lock"):
+        await store.delete("abc")
+    assert await store.sessions() == []
 
 
 async def test_a_closed_store_fails_each_call_as_the_port_says(
