@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import assert_never
 
 from orbit.agent.application.desk import AgentDesk
+from orbit.agent.application.failures import unexpected
 from orbit.agent.application.lanes import OPEN_GATE, SessionGate
 from orbit.agent.application.outbox import EventSink
 from orbit.agent.application.planner_seat import PlannerSeat
@@ -148,7 +149,7 @@ class WorkCommands:
         except Refused as refusal:
             error = ErrorOccurred(code=refusal.code, message=refusal.message)
         except Exception as exc:
-            message = f"Orbit failed to handle {type(command).__name__}: {exc}"
+            message = unexpected(f"Orbit failed to handle {type(command).__name__}: {exc}", exc)
             error = ErrorOccurred(code=INTERNAL, message=message)
         await self._parts.events.put(error)
 

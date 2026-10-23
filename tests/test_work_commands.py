@@ -40,6 +40,7 @@ from orbit.protocol import (
     TaskSpec,
     UpdateSettings,
 )
+from tests.agent_fakes import logged_with_traceback
 
 COMMAND_ID = "c1"
 """The id every command is handled under."""
@@ -218,7 +219,9 @@ async def own_queued(recorded: Recorded, outcomes: list[BaseException | None]) -
     return commands
 
 
-async def test_a_queued_command_that_fails_reports_an_error_and_the_rest_still_run() -> None:
+async def test_a_queued_command_that_fails_reports_an_error_and_the_rest_still_run(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     recorded = Recorded()
     outcomes: list[BaseException | None] = [None, RuntimeError("disk gone"), None]
     commands = await own_queued(recorded, outcomes)
@@ -226,6 +229,7 @@ async def test_a_queued_command_that_fails_reports_an_error_and_the_rest_still_r
     message = "Orbit failed to handle RunTasks: disk gone"
     assert recorded.effects == [ErrorOccurred(code=INTERNAL, message=message)]
     assert commands.queued == ()
+    assert logged_with_traceback(caplog.records, message)
 
 
 async def test_a_queued_command_refused_reports_its_refusal_and_the_rest_still_run() -> None:

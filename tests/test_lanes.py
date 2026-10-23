@@ -12,6 +12,7 @@ from orbit.agent.application.lanes import Background, TurnSlot, stop
 from orbit.agent.domain.refusals import Refused
 from orbit.protocol import BUSY as BUSY_CODE
 from orbit.protocol import INTERNAL, BusyChanged, ErrorOccurred, Event
+from tests.agent_fakes import logged_with_traceback
 
 
 class SlowToStop:
@@ -195,7 +196,9 @@ async def test_close_cancelled_while_the_work_stops_is_cancelled() -> None:
     assert not lane.running
 
 
-async def test_a_crash_is_reported_once_and_close_does_not_raise_it() -> None:
+async def test_a_crash_is_reported_once_and_close_does_not_raise_it(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     lane, events = background()
 
     async def crash() -> None:
@@ -206,10 +209,10 @@ async def test_a_crash_is_reported_once_and_close_does_not_raise_it() -> None:
     await lane.close()
     await lane.close()
 
-    assert report == ErrorOccurred(
-        code=INTERNAL, message="The test lane stopped on an unexpected error: ValueError('boom')"
-    )
+    message = "The test lane stopped on an unexpected error: ValueError('boom')"
+    assert report == ErrorOccurred(code=INTERNAL, message=message)
     assert events.empty()
+    assert logged_with_traceback(caplog.records, message)
 
 
 def slot() -> tuple[TurnSlot, list[Event]]:
@@ -271,7 +274,9 @@ async def test_a_turn_while_one_runs_is_refused_and_closed() -> None:
     await turns.close()
 
 
-async def test_a_crash_is_reported_once_before_the_lane_frees() -> None:
+async def test_a_crash_is_reported_once_before_the_lane_frees(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     turns, posted = slot()
 
     async def crash() -> None:
@@ -281,10 +286,9 @@ async def test_a_crash_is_reported_once_before_the_lane_frees() -> None:
     await ended(turns.turn)
     await turns.close()
 
-    report = ErrorOccurred(
-        code=INTERNAL, message="The planner lane stopped on an unexpected error: ValueError('boom')"
-    )
-    assert posted == [BUSY, report, IDLE]
+    message = "The planner lane stopped on an unexpected error: ValueError('boom')"
+    assert posted == [BUSY, ErrorOccurred(code=INTERNAL, message=message), IDLE]
+    assert logged_with_traceback(caplog.records, message)
 
 
 async def test_a_stale_turns_end_leaves_the_lane_busy() -> None:

@@ -4,7 +4,7 @@ import asyncio
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
-from orbit.agent.application.failures import ReportedOnce, outcome
+from orbit.agent.application.failures import ReportedOnce, outcome, unexpected
 from orbit.agent.application.ports import EventLog, Fallback, Publish, StoreFailed
 from orbit.agent.domain.replay import LogBounds
 from orbit.agent.domain.storage import trim_target
@@ -327,7 +327,8 @@ class LogWriter:
         wasn't appended goes to the fallback, and the failure is told to ``failed``."""
         writing, self._writing = self._writing, []
         self._stopped = True
-        self._failed(StoreFailed(f"The event log writer stopped on an unexpected error: {exc!r}"))
+        message = f"The event log writer stopped on an unexpected error: {exc!r}"
+        self._failed(StoreFailed(unexpected(message, exc)))
         await self._divert(writing)
 
     @property

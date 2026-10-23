@@ -20,6 +20,7 @@ from orbit.agent.application.connection import (
     SessionConnection,
 )
 from orbit.agent.application.control_stream import ControlStream
+from orbit.agent.application.failures import unexpected
 from orbit.agent.application.handshake import HandshakeParts
 from orbit.agent.application.keeper import Clock, local_now
 from orbit.agent.application.outbox import Seqs
@@ -363,7 +364,7 @@ class ControlPlane:
             )
             return
         except Exception as exc:  # A bug in one handler mustn't leave its command unanswered.
-            message = f"Orbit failed to handle {type(envelope.payload).__name__}: {exc}"
+            message = unexpected(f"Orbit failed to handle {type(command).__name__}: {exc}", exc)
             await publish(CommandRefused(command_id=command_id, code=INTERNAL, message=message))
             return
         await publish(CommandAccepted(command_id=command_id))

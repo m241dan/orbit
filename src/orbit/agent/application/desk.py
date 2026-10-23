@@ -12,6 +12,7 @@ from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field, replace
 from typing import Any, Protocol
 
+from orbit.agent.application.failures import unexpected
 from orbit.agent.application.limit_pause import LimitPause
 from orbit.agent.application.ports import (
     AgentHost,
@@ -277,6 +278,6 @@ class AgentDesk:
         try:
             return await run.handle(tool, arguments)
         except Exception as exc:
-            message = f"Orbit failed to handle {tool}: {exc}"
+            message = unexpected(f"Orbit failed to handle {tool}: {exc}", exc)
             await self.publish(ErrorOccurred(agent_id=agent.id, code=INTERNAL, message=message))
             return Reply(message, is_error=True)

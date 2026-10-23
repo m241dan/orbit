@@ -7,6 +7,7 @@ from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 from typing import Any
 
+from orbit.agent.application.failures import unexpected
 from orbit.agent.application.outcomes import cancelling
 from orbit.agent.application.ports import Publish
 from orbit.agent.domain.refusals import Refused
@@ -46,7 +47,7 @@ def crash_of(task: "asyncio.Task[object]") -> BaseException | None:
 
 def crash_report(lane: str, exc: BaseException) -> ErrorOccurred:
     """The event telling the user that ``lane`` stopped on ``exc``, which nothing expected."""
-    message = f"The {lane} lane stopped on an unexpected error: {exc!r}"
+    message = unexpected(f"The {lane} lane stopped on an unexpected error: {exc!r}", exc)
     return ErrorOccurred(code=INTERNAL, message=message)
 
 

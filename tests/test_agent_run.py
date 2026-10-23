@@ -64,6 +64,7 @@ from tests.agent_fakes import (
     board,
     ended_unverified,
     keeps_claiming,
+    logged_with_traceback,
     payloads,
     queued,
     replies,
@@ -1033,7 +1034,9 @@ async def test_a_proposal_whose_trial_breaks_gets_an_error_reply() -> None:
     assert [t.status for t in board(events)] == ["error"]
 
 
-async def test_a_call_orbit_fails_to_handle_is_answered_and_reported() -> None:
+async def test_a_call_orbit_fails_to_handle_is_answered_and_reported(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     answers: list[Reply] = []
 
     async def checks(call: Call) -> TurnEndReason:
@@ -1050,6 +1053,7 @@ async def test_a_call_orbit_fails_to_handle_is_answered_and_reported() -> None:
     assert ErrorOccurred(agent_id="agent-1", code=INTERNAL, message=message) in events
     [answer] = [e for e in events if isinstance(e, AgentReply) and e.is_error]
     assert answer.text == message
+    assert logged_with_traceback(caplog.records, message)
 
 
 def started_task() -> tuple[Tasks, str]:

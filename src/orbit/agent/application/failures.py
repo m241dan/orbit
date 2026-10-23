@@ -1,9 +1,20 @@
-"""Calls to the store that may fail, and failures reported only once until a call works again."""
+"""Calls to the store that may fail, failures reported only once until a call works again, and
+unexpected errors, whose tracebacks are logged."""
 
+import logging
 from collections.abc import Awaitable
 
 from orbit.agent.application.ports import Publish, StoreFailed
 from orbit.protocol import SAVE_FAILED, ErrorOccurred
+
+logger = logging.getLogger(__name__)
+
+
+def unexpected(message: str, exc: BaseException) -> str:
+    """``message``, telling the user of ``exc``, which nothing expected; ``exc`` is logged with
+    its traceback, as the message alone loses its cause."""
+    logger.error("%s", message, exc_info=exc)
+    return message
 
 
 async def outcome[T](call: Awaitable[T]) -> T | StoreFailed:

@@ -58,6 +58,7 @@ from tests.agent_fakes import (
     frontend,
     greeted,
     hangs,
+    logged_with_traceback,
     no_steps,
     queued,
     session_for,
@@ -273,7 +274,9 @@ async def test_a_save_that_cannot_take_its_lock_is_an_error_not_a_refusal() -> N
     assert not any(isinstance(event, OUTCOMES) for event in queued(session))
 
 
-async def test_a_handler_that_fails_is_refused_as_internal_and_the_session_goes_on() -> None:
+async def test_a_handler_that_fails_is_refused_as_internal_and_the_session_goes_on(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     store = FakeStore()
     session = WorkspaceHost(store=store, new_id=lambda: "session-1")
     await greeted(session)
@@ -286,6 +289,7 @@ async def test_a_handler_that_fails_is_refused_as_internal_and_the_session_goes_
 
     message = "Orbit failed to handle DeleteSession: the disk is gone"
     assert (refused.code, refused.message) == (INTERNAL, message)
+    assert logged_with_traceback(caplog.records, message)
     assert events[-1] == CommandAccepted(command_id="c16")
 
 

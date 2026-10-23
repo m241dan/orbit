@@ -2,6 +2,7 @@
 CLI, and a step runner and workspace for verification."""
 
 import asyncio
+import logging
 from collections.abc import AsyncIterator, Awaitable, Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -1391,3 +1392,11 @@ class Source:
         if isinstance(outcome, Exception):
             raise outcome
         return outcome
+
+
+def logged_with_traceback(records: Sequence[logging.LogRecord], message: str) -> bool:
+    """Whether ``message`` is among ``records`` logged as an error with its traceback."""
+    return any(
+        r.levelno == logging.ERROR and r.getMessage() == message and r.exc_info is not None
+        for r in records
+    )

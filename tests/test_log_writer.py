@@ -50,6 +50,7 @@ from tests.agent_fakes import (
     events_until,
     frontend,
     greet,
+    logged_with_traceback,
     notice,
     payloads_of,
     publish,
@@ -185,16 +186,18 @@ async def test_a_session_appended_before_the_failing_one_stays_logged() -> None:
     assert log.logged == [notice(1)] and fallback.files == {"b": [notice(2, "b")]}
 
 
-async def test_an_unexpected_append_error_stops_the_appending_and_diverts_the_batch() -> None:
+async def test_an_unexpected_append_error_stops_the_appending_and_diverts_the_batch(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     log, fallback, failures = BuggyFor("b"), FakeFallback(), list[StoreFailed]()
     writer = LogWriter(log, Published(), overflow=Overflow(fallback, failures.append))
     writer.add("a", notice(1))
     writer.add("b", notice(2, "b"))
     await asyncio.sleep(0.01)
 
-    assert [str(error) for error in failures] == [
-        "The event log writer stopped on an unexpected error: ValueError('a bug')"
-    ]
+    message = "The event log writer stopped on an unexpected error: ValueError('a bug')"
+    assert [str(error) for error in failures] == [message]
+    assert logged_with_traceback(caplog.records, message)
     assert log.logged == [notice(1)] and fallback.files == {"b": [notice(2, "b")]}
     await writer.close()
 
